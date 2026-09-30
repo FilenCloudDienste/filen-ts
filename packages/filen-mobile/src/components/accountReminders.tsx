@@ -7,15 +7,14 @@ import useAccountQuery from "@/queries/useAccount.query"
 import useAppStore from "@/stores/useApp.store"
 import prompts from "@/lib/prompts"
 import alerts from "@/lib/alerts"
-import useIsAppActive from "@/hooks/useIsAppActive"
+import useIsUnlockedForeground from "@/hooks/useIsUnlockedForeground"
 import logger from "@/lib/logger"
 
 const AccountReminders = () => {
 	const { t } = useTranslation()
 	const accountQuery = useAccountQuery()
 	const pathname = usePathname()
-	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
-	const isActive = useIsAppActive()
+	const unlockedForeground = useIsUnlockedForeground()
 	const firedRef = useRef<boolean>(false)
 
 	useEffect(() => {
@@ -27,11 +26,7 @@ const AccountReminders = () => {
 			return
 		}
 
-		if (biometricUnlocked !== true) {
-			return
-		}
-
-		if (!isActive) {
+		if (!unlockedForeground) {
 			return
 		}
 
@@ -45,7 +40,7 @@ const AccountReminders = () => {
 
 		// If the app re-locks while reminders are mid-flight, stop landing prompts/navigation over the
 		// lock screen and re-arm so they surface again after the next unlock (the effect re-runs when
-		// biometricUnlocked flips back to true). A native alert already on screen can't be dismissed
+		// the app is unlocked and in front again). A native alert already on screen can't be dismissed
 		// programmatically, but this keeps any further prompt or navigation from going behind the lock.
 		const stillUnlocked = (): boolean => useAppStore.getState().biometricUnlocked === true
 
@@ -98,7 +93,7 @@ const AccountReminders = () => {
 				alerts.error(result.error)
 			}
 		})
-	}, [pathname, biometricUnlocked, isActive, accountQuery.status, accountQuery.isFetching, accountQuery.data, t])
+	}, [pathname, unlockedForeground, accountQuery.status, accountQuery.isFetching, accountQuery.data, t])
 
 	return null
 }

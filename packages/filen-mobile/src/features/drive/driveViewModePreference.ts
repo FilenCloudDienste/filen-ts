@@ -1,17 +1,13 @@
 import { useCallback } from "react"
 import { useSecureStore } from "@/lib/secureStore"
-import { getPerDirectoryKey } from "@/features/drive/driveSortPreference"
+import { type ScopedPreferences, getPerDirectoryKey, applyScopedPreference } from "@/features/drive/driveScopedPreference"
 import { type DrivePath } from "@/hooks/useDrivePath"
 
 export const VIEW_MODE_PREFERENCES_SECURE_STORE_KEY = "drive.viewModePreferences"
 
 export type DriveViewMode = "list" | "grid"
 
-export type ViewModePreferences = {
-	mode: "global" | "perDirectory"
-	global: DriveViewMode
-	perDirectory: Record<string, DriveViewMode>
-}
+export type ViewModePreferences = ScopedPreferences<DriveViewMode>
 
 export const DEFAULT_VIEW_MODE_PREFERENCES: ViewModePreferences = {
 	mode: "global",
@@ -47,16 +43,7 @@ export function useDriveViewMode(drivePath: DrivePath): {
 		(next: DriveViewMode) => {
 			const key = getPerDirectoryKey(drivePath)
 
-			setPrefs(prev => {
-				if (prev.mode === "perDirectory") {
-					return {
-						...prev,
-						perDirectory: { ...prev.perDirectory, [key]: next }
-					}
-				}
-
-				return { ...prev, global: next }
-			})
+			setPrefs(prev => applyScopedPreference(prev, key, next))
 		},
 		[drivePath, setPrefs]
 	)

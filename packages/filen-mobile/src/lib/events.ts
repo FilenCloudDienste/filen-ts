@@ -7,6 +7,19 @@ import type { QueueItem, PlaylistWithItems } from "@/features/audio/audio"
 
 export type DriveFileGoneReason = "trashed" | "deleted" | "replaced"
 
+export type DriveSelectedItem =
+	| {
+			type: "driveItem"
+			data: DriveItem
+	  }
+	| {
+			type: "root"
+			data: AnyNormalDir
+	  }
+
+// Picker result keyed by the awaiting helper's id: the selection under `K`, or a cancellation.
+type SelectionResult<K extends string, T> = ({ id: string; cancelled: false } & { [P in K]: T }) | { id: string; cancelled: true }
+
 export type Events = {
 	secureStoreChange: {
 		key: string
@@ -72,49 +85,13 @@ export type Events = {
 	focusChatInput: {
 		chatUuid: string
 	}
-	driveSelect:
-		| {
-				id: string
-				selectedItems: (
-					| {
-							type: "driveItem"
-							data: DriveItem
-					  }
-					| {
-							type: "root"
-							data: AnyNormalDir
-					  }
-				)[]
-				cancelled: false
-		  }
-		| {
-				id: string
-				cancelled: true
-		  }
-	contactsSelect:
-		| {
-				id: string
-				selectedContacts: Contact[]
-				cancelled: false
-		  }
-		| {
-				id: string
-				cancelled: true
-		  }
+	driveSelect: SelectionResult<"selectedItems", DriveSelectedItem[]>
+	contactsSelect: SelectionResult<"selectedContacts", Contact[]>
 	audioStatus: AudioStatus
 	audioLoading: boolean
 	audioQueue: QueueItem[]
 	audioQueuePosition: number
-	playlistsSelect:
-		| {
-				id: string
-				selectedPlaylists: PlaylistWithItems[]
-				cancelled: false
-		  }
-		| {
-				id: string
-				cancelled: true
-		  }
+	playlistsSelect: SelectionResult<"selectedPlaylists", PlaylistWithItems[]>
 }
 
 class TypedEventEmitter<T> {

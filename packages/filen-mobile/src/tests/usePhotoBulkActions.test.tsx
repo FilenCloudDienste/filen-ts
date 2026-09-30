@@ -7,13 +7,15 @@ vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/u
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock("expo-file-system", () => ({}))
-vi.mock("expo-media-library/legacy", () => ({ saveToLibraryAsync: vi.fn() }))
 vi.mock("@/lib/bulkOps", () => ({ runBulk: vi.fn() }))
 vi.mock("@/lib/tmp", () => ({ newTmpDir: vi.fn() }))
 vi.mock("@/lib/sdkUnwrap", () => ({ getRealDriveItemParent: vi.fn() }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
-vi.mock("@/hooks/useMediaPermissions", () => ({ hasAllNeededMediaPermissions: vi.fn() }))
-vi.mock("@/features/drive/driveDownload", () => ({ downloadDriveItemToDevice: vi.fn() }))
+vi.mock("@/features/drive/driveDownload", () => ({
+	downloadDriveItemToDevice: vi.fn(),
+	ensureSaveToPhotosPermission: vi.fn(),
+	saveDriveItemToPhotos: vi.fn()
+}))
 vi.mock("@/features/drive/drive", () => ({ default: { favorite: vi.fn(), trash: vi.fn() } }))
 vi.mock("@/features/offline/offline", () => ({ default: { storeFile: vi.fn() } }))
 vi.mock("@/features/transfers/transfers", () => ({ default: { download: vi.fn() } }))

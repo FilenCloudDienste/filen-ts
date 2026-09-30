@@ -23,6 +23,10 @@ const { mockGetSdkClients, mockSdkClient, mockChatsQueryGet, mockQueryUpdaterGet
 	}
 })
 
+vi.mock("@/lib/signals", () => ({
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
+}))
+
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))
 
 vi.mock("@filen/shared", async () => ({

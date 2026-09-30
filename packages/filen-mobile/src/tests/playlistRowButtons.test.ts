@@ -64,12 +64,7 @@ vi.mock("@/components/ui/menu", () => ({
 }))
 
 // React component dependencies that playlistRow.tsx imports at the top level
-vi.mock("uniwind", () => ({
-	useResolveClassNames: vi.fn(() => ({})),
-	useUniwind: vi.fn(() => ({ theme: "dark" }))
-}))
-
-vi.mock("@expo/vector-icons/Ionicons", () => ({
+vi.mock("@/components/ui/audioThumbnail", () => ({
 	default: () => null
 }))
 

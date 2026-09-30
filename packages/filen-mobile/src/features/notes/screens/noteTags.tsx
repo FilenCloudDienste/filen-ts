@@ -1,17 +1,19 @@
 import Text from "@/components/ui/text"
-import { Platform, ActivityIndicator } from "react-native"
-import { useLocalSearchParams, useNavigation } from "expo-router"
-import View, { GestureHandlerScrollView } from "@/components/ui/view"
-import SafeAreaView from "@/components/ui/safeAreaView"
-import ListEmpty from "@/components/ui/listEmpty"
+import { LoadingView } from "@/components/ui/loadingView"
+import { useLocalSearchParams } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
+import { GestureHandlerScrollView } from "@/components/ui/view"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import ListEmpty, { LoadErrorEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
-import Header, { type HeaderItem } from "@/components/ui/header"
+import { type HeaderItem } from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
-import { run, fastLocaleCompare } from "@filen/shared"
+import { fastLocaleCompare } from "@filen/shared"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { type Note, type NoteTag } from "@/types"
 import { tagDisplayName } from "@/lib/decryption"
@@ -24,7 +26,7 @@ import useNotesTagsQuery, { reuseRecentNotesTagsRead } from "@/features/notes/qu
 import DismissStack from "@/components/dismissStack"
 import { useTranslation } from "react-i18next"
 import { computeTagState } from "@/features/notes/utils"
-import { createTagFlow } from "@/features/notes/components/notesActions"
+import { createTagFlow, deleteTagAction } from "@/features/notes/components/notesActions"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
 
@@ -101,29 +103,18 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 					icon: "edit",
 					requiresOnline: true,
 					onPress: async () => {
-						const promptResult = await run(async () => {
-							return await prompts.input({
+						const newName = await inputPrompt(
+							{
 								title: t("new_tag_name"),
 								message: t("enter_tag_name"),
 								cancelText: t("cancel"),
 								okText: t("save")
-							})
-						})
+							},
+							{ tag: "notes", message: "rename tag prompt failed", level: "error", context: { tagUuid: tag.uuid } },
+							{ trim: true }
+						)
 
-						if (!promptResult.success) {
-							logger.error("notes", "rename tag prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
-							alerts.error(promptResult.error)
-
-							return
-						}
-
-						if (promptResult.data.cancelled) {
-							return
-						}
-
-						const newName = promptResult.data.value.trim()
-
-						if (newName.length === 0) {
+						if (newName === null) {
 							return
 						}
 
@@ -148,41 +139,7 @@ const Tag = ({ tag, targetNotes }: { tag: NoteTag; targetNotes: readonly Note[] 
 					icon: "delete",
 					destructive: true,
 					requiresOnline: true,
-					onPress: async () => {
-						const promptResponse = await run(async () => {
-							return await prompts.alert({
-								title: t("delete_tag"),
-								message: t("are_you_sure_delete_tag"),
-								cancelText: t("cancel"),
-								okText: t("delete"),
-								destructive: true
-							})
-						})
-
-						if (!promptResponse.success) {
-							logger.error("notes", "delete tag confirm prompt failed", { error: promptResponse.error, tagUuid: tag.uuid })
-							alerts.error(promptResponse.error)
-
-							return
-						}
-
-						if (promptResponse.data.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async () => {
-							await notes.deleteTag({
-								tag
-							})
-						})
-
-						if (!result.success) {
-							logger.error("notes", "delete tag failed", { error: result.error, tagUuid: tag.uuid })
-							alerts.error(result.error)
-
-							return
-						}
-					}
+					onPress: deleteTagAction({ t, tag })
 				}
 			]}
 		>
@@ -222,10 +179,9 @@ const NoteTags = () => {
 	const { uuids } = useLocalSearchParams<{
 		uuids?: string
 	}>()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 
 	// Resolve the notes from the live query result, so a tag change after this screen opens (or a
 	// note moved into trash via another client) reflects in the tri-state without re-navigation.
@@ -257,33 +213,10 @@ const NoteTags = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={liveNotes.length === 1 ? t("note_tags") : t("note_tags_selected")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={dismiss}
 				rightItems={
 					[
 						{
@@ -303,31 +236,16 @@ const NoteTags = () => {
 					] satisfies HeaderItem[]
 				}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{notesTagsQuery.status === "pending" ? (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<ActivityIndicator
-							size="large"
-							color={textForeground.color as string}
-						/>
-					</View>
+					<LoadingView />
 				) : notesTagsQuery.status === "error" ? (
-					<ListEmpty
-						icon="alert-circle-outline"
+					<LoadErrorEmpty
 						title={t("note_tags_error")}
-						description={t("please_check_connection")}
-						action={
-							<Button
-								onPress={() => {
-									void notesTagsQuery.refetch()
-								}}
-							>
-								{t("reload")}
-							</Button>
-						}
+						retryLabel={t("reload")}
+						onRetry={() => {
+							void notesTagsQuery.refetch()
+						}}
 					/>
 				) : tags.length === 0 ? (
 					<ListEmpty
@@ -339,7 +257,7 @@ const NoteTags = () => {
 								onPress={() => {
 									void createTagFlow({ t })
 								}}
-								disabled={!isOnline}
+								requiresOnline
 							>
 								{t("create_tag")}
 							</Button>
@@ -365,7 +283,7 @@ const NoteTags = () => {
 						})}
 					</GestureHandlerScrollView>
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

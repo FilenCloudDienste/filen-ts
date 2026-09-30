@@ -1,5 +1,6 @@
 import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
 import type { DriveItemFileExtracted } from "@/types"
+import type { FileSource } from "@/queries/fileSource"
 
 // The name a page picks its renderer and editor mode by: the one it opened with, for as long as it shows that
 // file. A rename elsewhere must never swap an open editor, and its unsaved edits, for another renderer; saves
@@ -15,4 +16,11 @@ export function galleryItemFollowing(existing: GalleryItemTagged, next: DriveIte
 		data: next,
 		openedName: galleryItemRenderName(existing)
 	}
+}
+
+export function galleryItemFileSource(item: GalleryItemTagged): FileSource {
+	// The held item goes by value so a cross-directory search hit (not in the global uuid cache) still resolves.
+	return item.type === "drive"
+		? { type: "drive", data: { uuid: item.data.data.uuid, item: item.data } }
+		: { type: "external", data: item.data }
 }

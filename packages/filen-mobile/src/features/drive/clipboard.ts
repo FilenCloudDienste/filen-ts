@@ -1,16 +1,10 @@
-import { AnyNormalDir_Tags } from "@filen/sdk-rs"
-import type { DriveItem } from "@/types"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import type { DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
-import { unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { normalParentUuidOf, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
 
 // Deep enough for any real tree; a longer chain is treated as unresolved.
 const MAX_ANCESTRY_DEPTH = 64
-
-function parentUuidOf(item: DriveItem): string | null {
-	return item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null
-}
 
 type PasteGuard = {
 	// The clipboard's directories: a paste can't land in any of them or below.
@@ -38,7 +32,7 @@ function pasteGuardOf(entry: DriveClipboardEntry): PasteGuard {
 		}
 
 		if (entry.mode === "cut") {
-			const parentUuid = parentUuidOf(item)
+			const parentUuid = normalParentUuidOf(item)
 
 			sharedParentUuid = sharedParentUuid === undefined || sharedParentUuid === parentUuid ? parentUuid : null
 		}
@@ -67,13 +61,13 @@ export function ancestryHits(targetUuid: string, dirUuids: ReadonlySet<string>, 
 			return true
 		}
 
-		const dir = cache.directoryUuidToAnyNormalDir.get(uuid)
+		const dir = cache.getNormalDir(uuid)
 
-		if (!dir || dir.tag !== AnyNormalDir_Tags.Dir) {
+		if (!dir) {
 			return "unresolved"
 		}
 
-		uuid = unwrapParentUuid(dir.inner[0].parent)
+		uuid = unwrapParentUuid(dir.parent)
 	}
 
 	return "unresolved"

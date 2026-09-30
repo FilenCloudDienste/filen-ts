@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker"
 import useMediaPermissionsQuery from "@/queries/useMediaPermissions.query"
 import { run } from "@filen/shared"
 import { useEffect, useRef, useCallback } from "react"
-import { AppState } from "react-native"
+import useOnAppForeground from "@/hooks/useOnAppForeground"
 import { withSystemPresentation } from "@/lib/systemPresentation"
 import logger from "@/lib/logger"
 
@@ -138,17 +138,7 @@ export default function useMediaPermissions(params?: MediaPermissionsParams): Me
 		}
 	}, [params?.shouldRequest, requestPermissions])
 
-	useEffect(() => {
-		const listener = AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "active") {
-				refetch()
-			}
-		})
-
-		return () => {
-			listener.remove()
-		}
-	}, [refetch])
+	useOnAppForeground(refetch)
 
 	if (query.status === "pending") {
 		return {

@@ -197,6 +197,7 @@ vi.mock("@/features/audio/queries/usePlaylists.query", () => ({
 
 // The SDK abort handle needs the native bindings; the source signal stands in for it.
 vi.mock("@/lib/signals", () => ({
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined),
 	wrapAbortSignalForSdk: (signal: AbortSignal) => signal,
 	disposeSdkAbortSignal: () => {}
 }))

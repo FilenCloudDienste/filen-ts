@@ -43,7 +43,6 @@ vi.mock("@/stores/useApp.store", () => ({
 	}
 }))
 vi.mock("@/queries/useLocalAuthentication.query", () => ({ fetchData: vi.fn() }))
-vi.mock("@/features/settings/screens/biometric", () => ({}))
 vi.mock("@/hooks/useEffectOnce", () => ({ default: vi.fn() }))
 vi.mock("@/components/ui/view", () => ({ default: "View" }))
 vi.mock("@/components/ui/text", () => ({ default: "Text" }))

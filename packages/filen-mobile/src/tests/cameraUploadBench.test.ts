@@ -124,7 +124,8 @@ vi.mock("expo-image-manipulator", () => ({
 // Empty supported-extension set → compress() early-returns the file untouched, so
 // compress-ON scenarios measure the listing/dedup-key costs without ImageManipulator.
 vi.mock("@/constants", () => ({
-	EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS: new Set<string>()
+	EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS: new Set<string>(),
+	IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app"
 }))
 
 vi.mock("@filen/sdk-rs", () => ({
@@ -253,7 +254,8 @@ vi.mock("@/lib/secureStore", () => ({
 
 			return undefined
 		},
-		set: async () => {}
+		set: async () => {},
+		subscribeKey: () => () => {}
 	},
 	useSecureStore: () => [null, () => {}]
 }))

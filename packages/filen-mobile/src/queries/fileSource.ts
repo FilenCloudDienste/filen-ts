@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import { type DriveItemFileExtracted } from "@/types"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 export type FileSource =
 	| {
@@ -32,13 +33,19 @@ export function fileSourceKey(source: FileSource): FileSource {
 	return source.type === "drive" ? { type: "drive", data: { uuid: source.data.uuid } } : source
 }
 
+// Prefers the by-value item (a cross-directory search hit may not be in the global uuid cache) and
+// falls back to the cache lookup. null when missing or not a file.
+export function resolveDriveFileItem(data: Extract<FileSource, { type: "drive" }>["data"]): DriveItemFileExtracted | null {
+	const item = data.item ?? cache.uuidToAnyDriveItem.get(data.uuid)
+
+	return item && isFileItem(item) ? item : null
+}
+
 export async function resolveFile(source: FileSource, signal?: AbortSignal): Promise<FileSystem.File> {
 	if (source.type === "drive") {
-		// Prefer the by-value item (a cross-directory search hit may not be in the global
-		// uuid cache); fall back to the cache lookup, then the not-a-file guard.
-		const item = source.data.item ?? cache.uuidToAnyDriveItem.get(source.data.uuid)
+		const item = resolveDriveFileItem(source.data)
 
-		if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
+		if (!item) {
 			throw new Error("Drive item not found or is not a file")
 		}
 

@@ -1,40 +1,19 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { sortParams } from "@filen/shared"
-import cache from "@/lib/cache"
-import { type DriveItemFileExtracted } from "@/types"
+import { type FileSource, fileSourceKey, resolveDriveFileItem } from "@/queries/fileSource"
 import audioCache from "@/features/audio/audioCache"
 
 export const BASE_QUERY_KEY = "useAudioMetadataQuery"
 
-export type UseAudioMetadataQueryParams =
-	| {
-			type: "drive"
-			data: {
-				uuid: string
-				// Optional by-value file item — threaded by callers holding a cross-directory
-				// search result not in the global uuid cache. Preferred over the cache lookup;
-				// stripped from the query key (see the queryKey below).
-				item?: DriveItemFileExtracted
-			}
-	  }
-	| {
-			type: "external"
-			data: {
-				url: string
-				name: string
-			}
-	  }
-
 export async function fetchData(
-	params: UseAudioMetadataQueryParams & {
+	params: FileSource & {
 		signal?: AbortSignal
 	}
 ) {
 	if (params.type === "drive") {
-		// Prefer the by-value item (cross-directory search hit); fall back to the cache.
-		const item = params.data.item ?? cache.uuidToAnyDriveItem.get(params.data.uuid)
+		const item = resolveDriveFileItem(params.data)
 
-		if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
+		if (!item) {
 			throw new Error("Drive item not found or is not a file")
 		}
 
@@ -57,18 +36,13 @@ export async function fetchData(
 }
 
 export function useAudioMetadataQuery(
-	params: UseAudioMetadataQueryParams,
+	params: FileSource,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
 		...options,
-		// Key off identity only — strip the optional by-value item so the object instance
-		// that carried it here can't destabilize the key (metadata is the same per uuid).
-		// `params` is referenced inline so the query exhaustive-deps lint sees it.
-		queryKey: [
-			BASE_QUERY_KEY,
-			sortParams(params.type === "drive" ? { type: "drive" as const, data: { uuid: params.data.uuid } } : params)
-		],
+		// Key off identity only (fileSourceKey strips the by-value item).
+		queryKey: [BASE_QUERY_KEY, sortParams(fileSourceKey(params))],
 		queryFn: ({ signal }) =>
 			fetchData({
 				...params,

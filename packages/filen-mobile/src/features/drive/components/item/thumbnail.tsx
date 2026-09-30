@@ -11,6 +11,7 @@ import { AppState } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
 import { useFocusEffect } from "expo-router"
 import logger from "@/lib/logger"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 const MAX_ERROR_RETRIES = 3
 const MAX_GENERATE_RETRIES = 3
@@ -363,7 +364,7 @@ const Thumbnail = ({
 	contentFit?: React.ComponentProps<typeof Image>["contentFit"]
 	target?: RenderTarget
 }) => {
-	if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+	if (isFileItem(item)) {
 		return (
 			<FileThumbnail
 				item={item}

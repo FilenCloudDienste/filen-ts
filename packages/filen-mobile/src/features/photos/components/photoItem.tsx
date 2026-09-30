@@ -14,39 +14,7 @@ import Menu from "@/features/drive/components/item/menu"
 import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import useDriveStore from "@/features/drive/store/useDrive.store"
-import { useResolveClassNames } from "uniwind"
-
-function FavoritedIndicator() {
-	const textRed500 = useResolveClassNames("text-red-500")
-
-	return (
-		<View className="bg-transparent flex-row items-center justify-center absolute bottom-0.5 left-0.5 z-10">
-			<View className="bg-white rounded-full p-0.5 flex-row items-center justify-center">
-				<Ionicons
-					name="heart"
-					size={13}
-					color={textRed500.color}
-				/>
-			</View>
-		</View>
-	)
-}
-
-function OfflineIndicator() {
-	const textGreen500 = useResolveClassNames("text-green-500")
-
-	return (
-		<View className="bg-transparent flex-row items-center justify-center absolute top-0.5 right-0.5 z-10">
-			<View className="bg-background-secondary rounded-full p-0.5 flex-row items-center justify-center">
-				<Ionicons
-					name="download-outline"
-					size={13}
-					color={textGreen500.color}
-				/>
-			</View>
-		</View>
-	)
-}
+import { IndicatorBadge } from "@/features/drive/components/item/indicators"
 
 function VideoIndicator() {
 	return (
@@ -131,8 +99,22 @@ export const Photo = ({
 						foreground={true}
 					>
 						{previewType === "video" && <VideoIndicator />}
-						{info.item.type === "file" && info.item.data.favorited && <FavoritedIndicator />}
-						{isStoredOffline && <OfflineIndicator />}
+						{info.item.type === "file" && info.item.data.favorited && (
+							<IndicatorBadge
+								type="favorited"
+								size={13}
+								positionClassName="bottom-0.5 left-0.5"
+								bgClassName="bg-white"
+							/>
+						)}
+						{isStoredOffline && (
+							<IndicatorBadge
+								type="offline"
+								size={13}
+								positionClassName="top-0.5 right-0.5"
+								bgClassName="bg-background-secondary"
+							/>
+						)}
 						{arePhotosSelected && (
 							<View
 								className={cn(

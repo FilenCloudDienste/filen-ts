@@ -2,7 +2,22 @@ import { create } from "zustand"
 import * as FileSystem from "expo-file-system"
 import type { AnyNormalDir, FilenSdkErrorInterface, UploadError, DownloadError, NonRootItem } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
+import type { CopyJobGlyph } from "@/features/copy/copyAdapter"
 import { clampedRatio } from "@filen/shared"
+
+type UploadErrors = {
+	upload: UploadError[]
+	scan: FilenSdkErrorInterface[]
+	unknown: Error[]
+}
+
+type DownloadErrors = {
+	download: (Omit<DownloadError, "item"> & {
+		item?: NonRootItem
+	})[]
+	scan: FilenSdkErrorInterface[]
+	unknown: Error[]
+}
 
 export type Transfer = {
 	id: string
@@ -18,11 +33,7 @@ export type Transfer = {
 			type: "uploadDirectory"
 			knownFiles: number
 			knownDirectories: number
-			errors: {
-				upload: UploadError[]
-				scan: FilenSdkErrorInterface[]
-				unknown: Error[]
-			}
+			errors: UploadErrors
 			localFileOrDir: FileSystem.File | FileSystem.Directory
 			parent: AnyNormalDir
 			// Effective remote name — what the item is called once uploaded (the caller-supplied
@@ -32,11 +43,7 @@ export type Transfer = {
 	  }
 	| {
 			type: "uploadFile"
-			errors: {
-				upload: UploadError[]
-				scan: FilenSdkErrorInterface[]
-				unknown: Error[]
-			}
+			errors: UploadErrors
 			localFileOrDir: FileSystem.File | FileSystem.Directory
 			parent: AnyNormalDir
 			// See uploadDirectory.name.
@@ -44,13 +51,7 @@ export type Transfer = {
 	  }
 	| {
 			type: "downloadFile"
-			errors: {
-				download: (Omit<DownloadError, "item"> & {
-					item?: NonRootItem
-				})[]
-				scan: FilenSdkErrorInterface[]
-				unknown: Error[]
-			}
+			errors: DownloadErrors
 			item: DriveItem
 			destination: FileSystem.File
 	  }
@@ -59,7 +60,7 @@ export type Transfer = {
 			// abort stops the copy and keeps what it already made.
 			type: "copy"
 			name: string
-			glyph: "directory" | "file" | "items"
+			glyph: CopyJobGlyph
 	  }
 	| {
 			type: "downloadDirectory"
@@ -69,13 +70,7 @@ export type Transfer = {
 				bytesTransferred: number
 				totalBytes: number
 			}
-			errors: {
-				download: (Omit<DownloadError, "item"> & {
-					item?: NonRootItem
-				})[]
-				scan: FilenSdkErrorInterface[]
-				unknown: Error[]
-			}
+			errors: DownloadErrors
 			item: DriveItem
 			destination: FileSystem.Directory
 	  }
@@ -103,7 +98,7 @@ export type FinishedTransfer = {
 	// "Completed with N errors" row label for completedWithErrors.
 	errorCount: number
 	// Copies only: the row glyph, and what the job reports besides failures for the notes line.
-	copyGlyph?: "directory" | "file" | "items"
+	copyGlyph?: CopyJobGlyph
 	copyNotes?: {
 		skipped: number
 		renamed: number

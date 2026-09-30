@@ -1,16 +1,16 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import { Fragment, useState, useEffect } from "react"
 import { Platform, AppState } from "react-native"
-import { useNavigation } from "expo-router"
-import { router } from "@/lib/router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { Image } from "expo-image"
 import { run, formatBytes, TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset } from "@filen/shared"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { shareTmpFile } from "@/lib/share"
 import prompts from "@/lib/prompts"
+import { confirmPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import thumbnails from "@/lib/thumbnails"
 import fileCache from "@/lib/fileCache"
@@ -90,24 +90,18 @@ async function confirmAndRun(options: {
 	action: () => Promise<void>
 	successMessage: string
 }): Promise<void> {
-	const promptResult = await run(async () => {
-		return await prompts.alert({
+	const confirmed = await confirmPrompt(
+		{
 			title: options.title,
 			message: options.message,
 			okText: i18n.t("clear"),
 			cancelText: i18n.t("cancel"),
 			destructive: true
-		})
-	})
+		},
+		{ tag: "settings", message: "clear cache confirmation prompt failed" }
+	)
 
-	if (!promptResult.success) {
-		logger.warn("settings", "clear cache confirmation prompt failed", { error: promptResult.error })
-		alerts.error(promptResult.error)
-
-		return
-	}
-
-	if (promptResult.data.cancelled) {
+	if (!confirmed) {
 		return
 	}
 
@@ -128,7 +122,7 @@ async function confirmAndRun(options: {
 }
 
 function Advanced() {
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const { t } = useTranslation()
 
 	const cacheSizesQuery = useCacheSizesQuery()
@@ -224,24 +218,18 @@ function Advanced() {
 	})()
 
 	const exportLogs = async () => {
-		const promptResult = await run(async () => {
-			return await prompts.alert({
+		const confirmed = await confirmPrompt(
+			{
 				title: t("export_logs"),
 				message: t("export_logs_consent"),
 				okText: t("export_logs_action"),
 				cancelText: i18n.t("cancel"),
 				destructive: false
-			})
-		})
+			},
+			{ tag: "settings", message: "export logs confirmation prompt failed" }
+		)
 
-		if (!promptResult.success) {
-			logger.warn("settings", "export logs confirmation prompt failed", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
-			return
-		}
-
-		if (promptResult.data.cancelled) {
+		if (!confirmed) {
 			return
 		}
 
@@ -283,14 +271,9 @@ function Advanced() {
 			<SettingsHeader
 				title={t("advanced")}
 				icon="close"
-				onDismiss={() => {
-					navigation.getParent()?.goBack()
-				}}
+				onDismiss={dismiss}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<SettingsScrollView>
 					<Group
 						className="bg-background-tertiary"
@@ -441,10 +424,9 @@ function Advanced() {
 
 												setTransferPreset(preset)
 
-												void prompts.alert({
+												void prompts.info({
 													title: t("transfer_performance_updated_title"),
-													message: t("transfer_performance_restart_required"),
-													singleButton: true
+													message: t("transfer_performance_restart_required")
 												})
 											}
 										}))
@@ -625,9 +607,7 @@ function Advanced() {
 								icon: "list-outline",
 								title: t("view_logs"),
 								subTitle: t("view_logs_description"),
-								onPress: () => {
-									router.push("/logViewer")
-								}
+								href: "/logViewer"
 							},
 							{
 								icon: "document-text-outline",
@@ -640,7 +620,7 @@ function Advanced() {
 						]}
 					/>
 				</SettingsScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

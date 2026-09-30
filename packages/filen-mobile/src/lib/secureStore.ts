@@ -1,21 +1,20 @@
 import * as ExpoSecureStore from "expo-secure-store"
 import { createMMKV, type MMKV } from "react-native-mmkv"
 import * as FileSystem from "expo-file-system"
-import { Platform } from "react-native"
+import { ensureDirectory } from "@/lib/fsUtils"
 import crypto from "crypto"
 import { serialize, deserialize } from "@/lib/serializer"
-import { run, Semaphore, runEffect } from "@filen/shared"
+import { run, Semaphore } from "@filen/shared"
 import { useRef, useEffect, useCallback, useState } from "react"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
 import { Buffer } from "react-native-quick-crypto"
-import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import { isEqual } from "es-toolkit"
 import { normalizeFilePathForSdk } from "@/lib/paths"
+import { SECURE_STORE_DIRECTORY, MMKV_DIRECTORY } from "@/lib/storageRoots"
+import { sealAesGcm, openAesGcm } from "@/lib/aesGcm"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import logger from "@/lib/logger"
-
-export const VERSION = 1
 
 // kSecAttrAccessibleAfterFirstUnlock — Apple's recommended class for background access. The
 // expo-secure-store default (kSecAttrAccessibleWhenUnlocked) makes the key unreadable the
@@ -25,6 +24,8 @@ export const VERSION = 1
 const ENCRYPTION_KEY_KEYCHAIN_OPTIONS: ExpoSecureStore.SecureStoreOptions = {
 	keychainAccessible: ExpoSecureStore.AFTER_FIRST_UNLOCK
 }
+
+export type SecureStoreKeyChange = { type: "set"; value: unknown } | { type: "removed" }
 
 class SecureStore {
 	private readonly mmkv: MMKV
@@ -50,25 +51,7 @@ class SecureStore {
 	// re-login; no migration.
 	public readonly secureStoreKeyEncryptionKey: string = "encryptionKeyAfu"
 	public readonly secureStoreFile: FileSystem.File = new FileSystem.File(
-		Platform.select({
-			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-				"secureStore",
-				`v${VERSION}`,
-				this.secureStoreFileName
-			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "secureStore", `v${VERSION}`, this.secureStoreFileName)
-		})
-	)
-	public readonly mmkvDirectory = new FileSystem.Directory(
-		Platform.select({
-			ios: FileSystem.Paths.join(
-				FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-				"mmkv",
-				`v${VERSION}`
-			),
-			default: FileSystem.Paths.join(FileSystem.Paths.document, "mmkv", `v${VERSION}`)
-		})
+		FileSystem.Paths.join(SECURE_STORE_DIRECTORY.uri, this.secureStoreFileName)
 	)
 
 	private directoriesEnsured = false
@@ -78,19 +61,9 @@ class SecureStore {
 			return
 		}
 
-		if (!this.secureStoreFile.parentDirectory.exists) {
-			this.secureStoreFile.parentDirectory.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
+		ensureDirectory(this.secureStoreFile.parentDirectory)
 
-		if (!this.mmkvDirectory.exists) {
-			this.mmkvDirectory.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
+		ensureDirectory(MMKV_DIRECTORY)
 
 		this.directoriesEnsured = true
 	}
@@ -117,7 +90,7 @@ class SecureStore {
 			id: this.fallbackMmkvId,
 			mode: "single-process",
 			encryptionKey: process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"],
-			path: normalizeFilePathForSdk(this.mmkvDirectory.uri),
+			path: normalizeFilePathForSdk(MMKV_DIRECTORY.uri),
 			readOnly: false
 		})
 	}
@@ -253,19 +226,7 @@ class SecureStore {
 			throw new Error("SecureStore: payload too short to contain IV + authTag")
 		}
 
-		const cipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(encryptionKey, "hex"), bytes.subarray(0, 12))
-
-		cipher.setAuthTag(bytes.subarray(bytes.length - 16))
-
-		const decrypted = cipher.update(bytes.subarray(12, bytes.length - 16))
-		const final = cipher.final()
-
-		// GCM is a stream mode — final() is empty for a single-update decrypt, so the
-		// concat (a full-payload copy) is skippable on the common path.
-		return deserialize((final.length === 0 ? decrypted : Buffer.concat([decrypted, final])) as unknown as string) as Record<
-			string,
-			unknown
-		>
+		return deserialize<Record<string, unknown>>(openAesGcm(Buffer.from(encryptionKey, "hex"), bytes, 0))
 	}
 
 	// Enumerate the destination's parent directory and delete every .securestore.tmp.* /
@@ -531,26 +492,8 @@ class SecureStore {
 			this.ensureDirectories()
 
 			const encryptionKey = await this.getEncryptionKey()
-			const iv = crypto.randomBytes(12)
-			const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(encryptionKey, "hex"), iv)
-			const encrypted = cipher.update(Buffer.from(serialize(data), "utf-8"))
-			const final = cipher.final()
-			const authTag = cipher.getAuthTag()
-
-			// Assemble the wire payload (IV ++ ciphertext ++ authTag — pinned by the
-			// hardening suite against an independent decryptor) with ONE output
-			// allocation. The previous Buffer.concat + new Uint8Array(...) pair copied
-			// the full payload twice — O(store bytes) of pure memcpy per write.
-			const payload = new Uint8Array(iv.length + encrypted.length + final.length + authTag.length)
-			let payloadOffset = 0
-
-			payload.set(iv, payloadOffset)
-			payloadOffset += iv.length
-			payload.set(encrypted, payloadOffset)
-			payloadOffset += encrypted.length
-			payload.set(final, payloadOffset)
-			payloadOffset += final.length
-			payload.set(authTag, payloadOffset)
+			// IV ++ ciphertext ++ authTag, pinned by the hardening suite against an independent decryptor.
+			const payload = sealAesGcm(Buffer.from(encryptionKey, "hex"), Buffer.from(serialize(data), "utf-8"))
 
 			// Stage the new payload in the SAME directory as the destination so the final
 			// move is an atomic intra-volume rename (not a cross-volume copy, which would
@@ -778,6 +721,40 @@ class SecureStore {
 			throw result.error
 		}
 	}
+
+	/**
+	 * Watches a single key; a whole-store clear is delivered as "removed". Returns the unsubscribe.
+	 */
+	public subscribeKey(key: string, listener: (change: SecureStoreKeyChange) => void): () => void {
+		const changeSubscription = events.subscribe("secureStoreChange", payload => {
+			if (payload.key === key) {
+				listener({
+					type: "set",
+					value: payload.value
+				})
+			}
+		})
+
+		const removeSubscription = events.subscribe("secureStoreRemove", payload => {
+			if (payload.key === key) {
+				listener({
+					type: "removed"
+				})
+			}
+		})
+
+		const clearSubscription = events.subscribe("secureStoreClear", () => {
+			listener({
+				type: "removed"
+			})
+		})
+
+		return () => {
+			changeSubscription.remove()
+			removeSubscription.remove()
+			clearSubscription.remove()
+		}
+	}
 }
 
 const secureStore = new SecureStore()
@@ -881,41 +858,13 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	})
 
 	useEffect(() => {
-		const { cleanup } = runEffect(defer => {
-			const secureStoreChangeSubscription = events.subscribe("secureStoreChange", payload => {
-				if (payload.key === key && !isLocalUpdateRef.current) {
-					setStateChecked(payload.value as T)
-				}
-			})
+		return secureStore.subscribeKey(key, change => {
+			if (isLocalUpdateRef.current) {
+				return
+			}
 
-			defer(() => {
-				secureStoreChangeSubscription.remove()
-			})
-
-			const secureStoreRemoveSubscription = events.subscribe("secureStoreRemove", payload => {
-				if (payload.key === key && !isLocalUpdateRef.current) {
-					setStateChecked(initialValueRef.current)
-				}
-			})
-
-			defer(() => {
-				secureStoreRemoveSubscription.remove()
-			})
-
-			const secureStoreClearSubscription = events.subscribe("secureStoreClear", () => {
-				if (!isLocalUpdateRef.current) {
-					setStateChecked(initialValueRef.current)
-				}
-			})
-
-			defer(() => {
-				secureStoreClearSubscription.remove()
-			})
+			setStateChecked(change.type === "set" ? (change.value as T) : initialValueRef.current)
 		})
-
-		return () => {
-			cleanup()
-		}
 	}, [key, setStateChecked])
 
 	return [state, set]

@@ -1,9 +1,10 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryUpdater } from "@/queries/client"
+import { queryUpdater, type QueryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useDriveItemVersionsQuery"
 
@@ -28,11 +29,7 @@ export async function fetchData(
 
 	return await authedSdkClient.listFileVersions(
 		fromCache,
-		params?.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
+		toSignalOpts(params?.signal)
 	)
 }
 
@@ -62,9 +59,7 @@ export function driveItemVersionsQueryUpdate({
 }: {
 	params: Parameters<typeof fetchData>[0]
 } & {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 	dataUpdatedAt?: number
 }): void {
 	const sortedParams = sortParams(params)

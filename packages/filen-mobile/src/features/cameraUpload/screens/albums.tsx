@@ -1,20 +1,21 @@
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import { LoadingView } from "@/components/ui/loadingView"
 import { Group } from "@/components/ui/settingsGroup"
 import { useCameraUploadConfig } from "@/features/cameraUpload/cameraUpload"
-import View, { GestureHandlerScrollView } from "@/components/ui/view"
-import { Fragment, useEffect } from "react"
+import View from "@/components/ui/view"
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
+import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
-import { Platform, ActivityIndicator, AppState } from "react-native"
+import { Platform } from "react-native"
 import { router } from "@/lib/router"
 import useCameraUploadAlbumsQuery from "@/features/cameraUpload/queries/useCameraUploadAlbums.query"
 import useCameraUploadAlbumLatestPhotoQuery from "@/features/cameraUpload/queries/useCameraUploadAlbumLatestPhoto.query"
 import Image from "@/components/ui/image"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
+import useOnAppForeground from "@/hooks/useOnAppForeground"
 import { useTranslation } from "react-i18next"
-import ListEmpty from "@/components/ui/listEmpty"
-import Button from "@/components/ui/button"
+import ListEmpty, { LoadErrorEmpty } from "@/components/ui/listEmpty"
 
 const ALBUM_PREVIEW_SIZE = {
 	width: 34,
@@ -58,7 +59,6 @@ const AlbumPreview = ({ albumId }: { albumId: string }) => {
 const Albums = () => {
 	const { t } = useTranslation()
 	const { config, setConfig } = useCameraUploadConfig()
-	const insets = useSafeAreaInsets()
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 
@@ -74,17 +74,7 @@ const Albums = () => {
 	const albumsQuery = useCameraUploadAlbumsQuery()
 	const { refetch } = albumsQuery
 
-	useEffect(() => {
-		const subscription = AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "active") {
-				refetch()
-			}
-		})
-
-		return () => {
-			subscription.remove()
-		}
-	}, [refetch])
+	useOnAppForeground(refetch)
 
 	return (
 		<Fragment>
@@ -115,35 +105,14 @@ const Albums = () => {
 					default: undefined
 				})}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{mediaPermissions.loading ? (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<ActivityIndicator
-							size="large"
-							color={textForeground.color as string}
-						/>
-					</View>
+					<LoadingView />
 				) : mediaPermissions.granted ? (
 					albumsQuery.status === "pending" ? (
-						<View className="flex-1 bg-transparent items-center justify-center">
-							<ActivityIndicator
-								size="large"
-								color={textForeground.color as string}
-							/>
-						</View>
+						<LoadingView />
 					) : albumsQuery.status === "success" && albumsQuery.data.length > 0 ? (
-						<GestureHandlerScrollView
-							className="bg-transparent"
-							contentInsetAdjustmentBehavior="automatic"
-							contentContainerClassName="px-4 gap-4"
-							contentContainerStyle={{
-								paddingBottom: insets.bottom
-							}}
-							showsHorizontalScrollIndicator={false}
-						>
+						<SettingsScrollView>
 							<Group
 								className="bg-background-tertiary"
 								buttons={albumsQuery.data
@@ -178,13 +147,11 @@ const Albums = () => {
 										}
 									})}
 							/>
-						</GestureHandlerScrollView>
+						</SettingsScrollView>
 					) : albumsQuery.status === "error" ? (
-						<ListEmpty
-							icon="warning-outline"
+						<LoadErrorEmpty
 							title={t("could_not_load_albums")}
-							description={t("please_check_connection")}
-							action={<Button onPress={() => refetch()}>{t("try_again")}</Button>}
+							onRetry={() => refetch()}
 						/>
 					) : (
 						<ListEmpty
@@ -198,7 +165,7 @@ const Albums = () => {
 						title={t("no_permissions_enable_manually")}
 					/>
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

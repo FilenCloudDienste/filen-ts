@@ -1,9 +1,11 @@
 import * as FileSystem from "expo-file-system"
+import { ensureDirectory } from "@/lib/fsUtils"
 import { AnyFile } from "@filen/sdk-rs"
 import { type DriveItem } from "@/types"
 import useHttpStore from "@/stores/useHttp.store"
 import { THUMBNAILS_DIRECTORY as DIRECTORY } from "@/lib/storageRoots"
 import { getPreviewType } from "@/lib/previewType"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 export function abortError(signal?: AbortSignal): Error {
 	const reason = signal?.reason
@@ -44,16 +46,9 @@ export function getPath(item: DriveItem): string {
 	return FileSystem.Paths.join(DIRECTORY.uri, `${item.data.uuid}.webp`)
 }
 
-export function ensureDirectory(): void {
-	if (!DIRECTORY.exists) {
-		DIRECTORY.create({
-			idempotent: true,
-			intermediates: true
-		})
-	}
+export function ensureThumbnailsDirectory(): void {
+	ensureDirectory(DIRECTORY)
 }
-
-export { driveItemToAnyFile } from "@/lib/sdkSources"
 
 export type ThumbnailKind = "image" | "video"
 
@@ -88,7 +83,7 @@ export function getThumbnailKindForName(name: string, canMakeThumbnail: boolean)
 // getThumbnailKindForName directly. Both entry points must answer identically: a format that
 // thumbnails only on the device that uploaded it is worse than one that never does.
 export function getThumbnailKind(item: DriveItem): ThumbnailKind | null {
-	if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+	if (!isFileItem(item)) {
 		return null
 	}
 

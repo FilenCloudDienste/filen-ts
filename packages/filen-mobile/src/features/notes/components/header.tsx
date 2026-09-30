@@ -3,17 +3,16 @@ import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import { NoteType } from "@filen/sdk-rs"
 import { Platform } from "react-native"
 import { useLocalSearchParams } from "expo-router"
-import { useResolveClassNames } from "uniwind"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useShallow } from "zustand/shallow"
 import useNotesTagsQuery from "@/features/notes/queries/useNotesTags.query"
-import { useSecureStore } from "@/lib/secureStore"
 import { useStringifiedClient } from "@/lib/auth"
 import { aggregateNoteSelectionFlags } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import { buildNotesHeaderRightItems } from "@/features/notes/components/notesHeaderMenuBuilders"
-import { NOTES_VIEW_MODES, type NotesViewMode } from "@/features/notes/notesViewModes"
+import { NOTES_VIEW_MODES } from "@/features/notes/notesViewModes"
+import { useNotesViewMode } from "@/features/notes/notesViewModePreference"
 import { useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import { type NoteTag } from "@/types"
@@ -35,12 +34,10 @@ export const Header = ({
 }) => {
 	const { t } = useTranslation()
 	const stringifiedClient = useStringifiedClient()
-	const textForeground = useResolveClassNames("text-foreground")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedNotes = useNotesStore(useShallow(state => state.selectedNotes))
 	const selectedTags = useNotesStore(useShallow(state => state.selectedTags))
 	const markedOffline = useNotesOfflineStore(useShallow(state => state.marked))
-	const [notesViewMode, setNotesViewMode] = useSecureStore<NotesViewMode>("notesViewMode", "notes")
+	const [notesViewMode, setNotesViewMode] = useNotesViewMode()
 	const [tagsSortBy, setTagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
@@ -91,7 +88,6 @@ export const Header = ({
 
 	const headerRightItems = buildNotesHeaderRightItems({
 		t,
-		textForeground,
 		selectedNotes,
 		selectedNotesLive,
 		markedOffline,
@@ -115,17 +111,10 @@ export const Header = ({
 
 		return [
 			{
-				type: "button",
-				icon: {
-					name: "close-outline",
-					color: textForeground.color,
-					size: 20
-				},
-				props: {
-					onPress: () => {
-						useNotesStore.getState().clearSelectedNotes()
-						useNotesStore.getState().clearSelectedTags()
-					}
+				type: "clearSelection",
+				onPress: () => {
+					useNotesStore.getState().clearSelectedNotes()
+					useNotesStore.getState().clearSelectedTags()
 				}
 			}
 		] satisfies HeaderItem[]
@@ -162,23 +151,9 @@ export const Header = ({
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
 			shadowVisible={false}
-			searchBarOptions={{
-				placement: "integratedButton",
+			search={{
 				placeholder: viewMode === "tags" ? t("search_tags") : t("search_notes"),
-				onChangeText: e => setSearchQuery(e.nativeEvent.text),
-				onCancelButtonPress: () => setSearchQuery(""),
-				onClose: () => setSearchQuery(""),
-				onOpen: () => setSearchQuery(""),
-				allowToolbarIntegration: false,
-				headerIconColor: textForeground.color,
-				textColor: textForeground.color,
-				barTintColor: "transparent",
-				tintColor: textForeground.color,
-				hintTextColor: textMutedForeground.color,
-				shouldShowHintSearchIcon: true,
-				hideNavigationBar: false,
-				hideWhenScrolling: false,
-				inputType: "text"
+				onChangeText: setSearchQuery
 			}}
 		/>
 	)

@@ -1,19 +1,11 @@
-import {
-	AnyDirWithContext,
-	AnyNormalDir,
-	AnySharedDir,
-	AnySharedDirWithContext,
-	AnyDirWithContext_Tags,
-	AnySharedDir_Tags,
-	AnyNormalDir_Tags,
-	AnyLinkedDir_Tags
-} from "@filen/sdk-rs"
+import type { AnyDirWithContext } from "@filen/sdk-rs"
 import { type DriveItem } from "@/types"
-import cache from "@/lib/cache"
-import { unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { unwrapAnyDirUuid } from "@/lib/sdkUnwrap"
+import { tryDriveItemToAnyDirWithContext } from "@/lib/sdkSources"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import * as FileSystem from "expo-file-system"
 import { OFFLINE_DIRECTORIES_DIRECTORY } from "@/lib/storageRoots"
+import { metaFileName } from "@/lib/metaFile"
 
 // "sharedInRoot" means the item lives at the top level of Shared In (no parent dir, just the shared root listing).
 export type OfflineParent = AnyDirWithContext | "sharedInRoot"
@@ -32,59 +24,14 @@ export function parentCacheKey(parent: OfflineParent | OfflineUuidParent): strin
 		return `uuid:${parent.uuid}`
 	}
 
-	switch (parent.tag) {
-		case AnyDirWithContext_Tags.Normal: {
-			switch (parent.inner[0].tag) {
-				case AnyNormalDir_Tags.Dir: {
-					return `dir:${parent.inner[0].inner[0].uuid}`
-				}
+	// The context tag keeps a normal and a shared/linked view of the same uuid apart; Dir vs Root needs no prefix.
+	const uuid = unwrapAnyDirUuid(parent)
 
-				case AnyNormalDir_Tags.Root: {
-					return `root:${parent.inner[0].inner[0].uuid}`
-				}
-
-				default: {
-					throw new Error("Unknown AnyNormalDir tag")
-				}
-			}
-		}
-
-		case AnyDirWithContext_Tags.Shared: {
-			switch (parent.inner[0].dir.tag) {
-				case AnySharedDir_Tags.Dir: {
-					return `shared-dir:${parent.inner[0].dir.inner[0].inner.uuid}`
-				}
-
-				case AnySharedDir_Tags.Root: {
-					return `shared-root:${parent.inner[0].dir.inner[0].inner.uuid}`
-				}
-
-				default: {
-					throw new Error("Unknown AnySharedDir tag")
-				}
-			}
-		}
-
-		case AnyDirWithContext_Tags.Linked: {
-			switch (parent.inner[0].dir.tag) {
-				case AnyLinkedDir_Tags.Dir: {
-					return `linked-dir:${parent.inner[0].dir.inner[0].inner.uuid}`
-				}
-
-				case AnyLinkedDir_Tags.Root: {
-					return `linked-root:${parent.inner[0].dir.inner[0].inner.uuid}`
-				}
-
-				default: {
-					throw new Error("Unknown AnyLinkedDir tag")
-				}
-			}
-		}
-
-		default: {
-			throw new Error("Unknown AnyDirWithContext tag")
-		}
+	if (uuid === null) {
+		throw new Error("Unknown AnyDirWithContext tag")
 	}
+
+	return `${parent.tag}:${uuid}`
 }
 
 export type OfflineSyncErrorKind = "download" | "listing" | "verify" | "store"
@@ -145,52 +92,8 @@ export function makeSyncError({
 // Extracted from Offline.findParentAnyDirWithContext so sync and future reconcile code can reuse
 // the conversion without needing an in-memory pathToItem map.
 export function directoryDriveItemToAnyDirWithContext(item: DriveItem): OfflineParent | null {
-	if (!isDirectoryItem(item)) {
-		return null
-	}
-
-	switch (item.type) {
-		case "directory": {
-			return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
-		}
-
-		case "sharedDirectory": {
-			const parentUuid = unwrapParentUuid(item.data.inner.parent)
-
-			// Honor the OfflineParent | null contract: a missing parent must NOT throw here. This runs
-			// for every nested entry inside an unguarded Promise.all in listDirectoriesRecursive, so a
-			// single throw would reject the whole offline index rebuild. All callers handle null with
-			// `if (!parent) continue`, so a missing-parent entry is skipped just like listFiles skips
-			// an undecodable meta.
-			if (!parentUuid) {
-				return null
-			}
-
-			// The cached parent may be absent in a fresh session — the listing stamps the role onto the
-			// item, recover from it before giving up.
-			const shareInfo = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)?.shareInfo ?? item.data.sharingRole
-
-			if (!shareInfo) {
-				return null
-			}
-
-			return new AnyDirWithContext.Shared(
-				AnySharedDirWithContext.new({
-					dir: new AnySharedDir.Dir(item.data),
-					shareInfo
-				})
-			)
-		}
-
-		case "sharedRootDirectory": {
-			return new AnyDirWithContext.Shared(
-				AnySharedDirWithContext.new({
-					dir: new AnySharedDir.Root(item.data),
-					shareInfo: item.data.sharingRole
-				})
-			)
-		}
-	}
+	// Must not throw: it runs per nested entry inside an unguarded Promise.all in listDirectoriesRecursive, and callers skip null.
+	return isDirectoryItem(item) ? tryDriveItemToAnyDirWithContext(item) : null
 }
 
 // secureStore key for the "Sync offline files on Wi-Fi only" setting. Boolean; absent/false →
@@ -219,7 +122,7 @@ export const OFFLINE_BACKGROUND_STANDALONE_FILE_CAP = 50
 // only for provably URI-safe segments).
 export function getTreeMetaSize(topLevelUuid: string): number | null {
 	try {
-		const info = new FileSystem.File(`${OFFLINE_DIRECTORIES_DIRECTORY.uri}/${topLevelUuid}/${topLevelUuid}.filenmeta`).info()
+		const info = new FileSystem.File(`${OFFLINE_DIRECTORIES_DIRECTORY.uri}/${topLevelUuid}/${metaFileName(topLevelUuid)}`).info()
 
 		if (!info.exists || typeof info.size !== "number") {
 			return null

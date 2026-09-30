@@ -161,11 +161,11 @@ export const drive = {
 
 	// ── Create directory prompt ────────────────────────────────────────────────
 	/** Create-directory dialog title and menu button label */
-	create_folder: "Create directory",
+	create_directory: "Create directory",
 	/** Create-directory dialog message */
-	enter_folder_name: "Enter a name for the new directory",
+	enter_directory_name: "Enter a name for the new directory",
 	/** Create-directory dialog input placeholder */
-	folder_name: "Directory name",
+	directory_name: "Directory name",
 
 	// ── Create text file prompt ────────────────────────────────────────────────
 	/** Create-text-file dialog message */
@@ -373,10 +373,6 @@ export const drive = {
 	confirm_disable_public_link: "Are you sure you want to disable the public link for this item?",
 
 	// ── DriveSelectToolbar (driveSelectToolbar.tsx) ───────────────────────────
-	/** Create-directory dialog title in the drive-select (move picker) toolbar */
-	create_directory: "Create directory",
-	/** Create-directory dialog message in the drive-select toolbar */
-	enter_directory_name: "Enter a name for the new directory",
 	/** Confirm button in the move toolbar: moves selected items into the current directory */
 	move_here: "Move here",
 	/** Destination picker confirm button for a copy: copy the chosen items into the directory being shown */

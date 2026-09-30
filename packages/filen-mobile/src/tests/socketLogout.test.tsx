@@ -58,8 +58,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 vi.mock("@/lib/auth", () => ({
 	default: { logout: vi.fn() },
-	useSdkClients: () => ({ authedSdkClient: h.client }),
-	useStringifiedClient: () => ({ userId: 7n })
+	useSdkClients: () => ({ authedSdkClient: h.client })
 }))
 vi.mock("@/features/chats/store/useChats.store", () => ({ default: { getState: () => ({ setTyping: vi.fn() }) } }))
 vi.mock("@/features/chats/chats", () => ({ default: { refetchChatsAndMessages: vi.fn(async () => undefined) } }))

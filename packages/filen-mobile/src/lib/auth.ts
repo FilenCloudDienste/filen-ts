@@ -35,7 +35,6 @@ import sandboxCache from "@/lib/sandboxCache"
 import logger from "@/lib/logger"
 import { queryClientPersisterKv } from "@/queries/client"
 import driveSearch from "@/features/drive/driveSearch"
-import drive from "@/features/drive/drive"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import events from "@/lib/events"
@@ -485,13 +484,6 @@ class Auth {
 
 		// The drive clipboard holds decrypted items of this account.
 		useDriveClipboardStore.getState().clear()
-
-		// Session-cached root uuid must not leak into the next account's session.
-		try {
-			drive.resetCachedRootUuid()
-		} catch (e) {
-			logger.error("auth", "drive root uuid reset failed during logout", { err: e })
-		}
 
 		// Sort memo caches key on decrypted names — same session-scoped wipe as cache.clear().
 		try {

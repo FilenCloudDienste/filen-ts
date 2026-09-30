@@ -93,6 +93,11 @@ vi.mock("@/features/drive/driveMetadata", () => ({
 vi.mock("@/lib/cache", () => ({
 	default: {
 		directoryUuidToAnyNormalDir: { get: mockCacheDirectoryUuidToAnyNormalDirGet },
+		getNormalDir: (uuid: string) => {
+			const dir = mockCacheDirectoryUuidToAnyNormalDirGet(uuid) as { tag: string; inner: [unknown] } | undefined
+
+			return dir && dir.tag === "Dir" ? dir.inner[0] : undefined
+		},
 		fileUuidToNormalFile: { get: mockCacheFileUuidToNormalFileGet },
 		forgetItem: mockCacheForgetItem,
 		cacheNewFile: mockCacheNewFile,

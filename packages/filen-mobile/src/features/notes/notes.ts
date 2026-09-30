@@ -6,12 +6,13 @@ import { noteExportFileName, wrapSdkNote } from "@/features/notes/utils"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 import JSZip from "jszip"
 import { sanitizeFileName } from "@filen/shared"
-import { newTmpFile } from "@/lib/tmp"
+import { writeTmpFile } from "@/lib/tmp"
 import * as FileSystem from "expo-file-system"
 import { addTag, removeTag, createTag, renameTag, deleteTag, favoriteTag } from "@/features/notes/notesTags"
 import { leave, removeParticipant, addParticipant, addParticipants, setParticipantPermission } from "@/features/notes/notesParticipants"
 import { getContent, setContent, setType, setTitle } from "@/features/notes/notesContent"
 import { setPinned, setFavorited, archive, restore, restoreFromHistory, trash, deleteNote } from "@/features/notes/notesLifecycle"
+import { toSignalOpts } from "@/lib/signals"
 
 const notes = {
 	addTag,
@@ -41,11 +42,7 @@ const notes = {
 		const { authedSdkClient } = await auth.getSdkClients()
 		const sdkResult = await authedSdkClient.duplicateNote(
 			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		const original = wrapSdkNote(sdkResult.original)
@@ -76,25 +73,11 @@ const notes = {
 		}
 
 		const exportName = noteExportFileName(note)
-		const file = newTmpFile(sanitizeFileName(exportName.fileName))
-
-		if (file.exists) {
-			file.delete()
-		}
-
-		file.write(content, {
-			encoding: "utf8"
-		})
 
 		return {
-			file,
+			...writeTmpFile(sanitizeFileName(exportName.fileName), content),
 			// Share MIME matching the typed extension (#83) — callers pass it to the share sheet.
-			mimeType: exportName.mimeType,
-			cleanup: () => {
-				if (file.exists) {
-					file.delete()
-				}
-			}
+			mimeType: exportName.mimeType
 		}
 	},
 
@@ -131,22 +114,8 @@ const notes = {
 		)
 
 		const buffer = await zip.generateAsync({ type: "uint8array" })
-		const file = newTmpFile(sanitizeFileName(`notes_export_${Date.now()}.zip`))
 
-		if (file.exists) {
-			file.delete()
-		}
-
-		file.write(buffer)
-
-		return {
-			file,
-			cleanup: () => {
-				if (file.exists) {
-					file.delete()
-				}
-			}
-		}
+		return writeTmpFile(sanitizeFileName(`notes_export_${Date.now()}.zip`), buffer)
 	},
 
 	async createWithOptionalTag({
@@ -224,11 +193,7 @@ const notes = {
 		let note = wrapSdkNote(
 			await authedSdkClient.createNote(
 				title,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 

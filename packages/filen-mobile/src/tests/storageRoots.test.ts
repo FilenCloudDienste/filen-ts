@@ -28,7 +28,7 @@ async function importRoots(platform: "ios" | "android") {
 	return import("@/lib/storageRoots")
 }
 
-describe("BASE_DIRECTORY_URI derivation", () => {
+describe("SHARED_BASE_DIRECTORY_URI derivation", () => {
 	it("on Android: directory paths are rooted at FileSystem.Paths.document.uri", async () => {
 		const { OFFLINE_DIRECTORY } = await importRoots("android")
 		const { Paths } = await import("expo-file-system")
@@ -79,6 +79,14 @@ describe("version segments embedded in paths", () => {
 
 		expect(RAW_PREVIEW_CACHE_VERSION).toBe(1)
 		expect(RAW_PREVIEW_CACHE_DIRECTORY.uri).toContain(`rawPreviews/v${RAW_PREVIEW_CACHE_VERSION}`)
+	})
+
+	it("SECURE_STORE_DIRECTORY / MMKV_DIRECTORY contain 'secureStore/v1' / 'mmkv/v1'", async () => {
+		const { SECURE_STORE_DIRECTORY, MMKV_DIRECTORY, SECURE_STORE_VERSION } = await importRoots("android")
+
+		expect(SECURE_STORE_VERSION).toBe(1)
+		expect(SECURE_STORE_DIRECTORY.uri).toContain(`secureStore/v${SECURE_STORE_VERSION}`)
+		expect(MMKV_DIRECTORY.uri).toContain(`mmkv/v${SECURE_STORE_VERSION}`)
 	})
 })
 
@@ -131,11 +139,19 @@ describe("database roots live on the private base (0xdead10cc)", () => {
 		expect(SDK_CACHE_PARENT_DIRECTORY.uri).not.toContain(IOS_APP_GROUP_IDENTIFIER)
 	})
 
-	it("plain-file areas stay on the shared container on iOS", async () => {
-		const { OFFLINE_DIRECTORY, FILE_CACHE_PARENT_DIRECTORY, THUMBNAILS_DIRECTORY, LOGS_DIRECTORY } = await importRoots("ios")
+	it("plain-file areas and the secure store stay on the shared container on iOS", async () => {
+		const { OFFLINE_DIRECTORY, FILE_CACHE_PARENT_DIRECTORY, THUMBNAILS_DIRECTORY, LOGS_DIRECTORY, SECURE_STORE_DIRECTORY, MMKV_DIRECTORY } =
+			await importRoots("ios")
 		const { IOS_APP_GROUP_IDENTIFIER } = await import("@/constants")
 
-		for (const dir of [OFFLINE_DIRECTORY, FILE_CACHE_PARENT_DIRECTORY, THUMBNAILS_DIRECTORY, LOGS_DIRECTORY]) {
+		for (const dir of [
+			OFFLINE_DIRECTORY,
+			FILE_CACHE_PARENT_DIRECTORY,
+			THUMBNAILS_DIRECTORY,
+			LOGS_DIRECTORY,
+			SECURE_STORE_DIRECTORY,
+			MMKV_DIRECTORY
+		]) {
 			expect(dir.uri).toContain(IOS_APP_GROUP_IDENTIFIER)
 		}
 	})

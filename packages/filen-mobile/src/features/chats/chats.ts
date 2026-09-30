@@ -18,6 +18,7 @@ import * as FileSystem from "expo-file-system"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 import logger from "@/lib/logger"
 import { uploadQuotaRefusal } from "@/features/transfers/quota"
+import { toSignalOpts } from "@/lib/signals"
 
 class Chats {
 	private readonly refetchChatsAndMessagesMutex: Semaphore = new Semaphore(1)
@@ -28,11 +29,7 @@ class Chats {
 		const messages = await authedSdkClient.listMessagesBefore(
 			chat,
 			before,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		return messages.map(wrapMessage)
@@ -69,11 +66,7 @@ class Chats {
 				chat,
 				message,
 				replyTo,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -139,11 +132,7 @@ class Chats {
 		return await authedSdkClient.sendTypingSignal(
 			chat,
 			type,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	}
 
@@ -154,11 +143,7 @@ class Chats {
 			await authedSdkClient.deleteMessage(
 				chat,
 				message,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -198,11 +183,7 @@ class Chats {
 				chat,
 				message,
 				newMessage,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -246,11 +227,7 @@ class Chats {
 		message = wrapMessage(
 			await authedSdkClient.disableMessageEmbed(
 				message,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -283,11 +260,7 @@ class Chats {
 			await authedSdkClient.renameChat(
 				chat,
 				newName,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -303,11 +276,7 @@ class Chats {
 
 		await authedSdkClient.leaveChat(
 			chat,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		// Purge the chat's queued unsent messages, send errors and input drafts immediately —
@@ -334,11 +303,7 @@ class Chats {
 
 		await authedSdkClient.deleteChat(
 			chat,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		// Purge the chat's queued unsent messages, send errors and input drafts immediately —
@@ -371,11 +336,7 @@ class Chats {
 			await authedSdkClient.muteChat(
 				chat,
 				mute,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -392,11 +353,7 @@ class Chats {
 		const chat = wrapChat(
 			await authedSdkClient.createChat(
 				contacts,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -428,11 +385,7 @@ class Chats {
 				await authedSdkClient.addChatParticipant(
 					updated,
 					contact,
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 			)
 		}
@@ -455,11 +408,7 @@ class Chats {
 			await authedSdkClient.removeChatParticipant(
 				chat,
 				participant.userId,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 
@@ -475,11 +424,7 @@ class Chats {
 
 		await authedSdkClient.markChatRead(
 			chat,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	}
 
@@ -489,11 +434,7 @@ class Chats {
 		chats = (
 			await authedSdkClient.updateLastChatFocusTimesNow(
 				chats,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		).map(wrapChat)
 

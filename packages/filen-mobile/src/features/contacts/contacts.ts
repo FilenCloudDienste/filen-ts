@@ -3,6 +3,7 @@ import { contactRequestsQueryUpdate } from "@/features/contacts/queries/useConta
 import { contactsQueryUpdate, contactsQueryGet, BASE_QUERY_KEY as CONTACTS_QUERY_KEY } from "@/features/contacts/queries/useContacts.query"
 import queryClient from "@/queries/client"
 import logger from "@/lib/logger"
+import { toSignalOpts } from "@/lib/signals"
 
 // Coalesces contact-list rereads: a request made while one is in flight gets one more pass after it,
 // so accepts that land during a read are never missed and a burst costs at most two reads.
@@ -51,11 +52,7 @@ const contacts = {
 
 		await authedSdkClient.acceptContactRequest(
 			uuid,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		// Remove the accepted request from the cache immediately for instant UI feedback.
@@ -98,11 +95,7 @@ const contacts = {
 
 		await authedSdkClient.denyContactRequest(
 			uuid,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		contactRequestsQueryUpdate({
@@ -118,11 +111,7 @@ const contacts = {
 
 		await authedSdkClient.cancelContactRequest(
 			uuid,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		contactRequestsQueryUpdate({
@@ -152,11 +141,7 @@ const contacts = {
 
 		const blockedUuid = await authedSdkClient.blockContact(
 			email,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		contactsQueryUpdate({
@@ -183,11 +168,7 @@ const contacts = {
 
 		await authedSdkClient.deleteContact(
 			uuid,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		contactsQueryUpdate({
@@ -203,19 +184,11 @@ const contacts = {
 
 		await authedSdkClient.unblockContact(
 			uuid,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		const contacts = await authedSdkClient.getContacts(
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		).catch(e => {
 			logger.error("contacts", "getContacts refresh failed after successful unblock; unblock did complete server-side", { uuid, error: e })
 
@@ -236,19 +209,11 @@ const contacts = {
 
 		await authedSdkClient.sendContactRequest(
 			email,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		const outgoing = await authedSdkClient.listOutgoingContactRequests(
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		contactRequestsQueryUpdate({

@@ -1,12 +1,12 @@
-import { Platform } from "react-native"
-import { onlineManager } from "@tanstack/react-query"
-import { useLocalSearchParams, useNavigation, useFocusEffect } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
-import Header, { type HeaderItem } from "@/components/ui/header"
-import { Fragment, useCallback } from "react"
+import { type HeaderItem } from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
+import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import { run, formatBytes } from "@filen/shared"
@@ -14,11 +14,11 @@ import useDriveItemVersionsQuery from "@/features/drive/queries/useDriveItemVers
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
 import drive from "@/features/drive/drive"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { confirmedAction } from "@/lib/confirmedAction"
 import type { FileVersion } from "@filen/sdk-rs"
 import Menu, { type MenuButton } from "@/components/ui/menu"
+import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import DismissStack from "@/components/dismissStack"
 import useFileVersionsStore from "@/features/drive/store/useFileVersions.store"
@@ -27,7 +27,10 @@ import { runBulk } from "@/lib/bulkOps"
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
 import ListRow from "@/components/ui/listRow"
 import useIsOnline from "@/hooks/useIsOnline"
+import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChange"
 import logger from "@/lib/logger"
+
+const clearSelectedVersions = () => useFileVersionsStore.getState().clearSelectedVersions()
 
 const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) => {
 	const { t } = useTranslation()
@@ -64,42 +67,12 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 							title: t("restore"),
 							icon: "restore",
 							requiresOnline: true,
-							onPress: async () => {
-								const promptResponse = await run(async () => {
-									return await prompts.alert({
-										title: t("restore_version"),
-										message: t("restore_version_confirmation"),
-										cancelText: t("cancel"),
-										okText: t("restore"),
-										destructive: true
-									})
-								})
-
-								if (!promptResponse.success) {
-									logger.warn("drive", "restore file version prompt failed", { error: promptResponse.error })
-									alerts.error(promptResponse.error)
-
-									return
-								}
-
-								if (promptResponse.data.cancelled) {
-									return
-								}
-
-								const result = await runWithLoading(async () => {
-									await drive.restoreFileVersion({
-										item,
-										version
-									})
-								})
-
-								if (!result.success) {
-									logger.error("drive", "restore file version failed", { error: result.error, uuid: version.uuid })
-									alerts.error(result.error)
-
-									return
-								}
-							}
+							onPress: confirmedAction({
+								promptTitle: t("restore_version"),
+								promptMessage: t("restore_version_confirmation"),
+								promptOkText: t("restore"),
+								action: () => drive.restoreFileVersion({ item, version })
+							})
 						},
 						{
 							id: "delete",
@@ -107,42 +80,12 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 							icon: "delete",
 							destructive: true,
 							requiresOnline: true,
-							onPress: async () => {
-								const promptResponse = await run(async () => {
-									return await prompts.alert({
-										title: t("delete_version"),
-										message: t("delete_version_confirmation"),
-										cancelText: t("cancel"),
-										okText: t("delete"),
-										destructive: true
-									})
-								})
-
-								if (!promptResponse.success) {
-									logger.warn("drive", "delete file version prompt failed", { error: promptResponse.error })
-									alerts.error(promptResponse.error)
-
-									return
-								}
-
-								if (promptResponse.data.cancelled) {
-									return
-								}
-
-								const result = await runWithLoading(async () => {
-									await drive.deleteVersion({
-										item,
-										version
-									})
-								})
-
-								if (!result.success) {
-									logger.error("drive", "delete file version failed", { error: result.error, uuid: version.uuid })
-									alerts.error(result.error)
-
-									return
-								}
-							}
+							onPress: confirmedAction({
+								promptTitle: t("delete_version"),
+								promptMessage: t("delete_version_confirmation"),
+								promptOkText: t("delete"),
+								action: () => drive.deleteVersion({ item, version })
+							})
 						}
 					]}
 				>
@@ -155,9 +98,8 @@ const Version = ({ version, item }: { version: FileVersion; item: DriveItem }) =
 
 const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item: DriveItem }) => {
 	const { t } = useTranslation()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const isOnline = useIsOnline()
 	const selectedVersions = useFileVersionsStore(useShallow(state => state.selectedVersions))
 
@@ -166,20 +108,12 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 	const rightItems = ((): HeaderItem[] | undefined => {
 		if (inSelectionMode) {
 			const menuButtons: MenuButton[] = [
-				{
-					id: "selectAll",
-					title: selectedVersions.length === versions.length ? t("deselect_all") : t("select_all"),
-					icon: "select",
-					onPress: () => {
-						if (selectedVersions.length === versions.length) {
-							useFileVersionsStore.getState().clearSelectedVersions()
-
-							return
-						}
-
-						useFileVersionsStore.getState().selectAllVersions(versions)
-					}
-				},
+				selectAllMenuButton({
+					t,
+					allSelected: selectedVersions.length === versions.length,
+					onClear: () => useFileVersionsStore.getState().clearSelectedVersions(),
+					onSelectAll: () => useFileVersionsStore.getState().selectAllVersions(versions)
+				}),
 				{
 					id: "bulkDelete",
 					title: t("delete_selected"),
@@ -205,20 +139,8 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 
 			return [
 				{
-					type: "menu",
-					props: {
-						type: "dropdown",
-						hitSlop: 20,
-						buttons: menuButtons
-					},
-					triggerProps: {
-						hitSlop: 20
-					},
-					icon: {
-						name: "ellipsis-horizontal",
-						size: 24,
-						color: textForeground.color
-					}
+					type: "ellipsisMenu",
+					buttons: menuButtons
 				}
 			]
 		}
@@ -238,101 +160,31 @@ const FileVersionsHeader = ({ versions, item }: { versions: FileVersion[]; item:
 				props: {
 					enabled: isOnline,
 					style: !isOnline ? { opacity: 0.5 } : undefined,
-					onPress: async () => {
-						const promptResponse = await run(async () => {
-							return await prompts.alert({
-								title: t("delete_all_versions"),
-								message: t("delete_all_versions_confirmation"),
-								cancelText: t("cancel"),
-								okText: t("delete_all"),
-								destructive: true
-							})
-						})
-
-						if (!promptResponse.success) {
-							logger.warn("drive", "delete all versions prompt failed", { error: promptResponse.error })
-							alerts.error(promptResponse.error)
-
-							return
-						}
-
-						if (promptResponse.data.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async () => {
-							await Promise.all(
-								versions.map(version => {
-									return drive.deleteVersion({
-										item,
-										version
-									})
-								})
-							)
-						})
-
-						if (!result.success) {
-							logger.error("drive", "delete all file versions failed", { error: result.error })
-							alerts.error(result.error)
-
-							return
-						}
-					}
+					onPress: confirmedAction({
+						promptTitle: t("delete_all_versions"),
+						promptMessage: t("delete_all_versions_confirmation"),
+						promptOkText: t("delete_all"),
+						action: () => Promise.all(versions.map(version => drive.deleteVersion({ item, version })))
+					})
 				}
 			}
 		]
 	})()
 
-	const leftItems: HeaderItem[] = (() => {
-		if (inSelectionMode) {
-			return [
+	const leftItems: HeaderItem[] | undefined = inSelectionMode
+		? [
 				{
-					type: "button",
-					icon: {
-						name: "close-outline",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							useFileVersionsStore.getState().clearSelectedVersions()
-						}
-					}
+					type: "clearSelection",
+					onPress: () => useFileVersionsStore.getState().clearSelectedVersions()
 				}
 			]
-		}
-
-		if (Platform.OS === "ios") {
-			return [
-				{
-					type: "button",
-					icon: {
-						name: "close",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							navigation.getParent()?.goBack()
-						}
-					}
-				}
-			]
-		}
-
-		return []
-	})()
+		: undefined
 
 	return (
-		<Header
+		<SettingsHeader
 			title={inSelectionMode ? t("selected", { count: selectedVersions.length }) : t("file_versions")}
-			transparent={Platform.OS === "ios"}
-			shadowVisible={false}
-			backVisible={Platform.OS === "android"}
-			backgroundColor={Platform.select({
-				ios: undefined,
-				default: bgBackgroundSecondary.backgroundColor as string
-			})}
+			icon="close"
+			onDismiss={dismiss}
 			leftItems={leftItems}
 			rightItems={rightItems}
 		/>
@@ -346,15 +198,7 @@ const FileVersions = () => {
 	}>()
 	const insets = useSafeAreaInsets()
 
-	useFocusEffect(
-		useCallback(() => {
-			useFileVersionsStore.getState().clearSelectedVersions()
-
-			return () => {
-				useFileVersionsStore.getState().clearSelectedVersions()
-			}
-		}, [])
-	)
+	useClearSelectionOnFocusChange(clearSelectedVersions)
 
 	const item = deserializeRouteParam<DriveItem>(itemSerialized)
 
@@ -382,21 +226,15 @@ const FileVersions = () => {
 				versions={versions}
 				item={item}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					data={versions}
 					loading={driveItemVersionsQuery.status === "pending"}
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}
+					requiresOnline={true}
 					onRefresh={async () => {
-						if (!onlineManager.isOnline()) {
-							return
-						}
-
 						const result = await run(async () => {
 							return await driveItemVersionsQuery.refetch()
 						})
@@ -423,7 +261,7 @@ const FileVersions = () => {
 					}}
 					keyExtractor={version => version.uuid}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

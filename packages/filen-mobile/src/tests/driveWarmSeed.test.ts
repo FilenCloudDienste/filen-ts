@@ -27,7 +27,8 @@ vi.mock("@/lib/cache", () => ({
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({ BASE_QUERY_KEY: "useDriveItemsQuery" }))
 
-vi.mock("@/features/audio/queries/usePlaylists.query", () => ({ BASE_QUERY_KEY: "usePlaylistsQuery" }))
+// usePlaylists.query loads for real so the playlist pass runs its actual gap-fill rule.
+vi.mock("@/features/audio/audio", () => ({ default: {} }))
 
 import { warmSeedDriveCaches } from "@/features/drive/driveWarmSeed"
 import logger from "@/lib/logger"

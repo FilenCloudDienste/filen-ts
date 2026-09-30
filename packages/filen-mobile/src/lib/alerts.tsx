@@ -2,7 +2,7 @@ import * as Burnt from "burnt"
 import { Notifier, NotifierComponents } from "react-native-notifier"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
+import { errorToMessage } from "@/lib/sdkErrors"
 import i18n from "@/lib/i18n"
 
 const NotifierErrorContainer = ({ children }: { children: React.ReactNode }) => {
@@ -31,16 +31,9 @@ const NotifierErrorContainer = ({ children }: { children: React.ReactNode }) => 
 // stay unchanged; the former `class Alerts` added no value (zero fields, zero `this`).
 export const alerts = {
 	error(message: unknown): void {
-		const unwrappedSdkError = unwrapSdkError(message)
-		const description = unwrappedSdkError
-			? unwrappedSdkErrorToHumanReadable(unwrappedSdkError)
-			: message instanceof Error
-				? message.message
-				: String(message)
-
 		Notifier.showNotification({
 			title: i18n.t("error"),
-			description,
+			description: errorToMessage(message),
 			duration: 3000,
 			Component: NotifierComponents.Alert,
 			componentProps: {

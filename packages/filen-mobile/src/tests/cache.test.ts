@@ -18,6 +18,7 @@ vi.mock("@filen/sdk-rs", () => {
 
 	return {
 		AnyNormalDir: { Dir: makeStub("Dir") },
+		AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
 		AnySharedDir: { Dir: makeStub("SharedDir"), Root: makeStub("SharedRoot") },
 		AnyLinkedDir: { Dir: makeStub("LinkedDir") },
 		AnyDirWithContext: { Normal: makeStub("Normal"), Shared: makeStub("Shared"), Linked: makeStub("Linked") },
@@ -264,6 +265,26 @@ describe("Cache", () => {
 			// StubDir wraps the raw sdk dir
 			expect(normalDir.tag).toBe("Dir")
 			expect(normalDir.inner[0]).toBe(sdkDir)
+		})
+	})
+
+	describe("getNormalDir", () => {
+		it("returns the raw dir for a cached normal dir", () => {
+			const cache = createCache()
+			const sdkDir = makeSdkDir("dir-uuid-get")
+
+			cache.cacheNewNormalDir(sdkDir, makeDirectoryDriveItem("dir-uuid-get"))
+
+			expect(cache.getNormalDir("dir-uuid-get")).toBe(sdkDir)
+		})
+
+		it("returns undefined for an unknown uuid or a non-Dir entry", () => {
+			const cache = createCache()
+
+			cache.directoryUuidToAnyNormalDir.set("root-uuid", { tag: "Root", inner: [{}] } as any)
+
+			expect(cache.getNormalDir("missing")).toBeUndefined()
+			expect(cache.getNormalDir("root-uuid")).toBeUndefined()
 		})
 	})
 

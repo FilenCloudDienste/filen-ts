@@ -96,7 +96,6 @@ const HeaderTitle = ({ chat }: { chat: TChat }) => {
 
 const Header = ({ chat }: { chat: TChat }) => {
 	const stringigiedClient = useStringifiedClient()
-	const textForeground = useResolveClassNames("text-foreground")
 	const unreadCount = useChatUnreadCount(chat)
 
 	const headerRightItems = (() => {
@@ -106,25 +105,13 @@ const Header = ({ chat }: { chat: TChat }) => {
 
 		return [
 			{
-				type: "menu",
-				props: {
-					type: "dropdown",
-					hitSlop: 20,
-					buttons: createMenuButtons({
-						chat,
-						userId: stringigiedClient.userId,
-						origin: "chat",
-						unreadCount
-					})
-				},
-				triggerProps: {
-					hitSlop: 20
-				},
-				icon: {
-					name: "ellipsis-horizontal",
-					size: 24,
-					color: textForeground.color
-				}
+				type: "ellipsisMenu",
+				buttons: createMenuButtons({
+					chat,
+					userId: stringigiedClient.userId,
+					origin: "chat",
+					unreadCount
+				})
 			}
 		] satisfies HeaderItem[]
 	})()

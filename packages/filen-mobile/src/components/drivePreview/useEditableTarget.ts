@@ -12,6 +12,7 @@ import auth from "@/lib/auth"
 import events from "@/lib/events"
 import logger from "@/lib/logger"
 import type { DriveItemFileExtracted } from "@/types"
+import { toSignalOpts } from "@/lib/signals"
 
 type Parent = AnyDirWithContext | "sharedInRoot" | null
 
@@ -35,7 +36,7 @@ export type EditableTarget = {
 // cached, a search hit or a file moved elsewhere into an unlisted directory may not.
 async function warmParent(parentUuid: string, signal?: AbortSignal): Promise<AnyDirWithContext | null> {
 	const { authedSdkClient } = await auth.getSdkClients()
-	const dir = await authedSdkClient.getDirOptional(parentUuid, signal ? { signal } : undefined)
+	const dir = await authedSdkClient.getDirOptional(parentUuid, toSignalOpts(signal))
 
 	if (!dir || signal?.aborted) {
 		return null

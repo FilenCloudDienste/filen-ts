@@ -77,14 +77,9 @@ vi.mock("@/features/notes/components/content/checklist", () => ({ default: () =>
 vi.mock("@/features/notes/utils", () => ({ noteTypeToEditorType: () => "text" }))
 vi.mock("@/features/notes/checklistView", () => ({ useChecklistHideCompleted: () => [false] }))
 // M3: flushToDisk is the controllable seam — the live flushInflightContentWithAlert helper
-// (exported from the component module) is exercised against it. hashNoteContent is a
-// deterministic stand-in; buildInflightEntries receives hashes as opaque strings anyway, so the
-// REAL @filen/shared implementation (pulled via importActual, bypassing this file's own
-// @filen/shared mock below) is used rather than re-implementing the algorithm here.
-vi.mock("@/features/notes/components/sync", async () => ({
-	sync: { flushToDisk: mockFlushToDisk, clearRejections: vi.fn() },
-	hashNoteContent: (content: string) => `h(${content})`,
-	buildInflightEntries: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).buildInflightEntries
+// (exported from the component module) is exercised against it.
+vi.mock("@/features/notes/components/sync", () => ({
+	sync: { flushToDisk: mockFlushToDisk, clearRejections: vi.fn() }
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
@@ -101,8 +96,11 @@ vi.mock("@/features/notes/notes", () => ({ default: {} }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
 vi.mock("@/lib/decryption", () => ({ noteDisplayTitle: () => "" }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
+// hashNoteContent is a deterministic stand-in; buildInflightEntries (real, via the shared mock)
+// receives hashes as opaque strings anyway.
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
+	hashNoteContent: (content: string) => `h(${content})`,
 	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {
 		const cleanups: (() => void)[] = []
 
@@ -116,11 +114,10 @@ import {
 	computeNoteLoading,
 	computeNoteFetchError,
 	isNoteContentUnavailable,
-	buildInflightEntries,
 	sessionBaseHashForNewSession,
 	flushInflightContentWithAlert
 } from "@/features/notes/components/content"
-import { hashNoteContent } from "@/features/notes/components/sync"
+import { hashNoteContent, buildInflightEntries } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { type Note } from "@/types"
 

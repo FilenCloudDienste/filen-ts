@@ -54,10 +54,10 @@ import {
 	abortError,
 	OfflineAbortError,
 	getPath,
-	ensureDirectory,
-	driveItemToAnyFile,
+	ensureThumbnailsDirectory,
 	getThumbnailKind
 } from "@/lib/thumbnailsHelpers"
+import { driveItemToAnyFile } from "@/lib/sdkSources"
 import { AnyFile } from "@filen/sdk-rs"
 import { fs } from "@/tests/mocks/expoFileSystem"
 
@@ -199,24 +199,24 @@ describe("getPath", () => {
 })
 
 // ---------------------------------------------------------------------------
-// ensureDirectory — creates the thumbnail directory when it does not exist
+// ensureThumbnailsDirectory — creates the thumbnail directory when it does not exist
 // ---------------------------------------------------------------------------
 
-describe("ensureDirectory", () => {
+describe("ensureThumbnailsDirectory", () => {
 	it("creates the thumbnails directory when it does not exist", () => {
 		// Confirm not present initially
 		expect(fs.has(THUMBNAILS_DIR)).toBe(false)
 
-		ensureDirectory()
+		ensureThumbnailsDirectory()
 
 		// Directory should now exist in the in-memory fs
 		expect(fs.get(THUMBNAILS_DIR)).toBe("dir")
 	})
 
 	it("is idempotent — calling it twice does not throw", () => {
-		ensureDirectory()
+		ensureThumbnailsDirectory()
 		expect(() => {
-			ensureDirectory()
+			ensureThumbnailsDirectory()
 		}).not.toThrow()
 	})
 })

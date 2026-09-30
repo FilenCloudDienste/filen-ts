@@ -84,7 +84,7 @@ vi.mock("@/lib/unlockedForeground", async () => {
 		}
 	}
 })
-vi.mock("@/features/notes/components/sync", async () => ({
+vi.mock("@/features/notes/components/sync", () => ({
 	sync: {
 		flushToDisk: () => Promise.resolve(true),
 		clearRejections: vi.fn(),
@@ -92,9 +92,7 @@ vi.mock("@/features/notes/components/sync", async () => ({
 		hold,
 		attachEditor,
 		peekedSince: () => state.peekedSinceReconnect
-	},
-	hashNoteContent: (content: string) => `h(${content})`,
-	buildInflightEntries: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).buildInflightEntries
+	}
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => ({ userId: 1 }) }))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
@@ -132,6 +130,7 @@ vi.mock("@/lib/decryption", () => ({ noteDisplayTitle: () => "" }))
 vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
+	hashNoteContent: (content: string) => `h(${content})`,
 	conflictCopyStamp: () => "stamp",
 	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {
 		const cleanups: (() => void)[] = []

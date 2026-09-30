@@ -14,6 +14,7 @@ import {
 	type ListRenderItemInfo as FlashListListRenderItemInfo
 } from "@shopify/flash-list"
 import logger from "@/lib/logger"
+import { onlineManager } from "@tanstack/react-query"
 
 export type ListRenderItemInfo<T> = FlashListListRenderItemInfo<T>
 
@@ -21,6 +22,8 @@ export type ListRef<T> = FlashListRef<T>
 
 export type VirtualListExtraProps = {
 	onRefresh?: (defer: DeferFn) => Promise<void> | void
+	// Pull-to-refresh is a no-op while offline (network-backed lists; local listings refresh offline).
+	requiresOnline?: boolean
 	itemWidth?: number
 	itemsPerRow?: number
 	loading?: boolean
@@ -105,7 +108,7 @@ const VirtualListInner = (<T,>(props: FlashListProps<T> & React.RefAttributes<Li
 	})
 
 	const onRefresh = async () => {
-		if (!props.onRefresh) {
+		if (!props.onRefresh || (props.requiresOnline && !onlineManager.isOnline())) {
 			return
 		}
 

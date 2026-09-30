@@ -1,18 +1,17 @@
 import * as FileSystem from "expo-file-system"
-import { AppState } from "react-native"
 import { ManagedFuture, EmbeddedPreviewResult_Tags, type EmbeddedPreviewResult } from "@filen/sdk-rs"
-import { Semaphore, run, planSizeCapEviction } from "@filen/shared"
-import { debounce } from "es-toolkit/function"
+import { Semaphore, run } from "@filen/shared"
 import { type DriveItemFileExtracted } from "@/types"
 import auth from "@/lib/auth"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal, toSignalOpts } from "@/lib/signals"
-import { driveItemToAnyFile } from "@/lib/thumbnailsHelpers"
+import { driveItemToAnyFile } from "@/lib/sdkSources"
 import offline from "@/features/offline/offline"
 import { newTmpFile } from "@/lib/tmp"
-import { ClearBarrier } from "@/lib/clearBarrier"
+import { DiskCache, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import { RAW_PREVIEW_CACHE_DIRECTORY } from "@/lib/storageRoots"
 import { RAW_PREVIEW_CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import { GC_AGE_MS, GC_CONCURRENCY } from "@/lib/cacheGc"
 import logger from "@/lib/logger"
 
 // `uri` = file:// URI of the JPEG the SDK extracted from the RAW container; `noPreview` = the SDK's
@@ -33,66 +32,13 @@ export type RawPreviewResult =
 const DIRECTORY = RAW_PREVIEW_CACHE_DIRECTORY
 
 const PREVIEW_EXTENSION = ".jpg"
-const GC_AGE_MS = 24 * 60 * 60 * 1000
-const GC_DEBOUNCE_MS = 30 * 1000
-// Bound gc's fan-out so a full cache doesn't launch O(N) concurrent native FS ops on the single
-// Hermes JS thread — mirrors fileCache.gc's GC_CONCURRENCY.
-const GC_CONCURRENCY = 8
 
 // Not a fileCache variant on purpose: fileCache keys on the file's own identity, short-circuits to
 // the offline copy (which would hand the RAW bytes to the preview) and derives the extension from
 // the file name — every one of those would need a branch. This cache is the derived artefact only.
-export class RawPreviewCache {
-	private readonly mutexes = new Map<string, Semaphore>()
-	private readonly clearBarrier = new ClearBarrier()
-
-	private ensureDirectory(): void {
-		if (!DIRECTORY.exists) {
-			DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
-	}
-
-	// Debounced gc after fresh extractions + immediate gc on app-background: reclamation runs where
-	// growth happens instead of competing with startup. Log-only on failure — not user-actionable.
-	private readonly scheduleGc = debounce(
-		() => {
-			this.gc().catch(err => {
-				logger.warn("rawPreviewCache", "gc failed", { error: err })
-			})
-		},
-		GC_DEBOUNCE_MS,
-		{
-			edges: ["trailing"]
-		}
-	)
-
+export class RawPreviewCache extends DiskCache {
 	public constructor() {
-		this.ensureDirectory()
-
-		AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "background") {
-				this.scheduleGc.cancel()
-
-				this.gc().catch(err => {
-					logger.warn("rawPreviewCache", "gc on background failed", { error: err })
-				})
-			}
-		})
-	}
-
-	private getMutexForKey(key: string): Semaphore {
-		let mutex = this.mutexes.get(key)
-
-		if (!mutex) {
-			mutex = new Semaphore(1)
-
-			this.mutexes.set(key, mutex)
-		}
-
-		return mutex
+		super(DIRECTORY, "rawPreviewCache")
 	}
 
 	private previewFile(uuid: string): FileSystem.File {
@@ -251,27 +197,12 @@ export class RawPreviewCache {
 		return result.data
 	}
 
-	public async gc(): Promise<void> {
-		if (!DIRECTORY.exists) {
-			return
-		}
-
-		// Under the ClearBarrier so a concurrent clear() (logout / clear preview cache) waits for
-		// this pass instead of deleting + recreating DIRECTORY mid-sweep.
-		await this.clearBarrier.enter()
-
-		try {
-			await this.runGc()
-		} finally {
-			this.clearBarrier.leave()
-		}
-	}
-
-	private async runGc(): Promise<void> {
+	protected async runGc(age?: number): Promise<void> {
 		const now = Date.now()
+		const ttlMs = age ?? GC_AGE_MS
 		const gcSemaphore = new Semaphore(GC_CONCURRENCY)
 		const toDelete: string[] = []
-		const survivors: { key: string; cachedAt: number; size: number }[] = []
+		const survivors: GcSurvivor[] = []
 
 		// Pass 1 (no mutexes, cheap stats): expired, empty and stray entries go; the rest are sized
 		// for the cap pass. lastModified is cachedAt — the move stamps it at extraction.
@@ -288,7 +219,7 @@ export class RawPreviewCache {
 
 			const cachedAt = entry.lastModified ?? 0
 
-			if (now >= cachedAt + GC_AGE_MS) {
+			if (now >= cachedAt + ttlMs) {
 				toDelete.push(entry.name)
 
 				continue
@@ -301,18 +232,7 @@ export class RawPreviewCache {
 			})
 		}
 
-		// Soft size cap over the survivors: oldest first, never the newest (the one being viewed).
-		const capCachedAt = new Map<string, number>()
-
-		for (const survivor of survivors) {
-			capCachedAt.set(survivor.key, survivor.cachedAt)
-		}
-
-		const capEvict = planSizeCapEviction(
-			survivors.map(survivor => ({ id: survivor.key, size: survivor.size, timestamp: survivor.cachedAt })),
-			RAW_PREVIEW_CACHE_MAX_SIZE_BYTES,
-			{ protectNewest: true }
-		)
+		const { evict: capEvict, plannedCachedAt: capCachedAt } = planGcCapEviction(survivors, RAW_PREVIEW_CACHE_MAX_SIZE_BYTES)
 
 		await Promise.all(
 			[...toDelete, ...capEvict].map(async name => {
@@ -351,7 +271,7 @@ export class RawPreviewCache {
 						// TTL / 0-byte candidate: only fires while it is still stale or still empty. A
 						// stray (non-.jpg) has no writer at all, so it always goes.
 						const stillStale =
-							!name.endsWith(PREVIEW_EXTENSION) || (file.size ?? 0) === 0 || now >= (file.lastModified ?? 0) + GC_AGE_MS
+							!name.endsWith(PREVIEW_EXTENSION) || (file.size ?? 0) === 0 || now >= (file.lastModified ?? 0) + ttlMs
 
 						if (!stillStale) {
 							return
@@ -362,37 +282,6 @@ export class RawPreviewCache {
 				})
 			})
 		)
-	}
-
-	public async clear(): Promise<void> {
-		await this.clearBarrier.runExclusive(() => {
-			if (DIRECTORY.exists) {
-				DIRECTORY.delete()
-			}
-
-			DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		})
-	}
-
-	public size(): number {
-		if (!DIRECTORY.exists) {
-			return 0
-		}
-
-		let total = 0
-
-		for (const entry of DIRECTORY.list()) {
-			if (!(entry instanceof FileSystem.File)) {
-				continue
-			}
-
-			total += entry.size ?? 0
-		}
-
-		return total
 	}
 }
 

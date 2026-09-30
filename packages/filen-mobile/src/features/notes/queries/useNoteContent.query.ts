@@ -1,10 +1,11 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import queryClient, { queryUpdater } from "@/queries/client"
+import queryClient, { queryUpdater, getCachedQuery, type QueryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import { readStartedInCurrentSocketSession, queryReadSinceSocketReconnect } from "@/queries/socketSession"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useNoteContentQuery"
 
@@ -74,11 +75,7 @@ export async function fetchData(
 
 	const content = await authedSdkClient.getNoteContent(
 		note,
-		params.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
+		toSignalOpts(params.signal)
 	)
 
 	contentReads.set(params.uuid, read)
@@ -129,7 +126,7 @@ export function noteContentQueryDataUpdatedAt(params: UseNoteContentQueryParams)
 // Whether the cached body was read (or is being read) since the socket last connected, so a re-check after
 // the reconnect has nothing to add.
 export function noteContentQueryReadSinceSocketReconnect(params: UseNoteContentQueryParams): boolean {
-	const query = queryClient.getQueryCache().find({ queryKey: noteContentQueryKey(params), exact: true })
+	const query = getCachedQuery(noteContentQueryKey(params))
 
 	return query !== undefined && queryReadSinceSocketReconnect(query)
 }
@@ -147,9 +144,7 @@ export function noteContentQueryUpdate({
 }: {
 	params: Parameters<typeof fetchData>[0]
 } & {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 	dataUpdatedAt?: number
 }): void {
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(

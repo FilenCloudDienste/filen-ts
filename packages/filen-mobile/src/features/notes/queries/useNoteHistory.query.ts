@@ -3,6 +3,7 @@ import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useNoteHistoryQuery"
 
@@ -29,11 +30,7 @@ export async function fetchData(
 
 	return await authedSdkClient.getNoteHistory(
 		note,
-		params.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
+		toSignalOpts(params.signal)
 	)
 }
 

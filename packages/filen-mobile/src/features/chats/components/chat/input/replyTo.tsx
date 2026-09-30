@@ -9,6 +9,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import { useSecureStore } from "@/lib/secureStore"
+import { chatReplyToKey } from "@/features/chats/chatDrafts"
 import { contactDisplayName } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import Avatar from "@/components/ui/avatar"
@@ -16,7 +17,7 @@ import PopupContainerView from "@/features/chats/components/chat/input/popupCont
 import { resolveReplySenderDisplayName } from "@/features/chats/utils"
 
 export const ReplyTo = ({ chat }: { chat: Chat }) => {
-	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
+	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(chatReplyToKey(chat.uuid), null)
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const { t } = useTranslation()

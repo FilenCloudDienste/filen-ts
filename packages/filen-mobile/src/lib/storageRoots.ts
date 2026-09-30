@@ -12,7 +12,7 @@ import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 // bump it when changing the on-disk layout, index format, or anything else that
 // makes old data incompatible with new code.
 
-const BASE_DIRECTORY_URI = Platform.select({
+export const SHARED_BASE_DIRECTORY_URI = Platform.select({
 	ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
 	default: FileSystem.Paths.document
 })
@@ -31,7 +31,7 @@ export function deriveIosLibraryDirectoryUri(documentDirectoryUri: string): stri
 // Two constraints pick this spot: (1) iOS kills a process that is suspended while holding a
 // file/SQLite lock inside the shared app-group container (RUNNINGBOARD 0xdead10cc), and a
 // WAL-mode connection holds a shared lock continuously even while idle — so not
-// BASE_DIRECTORY_URI; (2) Documents is exposed to the user via file sharing — so
+// SHARED_BASE_DIRECTORY_URI; (2) Documents is exposed to the user via file sharing — so
 // <container>/Library instead (backed up like the old location; never OS-purged, unlike
 // Caches). Plain-file areas (offline/fileCache/audioCache/thumbnails/logs) take no locks and
 // stay on the shared base. Nothing cross-process reads these DBs — the File/Documents Provider
@@ -42,7 +42,7 @@ const PRIVATE_BASE_DIRECTORY_URI = Platform.select({
 })
 
 export const OFFLINE_VERSION = 2
-export const OFFLINE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "offline"))
+export const OFFLINE_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "offline"))
 export const OFFLINE_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(OFFLINE_PARENT_DIRECTORY.uri, `v${OFFLINE_VERSION}`))
 export const OFFLINE_FILES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(OFFLINE_DIRECTORY.uri, "files"))
 export const OFFLINE_DIRECTORIES_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(OFFLINE_DIRECTORY.uri, "directories"))
@@ -50,12 +50,12 @@ export const OFFLINE_INDEX_FILE = new FileSystem.File(FileSystem.Paths.join(OFFL
 
 export const FILE_CACHE_VERSION = 1
 export const FILE_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(
-	FileSystem.Paths.join(BASE_DIRECTORY_URI, "fileCache", `v${FILE_CACHE_VERSION}`)
+	FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "fileCache", `v${FILE_CACHE_VERSION}`)
 )
 
 export const AUDIO_CACHE_VERSION = 2
 export const AUDIO_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(
-	FileSystem.Paths.join(BASE_DIRECTORY_URI, "audioCache", `v${AUDIO_CACHE_VERSION}`)
+	FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "audioCache", `v${AUDIO_CACHE_VERSION}`)
 )
 
 // v3: DEFAULT_WIDTH bumped 128 → 256 (thumbnails.ts). v4: image thumbnails moved off the manipulator
@@ -67,7 +67,7 @@ export const AUDIO_CACHE_PARENT_DIRECTORY = new FileSystem.Directory(
 // so a bump reclaims the superseded tree instead of leaking it — nothing else ever reads it, and every
 // user-facing reclaim path (clear, cache size, stray-file cleanup) roots at the CURRENT version only.
 export const THUMBNAILS_VERSION = 5
-export const THUMBNAILS_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "thumbnails"))
+export const THUMBNAILS_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "thumbnails"))
 export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 	FileSystem.Paths.join(THUMBNAILS_PARENT_DIRECTORY.uri, `v${THUMBNAILS_VERSION}`)
 )
@@ -78,7 +78,7 @@ export const THUMBNAILS_DIRECTORY = new FileSystem.Directory(
 // Bump on any layout change.
 export const RAW_PREVIEW_CACHE_VERSION = 1
 export const RAW_PREVIEW_CACHE_DIRECTORY = new FileSystem.Directory(
-	FileSystem.Paths.join(BASE_DIRECTORY_URI, "rawPreviews", `v${RAW_PREVIEW_CACHE_VERSION}`)
+	FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "rawPreviews", `v${RAW_PREVIEW_CACHE_VERSION}`)
 )
 
 export const SQLITE_VERSION = 1
@@ -102,5 +102,12 @@ export const SDK_CACHE_DB_FILE = new FileSystem.File(FileSystem.Paths.join(SDK_C
 // — never secrets/keys (stripped by logRedaction) — so it shares the same posture as offline/
 // fileCache and is wiped on logout. Excluded from user-facing cache-size accounting/clear.
 export const LOGS_VERSION = 1
-export const LOGS_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(BASE_DIRECTORY_URI, "logs"))
+export const LOGS_PARENT_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "logs"))
 export const LOGS_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(LOGS_PARENT_DIRECTORY.uri, `v${LOGS_VERSION}`))
+
+// secureStore.ts: the encrypted file store and the MMKV fallback. Bump on any layout change.
+export const SECURE_STORE_VERSION = 1
+export const SECURE_STORE_DIRECTORY = new FileSystem.Directory(
+	FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "secureStore", `v${SECURE_STORE_VERSION}`)
+)
+export const MMKV_DIRECTORY = new FileSystem.Directory(FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "mmkv", `v${SECURE_STORE_VERSION}`))

@@ -65,3 +65,10 @@ export const router: typeof expoRouter = new Proxy(expoRouter, {
 		return guarded
 	}
 })
+
+// Pops only when there is history to pop, through the guarded back() so a double-tap still pops once.
+export function goBackIfPossible(): void {
+	if (expoRouter.canGoBack()) {
+		router.back()
+	}
+}

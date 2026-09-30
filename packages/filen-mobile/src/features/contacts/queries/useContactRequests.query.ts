@@ -1,6 +1,6 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryUpdater } from "@/queries/client"
+import { createFixedKeyQuery } from "@/queries/createFixedKeyQuery"
 import auth from "@/lib/auth"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useContactRequestsQuery"
 
@@ -9,18 +9,10 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 
 	const [incoming, outgoing] = await Promise.all([
 		authedSdkClient.listIncomingContactRequests(
-			params?.signal
-				? {
-						signal: params.signal
-					}
-				: undefined
+			toSignalOpts(params?.signal)
 		),
 		authedSdkClient.listOutgoingContactRequests(
-			params?.signal
-				? {
-						signal: params.signal
-					}
-				: undefined
+			toSignalOpts(params?.signal)
 		)
 	])
 
@@ -30,38 +22,16 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 	}
 }
 
-export function useContactRequestsQuery(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
-		...options,
-		queryKey: [BASE_QUERY_KEY],
-		queryFn: ({ signal }) =>
-			fetchData({
-				signal
-			})
+const contactRequestsQuery = createFixedKeyQuery({
+	baseKey: BASE_QUERY_KEY,
+	fetchData,
+	empty: () => ({
+		incoming: [],
+		outgoing: []
 	})
+})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
-}
-
-export function contactRequestsQueryUpdate({
-	updater
-}: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-}) {
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		return typeof updater === "function"
-			? updater(
-					prev ?? {
-						incoming: [],
-						outgoing: []
-					}
-				)
-			: updater
-	})
-}
+export const useContactRequestsQuery = contactRequestsQuery.useQuery
+export const contactRequestsQueryUpdate = contactRequestsQuery.update
 
 export default useContactRequestsQuery

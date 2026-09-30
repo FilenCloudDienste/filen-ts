@@ -1,7 +1,7 @@
+import { useLocalSearchParams } from "expo-router"
 import { router } from "@/lib/router"
-import { randomUUID } from "expo-crypto"
-import events from "@/lib/events"
-import { serialize } from "@/lib/serializer"
+import { awaitPickerEvent } from "@/lib/awaitPickerEvent"
+import { serialize, deserializeRouteParam } from "@/lib/serializer"
 import type { PlaylistWithItems } from "@/features/audio/audio"
 
 export type SelectOptions = {
@@ -18,36 +18,44 @@ export async function selectPlaylists(options: Omit<SelectOptions, "id">): Promi
 			selectedPlaylists: PlaylistWithItems[]
 	  }
 > {
-	return new Promise(resolve => {
-		const id = randomUUID()
-
-		const sub = events.subscribe("playlistsSelect", data => {
-			if (data.id === id) {
-				sub.remove()
-
-				if (data.cancelled || data.selectedPlaylists.length === 0) {
-					resolve({
-						cancelled: true
-					})
-
-					return
+	return awaitPickerEvent(
+		"playlistsSelect",
+		id => {
+			router.push({
+				pathname: "/selectPlaylists",
+				params: {
+					selectOptions: serialize({
+						...options,
+						id
+					} satisfies SelectOptions)
 				}
+			})
+		},
+		data =>
+			data.cancelled || data.selectedPlaylists.length === 0
+				? {
+						cancelled: true
+					}
+				: {
+						cancelled: false,
+						selectedPlaylists: data.selectedPlaylists
+					}
+	)
+}
 
-				resolve({
-					cancelled: false,
-					selectedPlaylists: data.selectedPlaylists
-				})
-			}
-		})
+// Same shape as contacts' useSelectOptions: string read up front, no try/catch, so it stays compiled.
+export function usePlaylistSelectOptions(): SelectOptions | null {
+	const { selectOptions: param } = useLocalSearchParams<{
+		selectOptions?: string
+	}>()
+	const parsed = deserializeRouteParam<SelectOptions>(param)
 
-		router.push({
-			pathname: "/selectPlaylists",
-			params: {
-				selectOptions: serialize({
-					...options,
-					id
-				} satisfies SelectOptions)
-			}
-		})
-	})
+	if (!parsed || !parsed.id) {
+		return null
+	}
+
+	return {
+		id: parsed.id,
+		playlistUuidsToExclude: parsed.playlistUuidsToExclude
+	}
 }

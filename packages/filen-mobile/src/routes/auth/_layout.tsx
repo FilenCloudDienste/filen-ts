@@ -1,15 +1,14 @@
 import { Stack, Redirect } from "expo-router"
-import { useIsAuthed, useStringifiedClient } from "@/lib/auth"
-import { useStartScreen, buildStartScreenHref } from "@/features/settings/startScreen"
+import { useIsAuthed } from "@/lib/auth"
+import { useStartScreenHref } from "@/features/settings/hooks/useStartScreenHref"
 import View from "@/components/ui/view"
 
 const AuthLayout = () => {
 	const isAuthed = useIsAuthed()
-	const stringifiedClient = useStringifiedClient()
-	const [startScreen] = useStartScreen()
+	const startScreenHref = useStartScreenHref()
 
 	if (isAuthed) {
-		return <Redirect href={buildStartScreenHref(startScreen, stringifiedClient?.rootUuid ?? "root")} />
+		return <Redirect href={startScreenHref} />
 	}
 
 	return (

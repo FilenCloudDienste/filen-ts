@@ -5,7 +5,6 @@ import { useResolveClassNames } from "uniwind"
 import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
 import { type FetchStatus } from "@tanstack/react-query"
-import { run } from "@filen/shared"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
 import type { DriveItem } from "@/types"
@@ -14,7 +13,7 @@ import { type DriveSearchStatus } from "@/features/drive/hooks/useDriveSearch"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
 import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { confirmPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import useDriveStore from "@/features/drive/store/useDrive.store"
@@ -52,7 +51,6 @@ const Header = ({
 }) => {
 	const textForeground = useResolveClassNames("text-foreground")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedDriveItems = useDriveStore(useShallow(state => state.selectedItems))
 	const drivePath = useDrivePath()
 	const stringifiedClient = useStringifiedClient()
@@ -230,24 +228,18 @@ const Header = ({
 				destructive: true,
 				icon: "delete",
 				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
+					const confirmed = await confirmPrompt(
+						{
 							title: t("empty_trash"),
 							message: t("are_you_sure_empty_trash"),
 							cancelText: t("cancel"),
 							okText: t("empty"),
 							destructive: true
-						})
-					})
+						},
+						{ tag: "drive", message: "empty trash prompt failed" }
+					)
 
-					if (!promptResult.success) {
-						logger.warn("drive", "empty trash prompt failed", { error: promptResult.error })
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
+					if (!confirmed) {
 						return
 					}
 
@@ -278,22 +270,9 @@ const Header = ({
 
 		if (menuButtons.length > 0) {
 			items.push({
-				type: "menu",
-				props: {
-					type: "dropdown",
-					hitSlop: 20,
-					buttons: menuButtons
-				},
-				triggerProps: {
-					hitSlop: 20,
-					testID: "drive-header-more",
-					accessibilityLabel: t("more_actions")
-				},
-				icon: {
-					name: "ellipsis-horizontal",
-					size: 24,
-					color: textForeground.color
-				}
+				type: "ellipsisMenu",
+				buttons: menuButtons,
+				triggerProps: { testID: "drive-header-more", accessibilityLabel: t("more_actions") }
 			})
 		}
 
@@ -310,17 +289,8 @@ const Header = ({
 		if (selectedDriveItems.length > 0) {
 			return [
 				{
-					type: "button",
-					icon: {
-						name: "close-outline",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							useDriveStore.getState().clearSelectedItems()
-						}
-					}
+					type: "clearSelection",
+					onPress: () => useDriveStore.getState().clearSelectedItems()
 				}
 			] satisfies HeaderItem[]
 		}
@@ -379,23 +349,9 @@ const Header = ({
 			}
 			leftItems={leftItems}
 			rightItems={rightItems}
-			searchBarOptions={{
-				placement: "integratedButton",
+			search={{
 				placeholder: t("search_drive"),
-				onChangeText: e => setSearchQuery(e.nativeEvent.text),
-				onCancelButtonPress: () => setSearchQuery(""),
-				onClose: () => setSearchQuery(""),
-				onOpen: () => setSearchQuery(""),
-				allowToolbarIntegration: false,
-				headerIconColor: textForeground.color,
-				textColor: textForeground.color,
-				barTintColor: "transparent",
-				tintColor: textForeground.color,
-				hintTextColor: textMutedForeground.color,
-				shouldShowHintSearchIcon: true,
-				hideNavigationBar: false,
-				hideWhenScrolling: false,
-				inputType: "text"
+				onChangeText: setSearchQuery
 			}}
 		/>
 	)

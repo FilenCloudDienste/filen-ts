@@ -2,8 +2,6 @@ import { type TFunction } from "i18next"
 import { run } from "@filen/shared"
 import { type DriveViewMode } from "@/features/drive/driveViewModePreference"
 import { randomUUID } from "expo-crypto"
-import * as FileSystem from "expo-file-system"
-import * as MediaLibrary from "expo-media-library/legacy"
 import { type MenuButton } from "@/components/ui/menu"
 import { type Icons } from "@/components/ui/menuIcons"
 import { buildSortFieldButton, type SortDirectionOption } from "@/components/ui/sortFieldMenu"
@@ -13,16 +11,13 @@ import type { DriveItem } from "@/types"
 import { type SortByType } from "@/lib/sort"
 import alerts from "@/lib/alerts"
 import drive from "@/features/drive/drive"
-import useDriveStore from "@/features/drive/store/useDrive.store"
-import transfers from "@/features/transfers/transfers"
-import { newTmpDir } from "@/lib/tmp"
+import { clearDriveSelection } from "@/features/drive/store/useDrive.store"
 import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import offline from "@/features/offline/offline"
-import { appendOfflineSyncErrors } from "@/features/offline/store/useOffline.store"
-import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import { storeItemOffline } from "@/features/offline/storeItem"
 import { runBulk } from "@/lib/bulkOps"
 import { type DriveSelectionFlags } from "@/features/drive/driveSelectors"
-import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
+import { downloadDriveItemToDevice, ensureSaveToPhotosPermission, saveDriveItemToPhotos } from "@/features/drive/driveDownload"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import { buildSaveToCloudDriveButton } from "@/features/drive/linkedSave"
@@ -144,48 +139,72 @@ export function buildBulkActionMenu({
 
 	const hasUndecryptable = driveFlags.includesUndecryptable
 
-	if (drivePath.type === "trash") {
-		menuButtons.push({
-			id: "restoreSelected",
-			title: t("restore_selected"),
-			icon: "restore",
-			requiresOnline: true,
-			onPress: async () => {
-				await runBulk({
-					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					confirm: {
-						title: t("restore_selected"),
-						message: t("are_you_sure_restore_selected"),
-						okText: t("restore"),
-						cancelText: t("cancel")
-					},
-					op: item => drive.restore({ item })
-				})
-			}
-		})
+	// Confirm title reuses the button title.
+	const confirmBulkButton = ({
+		id,
+		title,
+		icon,
+		message,
+		okText,
+		destructive,
+		requiresOnline,
+		op
+	}: {
+		id: string
+		title: string
+		icon: Icons
+		message: string
+		okText: string
+		destructive?: boolean
+		requiresOnline?: boolean
+		op: (item: DriveItem) => Promise<unknown>
+	}): MenuButton => ({
+		id,
+		title,
+		icon,
+		destructive,
+		requiresOnline,
+		onPress: async () => {
+			await runBulk({
+				items: selectedDriveItems,
+				clearSelection: clearDriveSelection,
+				confirm: {
+					title,
+					message,
+					okText,
+					cancelText: t("cancel"),
+					destructive
+				},
+				op
+			})
+		}
+	})
 
-		menuButtons.push({
-			id: "deleteSelectedPermanently",
-			title: t("delete_selected_permanently"),
-			destructive: true,
-			icon: "delete",
-			requiresOnline: true,
-			onPress: async () => {
-				await runBulk({
-					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					confirm: {
-						title: t("delete_selected_permanently"),
-						message: t("are_you_sure_delete_selected_permanently"),
-						okText: t("delete"),
-						cancelText: t("cancel"),
-						destructive: true
-					},
-					op: item => drive.deletePermanently({ item })
-				})
-			}
-		})
+	if (drivePath.type === "trash") {
+		menuButtons.push(
+			confirmBulkButton({
+				id: "restoreSelected",
+				title: t("restore_selected"),
+				icon: "restore",
+				message: t("are_you_sure_restore_selected"),
+				okText: t("restore"),
+				requiresOnline: true,
+				op: item => drive.restore({ item })
+			})
+		)
+
+		menuButtons.push(
+			confirmBulkButton({
+				id: "deleteSelectedPermanently",
+				title: t("delete_selected_permanently"),
+				icon: "delete",
+				message: t("are_you_sure_delete_selected_permanently"),
+				okText: t("delete"),
+				destructive: true,
+				requiresOnline: true,
+				op: item => drive.deletePermanently({ item })
+			})
+		)
 
 		return menuButtons
 	}
@@ -205,7 +224,7 @@ export function buildBulkActionMenu({
 			onPress: async () => {
 				await runBulk({
 					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+					clearSelection: clearDriveSelection,
 					op: item =>
 						drive.favorite({
 							item,
@@ -268,7 +287,7 @@ export function buildBulkActionMenu({
 			id: "bulkSaveToCloudDrive",
 			title: t("save_selected_to_cloud_drive"),
 			items: selectedDriveItems,
-			onDone: () => useDriveStore.getState().clearSelectedItems()
+			onDone: clearDriveSelection
 		})
 
 		if (saveButton) {
@@ -282,7 +301,7 @@ export function buildBulkActionMenu({
 				items: selectedDriveItems,
 				withCut: offersMove,
 				bulk: true,
-				onDone: () => useDriveStore.getState().clearSelectedItems(),
+				onDone: clearDriveSelection,
 				t
 			})
 		)
@@ -307,7 +326,7 @@ export function buildBulkActionMenu({
 				await runBulk({
 					items: selectedDriveItems,
 					background: true,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+					clearSelection: clearDriveSelection,
 					op: async item => {
 						const result = await downloadDriveItemToDevice({ item })
 
@@ -335,67 +354,15 @@ export function buildBulkActionMenu({
 			icon: "image",
 			requiresOnline: true,
 			onPress: async () => {
-				const permissionsResult = await run(async () => {
-					return await hasAllNeededMediaPermissions({ shouldRequest: true, library: "any", needCamera: false })
-				})
-
-				if (!permissionsResult.success) {
-					logger.warn("drive", "bulk save to photos: media permissions check failed", { error: permissionsResult.error })
-					alerts.error(permissionsResult.error)
-
-					return
-				}
-
-				if (!permissionsResult.data) {
-					alerts.error(t("no_permissions_enable_manually"))
-
+				if (!(await ensureSaveToPhotosPermission(t))) {
 					return
 				}
 
 				await runBulk({
 					items: selectedDriveItems,
 					background: true,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					op: async item => {
-						const decryptedMeta = item.data.decryptedMeta
-
-						if (!decryptedMeta) {
-							return
-						}
-
-						const result = await run(async defer => {
-							const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, decryptedMeta.name))
-
-							defer(() => {
-								if (destination.parentDirectory.exists) {
-									destination.parentDirectory.delete()
-								}
-							})
-
-							if (!destination.parentDirectory.exists) {
-								destination.parentDirectory.create({
-									intermediates: true,
-									idempotent: true
-								})
-							}
-
-							if (destination.exists) {
-								destination.delete()
-							}
-
-							const downloadResult = await transfers.download({ item, destination })
-
-							if (!downloadResult) {
-								return
-							}
-
-							await MediaLibrary.saveToLibraryAsync(destination.uri)
-						})
-
-						if (!result.success) {
-							throw result.error
-						}
-					}
+					clearSelection: clearDriveSelection,
+					op: saveDriveItemToPhotos
 				})
 			}
 		})
@@ -434,7 +401,7 @@ export function buildBulkActionMenu({
 
 				await runBulk({
 					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+					clearSelection: clearDriveSelection,
 					op: async item => {
 						await Promise.all(contacts.map(contact => drive.shareWithFilenUser({ item, contact })))
 					}
@@ -489,7 +456,7 @@ export function buildBulkActionMenu({
 				await runBulk({
 					items: selectedDriveItems,
 					background: true,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+					clearSelection: clearDriveSelection,
 					op: async item => {
 						const parent = getRealDriveItemParent({ item, drivePath })
 
@@ -501,15 +468,7 @@ export function buildBulkActionMenu({
 							throw new Error(t("offline_location_unavailable"))
 						}
 
-						if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
-							await offline.storeFile({ file: item, parent })
-						} else {
-							// Degraded warnings mean the store committed — surface them via the offline
-							// error badge/list (sync passes won't re-warn an already-recorded observation).
-							const storeErrors = await offline.storeDirectory({ directory: item, parent })
-
-							appendOfflineSyncErrors(storeErrors.filter(error => error.degraded === true))
-						}
+						await storeItemOffline({ item, parent })
 					}
 				})
 			}
@@ -533,26 +492,17 @@ export function buildBulkActionMenu({
 		(drivePath.type === "offline" && !drivePath.uuid) ||
 		((drivePath.type === "drive" || drivePath.type === "favorites") && anySelectedTopLevelOffline)
 	) {
-		menuButtons.push({
-			id: "bulkRemoveOffline",
-			title: t("remove_offline_selected"),
-			icon: "trash",
-			destructive: true,
-			onPress: async () => {
-				await runBulk({
-					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					confirm: {
-						title: t("remove_offline_selected"),
-						message: t("confirm_remove_offline_selected"),
-						okText: t("remove_offline"),
-						cancelText: t("cancel"),
-						destructive: true
-					},
-					op: item => offline.removeItem(item)
-				})
-			}
-		})
+		menuButtons.push(
+			confirmBulkButton({
+				id: "bulkRemoveOffline",
+				title: t("remove_offline_selected"),
+				icon: "trash",
+				message: t("confirm_remove_offline_selected"),
+				okText: t("remove_offline"),
+				destructive: true,
+				op: item => offline.removeItem(item)
+			})
+		)
 	}
 
 	// Trash — owned content the user can move to trash (excludes sharedIn / offline)
@@ -563,102 +513,66 @@ export function buildBulkActionMenu({
 		drivePath.type === "links" ||
 		drivePath.type === "recents"
 	) {
-		menuButtons.push({
-			id: "bulkTrash",
-			title: t("trash_selected"),
-			icon: "trash",
-			destructive: true,
-			requiresOnline: true,
-			onPress: async () => {
-				await runBulk({
-					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					confirm: {
-						title: t("trash_selected"),
-						message: t("are_you_sure_trash_selected"),
-						okText: t("trash"),
-						cancelText: t("cancel"),
-						destructive: true
-					},
-					op: item => drive.trash({ item })
-				})
-			}
-		})
+		menuButtons.push(
+			confirmBulkButton({
+				id: "bulkTrash",
+				title: t("trash_selected"),
+				icon: "trash",
+				message: t("are_you_sure_trash_selected"),
+				okText: t("trash"),
+				destructive: true,
+				requiresOnline: true,
+				op: item => drive.trash({ item })
+			})
+		)
 	}
 
 	// Stop-sharing — sharedOut at root only
 	if (drivePath.type === "sharedOut" && isAtRoot) {
-		menuButtons.push({
-			id: "bulkStopSharing",
-			title: t("stop_sharing_selected"),
-			icon: "delete",
-			destructive: true,
-			requiresOnline: true,
-			onPress: async () => {
-				await runBulk({
-					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					confirm: {
-						title: t("stop_sharing_selected"),
-						message: t("are_you_sure_stop_sharing_selected"),
-						okText: t("stop_sharing"),
-						cancelText: t("cancel"),
-						destructive: true
-					},
-					op: item => drive.removeShare({ item })
-				})
-			}
-		})
+		menuButtons.push(
+			confirmBulkButton({
+				id: "bulkStopSharing",
+				title: t("stop_sharing_selected"),
+				icon: "delete",
+				message: t("are_you_sure_stop_sharing_selected"),
+				okText: t("stop_sharing"),
+				destructive: true,
+				requiresOnline: true,
+				op: item => drive.removeShare({ item })
+			})
+		)
 	}
 
 	// Remove-share — sharedIn at root only (declines a share invite for selected items)
 	if (drivePath.type === "sharedIn" && isAtRoot) {
-		menuButtons.push({
-			id: "bulkRemoveShare",
-			title: t("remove_share_selected"),
-			icon: "delete",
-			destructive: true,
-			requiresOnline: true,
-			onPress: async () => {
-				await runBulk({
-					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					confirm: {
-						title: t("remove_share_selected"),
-						message: t("are_you_sure_remove_share_selected"),
-						okText: t("remove"),
-						cancelText: t("cancel"),
-						destructive: true
-					},
-					op: item => drive.removeShare({ item })
-				})
-			}
-		})
+		menuButtons.push(
+			confirmBulkButton({
+				id: "bulkRemoveShare",
+				title: t("remove_share_selected"),
+				icon: "delete",
+				message: t("are_you_sure_remove_share_selected"),
+				okText: t("remove"),
+				destructive: true,
+				requiresOnline: true,
+				op: item => drive.removeShare({ item })
+			})
+		)
 	}
 
 	// Disable public link — links variant root only
 	if (drivePath.type === "links" && isAtRoot) {
-		menuButtons.push({
-			id: "bulkDisablePublicLink",
-			title: t("disable_public_link_selected"),
-			icon: "delete",
-			destructive: true,
-			requiresOnline: true,
-			onPress: async () => {
-				await runBulk({
-					items: selectedDriveItems,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					confirm: {
-						title: t("disable_public_link_selected"),
-						message: t("are_you_sure_disable_public_link_selected"),
-						okText: t("disable"),
-						cancelText: t("cancel"),
-						destructive: true
-					},
-					op: item => drive.disablePublicLink({ item })
-				})
-			}
-		})
+		menuButtons.push(
+			confirmBulkButton({
+				id: "bulkDisablePublicLink",
+				title: t("disable_public_link_selected"),
+				icon: "delete",
+				message: t("are_you_sure_disable_public_link_selected"),
+				okText: t("disable"),
+				destructive: true,
+				requiresOnline: true,
+				op: item => drive.disablePublicLink({ item })
+			})
+		)
 	}
 
 	return menuButtons

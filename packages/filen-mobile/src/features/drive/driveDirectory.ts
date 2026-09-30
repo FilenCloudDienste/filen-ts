@@ -1,13 +1,14 @@
 import auth from "@/lib/auth"
 import type { AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { itemFromModified } from "@/features/drive/driveModified"
 import { driveItemsQueryUpdateForNormalParent, driveItemsQueryRemoveDirectoryFromPhotos } from "@/features/drive/queries/useDriveItems.query"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { upsertItem } from "@filen/shared"
-import cache from "@/lib/cache"
 import events from "@/lib/events"
+import { toSignalOpts } from "@/lib/signals"
 
 export async function createDirectory({
 	parent,
@@ -22,20 +23,11 @@ export async function createDirectory({
 	const createdDir = await authedSdkClient.createDir(
 		parent,
 		name,
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 
-	const createdDriveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(createdDir))
+	const createdDriveItem = itemFromModified(createdDir)
 
-	if (createdDriveItem.type !== "directory") {
-		throw new Error("Invalid item type")
-	}
-
-	cache.cacheNewNormalDir(createdDir, createdDriveItem)
 	markDirectorySizesStale()
 
 	driveItemsQueryUpdateForNormalParent({
@@ -65,23 +57,7 @@ export async function move({ item, newParent }: { item: DriveItem; newParent: An
 			? await authedSdkClient.moveDir(item.data, newParent)
 			: await authedSdkClient.moveFile(item.data, newParent)
 
-	// Ugly but works for now, until we have a better way
-	if (!("region" in modifiedItem)) {
-		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
-	} else {
-		item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
-	}
-
-	if (item.type !== "directory" && item.type !== "file") {
-		throw new Error("Invalid item type")
-	}
-
-	// Refresh persistent caches with the moved item (its parent changed).
-	if (item.type === "file" && "region" in modifiedItem) {
-		cache.cacheNewFile(modifiedItem, item)
-	} else if (item.type === "directory" && !("region" in modifiedItem)) {
-		cache.cacheNewNormalDir(modifiedItem, item)
-	}
+	item = itemFromModified(modifiedItem)
 
 	markDirectorySizesStale()
 	// A queued create of this item must not land in its old parent after the removal below.

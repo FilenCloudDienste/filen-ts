@@ -1,9 +1,8 @@
 import { useQuery, onlineManager, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { sortParams } from "@filen/shared"
-import cache from "@/lib/cache"
 import rawPreviewCache, { type RawPreviewResult } from "@/lib/rawPreviewCache"
 import offline from "@/features/offline/offline"
-import { type FileSource, fileSourceKey } from "@/queries/fileSource"
+import { type FileSource, fileSourceKey, resolveDriveFileItem } from "@/queries/fileSource"
 
 export const BASE_QUERY_KEY = "useRawPreviewQuery"
 
@@ -22,11 +21,9 @@ export async function fetchData(
 		signal?: AbortSignal
 	}
 ): Promise<RawPreviewQueryResult> {
-	// Prefer the by-value item (a cross-directory search hit may not be in the global uuid
-	// cache); fall back to the cache lookup — same rule as resolveFile.
-	const item = params.data.item ?? cache.uuidToAnyDriveItem.get(params.data.uuid)
+	const item = resolveDriveFileItem(params.data)
 
-	if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
+	if (!item) {
 		throw new Error("Drive item not found or is not a file")
 	}
 

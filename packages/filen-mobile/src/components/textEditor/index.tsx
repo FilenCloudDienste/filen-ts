@@ -10,7 +10,7 @@ import { useNavigation } from "expo-router"
 import { useResolveClassNames, useUniwind } from "uniwind"
 import useRichtextStore from "@/stores/useRichtext.store"
 import MarkdownPreviewButton from "@/components/textEditor/markdownPreviewButton"
-import { useSecureStore } from "@/lib/secureStore"
+import { useTextEditorMarkdownPreviewActive } from "@/components/textEditor/markdownPreviewPreference"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import logger from "@/lib/logger"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
@@ -251,7 +251,7 @@ export const TextEditor = ({
 	const bgSecondary = useResolveClassNames("bg-background-secondary")
 	const text = useResolveClassNames("font-normal text-sm")
 	const { theme } = useUniwind()
-	const [textEditorMarkdownPreviewActive] = useSecureStore<Record<string, boolean>>("textEditorMarkdownPreviewActive", {})
+	const [textEditorMarkdownPreviewActive] = useTextEditorMarkdownPreviewActive()
 	// Both halves of the source are required together, so one condition decides the mode everywhere.
 	// A reader without a size would otherwise suppress `initialValue` while the DOM side stayed on the
 	// plain-string path, and the editor would come up empty.

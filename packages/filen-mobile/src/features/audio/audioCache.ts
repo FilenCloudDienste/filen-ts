@@ -1,20 +1,21 @@
 import * as FileSystem from "expo-file-system"
-import { AppState } from "react-native"
-import { Semaphore, run, planSizeCapEviction, normalizeTrackTags } from "@filen/shared"
-import { debounce } from "es-toolkit/function"
-import { ClearBarrier } from "@/lib/clearBarrier"
+import { extnameOf } from "@/lib/previewType"
+import { Semaphore, run, normalizeTrackTags } from "@filen/shared"
+import { DiskCache, cacheItemId, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
 import { atomicWrite } from "@/lib/fsAtomic"
 import fileCache from "@/lib/fileCache"
 import { parseWebStream } from "music-metadata"
 import { Image, type ImageRef } from "expo-image"
-import { xxHash32 } from "js-xxhash"
 import mimeTypes from "mime-types"
 import type { CacheItem } from "@/types"
 import { AUDIO_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
+import { META_FILE_SUFFIX, metaFileName } from "@/lib/metaFile"
 import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import { GC_AGE_MS, GC_CONCURRENCY } from "@/lib/cacheGc"
 import logger from "@/lib/logger"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 export type Metadata = {
 	pictureUri?: string | null
@@ -29,13 +30,6 @@ export type Metadata = {
 
 // Changing the storage index/persistence format requires bumping AUDIO_CACHE_VERSION in storageRoots.ts.
 const PARENT_DIRECTORY = AUDIO_CACHE_PARENT_DIRECTORY
-
-const GC_DEBOUNCE_MS = 30 * 1000
-// AU-09: bound gc's three fan-out passes so a large cache (hundreds of small sidecars/pictures)
-// doesn't launch O(N) concurrent native FS ops + JSON parses on the single Hermes JS thread — worst
-// during the synchronous app-background sweep. The per-key mutexes are for correctness, not throttling,
-// so a separate gc cap is needed. Mirrors fileCache.gc's GC_CONCURRENCY.
-const GC_CONCURRENCY = 8
 
 function parseMetadata(raw: string): Metadata {
 	const result = deserialize<unknown>(raw)
@@ -58,67 +52,15 @@ function audioFileTooLargeToParse(sizeBytes: number | null | undefined): boolean
 	return typeof sizeBytes === "number" && sizeBytes > AUDIO_METADATA_MAX_PARSE_SIZE_BYTES
 }
 
-export class AudioCache {
-	private readonly mutexes = new Map<string, Semaphore>()
-	private readonly clearBarrier = new ClearBarrier()
+export class AudioCache extends DiskCache {
 	// Global gate so concurrent metadata fetches across different items don't pile
 	// parseWebStream's JS-thread work on at once (Hermes is single-threaded — see
 	// AUDIO_METADATA_MAX_CONCURRENT_PARSES). The per-key mutex below only serializes
 	// the SAME item; this bounds parses across ALL items.
 	private readonly parseSemaphore = new Semaphore(AUDIO_METADATA_MAX_CONCURRENT_PARSES)
 
-	private ensureDirectory(): void {
-		if (!PARENT_DIRECTORY.exists) {
-			PARENT_DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
-	}
-
-	// Debounced gc after metadata writes + immediate gc on app-background:
-	// reclamation runs where growth happens instead of competing with startup.
-	// Log-only on failure — gc hygiene isn't user-actionable.
-	private readonly scheduleGc = debounce(
-		() => {
-			this.gc().catch(err => {
-				logger.error("audioCache", "gc failed (scheduled)", { error: err })
-			})
-		},
-		GC_DEBOUNCE_MS,
-		{
-			edges: ["trailing"]
-		}
-	)
-
 	public constructor() {
-		this.ensureDirectory()
-
-		AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "background") {
-				this.scheduleGc.cancel()
-
-				this.gc().catch(err => {
-					logger.error("audioCache", "gc failed (background)", { error: err })
-				})
-			}
-		})
-	}
-
-	private getMutexForKey(key: string): Semaphore {
-		let mutex = this.mutexes.get(key)
-
-		if (!mutex) {
-			mutex = new Semaphore(1)
-
-			this.mutexes.set(key, mutex)
-		}
-
-		return mutex
-	}
-
-	private getExternalItemId(item: Extract<CacheItem, { type: "external" }>): string {
-		return xxHash32(item.data.url).toString(16)
+		super(PARENT_DIRECTORY, "audioCache")
 	}
 
 	public getFiles(item: CacheItem): {
@@ -134,14 +76,14 @@ export class AudioCache {
 			metadata: new FileSystem.File(
 				FileSystem.Paths.join(
 					PARENT_DIRECTORY.uri,
-					`${item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)}.filenmeta`
+					metaFileName(cacheItemId(item))
 				)
 			)
 		}
 	}
 
 	public async getMetadata({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<Metadata> {
-		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+		if (item.type === "drive" && !isFileItem(item.data)) {
 			throw new Error("Item must be a file or shared file")
 		}
 
@@ -171,7 +113,7 @@ export class AudioCache {
 				}
 			} catch (e) {
 				logger.warn("audioCache", "metadata-only sidecar read failed; falling back to full get", {
-					uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+					uuid: cacheItemId(item),
 					error: e
 				})
 			}
@@ -196,12 +138,7 @@ export class AudioCache {
 		metadata: Metadata
 	}> {
 		const result = await run(async defer => {
-			if (
-				item.type === "drive" &&
-				item.data.type !== "file" &&
-				item.data.type !== "sharedFile" &&
-				item.data.type !== "sharedRootFile"
-			) {
+			if (item.type === "drive" && !isFileItem(item.data)) {
 				throw new Error("Item must be a file or shared file")
 			}
 
@@ -218,7 +155,7 @@ export class AudioCache {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
+			const mutex = this.getMutexForKey(cacheItemId(item))
 
 			await mutex.acquire()
 
@@ -240,7 +177,7 @@ export class AudioCache {
 					}
 				} catch (e) {
 					logger.error("audioCache", "corrupt metadata sidecar deleted", {
-						uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+						uuid: cacheItemId(item),
 						error: e
 					})
 
@@ -257,7 +194,7 @@ export class AudioCache {
 
 			let metadata: Metadata = null
 
-			if (MUSIC_METADATA_SUPPORTED_EXTENSIONS.has(FileSystem.Paths.extname(name).toLowerCase().trim())) {
+			if (MUSIC_METADATA_SUPPORTED_EXTENSIONS.has(extnameOf(name).toLowerCase().trim())) {
 				try {
 					if ((!metadataFile.exists || metadataFile.size === 0) && !audioFileTooLargeToParse(audioFile.size)) {
 						if (!audioFile.exists) {
@@ -282,7 +219,7 @@ export class AudioCache {
 						let pictureBlurhash: string | null = null
 
 						if (picture) {
-							const cacheId = item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)
+							const cacheId = cacheItemId(item)
 							const ext = mimeTypes.extension(picture.format) || "jpg"
 							const pictureFile = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, `${cacheId}.${ext}`))
 
@@ -305,7 +242,7 @@ export class AudioCache {
 								pictureBlurhash = await Image.generateBlurhashAsync(image, [4, 3])
 							} catch (e) {
 								logger.warn("audioCache", "blurhash generation failed for cover art", {
-									uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+									uuid: cacheItemId(item),
 									error: e
 								})
 							} finally {
@@ -348,7 +285,7 @@ export class AudioCache {
 					}
 				} catch (e) {
 					logger.error("audioCache", "audio metadata parse or sidecar write failed", {
-						uuid: item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item),
+						uuid: cacheItemId(item),
 						error: e
 					})
 
@@ -371,29 +308,11 @@ export class AudioCache {
 		return result.data
 	}
 
-	public async gc(age?: number): Promise<void> {
-		if (!PARENT_DIRECTORY.exists) {
-			return
-		}
-
-		// AU-11: participate in the ClearBarrier so a concurrent clear() (logout / "clear music metadata" /
-		// "clear all disk caches") waits for this gc pass to drain instead of deleting+recreating
-		// PARENT_DIRECTORY mid-sweep — matching getMetadata/get, which already bracket their disk
-		// work with enter()/leave().
-		await this.clearBarrier.enter()
-
-		try {
-			await this.runGc(age)
-		} finally {
-			this.clearBarrier.leave()
-		}
-	}
-
-	private async runGc(age?: number): Promise<void> {
+	protected async runGc(age?: number): Promise<void> {
 		const now = Date.now()
-		const ttlMs = age ?? 86400 * 1000
+		const ttlMs = age ?? GC_AGE_MS
 		const entries = PARENT_DIRECTORY.list()
-		const survivors: { key: string; cachedAt: number; size: number }[] = []
+		const survivors: GcSurvivor[] = []
 		// AU-09: shared cap across all three passes (created per gc run).
 		const gcSemaphore = new Semaphore(GC_CONCURRENCY)
 
@@ -406,7 +325,7 @@ export class AudioCache {
 						return
 					}
 
-					if (!entry.name.endsWith(".filenmeta")) {
+					if (!entry.name.endsWith(META_FILE_SUFFIX)) {
 						return
 					}
 
@@ -451,7 +370,7 @@ export class AudioCache {
 						}
 
 						survivors.push({
-							key: entry.name.replace(".filenmeta", ""),
+							key: entry.name.replace(META_FILE_SUFFIX, ""),
 							cachedAt,
 							size
 						})
@@ -459,7 +378,7 @@ export class AudioCache {
 						return
 					}
 
-					const mutex = this.getMutexForKey(entry.name.replace(".filenmeta", ""))
+					const mutex = this.getMutexForKey(entry.name.replace(META_FILE_SUFFIX, ""))
 
 					await mutex.acquire()
 
@@ -502,21 +421,11 @@ export class AudioCache {
 			})
 		)
 
-		// Pass 1.5: soft size-cap eviction over the survivors — drop the oldest sidecars
-		// (and their pictures) until within CACHE_MAX_SIZE_BYTES, never the newest. Skips
-		// any entry a concurrent get() refreshed (cachedAt changed) since planning.
-		const capCachedAt = new Map<string, number>()
-
-		for (const survivor of survivors) {
-			capCachedAt.set(survivor.key, survivor.cachedAt)
-		}
+		// Pass 1.5: soft size-cap eviction over the survivors (sidecars and their pictures).
+		const { evict: capEvict, plannedCachedAt: capCachedAt } = planGcCapEviction(survivors, CACHE_MAX_SIZE_BYTES)
 
 		await Promise.all(
-			planSizeCapEviction(
-				survivors.map(survivor => ({ id: survivor.key, size: survivor.size, timestamp: survivor.cachedAt })),
-				CACHE_MAX_SIZE_BYTES,
-				{ protectNewest: true }
-			).map(async cacheId => {
+			capEvict.map(async cacheId => {
 				await run(async defer => {
 					await gcSemaphore.acquire()
 
@@ -532,7 +441,7 @@ export class AudioCache {
 						mutex.release()
 					})
 
-					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, `${cacheId}.filenmeta`))
+					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, metaFileName(cacheId)))
 
 					if (!sidecar.exists) {
 						return
@@ -580,7 +489,7 @@ export class AudioCache {
 						return
 					}
 
-					if (entry.name.endsWith(".filenmeta")) {
+					if (entry.name.endsWith(META_FILE_SUFFIX)) {
 						return
 					}
 
@@ -591,7 +500,7 @@ export class AudioCache {
 						return
 					}
 
-					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, `${cacheId}.filenmeta`))
+					const sidecar = new FileSystem.File(FileSystem.Paths.join(PARENT_DIRECTORY.uri, metaFileName(cacheId)))
 
 					if (sidecar.exists) {
 						return
@@ -624,37 +533,6 @@ export class AudioCache {
 				})
 			})
 		)
-	}
-
-	public async clear(): Promise<void> {
-		await this.clearBarrier.runExclusive(() => {
-			if (PARENT_DIRECTORY.exists) {
-				PARENT_DIRECTORY.delete()
-			}
-
-			PARENT_DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		})
-	}
-
-	public size(): number {
-		if (!PARENT_DIRECTORY.exists) {
-			return 0
-		}
-
-		let total = 0
-
-		for (const entry of PARENT_DIRECTORY.list()) {
-			if (!(entry instanceof FileSystem.File)) {
-				continue
-			}
-
-			total += entry.size ?? 0
-		}
-
-		return total
 	}
 }
 

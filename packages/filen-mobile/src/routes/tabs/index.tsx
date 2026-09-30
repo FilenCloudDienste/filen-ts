@@ -1,10 +1,6 @@
 import { Redirect } from "expo-router"
-import { useStringifiedClient } from "@/lib/auth"
-import { useStartScreen, buildStartScreenHref } from "@/features/settings/startScreen"
+import { useStartScreenHref } from "@/features/settings/hooks/useStartScreenHref"
 
 export default function Index() {
-	const stringifiedClient = useStringifiedClient()
-	const [startScreen] = useStartScreen()
-
-	return <Redirect href={buildStartScreenHref(startScreen, stringifiedClient?.rootUuid ?? "root")} />
+	return <Redirect href={useStartScreenHref()} />
 }

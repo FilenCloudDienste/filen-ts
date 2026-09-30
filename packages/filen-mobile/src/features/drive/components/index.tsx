@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef } from "react"
+import { Fragment, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import useDrivePath, { type DrivePath } from "@/hooks/useDrivePath"
@@ -9,7 +9,7 @@ import { itemSorter } from "@/lib/sort"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
 import { useHideHiddenItems } from "@/features/drive/driveHiddenItems"
 import VirtualList, { type ListRef, type ListRenderItemInfo } from "@/components/ui/virtualList"
-import ListEmpty from "@/components/ui/listEmpty"
+import ListEmpty, { NoResultsEmpty, LoadErrorEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import Item from "@/features/drive/components/item"
 import Header from "@/features/drive/components/header"
@@ -22,9 +22,8 @@ import { useDriveViewMode } from "@/features/drive/driveViewModePreference"
 import { gridColumnsForWidth, GRID_EDGE_PADDING } from "@/features/drive/driveGrid"
 import { driveScreenUsesBaseBackground, hiddenFilterAppliesTo } from "@/features/drive/driveSelectors"
 import GridItem from "@/features/drive/components/item/gridItem"
-import { useFocusEffect } from "expo-router"
-import useDriveStore from "@/features/drive/store/useDrive.store"
-import { onlineManager } from "@tanstack/react-query"
+import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChange"
+import useDriveStore, { clearDriveSelection } from "@/features/drive/store/useDrive.store"
 import { useDriveSearch } from "@/features/drive/hooks/useDriveSearch"
 import { isSearchWindowTruncated, shouldRefetchListingAfterSearch } from "@/features/drive/hooks/driveSearchStatus"
 import { useDriveDirectorySizes } from "@/features/drive/hooks/useDriveDirectorySizes"
@@ -279,15 +278,7 @@ const Drive = () => {
 		}
 	}, [blocked, drivePath.type])
 
-	useFocusEffect(
-		useCallback(() => {
-			useDriveStore.getState().clearSelectedItems()
-
-			return () => {
-				useDriveStore.getState().clearSelectedItems()
-			}
-		}, [])
-	)
+	useClearSelectionOnFocusChange(clearDriveSelection)
 
 	return (
 		<Fragment>
@@ -354,19 +345,16 @@ const Drive = () => {
 									/>
 								)
 							}}
+							// The offline cache listing reads purely from local storage (the query is
+							// networkMode: "always"), so pull-to-refresh must work while offline. Every other
+							// variant hits the network.
+							requiresOnline={drivePath.type !== "offline"}
 							// Cache search is live (no manual refetch): suppress pull-to-refresh while it's
 							// the source. Every non-cache-search context keeps the existing refresh.
 							onRefresh={
 								isCacheSearch
 									? undefined
 									: async () => {
-											// The offline cache listing reads purely from local storage
-											// (the query is networkMode: "always"), so pull-to-refresh must
-											// work while offline. Every other variant hits the network.
-											if (!onlineManager.isOnline() && drivePath.type !== "offline") {
-												return
-											}
-
 											// Manual offline-cache sync on pull-to-refresh — fire-and-forget
 											// so the gesture resolves with the local listing refetch;
 											// offlineSync gates connectivity/Wi-Fi-only internally.
@@ -477,11 +465,7 @@ const Drive = () => {
 									}
 
 									return (
-										<ListEmpty
-											icon="search-outline"
-											title={t("no_results")}
-											description={t("no_results_description")}
-										/>
+										<NoResultsEmpty />
 									)
 								}
 
@@ -491,11 +475,9 @@ const Drive = () => {
 								// will be > 0 and this component is not rendered at all.
 								if (driveItemsQuery.status === "error") {
 									return (
-										<ListEmpty
-											icon="alert-circle-outline"
+										<LoadErrorEmpty
 											title={t("could_not_load_directory")}
-											description={t("please_check_connection")}
-											action={<Button onPress={() => void driveItemsQuery.refetch()}>{t("try_again")}</Button>}
+											onRetry={() => void driveItemsQuery.refetch()}
 										/>
 									)
 								}
@@ -503,11 +485,7 @@ const Drive = () => {
 								// Local-filter search (favorites/trash/recents/select/…) with no matches.
 								if (searchActive) {
 									return (
-										<ListEmpty
-											icon="search-outline"
-											title={t("no_results")}
-											description={t("no_results_description")}
-										/>
+										<NoResultsEmpty />
 									)
 								}
 

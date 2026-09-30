@@ -1,10 +1,10 @@
-import { Platform, ActivityIndicator } from "react-native"
-import { useNavigation } from "expo-router"
+import { ActivityIndicator } from "react-native"
+import useDismissStack from "@/hooks/useDismissStack"
 import { router } from "@/lib/router"
 import View from "@/components/ui/view"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
-import Header from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment, useRef, useState } from "react"
 import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/shared"
@@ -61,8 +61,6 @@ const Event = ({ event }: { event: UserEvent }) => {
 }
 
 const Events = () => {
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const insets = useSafeAreaInsets()
 
@@ -70,7 +68,7 @@ const Events = () => {
 	const [loadingMore, setLoadingMore] = useState<boolean>(false)
 	const [hasMore, setHasMore] = useState<boolean>(true)
 	const inflightRef = useRef<boolean>(false)
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const { t } = useTranslation()
 
 	// Read the DATA, not the last fetch's verdict (#103): an offline refetch fails and flips
@@ -92,49 +90,20 @@ const Events = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("events")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={dismiss}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					data={events}
 					loading={eventsQuery.status === "pending"}
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}
+					requiresOnline={true}
 					onRefresh={async () => {
-						if (!onlineManager.isOnline()) {
-							return
-						}
-
 						const result = await run(async () => {
 							setHasMore(true)
 
@@ -248,7 +217,7 @@ const Events = () => {
 					}}
 					keyExtractor={event => event.inner[0].id.toString()}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

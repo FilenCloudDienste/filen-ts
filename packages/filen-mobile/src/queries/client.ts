@@ -1,4 +1,4 @@
-import { QueryClient, QueryCache, onlineManager, notifyManager } from "@tanstack/react-query"
+import { QueryClient, QueryCache, onlineManager, notifyManager, type Query } from "@tanstack/react-query"
 import { experimental_createQueryPersister, type PersistedQuery } from "@tanstack/query-persist-client-core"
 import sqlite from "@/lib/sqlite"
 import { forEachKvRowByPrefix, prefixUpperBound } from "@/lib/kvScan"
@@ -8,7 +8,7 @@ import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
 import { AppState } from "react-native"
 import auth from "@/lib/auth"
-import useAppStore from "@/stores/useApp.store"
+import { isUnlockedForeground } from "@/lib/unlockedForeground"
 import logger from "@/lib/logger"
 import { trackServerReads } from "@/queries/socketSession"
 
@@ -891,7 +891,7 @@ const queryCache = new QueryCache({
 
 		// action === "alert". Gate on the root-overlay coordination invariant: never surface a banner
 		// while the Biometric/Privacy lock is up or the app is backgrounded, or it leaks behind those overlays.
-		if (useAppStore.getState().biometricUnlocked !== true || AppState.currentState !== "active") {
+		if (!isUnlockedForeground()) {
 			return
 		}
 
@@ -938,6 +938,12 @@ export const queryClient = new QueryClient({
 	}
 })
 
+// O(1) cache lookup: every query uses the global serialize-based queryKeyHashFn above, so the hash is the
+// serialized key. getQueryCache().find() would linear-scan and re-hash every cached query.
+export function getCachedQuery<T>(queryKey: unknown[]): Query<T> | undefined {
+	return queryClient.getQueryCache().get<T>(serialize(queryKey))
+}
+
 // The key the persister stores a query's row under. createPersister builds `${prefix}-${queryHash}`
 // (queryHash is our serialize-based queryKeyHashFn), and QueryPersisterKv then namespaces that again
 // under `${QUERY_CLIENT_PERSISTER_PREFIX}:` inside SQLite. Version-pinned third-party surface —
@@ -963,6 +969,9 @@ export function removeQueryEverywhere(queryKey: unknown[]): void {
 
 	queryClientPersisterKv.removeItem(persistedQueryStorageKey(queryKey))
 }
+
+// The `updater` param of the per-feature cache patch helpers: a replacement value or a patch of the current one.
+export type QueryUpdater<T> = T | ((prev: T) => T)
 
 // Plain object namespace (no instance state) — get/set delegate to the module-level
 // queryClient. Former `class QueryUpdater` added no value (zero fields, zero `this`).

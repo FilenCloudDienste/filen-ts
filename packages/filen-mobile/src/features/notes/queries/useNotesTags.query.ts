@@ -1,7 +1,8 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryUpdater } from "@/queries/client"
+import { type UseQueryOptions } from "@tanstack/react-query"
+import { createFixedKeyQuery } from "@/queries/createFixedKeyQuery"
 import auth from "@/lib/auth"
 import { NOTES_REUSE_WINDOW_MS } from "@/features/notes/queries/useNotesQuery"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useNotesTagsQuery"
 
@@ -16,11 +17,7 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	const tags = await authedSdkClient.listNoteTags(
-		params?.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
+		toSignalOpts(params?.signal)
 	)
 
 	lastServerReadAt = Date.now()
@@ -31,31 +28,13 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 	}))
 }
 
-export function useNotesTagsQuery(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
-		...options,
-		queryKey: [BASE_QUERY_KEY],
-		queryFn: ({ signal }) =>
-			fetchData({
-				signal
-			})
-	})
+const notesTagsQuery = createFixedKeyQuery({
+	baseKey: BASE_QUERY_KEY,
+	fetchData,
+	empty: () => []
+})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
-}
-
-export function notesTagsQueryUpdate({
-	updater
-}: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-}) {
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		return typeof updater === "function" ? updater(prev ?? []) : updater
-	})
-}
+export const useNotesTagsQuery = notesTagsQuery.useQuery
+export const notesTagsQueryUpdate = notesTagsQuery.update
 
 export default useNotesTagsQuery

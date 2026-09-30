@@ -132,8 +132,10 @@ import {
 	queryUpdater,
 	QUERY_CLIENT_CACHE_TIME,
 	restoreQueries,
-	preserveArrayIdentity
+	preserveArrayIdentity,
+	getCachedQuery
 } from "@/queries/client"
+import { serialize } from "@/lib/serializer"
 import { type PlaylistWithItems } from "@/features/audio/audio"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -1267,5 +1269,19 @@ describe("preserveArrayIdentity", () => {
 
 		expect(preserveArrayIdentity(prev, [])).toBe(prev)
 		expect(preserveArrayIdentity(prev, prev)).toBe(prev)
+	})
+})
+
+describe("getCachedQuery", () => {
+	it("looks the query up by the serialized key, the global queryKeyHashFn", () => {
+		const query = { queryHash: "h" }
+
+		mockQueryCacheGet.mockReset().mockReturnValue(query)
+
+		expect(getCachedQuery(["key", { b: 1, a: 2 }])).toBe(query)
+		expect(mockQueryCacheGet).toHaveBeenCalledExactlyOnceWith(serialize(["key", { b: 1, a: 2 }]))
+		expect(queryClient.getDefaultOptions().queries?.queryKeyHashFn?.(["key", { b: 1, a: 2 }])).toBe(
+			serialize(["key", { b: 1, a: 2 }])
+		)
 	})
 })

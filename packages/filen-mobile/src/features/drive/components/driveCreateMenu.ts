@@ -1,11 +1,10 @@
 import { type TFunction } from "i18next"
 import { AnyNormalDir } from "@filen/sdk-rs"
-import { run } from "@filen/shared"
 import { type DrivePath } from "@/hooks/useDrivePath"
 import { type MenuButton } from "@/components/ui/menu"
 import { type UseDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import drive from "@/features/drive/drive"
 import cache from "@/lib/cache"
@@ -58,6 +57,42 @@ export function canShowDriveCreateMenu({
 	)
 }
 
+// Prompt for a name and create it under `parent`. Shared by the drive create menu and the drive-select
+// toolbar; both only reach here in the user's own filtered drive, so the hidden-name notice always applies.
+export async function promptAndCreateDirectory({ parent, t }: { parent: AnyNormalDir; t: TFunction }): Promise<void> {
+	const name = await inputPrompt(
+		{
+			title: t("create_directory"),
+			message: t("enter_directory_name"),
+			cancelText: t("cancel"),
+			okText: t("create"),
+			placeholder: t("directory_name")
+		},
+		{ tag: "drive", message: "create directory prompt failed" },
+		{ trim: true }
+	)
+
+	if (name === null) {
+		return
+	}
+
+	const result = await runWithLoading(async () => {
+		await drive.createDirectory({
+			name,
+			parent
+		})
+	})
+
+	if (!result.success) {
+		logger.error("drive", "create directory failed", { error: result.error })
+		alerts.error(result.error)
+
+		return
+	}
+
+	await notifyIfNameIsHidden({ name, action: "created", appliesHere: true, t })
+}
+
 // The "Create directory" + "Upload" menu buttons, then Paste + "Clear clipboard" while the clipboard
 // holds something. Single source for the drive header's right menu and the empty-state CTA's dropdown,
 // so both always offer the identical actions.
@@ -77,7 +112,7 @@ export function buildDriveCreateMenuButtons({
 	return [
 		{
 			id: "createFolder",
-			title: t("create_folder"),
+			title: t("create_directory"),
 			icon: "plus",
 			requiresOnline: true,
 			onPress: async () => {
@@ -85,51 +120,7 @@ export function buildDriveCreateMenuButtons({
 					return
 				}
 
-				const promptResult = await run(async () => {
-					return await prompts.input({
-						title: t("create_folder"),
-						message: t("enter_folder_name"),
-						cancelText: t("cancel"),
-						okText: t("create"),
-						placeholder: t("folder_name")
-					})
-				})
-
-				if (!promptResult.success) {
-					logger.warn("drive", "create directory prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const folderName = promptResult.data.value.trim()
-
-				if (folderName.length === 0) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await drive.createDirectory({
-						name: folderName,
-						parent
-					})
-				})
-
-				if (!result.success) {
-					logger.error("drive", "create directory failed", { error: result.error })
-					alerts.error(result.error)
-
-					return
-				}
-
-				// canShowDriveCreateMenu already restricts this menu to filtered browsing contexts
-				// (it requires !selectOptions and a drive-like variant), so the listing this lands in
-				// is always one the preference applies to.
-				await notifyIfNameIsHidden({ name: folderName, action: "created", appliesHere: true, t })
+				await promptAndCreateDirectory({ parent, t })
 			}
 		},
 		{

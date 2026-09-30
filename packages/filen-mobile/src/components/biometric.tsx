@@ -1,9 +1,9 @@
-import secureStore, { useSecureStore } from "@/lib/secureStore"
+import secureStore from "@/lib/secureStore"
 import i18n from "@/lib/i18n"
 import { useTranslation } from "react-i18next"
 import useAppStore from "@/stores/useApp.store"
 import { fetchData } from "@/queries/useLocalAuthentication.query"
-import { type Biometric as TBiometric } from "@/features/settings/screens/biometric"
+import { type Biometric as TBiometric, BIOMETRIC_SECURE_STORE_KEY, useBiometric } from "@/features/settings/biometric"
 import useEffectOnce from "@/hooks/useEffectOnce"
 import { Platform, AppState, type AppStateStatus } from "react-native"
 import { FullWindowOverlay } from "react-native-screens"
@@ -372,7 +372,7 @@ async function promptPin(biometric: EnabledBiometric): Promise<PinResult> {
 
 async function applyAuthFailure(biometric: EnabledBiometric): Promise<void> {
 	try {
-		await secureStore.set("biometric", {
+		await secureStore.set(BIOMETRIC_SECURE_STORE_KEY, {
 			...biometric,
 			...nextLockState(biometric)
 		} satisfies TBiometric)
@@ -391,7 +391,7 @@ async function applyAuthSuccess(biometric: EnabledBiometric, onSuccess: () => vo
 	onSuccess()
 
 	const result = await run(() =>
-		secureStore.set("biometric", {
+		secureStore.set(BIOMETRIC_SECURE_STORE_KEY, {
 			...biometric,
 			lockedMultiplier: LOCK_MULTIPLIER_INITIAL,
 			lockedUntil: 0
@@ -544,7 +544,7 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 				isPromptingRef.current = false
 			})
 
-			const biometric = await secureStore.get<TBiometric>("biometric")
+			const biometric = await secureStore.get<TBiometric>(BIOMETRIC_SECURE_STORE_KEY)
 
 			if (!biometric?.enabled) {
 				return
@@ -621,9 +621,7 @@ function BiometricInner({ setAuthenticated }: { setAuthenticated: React.Dispatch
 function Locked({ lockedUntil, lockSeconds }: { lockedUntil: number; lockSeconds: number }) {
 	const { t } = useTranslation()
 	const [msLeft, setMsLeft] = useState<number>(() => Math.max(0, lockedUntil - new Date().getTime()))
-	const [, setBiometric] = useSecureStore<TBiometric>("biometric", {
-		enabled: false
-	})
+	const [, setBiometric] = useBiometric()
 	const totalMs = lockSeconds * LOCK_BASE_MS
 
 	useEffect(() => {
@@ -677,9 +675,7 @@ function Locked({ lockedUntil, lockSeconds }: { lockedUntil: number; lockSeconds
 }
 
 function Biometric() {
-	const [biometric] = useSecureStore<TBiometric>("biometric", {
-		enabled: false
-	})
+	const [biometric] = useBiometric()
 	const [authenticated, setAuthenticated] = useState<boolean>(false)
 	const [lastAppOpenTimestamp, setLastAppOpenTimestamp] = useState<number>(0)
 	const lastAppCloseTimestampRef = useRef<number>(0)

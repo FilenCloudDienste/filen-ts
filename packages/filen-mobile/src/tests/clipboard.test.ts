@@ -14,14 +14,23 @@ vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" 
 vi.mock("@/constants", () => ({ EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set(), EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set() }))
 vi.mock("@/lib/serializer", () => ({ serialize: (x: unknown) => JSON.stringify(x) }))
 // Fixtures carry their parent uuid as a plain string.
-vi.mock("@/lib/sdkUnwrap", () => ({ unwrapParentUuid: (parent: string | null) => parent }))
+vi.mock("@/lib/sdkUnwrap", () => ({
+	unwrapParentUuid: (parent: string | null) => parent,
+	normalParentUuidOf: (item: { type: string; data: { parent?: string | null } }) =>
+		item.type === "file" || item.type === "directory" ? (item.data.parent ?? null) : null
+}))
 vi.mock("@/lib/cache", () => ({
 	default: {
 		get rootUuid() {
 			return h.cache.rootUuid
 		},
 		uuidToAnyDriveItem: h.items,
-		directoryUuidToAnyNormalDir: h.dirs
+		directoryUuidToAnyNormalDir: h.dirs,
+		getNormalDir: (uuid: string) => {
+			const dir = h.dirs.get(uuid) as { tag: string; inner: [unknown] } | undefined
+
+			return dir && dir.tag === "Dir" ? dir.inner[0] : undefined
+		}
 	}
 }))
 vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))

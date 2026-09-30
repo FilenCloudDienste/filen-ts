@@ -27,7 +27,8 @@ vi.mock("@filen/shared", async () => {
 vi.mock("@/queries/client", () => ({
 	get queryClient() {
 		return holder.client
-	}
+	},
+	getCachedQuery: (queryKey: unknown[]) => holder.client.getQueryCache().find({ queryKey, exact: true })
 }))
 
 vi.mock("@/lib/cache", () => ({

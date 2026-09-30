@@ -13,6 +13,10 @@ const { mockQueryUpdaterSet } = vi.hoisted(() => ({
 	)
 }))
 
+vi.mock("@/lib/signals", () => ({
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
+}))
+
 vi.mock("@/queries/client", () => ({
 	queryUpdater: { set: mockQueryUpdaterSet }
 }))

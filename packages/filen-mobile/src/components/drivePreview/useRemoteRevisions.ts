@@ -30,6 +30,7 @@ import prompts from "@/lib/prompts"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import type { DriveItem, DriveItemFileExtracted } from "@/types"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 type Revision = { item: DriveItem; previousUuid?: string }
 
@@ -57,10 +58,6 @@ interface UseRemoteRevisionsParams {
 
 function identityOf(item: DriveItem): RevisionIdentity {
 	return { uuid: item.data.uuid, stableUuid: item.type === "file" ? item.data.stableUuid : undefined }
-}
-
-function isFile(item: DriveItem): item is DriveItemFileExtracted {
-	return item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
 }
 
 // Keeps an open text or PDF editor on the latest version of its file, and asks before that would lose
@@ -154,7 +151,7 @@ export default function useRemoteRevisions({
 			events.emit("driveItemUpdated", { previousUuid: from.data.uuid, item: to })
 
 			// What the editor follows now, until it re-renders on it.
-			if (isFile(to)) {
+			if (isFileItem(to)) {
 				latest.current = { ...latest.current, item: { type: "drive", data: to }, itemToUse: to, hasEdits: false }
 			}
 
@@ -483,7 +480,7 @@ export default function useRemoteRevisions({
 		// Whether `from` and `to` are the same version of a file in different directories: a move elsewhere.
 		function isMove(from: DriveItemFileExtracted, to: DriveItem): to is DriveItemFileExtracted {
 			return (
-				isFile(to) &&
+				isFileItem(to) &&
 				to.data.uuid === from.data.uuid &&
 				from.type === "file" &&
 				to.type === "file" &&
@@ -620,7 +617,7 @@ export default function useRemoteRevisions({
 		): Promise<GapCheck> {
 			const { lineage: found, sameName } = lookedUp
 
-			if (found !== undefined && isFile(found)) {
+			if (found !== undefined && isFileItem(found)) {
 				if (found.data.uuid === displayed.data.uuid) {
 					// Renamed elsewhere: followed, and a save writes under the new name.
 					if (found.data.decryptedMeta?.name !== displayed.data.decryptedMeta?.name) {
@@ -667,7 +664,7 @@ export default function useRemoteRevisions({
 			if (movedTo !== null && movedTo !== parentUuid) {
 				const moved = unwrappedFileIntoDriveItem(unwrapFileMeta(lookup.data))
 
-				if (!isFile(moved)) {
+				if (!isFileItem(moved)) {
 					return { kind: "unknown" }
 				}
 

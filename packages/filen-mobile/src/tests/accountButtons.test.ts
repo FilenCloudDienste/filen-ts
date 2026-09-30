@@ -26,8 +26,7 @@ const {
 	mockAuthedSdkClient,
 	mockRunWithLoading,
 	mockRouterPush,
-	mockCanOpenURL,
-	mockOpenURL,
+	mockOpenTrustedUrl,
 	mockRefetch
 } = vi.hoisted(() => {
 	const mockAuthedSdkClient = {
@@ -53,8 +52,7 @@ const {
 		mockAuthedSdkClient,
 		mockRunWithLoading: vi.fn(),
 		mockRouterPush: vi.fn(),
-		mockCanOpenURL: vi.fn(),
-		mockOpenURL: vi.fn(),
+		mockOpenTrustedUrl: vi.fn(),
 		mockRefetch
 	}
 })
@@ -86,9 +84,8 @@ vi.mock("expo-router", () => ({
 	router: { push: mockRouterPush }
 }))
 
-vi.mock("expo-linking", () => ({
-	canOpenURL: mockCanOpenURL,
-	openURL: mockOpenURL
+vi.mock("@/lib/openTrustedUrl", () => ({
+	openTrustedUrl: mockOpenTrustedUrl
 }))
 
 vi.mock("@filen/shared", async () => ({
@@ -104,18 +101,18 @@ vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
 	runWithLoading: mockRunWithLoading
 }))
 
-// shareTmpFile + newTmpFile: not exercised in the branches we test, provide no-op stubs
+// shareTmpFile + writeTmpFile: not exercised in the branches we test, provide no-op stubs
 vi.mock("@/lib/share", () => ({
 	shareTmpFile: vi.fn()
 }))
 
 vi.mock("@/lib/tmp", () => ({
-	newTmpFile: vi.fn(() => ({
-		uri: "file:///tmp/file.txt",
-		name: "file.txt",
-		exists: false,
-		write: vi.fn(),
-		delete: vi.fn()
+	writeTmpFile: vi.fn(() => ({
+		file: {
+			uri: "file:///tmp/file.txt",
+			name: "file.txt"
+		},
+		cleanup: vi.fn()
 	}))
 }))
 
@@ -203,8 +200,7 @@ beforeEach(() => {
 	mockPromptsAlert.mockResolvedValue({ cancelled: false })
 	mockPromptsInput.mockResolvedValue({ cancelled: false, value: "" })
 	mockRunWithLoading.mockResolvedValue({ success: true, data: undefined })
-	mockCanOpenURL.mockResolvedValue(true)
-	mockOpenURL.mockResolvedValue(undefined)
+	mockOpenTrustedUrl.mockResolvedValue(undefined)
 	mockRefetch.mockResolvedValue(undefined)
 	mockAuthedSdkClient.deleteAllVersions.mockResolvedValue(undefined)
 	mockAuthedSdkClient.deleteAllItems.mockResolvedValue(undefined)
@@ -221,36 +217,21 @@ describe("buildDangerZoneButtons", () => {
 		const buttons = buildDangerZoneButtons({
 			t,
 			accountQuery: makeAccountQuery(),
-			isOnline: true,
 			textRed500
 		})
 
 		expect(buttons).toHaveLength(3)
 	})
 
-	it("all buttons have disabled===true when isOnline===false", () => {
+	it("all buttons require online", () => {
 		const buttons = buildDangerZoneButtons({
 			t,
 			accountQuery: makeAccountQuery(),
-			isOnline: false,
 			textRed500
 		})
 
 		for (const btn of buttons) {
-			expect(btn.disabled).toBe(true)
-		}
-	})
-
-	it("all buttons have disabled===false when isOnline===true", () => {
-		const buttons = buildDangerZoneButtons({
-			t,
-			accountQuery: makeAccountQuery(),
-			isOnline: true,
-			textRed500
-		})
-
-		for (const btn of buttons) {
-			expect(btn.disabled).toBe(false)
+			expect(btn.requiresOnline).toBe(true)
 		}
 	})
 
@@ -260,7 +241,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[0]
@@ -276,7 +256,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[0]
@@ -294,7 +273,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[0]
@@ -314,7 +292,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[0]
@@ -331,7 +308,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[1]
@@ -349,7 +325,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[1]
@@ -369,7 +344,6 @@ describe("buildDangerZoneButtons", () => {
 			const button = buildDangerZoneButtons({
 				t,
 				accountQuery: makeAccountQuery({ storageUsed: 5000n }),
-				isOnline: true,
 				textRed500
 			})[1]
 
@@ -395,7 +369,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[2]
@@ -417,7 +390,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[2]
@@ -438,7 +410,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[2]
@@ -457,7 +428,6 @@ describe("buildDangerZoneButtons", () => {
 			const buttons = buildDangerZoneButtons({
 				t,
 				accountQuery: accountQuery,
-				isOnline: true,
 				textRed500
 			})
 			const btn = buttons[2]
@@ -477,8 +447,7 @@ describe("buildProfileButtons", () => {
 	it("returns buttons array with expected items", () => {
 		const buttons = buildProfileButtons({
 			t,
-			accountQuery: makeAccountQuery(),
-			isOnline: true
+			accountQuery: makeAccountQuery()
 		})
 
 		// At minimum the 5 known buttons
@@ -495,8 +464,7 @@ describe("buildProfileButtons", () => {
 
 			const buttons = buildProfileButtons({
 				t,
-				accountQuery: makeAccountQuery(),
-				isOnline: true
+				accountQuery: makeAccountQuery()
 			})
 			const changeEmailBtn = buttons[0]
 
@@ -517,8 +485,7 @@ describe("buildProfileButtons", () => {
 
 			const buttons = buildProfileButtons({
 				t,
-				accountQuery: makeAccountQuery(),
-				isOnline: true
+				accountQuery: makeAccountQuery()
 			})
 			const changeEmailBtn = buttons[0]
 
@@ -534,8 +501,7 @@ describe("buildProfileButtons", () => {
 
 			const buttons = buildProfileButtons({
 				t,
-				accountQuery: makeAccountQuery(),
-				isOnline: true
+				accountQuery: makeAccountQuery()
 			})
 			const changeEmailBtn = buttons[0]
 
@@ -555,8 +521,7 @@ describe("buildProfileButtons", () => {
 
 			const buttons = buildProfileButtons({
 				t,
-				accountQuery: makeAccountQuery(),
-				isOnline: true
+				accountQuery: makeAccountQuery()
 			})
 			const changeEmailBtn = buttons[0]
 
@@ -578,8 +543,7 @@ describe("buildProfileButtons", () => {
 
 			const buttons = buildProfileButtons({
 				t,
-				accountQuery: makeAccountQuery(),
-				isOnline: true
+				accountQuery: makeAccountQuery()
 			})
 			const changeEmailBtn = buttons[0]
 
@@ -589,43 +553,35 @@ describe("buildProfileButtons", () => {
 		})
 	})
 
-	describe("more account settings — canOpenURL===false", () => {
-		it("calls alerts.error with cannot_open_link when canOpenURL returns false", async () => {
-			// Confirm the open-web-app alert
+	describe("more account settings", () => {
+		it("opens the web app account settings after confirmation", async () => {
 			mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
-			mockCanOpenURL.mockResolvedValueOnce(false)
 
 			const buttons = buildProfileButtons({
 				t,
-				accountQuery: makeAccountQuery(),
-				isOnline: true
+				accountQuery: makeAccountQuery()
 			})
 			// "more_account_settings" is the last button (index 4)
 			const moreBtn = buttons[4]
 
 			await moreBtn?.onPress?.()
 
-			expect(mockAlertsError).toHaveBeenCalledTimes(1)
-			expect(mockAlertsError).toHaveBeenCalledWith("cannot_open_link")
-			expect(mockOpenURL).not.toHaveBeenCalled()
+			expect(mockOpenTrustedUrl).toHaveBeenCalledTimes(1)
+			expect(mockOpenTrustedUrl).toHaveBeenCalledWith("settings", "https://app.filen.io/#/settings/account")
 		})
 
-		it("calls openURL when canOpenURL returns true", async () => {
-			mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
-			mockCanOpenURL.mockResolvedValueOnce(true)
-			mockOpenURL.mockResolvedValueOnce(undefined)
+		it("does not open anything when the prompt is cancelled", async () => {
+			mockPromptsAlert.mockResolvedValueOnce({ cancelled: true })
 
 			const buttons = buildProfileButtons({
 				t,
-				accountQuery: makeAccountQuery(),
-				isOnline: true
+				accountQuery: makeAccountQuery()
 			})
 			const moreBtn = buttons[4]
 
 			await moreBtn?.onPress?.()
 
-			expect(mockOpenURL).toHaveBeenCalledTimes(1)
-			expect(mockAlertsError).not.toHaveBeenCalledWith("cannot_open_link")
+			expect(mockOpenTrustedUrl).not.toHaveBeenCalled()
 		})
 	})
 })
@@ -638,8 +594,7 @@ describe("buildAccountToggleButtons", () => {
 	it("returns exactly 2 buttons", () => {
 		const buttons = buildAccountToggleButtons({
 			t,
-			accountQuery: makeAccountQuery(),
-			isOnline: true
+			accountQuery: makeAccountQuery()
 		})
 
 		expect(buttons).toHaveLength(2)
@@ -648,8 +603,7 @@ describe("buildAccountToggleButtons", () => {
 	it("file-versioning switch value mirrors accountQuery.data.versioningEnabled (true)", () => {
 		const buttons = buildAccountToggleButtons({
 			t,
-			accountQuery: makeAccountQuery({ versioningEnabled: true }),
-			isOnline: true
+			accountQuery: makeAccountQuery({ versioningEnabled: true })
 		})
 		const btn = buttons[0]
 
@@ -664,8 +618,7 @@ describe("buildAccountToggleButtons", () => {
 	it("file-versioning switch value mirrors accountQuery.data.versioningEnabled (false)", () => {
 		const buttons = buildAccountToggleButtons({
 			t,
-			accountQuery: makeAccountQuery({ versioningEnabled: false }),
-			isOnline: true
+			accountQuery: makeAccountQuery({ versioningEnabled: false })
 		})
 		const btn = buttons[0]
 
@@ -677,8 +630,7 @@ describe("buildAccountToggleButtons", () => {
 	it("login-alerts switch value mirrors accountQuery.data.loginAlertsEnabled (true)", () => {
 		const buttons = buildAccountToggleButtons({
 			t,
-			accountQuery: makeAccountQuery({ loginAlertsEnabled: true }),
-			isOnline: true
+			accountQuery: makeAccountQuery({ loginAlertsEnabled: true })
 		})
 		const btn = buttons[1]
 
@@ -690,8 +642,7 @@ describe("buildAccountToggleButtons", () => {
 	it("login-alerts switch value mirrors accountQuery.data.loginAlertsEnabled (false)", () => {
 		const buttons = buildAccountToggleButtons({
 			t,
-			accountQuery: makeAccountQuery({ loginAlertsEnabled: false }),
-			isOnline: true
+			accountQuery: makeAccountQuery({ loginAlertsEnabled: false })
 		})
 		const btn = buttons[1]
 
@@ -700,15 +651,14 @@ describe("buildAccountToggleButtons", () => {
 		}
 	})
 
-	it("both buttons are disabled when isOnline===false", () => {
+	it("both buttons require online", () => {
 		const buttons = buildAccountToggleButtons({
 			t,
-			accountQuery: makeAccountQuery(),
-			isOnline: false
+			accountQuery: makeAccountQuery()
 		})
 
 		for (const btn of buttons) {
-			expect(btn.disabled).toBe(true)
+			expect(btn.requiresOnline).toBe(true)
 		}
 	})
 })
@@ -721,38 +671,25 @@ describe("buildTwoFactorButtons", () => {
 	it("returns exactly 1 button", () => {
 		const buttons = buildTwoFactorButtons({
 			t,
-			accountQuery: makeAccountQuery(),
-			isOnline: true
+			accountQuery: makeAccountQuery()
 		})
 
 		expect(buttons).toHaveLength(1)
 	})
 
-	it("2FA switch is disabled when isOnline===false", () => {
+	it("2FA switch requires online", () => {
 		const buttons = buildTwoFactorButtons({
 			t,
-			accountQuery: makeAccountQuery(),
-			isOnline: false
+			accountQuery: makeAccountQuery()
 		})
 
-		expect(buttons[0]?.disabled).toBe(true)
-	})
-
-	it("2FA switch is not disabled when isOnline===true", () => {
-		const buttons = buildTwoFactorButtons({
-			t,
-			accountQuery: makeAccountQuery(),
-			isOnline: true
-		})
-
-		expect(buttons[0]?.disabled).toBe(false)
+		expect(buttons[0]?.requiresOnline).toBe(true)
 	})
 
 	it("switch value mirrors accountQuery.data.twoFactorEnabled (false)", () => {
 		const buttons = buildTwoFactorButtons({
 			t,
-			accountQuery: makeAccountQuery({ twoFactorEnabled: false }),
-			isOnline: true
+			accountQuery: makeAccountQuery({ twoFactorEnabled: false })
 		})
 		const btn = buttons[0]
 
@@ -764,8 +701,7 @@ describe("buildTwoFactorButtons", () => {
 	it("switch value mirrors accountQuery.data.twoFactorEnabled (true)", () => {
 		const buttons = buildTwoFactorButtons({
 			t,
-			accountQuery: makeAccountQuery({ twoFactorEnabled: true }),
-			isOnline: true
+			accountQuery: makeAccountQuery({ twoFactorEnabled: true })
 		})
 		const btn = buttons[0]
 
@@ -784,8 +720,7 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery,
-				isOnline: true
+				accountQuery: accountQuery
 			})
 			const btn = buttons[0]
 
@@ -805,8 +740,7 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery,
-				isOnline: true
+				accountQuery: accountQuery
 			})
 			const btn = buttons[0]
 
@@ -824,8 +758,7 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: true })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery,
-				isOnline: true
+				accountQuery: accountQuery
 			})
 			const btn = buttons[0]
 
@@ -846,8 +779,7 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery,
-				isOnline: true
+				accountQuery: accountQuery
 			})
 			const btn = buttons[0]
 
@@ -866,8 +798,7 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery,
-				isOnline: true
+				accountQuery: accountQuery
 			})
 			const btn = buttons[0]
 
@@ -885,8 +816,7 @@ describe("buildTwoFactorButtons", () => {
 			const accountQuery = makeAccountQuery({ twoFactorEnabled: false })
 			const buttons = buildTwoFactorButtons({
 				t,
-				accountQuery: accountQuery,
-				isOnline: true
+				accountQuery: accountQuery
 			})
 			const btn = buttons[0]
 
@@ -918,7 +848,7 @@ describe("account writes — patch vs reread", () => {
 
 	it("file versioning: patches the value it sent, no reread", async () => {
 		await flipSwitch(
-			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ versioningEnabled: true }), isOnline: true }),
+			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ versioningEnabled: true }) }),
 			0,
 			false
 		)
@@ -930,7 +860,7 @@ describe("account writes — patch vs reread", () => {
 
 	it("login alerts: patches the value it sent, no reread", async () => {
 		await flipSwitch(
-			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ loginAlertsEnabled: false }), isOnline: true }),
+			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ loginAlertsEnabled: false }) }),
 			1,
 			true
 		)
@@ -944,7 +874,7 @@ describe("account writes — patch vs reread", () => {
 		mockAuthedSdkClient.setVersioningEnabled.mockRejectedValueOnce(new Error("boom"))
 
 		await flipSwitch(
-			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ versioningEnabled: true }), isOnline: true }),
+			buildAccountToggleButtons({ t, accountQuery: makeAccountQuery({ versioningEnabled: true }) }),
 			0,
 			false
 		)
@@ -956,7 +886,7 @@ describe("account writes — patch vs reread", () => {
 	it("nickname: patches the trimmed name it sent, no reread", async () => {
 		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "  new name  " })
 
-		const buttons = buildProfileButtons({ t, accountQuery: makeAccountQuery(), isOnline: true })
+		const buttons = buildProfileButtons({ t, accountQuery: makeAccountQuery() })
 		const nicknameBtn = buttons.find(b => b.title === "change_nickname")
 
 		await nicknameBtn?.onPress?.()
@@ -970,7 +900,7 @@ describe("account writes — patch vs reread", () => {
 		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "123456" })
 		mockAuthedSdkClient.enable2faGetRecoveryKey.mockResolvedValueOnce("recovery-key")
 
-		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: false }), isOnline: true })
+		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: false }) })
 
 		if (buttons[0]?.rightItem?.type === "switch") {
 			await buttons[0].rightItem.onValueChange(true)
@@ -984,7 +914,7 @@ describe("account writes — patch vs reread", () => {
 		mockPromptsAlert.mockResolvedValueOnce({ cancelled: false })
 		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "654321" })
 
-		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: true }), isOnline: true })
+		const buttons = buildTwoFactorButtons({ t, accountQuery: makeAccountQuery({ twoFactorEnabled: true }) })
 
 		if (buttons[0]?.rightItem?.type === "switch") {
 			await buttons[0].rightItem.onValueChange(false)
@@ -1000,7 +930,6 @@ describe("account writes — patch vs reread", () => {
 		const buttons = buildDangerZoneButtons({
 			t,
 			accountQuery: makeAccountQuery({ twoFactorEnabled: false }),
-			isOnline: true,
 			textRed500
 		})
 
@@ -1017,7 +946,7 @@ describe("account writes — patch vs reread", () => {
 			.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
 			.mockResolvedValueOnce({ cancelled: false, value: "secret" })
 
-		await buildProfileButtons({ t, accountQuery: makeAccountQuery(), isOnline: true })[0]?.onPress?.()
+		await buildProfileButtons({ t, accountQuery: makeAccountQuery() })[0]?.onPress?.()
 
 		expect(mockAuthedSdkClient.changeEmail).toHaveBeenCalledWith("secret", "new@example.com")
 		expect(mockRefetch).toHaveBeenCalledTimes(1)
@@ -1030,7 +959,6 @@ describe("account writes — patch vs reread", () => {
 		const buttons = buildDangerZoneButtons({
 			t,
 			accountQuery: makeAccountQuery({ versionedStorage: 10n, storageUsed: 10n }),
-			isOnline: true,
 			textRed500
 		})
 

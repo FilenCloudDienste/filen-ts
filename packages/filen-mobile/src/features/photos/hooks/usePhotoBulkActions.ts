@@ -1,24 +1,17 @@
-import { run } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
-import * as FileSystem from "expo-file-system"
-import * as MediaLibrary from "expo-media-library/legacy"
 import { type MenuButton } from "@/components/ui/menu"
+import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
 import { type DriveItemFileExtracted } from "@/types"
 import { type DrivePath } from "@/hooks/useDrivePath"
-import useDriveStore from "@/features/drive/store/useDrive.store"
-import { aggregateDriveSelectionFlags } from "@/features/drive/driveSelectors"
+import useDriveStore, { clearDriveSelection } from "@/features/drive/store/useDrive.store"
+import { aggregateDriveSelectionFlags, isFileItem } from "@/features/drive/driveSelectors"
 import { runBulk } from "@/lib/bulkOps"
-import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
+import { downloadDriveItemToDevice, ensureSaveToPhotosPermission, saveDriveItemToPhotos } from "@/features/drive/driveDownload"
 import drive from "@/features/drive/drive"
 import offline from "@/features/offline/offline"
-import transfers from "@/features/transfers/transfers"
-import { newTmpDir } from "@/lib/tmp"
 import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
-import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
-import alerts from "@/lib/alerts"
 import { buildCopyMenuButton } from "@/features/drive/components/item/menuActionsCopy"
-import logger from "@/lib/logger"
 
 /**
  * Builds the bulk-action menu buttons (favorite / copy / save-to-device / download /
@@ -33,20 +26,14 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 
 	const bulkButtons: MenuButton[] = []
 
-	bulkButtons.push({
-		id: "selectAll",
-		title: selectedItems.length === items.length ? t("deselect_all") : t("select_all"),
-		icon: "select",
-		onPress: () => {
-			if (selectedItems.length === items.length) {
-				useDriveStore.getState().clearSelectedItems()
-
-				return
-			}
-
-			useDriveStore.getState().selectAllItems(items)
-		}
-	})
+	bulkButtons.push(
+		selectAllMenuButton({
+			t,
+			allSelected: selectedItems.length === items.length,
+			onClear: clearDriveSelection,
+			onSelectAll: () => useDriveStore.getState().selectAllItems(items)
+		})
+	)
 
 	bulkButtons.push({
 		id: "bulkFavorite",
@@ -56,7 +43,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 		onPress: async () => {
 			await runBulk({
 				items: selectedItems,
-				clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+				clearSelection: clearDriveSelection,
 				op: item =>
 					drive.favorite({
 						item,
@@ -73,7 +60,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 				items: selectedItems,
 				withCut: false,
 				bulk: true,
-				onDone: () => useDriveStore.getState().clearSelectedItems(),
+				onDone: clearDriveSelection,
 				t
 			})
 		)
@@ -86,68 +73,15 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 			icon: "image",
 			requiresOnline: true,
 			onPress: async () => {
-				const permissionsResult = await run(async () => {
-					return await hasAllNeededMediaPermissions({ shouldRequest: true, library: "any", needCamera: false })
-				})
-
-				if (!permissionsResult.success) {
-					logger.error("photos", "media permissions check failed in save-to-photos", { error: permissionsResult.error })
-					alerts.error(permissionsResult.error)
-
-					return
-				}
-
-				if (!permissionsResult.data) {
-					alerts.error(t("no_permissions_enable_manually"))
-
+				if (!(await ensureSaveToPhotosPermission(t))) {
 					return
 				}
 
 				await runBulk({
 					items: selectedItems,
 					background: true,
-					clearSelection: () => useDriveStore.getState().clearSelectedItems(),
-					op: async item => {
-						const meta = item.data.decryptedMeta
-
-						if (!meta) {
-							logger.warn("photos", "skipping item with no decryptedMeta in save-to-photos bulk op", { uuid: item.data.uuid })
-
-							return
-						}
-
-						const saveResult = await run(async defer => {
-							const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, meta.name))
-
-							defer(() => {
-								if (destination.parentDirectory.exists) {
-									destination.parentDirectory.delete()
-								}
-							})
-
-							if (!destination.parentDirectory.exists) {
-								destination.parentDirectory.create({ intermediates: true, idempotent: true })
-							}
-
-							if (destination.exists) {
-								destination.delete()
-							}
-
-							const downloadResult = await transfers.download({ item, destination })
-
-							if (!downloadResult) {
-								logger.warn("photos", "download returned falsy result during save-to-photos, skipping MediaLibrary save", { uuid: item.data.uuid, name: meta.name })
-
-								return
-							}
-
-							await MediaLibrary.saveToLibraryAsync(destination.uri)
-						})
-
-						if (!saveResult.success) {
-							throw saveResult.error
-						}
-					}
+					clearSelection: clearDriveSelection,
+					op: saveDriveItemToPhotos
 				})
 			}
 		})
@@ -162,7 +96,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 			await runBulk({
 				items: selectedItems,
 				background: true,
-				clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+				clearSelection: clearDriveSelection,
 				op: async item => {
 					const result = await downloadDriveItemToDevice({ item })
 
@@ -183,7 +117,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 			await runBulk({
 				items: selectedItems,
 				background: true,
-				clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+				clearSelection: clearDriveSelection,
 				op: async item => {
 					const parent = getRealDriveItemParent({ item, drivePath })
 
@@ -195,7 +129,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 						throw new Error(t("directory_not_found"))
 					}
 
-					if (item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile") {
+					if (isFileItem(item)) {
 						await offline.storeFile({ file: item, parent })
 					}
 				}
@@ -212,7 +146,7 @@ export function usePhotoBulkActions({ items, drivePath }: { items: DriveItemFile
 		onPress: async () => {
 			await runBulk({
 				items: selectedItems,
-				clearSelection: () => useDriveStore.getState().clearSelectedItems(),
+				clearSelection: clearDriveSelection,
 				confirm: {
 					title: t("trash_selected"),
 					message: t("are_you_sure_trash_selected_photos"),

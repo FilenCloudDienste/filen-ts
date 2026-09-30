@@ -2,6 +2,7 @@ import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { run } from "@filen/shared"
 import * as FileSystem from "expo-file-system"
+import { extnameOf } from "@/lib/previewType"
 import {
 	type Dir,
 	File,
@@ -11,7 +12,6 @@ import {
 	ManagedFuture,
 	AnyNormalDir,
 	AnyNormalDir_Tags,
-	AnyFile,
 	type SharedFile,
 	type DownloadError,
 	type UploadError,
@@ -37,13 +37,26 @@ import {
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import { addAccountStorageUsed } from "@/queries/useAccount.query"
 import type { DriveItem } from "@/types"
-import { driveItemToAnyDirWithContext } from "@/lib/sdkSources"
+import { driveItemToAnyDirWithContext, driveItemToAnyFile } from "@/lib/sdkSources"
 import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import drive from "@/features/drive/drive"
 import thumbnails from "@/lib/thumbnails"
 import { EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { randomUUID } from "expo-crypto"
+
+function isTransferOfType<T extends Transfer["type"]>(transfer: Transfer, type: T): transfer is Extract<Transfer, { type: T }> {
+	return transfer.type === type
+}
+
+// One map over the active list per event, replacing only the entry with this id and type.
+function patchTransfer<T extends Transfer["type"]>(
+	id: string,
+	type: T,
+	patch: (transfer: Extract<Transfer, { type: T }>) => Extract<Transfer, { type: T }>
+): void {
+	useTransfersStore.getState().setTransfers(prev => prev.map(t => (t.id === id && isTransferOfType(t, type) ? patch(t) : t)))
+}
 
 // Registers pause/resume event listeners on both the per-transfer and global PauseSignals,
 // and queues their removal via defer() so the `run` cleanup block tears them down automatically.
@@ -54,31 +67,15 @@ function registerPauseListeners(
 	globalPauseSignal: PauseSignal,
 	defer: (fn: () => void) => void
 ): void {
-	const onPause = () => {
-		useTransfersStore.getState().setTransfers(prev =>
-			prev.map(t =>
-				t.id === id && t.type === type
-					? {
-							...t,
-							paused: true
-						}
-					: t
-			)
-		)
+	const setPaused = (paused: boolean) => {
+		patchTransfer(id, type, t => ({
+			...t,
+			paused
+		}))
 	}
 
-	const onResume = () => {
-		useTransfersStore.getState().setTransfers(prev =>
-			prev.map(t =>
-				t.id === id && t.type === type
-					? {
-							...t,
-							paused: false
-						}
-					: t
-			)
-		)
-	}
+	const onPause = () => setPaused(true)
+	const onResume = () => setPaused(false)
 
 	transferPauseSignal.addEventListener("pause", onPause)
 	transferPauseSignal.addEventListener("resume", onResume)
@@ -450,78 +447,48 @@ export async function uploadCore(
 				normalizeFilePathForSdk(localFileOrDir.uri),
 				{
 					onScanComplete(totalDirs, totalFiles, totalBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "uploadDirectory"
-									? {
-											...t,
-											size: Number(totalBytes),
-											knownDirectories: Number(totalDirs),
-											knownFiles: Number(totalFiles)
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "uploadDirectory", t => ({
+							...t,
+							size: Number(totalBytes),
+							knownDirectories: Number(totalDirs),
+							knownFiles: Number(totalFiles)
+						}))
 					},
 					onScanErrors(errors) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "uploadDirectory"
-									? {
-											...t,
-											errors: {
-												...t.errors,
-												scan: [...t.errors.scan, ...errors]
-											}
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "uploadDirectory", t => ({
+							...t,
+							errors: {
+								...t.errors,
+								scan: [...t.errors.scan, ...errors]
+							}
+						}))
 					},
 					onScanProgress(knownDirs, knownFiles, knownBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "uploadDirectory"
-									? {
-											...t,
-											size: Number(knownBytes),
-											knownDirectories: Number(knownDirs),
-											knownFiles: Number(knownFiles)
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "uploadDirectory", t => ({
+							...t,
+							size: Number(knownBytes),
+							knownDirectories: Number(knownDirs),
+							knownFiles: Number(knownFiles)
+						}))
 					},
 					onUploadErrors(errors) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "uploadDirectory"
-									? {
-											...t,
-											errors: {
-												...t.errors,
-												upload: [...t.errors.upload, ...errors]
-											}
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "uploadDirectory", t => ({
+							...t,
+							errors: {
+								...t.errors,
+								upload: [...t.errors.upload, ...errors]
+							}
+						}))
 						// The SDK resolves Ok despite per-entry failures — thread them into the resolved
 						// value (mirrors downloadCore's directory branch) so callers can act on partial
 						// uploads instead of trusting resolution alone.
 						transferred.errors.push(...errors)
 					},
 					onUploadUpdate(uploadedDirs, uploadedFiles, uploadedBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "uploadDirectory"
-									? {
-											...t,
-											bytesTransferred: t.bytesTransferred + Number(uploadedBytes)
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "uploadDirectory", t => ({
+							...t,
+							bytesTransferred: t.bytesTransferred + Number(uploadedBytes)
+						}))
 
 						for (const uploadedDir of uploadedDirs) {
 							transferred.directories.push(uploadedDir)
@@ -638,34 +605,28 @@ export async function uploadCore(
 
 			logger.error("transfers", "Directory upload failed", { id, error: result.error })
 
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.map(t =>
-					t.id === id && t.type === "uploadDirectory"
+			patchTransfer(id, "uploadDirectory", t => ({
+				...t,
+				errors: {
+					...t.errors,
+					...(FilenSdkError.hasInner(result.error)
 						? {
-								...t,
-								errors: {
-									...t.errors,
-									...(FilenSdkError.hasInner(result.error)
-										? {
-												upload: [
-													...t.errors.upload,
-													{
-														error: FilenSdkError.getInner(result.error),
-														path: normalizeFilePathForSdk(localFileOrDir.uri)
-													}
-												]
-											}
-										: {
-												unknown: [
-													...t.errors.unknown,
-													result.error instanceof Error ? result.error : new Error(String(result.error))
-												]
-											})
-								}
+								upload: [
+									...t.errors.upload,
+									{
+										error: FilenSdkError.getInner(result.error),
+										path: normalizeFilePathForSdk(localFileOrDir.uri)
+									}
+								]
 							}
-						: t
-				)
-			)
+						: {
+								unknown: [
+									...t.errors.unknown,
+									result.error instanceof Error ? result.error : new Error(String(result.error))
+								]
+							})
+				}
+			}))
 
 			// The error is now written to the store entry; remove the settled (errored) transfer so the
 			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
@@ -768,16 +729,10 @@ export async function uploadCore(
 			normalizeFilePathForSdk(localFileOrDir.uri),
 			{
 				onUpdate(uploadedBytes) {
-					useTransfersStore.getState().setTransfers(prev =>
-						prev.map(t =>
-							t.id === id && t.type === "uploadFile"
-								? {
-										...t,
-										bytesTransferred: t.bytesTransferred + Number(uploadedBytes)
-									}
-								: t
-						)
-					)
+					patchTransfer(id, "uploadFile", t => ({
+						...t,
+						bytesTransferred: t.bytesTransferred + Number(uploadedBytes)
+					}))
 				}
 			},
 			ManagedFuture.new({
@@ -802,34 +757,25 @@ export async function uploadCore(
 
 		logger.error("transfers", "File upload failed", { id, error: result.error })
 
-		useTransfersStore.getState().setTransfers(prev =>
-			prev.map(t =>
-				t.id === id && t.type === "uploadFile"
+		patchTransfer(id, "uploadFile", t => ({
+			...t,
+			errors: {
+				...t.errors,
+				...(FilenSdkError.hasInner(result.error)
 					? {
-							...t,
-							errors: {
-								...t.errors,
-								...(FilenSdkError.hasInner(result.error)
-									? {
-											upload: [
-												...t.errors.upload,
-												{
-													error: FilenSdkError.getInner(result.error),
-													path: normalizeFilePathForSdk(localFileOrDir.uri)
-												}
-											]
-										}
-									: {
-											unknown: [
-												...t.errors.unknown,
-												result.error instanceof Error ? result.error : new Error(String(result.error))
-											]
-										})
-							}
+							upload: [
+								...t.errors.upload,
+								{
+									error: FilenSdkError.getInner(result.error),
+									path: normalizeFilePathForSdk(localFileOrDir.uri)
+								}
+							]
 						}
-					: t
-			)
-		)
+					: {
+							unknown: [...t.errors.unknown, result.error instanceof Error ? result.error : new Error(String(result.error))]
+						})
+			}
+		}))
 
 		// The error is now written to the store entry; remove the settled (errored) transfer so the
 		// floating bar, foreground service and speed interval don't stay alive forever, and keep an
@@ -900,7 +846,7 @@ export async function uploadCore(
 	}
 
 	const uploadedFileName = name ?? localFileOrDir.name ?? ""
-	const ext = FileSystem.Paths.extname(uploadedFileName).toLowerCase().trim()
+	const ext = extnameOf(uploadedFileName).toLowerCase().trim()
 	const canMakeThumbnail = result.data.canMakeThumbnail === true
 
 	// A cheap superset of the real gate, not a second definition of it: either half can still admit
@@ -1086,19 +1032,13 @@ export async function downloadCore(
 				normalizeFilePathForSdk(destination.uri),
 				{
 					onDownloadErrors(errors) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadDirectory"
-									? {
-											...t,
-											errors: {
-												...t.errors,
-												download: [...t.errors.download, ...errors]
-											}
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "downloadDirectory", t => ({
+							...t,
+							errors: {
+								...t.errors,
+								download: [...t.errors.download, ...errors]
+							}
+						}))
 						transferred.errors.push(...errors)
 					},
 					onDownloadUpdate(downloadedDirs, downloadedFiles, downloadedBytes) {
@@ -1110,76 +1050,46 @@ export async function downloadCore(
 							transferred.files.push(downloadedFile)
 						}
 
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadDirectory"
-									? {
-											...t,
-											bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "downloadDirectory", t => ({
+							...t,
+							bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
+						}))
 					},
 					onQueryDownloadProgress(knownBytes, totalBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadDirectory"
-									? {
-											...t,
-											directoryQueryProgress: {
-												bytesTransferred: Number(knownBytes),
-												totalBytes: Number(totalBytes)
-											}
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "downloadDirectory", t => ({
+							...t,
+							directoryQueryProgress: {
+								bytesTransferred: Number(knownBytes),
+								totalBytes: Number(totalBytes)
+							}
+						}))
 					},
 					onScanComplete(totalDirs, totalFiles, totalBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadDirectory"
-									? {
-											...t,
-											size: Number(totalBytes),
-											knownDirectories: Number(totalDirs),
-											knownFiles: Number(totalFiles)
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "downloadDirectory", t => ({
+							...t,
+							size: Number(totalBytes),
+							knownDirectories: Number(totalDirs),
+							knownFiles: Number(totalFiles)
+						}))
 					},
 					onScanErrors(errors) {
 						transferred.scanErrors.push(...errors)
 
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadDirectory"
-									? {
-											...t,
-											errors: {
-												...t.errors,
-												scan: [...t.errors.scan, ...errors]
-											}
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "downloadDirectory", t => ({
+							...t,
+							errors: {
+								...t.errors,
+								scan: [...t.errors.scan, ...errors]
+							}
+						}))
 					},
 					onScanProgress(knownDirs, knownFiles, knownBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadDirectory"
-									? {
-											...t,
-											size: Number(knownBytes),
-											knownDirectories: Number(knownDirs),
-											knownFiles: Number(knownFiles)
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "downloadDirectory", t => ({
+							...t,
+							size: Number(knownBytes),
+							knownDirectories: Number(knownDirs),
+							knownFiles: Number(knownFiles)
+						}))
 					}
 				},
 				targetDir,
@@ -1212,34 +1122,28 @@ export async function downloadCore(
 
 			logger.error("transfers", "Directory download failed", { id, error: result.error })
 
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.map(t =>
-					t.id === id && t.type === "downloadDirectory"
+			patchTransfer(id, "downloadDirectory", t => ({
+				...t,
+				errors: {
+					...t.errors,
+					...(FilenSdkError.hasInner(result.error)
 						? {
-								...t,
-								errors: {
-									...t.errors,
-									...(FilenSdkError.hasInner(result.error)
-										? {
-												download: [
-													...t.errors.download,
-													{
-														path: normalizeFilePathForSdk(destination.uri),
-														error: FilenSdkError.getInner(result.error)
-													}
-												]
-											}
-										: {
-												unknown: [
-													...t.errors.unknown,
-													result.error instanceof Error ? result.error : new Error(String(result.error))
-												]
-											})
-								}
+								download: [
+									...t.errors.download,
+									{
+										path: normalizeFilePathForSdk(destination.uri),
+										error: FilenSdkError.getInner(result.error)
+									}
+								]
 							}
-						: t
-				)
-			)
+						: {
+								unknown: [
+									...t.errors.unknown,
+									result.error instanceof Error ? result.error : new Error(String(result.error))
+								]
+							})
+				}
+			}))
 
 			// The error is now written to the store entry; remove the settled (errored) transfer so the
 			// floating bar, foreground service and speed interval don't stay alive forever, and keep an
@@ -1274,18 +1178,11 @@ export async function downloadCore(
 			throw new Error("Destination must be a file for file downloads.")
 		}
 
-		const remoteAnyFile: AnyFile = (() => {
-			switch (item.type) {
-				case "file": {
-					return new AnyFile.File(item.data)
-				}
+		const remoteAnyFile = driveItemToAnyFile(item)
 
-				case "sharedFile":
-				case "sharedRootFile": {
-					return new AnyFile.Shared(item.data)
-				}
-			}
-		})()
+		if (!remoteAnyFile) {
+			throw new Error("Not a file item")
+		}
 
 		useTransfersStore.getState().setTransfers(prev => [
 			...prev,
@@ -1364,16 +1261,10 @@ export async function downloadCore(
 		if (cachedOrOfflineFile.success && cachedOrOfflineFile.data) {
 			await cachedOrOfflineFile.data.copy(destination)
 
-			useTransfersStore.getState().setTransfers(prev =>
-				prev.map(t =>
-					t.id === id && t.type === "downloadFile"
-						? {
-								...t,
-								bytesTransferred: Number(item.data.size)
-							}
-						: t
-				)
-			)
+			patchTransfer(id, "downloadFile", t => ({
+				...t,
+				bytesTransferred: Number(item.data.size)
+			}))
 		} else {
 			wrappedAbortSignal = wrapAbortSignalForSdk(compositeAbortSignal)
 
@@ -1382,16 +1273,10 @@ export async function downloadCore(
 				normalizeFilePathForSdk(destination.uri),
 				{
 					onUpdate(downloadedBytes) {
-						useTransfersStore.getState().setTransfers(prev =>
-							prev.map(t =>
-								t.id === id && t.type === "downloadFile"
-									? {
-											...t,
-											bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
-										}
-									: t
-							)
-						)
+						patchTransfer(id, "downloadFile", t => ({
+							...t,
+							bytesTransferred: t.bytesTransferred + Number(downloadedBytes)
+						}))
 					}
 				},
 				ManagedFuture.new({
@@ -1431,34 +1316,25 @@ export async function downloadCore(
 
 		logger.error("transfers", "File download failed", { id, error: result.error })
 
-		useTransfersStore.getState().setTransfers(prev =>
-			prev.map(t =>
-				t.id === id && t.type === "downloadFile"
+		patchTransfer(id, "downloadFile", t => ({
+			...t,
+			errors: {
+				...t.errors,
+				...(FilenSdkError.hasInner(result.error)
 					? {
-							...t,
-							errors: {
-								...t.errors,
-								...(FilenSdkError.hasInner(result.error)
-									? {
-											download: [
-												...t.errors.download,
-												{
-													path: normalizeFilePathForSdk(destination.uri),
-													error: FilenSdkError.getInner(result.error)
-												}
-											]
-										}
-									: {
-											unknown: [
-												...t.errors.unknown,
-												result.error instanceof Error ? result.error : new Error(String(result.error))
-											]
-										})
-							}
+							download: [
+								...t.errors.download,
+								{
+									path: normalizeFilePathForSdk(destination.uri),
+									error: FilenSdkError.getInner(result.error)
+								}
+							]
 						}
-					: t
-			)
-		)
+					: {
+							unknown: [...t.errors.unknown, result.error instanceof Error ? result.error : new Error(String(result.error))]
+						})
+			}
+		}))
 
 		// The error is now written to the store entry; remove the settled (errored) transfer so the
 		// floating bar, foreground service and speed interval don't stay alive forever, and keep an

@@ -1,25 +1,22 @@
 import useChatsQuery from "@/features/chats/queries/useChats.query"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
-import ListEmpty from "@/components/ui/listEmpty"
+import ListEmpty, { NoResultsEmpty } from "@/components/ui/listEmpty"
 import { type Chat as TChat } from "@/types"
-import { parseNumbersFromString, run, cn, contactDisplayName } from "@filen/shared"
+import { parseNumbersFromString, run, contactDisplayName } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import Chat from "@/features/chats/components/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
 import { chatDisplayName } from "@/lib/decryption"
-import { Platform } from "react-native"
-import { onlineManager } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import Button from "@/components/ui/button"
 import { createChatFlow } from "@/features/chats/chatsActions"
-import useIsOnline from "@/hooks/useIsOnline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
 import logger from "@/lib/logger"
+import { TAB_LIST_CONTENT_CLASS } from "@/constants"
 
 const List = ({ searchQuery }: { searchQuery: string }) => {
 	const { t } = useTranslation()
-	const isOnline = useIsOnline()
 	const chatsQuery = useChatsQuery()
 	const stringigiedClient = useStringifiedClient()
 	const blocked = useBlockedUsers()
@@ -83,10 +80,6 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 	})()
 
 	const onRefresh = async () => {
-		if (!onlineManager.isOnline()) {
-			return
-		}
-
 		const result = await run(async () => {
 			await chatsQuery.refetch()
 		})
@@ -107,11 +100,7 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 
 	const emptyComponent = () =>
 		searchQuery && searchQuery.length > 0 ? (
-			<ListEmpty
-				icon="search-outline"
-				title={t("no_results")}
-				description={t("no_results_description")}
-			/>
+			<NoResultsEmpty />
 		) : (
 			<ListEmpty
 				icon="chatbubbles-outline"
@@ -120,7 +109,7 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 				action={
 					<Button
 						onPress={() => void createChatFlow()}
-						disabled={!isOnline}
+						requiresOnline
 					>
 						{t("create_chat")}
 					</Button>
@@ -131,11 +120,12 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 	return (
 		<VirtualList
 			className="flex-1"
-			contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+			contentContainerClassName={TAB_LIST_CONTENT_CLASS}
 			loading={chatsQuery.status === "pending"}
 			keyExtractor={keyExtractor}
 			data={chats}
 			renderItem={renderItem}
+			requiresOnline={true}
 			onRefresh={onRefresh}
 			emptyComponent={emptyComponent}
 		/>

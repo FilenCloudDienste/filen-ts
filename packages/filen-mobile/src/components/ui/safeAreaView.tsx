@@ -33,4 +33,17 @@ const SafeAreaView = ({
 	)
 }
 
+const SCREEN_BODY_EDGES: ("left" | "right")[] = ["left", "right"]
+
+// Screen body under a native header: the header owns the top inset, lists/scroll views the bottom.
+export const ScreenBody = ({ className, ...props }: { children: React.ReactNode } & ViewProps) => {
+	return (
+		<SafeAreaView
+			{...props}
+			edges={SCREEN_BODY_EDGES}
+			className={cn("bg-background-secondary", className)}
+		/>
+	)
+}
+
 export default SafeAreaView

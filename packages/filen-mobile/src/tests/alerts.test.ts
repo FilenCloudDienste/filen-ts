@@ -1,9 +1,8 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockShowNotification, mockUnwrapSdkError, mockUnwrappedSdkErrorToHumanReadable } = vi.hoisted(() => ({
+const { mockShowNotification, mockErrorToMessage } = vi.hoisted(() => ({
 	mockShowNotification: vi.fn(),
-	mockUnwrapSdkError: vi.fn(),
-	mockUnwrappedSdkErrorToHumanReadable: vi.fn()
+	mockErrorToMessage: vi.fn()
 }))
 
 // ---------- boundary mocks ----------
@@ -48,89 +47,43 @@ vi.mock("@/lib/i18n", () => ({
 	}
 }))
 
-// Mock the sdkErrors boundary so we control what unwrapSdkError returns
+// The message precedence itself is covered in sdkErrorHumanReadable.test.ts.
 vi.mock("@/lib/sdkErrors", () => ({
-	unwrapSdkError: mockUnwrapSdkError,
-	unwrappedSdkErrorToHumanReadable: mockUnwrappedSdkErrorToHumanReadable
+	errorToMessage: mockErrorToMessage
 }))
 
 import { alerts } from "@/lib/alerts"
 
 beforeEach(() => {
 	mockShowNotification.mockClear()
-	mockUnwrapSdkError.mockReset()
-	mockUnwrappedSdkErrorToHumanReadable.mockReset()
-	// Default: not a SDK error
-	mockUnwrapSdkError.mockReturnValue(null)
+	mockErrorToMessage.mockReset()
+	mockErrorToMessage.mockImplementation((message: unknown) => String(message))
 })
 
 // ---------------------------------------------------------------------------
-// Alerts.error — message dispatch / error-type branching
+// Alerts.error
 // ---------------------------------------------------------------------------
 
-describe("Alerts.error — message dispatch / error-type branching", () => {
-	it("uses unwrappedSdkErrorToHumanReadable when unwrapSdkError returns non-null (FilenSdkError path)", () => {
-		const fakeUnwrapped = { kind: () => "Internal", message: () => "boom" }
-		mockUnwrapSdkError.mockReturnValue(fakeUnwrapped)
-		mockUnwrappedSdkErrorToHumanReadable.mockReturnValue("human readable SDK message")
+describe("Alerts.error", () => {
+	it("shows errorToMessage's string for the caught value, with no fallback", () => {
+		mockErrorToMessage.mockReturnValue("human readable message")
 
 		const fakeError = new Error("raw")
 		alerts.error(fakeError)
 
-		expect(mockUnwrapSdkError).toHaveBeenCalledWith(fakeError)
-		expect(mockUnwrappedSdkErrorToHumanReadable).toHaveBeenCalledWith(fakeUnwrapped)
+		expect(mockErrorToMessage).toHaveBeenCalledWith(fakeError)
 		expect(mockShowNotification).toHaveBeenCalledTimes(1)
 		const callArgs = mockShowNotification.mock.calls[0]?.[0] as { description: string }
-		expect(callArgs.description).toBe("human readable SDK message")
-	})
-
-	it("uses error.message when unwrapSdkError returns null and input is a plain Error", () => {
-		mockUnwrapSdkError.mockReturnValue(null)
-		const plainError = new Error("plain error message")
-		alerts.error(plainError)
-
-		expect(mockUnwrappedSdkErrorToHumanReadable).not.toHaveBeenCalled()
-		expect(mockShowNotification).toHaveBeenCalledTimes(1)
-		const callArgs = mockShowNotification.mock.calls[0]?.[0] as { description: string }
-		expect(callArgs.description).toBe("plain error message")
-	})
-
-	it("uses String(message) when input is a string", () => {
-		mockUnwrapSdkError.mockReturnValue(null)
-		alerts.error("something went wrong")
-
-		expect(mockShowNotification).toHaveBeenCalledTimes(1)
-		const callArgs = mockShowNotification.mock.calls[0]?.[0] as { description: string }
-		expect(callArgs.description).toBe("something went wrong")
-	})
-
-	it("uses the stringified number when input is a number", () => {
-		mockUnwrapSdkError.mockReturnValue(null)
-		alerts.error(42)
-
-		expect(mockShowNotification).toHaveBeenCalledTimes(1)
-		const callArgs = mockShowNotification.mock.calls[0]?.[0] as { description: string }
-		expect(callArgs.description).toBe("42")
-	})
-
-	it("uses 'null' when input is null", () => {
-		mockUnwrapSdkError.mockReturnValue(null)
-		alerts.error(null)
-
-		expect(mockShowNotification).toHaveBeenCalledTimes(1)
-		const callArgs = mockShowNotification.mock.calls[0]?.[0] as { description: string }
-		expect(callArgs.description).toBe("null")
+		expect(callArgs.description).toBe("human readable message")
 	})
 
 	it("calls Notifier.showNotification exactly once per error() call", () => {
-		mockUnwrapSdkError.mockReturnValue(null)
 		alerts.error("one")
 		alerts.error("two")
 		expect(mockShowNotification).toHaveBeenCalledTimes(2)
 	})
 
 	it("sets the title to the i18n 'error' key", () => {
-		mockUnwrapSdkError.mockReturnValue(null)
 		alerts.error("x")
 
 		const callArgs = mockShowNotification.mock.calls[0]?.[0] as { title: string }

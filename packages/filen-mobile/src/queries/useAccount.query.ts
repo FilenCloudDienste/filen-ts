@@ -1,7 +1,8 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryClient, queryUpdater } from "@/queries/client"
+import { queryClient, queryUpdater, getCachedQuery } from "@/queries/client"
 import auth from "@/lib/auth"
 import type { QuotaCheckDeps } from "@filen/shared"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useAccountQuery"
 
@@ -14,11 +15,7 @@ export async function fetchData(signal?: AbortSignal) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	return await authedSdkClient.getUserInfo(
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 }
 
@@ -110,7 +107,7 @@ export function accountQueryPatch(fields: Partial<Account>): void {
 		return
 	}
 
-	const query = queryClient.getQueryCache().get(queryClient.defaultQueryOptions({ queryKey: [BASE_QUERY_KEY] }).queryHash)
+	const query = getCachedQuery([BASE_QUERY_KEY])
 
 	if (query?.promise && query.state.fetchStatus !== "idle") {
 		rewriteWhenReadLands(fields, query.promise)
@@ -122,7 +119,7 @@ export function accountQueryPatch(fields: Partial<Account>): void {
 // looked up by its hash (as getQueryState does) rather than invalidateQueries hashing the key once per
 // cached query.
 export function markAccountStale(): void {
-	const query = queryClient.getQueryCache().get(queryClient.defaultQueryOptions({ queryKey: [BASE_QUERY_KEY] }).queryHash)
+	const query = getCachedQuery([BASE_QUERY_KEY])
 
 	if (query && !query.state.isInvalidated) {
 		query.invalidate()

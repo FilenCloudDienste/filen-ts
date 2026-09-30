@@ -1,5 +1,6 @@
 import { type HeaderItem } from "@/components/ui/header"
 import { type MenuButton } from "@/components/ui/menu"
+import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
 import { type Icons } from "@/components/ui/menuIcons"
 import { buildSortFieldButton, type SortDirectionOption } from "@/components/ui/sortFieldMenu"
 import { NoteType } from "@filen/sdk-rs"
@@ -9,7 +10,7 @@ import { Platform } from "react-native"
 import { router } from "@/lib/router"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import notesLib from "@/features/notes/notes"
 import { isUntaggedTagUuid } from "@/features/notes/utils"
 import { shareTmpFile } from "@/lib/share"
@@ -22,13 +23,8 @@ import { createTagFlow } from "@/features/notes/components/notesActions"
 import { type NotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
-import { useResolveClassNames } from "uniwind"
 import { NOTES_VIEW_MODES, NOTES_VIEW_MODE_ORDER, type NotesViewMode } from "@/features/notes/notesViewModes"
 import logger from "@/lib/logger"
-
-// Re-exported so the existing importers keep their import path; the type and everything that varies
-// per mode now live together in notesViewModes, which is exhaustive over the union.
-export { type NotesViewMode } from "@/features/notes/notesViewModes"
 
 // Sort picker for the tags view, mirroring the drive header's buildSortMenuButton structure.
 // buildSortFieldButton keeps each field's directions as a nested submenu on iOS and collapses them
@@ -80,7 +76,6 @@ export function buildTagsSortMenuButton(current: NotesTagsSortBy, setSort: (next
 // getState() for imperative selection mutations inside onPress handlers).
 export function buildNotesHeaderRightItems({
 	t,
-	textForeground,
 	selectedNotes,
 	selectedNotesLive,
 	selectedTags,
@@ -97,7 +92,6 @@ export function buildNotesHeaderRightItems({
 	createNote
 }: {
 	t: TFunction
-	textForeground: ReturnType<typeof useResolveClassNames>
 	// The raw selection — drives selection-count gating, the select-all toggle and the
 	// "N selected" title. May contain ghosts (remote-deleted notes still in the store).
 	selectedNotes: Note[]
@@ -128,20 +122,14 @@ export function buildNotesHeaderRightItems({
 	// offline notes and nothing else.
 	if (viewMode !== "tags") {
 		if (onlyNotes.length > 0) {
-			menuButtons.push({
-				id: "selectAll",
-				title: selectedNotes.length === onlyNotes.length ? t("deselect_all") : t("select_all"),
-				icon: "select",
-				onPress: () => {
-					if (selectedNotes.length === onlyNotes.length) {
-						useNotesStore.getState().clearSelectedNotes()
-
-						return
-					}
-
-					useNotesStore.getState().selectAllNotes(onlyNotes)
-				}
-			})
+			menuButtons.push(
+				selectAllMenuButton({
+					t,
+					allSelected: selectedNotes.length === onlyNotes.length,
+					onClear: () => useNotesStore.getState().clearSelectedNotes(),
+					onSelectAll: () => useNotesStore.getState().selectAllNotes(onlyNotes)
+				})
+			)
 		}
 
 		// A note created from a narrowed view is neither kept on the device nor shared with anyone, so
@@ -261,29 +249,18 @@ export function buildNotesHeaderRightItems({
 										}
 									})
 
-									const promptResult = await run(async () => {
-										return await prompts.input({
+									const newName = await inputPrompt(
+										{
 											title: t("import_note"),
 											message: t("enter_note_name"),
 											cancelText: t("cancel"),
 											okText: t("import")
-										})
-									})
+										},
+										{ tag: "notes", message: "import note name prompt failed", level: "error" },
+										{ trim: true }
+									)
 
-									if (!promptResult.success) {
-										logger.error("notes", "import note name prompt failed", { error: promptResult.error })
-										alerts.error(promptResult.error)
-
-										return
-									}
-
-									if (promptResult.data.cancelled) {
-										return
-									}
-
-									const newName = promptResult.data.value.trim()
-
-									if (newName.length === 0) {
+									if (newName === null) {
 										return
 									}
 
@@ -635,20 +612,14 @@ export function buildNotesHeaderRightItems({
 		}
 	} else {
 		if (notesTags.length > 0) {
-			menuButtons.push({
-				id: "selectAll",
-				title: selectedTags.length === notesTags.length ? t("deselect_all") : t("select_all"),
-				icon: "select",
-				onPress: () => {
-					if (selectedTags.length === notesTags.length) {
-						useNotesStore.getState().clearSelectedTags()
-
-						return
-					}
-
-					useNotesStore.getState().selectAllTags(notesTags)
-				}
-			})
+			menuButtons.push(
+				selectAllMenuButton({
+					t,
+					allSelected: selectedTags.length === notesTags.length,
+					onClear: () => useNotesStore.getState().clearSelectedTags(),
+					onSelectAll: () => useNotesStore.getState().selectAllTags(notesTags)
+				})
+			)
 		}
 
 		if (selectedTags.length > 0) {
@@ -739,20 +710,8 @@ export function buildNotesHeaderRightItems({
 
 	if (menuButtons.length > 0) {
 		items.push({
-			type: "menu",
-			props: {
-				type: "dropdown",
-				hitSlop: 20,
-				buttons: menuButtons
-			},
-			triggerProps: {
-				hitSlop: 20
-			},
-			icon: {
-				name: "ellipsis-horizontal",
-				size: 24,
-				color: textForeground.color
-			}
+			type: "ellipsisMenu",
+			buttons: menuButtons
 		})
 	}
 

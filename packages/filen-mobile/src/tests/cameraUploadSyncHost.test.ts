@@ -119,7 +119,7 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 	default: mockCameraUpload,
 	// shouldRegisterBackground is toggled purely via the offline-background secureStore key below, so
 	// the config stays a harmless default (shouldSync=false) — keeps this test off the AnyNormalDir graph.
-	useCameraUpload: () => ({
+	useCameraUploadConfig: () => ({
 		config: {
 			enabled: false,
 			remoteDir: null,
@@ -137,7 +137,7 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({
 
 vi.mock("@/lib/secureStore", () => ({
 	// Only the offline-background key is read via useSecureStore in sync.tsx (config goes through the
-	// mocked useCameraUpload). Drive shouldRegisterBackground straight off this value.
+	// mocked useCameraUploadConfig). Drive shouldRegisterBackground straight off this value.
 	useSecureStore: () => [offlineBg.value]
 }))
 

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { pruneSelection } from "@filen/shared"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader, { type HeaderItem } from "@/components/ui/header"
@@ -8,10 +8,10 @@ import { useShallow } from "zustand/shallow"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import useChatsQuery from "@/features/chats/queries/useChats.query"
 import { useStringifiedClient } from "@/lib/auth"
-import { useFocusEffect } from "expo-router"
-import { useResolveClassNames } from "uniwind"
+import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChange"
 import chatsLib from "@/features/chats/chats"
 import type { MenuButton } from "@/components/ui/menu"
+import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
 import { createChatFlow } from "@/features/chats/chatsActions"
 import { runBulk } from "@/lib/bulkOps"
 import { aggregateChatSelectionFlags, allVisibleChatsSelected, chatHasUnread, isOneOnOneWithBlocked } from "@/features/chats/chatSelectors"
@@ -20,13 +20,13 @@ import { LazyWrapper } from "@/components/lazyWrapper"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
 
+const clearSelectedChats = () => useChatsStore.getState().clearSelectedChats()
+
 const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetStateAction<string>> }) => {
 	const { t } = useTranslation()
 	const stringigiedClient = useStringifiedClient()
 	const selectedChats = useChatsStore(useShallow(state => state.selectedChats))
 	const blocked = useBlockedUsers()
-	const textForeground = useResolveClassNames("text-foreground")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	const chatsQuery = useChatsQuery({
 		enabled: false
@@ -71,17 +71,8 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 
 		return [
 			{
-				type: "button",
-				icon: {
-					name: "close-outline",
-					color: textForeground.color,
-					size: 20
-				},
-				props: {
-					onPress: () => {
-						useChatsStore.getState().clearSelectedChats()
-					}
-				}
+				type: "clearSelection",
+				onPress: () => useChatsStore.getState().clearSelectedChats()
 			}
 		] satisfies HeaderItem[]
 	})()
@@ -92,20 +83,14 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 
 		const allSelected = allVisibleChatsSelected(chats, selectedChats)
 
-		menuButtons.push({
-			id: "selectAll",
-			title: allSelected ? t("deselect_all") : t("select_all"),
-			icon: "select",
-			onPress: () => {
-				if (allSelected) {
-					useChatsStore.getState().clearSelectedChats()
-
-					return
-				}
-
-				useChatsStore.getState().selectAllChats(chats)
-			}
-		})
+		menuButtons.push(
+			selectAllMenuButton({
+				t,
+				allSelected,
+				onClear: () => useChatsStore.getState().clearSelectedChats(),
+				onSelectAll: () => useChatsStore.getState().selectAllChats(chats)
+			})
+		)
 
 		if (selectedChats.length === 0) {
 			menuButtons.push({
@@ -214,20 +199,8 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 
 		if (menuButtons.length > 0) {
 			items.push({
-				type: "menu",
-				props: {
-					type: "dropdown",
-					hitSlop: 20,
-					buttons: menuButtons
-				},
-				triggerProps: {
-					hitSlop: 20
-				},
-				icon: {
-					name: "ellipsis-horizontal",
-					size: 24,
-					color: textForeground.color
-				}
+				type: "ellipsisMenu",
+				buttons: menuButtons
 			})
 		}
 
@@ -241,23 +214,9 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 			leftItems={headerLeftItems}
 			rightItems={headerRightItems}
 			shadowVisible={false}
-			searchBarOptions={{
-				placement: "integratedButton",
+			search={{
 				placeholder: t("search_chats"),
-				onChangeText: e => setSearchQuery(e.nativeEvent.text),
-				onCancelButtonPress: () => setSearchQuery(""),
-				onClose: () => setSearchQuery(""),
-				onOpen: () => setSearchQuery(""),
-				allowToolbarIntegration: false,
-				headerIconColor: textForeground.color,
-				textColor: textForeground.color,
-				barTintColor: "transparent",
-				tintColor: textForeground.color,
-				hintTextColor: textMutedForeground.color,
-				shouldShowHintSearchIcon: true,
-				hideNavigationBar: false,
-				hideWhenScrolling: false,
-				inputType: "text"
+				onChangeText: setSearchQuery
 			}}
 		/>
 	)
@@ -266,15 +225,7 @@ const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<React.SetSt
 export const Chats = () => {
 	const [searchQuery, setSearchQuery] = useState<string>("")
 
-	useFocusEffect(
-		useCallback(() => {
-			useChatsStore.getState().clearSelectedChats()
-
-			return () => {
-				useChatsStore.getState().clearSelectedChats()
-			}
-		}, [])
-	)
+	useClearSelectionOnFocusChange(clearSelectedChats)
 
 	return (
 		<Fragment>

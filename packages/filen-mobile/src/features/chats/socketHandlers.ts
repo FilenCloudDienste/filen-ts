@@ -6,6 +6,7 @@ import { wrapChat, wrapMessage } from "@/features/chats/chatsWrap"
 import events from "@/lib/events"
 import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 import logger from "@/lib/logger"
+import auth from "@/lib/auth"
 
 export type ChatSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Chat }>
 
@@ -65,7 +66,9 @@ async function removeChatLocally(uuid: string): Promise<boolean> {
 	return true
 }
 
-export async function handleChatEvent({ event, userId }: { event: ChatSocketEvent; userId: bigint }): Promise<void> {
+export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Promise<void> {
+	// Read at entry so the delayed MessageNew callbacks keep event-time identity. Null (not signed in yet) never matches.
+	const userId = auth.currentUserId()
 	const [eventInner] = event.inner
 
 	switch (eventInner.inner.tag) {

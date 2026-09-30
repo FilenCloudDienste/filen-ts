@@ -7,6 +7,7 @@ import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import { sync } from "@/features/notes/components/sync"
+import { toSignalOpts } from "@/lib/signals"
 
 export async function setPinned({ note, pinned, signal }: { note: Note; pinned: boolean; signal?: AbortSignal }) {
 	if (pinned === note.pinned) {
@@ -19,11 +20,7 @@ export async function setPinned({ note, pinned, signal }: { note: Note; pinned: 
 		await authedSdkClient.setNotePinned(
 			note,
 			pinned,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -45,11 +42,7 @@ export async function setFavorited({ note, favorite, signal }: { note: Note; fav
 		await authedSdkClient.setNoteFavorited(
 			note,
 			favorite,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -70,11 +63,7 @@ export async function archive({ note, signal }: { note: Note; signal?: AbortSign
 	note = wrapSdkNote(
 		await authedSdkClient.archiveNote(
 			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -95,11 +84,7 @@ export async function restore({ note, signal }: { note: Note; signal?: AbortSign
 	note = wrapSdkNote(
 		await authedSdkClient.restoreNote(
 			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -117,11 +102,7 @@ export async function restoreFromHistory({ note, history, signal }: { note: Note
 		await authedSdkClient.restoreNoteFromHistory(
 			note,
 			history,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -180,11 +161,7 @@ export async function trash({ note, signal }: { note: Note; signal?: AbortSignal
 	note = wrapSdkNote(
 		await authedSdkClient.trashNote(
 			note,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -204,11 +181,7 @@ export async function deleteNote({ note, signal }: { note: Note; signal?: AbortS
 
 	await authedSdkClient.deleteNote(
 		note,
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 
 	// Drop the note from the selection immediately so the list header's

@@ -145,14 +145,6 @@ vi.mock("expo-file-system", () => ({
 	}
 }))
 
-vi.mock("expo-media-library/legacy", () => ({
-	saveToLibraryAsync: vi.fn()
-}))
-
-vi.mock("@/hooks/useMediaPermissions", () => ({
-	hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true)
-}))
-
 vi.mock("@/lib/share", () => ({
 	shareTmpFile: vi.fn().mockResolvedValue({ success: true })
 }))
@@ -180,7 +172,10 @@ vi.mock("@/features/drive/driveSelectResolve", () => ({
 }))
 
 vi.mock("@/features/drive/driveDownload", () => ({
-	downloadDriveItemToDevice: vi.fn()
+	downloadDriveItemToDevice: vi.fn(),
+	downloadFileItemToTmp: vi.fn(),
+	ensureSaveToPhotosPermission: vi.fn(),
+	saveDriveItemToPhotos: vi.fn()
 }))
 
 vi.mock("react-native-blob-util", () => ({

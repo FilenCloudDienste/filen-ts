@@ -1,29 +1,27 @@
 import { Fragment, useState, useCallback, useEffect } from "react"
-import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import useNotesQuery, { reuseRecentNotesRead } from "@/features/notes/queries/useNotesQuery"
 import { notesSorter } from "@/lib/sort"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
-import ListEmpty from "@/components/ui/listEmpty"
+import ListEmpty, { NoResultsEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import { type Note as TNote, type NoteTag } from "@/types"
-import { run, cn, pruneSelection } from "@filen/shared"
+import { run, pruneSelection } from "@filen/shared"
 import { createNoteFlow, createTagFlow } from "@/features/notes/components/notesActions"
 import { sortNoteTags, useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import alerts from "@/lib/alerts"
-import { Platform } from "react-native"
+import { TAB_LIST_CONTENT_CLASS } from "@/constants"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
 import Note, { type ListItem as NoteListItem, type DataItem as NoteDataItem } from "@/features/notes/components/note"
 import useNotesStore from "@/features/notes/store/useNotes.store"
 import useNotesTagsQuery, { reuseRecentNotesTagsRead } from "@/features/notes/queries/useNotesTags.query"
-import { useSecureStore } from "@/lib/secureStore"
 import { useShallow } from "zustand/shallow"
 import {
 	NOTES_VIEW_MODES,
 	narrowNotesForViewMode,
-	notesViewModeAwaitsUser,
-	type NotesViewMode
+	notesViewModeAwaitsUser
 } from "@/features/notes/notesViewModes"
+import { useNotesViewMode } from "@/features/notes/notesViewModePreference"
 import { useStringifiedClient } from "@/lib/auth"
 import Tag from "@/features/notes/components/tag"
 import { useTranslation } from "react-i18next"
@@ -39,7 +37,6 @@ import {
 	UNTAGGED_TAG_UUID
 } from "@/features/notes/utils"
 import { LazyWrapper } from "@/components/lazyWrapper"
-import useIsOnline from "@/hooks/useIsOnline"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import notesOffline from "@/features/notes/notesOffline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
@@ -47,9 +44,8 @@ import logger from "@/lib/logger"
 
 const Notes = () => {
 	const { t } = useTranslation()
-	const isOnline = useIsOnline()
 	const blocked = useBlockedUsers()
-	const [notesViewMode] = useSecureStore<NotesViewMode>("notesViewMode", "notes")
+	const [notesViewMode] = useNotesViewMode()
 	const [tagsSortBy] = useNotesTagsSortBy()
 	const { tagUuid } = useLocalSearchParams<{
 		tagUuid?: string
@@ -258,10 +254,6 @@ const Notes = () => {
 	}
 
 	const onRefresh = async () => {
-		if (!onlineManager.isOnline()) {
-			return
-		}
-
 		const result = await run(async () => {
 			await Promise.all([
 				notesQuery.refetch(),
@@ -318,11 +310,7 @@ const Notes = () => {
 	const noteRowsEmptyComponent = () => {
 		if (searchActive) {
 			return (
-				<ListEmpty
-					icon="search-outline"
-					title={t("no_results")}
-					description={t("no_results_description")}
-				/>
+				<NoResultsEmpty />
 			)
 		}
 
@@ -340,7 +328,7 @@ const Notes = () => {
 								// #84: a note created from the virtual screen must not be tag-attached.
 								void createNoteFlow({ t, tag: isUntaggedScreen ? null : tag })
 							}}
-							disabled={!isOnline}
+							requiresOnline
 						>
 							{t("create_note")}
 						</Button>
@@ -353,11 +341,7 @@ const Notes = () => {
 	const tagsEmptyComponent = () => {
 		if (searchActive) {
 			return (
-				<ListEmpty
-					icon="search-outline"
-					title={t("no_results")}
-					description={t("no_results_description")}
-				/>
+				<NoResultsEmpty />
 			)
 		}
 
@@ -371,7 +355,7 @@ const Notes = () => {
 						onPress={() => {
 							void createTagFlow({ t })
 						}}
-						disabled={!isOnline}
+						requiresOnline
 					>
 						{t("create_tag")}
 					</Button>
@@ -392,7 +376,7 @@ const Notes = () => {
 					{viewMode !== "tags" ? (
 						<VirtualList
 							className="flex-1"
-							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+							contentContainerClassName={TAB_LIST_CONTENT_CLASS}
 							keyExtractor={keyExtractorNotesView}
 							data={notes}
 							renderItem={renderItemNotesView}
@@ -400,17 +384,19 @@ const Notes = () => {
 							// id resolves, and an empty list under "No shared notes" is a wrong answer rather
 							// than a slow one.
 							loading={notesQuery.status === "pending" || awaitsUser}
+							requiresOnline={true}
 							onRefresh={onRefresh}
 							emptyComponent={noteRowsEmptyComponent}
 						/>
 					) : (
 						<VirtualList
 							className="flex-1"
-							contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+							contentContainerClassName={TAB_LIST_CONTENT_CLASS}
 							keyExtractor={keyExtractorTagsView}
 							data={notesTags}
 							loading={notesTagsQuery.status === "pending"}
 							renderItem={renderItemTagsView}
+							requiresOnline={true}
 							onRefresh={onRefresh}
 							emptyComponent={tagsEmptyComponent}
 						/>

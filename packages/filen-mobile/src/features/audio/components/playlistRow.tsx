@@ -1,16 +1,15 @@
-import { useResolveClassNames } from "uniwind"
 import { useState } from "react"
 import { Platform } from "react-native"
 import { router } from "@/lib/router"
 import { run, cn } from "@filen/shared"
 import alerts from "@/lib/alerts"
-import Ionicons from "@expo/vector-icons/Ionicons"
 import View from "@/components/ui/view"
+import AudioThumbnail from "@/components/ui/audioThumbnail"
 import Text from "@/components/ui/text"
 import audio, { type PlaylistWithItems, useAudioQueue } from "@/features/audio/audio"
 import { PressableScale } from "@/components/ui/pressables"
 import { simpleDateNoTime } from "@/lib/time"
-import prompts from "@/lib/prompts"
+import { confirmPrompt, inputPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import { selectDriveItems } from "@/features/drive/driveSelectSession"
@@ -163,14 +162,16 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 					return
 				}
 
-				if (selectDriveItemsResult.data.cancelled || selectDriveItemsResult.data.selectedItems.length === 0) {
+				if (selectDriveItemsResult.data.cancelled) {
 					return
 				}
+
+				const items = selectDriveItemsResult.data.selectedItems
 
 				const result = await runWithLoading(async () => {
 					await audio.addFilesToPlaylist({
 						playlist,
-						items: selectDriveItemsResult.data.cancelled ? [] : selectDriveItemsResult.data.selectedItems
+						items
 					})
 				})
 
@@ -188,31 +189,20 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 			icon: "edit",
 			requiresOnline: true,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
+				const newName = await inputPrompt(
+					{
 						title: t("rename_playlist"),
 						message: t("enter_playlist_name"),
 						placeholder: t("playlist_name_placeholder"),
 						cancelText: t("cancel"),
 						okText: t("rename"),
 						defaultValue: playlist.name
-					})
-				})
+					},
+					{ tag: "audio", message: "rename playlist prompt failed", level: "error", context: { playlistUuid: playlist.uuid } },
+					{ trim: true }
+				)
 
-				if (!promptResult.success) {
-					logger.error("audio", "rename playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const newName = promptResult.data.value.trim()
-
-				if (newName.length === 0) {
+				if (newName === null) {
 					return
 				}
 
@@ -238,24 +228,18 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 			destructive: true,
 			requiresOnline: true,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("delete_playlist"),
 						message: t("delete_playlist_confirm"),
 						cancelText: t("cancel"),
 						okText: t("delete"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "audio", message: "delete playlist prompt failed", level: "error", context: { playlistUuid: playlist.uuid } }
+				)
 
-				if (!promptResult.success) {
-					logger.error("audio", "delete playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
+				if (!confirmed) {
 					return
 				}
 
@@ -278,7 +262,6 @@ export function buildPlaylistRowButtons({ t, playlist }: { t: TFunction; playlis
 
 export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWithItems; selectOptions?: SelectOptions }) {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
 	const { queueItem } = useAudioQueue()
 	const isSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.some(p => p.uuid === playlist.uuid)))
 	const arePlaylistsSelected = usePlaylistsStore(useShallow(state => state.selectedPlaylists.length > 0))
@@ -351,19 +334,10 @@ export function PlaylistRow({ playlist, selectOptions }: { playlist: PlaylistWit
 						/>
 					</View>
 				)}
-				<View
-					className={cn(
-						"bg-background-tertiary size-10 rounded-lg flex-row items-center justify-center",
-						isCurrent ? "border border-blue-500" : "border border-transparent",
-						isSelected ? "bg-background-secondary" : ""
-					)}
-				>
-					<Ionicons
-						name="musical-note"
-						size={16}
-						color={textForeground.color}
-					/>
-				</View>
+				<AudioThumbnail
+					active={isCurrent}
+					className={isSelected ? "bg-background-secondary" : undefined}
+				/>
 				<View className="flex-col bg-transparent flex-1 border-b border-separator py-2.5">
 					<Text
 						numberOfLines={1}

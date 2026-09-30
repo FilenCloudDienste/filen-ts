@@ -8,7 +8,7 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { type TextStyle, useWindowDimensions, ActivityIndicator } from "react-native"
 import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
 import useFileUrlQuery from "@/queries/useFileUrl.query"
-import { type FileSource } from "@/queries/fileSource"
+import { galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 import useIsOnline from "@/hooks/useIsOnline"
 import UnavailableOfflineNotice from "@/components/drivePreview/unavailableOfflineNotice"
 import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
@@ -452,23 +452,7 @@ const PreviewAudioInner = ({ item, metadata, fileUrl }: { item: GalleryItemTagge
 const PreviewAudio = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
-	const source: FileSource =
-		item.type === "drive"
-			? {
-					type: "drive",
-					data: {
-						uuid: item.data.data.uuid,
-						// By-value so a cross-directory search hit resolves its metadata and bytes.
-						item: item.data
-					}
-				}
-			: {
-					type: "external",
-					data: {
-						url: item.data.url,
-						name: item.data.name
-					}
-				}
+	const source = galleryItemFileSource(item)
 	const audioMetadataQuery = useAudioMetadataQuery(source)
 	// Resolved only once the tags are read: reading them pulls an uncached file into the file cache,
 	// which this URL then prefers, so playback reuses those bytes instead of streaming them again.

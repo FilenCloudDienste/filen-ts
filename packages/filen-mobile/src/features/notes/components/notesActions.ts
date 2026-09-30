@@ -1,12 +1,12 @@
 import { type TFunction } from "i18next"
 import { type NoteTag } from "@/types"
 import { NoteType } from "@filen/sdk-rs"
-import { run } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { router } from "@/lib/router"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import notesLib from "@/features/notes/notes"
+import { confirmedAction } from "@/lib/confirmedAction"
 import logger from "@/lib/logger"
 
 export const createNoteFlow = async ({
@@ -18,29 +18,18 @@ export const createNoteFlow = async ({
 	tag: NoteTag | null
 	type?: NoteType
 }): Promise<void> => {
-	const result = await run(async () => {
-		return await prompts.input({
+	const title = await inputPrompt(
+		{
 			title: t("create_note"),
 			message: t("enter_note_name"),
 			cancelText: t("cancel"),
 			okText: t("create")
-		})
-	})
+		},
+		{ tag: "notes", message: "create note prompt failed", level: "error" },
+		{ trim: true }
+	)
 
-	if (!result.success) {
-		logger.error("notes", "create note prompt failed", { error: result.error })
-		alerts.error(result.error)
-
-		return
-	}
-
-	if (result.data.cancelled) {
-		return
-	}
-
-	const title = result.data.value.trim()
-
-	if (title.length === 0) {
+	if (title === null) {
 		return
 	}
 
@@ -63,29 +52,18 @@ export const createNoteFlow = async ({
 }
 
 export const createTagFlow = async ({ t }: { t: TFunction }): Promise<void> => {
-	const result = await run(async () => {
-		return await prompts.input({
+	const name = await inputPrompt(
+		{
 			title: t("new_tag_name"),
 			message: t("enter_tag_name"),
 			cancelText: t("cancel"),
 			okText: t("add")
-		})
-	})
+		},
+		{ tag: "notes", message: "create tag prompt failed", level: "error" },
+		{ trim: true }
+	)
 
-	if (!result.success) {
-		logger.error("notes", "create tag prompt failed", { error: result.error })
-		alerts.error(result.error)
-
-		return
-	}
-
-	if (result.data.cancelled) {
-		return
-	}
-
-	const name = result.data.value.trim()
-
-	if (name.length === 0) {
+	if (name === null) {
 		return
 	}
 
@@ -100,3 +78,11 @@ export const createTagFlow = async ({ t }: { t: TFunction }): Promise<void> => {
 		return
 	}
 }
+
+export const deleteTagAction = ({ t, tag }: { t: TFunction; tag: NoteTag }): (() => Promise<void>) =>
+	confirmedAction({
+		promptTitle: t("delete_tag"),
+		promptMessage: t("are_you_sure_delete_tag"),
+		promptOkText: t("delete"),
+		action: () => notesLib.deleteTag({ tag })
+	})

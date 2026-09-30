@@ -2,8 +2,8 @@ import { type Button } from "@/components/ui/settingsGroup"
 import { type TFunction } from "i18next"
 import { useResolveClassNames } from "uniwind"
 import useAccountQuery, { accountQueryPatch } from "@/queries/useAccount.query"
-import { run, formatBytes } from "@filen/shared"
-import prompts from "@/lib/prompts"
+import { formatBytes } from "@filen/shared"
+import { confirmPrompt, inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import auth from "@/lib/auth"
@@ -13,10 +13,13 @@ import { clearClipboardAfterDeleteAll } from "@/features/drive/clipboardFollow"
 import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
 import { shareTmpFile } from "@/lib/share"
-import { newTmpFile } from "@/lib/tmp"
+import { writeTmpFile } from "@/lib/tmp"
 import { convertBigInts } from "@/lib/utils"
-import * as Linking from "expo-linking"
+import { openTrustedUrl } from "@/lib/openTrustedUrl"
 import logger from "@/lib/logger"
+import { WEB_APP_URL } from "@/constants"
+
+const ACCOUNT_SETTINGS_URL = `${WEB_APP_URL}settings/account`
 
 type AccountQuerySuccess = Extract<ReturnType<typeof useAccountQuery>, { status: "success" }>
 
@@ -27,12 +30,10 @@ type AccountQuerySuccess = Extract<ReturnType<typeof useAccountQuery>, { status:
 export function buildDangerZoneButtons({
 	t,
 	accountQuery,
-	isOnline,
 	textRed500
 }: {
 	t: TFunction
 	accountQuery: AccountQuerySuccess
-	isOnline: boolean
 	textRed500: ReturnType<typeof useResolveClassNames>
 }): Button[] {
 	return [
@@ -42,51 +43,39 @@ export function buildDangerZoneButtons({
 			title: t("delete_versioned_files"),
 			titleClassName: "text-red-500",
 			subTitle: formatBytes(Number(accountQuery.data.versionedStorage)),
-			disabled: !isOnline,
+			requiresOnline: true,
 			onPress: async () => {
 				if (accountQuery.data.versionedStorage <= 0) {
 					return
 				}
 
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("delete_versioned_files"),
 						message: t("delete_versioned_files_description_non_reversible"),
 						okText: t("delete"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "delete versioned files confirmation prompt failed" }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "delete versioned files confirmation prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
+				if (!confirmed) {
 					return
 				}
 
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const confirmPromptResult = await run(async () => {
-					return await prompts.alert({
+				const reconfirmed = await confirmPrompt(
+					{
 						title: t("are_you_sure"),
 						message: t("delete_versioned_files_description_are_you_sure"),
 						okText: t("delete"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "delete versioned files 2nd confirmation prompt failed" }
+				)
 
-				if (!confirmPromptResult.success) {
-					logger.warn("settings", "delete versioned files 2nd confirmation prompt failed", { error: confirmPromptResult.error })
-					alerts.error(confirmPromptResult.error)
-
-					return
-				}
-
-				if (confirmPromptResult.data.cancelled) {
+				if (!reconfirmed) {
 					return
 				}
 
@@ -112,51 +101,39 @@ export function buildDangerZoneButtons({
 			title: t("delete_all_files_and_directories"),
 			titleClassName: "text-red-500",
 			subTitle: formatBytes(Number(accountQuery.data.storageUsed)),
-			disabled: !isOnline,
+			requiresOnline: true,
 			onPress: async () => {
 				if (accountQuery.data.storageUsed <= 0) {
 					return
 				}
 
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("delete_all_files_and_directories"),
 						message: t("delete_all_files_and_directories_description_non_reversible"),
 						okText: t("delete"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "delete all files confirmation prompt failed" }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "delete all files confirmation prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
+				if (!confirmed) {
 					return
 				}
 
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const confirmPromptResult = await run(async () => {
-					return await prompts.alert({
+				const reconfirmed = await confirmPrompt(
+					{
 						title: t("are_you_sure"),
 						message: t("delete_all_files_and_directories_description_are_you_sure"),
 						okText: t("delete"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "delete all files 2nd confirmation prompt failed" }
+				)
 
-				if (!confirmPromptResult.success) {
-					logger.warn("settings", "delete all files 2nd confirmation prompt failed", { error: confirmPromptResult.error })
-					alerts.error(confirmPromptResult.error)
-
-					return
-				}
-
-				if (confirmPromptResult.data.cancelled) {
+				if (!reconfirmed) {
 					return
 				}
 
@@ -185,78 +162,54 @@ export function buildDangerZoneButtons({
 			title: t("request_account_deletion"),
 			titleClassName: "text-red-500",
 			subTitle: t("request_account_deletion_description"),
-			disabled: !isOnline,
+			requiresOnline: true,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("request_account_deletion"),
 						message: t("request_account_deletion_description_non_reversible_will_send_email_first_to_confirm"),
 						okText: t("request"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "request account deletion prompt failed" }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "request account deletion prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
+				if (!confirmed) {
 					return
 				}
 
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const confirmPromptResult = await run(async () => {
-					return await prompts.alert({
+				const reconfirmed = await confirmPrompt(
+					{
 						title: t("are_you_sure"),
 						message: t("request_account_deletion_description_non_reversible_will_send_email_first_to_confirm_are_you_sure"),
 						okText: t("request"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "request account deletion 2nd confirmation prompt failed" }
+				)
 
-				if (!confirmPromptResult.success) {
-					logger.warn("settings", "request account deletion 2nd confirmation prompt failed", { error: confirmPromptResult.error })
-					alerts.error(confirmPromptResult.error)
-
-					return
-				}
-
-				if (confirmPromptResult.data.cancelled) {
+				if (!reconfirmed) {
 					return
 				}
 
 				let twoFactorCode: string | undefined = undefined
 
 				if (accountQuery.data.twoFactorEnabled) {
-					const twoFactorPromptResult = await run(async () => {
-						return await prompts.input({
+					const twoFactor = await inputPrompt(
+						{
 							title: t("enter_two_factor_code"),
 							message: t("enter_two_factor_code_description_confirm"),
 							cancelText: t("cancel"),
 							okText: t("request"),
 							inputType: "secure-text",
 							destructive: true
-						})
-					})
+						},
+						{ tag: "settings", message: "delete account 2FA prompt failed" }
+					)
 
-					if (!twoFactorPromptResult.success) {
-						logger.warn("settings", "delete account 2FA prompt failed", { error: twoFactorPromptResult.error })
-						alerts.error(twoFactorPromptResult.error)
-
-						return
-					}
-
-					if (twoFactorPromptResult.data.cancelled) {
-						return
-					}
-
-					const twoFactor = twoFactorPromptResult.data.value
-
-					if (twoFactor.length === 0) {
+					if (twoFactor === null) {
 						return
 					}
 
@@ -287,12 +240,10 @@ export function buildDangerZoneButtons({
 // more settings). Extracted verbatim from the account screen.
 export function buildProfileButtons({
 	t,
-	accountQuery,
-	isOnline
+	accountQuery
 }: {
 	t: TFunction
 	accountQuery: AccountQuerySuccess
-	isOnline: boolean
 }): Button[] {
 	return [
 		{
@@ -300,59 +251,37 @@ export function buildProfileButtons({
 			title: t("change_email_address"),
 			subTitle: accountQuery.data.email,
 			subTitleNumberOfLines: 1,
-			disabled: !isOnline,
+			requiresOnline: true,
 			onPress: async () => {
-				const newEmailPromptResult = await run(async () => {
-					return await prompts.input({
+				const newEmail = await inputPrompt(
+					{
 						title: t("change_email_address"),
 						message: t("enter_new_email_address"),
 						cancelText: t("cancel"),
 						okText: t("next"),
 						keyboardType: "email-address"
-					})
-				})
+					},
+					{ tag: "settings", message: "change email new-email prompt failed" },
+					{ trim: true }
+				)
 
-				if (!newEmailPromptResult.success) {
-					logger.warn("settings", "change email new-email prompt failed", { error: newEmailPromptResult.error })
-					alerts.error(newEmailPromptResult.error)
-
+				if (newEmail === null) {
 					return
 				}
 
-				if (newEmailPromptResult.data.cancelled) {
-					return
-				}
-
-				const newEmail = newEmailPromptResult.data.value.trim()
-
-				if (newEmail.length === 0) {
-					return
-				}
-
-				const confirmNewEmailPromptResult = await run(async () => {
-					return await prompts.input({
+				const confirmNewEmail = await inputPrompt(
+					{
 						title: t("change_email_address"),
 						message: t("confirm_new_email_address"),
 						cancelText: t("cancel"),
 						okText: t("next"),
 						keyboardType: "email-address"
-					})
-				})
+					},
+					{ tag: "settings", message: "change email confirm-email prompt failed" },
+					{ trim: true }
+				)
 
-				if (!confirmNewEmailPromptResult.success) {
-					logger.warn("settings", "change email confirm-email prompt failed", { error: confirmNewEmailPromptResult.error })
-					alerts.error(confirmNewEmailPromptResult.error)
-
-					return
-				}
-
-				if (confirmNewEmailPromptResult.data.cancelled) {
-					return
-				}
-
-				const confirmNewEmail = confirmNewEmailPromptResult.data.value.trim()
-
-				if (confirmNewEmail.length === 0) {
+				if (confirmNewEmail === null) {
 					return
 				}
 
@@ -362,30 +291,18 @@ export function buildProfileButtons({
 					return
 				}
 
-				const passwordPromptResult = await run(async () => {
-					return await prompts.input({
+				const password = await inputPrompt(
+					{
 						title: t("change_email_address"),
 						message: t("enter_password"),
 						cancelText: t("cancel"),
 						okText: t("save"),
 						inputType: "secure-text"
-					})
-				})
+					},
+					{ tag: "settings", message: "change email password prompt failed" }
+				)
 
-				if (!passwordPromptResult.success) {
-					logger.warn("settings", "change email password prompt failed", { error: passwordPromptResult.error })
-					alerts.error(passwordPromptResult.error)
-
-					return
-				}
-
-				if (passwordPromptResult.data.cancelled) {
-					return
-				}
-
-				const password = passwordPromptResult.data.value
-
-				if (password.length === 0) {
+				if (password === null) {
 					return
 				}
 
@@ -409,32 +326,21 @@ export function buildProfileButtons({
 			title: t("change_nickname"),
 			subTitle: accountQuery.data.nickName,
 			subTitleNumberOfLines: 1,
-			disabled: !isOnline,
+			requiresOnline: true,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
+				const newNickname = await inputPrompt(
+					{
 						title: t("change_nickname"),
 						message: t("enter_nickname"),
 						cancelText: t("cancel"),
 						okText: t("save"),
 						placeholder: accountQuery.data.nickName
-					})
-				})
+					},
+					{ tag: "settings", message: "change nickname prompt failed" },
+					{ trim: true }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "change nickname prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const newNickname = promptResult.data.value.trim()
-
-				if (newNickname.length === 0) {
+				if (newNickname === null) {
 					return
 				}
 
@@ -473,16 +379,15 @@ export function buildProfileButtons({
 			icon: "document-text-outline",
 			title: t("gdpr_information"),
 			subTitle: t("gdpr_information_description"),
-			disabled: !isOnline,
+			requiresOnline: true,
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
 					const { authedSdkClient } = await auth.getSdkClients()
 
-					const file = newTmpFile(`gdpr_${accountQuery.data.email}.txt`)
-
-					file.write(JSON.stringify(convertBigInts(await authedSdkClient.getGdprInfo()), null, 4))
-
-					return file
+					return writeTmpFile(
+						`gdpr_${accountQuery.data.email}.txt`,
+						JSON.stringify(convertBigInts(await authedSdkClient.getGdprInfo()), null, 4)
+					)
 				})
 
 				if (!result.success) {
@@ -493,13 +398,9 @@ export function buildProfileButtons({
 				}
 
 				const shareResult = await shareTmpFile({
-					uri: result.data.uri,
-					name: result.data.name,
-					cleanup: () => {
-						if (result.data.exists) {
-							result.data.delete()
-						}
-					}
+					uri: result.data.file.uri,
+					name: result.data.file.name,
+					cleanup: result.data.cleanup
 				})
 
 				if (!shareResult.success) {
@@ -514,53 +415,21 @@ export function buildProfileButtons({
 			icon: "settings-outline",
 			title: t("more_account_settings"),
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("open_web_app"),
 						message: t("open_web_app_to_change_more_settings_do_you_want_to_open_it"),
 						okText: t("open"),
 						cancelText: t("cancel")
-					})
-				})
+					},
+					{ tag: "settings", message: "open web app prompt failed" }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "open web app prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
+				if (!confirmed) {
 					return
 				}
 
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const canOpenResult = await run(async () => {
-					return await Linking.canOpenURL("https://app.filen.io/#/settings/account")
-				})
-
-				if (!canOpenResult.success) {
-					logger.error("settings", "canOpenURL check failed", { error: canOpenResult.error })
-					alerts.error(canOpenResult.error)
-
-					return
-				}
-
-				if (!canOpenResult.data) {
-					alerts.error(t("cannot_open_link"))
-
-					return
-				}
-
-				const openResult = await run(async () => {
-					return await Linking.openURL("https://app.filen.io/#/settings/account")
-				})
-
-				if (!openResult.success) {
-					logger.error("settings", "openURL failed", { error: openResult.error })
-					alerts.error(openResult.error)
-
-					return
-				}
+				await openTrustedUrl("settings", ACCOUNT_SETTINGS_URL)
 			}
 		}
 	]
@@ -569,19 +438,17 @@ export function buildProfileButtons({
 // Account feature toggles (file versioning / login alerts).
 export function buildAccountToggleButtons({
 	t,
-	accountQuery,
-	isOnline
+	accountQuery
 }: {
 	t: TFunction
 	accountQuery: AccountQuerySuccess
-	isOnline: boolean
 }): Button[] {
 	return [
 		{
 			icon: "layers-outline",
 			title: t("file_versioning"),
 			subTitle: t("file_versioning_description"),
-			disabled: !isOnline,
+			requiresOnline: true,
 			rightItem: {
 				type: "switch",
 				value: accountQuery.data.versioningEnabled,
@@ -611,7 +478,7 @@ export function buildAccountToggleButtons({
 			icon: "notifications-outline",
 			title: t("login_alerts"),
 			subTitle: t("login_alerts_description"),
-			disabled: !isOnline,
+			requiresOnline: true,
 			rightItem: {
 				type: "switch",
 				value: accountQuery.data.loginAlertsEnabled,
@@ -643,70 +510,50 @@ export function buildAccountToggleButtons({
 // 2FA enable / disable switch button. Extracted verbatim from twoFactor.tsx.
 export function buildTwoFactorButtons({
 	t,
-	accountQuery,
-	isOnline
+	accountQuery
 }: {
 	t: TFunction
 	accountQuery: AccountQuerySuccess
-	isOnline: boolean
 }): Button[] {
 	return [
 		{
 			icon: "shield-checkmark-outline",
 			title: t("two_factor_authentication"),
 			subTitle: t("two_factor_authentication_description"),
-			disabled: !isOnline,
+			requiresOnline: true,
 			rightItem: {
 				type: "switch",
 				value: accountQuery.data.twoFactorEnabled,
 				onValueChange: async () => {
 					if (accountQuery.data.twoFactorEnabled) {
-						const promptResult = await run(async () => {
-							return await prompts.alert({
+						const confirmed = await confirmPrompt(
+							{
 								title: t("disable_two_factor_authentication"),
 								message: t("disable_two_factor_authentication_description"),
 								okText: t("continue"),
 								cancelText: t("cancel"),
 								destructive: true
-							})
-						})
+							},
+							{ tag: "settings", message: "disable 2FA confirmation prompt failed" }
+						)
 
-						if (!promptResult.success) {
-							logger.warn("settings", "disable 2FA confirmation prompt failed", { error: promptResult.error })
-							alerts.error(promptResult.error)
-
+						if (!confirmed) {
 							return
 						}
 
-						if (promptResult.data.cancelled) {
-							return
-						}
-
-						const twoFactorPromptResult = await run(async () => {
-							return await prompts.input({
+						const twoFactor = await inputPrompt(
+							{
 								title: t("enter_two_factor_code"),
 								message: t("enter_two_factor_code_description"),
 								cancelText: t("cancel"),
 								okText: t("disable"),
 								inputType: "secure-text",
 								destructive: true
-							})
-						})
+							},
+							{ tag: "settings", message: "disable 2FA code prompt failed" }
+						)
 
-						if (!twoFactorPromptResult.success) {
-							logger.warn("settings", "disable 2FA code prompt failed", { error: twoFactorPromptResult.error })
-							alerts.error(twoFactorPromptResult.error)
-
-							return
-						}
-
-						if (twoFactorPromptResult.data.cancelled) {
-							return
-						}
-
-						const twoFactor = twoFactorPromptResult.data.value
-
-						if (twoFactor.length === 0) {
+						if (twoFactor === null) {
 							return
 						}
 
@@ -727,30 +574,18 @@ export function buildTwoFactorButtons({
 						return
 					}
 
-					const twoFactorPromptResult = await run(async () => {
-						return await prompts.input({
+					const twoFactor = await inputPrompt(
+						{
 							title: t("enter_two_factor_code"),
 							message: t("enter_two_factor_code_description"),
 							cancelText: t("cancel"),
 							okText: t("enable"),
 							inputType: "secure-text"
-						})
-					})
+						},
+						{ tag: "settings", message: "enable 2FA code prompt failed" }
+					)
 
-					if (!twoFactorPromptResult.success) {
-						logger.warn("settings", "enable 2FA code prompt failed", { error: twoFactorPromptResult.error })
-						alerts.error(twoFactorPromptResult.error)
-
-						return
-					}
-
-					if (twoFactorPromptResult.data.cancelled) {
-						return
-					}
-
-					const twoFactor = twoFactorPromptResult.data.value
-
-					if (twoFactor.length === 0) {
+					if (twoFactor === null) {
 						return
 					}
 
@@ -792,24 +627,18 @@ export function buildLogoutButtons({ t }: { t: TFunction }): Button[] {
 			icon: "log-out-outline",
 			title: t("logout"),
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("logout"),
 						message: t("logout_confirm_wipes_local_data"),
 						okText: t("logout"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "logout confirmation prompt failed" }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "logout confirmation prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
+				if (!confirmed) {
 					return
 				}
 

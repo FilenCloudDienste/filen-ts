@@ -259,6 +259,50 @@ describe("SecureStore", () => {
 		})
 	})
 
+	describe("SecureStore.subscribeKey", () => {
+		it("delivers set for the watched key only", async () => {
+			const changes: unknown[] = []
+			const unsubscribe = secureStore.subscribeKey("watched", change => changes.push(change))
+
+			await secureStore.set("other", 1)
+			await secureStore.set("watched", 2)
+
+			unsubscribe()
+
+			expect(changes).toEqual([{ type: "set", value: 2 }])
+		})
+
+		it("delivers removed for a remove of the watched key and for a clear", async () => {
+			await secureStore.set("watched", 1)
+			await secureStore.set("other", 1)
+
+			const changes: unknown[] = []
+			const unsubscribe = secureStore.subscribeKey("watched", change => changes.push(change))
+
+			await secureStore.remove("other")
+			await secureStore.remove("watched")
+			await secureStore.clear()
+
+			unsubscribe()
+
+			expect(changes).toEqual([{ type: "removed" }, { type: "removed" }])
+		})
+
+		it("the returned unsubscribe removes all three listeners", () => {
+			const unsubscribe = secureStore.subscribeKey("watched", () => {})
+
+			expect(mockEventEmitter.listenerCount("secureStoreChange")).toBe(1)
+			expect(mockEventEmitter.listenerCount("secureStoreRemove")).toBe(1)
+			expect(mockEventEmitter.listenerCount("secureStoreClear")).toBe(1)
+
+			unsubscribe()
+
+			expect(mockEventEmitter.listenerCount("secureStoreChange")).toBe(0)
+			expect(mockEventEmitter.listenerCount("secureStoreRemove")).toBe(0)
+			expect(mockEventEmitter.listenerCount("secureStoreClear")).toBe(0)
+		})
+	})
+
 	describe("SecureStore.getEncryptionKey — MMKV fallback path", () => {
 		it("generates and stores a new key in MMKV when expo-secure-store is unavailable", async () => {
 			vi.mocked(expoSecureStoreMock.isAvailableAsync).mockResolvedValue(false)

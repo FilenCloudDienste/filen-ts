@@ -4,6 +4,7 @@ import { type Dir } from "@filen/sdk-rs"
 import { type CameraUploadHashEntry } from "@/features/cameraUpload/cameraUploadState"
 import { isTrashParent } from "@/lib/sdkUnwrap"
 import { isHeicFile } from "@/lib/imageConversion"
+import { extnameOf } from "@/lib/previewType"
 
 export type CollisionParams = {
 	iteration: number
@@ -88,7 +89,7 @@ export function modifyAssetPathOnCollision({ iteration, path, asset, compress }:
 	// mid-stem ("vacation_<T>.2024") and diverge from the remote key ("vacation.2024_<T>", derived
 	// from the uploaded `<full-stem>_<suffix>.<uploadExt>` name via dedupTreeKey). Otherwise split
 	// the real trailing extension so the suffix lands before it ("img_0001_<T>.jpg").
-	const ext = compress ? "" : FileSystem.Paths.extname(asset.name)
+	const ext = compress ? "" : extnameOf(asset.name)
 	const basename = compress ? asset.name : FileSystem.Paths.basename(asset.name, ext)
 	const slashIndex = path.lastIndexOf("/")
 	const parentDir = slashIndex > 0 ? path.slice(0, slashIndex) : slashIndex === 0 ? "/" : ""
@@ -156,13 +157,13 @@ export function albumFolderTitle(title: string): string | null {
 // different-extension siblings never merge.
 export function dedupTreeKey({ path, compress, convertHeic }: { path: string; compress: boolean; convertHeic?: boolean }): string {
 	if (compress) {
-		const ext = FileSystem.Paths.extname(path)
+		const ext = extnameOf(path)
 
 		return ext.length === 0 ? path : path.slice(0, -ext.length)
 	}
 
 	if (convertHeic && isHeicFile(path)) {
-		const ext = FileSystem.Paths.extname(path)
+		const ext = extnameOf(path)
 
 		return ext.length === 0 ? path : `${path.slice(0, -ext.length)}.jpg`
 	}
@@ -175,7 +176,7 @@ export function dedupTreeKey({ path, compress, convertHeic }: { path: string; co
 // `dedupTreeKey`: the local source extension and the remote (possibly `.jpg`)
 // extension must not leak into the collision suffix or the keys diverge again.
 export function stripFilenameExtension(name: string): string {
-	const ext = FileSystem.Paths.extname(name)
+	const ext = extnameOf(name)
 
 	if (ext.length === 0) {
 		return name
@@ -198,7 +199,7 @@ export function collisionBaseName({ name, compress, convertHeic }: { name: strin
 	}
 
 	if (convertHeic && isHeicFile(name)) {
-		const ext = FileSystem.Paths.extname(name)
+		const ext = extnameOf(name)
 
 		return ext.length === 0 ? name : `${name.slice(0, -ext.length)}.jpg`
 	}

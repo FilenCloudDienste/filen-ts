@@ -20,23 +20,30 @@ export function whenUnlockedForeground(): Promise<void> {
 	}
 
 	return new Promise(resolve => {
-		const check = () => {
+		const off = onUnlockedForegroundChange(() => {
 			if (!isUnlockedForeground()) {
 				return
 			}
 
-			unsubscribeApp()
-			appState.remove()
+			off()
 			resolve()
-		}
-
-		const unsubscribeApp = useAppStore.subscribe((state, prev) => {
-			if (state.biometricUnlocked !== prev.biometricUnlocked) {
-				check()
-			}
 		})
-		const appState = AppState.addEventListener("change", check)
 	})
+}
+
+// Calls cb whenever an input of isUnlockedForeground() may have changed. Returns the unsubscribe.
+export function onUnlockedForegroundChange(cb: () => void): () => void {
+	const unsubscribeApp = useAppStore.subscribe((state, prev) => {
+		if (state.biometricUnlocked !== prev.biometricUnlocked) {
+			cb()
+		}
+	})
+	const appState = AppState.addEventListener("change", () => cb())
+
+	return () => {
+		unsubscribeApp()
+		appState.remove()
+	}
 }
 
 // alerts.normal shows a toast for 3 s. A toast shown sooner covers the one before it (iOS keeps no queue).

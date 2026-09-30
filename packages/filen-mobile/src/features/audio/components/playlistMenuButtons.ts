@@ -2,13 +2,14 @@ import { router } from "@/lib/router"
 import { run } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import audio, { type PlaylistWithItems } from "@/features/audio/audio"
-import prompts from "@/lib/prompts"
+import { confirmPrompt, inputPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { selectDriveItems } from "@/features/drive/driveSelectSession"
 import { selectPlaylists } from "@/features/audio/playlistsSelect"
 import usePlaylistTracksStore, { type PlaylistTrack } from "@/features/audio/store/usePlaylistTracks.store"
 import { runBulk } from "@/lib/bulkOps"
 import type { MenuButton } from "@/components/ui/menu"
+import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
 import { type TFunction } from "i18next"
 import logger from "@/lib/logger"
 
@@ -36,14 +37,16 @@ export async function addTracksToPlaylistFlow({ playlist }: { playlist: Playlist
 		return
 	}
 
-	if (selectDriveItemsResult.data.cancelled || selectDriveItemsResult.data.selectedItems.length === 0) {
+	if (selectDriveItemsResult.data.cancelled) {
 		return
 	}
+
+	const items = selectDriveItemsResult.data.selectedItems
 
 	const result = await runWithLoading(async () => {
 		await audio.addFilesToPlaylist({
 			playlist,
-			items: selectDriveItemsResult.data.cancelled ? [] : selectDriveItemsResult.data.selectedItems
+			items
 		})
 	})
 
@@ -78,24 +81,22 @@ export function buildSelectionMenuButtons({
 	const selectedTrackUuids = new Set(selectedTracks.map(st => st.uuid))
 	const allVisibleSelected = selectableTracks.length > 0 && selectableTracks.every(track => selectedTrackUuids.has(track.uuid))
 
-	buttons.push({
-		id: "selectAllTracks",
-		title: allVisibleSelected ? t("deselect_all") : t("select_all"),
-		icon: "select",
-		onPress: () => {
-			if (selectableTracks.length === 0) {
-				return
+	buttons.push(
+		selectAllMenuButton({
+			t,
+			id: "selectAllTracks",
+			allSelected: allVisibleSelected,
+			onClear: () => usePlaylistTracksStore.getState().clearSelectedTracks(),
+			// An empty filtered set would replace the selection with [].
+			onSelectAll: () => {
+				if (selectableTracks.length === 0) {
+					return
+				}
+
+				usePlaylistTracksStore.getState().selectAllTracks(selectableTracks)
 			}
-
-			if (allVisibleSelected) {
-				usePlaylistTracksStore.getState().clearSelectedTracks()
-
-				return
-			}
-
-			usePlaylistTracksStore.getState().selectAllTracks(selectableTracks)
-		}
-	})
+		})
+	)
 
 	buttons.push({
 		id: "bulkAddToQueue",
@@ -349,31 +350,20 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 			title: t("rename_playlist"),
 			requiresOnline: true,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
+				const newName = await inputPrompt(
+					{
 						title: t("rename_playlist"),
 						message: t("enter_playlist_name"),
 						placeholder: t("playlist_name_placeholder"),
 						cancelText: t("cancel"),
 						okText: t("rename"),
 						defaultValue: playlist.name
-					})
-				})
+					},
+					{ tag: "audio", message: "rename playlist prompt failed", level: "error", context: { playlistUuid: playlist.uuid } },
+					{ trim: true }
+				)
 
-				if (!promptResult.success) {
-					logger.error("audio", "rename playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const newName = promptResult.data.value.trim()
-
-				if (newName.length === 0) {
+				if (newName === null) {
 					return
 				}
 
@@ -408,24 +398,18 @@ export function buildPlaylistMenuButtons({ t, playlist }: { t: TFunction; playli
 			destructive: true,
 			requiresOnline: true,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("delete_playlist"),
 						message: t("delete_playlist_confirm"),
 						cancelText: t("cancel"),
 						okText: t("delete"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "audio", message: "delete playlist prompt failed", level: "error", context: { playlistUuid: playlist.uuid } }
+				)
 
-				if (!promptResult.success) {
-					logger.error("audio", "delete playlist prompt failed", { playlistUuid: playlist.uuid, error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
+				if (!confirmed) {
 					return
 				}
 

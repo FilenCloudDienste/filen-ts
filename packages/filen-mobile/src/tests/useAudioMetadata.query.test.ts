@@ -43,6 +43,10 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
+vi.mock("@/lib/fileCache", () => ({
+	default: {}
+}))
+
 vi.mock("@/features/audio/audioCache", () => ({
 	default: {
 		getMetadata: mockAudioCacheGetMetadata
@@ -50,7 +54,7 @@ vi.mock("@/features/audio/audioCache", () => ({
 }))
 
 import { fetchData } from "@/features/audio/queries/useAudioMetadata.query"
-import { type UseAudioMetadataQueryParams } from "@/features/audio/queries/useAudioMetadata.query"
+import { type FileSource } from "@/queries/fileSource"
 
 const FAKE_METADATA = {
 	title: "Test Track",
@@ -119,7 +123,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 
 	describe("drive type — error paths", () => {
 		it("throws 'Drive item not found or is not a file' when uuid is not in cache", async () => {
-			const params: UseAudioMetadataQueryParams = { type: "drive", data: { uuid: "missing-uuid" } }
+			const params: FileSource = { type: "drive", data: { uuid: "missing-uuid" } }
 
 			await expect(fetchData(params)).rejects.toThrow("Drive item not found or is not a file")
 			expect(mockAudioCacheGetMetadata).not.toHaveBeenCalled()
@@ -129,7 +133,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 			const item = makeDirectoryItem("dir-only")
 			mockCacheMap.set("dir-only", item)
 
-			const params: UseAudioMetadataQueryParams = { type: "drive", data: { uuid: "dir-only" } }
+			const params: FileSource = { type: "drive", data: { uuid: "dir-only" } }
 
 			await expect(fetchData(params)).rejects.toThrow("Drive item not found or is not a file")
 			expect(mockAudioCacheGetMetadata).not.toHaveBeenCalled()
@@ -142,7 +146,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 			mockCacheMap.set("audio-file-uuid", item)
 
 			const signal = new AbortController().signal
-			const params: UseAudioMetadataQueryParams = { type: "drive", data: { uuid: "audio-file-uuid" } }
+			const params: FileSource = { type: "drive", data: { uuid: "audio-file-uuid" } }
 			const result = await fetchData({ ...params, signal })
 
 			expect(mockAudioCacheGetMetadata).toHaveBeenCalledWith({
@@ -156,7 +160,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 			const item = makeSharedFileItem("sf-audio-uuid")
 			mockCacheMap.set("sf-audio-uuid", item)
 
-			const params: UseAudioMetadataQueryParams = { type: "drive", data: { uuid: "sf-audio-uuid" } }
+			const params: FileSource = { type: "drive", data: { uuid: "sf-audio-uuid" } }
 			await fetchData(params)
 
 			expect(mockAudioCacheGetMetadata).toHaveBeenCalledWith({
@@ -169,7 +173,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 			const item = makeSharedRootFileItem("srf-audio-uuid")
 			mockCacheMap.set("srf-audio-uuid", item)
 
-			const params: UseAudioMetadataQueryParams = { type: "drive", data: { uuid: "srf-audio-uuid" } }
+			const params: FileSource = { type: "drive", data: { uuid: "srf-audio-uuid" } }
 			await fetchData(params)
 
 			expect(mockAudioCacheGetMetadata).toHaveBeenCalledWith({
@@ -183,7 +187,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 			mockCacheMap.set("sig-audio-uuid", item)
 
 			const signal = new AbortController().signal
-			const params: UseAudioMetadataQueryParams = { type: "drive", data: { uuid: "sig-audio-uuid" } }
+			const params: FileSource = { type: "drive", data: { uuid: "sig-audio-uuid" } }
 			await fetchData({ ...params, signal })
 
 			expect(mockAudioCacheGetMetadata).toHaveBeenCalledWith({
@@ -197,7 +201,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 		it("calls audioCache.getMetadata with { item: { type: 'external', data: params.data }, signal: params.signal }", async () => {
 			const externalData = { url: "https://cdn.example.com/track.mp3", name: "track.mp3" }
 			const signal = new AbortController().signal
-			const params: UseAudioMetadataQueryParams = { type: "external", data: externalData }
+			const params: FileSource = { type: "external", data: externalData }
 			const result = await fetchData({ ...params, signal })
 
 			expect(mockAudioCacheGetMetadata).toHaveBeenCalledWith({
@@ -209,7 +213,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 
 		it("forwards signal correctly for external type", async () => {
 			const signal = new AbortController().signal
-			const params: UseAudioMetadataQueryParams = {
+			const params: FileSource = {
 				type: "external",
 				data: { url: "https://cdn.example.com/song.flac", name: "song.flac" }
 			}
@@ -221,7 +225,7 @@ describe("fetchData (useAudioMetadata.query)", () => {
 		})
 
 		it("does not access the cache map for external type", async () => {
-			const params: UseAudioMetadataQueryParams = {
+			const params: FileSource = {
 				type: "external",
 				data: { url: "https://cdn.example.com/bypass.mp3", name: "bypass.mp3" }
 			}

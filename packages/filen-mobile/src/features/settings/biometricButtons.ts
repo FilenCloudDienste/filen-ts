@@ -1,10 +1,10 @@
 import { type TFunction } from "i18next"
 import { run } from "@filen/shared"
-import prompts from "@/lib/prompts"
+import { confirmPrompt, inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import events from "@/lib/events"
 import fileProvider from "@/features/settings/fileProvider"
-import { type Biometric } from "@/features/settings/screens/biometric"
+import { type Biometric } from "@/features/settings/biometric"
 import logger from "@/lib/logger"
 
 export async function enableBiometric({
@@ -27,8 +27,8 @@ export async function enableBiometric({
 	// disable() is deferred until AFTER the fallback password
 	// is validated, so a cancel/mismatch leaves the provider intact.
 	if (fileProviderEnabled) {
-		const confirmProviderDisableResult = await run(async () => {
-			return await prompts.alert({
+		const confirmed = await confirmPrompt(
+			{
 				title: t("biometric_disables_file_provider_title"),
 				message: t("biometric_disables_file_provider_message"),
 				okText: t("continue"),
@@ -36,72 +36,42 @@ export async function enableBiometric({
 				// Continuing disables the file provider — styled destructive like the
 				// symmetric file-provider-disables-biometric prompt.
 				destructive: true
-			})
-		})
+			},
+			{ tag: "settings", message: "biometric enable — provider-disable confirmation prompt failed" }
+		)
 
-		if (!confirmProviderDisableResult.success) {
-			logger.warn("settings", "biometric enable — provider-disable confirmation prompt failed", { error: confirmProviderDisableResult.error })
-			alerts.error(confirmProviderDisableResult.error)
-
-			return
-		}
-
-		if (confirmProviderDisableResult.data.cancelled) {
+		if (!confirmed) {
 			return
 		}
 	}
 
-	const fallbackPromptResult = await run(async () => {
-		return await prompts.input({
+	const fallbackPassword = await inputPrompt(
+		{
 			title: t("fallback_password"),
 			message: t("enter_fallback_password"),
 			cancelText: t("cancel"),
 			okText: t("continue"),
 			inputType: "secure-text"
-		})
-	})
+		},
+		{ tag: "settings", message: "biometric enable — fallback password prompt failed" }
+	)
 
-	if (!fallbackPromptResult.success) {
-		logger.warn("settings", "biometric enable — fallback password prompt failed", { error: fallbackPromptResult.error })
-		alerts.error(fallbackPromptResult.error)
-
+	if (fallbackPassword === null) {
 		return
 	}
 
-	if (fallbackPromptResult.data.cancelled) {
-		return
-	}
-
-	const fallbackPassword = fallbackPromptResult.data.value
-
-	if (fallbackPassword.length === 0) {
-		return
-	}
-
-	const confirmFallbackPasswordPromptResult = await run(async () => {
-		return await prompts.input({
+	const confirmFallbackPassword = await inputPrompt(
+		{
 			title: t("fallback_password"),
 			message: t("enter_confirm_fallback_password"),
 			cancelText: t("cancel"),
 			okText: t("save"),
 			inputType: "secure-text"
-		})
-	})
+		},
+		{ tag: "settings", message: "biometric enable — confirm fallback password prompt failed" }
+	)
 
-	if (!confirmFallbackPasswordPromptResult.success) {
-		logger.warn("settings", "biometric enable — confirm fallback password prompt failed", { error: confirmFallbackPasswordPromptResult.error })
-		alerts.error(confirmFallbackPasswordPromptResult.error)
-
-		return
-	}
-
-	if (confirmFallbackPasswordPromptResult.data.cancelled) {
-		return
-	}
-
-	const confirmFallbackPassword = confirmFallbackPasswordPromptResult.data.value
-
-	if (confirmFallbackPassword.length === 0) {
+	if (confirmFallbackPassword === null) {
 		return
 	}
 

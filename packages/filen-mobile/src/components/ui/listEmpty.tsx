@@ -2,6 +2,8 @@ import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
+import Button from "@/components/ui/button"
+import { useTranslation } from "react-i18next"
 
 // Standard empty-state cell rendered inside list emptyComponent slots.
 // `flex-1` + center alignment puts the content at the true middle of the list area.
@@ -31,6 +33,31 @@ const ListEmpty = ({
 			{description ? <Text className="text-xs text-muted-foreground text-center max-w-xs">{description}</Text> : null}
 			{action ? <View className="mt-4 bg-transparent">{action}</View> : null}
 		</View>
+	)
+}
+
+export const NoResultsEmpty = () => {
+	const { t } = useTranslation()
+
+	return (
+		<ListEmpty
+			icon="search-outline"
+			title={t("no_results")}
+			description={t("no_results_description")}
+		/>
+	)
+}
+
+export const LoadErrorEmpty = ({ title, onRetry, retryLabel }: { title: string; onRetry: () => void; retryLabel?: string }) => {
+	const { t } = useTranslation()
+
+	return (
+		<ListEmpty
+			icon="warning-outline"
+			title={title}
+			description={t("please_check_connection")}
+			action={<Button onPress={onRetry}>{retryLabel ?? t("try_again")}</Button>}
+		/>
 	)
 }
 

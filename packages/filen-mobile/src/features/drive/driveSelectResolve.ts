@@ -1,9 +1,7 @@
 import { AnyNormalDir } from "@filen/sdk-rs"
-import { type Events } from "@/lib/events"
+import type { DriveSelectedItem } from "@/lib/events"
 import cache from "@/lib/cache"
 import logger from "@/lib/logger"
-
-type DriveSelectSelectedItem = Extract<Events["driveSelect"], { cancelled: false }>["selectedItems"][number]
 
 // Resolves a driveSelect picker result element to the AnyNormalDir a caller can upload/import into.
 // Root passes straight through. For a picked own-directory: prefer the cache entry (populated by a
@@ -12,7 +10,7 @@ type DriveSelectSelectedItem = Extract<Events["driveSelect"], { cancelled: false
 // a listing — must NOT no-op silently, leaving the user's pick with no effect and no log. Shared
 // directories carry no plain Dir struct and aren't valid destinations, so those resolve to null
 // (logged with the uuid + type), as does anything unexpected.
-export function resolveSelectedDriveItemToAnyNormalDir(selectedItem: DriveSelectSelectedItem): AnyNormalDir | null {
+export function resolveSelectedDriveItemToAnyNormalDir(selectedItem: DriveSelectedItem): AnyNormalDir | null {
 	if (selectedItem.type === "root") {
 		return selectedItem.data
 	}

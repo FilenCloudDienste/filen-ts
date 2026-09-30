@@ -1,12 +1,17 @@
-import { Platform } from "react-native"
 import { Fragment } from "react"
 import { useResolveClassNames } from "uniwind"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { useTranslation } from "react-i18next"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
-import Header, { type HeaderItem } from "@/components/ui/header"
+import { type HeaderItem } from "@/components/ui/header"
+import { type MenuButton } from "@/components/ui/menu"
+import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import VirtualList from "@/components/ui/virtualList"
 import ParticipantRow, { type ParticipantRowProps } from "@/components/participants/participantRow"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
+import { router } from "@/lib/router"
+import useIsOnline from "@/hooks/useIsOnline"
 
 export type ParticipantListProps<T> = {
 	title: string
@@ -15,32 +20,82 @@ export type ParticipantListProps<T> = {
 	participants: readonly T[]
 	keyExtractor: (participant: T) => string
 	toRowProps: (participant: T) => ParticipantRowProps
-	headerLeftItems?: HeaderItem[]
-	headerRightItems?: HeaderItem[]
+	// Owner-only: selection mode (bulk menu) and the add button.
+	owner?: {
+		selectedCount: number
+		clearSelection: () => void
+		selectAll: () => void
+		bulkButtons: MenuButton[]
+		onAdd: () => Promise<void>
+	}
 }
 
 export const ParticipantList = <T,>(props: ParticipantListProps<T>) => {
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
+	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
+	const textForeground = useResolveClassNames("text-foreground")
+	const isOnline = useIsOnline()
+	const owner = props.owner
+	const inSelectionMode = owner !== undefined && owner.selectedCount > 0
+
+	const headerLeftItems: HeaderItem[] | undefined = inSelectionMode
+		? [
+				{
+					type: "clearSelection",
+					onPress: owner.clearSelection
+				}
+			]
+		: undefined
+
+	const headerRightItems: HeaderItem[] | undefined = (() => {
+		if (!owner) {
+			return undefined
+		}
+
+		if (inSelectionMode) {
+			const allSelected = owner.selectedCount === props.participants.length
+
+			return [
+				{
+					type: "ellipsisMenu",
+					buttons: [
+						selectAllMenuButton({
+							t,
+							allSelected,
+							onClear: owner.clearSelection,
+							onSelectAll: owner.selectAll
+						}),
+						...owner.bulkButtons
+					]
+				}
+			]
+		}
+
+		return [
+			{
+				type: "button",
+				icon: {
+					name: "add-outline",
+					color: textForeground.color,
+					size: 20
+				},
+				props: {
+					enabled: isOnline,
+					onPress: owner.onAdd
+				}
+			}
+		]
+	})()
 
 	return (
 		<Fragment>
-			<Header
-				title={props.title}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={props.headerLeftItems}
-				rightItems={props.headerRightItems}
+			<SettingsHeader
+				title={inSelectionMode ? t("selected", { count: owner.selectedCount }) : props.title}
+				onDismiss={() => router.back()}
+				leftItems={headerLeftItems}
+				rightItems={headerRightItems}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					data={props.participants as T[]}
 					contentContainerStyle={{
@@ -58,7 +113,7 @@ export const ParticipantList = <T,>(props: ParticipantListProps<T>) => {
 					}}
 					keyExtractor={participant => props.keyExtractor(participant)}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

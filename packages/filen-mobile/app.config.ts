@@ -4,11 +4,10 @@ import "ts-node/register"
 import type { ExpoConfig, ConfigContext } from "expo/config"
 import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
 import { EXTERNAL_LINK_PROTOCOLS } from "./src/components/textEditor/linkUtils"
+import { APPLE_TEAM_ID, IOS_APP_GROUP_IDENTIFIER, IOS_KEYCHAIN_ACCESS_GROUP } from "./src/lib/appIdentity"
 
 const VERSION: string = "4.0.18"
 
-const APPLE_TEAM_ID: string = "7YTW5D2K7P"
-const IOS_APP_GROUP_ID: string = "group.io.filen.app"
 const ANDROID_MIN_SDK_VERSION: number = 31
 const ANDROID_TARGET_SDK_VERSION: number = 36
 const ANDROID_COMPILE_SDK_VERSION: number = 36
@@ -67,11 +66,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 		// capability is enabled automatically by CI's cloud signing (-allowProvisioningUpdates).
 		associatedDomains: ["webcredentials:filen.io", "webcredentials:drive.filen.io", "webcredentials:app.filen.io"],
 		entitlements: {
-			"com.apple.security.application-groups": [IOS_APP_GROUP_ID],
+			"com.apple.security.application-groups": [IOS_APP_GROUP_IDENTIFIER],
 			// Dedicated team-prefixed keychain access group shared with the File Provider extension so
 			// both can read the auth.json DEK. On iOS the app group alone does NOT grant keychain sharing;
 			// a keychain-access-groups entry is required on both the app and the extension.
-			"keychain-access-groups": [`${APPLE_TEAM_ID}.io.filen.sharedkeys`]
+			"keychain-access-groups": [IOS_KEYCHAIN_ACCESS_GROUP]
 		},
 		config: {
 			usesNonExemptEncryption: false
@@ -255,7 +254,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 			{
 				ios: {
 					enabled: true,
-					appGroupId: IOS_APP_GROUP_ID,
+					appGroupId: IOS_APP_GROUP_IDENTIFIER,
 					activationRule: {
 						supportsFileWithMaxCount: 100,
 						supportsImageWithMaxCount: 100,
@@ -318,7 +317,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				targets: ["aarch64-apple-ios", "aarch64-apple-ios-sim"],
 				cargoArgs: "-F heif-decoder",
 				developmentTeamId: APPLE_TEAM_ID,
-				iosAppGroupIdentifier: IOS_APP_GROUP_ID
+				iosAppGroupIdentifier: IOS_APP_GROUP_IDENTIFIER
 			}
 		],
 		[

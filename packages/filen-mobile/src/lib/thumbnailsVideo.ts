@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system"
 import * as ImageManipulator from "expo-image-manipulator"
 import * as VideoThumbnails from "expo-video-thumbnails"
 import { normalizeFilePathForExpo } from "@/lib/paths"
+import { renderAndSave } from "@/lib/imageManipulator"
 import { run } from "@filen/shared"
 import { abortError } from "@/lib/thumbnailsHelpers"
 
@@ -81,48 +82,17 @@ export async function generateVideo(
 		// Resize + re-encode to WEBP. This is the app's LAST manipulator decode in the thumbnail
 		// pipeline — images are SDK decodes now, but Rust decodes no video, so the frame still comes
 		// back through expo and has to be resized here.
-		// Hold the Context in a local binding across the await: expo-image-manipulator's Context
-		// cancels its underlying coroutine task on sharedObjectDidRelease, so letting it become
-		// Hermes-GC-eligible during renderAsync would reject with JobCancellationException. The same
-		// hazard applies wherever a Context crosses an await — cameraUpload's compress,
-		// imageConversion, avatarUpload.
-		const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(thumbnail.uri)).resize({
-			width: params.width
-		})
-
-		let manipulated: ImageManipulator.ImageRef | null = null
-
-		// Free the native SharedObjects (Context + rendered ImageRef) on scope exit — both wrap decoded
-		// native bitmaps Hermes GC doesn't track, so without release they pile up during bulk generation
-		// until the OS memory-kills the app. Deferred so it runs AFTER renderAsync/saveAsync settle
-		// (releasing the Context mid-render cancels its coroutine — see the binding note above).
-		defer(() => {
-			manipulated?.release()
-			context.release()
-		})
+		let saved: ImageManipulator.ImageResult
 
 		try {
-			manipulated = await context.renderAsync()
-		} catch (error) {
-			if (params.signal?.aborted) {
-				throw abortError(params.signal)
-			}
-
-			throw error
-		}
-
-		if (params.signal?.aborted) {
-			throw abortError(params.signal)
-		}
-
-		let saved: ImageManipulator.ImageResult | null = null
-
-		try {
-			saved = await manipulated.saveAsync({
-				compress: params.quality,
-				format: ImageManipulator.SaveFormat.WEBP,
-				base64: false
-			})
+			saved = await renderAndSave(
+				normalizeFilePathForExpo(thumbnail.uri),
+				{
+					compress: params.quality,
+					format: ImageManipulator.SaveFormat.WEBP
+				},
+				params.width
+			)
 		} catch (error) {
 			if (params.signal?.aborted) {
 				throw abortError(params.signal)
@@ -134,13 +104,7 @@ export async function generateVideo(
 		const savedFile = new FileSystem.File(saved.uri)
 		const outputFile = new FileSystem.File(params.outputPath)
 
-		try {
-			if (outputFile.exists) {
-				outputFile.delete()
-			}
-
-			await savedFile.move(outputFile)
-		} catch (error) {
+		const discardSaved = () => {
 			try {
 				if (savedFile.exists) {
 					savedFile.delete()
@@ -148,6 +112,22 @@ export async function generateVideo(
 			} catch {
 				// Best-effort cleanup of the orphaned manipulated file
 			}
+		}
+
+		if (params.signal?.aborted) {
+			discardSaved()
+
+			throw abortError(params.signal)
+		}
+
+		try {
+			if (outputFile.exists) {
+				outputFile.delete()
+			}
+
+			await savedFile.move(outputFile)
+		} catch (error) {
+			discardSaved()
 
 			const message = error instanceof Error ? error.message : String(error)
 

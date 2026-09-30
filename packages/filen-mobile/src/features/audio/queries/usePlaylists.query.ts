@@ -3,7 +3,7 @@ import { queryClient, queryUpdater } from "@/queries/client"
 import { driveContentChangedSince } from "@/lib/driveChanges"
 import audio from "@/features/audio/audio"
 import cache from "@/lib/cache"
-import { type DriveItemFileExtracted } from "@/types"
+import { type DriveItem } from "@/types"
 
 export const BASE_QUERY_KEY = "usePlaylistsQuery"
 
@@ -38,12 +38,14 @@ let cleanReadStartedAt: number | null = null
  * from a real listing would hand every cache reader an item the SDK refuses to mutate
  * (ErrorKind.MissingStableUuid) — the public-link screen prefers this cache over its own route item.
  */
-function seedTrackIfUncached(item: DriveItemFileExtracted): void {
+export function seedTrackIfUncached(item: DriveItem): boolean {
 	if (cache.uuidToAnyDriveItem.has(item.data.uuid)) {
-		return
+		return false
 	}
 
 	cache.uuidToAnyDriveItem.set(item.data.uuid, item)
+
+	return true
 }
 
 function applyPatchesSince(count: number, playlists: Playlists): Playlists {

@@ -6,6 +6,7 @@ import { SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoot
 import { prefixUpperBound } from "@/lib/kvScan"
 import logger from "@/lib/logger"
 import * as FileSystem from "expo-file-system"
+import { ensureDirectory } from "@/lib/fsUtils"
 
 const OPEN_DB_MAX_ATTEMPTS = 10
 const OPEN_DB_BASE_BACKOFF_MS = 100
@@ -148,12 +149,7 @@ class Sqlite {
 			}
 
 			if (!this.db) {
-				if (!SQLITE_DB_FILE_DIRECTORY.exists) {
-					SQLITE_DB_FILE_DIRECTORY.create({
-						idempotent: true,
-						intermediates: true
-					})
-				}
+				ensureDirectory(SQLITE_DB_FILE_DIRECTORY)
 
 				// Changing the on-disk database file format requires bumping SQLITE_VERSION in storageRoots.ts.
 				this.db = open({

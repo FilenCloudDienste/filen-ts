@@ -79,7 +79,7 @@ vi.mock("@/lib/i18n", () => ({
 	}
 }))
 
-import { unwrappedSdkErrorToHumanReadable, unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
+import { unwrappedSdkErrorToHumanReadable, unwrapSdkError, isNetworkClassError, errorToMessage } from "@/lib/sdkErrors"
 
 function makeError(
 	kind: string,
@@ -277,5 +277,40 @@ describe("isNetworkClassError", () => {
 		getInnerRef.current = () => inner
 
 		expect(isNetworkClassError(new Error("wrapper"))).toBe(false)
+	})
+})
+
+describe("errorToMessage", () => {
+	it("uses the label-first SDK message when the value wraps a FilenSdkError", () => {
+		hasInnerRef.current = () => true
+		getInnerRef.current = () => makeError(ErrorKindMock.Reqwest, "", { innerMessage: "error sending request" })
+
+		expect(errorToMessage(new Error("wrapper"), "fallback")).toBe(en.network_error)
+	})
+
+	it("uses Error.message for a plain Error", () => {
+		hasInnerRef.current = () => false
+
+		expect(errorToMessage(new Error("plain error message"), "fallback")).toBe("plain error message")
+	})
+
+	it("returns a string as-is", () => {
+		hasInnerRef.current = () => false
+
+		expect(errorToMessage("something went wrong", "fallback")).toBe("something went wrong")
+	})
+
+	it("uses the fallback for any other value when one is given", () => {
+		hasInnerRef.current = () => false
+
+		expect(errorToMessage(42, "fallback")).toBe("fallback")
+		expect(errorToMessage({ code: 1 }, "fallback")).toBe("fallback")
+	})
+
+	it("stringifies any other value without a fallback", () => {
+		hasInnerRef.current = () => false
+
+		expect(errorToMessage(42)).toBe("42")
+		expect(errorToMessage(null)).toBe("null")
 	})
 })

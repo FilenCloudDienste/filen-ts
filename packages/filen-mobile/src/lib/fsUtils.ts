@@ -7,6 +7,28 @@ import {
 	THUMBNAILS_DIRECTORY
 } from "@/lib/storageRoots"
 
+// The exists check stays: an idempotent create() stats, validates and checks permissions natively,
+// which costs more than a bare stat on the common already-exists path.
+export function ensureDirectory(dir: FileSystem.Directory): void {
+	if (!dir.exists) {
+		dir.create({
+			idempotent: true,
+			intermediates: true
+		})
+	}
+}
+
+export function resetDirectory(dir: FileSystem.Directory): void {
+	if (dir.exists) {
+		dir.delete()
+	}
+
+	dir.create({
+		idempotent: true,
+		intermediates: true
+	})
+}
+
 // Calls `visit` for every File and Directory under `directory`, recursively.
 // Visits each entry exactly once even if the tree contains symlink-style cycles.
 // Subtree read failures are swallowed — best-effort traversal.

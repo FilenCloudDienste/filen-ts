@@ -5,7 +5,8 @@ import { useWindowDimensions } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import { SvgXml, parse } from "react-native-svg"
 import useFileTextQuery from "@/queries/useFileText.query"
-import { type GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
+import { galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 import UnavailableOfflineNotice from "@/components/drivePreview/unavailableOfflineNotice"
 import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -56,25 +57,7 @@ const PreviewSvg = ({
 	const dimensions = useWindowDimensions()
 	const isOnline = useIsOnline()
 
-	const fileTextQuery = useFileTextQuery(
-		item.type === "drive"
-			? {
-					type: "drive",
-					data: {
-						uuid: item.data.data.uuid,
-						// Thread the held item by value so a cross-directory search hit (not in
-						// the global uuid cache) still resolves its bytes.
-						item: item.data
-					}
-				}
-			: {
-					type: "external",
-					data: {
-						url: item.data.url,
-						name: item.data.name
-					}
-				}
-	)
+	const fileTextQuery = useFileTextQuery(galleryItemFileSource(item))
 
 	const xml = fileTextQuery.status === "success" ? fileTextQuery.data : null
 	const tooLarge = xml !== null && xml.length > MAX_SVG_SOURCE_LENGTH
@@ -82,7 +65,7 @@ const PreviewSvg = ({
 	// Stable per-source id for the render boundary's key — cheaper than keying on the (up to
 	// multi-MB) document string, and it changes exactly when the previewed item does, so a
 	// recycled cell mounts a fresh boundary and never inherits a prior item's failure.
-	const itemKey = item.type === "drive" ? item.data.data.uuid : item.data.url
+	const itemKey = galleryItemKey(item)
 
 	// <SvgXml> wraps parse() in its OWN try/catch and, on a malformed document, silently returns
 	// null (a blank page) instead of throwing — so an error boundary around it never fires for

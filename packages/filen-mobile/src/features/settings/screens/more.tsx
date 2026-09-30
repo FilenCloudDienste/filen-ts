@@ -3,12 +3,11 @@ import SafeAreaView from "@/components/ui/safeAreaView"
 import Header from "@/components/ui/header"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import { Platform, ActivityIndicator } from "react-native"
-import * as Linking from "expo-linking"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { PressableScale } from "@/components/ui/pressables"
-import { run, formatBytes } from "@filen/shared"
+import { formatBytes } from "@filen/shared"
 import { router } from "@/lib/router"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
@@ -18,8 +17,7 @@ import { useTranslation } from "react-i18next"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import { LazyWrapper } from "@/components/lazyWrapper"
 import StorageUsageBar from "@/features/settings/components/storageUsageBar"
-import logger from "@/lib/logger"
-import alerts from "@/lib/alerts"
+import { openTrustedUrl } from "@/lib/openTrustedUrl"
 
 const TERMS_URL = "https://filen.io/terms"
 const PRIVACY_URL = "https://filen.io/privacy"
@@ -34,12 +32,20 @@ const DEVELOPER_BUTTONS: Button[] = SHOW_DEVELOPER_MENU
 			{
 				icon: "bug-outline",
 				title: "Developer",
-				onPress: () => {
-					router.push("/developer")
-				}
+				href: "/developer"
 			}
 		]
 	: []
+
+// The uuid segment is a placeholder: useDrivePath resolves a non-uuid segment to the virtual root.
+function driveListingHref(type: "favorites" | "offline" | "links" | "sharedIn" | "sharedOut") {
+	return {
+		pathname: `/${type}/[uuid]` as const,
+		params: {
+			uuid: type
+		}
+	}
+}
 
 function More() {
 	const stringifiedClient = useStringifiedClient()
@@ -64,23 +70,6 @@ function More() {
 					max: formatBytes(Number(accountQuery.data.maxStorage))
 				})}`
 			: null
-
-	// External links (Terms / Privacy) — Linking.openURL is a real app-switch, exempt from
-	// withSystemPresentation (it doesn't flash the privacy cover / re-lock biometric). Mirrors the
-	// chat link-open pattern (run() + logger.error + alerts.error on failure).
-	const openExternalLink = async (url: string) => {
-		const result = await run(async () => {
-			return await Linking.openURL(url)
-		})
-
-		if (!result.success) {
-			logger.error("settings", "failed to open external link", {
-				url,
-				error: result.error
-			})
-			alerts.error(result.error)
-		}
-	}
 
 	return (
 		<Fragment>
@@ -150,40 +139,22 @@ function More() {
 								{
 									icon: "time-outline",
 									title: t("recents"),
-									onPress: () => {
-										router.push("/recents")
-									}
+									href: "/recents"
 								},
 								{
 									icon: "heart-outline",
 									title: t("favorites"),
-									onPress: () => {
-										router.push({
-											pathname: "/favorites/[uuid]",
-											params: {
-												uuid: "favorites"
-											}
-										})
-									}
+									href: driveListingHref("favorites")
 								},
 								{
 									icon: "cloud-download-outline",
 									title: t("saved_offline"),
-									onPress: () => {
-										router.push({
-											pathname: "/offline/[uuid]",
-											params: {
-												uuid: "offline"
-											}
-										})
-									}
+									href: driveListingHref("offline")
 								},
 								{
 									icon: "trash-outline",
 									title: t("trash"),
-									onPress: () => {
-										router.push("/trash")
-									}
+									href: "/trash"
 								}
 							]}
 						/>
@@ -194,40 +165,19 @@ function More() {
 											{
 												icon: "link-outline",
 												title: t("public_links"),
-												onPress: () => {
-													router.push({
-														pathname: "/links/[uuid]",
-														params: {
-															uuid: "links"
-														}
-													})
-												}
+												href: driveListingHref("links")
 											} satisfies Button
 										]
 									: []),
 								{
 									icon: "download-outline",
 									title: t("shared_with_me"),
-									onPress: () => {
-										router.push({
-											pathname: "/sharedIn/[uuid]",
-											params: {
-												uuid: "sharedIn"
-											}
-										})
-									}
+									href: driveListingHref("sharedIn")
 								},
 								{
 									icon: "share-outline",
 									title: t("shared_with_others"),
-									onPress: () => {
-										router.push({
-											pathname: "/sharedOut/[uuid]",
-											params: {
-												uuid: "sharedOut"
-											}
-										})
-									}
+									href: driveListingHref("sharedOut")
 								}
 							]}
 						/>
@@ -241,16 +191,12 @@ function More() {
 										contactRequestsQuery.data && contactRequestsQuery.data.incoming.length > 0
 											? contactRequestsQuery.data.incoming.length.toString()
 											: undefined,
-									onPress: () => {
-										router.push("/contacts")
-									}
+									href: "/contacts"
 								},
 								{
 									icon: "musical-note-outline",
 									title: t("playlists"),
-									onPress: () => {
-										router.push("/playlists")
-									}
+									href: "/playlists"
 								}
 							]}
 						/>
@@ -261,44 +207,32 @@ function More() {
 									title: t("security"),
 									// Data-loss warning — it must not disappear just because the device is offline (#103).
 									badge: accountQuery.data && !accountQuery.data.didExportMasterKeys ? "!" : undefined,
-									onPress: () => {
-										router.push("/security")
-									}
+									href: "/security"
 								},
 								{
 									icon: "folder-open-outline",
 									title: Platform.OS === "ios" ? t("file_provider") : t("documents_provider"),
-									onPress: () => {
-										router.push("/fileProvider")
-									}
+									href: "/fileProvider"
 								},
 								{
 									icon: "cloud-offline-outline",
 									title: t("offline"),
-									onPress: () => {
-										router.push("/offlineSettings")
-									}
+									href: "/offlineSettings"
 								},
 								{
 									icon: "color-palette-outline",
 									title: t("appearance"),
-									onPress: () => {
-										router.push("/appearance")
-									}
+									href: "/appearance"
 								},
 								{
 									icon: "list-outline",
 									title: t("events"),
-									onPress: () => {
-										router.push("/events")
-									}
+									href: "/events"
 								},
 								{
 									icon: "build-outline",
 									title: t("advanced"),
-									onPress: () => {
-										router.push("/advanced")
-									}
+									href: "/advanced"
 								},
 								...DEVELOPER_BUTTONS
 							]}
@@ -308,22 +242,20 @@ function More() {
 								{
 									icon: "code-slash-outline",
 									title: t("third_party_notices"),
-									onPress: () => {
-										router.push("/thirdPartyNotices")
-									}
+									href: "/thirdPartyNotices"
 								},
 								{
 									icon: "document-text-outline",
 									title: t("terms_of_service"),
 									onPress: () => {
-										openExternalLink(TERMS_URL)
+										openTrustedUrl("settings", TERMS_URL)
 									}
 								},
 								{
 									icon: "shield-checkmark-outline",
 									title: t("privacy_policy"),
 									onPress: () => {
-										openExternalLink(PRIVACY_URL)
+										openTrustedUrl("settings", PRIVACY_URL)
 									}
 								}
 							]}

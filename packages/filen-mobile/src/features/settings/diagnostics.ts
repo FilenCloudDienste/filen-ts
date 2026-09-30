@@ -3,7 +3,7 @@ import { Platform } from "react-native"
 import Constants from "expo-constants"
 import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
-import { newTmpFile } from "@/lib/tmp"
+import { writeTmpFile } from "@/lib/tmp"
 import i18n from "@/lib/i18n"
 import backgroundRunLog from "@/features/cameraUpload/backgroundRunLog"
 
@@ -81,22 +81,12 @@ const diagnostics = {
 			type: "uint8array"
 		})
 
-		const tmp = newTmpFile(`filen-logs-${Date.now()}.zip`)
-
-		if (tmp.exists) {
-			tmp.delete()
-		}
-
-		tmp.write(buffer)
+		const { file, cleanup } = writeTmpFile(`filen-logs-${Date.now()}.zip`, buffer)
 
 		return {
-			uri: tmp.uri,
-			name: tmp.name,
-			cleanup: () => {
-				if (tmp.exists) {
-					tmp.delete()
-				}
-			}
+			uri: file.uri,
+			name: file.name,
+			cleanup
 		}
 	}
 }

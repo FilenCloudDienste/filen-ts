@@ -17,7 +17,7 @@ import PreviewSlot from "@/components/drivePreview/previewSlot"
 import View from "@/components/ui/view"
 import { type ListRenderItemInfo } from "@shopify/flash-list"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
-import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
+import { galleryItemRenderName, galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 
 const GalleryItem = ({
 	info,
@@ -41,31 +41,12 @@ const GalleryItem = ({
 	const previewType = getPreviewType(galleryItemRenderName(info.item))
 	const rendersFromUrl = previewType === "image" || previewType === "video"
 
-	const fileUrlQuery = useFileUrlQuery(
-		info.item.type === "drive"
-			? {
-					type: "drive",
-					data: {
-						uuid: info.item.data.data.uuid,
-						// Thread the held item by value so a cross-directory search hit (not in
-						// the global uuid cache) still resolves its bytes.
-						item: info.item.data
-					}
-				}
-			: {
-					type: "external",
-					data: {
-						url: info.item.data.url,
-						name: info.item.data.name
-					}
-				},
-		{
-			// Only image and video render from a URL. Every other type reads its own bytes (audio
-			// resolves its URL once its tags have pulled the file local), so resolving one here would
-			// only hold that read back behind an HTTP-provider wait.
-			enabled: rendersFromUrl
-		}
-	)
+	const fileUrlQuery = useFileUrlQuery(galleryItemFileSource(info.item), {
+		// Only image and video render from a URL. Every other type reads its own bytes (audio
+		// resolves its URL once its tags have pulled the file local), so resolving one here would
+		// only hold that read back behind an HTTP-provider wait.
+		enabled: rendersFromUrl
+	})
 
 	const fileUrl = fileUrlQuery.status === "success" ? fileUrlQuery.data : null
 

@@ -1,10 +1,9 @@
 import { useResolveClassNames } from "uniwind"
 import { Stack } from "expo-router"
-import type { SearchBarProps } from "react-native-screens"
 import { View } from "@/components/ui/view"
 import { cn } from "@filen/shared"
 import { Platform, ActivityIndicator, type ColorValue } from "react-native"
-import Menu from "@/components/ui/menu"
+import Menu, { type MenuButton } from "@/components/ui/menu"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
@@ -27,14 +26,40 @@ export type HeaderItem =
 			type: "loader"
 			props?: React.ComponentProps<typeof ActivityIndicator>
 	  }
+	// Plain-literal variants rather than builder functions: the React Compiler assumes an unknown call mutates
+	// its arguments, which would un-memoize every button pushed into `buttons`.
+	| {
+			type: "ellipsisMenu"
+			buttons: MenuButton[]
+			triggerProps?: React.ComponentProps<typeof PressableScale>
+	  }
+	| {
+			type: "clearSelection"
+			onPress: () => void
+	  }
+
+export type HeaderSearch = {
+	placeholder: string
+	onChangeText: (query: string) => void
+}
+
+const ELLIPSIS_ICON = {
+	name: "ellipsis-horizontal"
+} satisfies React.ComponentProps<typeof Ionicons>
+
+const CLEAR_SELECTION_ICON = {
+	name: "close-outline"
+} satisfies React.ComponentProps<typeof Ionicons>
 
 const HeaderItemButton = ({
 	icon,
+	iconColor,
 	text,
 	className,
 	...props
 }: React.ComponentProps<typeof PressableScale> & {
 	icon?: React.ComponentProps<typeof Ionicons>
+	iconColor: ColorValue | undefined
 	text?: React.ComponentProps<typeof Text>
 }) => {
 	return (
@@ -48,6 +73,7 @@ const HeaderItemButton = ({
 			{icon ? (
 				<Ionicons
 					{...icon}
+					color={icon.color ?? iconColor}
 					size={24}
 				/>
 			) : (
@@ -60,11 +86,13 @@ const HeaderItemButton = ({
 export const HeaderLeftRightWrapper = ({
 	isLeft,
 	isRight,
-	items
+	items,
+	iconColor
 }: {
 	isLeft?: boolean
 	isRight?: boolean
 	items?: HeaderItem[]
+	iconColor: ColorValue | undefined
 }) => {
 	return (
 		<View
@@ -91,6 +119,7 @@ export const HeaderLeftRightWrapper = ({
 								key={index}
 								{...item.props}
 								icon={item.icon}
+								iconColor={iconColor}
 								text={item.text}
 							/>
 						)
@@ -106,9 +135,39 @@ export const HeaderLeftRightWrapper = ({
 								<HeaderItemButton
 									{...item.triggerProps}
 									icon={item.icon}
+									iconColor={iconColor}
 									text={item.text}
 								/>
 							</Menu>
+						)
+					}
+
+					case "ellipsisMenu": {
+						return (
+							<Menu
+								key={index}
+								type="dropdown"
+								hitSlop={20}
+								buttons={item.buttons}
+							>
+								<HeaderItemButton
+									hitSlop={20}
+									{...item.triggerProps}
+									icon={ELLIPSIS_ICON}
+									iconColor={iconColor}
+								/>
+							</Menu>
+						)
+					}
+
+					case "clearSelection": {
+						return (
+							<HeaderItemButton
+								key={index}
+								onPress={item.onPress}
+								icon={CLEAR_SELECTION_ICON}
+								iconColor={iconColor}
+							/>
 						)
 					}
 
@@ -137,7 +196,7 @@ export const Header = ({
 	backVisible,
 	shadowVisible,
 	transparent,
-	searchBarOptions,
+	search,
 	leftItems,
 	rightItems,
 	backgroundColor
@@ -146,13 +205,14 @@ export const Header = ({
 	backVisible?: boolean
 	shadowVisible?: boolean
 	transparent?: boolean
-	searchBarOptions?: SearchBarProps
+	search?: HeaderSearch
 	leftItems?: HeaderItem[] | (() => HeaderItem[] | null | undefined | void)
 	rightItems?: HeaderItem[] | (() => HeaderItem[] | null | undefined | void)
 	backgroundColor?: string
 }) => {
 	const bgBackground = useResolveClassNames("bg-background")
 	const textForeground = useResolveClassNames("text-foreground")
+	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 
 	const headerRightItems = (() => {
 		const items = typeof rightItems === "function" ? rightItems() : rightItems
@@ -198,13 +258,33 @@ export const Header = ({
 					color: textForeground.color as string
 				},
 				headerTintColor: textForeground.color as string,
-				headerSearchBarOptions: searchBarOptions,
+				headerSearchBarOptions: search
+					? {
+							placement: "integratedButton",
+							placeholder: search.placeholder,
+							onChangeText: e => search.onChangeText(e.nativeEvent.text),
+							onCancelButtonPress: () => search.onChangeText(""),
+							onClose: () => search.onChangeText(""),
+							onOpen: () => search.onChangeText(""),
+							allowToolbarIntegration: false,
+							headerIconColor: textForeground.color,
+							textColor: textForeground.color,
+							barTintColor: "transparent",
+							tintColor: textForeground.color,
+							hintTextColor: textMutedForeground.color,
+							shouldShowHintSearchIcon: true,
+							hideNavigationBar: false,
+							hideWhenScrolling: false,
+							inputType: "text"
+						}
+					: undefined,
 				headerRight:
 					headerRightItems.length > 0
 						? () => (
 								<HeaderLeftRightWrapper
 									isRight={true}
 									items={headerRightItems}
+									iconColor={textForeground.color}
 								/>
 							)
 						: undefined,
@@ -214,6 +294,7 @@ export const Header = ({
 								<HeaderLeftRightWrapper
 									isLeft={true}
 									items={headerLeftItems}
+									iconColor={textForeground.color}
 								/>
 							)
 						: undefined

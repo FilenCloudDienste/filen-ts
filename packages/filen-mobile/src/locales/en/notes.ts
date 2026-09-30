@@ -199,12 +199,10 @@ export const notes = {
 	no_preview_history: "No preview",
 	/** Confirmation dialog title before restoring the open note to a past version */
 	restore_note: "Restore note",
-	/** Confirmation dialog message before restoring the open note to a past version */
+	/** Confirmation dialog message before restoring a note to a past version (editor and history list) */
 	are_you_sure_restore_note: "Are you sure you want to restore the note to this version?",
 	/** Confirmation dialog title before restoring a selected history version */
 	restore_history: "Restore version",
-	/** Confirmation dialog message before restoring a selected history version */
-	restore_history_confirmation: "Are you sure you want to restore the note to this version?",
 
 	// ── Note participants ─────────────────────────────────────────────────────
 	/** Participants screen — header title (a note's collaborators) */

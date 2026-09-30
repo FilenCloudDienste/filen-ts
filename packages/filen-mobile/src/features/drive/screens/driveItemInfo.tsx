@@ -1,28 +1,25 @@
-import SafeAreaView from "@/components/ui/safeAreaView"
-import { Platform, ScrollView } from "react-native"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import { ScrollView } from "react-native"
 import { useLocalSearchParams } from "expo-router"
 import { router } from "@/lib/router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
-import Header from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment } from "react"
-import { useResolveClassNames } from "uniwind"
-import { cn } from "@filen/shared"
 import { Information } from "@/features/drive/components/information"
 import DismissStack from "@/components/dismissStack"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import { useTranslation } from "react-i18next"
 import DriveItemHero from "@/components/ui/driveItemHero"
 import { isDrivePathType } from "@/hooks/useDrivePath"
+import { ITEM_DETAIL_CONTENT_CLASS } from "@/features/drive/components/itemDetailLayout"
 
 const DriveItemInfo = () => {
 	const { item: itemSerialized, drivePathType } = useLocalSearchParams<{
 		item?: string
 		drivePathType?: string
 	}>()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const { t } = useTranslation()
 
 	const item = deserializeRouteParam<DriveItem>(itemSerialized)
@@ -40,40 +37,16 @@ const DriveItemInfo = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("item_info")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.back()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={() => {
+					router.back()
+				}}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<ScrollView
-					contentContainerClassName={cn("bg-transparent px-4 flex-col pb-40 pt-10", Platform.OS === "ios" && "pt-24")}
+					contentContainerClassName={ITEM_DETAIL_CONTENT_CLASS}
 					showsHorizontalScrollIndicator={true}
 					showsVerticalScrollIndicator={false}
 				>
@@ -85,7 +58,7 @@ const DriveItemInfo = () => {
 						/>
 					</View>
 				</ScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

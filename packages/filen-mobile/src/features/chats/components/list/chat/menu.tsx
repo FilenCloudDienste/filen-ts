@@ -3,11 +3,10 @@ import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import { useStringifiedClient } from "@/lib/auth"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
-import { run } from "@filen/shared"
+import { inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import chats from "@/features/chats/chats"
-import { selectContacts } from "@/features/contacts/contactsSelect"
+import { addChatParticipantsFlow } from "@/features/chats/chatsActions"
 import { router } from "@/lib/router"
 import useChatsStore from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
@@ -181,29 +180,7 @@ export function createMenuButtons({
 						requiresOnline: true,
 						title: t("add_participant"),
 						icon: "users",
-						onPress: async () => {
-							const selectContactsResult = await selectContacts({
-								userIdsToExclude: chat.participants.map(p => Number(p.userId))
-							})
-
-							if (selectContactsResult.cancelled) {
-								return
-							}
-
-							const result = await runWithLoading(async () => {
-								return await chats.addParticipants({
-									chat,
-									contacts: selectContactsResult.selectedContacts
-								})
-							})
-
-							if (!result.success) {
-								logger.error("chats", "addParticipants (list menu) failed", { error: result.error })
-								alerts.error(result.error)
-
-								return
-							}
-						}
+						onPress: () => addChatParticipantsFlow(chat)
 					} satisfies MenuButton,
 					{
 						id: "editName",
@@ -211,29 +188,18 @@ export function createMenuButtons({
 						title: t("edit_name"),
 						icon: "edit",
 						onPress: async () => {
-							const promptResult = await run(async () => {
-								return await prompts.input({
+							const newName = await inputPrompt(
+								{
 									title: t("edit_chat_name"),
 									message: t("enter_chat_name"),
 									cancelText: t("cancel"),
 									okText: t("save")
-								})
-							})
+								},
+								{ tag: "chats", message: "edit chat name prompt failed", level: "error" },
+								{ trim: true }
+							)
 
-							if (!promptResult.success) {
-								logger.error("chats", "edit chat name prompt failed", { error: promptResult.error })
-								alerts.error(promptResult.error)
-
-								return
-							}
-
-							if (promptResult.data.cancelled) {
-								return
-							}
-
-							const newName = promptResult.data.value.trim()
-
-							if (newName.length === 0) {
+							if (newName === null) {
 								return
 							}
 

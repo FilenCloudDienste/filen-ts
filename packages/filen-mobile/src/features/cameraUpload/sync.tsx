@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import { AppState } from "react-native"
 import logger from "@/lib/logger"
-import cameraUpload, { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { useCameraUploadConfig } from "@/features/cameraUpload/cameraUpload"
 import { registerBackgroundSync, unregisterBackgroundSync } from "@/features/cameraUpload/backgroundTask"
 import { debounce } from "es-toolkit/function"
 import { useSecureStore } from "@/lib/secureStore"
@@ -9,6 +9,15 @@ import { OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/off
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import auth from "@/lib/auth"
 import { Semaphore } from "@filen/shared"
+import useForegroundTrigger from "@/hooks/useForegroundTrigger"
+
+function mountSync(): void {
+	cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Mount sync failed", { error: err }))
+}
+
+function foregroundSync(): void {
+	cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Foreground transition sync failed", { error: err }))
+}
 
 const syncDebounced = debounce(
 	() => {
@@ -71,7 +80,7 @@ const updateBackgroundTask = debounce(
 )
 
 const CameraUploadSync = () => {
-	const { config } = useCameraUpload()
+	const { config } = useCameraUploadConfig()
 	// The single OS background task serves EVERY background producer (camera upload, the budgeted
 	// offline-files pass, and the offline-notes refresh) — registration must follow the OR of their
 	// opt-ins, or enabling one alone would never schedule the task. This component is always mounted
@@ -88,24 +97,10 @@ const CameraUploadSync = () => {
 	const albumIdsKey = config.albumIds.join(",")
 	const remoteDirUuid = config.remoteDir?.inner[0].uuid
 
+	useForegroundTrigger(mountSync, foregroundSync)
+
 	useEffect(() => {
-		// Mount ≠ foreground: an iOS cold background launch (BGProcessingTask) mounts the
-		// tree with AppState "background" — this unbudgeted sync would race the budgeted
-		// background-task sync (deadline-bounded) for the engine's syncing flag. The listener
-		// below covers the deferred first sync on the real "active" transition.
-		if (AppState.currentState === "active") {
-			cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Mount sync failed", { error: err }))
-		}
-
-		const appStateListener = AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "active") {
-				cameraUpload.sync().catch(err => logger.warn("cameraUpload", "Foreground transition sync failed", { error: err }))
-			}
-		})
-
 		return () => {
-			appStateListener.remove()
-
 			cameraUpload.cancel()
 
 			// Symmetric timer hygiene with updateBackgroundTask.cancel() below (CU-04): the 5s
@@ -117,8 +112,8 @@ const CameraUploadSync = () => {
 	}, [])
 
 	useEffect(() => {
-		// Same mount-vs-foreground guard as above: the initial run of this effect must not
-		// fire an unbudgeted sync during a background launch. Genuine config changes only
+		// Same mount-vs-foreground rule as useForegroundTrigger: the initial run of this effect must
+		// not fire an unbudgeted sync during a background launch. Genuine config changes only
 		// happen from foreground UI, so the guard never skips a real change.
 		if (shouldSync && AppState.currentState === "active") {
 			syncDebounced()

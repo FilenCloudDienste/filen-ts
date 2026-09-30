@@ -1,12 +1,11 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { LoadingView } from "@/components/ui/loadingView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import View from "@/components/ui/view"
 import { Fragment } from "react"
-import ListEmpty from "@/components/ui/listEmpty"
-import Button from "@/components/ui/button"
-import { useNavigation } from "expo-router"
+import { LoadErrorEmpty } from "@/components/ui/listEmpty"
+import useDismissStack from "@/hooks/useDismissStack"
 import { run, cn } from "@filen/shared"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
@@ -34,7 +33,7 @@ import logger from "@/lib/logger"
 
 function Account() {
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const textRed500 = useResolveClassNames("text-red-500")
 	const isOnline = useIsOnline()
 	const { t } = useTranslation()
@@ -46,26 +45,15 @@ function Account() {
 			<SettingsHeader
 				title={t("account")}
 				icon="close"
-				onDismiss={() => {
-					navigation.getParent()?.goBack()
-				}}
+				onDismiss={dismiss}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{accountQuery.status === "pending" ? (
-					<SettingsLoadingView />
+					<LoadingView />
 				) : accountQuery.status === "error" ? (
-					<ListEmpty
-						icon="warning-outline"
+					<LoadErrorEmpty
 						title={t("could_not_load_account")}
-						description={t("please_check_connection")}
-						action={
-							<Button onPress={() => accountQuery.refetch()}>
-								{t("try_again")}
-							</Button>
-						}
+						onRetry={() => accountQuery.refetch()}
 					/>
 				) : (
 					<SettingsScrollView>
@@ -166,11 +154,11 @@ function Account() {
 						</PressableScale>
 						<Group
 							className="bg-background-tertiary"
-							buttons={buildProfileButtons({ t, accountQuery, isOnline })}
+							buttons={buildProfileButtons({ t, accountQuery })}
 						/>
 						<Group
 							className="bg-background-tertiary"
-							buttons={buildAccountToggleButtons({ t, accountQuery, isOnline })}
+							buttons={buildAccountToggleButtons({ t, accountQuery })}
 						/>
 						<Group
 							className="bg-background-tertiary"
@@ -182,12 +170,12 @@ function Account() {
 							</View>
 							<Group
 								className="bg-background-tertiary"
-								buttons={buildDangerZoneButtons({ t, accountQuery, isOnline, textRed500 })}
+								buttons={buildDangerZoneButtons({ t, accountQuery, textRed500 })}
 							/>
 						</View>
 					</SettingsScrollView>
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

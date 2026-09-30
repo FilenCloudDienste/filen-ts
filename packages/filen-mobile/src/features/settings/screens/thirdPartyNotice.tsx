@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
 import Header from "@/components/ui/header"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import View, { GestureHandlerScrollView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import ListEmpty from "@/components/ui/listEmpty"
@@ -52,15 +52,12 @@ export const ThirdPartyNotice = () => {
 					title={t("third_party_notices")}
 					{...headerProps}
 				/>
-				<SafeAreaView
-					className="flex-1 bg-background-secondary"
-					edges={["left", "right"]}
-				>
+				<ScreenBody>
 					<ListEmpty
 						icon="warning-outline"
 						title={t("third_party_notice_missing")}
 					/>
-				</SafeAreaView>
+				</ScreenBody>
 			</Fragment>
 		)
 	}
@@ -71,10 +68,7 @@ export const ThirdPartyNotice = () => {
 				title={notice.name}
 				{...headerProps}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<GestureHandlerScrollView
 					contentContainerClassName="px-4 pb-40 gap-4"
 					contentInsetAdjustmentBehavior="automatic"
@@ -126,7 +120,7 @@ export const ThirdPartyNotice = () => {
 						<Text className="text-muted-foreground text-sm leading-5">{t("third_party_notice_no_license_text")}</Text>
 					)}
 				</GestureHandlerScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

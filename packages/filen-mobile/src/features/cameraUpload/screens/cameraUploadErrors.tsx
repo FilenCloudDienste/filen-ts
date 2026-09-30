@@ -1,13 +1,11 @@
 import Text from "@/components/ui/text"
-import { Platform } from "react-native"
 import { router } from "@/lib/router"
 import View from "@/components/ui/view"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
-import Header, { type HeaderItem } from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { type MenuButton } from "@/components/ui/menu"
 import { Fragment } from "react"
-import { useResolveClassNames } from "uniwind"
 import VirtualList from "@/components/ui/virtualList"
 import { PressableOpacity } from "@/components/ui/pressables"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
@@ -16,7 +14,7 @@ import useCameraUploadStore, {
 	type CameraUploadSkippedAsset
 } from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useShallow } from "zustand/shallow"
-import { unwrapSdkError, unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
+import { errorToMessage } from "@/lib/sdkErrors"
 import logger from "@/lib/logger"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import { useTranslation } from "react-i18next"
@@ -40,27 +38,7 @@ const SectionHeader = ({ title }: { title: string }) => {
 const ErrorRow = ({ error }: { error: CameraUploadError }) => {
 	const { t } = useTranslation()
 
-	const errorMessage = (() => {
-		if (!error.error) {
-			return t("unknown_error")
-		}
-
-		const unwrappedError = unwrapSdkError(error.error)
-
-		if (unwrappedError) {
-			return unwrappedSdkErrorToHumanReadable(unwrappedError)
-		}
-
-		if (error.error instanceof Error) {
-			return (error.error as Error).message
-		}
-
-		if (typeof error.error === "string") {
-			return error.error
-		}
-
-		return t("unknown_error")
-	})()
+	const errorMessage = error.error ? errorToMessage(error.error, t("unknown_error")) : t("unknown_error")
 
 	return (
 		<View className="flex-row items-center px-4 bg-transparent flex-1">
@@ -101,8 +79,6 @@ const SkippedRow = ({ asset }: { asset: CameraUploadSkippedAsset }) => {
 
 const CameraUploadErrors = () => {
 	const { t } = useTranslation()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const errors = useCameraUploadStore(useShallow(state => state.errors))
 	const skippedAssets = useCameraUploadStore(useShallow(state => state.skippedAssets))
@@ -180,56 +156,20 @@ const CameraUploadErrors = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("camera_upload_issues")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "chevron-back-outline",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.back()
-								}
-							}
-						}
-					] satisfies HeaderItem[],
-					default: undefined
-				})}
+				icon="chevron-back-outline"
+				onDismiss={() => {
+					router.back()
+				}}
 				rightItems={[
 					{
-						type: "menu",
-						props: {
-							type: "dropdown",
-							hitSlop: 20,
-							buttons: menuButtons
-						},
-						triggerProps: {
-							hitSlop: 20
-						},
-						icon: {
-							name: "ellipsis-horizontal",
-							size: 24,
-							color: textForeground.color
-						}
+						type: "ellipsisMenu",
+						buttons: menuButtons
 					}
 				]}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList<Row>
 					data={rows}
 					contentContainerStyle={{
@@ -264,7 +204,7 @@ const CameraUploadErrors = () => {
 					}}
 					keyExtractor={row => row.id}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

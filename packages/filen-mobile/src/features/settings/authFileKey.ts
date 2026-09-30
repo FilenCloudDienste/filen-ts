@@ -3,6 +3,8 @@ import crypto from "crypto"
 import { Buffer } from "react-native-quick-crypto"
 import * as ExpoSecureStore from "expo-secure-store"
 import { getOrCreateDek as androidGetOrCreateDek, purgeDek as androidPurgeDek } from "@/modules/filen-auth-key"
+import { sealAesGcm, openAesGcm } from "@/lib/aesGcm"
+import { IOS_KEYCHAIN_ACCESS_GROUP } from "@/lib/appIdentity"
 
 // auth.json data-encryption key (DEK). A random 32-byte AES-256-GCM key that encrypts the
 // provider's auth.json. Kept separate from the app's SecureStore key (no migration; least
@@ -20,11 +22,10 @@ const AUTH_FILE_VERSION = 0x01
 
 const IOS_DEK_SERVICE = "io.filen.fileprovider"
 const IOS_DEK_ACCOUNT = "fileProviderAuthKey"
-const IOS_DEK_ACCESS_GROUP = "7YTW5D2K7P.io.filen.sharedkeys"
 
 const IOS_SECURE_STORE_OPTIONS: ExpoSecureStore.SecureStoreOptions = {
 	keychainService: IOS_DEK_SERVICE,
-	accessGroup: IOS_DEK_ACCESS_GROUP
+	accessGroup: IOS_KEYCHAIN_ACCESS_GROUP
 }
 
 /**
@@ -74,27 +75,7 @@ export async function purgeAuthDek(): Promise<void> {
  * expects: version(0x01) ++ iv(12) ++ ciphertext ++ authTag(16), AES-256-GCM, no AAD.
  */
 export function sealAuthFile(plaintext: string, dek: Uint8Array): Uint8Array {
-	const iv = crypto.randomBytes(12)
-	const cipher = crypto.createCipheriv("aes-256-gcm", dek, iv)
-	const encrypted = cipher.update(Buffer.from(plaintext, "utf-8"))
-	const final = cipher.final()
-	const authTag = cipher.getAuthTag()
-
-	// Assemble version(1) ++ iv(12) ++ ciphertext ++ tag(16) with one allocation + .set() (mirrors
-	// secureStore.ts — avoids Buffer/Uint8Array type juggling and double copies).
-	const out = new Uint8Array(1 + iv.length + encrypted.length + final.length + authTag.length)
-	let offset = 0
-	out[offset] = AUTH_FILE_VERSION
-	offset += 1
-	out.set(iv, offset)
-	offset += iv.length
-	out.set(encrypted, offset)
-	offset += encrypted.length
-	out.set(final, offset)
-	offset += final.length
-	out.set(authTag, offset)
-
-	return out
+	return sealAesGcm(dek, Buffer.from(plaintext, "utf-8"), AUTH_FILE_VERSION)
 }
 
 /**
@@ -107,13 +88,5 @@ export function openAuthFile(sealed: Uint8Array, dek: Uint8Array): string {
 		throw new Error("unrecognized auth file format")
 	}
 
-	const iv = sealed.subarray(1, 13)
-	const ciphertext = sealed.subarray(13, sealed.length - 16)
-	const authTag = sealed.subarray(sealed.length - 16)
-
-	const decipher = crypto.createDecipheriv("aes-256-gcm", dek, iv)
-
-	decipher.setAuthTag(authTag)
-
-	return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf-8")
+	return openAesGcm(dek, sealed, 1).toString("utf-8")
 }

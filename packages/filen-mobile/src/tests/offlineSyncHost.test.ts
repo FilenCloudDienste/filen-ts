@@ -7,21 +7,43 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // which kicks the initial offline index-refresh + offlineSync pass on mount and
 // re-syncs on background → foreground transitions. Mirrors the notesSync
 // host-component render tests.
-const { mockOffline, mockOfflineSync, mockAlerts, appActive } = vi.hoisted(() => ({
-	mockOffline: { updateIndex: vi.fn() },
-	mockOfflineSync: { sync: vi.fn() },
-	mockAlerts: { error: vi.fn() },
-	appActive: { value: true }
-}))
+const { mockOffline, mockOfflineSync, mockAlerts, appState } = vi.hoisted(() => {
+	const listeners = new Set<(state: string) => void>()
 
+	return {
+		mockOffline: { updateIndex: vi.fn() },
+		mockOfflineSync: { sync: vi.fn() },
+		mockAlerts: { error: vi.fn() },
+		appState: {
+			currentState: "active",
+			listeners,
+			addEventListener(_type: string, handler: (state: string) => void) {
+				listeners.add(handler)
+
+				return {
+					remove: () => {
+						listeners.delete(handler)
+					}
+				}
+			},
+			emit(state: string) {
+				appState.currentState = state
+
+				for (const listener of listeners) {
+					listener(state)
+				}
+			}
+		}
+	}
+})
+
+vi.mock("react-native", () => ({ AppState: appState }))
 vi.mock("@/features/offline/offline", () => ({ default: mockOffline }))
 vi.mock("@/features/offline/offlineSync", () => ({ default: mockOfflineSync }))
 vi.mock("@/lib/alerts", () => ({ default: mockAlerts }))
-vi.mock("@/hooks/useIsAppActive", () => ({ default: () => appActive.value }))
 
 import OfflineSync from "@/features/offline/sync"
-import { AppState } from "react-native"
-import { render } from "@testing-library/react"
+import { render, act } from "@testing-library/react"
 import React from "react"
 
 // Flush the depth-1 fire-and-forget .catch() chain so it settles before assertions.
@@ -32,7 +54,8 @@ async function flushMicrotasks(): Promise<void> {
 
 beforeEach(() => {
 	vi.clearAllMocks()
-	appActive.value = true
+	appState.currentState = "active"
+	appState.listeners.clear()
 	mockOffline.updateIndex.mockResolvedValue(undefined)
 	mockOfflineSync.sync.mockResolvedValue(undefined)
 })
@@ -47,24 +70,30 @@ describe("OfflineSync host", () => {
 	})
 
 	it("does NOT fire the mount sync when the tree mounts in background (iOS cold BGTask launch)", async () => {
-		// Audit B2a (2026-06-11): an iOS cold background launch mounts the layout with
-		// AppState "background" — the unbudgeted mount sync must not race the budgeted
-		// background pass for offlineSync's inFlight coalescing.
-		const appStateMock = AppState as unknown as { currentState: string }
-		const previous = appStateMock.currentState
+		// An iOS cold background launch mounts the layout with AppState "background" — the
+		// unbudgeted mount sync must not race the budgeted background pass for offlineSync's
+		// inFlight coalescing.
+		appState.currentState = "background"
 
-		appStateMock.currentState = "background"
-		appActive.value = false
+		render(React.createElement(OfflineSync))
+		await flushMicrotasks()
 
-		try {
-			render(React.createElement(OfflineSync))
-			await flushMicrotasks()
+		expect(mockOffline.updateIndex).not.toHaveBeenCalled()
+		expect(mockOfflineSync.sync).not.toHaveBeenCalled()
+	})
 
-			expect(mockOffline.updateIndex).not.toHaveBeenCalled()
-			expect(mockOfflineSync.sync).not.toHaveBeenCalled()
-		} finally {
-			appStateMock.currentState = previous
-		}
+	it("defers a background mount's first sync to the first transition to active", async () => {
+		appState.currentState = "background"
+
+		render(React.createElement(OfflineSync))
+		await flushMicrotasks()
+
+		act(() => {
+			appState.emit("active")
+		})
+		await flushMicrotasks()
+
+		expect(mockOfflineSync.sync).toHaveBeenCalledOnce()
 	})
 
 	it("surfaces an initial-sync failure via alerts.error", async () => {
@@ -77,32 +106,42 @@ describe("OfflineSync host", () => {
 		expect(mockAlerts.error).toHaveBeenCalledWith(err)
 	})
 
-	it("fires offlineSync.sync on a background → foreground transition, but not on same-state rerenders", async () => {
+	it("fires offlineSync.sync on a background → foreground transition, but not on rerenders", async () => {
 		const { rerender } = render(React.createElement(OfflineSync))
 		await flushMicrotasks()
 
 		// Mount effect only.
 		expect(mockOfflineSync.sync).toHaveBeenCalledTimes(1)
 
-		// Same-state rerender → no extra sync.
+		// Rerender → no extra sync.
 		rerender(React.createElement(OfflineSync))
 		await flushMicrotasks()
 
 		expect(mockOfflineSync.sync).toHaveBeenCalledTimes(1)
 
 		// Goes to background → no sync.
-		appActive.value = false
-		rerender(React.createElement(OfflineSync))
+		act(() => {
+			appState.emit("background")
+		})
 		await flushMicrotasks()
 
 		expect(mockOfflineSync.sync).toHaveBeenCalledTimes(1)
 
 		// Returns to foreground → one more sync.
-		appActive.value = true
-		rerender(React.createElement(OfflineSync))
+		act(() => {
+			appState.emit("active")
+		})
 		await flushMicrotasks()
 
 		expect(mockOfflineSync.sync).toHaveBeenCalledTimes(2)
+	})
+
+	it("stops listening on unmount", () => {
+		const { unmount } = render(React.createElement(OfflineSync))
+
+		unmount()
+
+		expect(appState.listeners.size).toBe(0)
 	})
 
 	it("renders nothing", () => {

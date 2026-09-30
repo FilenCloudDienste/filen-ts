@@ -1,4 +1,4 @@
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import Button from "@/components/ui/button"
@@ -7,14 +7,14 @@ import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import { Fragment } from "react"
 import { Platform } from "react-native"
 import { useLocalSearchParams } from "expo-router"
-import { router } from "@/lib/router"
+import { goBackIfPossible } from "@/lib/router"
 import { run } from "@filen/shared"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import * as Clipboard from "expo-clipboard"
+import { copyToClipboard } from "@/lib/clipboard"
 import { useTranslation } from "react-i18next"
 import alerts from "@/lib/alerts"
 import { shareTmpFile } from "@/lib/share"
-import { newTmpFile } from "@/lib/tmp"
+import { writeTmpFile } from "@/lib/tmp"
 import logger from "@/lib/logger"
 
 function TwoFactorRecoveryKey() {
@@ -26,16 +26,9 @@ function TwoFactorRecoveryKey() {
 			<SettingsHeader
 				title={t("two_factor_recovery_key")}
 				icon="chevron-back-outline"
-				onDismiss={() => {
-					if (router.canGoBack()) {
-						router.back()
-					}
-				}}
+				onDismiss={goBackIfPossible}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{!recoveryKey || recoveryKey.length === 0 ? (
 					<ListEmpty
 						icon="warning-outline"
@@ -65,18 +58,12 @@ function TwoFactorRecoveryKey() {
 							<View className="bg-transparent flex-col gap-3">
 								<Button
 									onPress={async () => {
-										const result = await run(async () => {
-											return await Clipboard.setStringAsync(recoveryKey)
-										})
-
-										if (!result.success) {
-											logger.warn("settings", "copy recovery key to clipboard failed", { error: result.error })
-											alerts.error(result.error)
-
-											return
-										}
-
-										alerts.normal(t("copied_to_clipboard"))
+										await copyToClipboard(
+											recoveryKey,
+											t("copied_to_clipboard"),
+											"settings",
+											"copy recovery key to clipboard failed"
+										)
 									}}
 								>
 									{t("copy")}
@@ -84,15 +71,7 @@ function TwoFactorRecoveryKey() {
 								<Button
 									onPress={async () => {
 										const exportResult = await run(async () => {
-											const file = newTmpFile(`recovery-key.${Date.now()}.txt`)
-
-											if (file.exists) {
-												file.delete()
-											}
-
-											file.write(recoveryKey)
-
-											return file
+											return writeTmpFile(`recovery-key.${Date.now()}.txt`, recoveryKey)
 										})
 
 										if (!exportResult.success) {
@@ -103,13 +82,9 @@ function TwoFactorRecoveryKey() {
 										}
 
 										const shareResult = await shareTmpFile({
-											uri: exportResult.data.uri,
-											name: exportResult.data.name,
-											cleanup: () => {
-												if (exportResult.data.exists) {
-													exportResult.data.delete()
-												}
-											}
+											uri: exportResult.data.file.uri,
+											name: exportResult.data.file.name,
+											cleanup: exportResult.data.cleanup
 										})
 
 										if (!shareResult.success) {
@@ -122,20 +97,14 @@ function TwoFactorRecoveryKey() {
 								>
 									{t("share")}
 								</Button>
-								<Button
-									onPress={() => {
-										if (router.canGoBack()) {
-											router.back()
-										}
-									}}
-								>
+								<Button onPress={goBackIfPossible}>
 									{t("two_factor_recovery_key_saved_confirm")}
 								</Button>
 							</View>
 						</View>
 					</SettingsScrollView>
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

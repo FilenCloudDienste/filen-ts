@@ -1131,14 +1131,14 @@ describe("AudioCache", () => {
 			expect(cache.size()).toBe(5 + 11)
 		})
 
-		it("ignores stray subdirectories", async () => {
+		it("counts files in stray subdirectories", async () => {
 			const cache = await createAudioCache()
 
 			fs.set(`${AUDIO_BASE_DIR}/some-dir`, "dir")
 			fs.set(`${AUDIO_BASE_DIR}/some-dir/nested`, new Uint8Array([1, 2, 3]))
 			fs.set(`${AUDIO_BASE_DIR}/a.filenmeta`, new Uint8Array([4]))
 
-			expect(cache.size()).toBe(1)
+			expect(cache.size()).toBe(3 + 1)
 		})
 
 		it("includes picture jpg files in total size", async () => {

@@ -57,6 +57,11 @@ export function unwrapParentUuid(parent: ParentUuid): string | null {
 	}
 }
 
+// Only own files and directories have a parent listing; shared variants resolve to null.
+export function normalParentUuidOf(item: DriveItem): string | null {
+	return item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null
+}
+
 // The generated bindings model an item's parent as the ParentUuid tagged enum: Uuid(uuid) for a
 // real parent directory plus the unit variants Trash/Recents/Favorites/Links. getDirOptional /
 // getFileOptional return trashed items with parent = ParentUuid.Trash (permanently deleted items

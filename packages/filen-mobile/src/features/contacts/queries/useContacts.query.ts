@@ -1,6 +1,6 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryUpdater } from "@/queries/client"
+import { createFixedKeyQuery } from "@/queries/createFixedKeyQuery"
 import auth from "@/lib/auth"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useContactsQuery"
 
@@ -9,18 +9,10 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 
 	const [contacts, blocked] = await Promise.all([
 		authedSdkClient.getContacts(
-			params?.signal
-				? {
-						signal: params.signal
-					}
-				: undefined
+			toSignalOpts(params?.signal)
 		),
 		authedSdkClient.getBlockedContacts(
-			params?.signal
-				? {
-						signal: params.signal
-					}
-				: undefined
+			toSignalOpts(params?.signal)
 		)
 	])
 
@@ -30,42 +22,17 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 	}
 }
 
-export function useContactsQuery(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
-		...options,
-		queryKey: [BASE_QUERY_KEY],
-		queryFn: ({ signal }) =>
-			fetchData({
-				signal
-			})
+const contactsQuery = createFixedKeyQuery({
+	baseKey: BASE_QUERY_KEY,
+	fetchData,
+	empty: () => ({
+		contacts: [],
+		blocked: []
 	})
+})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
-}
-
-export function contactsQueryUpdate({
-	updater
-}: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-}) {
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		return typeof updater === "function"
-			? updater(
-					prev ?? {
-						contacts: [],
-						blocked: []
-					}
-				)
-			: updater
-	})
-}
-
-export function contactsQueryGet() {
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
-}
+export const useContactsQuery = contactsQuery.useQuery
+export const contactsQueryUpdate = contactsQuery.update
+export const contactsQueryGet = contactsQuery.get
 
 export default useContactsQuery

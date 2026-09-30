@@ -3,6 +3,7 @@ import { type Note, type NoteTag } from "@/types"
 import { wrapSdkNote, wrapSdkNoteTag } from "@/features/notes/utils"
 import { notesTagsQueryUpdate } from "@/features/notes/queries/useNotesTags.query"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
+import { toSignalOpts } from "@/lib/signals"
 
 export async function addTag({ note, tag, signal }: { note: Note; tag: NoteTag; signal?: AbortSignal }) {
 	if (note.tags.find(t => t.uuid === tag.uuid)) {
@@ -13,11 +14,7 @@ export async function addTag({ note, tag, signal }: { note: Note; tag: NoteTag; 
 	const { note: modifiedNoteSdk } = await authedSdkClient.addTagToNote(
 		note,
 		tag,
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 
 	const modifiedNote = wrapSdkNote(modifiedNoteSdk)
@@ -40,11 +37,7 @@ export async function removeTag({ note, tag, signal }: { note: Note; tag: NoteTa
 		await authedSdkClient.removeTagFromNote(
 			note,
 			tag,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -60,11 +53,7 @@ export async function createTag({ name, signal }: { name: string; signal?: Abort
 	const tag = wrapSdkNoteTag(
 		await authedSdkClient.createNoteTag(
 			name,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -86,11 +75,7 @@ export async function renameTag({ tag, newName, signal }: { tag: NoteTag; newNam
 		await authedSdkClient.renameNoteTag(
 			tag,
 			newName,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -117,11 +102,7 @@ export async function deleteTag({ tag, signal }: { tag: NoteTag; signal?: AbortS
 
 	await authedSdkClient.deleteNoteTag(
 		tag,
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 
 	notesTagsQueryUpdate({
@@ -144,11 +125,7 @@ export async function favoriteTag({ tag, signal, favorite }: { tag: NoteTag; sig
 		await authedSdkClient.setNoteTagFavorited(
 			tag,
 			favorite,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 

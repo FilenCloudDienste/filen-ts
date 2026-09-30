@@ -4,7 +4,7 @@ import usePipStore from "@/stores/usePip.store"
 import View from "@/components/ui/view"
 import { AnimatedView } from "@/components/ui/animated"
 import { useNavigation } from "expo-router"
-import { router } from "@/lib/router"
+import { goBackIfPossible, router } from "@/lib/router"
 import { type DriveItemFileExtracted } from "@/types"
 import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
 import { useWindowDimensions, Platform, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
@@ -27,6 +27,7 @@ import { FlashList, type FlashListRef } from "@shopify/flash-list"
 import galleryVideoPlayers from "@/components/drivePreview/galleryVideoPlayers"
 import { endPreviewNotices } from "@/components/drivePreview/remoteFileState"
 import logger from "@/lib/logger"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 const DISMISS_POSITION_RATIO = 0.22
 const DISMISS_VELOCITY_THRESHOLD = 800
@@ -254,11 +255,7 @@ function navigateBack({ didNavigateBack, isDismissing }: { didNavigateBack: Shar
 	didNavigateBack.value = 1
 	isDismissing.value = 1
 
-	if (!router.canGoBack()) {
-		return
-	}
-
-	router.back()
+	goBackIfPossible()
 }
 
 const Gallery = () => {
@@ -622,7 +619,7 @@ const Gallery = () => {
 	// the updated item.
 	useEffect(() => {
 		const updateSubscription = events.subscribe("driveItemUpdated", ({ previousUuid, item }) => {
-			if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+			if (!isFileItem(item)) {
 				return
 			}
 

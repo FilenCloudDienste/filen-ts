@@ -122,7 +122,7 @@ describe("the compiled drive Header", () => {
 
 	type StackHeaderProps = {
 		title: string
-		rightItems: { props?: { buttons?: { id: string }[] } }[]
+		rightItems: { buttons?: { id: string }[] }[]
 	}
 
 	const DIRECTORY_UUID = "0b7c4f1e-3a52-4d8e-9f61-2c5d8a7e4b90"
@@ -168,13 +168,12 @@ describe("the compiled drive Header", () => {
 			uniwind: { useResolveClassNames: () => classNames },
 			"react-native": { Platform: { OS: "ios" } },
 			"zustand/shallow": { useShallow: (selector: unknown) => selector },
-			"@filen/shared": { run: () => {} },
 			"@/components/ui/header": withDefault("StackHeader"),
 			"@/hooks/useDrivePath": withDefault(() => drivePath),
 			"@/features/drive/driveSortPreference": { useDriveSortPreference: () => sortPreference },
 			"@/features/drive/driveViewModePreference": { useDriveViewMode: () => viewMode },
 			"@/lib/alerts": withDefault({}),
-			"@/lib/prompts": withDefault({}),
+			"@/lib/promptFlow": { confirmPrompt: () => {} },
 			"@/components/ui/fullScreenLoadingModal": { runWithLoading: () => {} },
 			"@/features/drive/drive": withDefault({}),
 			"@/features/drive/store/useDrive.store": withDefault((selector: (state: typeof storeState) => unknown) => selector(storeState)),
@@ -228,7 +227,7 @@ describe("the compiled drive Header", () => {
 			title: (props: HeaderProps) => Header(props).props.title,
 			menuIds: (props: HeaderProps) =>
 				Header(props)
-					.props.rightItems.flatMap(item => item.props?.buttons ?? [])
+					.props.rightItems.flatMap(item => item.buttons ?? [])
 					.map(button => button.id),
 			resolveTitle,
 			buildSaveButton

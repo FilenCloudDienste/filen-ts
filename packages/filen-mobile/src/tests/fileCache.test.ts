@@ -98,6 +98,7 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 vi.mock("@/lib/signals", () => ({
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined),
 	wrapAbortSignalForSdk: vi.fn(s => s),
 	disposeSdkAbortSignal: vi.fn()
 }))

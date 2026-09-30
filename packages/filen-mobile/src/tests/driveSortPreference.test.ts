@@ -9,7 +9,8 @@ vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))
 
-import { isSortable, getPerDirectoryKey, resolveEffectiveSort, DEFAULT_SORT_PREFERENCES } from "@/features/drive/driveSortPreference"
+import { isSortable, resolveEffectiveSort, DEFAULT_SORT_PREFERENCES } from "@/features/drive/driveSortPreference"
+import { getPerDirectoryKey } from "@/features/drive/driveScopedPreference"
 import type { SortPreferences } from "@/features/drive/driveSortPreference"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
 

@@ -17,6 +17,7 @@ vi.mock("@/queries/client", () => ({
 	get queryClient() {
 		return holder.client
 	},
+	getCachedQuery: (queryKey: unknown[]) => holder.client.getQueryCache().find({ queryKey, exact: true }),
 	queryUpdater: { set: vi.fn() }
 }))
 vi.mock("@/lib/cache", () => ({ default: {} }))

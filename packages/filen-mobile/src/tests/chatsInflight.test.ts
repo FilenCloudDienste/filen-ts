@@ -67,9 +67,9 @@ vi.mock("@/features/chats/queries/useChatMessages.query", () => ({
 import {
 	purgeChatInflightState,
 	retryInflightMessage,
-	removeInflightMessage,
-	chatDraftSecureStoreKeys
+	removeInflightMessage
 } from "@/features/chats/chatsInflight"
+import { chatDraftSecureStoreKeys } from "@/features/chats/chatDrafts"
 import type { Chat } from "@/types"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 

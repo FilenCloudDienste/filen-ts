@@ -13,6 +13,7 @@ import { type DriveItem, type Note } from "@/types"
 import type { ListItem as NoteListItem, Item as NoteItem } from "@/features/notes/components/note"
 import i18n from "@/lib/i18n"
 import { intlLanguage } from "@/lib/time"
+import { isDirectoryItem, isFileItem } from "@/features/drive/driveSelectors"
 
 // Constructing an Intl.DateTimeFormat is ~98% of the cost of formatting one date with it (measured
 // 21.6µs vs 0.32µs), and this one sat inside the notes grouping pass — which re-runs on every
@@ -58,10 +59,6 @@ export function clearSortCaches(): void {
 	clearNaturalSortCaches()
 }
 
-function isDirectoryType(type: string): boolean {
-	return type === "directory" || type === "sharedDirectory" || type === "sharedRootDirectory"
-}
-
 // The index-array decorate/sort/permute engine (dirs-first partitioning, the lazy name
 // tiebreak inside the size branch, the bigint-through size handling, and the deterministic
 // primary-key → name → numeric-uuid → uuid tiebreak chain guarding against unstable
@@ -73,9 +70,7 @@ function nameSortKey(item: DriveItem): string {
 }
 
 function mimeSortKey(item: DriveItem): string {
-	return item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile"
-		? (item.data.decryptedMeta?.mime ?? driveItemName(item))
-		: driveItemName(item)
+	return isFileItem(item) ? (item.data.decryptedMeta?.mime ?? driveItemName(item)) : driveItemName(item)
 }
 
 function uploadDateSortKey(item: DriveItem): number {
@@ -167,7 +162,7 @@ function makeSortAccessors<T extends DriveItem>(directorySizes?: ReadonlyMap<str
 	return {
 		getUuid: item => item.data.uuid,
 		getSize: item => item.data.size,
-		isDirectory: item => isDirectoryType(item.type),
+		isDirectory: isDirectoryItem,
 		nameKey: nameSortKey,
 		...(directorySizes !== undefined ? { directorySizes } : {})
 	}

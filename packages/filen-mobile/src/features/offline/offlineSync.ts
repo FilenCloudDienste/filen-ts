@@ -31,12 +31,9 @@ import {
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import { isFileItem } from "@/features/drive/driveSelectors"
 import type { DriveItem } from "@/types"
+import { AUTO_SYNC_MIN_INTERVAL_MS } from "@/constants"
 
 type AuthedSdkClient = Awaited<ReturnType<typeof auth.getSdkClients>>["authedSdkClient"]
-
-// Auto triggers (app start / foreground / reconnect) are coalesced behind this min-interval since
-// the last COMPLETED pass; manual triggers (offline-screen sync button / pull-to-refresh) bypass it.
-export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
 
 // A broken meta whose parent could not be resolved usually stays that way for a while (the parent
 // was deleted, or sits outside anything resolvable), so automatic passes skip its lookups for this

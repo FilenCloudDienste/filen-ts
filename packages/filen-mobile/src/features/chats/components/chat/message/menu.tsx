@@ -2,11 +2,11 @@ import { type Chat as TChat } from "@/types"
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import MenuComponent, { type MenuButton } from "@/components/ui/menu"
 import { useSecureStore } from "@/lib/secureStore"
+import { chatInputValueKey, chatReplyToKey, chatEditMessageKey } from "@/features/chats/chatDrafts"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
-import * as Clipboard from "expo-clipboard"
-import alerts from "@/lib/alerts"
-import { run, isBlocked } from "@filen/shared"
+import { copyToClipboard } from "@/lib/clipboard"
+import { isBlocked } from "@filen/shared"
 import { useStringifiedClient } from "@/lib/auth"
 import chats from "@/features/chats/chats"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/chatsInflight"
@@ -14,10 +14,8 @@ import { simpleDate } from "@/lib/time"
 import events from "@/lib/events"
 import { useTranslation } from "react-i18next"
 import { confirmedAction } from "@/lib/confirmedAction"
-import contacts from "@/features/contacts/contacts"
+import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
 import logger from "@/lib/logger"
 
 export const Menu = ({
@@ -34,60 +32,27 @@ export const Menu = ({
 	isAnchoredToRight?: boolean
 }) => {
 	const { t } = useTranslation()
-	const [, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
-	const [, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
+	const [, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(chatReplyToKey(chat.uuid), null)
+	const [, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(chatEditMessageKey(chat.uuid), null)
 	const stringifiedClient = useStringifiedClient()
-	const [, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
+	const [, setChatInputValue] = useSecureStore<string>(chatInputValueKey(chat.uuid), "")
 	const isFailedInflight = useChatsStore(useShallow(state => state.inflightErrors[info.item.inflightId ?? ""] !== undefined))
 
 	const isOwner = info.item.inner.senderId === stringifiedClient?.userId
 	const blocked = useBlockedUsers()
 	const senderBlocked = isBlocked({ userId: info.item.inner.senderId, email: info.item.inner.senderEmail }, blocked)
 
-	const blockButton = {
-		id: "block",
-		title: t("block"),
-		icon: "block" as const,
-		destructive: true,
-		requiresOnline: true,
-		onPress: async () => {
-			const promptResponse = await run(async () => {
-				return await prompts.alert({
-					title: t("block_contact"),
-					message: t("block_contact_confirmation"),
-					cancelText: t("cancel"),
-					okText: t("block"),
-					destructive: true
-				})
-			})
-
-			if (!promptResponse.success) {
-				logger.error("chats", "block contact prompt failed", { error: promptResponse.error })
-				alerts.error(promptResponse.error)
-
-				return
-			}
-
-			if (promptResponse.data.cancelled) {
-				return
-			}
-
-			const result = await runWithLoading(async () => {
-				await contacts.block({
-					userId: info.item.inner.senderId,
-					email: info.item.inner.senderEmail,
-					avatar: info.item.inner.senderAvatar,
-					nickName: info.item.inner.senderNickName,
-					timestamp: info.item.sentTimestamp
-				})
-			})
-
-			if (!result.success) {
-				logger.error("chats", "block contact failed", { error: result.error })
-				alerts.error(result.error)
-			}
+	const blockButton = buildBlockToggleMenuAction({
+		t,
+		isBlocked: false,
+		target: {
+			userId: info.item.inner.senderId,
+			email: info.item.inner.senderEmail,
+			avatar: info.item.inner.senderAvatar,
+			nickName: info.item.inner.senderNickName,
+			timestamp: info.item.sentTimestamp
 		}
-	} satisfies MenuButton
+	})
 
 	const deleteButton = {
 		id: "delete",
@@ -112,22 +77,11 @@ export const Menu = ({
 		title: t("copy"),
 		icon: "copy" as const,
 		onPress: async () => {
-			const result = await run(async () => {
-				if (!info.item.inner.message) {
-					return
-				}
-
-				return await Clipboard.setStringAsync(info.item.inner.message)
-			})
-
-			if (!result.success) {
-				logger.error("chats", "copy message to clipboard failed", { error: result.error })
-				alerts.error(result.error)
-
+			if (!info.item.inner.message) {
 				return
 			}
 
-			alerts.normal(t("copied_to_clipboard"))
+			await copyToClipboard(info.item.inner.message, t("copied_to_clipboard"), "chats", "copy message to clipboard failed")
 		}
 	} satisfies MenuButton
 

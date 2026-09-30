@@ -1,11 +1,10 @@
 import { useQuery, onlineManager, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { sortParams } from "@filen/shared"
 import { AnyFile } from "@filen/sdk-rs"
-import cache from "@/lib/cache"
 import useHttpStore from "@/stores/useHttp.store"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
-import { type FileSource, fileSourceKey } from "@/queries/fileSource"
+import { type FileSource, fileSourceKey, resolveDriveFileItem } from "@/queries/fileSource"
 import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
 import { waitForHttpProvider } from "@/lib/thumbnailsHelpers"
@@ -63,11 +62,9 @@ export async function fetchData(
 		)
 	}
 
-	// Prefer the by-value item (a cross-directory search hit may not be in the global uuid
-	// cache); fall back to the cache lookup.
-	const item = params.data.item ?? cache.uuidToAnyDriveItem.get(params.data.uuid)
+	const item = resolveDriveFileItem(params.data)
 
-	if (!item || (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile")) {
+	if (!item) {
 		return null
 	}
 

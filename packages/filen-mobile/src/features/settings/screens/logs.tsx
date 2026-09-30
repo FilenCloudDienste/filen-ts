@@ -1,22 +1,22 @@
 import { Platform } from "react-native"
 import { Fragment, useEffect, useState } from "react"
-import { useNavigation } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useResolveClassNames } from "uniwind"
 import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
 import Text from "@/components/ui/text"
-import SafeAreaView from "@/components/ui/safeAreaView"
-import Header from "@/components/ui/header"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import VirtualList from "@/components/ui/virtualList"
 import ListEmpty from "@/components/ui/listEmpty"
 import { PressableOpacity } from "@/components/ui/pressables"
-import logger, { type ReadLogEntry } from "@/lib/logger"
+import logger, { LOG_LEVEL_RANK, type LogLevel, type ReadLogEntry } from "@/lib/logger"
 
 // Console look: a real monospace font so the view mirrors the exported NDJSON.
 const MONO = Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" })
 
-const LEVEL_CLASS: Record<string, string> = {
+const LEVEL_CLASS: Record<LogLevel, string> = {
 	error: "text-red-500",
 	warn: "text-yellow-500",
 	info: "text-blue-500",
@@ -38,20 +38,12 @@ const FILTER_LABEL_KEY: Record<
 	debug: "log_level_debug"
 }
 
-// RANK ladder (mirrors src/lib/logger.ts). The viewer only offers filter levels that can actually
-// appear given the logger's effective minLevel — in prod minLevel is "warn", so Info/Debug (never
-// captured) aren't shown; in dev all levels are offered.
-const FILTER_RANK: Record<string, number> = {
-	debug: 10,
-	info: 20,
-	warn: 30,
-	error: 40
-}
+// Only offer filter levels that can actually appear given the logger's effective minLevel — in prod
+// minLevel is "warn", so Info/Debug (never captured) aren't shown; in dev all levels are offered.
+function visibleLevelFilters(minLevel: LogLevel): readonly LevelFilter[] {
+	const minRank = LOG_LEVEL_RANK[minLevel]
 
-function visibleLevelFilters(minLevel: string): readonly LevelFilter[] {
-	const minRank = FILTER_RANK[minLevel] ?? 0
-
-	return LEVEL_FILTERS.filter(f => f === "all" || (FILTER_RANK[f] ?? 0) >= minRank)
+	return LEVEL_FILTERS.filter(f => f === "all" || LOG_LEVEL_RANK[f] >= minRank)
 }
 
 function pad(value: number, length: number = 2): string {
@@ -94,7 +86,7 @@ function stringifyData(data: unknown): string {
 }
 
 const LogRow = ({ entry, expanded, onToggle }: { entry: ReadLogEntry; expanded: boolean; onToggle: () => void }) => {
-	const levelClass = LEVEL_CLASS[entry.l] ?? "text-muted-foreground"
+	const levelClass = LEVEL_CLASS[entry.l]
 	const hasData = entry.data !== undefined
 
 	return (
@@ -137,9 +129,8 @@ const LogRow = ({ entry, expanded, onToggle }: { entry: ReadLogEntry; expanded: 
 
 const Logs = () => {
 	const { t } = useTranslation()
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const insets = useSafeAreaInsets()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 
 	const [entries, setEntries] = useState<ReadLogEntry[]>([])
@@ -163,33 +154,10 @@ const Logs = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("logs")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={dismiss}
 				rightItems={[
 					{
 						type: "menu",
@@ -213,10 +181,7 @@ const Logs = () => {
 					}
 				]}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					data={visible}
 					extraData={expanded}
@@ -256,7 +221,7 @@ const Logs = () => {
 						/>
 					)}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

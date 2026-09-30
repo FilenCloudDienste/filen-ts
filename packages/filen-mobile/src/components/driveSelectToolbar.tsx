@@ -2,25 +2,24 @@ import { Fragment, useRef } from "react"
 import { CrossGlassContainerView } from "@/components/ui/view"
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons"
 import { useResolveClassNames } from "uniwind"
-import Text from "@/components/ui/text"
+import FloatingActionPill from "@/components/ui/floatingActionPill"
 import { PressableScale } from "@/components/ui/pressables"
 import useDrivePath from "@/hooks/useDrivePath"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { run, cn } from "@filen/shared"
+import { cn } from "@filen/shared"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
-import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
+import { promptAndCreateDirectory } from "@/features/drive/components/driveCreateMenu"
 import alerts from "@/lib/alerts"
 import drive from "@/features/drive/drive"
 import cache from "@/lib/cache"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import { useSdkClients } from "@/lib/auth"
-import { unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { normalParentUuidOf } from "@/lib/sdkUnwrap"
 import useDriveSelectStore, { selectDriveSelectSelection } from "@/features/drive/store/useDriveSelect.store"
 import { everyItemAlreadyIn } from "@/features/drive/driveSelectors"
 import { useShallow } from "zustand/shallow"
 import events from "@/lib/events"
-import { useNavigation } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { useTranslation } from "react-i18next"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
@@ -32,7 +31,7 @@ const DriveSelectToolbar = () => {
 	const { authedSdkClient } = useSdkClients()
 	const selectSessionId = drivePath.selectOptions?.id
 	const selectedItems = useDriveSelectStore(useShallow(state => selectDriveSelectSelection(state, selectSessionId)))
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const { t } = useTranslation()
 	const isOnline = useIsOnline()
 	const isSubmitting = useRef(false)
@@ -58,9 +57,7 @@ const DriveSelectToolbar = () => {
 	const isSameParentAsSelectedItems =
 		parentDir !== null &&
 		drivePath.selectOptions !== undefined &&
-		everyItemAlreadyIn(drivePath.selectOptions.items, parentDir.inner[0].uuid, item =>
-			item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null
-		)
+		everyItemAlreadyIn(drivePath.selectOptions.items, parentDir.inner[0].uuid, normalParentUuidOf)
 
 	const canSelect = (() => {
 		if (!drivePath.selectOptions) {
@@ -85,51 +82,7 @@ const DriveSelectToolbar = () => {
 			return
 		}
 
-		const promptResult = await run(async () => {
-			return await prompts.input({
-				title: t("create_directory"),
-				message: t("enter_directory_name"),
-				cancelText: t("cancel"),
-				okText: t("create")
-			})
-		})
-
-		if (!promptResult.success) {
-			logger.error("driveSelect", "Create directory prompt failed", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
-			return
-		}
-
-		if (promptResult.data.cancelled) {
-			return
-		}
-
-		const newName = promptResult.data.value.trim()
-
-		if (newName.length === 0) {
-			return
-		}
-
-		const result = await runWithLoading(async () => {
-			await drive.createDirectory({
-				parent: parentDir,
-				name: newName
-			})
-		})
-
-		if (!result.success) {
-			logger.error("driveSelect", "Create directory operation failed", { error: result.error })
-			alerts.error(result.error)
-
-			return
-		}
-
-		// The picker itself never filters, so the new directory appears here regardless — but the
-		// listing the user returns to does, and a destination they just created and then cannot find
-		// is the worst version of this. `appliesHere: true`: a picker destination is always in the
-		// user's own drive, which is filtered.
-		await notifyIfNameIsHidden({ name: newName, action: "created", appliesHere: true, t })
+		await promptAndCreateDirectory({ parent: parentDir, t })
 	}
 
 	const submit = async () => {
@@ -173,7 +126,7 @@ const DriveSelectToolbar = () => {
 					return
 				}
 
-				navigation.getParent()?.goBack()
+				dismiss()
 
 				break
 			}
@@ -197,7 +150,7 @@ const DriveSelectToolbar = () => {
 					cancelled: false
 				})
 
-				navigation.getParent()?.goBack()
+				dismiss()
 
 				break
 			}
@@ -207,7 +160,7 @@ const DriveSelectToolbar = () => {
 					return
 				}
 
-				navigation.getParent()?.goBack()
+				dismiss()
 
 				if (selectedItems.length === 0) {
 					if (!parentDir || !drivePath.selectOptions.directories) {
@@ -265,59 +218,31 @@ const DriveSelectToolbar = () => {
 				</PressableScale>
 			)}
 			{drivePath.selectOptions?.intention === "move" && parentDir && drivePath.selectOptions.items.length > 0 && (
-				<PressableScale
+				<FloatingActionPill
 					testID="drive-select-move-here"
-					onPress={submit}
-					className="absolute right-4"
+					label={t("move_here")}
 					enabled={!isSameParentAsSelectedItems && isOnline}
-					style={{
-						bottom: insets.bottom
-					}}
-				>
-					<CrossGlassContainerView
-						className={cn(
-							"min-h-12 min-w-12 px-4 flex-row items-center justify-center",
-							(isSameParentAsSelectedItems || !isOnline) && "opacity-50"
-						)}
-					>
-						<Text className="font-bold text-blue-500">{t("move_here")}</Text>
-					</CrossGlassContainerView>
-				</PressableScale>
+					onPress={submit}
+				/>
 			)}
 			{drivePath.selectOptions?.intention === "copy" && parentDir && (
-				<PressableScale
+				<FloatingActionPill
 					testID="drive-select-copy-here"
-					onPress={submit}
-					className="absolute right-4"
+					label={t("copy_here")}
 					enabled={isOnline}
-					style={{
-						bottom: insets.bottom
-					}}
-				>
-					<CrossGlassContainerView className={cn("min-h-12 min-w-12 px-4 flex-row items-center justify-center", !isOnline && "opacity-50")}>
-						<Text className="font-bold text-blue-500">{t("copy_here")}</Text>
-					</CrossGlassContainerView>
-				</PressableScale>
+					onPress={submit}
+				/>
 			)}
 			{drivePath.selectOptions?.intention === "select" && (
-				<PressableScale
-					onPress={submit}
-					className="absolute right-4"
+				<FloatingActionPill
+					label={
+						selectedItems.length === 0 && parentDir && drivePath.selectOptions.directories
+							? t("select_root")
+							: t("select_n_items", { count: selectedItems.length })
+					}
 					enabled={canSelect}
-					style={{
-						bottom: insets.bottom
-					}}
-				>
-					<CrossGlassContainerView
-						className={cn("min-h-12 min-w-12 px-4 flex-row items-center justify-center", !canSelect && "opacity-50")}
-					>
-						<Text className="font-bold text-blue-500">
-							{selectedItems.length === 0 && parentDir && drivePath.selectOptions.directories
-								? t("select_root")
-								: t("select_n_items", { count: selectedItems.length })}
-						</Text>
-					</CrossGlassContainerView>
-				</PressableScale>
+					onPress={submit}
+				/>
 			)}
 		</Fragment>
 	)

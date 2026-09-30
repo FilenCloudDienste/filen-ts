@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { type AnyNormalDir, AnyNormalDir_Tags } from "@filen/sdk-rs"
 import auth from "@/lib/auth"
 import { unwrapDirMeta, isTrashParent } from "@/lib/sdkUnwrap"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useCameraUploadDestinationQuery"
 
@@ -20,7 +21,7 @@ export async function fetchData(
 	}
 ): Promise<CameraUploadDestination> {
 	const { authedSdkClient } = await auth.getSdkClients()
-	const dir = await authedSdkClient.getDirOptional(params.uuid, params.signal ? { signal: params.signal } : undefined)
+	const dir = await authedSdkClient.getDirOptional(params.uuid, toSignalOpts(params.signal))
 
 	// undefined (permanently deleted) or a Trash-parented Dir ⇒ unusable. unwrapDirMeta accepts a
 	// plain Dir struct directly (its "uuid" in dir branch), so the fresh decrypted name comes from

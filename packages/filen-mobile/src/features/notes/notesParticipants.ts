@@ -6,6 +6,7 @@ import { noteContentQueryKey } from "@/features/notes/queries/useNoteContent.que
 import { removeQueryEverywhere } from "@/queries/client"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import { toSignalOpts } from "@/lib/signals"
 
 export async function leave({ note, signal }: { note: Note; signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
@@ -14,11 +15,7 @@ export async function leave({ note, signal }: { note: Note; signal?: AbortSignal
 		await authedSdkClient.removeNoteParticipant(
 			note,
 			(await authedSdkClient.toStringified()).userId,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -63,11 +60,7 @@ export async function removeParticipant({
 		await authedSdkClient.removeNoteParticipant(
 			note,
 			participantUserId,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -122,11 +115,7 @@ export async function addParticipants({
 				updated,
 				contact,
 				permissionsWrite,
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		)
 	}
@@ -178,11 +167,7 @@ export async function setParticipantPermission({
 		note.uuid,
 		participant,
 		permissionsWrite,
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 
 	const updatedNote: Note = {

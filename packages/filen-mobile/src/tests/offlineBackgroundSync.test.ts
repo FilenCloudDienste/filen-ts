@@ -75,6 +75,34 @@ vi.mock("@/lib/sdkErrors", () => ({
 }))
 
 vi.mock("@/lib/sdkUnwrap", () => ({
+	// Mirrors the real Normal vs Shared/Linked walk over the literal parent shapes these tests build.
+	unwrapAnyDirUuid: (dir: unknown) => {
+		const d = dir as {
+			tag?: string
+			inner?: [
+				{
+					inner?: [{ uuid?: string }]
+					dir?: { inner?: [{ inner?: { uuid?: string } }] }
+				}
+			]
+		}
+		const inner = d?.inner?.[0]
+
+		switch (d?.tag) {
+			case "Normal": {
+				return inner?.inner?.[0]?.uuid ?? null
+			}
+
+			case "Shared":
+			case "Linked": {
+				return inner?.dir?.inner?.[0]?.inner?.uuid ?? null
+			}
+
+			default: {
+				return null
+			}
+		}
+	},
 	unwrapFileMeta: (file: unknown) => {
 		const f = file as {
 			uuid?: string

@@ -46,6 +46,11 @@ vi.mock("@/lib/cache", () => ({
 		rootUuid: "root",
 		fileUuidToNormalFile: h.files,
 		directoryUuidToAnyNormalDir: h.dirs,
+		getNormalDir: (uuid: string) => {
+			const dir = h.dirs.get(uuid) as { tag: string; inner: [unknown] } | undefined
+
+			return dir && dir.tag === "Dir" ? dir.inner[0] : undefined
+		},
 		cacheNewFile: (file: RawFile) => h.files.set(file.uuid, file),
 		cacheNewNormalDir: (dir: RawDir) => h.dirs.set(dir.uuid, { tag: "Dir", inner: [dir] }),
 		forgetItem: (uuid: string) => {

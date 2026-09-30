@@ -22,7 +22,8 @@ export function driveItemToAnyFile(item: DriveItem): AnyFile | null {
 	}
 }
 
-export function driveItemToAnyDirWithContext(item: DriveItemDirectoryExtracted): AnyDirWithContext {
+// Null when a shared directory's role is unrecoverable; see driveItemToAnyDirWithContext for the throwing variant.
+export function tryDriveItemToAnyDirWithContext(item: DriveItemDirectoryExtracted): AnyDirWithContext | null {
 	switch (item.type) {
 		case "directory": {
 			return new AnyDirWithContext.Normal(new AnyNormalDir.Dir(item.data))
@@ -32,29 +33,18 @@ export function driveItemToAnyDirWithContext(item: DriveItemDirectoryExtracted):
 			const parentUuid = unwrapParentUuid(item.data.inner.parent)
 
 			if (!parentUuid) {
-				throw new Error("Shared directory is missing parent information.")
+				return null
 			}
 
-			// TC-06: resolve the share context for THIS child directory. We need a SharingRole; the
-			// listing path stamps the parent's role onto the child both as the cached parent's
-			// shareInfo AND (when present) directly on item.data.sharingRole. Prefer the cached
-			// parent, then fall back to the item's own sharingRole, so a cold start / restored route
-			// param / evicted cache no longer hard-fails when the role is still recoverable from the
-			// item — mirroring offlineHelpers, which resolves the same miss gracefully.
+			// The listing stamps the parent's role onto the child both as the cached parent's shareInfo and
+			// on item.data.sharingRole; the latter survives a cold start, restored route param or evicted cache.
 			const shareInfo = cache.directoryUuidToAnySharedDirWithContext.get(parentUuid)?.shareInfo ?? item.data.sharingRole
 
 			if (!shareInfo) {
-				// Neither the cached parent nor the item carries the share context. This is genuinely
-				// recoverable — re-opening the shared parent in the drive repopulates the cache — but
-				// resolving it here would require an extra SDK round-trip the silent transfer layer
-				// deliberately avoids; a clearer retryable message is the sanctioned minimum.
-				throw new Error("Shared directory is missing its share context. Open the shared directory once, then retry.")
+				return null
 			}
 
-			// Target the shared directory ITSELF (item.data), borrowing only the shareInfo resolved
-			// above — mirrors offline.ts findParentAnyDirWithContext. Wrapping the parent's
-			// AnySharedDirWithContext directly would target the PARENT's (larger) tree instead of
-			// this child directory.
+			// Target the child itself, borrowing only the role; wrapping the parent's context would target the parent's tree.
 			return new AnyDirWithContext.Shared(
 				AnySharedDirWithContext.new({
 					dir: new AnySharedDir.Dir(item.data),
@@ -72,4 +62,15 @@ export function driveItemToAnyDirWithContext(item: DriveItemDirectoryExtracted):
 			)
 		}
 	}
+}
+
+export function driveItemToAnyDirWithContext(item: DriveItemDirectoryExtracted): AnyDirWithContext {
+	const context = tryDriveItemToAnyDirWithContext(item)
+
+	if (!context) {
+		// Recoverable by re-opening the shared parent (repopulates the cache); resolving it here would cost an SDK round-trip.
+		throw new Error("Shared directory is missing its share context. Open the shared directory once, then retry.")
+	}
+
+	return context
 }

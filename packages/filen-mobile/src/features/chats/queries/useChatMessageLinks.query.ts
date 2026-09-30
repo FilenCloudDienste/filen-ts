@@ -5,6 +5,7 @@ import { getPreviewType } from "@/lib/previewType"
 import { extractLinks } from "@/lib/linkParser"
 import { MaybeEncryptedUniffi_Tags, type DirPublicInfo, type LinkedFile } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
+import { toSignalOpts } from "@/lib/signals"
 
 const MAX_FILE_SIZE_IMAGE = 32 * 1024 * 1024
 
@@ -81,11 +82,7 @@ export async function fetchData(
 						return authedSdkClient.getDirPublicLinkInfo(
 							filenPublicLink.uuid,
 							filenPublicLink.key,
-							params.signal
-								? {
-										signal: params.signal
-									}
-								: undefined
+							toSignalOpts(params.signal)
 						)
 					})
 
@@ -111,11 +108,7 @@ export async function fetchData(
 						filenPublicLink.uuid,
 						filenPublicLink.key,
 						undefined,
-						params.signal
-							? {
-									signal: params.signal
-								}
-							: undefined
+						toSignalOpts(params.signal)
 					)
 				})
 

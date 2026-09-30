@@ -7,3 +7,4 @@ export const MUSIC_METADATA_SUPPORTED_EXTENSIONS = new Set([".mp3", ".m4a", ".fl
 // Small cap so size-gate tests can exceed it with tiny fixtures (real value is 100 MiB).
 export const AUDIO_METADATA_MAX_PARSE_SIZE_BYTES = 1024
 export const AUDIO_METADATA_MAX_CONCURRENT_PARSES = 1
+export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000

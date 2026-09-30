@@ -16,7 +16,7 @@ import { cn } from "@filen/shared"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useRecyclingState } from "@shopify/flash-list"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
-import { FavoritedIndicator, OfflineIndicator } from "@/features/drive/components/item/indicators"
+import { IndicatorBadge } from "@/features/drive/components/item/indicators"
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
@@ -126,8 +126,22 @@ const Item = ({
 						onPress={onPress}
 					>
 						<View className="bg-transparent shrink-0 items-center flex-row">
-							{showFavorited && <FavoritedIndicator />}
-							{showOffline && <OfflineIndicator />}
+							{showFavorited && (
+								<IndicatorBadge
+									type="favorited"
+									size={14}
+									positionClassName="bottom-1 -right-2.5"
+									bgClassName="bg-background-tertiary"
+								/>
+							)}
+							{showOffline && (
+								<IndicatorBadge
+									type="offline"
+									size={14}
+									positionClassName="bottom-1 -left-2.5"
+									bgClassName="bg-background-tertiary"
+								/>
+							)}
 							<Thumbnail
 								item={info.item}
 								target={info.target}

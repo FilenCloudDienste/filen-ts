@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system"
+import { ensureDirectory } from "@/lib/fsUtils"
 import { LOGS_DIRECTORY } from "@/lib/storageRoots"
 import { serialize, deserialize, freezeForLog } from "@/lib/serializer"
 
@@ -20,7 +21,7 @@ import { serialize, deserialize, freezeForLog } from "@/lib/serializer"
 
 export type LogLevel = "debug" | "info" | "warn" | "error"
 
-const RANK: Record<LogLevel, number> = {
+export const LOG_LEVEL_RANK: Record<LogLevel, number> = {
 	debug: 10,
 	info: 20,
 	warn: 30,
@@ -95,8 +96,8 @@ export class Logger {
 		...DEFAULT_CONFIG
 	}
 
-	private minRank: number = RANK[DEFAULT_CONFIG.minLevel]
-	private persistRank: number = RANK[DEFAULT_CONFIG.persistLevel]
+	private minRank: number = LOG_LEVEL_RANK[DEFAULT_CONFIG.minLevel]
+	private persistRank: number = LOG_LEVEL_RANK[DEFAULT_CONFIG.persistLevel]
 
 	// Circular breadcrumb ring — O(1) push, no allocation growth.
 	private ring: (Entry | undefined)[] = new Array<Entry | undefined>(DEFAULT_CONFIG.breadcrumbCapacity)
@@ -130,7 +131,7 @@ export class Logger {
 		// deterministic in tests (where __DEV__ is undefined → keeps the dev "debug" default).
 		if ((globalThis as { __DEV__?: boolean }).__DEV__ === false) {
 			this.config.minLevel = "warn"
-			this.minRank = RANK["warn"]
+			this.minRank = LOG_LEVEL_RANK["warn"]
 		}
 	}
 
@@ -140,8 +141,8 @@ export class Logger {
 			...opts
 		}
 
-		this.minRank = RANK[this.config.minLevel]
-		this.persistRank = RANK[this.config.persistLevel]
+		this.minRank = LOG_LEVEL_RANK[this.config.minLevel]
+		this.persistRank = LOG_LEVEL_RANK[this.config.persistLevel]
 
 		if (this.ring.length !== this.config.breadcrumbCapacity) {
 			this.ring = new Array<Entry | undefined>(this.config.breadcrumbCapacity)
@@ -184,7 +185,7 @@ export class Logger {
 			return
 		}
 
-		const rank = RANK[level]
+		const rank = LOG_LEVEL_RANK[level]
 
 		// HOT PATH gate — the cheapest possible check; gated calls cost a compare + return.
 		if (rank < this.minRank) {
@@ -222,7 +223,7 @@ export class Logger {
 			return
 		}
 
-		const rank = RANK[level]
+		const rank = LOG_LEVEL_RANK[level]
 
 		if (rank < this.minRank) {
 			return
@@ -370,12 +371,7 @@ export class Logger {
 			return
 		}
 
-		if (!LOGS_DIRECTORY.exists) {
-			LOGS_DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
+		ensureDirectory(LOGS_DIRECTORY)
 
 		this.directoryReady = true
 	}

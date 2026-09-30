@@ -1,10 +1,12 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryUpdater } from "@/queries/client"
+import { queryUpdater, type QueryUpdater } from "@/queries/client"
 import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { type DriveItem } from "@/types"
+import { toSignalOpts } from "@/lib/signals"
+import { makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 
 export const BASE_QUERY_KEY = "useDriveItemPublicLinkStatusQuery"
 
@@ -34,11 +36,7 @@ export async function fetchData(
 	if (item.type === "file") {
 		const status = await authedSdkClient.getFileLinkStatus(
 			item.data,
-			params?.signal
-				? {
-						signal: params.signal
-					}
-				: undefined
+			toSignalOpts(params?.signal)
 		)
 
 		if (!status) {
@@ -52,11 +50,7 @@ export async function fetchData(
 	} else if (item.type === "directory") {
 		const status = await authedSdkClient.getDirLinkStatus(
 			item.data,
-			params?.signal
-				? {
-						signal: params.signal
-					}
-				: undefined
+			toSignalOpts(params?.signal)
 		)
 
 		if (!status) {
@@ -72,10 +66,22 @@ export async function fetchData(
 	return null
 }
 
+export function publicLinkUrlFromStatus(item: DriveItem, data: NonNullable<Awaited<ReturnType<typeof fetchData>>>): string | null {
+	return makeDriveItemPublicLink({
+		item,
+		linkUuid: data.status.linkUuid,
+		linkKey: data.type === "directory" ? data.status.linkKey : undefined
+	})
+}
+
 // Stable query key: identity (uuid) only, with the optional by-value item stripped so its object
 // identity can't destabilize the key and both resolution sources for one uuid share a cache entry.
 export function publicLinkStatusQueryKey(params: UseDriveItemPublicLinkStatusQueryParams): { uuid: string } {
 	return { uuid: params.uuid }
+}
+
+export function publicLinkStatusQueryFullKey(params: UseDriveItemPublicLinkStatusQueryParams): unknown[] {
+	return [BASE_QUERY_KEY, sortParams(publicLinkStatusQueryKey(params))]
 }
 
 export function useDriveItemPublicLinkStatusQuery(
@@ -84,7 +90,7 @@ export function useDriveItemPublicLinkStatusQuery(
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
 	const query = useQuery({
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortParams(publicLinkStatusQueryKey(params))],
+		queryKey: publicLinkStatusQueryFullKey(params),
 		queryFn: ({ signal }) =>
 			fetchData({
 				...params,
@@ -102,15 +108,11 @@ export function driveItemPublicLinkStatusQueryUpdate({
 }: {
 	params: Parameters<typeof fetchData>[0]
 } & {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 	dataUpdatedAt?: number
 }): void {
-	const sortedParams = sortParams(publicLinkStatusQueryKey(params))
-
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
-		[BASE_QUERY_KEY, sortedParams],
+		publicLinkStatusQueryFullKey(params),
 		prev => {
 			const currentData = prev ?? (null satisfies Awaited<ReturnType<typeof fetchData>>)
 

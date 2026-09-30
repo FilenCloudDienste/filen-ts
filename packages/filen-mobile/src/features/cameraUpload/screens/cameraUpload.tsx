@@ -1,5 +1,6 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { LoadingView } from "@/components/ui/loadingView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import cameraUpload, { useCameraUploadConfig, type Config } from "@/features/cameraUpload/cameraUpload"
 import cameraUploadState from "@/features/cameraUpload/cameraUploadState"
@@ -7,11 +8,10 @@ import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useC
 import { applyAfterActivationToggle, CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY } from "@/features/cameraUpload/cameraUploadHelpers"
 import { useSecureStore } from "@/lib/secureStore"
 import { CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY, DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED } from "@/lib/imageConversion"
-import View from "@/components/ui/view"
 import { Fragment, useCallback } from "react"
 import { useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
-import { selectDriveItems } from "@/features/drive/driveSelectSession"
+import { selectDriveDirectory } from "@/features/drive/driveSelectSession"
 import alerts from "@/lib/alerts"
 import prompts from "@/lib/prompts"
 import logger from "@/lib/logger"
@@ -20,12 +20,9 @@ import cache from "@/lib/cache"
 import { unwrapDirMeta } from "@/lib/sdkUnwrap"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
-import Header from "@/components/ui/header"
-import { Platform, ActivityIndicator } from "react-native"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import useMediaPermissions from "@/hooks/useMediaPermissions"
 import { AnyNormalDir_Tags } from "@filen/sdk-rs"
-import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSelectResolve"
-import useIsOnline from "@/hooks/useIsOnline"
 import { useTranslation } from "react-i18next"
 import ListEmpty from "@/components/ui/listEmpty"
 import useIsBatteryOptimized from "@/hooks/useIsBatteryOptimized"
@@ -46,9 +43,6 @@ const CameraUpload = () => {
 	const destination = useCameraUploadDestination(config.remoteDir)
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const textRed500 = useResolveClassNames("text-red-500")
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
-	const isOnline = useIsOnline()
 
 	// Android throttles background jobs for apps it is battery-optimizing, down to disabling their
 	// network access entirely in the lower standby buckets — which is what makes background upload
@@ -121,45 +115,16 @@ const CameraUpload = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("camera_upload")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.back()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={() => {
+					router.back()
+				}}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{mediaPermissions.loading ? (
-					<View className="flex-1 bg-transparent items-center justify-center">
-						<ActivityIndicator
-							size="large"
-							color={textForeground.color as string}
-						/>
-					</View>
+					<LoadingView />
 				) : mediaPermissions.granted ? (
 					<SettingsScrollView>
 						<Group
@@ -181,9 +146,7 @@ const CameraUpload = () => {
 											icon: "albums-outline",
 											title: t("albums"),
 											subTitle: t("albums_description"),
-											onPress: () => {
-												router.push("/cameraUpload/albums")
-											},
+											href: "/cameraUpload/albums",
 											rightItem: {
 												type: "badge",
 												value:
@@ -205,7 +168,7 @@ const CameraUpload = () => {
 										{
 											icon: "folder-open-outline",
 											title: t("cloud_directory"),
-											disabled: !isOnline,
+											requiresOnline: true,
 											subTitle: destinationSubTitle,
 											rightItem: {
 												type: "badge",
@@ -235,14 +198,9 @@ const CameraUpload = () => {
 													: undefined
 
 												const result = await run(async () => {
-													return await selectDriveItems({
-														type: "single",
-														files: false,
-														directories: true,
-														items: [],
-														initiallySelected:
-															currentDirItem && currentDirItem.type === "directory" ? [currentDirItem] : []
-													})
+													return await selectDriveDirectory(
+														currentDirItem && currentDirItem.type === "directory" ? [currentDirItem] : []
+													)
 												})
 
 												if (!result.success) {
@@ -252,18 +210,7 @@ const CameraUpload = () => {
 													return
 												}
 
-												if (result.data.cancelled) {
-													return
-												}
-
-												const selectedItem = result.data.selectedItems[0]
-
-												if (!selectedItem) {
-													return
-												}
-
-												// Cache-first; falls back to the by-value AnyNormalDir for an own-directory pick.
-												const remoteDir = resolveSelectedDriveItemToAnyNormalDir(selectedItem)
+												const remoteDir = result.data
 
 												if (!remoteDir) {
 													return
@@ -425,7 +372,7 @@ const CameraUpload = () => {
 						title={t("no_permissions_enable_manually")}
 					/>
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

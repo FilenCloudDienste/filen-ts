@@ -2,22 +2,22 @@ import { type TFunction } from "i18next"
 import { run, type Result } from "@filen/shared"
 import { AnyNormalDir } from "@filen/sdk-rs"
 import * as FileSystem from "expo-file-system"
-import * as ImagePicker from "expo-image-picker"
+import { ensureDirectory } from "@/lib/fsUtils"
+import { extnameOf } from "@/lib/previewType"
 import DocumentScanner, {
 	ResponseType as DocumentScannerResponseType,
 	ScanDocumentResponseStatus
 } from "react-native-document-scanner-plugin"
-import { randomUUID } from "expo-crypto"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversion"
-import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { withSystemPresentation } from "@/lib/systemPresentation"
 import { pickDocuments } from "@/lib/documentPicker"
+import { pickMedia, pickedAssetName, requireMediaPermissions, type MediaSource } from "@/lib/mediaPicker"
 import { notifyIfNameIsHidden } from "@/features/drive/components/hiddenNameNotice"
-import { hiddenFilterAppliesTo } from "@/features/drive/driveSelectors"
+import { hiddenFilterAppliesTo, isFileItem } from "@/features/drive/driveSelectors"
 import transfers from "@/features/transfers/transfers"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { uploadQuotaRefusal } from "@/features/transfers/quota"
 import { newTmpDir } from "@/lib/tmp"
@@ -68,7 +68,7 @@ async function maybeConvertHeicForUpload({
 
 	return {
 		file: converted,
-		name: `${FileSystem.Paths.basename(name, FileSystem.Paths.extname(name))}.jpg`,
+		name: `${FileSystem.Paths.basename(name, extnameOf(name))}.jpg`,
 		mime: "image/jpeg",
 		convertedTmpFile: converted
 	}
@@ -185,33 +185,6 @@ export function useDriveUpload({
 		return false
 	}
 
-	const requireMediaPermissions = async (needCamera: boolean): Promise<boolean> => {
-		const permissionsResult = await run(async () => {
-			return await withSystemPresentation(() =>
-				hasAllNeededMediaPermissions({
-					shouldRequest: true,
-					library: "none",
-					needCamera
-				})
-			)
-		})
-
-		if (!permissionsResult.success) {
-			logger.warn("drive-upload", "media permissions check failed", { error: permissionsResult.error })
-			alerts.error(permissionsResult.error)
-
-			return false
-		}
-
-		if (!permissionsResult.data) {
-			alerts.error(t("no_permissions_enable_manually"))
-
-			return false
-		}
-
-		return true
-	}
-
 	const uploadFiles = async (): Promise<void> => {
 		if (!parent) {
 			return
@@ -303,37 +276,18 @@ export function useDriveUpload({
 		reportTransferResults(transferResult.data)
 	}
 
-	// Shared body for library-picker and camera-capture flows. The only
-	// differences between uploadPhotosOrVideos and takePhotoOrVideo are the
-	// ImagePicker launcher used and whether created/modified timestamps are
-	// injected (camera captures should record the current time; library assets
-	// already carry their own metadata via the OS).
-	const uploadFromPicker = async (launcher: () => Promise<ImagePicker.ImagePickerResult>, addTimestamps: boolean): Promise<void> => {
+	// Shared body for library-picker and camera-capture flows. Camera captures record the current
+	// time; library assets already carry their own metadata via the OS.
+	const uploadFromPicker = async (source: MediaSource): Promise<void> => {
 		if (!parent) {
 			return
 		}
 
-		// addTimestamps=true → camera capture (needs CAMERA permission); false → library picker (no camera)
-		if (!(await requireMediaPermissions(addTimestamps))) {
+		const assets = await pickMedia({ source })
+
+		if (!assets) {
 			return
 		}
-
-		const imagePickerResult = await run(async () => {
-			return await withSystemPresentation(() => launcher())
-		})
-
-		if (!imagePickerResult.success) {
-			logger.warn("drive-upload", "image picker failed", { error: imagePickerResult.error })
-			alerts.error(imagePickerResult.error)
-
-			return
-		}
-
-		if (imagePickerResult.data.canceled) {
-			return
-		}
-
-		const assets = imagePickerResult.data.assets
 
 		if (!(await fitsOrRefuse(assets.map(asset => new FileSystem.File(asset.uri))))) {
 			return
@@ -358,12 +312,9 @@ export function useDriveUpload({
 								throw new Error("Asset file does not exist")
 							}
 
-							const extname = FileSystem.Paths.extname(asset.uri)
-							const fileName = asset.fileName ?? `${randomUUID()}${extname}`
-
 							const converted = await maybeConvertHeicForUpload({
 								file: assetFile,
-								name: fileName,
+								name: pickedAssetName(asset),
 								mime: asset.mimeType,
 								enabled: convertHeic
 							})
@@ -383,7 +334,7 @@ export function useDriveUpload({
 								parent,
 								name: converted.name,
 								mime: converted.mime,
-								...(addTimestamps ? { created: Date.now(), modified: Date.now() } : {})
+								...(source === "camera" ? { created: Date.now(), modified: Date.now() } : {})
 							})
 						},
 						{
@@ -405,35 +356,11 @@ export function useDriveUpload({
 	}
 
 	const uploadPhotosOrVideos = (): Promise<void> => {
-		return uploadFromPicker(
-			() =>
-				ImagePicker.launchImageLibraryAsync({
-					mediaTypes: ["images", "videos"],
-					exif: false,
-					base64: false,
-					quality: 1,
-					allowsMultipleSelection: true,
-					presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-					shouldDownloadFromNetwork: true
-				}),
-			false
-		)
+		return uploadFromPicker("library")
 	}
 
 	const takePhotoOrVideo = (): Promise<void> => {
-		return uploadFromPicker(
-			() =>
-				ImagePicker.launchCameraAsync({
-					mediaTypes: ["images", "videos"],
-					exif: false,
-					base64: false,
-					quality: 1,
-					allowsMultipleSelection: true,
-					presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-					shouldDownloadFromNetwork: true
-				}),
-			true
-		)
+		return uploadFromPicker("camera")
 	}
 
 	const scanDocument = async (): Promise<void> => {
@@ -441,7 +368,7 @@ export function useDriveUpload({
 			return
 		}
 
-		if (!(await requireMediaPermissions(true))) {
+		if (!(await requireMediaPermissions({ needCamera: true }))) {
 			return
 		}
 
@@ -521,34 +448,23 @@ export function useDriveUpload({
 			return
 		}
 
-		const promptResult = await run(async () => {
-			return await prompts.input({
+		let fileName = await inputPrompt(
+			{
 				title: t("create_text_file"),
 				message: t("enter_text_file_name"),
 				cancelText: t("cancel"),
 				okText: t("create"),
 				placeholder: t("text_file_name")
-			})
-		})
+			},
+			{ tag: "drive-upload", message: "create text file prompt failed" },
+			{ trim: true }
+		)
 
-		if (!promptResult.success) {
-			logger.warn("drive-upload", "create text file prompt failed", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
+		if (fileName === null) {
 			return
 		}
 
-		if (promptResult.data.cancelled) {
-			return
-		}
-
-		let fileName = promptResult.data.value.trim()
-
-		if (fileName.length === 0) {
-			return
-		}
-
-		const extname = FileSystem.Paths.extname(fileName)
+		const extname = extnameOf(fileName)
 
 		if (extname.length === 0) {
 			fileName += ".txt"
@@ -564,12 +480,7 @@ export function useDriveUpload({
 				}
 			})
 
-			if (!tmpDir.exists) {
-				tmpDir.create({
-					idempotent: true,
-					intermediates: true
-				})
-			}
+			ensureDirectory(tmpDir)
 
 			if (tmpFile.exists) {
 				tmpFile.delete()
@@ -612,7 +523,7 @@ export function useDriveUpload({
 
 		const item = unwrappedFileIntoDriveItem(unwrapFileMeta(file))
 
-		if (item.type !== "file" && item.type !== "sharedFile" && item.type !== "sharedRootFile") {
+		if (!isFileItem(item)) {
 			return
 		}
 

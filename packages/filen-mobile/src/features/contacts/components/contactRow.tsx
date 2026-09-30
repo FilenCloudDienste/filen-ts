@@ -12,6 +12,8 @@ import chatsLib from "@/features/chats/chats"
 import { router } from "@/lib/router"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import prompts from "@/lib/prompts"
+import { confirmedAction } from "@/lib/confirmedAction"
+import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
 import useContactsStore, { type ContactListItemWithHeader } from "@/features/contacts/store/useContacts.store"
 import { useShallow } from "zustand/shallow"
 import { run, contactDisplayName } from "@filen/shared"
@@ -150,7 +152,7 @@ export const Contact = ({
 		}
 	}
 
-	const menuButtons = (() => {
+	const baseMenuButtons = (() => {
 		const buttons: MenuButton[] = []
 
 		if (!selectOptions && info.item.type !== "header") {
@@ -204,287 +206,72 @@ export const Contact = ({
 				title: t("remove"),
 				destructive: true,
 				icon: "delete",
-				onPress: async () => {
-					const promptResponse = await run(async () => {
-						return await prompts.alert({
-							title: t("remove_contact"),
-							message: t("remove_contact_confirmation"),
-							cancelText: t("cancel"),
-							okText: t("remove"),
-							destructive: true
+				onPress: confirmedAction({
+					promptTitle: t("remove_contact"),
+					promptMessage: t("remove_contact_confirmation"),
+					promptOkText: t("remove"),
+					action: () =>
+						contacts.delete({
+							uuid: contactItem.data.uuid
 						})
-					})
-
-					if (!promptResponse.success) {
-						logger.warn("contacts", "remove contact prompt failed", { error: promptResponse.error })
-						alerts.error(promptResponse.error)
-
-						return
-					}
-
-					if (promptResponse.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						if (info.item.type !== "contact") {
-							throw new Error("Invalid contact type")
-						}
-
-						await contacts.delete({
-							uuid: info.item.data.uuid
-						})
-					})
-
-					if (!result.success) {
-						logger.error("contacts", "remove contact failed", { error: result.error })
-						alerts.error(result.error)
-
-						return
-					}
-				}
+				})
 			})
 
-			buttons.push({
-				id: "block",
-				requiresOnline: true,
-				title: t("block"),
-				destructive: true,
-				icon: "block",
-				onPress: async () => {
-					const promptResponse = await run(async () => {
-						return await prompts.alert({
-							title: t("block_contact"),
-							message: t("block_contact_confirmation"),
-							cancelText: t("cancel"),
-							okText: t("block"),
-							destructive: true
-						})
-					})
-
-					if (!promptResponse.success) {
-						logger.warn("contacts", "block contact prompt failed", { error: promptResponse.error })
-						alerts.error(promptResponse.error)
-
-						return
-					}
-
-					if (promptResponse.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						if (info.item.type !== "contact") {
-							throw new Error("Invalid contact type")
-						}
-
-						await contacts.block({
-							userId: info.item.data.userId,
-							email: info.item.data.email,
-							avatar: info.item.data.avatar,
-							nickName: info.item.data.nickName,
-							timestamp: info.item.data.timestamp
-						})
-					})
-
-					if (!result.success) {
-						logger.error("contacts", "block contact failed", {
-							email: info.item.type === "contact" ? info.item.data.email : undefined,
-							error: result.error
-						})
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
+			buttons.push(
+				buildBlockToggleMenuAction({
+					t,
+					isBlocked: false,
+					target: contactItem.data
+				})
+			)
 		}
 
 		if (info.item.type === "blocked") {
-			// Unblock is constructive (lifts a restriction), not destructive.
-			buttons.push({
-				id: "unblock",
-				requiresOnline: true,
-				title: t("unblock"),
-				icon: "restore",
-				onPress: async () => {
-					const promptResponse = await run(async () => {
-						return await prompts.alert({
-							title: t("unblock_contact"),
-							message: t("unblock_contact_confirmation"),
-							cancelText: t("cancel"),
-							okText: t("unblock")
-						})
-					})
-
-					if (!promptResponse.success) {
-						logger.warn("contacts", "unblock contact prompt failed", { error: promptResponse.error })
-						alerts.error(promptResponse.error)
-
-						return
-					}
-
-					if (promptResponse.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						if (info.item.type !== "blocked") {
-							throw new Error("Invalid contact type")
-						}
-
-						await contacts.unblock({
-							uuid: info.item.data.uuid
-						})
-					})
-
-					if (!result.success) {
-						logger.error("contacts", "unblock contact failed", {
-							uuid: info.item.type === "blocked" ? info.item.data.uuid : undefined,
-							error: result.error
-						})
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
-		}
-
-		if (info.item.type === "incomingRequest") {
-			buttons.push({
-				id: "accept",
-				requiresOnline: true,
-				title: t("accept"),
-				icon: "checkmark",
-				onPress: async () => {
-					const result = await runWithLoading(async () => {
-						if (info.item.type !== "incomingRequest") {
-							throw new Error("Invalid contact type")
-						}
-
-						await contacts.acceptRequest({
-							uuid: info.item.data.uuid
-						})
-					})
-
-					if (!result.success) {
-						logger.error("contacts", "acceptRequest via menu failed", {
-							uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined,
-							error: result.error
-						})
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
-
-			buttons.push({
-				id: "deny",
-				requiresOnline: true,
-				title: t("deny"),
-				destructive: true,
-				icon: "delete",
-				onPress: async () => {
-					const promptResponse = await run(async () => {
-						return await prompts.alert({
-							title: t("deny_contact"),
-							message: t("deny_contact_confirmation"),
-							cancelText: t("cancel"),
-							okText: t("deny"),
-							destructive: true
-						})
-					})
-
-					if (!promptResponse.success) {
-						logger.warn("contacts", "deny request prompt failed", { error: promptResponse.error })
-						alerts.error(promptResponse.error)
-
-						return
-					}
-
-					if (promptResponse.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						if (info.item.type !== "incomingRequest") {
-							throw new Error("Invalid contact type")
-						}
-
-						await contacts.denyRequest({
-							uuid: info.item.data.uuid
-						})
-					})
-
-					if (!result.success) {
-						logger.error("contacts", "denyRequest via menu failed", {
-							uuid: info.item.type === "incomingRequest" ? info.item.data.uuid : undefined,
-							error: result.error
-						})
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
-		}
-
-		if (info.item.type === "outgoingRequest") {
-			buttons.push({
-				id: "cancel",
-				requiresOnline: true,
-				title: t("cancel"),
-				destructive: true,
-				icon: "cancel",
-				onPress: async () => {
-					const promptResponse = await run(async () => {
-						return await prompts.alert({
-							title: t("cancel_contact"),
-							message: t("cancel_contact_confirmation"),
-							cancelText: t("cancel"),
-							okText: t("cancel_request"),
-							destructive: true
-						})
-					})
-
-					if (!promptResponse.success) {
-						logger.warn("contacts", "cancel request prompt failed", { error: promptResponse.error })
-						alerts.error(promptResponse.error)
-
-						return
-					}
-
-					if (promptResponse.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						if (info.item.type !== "outgoingRequest") {
-							throw new Error("Invalid contact type")
-						}
-
-						await contacts.cancelRequest({
-							uuid: info.item.data.uuid
-						})
-					})
-
-					if (!result.success) {
-						logger.error("contacts", "cancelRequest via menu failed", {
-							uuid: info.item.type === "outgoingRequest" ? info.item.data.uuid : undefined,
-							error: result.error
-						})
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
+			buttons.push(
+				buildBlockToggleMenuAction({
+					t,
+					isBlocked: true,
+					target: info.item.data
+				})
+			)
 		}
 
 		return buttons
 	})()
+
+	// Kept apart from baseMenuButtons and only ever handed to JSX: onAccept/onDeny read inFlightRef,
+	// and the refs lint rejects passing them to a call or reading a structure holding them in render.
+	const requestMenuButtons: MenuButton[] =
+		info.item.type === "incomingRequest"
+			? [
+					{
+						id: "accept",
+						requiresOnline: true,
+						title: t("accept"),
+						icon: "checkmark",
+						onPress: onAccept
+					},
+					{
+						id: "deny",
+						requiresOnline: true,
+						title: t("deny"),
+						destructive: true,
+						icon: "delete",
+						onPress: onDeny
+					}
+				]
+			: info.item.type === "outgoingRequest"
+				? [
+						{
+							id: "cancel",
+							requiresOnline: true,
+							title: t("cancel"),
+							destructive: true,
+							icon: "cancel",
+							onPress: onDeny
+						}
+					]
+				: []
 
 	const disabled = (() => {
 		if (!selectOptions) {
@@ -513,22 +300,14 @@ export const Contact = ({
 			return
 		}
 
-		useContactsStore.getState().setSelectedContacts(prev => {
-			const prevSelected = prev.some(i => i.data.uuid === item.data.uuid && i.type === item.type)
-
-			if (prevSelected) {
-				return prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type))
-			}
-
-			return [...prev.filter(i => !(i.data.uuid === item.data.uuid && i.type === item.type)), item]
-		})
+		useContactsStore.getState().toggleSelectedContact(item)
 	}
 
 	if (info.item.type === "header") {
 		return <ListRowSectionHeader title={info.item.data.title} />
 	}
 
-	const showTrailing = info.item.type === "incomingRequest" || info.item.type === "outgoingRequest" || menuButtons.length > 0
+	const showMenu = info.item.type === "incomingRequest" || info.item.type === "outgoingRequest" || baseMenuButtons.length > 0
 
 	return (
 		<ListRow
@@ -549,7 +328,7 @@ export const Contact = ({
 			title={contactDisplayName(info.item.data)}
 			subtitle={info.item.data.email}
 			trailing={
-				showTrailing ? (
+				showMenu ? (
 					<View className="flex-row items-center gap-3 bg-transparent">
 						{info.item.type === "incomingRequest" && (
 							<PressableScale
@@ -583,11 +362,11 @@ export const Contact = ({
 								/>
 							</PressableScale>
 						)}
-						{menuButtons.length > 0 && (
+						{showMenu && (
 							<Menu
 								type="dropdown"
 								isAnchoredToRight={true}
-								buttons={menuButtons}
+								buttons={[...baseMenuButtons, ...requestMenuButtons]}
 							>
 								<EllipsisMenuTrigger />
 							</Menu>

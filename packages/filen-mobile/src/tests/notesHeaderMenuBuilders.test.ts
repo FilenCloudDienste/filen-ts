@@ -161,7 +161,6 @@ import { buildNotesHeaderRightItems, buildTagsSortMenuButton } from "@/features/
 import { Platform } from "react-native"
 import { type NoteSelectionFlags } from "@filen/shared"
 import { type Note, type NoteTag } from "@/types"
-import { type MenuButton } from "@/components/ui/menu"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -225,11 +224,11 @@ function topLevelIds(items: ReturnType<typeof buildNotesHeaderRightItems>): stri
 
 	const first = items[0]
 
-	if (!first || first.type !== "menu") {
+	if (!first || first.type !== "ellipsisMenu") {
 		return []
 	}
 
-	const buttons = (first.props?.buttons ?? []) as MenuButton[]
+	const buttons = first.buttons
 
 	return buttons.map(b => b.id)
 }
@@ -238,7 +237,6 @@ function topLevelIds(items: ReturnType<typeof buildNotesHeaderRightItems>): stri
 function defaultParams() {
 	return {
 		t: t as never,
-		textForeground: { color: "#fff" } as never,
 		selectedNotes: [] as Note[],
 		selectedNotesLive: [] as Note[],
 		selectedTags: [] as NoteTag[],
@@ -335,7 +333,7 @@ describe("buildNotesHeaderRightItems", () => {
 				onlyNotes: [note],
 				selectedNotes: [note]
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const selectAll = buttons.find(b => b.id === "selectAll")
 
 			expect(selectAll?.title).toBe("deselect_all")
@@ -349,7 +347,7 @@ describe("buildNotesHeaderRightItems", () => {
 				onlyNotes: [note1, note2],
 				selectedNotes: [note1]
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const selectAll = buttons.find(b => b.id === "selectAll")
 
 			expect(selectAll?.title).toBe("select_all")
@@ -417,7 +415,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedNotes: [note],
 				noteFlags: makeNoteFlags({ count: 1, includesUndecryptable: false, includesPinned: true })
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const pin = buttons.find(b => b.id === "bulkPin")
 
 			expect(pin?.title).toBe("unpin_selected")
@@ -482,7 +480,7 @@ describe("buildNotesHeaderRightItems", () => {
 				noteFlags: makeNoteFlags({ count: 1, includesUndecryptable: false }),
 				onlyNotes: selected
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 
 			expect(buttons.find(b => b.id === "selectAll")?.title).toBe(t("deselect_all"))
 		})
@@ -815,7 +813,7 @@ describe("buildNotesHeaderRightItems", () => {
 					participantOfEveryAndNotOwner: true
 				})
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const leave = buttons.find(b => b.id === "bulkLeave")
 
 			expect(leave?.destructive).toBe(true)
@@ -880,7 +878,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedTags: [tag],
 				notesTags: [tag]
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const del = buttons.find(b => b.id === "bulkDelete")
 
 			expect(del?.destructive).toBe(true)
@@ -895,7 +893,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedTags: [tag],
 				notesTags: [tag]
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const fav = buttons.find(b => b.id === "bulkFavorite")
 
 			expect(fav?.title).toBe("unfavorite_selected")
@@ -911,7 +909,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedTags: [plain, favorited],
 				notesTags: [plain, favorited]
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const fav = buttons.find(b => b.id === "bulkFavorite")
 
 			expect(fav?.title).toBe("unfavorite_selected")
@@ -926,7 +924,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedTags: [tag],
 				notesTags: [tag]
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const fav = buttons.find(b => b.id === "bulkFavorite")
 
 			expect(fav?.title).toBe("favorite_selected")
@@ -1003,7 +1001,7 @@ describe("buildNotesHeaderRightItems", () => {
 
 			// Even in this minimal case the menu exists with createTag + viewMode
 			expect(items).toHaveLength(1)
-			expect(items[0]?.type).toBe("menu")
+			expect(items[0]?.type).toBe("ellipsisMenu")
 		})
 	})
 
@@ -1061,7 +1059,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedNotes: [],
 				selectedTags: []
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const viewModeBtn = buttons.find(b => b.id === "viewMode")
 			const notesViewSub = viewModeBtn?.subButtons?.find(s => s.id === "notesView")
 
@@ -1078,7 +1076,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedNotes: [],
 				selectedTags: []
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const viewModeBtn = buttons.find(b => b.id === "viewMode")
 
 			expect(viewModeBtn?.subButtons?.map(sub => sub.id)).toEqual(["notesView", "tagsView", "offlineView", "sharedView"])
@@ -1106,7 +1104,7 @@ describe("buildNotesHeaderRightItems", () => {
 					selectedNotes: [],
 					selectedTags: []
 				})
-				const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+				const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 				const sharedSub = buttons.find(b => b.id === "viewMode")?.subButtons?.find(s => s.id === "sharedView")
 
 				sharedSub?.onPress?.()
@@ -1131,7 +1129,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedNotes: [],
 				selectedTags: []
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const viewModeBtn = buttons.find(b => b.id === "viewMode")
 
 			expect(viewModeBtn?.subButtons?.find(s => s.id === "sharedView")?.checked).toBe(true)
@@ -1146,7 +1144,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedNotes: [],
 				selectedTags: []
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const viewModeBtn = buttons.find(b => b.id === "viewMode")
 			const offlineViewSub = viewModeBtn?.subButtons?.find(s => s.id === "offlineView")
 
@@ -1165,7 +1163,7 @@ describe("buildNotesHeaderRightItems", () => {
 					selectedNotes: [],
 					selectedTags: []
 				})
-				const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+				const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 
 				return buttons.find(b => b.id === "viewMode")?.icon
 			}
@@ -1185,7 +1183,7 @@ describe("buildNotesHeaderRightItems", () => {
 				selectedNotes: [],
 				selectedTags: []
 			})
-			const buttons = (items[0]?.type === "menu" ? (items[0].props?.buttons ?? []) : []) as MenuButton[]
+			const buttons = items[0]?.type === "ellipsisMenu" ? items[0].buttons : []
 			const viewModeBtn = buttons.find(b => b.id === "viewMode")
 			const tagsViewSub = viewModeBtn?.subButtons?.find(s => s.id === "tagsView")
 
@@ -1257,7 +1255,7 @@ describe("buildNotesHeaderRightItems", () => {
 	})
 
 	describe("result shape", () => {
-		it("returns a single HeaderItem of type 'menu' when there are menu buttons", () => {
+		it("returns a single HeaderItem of type 'ellipsisMenu' when there are menu buttons", () => {
 			const note = makeNote()
 			const items = buildNotesHeaderRightItems({
 				...defaultParams(),
@@ -1265,7 +1263,7 @@ describe("buildNotesHeaderRightItems", () => {
 			})
 
 			expect(items).toHaveLength(1)
-			expect(items[0]?.type).toBe("menu")
+			expect(items[0]?.type).toBe("ellipsisMenu")
 		})
 
 		it("returns empty array when no menu buttons are generated", () => {

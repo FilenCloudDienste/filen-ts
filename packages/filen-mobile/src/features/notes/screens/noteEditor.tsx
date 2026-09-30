@@ -1,8 +1,8 @@
 import { Fragment } from "react"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import StackHeader from "@/components/ui/header"
-import { useLocalSearchParams, useNavigation } from "expo-router"
-import { router } from "@/lib/router"
+import { useLocalSearchParams } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import useNotesQuery from "@/features/notes/queries/useNotesQuery"
 import { type Note as TNote, type NoteHistory } from "@/types"
 import { noteDisplayTitle } from "@/lib/decryption"
@@ -13,12 +13,9 @@ import useNotesInflightStore from "@/features/notes/store/useNotesInflight.store
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import { useShallow } from "zustand/shallow"
 import { simpleDate } from "@/lib/time"
-import { run } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
-import prompts from "@/lib/prompts"
+import { confirmedAction } from "@/lib/confirmedAction"
 import notes from "@/features/notes/notes"
-import alerts from "@/lib/alerts"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { deserializeRouteParam } from "@/lib/serializer"
 import { createMenuButtons } from "@/features/notes/components/note/menu"
 import { useChecklistHideCompleted } from "@/features/notes/checklistView"
@@ -29,7 +26,6 @@ import { NoteType } from "@filen/sdk-rs"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
 import { useTranslation } from "react-i18next"
-import logger from "@/lib/logger"
 import Text from "@/components/ui/text"
 import View, { CrossGlassContainerView } from "@/components/ui/view"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -69,7 +65,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 	const isAvailableOffline = useNotesOfflineStore(state => state.marked[note.uuid] === true)
 	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const keyboardState = useKeyboardState()
 	const dispatch = useTextEditorStore(state => state.dispatch)
 	const [hideCompletedChecklistItems, toggleHideCompletedChecklistItems] = useChecklistHideCompleted(note.uuid)
@@ -120,7 +116,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 						},
 						props: {
 							onPress: () => {
-								navigation.getParent()?.goBack()
+								dismiss()
 							}
 						}
 					}
@@ -133,56 +129,13 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 						{
 							type: "button",
 							props: {
-								onPress: async () => {
-									if (!history) {
-										return
-									}
-
-									const result = await run(async () => {
-										return await prompts.alert({
-											title: t("restore_note"),
-											message: t("are_you_sure_restore_note"),
-											cancelText: t("cancel"),
-											okText: t("restore"),
-											destructive: true
-										})
-									})
-
-									if (!result.success) {
-										logger.error("notes", "restore from history prompt failed", {
-											error: result.error,
-											noteUuid: note.uuid
-										})
-										alerts.error(result.error)
-
-										return
-									}
-
-									if (result.data.cancelled) {
-										return
-									}
-
-									const restoreResult = await runWithLoading(async () => {
-										return await notes.restoreFromHistory({
-											note,
-											history
-										})
-									})
-
-									if (!restoreResult.success) {
-										logger.error("notes", "restore from history failed", {
-											error: restoreResult.error,
-											noteUuid: note.uuid
-										})
-										alerts.error(restoreResult.error)
-
-										return
-									}
-
-									if (router.canGoBack()) {
-										router.back()
-									}
-								},
+								onPress: confirmedAction({
+									promptTitle: t("restore_note"),
+									promptMessage: t("are_you_sure_restore_note"),
+									promptOkText: t("restore"),
+									action: () => notes.restoreFromHistory({ note, history }),
+									dismiss: () => true
+								}),
 								hitSlop: 32
 							},
 							icon: {
@@ -197,28 +150,16 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 				if (!isInflight) {
 					return [
 						{
-							type: "menu",
-							props: {
-								type: "dropdown",
-								hitSlop: 20,
-								buttons: createMenuButtons({
-									note,
-									writeAccess,
-									origin: "content",
-									isOwner,
-									isAvailableOffline,
-									hideCompletedChecklistItems,
-									onToggleHideCompletedChecklistItems: toggleHideCompletedChecklistItems
-								})
-							},
-							triggerProps: {
-								hitSlop: 20
-							},
-							icon: {
-								name: "ellipsis-horizontal",
-								size: 24,
-								color: textForeground.color
-							}
+							type: "ellipsisMenu",
+							buttons: createMenuButtons({
+								note,
+								writeAccess,
+								origin: "content",
+								isOwner,
+								isAvailableOffline,
+								hideCompletedChecklistItems,
+								onToggleHideCompletedChecklistItems: toggleHideCompletedChecklistItems
+							})
 						}
 					]
 				}

@@ -3,7 +3,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const {
 	mockQueryUpdaterSet,
-	mockQueryCacheFind,
+	mockGetCachedQuery,
 	mockFetchQuery,
 	mockGetQueryState,
 	mockQueryUpdaterGet,
@@ -27,7 +27,7 @@ const {
 
 	return {
 		mockQueryUpdaterSet: vi.fn(),
-		mockQueryCacheFind: vi.fn((): unknown => undefined),
+		mockGetCachedQuery: vi.fn((): unknown => undefined),
 		mockFetchQuery: vi.fn(),
 		mockQueryUpdaterGet: vi.fn().mockReturnValue(undefined),
 		// Defaults to "the listing row already exists and holds []" — the pre-existing baseline for
@@ -99,9 +99,9 @@ vi.mock("@/queries/client", () => ({
 	},
 	queryClient: {
 		getQueryState: mockGetQueryState,
-		getQueryCache: () => ({ find: mockQueryCacheFind }),
 		fetchQuery: mockFetchQuery
 	},
+	getCachedQuery: mockGetCachedQuery,
 	// Real implementation, not a passthrough: driveItemsQueryUpdate returns through it, so a stub
 	// would let these updater-forwarding assertions pass against behaviour production never runs.
 	// Its own contract is unit-tested in client.test.ts.
@@ -1498,8 +1498,8 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 	const other = { type: "file", data: { uuid: "o1", stableUuid: "other", decryptedMeta: { name: "other.md" } } }
 
 	beforeEach(() => {
-		mockQueryCacheFind.mockReset()
-		mockQueryCacheFind.mockReturnValue(undefined)
+		mockGetCachedQuery.mockReset()
+		mockGetCachedQuery.mockReturnValue(undefined)
 		mockFetchQuery.mockReset()
 		cacheDirectoryUuidToAnyNormalDir.clear()
 		mockCacheRootUuid.value = "root-uuid"
@@ -1508,7 +1508,7 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 	it("replaces a held listing's read begun before the reconnect, silently, so its callers get the new one", async () => {
 		const fetch = vi.fn().mockResolvedValue([other, head])
 
-		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "fetching", status: "success" }, fetch })
+		mockGetCachedQuery.mockReturnValue({ state: { data: [other], fetchStatus: "fetching", status: "success" }, fetch })
 
 		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({
 			lineage: head,
@@ -1519,7 +1519,7 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 	})
 
 	it("refreshes a held listing read before the gap through its query", async () => {
-		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
+		mockGetCachedQuery.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
 		mockFetchQuery.mockResolvedValue([other, head])
 
 		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({
@@ -1532,7 +1532,7 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 	it("writes the socket's pending creates before reading a cached listing, so a new version is in it", async () => {
 		const flushNow = vi.spyOn(socketCreateBatcher, "flushNow")
 
-		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
+		mockGetCachedQuery.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
 		mockFetchQuery.mockResolvedValue([other])
 
 		await driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")
@@ -1544,7 +1544,7 @@ describe("driveItemsQueryFindFileInNormalParent — one read of the open file's 
 	it("reports a file of another lineage now holding the name, whatever its case", async () => {
 		const replacement = { type: "file", data: { uuid: "r1", stableUuid: "else", decryptedMeta: { name: "Notes.MD" } } }
 
-		mockQueryCacheFind.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
+		mockGetCachedQuery.mockReturnValue({ state: { data: [other], fetchStatus: "idle", status: "success" } })
 		mockFetchQuery.mockResolvedValue([other, replacement])
 
 		await expect(driveItemsQueryFindFileInNormalParent("dir-1", "lineage", "notes.md")).resolves.toEqual({

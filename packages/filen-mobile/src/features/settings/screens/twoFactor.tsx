@@ -1,26 +1,21 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { LoadingView } from "@/components/ui/loadingView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
-import ListEmpty from "@/components/ui/listEmpty"
+import { LoadErrorEmpty } from "@/components/ui/listEmpty"
 import View from "@/components/ui/view"
 import { Fragment } from "react"
-import { router } from "@/lib/router"
-import { run } from "@filen/shared"
+import { goBackIfPossible } from "@/lib/router"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import useAccountQuery from "@/queries/useAccount.query"
-import alerts from "@/lib/alerts"
 import { buildTwoFactorButtons } from "@/features/settings/accountButtons"
 import QRCode from "react-qr-code"
 import Button from "@/components/ui/button"
-import * as Clipboard from "expo-clipboard"
+import { copyToClipboard } from "@/lib/clipboard"
 import { useTranslation } from "react-i18next"
-import useIsOnline from "@/hooks/useIsOnline"
-import logger from "@/lib/logger"
 
 function TwoFactor() {
 	const { t } = useTranslation()
-	const isOnline = useIsOnline()
 
 	const accountQuery = useAccountQuery()
 
@@ -29,30 +24,21 @@ function TwoFactor() {
 			<SettingsHeader
 				title={t("two_factor_authentication")}
 				icon="chevron-back-outline"
-				onDismiss={() => {
-					if (router.canGoBack()) {
-						router.back()
-					}
-				}}
+				onDismiss={goBackIfPossible}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{accountQuery.status === "pending" ? (
-					<SettingsLoadingView />
+					<LoadingView />
 				) : accountQuery.status === "error" ? (
-					<ListEmpty
-						icon="warning-outline"
+					<LoadErrorEmpty
 						title={t("could_not_load_account")}
-						description={t("please_check_connection")}
-						action={<Button onPress={() => accountQuery.refetch()}>{t("try_again")}</Button>}
+						onRetry={() => accountQuery.refetch()}
 					/>
 				) : (
 					<SettingsScrollView>
 						<Group
 							className="bg-background-tertiary"
-							buttons={buildTwoFactorButtons({ t, accountQuery, isOnline })}
+							buttons={buildTwoFactorButtons({ t, accountQuery })}
 						/>
 						{!accountQuery.data.twoFactorEnabled &&
 							accountQuery.data.twoFactorKey &&
@@ -78,18 +64,12 @@ function TwoFactor() {
 									</View>
 									<Button
 										onPress={async () => {
-											const result = await run(async () => {
-												return await Clipboard.setStringAsync(accountQuery.data.twoFactorKey ?? "")
-											})
-
-											if (!result.success) {
-												logger.warn("settings", "copy 2FA secret to clipboard failed", { error: result.error })
-												alerts.error(result.error)
-
-												return
-											}
-
-											alerts.normal(t("secret_copied_to_clipboard"))
+											await copyToClipboard(
+												accountQuery.data.twoFactorKey ?? "",
+												t("secret_copied_to_clipboard"),
+												"settings",
+												"copy 2FA secret to clipboard failed"
+											)
 										}}
 									>
 										{t("copy_secret")}
@@ -98,7 +78,7 @@ function TwoFactor() {
 							)}
 					</SettingsScrollView>
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

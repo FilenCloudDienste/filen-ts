@@ -1,4 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+
+vi.mock("@/lib/signals", () => ({
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
+}))
+
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 // useNoteContent.query / useNoteHistory.query fetchData resolution:

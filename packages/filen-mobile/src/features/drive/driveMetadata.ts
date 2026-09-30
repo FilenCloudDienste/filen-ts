@@ -1,9 +1,9 @@
 import auth from "@/lib/auth"
-import { CreatedTime, DirColor, NonRootNormalItem, NonRootNormalItem_Tags } from "@filen/sdk-rs"
+import { CreatedTime, DirColor, NonRootNormalItem } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { driveItemsQueryUpdateGlobal, driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
-import cache from "@/lib/cache"
+import { itemFromModified } from "@/features/drive/driveModified"
 import events from "@/lib/events"
 import { applyMembershipPatch } from "@filen/shared"
 
@@ -15,6 +15,23 @@ import { applyMembershipPatch } from "@filen/shared"
  */
 export function favoritesListingUpdater(prev: DriveItem[], item: DriveItem, favorited: boolean): DriveItem[] {
 	return applyMembershipPatch(prev, item, favorited)
+}
+
+// Replace a modified item in every listing under its parent and re-point an open preview / active search at it.
+function replaceInListings({ previousUuid, item }: { previousUuid: string; item: Extract<DriveItem, { type: "directory" | "file" }> }) {
+	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
+
+	if (unwrappedParentUuid) {
+		driveItemsQueryUpdateGlobal({
+			parentUuid: unwrappedParentUuid,
+			updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
+		})
+	}
+
+	events.emit("driveItemUpdated", {
+		previousUuid,
+		item
+	})
 }
 
 export async function favorite({ item, favorited }: { item: DriveItem; favorited: boolean }) {
@@ -37,31 +54,7 @@ export async function favorite({ item, favorited }: { item: DriveItem; favorited
 		favorited
 	)
 
-	if (modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
-		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem.inner[0]))
-	} else {
-		item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem.inner[0]))
-	}
-
-	if (item.type !== "directory" && item.type !== "file") {
-		throw new Error("Invalid item type")
-	}
-
-	// Sync persistent caches — `favorited` flag changed on the raw Dir/File.
-	if (item.type === "directory" && modifiedItem.tag === NonRootNormalItem_Tags.Dir) {
-		cache.cacheNewNormalDir(modifiedItem.inner[0], item)
-	} else if (item.type === "file" && modifiedItem.tag === NonRootNormalItem_Tags.File) {
-		cache.cacheNewFile(modifiedItem.inner[0], item)
-	}
-
-	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-	if (unwrappedParentUuid) {
-		driveItemsQueryUpdateGlobal({
-			parentUuid: unwrappedParentUuid,
-			updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-		})
-	}
+	item = itemFromModified(modifiedItem.inner[0])
 
 	driveItemsQueryUpdate({
 		params: {
@@ -74,7 +67,7 @@ export async function favorite({ item, favorited }: { item: DriveItem; favorited
 	})
 
 	// Refresh an open preview showing this file (favorite badge in the header).
-	events.emit("driveItemUpdated", {
+	replaceInListings({
 		previousUuid,
 		item
 	})
@@ -109,35 +102,10 @@ export async function rename({ item, newName }: { item: DriveItem; newName: stri
 					created: CreatedTime.Keep.new()
 				})
 
-	// Ugly but works for now, until we have a better way
-	if (!("region" in modifiedItem)) {
-		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
-	} else {
-		item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
-	}
-
-	if (item.type !== "directory" && item.type !== "file") {
-		throw new Error("Invalid item type")
-	}
-
-	// Sync persistent caches — name (decryptedMeta) changed on the raw Dir/File.
-	if (item.type === "file" && "region" in modifiedItem) {
-		cache.cacheNewFile(modifiedItem, item)
-	} else if (item.type === "directory" && !("region" in modifiedItem)) {
-		cache.cacheNewNormalDir(modifiedItem, item)
-	}
-
-	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-	if (unwrappedParentUuid) {
-		driveItemsQueryUpdateGlobal({
-			parentUuid: unwrappedParentUuid,
-			updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-		})
-	}
+	item = itemFromModified(modifiedItem)
 
 	// Refresh an open preview showing this file (new name in the header).
-	events.emit("driveItemUpdated", {
+	replaceInListings({
 		previousUuid,
 		item
 	})
@@ -156,27 +124,11 @@ export async function setDirColor({ item, color }: { item: DriveItem; color: Dir
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedDir = await authedSdkClient.setDirColor(item.data, color)
 
-	item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedDir))
-
-	if (item.type !== "directory") {
-		throw new Error("Invalid item type")
-	}
-
-	// Sync persistent caches — `color` changed on the raw Dir.
-	cache.cacheNewNormalDir(modifiedDir, item)
-
-	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
-
-	if (unwrappedParentUuid) {
-		driveItemsQueryUpdateGlobal({
-			parentUuid: unwrappedParentUuid,
-			updater: prev => prev.map(i => (i.data.uuid === item.data.uuid ? item : i))
-		})
-	}
+	item = itemFromModified(modifiedDir)
 
 	// Self-heal an open preview + an active subtree cache-search (Effect D replaces the
 	// row by previousUuid and clears any tombstone) — color changed in place.
-	events.emit("driveItemUpdated", {
+	replaceInListings({
 		previousUuid,
 		item
 	})

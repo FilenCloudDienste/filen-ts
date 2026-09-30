@@ -21,13 +21,14 @@ import {
 import auth from "@/lib/auth"
 import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
-import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
+import { wrapAbortSignalForSdk, disposeSdkAbortSignal, toSignalOpts } from "@/lib/signals"
 import { playlistsQueryUpdate, playlistsQueryGet, playlistPatchedSinceNow } from "@/features/audio/queries/usePlaylists.query"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { convertBigInts } from "@/lib/utils"
 import logger from "@/lib/logger"
 import { shuffle } from "es-toolkit/array"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 export type LoopMode = "none" | "track" | "queue"
 
@@ -1075,11 +1076,7 @@ export class Audio {
 				new AnyNormalDir.Root({
 					uuid: authedSdkClient.root().uuid
 				}),
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === ".filen")
 
@@ -1089,22 +1086,14 @@ export class Audio {
 					uuid: authedSdkClient.root().uuid
 				}),
 				".filen",
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		}
 
 		let playlistsDir = (
 			await authedSdkClient.listDir(
 				new AnyNormalDir.Dir(dotFilenDir),
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === "playlists")
 
@@ -1112,11 +1101,7 @@ export class Audio {
 			playlistsDir = await authedSdkClient.createDir(
 				new AnyNormalDir.Dir(dotFilenDir),
 				"Playlists",
-				signal
-					? {
-							signal
-						}
-					: undefined
+				toSignalOpts(signal)
 			)
 		}
 
@@ -1182,11 +1167,7 @@ export class Audio {
 		const playlistsDir = await this.getPlaylistsDirectory(signal)
 		const playlists = await authedSdkClient.listDir(
 			new AnyNormalDir.Dir(playlistsDir),
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 
 		const parsedPlaylists = await Promise.all(
@@ -1204,11 +1185,7 @@ export class Audio {
 							abortSignal: wrappedAbortSignal,
 							pauseSignal: undefined
 						},
-						signal
-							? {
-									signal
-								}
-							: undefined
+						toSignalOpts(signal)
 					)
 
 					const result = this.parsePlaylistBytes(read)
@@ -1228,11 +1205,7 @@ export class Audio {
 								try {
 									const fileExists = await authedSdkClient.getFileOptional(
 										file.uuid,
-										signal
-											? {
-													signal
-												}
-											: undefined
+										toSignalOpts(signal)
 									)
 
 									if (!fileExists) {
@@ -1473,7 +1446,7 @@ export class Audio {
 					item.type === "driveItem" &&
 					!item.data.data.undecryptable &&
 					Boolean(item.data.data.decryptedMeta) &&
-					(item.data.type === "file" || item.data.type === "sharedFile" || item.data.type === "sharedRootFile")
+					isFileItem(item.data)
 			)
 			.map(item => item.data)
 
@@ -1636,22 +1609,14 @@ export class Audio {
 			const file = (
 				await authedSdkClient.listDir(
 					new AnyNormalDir.Dir(playlistsDir),
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 			).files.find(f => f.meta.tag === FileMeta_Tags.Decoded && f.meta.inner[0].name.toLowerCase().trim() === playlistFileName)
 
 			if (file) {
 				await authedSdkClient.deleteFilePermanently(
 					file,
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 
 				markDirectorySizesStale()

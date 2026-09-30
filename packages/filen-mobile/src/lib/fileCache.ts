@@ -1,21 +1,22 @@
 import * as FileSystem from "expo-file-system"
-import { AppState } from "react-native"
+import { extnameOf } from "@/lib/previewType"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
-import { Semaphore, run, planSizeCapEviction } from "@filen/shared"
-import { debounce } from "es-toolkit/function"
+import { Semaphore, run } from "@filen/shared"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
 import { atomicWrite } from "@/lib/fsAtomic"
 import auth from "@/lib/auth"
 import { normalizeFilePathForSdk } from "@/lib/paths"
-import { wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
-import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
-import { ClearBarrier } from "@/lib/clearBarrier"
+import { wrapAbortSignalForSdk, disposeSdkAbortSignal, toSignalOpts } from "@/lib/signals"
+import { ensureDirectory, sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
+import { DiskCache, cacheItemId, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import offline from "@/features/offline/offline"
-import { xxHash32 } from "js-xxhash"
 import { FILE_CACHE_PARENT_DIRECTORY } from "@/lib/storageRoots"
+import { metaFileName } from "@/lib/metaFile"
 import { CACHE_MAX_SIZE_BYTES } from "@/lib/cacheEviction"
+import { GC_AGE_MS, GC_CONCURRENCY } from "@/lib/cacheGc"
 import logger from "@/lib/logger"
+import { isFileItem } from "@/features/drive/driveSelectors"
 
 export type Metadata = (
 	| {
@@ -35,14 +36,13 @@ export type Metadata = (
 
 // Changing the storage index/persistence format requires bumping FILE_CACHE_VERSION in storageRoots.ts.
 
-const DEFAULT_GC_AGE_MS = 24 * 60 * 60 * 1000
-const GC_DEBOUNCE_MS = 30 * 1000
-// TC-13: bound gc's two fan-out passes so a large cache (the ~250MB preview cache can hold hundreds
-// of small files) doesn't launch O(N) concurrent native FS ops + JSON parses on the single Hermes JS
-// thread — worst during the synchronous app-background sweep. The per-key mutexes are for correctness
-// (don't delete an entry a concurrent get() is writing), NOT throttling, so a separate gc cap is needed.
-const GC_CONCURRENCY = 8
 export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
+
+// Empty or expired. A sidecar without a numeric cachedAt counts as stale: `now >= NaN` is false, so
+// it would survive forever and its NaN would poison the size-cap eviction sort.
+function isStaleSidecar(metadata: Metadata, now: number, ttlMs: number): boolean {
+	return Object.keys(metadata).length === 0 || typeof metadata.cachedAt !== "number" || now >= metadata.cachedAt + ttlMs
+}
 
 /**
  * Whether a stored metadata sidecar still identifies the same cached bytes as `item`.
@@ -58,7 +58,7 @@ export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
  */
 function metadataMatchesItem(metadata: Metadata, item: CacheItem): boolean {
 	if (item.type === "drive") {
-		if (item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+		if (!isFileItem(item.data)) {
 			return false
 		}
 
@@ -84,69 +84,9 @@ function metadataMatchesItem(metadata: Metadata, item: CacheItem): boolean {
 	return metadata.data.url === item.data.url && metadata.data.name === item.data.name
 }
 
-export class FileCache {
-	private readonly mutexes = new Map<string, Semaphore>()
-	private readonly clearBarrier = new ClearBarrier()
-	private directoryEnsured = false
-
-	private ensureDirectory(): void {
-		if (this.directoryEnsured) {
-			return
-		}
-
-		if (!PARENT_DIRECTORY.exists) {
-			PARENT_DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
-
-		this.directoryEnsured = true
-	}
-
-	// Debounced gc after fresh downloads + immediate gc on app-background:
-	// reclamation runs where growth happens instead of competing with startup.
-	// Log-only on failure — gc hygiene isn't user-actionable.
-	private readonly scheduleGc = debounce(
-		() => {
-			this.gc().catch(err => {
-				logger.warn("fileCache", "gc failed", { error: err })
-			})
-		},
-		GC_DEBOUNCE_MS,
-		{
-			edges: ["trailing"]
-		}
-	)
-
+export class FileCache extends DiskCache {
 	public constructor() {
-		this.ensureDirectory()
-
-		AppState.addEventListener("change", nextAppState => {
-			if (nextAppState === "background") {
-				this.scheduleGc.cancel()
-
-				this.gc().catch(err => {
-					logger.warn("fileCache", "gc on background failed", { error: err })
-				})
-			}
-		})
-	}
-
-	private getMutexForKey(key: string): Semaphore {
-		let mutex = this.mutexes.get(key)
-
-		if (!mutex) {
-			mutex = new Semaphore(1)
-
-			this.mutexes.set(key, mutex)
-		}
-
-		return mutex
-	}
-
-	private getExternalItemId(item: Extract<CacheItem, { type: "external" }>): string {
-		return xxHash32(item.data.url).toString(16)
+		super(PARENT_DIRECTORY, "fileCache")
 	}
 
 	public getFiles(
@@ -166,29 +106,25 @@ export class FileCache {
 			throw new Error("Item does not have decrypted metadata")
 		}
 
-		// Resolved once: for an external item this is an xxHash32 of its URL, and it was previously
-		// recomputed at all three sites below.
-		const itemId = item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item)
+		// Resolved once: an external item's id hashes its URL.
+		const itemId = cacheItemId(item)
 		const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(PARENT_DIRECTORY.uri, itemId))
 
-		if ((opts?.ensureParentDirectory ?? true) && !parentDirectory.exists) {
-			parentDirectory.create({
-				idempotent: true,
-				intermediates: true
-			})
+		if (opts?.ensureParentDirectory ?? true) {
+			ensureDirectory(parentDirectory)
 		}
 
 		return {
 			file: new FileSystem.File(
 				FileSystem.Paths.join(
 					parentDirectory.uri,
-					`${itemId}${FileSystem.Paths.extname(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)}`
+					`${itemId}${extnameOf(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)}`
 				)
 			),
 			metadata: new FileSystem.File(
 				FileSystem.Paths.join(
 					parentDirectory.uri,
-					`${itemId}.filenmeta`
+					metaFileName(itemId)
 				)
 			),
 			parentDirectory
@@ -196,7 +132,7 @@ export class FileCache {
 	}
 
 	public async has(item: CacheItem): Promise<boolean> {
-		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+		if (item.type === "drive" && !isFileItem(item.data)) {
 			return false
 		}
 
@@ -240,7 +176,7 @@ export class FileCache {
 				// and re-check the sidecar under the lock first. A concurrent get() holds this same mutex
 				// while writing a FRESH sidecar via atomicWrite (delete-temp-then-move) — without this,
 				// has() could delete the valid sidecar get() just materialized, forcing a needless re-download.
-				const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
+				const mutex = this.getMutexForKey(cacheItemId(item))
 
 				await mutex.acquire()
 
@@ -288,7 +224,7 @@ export class FileCache {
 	}
 
 	public async get({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<FileSystem.File> {
-		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+		if (item.type === "drive" && !isFileItem(item.data)) {
 			throw new Error("Item must be a file or shared file")
 		}
 
@@ -307,7 +243,7 @@ export class FileCache {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
+			const mutex = this.getMutexForKey(cacheItemId(item))
 
 			await mutex.acquire()
 
@@ -336,12 +272,7 @@ export class FileCache {
 				}
 			}
 
-			if (!parentDirectory.exists) {
-				parentDirectory.create({
-					idempotent: true,
-					intermediates: true
-				})
-			}
+			ensureDirectory(parentDirectory)
 
 			try {
 				const { authedSdkClient } = await auth.getSdkClients()
@@ -362,7 +293,7 @@ export class FileCache {
 						idempotent: true
 					})
 				} else {
-					if (item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+					if (!isFileItem(item.data)) {
 						throw new Error("Item must be a file or shared file")
 					}
 
@@ -374,11 +305,7 @@ export class FileCache {
 							pauseSignal: undefined,
 							abortSignal: wrappedSignal
 						}),
-						signal
-							? {
-									signal
-								}
-							: undefined
+						toSignalOpts(signal)
 					)
 				}
 
@@ -390,7 +317,7 @@ export class FileCache {
 				// no longer leave a torn sidecar. No delete-first — that would reopen the
 				// window where a crash leaves the entry sidecar-less.
 				if (item.type === "drive") {
-					if (item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+					if (!isFileItem(item.data)) {
 						throw new Error("Item must be a file or shared file")
 					}
 
@@ -422,10 +349,7 @@ export class FileCache {
 				}
 
 				logger.error("fileCache", "file download/cache failed", {
-					uuid:
-						item.type === "drive"
-							? item.data.data.uuid
-							: this.getExternalItemId(item as Extract<CacheItem, { type: "external" }>),
+					uuid: cacheItemId(item),
 					error: e
 				})
 
@@ -441,7 +365,7 @@ export class FileCache {
 	}
 
 	public async remove(item: CacheItem): Promise<void> {
-		if (item.type === "drive" && item.data.type !== "file" && item.data.type !== "sharedFile" && item.data.type !== "sharedRootFile") {
+		if (item.type === "drive" && !isFileItem(item.data)) {
 			throw new Error("Item must be a file or shared file")
 		}
 
@@ -452,7 +376,7 @@ export class FileCache {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(item.type === "drive" ? item.data.data.uuid : this.getExternalItemId(item))
+			const mutex = this.getMutexForKey(cacheItemId(item))
 
 			await mutex.acquire()
 
@@ -480,29 +404,11 @@ export class FileCache {
 		}
 	}
 
-	public async gc(age?: number): Promise<void> {
-		if (!PARENT_DIRECTORY.exists) {
-			return
-		}
-
-		// TC-14: participate in the ClearBarrier so a concurrent clear() (logout / "clear all disk caches" /
-		// "clear preview cache") waits for this gc pass to drain instead of deleting+recreating
-		// PARENT_DIRECTORY mid-sweep — matching has/get/remove, which already bracket their disk work with
-		// enter()/leave().
-		await this.clearBarrier.enter()
-
-		try {
-			await this.runGc(age)
-		} finally {
-			this.clearBarrier.leave()
-		}
-	}
-
-	private async runGc(age?: number): Promise<void> {
+	protected async runGc(age?: number): Promise<void> {
 		const toDelete: string[] = []
-		const survivors: { key: string; cachedAt: number; size: number }[] = []
+		const survivors: GcSurvivor[] = []
 		const now = Date.now()
-		const ttlMs = age ?? DEFAULT_GC_AGE_MS
+		const ttlMs = age ?? GC_AGE_MS
 		const entries = PARENT_DIRECTORY.list()
 		const gcSemaphore = new Semaphore(GC_CONCURRENCY)
 
@@ -517,7 +423,7 @@ export class FileCache {
 						}
 
 						const uuid = entry.name
-						const metadataFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, `${uuid}.filenmeta`))
+						const metadataFile = new FileSystem.File(FileSystem.Paths.join(entry.uri, metaFileName(uuid)))
 
 						if (!metadataFile.exists) {
 							return { kind: "delete" as const, uuid }
@@ -525,16 +431,7 @@ export class FileCache {
 
 						const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-						// TC-17: a parseable-but-malformed sidecar lacking a numeric cachedAt would make
-						// `now >= NaN` false → it would survive forever AND its NaN cachedAt would poison the
-						// size-cap eviction sort (NaN comparators are unstable). Treat a non-numeric cachedAt
-						// as a corrupt deletion candidate (matches audioCache's parseMetadata cachedAt check).
-						if (
-							!metadata ||
-							Object.keys(metadata).length === 0 ||
-							typeof metadata.cachedAt !== "number" ||
-							now >= metadata.cachedAt + ttlMs
-						) {
+						if (!metadata || isStaleSidecar(metadata, now, ttlMs)) {
 							return { kind: "delete" as const, uuid }
 						}
 
@@ -568,21 +465,7 @@ export class FileCache {
 			})
 		)
 
-		// Soft size-cap eviction over the survivors: drop the oldest entries until the cache
-		// is within CACHE_MAX_SIZE_BYTES, never the newest (the file just cached / in use). A
-		// single entry larger than the cap is kept and ages out via the TTL above. cachedAt is
-		// captured so Phase 2 skips any entry a concurrent get() refreshed since planning.
-		const capCachedAt = new Map<string, number>()
-
-		for (const survivor of survivors) {
-			capCachedAt.set(survivor.key, survivor.cachedAt)
-		}
-
-		const capEvict = planSizeCapEviction(
-			survivors.map(survivor => ({ id: survivor.key, size: survivor.size, timestamp: survivor.cachedAt })),
-			CACHE_MAX_SIZE_BYTES,
-			{ protectNewest: true }
-		)
+		const { evict: capEvict, plannedCachedAt: capCachedAt } = planGcCapEviction(survivors, CACHE_MAX_SIZE_BYTES)
 
 		await Promise.all(
 			[...toDelete, ...capEvict].map(async uuid => {
@@ -613,19 +496,14 @@ export class FileCache {
 					// for this uuid while we were queued behind it — Phase 1 ran without the mutex.
 					// TTL/corrupt entries delete if still stale; a size-cap eviction only deletes if
 					// its cachedAt is unchanged (a refresh makes it the newest → must be kept).
-					const metadataFile = new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, `${uuid}.filenmeta`))
+					const metadataFile = new FileSystem.File(FileSystem.Paths.join(parentDirectory.uri, metaFileName(uuid)))
 					const plannedCapCachedAt = capCachedAt.get(uuid)
 
 					if (metadataFile.exists) {
 						const recheck = await run(async () => {
 							const metadata = deserialize(await metadataFile.text()) as Metadata | null
 
-							if (
-								!metadata ||
-								Object.keys(metadata).length === 0 ||
-								typeof metadata.cachedAt !== "number" ||
-								now >= metadata.cachedAt + ttlMs
-							) {
+							if (!metadata || isStaleSidecar(metadata, now, ttlMs)) {
 								return true
 							}
 
@@ -641,25 +519,6 @@ export class FileCache {
 				})
 			})
 		)
-	}
-
-	public async clear(): Promise<void> {
-		await this.clearBarrier.runExclusive(() => {
-			if (PARENT_DIRECTORY.exists) {
-				PARENT_DIRECTORY.delete()
-			}
-
-			PARENT_DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
-
-			this.directoryEnsured = true
-		})
-	}
-
-	public size(): number {
-		return sumLocalDirectoryFileBytes(PARENT_DIRECTORY)
 	}
 }
 

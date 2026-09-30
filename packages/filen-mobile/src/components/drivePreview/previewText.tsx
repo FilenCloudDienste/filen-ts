@@ -21,7 +21,7 @@ import alerts from "@/lib/alerts"
 import { useRecyclingState } from "@shopify/flash-list"
 import { AnyDirWithContext_Tags } from "@filen/sdk-rs"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
-import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
+import { galleryItemRenderName, galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
 import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
 import PreviewLoadFailedNotice from "@/components/drivePreview/previewLoadFailedNotice"
@@ -326,24 +326,7 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	const isOnline = useIsOnline()
 	const previewType = getPreviewType(galleryItemRenderName(item))
 
-	const query = useFileUriQuery(
-		item.type === "external"
-			? {
-					type: "external",
-					data: {
-						url: item.data.url,
-						name: item.data.name
-					}
-				}
-			: {
-					type: "drive",
-					data: {
-						uuid: item.data.data.uuid,
-						// By-value so a cross-directory search hit resolves its bytes.
-						item: item.data
-					}
-				}
-	)
+	const query = useFileUriQuery(galleryItemFileSource(item))
 
 	// No magic: text has no signature. Content that turns out not to be text is caught after decoding,
 	// by the editor's binary-content gate.

@@ -262,14 +262,6 @@ vi.mock("@/features/drive/driveSearch", () => ({
 	}
 }))
 
-vi.mock("@/features/drive/drive", () => ({
-	default: {
-		resetCachedRootUuid: vi.fn(() => {
-			callLog.push("drive.resetCachedRootUuid")
-		})
-	}
-}))
-
 vi.mock("@/features/drive/socketCreateBatcher", () => ({
 	default: {
 		discard: vi.fn(() => {
@@ -515,12 +507,6 @@ describe("auth.logout", () => {
 
 		expect(cacheClearIdx).toBeGreaterThanOrEqual(0)
 		expect(sqliteClearIdx).toBeGreaterThan(cacheClearIdx)
-
-		// The session-cached drive root uuid is reset in Phase 5, right after the in-memory cache wipe,
-		// so it can't leak into the next account's session.
-		const driveResetIdx = callLog.indexOf("drive.resetCachedRootUuid")
-
-		expect(driveResetIdx).toBeGreaterThan(cacheClearIdx)
 
 		// The account-scoped camera-upload ledger is latched in Phase 5, alongside the in-memory cache
 		// wipe, so a worker-tail write can't re-insert into the next account's shield.

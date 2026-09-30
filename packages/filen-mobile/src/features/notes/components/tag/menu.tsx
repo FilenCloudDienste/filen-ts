@@ -6,13 +6,13 @@ import useNotesStore from "@/features/notes/store/useNotes.store"
 import { useShallow } from "zustand/shallow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import notes from "@/features/notes/notes"
-import prompts from "@/lib/prompts"
-import { run } from "@filen/shared"
+import { inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import { router } from "@/lib/router"
 import { Paths } from "expo-file-system"
 import { useTranslation } from "react-i18next"
 import logger from "@/lib/logger"
+import { deleteTagAction } from "@/features/notes/components/notesActions"
 
 export type TagMenuOrigin = "tags"
 
@@ -38,29 +38,18 @@ const Menu = ({
 	}
 
 	const createNote = async (type: NoteType) => {
-		const result = await run(async () => {
-			return await prompts.input({
+		const title = await inputPrompt(
+			{
 				title: t("create_note"),
 				message: t("enter_note_name"),
 				cancelText: t("cancel"),
 				okText: t("create")
-			})
-		})
+			},
+			{ tag: "notes", message: "create note in tag prompt failed", level: "error", context: { tagUuid: tag.uuid } },
+			{ trim: true }
+		)
 
-		if (!result.success) {
-			logger.error("notes", "create note in tag prompt failed", { error: result.error, tagUuid: tag.uuid })
-			alerts.error(result.error)
-
-			return
-		}
-
-		if (result.data.cancelled) {
-			return
-		}
-
-		const title = result.data.value.trim()
-
-		if (title.length === 0) {
+		if (title === null) {
 			return
 		}
 
@@ -89,49 +78,17 @@ const Menu = ({
 
 		const buttons: MenuButton[] = []
 
+		const deleteButton: MenuButton = {
+			id: "delete",
+			title: t("delete"),
+			icon: "delete",
+			destructive: true,
+			requiresOnline: true,
+			onPress: deleteTagAction({ t, tag })
+		}
+
 		if (tag.undecryptable) {
-			buttons.push({
-				id: "delete",
-				title: t("delete"),
-				icon: "delete",
-				destructive: true,
-				requiresOnline: true,
-				onPress: async () => {
-					const promptResult = await run(async () => {
-						return await prompts.alert({
-							title: t("delete_tag"),
-							message: t("are_you_sure_delete_tag"),
-							cancelText: t("cancel"),
-							okText: t("delete"),
-							destructive: true
-						})
-					})
-
-					if (!promptResult.success) {
-						logger.error("notes", "delete tag confirm prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
-						alerts.error(promptResult.error)
-
-						return
-					}
-
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					const result = await runWithLoading(async () => {
-						await notes.deleteTag({
-							tag
-						})
-					})
-
-					if (!result.success) {
-						logger.error("notes", "delete tag failed", { error: result.error, tagUuid: tag.uuid })
-						alerts.error(result.error)
-
-						return
-					}
-				}
-			})
+			buttons.push(deleteButton)
 
 			return buttons
 		}
@@ -236,30 +193,19 @@ const Menu = ({
 			icon: "edit",
 			requiresOnline: true,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
+				const newName = await inputPrompt(
+					{
 						title: t("rename_tag"),
 						message: t("enter_new_name"),
 						defaultValue: tag.name,
 						cancelText: t("cancel"),
 						okText: t("rename")
-					})
-				})
+					},
+					{ tag: "notes", message: "rename tag prompt failed", level: "error", context: { tagUuid: tag.uuid } },
+					{ trim: true }
+				)
 
-				if (!promptResult.success) {
-					logger.error("notes", "rename tag prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const newName = promptResult.data.value.trim()
-
-				if (newName.length === 0) {
+				if (newName === null) {
 					return
 				}
 
@@ -279,48 +225,7 @@ const Menu = ({
 			}
 		})
 
-		buttons.push({
-			id: "delete",
-			title: t("delete"),
-			icon: "delete",
-			destructive: true,
-			requiresOnline: true,
-			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
-						title: t("delete_tag"),
-						message: t("are_you_sure_delete_tag"),
-						cancelText: t("cancel"),
-						okText: t("delete"),
-						destructive: true
-					})
-				})
-
-				if (!promptResult.success) {
-					logger.error("notes", "delete tag confirm prompt failed", { error: promptResult.error, tagUuid: tag.uuid })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await notes.deleteTag({
-						tag
-					})
-				})
-
-				if (!result.success) {
-					logger.error("notes", "delete tag failed", { error: result.error, tagUuid: tag.uuid })
-					alerts.error(result.error)
-
-					return
-				}
-			}
-		})
+		buttons.push(deleteButton)
 
 		return buttons
 	})()

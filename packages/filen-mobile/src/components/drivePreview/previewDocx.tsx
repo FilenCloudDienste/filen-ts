@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 
 const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
@@ -22,24 +23,7 @@ const PreviewDocx = ({ item }: { item: GalleryItemTagged }) => {
 	const insets = useSafeAreaInsets()
 	const isOnline = useIsOnline()
 
-	const query = useFileUriQuery(
-		item.type === "external"
-			? {
-					type: "external",
-					data: {
-						url: item.data.url,
-						name: item.data.name
-					}
-				}
-			: {
-					type: "drive",
-					data: {
-						uuid: item.data.data.uuid,
-						// By-value so a cross-directory search hit resolves its bytes.
-						item: item.data
-					}
-				}
-	)
+	const query = useFileUriQuery(galleryItemFileSource(item))
 
 	// A .docx is a zip, so the header check is on the archive signature rather than on anything
 	// Office-specific — enough to tell a renamed file from a document before the renderer sees it.

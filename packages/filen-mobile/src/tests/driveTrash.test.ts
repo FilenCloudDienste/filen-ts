@@ -135,9 +135,9 @@ beforeEach(() => {
 	})
 
 	// The SDK returns the modified file; the unwrap mock turns it into a DriveItem.
-	// `region` present so restore() takes the file branch.
+	// `region` present (as on every SDK File) so the file branch is taken.
 	mockRestoreFile.mockResolvedValue({ uuid: "file-1", region: "us" })
-	mockRestoreFileVersion.mockResolvedValue({ uuid: "file-1" })
+	mockRestoreFileVersion.mockResolvedValue({ uuid: "file-1", region: "us" })
 	mockDeleteFileVersion.mockResolvedValue(undefined)
 	mockDeleteFilePermanently.mockResolvedValue(undefined)
 	mockDeleteDirPermanently.mockResolvedValue(undefined)
@@ -171,7 +171,7 @@ describe("restoreFileVersion — versions list cache update (bug #11)", () => {
 	// lands on an unobserved key and the restored version stays on screen until a manual refetch.
 	it("keys the versions-cache update on the PRE-rotation uuid, not the rotated file uuid", async () => {
 		// SDK returns the file with a rotated uuid (equals the restored version's uuid).
-		mockRestoreFileVersion.mockResolvedValueOnce({ uuid: "ver-old" })
+		mockRestoreFileVersion.mockResolvedValueOnce({ uuid: "ver-old", region: "us" })
 
 		await restoreFileVersion({ item: fileItem, version: makeVersion("ver-old") })
 

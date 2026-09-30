@@ -14,6 +14,10 @@ const { mockGetSdkClients, mockNotesWithContentQueryUpdate, mockNotesTagsQueryUp
 // Module mocks
 // ---------------------------------------------------------------------------
 
+vi.mock("@/lib/signals", () => ({
+	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
+}))
+
 vi.mock("uniffi-bindgen-react-native", async () => await import("@/tests/mocks/uniffiBindgenReactNative"))
 
 vi.mock("react-native", async () => await import("@/tests/mocks/reactNative"))

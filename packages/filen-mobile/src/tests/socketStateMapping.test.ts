@@ -83,8 +83,7 @@ vi.mock("@/features/contacts/socketHandlers", () => ({
 
 vi.mock("@/lib/auth", () => ({
 	default: { logout: vi.fn().mockResolvedValue(undefined) },
-	useSdkClients: vi.fn(),
-	useStringifiedClient: vi.fn()
+	useSdkClients: vi.fn()
 }))
 
 // ---------------------------------------------------------------------------

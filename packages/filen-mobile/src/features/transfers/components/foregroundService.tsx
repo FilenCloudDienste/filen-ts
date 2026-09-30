@@ -11,6 +11,7 @@ import { useSecureStore } from "@/lib/secureStore"
 import { copyingItemCount } from "@/features/copy/copyRowText"
 import useAppStore from "@/stores/useApp.store"
 import { router } from "@/lib/router"
+import { isUnlockedForeground, onUnlockedForegroundChange } from "@/lib/unlockedForeground"
 
 function snapshotOf(state: TransfersStore): TransferProgressSnapshot {
 	return {
@@ -34,7 +35,7 @@ function ForegroundService() {
 		}
 
 		const openIfReady = () => {
-			if (useAppStore.getState().biometricUnlocked !== true || AppState.currentState !== "active") {
+			if (!isUnlockedForeground()) {
 				return
 			}
 
@@ -48,23 +49,13 @@ function ForegroundService() {
 		}
 
 		const unsubscribeRequest = foregroundService.onOpenTransfersRequest(openIfReady)
-		const unsubscribeApp = useAppStore.subscribe((state, prev) => {
-			if (state.biometricUnlocked !== prev.biometricUnlocked) {
-				openIfReady()
-			}
-		})
-		const appStateSubscription = AppState.addEventListener("change", nextState => {
-			if (nextState === "active") {
-				openIfReady()
-			}
-		})
+		const unsubscribeChange = onUnlockedForegroundChange(openIfReady)
 
 		openIfReady()
 
 		return () => {
 			unsubscribeRequest()
-			unsubscribeApp()
-			appStateSubscription.remove()
+			unsubscribeChange()
 		}
 	}, [])
 

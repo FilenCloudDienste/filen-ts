@@ -34,6 +34,11 @@ const h = vi.hoisted(() => {
 			cacheDriveItemReference(item: Item) {
 				this.uuidToAnyDriveItem.set(item.data.uuid, item)
 			},
+			getNormalDir(uuid: string) {
+				const dir = this.directoryUuidToAnyNormalDir.get(uuid)
+
+				return dir && dir.tag === "Dir" ? dir.inner[0] : undefined
+			},
 			cacheNewFile(file: Item["data"], item: Item) {
 				this.uuidToAnyDriveItem.set(file.uuid, item)
 				this.fileUuidToNormalFile.set(file.uuid, file)

@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { randomUUID } from "expo-crypto"
 import logger from "@/lib/logger"
+import { ensureDirectory } from "@/lib/fsUtils"
 
 // Filen-owned temporary files live under FileSystem.Paths.cache/filen-tmp/ so the
 // sandbox-cache clear action (which wipes other-libs' detritus from Paths.cache) can
@@ -10,19 +11,9 @@ import logger from "@/lib/logger"
 export const TMP_DIR_NAME = "filen-tmp"
 
 const directory = new FileSystem.Directory(FileSystem.Paths.join(FileSystem.Paths.cache, TMP_DIR_NAME))
-let ensured = false
 
 function ensure(): FileSystem.Directory {
-	if (!ensured || !directory.exists) {
-		if (!directory.exists) {
-			directory.create({
-				idempotent: true,
-				intermediates: true
-			})
-		}
-
-		ensured = true
-	}
+	ensureDirectory(directory)
 
 	return directory
 }
@@ -38,11 +29,45 @@ export function newTmpFile(name?: string): FileSystem.File {
 	return new FileSystem.File(FileSystem.Paths.join(ensure().uri, name ?? randomUUID()))
 }
 
+// Writes `data` to filen-tmp/`name` (replacing a leftover of the same name) and pairs the file with
+// the cleanup shareTmpFile runs after the share sheet closes.
+export function writeTmpFile(name: string, data: string | Uint8Array): { file: FileSystem.File; cleanup: () => void } {
+	const file = newTmpFile(name)
+
+	if (file.exists) {
+		file.delete()
+	}
+
+	file.write(data)
+
+	return {
+		file,
+		cleanup: () => {
+			if (file.exists) {
+				file.delete()
+			}
+		}
+	}
+}
+
 // Returns a fresh FileSystem.Directory handle inside the filen-tmp directory. The
 // directory is NOT created on disk — the caller is responsible for creating it
 // before writing children. Pass a custom name; defaults to a random uuid.
 export function newTmpDir(name?: string): FileSystem.Directory {
 	return new FileSystem.Directory(FileSystem.Paths.join(ensure().uri, name ?? randomUUID()))
+}
+
+// Returns a File handle named `name` inside a fresh, created uuid directory under filen-tmp,
+// ready to be written/downloaded to. The caller owns deleting the parent directory.
+export function newTmpStagedFile(name: string): FileSystem.File {
+	const dir = newTmpDir()
+
+	dir.create({
+		intermediates: true,
+		idempotent: true
+	})
+
+	return new FileSystem.File(FileSystem.Paths.join(dir.uri, name))
 }
 
 // Wipes every entry under filen-tmp/. Safe to call only when no transfers/uploads/
@@ -60,6 +85,5 @@ export function sweepTmpDir(): void {
 		logger.warn("tmp", "sweepTmpDir delete failed", { error: e })
 	}
 
-	ensured = false
-	ensure()
+	ensureDirectory(directory)
 }

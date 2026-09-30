@@ -1,12 +1,11 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import { Fragment } from "react"
-import { useNavigation } from "expo-router"
-import { run, THEME_SETTINGS, type ThemeSetting } from "@filen/shared"
+import useDismissStack from "@/hooks/useDismissStack"
+import { THEME_SETTINGS, type ThemeSetting } from "@filen/shared"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import prompts from "@/lib/prompts"
-import alerts from "@/lib/alerts"
+import { confirmPrompt } from "@/lib/promptFlow"
 import { useDriveSortPreferences, DEFAULT_SORT_PREFERENCES } from "@/features/drive/driveSortPreference"
 import { useDriveViewModePreferences, DEFAULT_VIEW_MODE_PREFERENCES } from "@/features/drive/driveViewModePreference"
 import { useHideHiddenItems } from "@/features/drive/driveHiddenItems"
@@ -17,10 +16,9 @@ import { useLanguage, LANGUAGE_LABELS } from "@/lib/language"
 import { SUPPORTED_LANGUAGES } from "@/locales/languages"
 import { changeAppLanguage, hasTranslations } from "@/lib/i18n"
 import { useThemeSetting, changeAppTheme } from "@/lib/theme"
-import logger from "@/lib/logger"
 
 function Appearance() {
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const [sortPrefs, setSortPrefs] = useDriveSortPreferences()
 	const [viewModePrefs, setViewModePrefs] = useDriveViewModePreferences()
 	const [hideHiddenItems, setHideHiddenItems] = useHideHiddenItems()
@@ -131,24 +129,18 @@ function Appearance() {
 			title: t("reset_sort"),
 			subTitle: t("reset_sort_description"),
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("reset_sort"),
 						message: t("reset_sort_confirm"),
 						okText: t("reset"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "reset sort confirmation prompt failed" }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "reset sort confirmation prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
+				if (!confirmed) {
 					return
 				}
 
@@ -177,24 +169,18 @@ function Appearance() {
 			title: t("reset_view"),
 			subTitle: t("reset_view_description"),
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.alert({
+				const confirmed = await confirmPrompt(
+					{
 						title: t("reset_view"),
 						message: t("reset_view_confirm"),
 						okText: t("reset"),
 						cancelText: t("cancel"),
 						destructive: true
-					})
-				})
+					},
+					{ tag: "settings", message: "reset view confirmation prompt failed" }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "reset view confirmation prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
+				if (!confirmed) {
 					return
 				}
 
@@ -224,14 +210,9 @@ function Appearance() {
 			<SettingsHeader
 				title={t("appearance")}
 				icon="close"
-				onDismiss={() => {
-					navigation.getParent()?.goBack()
-				}}
+				onDismiss={dismiss}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<SettingsScrollView>
 					<Group
 						className="bg-background-tertiary"
@@ -246,7 +227,7 @@ function Appearance() {
 						buttons={viewButtons}
 					/>
 				</SettingsScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

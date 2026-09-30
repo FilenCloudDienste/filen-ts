@@ -61,7 +61,7 @@ vi.mock("@/lib/cache", () => ({
 }))
 
 vi.mock("@/features/cameraUpload/cameraUpload", () => ({
-	useCameraUpload: () => ({
+	useCameraUploadConfig: () => ({
 		config: mocks.cameraUploadConfig
 	})
 }))

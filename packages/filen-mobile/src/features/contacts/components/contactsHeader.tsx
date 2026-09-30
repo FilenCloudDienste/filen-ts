@@ -7,8 +7,8 @@ import contacts from "@/features/contacts/contacts"
 import { addContactFlow } from "@/features/contacts/contactsActions"
 import useContactsStore, { type ContactListItem } from "@/features/contacts/store/useContacts.store"
 import { runBulk } from "@/lib/bulkOps"
-import { useNavigation } from "expo-router"
-import { router } from "@/lib/router"
+import useDismissStack from "@/hooks/useDismissStack"
+import { goBackIfPossible } from "@/lib/router"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import events from "@/lib/events"
 import { useShallow } from "zustand/shallow"
@@ -19,9 +19,8 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectOptions = useSelectOptions()
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const selectedContacts = useContactsStore(
 		useShallow(state => state.selectedContacts.filter(c => c.type === "contact").map(c => c.data as TContact))
 	)
@@ -55,7 +54,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 								cancelled: false
 							})
 
-							navigation.getParent()?.goBack()
+							dismiss()
 						}
 					}
 				}
@@ -253,20 +252,8 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 
 		if (menuButtons.length > 0) {
 			items.push({
-				type: "menu",
-				props: {
-					type: "dropdown",
-					hitSlop: 20,
-					buttons: menuButtons
-				},
-				triggerProps: {
-					hitSlop: 20
-				},
-				icon: {
-					name: "ellipsis-horizontal",
-					size: 24,
-					color: textForeground.color
-				}
+				type: "ellipsisMenu",
+				buttons: menuButtons
 			})
 		}
 
@@ -277,17 +264,8 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 		if (inBulkMode) {
 			return [
 				{
-					type: "button",
-					icon: {
-						name: "close-outline",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							useContactsStore.getState().clearSelectedContacts()
-						}
-					}
+					type: "clearSelection",
+					onPress: () => useContactsStore.getState().clearSelectedContacts()
 				}
 			] satisfies HeaderItem[]
 		}
@@ -301,13 +279,7 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 					size: 20
 				},
 				props: {
-					onPress: () => {
-						if (!router.canGoBack()) {
-							return
-						}
-
-						router.back()
-					}
+					onPress: goBackIfPossible
 				}
 			}
 		] satisfies HeaderItem[]
@@ -326,23 +298,9 @@ export const Header = ({ setSearchQuery }: { setSearchQuery: React.Dispatch<Reac
 			})}
 			shadowVisible={false}
 			rightItems={headerRightItems}
-			searchBarOptions={{
-				placement: "integratedButton",
+			search={{
 				placeholder: t("search_contacts"),
-				onChangeText: e => setSearchQuery(e.nativeEvent.text),
-				onCancelButtonPress: () => setSearchQuery(""),
-				onClose: () => setSearchQuery(""),
-				onOpen: () => setSearchQuery(""),
-				allowToolbarIntegration: false,
-				headerIconColor: textForeground.color,
-				textColor: textForeground.color,
-				barTintColor: "transparent",
-				tintColor: textForeground.color,
-				hintTextColor: textMutedForeground.color,
-				shouldShowHintSearchIcon: true,
-				hideNavigationBar: false,
-				hideWhenScrolling: false,
-				inputType: "text"
+				onChangeText: setSearchQuery
 			}}
 		/>
 	)

@@ -1,8 +1,7 @@
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
-import { run } from "@filen/shared"
+import { confirmPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
-import { router } from "@/lib/router"
+import { goBackIfPossible } from "@/lib/router"
 import { t } from "@/lib/i18n"
 import logger from "@/lib/logger"
 import useAppStore from "@/stores/useApp.store"
@@ -11,7 +10,7 @@ import useAppStore from "@/stores/useApp.store"
 // prompt → guard cancel → runWithLoading(action) → guard failure → optionally pop back on
 // success. Pop-back is either a `dismiss` predicate (drive checks the item type) or a
 // `dismissPathnamePrefix` matched against the current route (notes/chats). The helper adds the
-// `router.canGoBack()` guard, so neither needs to.
+// can-go-back guard, so neither needs to.
 export function confirmedAction({
 	promptTitle,
 	promptMessage,
@@ -29,30 +28,24 @@ export function confirmedAction({
 	promptDestructive?: boolean
 	// Return value is awaited then discarded (matches the original `await feature.X(...)`).
 	action: () => Promise<unknown>
-	// Whether to pop back on success. `router.canGoBack()` is checked by the helper.
+	// Whether to pop back on success. The helper skips the pop when there is no history.
 	dismiss?: () => boolean
 	// Pop back on success when the current pathname starts with this. Takes precedence over `dismiss`.
 	dismissPathnamePrefix?: string
 }): () => Promise<void> {
 	return async () => {
-		const promptResult = await run(async () => {
-			return await prompts.alert({
+		const confirmed = await confirmPrompt(
+			{
 				title: promptTitle,
 				message: promptMessage,
 				cancelText: t("cancel"),
 				okText: promptOkText,
 				destructive: promptDestructive
-			})
-		})
+			},
+			{ tag: "confirmedAction", message: "prompt threw unexpectedly" }
+		)
 
-		if (!promptResult.success) {
-			logger.warn("confirmedAction", "prompt threw unexpectedly", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
-			return
-		}
-
-		if (promptResult.data.cancelled) {
+		if (!confirmed) {
 			return
 		}
 
@@ -69,8 +62,8 @@ export function confirmedAction({
 
 		const shouldDismiss = dismissPathnamePrefix ? useAppStore.getState().pathname.startsWith(dismissPathnamePrefix) : dismiss?.()
 
-		if (shouldDismiss && router.canGoBack()) {
-			router.back()
+		if (shouldDismiss) {
+			goBackIfPossible()
 		}
 	}
 }

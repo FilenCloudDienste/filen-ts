@@ -21,7 +21,6 @@ vi.mock("expo-file-system", () => ({
 	File: vi.fn(),
 	Paths: { join: vi.fn() }
 }))
-vi.mock("expo-media-library/legacy", () => ({ saveToLibraryAsync: vi.fn() }))
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }))
 
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
@@ -52,11 +51,15 @@ vi.mock("@/features/drive/drive", () => ({
 }))
 
 vi.mock("@/features/drive/store/useDrive.store", () => ({
-	default: { getState: vi.fn(() => ({ clearSelectedItems: mockClearSelectedItems })) }
+	clearDriveSelection: () => mockClearSelectedItems()
 }))
 
 vi.mock("@/features/drive/driveSelectors", () => ({}))
-vi.mock("@/features/drive/driveDownload", () => ({ downloadDriveItemToDevice: vi.fn() }))
+vi.mock("@/features/drive/driveDownload", () => ({
+	downloadDriveItemToDevice: vi.fn(),
+	ensureSaveToPhotosPermission: vi.fn(),
+	saveDriveItemToPhotos: vi.fn()
+}))
 
 vi.mock("@/features/transfers/transfers", () => ({
 	default: { download: vi.fn() }
@@ -70,10 +73,6 @@ vi.mock("@/features/offline/offline", () => ({
 		storeDirectory: vi.fn(),
 		removeItem: vi.fn()
 	}
-}))
-
-vi.mock("@/hooks/useMediaPermissions", () => ({
-	hasAllNeededMediaPermissions: vi.fn()
 }))
 
 vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }))

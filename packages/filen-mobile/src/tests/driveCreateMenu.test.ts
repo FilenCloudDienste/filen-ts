@@ -6,10 +6,9 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-// This suite exercises only getDriveParent / canShowDriveCreateMenu, neither of which touches the
-// hidden-items preference — but driveCreateMenu imports components/hiddenNameNotice, which reaches
-// driveHiddenItems -> secureStore -> expo-secure-store. The stub exists purely to keep the module
-// graph loadable. isHiddenName now comes from @filen/shared (see filenShared mock).
+// driveCreateMenu imports components/hiddenNameNotice, which reaches driveHiddenItems -> secureStore
+// -> expo-secure-store; the stub keeps the module graph loadable with the preference off.
+// isHiddenName comes from @filen/shared (see filenShared mock).
 vi.mock("@/features/drive/driveHiddenItems", () => ({
 	readHideHiddenItems: async () => false
 }))
@@ -61,7 +60,15 @@ vi.mock("@/lib/prompts", () => ({
 	}
 }))
 
-vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn(fn => fn()) }))
+vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
+	runWithLoading: async (fn: () => Promise<unknown>) => {
+		try {
+			return { success: true, data: await fn() }
+		} catch (error) {
+			return { success: false, error }
+		}
+	}
+}))
 
 vi.mock("@/features/drive/drive", () => ({
 	default: {
@@ -69,11 +76,19 @@ vi.mock("@/features/drive/drive", () => ({
 	}
 }))
 
-import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
+import {
+	getDriveParent,
+	canShowDriveCreateMenu,
+	buildDriveCreateMenuButtons,
+	promptAndCreateDirectory
+} from "@/features/drive/components/driveCreateMenu"
 import type { UseDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import type { DriveItem } from "@/types"
 import type { TFunction } from "i18next"
 import cache from "@/lib/cache"
+import prompts from "@/lib/prompts"
+import alerts from "@/lib/alerts"
+import drive from "@/features/drive/drive"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import type { AnyNormalDir } from "@filen/sdk-rs"
 
@@ -87,6 +102,7 @@ const DIR_UUID = "22222222-2222-4222-8222-222222222222"
 const drivePathAt = (uuid: string | null): DrivePath => ({ type: "drive", uuid })
 
 beforeEach(() => {
+	vi.clearAllMocks()
 	cache.rootUuid = null
 	cache.directoryUuidToAnyNormalDir.clear()
 })
@@ -216,5 +232,44 @@ describe("buildDriveCreateMenuButtons clipboard entries", () => {
 
 		expect(ids(favoritesPath, { mode: "cut", items: files }).find(([id]) => id === "paste")).toEqual(["paste", true])
 		expect(ids(favoritesPath, { mode: "copy", items: files }).find(([id]) => id === "paste")).toEqual(["paste", false])
+	})
+})
+
+// ---------------------------------------------------------------------------
+// promptAndCreateDirectory — shared by the create menu and the drive-select toolbar
+// ---------------------------------------------------------------------------
+
+describe("promptAndCreateDirectory", () => {
+	const t = ((key: string) => key) as unknown as TFunction
+	const parent = { tag: "Root", inner: [{ uuid: ROOT_UUID }] } as unknown as AnyNormalDir
+
+	it("creates the trimmed name under the parent", async () => {
+		vi.mocked(prompts.input).mockResolvedValueOnce({ cancelled: false, value: "  Docs  " } as never)
+
+		await promptAndCreateDirectory({ parent, t })
+
+		expect(drive.createDirectory).toHaveBeenCalledWith({ name: "Docs", parent })
+		expect(alerts.error).not.toHaveBeenCalled()
+	})
+
+	it("does nothing when the prompt is cancelled or the name is blank", async () => {
+		vi.mocked(prompts.input).mockResolvedValueOnce({ cancelled: true } as never)
+		vi.mocked(prompts.input).mockResolvedValueOnce({ cancelled: false, value: "   " } as never)
+
+		await promptAndCreateDirectory({ parent, t })
+		await promptAndCreateDirectory({ parent, t })
+
+		expect(drive.createDirectory).not.toHaveBeenCalled()
+	})
+
+	it("surfaces a failed create", async () => {
+		const error = new Error("boom")
+
+		vi.mocked(prompts.input).mockResolvedValueOnce({ cancelled: false, value: "Docs" } as never)
+		vi.mocked(drive.createDirectory).mockRejectedValueOnce(error)
+
+		await promptAndCreateDirectory({ parent, t })
+
+		expect(alerts.error).toHaveBeenCalledWith(error)
 	})
 })

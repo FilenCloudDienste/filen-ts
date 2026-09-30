@@ -1,11 +1,9 @@
-import { onlineManager } from "@tanstack/react-query"
-import { run, cn } from "@filen/shared"
-import { Fragment, useState, useCallback, useEffect, useRef } from "react"
-import { Platform } from "react-native"
+import { run } from "@filen/shared"
+import { Fragment, useState, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
-import ListEmpty from "@/components/ui/listEmpty"
+import ListEmpty, { NoResultsEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import alerts from "@/lib/alerts"
 import { addContactFlow } from "@/features/contacts/contactsActions"
@@ -17,12 +15,12 @@ import Contact from "@/features/contacts/components/contactRow"
 import { ListRowSectionHeader } from "@/components/ui/listRow"
 import { useSelectOptions } from "@/features/contacts/contactsSelect"
 import useContactSections from "@/features/contacts/hooks/useContactSections"
-import useIsOnline from "@/hooks/useIsOnline"
+import useOnUnmountWithLatest from "@/hooks/useOnUnmountWithLatest"
+import { TAB_LIST_CONTENT_CLASS } from "@/constants"
 import logger from "@/lib/logger"
 
 const Contacts = () => {
 	const { t } = useTranslation()
-	const isOnline = useIsOnline()
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const selectOptions = useSelectOptions()
 	const { items, contactsQuery, contactRequestsQuery } = useContactSections({
@@ -30,37 +28,21 @@ const Contacts = () => {
 		selectOptions
 	})
 
-	// Hold the latest selectOptions in a ref so the cancel effect below runs on unmount
-	// ONLY. Depending on selectOptions directly re-ran the cleanup on every re-render
-	// (useSelectOptions deserializes a fresh object per render), emitting a spurious
-	// `cancelled: true` milliseconds after the picker opened — selectContacts() resolved
-	// as cancelled and dropped its listener, so the later confirm emitted into the void
-	// (the silent share-with-Filen-user bug). Pattern mirrors playlists.tsx.
-	const selectOptionsRef = useRef(selectOptions)
-
-	useEffect(() => {
-		selectOptionsRef.current = selectOptions
-	})
-
-	useEffect(() => {
-		// When in picker mode, emit a cancellation on unmount so selectContacts()
-		// resolves and removes its contactsSelect listener. Without this, dismissing
-		// the modal via OS back gesture / header close (which emit no event) leaves
-		// the awaiting promise pending forever and leaks the listener. A confirmed
-		// selection emits its own event + removes the listener before this fires.
-		return () => {
-			const currentSelectOptions = selectOptionsRef.current
-
-			if (!currentSelectOptions) {
-				return
-			}
-
-			events.emit("contactsSelect", {
-				id: currentSelectOptions.id,
-				cancelled: true
-			})
+	// When in picker mode, emit a cancellation on unmount so selectContacts()
+	// resolves and removes its contactsSelect listener. Without this, dismissing
+	// the modal via OS back gesture / header close (which emit no event) leaves
+	// the awaiting promise pending forever and leaks the listener. A confirmed
+	// selection emits its own event + removes the listener before this fires.
+	useOnUnmountWithLatest(selectOptions, latestSelectOptions => {
+		if (!latestSelectOptions) {
+			return
 		}
-	}, [])
+
+		events.emit("contactsSelect", {
+			id: latestSelectOptions.id,
+			cancelled: true
+		})
+	})
 
 	const keyExtractor = (item: ContactListItemWithHeader) => {
 		switch (item.type) {
@@ -100,10 +82,6 @@ const Contacts = () => {
 	}
 
 	const onRefresh = async () => {
-		if (!onlineManager.isOnline()) {
-			return
-		}
-
 		const result = await run(async () => {
 			await Promise.all([contactsQuery.refetch(), contactRequestsQuery.refetch()])
 		})
@@ -117,11 +95,7 @@ const Contacts = () => {
 	const emptyComponent = () => {
 		if (searchQuery.length > 0) {
 			return (
-				<ListEmpty
-					icon="search-outline"
-					title={t("no_results")}
-					description={t("no_results_description")}
-				/>
+				<NoResultsEmpty />
 			)
 		}
 
@@ -133,7 +107,7 @@ const Contacts = () => {
 				action={
 					<Button
 						onPress={() => void addContactFlow({ t })}
-						disabled={!isOnline}
+						requiresOnline
 					>
 						{t("add_contact")}
 					</Button>
@@ -178,21 +152,19 @@ const Contacts = () => {
 	return (
 		<Fragment>
 			<Header setSearchQuery={setSearchQuery} />
-			<SafeAreaView
-				edges={["left", "right"]}
-				className="bg-background-secondary"
-			>
+			<ScreenBody>
 				<VirtualList
 					className="flex-1 bg-background-secondary"
-					contentContainerClassName={cn("pb-40", Platform.OS === "android" && "pb-96")}
+					contentContainerClassName={TAB_LIST_CONTENT_CLASS}
 					keyExtractor={keyExtractor}
 					data={items}
 					renderItem={renderItem}
 					loading={contactRequestsQuery.status === "pending" || contactsQuery.status === "pending"}
+					requiresOnline={true}
 					onRefresh={onRefresh}
 					emptyComponent={emptyComponent}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

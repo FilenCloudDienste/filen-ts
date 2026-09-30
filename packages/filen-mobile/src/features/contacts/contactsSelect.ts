@@ -1,11 +1,9 @@
 import { useLocalSearchParams } from "expo-router"
 import { router } from "@/lib/router"
-import { randomUUID } from "expo-crypto"
-import events from "@/lib/events"
-import { serialize, deserialize } from "@/lib/serializer"
+import { awaitPickerEvent } from "@/lib/awaitPickerEvent"
+import { serialize, deserializeRouteParam } from "@/lib/serializer"
 import type { Contact as TContact } from "@filen/sdk-rs"
 import useContactsStore from "@/features/contacts/store/useContacts.store"
-import logger from "@/lib/logger"
 
 export type SelectOptions = {
 	id: string
@@ -21,70 +19,52 @@ export async function selectContacts(options?: Omit<SelectOptions, "id">): Promi
 			selectedContacts: TContact[]
 	  }
 > {
-	return new Promise(resolve => {
-		const id = randomUUID()
+	// Ensure clean state when entering picker mode. If the user had bulk
+	// mode active before (long-press → Select on the standalone contacts
+	// screen), the picker would otherwise render checkboxes on the first
+	// paint with stale bulk state. clearSelectedContacts() resets BOTH
+	// selectedContacts and bulkMode.
+	useContactsStore.getState().clearSelectedContacts()
 
-		// Ensure clean state when entering picker mode. If the user had bulk
-		// mode active before (long-press → Select on the standalone contacts
-		// screen), the picker would otherwise render checkboxes on the first
-		// paint with stale bulk state. clearSelectedContacts() resets BOTH
-		// selectedContacts and bulkMode.
-		useContactsStore.getState().clearSelectedContacts()
-
-		const sub = events.subscribe("contactsSelect", data => {
-			if (data.id === id) {
-				sub.remove()
-
-				if (data.cancelled || data.selectedContacts.length === 0) {
-					resolve({
-						cancelled: true
-					})
-
-					return
+	return awaitPickerEvent(
+		"contactsSelect",
+		id => {
+			router.push({
+				pathname: "/contacts",
+				params: {
+					selectOptions: serialize({
+						...options,
+						id
+					} satisfies SelectOptions)
 				}
-
-				resolve({
-					cancelled: false,
-					selectedContacts: data.selectedContacts
-				})
-			}
-		})
-
-		router.push({
-			pathname: "/contacts",
-			params: {
-				selectOptions: serialize({
-					...options,
-					id
-				} satisfies SelectOptions)
-			}
-		})
-	})
+			})
+		},
+		data =>
+			data.cancelled || data.selectedContacts.length === 0
+				? {
+						cancelled: true
+					}
+				: {
+						cancelled: false,
+						selectedContacts: data.selectedContacts
+					}
+	)
 }
 
-export function useSelectOptions() {
-	const searchParams = useLocalSearchParams<{
+// Reads the param string up front and parses without a try/catch, so the React Compiler memoizes the
+// result on that string instead of building a fresh object every render.
+export function useSelectOptions(): SelectOptions | null {
+	const { selectOptions: param } = useLocalSearchParams<{
 		selectOptions?: string
 	}>()
+	const parsed = deserializeRouteParam<SelectOptions>(param)
 
-	const selectOptions = ((): SelectOptions | null => {
-		if (searchParams && searchParams.selectOptions) {
-			try {
-				const parsed = deserialize(searchParams.selectOptions) as SelectOptions
-
-				return {
-					id: parsed.id,
-					userIdsToExclude: parsed.userIdsToExclude
-				}
-			} catch (e) {
-				logger.error("contacts-select", "Failed to deserialize selectOptions param", { error: e })
-
-				return null
-			}
-		}
-
+	if (!parsed) {
 		return null
-	})()
+	}
 
-	return selectOptions
+	return {
+		id: parsed.id,
+		userIdsToExclude: parsed.userIdsToExclude
+	}
 }

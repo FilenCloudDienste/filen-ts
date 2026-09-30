@@ -4,19 +4,16 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Text from "@/components/ui/text"
 import { useResolveClassNames } from "uniwind"
 import audio, { useAudio } from "@/features/audio/audio"
-import Image from "@/components/ui/image"
+import AudioThumbnail from "@/components/ui/audioThumbnail"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
 import { AudioSlider, FONT_TABULAR_NUMS } from "@/components/drivePreview/previewAudio"
 import alerts from "@/lib/alerts"
-import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
-import { useTranslation } from "react-i18next"
-import { resolveAudioTrackLabels } from "@/features/audio/utils"
+import useNowPlayingDisplay from "@/features/audio/hooks/useNowPlayingDisplay"
 import logger from "@/lib/logger"
 
 const PlaylistToolbar = () => {
-	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
@@ -25,31 +22,7 @@ const PlaylistToolbar = () => {
 	const queueItem = loading ? null : currentQueueItem
 	const buttonsEnabled = !!queueItem && !loading
 
-	const audioMetadataQuery = useAudioMetadataQuery(
-		{
-			type: "drive",
-			data: {
-				uuid: queueItem?.item.data.uuid ?? "",
-				// By-value so a cross-directory search hit resolves its metadata.
-				item: queueItem?.item
-			}
-		},
-		{
-			enabled: !!queueItem
-		}
-	)
-
-	const { titleLabel, artistLabel } = resolveAudioTrackLabels(
-		queueItem,
-		audioMetadataQuery.status === "success",
-		audioMetadataQuery.data?.title,
-		audioMetadataQuery.data?.artist,
-		{
-			notPlaying: t("not_playing"),
-			unknownTitle: t("unknown_title"),
-			unknownArtist: t("unknown_artist")
-		}
-	)
+	const { pictureUri, titleLabel, artistLabel } = useNowPlayingDisplay(queueItem)
 
 	return (
 		<View
@@ -64,25 +37,10 @@ const PlaylistToolbar = () => {
 			>
 				<View className="flex-row items-center justify-between bg-transparent gap-6 flex-1">
 					<View className="flex-row items-center gap-3 bg-transparent flex-1">
-						{queueItem && audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
-							<Image
-								className="size-10 rounded-lg bg-background-tertiary"
-								source={{
-									uri: audioMetadataQuery.data.pictureUri
-								}}
-								contentFit="contain"
-								cachePolicy="disk"
-								recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}
-							/>
-						) : (
-							<View className="bg-background-tertiary size-10 rounded-lg flex-row items-center justify-center">
-								<Ionicons
-									name="musical-note"
-									size={16}
-									color={textForeground.color}
-								/>
-							</View>
-						)}
+						<AudioThumbnail
+							pictureUri={pictureUri}
+							recyclingKey={queueItem ? `toolbar-audio-picture-${queueItem.item.data.uuid}` : undefined}
+						/>
 						<View className="flex-col bg-transparent flex-1 justify-center">
 							<Text
 								numberOfLines={1}

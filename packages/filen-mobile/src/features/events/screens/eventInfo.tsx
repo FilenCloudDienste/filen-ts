@@ -1,12 +1,11 @@
-import SafeAreaView from "@/components/ui/safeAreaView"
-import { Platform, ScrollView } from "react-native"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import { ScrollView } from "react-native"
 import { useLocalSearchParams } from "expo-router"
 import { router } from "@/lib/router"
 import { deserializeRouteParam } from "@/lib/serializer"
 import View from "@/components/ui/view"
-import Header from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment } from "react"
-import { useResolveClassNames } from "uniwind"
 import { type UserEvent } from "@filen/sdk-rs"
 import { buildEventDetails } from "@/features/events/eventDetails"
 import DismissStack from "@/components/dismissStack"
@@ -18,8 +17,6 @@ const EventInfo = () => {
 	const { event: eventSerialized } = useLocalSearchParams<{
 		event?: string
 	}>()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const { t } = useTranslation()
 
 	const event = deserializeRouteParam<UserEvent>(eventSerialized)
@@ -34,38 +31,14 @@ const EventInfo = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("event_info")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									router.back()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={() => {
+					router.back()
+				}}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<ScrollView
 					contentContainerClassName="bg-transparent px-4 flex-col pb-40"
 					showsHorizontalScrollIndicator={false}
@@ -82,7 +55,7 @@ const EventInfo = () => {
 						))}
 					</View>
 				</ScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

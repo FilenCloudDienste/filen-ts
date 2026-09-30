@@ -1,6 +1,6 @@
 import { queryClient } from "@/queries/client"
 import { BASE_QUERY_KEY as DRIVE_ITEMS_BASE_QUERY_KEY } from "@/features/drive/queries/useDriveItems.query"
-import { BASE_QUERY_KEY as PLAYLISTS_BASE_QUERY_KEY } from "@/features/audio/queries/usePlaylists.query"
+import { BASE_QUERY_KEY as PLAYLISTS_BASE_QUERY_KEY, seedTrackIfUncached } from "@/features/audio/queries/usePlaylists.query"
 import cache from "@/lib/cache"
 import { type DriveItem } from "@/types"
 import logger from "@/lib/logger"
@@ -115,11 +115,9 @@ export async function warmSeedDriveCaches(): Promise<void> {
 			try {
 				for (const playlist of row.data) {
 					for (const { item } of playlist.files ?? []) {
-						// Fill gaps only: a possibly-stale playlist snapshot must not shadow the
+						// Fills gaps only: a possibly-stale playlist snapshot must not shadow the
 						// freshest-wins drive-listing copy of the same file.
-						if (!cache.uuidToAnyDriveItem.has(item.data.uuid)) {
-							cache.uuidToAnyDriveItem.set(item.data.uuid, item)
-
+						if (seedTrackIfUncached(item)) {
 							seeded++
 						}
 

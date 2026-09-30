@@ -1,6 +1,6 @@
 import type { ListRenderItemInfo } from "@/components/ui/virtualList"
 import type { DriveItem } from "@/types"
-import { isDirectoryItem } from "@/features/drive/driveSelectors"
+import { isDirectoryItem, isFileItem } from "@/features/drive/driveSelectors"
 import useDirectorySizeQuery from "@/features/drive/queries/useDirectorySize.query"
 import { formatBytes } from "@filen/shared"
 import type { DrivePath } from "@/hooks/useDrivePath"
@@ -20,7 +20,7 @@ const Size = ({ info, drivePath }: { info: ListRenderItemInfo<DriveItem>; driveP
 		}
 	)
 
-	if (info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile") {
+	if (isFileItem(info.item)) {
 		return ` • ${formatBytes(Number(info.item.data.size))}`
 	}
 

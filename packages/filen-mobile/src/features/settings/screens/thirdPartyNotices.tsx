@@ -1,14 +1,13 @@
 import { useState, Fragment, useCallback } from "react"
-import { useNavigation } from "expo-router"
-import { Platform } from "react-native"
+import useDismissStack from "@/hooks/useDismissStack"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
-import Header from "@/components/ui/header"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import SettingsHeader from "@/components/ui/settingsHeader"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
-import ListEmpty from "@/components/ui/listEmpty"
+import { NoResultsEmpty } from "@/components/ui/listEmpty"
 import { PressableScale } from "@/components/ui/pressables"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import { router } from "@/lib/router"
@@ -68,10 +67,7 @@ const Row = ({ notice }: { notice: ThirdPartyNotice }) => {
 export const ThirdPartyNotices = () => {
 	const { t } = useTranslation()
 	const [searchQuery, setSearchQuery] = useState<string>("")
-	const textForeground = useResolveClassNames("text-foreground")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 
 	const query = searchQuery.trim().toLowerCase()
 
@@ -88,56 +84,16 @@ export const ThirdPartyNotices = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("third_party_notices")}
-				shadowVisible={false}
-				transparent={Platform.OS === "ios"}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
-				searchBarOptions={{
-					placement: "integratedButton",
+				icon="close"
+				onDismiss={dismiss}
+				search={{
 					placeholder: t("third_party_notices_search"),
-					onChangeText: e => setSearchQuery(e.nativeEvent.text),
-					onCancelButtonPress: () => setSearchQuery(""),
-					onClose: () => setSearchQuery(""),
-					onOpen: () => setSearchQuery(""),
-					allowToolbarIntegration: false,
-					headerIconColor: textForeground.color,
-					textColor: textForeground.color,
-					barTintColor: "transparent",
-					tintColor: textForeground.color,
-					hintTextColor: textMutedForeground.color,
-					shouldShowHintSearchIcon: true,
-					hideNavigationBar: false,
-					hideWhenScrolling: false,
-					inputType: "text"
+					onChangeText: setSearchQuery
 				}}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					className="flex-1 bg-background-secondary"
 					data={visible}
@@ -145,14 +101,10 @@ export const ThirdPartyNotices = () => {
 					keyExtractor={keyExtractor}
 					contentContainerClassName="pb-40"
 					emptyComponent={() => (
-						<ListEmpty
-							icon="search-outline"
-							title={t("no_results")}
-							description={t("no_results_description")}
-						/>
+						<NoResultsEmpty />
 					)}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

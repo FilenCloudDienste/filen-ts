@@ -1,22 +1,18 @@
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
-import { Platform } from "react-native"
-import { onlineManager } from "@tanstack/react-query"
-import { useLocalSearchParams, useNavigation } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
 import View from "@/components/ui/view"
-import SafeAreaView from "@/components/ui/safeAreaView"
-import ListEmpty from "@/components/ui/listEmpty"
-import Button from "@/components/ui/button"
-import Header from "@/components/ui/header"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import ListEmpty, { LoadErrorEmpty } from "@/components/ui/listEmpty"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment } from "react"
-import { useResolveClassNames } from "uniwind"
 import { run } from "@filen/shared"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
-import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { confirmedAction } from "@/lib/confirmedAction"
 import { type NoteHistory as TNoteHistory, type Note } from "@/types"
 import Menu from "@/components/ui/menu"
 import useNotesQuery from "@/features/notes/queries/useNotesQuery"
@@ -75,45 +71,12 @@ const History = ({ history, note }: { history: TNoteHistory; note: Note }) => {
 							title: t("restore"),
 							icon: "restore",
 							requiresOnline: true,
-							onPress: async () => {
-								const promptResponse = await run(async () => {
-									return await prompts.alert({
-										title: t("restore_history"),
-										message: t("restore_history_confirmation"),
-										cancelText: t("cancel"),
-										okText: t("restore"),
-										destructive: true
-									})
-								})
-
-								if (!promptResponse.success) {
-									logger.error("notes", "restore history prompt failed", {
-										error: promptResponse.error,
-										noteUuid: note.uuid
-									})
-									alerts.error(promptResponse.error)
-
-									return
-								}
-
-								if (promptResponse.data.cancelled) {
-									return
-								}
-
-								const result = await runWithLoading(async () => {
-									await notes.restoreFromHistory({
-										note,
-										history
-									})
-								})
-
-								if (!result.success) {
-									logger.error("notes", "restore from history failed", { error: result.error, noteUuid: note.uuid })
-									alerts.error(result.error)
-
-									return
-								}
-							}
+							onPress: confirmedAction({
+								promptTitle: t("restore_history"),
+								promptMessage: t("are_you_sure_restore_note"),
+								promptOkText: t("restore"),
+								action: () => notes.restoreFromHistory({ note, history })
+							})
 						}
 					]}
 				>
@@ -129,10 +92,8 @@ const NoteHistory = () => {
 	const { uuid } = useLocalSearchParams<{
 		uuid?: string
 	}>()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 
 	const notesQuery = useNotesQuery({
 		enabled: false
@@ -157,19 +118,12 @@ const NoteHistory = () => {
 	const historyEmptyComponent = () => {
 		if (noteHistoryQuery.status === "error") {
 			return (
-				<ListEmpty
-					icon="alert-circle-outline"
+				<LoadErrorEmpty
 					title={t("note_history_error")}
-					description={t("please_check_connection")}
-					action={
-						<Button
-							onPress={() => {
-								void noteHistoryQuery.refetch()
-							}}
-						>
-							{t("reload")}
-						</Button>
-					}
+					retryLabel={t("reload")}
+					onRetry={() => {
+						void noteHistoryQuery.refetch()
+					}}
 				/>
 			)
 		}
@@ -189,49 +143,20 @@ const NoteHistory = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("note_history")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={dismiss}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					data={history}
 					loading={noteHistoryQuery.status === "pending"}
 					contentContainerStyle={{
 						paddingBottom: insets.bottom
 					}}
+					requiresOnline={true}
 					onRefresh={async () => {
-						if (!onlineManager.isOnline()) {
-							return
-						}
-
 						const result = await run(async () => {
 							return await noteHistoryQuery.refetch()
 						})
@@ -252,7 +177,7 @@ const NoteHistory = () => {
 					}}
 					keyExtractor={history => history.id.toString()}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

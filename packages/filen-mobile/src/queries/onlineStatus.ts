@@ -1,8 +1,9 @@
-import NetInfo, { type NetInfoState } from "@react-native-community/netinfo"
+import NetInfo from "@react-native-community/netinfo"
 import { onlineManager } from "@tanstack/react-query"
 import { AppState } from "react-native"
 import { NETINFO_CONFIG } from "@/constants"
 import logger from "@/lib/logger"
+import { computeOnline } from "@/lib/connectivity"
 
 // NetInfo.configure MUST run before the first NetInfo.addEventListener anywhere in the app:
 // configure() tears down NetInfo's internal state — severing every existing subscription ("calling
@@ -13,10 +14,6 @@ import logger from "@/lib/logger"
 // permanently "offline" until the process died. Keeping configure and the subscription in this one
 // module makes the ordering impossible to break from the outside.
 NetInfo.configure(NETINFO_CONFIG)
-
-function computeOnline(state: NetInfoState): boolean {
-	return state.isConnected !== false && state.isInternetReachable !== false
-}
 
 onlineManager.setEventListener(setOnline => {
 	return NetInfo.addEventListener(state => {

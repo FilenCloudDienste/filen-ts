@@ -19,6 +19,7 @@ import {
 import offline from "@/features/offline/offline"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import { type DriveItem } from "@/types"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useDirectorySizeQuery"
 
@@ -166,11 +167,7 @@ export async function fetchData(
 	const { authedSdkClient } = await auth.getSdkClients()
 	const { size, files, dirs } = await authedSdkClient.getDirSize(
 		anyDirWithContext,
-		params?.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
+		toSignalOpts(params?.signal)
 	)
 
 	return {

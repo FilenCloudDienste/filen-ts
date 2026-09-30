@@ -1,5 +1,5 @@
 import { FilenSdkError, ErrorKind } from "@filen/sdk-rs"
-import { isNetworkClassErrorKind } from "@filen/shared"
+import { isNetworkClassErrorKind, isPermanentRejection } from "@filen/shared"
 import i18n from "@/lib/i18n"
 import { type en } from "@/locales/en"
 
@@ -20,6 +20,15 @@ export function isNetworkClassError(error: unknown): boolean {
 	const unwrapped = unwrapSdkError(error)
 
 	return isNetworkClassErrorKind(unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined)
+}
+
+export function isPermanentSdkRejection(error: unknown): boolean {
+	const unwrapped = unwrapSdkError(error)
+
+	return isPermanentRejection({
+		hasSdkError: unwrapped !== null,
+		kind: unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
+	})
 }
 
 const ERROR_KEY_BY_KIND: Partial<Record<ErrorKind, keyof typeof en>> = {
@@ -94,4 +103,24 @@ export function unwrappedSdkErrorToHumanReadable(unwrapped: FilenSdkError): stri
 		serverMessage: unwrapped.serverMessage(),
 		innerMessage: unwrapped.innerMessage()
 	})
+}
+
+// Any caught value → display string, SDK errors via the label-first rule above. Without a
+// `fallback`, anything that is not an Error or string is stringified.
+export function errorToMessage(error: unknown, fallback?: string): string {
+	const unwrapped = unwrapSdkError(error)
+
+	if (unwrapped) {
+		return unwrappedSdkErrorToHumanReadable(unwrapped)
+	}
+
+	if (error instanceof Error) {
+		return error.message
+	}
+
+	if (typeof error === "string") {
+		return error
+	}
+
+	return fallback ?? String(error)
 }

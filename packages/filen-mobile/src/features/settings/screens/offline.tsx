@@ -1,15 +1,15 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import { Fragment } from "react"
-import { useNavigation } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { useSecureStore } from "@/lib/secureStore"
 import { OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY, OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY } from "@/features/offline/offlineHelpers"
 import { useTranslation } from "react-i18next"
 
 function OfflineSettings() {
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 	const { t } = useTranslation()
 	const [wifiOnly, setWifiOnly] = useSecureStore<boolean>(OFFLINE_SYNC_WIFI_ONLY_SECURE_STORE_KEY, false)
 	const [backgroundSync, setBackgroundSync] = useSecureStore<boolean>(OFFLINE_BACKGROUND_SYNC_SECURE_STORE_KEY, false)
@@ -19,14 +19,9 @@ function OfflineSettings() {
 			<SettingsHeader
 				title={t("offline")}
 				icon="close"
-				onDismiss={() => {
-					navigation.getParent()?.goBack()
-				}}
+				onDismiss={dismiss}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<SettingsScrollView>
 					<Group
 						className="bg-background-tertiary"
@@ -58,7 +53,7 @@ function OfflineSettings() {
 						]}
 					/>
 				</SettingsScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
-import { AppState } from "react-native"
+import { useState } from "react"
 import * as FileSystem from "expo-file-system"
+import useOnAppForeground from "@/hooks/useOnAppForeground"
 
 function readAvailableDiskSpace(): number {
 	const available = FileSystem.Paths.availableDiskSpace
@@ -12,17 +12,7 @@ function readAvailableDiskSpace(): number {
 export default function useDeviceDiskSpace(): number {
 	const [availableBytes, setAvailableBytes] = useState<number>(readAvailableDiskSpace)
 
-	useEffect(() => {
-		const subscription = AppState.addEventListener("change", next => {
-			if (next === "active") {
-				setAvailableBytes(readAvailableDiskSpace())
-			}
-		})
-
-		return () => {
-			subscription.remove()
-		}
-	}, [])
+	useOnAppForeground(() => setAvailableBytes(readAvailableDiskSpace()))
 
 	return availableBytes
 }

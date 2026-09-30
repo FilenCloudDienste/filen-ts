@@ -1,16 +1,17 @@
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import { Fragment } from "react"
-import { router } from "@/lib/router"
+import { goBackIfPossible } from "@/lib/router"
 import { run, formatBytes } from "@filen/shared"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { Platform } from "react-native"
 import prompts from "@/lib/prompts"
+import { confirmPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import fileProvider, { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
-import { type Biometric } from "@/features/settings/screens/biometric"
+import { type Biometric, BIOMETRIC_SECURE_STORE_KEY, useBiometric } from "@/features/settings/biometric"
 import Text from "@/components/ui/text"
 import useDeviceDiskSpace from "@/hooks/useDeviceDiskSpace"
 import useFileProviderCacheBudgetQuery, {
@@ -40,9 +41,7 @@ function FileProviderSettings() {
 	const featureLabel = Platform.OS === "ios" ? t("file_provider") : t("documents_provider")
 	const featureDescription = Platform.OS === "ios" ? t("file_provider_description") : t("documents_provider_description")
 	const [enabled, setEnabled] = useSecureStore<boolean>(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)
-	const [biometric, setBiometric] = useSecureStore<Biometric>("biometric", {
-		enabled: false
-	})
+	const [biometric, setBiometric] = useBiometric()
 	const availableBytes = useDeviceDiskSpace()
 	const cacheBudgetQuery = useFileProviderCacheBudgetQuery({ enabled })
 	const currentCacheBudgetBytes = cacheBudgetQuery.data
@@ -78,24 +77,18 @@ function FileProviderSettings() {
 					// biometric gate — keeping both on would only create a
 					// false sense of security).
 					if (biometric.enabled) {
-						const confirmResult = await run(async () => {
-							return await prompts.alert({
+						const confirmed = await confirmPrompt(
+							{
 								title: t("file_provider_disables_biometric_title"),
 								message: t("file_provider_disables_biometric_message"),
 								okText: t("continue"),
 								cancelText: t("cancel"),
 								destructive: true
-							})
-						})
+							},
+							{ tag: "file-provider", message: "biometric-disable confirmation prompt failed" }
+						)
 
-						if (!confirmResult.success) {
-							logger.warn("file-provider", "biometric-disable confirmation prompt failed", { error: confirmResult.error })
-							alerts.error(confirmResult.error)
-
-							return
-						}
-
-						if (confirmResult.data.cancelled) {
+						if (!confirmed) {
 							return
 						}
 					}
@@ -109,7 +102,7 @@ function FileProviderSettings() {
 					const previousBiometric = biometric
 
 					if (biometric.enabled) {
-						await secureStore.set("biometric", { enabled: false } satisfies Biometric)
+						await secureStore.set(BIOMETRIC_SECURE_STORE_KEY, { enabled: false } satisfies Biometric)
 						setBiometric({
 							enabled: false
 						})
@@ -144,7 +137,7 @@ function FileProviderSettings() {
 						}
 
 						if (previousBiometric.enabled) {
-							await secureStore.set("biometric", previousBiometric)
+							await secureStore.set(BIOMETRIC_SECURE_STORE_KEY, previousBiometric)
 							setBiometric(previousBiometric)
 						}
 
@@ -160,11 +153,10 @@ function FileProviderSettings() {
 						// A freshly registered domain lands disabled in Files.app — without this
 						// hint nothing appears until the user finds the Locations toggle themselves.
 						await run(async () => {
-							return await prompts.alert({
+							await prompts.info({
 								title: t("file_provider_enable_in_files_app_title"),
 								message: t("file_provider_enable_in_files_app_message"),
-								okText: t("ok"),
-								singleButton: true
+								okText: t("ok")
 							})
 						})
 					}
@@ -232,16 +224,9 @@ function FileProviderSettings() {
 			<SettingsHeader
 				title={featureLabel}
 				icon="close"
-				onDismiss={() => {
-					if (router.canGoBack()) {
-						router.back()
-					}
-				}}
+				onDismiss={goBackIfPossible}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<SettingsScrollView contentContainerClassName="px-4 gap-2">
 					<Group
 						className="bg-background-tertiary"
@@ -249,7 +234,7 @@ function FileProviderSettings() {
 					/>
 					<Text className="text-sm text-muted-foreground px-4 leading-5">{featureDescription}</Text>
 				</SettingsScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

@@ -1,4 +1,4 @@
-import { DriveEvent_Tags, NonRootItem_Tags, AnyNormalDir_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
+import { DriveEvent_Tags, NonRootItem_Tags, SocketEvent_Tags, type SocketEvent } from "@filen/sdk-rs"
 import { favoritesListingUpdater } from "@/features/drive/driveMetadata"
 import {
 	driveItemsQueryUpdateGlobal,
@@ -202,15 +202,15 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// the count / select-all toggle / bulk ops never target a ghost.
 			useDriveStore.getState().removeFromSelection([inner.uuid])
 
-			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+			const fromCache = cache.getNormalDir(inner.uuid)
 
-			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+			if (fromCache) {
+				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
 
 				if (unwrappedParentUuid) {
 					driveItemsQueryUpdateGlobal({
 						parentUuid: unwrappedParentUuid,
-						updater: prev => prev.filter(i => i.data.uuid !== fromCache.inner[0].uuid)
+						updater: prev => prev.filter(i => i.data.uuid !== fromCache.uuid)
 					})
 				}
 			}
@@ -328,8 +328,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 			// unconditionally, even on a cold cache. Only locating the PREVIOUS listing needs the
 			// cached old shape, so that removal stays gated on the cache hit. Read the old shape
 			// FIRST: the write-through below overwrites this same cache entry.
-			const fromCacheOld = cache.directoryUuidToAnyNormalDir.get(inner.dir.uuid)
-			const fromCacheOldDir = fromCacheOld && fromCacheOld.tag === AnyNormalDir_Tags.Dir ? fromCacheOld.inner[0] : null
+			const fromCacheOldDir = cache.getNormalDir(inner.dir.uuid)
 
 			if (!fromCacheOldDir) {
 				logger.debug("drive-socket", "FolderMove: previous parent not cached, old-listing removal skipped", {
@@ -375,14 +374,14 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FolderMetadataChanged: {
 			const [inner] = eventInner.inner.inner
 
-			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+			const fromCache = cache.getNormalDir(inner.uuid)
 
-			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
+			if (fromCache) {
 				const updatedRawDir = {
-					...fromCache.inner[0],
+					...fromCache,
 					meta: inner.meta
 				}
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
 				const unwrappedDirMeta = unwrapDirMeta(updatedRawDir)
 				const driveItem = unwrappedDirIntoDriveItem(unwrappedDirMeta)
 
@@ -488,10 +487,10 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 				dirUuid: inner.uuid
 			})
 
-			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+			const fromCache = cache.getNormalDir(inner.uuid)
 
-			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
-				const item = unwrappedDirIntoDriveItem(unwrapDirMeta(fromCache.inner[0]))
+			if (fromCache) {
+				const item = unwrappedDirIntoDriveItem(unwrapDirMeta(fromCache))
 
 				// Do NOT re-add to recents: the global removal above already
 				// removed the item from every listing including recents, which is
@@ -514,12 +513,12 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 		case DriveEvent_Tags.FolderColorChanged: {
 			const [inner] = eventInner.inner.inner
 
-			const fromCache = cache.directoryUuidToAnyNormalDir.get(inner.uuid)
+			const fromCache = cache.getNormalDir(inner.uuid)
 
-			if (fromCache && fromCache.tag === AnyNormalDir_Tags.Dir) {
-				const unwrappedParentUuid = unwrapParentUuid(fromCache.inner[0].parent)
+			if (fromCache) {
+				const unwrappedParentUuid = unwrapParentUuid(fromCache.parent)
 				const updatedRawDir = {
-					...fromCache.inner[0],
+					...fromCache,
 					color: inner.color
 				}
 				const driveItem = unwrappedDirIntoDriveItem(unwrapDirMeta(updatedRawDir))
@@ -534,7 +533,7 @@ export async function handleDriveEvent({ event }: { event: DriveSocketEvent }): 
 						parentUuid: unwrappedParentUuid,
 						updater: prev =>
 							prev.map(i =>
-								i.data.uuid === fromCache.inner[0].uuid && i.type === "directory"
+								i.data.uuid === fromCache.uuid && i.type === "directory"
 									? {
 											...i,
 											data: {

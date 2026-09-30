@@ -7,7 +7,7 @@ import { useShallow } from "zustand/shallow"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { isDriveItemDisabled, isDriveItemNavigateOnly, nextDriveSelectSelection, resolveDriveNavigationTarget } from "@/features/drive/driveSelectors"
+import { isDriveItemDisabled, isDriveItemNavigateOnly, nextDriveSelectSelection, resolveDriveNavigationTarget, isFileItem } from "@/features/drive/driveSelectors"
 import { router } from "@/lib/router"
 
 export default function useDriveItemInteraction({
@@ -38,10 +38,7 @@ export default function useDriveItemInteraction({
 			selectDriveSelectSelection(state, selectSessionId).some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
 		)
 	)
-	const previewType =
-		info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile"
-			? getPreviewType(driveItemDisplayName(info.item))
-			: null
+	const previewType = isFileItem(info.item) ? getPreviewType(driveItemDisplayName(info.item)) : null
 
 	const disabled = isDriveItemDisabled({
 		item: info.item,
@@ -99,10 +96,7 @@ export default function useDriveItemInteraction({
 			// areDriveItemsSelected branch so a lingering in-drive multi-select can't
 			// swallow picker taps into the wrong store. Directories keep navigating;
 			// their pick affordance is the checkbox.
-			if (
-				drivePath.selectOptions?.intention === "select" &&
-				(info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile")
-			) {
+			if (drivePath.selectOptions?.intention === "select" && isFileItem(info.item)) {
 				onPressSelectForDriveSelect()
 
 				return
@@ -122,7 +116,7 @@ export default function useDriveItemInteraction({
 				return
 			}
 
-			if (info.item.type === "file" || info.item.type === "sharedFile" || info.item.type === "sharedRootFile") {
+			if (isFileItem(info.item)) {
 				useDrivePreviewStore.getState().open({
 					initialItem: {
 						type: "drive",
@@ -132,7 +126,7 @@ export default function useDriveItemInteraction({
 						}
 					},
 					items: getListItems()
-						.filter(i => i.type === "file" || i.type === "sharedFile" || i.type === "sharedRootFile")
+						.filter(isFileItem)
 						.map(item => ({
 							type: "drive",
 							data: item

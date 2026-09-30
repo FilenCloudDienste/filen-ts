@@ -1,7 +1,7 @@
 import { run } from "@filen/shared"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { confirmPrompt } from "@/lib/promptFlow"
 import logger from "@/lib/logger"
 
 export type BulkActionConfirm = {
@@ -50,24 +50,18 @@ export async function runBulk<T>({ items, op, clearSelection, confirm, backgroun
 	}
 
 	if (confirm) {
-		const promptResult = await run(async () => {
-			return await prompts.alert({
+		const confirmed = await confirmPrompt(
+			{
 				title: confirm.title,
 				message: confirm.message,
 				okText: confirm.okText,
 				cancelText: confirm.cancelText,
 				destructive: confirm.destructive
-			})
-		})
+			},
+			{ tag: "bulkOps", message: "confirm prompt threw unexpectedly" }
+		)
 
-		if (!promptResult.success) {
-			logger.warn("bulkOps", "confirm prompt threw unexpectedly", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
-			return false
-		}
-
-		if (promptResult.data.cancelled) {
+		if (!confirmed) {
 			return false
 		}
 	}

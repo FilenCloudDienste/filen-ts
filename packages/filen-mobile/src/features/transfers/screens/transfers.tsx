@@ -1,18 +1,17 @@
 import { Fragment } from "react"
 import { type TFunction } from "i18next"
 import Text from "@/components/ui/text"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
-import { Platform } from "react-native"
 import { useShallow } from "zustand/shallow"
 import useTransfersStore, {
 	type Transfer as TTransfer,
 	type FinishedTransfer as TFinishedTransfer
 } from "@/features/transfers/store/useTransfers.store"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
-import View, { CrossGlassContainerView } from "@/components/ui/view"
-import { PressableScale } from "@/components/ui/pressables"
-import Header, { type HeaderItem } from "@/components/ui/header"
+import View from "@/components/ui/view"
+import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { useResolveClassNames } from "uniwind"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { router } from "@/lib/router"
@@ -23,9 +22,8 @@ import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { ItemGlyph } from "@/components/itemIcons"
 import transfersLib from "@/features/transfers/transfers"
 import { driveItemDisplayName } from "@/lib/decryption"
-import { run, clampedRatio } from "@filen/shared"
-import prompts from "@/lib/prompts"
-import alerts from "@/lib/alerts"
+import { clampedRatio } from "@filen/shared"
+import { confirmPrompt } from "@/lib/promptFlow"
 import logger from "@/lib/logger"
 import useCopyJobsStore from "@/features/copy/store/useCopyJobs.store"
 import copyRunner from "@/features/copy/copyRunner"
@@ -83,25 +81,6 @@ export function finishedTransferSubtitle(finished: TFinishedTransfer, t: TFuncti
 	}
 
 	return t("transfer_completed")
-}
-
-const RowMenuTrigger = () => {
-	const textForeground = useResolveClassNames("text-foreground")
-
-	return (
-		<CrossGlassContainerView>
-			<PressableScale
-				className="size-9 flex-row items-center justify-center"
-				rippleColor="transparent"
-			>
-				<Ionicons
-					name="ellipsis-horizontal"
-					size={20}
-					color={textForeground.color}
-				/>
-			</PressableScale>
-		</CrossGlassContainerView>
-	)
 }
 
 // Same layout as an upload row, with the state as text under the title instead of a second icon.
@@ -165,7 +144,7 @@ const CopyActiveRow = ({ transfer }: { transfer: CopyTransfer }) => {
 							}
 						]}
 					>
-						<RowMenuTrigger />
+						<EllipsisMenuTrigger />
 					</Menu>
 				</View>
 			</View>
@@ -260,7 +239,7 @@ const CopyFinishedRow = ({ finished }: { finished: TFinishedTransfer }) => {
 							}
 						]}
 					>
-						<RowMenuTrigger />
+						<EllipsisMenuTrigger />
 					</Menu>
 				</View>
 			</View>
@@ -347,24 +326,18 @@ const ActiveTransferRow = ({
 								icon: "cancel",
 								destructive: true,
 								onPress: async () => {
-									const promptResult = await run(async () => {
-										return await prompts.alert({
+									const confirmed = await confirmPrompt(
+										{
 											title: t("cancel_transfer"),
 											message: t("confirm_cancel_transfer"),
 											cancelText: t("cancel"),
 											okText: t("cancel_transfer"),
 											destructive: true
-										})
-									})
+										},
+										{ tag: "transfers", message: "Transfer cancel prompt failed" }
+									)
 
-									if (!promptResult.success) {
-										logger.warn("transfers", "Transfer cancel prompt failed", { error: promptResult.error })
-										alerts.error(promptResult.error)
-
-										return
-									}
-
-									if (promptResult.data.cancelled) {
+									if (!confirmed) {
 										return
 									}
 
@@ -373,7 +346,7 @@ const ActiveTransferRow = ({
 							}
 						]}
 					>
-						<RowMenuTrigger />
+						<EllipsisMenuTrigger />
 					</Menu>
 				</View>
 			</View>
@@ -425,7 +398,7 @@ const FinishedTransferRow = ({ finished }: { finished: TFinishedTransfer }) => {
 							}
 						]}
 					>
-						<RowMenuTrigger />
+						<EllipsisMenuTrigger />
 					</Menu>
 				</View>
 			</View>
@@ -468,144 +441,101 @@ const TransfersHeader = () => {
 			hasFinished: state.finishedTransfers.length > 0
 		}))
 	)
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 
 	return (
-		<Header
+		<SettingsHeader
 			title={t("transfers")}
-			transparent={Platform.OS === "ios"}
-			shadowVisible={false}
-			backVisible={Platform.OS === "android"}
-			backgroundColor={Platform.select({
-				ios: undefined,
-				default: bgBackgroundSecondary.backgroundColor as string
-			})}
-			leftItems={Platform.select({
-				ios: [
-					{
-						type: "button",
-						icon: {
-							name: "close",
-							color: textForeground.color,
-							size: 20
-						},
-						props: {
-							onPress: () => {
-								router.back()
-							}
-						}
-					}
-				] satisfies HeaderItem[],
-				default: undefined
-			})}
+			icon="close"
+			onDismiss={() => {
+				router.back()
+			}}
 			rightItems={
 				count > 0 || hasFinished
 					? [
 							{
-								type: "menu",
-								props: {
-									type: "dropdown",
-									hitSlop: 20,
-									buttons: [
-										...(count > 0
-											? allPaused
-												? [
-														{
-															id: "resumeAll",
-															title: t("resume_all"),
-															icon: "play" as const,
-															onPress: () => {
-																// Iterate per-transfer instead of resuming the
-																// global signal: the store's `paused` flag is
-																// driven by the per-transfer signal, so a global
-																// resume would leave individually-paused transfers
-																// stuck (store says resumed, SDK still paused).
-																// Read the live array imperatively to avoid a stale
-																// closure (the header no longer subscribes to it).
-																for (const transfer of useTransfersStore.getState().transfers) {
-																	transfer.resume()
-																}
-															}
-														}
-													]
-												: [
-														{
-															id: "pauseAll",
-															title: t("pause_all"),
-															icon: "pause" as const,
-															onPress: () => {
-																// Same reason — iterate per-transfer so the
-																// per-transfer signal stays in sync with the store
-																// and so the global pause signal doesn't stay
-																// sticky and silently pause future uploads.
-																for (const transfer of useTransfersStore.getState().transfers) {
-																	transfer.pause()
-																}
-															}
-														}
-													]
-											: []),
-										...(count > 0
+								type: "ellipsisMenu",
+								buttons: [
+									...(count > 0
+										? allPaused
 											? [
 													{
-														id: "abortAll",
-														title: t("cancel_all"),
-														icon: "cancel" as const,
-														destructive: true,
-														onPress: async () => {
-															const promptResult = await run(async () => {
-																return await prompts.alert({
-																	title: t("cancel_all_transfers"),
-																	message: t("confirm_cancel_all_transfers"),
-																	cancelText: t("cancel"),
-																	okText: t("cancel_all"),
-																	destructive: true
-																})
-															})
-
-															if (!promptResult.success) {
-																logger.warn("transfers", "Cancel-all prompt failed", {
-																	error: promptResult.error
-																})
-																alerts.error(promptResult.error)
-
-																return
-															}
-
-															if (promptResult.data.cancelled) {
-																return
-															}
-
-															transfersLib.cancelAll()
-														}
-													}
-												]
-											: []),
-										...(hasFinished
-											? [
-													{
-														// Not destructive — finished entries are just session UI bookkeeping, so no
-														// confirmation prompt.
-														id: "clearFinished",
-														title: t("transfers_clear_finished"),
-														icon: "trash" as const,
+														id: "resumeAll",
+														title: t("resume_all"),
+														icon: "play" as const,
 														onPress: () => {
-															useTransfersStore.getState().clearFinishedTransfers()
+															// Iterate per-transfer instead of resuming the
+															// global signal: the store's `paused` flag is
+															// driven by the per-transfer signal, so a global
+															// resume would leave individually-paused transfers
+															// stuck (store says resumed, SDK still paused).
+															// Read the live array imperatively to avoid a stale
+															// closure (the header no longer subscribes to it).
+															for (const transfer of useTransfersStore.getState().transfers) {
+																transfer.resume()
+															}
 														}
 													}
 												]
-											: [])
-									]
-								},
-								triggerProps: {
-									hitSlop: 20
-								},
-								icon: {
-									name: "ellipsis-horizontal",
-									size: 24,
-									color: textForeground.color
-								}
+											: [
+													{
+														id: "pauseAll",
+														title: t("pause_all"),
+														icon: "pause" as const,
+														onPress: () => {
+															// Same reason — iterate per-transfer so the
+															// per-transfer signal stays in sync with the store
+															// and so the global pause signal doesn't stay
+															// sticky and silently pause future uploads.
+															for (const transfer of useTransfersStore.getState().transfers) {
+																transfer.pause()
+															}
+														}
+													}
+												]
+										: []),
+									...(count > 0
+										? [
+												{
+													id: "abortAll",
+													title: t("cancel_all"),
+													icon: "cancel" as const,
+													destructive: true,
+													onPress: async () => {
+														const confirmed = await confirmPrompt(
+															{
+																title: t("cancel_all_transfers"),
+																message: t("confirm_cancel_all_transfers"),
+																cancelText: t("cancel"),
+																okText: t("cancel_all"),
+																destructive: true
+															},
+															{ tag: "transfers", message: "Cancel-all prompt failed" }
+														)
+	
+														if (!confirmed) {
+															return
+														}
+	
+														transfersLib.cancelAll()
+													}
+												}
+											]
+										: []),
+									...(hasFinished
+										? [
+												{
+													// Not destructive — finished entries are just session UI bookkeeping, so no
+													// confirmation prompt.
+													id: "clearFinished",
+													title: t("transfers_clear_finished"),
+													icon: "trash" as const,
+													onPress: () => {
+														useTransfersStore.getState().clearFinishedTransfers()
+													}
+												}
+											]
+										: [])
+								]
 							}
 						]
 					: undefined
@@ -631,10 +561,7 @@ const Transfers = () => {
 	return (
 		<Fragment>
 			<TransfersHeader />
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					className="flex-1 bg-transparent"
 					keyExtractor={item =>
@@ -653,7 +580,7 @@ const Transfers = () => {
 						paddingBottom: insets.bottom
 					}}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

@@ -1,10 +1,10 @@
 import Text from "@/components/ui/text"
-import { Platform, ActivityIndicator } from "react-native"
+import { LoadingView } from "@/components/ui/loadingView"
 import { useLocalSearchParams } from "expo-router"
-import { router } from "@/lib/router"
-import { deserialize } from "@/lib/serializer"
-import Header, { type HeaderItem } from "@/components/ui/header"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { goBackIfPossible } from "@/lib/router"
+import { deserializeRouteParam } from "@/lib/serializer"
+import SettingsHeader from "@/components/ui/settingsHeader"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Fragment, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
@@ -13,7 +13,7 @@ import type { DriveItem } from "@/types"
 import DismissStack from "@/components/dismissStack"
 import { View, GestureHandlerScrollView, CrossGlassContainerView } from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import useDriveItemPublicLinkStatusQuery from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
+import useDriveItemPublicLinkStatusQuery, { publicLinkUrlFromStatus } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 import Button from "@/components/ui/button"
 import useIsOnline from "@/hooks/useIsOnline"
 import drive from "@/features/drive/drive"
@@ -22,11 +22,10 @@ import alerts from "@/lib/alerts"
 import { Group } from "@/components/ui/settingsGroup"
 import { PressableOpacity } from "@/components/ui/pressables"
 import { PasswordState_Tags, PasswordState, PublicLinkExpiration } from "@filen/sdk-rs"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import { run } from "@filen/shared"
 import { shareUrl } from "@/lib/share"
 import Menu from "@/components/ui/menu"
-import { makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { DirectoryIcon } from "@/components/itemIcons"
 import cache from "@/lib/cache"
@@ -34,7 +33,7 @@ import useAccountQuery from "@/queries/useAccount.query"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import i18n from "@/lib/i18n"
-import ListEmpty from "@/components/ui/listEmpty"
+import ListEmpty, { LoadErrorEmpty } from "@/components/ui/listEmpty"
 import { recentHeldLinkStatus, isExpirationChecked, isPublicLinkQueryError, linkStatusForWrite } from "@/features/publicLink/utils"
 import logger from "@/lib/logger"
 import { type PublicLinkEdits } from "@/features/drive/drivePublicLink"
@@ -84,29 +83,15 @@ function PublicLink() {
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
 	const [edited, setEdited] = useState<PublicLinkEdits | null>(null)
 	const isOnline = useIsOnline()
 
-	const itemParsed = (() => {
-		if (!itemSerialized) {
-			return null
-		}
-
-		try {
-			const item = deserialize(itemSerialized) as DriveItem
-
-			// Prefer the cache copy (fresher — a rename that arrived over the socket lands there);
-			// the deserialized param item is a valid fallback and must never be discarded.
-			return cache.uuidToAnyDriveItem.get(item.data.uuid) ?? item
-		} catch (err) {
-			logger.error("publicLink", "failed to deserialize item from route param", { error: err, itemSerialized: typeof itemSerialized === "string" ? itemSerialized.slice(0, 80) : null })
-
-			return null
-		}
-	})()
+	const itemParam = deserializeRouteParam<DriveItem>(itemSerialized)
+	// Prefer the cache copy (fresher — a rename that arrived over the socket lands there);
+	// the deserialized param item is a valid fallback and must never be discarded.
+	const itemParsed = itemParam ? (cache.uuidToAnyDriveItem.get(itemParam.data.uuid) ?? itemParam) : null
 
 	const publicLinkStatusQuery = useDriveItemPublicLinkStatusQuery(
 		{
@@ -139,35 +124,10 @@ function PublicLink() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("public_link")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									if (router.canGoBack()) {
-										router.back()
-									}
-								}
-							}
-						}
-					] satisfies HeaderItem[],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={goBackIfPossible}
 				rightItems={
 					publicLinkStatusQuery.status === "success" && publicLinkStatusQuery.data !== null && userIsSubbed
 						? edited && isOnline
@@ -233,14 +193,7 @@ function PublicLink() {
 														throw new Error(i18n.t("error_generic"))
 													}
 
-													const url = makeDriveItemPublicLink({
-														item: itemParsed,
-														linkUuid: publicLinkStatusQuery.data.status.linkUuid,
-														linkKey:
-															publicLinkStatusQuery.data.type === "directory"
-																? publicLinkStatusQuery.data.status.linkKey
-																: undefined
-													})
+													const url = publicLinkUrlFromStatus(itemParsed, publicLinkStatusQuery.data)
 
 													if (!url) {
 														throw new Error(i18n.t("public_link_generate_failed"))
@@ -262,10 +215,7 @@ function PublicLink() {
 						: undefined
 				}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{publicLinkStatusQuery.status === "success" && accountQuery.status === "success" ? (
 					<Fragment>
 						{userIsSubbed ? (
@@ -315,7 +265,7 @@ function PublicLink() {
 												{
 													icon: "link-outline",
 													title: t("enabled"),
-													disabled: !isOnline,
+													requiresOnline: true,
 													rightItem: {
 														type: "switch",
 														value: true,
@@ -361,31 +311,19 @@ function PublicLink() {
 																)}
 																<PressableOpacity
 																	onPress={async () => {
-																		const promptResult = await run(async () => {
-																			return await prompts.input({
+																		const newPassword = await inputPrompt(
+																			{
 																				title: t("password"),
 																				message: t("enter_the_password"),
 																				cancelText: t("cancel"),
 																				okText: t("save"),
 																				placeholder: t("password"),
 																				inputType: "secure-text"
-																			})
-																		})
+																			},
+																			{ tag: "publicLink", message: "password prompt failed" }
+																		)
 
-																		if (!promptResult.success) {
-																			logger.warn("publicLink", "password prompt failed", { error: promptResult.error })
-																			alerts.error(promptResult.error)
-
-																			return
-																		}
-
-																		if (promptResult.data.cancelled) {
-																			return
-																		}
-
-																		const newPassword = promptResult.data.value
-
-																		if (newPassword.length === 0) {
+																		if (newPassword === null) {
 																			return
 																		}
 
@@ -496,7 +434,7 @@ function PublicLink() {
 										description={t("public_link_description")}
 										action={
 											<Button
-												disabled={!isOnline}
+												requiresOnline
 												onPress={async () => {
 													if (!isOnline) {
 														return
@@ -532,30 +470,17 @@ function PublicLink() {
 						)}
 					</Fragment>
 				) : isPublicLinkQueryError(publicLinkStatusQuery.status, accountQuery.status) ? (
-					<ListEmpty
-						icon="warning-outline"
+					<LoadErrorEmpty
 						title={t("could_not_load_link")}
-						description={t("please_check_connection")}
-						action={
-							<Button
-								onPress={() => {
-									void publicLinkStatusQuery.refetch()
-									void accountQuery.refetch()
-								}}
-							>
-								{t("try_again")}
-							</Button>
-						}
+						onRetry={() => {
+							void publicLinkStatusQuery.refetch()
+							void accountQuery.refetch()
+						}}
 					/>
 				) : (
-					<View className="flex-1 items-center justify-center bg-transparent">
-						<ActivityIndicator
-							color={textForeground.color}
-							size="large"
-						/>
-					</View>
+					<LoadingView />
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

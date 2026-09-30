@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 import { type TFunction } from "i18next"
-import { type Biometric } from "@/features/settings/screens/biometric"
+import { type Biometric } from "@/features/settings/biometric"
 
 // --- hoisted mocks ---
 const { mockPromptsAlert, mockPromptsInput, mockAlertsError, mockFileProviderDisable, mockSetBiometric, mockSetFileProviderEnabled } =

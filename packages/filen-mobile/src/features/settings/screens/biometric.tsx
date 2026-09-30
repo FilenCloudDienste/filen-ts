@@ -1,16 +1,17 @@
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group } from "@/components/ui/settingsGroup"
 import { Fragment } from "react"
-import { router } from "@/lib/router"
+import { goBackIfPossible } from "@/lib/router"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { useSecureStore } from "@/lib/secureStore"
 import useLocalAuthenticationQuery from "@/queries/useLocalAuthentication.query"
 import { actionSheet } from "@/providers/actionSheet.provider"
 import { FILE_PROVIDER_ENABLED_SECURE_STORE_KEY } from "@/features/settings/fileProvider"
 import { useTranslation } from "react-i18next"
-import { SettingsLoadingView } from "@/components/ui/settingsLoadingView"
+import { LoadingView } from "@/components/ui/loadingView"
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import { enableBiometric } from "@/features/settings/biometricButtons"
+import { type Biometric, useBiometric } from "@/features/settings/biometric"
 import { type TFunction } from "i18next"
 import ListEmpty from "@/components/ui/listEmpty"
 
@@ -33,24 +34,9 @@ function getLockAfterLabel(lockAfter: number, t: TFunction): string {
 	}
 }
 
-export type Biometric =
-	| {
-			enabled: false
-	  }
-	| {
-			enabled: true
-			fallback: string
-			lockAfter: number
-			lockedUntil: number
-			lockedMultiplier: number
-			pinOnly: boolean
-	  }
-
 function BiometricComponent() {
 	const { t } = useTranslation()
-	const [biometric, setBiometric] = useSecureStore<Biometric>("biometric", {
-		enabled: false
-	})
+	const [biometric, setBiometric] = useBiometric()
 	const [fileProviderEnabled, setFileProviderEnabled] = useSecureStore<boolean>(FILE_PROVIDER_ENABLED_SECURE_STORE_KEY, false)
 	const localAuthenticationQuery = useLocalAuthenticationQuery()
 
@@ -59,16 +45,9 @@ function BiometricComponent() {
 			<SettingsHeader
 				title={t("biometric_authentication")}
 				icon="chevron-back-outline"
-				onDismiss={() => {
-					if (router.canGoBack()) {
-						router.back()
-					}
-				}}
+				onDismiss={goBackIfPossible}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				{localAuthenticationQuery.status === "success" ? (
 					localAuthenticationQuery.data.hasHardware && localAuthenticationQuery.data.isEnrolled ? (
 						<SettingsScrollView>
@@ -185,9 +164,9 @@ function BiometricComponent() {
 						/>
 					)
 				) : (
-					<SettingsLoadingView />
+					<LoadingView />
 				)}
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

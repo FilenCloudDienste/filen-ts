@@ -14,6 +14,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import { useSecureStore } from "@/lib/secureStore"
+import { chatInputValueKey, chatReplyToKey, chatEditMessageKey } from "@/features/chats/chatDrafts"
 import { cn, run, Semaphore, runEffect } from "@filen/shared"
 import { useStringifiedClient } from "@/lib/auth"
 import { makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
@@ -30,16 +31,13 @@ import { chatMessagesQueryUpdate } from "@/features/chats/queries/useChatMessage
 import { shouldSuppressKeyboardSuggestions } from "@/features/chats/utils"
 import Menu from "@/components/ui/menu"
 import { pickDocuments } from "@/lib/documentPicker"
-import * as ImagePicker from "expo-image-picker"
-import * as FileSystem from "expo-file-system"
-import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import { pickMedia, pickedAssetName, type MediaSource } from "@/lib/mediaPicker"
 import { selectDriveItems } from "@/features/drive/driveSelectSession"
 import drive from "@/features/drive/drive"
 import useAccountQuery from "@/queries/useAccount.query"
 import MentionSuggestions from "@/features/chats/components/chat/input/mentionSuggestions"
 import EmojiSuggestions from "@/features/chats/components/chat/input/emojiSuggestions"
 import ReplyTo from "@/features/chats/components/chat/input/replyTo"
-import { withSystemPresentation } from "@/lib/systemPresentation"
 import logger from "@/lib/logger"
 
 type ChatTextInputProps = {
@@ -142,14 +140,14 @@ const Input = ({ chat }: { chat: Chat }) => {
 	const { onLayout: inputViewOnLayout, layout: inputViewLayout } = useViewLayout()
 	const textForeground = useResolveClassNames("text-foreground")
 	const windowDimensions = useWindowDimensions()
-	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
+	const [chatInputValue, setChatInputValue] = useSecureStore<string>(chatInputValueKey(chat.uuid), "")
 	const inputRef = useRef<TextInput>(null)
 	const isSendingRef = useRef(false)
 	const stringifiedClient = useStringifiedClient()
 	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 	const sendTypingEventSemaphoreRef = useRef<Semaphore>(new Semaphore(1))
-	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(`chatReplyTo:${chat.uuid}`, null)
-	const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(`chatEditMessage:${chat.uuid}`, null)
+	const [chatReplyTo, setChatReplyTo] = useSecureStore<ChatMessageWithInflightId | null>(chatReplyToKey(chat.uuid), null)
+	const [chatEditMessage, setChatEditMessage] = useSecureStore<ChatMessageWithInflightId | null>(chatEditMessageKey(chat.uuid), null)
 	const isOnline = useIsOnline()
 
 	const accountQuery = useAccountQuery()
@@ -188,6 +186,22 @@ const Input = ({ chat }: { chat: Chat }) => {
 		}
 
 		insertLinksIntoInput(result.data)
+	}
+
+	const pickAndInsert = async (source: MediaSource) => {
+		const picked = await pickMedia({ source })
+
+		if (!picked) {
+			return
+		}
+
+		await uploadAssetsAndInsert(
+			picked.map(asset => ({
+				uri: asset.uri,
+				name: pickedAssetName(asset),
+				mimeType: asset.mimeType
+			}))
+		)
 	}
 
 	const onChangeText = (text: string) => {
@@ -452,135 +466,13 @@ const Input = ({ chat }: { chat: Chat }) => {
 							id: "addMedia",
 							title: t("add_photos_or_videos_from_gallery"),
 							icon: "image",
-							onPress: async () => {
-								const permissionsResult = await run(async () => {
-									return await withSystemPresentation(() =>
-										hasAllNeededMediaPermissions({
-											shouldRequest: true,
-											library: "none",
-											needCamera: false
-										})
-									)
-								})
-
-								if (!permissionsResult.success) {
-									logger.error("chats", "addMedia permissions check failed", { error: permissionsResult.error })
-									alerts.error(permissionsResult.error)
-
-									return
-								}
-
-								if (!permissionsResult.data) {
-									alerts.error(t("no_permissions_enable_manually"))
-
-									return
-								}
-
-								const imagePickerResult = await run(async () => {
-									return await withSystemPresentation(() =>
-										ImagePicker.launchImageLibraryAsync({
-											mediaTypes: ["images", "videos"],
-											exif: false,
-											base64: false,
-											quality: 1,
-											allowsMultipleSelection: true,
-											presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-											shouldDownloadFromNetwork: true
-										})
-									)
-								})
-
-								if (!imagePickerResult.success) {
-									logger.error("chats", "addMedia image picker failed", { error: imagePickerResult.error })
-									alerts.error(imagePickerResult.error)
-
-									return
-								}
-
-								if (imagePickerResult.data.canceled) {
-									return
-								}
-
-								const assets = imagePickerResult.data.assets.map(asset => {
-									const extname = FileSystem.Paths.extname(asset.uri)
-									const fileName = asset.fileName ?? `${randomUUID()}${extname}`
-
-									return {
-										uri: asset.uri,
-										name: fileName,
-										mimeType: asset.mimeType
-									} satisfies Parameters<typeof chats.uploadAssetsAndGenerateLinks>[0][number]
-								})
-
-								await uploadAssetsAndInsert(assets)
-							}
+							onPress: () => pickAndInsert("library")
 						},
 						{
 							id: "takeMedia",
 							title: t("take_photo_or_video"),
 							icon: "camera",
-							onPress: async () => {
-								const permissionsResult = await run(async () => {
-									return await withSystemPresentation(() =>
-										hasAllNeededMediaPermissions({
-											shouldRequest: true,
-											needCamera: true,
-											library: "none"
-										})
-									)
-								})
-
-								if (!permissionsResult.success) {
-									logger.error("chats", "takeMedia permissions check failed", { error: permissionsResult.error })
-									alerts.error(permissionsResult.error)
-
-									return
-								}
-
-								if (!permissionsResult.data) {
-									alerts.error(t("no_permissions_enable_manually"))
-
-									return
-								}
-
-								const imagePickerResult = await run(async () => {
-									return await withSystemPresentation(() =>
-										ImagePicker.launchCameraAsync({
-											mediaTypes: ["images", "videos"],
-											exif: false,
-											base64: false,
-											quality: 1,
-											allowsMultipleSelection: true,
-											presentationStyle: ImagePicker.UIImagePickerPresentationStyle.PAGE_SHEET,
-											shouldDownloadFromNetwork: true
-										})
-									)
-								})
-
-								if (!imagePickerResult.success) {
-									logger.error("chats", "takeMedia camera picker failed", { error: imagePickerResult.error })
-									alerts.error(imagePickerResult.error)
-
-									return
-								}
-
-								if (imagePickerResult.data.canceled) {
-									return
-								}
-
-								const assets = imagePickerResult.data.assets.map(asset => {
-									const extname = FileSystem.Paths.extname(asset.uri)
-									const fileName = asset.fileName ?? `${randomUUID()}${extname}`
-
-									return {
-										uri: asset.uri,
-										name: fileName,
-										mimeType: asset.mimeType
-									} satisfies Parameters<typeof chats.uploadAssetsAndGenerateLinks>[0][number]
-								})
-
-								await uploadAssetsAndInsert(assets)
-							}
+							onPress: () => pickAndInsert("camera")
 						},
 						{
 							id: "addFiles",
@@ -619,8 +511,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 									return await selectDriveItems({
 										type: "multiple",
 										files: true,
-										directories: false,
-										items: []
+										directories: false
 									})
 								})
 
@@ -631,7 +522,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 									return
 								}
 
-								if (selectDriveItemsResult.data.cancelled || selectDriveItemsResult.data.selectedItems.length === 0) {
+								if (selectDriveItemsResult.data.cancelled) {
 									return
 								}
 

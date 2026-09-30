@@ -2,14 +2,11 @@ import { useCallback } from "react"
 import { useSecureStore } from "@/lib/secureStore"
 import type { SortByType } from "@/lib/sort"
 import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
+import { type ScopedPreferences, getPerDirectoryKey, applyScopedPreference } from "@/features/drive/driveScopedPreference"
 
 export const SORT_PREFERENCES_SECURE_STORE_KEY = "drive.sortPreferences"
 
-export type SortPreferences = {
-	mode: "global" | "perDirectory"
-	global: SortByType
-	perDirectory: Record<string, SortByType>
-}
+export type SortPreferences = ScopedPreferences<SortByType>
 
 export const DEFAULT_SORT_PREFERENCES: SortPreferences = {
 	mode: "global",
@@ -21,10 +18,6 @@ export const DEFAULT_SORT_PREFERENCES: SortPreferences = {
 // (always uploadDateDesc — chronological is the whole point of the view).
 export function isSortable(type: DrivePathType | null): type is DrivePathType {
 	return type !== null && type !== "recents"
-}
-
-export function getPerDirectoryKey(drivePath: DrivePath): string {
-	return `${drivePath.type ?? ""}:${drivePath.uuid ?? ""}`
 }
 
 export function resolveEffectiveSort(prefs: SortPreferences, drivePath: DrivePath): SortByType {
@@ -67,22 +60,7 @@ export function useDriveSortPreference(drivePath: DrivePath): {
 
 			const key = getPerDirectoryKey(drivePath)
 
-			setPrefs(prev => {
-				if (prev.mode === "perDirectory") {
-					return {
-						...prev,
-						perDirectory: {
-							...prev.perDirectory,
-							[key]: next
-						}
-					}
-				}
-
-				return {
-					...prev,
-					global: next
-				}
-			})
+			setPrefs(prev => applyScopedPreference(prev, key, next))
 		},
 		[drivePath, sortable, setPrefs]
 	)

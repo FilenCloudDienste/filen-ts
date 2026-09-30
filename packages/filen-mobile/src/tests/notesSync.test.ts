@@ -174,7 +174,8 @@ function asSdkError<E>(error: E, kind: string): E {
 	return error
 }
 
-import { Sync, SyncHost, hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS, sync as singletonSync } from "@/features/notes/components/sync"
+import { Sync, SyncHost, sync as singletonSync } from "@/features/notes/components/sync"
+import { hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import sqlite from "@/lib/sqlite"
 import alerts from "@/lib/alerts"
 import events from "@/lib/events"
@@ -182,7 +183,7 @@ import useAppStore from "@/stores/useApp.store"
 import { AppState } from "react-native"
 import { render } from "@testing-library/react"
 import React from "react"
-import type { InflightContent } from "@/features/notes/store/useNotes.store"
+import type { InflightContent } from "@/features/notes/store/useNotesInflight.store"
 
 const KV_KEY = "inflightNoteContent"
 

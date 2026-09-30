@@ -13,6 +13,7 @@ import useNotesInflightStore, { type InflightContent, INFLIGHT_CONTENT_SQLITE_KV
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useAppStore from "@/stores/useApp.store"
 import { removeQueryEverywhere, queryClientPersisterKv } from "@/queries/client"
+import { AUTO_SYNC_MIN_INTERVAL_MS } from "@/constants"
 
 // Per-note ledger rows: `notesOffline:marked:<uuid>`. One row per marked note so a mark/unmark is a
 // point write instead of a rewrite of the whole set.
@@ -28,11 +29,6 @@ const PENDING_EVICTION_PREFIX = "notesOffline:evict:"
 // simultaneous requests would starve everything else sharing the SDK's TPS budget. Shared by the sync
 // pass AND the socket-driven refresh — a bulk remote edit can otherwise fan out just as wide.
 const FETCH_CONCURRENCY = 3
-
-// Floor between two AUTOMATIC passes. Every `inactive -> active` flip reaches sync(): Face ID, the
-// share sheet, a permission dialog, an app-switcher peek. Without a floor, five quick peeks are five
-// full listNotes round trips. Background runs bypass it — they fire rarely and are the whole point.
-export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
 
 type KvCommand = [string, (string | Uint8Array)[]]
 

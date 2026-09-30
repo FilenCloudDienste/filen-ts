@@ -1,14 +1,19 @@
 import { Platform } from "react-native"
 import * as FileSystem from "expo-file-system"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
+import * as MediaLibrary from "expo-media-library/legacy"
 import mimeTypes from "mime-types"
+import { type TFunction } from "i18next"
 import { run, type Result, driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/types"
-import { listLocalDirectoryRecursive } from "@/lib/fsUtils"
+import { ensureDirectory, listLocalDirectoryRecursive } from "@/lib/fsUtils"
 import { normalizeFilePathForBlobUtil } from "@/lib/paths"
-import { newTmpDir } from "@/lib/tmp"
+import { newTmpDir, newTmpStagedFile } from "@/lib/tmp"
+import { createCompletionGate } from "@/lib/completionGate"
 import { isFileItem } from "@/features/drive/driveSelectors"
 import transfers from "@/features/transfers/transfers"
+import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
+import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
 import logger from "@/lib/logger"
 
@@ -98,37 +103,24 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 			}
 		})
 
-		if (!destination.parentDirectory.exists) {
-			destination.parentDirectory.create({
-				intermediates: true,
-				idempotent: true
-			})
-		}
+		ensureDirectory(destination.parentDirectory)
 
 		if (destination.exists) {
 			destination.delete()
 		}
 
-		let resolveCompletion: (() => void) | undefined
+		const gate = createCompletionGate()
 
-		const completionPromise = new Promise<void>(resolve => {
-			resolveCompletion = resolve
-		})
-
-		// Safety net: the transfer entry (notification/floating bar) stays alive until this
-		// promise resolves, so it MUST resolve on EVERY exit — abort (null result), a download
-		// throw, and the missing-files throw below all skip the MediaStore block whose own defer
-		// normally resolves it. Registered before the download starts; resolving twice is a no-op.
-		defer(() => {
-			resolveCompletion?.()
-		})
+		// Safety net: abort (null result), a download throw and the missing-files throw below all
+		// skip the MediaStore block whose own defer normally opens the gate.
+		defer(gate.open)
 
 		const result = await transfers.download({
 			item,
 			destination,
 			awaitExternalCompletionBeforeMarkingAsFinished: () =>
 				Platform.select({
-					android: completionPromise,
+					android: gate.wait(),
 					default: Promise.resolve()
 				})
 		})
@@ -146,9 +138,7 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 
 		if (Platform.OS === "android") {
 			mediaStoreCopyResult = await run<void>(async defer => {
-				defer(() => {
-					resolveCompletion?.()
-				})
+				defer(gate.open)
 
 				if (fileMime !== null && destination instanceof FileSystem.File) {
 					await copyToPublicDownloads({
@@ -246,4 +236,79 @@ export async function downloadDriveItemToDevice({ item }: { item: DriveItem }): 
 			throw mediaStoreCopyResult.error
 		}
 	})
+}
+
+// Requests photo-library write access for save-to-photos. Alerts and returns false when the
+// action must not proceed.
+export async function ensureSaveToPhotosPermission(t: TFunction): Promise<boolean> {
+	const result = await run(async () => {
+		return await hasAllNeededMediaPermissions({ shouldRequest: true, library: "any", needCamera: false })
+	})
+
+	if (!result.success) {
+		logger.warn("drive-download", "save to photos: media permissions check failed", { error: result.error })
+		alerts.error(result.error)
+
+		return false
+	}
+
+	if (!result.data) {
+		alerts.error(t("no_permissions_enable_manually"))
+
+		return false
+	}
+
+	return true
+}
+
+// Stages the file in a fresh tmp directory, downloads it and saves it to the OS photo library.
+// Returns quietly on abort, throws on failure.
+export async function saveDriveItemToPhotos(item: DriveItem): Promise<void> {
+	const result = await run(async defer => {
+		if (!item.data.decryptedMeta) {
+			throw new Error("Missing decrypted metadata")
+		}
+
+		const destination = newTmpStagedFile(item.data.decryptedMeta.name)
+
+		defer(() => {
+			if (destination.parentDirectory.exists) {
+				destination.parentDirectory.delete()
+			}
+		})
+
+		if (!(await transfers.download({ item, destination }))) {
+			return
+		}
+
+		await MediaLibrary.saveToLibraryAsync(destination.uri)
+	})
+
+	if (!result.success) {
+		throw result.error
+	}
+}
+
+// Stages a single file in a fresh tmp directory and downloads it there. Returns null on abort,
+// throws on failure. The caller owns deleting the staging directory.
+export async function downloadFileItemToTmp(item: DriveItem): Promise<FileSystem.File | null> {
+	if (!item.data.decryptedMeta) {
+		throw new Error("Missing decrypted metadata")
+	}
+
+	const destination = newTmpStagedFile(item.data.decryptedMeta.name)
+	const downloadResult = await transfers.download({
+		item,
+		destination
+	})
+
+	if (!downloadResult) {
+		return null
+	}
+
+	if (downloadResult.files.length === 0 || downloadResult.directories.length > 0 || !downloadResult.files[0] || !destination.exists) {
+		throw new Error("Downloaded item is not a file")
+	}
+
+	return destination
 }

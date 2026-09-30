@@ -6,17 +6,39 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // Coverage for the <NotesOfflineSync /> host component (src/features/notes/components/offlineSync.tsx),
 // which loads the offline-notes ledger and kicks a convergence pass on mount, then re-syncs on every
 // background → foreground transition. Mirrors offlineSyncHost.test.ts.
-const { mockNotesOffline, appActive } = vi.hoisted(() => ({
-	mockNotesOffline: { sync: vi.fn(), load: vi.fn() },
-	appActive: { value: true }
-}))
+const { mockNotesOffline, appState } = vi.hoisted(() => {
+	const listeners = new Set<(state: string) => void>()
 
+	return {
+		mockNotesOffline: { sync: vi.fn(), load: vi.fn() },
+		appState: {
+			currentState: "active",
+			listeners,
+			addEventListener(_type: string, handler: (state: string) => void) {
+				listeners.add(handler)
+
+				return {
+					remove: () => {
+						listeners.delete(handler)
+					}
+				}
+			},
+			emit(state: string) {
+				appState.currentState = state
+
+				for (const listener of listeners) {
+					listener(state)
+				}
+			}
+		}
+	}
+})
+
+vi.mock("react-native", () => ({ AppState: appState }))
 vi.mock("@/features/notes/notesOffline", () => ({ default: mockNotesOffline }))
-vi.mock("@/hooks/useIsAppActive", () => ({ default: () => appActive.value }))
 
 import NotesOfflineSync from "@/features/notes/components/offlineSync"
-import { AppState } from "react-native"
-import { render } from "@testing-library/react"
+import { render, act } from "@testing-library/react"
 import React from "react"
 
 // Flush the depth-1 fire-and-forget .catch() chains so they settle before assertions.
@@ -25,22 +47,10 @@ async function flushMicrotasks(): Promise<void> {
 	await Promise.resolve()
 }
 
-function withAppState(state: string, run: () => void): void {
-	const appStateMock = AppState as unknown as { currentState: string }
-	const previous = appStateMock.currentState
-
-	appStateMock.currentState = state
-
-	try {
-		run()
-	} finally {
-		appStateMock.currentState = previous
-	}
-}
-
 beforeEach(() => {
 	vi.clearAllMocks()
-	appActive.value = true
+	appState.currentState = "active"
+	appState.listeners.clear()
 	mockNotesOffline.sync.mockResolvedValue(undefined)
 	mockNotesOffline.load.mockResolvedValue(undefined)
 })
@@ -54,15 +64,22 @@ describe("NotesOfflineSync host", () => {
 		expect(mockNotesOffline.sync).toHaveBeenCalledOnce()
 	})
 
+	it("loads the ledger before the mount pass starts", async () => {
+		render(React.createElement(NotesOfflineSync))
+		await flushMicrotasks()
+
+		const loadOrder = mockNotesOffline.load.mock.invocationCallOrder[0] ?? Infinity
+		const syncOrder = mockNotesOffline.sync.mock.invocationCallOrder[0] ?? -Infinity
+
+		expect(loadOrder).toBeLessThan(syncOrder)
+	})
+
 	it("does NOT fire the mount pass when the tree mounts in background (iOS cold BGTask launch)", async () => {
 		// An unbudgeted pass here would win the in-flight join against the budgeted one the background
 		// task runs moments later.
-		appActive.value = false
+		appState.currentState = "background"
 
-		withAppState("background", () => {
-			render(React.createElement(NotesOfflineSync))
-		})
-
+		render(React.createElement(NotesOfflineSync))
 		await flushMicrotasks()
 
 		expect(mockNotesOffline.sync).not.toHaveBeenCalled()
@@ -74,27 +91,25 @@ describe("NotesOfflineSync host", () => {
 	// that debounced registration fires — and a notes-only user's background task would deregister
 	// itself, killing the one trigger that reaches them.
 	it("still loads the ledger when the tree mounts in background", async () => {
-		appActive.value = false
+		appState.currentState = "background"
 
-		withAppState("background", () => {
-			render(React.createElement(NotesOfflineSync))
-		})
-
+		render(React.createElement(NotesOfflineSync))
 		await flushMicrotasks()
 
 		expect(mockNotesOffline.load).toHaveBeenCalledOnce()
 	})
 
 	it("fires a pass on the first background → foreground transition", async () => {
-		appActive.value = false
+		appState.currentState = "background"
 
-		const { rerender } = withAppStateRender("background")
+		render(React.createElement(NotesOfflineSync))
+		await flushMicrotasks()
 
 		expect(mockNotesOffline.sync).not.toHaveBeenCalled()
 
-		appActive.value = true
-
-		rerender(React.createElement(NotesOfflineSync))
+		act(() => {
+			appState.emit("active")
+		})
 		await flushMicrotasks()
 
 		expect(mockNotesOffline.sync).toHaveBeenCalledOnce()
@@ -120,18 +135,3 @@ describe("NotesOfflineSync host", () => {
 		await flushMicrotasks()
 	})
 })
-
-// Renders with AppState pinned for the duration of the initial mount only, returning the rerender
-// handle so the transition can be driven afterwards.
-function withAppStateRender(state: string): { rerender: (ui: React.ReactElement) => void } {
-	const appStateMock = AppState as unknown as { currentState: string }
-	const previous = appStateMock.currentState
-
-	appStateMock.currentState = state
-
-	try {
-		return render(React.createElement(NotesOfflineSync))
-	} finally {
-		appStateMock.currentState = previous
-	}
-}

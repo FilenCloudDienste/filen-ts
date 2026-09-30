@@ -1,8 +1,10 @@
-import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryUpdater } from "@/queries/client"
+import { type UseQueryOptions } from "@tanstack/react-query"
+import { type QueryUpdater } from "@/queries/client"
+import { createFixedKeyQuery } from "@/queries/createFixedKeyQuery"
 import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import auth from "@/lib/auth"
 import { type Note } from "@/types"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useNotesQuery"
 
@@ -22,11 +24,7 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	const all = await authedSdkClient.listNotes(
-		params?.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
+		toSignalOpts(params?.signal)
 	)
 
 	const notes: Note[] = all.map(n => ({
@@ -37,20 +35,14 @@ export async function fetchData(params?: { signal?: AbortSignal }) {
 	return notes
 }
 
-export function useNotesQuery(
-	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
-): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const query = useQuery({
-		...options,
-		queryKey: [BASE_QUERY_KEY],
-		queryFn: ({ signal }) =>
-			fetchData({
-				signal
-			})
-	})
+const notesQuery = createFixedKeyQuery({
+	baseKey: BASE_QUERY_KEY,
+	fetchData,
+	empty: () => []
+})
 
-	return query as UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error>
-}
+export const useNotesQuery = notesQuery.useQuery
+export const notesQueryGet = notesQuery.get
 
 // Bumped on every list write. Snapshot-replacers (the socket New handler's fetched list) compare
 // it around their network round-trip: a write landing mid-fetch means the snapshot is stale and
@@ -61,22 +53,10 @@ export function getNotesListGeneration(): number {
 	return notesListGeneration
 }
 
-export function notesQueryUpdate({
-	updater
-}: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
-}) {
+export function notesQueryUpdate(params: { updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>> }) {
 	notesListGeneration++
 
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY], prev => {
-		return typeof updater === "function" ? updater(prev ?? []) : updater
-	})
-}
-
-export function notesQueryGet() {
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY])
+	notesQuery.update(params)
 }
 
 export default useNotesQuery

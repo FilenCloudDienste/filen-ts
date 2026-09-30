@@ -1,11 +1,7 @@
-import { Platform } from "react-native"
-import { useLocalSearchParams, useFocusEffect } from "expo-router"
-import { router } from "@/lib/router"
-import { type HeaderItem } from "@/components/ui/header"
-import { useCallback } from "react"
-import { useResolveClassNames } from "uniwind"
-import { run, contactDisplayName } from "@filen/shared"
-import prompts from "@/lib/prompts"
+import { useLocalSearchParams } from "expo-router"
+import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChange"
+import { contactDisplayName } from "@filen/shared"
+import { confirmPrompt } from "@/lib/promptFlow"
 import { useStringifiedClient } from "@/lib/auth"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
@@ -21,32 +17,22 @@ import { runBulk } from "@/lib/bulkOps"
 import { useTranslation } from "react-i18next"
 import ParticipantList from "@/components/participants/participantList"
 import { type ParticipantRowProps } from "@/components/participants/participantRow"
-import useIsOnline from "@/hooks/useIsOnline"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import logger from "@/lib/logger"
-import { contactsQueryGet } from "@/features/contacts/queries/useContacts.query"
 import { buildBlockToggleMenuAction } from "@/features/contacts/contactsActions"
+
+const clearSelectedNoteParticipants = () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants()
 
 const NoteParticipants = () => {
 	const { t } = useTranslation()
 	const { uuid } = useLocalSearchParams<{
 		uuid?: string
 	}>()
-	const textForeground = useResolveClassNames("text-foreground")
 	const stringifiedClient = useStringifiedClient()
 	const selectedNoteParticipants = useNoteParticipantsStore(useShallow(state => state.selectedNoteParticipants))
-	const isOnline = useIsOnline()
 	const blocked = useBlockedUsers()
 
-	useFocusEffect(
-		useCallback(() => {
-			useNoteParticipantsStore.getState().clearSelectedNoteParticipants()
-
-			return () => {
-				useNoteParticipantsStore.getState().clearSelectedNoteParticipants()
-			}
-		}, [])
-	)
+	useClearSelectionOnFocusChange(clearSelectedNoteParticipants)
 
 	const notesQuery = useNotesQuery({
 		enabled: false
@@ -63,13 +49,10 @@ const NoteParticipants = () => {
 		return <DismissStack />
 	}
 
-	const inSelectionMode = isOwner && selectedNoteParticipants.length > 0
-
 	const toRowProps = (participant: NoteParticipant): ParticipantRowProps => {
 		const isSelected = selectedNoteParticipants.some(p => p.userId === participant.userId)
 		const areOthersSelected = selectedNoteParticipants.length > 0
 		const isParticipantBlocked = blocked.userIds.has(participant.userId)
-		const blockedUuid = isParticipantBlocked ? contactsQueryGet()?.blocked.find(b => b.userId === participant.userId)?.uuid : undefined
 
 		return {
 			email: participant.email,
@@ -81,12 +64,13 @@ const NoteParticipants = () => {
 				buildBlockToggleMenuAction({
 					t,
 					isBlocked: isParticipantBlocked,
-					blockedUuid,
-					userId: participant.userId,
-					email: participant.email,
-					avatar: participant.avatar,
-					nickName: participant.nickName,
-					timestamp: participant.addedTimestamp
+					target: {
+						userId: participant.userId,
+						email: participant.email,
+						avatar: participant.avatar,
+						nickName: participant.nickName,
+						timestamp: participant.addedTimestamp
+					}
 				})
 			],
 			ownerActions: isOwner
@@ -129,28 +113,26 @@ const NoteParticipants = () => {
 								icon: "delete",
 								requiresOnline: true,
 								onPress: async () => {
-									const promptResponse = await run(async () => {
-										return await prompts.alert({
+									const confirmed = await confirmPrompt(
+										{
 											title: t("remove_participant"),
 											message: t("remove_participant_confirmation_note"),
 											cancelText: t("cancel"),
 											okText: t("remove"),
 											destructive: true
-										})
-									})
+										},
+										{
+											tag: "notes",
+											message: "remove participant prompt failed",
+											level: "error",
+											context: {
+												noteUuid: note.uuid,
+												userId: participant.userId
+											}
+										}
+									)
 
-									if (!promptResponse.success) {
-										logger.error("notes", "remove participant prompt failed", {
-											error: promptResponse.error,
-											noteUuid: note.uuid,
-											userId: participant.userId
-										})
-										alerts.error(promptResponse.error)
-
-										return
-									}
-
-									if (promptResponse.data.cancelled) {
+									if (!confirmed) {
 										return
 									}
 
@@ -179,207 +161,118 @@ const NoteParticipants = () => {
 		}
 	}
 
-	const headerLeftItems: HeaderItem[] = (() => {
-		if (inSelectionMode) {
-			return [
-				{
-					type: "button",
-					icon: {
-						name: "close-outline",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							useNoteParticipantsStore.getState().clearSelectedNoteParticipants()
-						}
-					}
-				}
-			]
+	const addParticipants = async () => {
+		const selectContactsResult = await selectContacts({
+			userIdsToExclude: note.participants.map(p => Number(p.userId))
+		})
+
+		if (selectContactsResult.cancelled) {
+			return
 		}
 
-		if (Platform.OS === "ios") {
-			return [
-				{
-					type: "button",
-					icon: {
-						name: "close",
-						color: textForeground.color,
-						size: 20
-					},
-					props: {
-						onPress: () => {
-							router.back()
-						}
-					}
-				}
-			]
+		const result = await runWithLoading(async () => {
+			return await notes.addParticipants({
+				note,
+				contacts: selectContactsResult.selectedContacts,
+				permissionsWrite: true
+			})
+		})
+
+		if (!result.success) {
+			logger.error("notes", "add participants failed", { error: result.error, noteUuid: note.uuid })
+			alerts.error(result.error)
 		}
-
-		return []
-	})()
-
-	const headerRightItems: HeaderItem[] | undefined = (() => {
-		if (inSelectionMode) {
-			const menuButtons: MenuButton[] = [
-				{
-					id: "selectAll",
-					title: selectedNoteParticipants.length === participants.length ? t("deselect_all") : t("select_all"),
-					icon: "select",
-					onPress: () => {
-						if (selectedNoteParticipants.length === participants.length) {
-							useNoteParticipantsStore.getState().clearSelectedNoteParticipants()
-
-							return
-						}
-
-						useNoteParticipantsStore.getState().selectAllNoteParticipants(participants)
-					}
-				},
-				{
-					id: "bulkPermissions",
-					title: t("permissions"),
-					icon: "edit",
-					requiresOnline: true,
-					subButtons: [
-						{
-							id: "bulkPermissionRead",
-							title: t("permission_read"),
-							icon: "eye",
-							requiresOnline: true,
-							onPress: async () => {
-								await runBulk({
-									items: selectedNoteParticipants,
-									clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
-									op: participant =>
-										notes.setParticipantPermission({
-											note,
-											participant,
-											permissionsWrite: false
-										})
-								})
-							}
-						},
-						{
-							id: "bulkPermissionWrite",
-							title: t("permission_write"),
-							icon: "edit",
-							requiresOnline: true,
-							onPress: async () => {
-								await runBulk({
-									items: selectedNoteParticipants,
-									clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
-									op: participant =>
-										notes.setParticipantPermission({
-											note,
-											participant,
-											permissionsWrite: true
-										})
-								})
-							}
-						}
-					]
-				},
-				{
-					id: "bulkRemove",
-					title: t("remove_selected"),
-					icon: "delete",
-					destructive: true,
-					requiresOnline: true,
-					onPress: async () => {
-						await runBulk({
-							items: selectedNoteParticipants,
-							clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
-							confirm: {
-								title: t("remove_selected"),
-								message: t("remove_selected_participants_confirmation_note"),
-								okText: t("remove"),
-								cancelText: t("cancel"),
-								destructive: true
-							},
-							op: participant =>
-								notes.removeParticipant({
-									note,
-									participantUserId: participant.userId
-								})
-						})
-					}
-				}
-			]
-
-			return [
-				{
-					type: "menu",
-					props: {
-						type: "dropdown",
-						hitSlop: 20,
-						buttons: menuButtons
-					},
-					triggerProps: {
-						hitSlop: 20
-					},
-					icon: {
-						name: "ellipsis-horizontal",
-						size: 24,
-						color: textForeground.color
-					}
-				}
-			]
-		}
-
-		if (!isOwner) {
-			return undefined
-		}
-
-		return [
-			{
-				type: "button",
-				icon: {
-					name: "add-outline",
-					color: textForeground.color,
-					size: 20
-				},
-				props: {
-					enabled: isOnline,
-					onPress: async () => {
-						const selectContactsResult = await selectContacts({
-							userIdsToExclude: note.participants.map(p => Number(p.userId))
-						})
-
-						if (selectContactsResult.cancelled) {
-							return
-						}
-
-						const result = await runWithLoading(async () => {
-							return await notes.addParticipants({
-								note,
-								contacts: selectContactsResult.selectedContacts,
-								permissionsWrite: true
-							})
-						})
-
-						if (!result.success) {
-							logger.error("notes", "add participants failed", { error: result.error, noteUuid: note.uuid })
-							alerts.error(result.error)
-
-							return
-						}
-					}
-				}
-			}
-		]
-	})()
+	}
 
 	return (
 		<ParticipantList
-			title={inSelectionMode ? t("selected", { count: selectedNoteParticipants.length }) : t("note_participants")}
+			title={t("note_participants")}
 			emptyTitle={t("no_note_participants")}
 			emptyDescription={t("no_note_participants_description")}
 			participants={participants}
 			keyExtractor={participant => participant.userId.toString()}
 			toRowProps={toRowProps}
-			headerLeftItems={headerLeftItems}
-			headerRightItems={headerRightItems}
+			owner={
+				isOwner
+					? {
+							selectedCount: selectedNoteParticipants.length,
+							clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
+							selectAll: () => useNoteParticipantsStore.getState().selectAllNoteParticipants(participants),
+							bulkButtons: [
+								{
+									id: "bulkPermissions",
+									title: t("permissions"),
+									icon: "edit",
+									requiresOnline: true,
+									subButtons: [
+										{
+											id: "bulkPermissionRead",
+											title: t("permission_read"),
+											icon: "eye",
+											requiresOnline: true,
+											onPress: async () => {
+												await runBulk({
+													items: selectedNoteParticipants,
+													clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
+													op: participant =>
+														notes.setParticipantPermission({
+															note,
+															participant,
+															permissionsWrite: false
+														})
+												})
+											}
+										},
+										{
+											id: "bulkPermissionWrite",
+											title: t("permission_write"),
+											icon: "edit",
+											requiresOnline: true,
+											onPress: async () => {
+												await runBulk({
+													items: selectedNoteParticipants,
+													clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
+													op: participant =>
+														notes.setParticipantPermission({
+															note,
+															participant,
+															permissionsWrite: true
+														})
+												})
+											}
+										}
+									]
+								},
+								{
+									id: "bulkRemove",
+									title: t("remove_selected"),
+									icon: "delete",
+									destructive: true,
+									requiresOnline: true,
+									onPress: async () => {
+										await runBulk({
+											items: selectedNoteParticipants,
+											clearSelection: () => useNoteParticipantsStore.getState().clearSelectedNoteParticipants(),
+											confirm: {
+												title: t("remove_selected"),
+												message: t("remove_selected_participants_confirmation_note"),
+												okText: t("remove"),
+												cancelText: t("cancel"),
+												destructive: true
+											},
+											op: participant =>
+												notes.removeParticipant({
+													note,
+													participantUserId: participant.userId
+												})
+										})
+									}
+								}
+							],
+							onAdd: addParticipants
+						}
+					: undefined
+			}
 		/>
 	)
 }

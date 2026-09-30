@@ -11,17 +11,18 @@ import { isConvertHeicToJpgEnabled, convertHeicToJpg } from "@/lib/imageConversi
 import { transplantMetadata } from "@/modules/filen-exif"
 import transfers from "@/features/transfers/transfers"
 import * as FileSystem from "expo-file-system"
+import { extnameOf } from "@/lib/previewType"
 import { fileHash } from "@preeternal/react-native-file-hash"
 import { run, Semaphore, fastLocaleCompare, InFlight } from "@filen/shared"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { randomUUID } from "expo-crypto"
 import { newTmpFile } from "@/lib/tmp"
-import { useShallow } from "zustand/shallow"
-import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
+import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS, AUTO_SYNC_MIN_INTERVAL_MS } from "@/constants"
 import * as ImageManipulator from "expo-image-manipulator"
-import events from "@/lib/events"
+import { renderAndSave } from "@/lib/imageManipulator"
 import NetInfo from "@react-native-community/netinfo"
+import { computeOnline } from "@/lib/connectivity"
 import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import cache from "@/lib/cache"
@@ -190,13 +191,6 @@ export const MAX_BACKGROUND_UPLOAD_ABORTS = 2
 // CameraUploadHashEntry / normalizeCameraUploadHashEntry).
 export const VERSION = 1
 
-// BG-05: min-interval coalescing for non-manual sync triggers. reconnect.ts fans out a sync on
-// every offline→online flip and sync.tsx kicks one on every foreground transition; flaky
-// connectivity (cellular handoff, elevators) drove repeated full local-media listings back-to-back.
-// Auto triggers that arrive within this window of a completed FOREGROUND pass no-op; explicit
-// (manual) syncs always bypass. Mirrors offlineSync's AUTO_SYNC_MIN_INTERVAL_MS.
-export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
-
 // Width of the per-delta upload worker pool in sync(). Bounds the pre-staging
 // probes (getUri/md5) and keeps the stagingMutex(4) waiter queue at O(width)
 // instead of O(deltas) — the mutex itself remains the binding bound for
@@ -363,7 +357,7 @@ class CameraUpload {
 	// large pending set cannot stage the whole camera roll at once.
 	private readonly stagingMutex = new Semaphore(4)
 	private readonly uploadFailures = new Map<string, number>()
-	public secureStoreKey: string = `cameraUploadConfig:v${VERSION}`
+	public readonly secureStoreKey: string = `cameraUploadConfig:v${VERSION}`
 
 	private readonly ensureParentDirectoryExistsCache = new Map<
 		string,
@@ -379,26 +373,10 @@ class CameraUpload {
 	private readonly ensureParentDirectoryExistsInFlight = new InFlight<string, AnyNormalDir>()
 
 	public constructor() {
-		events.subscribe("secureStoreChange", ({ key }) => {
-			if (key === this.secureStoreKey) {
-				this.ensureParentDirectoryExistsCache.clear()
-
-				this.cancel()
-			}
-		})
-
-		events.subscribe("secureStoreClear", () => {
+		secureStore.subscribeKey(this.secureStoreKey, () => {
 			this.ensureParentDirectoryExistsCache.clear()
 
 			this.cancel()
-		})
-
-		events.subscribe("secureStoreRemove", ({ key }) => {
-			if (key === this.secureStoreKey) {
-				this.ensureParentDirectoryExistsCache.clear()
-
-				this.cancel()
-			}
 		})
 	}
 
@@ -459,78 +437,58 @@ class CameraUpload {
 			throw new Error(`compress() called on file outside cache directory: ${file.uri}`)
 		}
 
-		// Hold the Context in a local binding across the await. expo-image-manipulator's
-		// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
-		// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
-		// the native task would be cancelled and renderAsync would reject with
-		// JobCancellationException.
-		const context = ImageManipulator.ImageManipulator.manipulate(normalizeFilePathForExpo(file.uri))
+		const result = await renderAndSave(normalizeFilePathForExpo(file.uri), {
+			compress: 0.8,
+			format: ImageManipulator.SaveFormat.JPEG
+		})
 
-		// The Context and the rendered ImageRef both wrap decoded native bitmaps that Hermes GC does not
-		// track; a bulk camera upload compresses many files back-to-back, so release them explicitly on
-		// every exit path (finally below) or the native memory accumulates until the OS OOM-kills the app.
-		let manipulated: ImageManipulator.ImageRef | null = null
+		const manipulatedFile = new FileSystem.File(result.uri)
 
-		try {
-			manipulated = await context.renderAsync()
+		if (!manipulatedFile.exists) {
+			throw new Error(i18n.t("camera_upload_processing_failed"))
+		}
 
-			const result = await manipulated.saveAsync({
-				compress: 0.8,
-				format: ImageManipulator.SaveFormat.JPEG,
-				base64: false
-			})
-
-			const manipulatedFile = new FileSystem.File(result.uri)
-
-			if (!manipulatedFile.exists) {
-				throw new Error(i18n.t("camera_upload_processing_failed"))
-			}
-
-			if (!manipulatedFile.size || !file.size || manipulatedFile.size >= file.size) {
-				if (manipulatedFile.exists) {
-					manipulatedFile.delete()
-				}
-
-				return file
-			}
-
-			// Carry the original's EXIF/XMP into the compressed JPEG (native, no pixel re-encode,
-			// orientation neutralized) BEFORE `file` is overwritten below — `file` is still the
-			// original source here, `manipulatedFile` the compressed output. Best-effort: runs off
-			// the JS/UI thread and is background-task-safe (atomic replace + fail-open), so on any
-			// failure `manipulatedFile` stays the plain compressed file.
-			try {
-				await transplantMetadata(file.uri, manipulatedFile.uri)
-			} catch (e) {
-				logger.warn("cameraUpload", "Metadata transplant after compression failed, keeping compressed file", { error: e })
-			}
-
-			// The destination is the tmp staging file, which ALWAYS exists by construction
-			// (the asset was copied into it before compress() was called). Native copy throws
-			// when the destination exists unless overwrite is requested.
-			await manipulatedFile.copy(file, {
-				overwrite: true
-			})
-
+		if (!manipulatedFile.size || !file.size || manipulatedFile.size >= file.size) {
 			if (manipulatedFile.exists) {
 				manipulatedFile.delete()
 			}
 
-			// Correct the extension to .jpg since the content is now JPEG.
-			// File.move() updates the uri property in place.
-			if (extname !== ".jpg" && extname !== ".jpeg") {
-				const newFile = new FileSystem.File(file.uri.replace(/\.[^.]+$/, ".jpg"))
-
-				await file.move(newFile)
-
-				return newFile
-			}
-
 			return file
-		} finally {
-			manipulated?.release()
-			context.release()
 		}
+
+		// Carry the original's EXIF/XMP into the compressed JPEG (native, no pixel re-encode,
+		// orientation neutralized) BEFORE `file` is overwritten below — `file` is still the
+		// original source here, `manipulatedFile` the compressed output. Best-effort: runs off
+		// the JS/UI thread and is background-task-safe (atomic replace + fail-open), so on any
+		// failure `manipulatedFile` stays the plain compressed file.
+		try {
+			await transplantMetadata(file.uri, manipulatedFile.uri)
+		} catch (e) {
+			logger.warn("cameraUpload", "Metadata transplant after compression failed, keeping compressed file", { error: e })
+		}
+
+		// The destination is the tmp staging file, which ALWAYS exists by construction
+		// (the asset was copied into it before compress() was called). Native copy throws
+		// when the destination exists unless overwrite is requested.
+		await manipulatedFile.copy(file, {
+			overwrite: true
+		})
+
+		if (manipulatedFile.exists) {
+			manipulatedFile.delete()
+		}
+
+		// Correct the extension to .jpg since the content is now JPEG.
+		// File.move() updates the uri property in place.
+		if (extname !== ".jpg" && extname !== ".jpeg") {
+			const newFile = new FileSystem.File(file.uri.replace(/\.[^.]+$/, ".jpg"))
+
+			await file.move(newFile)
+
+			return newFile
+		}
+
+		return file
 	}
 
 	private async listLocal({
@@ -1352,27 +1310,12 @@ class CameraUpload {
 				return
 			}
 
-			// Camera upload requires server reachability for listing + uploading.
-			// Without it, every listRemote / createDir / transfers.upload call
-			// fails into useCameraUploadStore.errors and surfaces banners.
-			//
-			// Only a DEFINITIVE `false` bails. `isInternetReachable` is `boolean | null`, and on iOS it
-			// is null for a window at the start of EVERY process: the native module there reports only
-			// type/isConnected/details, so NetInfo falls back to its own probe (gateway.filen.io, ours
-			// via NETINFO_CONFIG) and reports null until that probe first settles — while fetch() returns
-			// the cached state without waiting for it. Treating null as offline therefore skipped whole
-			// headless runs whenever the probe lost the race against setup(), which is exactly what a
-			// woken radio makes likely. It also disagreed with computeOnline() in queries/onlineStatus,
-			// the app's declared source of truth, which counts null as online.
-			//
-			// The trade this accepts: null only ever co-occurs with isConnected === true (a
-			// no-connection state resolves to false), so a device with no link still bails here — but a
-			// CONNECTED-yet-unreachable one (captive portal, dead gateway) whose probe has not settled
-			// now proceeds, and its listings/uploads fail into the error store instead. That is the same
-			// outcome the paragraph above describes avoiding, traded knowingly: it is bounded by the run
-			// budget and self-heals on the next pass, whereas the old reading silently forfeited an
-			// entire OS window on every cold start.
-			if (!netState.isConnected || netState.isInternetReachable === false) {
+			// Listing and uploading need the server, or every call fails into the error store. fetch()
+			// returns the cached state without awaiting NetInfo's reachability probe, so on iOS a cold
+			// headless run often sees a null `isInternetReachable`; counting that as offline forfeited the
+			// whole OS window. The accepted trade: a connected-but-unreachable device (captive portal) whose
+			// probe has not settled proceeds and fails into the error store, bounded by the run budget.
+			if (!computeOnline(netState)) {
 				skipped = "offline"
 
 				return
@@ -1930,7 +1873,7 @@ class CameraUpload {
 						// Create the staging tmp file WITH the original extension so that
 						// compress() can pass the supported-extension gate (it checks
 						// extname(file.uri) — a bare UUID with no extension always fails).
-						const srcExt = FileSystem.Paths.extname(localFile.info.filename).toLowerCase()
+						const srcExt = extnameOf(localFile.info.filename).toLowerCase()
 						const tmpFile = newTmpFile(`${randomUUID()}${srcExt}`)
 
 						defer(() => {
@@ -1974,7 +1917,7 @@ class CameraUpload {
 						const uploadExt = FileSystem.Paths.extname(uploadFile.uri).toLowerCase()
 						const plainUploadName =
 							uploadExt !== "" && uploadExt !== srcExt
-								? `${FileSystem.Paths.basename(localFile.info.filename, FileSystem.Paths.extname(localFile.info.filename))}${uploadExt}`
+								? `${FileSystem.Paths.basename(localFile.info.filename, extnameOf(localFile.info.filename))}${uploadExt}`
 								: localFile.info.filename
 						// #B2: a collision member uploads under its collision-resolved name
 						// (`name_<suffix>.ext`) so the remote listing's base key reproduces
@@ -1984,7 +1927,7 @@ class CameraUpload {
 						// FINAL name, AFTER the compress extension rewrite, and adds only
 						// [a-z0-9_-] characters, so it needs no sanitization beyond the
 						// plain name's. Non-colliding assets keep their plain name.
-						const plainUploadExt = FileSystem.Paths.extname(plainUploadName)
+						const plainUploadExt = extnameOf(plainUploadName)
 						const uploadName =
 							localFile.collisionSuffix.length > 0
 								? `${FileSystem.Paths.basename(plainUploadName, plainUploadExt)}${localFile.collisionSuffix}${plainUploadExt}`
@@ -2179,24 +2122,6 @@ export function useCameraUploadConfig() {
 	const [config, setConfig] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
 
 	return { config, setConfig }
-}
-
-export function useCameraUpload() {
-	const syncing = useCameraUploadStore(useShallow(state => state.syncing))
-	const errors = useCameraUploadStore(useShallow(state => state.errors))
-	const [config, setConfig] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
-
-	const sync = (params?: Parameters<CameraUpload["sync"]>[0]) => cameraUpload.sync(params)
-	const cancel = () => cameraUpload.cancel()
-
-	return {
-		syncing,
-		errors,
-		config,
-		sync,
-		setConfig,
-		cancel
-	}
 }
 
 export default cameraUpload

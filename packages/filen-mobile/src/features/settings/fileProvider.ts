@@ -4,9 +4,11 @@ import { Semaphore } from "@filen/shared"
 import { IOS_APP_GROUP_IDENTIFIER } from "@/constants"
 import auth from "@/lib/auth"
 import secureStore from "@/lib/secureStore"
+import { type Biometric, BIOMETRIC_SECURE_STORE_KEY } from "@/features/settings/biometric"
 import logger from "@/lib/logger"
 import { getOrCreateAuthDek, purgeAuthDek, sealAuthFile, openAuthFile } from "@/features/settings/authFileKey"
 import { atomicWrite } from "@/lib/fsAtomic"
+import { SHARED_BASE_DIRECTORY_URI } from "@/lib/storageRoots"
 import { registerDomain, unregisterDomain, isDomainRegistered } from "@/modules/file-provider-domain"
 
 // Safety floor for cache budgets. Below this the extension would thrash —
@@ -57,15 +59,7 @@ async function withDomainCallTimeout<T>(promise: Promise<T>, label: string): Pro
 	}
 }
 
-export const AUTH_FILE = new FileSystem.File(
-	FileSystem.Paths.join(
-		Platform.select({
-			ios: FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER] ?? FileSystem.Paths.document,
-			default: FileSystem.Paths.document
-		}),
-		"auth.json"
-	)
-)
+export const AUTH_FILE = new FileSystem.File(FileSystem.Paths.join(SHARED_BASE_DIRECTORY_URI, "auth.json"))
 
 if (Platform.OS === "ios" && !FileSystem.Paths.appleSharedContainers?.[IOS_APP_GROUP_IDENTIFIER]) {
 	logger.warn("file-provider", "App Group container not found — auth.json falling back to private Documents; file provider extension will not see the file", { groupId: IOS_APP_GROUP_IDENTIFIER })
@@ -226,7 +220,7 @@ class FileProvider {
 			// teardown calls disable() under this same mutex before it flips the flag, so a
 			// pre-mutex read could pass the gate on a value a concurrent biometric enable was
 			// about to change; under the mutex both orderings converge.
-			const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+			const biometric = await secureStore.get<Biometric>(BIOMETRIC_SECURE_STORE_KEY)
 
 			if (biometric?.enabled) {
 				throw new Error("cannot enable the file provider while biometric lock is on")
@@ -303,7 +297,7 @@ class FileProvider {
 
 		try {
 			const enabled = await this.enabled()
-			const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+			const biometric = await secureStore.get<Biometric>(BIOMETRIC_SECURE_STORE_KEY)
 
 			return await action({
 				enabled,
@@ -357,7 +351,7 @@ class FileProvider {
 		// native registration landed late is exactly the state where biometric is still on AND
 		// the domain exists — that mismatch is repaired here by removing the domain, not ratified
 		// by returning early. The settings screen's own consent flow is the way back in.
-		const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+		const biometric = await secureStore.get<Biometric>(BIOMETRIC_SECURE_STORE_KEY)
 
 		if (biometric?.enabled) {
 			if (await withDomainCallTimeout(isDomainRegistered(FILE_PROVIDER_DOMAIN_IDENTIFIER), "isDomainRegistered")) {
@@ -448,7 +442,7 @@ class FileProvider {
 			// backed-up App Group container. Fail CLOSED instead — drop the file
 			// and the domain. Re-enabling is a deliberate act with consent; the
 			// provider being off is the safe half of that trade.
-			const biometric = await secureStore.get<{ enabled: boolean }>("biometric")
+			const biometric = await secureStore.get<Biometric>(BIOMETRIC_SECURE_STORE_KEY)
 
 			if (biometric?.enabled) {
 				logger.warn("file-provider", "cannot migrate auth.json while biometric lock is on — deleting the unreadable file rather than leaving credentials at rest", { error: e })

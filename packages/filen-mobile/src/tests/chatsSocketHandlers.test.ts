@@ -82,6 +82,12 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 
+vi.mock("@/lib/auth", () => ({
+	default: {
+		currentUserId: () => 100n // USER_ID
+	}
+}))
+
 // The ConversationDeleted handler purges the chat's inflight queue/errors/drafts (D4b/M5) —
 // the purge itself is covered by chatsInflight.test.ts; here we only assert the wiring.
 vi.mock("@/features/chats/chatsInflight", () => ({
@@ -250,7 +256,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			const typingInner = { typingType: ChatTypingType.Down, chat: "chat-1", senderId: OTHER_USER_ID }
 			const event = makeTypingEvent(ChatTypingType.Down, "chat-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockSetTyping).toHaveBeenCalledOnce()
 
@@ -265,7 +271,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("deduplicates — existing indicator from same sender is replaced", async () => {
 			const event = makeTypingEvent(ChatTypingType.Down, "chat-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			const updater = mockSetTyping.mock.calls[0]?.[0] as (prev: Record<string, unknown[]>) => Record<string, unknown[]>
 			const existingIndicator = { senderId: OTHER_USER_ID, chat: "chat-1" }
@@ -286,7 +292,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeTypingEvent(ChatTypingType.Down, "chat-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			// The first call is the outer setTyping — the updater runs and sets the 10s timeout
 			expect(mockSetTyping).toHaveBeenCalledOnce()
@@ -308,8 +314,8 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			// The SAME sender starts typing in chat-A, then in chat-B before A's 10s watchdog elapses.
 			// A group-chat member can legitimately be typing in two chats at once.
-			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-A", OTHER_USER_ID), userId: USER_ID })
-			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-B", OTHER_USER_ID), userId: USER_ID })
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-A", OTHER_USER_ID) })
+			await handleChatEvent({ event: makeTypingEvent(ChatTypingType.Down, "chat-B", OTHER_USER_ID) })
 
 			expect((typingState["chat-A"] ?? []).map(t => t.senderId)).toEqual([OTHER_USER_ID])
 			expect((typingState["chat-B"] ?? []).map(t => t.senderId)).toEqual([OTHER_USER_ID])
@@ -328,7 +334,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("removes typing indicator for the sender in the chat", async () => {
 			const event = makeTypingEvent(ChatTypingType.Up, "chat-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockSetTyping).toHaveBeenCalledOnce()
 
@@ -354,7 +360,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("calls chatMessagesQueryUpdate after the 1ms delay", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			// Before the timeout fires — not yet called
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
@@ -367,7 +373,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("the updater adds the new message and deduplicates by uuid", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 			vi.advanceTimersByTime(1)
 
 			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
@@ -386,7 +392,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("appends the new message when it is not already present", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-new", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 			vi.advanceTimersByTime(1)
 
 			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
@@ -405,7 +411,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("does NOT remove and re-append an already-present message (returns prev unchanged)", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 			vi.advanceTimersByTime(3000)
 
 			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
@@ -431,7 +437,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("clears the typing indicator for the sender immediately", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			// setTyping is called immediately (not delayed) to clear the indicator
 			expect(mockSetTyping).toHaveBeenCalledOnce()
@@ -444,7 +450,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("calls chatsQueryUpdate after an additional 1ms to update lastMessage", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			// Advance past both timeouts (1ms outer + 1ms inner)
 			vi.advanceTimersByTime(2)
@@ -457,7 +463,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("does NOT call chatMessagesQueryUpdate before 3 seconds", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			vi.advanceTimersByTime(2999)
 
@@ -467,7 +473,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("calls chatMessagesQueryUpdate after 3 seconds have passed", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-1", USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			vi.advanceTimersByTime(3000)
 
@@ -479,7 +485,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			// inflight uuid, so the server-uuid dedupe alone can't see it.
 			const event = makeMessageNewEvent("chat-1", "msg-server", USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 			vi.advanceTimersByTime(3000)
 
 			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
@@ -503,7 +509,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("still APPENDS when the pending copy has different content (only a true match is swapped)", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-server", USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 			vi.advanceTimersByTime(3000)
 
 			const { updater } = mockChatMessagesQueryUpdate.mock.calls[0]![0] as {
@@ -528,7 +534,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("does NOT regress lastMessage to an older self message (delayed 3s delivery after a newer peer message)", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-old-self", USER_ID, 100n)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 			// Outer 3000ms self delay + inner 1ms chats-update delay.
 			vi.advanceTimersByTime(3001)
 
@@ -546,7 +552,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 		it("replaces lastMessage when the incoming message is newer (or timestamps are missing/equal)", async () => {
 			const event = makeMessageNewEvent("chat-1", "msg-new-self", USER_ID, 300n)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 			vi.advanceTimersByTime(3001)
 
 			const updater = capturedChatsUpdaters[capturedChatsUpdaters.length - 1]!
@@ -574,7 +580,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 				inner: ["New Chat Name"]
 			})
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
 
@@ -595,7 +601,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 				inner: ["encryptedBlob"]
 			})
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
 		})
@@ -612,7 +618,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 				inner: ["Updated content"]
 			})
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
 
@@ -636,7 +642,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 				inner: ["encryptedBlob"]
 			})
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 		})
@@ -658,7 +664,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeMessageDeleteEvent("msg-del")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
 
@@ -682,7 +688,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeMessageDeleteEvent("msg-not-found")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 		})
@@ -692,7 +698,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeMessageDeleteEvent("msg-1")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 		})
@@ -712,7 +718,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeMessageEmbedDisabledEvent("msg-embed")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatMessagesQueryUpdate).toHaveBeenCalledOnce()
 
@@ -733,7 +739,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeMessageEmbedDisabledEvent("msg-not-found")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
 		})
@@ -748,7 +754,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 			const newChat = { uuid: "chat-new", name: "New Chat" }
 			const event = makeConversationsNewEvent(newChat)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
 
@@ -776,7 +782,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationDeletedEvent("chat-gone")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockEventsEmit).toHaveBeenCalledOnce()
 			expect(mockEventsEmit).toHaveBeenCalledWith("chatConversationDeleted", { uuid: "chat-gone" })
@@ -788,7 +794,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationDeletedEvent("chat-gone")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			// Called synchronously — no timer advance needed
 			expect(mockRemoveFromSelection).toHaveBeenCalledOnce()
@@ -800,7 +806,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationDeletedEvent("chat-gone")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockRemoveFromSelection).not.toHaveBeenCalled()
 		})
@@ -812,7 +818,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationDeletedEvent("chat-gone")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			// Called without any timer advance.
 			expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
@@ -826,7 +832,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationDeletedEvent("chat-gone")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
 			expect(mockPurgeChatInflightState).toHaveBeenCalledWith("chat-gone")
@@ -837,7 +843,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationDeletedEvent("chat-gone")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockEventsEmit).not.toHaveBeenCalled()
 		})
@@ -847,7 +853,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationDeletedEvent("chat-gone")
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			// Neither messages nor chats update should fire immediately
 			expect(mockChatMessagesQueryUpdate).not.toHaveBeenCalled()
@@ -888,7 +894,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationParticipantLeftEvent("chat-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
 
@@ -911,7 +917,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationParticipantLeftEvent("chat-1", OTHER_USER_ID)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
 		})
@@ -924,7 +930,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 				const event = makeConversationParticipantLeftEvent("chat-1", USER_ID)
 
-				await handleChatEvent({ event, userId: USER_ID })
+				await handleChatEvent({ event })
 
 				expect(mockPurgeChatInflightState).toHaveBeenCalledTimes(1)
 				expect(mockPurgeChatInflightState).toHaveBeenCalledWith("chat-1")
@@ -936,7 +942,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 				const event = makeConversationParticipantLeftEvent("chat-1", USER_ID)
 
-				await handleChatEvent({ event, userId: USER_ID })
+				await handleChatEvent({ event })
 
 				expect(mockEventsEmit).toHaveBeenCalledOnce()
 				expect(mockEventsEmit).toHaveBeenCalledWith("chatConversationDeleted", { uuid: "chat-1" })
@@ -949,7 +955,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 				const event = makeConversationParticipantLeftEvent("chat-1", USER_ID)
 
-				await handleChatEvent({ event, userId: USER_ID })
+				await handleChatEvent({ event })
 
 				// No immediate participants-filter update — removal is deferred like a deletion.
 				expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
@@ -981,7 +987,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationParticipantNewEvent("chat-1", newParticipant)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).toHaveBeenCalledOnce()
 
@@ -1000,7 +1006,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationParticipantNewEvent("chat-1", updatedParticipant)
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			const updater = capturedChatsUpdaters[0]!
 			const prev = [{ uuid: "chat-1", participants: [{ userId: OTHER_USER_ID, email: "old@example.com" }] }]
@@ -1016,7 +1022,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 			const event = makeConversationParticipantNewEvent("chat-1", { userId: 500n })
 
-			await handleChatEvent({ event, userId: USER_ID })
+			await handleChatEvent({ event })
 
 			expect(mockChatsQueryUpdate).not.toHaveBeenCalled()
 		})
@@ -1028,7 +1034,7 @@ describe("handleChatEvent — chats socket handler (#51)", () => {
 
 	describe("default case — unhandled event tag", () => {
 		it("throws 'Unhandled chat event' for an unknown event tag", async () => {
-			await expect(handleChatEvent({ event: makeUnknownTagEvent(), userId: USER_ID })).rejects.toThrow("Unhandled chat event")
+			await expect(handleChatEvent({ event: makeUnknownTagEvent() })).rejects.toThrow("Unhandled chat event")
 		})
 	})
 })

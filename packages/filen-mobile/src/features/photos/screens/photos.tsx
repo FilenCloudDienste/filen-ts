@@ -1,5 +1,4 @@
 import { Fragment, useCallback } from "react"
-import { onlineManager } from "@tanstack/react-query"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import View from "@/components/ui/view"
 import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
@@ -12,12 +11,12 @@ import useViewLayout from "@/hooks/useViewLayout"
 import useDrivePath from "@/hooks/useDrivePath"
 import { useFocusEffect } from "expo-router"
 import { router } from "@/lib/router"
-import cameraUpload, { DEFAULT_CONFIG, type Config } from "@/features/cameraUpload/cameraUpload"
+import cameraUpload, { useCameraUploadConfig } from "@/features/cameraUpload/cameraUpload"
 import { remoteListingPosition } from "@/features/cameraUpload/remoteListing"
 import { useCameraUploadDestination } from "@/features/cameraUpload/queries/useCameraUploadDestination.query"
 import Button from "@/components/ui/button"
 import usePhotosStore from "@/features/photos/store/usePhotos.store"
-import { useSecureStore } from "@/lib/secureStore"
+import { usePhotosGridTiles } from "@/features/photos/photosGridTiles"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { useTranslation } from "react-i18next"
 import Header from "@/features/photos/components/photosHeader"
@@ -30,9 +29,9 @@ import logger from "@/lib/logger"
 const Photos = () => {
 	const { t } = useTranslation()
 	const { layout, onLayout } = useViewLayout()
-	const [config] = useSecureStore<Config>(cameraUpload.secureStoreKey, DEFAULT_CONFIG)
+	const { config } = useCameraUploadConfig()
 	const drivePath = useDrivePath()
-	const [photosGridTiles] = useSecureStore<number>("photosGridTiles", 4)
+	const [photosGridTiles] = usePhotosGridTiles()
 	const destination = useCameraUploadDestination(config.remoteDir)
 
 	useFocusEffect(
@@ -121,11 +120,8 @@ const Photos = () => {
 										/>
 									)
 								}}
+								requiresOnline={true}
 								onRefresh={async () => {
-									if (!onlineManager.isOnline()) {
-										return
-									}
-
 									const listingPosition = remoteListingPosition()
 									const result = await run(async () => {
 										await driveItemsQuery.refetch()

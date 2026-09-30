@@ -5,6 +5,9 @@ import Ionicons from "@expo/vector-icons/Ionicons"
 import { useResolveClassNames } from "uniwind"
 import { PressableOpacity } from "@/components/ui/pressables"
 import { cn } from "@filen/shared"
+import useIsOnline from "@/hooks/useIsOnline"
+import { type Href } from "expo-router"
+import { router } from "@/lib/router"
 
 export type Button = {
 	icon?: React.ComponentProps<typeof Ionicons>["name"]
@@ -27,13 +30,16 @@ export type Button = {
 	badge?: string | React.ReactNode
 	badgeColor?: string
 	onPress?: () => void
+	// Static navigation target; `onPress` wins when both are set.
+	href?: Href
 	/**
 	 * When true, the row renders muted (opacity-50) and is non-interactive — onPress
-	 * is suppressed and the switch right-item (if any) is also disabled. Used by
-	 * settings screens to gray out SDK-touching controls offline; the global offline
-	 * banner is the explanation.
+	 * is suppressed and the switch right-item (if any) is also disabled.
 	 */
 	disabled?: boolean
+	// Disables the row while offline (same contract as the Menu button flag). SDK-touching
+	// rows set this; the global offline banner is the explanation.
+	requiresOnline?: boolean
 	rightItem?:
 		| {
 				type: "switch"
@@ -92,13 +98,15 @@ export function GroupButtonContainer(
 export function Group({ buttons, className }: { buttons: Button[]; className?: string }) {
 	const textForeground = useResolveClassNames("text-foreground")
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
+	const isOnline = useIsOnline()
 
 	return (
 		<View className={cn("bg-background-secondary rounded-3xl overflow-hidden", className)}>
 			{buttons.map(
 				(
 					{
-						onPress,
+						onPress: onPressProp,
+						href,
 						icon,
 						iconColor,
 						leading,
@@ -110,10 +118,14 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 						badgeColor,
 						titleClassName,
 						subTitleClassName,
-						disabled
+						disabled: disabledProp,
+						requiresOnline
 					},
 					index
 				) => {
+					const disabled = disabledProp === true || (requiresOnline === true && !isOnline)
+					const onPress = onPressProp ?? (href ? () => router.push(href) : undefined)
+
 					return (
 						<GroupButtonContainer
 							key={index}

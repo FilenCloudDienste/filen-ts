@@ -2,6 +2,7 @@ import { type Chat } from "@/types"
 import { useEffect } from "react"
 import { PressableScale } from "@/components/ui/pressables"
 import { useSecureStore } from "@/lib/secureStore"
+import { chatInputValueKey } from "@/features/chats/chatDrafts"
 import useChatsStore, { type Suggestions } from "@/features/chats/store/useChats.store"
 import { useShallow } from "zustand/shallow"
 import { findClosestIndexString } from "@filen/shared"
@@ -41,7 +42,7 @@ export function AutocompleteSuggestions<T>({
 	itemKey: (item: T) => string
 	renderItem: (item: T) => React.ReactNode
 }) {
-	const [chatInputValue, setChatInputValue] = useSecureStore<string>(`chatInputValue:${chat.uuid}`, "")
+	const [chatInputValue, setChatInputValue] = useSecureStore<string>(chatInputValueKey(chat.uuid), "")
 	const inputSelection = useChatsStore(useShallow(state => state.inputSelection))
 	const suggestionsVisible = useChatsStore(useShallow(state => state.suggestionsVisible))
 	const inputFocused = useChatsStore(useShallow(state => state.inputFocused))

@@ -1,13 +1,11 @@
-import { Fragment, useCallback, useEffect, useState } from "react"
-import useIsOnline from "@/hooks/useIsOnline"
-import Header, { type HeaderItem } from "@/components/ui/header"
-import SafeAreaView from "@/components/ui/safeAreaView"
-import View from "@/components/ui/view"
-import { Platform, ActivityIndicator } from "react-native"
-import { useResolveClassNames } from "uniwind"
-import ListEmpty from "@/components/ui/listEmpty"
+import { Fragment, useEffect, useState } from "react"
+import { LoadingView } from "@/components/ui/loadingView"
+import SettingsHeader from "@/components/ui/settingsHeader"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import ListEmpty, { NoResultsEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
-import { useLocalSearchParams, useFocusEffect } from "expo-router"
+import { useLocalSearchParams } from "expo-router"
+import useClearSelectionOnFocusChange from "@/hooks/useClearSelectionOnFocusChange"
 import { router } from "@/lib/router"
 import usePlaylistsQuery from "@/features/audio/queries/usePlaylists.query"
 import alerts from "@/lib/alerts"
@@ -27,27 +25,17 @@ import {
 import { driveItemDisplayName } from "@/lib/decryption"
 import logger from "@/lib/logger"
 
+const clearSelectedTracks = () => usePlaylistTracksStore.getState().clearSelectedTracks()
+
 export function Playlist() {
 	const { t } = useTranslation()
-	const isOnline = useIsOnline()
-	const textForeground = useResolveClassNames("text-foreground")
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const selectedTracks = usePlaylistTracksStore(useShallow(state => state.selectedTracks))
 	const [searchQuery, setSearchQuery] = useState<string>("")
 	const { uuid } = useLocalSearchParams<{
 		uuid?: string
 	}>()
 
-	useFocusEffect(
-		useCallback(() => {
-			usePlaylistTracksStore.getState().clearSelectedTracks()
-
-			return () => {
-				usePlaylistTracksStore.getState().clearSelectedTracks()
-			}
-		}, [])
-	)
+	useClearSelectionOnFocusChange(clearSelectedTracks)
 
 	const playlistsQuery = usePlaylistsQuery({
 		enabled: false
@@ -79,45 +67,16 @@ export function Playlist() {
 	if (playlistsQuery.status === "pending" || !playlist) {
 		return (
 			<Fragment>
-				<Header
+				<SettingsHeader
 					title={t("playlists")}
-					transparent={Platform.OS === "ios"}
-					shadowVisible={false}
-					backVisible={Platform.OS === "android"}
-					backgroundColor={Platform.select({
-						ios: undefined,
-						default: bgBackgroundSecondary.backgroundColor as string
-					})}
-					leftItems={Platform.select({
-						ios: [
-							{
-								type: "button",
-								icon: {
-									name: "chevron-back-outline",
-									color: textForeground.color,
-									size: 20
-								},
-								props: {
-									onPress: () => {
-										router.back()
-									}
-								}
-							}
-						],
-						default: undefined
-					})}
+					icon="chevron-back-outline"
+					onDismiss={() => {
+						router.back()
+					}}
 				/>
-				<SafeAreaView
-					className="flex-1 bg-background-secondary"
-					edges={["left", "right"]}
-				>
+				<ScreenBody>
 					{playlistsQuery.status === "pending" ? (
-						<View className="flex-1 items-center justify-center bg-background-secondary">
-							<ActivityIndicator
-								size="large"
-								color={textForeground.color as string}
-							/>
-						</View>
+						<LoadingView />
 					) : (
 						<ListEmpty
 							icon="warning-outline"
@@ -134,7 +93,7 @@ export function Playlist() {
 							}
 						/>
 					)}
-				</SafeAreaView>
+				</ScreenBody>
 			</Fragment>
 		)
 	}
@@ -163,92 +122,34 @@ export function Playlist() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={tracksInSelectionMode ? t("selected", { count: selectedTracks.length }) : playlist.name}
-				searchBarOptions={{
-					placement: "integratedButton",
+				search={{
 					placeholder: t("search_tracks"),
-					onChangeText: e => setSearchQuery(e.nativeEvent.text),
-					onCancelButtonPress: () => setSearchQuery(""),
-					onClose: () => setSearchQuery(""),
-					onOpen: () => setSearchQuery(""),
-					allowToolbarIntegration: false,
-					headerIconColor: textForeground.color,
-					textColor: textForeground.color,
-					barTintColor: "transparent",
-					tintColor: textForeground.color,
-					hintTextColor: textMutedForeground.color,
-					shouldShowHintSearchIcon: true,
-					hideNavigationBar: false,
-					hideWhenScrolling: false,
-					inputType: "text"
+					onChangeText: setSearchQuery
 				}}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
+				icon="chevron-back-outline"
+				onDismiss={() => {
+					router.back()
+				}}
 				leftItems={
 					tracksInSelectionMode
-						? ([
+						? [
 								{
-									type: "button",
-									icon: {
-										name: "close-outline",
-										color: textForeground.color,
-										size: 20
-									},
-									props: {
-										onPress: () => {
-											usePlaylistTracksStore.getState().clearSelectedTracks()
-										}
-									}
+									type: "clearSelection",
+									onPress: () => usePlaylistTracksStore.getState().clearSelectedTracks()
 								}
-							] satisfies HeaderItem[])
-						: Platform.select({
-								ios: [
-									{
-										type: "button",
-										icon: {
-											name: "chevron-back-outline",
-											color: textForeground.color,
-											size: 20
-										},
-										props: {
-											onPress: () => {
-												router.back()
-											}
-										}
-									}
-								],
-								default: undefined
-							})
+							]
+						: undefined
 				}
 				rightItems={[
 					{
-						type: "menu",
-						props: {
-							type: "dropdown",
-							hitSlop: 20,
-							buttons: tracksInSelectionMode ? baseRightMenuButtons : buildPlaylistMenuButtons({ t, playlist })
-						},
-						triggerProps: {
-							hitSlop: 20
-						},
-						icon: {
-							name: "ellipsis-horizontal",
-							size: 24,
-							color: textForeground.color
-						}
+						type: "ellipsisMenu",
+						buttons: tracksInSelectionMode ? baseRightMenuButtons : buildPlaylistMenuButtons({ t, playlist })
 					}
 				]}
 			/>
-			<SafeAreaView
-				className="bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<ReorderableList
 					style={{
 						flex: 1
@@ -280,11 +181,7 @@ export function Playlist() {
 					}}
 					ListEmptyComponent={() =>
 						searchActive ? (
-							<ListEmpty
-								icon="search-outline"
-								title={t("no_results")}
-								description={t("no_results_description")}
-							/>
+							<NoResultsEmpty />
 						) : (
 							<ListEmpty
 								icon="musical-note-outline"
@@ -293,7 +190,7 @@ export function Playlist() {
 								action={
 									<Button
 										onPress={handleAddTracks}
-										disabled={!isOnline}
+										requiresOnline
 									>
 										{t("add_tracks")}
 									</Button>
@@ -312,7 +209,7 @@ export function Playlist() {
 					}}
 					keyExtractor={track => track.uuid}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

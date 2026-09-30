@@ -184,7 +184,7 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
 }))
 
 vi.mock("@/lib/secureStore", () => ({
-	default: { get: vi.fn(), set: vi.fn() },
+	default: { get: vi.fn(), set: vi.fn(), subscribeKey: vi.fn() },
 	useSecureStore: vi.fn()
 }))
 
@@ -342,21 +342,18 @@ import { getPermissionsAsync } from "expo-media-library/legacy"
 import auth from "@/lib/auth"
 import transfers from "@/features/transfers/transfers"
 import { unwrapFileMeta } from "@/lib/sdkUnwrap"
-import events from "@/lib/events"
 import { ml, MediaType } from "@/tests/mocks/expoMediaLibrary"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import { mockFileHash, blake3BytesForContent, fileHashImplementation } from "@/tests/mocks/reactNativeFileHash"
 import * as FileSystem from "expo-file-system"
 
-// #103 — capture constructor-registered handlers in beforeAll (after module
+// #103 — capture the constructor-registered subscription in beforeAll (after module
 // evaluation is complete) so the snapshot is not empty when mock-hoisting or
 // lazy-initialisation order changes.
-let eventHandlers: Record<string, Function | undefined> = {}
+let configSubscription: Parameters<typeof secureStore.subscribeKey> | undefined
 
 beforeAll(() => {
-	eventHandlers = Object.fromEntries(
-		vi.mocked(events.subscribe).mock.calls.map(([event, handler]) => [event as string, handler as Function])
-	)
+	configSubscription = vi.mocked(secureStore.subscribeKey).mock.calls[0]
 })
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -810,11 +807,19 @@ describe("sync pre-flight checks", () => {
 	it("proceeds when isInternetReachable is null (reachability not determined yet)", async () => {
 		// iOS reports null for a window at the start of every process: its native module supplies no
 		// isInternetReachable, so NetInfo falls back to a probe and serves null from cache until that
-		// probe first settles. Treating null as offline skipped whole headless runs — and disagreed
-		// with computeOnline() in queries/onlineStatus, which counts null as online. isConnected is
+		// probe first settles. Treating null as offline skipped whole headless runs. isConnected is
 		// still authoritative, so a genuinely offline device (below) is unaffected.
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
 		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: null } as any)
+
+		await cameraUpload.sync()
+
+		expect(mockSetSyncing).toHaveBeenCalledWith(true)
+	})
+
+	it("proceeds when isConnected is null (NetInfo state unknown), like the rest of the app", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "unknown", isConnected: null, isInternetReachable: null } as any)
 
 		await cameraUpload.sync()
 
@@ -1295,75 +1300,24 @@ describe("cancel", () => {
 // ─── Constructor event subscriptions ─────────────────────────────────────────
 
 describe("constructor events", () => {
-	it("subscribes to secureStoreChange, secureStoreClear, and secureStoreRemove", () => {
-		expect(eventHandlers["secureStoreChange"]).toBeDefined()
-		expect(eventHandlers["secureStoreClear"]).toBeDefined()
-		expect(eventHandlers["secureStoreRemove"]).toBeDefined()
+	it("subscribes to the config key", () => {
+		expect(configSubscription?.[0]).toBe("cameraUploadConfig:v1")
 	})
 
-	it("secureStoreChange with matching key triggers cancel", () => {
-		const controllerBefore = (cameraUpload as any).globalAbortController
+	it.each([{ type: "set", value: {} } as const, { type: "removed" } as const])(
+		"a $type config change triggers cancel and clears ensureParentDirectoryExistsCache",
+		change => {
+			const controllerBefore = (cameraUpload as any).globalAbortController
+			const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
 
-		// Seed the parent-dir cache to verify it gets cleared too
-		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
+			dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
 
-		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
+			configSubscription?.[1](change)
 
-		eventHandlers["secureStoreChange"]!({ key: "cameraUploadConfig:v1" })
-
-		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
-		expect(dirCache.size).toBe(0)
-	})
-
-	it("secureStoreChange with unrelated key does not trigger cancel", () => {
-		const controllerBefore = (cameraUpload as any).globalAbortController
-		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
-
-		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
-
-		eventHandlers["secureStoreChange"]!({ key: "someOtherKey" })
-
-		expect((cameraUpload as any).globalAbortController).toBe(controllerBefore)
-		// Cache must NOT be cleared for unrelated keys
-		expect(dirCache.size).toBe(1)
-	})
-
-	it("secureStoreClear triggers cancel and clears ensureParentDirectoryExistsCache", () => {
-		const controllerBefore = (cameraUpload as any).globalAbortController
-		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
-
-		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
-
-		eventHandlers["secureStoreClear"]!()
-
-		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
-		expect(dirCache.size).toBe(0)
-	})
-
-	it("secureStoreRemove with matching key triggers cancel and clears ensureParentDirectoryExistsCache", () => {
-		const controllerBefore = (cameraUpload as any).globalAbortController
-		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
-
-		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
-
-		eventHandlers["secureStoreRemove"]!({ key: "cameraUploadConfig:v1" })
-
-		expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
-		expect(dirCache.size).toBe(0)
-	})
-
-	it("secureStoreRemove with unrelated key does not trigger cancel", () => {
-		const controllerBefore = (cameraUpload as any).globalAbortController
-		const dirCache = (cameraUpload as any).ensureParentDirectoryExistsCache as Map<string, unknown>
-
-		dirCache.set("some-key", { value: {}, expires: Date.now() + 60000 })
-
-		eventHandlers["secureStoreRemove"]!({ key: "someOtherKey" })
-
-		expect((cameraUpload as any).globalAbortController).toBe(controllerBefore)
-		// Cache must NOT be cleared for unrelated keys
-		expect(dirCache.size).toBe(1)
-	})
+			expect((cameraUpload as any).globalAbortController).not.toBe(controllerBefore)
+			expect(dirCache.size).toBe(0)
+		}
+	)
 })
 
 // ─── Sync flow ───────────────────────────────────────────────────────────────

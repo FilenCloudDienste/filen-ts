@@ -1,10 +1,9 @@
 import { Fragment } from "react"
 import { Platform } from "react-native"
-import { useNavigation } from "expo-router"
-import { router } from "@/lib/router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { run } from "@filen/shared"
 import { SettingsScrollView } from "@/components/ui/settingsScrollView"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { Group } from "@/components/ui/settingsGroup"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -118,7 +117,7 @@ async function showEnvironmentInfo(): Promise<void> {
 }
 
 function Developer() {
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 
 	// Defense-in-depth: the More-tab row is already __DEV__-gated, but guard here too so a deep link /
 	// programmatic push can never render the debug surface in a production build. globalThis read (not
@@ -132,14 +131,9 @@ function Developer() {
 			<SettingsHeader
 				title="Developer"
 				icon="close"
-				onDismiss={() => {
-					navigation.getParent()?.goBack()
-				}}
+				onDismiss={dismiss}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<SettingsScrollView>
 					<Group
 						className="bg-background-tertiary"
@@ -198,9 +192,7 @@ function Developer() {
 							{
 								icon: "list-outline",
 								title: "View logs",
-								onPress: () => {
-									router.push("/logViewer")
-								}
+								href: "/logViewer"
 							},
 							{
 								icon: "document-text-outline",
@@ -250,7 +242,7 @@ function Developer() {
 						]}
 					/>
 				</SettingsScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

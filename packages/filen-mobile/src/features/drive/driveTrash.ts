@@ -1,7 +1,8 @@
 import auth from "@/lib/auth"
 import { type FileVersion } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { unwrapDirMeta, unwrapFileMeta, unwrapParentUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { itemFromModified } from "@/features/drive/driveModified"
 import {
 	driveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdate,
@@ -72,20 +73,8 @@ export async function trash({ item }: { item: DriveItem }) {
 
 	const modifiedItem = item.type === "directory" ? await authedSdkClient.trashDir(item.data) : await authedSdkClient.trashFile(item.data)
 
-	// Ugly but works for now, until we have a better way
-	if (!("region" in modifiedItem)) {
-		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
-	} else {
-		item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
-	}
-
-	// Sync persistent caches — `trash` flag flipped on the raw Dir/File. Item
-	// still exists, just lives in the trash listing now.
-	if (item.type === "file" && "region" in modifiedItem) {
-		cache.cacheNewFile(modifiedItem, item)
-	} else if (item.type === "directory" && !("region" in modifiedItem)) {
-		cache.cacheNewNormalDir(modifiedItem, item)
-	}
+	// The item still exists, it just lives in the trash listing now.
+	item = itemFromModified(modifiedItem)
 
 	markDirectorySizesStale()
 	// A queued create of this item must not land after the removal below.
@@ -138,23 +127,7 @@ export async function restore({ item }: { item: DriveItem }) {
 	const modifiedItem =
 		item.type === "directory" ? await authedSdkClient.restoreDir(item.data) : await authedSdkClient.restoreFile(item.data)
 
-	// Ugly but works for now, until we have a better way
-	if (!("region" in modifiedItem)) {
-		item = unwrappedDirIntoDriveItem(unwrapDirMeta(modifiedItem))
-	} else {
-		item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedItem))
-	}
-
-	if (item.type !== "directory" && item.type !== "file") {
-		throw new Error("Invalid item type")
-	}
-
-	// Refresh persistent caches with the restored item (its trash flag flipped).
-	if (item.type === "file" && "region" in modifiedItem) {
-		cache.cacheNewFile(modifiedItem, item)
-	} else if (item.type === "directory" && !("region" in modifiedItem)) {
-		cache.cacheNewNormalDir(modifiedItem, item)
-	}
+	item = itemFromModified(modifiedItem)
 
 	markDirectorySizesStale()
 
@@ -238,14 +211,7 @@ export async function restoreFileVersion({ item, version }: { item: DriveItem; v
 	const { authedSdkClient } = await auth.getSdkClients()
 	const modifiedFile = await authedSdkClient.restoreFileVersion(item.data, version)
 
-	item = unwrappedFileIntoDriveItem(unwrapFileMeta(modifiedFile))
-
-	if (item.type !== "file") {
-		throw new Error("Invalid item type")
-	}
-
-	// Sync persistent caches — file size / chunks changed after version restore.
-	cache.cacheNewFile(modifiedFile, item)
+	item = itemFromModified(modifiedFile)
 	markDirectorySizesStale()
 
 	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)

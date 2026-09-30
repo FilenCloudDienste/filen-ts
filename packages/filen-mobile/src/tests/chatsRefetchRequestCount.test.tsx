@@ -54,6 +54,7 @@ vi.mock("@/queries/client", async () => {
 	return {
 		default: queryClient,
 		queryClient,
+		getCachedQuery: (queryKey: unknown[]) => queryClient.getQueryCache().find({ queryKey, exact: true }),
 		queryUpdater: {
 			get: (queryKey: unknown[]) => queryClient.getQueryData(queryKey),
 			set: (queryKey: unknown[], updater: unknown) =>

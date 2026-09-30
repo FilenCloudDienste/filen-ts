@@ -1,19 +1,10 @@
 import auth from "@/lib/auth"
-import {
-	ErrorKind,
-	type LinkedRootDir,
-	DirMeta_Tags,
-	type File,
-	FileMeta,
-	ParentUuid,
-	MaybeEncryptedUniffi_Tags
-} from "@filen/sdk-rs"
+import { ErrorKind, type LinkedRootDir, DirMeta_Tags } from "@filen/sdk-rs"
 import { linkedRootOf } from "@/features/drive/utils"
-import { unwrapDirMeta, unwrapFileMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
+import { unwrapDirMeta, unwrappedDirIntoDriveItem, linkedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import { run } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { router } from "@/lib/router"
 import { serialize } from "@/lib/serializer"
@@ -75,28 +66,23 @@ const drive = {
 
 			if (unwrappedError?.kind() === ErrorKind.WrongPassword) {
 				if (!password) {
-					const promptResult = await run(async () => {
-						return await prompts.input({
+					const enteredPassword = await inputPrompt(
+						{
 							title: i18n.t("password_required"),
 							message: i18n.t("enter_public_link_directory_password"),
 							cancelText: i18n.t("cancel"),
 							okText: i18n.t("submit"),
 							inputType: "secure-text"
-						})
-					})
+						},
+						{ tag: "drive-link", message: "openLinkedDirectory password prompt failed" },
+						{ allowEmpty: true }
+					)
 
-					if (!promptResult.success) {
-						logger.warn("drive-link", "openLinkedDirectory password prompt failed", { error: promptResult.error })
-						alerts.error(promptResult.error)
-
+					if (enteredPassword === null) {
 						return
 					}
 
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					password = promptResult.data.value
+					password = enteredPassword
 
 					await this.openLinkedDirectory({
 						linkUuid,
@@ -157,28 +143,23 @@ const drive = {
 
 			if (unwrappedError?.kind() === ErrorKind.WrongPassword) {
 				if (!password) {
-					const promptResult = await run(async () => {
-						return await prompts.input({
+					const enteredPassword = await inputPrompt(
+						{
 							title: i18n.t("password_required"),
 							message: i18n.t("enter_public_link_file_password"),
 							cancelText: i18n.t("cancel"),
 							okText: i18n.t("submit"),
 							inputType: "secure-text"
-						})
-					})
+						},
+						{ tag: "drive-link", message: "openLinkedFile password prompt failed" },
+						{ allowEmpty: true }
+					)
 
-					if (!promptResult.success) {
-						logger.warn("drive-link", "openLinkedFile password prompt failed", { error: promptResult.error })
-						alerts.error(promptResult.error)
-
+					if (enteredPassword === null) {
 						return
 					}
 
-					if (promptResult.data.cancelled) {
-						return
-					}
-
-					password = promptResult.data.value
+					password = enteredPassword
 
 					await this.openLinkedFile({
 						linkUuid,
@@ -205,60 +186,20 @@ const drive = {
 		router.push({
 			pathname: "/linkedFile",
 			params: {
-				item: serialize(
-					unwrappedFileIntoDriveItem(
-						unwrapFileMeta({
-							...result.data,
-							// No whole-life id on a public link — see linkedFileIntoDriveItem.
-							stableUuid: undefined,
-							meta: new FileMeta.Decoded({
-								name:
-									result.data.name.tag === MaybeEncryptedUniffi_Tags.Decrypted
-										? result.data.name.inner[0]
-										: result.data.uuid,
-								mime:
-									result.data.mime.tag === MaybeEncryptedUniffi_Tags.Decrypted
-										? result.data.mime.inner[0]
-										: "application/octet-stream",
-								size: result.data.size,
-								version: result.data.version,
-								key: fileKey,
-								created: result.data.timestamp,
-								modified: result.data.timestamp,
-								hash: undefined
-							}),
-							parent: new ParentUuid.Uuid(result.data.uuid),
-							// The SDK's own gate (0.4.42+) — see linkedFileIntoDriveItem.
-							canMakeThumbnail: result.data.canMakeThumbnail,
-							favorited: false
-						} satisfies File)
-					)
-				)
+				item: serialize(linkedFileIntoDriveItem(result.data))
 			}
 		})
 	},
 
-	// The drive root uuid is stable for the lifetime of an authenticated session.
-	// Cache it after the first resolve so repeated callers (header bulk-move,
-	// per-item move) don't each round-trip through `getSdkClients()`.
-	cachedRootUuid: null as string | null,
-
+	// cache.rootUuid is set at boot for every authed session; the SDK is only the fallback.
 	async getRootUuid(): Promise<string> {
-		if (this.cachedRootUuid) {
-			return this.cachedRootUuid
+		if (cache.rootUuid !== null) {
+			return cache.rootUuid
 		}
 
 		const { authedSdkClient } = await auth.getSdkClients()
-		const rootUuid = authedSdkClient.root().uuid
 
-		this.cachedRootUuid = rootUuid
-
-		return rootUuid
-	},
-
-	// Session-cached root uuid must not leak into the next account's session.
-	resetCachedRootUuid(): void {
-		this.cachedRootUuid = null
+		return authedSdkClient.root().uuid
 	}
 }
 

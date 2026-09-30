@@ -11,8 +11,7 @@ import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import notes from "@/features/notes/notes"
 import notesOffline from "@/features/notes/notesOffline"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
-import prompts from "@/lib/prompts"
-import { run } from "@filen/shared"
+import { inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import { confirmedAction } from "@/lib/confirmedAction"
 import { router } from "@/lib/router"
@@ -394,30 +393,19 @@ export function createMenuButtons({
 			title: t("rename"),
 			icon: "edit",
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
+				const newTitle = await inputPrompt(
+					{
 						title: t("rename_note"),
 						message: t("enter_new_name"),
 						defaultValue: noteDisplayTitle(note),
 						cancelText: t("cancel"),
 						okText: t("rename")
-					})
-				})
+					},
+					{ tag: "notes", message: "rename note prompt failed", level: "error", context: { noteUuid: note.uuid } },
+					{ trim: true }
+				)
 
-				if (!promptResult.success) {
-					logger.error("notes", "rename note prompt failed", { error: promptResult.error, noteUuid: note.uuid })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const newTitle = promptResult.data.value.trim()
-
-				if (newTitle.length === 0) {
+				if (newTitle === null) {
 					return
 				}
 

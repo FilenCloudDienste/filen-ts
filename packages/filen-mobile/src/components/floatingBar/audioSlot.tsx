@@ -1,4 +1,3 @@
-import { useTranslation } from "react-i18next"
 import { router } from "@/lib/router"
 import { ActivityIndicator } from "react-native"
 import audio, { useAudio } from "@/features/audio/audio"
@@ -6,44 +5,17 @@ import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
 import { useResolveClassNames } from "uniwind"
-import useAudioMetadataQuery from "@/features/audio/queries/useAudioMetadata.query"
-import Image from "@/components/ui/image"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { resolveAudioTrackLabels } from "@/features/audio/utils"
+import AudioThumbnail from "@/components/ui/audioThumbnail"
+import useNowPlayingDisplay from "@/features/audio/hooks/useNowPlayingDisplay"
 import AudioProgressBar from "@/components/floatingBar/audioProgressBar"
 
 const AudioSlot = () => {
-	const { t } = useTranslation()
 	const { status, loading, queueItem } = useAudio()
 	const textForeground = useResolveClassNames("text-foreground")
-
-	const audioMetadataQuery = useAudioMetadataQuery(
-		{
-			type: "drive",
-			data: {
-				uuid: queueItem?.item.data.uuid ?? "",
-				// By-value so a cross-directory search hit resolves its metadata.
-				item: queueItem?.item
-			}
-		},
-		{
-			enabled: !!queueItem
-		}
-	)
+	const { pictureUri, titleLabel, artistLabel } = useNowPlayingDisplay(queueItem ?? null)
 
 	const playing = status?.playing ?? false
-
-	const { titleLabel, artistLabel } = resolveAudioTrackLabels(
-		queueItem ?? null,
-		audioMetadataQuery.status === "success",
-		audioMetadataQuery.data?.title,
-		audioMetadataQuery.data?.artist,
-		{
-			notPlaying: t("not_playing"),
-			unknownTitle: t("unknown_title"),
-			unknownArtist: t("unknown_artist")
-		}
-	)
 
 	const onBodyPress = () => {
 		router.push("/playlists")
@@ -69,25 +41,11 @@ const AudioSlot = () => {
 		>
 			<View className="flex-row items-center px-3 py-2 gap-2 bg-transparent flex-1">
 				<View className="flex-row items-center gap-2 bg-transparent flex-1">
-					{audioMetadataQuery.status === "success" && audioMetadataQuery.data?.pictureUri ? (
-						<Image
-							className="size-8 rounded-lg bg-background-tertiary"
-							source={{
-								uri: audioMetadataQuery.data.pictureUri
-							}}
-							contentFit="contain"
-							cachePolicy="disk"
-							recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}
-						/>
-					) : (
-						<View className="bg-background-tertiary size-8 rounded-lg flex-row items-center justify-center">
-							<Ionicons
-								name="musical-note"
-								size={16}
-								color={textForeground.color}
-							/>
-						</View>
-					)}
+					<AudioThumbnail
+						pictureUri={pictureUri}
+						size={32}
+						recyclingKey={`toolbar-audio-picture-${queueItem.item.data.uuid}`}
+					/>
 					<View className="flex-col bg-transparent flex-1 justify-center">
 						<Text
 							className="text-xs"

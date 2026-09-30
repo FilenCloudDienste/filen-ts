@@ -8,14 +8,17 @@ export function AudioThumbnail({
 	pictureUri,
 	active = false,
 	recyclingKey,
-	className
+	className,
+	size
 }: {
 	pictureUri?: string | null
 	active?: boolean
 	recyclingKey?: string
 	className?: string
+	size?: number
 }) {
 	const textForeground = useResolveClassNames("text-foreground")
+	const dimension = size ?? 40
 
 	if (pictureUri) {
 		return (
@@ -26,8 +29,8 @@ export function AudioThumbnail({
 					className
 				)}
 				style={{
-					width: 40,
-					height: 40
+					width: dimension,
+					height: dimension
 				}}
 				source={{
 					uri: pictureUri
@@ -47,8 +50,8 @@ export function AudioThumbnail({
 				className
 			)}
 			style={{
-				width: 40,
-				height: 40
+				width: dimension,
+				height: dimension
 			}}
 		>
 			<Ionicons

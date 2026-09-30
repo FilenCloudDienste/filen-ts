@@ -3,7 +3,8 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 const h = vi.hoisted(() => ({
 	push: vi.fn(),
 	listeners: new Set<(data: unknown) => void>(),
-	cacheItems: new Map<string, unknown>()
+	cacheItems: new Map<string, unknown>(),
+	resolve: vi.fn()
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
@@ -18,6 +19,7 @@ vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
 vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: async () => ({ authedSdkClient: { root: () => ({ uuid: "root-uuid" }) } }) }
 }))
+vi.mock("@/features/drive/driveSelectResolve", () => ({ resolveSelectedDriveItemToAnyNormalDir: h.resolve }))
 vi.mock("@/lib/events", () => ({
 	default: {
 		subscribe: (_name: string, listener: (data: unknown) => void) => {
@@ -32,7 +34,7 @@ vi.mock("@/lib/events", () => ({
 		}
 	}
 }))
-import { openDriveSelect, selectCopyDestination } from "@/features/drive/driveSelectSession"
+import { openDriveSelect, selectCopyDestination, selectDriveDirectory } from "@/features/drive/driveSelectSession"
 import useDriveSelectStore from "@/features/drive/store/useDriveSelect.store"
 import events from "@/lib/events"
 import type { DriveItem } from "@/types"
@@ -44,6 +46,7 @@ beforeEach(() => {
 	h.push.mockClear()
 	h.listeners.clear()
 	h.cacheItems.clear()
+	h.resolve.mockReset()
 	useDriveSelectStore.setState({ sessions: {} })
 })
 
@@ -145,5 +148,76 @@ describe("selectCopyDestination", () => {
 
 		await expect(picked).resolves.toBeNull()
 		expect(h.listeners.size).toBe(0)
+	})
+})
+
+describe("selectDriveDirectory", () => {
+	async function opened(): Promise<void> {
+		await vi.waitFor(() => expect(h.push).toHaveBeenCalledOnce())
+	}
+
+	it("opens a single-directory select session with the preselection and no source items", async () => {
+		void selectDriveDirectory([item])
+
+		await opened()
+
+		expect(JSON.parse(h.push.mock.calls[0]?.[0].params.selectOptions)).toEqual({
+			type: "single",
+			files: false,
+			directories: true,
+			intention: "select",
+			id: "session-1"
+		})
+		expect(useDriveSelectStore.getState().sessions["session-1"]?.items).toEqual([])
+		expect(useDriveSelectStore.getState().sessions["session-1"]?.selectedItems).toEqual([item])
+	})
+
+	it("resolves the first pick to its directory", async () => {
+		const dir = { tag: "Dir", inner: [{ uuid: "dest-uuid" }] } as unknown as AnyNormalDir
+		const selected = { type: "root" as const, data: dir }
+
+		h.resolve.mockReturnValue(dir)
+
+		const picked = selectDriveDirectory()
+
+		await opened()
+
+		events.emit("driveSelect", { id: "session-1", cancelled: false, selectedItems: [selected] })
+
+		await expect(picked).resolves.toBe(dir)
+		expect(h.resolve).toHaveBeenCalledExactlyOnceWith(selected)
+	})
+
+	it("an unresolvable pick resolves null", async () => {
+		h.resolve.mockReturnValue(null)
+
+		const picked = selectDriveDirectory()
+
+		await opened()
+
+		events.emit("driveSelect", { id: "session-1", cancelled: false, selectedItems: [{ type: "driveItem", data: item }] })
+
+		await expect(picked).resolves.toBeNull()
+	})
+
+	it("a dismissed or empty pick resolves null without resolving anything", async () => {
+		const dismissed = selectDriveDirectory()
+
+		await opened()
+
+		events.emit("driveSelect", { id: "session-1", cancelled: true })
+
+		await expect(dismissed).resolves.toBeNull()
+
+		h.push.mockClear()
+
+		const empty = selectDriveDirectory()
+
+		await opened()
+
+		events.emit("driveSelect", { id: "session-1", cancelled: false, selectedItems: [] })
+
+		await expect(empty).resolves.toBeNull()
+		expect(h.resolve).not.toHaveBeenCalled()
 	})
 })

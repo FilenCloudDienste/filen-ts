@@ -6,17 +6,14 @@ import { noteContentQueryUpdate } from "@/features/notes/queries/useNoteContent.
 import { createNotePreviewFromContentText, hashNoteContent } from "@filen/shared"
 import { rememberNotePush } from "@/features/notes/pushEchoes"
 import { notesQueryUpdate } from "@/features/notes/queries/useNotesQuery"
+import { toSignalOpts } from "@/lib/signals"
 
 export async function getContent({ note, signal }: { note: Note; signal?: AbortSignal }) {
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	return await authedSdkClient.getNoteContent(
 		note,
-		signal
-			? {
-					signal
-				}
-			: undefined
+		toSignalOpts(signal)
 	)
 }
 
@@ -45,11 +42,7 @@ export async function setContent({
 				note.noteType === NoteType.Checklist ? "checklist" : note.noteType === NoteType.Rich ? "rich" : "other",
 				content
 			),
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -96,11 +89,7 @@ export async function setType({
 			note,
 			type,
 			knownContent,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 
@@ -122,11 +111,7 @@ export async function setTitle({ note, newTitle, signal }: { note: Note; newTitl
 		await authedSdkClient.setNoteTitle(
 			note,
 			newTitle,
-			signal
-				? {
-						signal
-					}
-				: undefined
+			toSignalOpts(signal)
 		)
 	)
 

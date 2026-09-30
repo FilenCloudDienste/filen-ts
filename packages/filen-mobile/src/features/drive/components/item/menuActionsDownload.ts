@@ -5,20 +5,19 @@ import { type PreviewType } from "@/lib/previewType"
 import { type OfflineParent } from "@/features/offline/offlineHelpers"
 import alerts from "@/lib/alerts"
 import { run } from "@filen/shared"
-import * as FileSystem from "expo-file-system"
-import transfers from "@/features/transfers/transfers"
-import { newTmpDir } from "@/lib/tmp"
-import * as MediaLibrary from "expo-media-library/legacy"
-import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
-import offline from "@/features/offline/offline"
-import { appendOfflineSyncErrors } from "@/features/offline/store/useOffline.store"
+import { storeItemOffline } from "@/features/offline/storeItem"
 import { resolveMimeType } from "@/lib/utils"
 import { shareTmpFile } from "@/lib/share"
 import { withSystemPresentation } from "@/lib/systemPresentation"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import * as ReactNativeBlobUtil from "react-native-blob-util"
 import { Platform } from "react-native"
-import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
+import {
+	downloadDriveItemToDevice,
+	downloadFileItemToTmp,
+	ensureSaveToPhotosPermission,
+	saveDriveItemToPhotos
+} from "@/features/drive/driveDownload"
 import { isFileItem } from "@/features/drive/driveSelectors"
 import logger from "@/lib/logger"
 
@@ -41,15 +40,7 @@ export function buildDownloadSubButtons({
 }): MenuButton[] {
 	const downloadSubButtons: MenuButton[] = []
 
-	if (
-		(item.type === "file" ||
-			item.type === "directory" ||
-			item.type === "sharedFile" ||
-			item.type === "sharedRootFile" ||
-			item.type === "sharedDirectory" ||
-			item.type === "sharedRootDirectory") &&
-		item.data.decryptedMeta
-	) {
+	if (item.data.decryptedMeta) {
 		downloadSubButtons.push({
 			id: "downloadToDevice",
 			title: t("download_to_device"),
@@ -75,40 +66,13 @@ export function buildDownloadSubButtons({
 			title: t("make_available_offline"),
 			icon: "archive",
 			onPress: async () => {
-				if (isFileItem(item)) {
-					const result = await run(async () => {
-						return await offline.storeFile({
-							file: item,
-							parent: parentForOfflineStorage
-						})
-					})
+				const result = await run(async () => {
+					await storeItemOffline({ item, parent: parentForOfflineStorage })
+				})
 
-					if (!result.success) {
-						logger.warn("drive", "make available offline (file) failed", { error: result.error, uuid: item.data.uuid })
-						alerts.error(result.error)
-
-						return
-					}
-				} else {
-					const result = await run(async () => {
-						return await offline.storeDirectory({
-							directory: item,
-							parent: parentForOfflineStorage
-						})
-					})
-
-					if (!result.success) {
-						logger.warn("drive", "make available offline (directory) failed", { error: result.error, uuid: item.data.uuid })
-						alerts.error(result.error)
-
-						return
-					}
-
-					// Degraded warnings (e.g. a remote file whose content is shorter than its
-					// metadata claims) mean the store COMMITTED — surface them via the offline
-					// error badge/list, since sync passes won't re-warn for an already-recorded
-					// observation.
-					appendOfflineSyncErrors(result.data.filter(error => error.degraded === true))
+				if (!result.success) {
+					logger.warn("drive", "make available offline failed", { error: result.error, uuid: item.data.uuid })
+					alerts.error(result.error)
 				}
 			}
 		})
@@ -124,67 +88,20 @@ export function buildDownloadSubButtons({
 			title: t("save_to_photos"),
 			icon: "image",
 			onPress: async () => {
-				const permissionsResult = await run(async () => {
-					return await hasAllNeededMediaPermissions({ shouldRequest: true, library: "any", needCamera: false })
-				})
-
-				if (!permissionsResult.success) {
-					logger.warn("drive", "save to photos: media permissions check failed", { error: permissionsResult.error })
-					alerts.error(permissionsResult.error)
-
-					return
-				}
-
-				if (!permissionsResult.data) {
-					alerts.error(t("no_permissions_enable_manually"))
-
+				if (!(await ensureSaveToPhotosPermission(t))) {
 					return
 				}
 
 				// Non-blocking: the download's progress + speed surface in the floating transfer bar
 				// (and the Android notification); a full-screen blocking loader would freeze the app on
 				// large media and hide that better progress UI. Mirrors "Download to device" / Export.
-				const result = await run(async defer => {
-					if (!item.data.decryptedMeta) {
-						throw new Error("Missing decrypted metadata")
-					}
-
-					const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-
-					defer(() => {
-						if (destination.parentDirectory.exists) {
-							destination.parentDirectory.delete()
-						}
-					})
-
-					if (!destination.parentDirectory.exists) {
-						destination.parentDirectory.create({
-							intermediates: true,
-							idempotent: true
-						})
-					}
-
-					if (destination.exists) {
-						destination.delete()
-					}
-
-					const result = await transfers.download({
-						item,
-						destination
-					})
-
-					if (!result) {
-						return
-					}
-
-					await MediaLibrary.saveToLibraryAsync(destination.uri)
+				const result = await run(async () => {
+					await saveDriveItemToPhotos(item)
 				})
 
 				if (!result.success) {
 					logger.error("drive", "save to photos failed", { error: result.error, uuid: item.data.uuid })
 					alerts.error(result.error)
-
-					return
 				}
 			}
 		})
@@ -225,44 +142,7 @@ export function buildExportButton({ item, id, t }: { item: DriveItem; id: string
 			// bar (and the Android notification) via transfers.download, so a full-screen blocking
 			// loader would only freeze the app on large files and hide that better progress UI. The OS
 			// share sheet opens once the download resolves. Mirrors the non-blocking "Download to device".
-			const result = await run(async () => {
-				if (!item.data.decryptedMeta) {
-					throw new Error("Missing decrypted metadata")
-				}
-
-				const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-
-				if (!destination.parentDirectory.exists) {
-					destination.parentDirectory.create({
-						intermediates: true,
-						idempotent: true
-					})
-				}
-
-				if (destination.exists) {
-					destination.delete()
-				}
-
-				const downloadResult = await transfers.download({
-					item,
-					destination
-				})
-
-				if (!downloadResult) {
-					return null
-				}
-
-				if (
-					downloadResult.files.length === 0 ||
-					downloadResult.directories.length > 0 ||
-					!downloadResult.files[0] ||
-					!destination.exists
-				) {
-					throw new Error("Downloaded item is not a file")
-				}
-
-				return destination
-			})
+			const result = await run(async () => await downloadFileItemToTmp(item))
 
 			if (!result.success) {
 				logger.error("drive", "export download failed", { error: result.error, uuid: item.data.uuid })
@@ -318,44 +198,7 @@ export function buildOpenWithButton({ item, id, t }: { item: DriveItem; id: stri
 			// (and the Android notification) via transfers.download, so a full-screen blocking loader would
 			// only freeze the app on large files. The native app chooser opens once the download resolves.
 			// Mirrors Export, but hands the file to ACTION_VIEW instead of the OS share sheet.
-			const result = await run(async () => {
-				if (!item.data.decryptedMeta) {
-					throw new Error("Missing decrypted metadata")
-				}
-
-				const destination = new FileSystem.File(FileSystem.Paths.join(newTmpDir().uri, item.data.decryptedMeta.name))
-
-				if (!destination.parentDirectory.exists) {
-					destination.parentDirectory.create({
-						intermediates: true,
-						idempotent: true
-					})
-				}
-
-				if (destination.exists) {
-					destination.delete()
-				}
-
-				const downloadResult = await transfers.download({
-					item,
-					destination
-				})
-
-				if (!downloadResult) {
-					return null
-				}
-
-				if (
-					downloadResult.files.length === 0 ||
-					downloadResult.directories.length > 0 ||
-					!downloadResult.files[0] ||
-					!destination.exists
-				) {
-					throw new Error("Downloaded item is not a file")
-				}
-
-				return destination
-			})
+			const result = await run(async () => await downloadFileItemToTmp(item))
 
 			if (!result.success) {
 				logger.error("drive", "open with download failed", { error: result.error, uuid: item.data.uuid })

@@ -1,13 +1,10 @@
 import { useEffect } from "react"
 import {
 	run,
-	Semaphore,
 	createExecutableTimeout,
-	isPermanentRejection,
 	MAX_NON_RETRYABLE_REJECTIONS,
 	hashNoteContent,
 	mergeInflight,
-	buildInflightEntries,
 	pruneAndRebaseNoteOutboxAfterPush,
 	reconcileNoteOutboxAgainstCloud
 } from "@filen/shared"
@@ -22,23 +19,11 @@ import { type Note } from "@/types"
 import sqlite from "@/lib/sqlite"
 import { fetchData as notesQueryFetch, notesQueryGet } from "@/features/notes/queries/useNotesQuery"
 import { noteContentQueryUpdate, noteContentQueryDataUpdatedAt } from "@/features/notes/queries/useNoteContent.query"
-import { unwrapSdkError } from "@/lib/sdkErrors"
-import { ErrorKind } from "@filen/sdk-rs"
+import { isPermanentSdkRejection } from "@/lib/sdkErrors"
 import logger from "@/lib/logger"
 import events from "@/lib/events"
 import { whenUnlockedForeground } from "@/lib/unlockedForeground"
-
-// D3/#41/M1: content hash, disk-restore merge, and the monotonic-timestamp entry builder now live in
-// a shared module (web's outbox uses the identical algorithms). Re-exported here so every existing
-// importer of this module's outbox surface (content/index.tsx, the notes tests) resolves unchanged.
-export { hashNoteContent, mergeInflight, buildInflightEntries }
-
-// #40 / VC3: a genuine read-only/permission rejection (the server replies with a non-network,
-// non-auth error) must eventually DROP so the wedged content query re-enables — but a TRANSIENT
-// non-network error (e.g. a one-off `ErrorKind.Server`, the catch-all for non-`internal_error` API
-// failures) must NOT lose the first edit. We bound the drop: only after this many CONSECUTIVE
-// non-network, non-auth SDK rejections for the same note do we discard its inflight content.
-export { MAX_NON_RETRYABLE_REJECTIONS }
+import { OutboxSync } from "@/lib/outboxSync"
 
 // The note's newest outbox entry, when it was typed on `base` (none left, or rebased: undefined).
 function newestEntryOnBase(noteUuid: string, base: string): InflightContent[string][number] | undefined {
@@ -53,19 +38,8 @@ function newestEntryOnBase(noteUuid: string, base: string): InflightContent[stri
 // Waits between re-drives of a failed push: 30s, 2m, then every 10m.
 export const PUSH_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const
 
-export class Sync {
-	private readonly mutex: Semaphore = new Semaphore(1)
+export class Sync extends OutboxSync<InflightContent> {
 	private syncTimeout: ReturnType<typeof createExecutableTimeout> | null = null
-	public readonly sqliteKvKey: string = INFLIGHT_CONTENT_SQLITE_KV_KEY
-	private readonly initPromise: Promise<void>
-	private resolveInit!: () => void
-	private abortController: AbortController = new AbortController()
-	// Set true by start() (called only from the SyncHost mount). A headless background run never
-	// mounts SyncHost, so start() never runs and initPromise never resolves — sync() guards on
-	// this to no-op instead of hanging forever on Promise.all([mutex, initPromise]) (which would
-	// hold the mutex and wedge every future pass). Nothing was hydrated to sync without a prior
-	// restore anyway; persisted edits flush on the next foreground open.
-	private started: boolean = false
 	// VC3: per-note count of CONSECUTIVE non-network, non-auth SDK rejections. Transient (in
 	// memory only — never persisted to disk), reset on any successful sync or when the note's
 	// inflight is dropped/drained. Bounds the #40 drop so a one-off `Server` error never loses
@@ -92,22 +66,16 @@ export class Sync {
 	private pushLanded = false
 
 	public constructor() {
-		this.initPromise = new Promise(resolve => {
-			this.resolveInit = resolve
+		super({
+			sqliteKvKey: INFLIGHT_CONTENT_SQLITE_KV_KEY,
+			logScope: "notes-sync"
 		})
 	}
 
-	public start(): void {
-		this.started = true
-
-		this.restoreFromDisk()
-	}
-
-	public cancel(): void {
+	public override cancel(): void {
 		this.syncTimeout?.cancel()
 		this.syncTimeout = null
-		this.abortController.abort()
-		this.abortController = new AbortController()
+		super.cancel()
 		this.failed.clear()
 		this.retryStep = 0
 		this.pushLanded = false
@@ -246,7 +214,7 @@ export class Sync {
 		}
 	}
 
-	private async restoreFromDisk() {
+	protected override async restoreFromDisk(): Promise<void> {
 		// #41 fix: this is the ONLY disk→store bridge, so it MUST hydrate the store
 		// even with no network. The previous structure gated `setInflightContent` on
 		// a successful cloud fetch (`listNotes` + `getNoteContent`), so an offline
@@ -360,137 +328,78 @@ export class Sync {
 		}
 	}
 
-	// M3: reports persistence failure as `false` instead of throwing (it still never
-	// throws). Sync-internal callers ignore the return (the next pass re-flushes);
-	// COMPONENT call sites must surface a `false` — a failing SQLite write means the
-	// user's edit survives in memory only and would otherwise die with zero signal.
-	public async flushToDisk(inflightContent: InflightContent): Promise<boolean> {
-		await this.initPromise
+	private sync(): Promise<void> {
+		return this.runPass(
+			async signal => {
+				const inflightContent = useNotesInflightStore.getState().inflightContent
 
-		const result = await run(async () => {
-			if (Object.keys(inflightContent).length === 0) {
-				await sqlite.kvAsync.remove(this.sqliteKvKey)
+				if (Object.keys(inflightContent).length === 0) {
+					this.nonRetryableRejections.clear()
 
-				return
-			}
-
-			await sqlite.kvAsync.set(this.sqliteKvKey, inflightContent)
-		})
-
-		if (!result.success) {
-			logger.error("notes-sync", "flushToDisk failed; in-flight edit not persisted", { error: result.error })
-		}
-
-		return result.success
-	}
-
-	private async sync(): Promise<void> {
-		// Headless guard: without start() (SyncHost never mounted in a background run) initPromise
-		// never resolves, so the Promise.all below would hang forever holding the mutex — wedging
-		// every future pass. Nothing was hydrated to sync anyway; no-op until the UI has started it.
-		if (!this.started) {
-			return
-		}
-
-		if (!onlineManager.isOnline()) {
-			return
-		}
-
-		const signal = this.abortController.signal
-
-		const result = await run(async defer => {
-			await Promise.all([this.mutex.acquire(), this.initPromise])
-
-			defer(() => {
-				this.mutex.release()
-			})
-
-			const inflightContent = useNotesInflightStore.getState().inflightContent
-
-			if (Object.keys(inflightContent).length === 0) {
-				this.nonRetryableRejections.clear()
-
-				return
-			}
-
-			// VC3: drop stale rejection counters for notes whose inflight is gone (drained,
-			// cleared via the remote-edit reload, or pruned on reconcile). Otherwise a fresh
-			// edit on a previously-rejected note would inherit a stale count and lose part of
-			// its retry budget.
-			for (const trackedUuid of this.nonRetryableRejections.keys()) {
-				const entries = inflightContent[trackedUuid]
-
-				if (!entries || entries.length === 0) {
-					this.nonRetryableRejections.delete(trackedUuid)
+					return null
 				}
-			}
 
-			// D3: one overwrite toast per note per pass. Each note is pushed at most once per
-			// pass anyway (only its most recent entry goes out), so this is belt-and-braces
-			// against ever stacking duplicate toasts for the same note.
-			const toastedConflicts = new Set<string>()
+				// VC3: drop stale rejection counters for notes whose inflight is gone (drained,
+				// cleared via the remote-edit reload, or pruned on reconcile). Otherwise a fresh
+				// edit on a previously-rejected note would inherit a stale count and lose part of
+				// its retry budget.
+				for (const trackedUuid of this.nonRetryableRejections.keys()) {
+					const entries = inflightContent[trackedUuid]
 
-			const results = await Promise.allSettled(
-				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
-					if (signal.aborted || this.holds.has(noteUuid)) {
-						return
+					if (!entries || entries.length === 0) {
+						this.nonRetryableRejections.delete(trackedUuid)
 					}
-
-					if (contents.length === 0) {
-						return
-					}
-
-					const mostRecentContent = [...contents].sort((a, b) => b.timestamp - a.timestamp).at(0)
-
-					if (!mostRecentContent) {
-						return
-					}
-
-					let finishPass: () => void = () => undefined
-
-					this.passes.set(
-						noteUuid,
-						new Promise<void>(resolve => {
-							finishPass = resolve
-						})
-					)
-
-					try {
-						await this.pushNote(noteUuid, mostRecentContent, signal, toastedConflicts)
-					} finally {
-						this.passes.delete(noteUuid)
-						finishPass()
-					}
-				})
-			)
-
-			for (const r of results) {
-				if (r.status === "rejected") {
-					logger.error("notes-sync", "failed to sync note in pass", { reason: String(r.reason) })
 				}
-			}
 
-			// D2: never flush after an aborted pass. Logout aborts in-flight sync (Phase 2)
-			// and later wipes SQLite (Phase 6) — a late flush here would resurrect the
-			// previous account's plaintext queue onto disk after the wipe. Mirrors the
-			// chats sync fix.
-			if (!signal.aborted) {
-				await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
-			}
-		})
+				// D3: one overwrite toast per note per pass. Each note is pushed at most once per
+				// pass anyway (only its most recent entry goes out), so this is belt-and-braces
+				// against ever stacking duplicate toasts for the same note.
+				const toastedConflicts = new Set<string>()
 
-		if (!signal.aborted) {
-			this.scheduleRetry()
-		}
+				const results = await Promise.allSettled(
+					Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
+						if (signal.aborted || this.holds.has(noteUuid)) {
+							return
+						}
 
-		if (!result.success) {
-			if (signal.aborted) {
-				return
-			}
+						if (contents.length === 0) {
+							return
+						}
 
-			logger.error("notes-sync", "sync pass failed unexpectedly", { error: result.error })
-			alerts.error(result.error)
-		}
+						const mostRecentContent = [...contents].sort((a, b) => b.timestamp - a.timestamp).at(0)
+
+						if (!mostRecentContent) {
+							return
+						}
+
+						let finishPass: () => void = () => undefined
+
+						this.passes.set(
+							noteUuid,
+							new Promise<void>(resolve => {
+								finishPass = resolve
+							})
+						)
+
+						try {
+							await this.pushNote(noteUuid, mostRecentContent, signal, toastedConflicts)
+						} finally {
+							this.passes.delete(noteUuid)
+							finishPass()
+						}
+					})
+				)
+
+				for (const r of results) {
+					if (r.status === "rejected") {
+						logger.error("notes-sync", "failed to sync note in pass", { reason: String(r.reason) })
+					}
+				}
+
+				return useNotesInflightStore.getState().inflightContent
+			},
+			() => this.scheduleRetry()
+		)
 	}
 
 	// One note's share of a pass: its conflict peek, then its push. Registered in `passes` by the caller.
@@ -623,10 +532,7 @@ export class Sync {
 			//      genuine read-only/permission rejection still un-wedges the query
 			//      after N attempts.
 			//   4. Any non-SDK error (e.g. abort) is re-thrown unchanged.
-			const unwrapped = unwrapSdkError(e)
-			const kind = unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
-
-			if (!isPermanentRejection({ hasSdkError: unwrapped !== null, kind })) {
+			if (!isPermanentSdkRejection(e)) {
 				// Re-driven on the backoff timer; an aborted pass (logout) is not a failure.
 				if (!signal.aborted) {
 					this.failed.add(noteUuid)

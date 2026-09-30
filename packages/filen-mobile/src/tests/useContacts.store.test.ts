@@ -24,23 +24,13 @@ describe("useContactsStore — bulk mode auto-exit", () => {
 		expect(useContactsStore.getState().bulkMode).toBe(false)
 	})
 
-	it("exits bulk mode when setSelectedContacts empties the selection", () => {
-		useContactsStore.getState().setBulkMode(true)
-		useContactsStore.getState().setSelectedContacts([makeContact("a")])
-
-		expect(useContactsStore.getState().bulkMode).toBe(true)
-
-		useContactsStore.getState().setSelectedContacts([])
-
-		expect(useContactsStore.getState().bulkMode).toBe(false)
-	})
-
 	it("stays in bulk mode while at least one contact remains selected", () => {
 		const a = makeContact("a")
 		const b = makeContact("b")
 
 		useContactsStore.getState().setBulkMode(true)
-		useContactsStore.getState().setSelectedContacts([a, b])
+		useContactsStore.getState().toggleSelectedContact(a)
+		useContactsStore.getState().toggleSelectedContact(b)
 
 		useContactsStore.getState().toggleSelectedContact(a)
 

@@ -3,7 +3,7 @@ import { validateUuid } from "@/lib/uuid"
 import type { DriveItem, DriveItemDirectorySharedRoot, DriveItemDirectorySharedNonRoot } from "@/types"
 import { deserializeRouteParam } from "@/lib/serializer"
 import { getDriveSelectSession } from "@/features/drive/store/useDriveSelect.store"
-import { useCameraUpload } from "@/features/cameraUpload/cameraUpload"
+import { useCameraUploadConfig } from "@/features/cameraUpload/cameraUpload"
 import type { PreviewType } from "@/lib/previewType"
 import type { SharingRole } from "@filen/sdk-rs"
 
@@ -124,7 +124,7 @@ export default function useDrivePath(): DrivePath {
 	const linkedParam = searchParams.linked
 	const sharedParam = searchParams.shared
 	const { getId: getNavigationId } = useNavigation()
-	const { config: cameraUploadConfig } = useCameraUpload()
+	const { config: cameraUploadConfig } = useCameraUploadConfig()
 
 	// No try/catch and no hook referenced as a value in here: either makes the React Compiler skip this hook,
 	// and the DrivePath it returns is then a new object every render (every row re-renders, the listing

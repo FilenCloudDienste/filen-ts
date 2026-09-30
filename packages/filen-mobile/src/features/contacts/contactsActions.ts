@@ -1,41 +1,31 @@
 import { type TFunction } from "i18next"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import contacts from "@/features/contacts/contacts"
-import { run } from "@filen/shared"
 import { type MenuButton } from "@/components/ui/menu"
 import logger from "@/lib/logger"
+import { confirmedAction } from "@/lib/confirmedAction"
+import { contactsQueryGet } from "@/features/contacts/queries/useContacts.query"
 
 /**
  * Prompt the user for a Filen email address and send a contact request.
  * Used by the header menu "add" item and the empty-state CTA — keep in sync.
  */
 export async function addContactFlow({ t }: { t: TFunction }): Promise<void> {
-	const promptResult = await run(async () => {
-		return await prompts.input({
+	const email = await inputPrompt(
+		{
 			title: t("add_contact"),
 			message: t("enter_contact_filen_email"),
 			cancelText: t("cancel"),
 			okText: t("add"),
 			keyboardType: "email-address"
-		})
-	})
+		},
+		{ tag: "contacts", message: "addContactFlow prompt failed" },
+		{ trim: true }
+	)
 
-	if (!promptResult.success) {
-		logger.warn("contacts", "addContactFlow prompt failed", { error: promptResult.error })
-		alerts.error(promptResult.error)
-
-		return
-	}
-
-	if (promptResult.data.cancelled) {
-		return
-	}
-
-	const email = promptResult.data.value.trim()
-
-	if (email.length === 0) {
+	if (email === null) {
 		return
 	}
 
@@ -50,63 +40,49 @@ export async function addContactFlow({ t }: { t: TFunction }): Promise<void> {
 }
 
 /**
- * Builds a Block or Unblock menu action for a user identified by id + email, usable from any
- * participant row (chat / note). `blockedUuid` is required to unblock (the BlockedContact uuid).
+ * Builds a Block or Unblock menu action for a user, usable from contact and participant rows.
  * `timestamp` is cosmetic (blocked-list sort order) and self-heals on the next contacts refetch.
  */
-export function buildBlockToggleMenuAction(params: {
+export function buildBlockToggleMenuAction({
+	t,
+	isBlocked,
+	target
+}: {
 	t: TFunction
 	isBlocked: boolean
-	blockedUuid: string | undefined
-	userId: bigint
-	email: string
-	avatar: string | undefined
-	nickName: string | undefined
-	timestamp: bigint
+	target: {
+		userId: bigint
+		email: string
+		avatar: string | undefined
+		nickName: string | undefined
+		timestamp: bigint
+	}
 }): MenuButton {
-	const { t, isBlocked, blockedUuid, userId, email, avatar, nickName, timestamp } = params
-
 	if (isBlocked) {
+		// Unblock is constructive (lifts a restriction), not destructive.
 		return {
 			id: "unblock",
 			title: t("unblock"),
 			icon: "restore",
 			requiresOnline: true,
 			onPress: async () => {
+				// Resolved on press so rows never search the blocked list while rendering.
+				const blockedUuid = contactsQueryGet()?.blocked.find(b => b.userId === target.userId)?.uuid
+
 				if (!blockedUuid) {
 					return
 				}
 
-				const promptResponse = await run(async () => {
-					return await prompts.alert({
-						title: t("unblock_contact"),
-						message: t("unblock_contact_confirmation"),
-						cancelText: t("cancel"),
-						okText: t("unblock")
-					})
-				})
-
-				if (!promptResponse.success) {
-					logger.warn("contacts", "unblock confirmation prompt failed", { error: promptResponse.error })
-					alerts.error(promptResponse.error)
-
-					return
-				}
-
-				if (promptResponse.data.cancelled) {
-					return
-				}
-
-				const result = await runWithLoading(async () => {
-					await contacts.unblock({
-						uuid: blockedUuid
-					})
-				})
-
-				if (!result.success) {
-					logger.error("contacts", "unblock failed", { blockedUuid, error: result.error })
-					alerts.error(result.error)
-				}
+				await confirmedAction({
+					promptTitle: t("unblock_contact"),
+					promptMessage: t("unblock_contact_confirmation"),
+					promptOkText: t("unblock"),
+					promptDestructive: false,
+					action: () =>
+						contacts.unblock({
+							uuid: blockedUuid
+						})
+				})()
 			}
 		}
 	}
@@ -117,42 +93,18 @@ export function buildBlockToggleMenuAction(params: {
 		icon: "block",
 		destructive: true,
 		requiresOnline: true,
-		onPress: async () => {
-			const promptResponse = await run(async () => {
-				return await prompts.alert({
-					title: t("block_contact"),
-					message: t("block_contact_confirmation"),
-					cancelText: t("cancel"),
-					okText: t("block"),
-					destructive: true
+		onPress: confirmedAction({
+			promptTitle: t("block_contact"),
+			promptMessage: t("block_contact_confirmation"),
+			promptOkText: t("block"),
+			action: () =>
+				contacts.block({
+					userId: target.userId,
+					email: target.email,
+					avatar: target.avatar,
+					nickName: target.nickName,
+					timestamp: target.timestamp
 				})
-			})
-
-			if (!promptResponse.success) {
-				logger.warn("contacts", "block confirmation prompt failed", { error: promptResponse.error })
-				alerts.error(promptResponse.error)
-
-				return
-			}
-
-			if (promptResponse.data.cancelled) {
-				return
-			}
-
-			const result = await runWithLoading(async () => {
-				await contacts.block({
-					userId,
-					email,
-					avatar,
-					nickName,
-					timestamp
-				})
-			})
-
-			if (!result.success) {
-				logger.error("contacts", "block failed", { email, error: result.error })
-				alerts.error(result.error)
-			}
-		}
+		})
 	}
 }

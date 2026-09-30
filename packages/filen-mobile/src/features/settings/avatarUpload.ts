@@ -3,6 +3,7 @@ import * as ImageManipulator from "expo-image-manipulator"
 import { type ImagePickerAsset } from "expo-image-picker"
 import { EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS } from "@/constants"
 import i18n from "@/lib/i18n"
+import { renderAndSave } from "@/lib/imageManipulator"
 import { type DeferFn } from "@filen/shared"
 
 // Validates a freshly-picked image and, when it isn't already JPEG/PNG, transcodes it to JPEG
@@ -34,43 +35,23 @@ export async function prepareAvatarFileForUpload({ asset, defer }: { asset: Imag
 			throw new Error(i18n.t("avatar_unsupported_format"))
 		}
 
-		// Hold the Context in a local binding across the await. expo-image-manipulator's
-		// Context overrides sharedObjectDidRelease to cancel its underlying coroutine task;
-		// if the chained intermediate ref were eligible for Hermes GC during renderAsync,
-		// the native task would be cancelled and renderAsync would reject with
-		// JobCancellationException.
-		const context = ImageManipulator.ImageManipulator.manipulate(asset.uri)
+		const saved = await renderAndSave(asset.uri, {
+			format: ImageManipulator.SaveFormat.JPEG
+		})
 
-		// The Context and rendered ImageRef wrap decoded native bitmaps Hermes GC does not track;
-		// release both once the transcode is done (finally) so a picked avatar doesn't strand native
-		// memory (same SharedObject-release discipline as the thumbnail / camera-upload image paths).
-		let manipulated: ImageManipulator.ImageRef | null = null
+		const convertedFile = new FileSystem.File(saved.uri)
 
-		try {
-			manipulated = await context.renderAsync()
-
-			const saved = await manipulated.saveAsync({
-				format: ImageManipulator.SaveFormat.JPEG,
-				base64: false
-			})
-
-			const convertedFile = new FileSystem.File(saved.uri)
-
-			defer(() => {
-				if (convertedFile.exists) {
-					convertedFile.delete()
-				}
-			})
-
-			if (!convertedFile.exists) {
-				throw new Error(i18n.t("avatar_upload_failed"))
+		defer(() => {
+			if (convertedFile.exists) {
+				convertedFile.delete()
 			}
+		})
 
-			fileToUpload = convertedFile
-		} finally {
-			manipulated?.release()
-			context.release()
+		if (!convertedFile.exists) {
+			throw new Error(i18n.t("avatar_upload_failed"))
 		}
+
+		fileToUpload = convertedFile
 	}
 
 	return fileToUpload

@@ -325,9 +325,9 @@ export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveI
 		return null
 	}
 
-	if (drivePath.type === "offline") {
+	if (drivePath.type === "offline" || drivePath.type === "favorites" || drivePath.type === "links") {
 		return {
-			pathname: "/offline/[uuid]" as const,
+			pathname: `/${drivePath.type}/[uuid]` as const,
 			params: {
 				uuid: item.data.uuid
 			}
@@ -345,40 +345,12 @@ export function resolveDriveNavigationTarget({ item, drivePath }: { item: DriveI
 				? { kind: "dir", dir: item.data, role: item.data.sharingRole }
 				: undefined
 
-	if (drivePath.type === "sharedIn") {
+	if (drivePath.type === "sharedIn" || drivePath.type === "sharedOut") {
 		return {
-			pathname: "/sharedIn/[uuid]" as const,
+			pathname: `/${drivePath.type}/[uuid]` as const,
 			params: {
 				uuid: item.data.uuid,
 				...(sharedNavContext ? { shared: serialize(sharedNavContext) } : {})
-			}
-		}
-	}
-
-	if (drivePath.type === "sharedOut") {
-		return {
-			pathname: "/sharedOut/[uuid]" as const,
-			params: {
-				uuid: item.data.uuid,
-				...(sharedNavContext ? { shared: serialize(sharedNavContext) } : {})
-			}
-		}
-	}
-
-	if (drivePath.type === "favorites") {
-		return {
-			pathname: "/favorites/[uuid]" as const,
-			params: {
-				uuid: item.data.uuid
-			}
-		}
-	}
-
-	if (drivePath.type === "links") {
-		return {
-			pathname: "/links/[uuid]" as const,
-			params: {
-				uuid: item.data.uuid
 			}
 		}
 	}

@@ -159,7 +159,8 @@ vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
 vi.mock("@/lib/secureStore", () => ({
 	default: {
 		get: vi.fn(),
-		set: vi.fn()
+		set: vi.fn(),
+		subscribeKey: vi.fn()
 	},
 	useSecureStore: vi.fn()
 }))

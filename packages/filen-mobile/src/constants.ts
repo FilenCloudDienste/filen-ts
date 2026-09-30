@@ -1,10 +1,11 @@
 import type { NetInfoConfiguration } from "@react-native-community/netinfo"
 import { Platform } from "react-native"
 
-export const IOS_APP_GROUP_IDENTIFIER: string = "group.io.filen.app"
+export { IOS_APP_GROUP_IDENTIFIER } from "@/lib/appIdentity"
 
-export const FILE_PUBLIC_LINK_URL_PREFIX: string = "https://app.filen.io/#/d/"
-export const DIRECTORY_PUBLIC_LINK_URL_PREFIX: string = "https://app.filen.io/#/f/"
+export const WEB_APP_URL = "https://app.filen.io/#/"
+export const FILE_PUBLIC_LINK_URL_PREFIX: string = `${WEB_APP_URL}d/`
+export const DIRECTORY_PUBLIC_LINK_URL_PREFIX: string = `${WEB_APP_URL}f/`
 
 // Pinned local HTTP-provider port (spec: docs/pip-video-player.md §5.4). Player sources are
 // initial-only and URLs embed the port, so provider restarts must land on the SAME port or every
@@ -244,3 +245,11 @@ export const PRIVATE_HOST = [
 	/^f[cd][0-9a-f]{2}:/i,
 	/^fe80:/i
 ]
+
+// Floor between AUTOMATIC passes of the sync engines (offline, notes offline, camera upload), counted
+// from the last completed pass. App start, every foreground flip (Face ID, share sheet, permission
+// dialogs) and every reconnect trigger one; each engine decides which triggers bypass it.
+export const AUTO_SYNC_MIN_INTERVAL_MS = 60_000
+
+// Bottom clearance for lists that scroll under the tab bar / floating bar.
+export const TAB_LIST_CONTENT_CLASS = Platform.OS === "android" ? "pb-96" : "pb-40"

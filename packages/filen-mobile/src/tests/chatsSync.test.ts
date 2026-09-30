@@ -135,7 +135,8 @@ function asSdkError<E>(error: E, kind: string): E {
 }
 
 import { onlineManager } from "@tanstack/react-query"
-import { Sync, MAX_NON_RETRYABLE_REJECTIONS } from "@/features/chats/components/sync"
+import { Sync } from "@/features/chats/components/sync"
+import { MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import sqlite from "@/lib/sqlite"
 import type { InflightChatMessages } from "@/features/chats/store/useChats.store"
 

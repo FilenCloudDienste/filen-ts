@@ -18,6 +18,7 @@ import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SDK_CACHE_DIRECTORY, SDK_CACHE_PARENT_DIRECTORY, SDK_CACHE_DB_FILE, SDK_CACHE_VERSION } from "@/lib/storageRoots"
 import { useDriveSearchStore } from "@/features/drive/store/useDriveSearch.store"
 import logger from "@/lib/logger"
+import { ensureDirectory } from "@/lib/fsUtils"
 
 // One window loads the whole match set (up to this cap) so the local sort produces a
 // correct GLOBAL order for the user's sort pref — the SDK window is hardcoded
@@ -143,9 +144,7 @@ export class DriveSearch {
 
 		this.sweepOldVersions()
 
-		if (!SDK_CACHE_DIRECTORY.exists) {
-			SDK_CACHE_DIRECTORY.create({ idempotent: true, intermediates: true })
-		}
+		ensureDirectory(SDK_CACHE_DIRECTORY)
 
 		try {
 			const { authedSdkClient } = await auth.getSdkClients()

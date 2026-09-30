@@ -1,4 +1,4 @@
-import auth, { useSdkClients, useStringifiedClient } from "@/lib/auth"
+import auth, { useSdkClients } from "@/lib/auth"
 import {
 	type JsClientInterface,
 	SocketEvent_Tags,
@@ -62,7 +62,7 @@ export function isSocketDataEvent(event: SocketEvent): boolean {
 	}
 }
 
-async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }) {
+async function onEvent(event: SocketEvent) {
 	if (isSocketDataEvent(event)) {
 		noteSocketDataEvent()
 	}
@@ -124,7 +124,7 @@ async function onEvent({ event, userId }: { event: SocketEvent; userId: bigint }
 			}
 
 			case SocketEvent_Tags.Chat: {
-				await handleChatEvent({ event, userId })
+				await handleChatEvent({ event })
 
 				break
 			}
@@ -172,12 +172,6 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 	// Set by the "logout" event: this unmounts only after the logout's wipe, and events already queued for
 	// JS still arrive after the listener is destroyed. Its session gets no event and no listener after it.
 	const sessionEndedRef = useRef(false)
-	const stringifiedClient = useStringifiedClient()
-	const stringifiedClientRef = useRef(stringifiedClient)
-
-	useEffect(() => {
-		stringifiedClientRef.current = stringifiedClient
-	}, [stringifiedClient])
 
 	const onAppStateChange = useCallback(
 		async (nextAppState: AppStateStatus) => {
@@ -202,12 +196,7 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 											return
 										}
 
-										const client = stringifiedClientRef.current
-
-										onEvent({
-											event,
-											userId: client ? client.userId : BigInt(0)
-										}).catch(e => logger.error("socket", "onEvent threw outside try/catch", { error: e }))
+										onEvent(event).catch(e => logger.error("socket", "onEvent threw outside try/catch", { error: e }))
 									}
 								},
 								undefined

@@ -1,10 +1,9 @@
 import { useIncomingShare, type ResolvedSharePayload } from "expo-sharing"
-import { Platform } from "react-native"
 import { useTranslation } from "react-i18next"
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import ListEmpty from "@/components/ui/listEmpty"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
-import Header from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { useResolveClassNames } from "uniwind"
 import { useNavigation, useFocusEffect } from "expo-router"
 import VirtualList from "@/components/ui/virtualList"
@@ -15,8 +14,7 @@ import { run, formatBytes } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { uploadQuotaRefusal } from "@/features/transfers/quota"
 import useIsOnline from "@/hooks/useIsOnline"
-import { selectDriveItems } from "@/features/drive/driveSelectSession"
-import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSelectResolve"
+import { selectDriveDirectory } from "@/features/drive/driveSelectSession"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { newTmpFile } from "@/lib/tmp"
 import { isEqual } from "es-toolkit"
@@ -112,8 +110,6 @@ function OfflineNotice() {
 
 function IncomingShare() {
 	const { t } = useTranslation()
-	const textForeground = useResolveClassNames("text-foreground")
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const insets = useSafeAreaInsets()
 	const { resolvedSharedPayloads, sharedPayloads, isResolving, error } = useIncomingShare()
 	const textBlue500 = useResolveClassNames("text-blue-500")
@@ -210,12 +206,7 @@ function IncomingShare() {
 
 		try {
 			const selectResult = await run(async () => {
-				return await selectDriveItems({
-					type: "single",
-					files: false,
-					directories: true,
-					items: []
-				})
+				return await selectDriveDirectory()
 			})
 
 			if (!selectResult.success) {
@@ -225,22 +216,9 @@ function IncomingShare() {
 				return
 			}
 
-			if (selectResult.data.cancelled) {
-				return
-			}
-
-			const selectedItem = selectResult.data.selectedItems[0]
-
-			if (!selectedItem) {
-				return
-			}
-
-			const remoteDir = resolveSelectedDriveItemToAnyNormalDir(selectedItem)
+			const remoteDir = selectResult.data
 
 			if (!remoteDir) {
-				// The helper already logged the uuid/type diagnostics for the unresolved pick.
-				logger.warn("incomingShare", "selected directory could not be resolved, upload aborted")
-
 				return
 			}
 
@@ -350,33 +328,12 @@ function IncomingShare() {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("saved_shares")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={() => {
+					navigation.getParent()?.goBack()
+				}}
 				rightItems={
 					action === "confirm"
 						? [
@@ -395,10 +352,7 @@ function IncomingShare() {
 						: undefined
 				}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<VirtualList
 					data={payloads}
 					loading={isLoadingPayloads}
@@ -426,7 +380,7 @@ function IncomingShare() {
 					}}
 					keyExtractor={payload => payload.contentUri}
 				/>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

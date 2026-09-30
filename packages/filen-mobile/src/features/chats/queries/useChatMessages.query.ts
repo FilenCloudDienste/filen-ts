@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import queryClient, { queryUpdater } from "@/queries/client"
+import queryClient, { queryUpdater, getCachedQuery, type QueryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import { sortParams } from "@filen/shared"
 import { type Chat } from "@/types"
@@ -7,6 +7,7 @@ import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.
 import { wrapMessage } from "@/features/chats/chatsWrap"
 import { chatsQueryGet } from "@/features/chats/queries/useChats.query"
 import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useChatMessagesQuery"
 
@@ -39,11 +40,7 @@ export async function fetchData(
 	const messages = await authedSdkClient.listMessagesBefore(
 		chat,
 		BigInt(Date.now() + 3600000),
-		params?.signal
-			? {
-					signal: params.signal
-				}
-			: undefined
+		toSignalOpts(params?.signal)
 	)
 
 	return messages.map(m => ({
@@ -58,6 +55,10 @@ export function chatMessagesQueryKey(params: UseChatMessagesQueryParams): { uuid
 	return { uuid: params.uuid }
 }
 
+export function chatMessagesQueryFullKey(params: UseChatMessagesQueryParams): unknown[] {
+	return [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))]
+}
+
 export function useChatMessagesQuery(
 	params: UseChatMessagesQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
@@ -67,7 +68,7 @@ export function useChatMessagesQuery(
 		// current socket session.
 		refetchOnMount: socketCoveredRefetchOnMount(),
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))],
+		queryKey: chatMessagesQueryFullKey(params),
 		queryFn: ({ signal }) =>
 			fetchData({
 				...params,
@@ -83,13 +84,9 @@ export function chatMessagesQueryUpdate({
 	updater
 }: {
 	params: UseChatMessagesQueryParams
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 }) {
-	const sortedParams = sortParams(chatMessagesQueryKey(params))
-
-	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams], prev => {
+	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(chatMessagesQueryFullKey(params), prev => {
 		return typeof updater === "function" ? updater(prev ?? []) : updater
 	})
 }
@@ -97,7 +94,7 @@ export function chatMessagesQueryUpdate({
 // Through the query registry rather than the bare fetchData, so an open chat's in-flight read is shared.
 export function chatMessagesQueryFetch(params: UseChatMessagesQueryParams): Promise<Awaited<ReturnType<typeof fetchData>>> {
 	return queryClient.fetchQuery({
-		queryKey: [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))],
+		queryKey: chatMessagesQueryFullKey(params),
 		queryFn: ({ signal }) =>
 			fetchData({
 				...params,
@@ -107,19 +104,13 @@ export function chatMessagesQueryFetch(params: UseChatMessagesQueryParams): Prom
 }
 
 export function chatMessagesQueryGet(params: UseChatMessagesQueryParams) {
-	const sortedParams = sortParams(chatMessagesQueryKey(params))
-
-	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>([BASE_QUERY_KEY, sortedParams])
+	return queryUpdater.get<Awaited<ReturnType<typeof fetchData>>>(chatMessagesQueryFullKey(params))
 }
 
 // Whether an open chat screen observes this chat's messages. The chats list's unread badges observe
 // with enabled:false and don't count. One hash lookup, like chatMessagesQueryGet.
 export function chatMessagesQueryIsActive(params: UseChatMessagesQueryParams): boolean {
-	const { queryHash } = queryClient.defaultQueryOptions({
-		queryKey: [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))]
-	})
-
-	return queryClient.getQueryCache().get(queryHash)?.isActive() === true
+	return getCachedQuery(chatMessagesQueryFullKey(params))?.isActive() === true
 }
 
 export default useChatMessagesQuery

@@ -7,9 +7,11 @@ import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"
 import { NonRootDir_Tags, AnyDirWithContext, AnySharedDir, AnySharedDirWithContext } from "@filen/sdk-rs"
 import { unwrapFileMeta, unwrapDirMeta, unwrapAnyDirUuid, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
-import { sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
+import { ensureDirectory, sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { ClearBarrier } from "@/lib/clearBarrier"
 import { atomicWrite } from "@/lib/fsAtomic"
+import { META_FILE_SUFFIX, metaFileName } from "@/lib/metaFile"
+import { createCompletionGate } from "@/lib/completionGate"
 import {
 	parentCacheKey,
 	directoryDriveItemToAnyDirWithContext,
@@ -31,6 +33,7 @@ import {
 	OFFLINE_DIRECTORIES_DIRECTORY,
 	OFFLINE_INDEX_FILE
 } from "@/lib/storageRoots"
+import { toSignalOpts } from "@/lib/signals"
 
 export type Uuid = string
 
@@ -214,26 +217,9 @@ export class Offline {
 			// Both leaf directories existing implies the whole chain exists — the warm re-check
 			// after every invalidateCaches costs 2 stats instead of stat + list + 3 stats.
 			if (!FILES_DIRECTORY.exists || !DIRECTORIES_DIRECTORY.exists) {
-				if (!DIRECTORY.exists) {
-					DIRECTORY.create({
-						intermediates: true,
-						idempotent: true
-					})
-				}
-
-				if (!FILES_DIRECTORY.exists) {
-					FILES_DIRECTORY.create({
-						intermediates: true,
-						idempotent: true
-					})
-				}
-
-				if (!DIRECTORIES_DIRECTORY.exists) {
-					DIRECTORIES_DIRECTORY.create({
-						intermediates: true,
-						idempotent: true
-					})
-				}
+				ensureDirectory(DIRECTORY)
+				ensureDirectory(FILES_DIRECTORY)
+				ensureDirectory(DIRECTORIES_DIRECTORY)
 			}
 
 			this.directoriesEnsured = true
@@ -302,7 +288,7 @@ export class Offline {
 			return cached
 		}
 
-		const metaFile = new FileSystem.File(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}/${topLevelUuid}.filenmeta`)
+		const metaFile = new FileSystem.File(`${DIRECTORIES_DIRECTORY_URI}/${topLevelUuid}/${metaFileName(topLevelUuid)}`)
 		const metaInfo = metaFile.info()
 
 		if (!metaInfo.exists || (metaInfo.size ?? 0) === 0) {
@@ -345,7 +331,7 @@ export class Offline {
 	// Reads a standalone files/{uuid}/{uuid}.filenmeta — null when missing, empty, or undecodable.
 	// Callers treat null as "no usable meta"; broken-entry handling lives in listBrokenStandaloneUuids.
 	private async readStandaloneMeta(uuid: string): Promise<FileOrDirectoryOfflineMeta | null> {
-		const metaFile = new FileSystem.File(`${FILES_DIRECTORY_URI}/${uuid}/${uuid}.filenmeta`)
+		const metaFile = new FileSystem.File(`${FILES_DIRECTORY_URI}/${uuid}/${metaFileName(uuid)}`)
 		const metaInfo = metaFile.info()
 
 		if (!metaInfo.exists || (metaInfo.size ?? 0) === 0) {
@@ -713,7 +699,7 @@ export class Offline {
 					return
 				}
 
-				const metaFile = new FileSystem.File(`${entry.uri}/${entry.name}.filenmeta`)
+				const metaFile = new FileSystem.File(`${entry.uri}/${metaFileName(entry.name)}`)
 				const metaInfo = metaFile.info()
 
 				if (!metaInfo.exists || (metaInfo.size ?? 0) === 0) {
@@ -768,7 +754,7 @@ export class Offline {
 				continue
 			}
 
-			const metaFile = new FileSystem.File(`${entry.uri}/${entry.name}.filenmeta`)
+			const metaFile = new FileSystem.File(`${entry.uri}/${metaFileName(entry.name)}`)
 			const metaInfo = metaFile.info()
 			let brokenMeta = !metaInfo.exists || (metaInfo.size ?? 0) === 0
 
@@ -793,7 +779,7 @@ export class Offline {
 			let dataFileSize: number | null = null
 
 			for (const inner of entry.list()) {
-				if (inner instanceof FileSystem.File && !inner.name.endsWith(".filenmeta")) {
+				if (inner instanceof FileSystem.File && !inner.name.endsWith(META_FILE_SUFFIX)) {
 					dataFileSize = inner.size
 
 					break
@@ -861,7 +847,7 @@ export class Offline {
 					return
 				}
 
-				const metaFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, uuid, `${uuid}.filenmeta`))
+				const metaFile = new FileSystem.File(FileSystem.Paths.join(DIRECTORIES_DIRECTORY.uri, uuid, metaFileName(uuid)))
 
 				atomicWrite(
 					metaFile,
@@ -992,7 +978,7 @@ export class Offline {
 				let dataFile: FileSystem.File | null = null
 
 				for (const entry of standaloneDir.list()) {
-					if (entry instanceof FileSystem.File && !entry.name.endsWith(".filenmeta")) {
+					if (entry instanceof FileSystem.File && !entry.name.endsWith(META_FILE_SUFFIX)) {
 						dataFile = entry
 
 						break
@@ -1007,7 +993,7 @@ export class Offline {
 					dataFile.rename(newName)
 				}
 
-				const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, `${item.data.uuid}.filenmeta`))
+				const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, metaFileName(item.data.uuid)))
 
 				// A rename never changes bytes (same uuid ⟹ same content) — carry the delivered-size
 				// record so a meta-size-drifted file doesn't lose its blessing on rename.
@@ -1151,12 +1137,7 @@ export class Offline {
 			// (uuids + fixed ASCII suffixes), where encoding is the identity.
 			const liveDirUri = liveDir.uri
 
-			if (!liveDir.exists) {
-				liveDir.create({
-					intermediates: true,
-					idempotent: true
-				})
-			}
+			ensureDirectory(liveDir)
 
 			// Prior state, captured at pass entry — BEFORE tmp crash recovery, whose rescue needs the
 			// meta's claimed paths. The existing meta is both the local-view source and the
@@ -1165,7 +1146,7 @@ export class Offline {
 			// healthy bytes and the meta is rebuilt from the listing (near-free repair).
 			const existingMeta = await this.readDirectoryMeta(topLevelUuid)
 			const metaWasUnreadable = existingMeta === null && !initialStore
-			const metaFile = new FileSystem.File(`${liveDirUri}/${topLevelUuid}.filenmeta`)
+			const metaFile = new FileSystem.File(`${liveDirUri}/${metaFileName(topLevelUuid)}`)
 			const existingEntries = existingMeta?.entries ?? {}
 
 			// Crash recovery with RESCUE: a previous pass that died mid-move can leave /.sync-tmp-{uuid}
@@ -1195,12 +1176,7 @@ export class Offline {
 					if (!new FileSystem.File(destinationUri).exists && !new FileSystem.Directory(destinationUri).exists) {
 						const destinationParent = new FileSystem.Directory(FileSystem.Paths.dirname(destinationUri))
 
-						if (!destinationParent.exists) {
-							destinationParent.create({
-								intermediates: true,
-								idempotent: true
-							})
-						}
+						ensureDirectory(destinationParent)
 
 						if (entry instanceof FileSystem.Directory) {
 							// moveSync, NOT move: move() is async since expo-file-system 56 and this
@@ -1301,11 +1277,7 @@ export class Offline {
 							scanErrors.push(...errs)
 						}
 					},
-					signal
-						? {
-								signal
-							}
-						: undefined
+					toSignalOpts(signal)
 				)
 			)
 
@@ -1565,12 +1537,7 @@ export class Offline {
 						const destinationUri = FileSystem.Paths.join(liveDirUri, op.to)
 						const destinationParent = new FileSystem.Directory(FileSystem.Paths.dirname(destinationUri))
 
-						if (!destinationParent.exists) {
-							destinationParent.create({
-								intermediates: true,
-								idempotent: true
-							})
-						}
+						ensureDirectory(destinationParent)
 
 						if (op.isDirectory) {
 							const from = new FileSystem.Directory(liveDirUri, op.from)
@@ -1645,22 +1612,16 @@ export class Offline {
 
 				downloadRan = true
 
-				let resolveCompletion: (() => void) | undefined
+				const gate = createCompletionGate()
 
-				defer(() => {
-					resolveCompletion?.()
-				})
-
-				const completionPromise = new Promise<void>(resolve => {
-					resolveCompletion = resolve
-				})
+				defer(gate.open)
 
 				const downloadResult = await run(async () =>
 					transfers.download({
 						item: directory,
 						destination: liveDir,
 						background: background ?? false,
-						awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
+						awaitExternalCompletionBeforeMarkingAsFinished: gate.wait,
 						preserveDestinationOnStart: true,
 						signal
 					})
@@ -2101,11 +2062,11 @@ export class Offline {
 					}
 				}
 
-				const metaFileName = `${topLevelUuid}.filenmeta`
+				const metaName = metaFileName(topLevelUuid)
 
 				const sweep = (dir: FileSystem.Directory, relPrefix: string): void => {
 					for (const entry of dir.list()) {
-						if (relPrefix === "" && entry.name === metaFileName) {
+						if (relPrefix === "" && entry.name === metaName) {
 							continue
 						}
 
@@ -2201,7 +2162,7 @@ export class Offline {
 			}
 
 			const dataFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, file.data.decryptedMeta.name))
-			const metaFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, `${file.data.uuid}.filenmeta`))
+			const metaFile = new FileSystem.File(FileSystem.Paths.join(FILES_DIRECTORY.uri, file.data.uuid, metaFileName(file.data.uuid)))
 
 			if (dataFile.parentDirectory.exists) {
 				dataFile.parentDirectory.delete()
@@ -2213,21 +2174,15 @@ export class Offline {
 			})
 
 			const innerResult = await run(async defer => {
-				let resolveCompletion: (() => void) | undefined
+				const gate = createCompletionGate()
 
-				defer(() => {
-					resolveCompletion?.()
-				})
-
-				const completionPromise = new Promise<void>(resolve => {
-					resolveCompletion = resolve
-				})
+				defer(gate.open)
 
 				const downloadResult = await transfers.download({
 					item: file,
 					destination: dataFile,
 					background: background ?? false,
-					awaitExternalCompletionBeforeMarkingAsFinished: () => completionPromise,
+					awaitExternalCompletionBeforeMarkingAsFinished: gate.wait,
 					signal
 				})
 
@@ -2343,14 +2298,9 @@ export class Offline {
 
 			const standaloneDir = new FileSystem.Directory(FileSystem.Paths.join(FILES_DIRECTORY.uri, item.data.uuid))
 
-			if (!standaloneDir.exists) {
-				standaloneDir.create({
-					intermediates: true,
-					idempotent: true
-				})
-			}
+			ensureDirectory(standaloneDir)
 
-			const metaFileName = `${item.data.uuid}.filenmeta`
+			const metaName = metaFileName(item.data.uuid)
 			const dataFileName = item.data.decryptedMeta.name
 			let deletedStaleData = false
 
@@ -2358,13 +2308,13 @@ export class Offline {
 			// the meta, never the current data file (the download overwrites it in place). Names
 			// compare in NFC: iOS Foundation lists names in NFD, and a raw compare would classify
 			// the CURRENT umlaut-named data file as stale, deleting it on every heal.
-			const metaFileNameNfc = normalizeNfcFast(metaFileName)
+			const metaNameNfc = normalizeNfcFast(metaName)
 			const dataFileNameNfc = normalizeNfcFast(dataFileName)
 
 			for (const entry of standaloneDir.list()) {
 				const entryNameNfc = normalizeNfcFast(entry.name)
 
-				if (entryNameNfc === metaFileNameNfc || entryNameNfc === dataFileNameNfc) {
+				if (entryNameNfc === metaNameNfc || entryNameNfc === dataFileNameNfc) {
 					continue
 				}
 
@@ -2399,7 +2349,7 @@ export class Offline {
 				return false
 			}
 
-			const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, metaFileName))
+			const metaFile = new FileSystem.File(FileSystem.Paths.join(standaloneDir.uri, metaName))
 
 			// Same delivered-size record as storeFile — without it a meta-size-drifted remote
 			// would be re-healed (re-downloaded at the same shortfall) on every thorough pass.

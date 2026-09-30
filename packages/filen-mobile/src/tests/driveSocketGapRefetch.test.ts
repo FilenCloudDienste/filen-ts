@@ -9,7 +9,12 @@ const h = vi.hoisted(() => ({
 	getConfig: vi.fn(),
 	fakeCache: {
 		rootUuid: "root" as string | null,
-		directoryUuidToAnyNormalDir: new Map<string, { tag: string; inner: [{ uuid: string; parent: string }] }>()
+		directoryUuidToAnyNormalDir: new Map<string, { tag: string; inner: [{ uuid: string; parent: string }] }>(),
+		getNormalDir(uuid: string) {
+			const dir = this.directoryUuidToAnyNormalDir.get(uuid)
+
+			return dir && dir.tag === "Dir" ? dir.inner[0] : undefined
+		}
 	}
 }))
 

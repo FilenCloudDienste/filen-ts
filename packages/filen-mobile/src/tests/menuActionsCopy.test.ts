@@ -16,7 +16,10 @@ vi.mock("@/lib/router", () => ({ router: { push: vi.fn() } }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
 vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
 vi.mock("@/lib/prompts", () => ({ default: { alert: vi.fn(), input: vi.fn() } }))
-vi.mock("@/lib/auth", () => ({ default: { getSdkClients: vi.fn() } }))
+vi.mock("@/features/drive/queries/useDriveItemPublicLinkStatus.query", () => ({
+	fetchData: vi.fn(),
+	publicLinkUrlFromStatus: vi.fn()
+}))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn((x: unknown) => JSON.stringify(x)) }))
 vi.mock("@/lib/previewType", () => ({ getPreviewType: vi.fn(() => "other") }))
 vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" } }))
@@ -32,7 +35,10 @@ vi.mock("@/lib/cache", () => ({
 vi.mock("@/lib/sdkUnwrap", () => ({
 	getRealDriveItemParent: vi.fn(() => null),
 	makeDriveItemPublicLink: vi.fn(),
-	unwrapParentUuid: vi.fn((parent: string | null) => parent ?? null)
+	unwrapParentUuid: vi.fn((parent: string | null) => parent ?? null),
+	normalParentUuidOf: vi.fn((item: { type: string; data: { parent?: string | null } }) =>
+		item.type === "file" || item.type === "directory" ? (item.data.parent ?? null) : null
+	)
 }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
 vi.mock("@/features/drive/drive", () => ({ default: { getRootUuid: vi.fn() } }))

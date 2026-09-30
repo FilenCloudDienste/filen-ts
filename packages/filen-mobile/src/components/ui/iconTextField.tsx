@@ -1,12 +1,14 @@
 import { Fragment } from "react"
 import { TextInput, type TextInputProps } from "react-native"
 import Ionicons from "@expo/vector-icons/Ionicons"
+import { cn } from "@filen/shared"
 import View from "@/components/ui/view"
 
 const IconTextField = ({
 	icon,
 	iconColor,
 	showDividerBelow,
+	className,
 	...textInputProps
 }: {
 	icon: React.ComponentProps<typeof Ionicons>["name"]
@@ -15,7 +17,7 @@ const IconTextField = ({
 } & TextInputProps) => {
 	return (
 		<Fragment>
-			<View className="flex-row items-center px-4">
+			<View className={cn("flex-row items-center px-4", className)}>
 				<Ionicons
 					name={icon}
 					size={18}

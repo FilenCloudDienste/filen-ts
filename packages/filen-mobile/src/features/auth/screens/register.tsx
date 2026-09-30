@@ -1,22 +1,23 @@
 import { Fragment, useState } from "react"
-import { Linking, Platform, TextInput } from "react-native"
 import { Trans, useTranslation } from "react-i18next"
-import { useNavigation } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { useResolveClassNames } from "uniwind"
-import { cn, isPasswordStrongEnough, isValidEmail, ratePasswordStrength, run } from "@filen/shared"
+import { cn, isPasswordStrongEnough, isValidEmail, ratePasswordStrength } from "@filen/shared"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import SafeAreaView from "@/components/ui/safeAreaView"
-import Header from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
+import IconTextField from "@/components/ui/iconTextField"
 import View, { KeyboardAwareScrollView } from "@/components/ui/view"
 import Text from "@/components/ui/text"
 import { PressableOpacity } from "@/components/ui/pressables"
 import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import useIsOnline from "@/hooks/useIsOnline"
 import useRegisterCheckQuery from "@/features/auth/queries/useRegisterCheck.query"
 import logger from "@/lib/logger"
+import { openTrustedUrl } from "@/lib/openTrustedUrl"
 
 type PasswordStrength = ReturnType<typeof ratePasswordStrength>["strength"]
 
@@ -45,14 +46,12 @@ const LEARN_MORE_URL = "https://filen.io/hub/free-10-gb-at-signup-eligibility-ch
 
 const Register = () => {
 	const { t } = useTranslation()
-	const navigation = useNavigation()
-	const textForeground = useResolveClassNames("text-foreground")
+	const dismiss = useDismissStack()
 	const textMutedForeground = useResolveClassNames("text-muted-foreground")
 	const textBlue500 = useResolveClassNames("text-blue-500")
 	const textGreen500 = useResolveClassNames("text-green-500")
 	const textRed500 = useResolveClassNames("text-red-500")
 	const textPrimary = useResolveClassNames("text-primary")
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
 	const [email, setEmail] = useState<string>("")
 	const [password, setPassword] = useState<string>("")
 	const [confirmPassword, setConfirmPassword] = useState<string>("")
@@ -64,10 +63,6 @@ const Register = () => {
 	const passwordsMatch = password.length > 0 && password === confirmPassword
 	const passwordStrongEnough = isPasswordStrongEnough(passwordStrength)
 	const canSubmit = emailValid && passwordsMatch && passwordStrongEnough && isOnline
-
-	const dismiss = (): void => {
-		navigation.getParent()?.goBack()
-	}
 
 	const handleRegister = async (): Promise<void> => {
 		if (!canSubmit) {
@@ -100,8 +95,8 @@ const Register = () => {
 			return
 		}
 
-		const promptResult = await run(async () => {
-			return await prompts.input({
+		const targetEmail = await inputPrompt(
+			{
 				title: t("resend_confirmation_email"),
 				message: t("enter_registered_email"),
 				placeholder: t("email_placeholder_hint"),
@@ -109,21 +104,14 @@ const Register = () => {
 				okText: t("resend"),
 				defaultValue: email.trim(),
 				keyboardType: "email-address"
-			})
-		})
+			},
+			{ tag: "auth", message: "resend confirmation prompt failed" },
+			{ trim: true, allowEmpty: true }
+		)
 
-		if (!promptResult.success) {
-			logger.warn("auth", "resend confirmation prompt failed", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
+		if (targetEmail === null) {
 			return
 		}
-
-		if (promptResult.data.cancelled) {
-			return
-		}
-
-		const targetEmail = promptResult.data.value.trim()
 
 		if (!isValidEmail(targetEmail)) {
 			alerts.error(t("please_enter_valid_email"))
@@ -145,43 +133,12 @@ const Register = () => {
 		alerts.normal(t("resend_confirmation_email_sent"))
 	}
 
-	const handleLearnMore = async (): Promise<void> => {
-		const result = await run(async () => {
-			return await Linking.openURL(LEARN_MORE_URL)
-		})
-
-		if (!result.success) {
-			logger.error("auth", "failed to open free-storage learn-more link", { error: result.error })
-		}
-	}
-
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={t("register")}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: dismiss
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={dismiss}
 				rightItems={() => {
 					if (!canSubmit) {
 						return null
@@ -218,74 +175,59 @@ const Register = () => {
 						<Text className="text-muted-foreground text-sm">{t("register_subtitle")}</Text>
 					</View>
 					<View className="bg-transparent rounded-2xl overflow-hidden">
-						<View className="flex-row items-center px-4 bg-transparent">
-							<Ionicons
-								name="mail-outline"
-								size={18}
-								color={textMutedForeground.color}
-							/>
-							<TextInput
-								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
-								placeholderTextColor={textMutedForeground.color as string}
-								placeholder={t("email")}
-								keyboardType="email-address"
-								autoCapitalize="none"
-								autoComplete="email"
-								autoCorrect={false}
-								// "username", not "emailAddress": pairs with the newPassword fields below so
-								// Password AutoFill saves the generated credential under this account name.
-								textContentType="username"
-								importantForAutofill="yes"
-								returnKeyType="next"
-								value={email}
-								onChangeText={setEmail}
-							/>
-						</View>
-						<View className="h-px bg-separator ml-12" />
-						<View className="flex-row items-center px-4 bg-transparent">
-							<Ionicons
-								name="lock-closed-outline"
-								size={18}
-								color={textMutedForeground.color}
-							/>
-							<TextInput
-								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
-								placeholderTextColor={textMutedForeground.color as string}
-								placeholder={t("password")}
-								secureTextEntry
-								autoCapitalize="none"
-								autoComplete="new-password"
-								autoCorrect={false}
-								textContentType="newPassword"
-								importantForAutofill="yes"
-								returnKeyType="next"
-								value={password}
-								onChangeText={setPassword}
-							/>
-						</View>
-						<View className="h-px bg-separator ml-12" />
-						<View className="flex-row items-center px-4 bg-transparent">
-							<Ionicons
-								name="lock-closed-outline"
-								size={18}
-								color={textMutedForeground.color}
-							/>
-							<TextInput
-								className="text-foreground text-base flex-1 py-4 pl-3 leading-5"
-								placeholderTextColor={textMutedForeground.color as string}
-								placeholder={t("confirm_password")}
-								secureTextEntry
-								autoCapitalize="none"
-								autoComplete="new-password"
-								autoCorrect={false}
-								textContentType="newPassword"
-								importantForAutofill="yes"
-								returnKeyType="go"
-								value={confirmPassword}
-								onChangeText={setConfirmPassword}
-								onSubmitEditing={handleRegister}
-							/>
-						</View>
+						<IconTextField
+							className="bg-transparent"
+							icon="mail-outline"
+							iconColor={textMutedForeground.color as string}
+							showDividerBelow
+							placeholderTextColor={textMutedForeground.color as string}
+							placeholder={t("email")}
+							keyboardType="email-address"
+							autoCapitalize="none"
+							autoComplete="email"
+							autoCorrect={false}
+							// "username", not "emailAddress": pairs with the newPassword fields below so
+							// Password AutoFill saves the generated credential under this account name.
+							textContentType="username"
+							importantForAutofill="yes"
+							returnKeyType="next"
+							value={email}
+							onChangeText={setEmail}
+						/>
+						<IconTextField
+							className="bg-transparent"
+							icon="lock-closed-outline"
+							iconColor={textMutedForeground.color as string}
+							showDividerBelow
+							placeholderTextColor={textMutedForeground.color as string}
+							placeholder={t("password")}
+							secureTextEntry
+							autoCapitalize="none"
+							autoComplete="new-password"
+							autoCorrect={false}
+							textContentType="newPassword"
+							importantForAutofill="yes"
+							returnKeyType="next"
+							value={password}
+							onChangeText={setPassword}
+						/>
+						<IconTextField
+							className="bg-transparent"
+							icon="lock-closed-outline"
+							iconColor={textMutedForeground.color as string}
+							placeholderTextColor={textMutedForeground.color as string}
+							placeholder={t("confirm_password")}
+							secureTextEntry
+							autoCapitalize="none"
+							autoComplete="new-password"
+							autoCorrect={false}
+							textContentType="newPassword"
+							importantForAutofill="yes"
+							returnKeyType="go"
+							value={confirmPassword}
+							onChangeText={setConfirmPassword}
+							onSubmitEditing={handleRegister}
+						/>
 					</View>
 					{passwordStrength !== null && (
 						<View className="flex-row items-center justify-between px-1 bg-transparent">
@@ -343,7 +285,9 @@ const Register = () => {
 								{registerCheckQuery.data.ok ? t("register_free_storage_eligible") : t("register_free_storage_not_eligible")}
 							</Text>
 							<PressableOpacity
-								onPress={handleLearnMore}
+								onPress={() => {
+									openTrustedUrl("auth", LEARN_MORE_URL)
+								}}
 								className="flex-row items-center gap-1"
 							>
 								<Text className="text-primary text-sm">{t("register_free_storage_learn_more")}</Text>

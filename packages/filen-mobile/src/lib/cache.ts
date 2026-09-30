@@ -1,5 +1,6 @@
 import {
 	AnyNormalDir,
+	AnyNormalDir_Tags,
 	AnySharedDir,
 	AnySharedDirWithContext,
 	AnyLinkedDir,
@@ -87,6 +88,13 @@ export class Cache {
 	public cacheNewNormalDir(dir: Dir, driveItem: DriveItem): void {
 		this.uuidToAnyDriveItem.set(dir.uuid, driveItem)
 		this.directoryUuidToAnyNormalDir.set(dir.uuid, new AnyNormalDir.Dir(dir))
+	}
+
+	// The cached normal Dir, or undefined when the uuid is unknown or the drive root.
+	public getNormalDir(uuid: string): Dir | undefined {
+		const dir = this.directoryUuidToAnyNormalDir.get(uuid)
+
+		return dir && dir.tag === AnyNormalDir_Tags.Dir ? dir.inner[0] : undefined
 	}
 
 	/**

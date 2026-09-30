@@ -12,13 +12,16 @@ import { buildPasteIntoMenuButton, offersPasteInto } from "@/features/drive/comp
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import { buildSaveToCloudDriveButton, linkAllowsDownload } from "@/features/drive/linkedSave"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import { run } from "@filen/shared"
 import { randomUUID } from "expo-crypto"
 import offline from "@/features/offline/offline"
-import { getRealDriveItemParent, makeDriveItemPublicLink, unwrapParentUuid } from "@/lib/sdkUnwrap"
+import { getRealDriveItemParent, normalParentUuidOf } from "@/lib/sdkUnwrap"
 import * as Clipboard from "expo-clipboard"
-import auth from "@/lib/auth"
+import {
+	fetchData as fetchPublicLinkStatus,
+	publicLinkUrlFromStatus
+} from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 import { getPreviewType } from "@/lib/previewType"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { openDriveSelect } from "@/features/drive/driveSelectSession"
@@ -140,7 +143,7 @@ export function createMenuButtons({
 			? null
 			: resolveDriveContainingDirectoryTarget({
 					item,
-					parentUuid: item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null,
+					parentUuid: normalParentUuidOf(item),
 					rootUuid: cache.rootUuid,
 					drivePath
 				})
@@ -297,30 +300,19 @@ export function createMenuButtons({
 			title: t("rename"),
 			icon: "edit",
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
+				const newName = await inputPrompt(
+					{
 						title: t("rename_item"),
 						message: t("enter_new_name"),
 						defaultValue: item.data.decryptedMeta?.name ?? "",
 						cancelText: t("cancel"),
 						okText: t("rename")
-					})
-				})
+					},
+					{ tag: "drive", message: "rename prompt failed" },
+					{ trim: true }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("drive", "rename prompt failed", { error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const newName = promptResult.data.value.trim()
-
-				if (newName.length === 0) {
+				if (newName === null) {
 					return
 				}
 
@@ -572,32 +564,13 @@ export function createMenuButtons({
 			icon: "copy",
 			onPress: async () => {
 				const result = await runWithLoading(async () => {
-					const { authedSdkClient } = await auth.getSdkClients()
+					const data = await fetchPublicLinkStatus({ uuid: item.data.uuid, item })
 
-					let linkUuid: string
-					let linkKey: string | undefined
-
-					if (item.type === "file") {
-						const status = await authedSdkClient.getFileLinkStatus(item.data)
-
-						if (!status) {
-							throw new Error("No public link found for this file")
-						}
-
-						linkUuid = status.linkUuid
-						linkKey = undefined
-					} else {
-						const status = await authedSdkClient.getDirLinkStatus(item.data)
-
-						if (!status) {
-							throw new Error("No public link found for this directory")
-						}
-
-						linkUuid = status.linkUuid
-						linkKey = status.linkKey ?? undefined
+					if (!data) {
+						throw new Error(t("error_generic"))
 					}
 
-					const url = makeDriveItemPublicLink({ item, linkUuid, linkKey })
+					const url = publicLinkUrlFromStatus(item, data)
 
 					if (!url) {
 						throw new Error("Could not generate public link URL")

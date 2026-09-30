@@ -3,7 +3,7 @@ import { useKeyboardState } from "react-native-keyboard-controller"
 import { useResolveClassNames } from "uniwind"
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { useSecureStore } from "@/lib/secureStore"
+import { useTextEditorMarkdownPreviewActive } from "@/components/textEditor/markdownPreviewPreference"
 import { PressableScale } from "@/components/ui/pressables"
 import { useShallow } from "zustand/shallow"
 import useTextEditorStore from "@/stores/useTextEditor.store"
@@ -12,10 +12,7 @@ const MarkdownPreviewButton = ({ id }: { id: string }) => {
 	const keyboardState = useKeyboardState()
 	const textForeground = useResolveClassNames("text-foreground")
 	const insets = useSafeAreaInsets()
-	const [textEditorMarkdownPreviewActive, setTextEditorMarkdownPreviewActive] = useSecureStore<Record<string, boolean>>(
-		"textEditorMarkdownPreviewActive",
-		{}
-	)
+	const [textEditorMarkdownPreviewActive, setTextEditorMarkdownPreviewActive] = useTextEditorMarkdownPreviewActive()
 	const textEditorReady = useTextEditorStore(useShallow(state => state.ready))
 
 	const active = textEditorMarkdownPreviewActive[id] ?? false

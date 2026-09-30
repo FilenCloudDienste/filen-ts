@@ -1,15 +1,14 @@
 import DriveItemHero from "@/components/ui/driveItemHero"
-import SafeAreaView from "@/components/ui/safeAreaView"
-import { Platform, ScrollView } from "react-native"
-import { useLocalSearchParams, useNavigation } from "expo-router"
+import { ScreenBody } from "@/components/ui/safeAreaView"
+import { ScrollView } from "react-native"
+import { useLocalSearchParams } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
-import Header from "@/components/ui/header"
+import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
-import { useResolveClassNames } from "uniwind"
-import { cn } from "@filen/shared"
 import DismissStack from "@/components/dismissStack"
 import { Information } from "@/features/drive/components/information"
 import useHttpStore from "@/stores/useHttp.store"
@@ -20,6 +19,7 @@ import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import useLinkSaveable from "@/features/drive/hooks/useLinkSaveable"
 import { linkSaveTarget } from "@/features/drive/linkedSave"
+import { ITEM_DETAIL_CONTENT_CLASS } from "@/features/drive/components/itemDetailLayout"
 
 // A standalone file link: a link view with no directory behind it.
 const LINKED_FILE_PATH: DrivePath = {
@@ -32,10 +32,8 @@ const LinkedFile = () => {
 	const { item: itemSerialized } = useLocalSearchParams<{
 		item?: string
 	}>()
-	const bgBackgroundSecondary = useResolveClassNames("bg-background-secondary")
-	const textForeground = useResolveClassNames("text-foreground")
 	const getFileUrl = useHttpStore(useShallow(state => state.getFileUrl))
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 
 	const item = deserializeRouteParam<Extract<DriveItem, { type: "file" }>>(itemSerialized)
 	const linkSaveable = useLinkSaveable(item?.type === "file" ? linkSaveTarget(LINKED_FILE_PATH, item) : null)
@@ -50,66 +48,28 @@ const LinkedFile = () => {
 
 	return (
 		<Fragment>
-			<Header
+			<SettingsHeader
 				title={driveItemDisplayName(item)}
-				transparent={Platform.OS === "ios"}
-				shadowVisible={false}
-				backVisible={Platform.OS === "android"}
-				backgroundColor={Platform.select({
-					ios: undefined,
-					default: bgBackgroundSecondary.backgroundColor as string
-				})}
-				leftItems={Platform.select({
-					ios: [
-						{
-							type: "button",
-							icon: {
-								name: "close",
-								color: textForeground.color,
-								size: 20
-							},
-							props: {
-								onPress: () => {
-									navigation.getParent()?.goBack()
-								}
-							}
-						}
-					],
-					default: undefined
-				})}
+				icon="close"
+				onDismiss={dismiss}
 				rightItems={[
 					{
-						type: "menu",
-						props: {
-							type: "dropdown",
-							hitSlop: 20,
-							buttons: getFileUrl
-								? createMenuButtons({
-										item,
-										drivePath: LINKED_FILE_PATH,
-										isStoredOffline: false,
-										linkSaveable,
-										t
-									})
-								: []
-						},
-						triggerProps: {
-							hitSlop: 20
-						},
-						icon: {
-							name: "ellipsis-horizontal",
-							size: 24,
-							color: textForeground.color
-						}
+						type: "ellipsisMenu",
+						buttons: getFileUrl
+							? createMenuButtons({
+									item,
+									drivePath: LINKED_FILE_PATH,
+									isStoredOffline: false,
+									linkSaveable,
+									t
+								})
+							: []
 					}
 				]}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
+			<ScreenBody>
 				<ScrollView
-					contentContainerClassName={cn("bg-transparent px-4 flex-col pb-40 pt-10", Platform.OS === "ios" && "pt-24")}
+					contentContainerClassName={ITEM_DETAIL_CONTENT_CLASS}
 					showsHorizontalScrollIndicator={true}
 					showsVerticalScrollIndicator={false}
 				>
@@ -122,7 +82,7 @@ const LinkedFile = () => {
 						/>
 					</View>
 				</ScrollView>
-			</SafeAreaView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

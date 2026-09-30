@@ -9,13 +9,20 @@ const loggerMock = vi.hoisted(() => ({
 const tmpFile = vi.hoisted(() => ({
 	uri: "file:///cache/filen-tmp/filen-logs.zip",
 	name: "filen-logs.zip",
-	exists: false,
-	write: vi.fn(),
-	delete: vi.fn()
+	write: vi.fn()
 }))
 
+const tmpCleanup = vi.hoisted(() => vi.fn())
+
 const tmpMock = vi.hoisted(() => ({
-	newTmpFile: vi.fn(() => tmpFile)
+	writeTmpFile: vi.fn((_name: string, data: string | Uint8Array) => {
+		tmpFile.write(data)
+
+		return {
+			file: tmpFile,
+			cleanup: tmpCleanup
+		}
+	})
 }))
 
 const backgroundRunLogMock = vi.hoisted(() => ({
@@ -36,10 +43,9 @@ describe("diagnostics.prepareLogsExport", () => {
 	beforeEach(() => {
 		loggerMock.flushNow.mockClear()
 		loggerMock.listLogFiles.mockReset()
-		tmpMock.newTmpFile.mockClear()
+		tmpMock.writeTmpFile.mockClear()
 		tmpFile.write.mockClear()
-		tmpFile.delete.mockClear()
-		tmpFile.exists = false
+		tmpCleanup.mockClear()
 		backgroundRunLogMock.list.mockReset()
 		backgroundRunLogMock.list.mockResolvedValue([])
 	})
@@ -161,7 +167,7 @@ describe("diagnostics.prepareLogsExport", () => {
 		expect(tmpFile.write).toHaveBeenCalled()
 	})
 
-	it("the returned cleanup deletes the tmp file when it exists", async () => {
+	it("returns the tmp file's own cleanup", async () => {
 		loggerMock.listLogFiles.mockReturnValue([
 			{ name: "current.ndjson", bytesSync: () => new TextEncoder().encode("ok\n") }
 		])
@@ -170,9 +176,8 @@ describe("diagnostics.prepareLogsExport", () => {
 
 		expect(result).not.toBe("no-logs")
 
-		tmpFile.exists = true
 		;(result as { cleanup: () => void }).cleanup()
 
-		expect(tmpFile.delete).toHaveBeenCalled()
+		expect(tmpCleanup).toHaveBeenCalledTimes(1)
 	})
 })

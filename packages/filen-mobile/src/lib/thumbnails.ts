@@ -3,6 +3,7 @@ import { type DriveItem } from "@/types"
 import { normalizeFilePathForExpo, normalizeFilePathForSdk } from "@/lib/paths"
 import { run, Semaphore, isAbortError, InFlight } from "@filen/shared"
 import { ClearBarrier } from "@/lib/clearBarrier"
+import { resetDirectory, sumLocalDirectoryFileBytes } from "@/lib/fsUtils"
 import { Platform } from "react-native"
 import useHttpStore from "@/stores/useHttp.store"
 import { onlineManager } from "@tanstack/react-query"
@@ -13,12 +14,12 @@ import {
 	OfflineAbortError,
 	ProviderUnavailableError,
 	getPath,
-	ensureDirectory,
-	driveItemToAnyFile,
+	ensureThumbnailsDirectory,
 	getThumbnailKind,
 	getThumbnailKindForName,
 	waitForHttpProvider
 } from "@/lib/thumbnailsHelpers"
+import { driveItemToAnyFile } from "@/lib/sdkSources"
 import offline from "@/features/offline/offline"
 import fileCache from "@/lib/fileCache"
 import { generateImageViaSdk, generateImageFromPathViaSdk, type SdkThumbnailOutcome } from "@/lib/thumbnailsSdk"
@@ -79,7 +80,7 @@ class Thumbnails {
 	private restored = false
 
 	public constructor() {
-		ensureDirectory()
+		ensureThumbnailsDirectory()
 
 		this.subscribeRecovery()
 	}
@@ -129,7 +130,7 @@ class Thumbnails {
 			// invisible to both clear() and size(), which only ever walk the current version.
 			sweepStaleThumbnailVersions()
 
-			ensureDirectory()
+			ensureThumbnailsDirectory()
 
 			for (const record of this.listThumbnailRecords()) {
 				scanned++
@@ -322,7 +323,7 @@ class Thumbnails {
 		videoTimestamp: number
 	}): Promise<string | null> {
 		const result = await run(async () => {
-			ensureDirectory()
+			ensureThumbnailsDirectory()
 
 			if (params.kind === "image") {
 				return await this.generateImageThumbnail(params)
@@ -605,7 +606,7 @@ class Thumbnails {
 		const result = await run(() =>
 			this.pending.coalesce(params.uuid, async (): Promise<string | null> => {
 				try {
-					ensureDirectory()
+					ensureThumbnailsDirectory()
 
 					if (isImage) {
 						// An SDK decode on the client's own gate — NOT behind the semaphore, exactly like the
@@ -719,33 +720,12 @@ class Thumbnails {
 			this.available.clear()
 			this.unavailable.clear()
 
-			if (DIRECTORY.exists) {
-				DIRECTORY.delete()
-			}
-
-			DIRECTORY.create({
-				idempotent: true,
-				intermediates: true
-			})
+			resetDirectory(DIRECTORY)
 		})
 	}
 
 	public size(): number {
-		if (!DIRECTORY.exists) {
-			return 0
-		}
-
-		let total = 0
-
-		for (const entry of DIRECTORY.list()) {
-			if (!(entry instanceof FileSystem.File)) {
-				continue
-			}
-
-			total += entry.size ?? 0
-		}
-
-		return total
+		return sumLocalDirectoryFileBytes(DIRECTORY)
 	}
 }
 

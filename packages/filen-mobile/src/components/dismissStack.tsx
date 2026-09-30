@@ -1,13 +1,14 @@
 import { useCallback } from "react"
-import { useFocusEffect, useNavigation } from "expo-router"
+import { useFocusEffect } from "expo-router"
+import useDismissStack from "@/hooks/useDismissStack"
 
 const DismissStack = () => {
-	const navigation = useNavigation()
+	const dismiss = useDismissStack()
 
 	useFocusEffect(
 		useCallback(() => {
-			navigation.getParent()?.goBack()
-		}, [navigation])
+			dismiss()
+		}, [dismiss])
 	)
 
 	return null

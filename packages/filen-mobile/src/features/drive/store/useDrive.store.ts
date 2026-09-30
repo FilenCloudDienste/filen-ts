@@ -45,4 +45,6 @@ export const useDriveStore = create<DriveStore>(set => ({
 	}
 }))
 
+export const clearDriveSelection = () => useDriveStore.getState().clearSelectedItems()
+
 export default useDriveStore

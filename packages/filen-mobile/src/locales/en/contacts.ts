@@ -69,20 +69,10 @@ export const contacts = {
 	/** Confirm button label in the deny-request dialog */
 	deny_request: "Deny request",
 
-	/** Dialog title: confirm denying a specific incoming contact request (alternative context — same action from inline button) */
-	deny_contact: "Deny request",
-	/** Dialog message: confirm denying a specific incoming contact request (alternative context) */
-	deny_contact_confirmation: "Are you sure you want to deny this contact request?",
-
 	/** Dialog title: confirm cancelling a sent (outgoing) contact request from the request row */
 	cancel_request_contact: "Cancel request",
 	/** Dialog message: confirm cancelling a sent (outgoing) contact request from the request row */
 	cancel_request_contact_confirmation: "Are you sure you want to cancel this contact request?",
-
-	/** Dialog title: confirm cancelling a sent (outgoing) contact request from the outgoing-row cancel button */
-	cancel_contact: "Cancel request",
-	/** Dialog message: confirm cancelling a sent (outgoing) contact request from the outgoing-row cancel button */
-	cancel_contact_confirmation: "Are you sure you want to cancel this contact request?",
 
 	// ── Bulk-action titles (include count; call t(key, { count })) ─────────────
 	/** Bulk header menu item: unblock N selected blocked contacts. {{count}} is the selection count */

@@ -4,7 +4,19 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // Hoisted mocks (must be defined before any imports)
 // ------------------------------------------------------------------
 
-const { mockCopyToMediaStore, mockTransfersDownload, mockNewTmpDir, mockPublicExists, mockPublicUnlink } = vi.hoisted(() => ({
+const {
+	mockCopyToMediaStore,
+	mockTransfersDownload,
+	mockNewTmpDir,
+	mockPublicExists,
+	mockPublicUnlink,
+	mockSaveToLibraryAsync,
+	mockHasAllNeededMediaPermissions,
+	mockAlertsError
+} = vi.hoisted(() => ({
+	mockSaveToLibraryAsync: vi.fn().mockResolvedValue(undefined),
+	mockHasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true),
+	mockAlertsError: vi.fn(),
 	mockCopyToMediaStore: vi.fn().mockResolvedValue(undefined),
 	// #86 replace-then-copy: exists/unlink of the previous public copy at
 	// LegacyDownloadDir. Default: nothing exists (fresh download).
@@ -131,8 +143,33 @@ vi.mock("@/lib/paths", () => {
 	}
 })
 
-vi.mock("@/lib/tmp", () => ({
-	newTmpDir: mockNewTmpDir
+vi.mock("@/lib/tmp", async () => {
+	const FileSystem = await import("expo-file-system")
+
+	return {
+		newTmpDir: mockNewTmpDir,
+		newTmpStagedFile: (name: string) => {
+			const dir = mockNewTmpDir()
+
+			dir.create({ intermediates: true, idempotent: true })
+
+			return new FileSystem.File(FileSystem.Paths.join(dir.uri, name))
+		}
+	}
+})
+
+vi.mock("expo-media-library/legacy", () => ({
+	saveToLibraryAsync: mockSaveToLibraryAsync
+}))
+
+vi.mock("@/hooks/useMediaPermissions", () => ({
+	hasAllNeededMediaPermissions: mockHasAllNeededMediaPermissions
+}))
+
+vi.mock("@/lib/alerts", () => ({
+	default: {
+		error: mockAlertsError
+	}
 }))
 
 vi.mock("@/lib/i18n", () => ({
@@ -156,7 +193,12 @@ vi.mock("@/lib/i18n", () => ({
 
 import * as FileSystem from "expo-file-system"
 import { fs } from "@/tests/mocks/expoFileSystem"
-import { downloadDriveItemToDevice } from "@/features/drive/driveDownload"
+import {
+	downloadDriveItemToDevice,
+	downloadFileItemToTmp,
+	ensureSaveToPhotosPermission,
+	saveDriveItemToPhotos
+} from "@/features/drive/driveDownload"
 import type { DriveItem } from "@/types"
 
 // ------------------------------------------------------------------
@@ -1635,5 +1677,123 @@ describe("downloadDriveItemToDevice — completion promise (notification persist
 
 		expect(result.success).toBe(true)
 		expect(stateDuringDownload).toBe("resolved")
+	})
+})
+
+// ------------------------------------------------------------------
+// Save to photos
+// ------------------------------------------------------------------
+
+describe("ensureSaveToPhotosPermission", () => {
+	const t = ((key: string) => key) as unknown as Parameters<typeof ensureSaveToPhotosPermission>[0]
+
+	beforeEach(() => {
+		mockHasAllNeededMediaPermissions.mockReset()
+		mockAlertsError.mockClear()
+	})
+
+	it("requests library access and proceeds when granted", async () => {
+		mockHasAllNeededMediaPermissions.mockResolvedValueOnce(true)
+
+		expect(await ensureSaveToPhotosPermission(t)).toBe(true)
+		expect(mockHasAllNeededMediaPermissions).toHaveBeenCalledWith({ shouldRequest: true, library: "any", needCamera: false })
+		expect(mockAlertsError).not.toHaveBeenCalled()
+	})
+
+	it("alerts the manual-enable hint and stops when denied", async () => {
+		mockHasAllNeededMediaPermissions.mockResolvedValueOnce(false)
+
+		expect(await ensureSaveToPhotosPermission(t)).toBe(false)
+		expect(mockAlertsError).toHaveBeenCalledWith("no_permissions_enable_manually")
+	})
+
+	it("alerts the error and stops when the check throws", async () => {
+		const error = new Error("boom")
+
+		mockHasAllNeededMediaPermissions.mockRejectedValueOnce(error)
+
+		expect(await ensureSaveToPhotosPermission(t)).toBe(false)
+		expect(mockAlertsError).toHaveBeenCalledWith(error)
+	})
+})
+
+describe("saveDriveItemToPhotos", () => {
+	beforeEach(() => {
+		mockSaveToLibraryAsync.mockReset().mockResolvedValue(undefined)
+	})
+
+	it("stages under a fresh tmp dir, saves to the library and removes the staging dir", async () => {
+		const item = makeFileItem({ name: "photo.jpg", mime: "image/jpeg" })
+
+		let destinationUri: string | null = null
+
+		mockTransfersDownload.mockImplementation(async ({ destination }: { destination: FileSystem.File }) => {
+			destinationUri = destination.uri
+
+			expect(destination.parentDirectory.exists).toBe(true)
+
+			return { files: [], directories: [] }
+		})
+
+		await saveDriveItemToPhotos(item)
+
+		expect(destinationUri).toMatch(new RegExp(`^${TMP_BASE}/[^/]+/photo\\.jpg$`))
+		expect(mockSaveToLibraryAsync).toHaveBeenCalledWith(destinationUri)
+		expect([...fs.keys()].some(key => key.startsWith(`${TMP_BASE}/`))).toBe(false)
+	})
+
+	it("returns quietly without saving when the download is aborted", async () => {
+		mockTransfersDownload.mockResolvedValueOnce(null)
+
+		await saveDriveItemToPhotos(makeFileItem({ name: "photo.jpg" }))
+
+		expect(mockSaveToLibraryAsync).not.toHaveBeenCalled()
+		expect([...fs.keys()].some(key => key.startsWith(`${TMP_BASE}/`))).toBe(false)
+	})
+
+	it("throws when the library save fails, still removing the staging dir", async () => {
+		mockSaveToLibraryAsync.mockRejectedValueOnce(new Error("save failed"))
+
+		await expect(saveDriveItemToPhotos(makeFileItem({ name: "photo.jpg" }))).rejects.toThrow("save failed")
+		expect([...fs.keys()].some(key => key.startsWith(`${TMP_BASE}/`))).toBe(false)
+	})
+
+	it("throws on missing decrypted metadata without downloading", async () => {
+		await expect(saveDriveItemToPhotos(makeFileItem({ decryptedMeta: null }))).rejects.toThrow("Missing decrypted metadata")
+		expect(mockTransfersDownload).not.toHaveBeenCalled()
+	})
+})
+
+describe("downloadFileItemToTmp", () => {
+	it("downloads into a created fresh tmp dir and returns the staged file", async () => {
+		mockTransfersDownload.mockImplementation(async ({ destination }: { destination: FileSystem.File }) => {
+			expect(destination.parentDirectory.exists).toBe(true)
+
+			destination.write("data")
+
+			return { files: [destination], directories: [] }
+		})
+
+		const file = await downloadFileItemToTmp(makeFileItem({ name: "doc.pdf" }))
+
+		expect(file?.uri).toMatch(new RegExp(`^${TMP_BASE}/[^/]+/doc\\.pdf$`))
+		expect(file?.exists).toBe(true)
+	})
+
+	it("returns null when the download is aborted", async () => {
+		mockTransfersDownload.mockResolvedValueOnce(null)
+
+		expect(await downloadFileItemToTmp(makeFileItem({ name: "doc.pdf" }))).toBeNull()
+	})
+
+	it("throws when the download did not produce a single file", async () => {
+		mockTransfersDownload.mockResolvedValueOnce({ files: [], directories: [] })
+
+		await expect(downloadFileItemToTmp(makeFileItem({ name: "doc.pdf" }))).rejects.toThrow("Downloaded item is not a file")
+	})
+
+	it("throws on missing decrypted metadata without downloading", async () => {
+		await expect(downloadFileItemToTmp(makeFileItem({ decryptedMeta: null }))).rejects.toThrow("Missing decrypted metadata")
+		expect(mockTransfersDownload).not.toHaveBeenCalled()
 	})
 })

@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import Menu from "@/features/drive/components/item/menu"
 import HighlightOverlay from "@/features/drive/components/item/highlightOverlay"
-import { FavoritedIndicatorCard, OfflineIndicatorCard } from "@/features/drive/components/item/indicators"
+import { IndicatorBadge } from "@/features/drive/components/item/indicators"
 import useDriveItemInteraction from "@/features/drive/hooks/useDriveItemInteraction"
 import useDriveItemIndicators from "@/features/drive/hooks/useDriveItemIndicators"
 import { driveItemDisplayName } from "@/lib/decryption"
@@ -104,8 +104,22 @@ export default function GridItem({
 						{/* Over the thumbnail (which fills the card, so a tint behind it would be
 						    invisible) but under the badges. The card clips it to its own rounding. */}
 						{highlighted && <HighlightOverlay />}
-						{showOffline && <OfflineIndicatorCard />}
-						{showFavorited && <FavoritedIndicatorCard />}
+						{showOffline && (
+							<IndicatorBadge
+								type="offline"
+								size={13}
+								positionClassName="bottom-1.5 left-1.5"
+								bgClassName="bg-background-tertiary"
+							/>
+						)}
+						{showFavorited && (
+							<IndicatorBadge
+								type="favorited"
+								size={13}
+								positionClassName="bottom-1.5 right-1.5"
+								bgClassName="bg-background-tertiary"
+							/>
+						)}
 						{isSelecting && (
 							<View className="absolute top-1.5 right-1.5 bg-transparent">
 								<Checkbox

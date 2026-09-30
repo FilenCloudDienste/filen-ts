@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { queryUpdater, preserveArrayIdentity, queryClient } from "@/queries/client"
+import { queryUpdater, preserveArrayIdentity, queryClient, getCachedQuery, type QueryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
 import { sortParams, run, upsertItems } from "@filen/shared"
@@ -35,6 +35,7 @@ import logger from "@/lib/logger"
 import events from "@/lib/events"
 import copyActivity from "@/features/drive/copyActivity"
 import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
+import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useDriveItemsQuery"
 
@@ -213,11 +214,7 @@ export async function fetchData(
 	}
 
 	const { authedSdkClient } = await auth.getSdkClients()
-	const signal = params.signal
-		? {
-				signal: params.signal
-			}
-		: undefined
+	const signal = toSignalOpts(params.signal)
 
 	const result: Result = await (async () => {
 		switch (params.path.type) {
@@ -729,9 +726,7 @@ export function driveItemsQueryRefetchFailedLinkedListing(uuid: string): void {
 
 function updateListing(
 	params: UseDriveItemsQueryParams,
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>),
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>,
 	cacheNext: boolean
 ): void {
 	const queryKey = driveItemsQueryKey(params)
@@ -786,9 +781,7 @@ export function driveItemsQueryUpdate({
 }: {
 	params: Parameters<typeof fetchData>[0]
 } & {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 }): void {
 	updateListing(params, updater, true)
 }
@@ -808,9 +801,7 @@ export function driveItemsQueryUpdateForNormalParent({
 	updater
 }: {
 	parentUuid: string
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 }): void {
 	driveItemsQueryUpdate({
 		params: { path: { type: "drive", uuid: parentUuid } },
@@ -878,7 +869,7 @@ export async function driveItemsQueryFindFileInNormalParent(
 
 	for (const params of keyed) {
 		const queryKey = driveItemsQueryKey(params)
-		const query = queryClient.getQueryCache().find<Awaited<ReturnType<typeof fetchData>>>({ queryKey, exact: true })
+		const query = getCachedQuery<Awaited<ReturnType<typeof fetchData>>>(queryKey)
 
 		if (query?.state.data === undefined) {
 			continue
@@ -961,9 +952,7 @@ export function driveItemsQueryUpdateGlobal({
 	updater,
 	parentUuid
 }: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 	parentUuid: string
 }): void {
 	for (const pathType of DRIVE_PATH_TYPES) {
@@ -1018,13 +1007,13 @@ function cachedAncestryReaches(uuid: string, ancestorUuid: string, memo?: Map<st
 
 		walked.push(current)
 
-		const anyDir = cache.directoryUuidToAnyNormalDir.get(current)
+		const dir = cache.getNormalDir(current)
 
-		if (!anyDir || anyDir.tag !== AnyNormalDir_Tags.Dir) {
+		if (!dir) {
 			break
 		}
 
-		const next = unwrapParentUuid(anyDir.inner[0].parent)
+		const next = unwrapParentUuid(dir.parent)
 
 		current = next && next !== current ? next : null
 	}
@@ -1235,9 +1224,7 @@ export function driveItemsQueryUpdateForPhotos({
 	updater,
 	parentUuid
 }: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 	parentUuid?: string
 }): void {
 	cameraUpload
@@ -1280,9 +1267,7 @@ export function driveItemsQueryUpdateForPhotos({
 export function driveItemsQueryUpdateForRecents({
 	updater
 }: {
-	updater:
-		| Awaited<ReturnType<typeof fetchData>>
-		| ((prev: Awaited<ReturnType<typeof fetchData>>) => Awaited<ReturnType<typeof fetchData>>)
+	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 }): void {
 	const params: UseDriveItemsQueryParams = {
 		path: {

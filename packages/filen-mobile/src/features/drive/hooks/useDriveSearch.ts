@@ -11,8 +11,7 @@ import { useDriveStore } from "@/features/drive/store/useDrive.store"
 import { unwrapDirMeta, unwrappedDirIntoDriveItem, unwrapFileMeta, unwrappedFileIntoDriveItem } from "@/lib/sdkUnwrap"
 import events from "@/lib/events"
 import useIsOnline from "@/hooks/useIsOnline"
-import useIsAppActive from "@/hooks/useIsAppActive"
-import { useAppStore } from "@/stores/useApp.store"
+import useIsUnlockedForeground from "@/hooks/useIsUnlockedForeground"
 import logger from "@/lib/logger"
 import { type DriveSearchStatus, deriveStatus, isOnlineComplete } from "@/features/drive/hooks/driveSearchStatus"
 
@@ -88,7 +87,7 @@ function resultSignature(hit: CacheSearchHit): string {
  * the query is non-empty AND the screen is focused AND the app is active AND biometric is
  * unlocked; it closes on screen-leave / tab-blur / query-clear / unmount. Background close
  * is owned by the `driveSearch` singleton (this effect's cleanup skips it when the app is
- * backgrounding), so `isAppActive` is purely an open-gate — the foreground edge re-opens.
+ * backgrounding), so foreground is purely an open-gate — the foreground edge re-opens.
  */
 export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriveSearch {
 	const [searchQuery, setSearchQuery] = useState<string>("")
@@ -115,9 +114,10 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	const cacheUnavailable = useDriveSearchStore(state => state.cacheUnavailable)
 	const resyncProgress = useDriveSearchStore(state => state.resyncProgress)
 	const isOnline = useIsOnline()
-	const isAppActive = useIsAppActive()
 	const isFocused = useIsFocused()
-	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
+	const unlockedForeground = useIsUnlockedForeground()
+	// The open-gate: screen focused, app in front, biometric unlocked.
+	const searchLive = isFocused && unlockedForeground
 
 	const isPlainDrive = drivePath.type === "drive" && !drivePath.selectOptions
 	const searchActive = searchQuery.trim().length > 0
@@ -202,7 +202,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// progressing (e.g. Listing ticks after a dropped Started). The watchdog effect can't
 	// setState synchronously (lint); this render-phase reset is the equivalent. (sessionKey
 	// changes — uuid / reopenNonce / on-off — already clear it via the block above.)
-	const watchdogRearmKey = `${isFocused}:${isAppActive}:${String(biometricUnlocked)}:${resyncProgress}`
+	const watchdogRearmKey = `${searchLive}:${resyncProgress}`
 	const [prevWatchdogRearmKey, setPrevWatchdogRearmKey] = useState<string>(watchdogRearmKey)
 
 	if (watchdogRearmKey !== prevWatchdogRearmKey) {
@@ -313,10 +313,10 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 
 	// Effect A — open / close + the per-session grace & watchdog timers. Their setState
 	// fires from timer / snapshot callbacks (allowed), never synchronously — the per-session
-	// reset is the render-phase block above. isAppActive is an OPEN-gate; background close is
+	// reset is the render-phase block above. Foreground is an OPEN-gate; background close is
 	// the singleton's job, so the cleanup skips close while the app is backgrounding.
 	useEffect(() => {
-		if (!searchEngaged || !isFocused || !isAppActive || biometricUnlocked !== true) {
+		if (!searchEngaged || !searchLive) {
 			return
 		}
 
@@ -425,7 +425,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 				void driveSearch.closeActive()
 			}
 		}
-	}, [searchEngaged, isFocused, isAppActive, biometricUnlocked, drivePath.uuid, reopenNonce])
+	}, [searchEngaged, searchLive, drivePath.uuid, reopenNonce])
 
 	// Grace timer — re-armed (cleared + restarted) on every resync sign-of-life via its
 	// `resyncProgress`/`resyncing` deps (the render-phase block above resets the latch on the same
@@ -433,7 +433,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	// the watchdog there's NO `hasSnapshot` guard: an EMPTY first snapshot must still be graced
 	// before it can surface as "no results".
 	useEffect(() => {
-		if (!isCacheSearch || !isFocused || !isAppActive || biometricUnlocked !== true) {
+		if (!isCacheSearch || !searchLive) {
 			return
 		}
 
@@ -448,7 +448,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		return () => {
 			clearTimeout(grace)
 		}
-	}, [isCacheSearch, isFocused, isAppActive, biometricUnlocked, drivePath.uuid, reopenNonce, resyncProgress, resyncing])
+	}, [isCacheSearch, searchLive, drivePath.uuid, reopenNonce, resyncProgress, resyncing])
 
 	// Watchdog — terminal "no sign of life". Re-arms on open AND on every resync-progress
 	// heartbeat (`resyncProgress`), so it measures SILENCE, not total elapsed time: a slow
@@ -460,7 +460,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		// the gates here, Effect A re-opens (bumping the generation) on a focus/foreground/
 		// unlock edge while this effect (which lacked those deps) didn't re-run, so the
 		// re-opened generation got NO watchdog and a wedged re-open span "warming" forever.
-		if (!isCacheSearch || !isFocused || !isAppActive || biometricUnlocked !== true || hasSnapshot) {
+		if (!isCacheSearch || !searchLive || hasSnapshot) {
 			return
 		}
 
@@ -475,7 +475,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		return () => {
 			clearTimeout(watchdog)
 		}
-	}, [isCacheSearch, isFocused, isAppActive, biometricUnlocked, hasSnapshot, drivePath.uuid, reopenNonce, resyncProgress])
+	}, [isCacheSearch, searchLive, hasSnapshot, drivePath.uuid, reopenNonce, resyncProgress])
 
 	// Effect B — debounced re-filter on query change. Reopens (bumps the nonce → Effect A)
 	// if the refilter finds no live search, so typing after a background→foreground cycle

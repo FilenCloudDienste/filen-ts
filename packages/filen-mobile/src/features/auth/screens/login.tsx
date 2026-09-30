@@ -12,7 +12,7 @@ import { PressableOpacity } from "@/components/ui/pressables"
 import IconTextField from "@/components/ui/iconTextField"
 import auth from "@/lib/auth"
 import alerts from "@/lib/alerts"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { unwrapSdkError } from "@/lib/sdkErrors"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -79,31 +79,18 @@ const Login = () => {
 	}
 
 	const promptForTwoFactor = async (wrongCode: boolean): Promise<string | null> => {
-		const promptResult = await run(async () => {
-			return await prompts.input({
+		return await inputPrompt(
+			{
 				title: t("two_factor_authentication"),
 				message: wrongCode ? t("incorrect_two_factor_code_try_again") : t("enter_two_factor_code_or_recovery_key"),
 				inputType: "plain-text",
 				placeholder: t("code_or_recovery_key"),
 				cancelText: t("cancel"),
 				okText: t("sign_in")
-			})
-		})
-
-		if (!promptResult.success) {
-			logger.warn("auth", "two-factor prompt failed", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
-			return null
-		}
-
-		if (promptResult.data.cancelled) {
-			return null
-		}
-
-		const code = promptResult.data.value.trim()
-
-		return code.length > 0 ? code : null
+			},
+			{ tag: "auth", message: "two-factor prompt failed" },
+			{ trim: true }
+		)
 	}
 
 	const handleLogin = async (): Promise<void> => {
@@ -180,8 +167,8 @@ const Login = () => {
 			return
 		}
 
-		const promptResult = await run(async () => {
-			return await prompts.input({
+		const targetEmail = await inputPrompt(
+			{
 				title: t("reset_password"),
 				message: t("enter_account_email"),
 				placeholder: t("email_placeholder_hint"),
@@ -189,21 +176,14 @@ const Login = () => {
 				okText: t("send"),
 				defaultValue: email.trim(),
 				keyboardType: "email-address"
-			})
-		})
+			},
+			{ tag: "auth", message: "reset password prompt failed" },
+			{ trim: true, allowEmpty: true }
+		)
 
-		if (!promptResult.success) {
-			logger.warn("auth", "reset password prompt failed", { error: promptResult.error })
-			alerts.error(promptResult.error)
-
+		if (targetEmail === null) {
 			return
 		}
-
-		if (promptResult.data.cancelled) {
-			return
-		}
-
-		const targetEmail = promptResult.data.value.trim()
 
 		if (!isValidEmail(targetEmail)) {
 			alerts.error(t("please_enter_valid_email"))

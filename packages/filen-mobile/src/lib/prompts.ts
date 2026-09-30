@@ -1,5 +1,5 @@
 import Alert from "@blazejkustra/react-native-alert"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore } from "@filen/shared"
 import { Platform } from "react-native"
 
 export type AlertPromptResult =
@@ -17,8 +17,14 @@ export type AlertPromptOptions = {
 	okText?: string
 	cancelText?: string
 	destructive?: boolean
-	// When true, render only the OK button (an informational acknowledgement, no cancel).
-	singleButton?: boolean
+}
+
+export type InfoPromptOptions = {
+	title?: string
+	message?: string
+	cancellable?: boolean
+	okText?: string
+	destructive?: boolean
 	// See ThreeButtonPromptOptions.gate.
 	gate?: PromptGate
 }
@@ -92,72 +98,57 @@ async function acquireOpen(gate: PromptGate | undefined): Promise<void> {
 	}
 }
 
+// Shows one alert in its turn in the prompts queue, holding the queue until the alert resolves.
+async function presentPrompt<T>(gate: PromptGate | undefined, show: (resolve: (value: T) => void) => void): Promise<T> {
+	await acquireOpen(gate)
+
+	try {
+		return await new Promise<T>(show)
+	} finally {
+		promptsMutex.release()
+	}
+}
+
 const prompts = {
 	async alert(options?: AlertPromptOptions): Promise<AlertPromptResult> {
-		const result = await run(async defer => {
-			await promptsMutex.acquire()
-
-			defer(() => {
-				promptsMutex.release()
-			})
-
-			return await new Promise<AlertPromptResult>(resolve => {
-				Alert.alert(
-					options?.title ?? "Title",
-					options?.message,
-					options?.singleButton
-						? [
-								{
-									text: options?.okText ?? "OK",
-									style: options?.destructive ? "destructive" : "default",
-									onPress: () => {
-										resolve({
-											cancelled: false
-										})
-									}
-								}
-							]
-						: [
-								{
-									text: options?.cancelText ?? "Cancel",
-									style: "cancel",
-									onPress: () => {
-										resolve({
-											cancelled: true
-										})
-									}
-								},
-								{
-									text: options?.okText ?? "OK",
-									style: options?.destructive ? "destructive" : "default",
-									onPress: () => {
-										resolve({
-											cancelled: false
-										})
-									}
-								}
-							],
+		return await presentPrompt<AlertPromptResult>(undefined, resolve => {
+			Alert.alert(
+				options?.title ?? "Title",
+				options?.message,
+				[
 					{
-						cancelable: options?.cancellable ?? true,
-						onDismiss: () => {
-							if (!(options?.cancellable ?? true)) {
-								return
-							}
-
+						text: options?.cancelText ?? "Cancel",
+						style: "cancel",
+						onPress: () => {
 							resolve({
 								cancelled: true
 							})
 						}
+					},
+					{
+						text: options?.okText ?? "OK",
+						style: options?.destructive ? "destructive" : "default",
+						onPress: () => {
+							resolve({
+								cancelled: false
+							})
+						}
 					}
-				)
-			})
+				],
+				{
+					cancelable: options?.cancellable ?? true,
+					onDismiss: () => {
+						if (!(options?.cancellable ?? true)) {
+							return
+						}
+
+						resolve({
+							cancelled: true
+						})
+					}
+				}
+			)
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	},
 
 	// Three-button alert: a primary (affirmative) action, a destructive action, and cancel.
@@ -166,166 +157,126 @@ const prompts = {
 	// on the right; iOS floats the cancel-style button to the bottom regardless and styles destructive
 	// red, so the affirmative goes first. A dismiss (tap-outside / back) resolves to "cancel".
 	async confirm3(options: ThreeButtonPromptOptions): Promise<ThreeButtonPromptResult> {
-		const result = await run(async defer => {
-			await acquireOpen(options.gate)
-
-			defer(() => {
-				promptsMutex.release()
-			})
-
-			return await new Promise<ThreeButtonPromptResult>(resolve => {
-				const primaryButton = {
-					text: options.primaryText,
-					style: "default" as const,
-					onPress: () => {
-						resolve("primary")
-					}
+		return await presentPrompt<ThreeButtonPromptResult>(options.gate, resolve => {
+			const primaryButton = {
+				text: options.primaryText,
+				style: "default" as const,
+				onPress: () => {
+					resolve("primary")
 				}
+			}
 
-				const destructiveButton = {
-					text: options.destructiveText,
-					style: "destructive" as const,
-					onPress: () => {
-						resolve("destructive")
-					}
+			const destructiveButton = {
+				text: options.destructiveText,
+				style: "destructive" as const,
+				onPress: () => {
+					resolve("destructive")
 				}
+			}
 
-				const cancelButton = {
-					text: options.cancelText ?? "Cancel",
-					style: "cancel" as const,
-					onPress: () => {
+			const cancelButton = {
+				text: options.cancelText ?? "Cancel",
+				style: "cancel" as const,
+				onPress: () => {
+					resolve("cancel")
+				}
+			}
+
+			Alert.alert(
+				options.title ?? "Title",
+				options.message,
+				Platform.OS === "android"
+					? [cancelButton, destructiveButton, primaryButton]
+					: [primaryButton, destructiveButton, cancelButton],
+				{
+					cancelable: options.cancellable ?? true,
+					onDismiss: () => {
+						if (!(options.cancellable ?? true)) {
+							return
+						}
+
 						resolve("cancel")
 					}
 				}
-
-				Alert.alert(
-					options.title ?? "Title",
-					options.message,
-					Platform.OS === "android"
-						? [cancelButton, destructiveButton, primaryButton]
-						: [primaryButton, destructiveButton, cancelButton],
-					{
-						cancelable: options.cancellable ?? true,
-						onDismiss: () => {
-							if (!(options.cancellable ?? true)) {
-								return
-							}
-
-							resolve("cancel")
-						}
-					}
-				)
-			})
+			)
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	},
 
-	async info(options?: AlertPromptOptions): Promise<void> {
-		const result = await run(async defer => {
-			await acquireOpen(options?.gate)
-
-			defer(() => {
-				promptsMutex.release()
-			})
-
-			return await new Promise<void>(resolve => {
-				Alert.alert(
-					options?.title ?? "Title",
-					options?.message,
-					[
-						{
-							text: options?.okText ?? "OK",
-							style: options?.destructive ? "destructive" : "default",
-							onPress: () => {
-								resolve()
-							}
-						}
-					],
+	async info(options?: InfoPromptOptions): Promise<void> {
+		await presentPrompt<void>(options?.gate, resolve => {
+			Alert.alert(
+				options?.title ?? "Title",
+				options?.message,
+				[
 					{
-						cancelable: options?.cancellable ?? true,
-						onDismiss: () => {
+						text: options?.okText ?? "OK",
+						style: options?.destructive ? "destructive" : "default",
+						onPress: () => {
 							resolve()
 						}
 					}
-				)
-			})
+				],
+				{
+					cancelable: options?.cancellable ?? true,
+					onDismiss: () => {
+						resolve()
+					}
+				}
+			)
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
 	},
 
 	async input(options?: InputPromptOptions): Promise<InputPromptResult> {
-		const result = await run(async defer => {
-			await promptsMutex.acquire()
-
-			defer(() => {
-				promptsMutex.release()
-			})
-
-			return await new Promise<InputPromptResult>(resolve => {
-				Alert.prompt(
-					options?.title ?? "Title",
-					options?.message,
-					[
-						{
-							text: options?.cancelText ?? "Cancel",
-							style: "cancel",
-							onPress: () => {
-								resolve({
-									cancelled: true
-								})
-							}
-						},
-						{
-							text: options?.okText ?? "OK",
-							style: options?.destructive ? "destructive" : "default",
-							onPress: (
-								value?:
-									| string
-									| {
-											login: string
-											password: string
-									  }
-							) => {
-								// Only login-password prompts hand back an object, and none is ever requested.
-								resolve({
-									cancelled: false,
-									value: typeof value === "string" ? value : ""
-								})
-							}
-						}
-					],
-					options?.inputType ?? "plain-text",
-					options?.defaultValue,
-					options?.keyboardType,
+		return await presentPrompt<InputPromptResult>(undefined, resolve => {
+			Alert.prompt(
+				options?.title ?? "Title",
+				options?.message,
+				[
 					{
-						cancelable: options?.cancellable ?? true,
-						onDismiss: () => {
-							if (!(options?.cancellable ?? true)) {
-								return
-							}
-
+						text: options?.cancelText ?? "Cancel",
+						style: "cancel",
+						onPress: () => {
 							resolve({
 								cancelled: true
 							})
 						}
+					},
+					{
+						text: options?.okText ?? "OK",
+						style: options?.destructive ? "destructive" : "default",
+						onPress: (
+							value?:
+								| string
+								| {
+										login: string
+										password: string
+								  }
+						) => {
+							// Only login-password prompts hand back an object, and none is ever requested.
+							resolve({
+								cancelled: false,
+								value: typeof value === "string" ? value : ""
+							})
+						}
 					}
-				)
-			})
+				],
+				options?.inputType ?? "plain-text",
+				options?.defaultValue,
+				options?.keyboardType,
+				{
+					cancelable: options?.cancellable ?? true,
+					onDismiss: () => {
+						if (!(options?.cancellable ?? true)) {
+							return
+						}
+
+						resolve({
+							cancelled: true
+						})
+					}
+				}
+			)
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 }
 

@@ -17,6 +17,7 @@ const {
 	mockDriveItemsQueryUpdateForNormalParent,
 	mockDriveItemsQueryGet,
 	mockCacheForgetItem,
+	mockCache,
 	mockUnwrapParentUuid,
 	mockUnwrappedDirIntoDriveItem,
 	mockUnwrappedFileIntoDriveItem,
@@ -130,6 +131,8 @@ const {
 		AnyLinkedDir: {}
 	}
 
+	const mockCacheForgetItem = vi.fn()
+
 	return {
 		mockGetSdkClients: vi.fn().mockResolvedValue({ authedSdkClient: mockAuthedSdkClient }),
 		mockAuthedSdkClient,
@@ -137,7 +140,14 @@ const {
 		mockDriveItemsQueryUpdateGlobal: vi.fn(),
 		mockDriveItemsQueryUpdateForNormalParent: vi.fn(),
 		mockDriveItemsQueryGet: vi.fn().mockReturnValue(null),
-		mockCacheForgetItem: vi.fn(),
+		mockCacheForgetItem,
+		mockCache: {
+			forgetItem: mockCacheForgetItem,
+			cacheNewFile: vi.fn(),
+			cacheNewNormalDir: vi.fn(),
+			directoryUuidToAnyNormalDir: new Map(),
+			rootUuid: null as string | null
+		},
 		mockUnwrapParentUuid: vi.fn().mockReturnValue("parent-uuid-0001"),
 		mockUnwrappedDirIntoDriveItem: vi.fn(),
 		mockUnwrappedFileIntoDriveItem: vi.fn(),
@@ -163,12 +173,7 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 vi.mock("@/lib/cache", () => ({
-	default: {
-		forgetItem: mockCacheForgetItem,
-		cacheNewFile: vi.fn(),
-		cacheNewNormalDir: vi.fn(),
-		directoryUuidToAnyNormalDir: new Map()
-	}
+	default: mockCache
 }))
 
 vi.mock("@/lib/utils", () => ({
@@ -1142,81 +1147,35 @@ describe("drive.removeShare", () => {
 describe("drive.getRootUuid", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		drive.cachedRootUuid = null
+		mockCache.rootUuid = null
 		mockGetSdkClients.mockResolvedValue({ authedSdkClient: mockAuthedSdkClient })
 		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-0001" })
 	})
 
-	it("first call invokes getSdkClients and returns the uuid from root()", async () => {
-		const result = await drive.getRootUuid()
-
-		expect(mockGetSdkClients).toHaveBeenCalledTimes(1)
-		expect(mockAuthedSdkClient.root).toHaveBeenCalledTimes(1)
-		expect(result).toBe("root-uuid-0001")
-	})
-
-	it("second call returns cached uuid without calling getSdkClients again", async () => {
-		await drive.getRootUuid()
-		vi.clearAllMocks()
+	it("returns cache.rootUuid without touching the SDK", async () => {
+		mockCache.rootUuid = "root-uuid-cached"
 
 		const result = await drive.getRootUuid()
 
 		expect(mockGetSdkClients).not.toHaveBeenCalled()
 		expect(mockAuthedSdkClient.root).not.toHaveBeenCalled()
-		expect(result).toBe("root-uuid-0001")
+		expect(result).toBe("root-uuid-cached")
 	})
 
-	it("after cachedRootUuid reset to null, next call re-fetches from SDK", async () => {
-		await drive.getRootUuid()
-		drive.cachedRootUuid = null
-		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-fresh" })
+	it("returns an empty-string cache.rootUuid as-is", async () => {
+		mockCache.rootUuid = ""
 
 		const result = await drive.getRootUuid()
 
-		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
-		expect(result).toBe("root-uuid-fresh")
+		expect(mockGetSdkClients).not.toHaveBeenCalled()
+		expect(result).toBe("")
 	})
 
-	it("stores the fetched uuid in cachedRootUuid after first call", async () => {
-		expect(drive.cachedRootUuid).toBeNull()
-
-		await drive.getRootUuid()
-
-		expect(drive.cachedRootUuid).toBe("root-uuid-0001")
-	})
-
-	it("resetCachedRootUuid clears the cache so the next call re-fetches from the SDK", async () => {
-		await drive.getRootUuid()
-
-		expect(drive.cachedRootUuid).toBe("root-uuid-0001")
-
-		drive.resetCachedRootUuid()
-
-		expect(drive.cachedRootUuid).toBeNull()
-
-		mockAuthedSdkClient.root.mockReturnValue({ uuid: "root-uuid-next" })
-
+	it("falls back to the SDK root when cache.rootUuid is null", async () => {
 		const result = await drive.getRootUuid()
 
-		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
-		expect(result).toBe("root-uuid-next")
-	})
-
-	it("FALSY-GUARD REGRESSION: empty-string uuid causes re-fetch on every call (truthy guard bug)", async () => {
-		// root() returns an empty string uuid (edge case)
-		mockAuthedSdkClient.root.mockReturnValue({ uuid: "" })
-
-		const result1 = await drive.getRootUuid()
-
-		// First call: getSdkClients called once, returns ""
 		expect(mockGetSdkClients).toHaveBeenCalledTimes(1)
-		expect(result1).toBe("")
-
-		// Because `if (this.cachedRootUuid)` is falsy for "", the cache is NOT respected
-		// and getSdkClients is called again on the second call — documents the truthy guard bug
-		const result2 = await drive.getRootUuid()
-
-		expect(mockGetSdkClients).toHaveBeenCalledTimes(2)
-		expect(result2).toBe("")
+		expect(mockAuthedSdkClient.root).toHaveBeenCalledTimes(1)
+		expect(result).toBe("root-uuid-0001")
 	})
 })

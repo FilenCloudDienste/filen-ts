@@ -15,6 +15,7 @@ import useFileUriQuery from "@/queries/useFileUri.query"
 import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import { galleryItemKey, type GalleryItemTagged } from "@/components/drivePreview/gallery"
+import { galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 import useEditableTarget from "@/components/drivePreview/useEditableTarget"
 import useRemoteRevisions from "@/components/drivePreview/useRemoteRevisions"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
@@ -50,24 +51,7 @@ const PreviewPdf = ({ item }: { item: GalleryItemTagged }) => {
 		}
 	}, [])
 
-	const query = useFileUriQuery(
-		item.type === "external"
-			? {
-					type: "external",
-					data: {
-						url: item.data.url,
-						name: item.data.name
-					}
-				}
-			: {
-					type: "drive",
-					data: {
-						uuid: item.data.data.uuid,
-						// By-value so a cross-directory search hit resolves its bytes.
-						item: item.data
-					}
-				}
-	)
+	const query = useFileUriQuery(galleryItemFileSource(item))
 
 	const source = useRangeSource(query.status === "success" ? query.data.uri : null, {
 		maxBytes: MAX_PDF_BYTES,

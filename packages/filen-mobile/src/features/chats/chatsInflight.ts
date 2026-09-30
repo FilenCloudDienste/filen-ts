@@ -5,12 +5,7 @@ import secureStore from "@/lib/secureStore"
 import { chatMessagesQueryUpdate } from "@/features/chats/queries/useChatMessages.query"
 import { type Chat } from "@/types"
 import logger from "@/lib/logger"
-
-// The per-chat draft keys written by the chat input (input/index.tsx and message/menu.tsx).
-// MUST stay in sync with the useSecureStore call sites there.
-export function chatDraftSecureStoreKeys(chatUuid: string): string[] {
-	return [`chatInputValue:${chatUuid}`, `chatReplyTo:${chatUuid}`, `chatEditMessage:${chatUuid}`]
-}
+import { chatDraftSecureStoreKeys } from "@/features/chats/chatDrafts"
 
 // D4b + M5: purges every piece of per-chat in-flight state when a chat is removed — queued unsent
 // messages, their error/strike entries, the persisted queue on disk and the per-chat input drafts.

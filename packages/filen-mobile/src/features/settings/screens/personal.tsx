@@ -1,16 +1,15 @@
-import SafeAreaView from "@/components/ui/safeAreaView"
+import { ScreenBody } from "@/components/ui/safeAreaView"
 import { Group, type Button } from "@/components/ui/settingsGroup"
-import { GestureHandlerScrollView } from "@/components/ui/view"
+import { SettingsScrollView } from "@/components/ui/settingsScrollView"
 import { Fragment, useState } from "react"
 import { useLocalSearchParams } from "expo-router"
-import { router } from "@/lib/router"
-import { run, COUNTRIES } from "@filen/shared"
+import { goBackIfPossible } from "@/lib/router"
+import { COUNTRIES } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { type fetchData } from "@/queries/useAccount.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import prompts from "@/lib/prompts"
+import { inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import auth from "@/lib/auth"
 import { deserializeRouteParam } from "@/lib/serializer"
@@ -28,7 +27,6 @@ function Personal() {
 	}>()
 	const { t } = useTranslation()
 	const textBlue500 = useResolveClassNames("text-blue-500")
-	const insets = useSafeAreaInsets()
 	const [personal, setPersonal] = useState<Awaited<ReturnType<typeof fetchData>>["personal"] | null>(
 		deserializeRouteParam<Awaited<ReturnType<typeof fetchData>>["personal"]>(personalSerialized)
 	)
@@ -47,30 +45,19 @@ function Personal() {
 			subTitle: personalData[field] ?? t("not_set"),
 			subTitleNumberOfLines: 1,
 			onPress: async () => {
-				const promptResult = await run(async () => {
-					return await prompts.input({
+				const value = await inputPrompt(
+					{
 						title,
 						message,
 						cancelText: t("cancel"),
 						okText: t("save"),
 						defaultValue: personalData[field] ?? undefined
-					})
-				})
+					},
+					{ tag: "settings", message: "personal info field prompt failed", context: { field } },
+					{ trim: true }
+				)
 
-				if (!promptResult.success) {
-					logger.warn("settings", "personal info field prompt failed", { field, error: promptResult.error })
-					alerts.error(promptResult.error)
-
-					return
-				}
-
-				if (promptResult.data.cancelled) {
-					return
-				}
-
-				const value = promptResult.data.value.trim()
-
-				if (value.length === 0) {
+				if (value === null) {
 					return
 				}
 
@@ -94,11 +81,7 @@ function Personal() {
 			<SettingsHeader
 				title={t("personal_information")}
 				icon="chevron-back-outline"
-				onDismiss={() => {
-					if (router.canGoBack()) {
-						router.back()
-					}
-				}}
+				onDismiss={goBackIfPossible}
 				rightItems={() => {
 					if (!modified || !isOnline) {
 						return null
@@ -132,19 +115,8 @@ function Personal() {
 					]
 				}}
 			/>
-			<SafeAreaView
-				className="flex-1 bg-background-secondary"
-				edges={["left", "right"]}
-			>
-				<GestureHandlerScrollView
-					className="bg-transparent flex-1"
-					contentInsetAdjustmentBehavior="automatic"
-					contentContainerClassName="px-4 gap-4"
-					showsHorizontalScrollIndicator={false}
-					contentContainerStyle={{
-						paddingBottom: insets.bottom
-					}}
-				>
+			<ScreenBody>
+				<SettingsScrollView>
 					<Group
 						className="bg-background-tertiary"
 						buttons={[
@@ -215,8 +187,8 @@ function Personal() {
 							}
 						]}
 					/>
-				</GestureHandlerScrollView>
-			</SafeAreaView>
+				</SettingsScrollView>
+			</ScreenBody>
 		</Fragment>
 	)
 }

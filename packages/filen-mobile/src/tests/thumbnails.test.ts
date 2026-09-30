@@ -246,16 +246,16 @@ vi.mock("@/lib/fileCache", () => ({
 }))
 
 // Partial on purpose: every other helper stays the real one (the error classes keep their identity,
-// so `instanceof` still holds), and ensureDirectory keeps creating the directory — the spy exists
+// so `instanceof` still holds), and ensureThumbnailsDirectory keeps creating the directory — the spy exists
 // only to observe WHEN restore() reaches it relative to the version sweep.
 vi.mock("@/lib/thumbnailsHelpers", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/lib/thumbnailsHelpers")>()
 
-	mockEnsureDirectory.mockImplementation(actual.ensureDirectory)
+	mockEnsureDirectory.mockImplementation(actual.ensureThumbnailsDirectory)
 
 	return {
 		...actual,
-		ensureDirectory: mockEnsureDirectory
+		ensureThumbnailsDirectory: mockEnsureDirectory
 	}
 })
 
@@ -1416,13 +1416,13 @@ describe("Thumbnails", () => {
 			expect(thumbnails.size()).toBe(7 + 13)
 		})
 
-		it("ignores stray subdirectories", () => {
+		it("counts files in stray subdirectories", () => {
 			fs.set(THUMBNAILS_DIR, "dir")
 			fs.set(`${THUMBNAILS_DIR}/a.webp`, new Uint8Array([1, 2]))
 			fs.set(`${THUMBNAILS_DIR}/nested`, "dir")
 			fs.set(`${THUMBNAILS_DIR}/nested/x.webp`, new Uint8Array([3, 4, 5]))
 
-			expect(thumbnails.size()).toBe(2)
+			expect(thumbnails.size()).toBe(2 + 3)
 		})
 	})
 

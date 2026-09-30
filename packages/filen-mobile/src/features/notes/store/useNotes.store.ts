@@ -2,8 +2,6 @@ import { create } from "zustand"
 import { type Note, type NoteTag } from "@/types"
 import { toggleInArray } from "@filen/shared"
 
-export { type InflightContent } from "@/features/notes/store/useNotesInflight.store"
-
 export type NotesStore = {
 	selectedNotes: Note[]
 	activeNote: Note | null

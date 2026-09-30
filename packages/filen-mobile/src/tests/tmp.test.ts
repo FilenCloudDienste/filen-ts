@@ -154,6 +154,15 @@ describe("newTmpFile / newTmpDir / ensure", () => {
 		expect(dir.uri).toMatch(/export$/)
 	})
 
+	it("newTmpStagedFile('a.bin') returns a File inside a created fresh directory under filen-tmp", async () => {
+		const { newTmpStagedFile, TMP_DIR_NAME } = await freshTmp()
+		const file = newTmpStagedFile("a.bin")
+
+		expect(file.uri).toMatch(new RegExp(`${TMP_DIR_NAME}/mock-uuid-\\d+/a\\.bin$`))
+		expect(file.exists).toBe(false)
+		expect(file.parentDirectory.exists).toBe(true)
+	})
+
 	it("calling newTmpFile() when the directory does not exist triggers directory creation", async () => {
 		const { newTmpFile, TMP_DIR_NAME } = await freshTmp()
 
@@ -208,5 +217,31 @@ describe("newTmpFile / newTmpDir / ensure", () => {
 		const tmpDirAfter = new Directory(tmpPath)
 
 		expect(tmpDirAfter.exists).toBe(true)
+	})
+})
+
+describe("writeTmpFile", () => {
+	it("writes the data to a filen-tmp file, replacing a leftover of the same name", async () => {
+		const { writeTmpFile, newTmpFile, TMP_DIR_NAME } = await freshTmp()
+
+		newTmpFile("export.txt").write("stale")
+
+		const { file } = writeTmpFile("export.txt", "fresh")
+
+		expect(file.uri).toContain(`/${TMP_DIR_NAME}/export.txt`)
+		expect(file.textSync()).toBe("fresh")
+	})
+
+	it("cleanup deletes the file and is a no-op once it is gone", async () => {
+		const { writeTmpFile } = await freshTmp()
+
+		const { file, cleanup } = writeTmpFile("export.bin", new Uint8Array([1, 2, 3]))
+
+		expect(file.exists).toBe(true)
+
+		cleanup()
+
+		expect(file.exists).toBe(false)
+		expect(() => cleanup()).not.toThrow()
 	})
 })

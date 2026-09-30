@@ -1,57 +1,23 @@
 import { useEffect } from "react"
-import { run, Semaphore, mergeInflightQueuesByUnion, isPermanentRejection, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
-import { onlineManager } from "@tanstack/react-query"
+import { run, mergeInflightQueuesByUnion, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import chats from "@/features/chats/chats"
-import alerts from "@/lib/alerts"
 import { AppState } from "react-native"
 import useChatsStore, { type InflightChatMessages } from "@/features/chats/store/useChats.store"
 import sqlite from "@/lib/sqlite"
 import { fetchData as chatsQueryFetch } from "@/features/chats/queries/useChats.query"
-import { FilenSdkError, ErrorKind } from "@filen/sdk-rs"
-import { unwrapSdkError } from "@/lib/sdkErrors"
+import { unwrapSdkError, isPermanentSdkRejection } from "@/lib/sdkErrors"
 import logger from "@/lib/logger"
+import { OutboxSync } from "@/lib/outboxSync"
 
-// D4a (ported from notes sync #40/VC3): a message whose send is rejected by the server with a
-// PERMANENT error (non-network, non-auth SDK rejection) must eventually stop being retried —
-// otherwise every sync pass re-attempts it forever. But a TRANSIENT non-network error (e.g. a
-// one-off `ErrorKind.Server`, the catch-all for non-`internal_error` API failures) must NOT lose
-// the message. We bound the drop: only after this many CONSECUTIVE non-network, non-auth SDK
-// rejections for the same message do we drop it from the send queue. The error entry (which
-// carries the counter and a message snapshot) is kept so the failure stays visible in the chat
-// until the user retries or removes it.
-export { MAX_NON_RETRYABLE_REJECTIONS }
-
-export class Sync {
-	private readonly mutex: Semaphore = new Semaphore(1)
-	public readonly sqliteKvKey: string = "inflightChatMessages"
-	private readonly initPromise: Promise<void>
-	private resolveInit!: () => void
-	private abortController: AbortController = new AbortController()
-	// Set true by start() (called only from the SyncHost mount). A headless background run never
-	// mounts SyncHost, so start() never runs and initPromise never resolves — sync() guards on
-	// this to no-op instead of hanging forever on Promise.all([mutex, initPromise]) (which would
-	// hold the mutex and wedge every future pass). Nothing was hydrated to sync without a prior
-	// restore anyway; persisted messages flush on the next foreground open.
-	private started: boolean = false
-
+export class Sync extends OutboxSync<InflightChatMessages> {
 	public constructor() {
-		this.initPromise = new Promise(resolve => {
-			this.resolveInit = resolve
+		super({
+			sqliteKvKey: "inflightChatMessages",
+			logScope: "chats-sync"
 		})
 	}
 
-	public start(): void {
-		this.started = true
-
-		this.restoreFromDisk()
-	}
-
-	public cancel(): void {
-		this.abortController.abort()
-		this.abortController = new AbortController()
-	}
-
-	private async restoreFromDisk() {
+	protected override async restoreFromDisk(): Promise<void> {
 		const result = await run(async defer => {
 			await this.mutex.acquire()
 
@@ -124,57 +90,17 @@ export class Sync {
 		}
 	}
 
-	// M3: reports persistence failure as `false` instead of throwing (it still never
-	// throws). Sync-internal callers ignore the return (the next pass re-flushes);
-	// COMPONENT call sites must surface a `false` — a failing SQLite write means the
-	// user's message survives in memory only and would otherwise die with zero signal.
-	public async flushToDisk(inflightChatMessages: InflightChatMessages): Promise<boolean> {
-		await this.initPromise
-
-		const result = await run(async () => {
-			const filtered = Object.fromEntries(Object.entries(inflightChatMessages).filter(([_, { messages }]) => messages.length > 0))
-
-			if (Object.keys(filtered).length === 0) {
-				await sqlite.kvAsync.remove(this.sqliteKvKey)
-
-				return
-			}
-
-			await sqlite.kvAsync.set(this.sqliteKvKey, filtered)
-		})
-
-		if (!result.success) {
-			logger.error("chats-sync", "flushToDisk failed — messages memory-only", { error: result.error })
-		}
-
-		return result.success
+	// Chats whose queue drained are not persisted.
+	protected override toPersisted(inflightChatMessages: InflightChatMessages): InflightChatMessages {
+		return Object.fromEntries(Object.entries(inflightChatMessages).filter(([_, { messages }]) => messages.length > 0))
 	}
 
-	private async sync(): Promise<void> {
-		// Headless guard: without start() (SyncHost never mounted in a background run) initPromise
-		// never resolves, so the Promise.all below would hang forever holding the mutex — wedging
-		// every future pass. Nothing was hydrated to sync anyway; no-op until the UI has started it.
-		if (!this.started) {
-			return
-		}
-
-		if (!onlineManager.isOnline()) {
-			return
-		}
-
-		const signal = this.abortController.signal
-
-		const result = await run(async defer => {
-			await Promise.all([this.mutex.acquire(), this.initPromise])
-
-			defer(() => {
-				this.mutex.release()
-			})
-
+	private sync(): Promise<void> {
+		return this.runPass(async signal => {
 			const inflightMessages = useChatsStore.getState().inflightMessages
 
 			if (Object.keys(inflightMessages).length === 0) {
-				return
+				return null
 			}
 
 			const results = await Promise.allSettled(
@@ -217,8 +143,7 @@ export class Sync {
 								return
 							}
 
-							const error =
-								e instanceof Error ? e : FilenSdkError.hasInner(e) ? FilenSdkError.getInner(e) : new Error(String(e))
+							const error = e instanceof Error ? e : (unwrapSdkError(e) ?? new Error(String(e)))
 
 							// D4a: classify the rejection exactly like the notes sync (#40/VC3,
 							// via the shared sdkRetryPolicy classifiers). Network-class errors,
@@ -227,9 +152,7 @@ export class Sync {
 							// Any OTHER SDK error (incl. the `Server` catch-all — the only signal
 							// for a permanent rejection the SDK exposes) increments the per-message
 							// consecutive-rejection counter.
-							const unwrapped = unwrapSdkError(e)
-							const kind = unwrapped !== null ? ErrorKind[unwrapped.kind()] : undefined
-							const permanent = isPermanentRejection({ hasSdkError: unwrapped !== null, kind })
+							const permanent = isPermanentSdkRejection(e)
 							const previousRejections =
 								useChatsStore.getState().inflightErrors[message.inflightId]?.permanentRejections ?? 0
 							const permanentRejections = permanent ? previousRejections + 1 : previousRejections
@@ -306,22 +229,8 @@ export class Sync {
 				}
 			}
 
-			// D2: never flush after an aborted pass. Logout aborts in-flight sync (Phase 2) and
-			// later wipes SQLite (Phase 6) — a late flush here would resurrect the previous
-			// account's plaintext queue onto disk after the wipe.
-			if (!signal.aborted) {
-				await this.flushToDisk(useChatsStore.getState().inflightMessages)
-			}
+			return useChatsStore.getState().inflightMessages
 		})
-
-		if (!result.success) {
-			if (signal.aborted) {
-				return
-			}
-
-			logger.error("chats-sync", "sync pass threw unexpectedly", { error: result.error })
-			alerts.error(result.error)
-		}
 	}
 
 	public syncNow(): void {

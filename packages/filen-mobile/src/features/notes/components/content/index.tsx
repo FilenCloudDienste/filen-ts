@@ -19,14 +19,14 @@ import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
 import { useEffect, useCallback, useRef } from "react"
-import { run, conflictCopyStamp } from "@filen/shared"
+import { run, conflictCopyStamp, hashNoteContent, buildInflightEntries } from "@filen/shared"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
 import prompts from "@/lib/prompts"
 import notes from "@/features/notes/notes"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
-import { sync, hashNoteContent, buildInflightEntries } from "@/features/notes/components/sync"
+import { sync } from "@/features/notes/components/sync"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { useHeaderHeight } from "expo-router/react-navigation"
 import useIsOnline from "@/hooks/useIsOnline"
@@ -105,11 +105,6 @@ export function sessionBaseHashForNewSession(entries: InflightContent[string] | 
 
 	return typeof cachedContent === "string" ? hashNoteContent(cachedContent) : null
 }
-
-// M1 + D3: the monotonic-timestamp + base-hash-carry builder now lives in @filen/shared, imported
-// above (via components/sync, which re-exports it) and re-exported here so this module's existing
-// exported surface — and the standalone test importing it — resolves unchanged.
-export { buildInflightEntries }
 
 // M3: sync.flushToDisk never throws — persistence failure comes back as `false`
 // (sync-internal callers ignore it; their next pass re-flushes). HERE it must surface:

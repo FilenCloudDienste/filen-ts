@@ -43,13 +43,6 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-// rawPreviewCache → thumbnailsHelpers → previewType reads EXPO_AUDIO_SUPPORTED_EXTENSIONS, which the
-// shared constants mock lacks — spread it in (the shared file stays untouched).
-vi.mock("@/constants", async () => ({
-	...(await import("@/tests/mocks/constants")),
-	EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".wav"])
-}))
-
 vi.mock("@filen/shared", async () => {
 	const sharedMock = await import("@/tests/mocks/filenShared")
 
@@ -92,14 +85,11 @@ vi.mock("@filen/shared", async () => {
 		}
 	}
 
-	// previewType.ts (reached via thumbnailsHelpers) builds its code-extension set from this at
-	// module load — pull the real one through so that import does not throw.
 	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
 
 	return {
 		...sharedMock,
 		Semaphore,
-		CODE_FILE_EXTENSIONS: actual.CODE_FILE_EXTENSIONS,
 		// gc() exercises the real eviction planner against the tiny RAW_PREVIEW_CACHE_MAX_SIZE_BYTES
 		// override below, so pull it through unmocked (a stub would silently skip the size-cap pass
 		// under test).
@@ -513,6 +503,17 @@ describe("RawPreviewCache", () => {
 
 			expect(fs.has(`${DIR}/old.jpg`)).toBe(false)
 			expect(fs.has(`${DIR}/fresh.jpg`)).toBe(true)
+		})
+
+		it("honours an explicit age", async () => {
+			const cache = await createCache()
+
+			writePreview("recent")
+			setMtime(`${DIR}/recent.jpg`, Date.now() - 60 * 1000)
+
+			await cache.gc(30 * 1000)
+
+			expect(fs.has(`${DIR}/recent.jpg`)).toBe(false)
 		})
 
 		it("evicts the oldest previews past RAW_PREVIEW_CACHE_MAX_SIZE_BYTES (mocked to 100), never the newest", async () => {
