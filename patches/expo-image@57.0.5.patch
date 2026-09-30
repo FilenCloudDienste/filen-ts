@@ -1,0 +1,52 @@
+diff --git a/ios/ExpoImage.podspec b/ios/ExpoImage.podspec
+index ea72ce827b184cdec4972c9c4202abd64cb43c3d..017fd2a529661ac4430e348b1da4ddfe3de12fa1 100644
+--- a/ios/ExpoImage.podspec
++++ b/ios/ExpoImage.podspec
+@@ -1,15 +1,6 @@
+ require 'json'
+ 
+ package = JSON.parse(File.read(File.join(__dir__, '..', 'package.json')))
+-podfile_properties = JSON.parse(File.read("#{Pod::Config.instance.installation_root}/Podfile.properties.json")) rescue {}
+-property_override = podfile_properties['expo-image.disable-libdav1d']
+-env_override = ENV['EXPO_IMAGE_DISABLE_LIBDAV1D']
+-disable_libdav1d =
+-  if property_override.nil?
+-    env_override == '1' || env_override == 'true'
+-  else
+-    property_override == 'true'
+-  end
+ 
+ Pod::Spec.new do |s|
+   s.name           = 'ExpoImage'
+@@ -29,10 +20,8 @@ Pod::Spec.new do |s|
+ 
+   s.dependency 'ExpoModulesCore'
+   s.dependency 'SDWebImage', '~> 5.21.0'
+-  s.dependency 'SDWebImageAVIFCoder', '~> 0.11.0'
+   s.dependency 'SDWebImageSVGCoder', '~> 1.7.0'
+   s.dependency 'SDWebImageWebPCoder', '~> 0.14.6'
+-  s.dependency 'libavif/libdav1d' unless disable_libdav1d
+ 
+   # Swift/Objective-C compatibility
+   s.pod_target_xcconfig = {
+diff --git a/ios/ImageModule.swift b/ios/ImageModule.swift
+index 033da4024ce4413c99df65d204717b2503d60511..cf0d12b4bac3fd494c00f513194b89141a144e8f 100644
+--- a/ios/ImageModule.swift
++++ b/ios/ImageModule.swift
+@@ -2,7 +2,6 @@
+ 
+ import ExpoModulesCore
+ internal import SDWebImage
+-internal import SDWebImageAVIFCoder
+ internal import SDWebImageSVGCoder
+ 
+ public final class ImageModule: Module {
+@@ -352,7 +351,7 @@ public final class ImageModule: Module {
+   static func registerCoders() {
+     SDImageCodersManager.shared.addCoder(WebPCoder.shared)
+     SDImageCodersManager.shared.addCoder(PSDCoder.shared)
+-    SDImageCodersManager.shared.addCoder(SDImageAVIFCoder.shared)
++    // AVIF is left to ImageIO (iOS 16+): the bundled libavif/dav1d coder aborts on some files in release builds.
+     SDImageCodersManager.shared.addCoder(SDImageSVGCoder.shared)
+     SDImageCodersManager.shared.addCoder(SDImageHEICCoder.shared)
+   }

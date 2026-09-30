@@ -57,6 +57,7 @@ patchedDependencies:
   expo-document-picker@57.0.1: patches/expo-document-picker@57.0.1.patch
   expo-file-system@57.0.6: patches/expo-file-system@57.0.6.patch
   expo-image-manipulator@57.0.16: patches/expo-image-manipulator@57.0.16.patch
+  expo-image@57.0.5: patches/expo-image@57.0.5.patch
   expo-media-library@57.0.4: patches/expo-media-library@57.0.4.patch
   expo-sharing@57.0.18: patches/expo-sharing@57.0.18.patch
   expo-video@57.0.3: patches/expo-video@57.0.3.patch
