@@ -14,7 +14,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import { formatRelativeTime } from "@/lib/time"
 import Icon from "@/features/notes/components/note/icon"
 import Menu from "@/features/notes/components/note/menu"
-import { cn, fastLocaleCompare } from "@filen/shared"
+import { cn, fastLocaleCompare, hasNoteWriteAccess } from "@filen/shared"
 import { PressableScale } from "@/components/ui/pressables"
 import { Checkbox } from "@/components/ui/checkbox"
 import Ionicons from "@expo/vector-icons/Ionicons"
@@ -115,9 +115,7 @@ const NoteRow = ({ item, nextNote, prevNote }: { item: DataItem; nextNote?: List
 	const sharedByOwnerEmail = isSharedToMe ? (item.participants.find(participant => participant.isOwner)?.email ?? null) : null
 	// A note shared TO us without write permission is view-only; surface it with an eye badge in the
 	// left column (alongside pin/favorite) so it reads as non-editable before the editor even opens.
-	const isReadOnly =
-		isSharedToMe &&
-		!item.participants.some(participant => participant.userId === stringifiedClient?.userId && participant.permissionsWrite)
+	const isReadOnly = isSharedToMe && !hasNoteWriteAccess(item, stringifiedClient?.userId)
 	const tags = [...item.tags].sort((a, b) => fastLocaleCompare(a.name ?? a.uuid, b.name ?? b.uuid))
 
 	// Notes are rendered inside a sectioned list (pinned / favorited /

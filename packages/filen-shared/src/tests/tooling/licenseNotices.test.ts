@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describeLicensing, poolLicenseTexts, repositoryOf, spdxOf, type PoolableNotice } from "@filen/shared/tooling"
+import { describedNotice, describeLicensing, poolLicenseTexts, repositoryOf, spdxOf, type PoolableNotice } from "@filen/shared/tooling"
 
 const APACHE =
 	"Apache License\nVersion 2.0, January 2004\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\nAPPENDIX: How to apply the Apache License to your work."
@@ -51,6 +51,25 @@ describe("describeLicensing", () => {
 
 	it("describes nothing without a directory", () => {
 		expect(describeLicensing(null, "MIT")).toEqual({ copyright: [], terms: [] })
+	})
+})
+
+describe("describedNotice", () => {
+	it("builds the entry in payload field order", () => {
+		const dir = packageDir({ LICENSE: "Copyright (c) 2020 Someone\n\nPermission is hereby granted." })
+		const entry = describedNotice({ name: "pkg", version: "1.0.0", license: "MIT", ecosystem: "npm", dir, repository: null })
+
+		expect(Object.keys(entry)).toEqual(["name", "version", "license", "ecosystem", "copyright", "repository", "texts", "terms"])
+		expect(entry).toEqual({
+			name: "pkg",
+			version: "1.0.0",
+			license: "MIT",
+			ecosystem: "npm",
+			copyright: ["Copyright (c) 2020 Someone"],
+			repository: null,
+			texts: [],
+			terms: ["Permission is hereby granted."]
+		})
 	})
 })
 

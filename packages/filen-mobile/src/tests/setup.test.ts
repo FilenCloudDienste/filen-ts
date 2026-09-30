@@ -68,6 +68,15 @@ vi.mock("@filen/shared", () => {
 		release(): void {
 			mockSemaphoreRelease()
 		}
+		async withPermit<T>(fn: () => Promise<T> | T): Promise<T> {
+			await this.acquire()
+
+			try {
+				return await fn()
+			} finally {
+				this.release()
+			}
+		}
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
@@ -324,10 +333,8 @@ describe("setup.setup", () => {
 		await expect(setup.setup()).rejects.toThrow("sqlite exploded")
 	})
 
-	// #184 — verify that the deferred mutex release fires unconditionally (in the
-	// finally block of run()), so the Semaphore is always returned even when the
-	// inner callback throws. Uses the inline LIFO-correct mock above.
-	it("releases the setup mutex (deferred cleanup) even when the inner callback rejects", async () => {
+	// #184 — the setup mutex is always returned, even when the inner callback throws.
+	it("releases the setup mutex even when the inner callback rejects", async () => {
 		const boom = new Error("init failed")
 		mockSecureStore.init.mockRejectedValue(boom)
 
@@ -336,7 +343,7 @@ describe("setup.setup", () => {
 		expect(mockSemaphoreRelease).toHaveBeenCalledOnce()
 	})
 
-	it("releases the setup mutex (deferred cleanup) on a successful run", async () => {
+	it("releases the setup mutex on a successful run", async () => {
 		await setup.setup()
 
 		expect(mockSemaphoreRelease).toHaveBeenCalledOnce()

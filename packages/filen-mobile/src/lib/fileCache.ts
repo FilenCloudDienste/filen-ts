@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import { extnameOf } from "@/lib/previewType"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore, run, runOrThrow } from "@filen/shared"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
 import { serialize, deserialize } from "@/lib/serializer"
 import { atomicWrite } from "@/lib/fsAtomic"
@@ -144,7 +144,7 @@ export class FileCache extends DiskCache {
 			}
 		}
 
-		const result = await run(async defer => {
+		return await runOrThrow(async defer => {
 			await this.clearBarrier.enter()
 
 			defer(() => {
@@ -176,9 +176,7 @@ export class FileCache extends DiskCache {
 				// and re-check the sidecar under the lock first. A concurrent get() holds this same mutex
 				// while writing a FRESH sidecar via atomicWrite (delete-temp-then-move) — without this,
 				// has() could delete the valid sidecar get() just materialized, forcing a needless re-download.
-				const mutex = this.getMutexForKey(cacheItemId(item))
-
-				await mutex.acquire()
+				const releaseKey = await this.keyMutexes.acquire(cacheItemId(item))
 
 				try {
 					if (!metadata.exists) {
@@ -205,7 +203,7 @@ export class FileCache extends DiskCache {
 
 					return false
 				} finally {
-					mutex.release()
+					releaseKey()
 				}
 			}
 
@@ -215,12 +213,6 @@ export class FileCache extends DiskCache {
 
 			return metadataMatchesItem(metadataContent, item)
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	public async get({ item, signal }: { item: CacheItem; signal?: AbortSignal }): Promise<FileSystem.File> {
@@ -236,20 +228,14 @@ export class FileCache extends DiskCache {
 			}
 		}
 
-		const result = await run(async defer => {
+		return await runOrThrow(async defer => {
 			await this.clearBarrier.enter()
 
 			defer(() => {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(cacheItemId(item))
-
-			await mutex.acquire()
-
-			defer(() => {
-				mutex.release()
-			})
+			defer(await this.keyMutexes.acquire(cacheItemId(item)))
 
 			const { file, metadata: metadataFile, parentDirectory } = this.getFiles(item)
 
@@ -356,12 +342,6 @@ export class FileCache extends DiskCache {
 				throw e
 			}
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	public async remove(item: CacheItem): Promise<void> {
@@ -369,20 +349,14 @@ export class FileCache extends DiskCache {
 			throw new Error("Item must be a file or shared file")
 		}
 
-		const result = await run(async defer => {
+		await runOrThrow(async defer => {
 			await this.clearBarrier.enter()
 
 			defer(() => {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(cacheItemId(item))
-
-			await mutex.acquire()
-
-			defer(() => {
-				mutex.release()
-			})
+			defer(await this.keyMutexes.acquire(cacheItemId(item)))
 
 			const { file, metadata: metadataFile, parentDirectory } = this.getFiles(item)
 
@@ -398,10 +372,6 @@ export class FileCache extends DiskCache {
 				parentDirectory.delete()
 			}
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
 	}
 
 	protected async runGc(age?: number): Promise<void> {
@@ -478,13 +448,7 @@ export class FileCache extends DiskCache {
 						gcSemaphore.release()
 					})
 
-					const mutex = this.getMutexForKey(uuid)
-
-					await mutex.acquire()
-
-					defer(() => {
-						mutex.release()
-					})
+					defer(await this.keyMutexes.acquire(uuid))
 
 					const parentDirectory = new FileSystem.Directory(FileSystem.Paths.join(PARENT_DIRECTORY.uri, uuid))
 

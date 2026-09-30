@@ -9,13 +9,15 @@ import type {
 	CopyUpdate
 } from "@filen/sdk-rs"
 import {
+	copyJobGlyph,
 	createCopyJob as createSharedCopyJob,
 	isCopyJobRunning,
 	type CopyJob as SharedCopyJob,
 	type CopyReportInput,
 	type CopyUpdateEvents,
 	type CopyUpdateInput,
-	type CopyDestination
+	type CopyDestination,
+	type CopyJobGlyph
 } from "@filen/shared"
 import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
@@ -23,7 +25,7 @@ import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/
 // The wasm side of @filen/shared's copy job: maps the SDK's copy values onto its inputs, and adds what
 // only web's copy card and transfers row use.
 
-export type { CopyDestination }
+export type { CopyDestination, CopyJobGlyph }
 
 export interface CopyJobFailure {
 	sourceUuid: string
@@ -32,28 +34,17 @@ export interface CopyJobFailure {
 	error: ErrorDTO
 }
 
-// What a copy's transfers row shows as its icon: the one item's kind, or several items.
-export type CopyJobGlyph = "directory" | "file" | "items"
-
 export function copyGlyphForItems(items: readonly DriveItem[]): CopyJobGlyph {
 	const [only] = items
 
-	if (only === undefined || items.length > 1) {
-		return "items"
-	}
-
-	return asDirectoryOrFile(only).type
+	return copyJobGlyph(items.length, only !== undefined && asDirectoryOrFile(only).type === "directory")
 }
 
 // A retry's entries carry SDK items: a file is the only kind with chunks.
 export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph {
 	const [only] = entries
 
-	if (only === undefined || entries.length > 1) {
-		return "items"
-	}
-
-	return "chunks" in only.item ? "file" : "directory"
+	return copyJobGlyph(entries.length, only !== undefined && !("chunks" in only.item))
 }
 
 export interface CopyJob extends SharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, ErrorDTO> {

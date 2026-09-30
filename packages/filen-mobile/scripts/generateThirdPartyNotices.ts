@@ -3,13 +3,15 @@ import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
 import {
-	describeLicensing,
+	describedNotice,
 	listInstalledNpm,
 	poolLicenseTexts,
 	readJson,
 	repositoryOf,
 	spdxOf,
-	type InstalledNpmPackage
+	type CollectedNotice,
+	type InstalledNpmPackage,
+	type NoticeEntry
 } from "@filen/shared/tooling"
 
 /**
@@ -44,19 +46,11 @@ const here = dirname(fileURLToPath(import.meta.url))
 const packageRoot = join(here, "..")
 const OUTPUT = join(packageRoot, "src", "features", "settings", "thirdPartyNotices.generated.ts")
 
-type Entry = {
-	name: string
-	version: string
-	license: string
-	ecosystem: "npm" | "rust" | "pod" | "gradle"
-	copyright: string[]
-	repository: string | null
-	/** Indices into the deduplicated boilerplate table. Empty when no license file was found. */
-	texts: number[]
-}
+const ECOSYSTEMS = ["npm", "rust", "pod", "gradle"] as const
 
-/** An entry before its terms are pooled — carries the verbatim texts the dedup pass replaces. */
-type Collected = Entry & { terms: string[] }
+type Ecosystem = (typeof ECOSYSTEMS)[number]
+
+type Collected = CollectedNotice<Ecosystem>
 
 /**
  * Highest version first; a release outranks its own prereleases. Leading numeric segments are compared
@@ -145,19 +139,16 @@ function collectNpm(): Collected[] {
 
 		seen.add(name)
 
-		const license = spdxOf(manifest["license"] ?? manifest["licenses"])
-		const licensing = describeLicensing(dir, license)
-
-		entries.push({
-			name,
-			version: typeof manifest["version"] === "string" ? manifest["version"] : version,
-			license,
-			ecosystem: "npm",
-			copyright: licensing.copyright,
-			repository: repositoryOf(manifest["repository"]),
-			texts: [],
-			terms: licensing.terms
-		})
+		entries.push(
+			describedNotice({
+				name,
+				version: typeof manifest["version"] === "string" ? manifest["version"] : version,
+				license: spdxOf(manifest["license"] ?? manifest["licenses"]),
+				ecosystem: "npm",
+				dir,
+				repository: repositoryOf(manifest["repository"])
+			})
+		)
 	}
 
 	return entries
@@ -196,19 +187,16 @@ function collectRust(): Collected[] {
 
 		const dir = roots.map(root => join(root, `${name}-${version}`)).find(existsSync) ?? null
 		const manifest = dir && existsSync(join(dir, "Cargo.toml")) ? readFileSync(join(dir, "Cargo.toml"), "utf8") : ""
-		const license = /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN"
-		const licensing = describeLicensing(dir, license)
-
-		entries.push({
-			name,
-			version,
-			license,
-			ecosystem: "rust",
-			copyright: licensing.copyright,
-			repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null,
-			texts: [],
-			terms: licensing.terms
-		})
+		entries.push(
+			describedNotice({
+				name,
+				version,
+				license: /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN",
+				ecosystem: "rust",
+				dir,
+				repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null
+			})
+		)
 	}
 
 	return entries
@@ -276,18 +264,17 @@ function collectPods(): Collected[] {
 
 		const spec = podSpec(name)
 		const license = spdxOf(spec?.license) === "UNKNOWN" ? spdxOf((spec?.license as { type?: unknown })?.type) : spdxOf(spec?.license)
-		const licensing = describeLicensing(join(podsRoot, name), license)
 
-		entries.push({
-			name,
-			version,
-			license,
-			ecosystem: "pod",
-			copyright: licensing.copyright,
-			repository: repositoryOf(spec?.homepage) ?? repositoryOf(spec?.source?.git),
-			texts: [],
-			terms: licensing.terms
-		})
+		entries.push(
+			describedNotice({
+				name,
+				version,
+				license,
+				ecosystem: "pod",
+				dir: join(podsRoot, name),
+				repository: repositoryOf(spec?.homepage) ?? repositoryOf(spec?.source?.git)
+			})
+		)
 	}
 
 	return entries
@@ -354,7 +341,7 @@ const collected = [...collectNpm(), ...collectRust(), ...collectPods(), ...colle
 
 const texts = poolLicenseTexts(collected)
 
-const notices: Entry[] = collected
+const notices: NoticeEntry<Ecosystem>[] = collected
 	.map(({ terms: _terms, ...entry }) => entry)
 	.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
 
@@ -373,7 +360,7 @@ export type ThirdPartyNotice = {
 	name: string
 	version: string
 	license: string
-	ecosystem: "npm" | "rust" | "pod" | "gradle"
+	ecosystem: ${ECOSYSTEMS.map(ecosystem => JSON.stringify(ecosystem)).join(" | ")}
 	copyright: string[]
 	repository: string | null
 	texts: number[]
@@ -386,7 +373,7 @@ export const THIRD_PARTY_NOTICES: readonly ThirdPartyNotice[] = ${JSON.stringify
 
 writeFileSync(OUTPUT, output, "utf8")
 
-const perEcosystem = ["npm", "rust", "pod", "gradle"].map(ecosystem => {
+const perEcosystem = ECOSYSTEMS.map(ecosystem => {
 	const rows = notices.filter(entry => entry.ecosystem === ecosystem)
 
 	return `  ${`${ecosystem}:`.padEnd(15)} ${String(rows.length).padStart(4)}  (${rows.filter(entry => entry.texts.length > 0).length} with text)`

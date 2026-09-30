@@ -24,10 +24,7 @@ import { randomUUID } from "expo-crypto"
 import offline from "@/features/offline/offline"
 import { getRealDriveItemParent, normalParentUuidOf } from "@/lib/sdkUnwrap"
 import * as Clipboard from "expo-clipboard"
-import {
-	fetchData as fetchPublicLinkStatus,
-	publicLinkUrlFromStatus
-} from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
+import { fetchData as fetchPublicLinkStatus, publicLinkUrlFromStatus } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 import { getPreviewType } from "@/lib/previewType"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { openDriveSelect } from "@/features/drive/driveSelectSession"
@@ -39,6 +36,9 @@ import {
 	canNavigateIntoDirectory,
 	hiddenFilterAppliesTo,
 	isFileItem,
+	isOwnEditableView,
+	isOwnItemView,
+	offersItemInfo,
 	resolveDriveContainingDirectoryTarget,
 	resolveDriveNavigationTarget
 } from "@/features/drive/driveSelectors"
@@ -92,13 +92,7 @@ export function createMenuButtons({
 		drivePath
 	})
 
-	const offersMove =
-		(item.type === "file" || item.type === "directory") &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "links" ||
-			drivePath.type === "recents")
+	const offersMove = (item.type === "file" || item.type === "directory") && isOwnEditableView(drivePath)
 
 	// Bulk-selection entry: the row's Menu owns iOS long-press (contextmenu),
 	// so we can't add an onLongPress to the inner Pressable. The Menu's
@@ -181,15 +175,7 @@ export function createMenuButtons({
 	// reads: meta (favorite/info/versions/color) → modify (rename/move) →
 	// output (download/share) → destructive. Matches iOS Files conventions.
 
-	if (
-		(item.type === "file" || item.type === "directory") &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "links" ||
-			drivePath.type === "recents" ||
-			drivePath.type === "photos")
-	) {
+	if ((item.type === "file" || item.type === "directory") && isOwnItemView(drivePath)) {
 		menuButtons.push({
 			id: "favorite",
 			requiresOnline: true,
@@ -214,15 +200,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		drivePath.type === "drive" ||
-		drivePath.type === "sharedOut" ||
-		drivePath.type === "favorites" ||
-		drivePath.type === "links" ||
-		drivePath.type === "recents" ||
-		drivePath.type === "offline" ||
-		drivePath.type === "photos"
-	) {
+	if (offersItemInfo(drivePath)) {
 		menuButtons.push({
 			id: "info",
 			title: t("info"),
@@ -262,14 +240,7 @@ export function createMenuButtons({
 		}
 	}
 
-	if (
-		item.type === "directory" &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "links" ||
-			drivePath.type === "recents")
-	) {
+	if (item.type === "directory" && isOwnEditableView(drivePath)) {
 		menuButtons.push({
 			id: "color",
 			requiresOnline: true,
@@ -291,15 +262,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		(item.type === "file" || item.type === "directory") &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "links" ||
-			drivePath.type === "recents" ||
-			drivePath.type === "photos")
-	) {
+	if ((item.type === "file" || item.type === "directory") && isOwnItemView(drivePath)) {
 		menuButtons.push({
 			id: "rename",
 			requiresOnline: true,
@@ -427,15 +390,7 @@ export function createMenuButtons({
 		})
 	}
 
-	if (
-		(item.type === "file" || item.type === "directory") &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "links" ||
-			drivePath.type === "recents" ||
-			drivePath.type === "photos")
-	) {
+	if ((item.type === "file" || item.type === "directory") && isOwnItemView(drivePath)) {
 		// Export (download → OS share sheet) belongs here too, not only under Download — exporting
 		// to another app IS a form of sharing. File-only, so null (omitted) for shared directories.
 		const shareExportButton = buildExportButton({ item, id: "shareExport", t })

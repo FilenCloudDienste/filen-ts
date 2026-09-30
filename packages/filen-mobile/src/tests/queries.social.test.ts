@@ -31,8 +31,7 @@ vi.mock("@filen/shared", async () => {
 
 	return {
 		...real,
-		parseFilenPublicLink: mockParseFilenPublicLink,
-		sortParams: (p: unknown) => p
+		parseFilenPublicLink: mockParseFilenPublicLink
 	}
 })
 

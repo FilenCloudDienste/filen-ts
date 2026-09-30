@@ -1,7 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import queryClient, { queryUpdater, getCachedQuery, type QueryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
-import { sortParams } from "@filen/shared"
 import { type Chat } from "@/types"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { wrapQueryMessage } from "@/features/chats/chatsWrap"
@@ -53,7 +52,7 @@ export function chatMessagesQueryKey(params: UseChatMessagesQueryParams): { uuid
 }
 
 export function chatMessagesQueryFullKey(params: UseChatMessagesQueryParams): unknown[] {
-	return [BASE_QUERY_KEY, sortParams(chatMessagesQueryKey(params))]
+	return [BASE_QUERY_KEY, chatMessagesQueryKey(params)]
 }
 
 export function useChatMessagesQuery(

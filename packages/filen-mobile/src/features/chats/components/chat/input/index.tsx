@@ -34,7 +34,7 @@ import { pickDocuments } from "@/lib/documentPicker"
 import { pickMedia, pickedAssetName, type MediaSource } from "@/lib/mediaPicker"
 import { selectDriveItems } from "@/features/drive/driveSelectSession"
 import drive from "@/features/drive/drive"
-import useAccountQuery from "@/queries/useAccount.query"
+import useAccountQuery, { isAccountSubscribed } from "@/queries/useAccount.query"
 import MentionSuggestions from "@/features/chats/components/chat/input/mentionSuggestions"
 import EmojiSuggestions from "@/features/chats/components/chat/input/emojiSuggestions"
 import ReplyTo from "@/features/chats/components/chat/input/replyTo"
@@ -152,7 +152,7 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 	const accountQuery = useAccountQuery()
 
-	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
+	const userIsSubbed = isAccountSubscribed(accountQuery)
 
 	const insertLinksIntoInput = (links: string[]) => {
 		const replacedMessage = chatInputValue.trim().length === 0 ? `${links.join("\n")} ` : `${chatInputValue} ${links.join("\n")}`
@@ -222,18 +222,14 @@ const Input = ({ chat }: { chat: Chat }) => {
 
 	const sendTypingEvent = useCallback(
 		async (type: ChatTypingType) => {
-			const result = await run(async defer => {
-				await sendTypingEventSemaphoreRef.current.acquire()
-
-				defer(() => {
-					sendTypingEventSemaphoreRef.current.release()
-				})
-
-				await chats.sendTyping({
-					chat,
-					type
-				})
-			})
+			const result = await run(() =>
+				sendTypingEventSemaphoreRef.current.withPermit(() =>
+					chats.sendTyping({
+						chat,
+						type
+					})
+				)
+			)
 
 			if (!result.success) {
 				logger.warn("chats", "sendTypingEvent failed", { error: result.error })

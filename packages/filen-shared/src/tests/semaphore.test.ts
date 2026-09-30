@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { Semaphore } from "@filen/shared"
+import { Semaphore, KeyedSemaphores } from "@filen/shared"
 
 describe("Semaphore", () => {
 	describe("constructor", () => {
@@ -190,6 +190,67 @@ describe("Semaphore", () => {
 		})
 	})
 
+	describe("withPermit", () => {
+		it("should hold a permit while fn runs and return its result", async () => {
+			const sem = new Semaphore(1)
+
+			const result = await sem.withPermit(() => {
+				expect(sem.count()).toBe(1)
+
+				return 42
+			})
+
+			expect(result).toBe(42)
+			expect(sem.count()).toBe(0)
+		})
+
+		it("should release the permit when fn throws", async () => {
+			const sem = new Semaphore(1)
+
+			await expect(
+				sem.withPermit(async () => {
+					throw new Error("boom")
+				})
+			).rejects.toThrow("boom")
+
+			expect(sem.count()).toBe(0)
+		})
+
+		it("should serialize callers", async () => {
+			const sem = new Semaphore(1)
+			const order: string[] = []
+
+			await Promise.all([
+				sem.withPermit(async () => {
+					order.push("a:start")
+
+					await new Promise(resolve => setTimeout(resolve, 10))
+
+					order.push("a:end")
+				}),
+				sem.withPermit(() => {
+					order.push("b")
+				})
+			])
+
+			expect(order).toEqual(["a:start", "a:end", "b"])
+		})
+
+		it("should not run fn when the acquire is purged", async () => {
+			const sem = new Semaphore(1)
+			const fn = vi.fn()
+
+			await sem.acquire()
+
+			const pending = sem.withPermit(fn)
+
+			sem.purge()
+
+			await expect(pending).rejects.toBe("Task has been purged")
+			expect(fn).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("count", () => {
 		it("should reflect current active count", async () => {
 			const sem = new Semaphore(3)
@@ -351,5 +412,82 @@ describe("Semaphore", () => {
 				}
 			}
 		)
+	})
+})
+
+describe("KeyedSemaphores", () => {
+	it("for() returns the same instance per key and distinct instances across keys", () => {
+		const keyed = new KeyedSemaphores()
+
+		expect(keyed.for("a")).toBe(keyed.for("a"))
+		expect(keyed.for("a")).not.toBe(keyed.for("b"))
+	})
+
+	it("acquire() serializes callers of the same key", async () => {
+		const keyed = new KeyedSemaphores()
+		const order: string[] = []
+
+		const releaseA = await keyed.acquire("k")
+		const pendingB = keyed.acquire("k").then(release => {
+			order.push("b")
+
+			release()
+		})
+
+		await Promise.resolve()
+
+		order.push("a")
+
+		releaseA()
+
+		await pendingB
+
+		expect(order).toEqual(["a", "b"])
+	})
+
+	it("acquire() does not block other keys", async () => {
+		const keyed = new KeyedSemaphores()
+
+		await keyed.acquire("a")
+
+		const releaseB = await keyed.acquire("b")
+
+		expect(typeof releaseB).toBe("function")
+	})
+
+	it("drops the entry once idle and keeps it while a waiter is queued", async () => {
+		const keyed = new KeyedSemaphores()
+		const releaseA = await keyed.acquire("k")
+		const held = keyed.for("k")
+		const pendingB = keyed.acquire("k")
+
+		releaseA()
+
+		// The waiter holds the permit, so the entry survives.
+		expect(keyed.for("k")).toBe(held)
+
+		const releaseB = await pendingB
+
+		releaseB()
+
+		expect(keyed.for("k")).not.toBe(held)
+	})
+
+	it("release is idempotent", async () => {
+		const keyed = new KeyedSemaphores()
+		const releaseA = await keyed.acquire("k")
+		const semaphore = keyed.for("k")
+		const pendingB = keyed.acquire("k")
+
+		releaseA()
+		releaseA()
+
+		expect(semaphore.count()).toBe(1)
+
+		const releaseB = await pendingB
+
+		releaseB()
+
+		expect(semaphore.count()).toBe(0)
 	})
 })

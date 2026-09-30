@@ -175,19 +175,7 @@ export function buildSelectionMenuButtons({
 					// addTracksToPlaylist dedups against the FRESHEST copy and re-stamps the target uuid.
 					await audio.addTracksToPlaylist({
 						playlist: target,
-						tracks: selectedTracks.map(t => ({
-							uuid: t.uuid,
-							name: t.name,
-							mime: t.mime,
-							size: t.size,
-							bucket: t.bucket,
-							key: t.key,
-							version: t.version,
-							chunks: t.chunks,
-							region: t.region,
-							playlist: target.uuid,
-							item: t.item
-						}))
+						tracks: selectedTracks
 					})
 				}
 			})

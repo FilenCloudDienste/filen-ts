@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
 import type { DriveItem } from "@/types"
-import { run, Semaphore, dirnameOf, type DeferFn } from "@filen/shared"
+import { run, runOrThrow, Semaphore, KeyedSemaphores, dirnameOf, errorMessage, type DeferFn } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"
@@ -190,7 +190,7 @@ export class Offline {
 	// isItemStored guard (cold cache) and race the destructive parent-directory delete/recreate, so
 	// call B wipes call A's in-flight download target mid-transfer. Keyed by UUID so distinct items
 	// still download concurrently up to storeMutex(3).
-	private readonly storeItemMutexes = new Map<string, Semaphore>()
+	private readonly storeItemMutexes = new KeyedSemaphores()
 	// clearBarrier: serializes clearAll against in-flight storeFile/storeDirectory/reconcileTree/removeItem.
 	private readonly clearBarrier = new ClearBarrier()
 	private readonly listDirectoriesCache = new Map<string, Awaited<ReturnType<Offline["listDirectories"]>>>()
@@ -254,42 +254,6 @@ export class Offline {
 	}
 
 	/**
-	 * Acquire the per-UUID store lock, serializing storeFile/storeDirectory/reconcileTree for the same
-	 * item so the check-then-act (guards → local mutations → download → commit) runs atomically per
-	 * UUID. Distinct UUIDs are unaffected and still bounded only by storeMutex(3).
-	 * Returns a release function that frees the slot and prunes the map entry once no one else holds or
-	 * waits on it, keeping the map bounded.
-	 */
-	private async acquireStoreItemLock(uuid: string): Promise<() => void> {
-		const existing = this.storeItemMutexes.get(uuid)
-		const mutex = existing ?? new Semaphore(1)
-
-		if (!existing) {
-			this.storeItemMutexes.set(uuid, mutex)
-		}
-
-		await mutex.acquire()
-
-		let released = false
-
-		return () => {
-			if (released) {
-				return
-			}
-
-			released = true
-
-			mutex.release()
-
-			// Prune the entry only when fully idle (no holder, no waiters) so a concurrent waiter
-			// keeps using the same Semaphore instance instead of racing on a fresh one.
-			if (mutex.count() === 0 && this.storeItemMutexes.get(uuid) === mutex) {
-				this.storeItemMutexes.delete(uuid)
-			}
-		}
-	}
-
-	/**
 	 * Enter a per-uuid store section: clearBarrier → per-uuid lock → [storeMutex] → ensureDirectories.
 	 * This is the one lock order every store method takes (callers never hold the per-uuid lock when
 	 * entering another section), so no deadlock is possible. Releases are registered on the caller's
@@ -302,11 +266,7 @@ export class Offline {
 			this.clearBarrier.leave()
 		})
 
-		const releaseStoreItemLock = await this.acquireStoreItemLock(uuid)
-
-		defer(() => {
-			releaseStoreItemLock()
-		})
+		defer(await this.storeItemMutexes.acquire(uuid))
 
 		if (opts?.storeMutex) {
 			await this.storeMutex.acquire()
@@ -509,87 +469,76 @@ export class Offline {
 	// Rebuild the on-disk index from the per-item metas (serialized by indexMutex). Does NOT take the
 	// clearBarrier — see updateIndex() above for the public, barrier-participating entry point.
 	private async rebuildIndex(): Promise<void> {
-		await run(
-			async defer => {
-				await this.indexMutex.acquire()
+		await this.indexMutex.withPermit(async () => {
+			// Previous in-memory index — the fixed-point base for the index write below. It
+			// survives invalidateCaches (only rebuildIndex, clearAll and readIndex assign it).
+			const previousIndex = this.indexCache
 
-				defer(() => {
-					this.indexMutex.release()
-				})
-
-				// Previous in-memory index — the fixed-point base for the index write below. It
-				// survives invalidateCaches (only rebuildIndex, clearAll and readIndex assign it).
-				const previousIndex = this.indexCache
-
-				// NO-MUTATION SKIP: this process is the offline store's only writer and every
-				// disk-mutation path bumps mutationCounter (via invalidateCaches). An unchanged
-				// counter since the last FULL in-process rebuild proves this rebuild would produce
-				// the identical index — skip the meta re-reads and write entirely. The first
-				// updateIndex of a session never skips (indexRebuildMutationCounter starts -1), so
-				// staleness left by a crashed previous session is rebuilt away.
-				if (previousIndex !== null && this.indexRebuildMutationCounter === this.mutationCounter) {
-					this.ensureDirectories()
-
-					await this.buildUuidToTopLevelIndex()
-
-					return
-				}
-
+			// NO-MUTATION SKIP: this process is the offline store's only writer and every
+			// disk-mutation path bumps mutationCounter (via invalidateCaches). An unchanged
+			// counter since the last FULL in-process rebuild proves this rebuild would produce
+			// the identical index — skip the meta re-reads and write entirely. The first
+			// updateIndex of a session never skips (indexRebuildMutationCounter starts -1), so
+			// staleness left by a crashed previous session is rebuilt away.
+			if (previousIndex !== null && this.indexRebuildMutationCounter === this.mutationCounter) {
 				this.ensureDirectories()
-				this.invalidateCaches()
 
-				const [files, directories] = await Promise.all([this.listFiles(), this.listDirectoriesRecursive()])
-				const indexFiles: Index["files"] = {}
-				const indexDirectories: Index["directories"] = {}
-
-				const addToIndex = (target: Index["files"], entries: readonly OfflineEntry[]): void => {
-					for (const { item, parent } of entries) {
-						target[item.data.uuid] = {
-							item,
-							parent
-						}
-					}
-				}
-
-				addToIndex(indexFiles, files)
-				addToIndex(indexDirectories, directories.directories)
-				addToIndex(indexFiles, directories.files)
-
-				const index: Index = {
-					files: indexFiles,
-					directories: indexDirectories
-				}
-
-				// Skip the (multi-MB at scale) serialize + atomic rewrite when the rebuilt index
-				// structurally equals the previous one and the file is still on disk — it already
-				// holds exactly this content. serializeEquals is conservative: any doubt falls
-				// back to the write.
-				const indexUnchanged = previousIndex !== null && INDEX_FILE.info().exists && serializeEquals(index, previousIndex)
-
-				if (indexUnchanged) {
-					// Structurally equal: no stored-offline answer can flip, so skip the selector re-runs.
-					this.indexCache = index
-				} else {
-					atomicWrite(INDEX_FILE, serialize(index satisfies Index))
-
-					this.setIndexCache(index)
-				}
-
-				// Eagerly warm uuidToTopLevelCache so the sync isItemTopLevelStoredSync
-				// used by drive item menus returns a defined answer immediately after
-				// boot. We just walked every top-level directory above; this re-reads their
-				// meta but is the price for a clean cache invariant: "indexCache set
-				// ⇒ uuidToTopLevelCache set".
 				await this.buildUuidToTopLevelIndex()
 
-				// Mark this rebuild as current — updateIndex calls with no interleaving mutation
-				// take the no-mutation skip above.
-				this.indexRebuildMutationCounter = this.mutationCounter
-			},
-			{
-				throw: true
+				return
 			}
-		)
+
+			this.ensureDirectories()
+			this.invalidateCaches()
+
+			const [files, directories] = await Promise.all([this.listFiles(), this.listDirectoriesRecursive()])
+			const indexFiles: Index["files"] = {}
+			const indexDirectories: Index["directories"] = {}
+
+			const addToIndex = (target: Index["files"], entries: readonly OfflineEntry[]): void => {
+				for (const { item, parent } of entries) {
+					target[item.data.uuid] = {
+						item,
+						parent
+					}
+				}
+			}
+
+			addToIndex(indexFiles, files)
+			addToIndex(indexDirectories, directories.directories)
+			addToIndex(indexFiles, directories.files)
+
+			const index: Index = {
+				files: indexFiles,
+				directories: indexDirectories
+			}
+
+			// Skip the (multi-MB at scale) serialize + atomic rewrite when the rebuilt index
+			// structurally equals the previous one and the file is still on disk — it already
+			// holds exactly this content. serializeEquals is conservative: any doubt falls
+			// back to the write.
+			const indexUnchanged = previousIndex !== null && INDEX_FILE.info().exists && serializeEquals(index, previousIndex)
+
+			if (indexUnchanged) {
+				// Structurally equal: no stored-offline answer can flip, so skip the selector re-runs.
+				this.indexCache = index
+			} else {
+				atomicWrite(INDEX_FILE, serialize(index satisfies Index))
+
+				this.setIndexCache(index)
+			}
+
+			// Eagerly warm uuidToTopLevelCache so the sync isItemTopLevelStoredSync
+			// used by drive item menus returns a defined answer immediately after
+			// boot. We just walked every top-level directory above; this re-reads their
+			// meta but is the price for a clean cache invariant: "indexCache set
+			// ⇒ uuidToTopLevelCache set".
+			await this.buildUuidToTopLevelIndex()
+
+			// Mark this rebuild as current — updateIndex calls with no interleaving mutation
+			// take the no-mutation skip above.
+			this.indexRebuildMutationCounter = this.mutationCounter
+		})
 	}
 
 	// Every swap goes through here so useOfflineStore's stored-offline selectors re-run.
@@ -604,61 +553,51 @@ export class Offline {
 			return this.indexCache
 		}
 
-		const result = await run(async defer => {
-			await this.indexMutex.acquire()
+		return await runOrThrow(() =>
+			this.indexMutex.withPermit(async () => {
+				if (this.indexCache) {
+					return this.indexCache
+				}
 
-			defer(() => {
-				this.indexMutex.release()
-			})
+				this.ensureDirectories()
 
-			if (this.indexCache) {
-				return this.indexCache
-			}
+				const indexInfo = INDEX_FILE.info()
 
-			this.ensureDirectories()
+				if (!indexInfo.exists || (indexInfo.size ?? 0) === 0) {
+					return {
+						files: {},
+						directories: {}
+					} satisfies Index
+				}
 
-			const indexInfo = INDEX_FILE.info()
+				const readResult = await run(async () => {
+					const index: Index = deserialize(await INDEX_FILE.text())
 
-			if (!indexInfo.exists || (indexInfo.size ?? 0) === 0) {
+					if (Object.keys(index).length === 0) {
+						throw new Error("Index file is empty")
+					}
+
+					return index
+				})
+
+				if (readResult.success) {
+					this.setIndexCache(readResult.data)
+
+					return readResult.data
+				}
+
+				logger.warn("offline", "Index file corrupt — deleted and reset to empty", { error: readResult.error })
+
+				if (INDEX_FILE.exists) {
+					INDEX_FILE.delete()
+				}
+
 				return {
 					files: {},
 					directories: {}
 				} satisfies Index
-			}
-
-			const readResult = await run(async () => {
-				const index: Index = deserialize(await INDEX_FILE.text())
-
-				if (Object.keys(index).length === 0) {
-					throw new Error("Index file is empty")
-				}
-
-				return index
 			})
-
-			if (readResult.success) {
-				this.setIndexCache(readResult.data)
-
-				return readResult.data
-			}
-
-			logger.warn("offline", "Index file corrupt — deleted and reset to empty", { error: readResult.error })
-
-			if (INDEX_FILE.exists) {
-				INDEX_FILE.delete()
-			}
-
-			return {
-				files: {},
-				directories: {}
-			} satisfies Index
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
+		)
 	}
 
 	// Sync variant of isItemStored over the in-memory index, for render-time reads. Returns
@@ -1021,7 +960,7 @@ export class Offline {
 		background?: boolean
 		signal?: AbortSignal
 	}): Promise<OfflineSyncError[]> {
-		const result = await run(async defer => {
+		return await runOrThrow(async defer => {
 			if (!isDirectoryItem(directory)) {
 				throw new Error("Item not of type directory")
 			}
@@ -1210,9 +1149,7 @@ export class Offline {
 					return finishAborted()
 				}
 
-				pushError(
-					treeError("listing", listingResult.error instanceof Error ? listingResult.error.message : String(listingResult.error))
-				)
+				pushError(treeError("listing", errorMessage(listingResult.error)))
 
 				return finish(errors)
 			}
@@ -1486,7 +1423,7 @@ export class Offline {
 			}
 
 			if (!opsResult.success) {
-				pushError(treeError("store", opsResult.error instanceof Error ? opsResult.error.message : String(opsResult.error)))
+				pushError(treeError("store", errorMessage(opsResult.error)))
 
 				return finish(errors)
 			}
@@ -1524,12 +1461,7 @@ export class Offline {
 				)
 
 				if (!downloadResult.success) {
-					pushError(
-						treeError(
-							"download",
-							downloadResult.error instanceof Error ? downloadResult.error.message : String(downloadResult.error)
-						)
-					)
+					pushError(treeError("download", errorMessage(downloadResult.error)))
 
 					return finish(errors)
 				}
@@ -1568,7 +1500,7 @@ export class Offline {
 							}
 						}
 
-						const errorMessage = await run(async () => downloadError.error.message())
+						const downloadMessage = await run(async () => downloadError.error.message())
 
 						pushError(
 							makeSyncError({
@@ -1577,7 +1509,7 @@ export class Offline {
 								name: matched?.item.data.decryptedMeta?.name ?? directoryName,
 								itemType: matched?.item.type ?? directory.type,
 								kind: "download",
-								message: errorMessage.success ? errorMessage.data : "Download failed"
+								message: downloadMessage.success ? downloadMessage.data : "Download failed"
 							})
 						)
 					}
@@ -1981,12 +1913,6 @@ export class Offline {
 			// reporting the listing degradation until it clears.
 			return errors
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	// Resolves true when the file IS stored offline on return (download completed + meta written,
@@ -2124,7 +2050,7 @@ export class Offline {
 		parent: OfflineParent
 		signal?: AbortSignal
 	}): Promise<boolean> {
-		const result = await run(async defer => {
+		return await runOrThrow(async defer => {
 			if (!isFileItem(item)) {
 				throw new Error("Item not of type file")
 			}
@@ -2200,12 +2126,6 @@ export class Offline {
 
 			return true
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	public async storeDirectory({
@@ -2700,7 +2620,7 @@ export class Offline {
 	}
 
 	public async removeItem(item: DriveItem): Promise<void> {
-		const result = await run(async defer => {
+		await runOrThrow(async defer => {
 			// The per-uuid lock keeps a removal from interleaving with a same-uuid reconcile/redownload
 			// mid-pass — without it the delete can land between that pass's download and commit,
 			// whose meta/index write then resurrects the item.
@@ -2764,10 +2684,6 @@ export class Offline {
 				})
 			}
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
 	}
 
 	// Looks up a file's local path: first checks standalone files/, then the owning directory tree's

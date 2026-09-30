@@ -20,9 +20,17 @@
 			"types": "./src/dom/index.ts",
 			"default": "./src/dom/index.ts"
 		},
+		"./emojis": {
+			"types": "./src/emojis/index.ts",
+			"default": "./src/emojis/index.ts"
+		},
 		"./tooling": {
 			"types": "./src/tooling/licenseNotices.ts",
 			"default": "./src/tooling/licenseNotices.ts"
+		},
+		"./tooling/i18n": {
+			"types": "./src/tooling/i18nPipeline.ts",
+			"default": "./src/tooling/i18nPipeline.ts"
 		}
 	},
 	"scripts": {

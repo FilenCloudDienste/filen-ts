@@ -7,7 +7,7 @@ import { useEffect, useState } from "react"
 import events from "@/lib/events"
 import {
 	run,
-	Semaphore,
+	KeyedSemaphores,
 	driveItemName,
 	parsePlaylist,
 	type Playlist,
@@ -19,7 +19,8 @@ import {
 	reorderPlaylistFile as reorderPlaylistFileShared
 } from "@filen/shared"
 import auth from "@/lib/auth"
-import { AnyNormalDir, DirMeta_Tags, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
+import { ensureDotFilenSubdirectory } from "@/lib/dotFilenDirectory"
+import { AnyNormalDir, AnyFile, FileMeta_Tags, FileMeta, ParentUuid, type Dir } from "@filen/sdk-rs"
 import { Buffer } from "react-native-quick-crypto"
 import { wrapAbortSignalForSdk, disposeSdkAbortSignal, toSignalOpts } from "@/lib/signals"
 import { playlistsQueryUpdate, playlistsQueryGet, playlistPatchedSinceNow } from "@/features/audio/queries/usePlaylists.query"
@@ -126,7 +127,7 @@ export class Audio {
 	// concurrent edits (rename / add / remove / reorder / dead-file cleanup) re-read the freshest copy
 	// and compose, instead of racing the read-modify-upload and clobbering each other. A delete waits for
 	// them too, or an upload still out would bring the playlist back. Keyed by uuid.
-	private readonly playlistWriteMutexes = new Map<string, Semaphore>()
+	private readonly playlistWriteMutexes = new KeyedSemaphores()
 
 	private state = new Proxy<State>(
 		{
@@ -1058,43 +1059,7 @@ export class Audio {
 	}
 
 	public async getPlaylistsDirectory(signal?: AbortSignal): Promise<Dir> {
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		let dotFilenDir = (
-			await authedSdkClient.listDir(
-				new AnyNormalDir.Root({
-					uuid: authedSdkClient.root().uuid
-				}),
-				toSignalOpts(signal)
-			)
-		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === ".filen")
-
-		if (!dotFilenDir) {
-			dotFilenDir = await authedSdkClient.createDir(
-				new AnyNormalDir.Root({
-					uuid: authedSdkClient.root().uuid
-				}),
-				".filen",
-				toSignalOpts(signal)
-			)
-		}
-
-		let playlistsDir = (
-			await authedSdkClient.listDir(
-				new AnyNormalDir.Dir(dotFilenDir),
-				toSignalOpts(signal)
-			)
-		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === "playlists")
-
-		if (!playlistsDir) {
-			playlistsDir = await authedSdkClient.createDir(
-				new AnyNormalDir.Dir(dotFilenDir),
-				"Playlists",
-				toSignalOpts(signal)
-			)
-		}
-
-		return playlistsDir
+		return await ensureDotFilenSubdirectory("Playlists", signal)
 	}
 
 	private playlistFileToDriveItem(file: PlaylistFile, now: number): DriveItemFileExtracted {
@@ -1281,18 +1246,6 @@ export class Audio {
 		return parsedPlaylists.filter(p => p !== null)
 	}
 
-	private playlistWriteMutex(uuid: string): Semaphore {
-		let mutex = this.playlistWriteMutexes.get(uuid)
-
-		if (!mutex) {
-			mutex = new Semaphore(1)
-
-			this.playlistWriteMutexes.set(uuid, mutex)
-		}
-
-		return mutex
-	}
-
 	/**
 	 * Serializes every whole-file write to a given playlist AND re-reads the freshest copy from the
 	 * query cache as the merge base, so concurrent edits (rename / add / remove / reorder / dead-file
@@ -1311,9 +1264,7 @@ export class Audio {
 		signal?: AbortSignal
 	}): Promise<void> {
 		const uuid = playlist.uuid
-		const mutex = this.playlistWriteMutex(uuid)
-
-		await mutex.acquire()
+		const release = await this.playlistWriteMutexes.acquire(uuid)
 
 		try {
 			// playlistsQueryGet() is the local source of truth the UI renders from; prefer it over the
@@ -1330,7 +1281,7 @@ export class Audio {
 				signal
 			})
 		} finally {
-			mutex.release()
+			release()
 		}
 	}
 
@@ -1554,9 +1505,7 @@ export class Audio {
 	}
 
 	public async deletePlaylist({ playlist, signal }: { playlist: Playlist; signal?: AbortSignal }): Promise<void> {
-		const mutex = this.playlistWriteMutex(playlist.uuid)
-
-		await mutex.acquire()
+		const release = await this.playlistWriteMutexes.acquire(playlist.uuid)
 
 		try {
 			const { authedSdkClient } = await auth.getSdkClients()
@@ -1585,7 +1534,7 @@ export class Audio {
 				updater: prev => prev.filter(p => p.uuid !== playlist.uuid)
 			})
 		} finally {
-			mutex.release()
+			release()
 		}
 	}
 }

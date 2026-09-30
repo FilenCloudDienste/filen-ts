@@ -13,6 +13,7 @@ import {
 	applyCopyUpdate,
 	copyJobShownBytes,
 	copyMaxBytes,
+	errorMessage,
 	isQuotaPreflightFailure,
 	settleCopyJob,
 	type CopyUpdateEvents,
@@ -987,7 +988,7 @@ function toJobError(e: unknown): ReturnType<typeof copyJobError> {
 
 	return {
 		kind: ErrorKind[ErrorKind.Internal],
-		message: e instanceof Error ? e.message : String(e),
+		message: errorMessage(e),
 		serverMessage: undefined
 	}
 }

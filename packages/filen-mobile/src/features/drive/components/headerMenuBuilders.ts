@@ -16,7 +16,7 @@ import { getRealDriveItemParent } from "@/lib/sdkUnwrap"
 import offline from "@/features/offline/offline"
 import { storeItemOffline } from "@/features/offline/storeItem"
 import { runBulk } from "@/lib/bulkOps"
-import { type DriveSelectionFlags } from "@/features/drive/driveSelectors"
+import { type DriveSelectionFlags, isOwnEditableView, isReadableView, offersBulkFavoriteShare } from "@/features/drive/driveSelectors"
 import { downloadDriveItemToDevice, ensureSaveToPhotosPermission, saveDriveItemToPhotos } from "@/features/drive/driveDownload"
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
@@ -211,11 +211,7 @@ export function buildBulkActionMenu({
 
 	// Favorite/Unfavorite first — toggle is the most-tapped bulk
 	// action, belongs at the top of the menu.
-	if (
-		!hasUndecryptable &&
-		driveFlags.everyNormalItem &&
-		(drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut")
-	) {
+	if (!hasUndecryptable && driveFlags.everyNormalItem && offersBulkFavoriteShare(drivePath)) {
 		menuButtons.push({
 			id: "bulkFavorite",
 			title: driveFlags.includesFavorited ? t("unfavorite_selected") : t("favorite_selected"),
@@ -235,14 +231,7 @@ export function buildBulkActionMenu({
 		})
 	}
 
-	const offersMove =
-		!hasUndecryptable &&
-		driveFlags.everyNormalItem &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "links" ||
-			drivePath.type === "recents")
+	const offersMove = !hasUndecryptable && driveFlags.everyNormalItem && isOwnEditableView(drivePath)
 
 	// Move — modify (location) comes before output (download/share).
 	// driveSelectToolbar already handles `Promise.all` over the items
@@ -308,15 +297,7 @@ export function buildBulkActionMenu({
 	}
 
 	// Download to device — applies to every read-capable variant.
-	if (
-		!hasUndecryptable &&
-		(drivePath.type === "drive" ||
-			drivePath.type === "recents" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "sharedIn" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "links")
-	) {
+	if (!hasUndecryptable && isReadableView(drivePath)) {
 		menuButtons.push({
 			id: "bulkDownload",
 			title: t("download_selected"),
@@ -372,10 +353,7 @@ export function buildBulkActionMenu({
 	// recipient's public key (SDK shareDir / shareFile). Grouped with
 	// the other "output" actions (download / save-to-photos). The
 	// picker is the confirmation gesture; no extra confirm dialog.
-	if (
-		!hasUndecryptable &&
-		(drivePath.type === "drive" || drivePath.type === "recents" || drivePath.type === "favorites" || drivePath.type === "sharedOut")
-	) {
+	if (!hasUndecryptable && offersBulkFavoriteShare(drivePath)) {
 		menuButtons.push({
 			id: "bulkShareFilenUser",
 			title: t("share_filen_user"),
@@ -438,12 +416,7 @@ export function buildBulkActionMenu({
 		// + not-already-stored guards below cover the edge cases (e.g. a nested sharedIn item whose
 		// containing folder wasn't browsed → parent unresolvable → button hidden, like the single-item
 		// contract). The offline lib fully supports shared items (offlineSync's listing-based flows).
-		(drivePath.type === "drive" ||
-			drivePath.type === "recents" ||
-			drivePath.type === "favorites" ||
-			drivePath.type === "sharedIn" ||
-			drivePath.type === "sharedOut" ||
-			drivePath.type === "links") &&
+		isReadableView(drivePath) &&
 		!everySelectedKnownStoredOffline &&
 		everySelectedParentResolvable
 	) {
@@ -506,13 +479,7 @@ export function buildBulkActionMenu({
 	}
 
 	// Trash — owned content the user can move to trash (excludes sharedIn / offline)
-	if (
-		drivePath.type === "drive" ||
-		drivePath.type === "favorites" ||
-		drivePath.type === "sharedOut" ||
-		drivePath.type === "links" ||
-		drivePath.type === "recents"
-	) {
+	if (isOwnEditableView(drivePath)) {
 		menuButtons.push(
 			confirmBulkButton({
 				id: "bulkTrash",

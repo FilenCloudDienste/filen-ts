@@ -1,7 +1,7 @@
 /**
  * Shared mock of @filen/shared for Vitest.
  *
- * Provides Semaphore (no-op) and run (execute with defer support).
+ * Provides Semaphore and KeyedSemaphores (no-op) and run/runOrThrow (execute with defer support).
  *
  * Usage in test files:
  *
@@ -20,6 +20,18 @@ import { vi } from "vitest"
 export class Semaphore {
 	async acquire(): Promise<void> {}
 	release(): void {}
+	async withPermit<T>(fn: () => Promise<T> | T): Promise<T> {
+		return await fn()
+	}
+}
+
+export class KeyedSemaphores {
+	for(): Semaphore {
+		return new Semaphore()
+	}
+	async acquire(): Promise<() => void> {
+		return () => {}
+	}
 }
 
 // Faithful to @filen/shared run(): ALWAYS resolves the full Result object on success —
@@ -53,11 +65,15 @@ export async function run(fn: (defer: (cleanup: () => void) => void) => Promise<
 	}
 }
 
+export async function runOrThrow(fn: (defer: (cleanup: () => void) => void) => Promise<any>): Promise<any> {
+	return (await run(fn, { throw: true })).data
+}
+
 export const createExecutableTimeout = vi.fn()
 
 // InFlight, the drive-listing splice rules, isHiddenName, fileIconKey, the notes outbox helpers,
 // partitionNotesByBucket, shareIdentityFromRole, the chat message segmentation pipeline and the copy
-// job, progress and quota helpers, the remote-change rules, sanitizeFileName, convertTimestampToMs and CODE_FILE_EXTENSIONS are plain data helpers with no timing-sensitive behavior (unlike
+// job, progress and quota helpers, the remote-change rules, sanitizeFileName, convertTimestampToMs, errorMessage and CODE_FILE_EXTENSIONS are plain data helpers with no timing-sensitive behavior (unlike
 // Semaphore's no-op above), so there is nothing to fake — pull them through vi.importActual, bypassing
 // this factory's own interception of the bare specifier.
 export const {
@@ -87,6 +103,7 @@ export const {
 	isEmojiOnly,
 	upsertItems,
 	createCopyJob,
+	copyJobGlyph,
 	applyCopyUpdate,
 	settleCopyJob,
 	isQuotaPreflightFailure,
@@ -106,5 +123,8 @@ export const {
 	conflictCopyName,
 	sanitizeFileName,
 	convertTimestampToMs,
-	CODE_FILE_EXTENSIONS
+	errorMessage,
+	CODE_FILE_EXTENSIONS,
+	isNoteOwner,
+	hasNoteWriteAccess
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

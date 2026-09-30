@@ -99,7 +99,6 @@ vi.mock("@/features/cameraUpload/cameraUpload", () => ({ default: { getConfig: h
 vi.mock("@/features/cameraUpload/remoteListing", () => ({ listCameraUploadRemote: vi.fn(), remoteWalkDropsEntries: vi.fn() }))
 vi.mock("@/features/offline/offline", () => ({ default: {} }))
 vi.mock("@/features/drive/utils", () => ({ linkPasswordState: vi.fn() }))
-vi.mock("@/features/drive/driveMetadata", () => ({ favoritesListingUpdater: vi.fn() }))
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({ markDirectorySizesStale: h.markDirectorySizesStale }))
 vi.mock("@/lib/sdkErrors", () => ({ unwrapSdkError: vi.fn() }))
 vi.mock("@/hooks/useDrivePath", () => ({

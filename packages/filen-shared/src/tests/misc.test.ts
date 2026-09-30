@@ -12,6 +12,7 @@ import {
 	formatBytes,
 	formatBytesFixed,
 	formatBytesPerSecond,
+	errorMessage,
 	isAbortError,
 	trimmedOrUndefined
 } from "@filen/shared"
@@ -473,6 +474,19 @@ describe("formatBytesFixed", () => {
 		expect(formatBytesFixed(1048575, 2)).toBe("1.00 MiB")
 		expect(formatBytesFixed(1023 * 1024)).toBe("1023.0 KiB")
 		expect(formatBytesFixed(1023)).toBe("1023 B")
+	})
+})
+
+describe("errorMessage", () => {
+	it("returns an Error's message", () => {
+		expect(errorMessage(new TypeError("boom"))).toBe("boom")
+	})
+
+	it("stringifies non-Error values", () => {
+		expect(errorMessage("plain")).toBe("plain")
+		expect(errorMessage(42)).toBe("42")
+		expect(errorMessage(undefined)).toBe("undefined")
+		expect(errorMessage({ message: "not an Error" })).toBe("[object Object]")
 	})
 })
 

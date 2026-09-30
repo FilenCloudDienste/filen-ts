@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { queryUpdater, preserveArrayIdentity, queryClient, getCachedQuery, type QueryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
-import { sortParams, run, upsertItems } from "@filen/shared"
+import { run, upsertItems } from "@filen/shared"
 import {
 	type File,
 	type Dir,
@@ -648,7 +648,7 @@ export function useDriveItemsQuery(
 }
 
 export function driveItemsQueryKey(params: UseDriveItemsQueryParams): unknown[] {
-	return [BASE_QUERY_KEY, removeVolatileParamsForKey(sortParams(params))]
+	return [BASE_QUERY_KEY, removeVolatileParamsForKey(params)]
 }
 
 // The listing path a drive-items query was keyed by (the inverse of driveItemsQueryKey).

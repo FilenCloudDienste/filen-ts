@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { MakeThumbnailInMemoryResult_Tags, ManagedFuture, type AnyFile, type MakeThumbnailInMemoryResult } from "@filen/sdk-rs"
-import { run } from "@filen/shared"
+import { runOrThrow } from "@filen/shared"
 import auth from "@/lib/auth"
 import { toSignalOpts, wrapAbortSignalForSdk, disposeSdkAbortSignal } from "@/lib/signals"
 import { throwIfAborted } from "@/lib/thumbnailsHelpers"
@@ -152,7 +152,7 @@ export async function generateImageFromPathViaSdk(params: {
 	outputPath: string
 	signal?: AbortSignal
 }): Promise<SdkThumbnailOutcome> {
-	const result = await run(async defer => {
+	return await runOrThrow(async defer => {
 		const { authedSdkClient } = await auth.getSdkClients()
 
 		// wrapAbortSignalForSdk allocates TWO uniffi (Rust Arc-backed) handles that nothing GCs. Arm
@@ -190,10 +190,4 @@ export async function generateImageFromPathViaSdk(params: {
 
 		return handleThumbnailResult(outcome, params)
 	})
-
-	if (!result.success) {
-		throw result.error
-	}
-
-	return result.data
 }

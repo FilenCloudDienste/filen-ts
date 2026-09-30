@@ -6,7 +6,7 @@
 // unicode glyph, self-contained and asset-free. An unknown shortcode (neither this table nor the custom
 // pack below) stays literal `:shortcode:` text.
 
-import customEmojiPackData from "@/assets/customEmojis.json"
+import { CUSTOM_EMOJI_PACK } from "@filen/shared/emojis"
 
 // shortcode (without the surrounding colons) → unicode glyph. Curated common set; extend as needed.
 export const EMOJI_SHORTCODES: Readonly<Record<string, string>> = {
@@ -285,23 +285,11 @@ export const EMOJI_SHORTCODES: Readonly<Record<string, string>> = {
 }
 
 // ── Custom emoji pack (non-unicode, image-backed) ───────────────────────────────────────────────────
-// Filen's shared custom emoji pack is a large (thousand-plus-entry) set of image-backed shortcodes —
-// Twitch/BTTV-style reaction emotes, not unicode glyphs — that mobile and old-web both source from a
-// CDN-hosted manifest (each entry's image is a remote https://cdn.filen.io/... url). The pack's DATA
-// (id/name/keywords/image url per entry) is canonical and shared across apps — mobile's copy lives at
-// filen-mobile/src/assets/customEmojis.json; this is that same file, copied verbatim rather than
-// regenerated, so both apps stay in lockstep on ids and CDN paths. The image urls are only renderable
-// here because the app's Content-Security-Policy allowlists cdn.filen.io under img-src.
-interface CustomEmojiPackEntry {
-	id: string
-	name: string
-	keywords: string[]
-	skins: { src: string }[]
-}
-
-// Vite/TS resolve the JSON import structurally against this interface (resolveJsonModule) — no runtime
-// parsing or cast needed.
-const CUSTOM_EMOJI_PACK: readonly CustomEmojiPackEntry[] = customEmojiPackData
+// Filen's custom emoji pack is a large (thousand-plus-entry) set of image-backed shortcodes —
+// Twitch/BTTV-style reaction emotes, not unicode glyphs — each entry's image a remote
+// https://cdn.filen.io/... url. The pack's DATA (id/name/keywords/image url per entry) is shared with
+// mobile via "@filen/shared/emojis", so both apps stay in lockstep on ids and CDN paths. The image urls
+// are only renderable here because the app's Content-Security-Policy allowlists cdn.filen.io under img-src.
 
 export interface CustomEmoji {
 	// The shortcode without surrounding colons, e.g. "kekw" for `:kekw:` — the pack entry's own `id`.
@@ -317,7 +305,7 @@ export const CUSTOM_EMOJIS: readonly CustomEmoji[] = CUSTOM_EMOJI_PACK.flatMap(e
 	const skin = entry.skins[0]
 
 	// Every entry in the shipped pack has a skin (verified against all 1107); still guarded rather than
-	// asserted non-null, since this is externally sourced data copied from another package.
+	// asserted non-null, since this is externally sourced data.
 	if (skin === undefined) {
 		return []
 	}

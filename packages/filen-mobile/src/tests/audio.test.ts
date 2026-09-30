@@ -74,51 +74,14 @@ vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 vi.mock("@filen/shared", async () => {
 	const sharedMock = await import("@/tests/mocks/filenShared")
 
-	// Override the shared no-op Semaphore with a faithful blocking mutex so the per-playlist write-lock
-	// serialization (AU-06/AU-07) is actually exercised. audio.ts uses Semaphore ONLY for that lock,
-	// and audioCache (the other Semaphore user) is mocked here — so this swap is scoped to that path.
-	class Semaphore {
-		private counter = 0
-		private readonly waiting: Array<() => void> = []
-		private readonly maxCount: number
-
-		public constructor(max = 1) {
-			this.maxCount = max
-		}
-
-		public acquire(): Promise<void> {
-			if (this.counter < this.maxCount) {
-				this.counter++
-
-				return Promise.resolve()
-			}
-
-			return new Promise<void>(resolve => {
-				this.waiting.push(resolve)
-			})
-		}
-
-		public release(): void {
-			if (this.counter <= 0) {
-				return
-			}
-
-			this.counter--
-
-			const next = this.waiting.shift()
-
-			if (next) {
-				this.counter++
-
-				next()
-			}
-		}
-	}
+	// The real KeyedSemaphores replaces the shared no-op so the per-playlist write-lock serialization
+	// (AU-06/AU-07) is actually exercised. audioCache (the other user) is mocked here.
+	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
 
 	return {
 		...sharedMock,
-		Semaphore,
-		driveItemName: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).driveItemName
+		KeyedSemaphores: actual.KeyedSemaphores,
+		driveItemName: actual.driveItemName
 	}
 })
 

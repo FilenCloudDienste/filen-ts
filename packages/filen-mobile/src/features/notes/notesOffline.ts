@@ -618,21 +618,17 @@ export class NotesOffline {
 	}
 
 	private async queueEviction(uuid: string): Promise<boolean> {
-		const result = await run(async defer => {
-			await this.evictionMutex.acquire()
+		const result = await run(() =>
+			this.evictionMutex.withPermit(async () => {
+				// Re-checked after the mutex, not only before it: a logout landing while we queued must
+				// not let this write land in the next account's store.
+				if (this.locked) {
+					return
+				}
 
-			defer(() => {
-				this.evictionMutex.release()
+				await sqlite.kvAsync.set(PENDING_EVICTION_PREFIX + uuid, true)
 			})
-
-			// Re-checked after the mutex, not only before it: a logout landing while we queued must
-			// not let this write land in the next account's store.
-			if (this.locked) {
-				return
-			}
-
-			await sqlite.kvAsync.set(PENDING_EVICTION_PREFIX + uuid, true)
-		})
+		)
 
 		if (!result.success) {
 			logger.error("notes-offline", "Could not queue a deferred eviction; keeping the note marked", {
@@ -645,19 +641,15 @@ export class NotesOffline {
 	}
 
 	private async dropPendingEviction(uuid: string): Promise<void> {
-		await run(async defer => {
-			await this.evictionMutex.acquire()
+		await run(() =>
+			this.evictionMutex.withPermit(async () => {
+				if (this.locked) {
+					return
+				}
 
-			defer(() => {
-				this.evictionMutex.release()
+				await sqlite.kvAsync.remove(PENDING_EVICTION_PREFIX + uuid)
 			})
-
-			if (this.locked) {
-				return
-			}
-
-			await sqlite.kvAsync.remove(PENDING_EVICTION_PREFIX + uuid)
-		})
+		)
 	}
 
 	/**
@@ -668,65 +660,61 @@ export class NotesOffline {
 	 * forever) and returns, so the next pass retries.
 	 */
 	private async drainPendingEvictions(): Promise<void> {
-		await run(async defer => {
-			await this.evictionMutex.acquire()
-
-			defer(() => {
-				this.evictionMutex.release()
-			})
-
-			if (this.locked) {
-				return
-			}
-
-			const db = await sqlite.openDb()
-			const pending: string[] = []
-
-			await forEachKvRowByPrefix(db, PENDING_EVICTION_PREFIX, rowKey => {
-				pending.push(rowKey.slice(PENDING_EVICTION_PREFIX.length))
-			})
-
-			if (pending.length === 0) {
-				return
-			}
-
-			// Persisted-inclusive, not the in-memory store alone. A headless run never mounts the
-			// component that hydrates that store, so an eviction the foreground deferred BECAUSE the
-			// note had unsynced edits would otherwise execute in the background — and the next
-			// foreground push would then find no dataUpdatedAt to preserve and remount the editor
-			// mid-edit, which is the exact failure the deferral exists to avoid.
-			const persistedInflight = await this.inflightUuidsIncludingPersisted()
-
-			for (const uuid of pending) {
+		await run(() =>
+			this.evictionMutex.withPermit(async () => {
 				if (this.locked) {
 					return
 				}
 
-				if (this.marked.has(uuid)) {
+				const db = await sqlite.openDb()
+				const pending: string[] = []
+
+				await forEachKvRowByPrefix(db, PENDING_EVICTION_PREFIX, rowKey => {
+					pending.push(rowKey.slice(PENDING_EVICTION_PREFIX.length))
+				})
+
+				if (pending.length === 0) {
+					return
+				}
+
+				// Persisted-inclusive, not the in-memory store alone. A headless run never mounts the
+				// component that hydrates that store, so an eviction the foreground deferred BECAUSE the
+				// note had unsynced edits would otherwise execute in the background — and the next
+				// foreground push would then find no dataUpdatedAt to preserve and remount the editor
+				// mid-edit, which is the exact failure the deferral exists to avoid.
+				const persistedInflight = await this.inflightUuidsIncludingPersisted()
+
+				for (const uuid of pending) {
+					if (this.locked) {
+						return
+					}
+
+					if (this.marked.has(uuid)) {
+						await sqlite.kvAsync.remove(PENDING_EVICTION_PREFIX + uuid)
+
+						continue
+					}
+
+					// The persisted view is snapshotted once (it is a kv read), but the in-memory one is
+					// re-read per iteration: this loop awaits between entries, so a note can gain a draft
+					// while the drain is working through earlier uuids — and evicting then is exactly the
+					// mid-edit editor remount the deferral exists to prevent.
+					if (isNoteScreenOpen(uuid) || persistedInflight.has(uuid) || inflightUuidSet().has(uuid)) {
+						continue
+					}
+
+					removeQueryEverywhere(noteContentQueryKey({ uuid }))
+
+					// Force the buffered delete to disk BEFORE dropping the queue row — the same ordering
+					// evictContent flushes for. The queue row is the only remaining record that this body
+					// owes removal, so retiring it while the delete is still sitting in the persister's
+					// debounce is exactly how a kill strands an unreclaimable decrypted body.
+					await queryClientPersisterKv.flushNow()
+
 					await sqlite.kvAsync.remove(PENDING_EVICTION_PREFIX + uuid)
-
-					continue
 				}
-
-				// The persisted view is snapshotted once (it is a kv read), but the in-memory one is
-				// re-read per iteration: this loop awaits between entries, so a note can gain a draft
-				// while the drain is working through earlier uuids — and evicting then is exactly the
-				// mid-edit editor remount the deferral exists to prevent.
-				if (isNoteScreenOpen(uuid) || persistedInflight.has(uuid) || inflightUuidSet().has(uuid)) {
-					continue
-				}
-
-				removeQueryEverywhere(noteContentQueryKey({ uuid }))
-
-				// Force the buffered delete to disk BEFORE dropping the queue row — the same ordering
-				// evictContent flushes for. The queue row is the only remaining record that this body
-				// owes removal, so retiring it while the delete is still sitting in the persister's
-				// debounce is exactly how a kill strands an unreclaimable decrypted body.
-				await queryClientPersisterKv.flushNow()
-
-				await sqlite.kvAsync.remove(PENDING_EVICTION_PREFIX + uuid)
-			}
-		})
+			})
+		)
 	}
 
 	// Marked notes carrying unsynced edits, including edits persisted by a previous session that no

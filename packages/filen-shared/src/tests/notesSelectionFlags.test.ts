@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { aggregateNoteSelectionFlags } from "@filen/shared"
+import { aggregateNoteSelectionFlags, hasNoteWriteAccess, isNoteOwner } from "@filen/shared"
 
 type TestNote = {
 	favorite: boolean
@@ -337,5 +337,40 @@ describe("aggregateNoteSelectionFlags — participantOfEveryAndNotOwner (Leave g
 		)
 
 		expect(flags.participantOfEveryAndNotOwner).toBe(false)
+	})
+})
+
+describe("isNoteOwner", () => {
+	it("is true when the given userId matches the note's ownerId", () => {
+		expect(isNoteOwner(note({ ownerId: ME }), ME)).toBe(true)
+	})
+
+	it("is false when the given userId does not match", () => {
+		expect(isNoteOwner(note({ ownerId: SOMEONE_ELSE }), ME)).toBe(false)
+	})
+
+	it("is false when userId is undefined (no resolved account yet)", () => {
+		expect(isNoteOwner(note({ ownerId: ME }), undefined)).toBe(false)
+	})
+})
+
+describe("hasNoteWriteAccess", () => {
+	it("is true for the owner, with no participant row of their own", () => {
+		expect(hasNoteWriteAccess(note({ ownerId: ME }), ME)).toBe(true)
+	})
+
+	it("is true for a participant carrying permissionsWrite", () => {
+		expect(hasNoteWriteAccess(note({ ownerId: SOMEONE_ELSE, participants: [participant(ME, true)] }), ME)).toBe(true)
+	})
+
+	it("is false for a participant without permissionsWrite", () => {
+		expect(hasNoteWriteAccess(note({ ownerId: SOMEONE_ELSE, participants: [participant(ME, false)] }), ME)).toBe(false)
+	})
+
+	it("is false for a user who is neither owner nor participant, and for an unresolved id", () => {
+		const n = note({ ownerId: SOMEONE_ELSE, participants: [participant(SOMEONE_ELSE + 1n, true)] })
+
+		expect(hasNoteWriteAccess(n, ME)).toBe(false)
+		expect(hasNoteWriteAccess(n, undefined)).toBe(false)
 	})
 })

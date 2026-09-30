@@ -1,6 +1,6 @@
 import type * as FileSystem from "expo-file-system"
 import { AppState } from "react-native"
-import { Semaphore, planSizeCapEviction } from "@filen/shared"
+import { KeyedSemaphores, planSizeCapEviction } from "@filen/shared"
 import { debounce } from "es-toolkit/function"
 import { xxHash32 } from "js-xxhash"
 import type { CacheItem } from "@/types"
@@ -49,7 +49,7 @@ export function planGcCapEviction(
 // Lifecycle shared by the disk caches rooted at one directory: per-key mutexes, a ClearBarrier that
 // clear() uses to drain readers/writers/gc, and debounced + app-background gc.
 export abstract class DiskCache {
-	private readonly mutexes = new Map<string, Semaphore>()
+	protected readonly keyMutexes = new KeyedSemaphores()
 	protected readonly clearBarrier = new ClearBarrier()
 	protected readonly directory: FileSystem.Directory
 	private readonly tag: string
@@ -87,18 +87,6 @@ export abstract class DiskCache {
 
 	protected ensureDirectory(): void {
 		ensureDirectory(this.directory)
-	}
-
-	protected getMutexForKey(key: string): Semaphore {
-		let mutex = this.mutexes.get(key)
-
-		if (!mutex) {
-			mutex = new Semaphore(1)
-
-			this.mutexes.set(key, mutex)
-		}
-
-		return mutex
 	}
 
 	protected abstract runGc(age?: number): Promise<void>

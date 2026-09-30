@@ -19,6 +19,7 @@ import {
 	type CopyDestination,
 	type CopyJob as SharedCopyJob,
 	type CopyJobOutcome as SharedCopyJobOutcome,
+	type CopyJobGlyph,
 	type CopyJobPhase,
 	type CopyReportInput,
 	type CopySettlement as SharedCopySettlement,
@@ -31,7 +32,7 @@ import type { DriveItem } from "@/types"
 
 // The uniffi side of @filen/shared's copy job: maps the SDK's copy values onto its inputs.
 
-export type { CopyDestination }
+export type { CopyDestination, CopyJobGlyph }
 
 // `kind` is the ErrorKind member name, which is what the shared job logic compares against.
 export type CopyJobError = {
@@ -49,9 +50,6 @@ export type CopyJobFailure = {
 	affectedFiles: number
 	affectedBytes: number
 }
-
-// The one item's kind, or several items: what a copy row shows as its icon.
-export type CopyJobGlyph = "directory" | "file" | "items"
 
 export type CopyJob = SharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, CopyJobError> & {
 	glyph: CopyJobGlyph

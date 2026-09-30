@@ -6,6 +6,7 @@ import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
 import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
+import { errorMessage } from "@filen/shared"
 import { AppState } from "react-native"
 import auth from "@/lib/auth"
 import { isUnlockedForeground } from "@/lib/unlockedForeground"
@@ -836,14 +837,6 @@ const ALERT_DEDUPE_WINDOW = 3000
 let lastAlertMessage: string | null = null
 let lastAlertAt = 0
 
-function alertMessageKey(err: unknown): string {
-	if (err instanceof Error) {
-		return err.message
-	}
-
-	return String(err)
-}
-
 const queryCache = new QueryCache({
 	// Fires ONCE when a query settles into an error state — not on every render. This is the
 	// correct place for imperative error UX (logging, logout, banners).
@@ -882,7 +875,7 @@ const queryCache = new QueryCache({
 		}
 
 		const now = Date.now()
-		const messageKey = alertMessageKey(err)
+		const messageKey = errorMessage(err)
 
 		if (messageKey === lastAlertMessage && now - lastAlertAt < ALERT_DEDUPE_WINDOW) {
 			return

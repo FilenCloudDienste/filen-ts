@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
 	applyCopyUpdate,
+	copyJobGlyph,
 	copyMaxBytes,
 	createCopyJob,
 	isQuotaPreflightFailure,
@@ -94,6 +95,15 @@ describe("createCopyJob", () => {
 		expect(created).toMatchObject({ id: "j", destination: DESTINATION, itemCount: 2, phase: "scanning", cancelRequest: null })
 		expect(created.counts.bytesDone).toBe(0)
 		expect(created.outcome).toEqual({ status: "running" })
+	})
+})
+
+describe("copyJobGlyph", () => {
+	it("names the one item's kind, or several items", () => {
+		expect(copyJobGlyph(1, true)).toBe("directory")
+		expect(copyJobGlyph(1, false)).toBe("file")
+		expect(copyJobGlyph(0, false)).toBe("items")
+		expect(copyJobGlyph(2, true)).toBe("items")
 	})
 })
 

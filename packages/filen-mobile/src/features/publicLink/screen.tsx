@@ -28,7 +28,7 @@ import Menu from "@/components/ui/menu"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import { DirectoryIcon } from "@/components/itemIcons"
 import cache from "@/lib/cache"
-import useAccountQuery from "@/queries/useAccount.query"
+import useAccountQuery, { isAccountSubscribed } from "@/queries/useAccount.query"
 import { driveItemDisplayName } from "@/lib/decryption"
 import CannotDecryptScreen from "@/components/cannotDecryptScreen"
 import i18n from "@/lib/i18n"
@@ -76,7 +76,7 @@ function PublicLink() {
 
 	const accountQuery = useAccountQuery()
 
-	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.filter(sub => Number(sub.activated) === 1).length > 0
+	const userIsSubbed = isAccountSubscribed(accountQuery)
 
 	// Only read inside the loaded-link branch, so the fallback is unreachable
 	const serverDownloadable = publicLinkStatusQuery.data

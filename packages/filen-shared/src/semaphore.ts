@@ -33,6 +33,17 @@ export class Semaphore {
 		})
 	}
 
+	// Holds a permit for the duration of fn. A purged acquire rejects without running fn.
+	public async withPermit<T>(fn: () => Promise<T> | T): Promise<T> {
+		await this.acquire()
+
+		try {
+			return await fn()
+		} finally {
+			this.release()
+		}
+	}
+
 	public release(): void {
 		if (this.counter <= 0) {
 			return
@@ -101,6 +112,49 @@ export class Semaphore {
 			// is moved at most once for each doubling of the consumed prefix.
 			this.waiting = this.waiting.slice(this.waitingHead)
 			this.waitingHead = 0
+		}
+	}
+}
+
+// Per-key mutexes, created on first use. Use either for() or acquire() for a given instance, not both.
+export class KeyedSemaphores {
+	private readonly semaphores = new Map<string, Semaphore>()
+
+	// Never pruned, so the returned instance can be held across calls.
+	public for(key: string): Semaphore {
+		let semaphore = this.semaphores.get(key)
+
+		if (!semaphore) {
+			semaphore = new Semaphore(1)
+
+			this.semaphores.set(key, semaphore)
+		}
+
+		return semaphore
+	}
+
+	// Resolves with an idempotent release that drops the entry once nothing holds or waits on it,
+	// keeping the map bounded.
+	public async acquire(key: string): Promise<() => void> {
+		const semaphore = this.for(key)
+
+		await semaphore.acquire()
+
+		let released = false
+
+		return () => {
+			if (released) {
+				return
+			}
+
+			released = true
+
+			semaphore.release()
+
+			// A waiter handed the permit keeps count() above 0, so queued callers share this instance.
+			if (semaphore.count() === 0 && this.semaphores.get(key) === semaphore) {
+				this.semaphores.delete(key)
+			}
 		}
 	}
 }

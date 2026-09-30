@@ -7,6 +7,17 @@ import { freeBytes, type StorageCounters } from "./storageQuota"
 
 export type CopyJobPhase = "scanning" | "creatingDirectories" | "copyingFiles" | "finishing" | "done" | "cancelled" | "failed"
 
+// What a copy's row shows as its icon: the one item's kind, or several items.
+export type CopyJobGlyph = "directory" | "file" | "items"
+
+export function copyJobGlyph(count: number, onlyIsDirectory: boolean): CopyJobGlyph {
+	if (count !== 1) {
+		return "items"
+	}
+
+	return onlyIsDirectory ? "directory" : "file"
+}
+
 export interface CopyDestination {
 	// null for the drive root.
 	uuid: string | null

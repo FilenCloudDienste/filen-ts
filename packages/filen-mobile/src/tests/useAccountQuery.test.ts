@@ -41,10 +41,12 @@ import useAccountQuery, {
 	addAccountStorageUsed,
 	ACCOUNT_QUOTA_TRUST_MS,
 	fetchFreshAccount,
+	isAccountSubscribed,
 	markAccountStale,
 	BASE_QUERY_KEY,
 	type Account
 } from "@/queries/useAccount.query"
+import type { UseQueryResult } from "@tanstack/react-query"
 
 const account = {
 	nickName: "old",
@@ -342,5 +344,24 @@ describe("quota helpers", () => {
 		addAccountStorageUsed(0n)
 
 		expect(holder.client.getQueryData<Account>([BASE_QUERY_KEY])?.storageUsed).toBe(100n)
+	})
+})
+
+describe("isAccountSubscribed", () => {
+	function query(status: "success" | "error" | "pending", activated: boolean[]): UseQueryResult<Account, Error> {
+		return {
+			status,
+			data: {
+				subs: activated.map(value => ({ activated: value }))
+			}
+		} as unknown as UseQueryResult<Account, Error>
+	}
+
+	it("is true only for a successful read with an activated subscription", () => {
+		expect(isAccountSubscribed(query("success", [false, true]))).toBe(true)
+		expect(isAccountSubscribed(query("success", [false]))).toBe(false)
+		expect(isAccountSubscribed(query("success", []))).toBe(false)
+		expect(isAccountSubscribed(query("error", [true]))).toBe(false)
+		expect(isAccountSubscribed(query("pending", [true]))).toBe(false)
 	})
 })

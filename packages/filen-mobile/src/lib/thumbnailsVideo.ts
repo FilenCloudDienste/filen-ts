@@ -3,7 +3,7 @@ import * as ImageManipulator from "expo-image-manipulator"
 import * as VideoThumbnails from "expo-video-thumbnails"
 import { normalizeFilePathForExpo } from "@/lib/paths"
 import { renderAndSave } from "@/lib/imageManipulator"
-import { run } from "@filen/shared"
+import { runOrThrow, errorMessage } from "@filen/shared"
 import { abortError, throwIfAborted } from "@/lib/thumbnailsHelpers"
 
 export async function generateVideo(
@@ -31,7 +31,7 @@ export async function generateVideo(
 		  }
 	)
 ): Promise<void> {
-	const result = await run(async defer => {
+	await runOrThrow(async defer => {
 		const url = "localSourceUri" in params ? normalizeFilePathForExpo(params.localSourceUri) : params.sourceUrl
 
 		throwIfAborted(params.signal)
@@ -52,7 +52,7 @@ export async function generateVideo(
 		} catch (error) {
 			throwIfAborted(params.signal)
 
-			const message = error instanceof Error ? error.message : String(error)
+			const message = errorMessage(error)
 
 			throw new Error(`Video thumbnail extraction failed at ${params.timestamp}s: ${message}`)
 		}
@@ -121,13 +121,9 @@ export async function generateVideo(
 		} catch (error) {
 			discardSaved()
 
-			const message = error instanceof Error ? error.message : String(error)
+			const message = errorMessage(error)
 
 			throw new Error(`Failed to move thumbnail to output path: ${message}`)
 		}
 	})
-
-	if (!result.success) {
-		throw result.error
-	}
 }

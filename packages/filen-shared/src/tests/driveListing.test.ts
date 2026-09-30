@@ -120,4 +120,19 @@ describe("applyMembershipPatch", () => {
 
 		expect(applyMembershipPatch(items, item("a"), false)).toEqual([item("b")])
 	})
+
+	it("moves a refreshed member to the end", () => {
+		const incoming = item("b", "new.txt")
+
+		expect(applyMembershipPatch([item("a"), item("b", "old.txt"), item("c")], incoming, true)).toEqual([item("a"), item("c"), incoming])
+	})
+
+	it("does not mutate the input list", () => {
+		const items = [item("a")]
+
+		applyMembershipPatch(items, item("b"), true)
+		applyMembershipPatch(items, item("a"), false)
+
+		expect(items).toEqual([item("a")])
+	})
 })

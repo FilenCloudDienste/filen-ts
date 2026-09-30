@@ -1,5 +1,6 @@
 import auth from "@/lib/auth"
-import { type ChatMessagePartial, ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir, DirMeta_Tags } from "@filen/sdk-rs"
+import { ensureDotFilenSubdirectory } from "@/lib/dotFilenDirectory"
+import { type ChatMessagePartial, ChatTypingType, type Contact, type ChatParticipant, AnyNormalDir } from "@filen/sdk-rs"
 import { type Chat, type ChatMessage } from "@/types"
 import { chatsQueryUpdate, chatsQueryFetch, chatsQueryGet, replaceChatInCache } from "@/features/chats/queries/useChats.query"
 import {
@@ -10,7 +11,7 @@ import {
 } from "@/features/chats/queries/useChatMessages.query"
 import { cachedMessagesMatchLastMessage } from "@/features/chats/chatSelectors"
 import { wrapChat, wrapMessage, withoutInflight } from "@/features/chats/chatsWrap"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore, run, runOrThrow } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
@@ -486,34 +487,7 @@ class Chats {
 	}
 
 	public async getChatUploadsDirectory() {
-		const { authedSdkClient } = await auth.getSdkClients()
-
-		let dotFilenDir = (
-			await authedSdkClient.listDir(
-				new AnyNormalDir.Root({
-					uuid: authedSdkClient.root().uuid
-				})
-			)
-		).dirs.find(d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === ".filen")
-
-		if (!dotFilenDir) {
-			dotFilenDir = await authedSdkClient.createDir(
-				new AnyNormalDir.Root({
-					uuid: authedSdkClient.root().uuid
-				}),
-				".filen"
-			)
-		}
-
-		let chatUploadsDir = (await authedSdkClient.listDir(new AnyNormalDir.Dir(dotFilenDir))).dirs.find(
-			d => d.meta.tag === DirMeta_Tags.Decoded && d.meta.inner[0].name.trim().toLowerCase() === "chat uploads"
-		)
-
-		if (!chatUploadsDir) {
-			chatUploadsDir = await authedSdkClient.createDir(new AnyNormalDir.Dir(dotFilenDir), "Chat Uploads")
-		}
-
-		return chatUploadsDir
+		return await ensureDotFilenSubdirectory("Chat Uploads")
 	}
 
 	// Uploads the given local assets into the chat-uploads directory, enables a public
@@ -553,7 +527,7 @@ class Chats {
 		return (
 			await Promise.all(
 				assets.map(async asset => {
-					const result = await run(async defer => {
+					const uploadedLinks = await runOrThrow(async defer => {
 						const assetFile = new FileSystem.File(asset.uri)
 
 						defer(() => {
@@ -607,11 +581,7 @@ class Chats {
 						return links
 					})
 
-					if (!result.success) {
-						throw result.error
-					}
-
-					const links = result.data
+					const links = uploadedLinks
 						.map(link => {
 							return makeDriveItemPublicLink({
 								item: link.item,

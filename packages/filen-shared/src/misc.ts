@@ -405,6 +405,10 @@ export function formatBytesPerSecond(bytesPerSecond: number): string {
 	return `${formatBytesFixed(bytesPerSecond)}/s`
 }
 
+export function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error)
+}
+
 export function isAbortError(error: unknown): boolean {
 	if (error instanceof DOMException && error.name === "AbortError") {
 		return true

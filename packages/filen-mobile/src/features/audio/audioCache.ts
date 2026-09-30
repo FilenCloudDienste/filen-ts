@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { extnameOf } from "@/lib/previewType"
-import { Semaphore, run, normalizeTrackTags } from "@filen/shared"
+import { Semaphore, run, runOrThrow, normalizeTrackTags } from "@filen/shared"
 import { DiskCache, cacheItemId, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
 import { serialize, deserialize } from "@/lib/serializer"
@@ -148,7 +148,7 @@ export class AudioCache extends DiskCache {
 		audio: FileSystem.File
 		metadata: Metadata
 	}> {
-		const result = await run(async defer => {
+		return await runOrThrow(async defer => {
 			if (item.type === "drive" && !isFileItem(item.data)) {
 				throw new Error("Item must be a file or shared file")
 			}
@@ -168,13 +168,7 @@ export class AudioCache extends DiskCache {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(cacheId)
-
-			await mutex.acquire()
-
-			defer(() => {
-				mutex.release()
-			})
+			defer(await this.keyMutexes.acquire(cacheId))
 
 			const { audio, metadata: metadataFile } = this.getFiles(item)
 
@@ -312,12 +306,6 @@ export class AudioCache extends DiskCache {
 				metadata
 			}
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	protected async runGc(age?: number): Promise<void> {
@@ -391,13 +379,7 @@ export class AudioCache extends DiskCache {
 						return
 					}
 
-					const mutex = this.getMutexForKey(cacheId)
-
-					await mutex.acquire()
-
-					defer(() => {
-						mutex.release()
-					})
+					defer(await this.keyMutexes.acquire(cacheId))
 
 					// Re-check inside the mutex. A concurrent get() may have just finished
 					// writing a fresh sidecar for this key — Pass 1's initial parse ran
@@ -442,13 +424,7 @@ export class AudioCache extends DiskCache {
 						gcSemaphore.release()
 					})
 
-					const mutex = this.getMutexForKey(cacheId)
-
-					await mutex.acquire()
-
-					defer(() => {
-						mutex.release()
-					})
+					defer(await this.keyMutexes.acquire(cacheId))
 
 					const sidecar = sidecarFile(cacheId)
 
@@ -520,13 +496,7 @@ export class AudioCache extends DiskCache {
 						gcSemaphore.release()
 					})
 
-					const mutex = this.getMutexForKey(cacheId)
-
-					await mutex.acquire()
-
-					defer(() => {
-						mutex.release()
-					})
+					defer(await this.keyMutexes.acquire(cacheId))
 
 					if (sidecar.exists) {
 						return

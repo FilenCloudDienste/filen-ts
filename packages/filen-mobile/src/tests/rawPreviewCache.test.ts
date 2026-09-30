@@ -42,50 +42,13 @@ vi.mock("@filen/sdk-rs", () => ({
 vi.mock("@filen/shared", async () => {
 	const sharedMock = await import("@/tests/mocks/filenShared")
 
-	// A faithful blocking mutex so the per-uuid serialization is real, as in fileCache.test.ts.
-	class Semaphore {
-		private counter = 0
-		private readonly waiting: Array<() => void> = []
-		private readonly maxCount: number
-
-		public constructor(max = 1) {
-			this.maxCount = max
-		}
-
-		public acquire(): Promise<void> {
-			if (this.counter < this.maxCount) {
-				this.counter++
-
-				return Promise.resolve()
-			}
-
-			return new Promise<void>(resolve => {
-				this.waiting.push(resolve)
-			})
-		}
-
-		public release(): void {
-			if (this.counter <= 0) {
-				return
-			}
-
-			this.counter--
-
-			const next = this.waiting.shift()
-
-			if (next) {
-				this.counter++
-
-				next()
-			}
-		}
-	}
-
 	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
 
 	return {
 		...sharedMock,
-		Semaphore,
+		// The real mutexes so the per-uuid serialization is real, as in fileCache.test.ts.
+		Semaphore: actual.Semaphore,
+		KeyedSemaphores: actual.KeyedSemaphores,
 		// gc() exercises the real eviction planner against the tiny RAW_PREVIEW_CACHE_MAX_SIZE_BYTES
 		// override below, so pull it through unmocked (a stub would silently skip the size-cap pass
 		// under test).

@@ -23,7 +23,7 @@ import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
 import { useEffect, useCallback, useRef } from "react"
-import { run, conflictCopyStamp, hashNoteContent, buildInflightEntries } from "@filen/shared"
+import { run, conflictCopyStamp, hashNoteContent, buildInflightEntries, hasNoteWriteAccess } from "@filen/shared"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
@@ -275,16 +275,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 
 	const { refetch } = noteContentQuery
 
-	const hasWriteAccess = (() => {
-		if (!stringifiedClient || history) {
-			return false
-		}
-
-		return (
-			note.ownerId === stringifiedClient.userId ||
-			note.participants.some(participant => participant.userId === stringifiedClient.userId && participant.permissionsWrite)
-		)
-	})()
+	const hasWriteAccess = !history && hasNoteWriteAccess(note, stringifiedClient?.userId)
 
 	const onValueChange = async (value: string) => {
 		// #40 fix (defense-in-depth): never write to the inflight store for a

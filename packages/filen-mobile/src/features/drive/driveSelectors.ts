@@ -80,7 +80,6 @@ export function isPlainDrivePath(drivePath: DrivePath): boolean {
 	return drivePath.type === "drive" && !drivePath.selectOptions
 }
 
-
 export function isDirectoryItem(item: DriveItem): item is DriveItemDirectoryExtracted {
 	return DIRECTORY_TYPES.has(item.type)
 }
@@ -502,6 +501,41 @@ export function hiddenFilterAppliesTo(drivePath: DrivePath): boolean {
 	}
 
 	return HIDDEN_FILTER_BY_DRIVE_PATH_TYPE[drivePath.type]
+}
+
+// Drive variants offering each item action, composed from one base so adding a variant is one edit.
+// The user's own content in a writable browsing view: move, color, paste into, bulk trash.
+const OWN_EDITABLE_VIEWS: ReadonlySet<DrivePathType> = new Set<DrivePathType>(["drive", "sharedOut", "favorites", "links", "recents"])
+// Single-item favorite, rename and share also reach photos.
+const OWN_ITEM_VIEWS: ReadonlySet<DrivePathType> = new Set<DrivePathType>([...OWN_EDITABLE_VIEWS, "photos"])
+const ITEM_INFO_VIEWS: ReadonlySet<DrivePathType> = new Set<DrivePathType>([...OWN_ITEM_VIEWS, "offline"])
+// Bulk download and make-offline read shared-in content too.
+const READABLE_VIEWS: ReadonlySet<DrivePathType> = new Set<DrivePathType>([...OWN_EDITABLE_VIEWS, "sharedIn"])
+// Bulk favorite and share omit links, unlike their single-item counterparts (OWN_ITEM_VIEWS).
+const BULK_FAVORITE_SHARE_VIEWS: ReadonlySet<DrivePathType> = new Set<DrivePathType>(["drive", "recents", "favorites", "sharedOut"])
+
+function viewIn(views: ReadonlySet<DrivePathType>, drivePath: DrivePath): boolean {
+	return drivePath.type !== null && views.has(drivePath.type)
+}
+
+export function isOwnEditableView(drivePath: DrivePath): boolean {
+	return viewIn(OWN_EDITABLE_VIEWS, drivePath)
+}
+
+export function isOwnItemView(drivePath: DrivePath): boolean {
+	return viewIn(OWN_ITEM_VIEWS, drivePath)
+}
+
+export function offersItemInfo(drivePath: DrivePath): boolean {
+	return viewIn(ITEM_INFO_VIEWS, drivePath)
+}
+
+export function isReadableView(drivePath: DrivePath): boolean {
+	return viewIn(READABLE_VIEWS, drivePath)
+}
+
+export function offersBulkFavoriteShare(drivePath: DrivePath): boolean {
+	return viewIn(BULK_FAVORITE_SHARE_VIEWS, drivePath)
 }
 
 /**

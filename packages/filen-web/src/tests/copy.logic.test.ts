@@ -433,11 +433,9 @@ describe("copy glyphs", () => {
 		meta: { type: "decoded", data: { name: "dir" } }
 	}
 
-	it("names the one item's kind, or several items", () => {
+	it("names the one item's kind", () => {
 		expect(copyGlyphForItems([narrowItem(dir)])).toBe("directory")
 		expect(copyGlyphForItems([narrowItem(mockFile("a"))])).toBe("file")
-		expect(copyGlyphForItems([narrowItem(mockFile("a")), narrowItem(dir)])).toBe("items")
-		expect(copyGlyphForItems([])).toBe("items")
 	})
 
 	it("reads a retry's single entry the same way", () => {
@@ -445,12 +443,6 @@ describe("copy glyphs", () => {
 
 		expect(copyGlyphForEntries([{ item: mockFile("a"), destination }])).toBe("file")
 		expect(copyGlyphForEntries([{ item: dir, destination }])).toBe("directory")
-		expect(
-			copyGlyphForEntries([
-				{ item: dir, destination },
-				{ item: mockFile("a"), destination }
-			])
-		).toBe("items")
 	})
 
 	it("defaults a job to several items", () => {

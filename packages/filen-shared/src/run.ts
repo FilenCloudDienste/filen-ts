@@ -75,6 +75,17 @@ export async function run<TResult, E = unknown>(
 	}
 }
 
+// run() that resolves the bare data and rethrows after the deferred cleanups, so callers skip the Result narrowing.
+export async function runOrThrow<TResult>(fn: (deferFn: DeferFn) => Promise<TResult> | TResult): Promise<TResult> {
+	const result = await run<TResult>(fn)
+
+	if (!result.success) {
+		throw result.error
+	}
+
+	return result.data
+}
+
 export function runEffect<TResult, E = unknown>(
 	fn: (deferFn: DeferFn) => TResult,
 	options?: Options & {

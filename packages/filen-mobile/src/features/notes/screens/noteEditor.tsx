@@ -22,6 +22,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import DismissStack from "@/components/dismissStack"
 import { useKeyboardState } from "react-native-keyboard-controller"
 import { NoteType } from "@filen/sdk-rs"
+import { hasNoteWriteAccess, isNoteOwner } from "@filen/shared"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { RichTextHeaderToolbar } from "@/components/textEditor/richText/toolbar"
 import { useTranslation } from "react-i18next"
@@ -69,11 +70,8 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 	const dispatch = useTextEditorStore(state => state.dispatch)
 	const [hideCompletedChecklistItems, toggleHideCompletedChecklistItems] = useChecklistHideCompleted(note.uuid)
 
-	const writeAccess =
-		note.ownerId === stringifiedClient?.userId ||
-		note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
-
-	const isOwner = note.ownerId === stringifiedClient?.userId
+	const writeAccess = hasNoteWriteAccess(note, stringifiedClient?.userId)
+	const isOwner = isNoteOwner(note, stringifiedClient?.userId)
 
 	// Swap the header title for the rich-text toolbar while the user is
 	// typing. Gated on:

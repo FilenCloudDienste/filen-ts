@@ -83,7 +83,6 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 }))
 vi.mock("@/features/drive/queries/useDirectorySize.query", () => ({ markDirectorySizesStale: vi.fn() }))
 vi.mock("@/features/drive/socketCreateBatcher", () => ({ default: { enqueue: vi.fn(), flushNow: vi.fn() } }))
-vi.mock("@/features/drive/driveMetadata", () => ({ favoritesListingUpdater: vi.fn() }))
 vi.mock("@/features/drive/store/useDrive.store", () => ({ default: { getState: () => ({ removeFromSelection: vi.fn() }) } }))
 
 import events from "@/lib/events"

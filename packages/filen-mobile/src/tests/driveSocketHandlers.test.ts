@@ -80,16 +80,6 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryMarkAllStale: vi.fn()
 }))
 
-// Faithful mirror of driveMetadata's pure favoritesListingUpdater (the real module pulls
-// auth/query chains unloadable here; the real function is unit-tested in driveMetadata.test.ts).
-vi.mock("@/features/drive/driveMetadata", () => ({
-	favoritesListingUpdater: (prev: Array<{ data: { uuid: string } }>, item: { data: { uuid: string } }, favorited: boolean) => {
-		const withoutItem = prev.filter(i => i.data.uuid !== item.data.uuid)
-
-		return favorited ? [...withoutItem, item] : withoutItem
-	}
-}))
-
 vi.mock("@/lib/cache", () => ({
 	default: {
 		directoryUuidToAnyNormalDir: { get: mockCacheDirectoryUuidToAnyNormalDirGet },

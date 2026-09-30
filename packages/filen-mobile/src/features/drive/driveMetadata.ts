@@ -7,16 +7,6 @@ import { itemFromModified } from "@/features/drive/driveModified"
 import events from "@/lib/events"
 import { applyMembershipPatch } from "@filen/shared"
 
-/**
- * Optimistic updater for the root Favorites listing (`{ type: "favorites", uuid: null }`).
- * When `favorited` is true, insert/refresh the item; when false, remove it.
- * `driveItemsQueryUpdateGlobal` only `.map()`s existing rows, so it can never
- * ADD a newly-favorited item to the Favorites listing — this closes that gap.
- */
-export function favoritesListingUpdater(prev: DriveItem[], item: DriveItem, favorited: boolean): DriveItem[] {
-	return applyMembershipPatch(prev, item, favorited)
-}
-
 // Replace a modified item in every listing under its parent and re-point an open preview / active search at it.
 function replaceInListings({ previousUuid, item }: { previousUuid: string; item: Extract<DriveItem, { type: "directory" | "file" }> }) {
 	const unwrappedParentUuid = unwrapParentUuid(item.data.parent)
@@ -56,7 +46,8 @@ export async function favorite({ item, favorited }: { item: DriveItem; favorited
 
 	item = itemFromModified(modifiedItem.inner[0])
 
-	driveItemsQueryUpdateRoot("favorites", prev => favoritesListingUpdater(prev, item, favorited))
+	// The replace-only global patch can't add a newly-favorited item to the Favorites root.
+	driveItemsQueryUpdateRoot("favorites", prev => applyMembershipPatch(prev, item, favorited))
 
 	// Refresh an open preview showing this file (favorite badge in the header).
 	replaceInListings({

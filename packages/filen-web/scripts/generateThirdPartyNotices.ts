@@ -3,13 +3,15 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
-	describeLicensing,
+	describedNotice,
 	listInstalledNpm,
 	poolLicenseTexts,
 	readJson,
 	repositoryOf,
 	spdxOf,
-	type InstalledNpmPackage
+	type CollectedNotice,
+	type InstalledNpmPackage,
+	type NoticeEntry
 } from "@filen/shared/tooling"
 
 /**
@@ -51,19 +53,7 @@ const OUTPUT = "src/features/settings/thirdPartyNotices.gen.ts"
 
 type Ecosystem = "npm" | "rust"
 
-interface Entry {
-	name: string
-	version: string
-	license: string
-	ecosystem: Ecosystem
-	copyright: string[]
-	repository: string | null
-	/** Indices into the deduplicated boilerplate table. Empty when no license file was found. */
-	texts: number[]
-}
-
-/** An entry before its terms are pooled — carries the verbatim texts the dedup pass replaces. */
-type Collected = Entry & { terms: string[] }
+type Collected = CollectedNotice<Ecosystem>
 
 function requireJson(path: string): Record<string, unknown> {
 	const json = readJson(path)
@@ -108,19 +98,16 @@ function collectNpm(installed: InstalledNpmPackage[]): Collected[] {
 
 		seen.add(id)
 
-		const license = spdxOf(manifest["license"] ?? manifest["licenses"])
-		const licensing = describeLicensing(dir, license)
-
-		entries.push({
-			name,
-			version,
-			license,
-			ecosystem: "npm",
-			copyright: licensing.copyright,
-			repository: repositoryOf(manifest["repository"]),
-			texts: [],
-			terms: licensing.terms
-		})
+		entries.push(
+			describedNotice({
+				name,
+				version,
+				license: spdxOf(manifest["license"] ?? manifest["licenses"]),
+				ecosystem: "npm",
+				dir,
+				repository: repositoryOf(manifest["repository"])
+			})
+		)
 	}
 
 	return entries
@@ -253,18 +240,14 @@ function collectRust(expected: string): { entries: Collected[]; ref: string; sou
 		const manifestPath = join(dir, "Cargo.toml")
 		const manifest = existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : ""
 		const license = /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN"
-		const licensing = describeLicensing(dir, license)
-
-		const entry: Collected = {
+		const entry = describedNotice({
 			name,
 			version,
 			license,
 			ecosystem: "rust",
-			copyright: licensing.copyright,
-			repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null,
-			texts: [],
-			terms: licensing.terms
-		}
+			dir,
+			repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null
+		})
 
 		// The same crate version can be locked twice — once from crates.io and once from a git fork of it.
 		// Identical attribution is one notice, not two (the payload is keyed by name@version). Attribution
@@ -308,7 +291,7 @@ const collected = [...npm, ...rust.entries]
 
 const texts = poolLicenseTexts(collected)
 
-const notices: Entry[] = collected
+const notices: NoticeEntry<Ecosystem>[] = collected
 	.map(({ terms: _terms, ...entry }) => entry)
 	.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
 

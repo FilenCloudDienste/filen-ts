@@ -12,7 +12,7 @@ import { router } from "@/lib/router"
 import Avatar from "@/components/ui/avatar"
 import { useStringifiedClient } from "@/lib/auth"
 import useContactRequestsQuery from "@/features/contacts/queries/useContactRequests.query"
-import useAccountQuery from "@/queries/useAccount.query"
+import useAccountQuery, { isAccountSubscribed } from "@/queries/useAccount.query"
 import { useTranslation } from "react-i18next"
 import { Group, type Button } from "@/components/ui/settingsGroup"
 import { LazyWrapper } from "@/components/lazyWrapper"
@@ -58,7 +58,7 @@ function More() {
 
 	const accountQuery = useAccountQuery()
 
-	const userIsSubbed = accountQuery.status === "success" && accountQuery.data.subs.some(sub => Number(sub.activated) === 1)
+	const userIsSubbed = isAccountSubscribed(accountQuery)
 
 	// Muted subtitle under the email: plan tier + total usage ("Pro · 29.5 GB of 45.5 TB"). Plans can
 	// be stacked (even different ones) to combine storage, so the tier is just "Pro" (any premium) vs

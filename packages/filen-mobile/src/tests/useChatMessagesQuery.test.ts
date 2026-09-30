@@ -27,11 +27,7 @@ vi.mock("@/lib/signals", () => ({
 	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined)
 }))
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	// sortParams feeds chatMessagesQueryGet's key on the true-miss path — identity is fine for the test.
-	sortParams: <T>(params: T): T => params
-}))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/lib/auth", () => ({
 	default: {

@@ -197,7 +197,8 @@ vi.mock("@/features/chats/queries/useChatMessageLinks.query", () => ({
 	default: vi.fn(() => ({ status: "pending" }))
 }))
 vi.mock("@/queries/useAccount.query", () => ({
-	default: vi.fn(() => ({ status: "pending" }))
+	default: vi.fn(() => ({ status: "pending" })),
+	isAccountSubscribed: vi.fn(() => false)
 }))
 
 // ── Custom hooks ──────────────────────────────────────────────────────────────

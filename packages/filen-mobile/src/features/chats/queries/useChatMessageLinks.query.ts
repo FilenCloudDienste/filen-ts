@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import auth from "@/lib/auth"
-import { sortParams, parseFilenPublicLink, run } from "@filen/shared"
+import { parseFilenPublicLink, run } from "@filen/shared"
 import { getPreviewType } from "@/lib/previewType"
 import { extractLinks } from "@/lib/linkParser"
 import { MaybeEncryptedUniffi_Tags, type DirPublicInfo, type LinkedFile } from "@filen/sdk-rs"
@@ -195,16 +195,14 @@ export function useChatMessageLinksQuery(
 	params: useChatMessageLinksQueryParams,
 	options?: Omit<UseQueryOptions<Awaited<ReturnType<typeof fetchData>>, Error>, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = sortParams(params)
-
 	const query = useQuery({
 		refetchOnMount: true,
 		staleTime: cached => chatMessageLinksStaleTime(cached.state.data),
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		queryKey: [BASE_QUERY_KEY, params],
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...params,
 				signal
 			})
 	})

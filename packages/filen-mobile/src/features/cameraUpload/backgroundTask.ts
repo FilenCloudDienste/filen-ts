@@ -3,7 +3,7 @@ import * as BackgroundTask from "expo-background-task"
 import { BackgroundTaskResult, BackgroundTaskStatus } from "expo-background-task"
 import { Platform } from "react-native"
 import logger from "@/lib/logger"
-import { run } from "@filen/shared"
+import { run, errorMessage } from "@filen/shared"
 import setup from "@/lib/setup"
 import cameraUpload, { type CameraUploadSkipReason } from "@/features/cameraUpload/cameraUpload"
 import offlineSync from "@/features/offline/offlineSync"
@@ -230,7 +230,7 @@ TaskManager.defineTask(TASK_NAME, async () => {
 			phase,
 			cancelled,
 			result: runFailed ? "failed" : "success",
-			errorMessage: runFailed ? (runError instanceof Error ? runError.message : String(runError)) : undefined,
+			errorMessage: runFailed ? errorMessage(runError) : undefined,
 			cameraUploaded,
 			cameraSkipReason
 		})

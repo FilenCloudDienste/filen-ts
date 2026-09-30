@@ -691,7 +691,7 @@ describe("useSecureStore", () => {
 		})
 	})
 
-	describe("getSecureStoreFlushMutex — shared semaphore across hook instances", () => {
+	describe("flush mutex — shared semaphore across hook instances", () => {
 		it("serializes concurrent sets from two hook instances sharing the same key", async () => {
 			const order: string[] = []
 

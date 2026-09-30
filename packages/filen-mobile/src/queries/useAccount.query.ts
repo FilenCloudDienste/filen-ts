@@ -178,4 +178,9 @@ export function useAccountQuery(options?: Omit<UseQueryOptions, "queryKey" | "qu
 	return query as UseQueryResult<Account, Error>
 }
 
+// The feature gate (public links, chat attachments): any activated subscription, deliberately not isPremium.
+export function isAccountSubscribed(accountQuery: UseQueryResult<Account, Error>): boolean {
+	return accountQuery.status === "success" && accountQuery.data.subs.some(sub => sub.activated)
+}
+
 export default useAccountQuery

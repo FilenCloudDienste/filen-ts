@@ -45,17 +45,24 @@ vi.mock("@/features/contacts/contactsSelect", () => ({ selectContacts: vi.fn() }
 vi.mock("@/features/drive/store/useDrive.store", () => ({
 	default: { getState: () => ({ selectedItems: [], toggleSelectedItem: vi.fn() }) }
 }))
-vi.mock("@/features/drive/driveSelectors", () => ({
-	canNavigateIntoDirectory: vi.fn(() => false),
-	hiddenFilterAppliesTo: vi.fn(() => false),
-	isFileItem: (item: { type: string }) => item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile",
-	isDirectoryItem: (item: { type: string }) =>
-		item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory",
-	resolveDriveContainingDirectoryTarget: vi.fn(() => null),
-	resolveDriveNavigationTarget: vi.fn(() => null),
-	everyItemAlreadyIn: (items: { data: { parent?: string } }[], parentUuid: string) =>
-		items.length > 0 && items.every(item => item.data.parent === parentUuid)
-}))
+vi.mock("@/features/drive/driveSelectors", async () => {
+	const actual = await vi.importActual<typeof import("@/features/drive/driveSelectors")>("@/features/drive/driveSelectors")
+
+	return {
+		isOwnEditableView: actual.isOwnEditableView,
+		isOwnItemView: actual.isOwnItemView,
+		offersItemInfo: actual.offersItemInfo,
+		canNavigateIntoDirectory: vi.fn(() => false),
+		hiddenFilterAppliesTo: vi.fn(() => false),
+		isFileItem: (item: { type: string }) => item.type === "file" || item.type === "sharedFile" || item.type === "sharedRootFile",
+		isDirectoryItem: (item: { type: string }) =>
+			item.type === "directory" || item.type === "sharedDirectory" || item.type === "sharedRootDirectory",
+		resolveDriveContainingDirectoryTarget: vi.fn(() => null),
+		resolveDriveNavigationTarget: vi.fn(() => null),
+		everyItemAlreadyIn: (items: { data: { parent?: string } }[], parentUuid: string) =>
+			items.length > 0 && items.every(item => item.data.parent === parentUuid)
+	}
+})
 vi.mock("@/lib/confirmedAction", () => ({ confirmedAction: vi.fn(() => async () => {}) }))
 vi.mock("@/features/drive/components/hiddenNameNotice", () => ({ notifyIfNameIsHidden: vi.fn() }))
 vi.mock("@/features/drive/components/item/menuActionsUndecryptable", () => ({

@@ -6,9 +6,10 @@ import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualLis
 import ListEmpty, { NoResultsEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
 import { type Note as TNote, type NoteTag } from "@/types"
-import { run, pruneSelection } from "@filen/shared"
+import { run, pruneSelection, sortNoteTags } from "@filen/shared"
 import { createNoteFlow, createTagFlow } from "@/features/notes/components/notesActions"
-import { sortNoteTags, useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
+import { useNotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
+import { tagDisplayName } from "@/lib/decryption"
 import alerts from "@/lib/alerts"
 import { TAB_LIST_CONTENT_CLASS } from "@/constants"
 import { useLocalSearchParams, useFocusEffect } from "expo-router"
@@ -203,7 +204,7 @@ const Notes = () => {
 			return []
 		}
 
-		const sorted = sortNoteTags(notesTagsData, tagsSortBy, notesForTag)
+		const sorted = sortNoteTags(notesTagsData, tagsSortBy, notesForTag, tagDisplayName)
 
 		// #84: virtual "Untagged" row — appended AFTER the sort so it is always at the
 		// bottom regardless of the sort preference; hidden when nothing is untagged.

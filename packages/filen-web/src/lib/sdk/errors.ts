@@ -1,3 +1,5 @@
+import { errorMessage } from "@filen/shared"
+
 // Two error species cross the worker boundary: plain `Error` (from wasm-bindgen marshalling /
 // JS) and the SDK's `FilenSdkError` (string `kind` + accessor METHODS). `FilenSdkError` clones
 // HOLLOW across postMessage (its data lives behind a wasm pointer), so every error must be
@@ -70,7 +72,7 @@ export function toErrorDTO(e: unknown): ErrorDTO {
 		dto.label = labelFirst(dto)
 		return dto
 	}
-	const message = e instanceof Error ? e.message : String(e)
+	const message = errorMessage(e)
 	// A custom Error subclass's own `.name` is the only identity that can survive this boundary — its
 	// class/prototype never does (sdk.worker.ts's Comlink.expose proxy structured-clones every thrown
 	// value into a plain object before it ever reaches Comlink's own — separately lossy — Error

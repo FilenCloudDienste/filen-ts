@@ -179,52 +179,50 @@ const InnerSocket = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 				return
 			}
 
-			const result = await run(async defer => {
-				await mutex.acquire()
+			const result = await run(() =>
+				mutex.withPermit(async () => {
+					switch (nextAppState) {
+						case "active": {
+							if (!socketListenerHandleRef.current && !sessionEndedRef.current) {
+								socketListenerHandleRef.current = (await sdkClient.addEventListener(
+									{
+										onEvent: event => {
+											if (sessionEndedRef.current) {
+												return
+											}
 
-				defer(() => {
-					mutex.release()
-				})
-
-				switch (nextAppState) {
-					case "active": {
-						if (!socketListenerHandleRef.current && !sessionEndedRef.current) {
-							socketListenerHandleRef.current = (await sdkClient.addEventListener(
-								{
-									onEvent: event => {
-										if (sessionEndedRef.current) {
-											return
+											onEvent(event).catch(e =>
+												logger.error("socket", "onEvent threw outside try/catch", { error: e })
+											)
 										}
+									},
+									undefined
+								)) as ListenerHandle
 
-										onEvent(event).catch(e => logger.error("socket", "onEvent threw outside try/catch", { error: e }))
-									}
-								},
-								undefined
-							)) as ListenerHandle
-
-							// Seed initial state from SDK once on listener registration;
-							// ongoing state is driven purely by SocketEvent_Tags events.
-							if (sdkClient.isSocketConnected()) {
-								useSocketStore.getState().setState("connected")
+								// Seed initial state from SDK once on listener registration;
+								// ongoing state is driven purely by SocketEvent_Tags events.
+								if (sdkClient.isSocketConnected()) {
+									useSocketStore.getState().setState("connected")
+								}
 							}
+
+							break
 						}
 
-						break
-					}
+						case "background": {
+							if (socketListenerHandleRef.current) {
+								socketListenerHandleRef.current.uniffiDestroy()
 
-					case "background": {
-						if (socketListenerHandleRef.current) {
-							socketListenerHandleRef.current.uniffiDestroy()
+								socketListenerHandleRef.current = null
 
-							socketListenerHandleRef.current = null
+								useSocketStore.getState().setState("disconnected")
+							}
 
-							useSocketStore.getState().setState("disconnected")
+							break
 						}
-
-						break
 					}
-				}
-			})
+				})
+			)
 
 			if (!result.success) {
 				logger.error("socket", "appState transition failed", { nextAppState, error: result.error })

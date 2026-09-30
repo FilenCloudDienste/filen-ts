@@ -1,7 +1,7 @@
 import { Text } from "@/components/ui/text"
 import View from "@/components/ui/view"
 import { Platform } from "react-native"
-import { customEmojis } from "@/assets/customEmojis"
+import { CUSTOM_EMOJI_PACK } from "@filen/shared/emojis"
 import { type Chat } from "@/types"
 import useChatsStore, { type ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import Image from "@/components/ui/image"
@@ -15,7 +15,7 @@ import logger from "@/lib/logger"
 
 export const customEmojiSrcById = new Map<string, string>()
 
-for (const emoji of customEmojis) {
+for (const emoji of CUSTOM_EMOJI_PACK) {
 	const src = emoji.skins[0]?.src
 
 	if (src) {

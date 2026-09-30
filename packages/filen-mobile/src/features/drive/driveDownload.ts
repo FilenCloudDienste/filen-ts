@@ -4,7 +4,7 @@ import * as ReactNativeBlobUtil from "react-native-blob-util"
 import * as MediaLibrary from "expo-media-library/legacy"
 import mimeTypes from "mime-types"
 import { type TFunction } from "i18next"
-import { run, type Result, driveItemName } from "@filen/shared"
+import { run, runOrThrow, type Result, driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/types"
 import { ensureDirectory, listLocalDirectoryRecursive } from "@/lib/fsUtils"
 import { normalizeFilePathForBlobUtil } from "@/lib/paths"
@@ -264,7 +264,7 @@ export async function ensureSaveToPhotosPermission(t: TFunction): Promise<boolea
 // Stages the file in a fresh tmp directory, downloads it and saves it to the OS photo library.
 // Returns quietly on abort, throws on failure.
 export async function saveDriveItemToPhotos(item: DriveItem): Promise<void> {
-	const result = await run(async defer => {
+	await runOrThrow(async defer => {
 		if (!item.data.decryptedMeta) {
 			throw new Error("Missing decrypted metadata")
 		}
@@ -283,10 +283,6 @@ export async function saveDriveItemToPhotos(item: DriveItem): Promise<void> {
 
 		await MediaLibrary.saveToLibraryAsync(destination.uri)
 	})
-
-	if (!result.success) {
-		throw result.error
-	}
 }
 
 // Stages a single file in a fresh tmp directory and downloads it there. Returns null on abort,

@@ -1,4 +1,4 @@
-import { run, Semaphore, driveItemName } from "@filen/shared"
+import { run, Semaphore, driveItemName, errorMessage } from "@filen/shared"
 import logger from "@/lib/logger"
 import { onlineManager } from "@tanstack/react-query"
 import NetInfo from "@react-native-community/netinfo"
@@ -157,10 +157,6 @@ function isOwnCloudParent(parent: OfflineParent): boolean {
 // local copy. The predicate's narrowing is only meaningful on the false branch.
 function isGoneOrTrashed(remote: { parent: ParentUuid } | undefined): remote is undefined {
 	return remote === undefined || isTrashParent(remote.parent)
-}
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error)
 }
 
 // A listing failure that is positive evidence the parent itself is remotely gone (FolderNotFound)

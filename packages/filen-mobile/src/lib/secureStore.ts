@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system"
 import { ensureDirectory } from "@/lib/fsUtils"
 import crypto from "crypto"
 import { serialize, deserialize } from "@/lib/serializer"
-import { run, Semaphore } from "@filen/shared"
+import { run, runOrThrow, Semaphore, KeyedSemaphores } from "@filen/shared"
 import { useRef, useEffect, useCallback, useState } from "react"
 import cache from "@/lib/cache"
 import events from "@/lib/events"
@@ -78,8 +78,8 @@ class SecureStore {
 		// Best-effort at construction (runs at module import time): a synchronous expo-file-system
 		// failure here (disk full, sandbox path not yet available, OS permissions) must not crash
 		// module evaluation. directoriesEnsured stays false on failure so init()/getEncryptionKey()/
-		// read()/write()/set()/remove()/clear() retry inside their run() wrappers, where a persistent
-		// failure surfaces through the normal result.error path instead.
+		// read()/write()/set()/remove()/clear() retry inside their runOrThrow() wrappers, where a persistent
+		// failure surfaces as a normal rejection instead.
 		try {
 			this.ensureDirectories()
 		} catch (e) {
@@ -108,46 +108,38 @@ class SecureStore {
 			return
 		}
 
-		const result = await run(async defer => {
-			await this.initMutex.acquire()
+		await runOrThrow(() =>
+			this.initMutex.withPermit(async () => {
+				// Re-check after acquiring the mutex: a concurrent caller may have completed init while we
+				// waited. Without this guard a second init() (e.g. setup()'s Promise.all call, after
+				// auth.isAuthed() already initialized the store) re-reads the cache and re-emits a
+				// secureStoreChange for every stored key — a redundant O(n) pass.
+				if (this.initDone) {
+					return
+				}
 
-			defer(() => {
-				this.initMutex.release()
+				this.ensureDirectories()
+
+				// init() uses the STRICT readExisting() (not the degrading read()) so a transient IO
+				// failure propagates through this runOrThrow() wrapper and init() rejects (retry next launch
+				// against the intact file). An UNDECRYPTABLE store no longer rejects — loadFromDisk's
+				// recovery ladder restores a valid backup or resets to empty (logged-out boot).
+				const [, current] = await Promise.all([this.getEncryptionKey(), (await this.readExisting()) ?? {}])
+
+				for (const key in current) {
+					const value = current[key]
+
+					cache.secureStore.set(key, value)
+
+					events.emit("secureStoreChange", {
+						key,
+						value
+					})
+				}
+
+				this.initDone = true
 			})
-
-			// Re-check after acquiring the mutex: a concurrent caller may have completed init while we
-			// waited. Without this guard a second init() (e.g. setup()'s Promise.all call, after
-			// auth.isAuthed() already initialized the store) re-reads the cache and re-emits a
-			// secureStoreChange for every stored key — a redundant O(n) pass.
-			if (this.initDone) {
-				return
-			}
-
-			this.ensureDirectories()
-
-			// init() uses the STRICT readExisting() (not the degrading read()) so a transient IO
-			// failure propagates through this run() wrapper and init() rejects (retry next launch
-			// against the intact file). An UNDECRYPTABLE store no longer rejects — loadFromDisk's
-			// recovery ladder restores a valid backup or resets to empty (logged-out boot).
-			const [, current] = await Promise.all([this.getEncryptionKey(), (await this.readExisting()) ?? {}])
-
-			for (const key in current) {
-				const value = current[key]
-
-				cache.secureStore.set(key, value)
-
-				events.emit("secureStoreChange", {
-					key,
-					value
-				})
-			}
-
-			this.initDone = true
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
+		)
 	}
 
 	private async isAvailable(): Promise<boolean> {
@@ -166,50 +158,47 @@ class SecureStore {
 	}
 
 	private async getEncryptionKey(): Promise<string> {
-		const result = await run(async defer => {
-			await this.keyMutex.acquire()
+		return await runOrThrow(() =>
+			this.keyMutex.withPermit(async () => {
+				this.ensureDirectories()
 
-			defer(() => {
-				this.keyMutex.release()
-			})
+				if (this.encryptionKey !== null) {
+					return this.encryptionKey
+				}
 
-			this.ensureDirectories()
+				const available = await this.isAvailable()
 
-			if (this.encryptionKey !== null) {
-				return this.encryptionKey
-			}
+				if (!available) {
+					this.encryptionKey = this.mmkv.getString(this.secureStoreKeyEncryptionKey) ?? null
 
-			const available = await this.isAvailable()
+					if (!this.encryptionKey) {
+						this.encryptionKey = crypto.randomBytes(32).toString("hex")
 
-			if (!available) {
-				this.encryptionKey = this.mmkv.getString(this.secureStoreKeyEncryptionKey) ?? null
+						this.mmkv.set(this.secureStoreKeyEncryptionKey, this.encryptionKey)
+					}
+
+					return this.encryptionKey
+				}
+
+				this.encryptionKey = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
 
 				if (!this.encryptionKey) {
+					logger.warn(
+						"secure-store",
+						"Encryption key not found in keychain — generating new key (first-install or keychain loss)"
+					)
 					this.encryptionKey = crypto.randomBytes(32).toString("hex")
 
-					this.mmkv.set(this.secureStoreKeyEncryptionKey, this.encryptionKey)
+					await ExpoSecureStore.setItemAsync(
+						this.secureStoreKeyEncryptionKey,
+						this.encryptionKey,
+						ENCRYPTION_KEY_KEYCHAIN_OPTIONS
+					)
 				}
 
 				return this.encryptionKey
-			}
-
-			this.encryptionKey = await ExpoSecureStore.getItemAsync(this.secureStoreKeyEncryptionKey)
-
-			if (!this.encryptionKey) {
-				logger.warn("secure-store", "Encryption key not found in keychain — generating new key (first-install or keychain loss)")
-				this.encryptionKey = crypto.randomBytes(32).toString("hex")
-
-				await ExpoSecureStore.setItemAsync(this.secureStoreKeyEncryptionKey, this.encryptionKey, ENCRYPTION_KEY_KEYCHAIN_OPTIONS)
-			}
-
-			return this.encryptionKey
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
+			})
+		)
 	}
 
 	// Pure AES-256-GCM decrypt + deserialize of a full store payload (12-byte IV ++ ciphertext ++
@@ -408,7 +397,7 @@ class SecureStore {
 	// transient read failure from collapsing the merge base to {} and destructively overwriting the
 	// whole encrypted store with the single key being written (finding 51).
 	private async readExisting(): Promise<Record<string, unknown> | null> {
-		const result = await run(async defer => {
+		return await runOrThrow(async defer => {
 			if (this.readCache) {
 				return this.readCache
 			}
@@ -427,155 +416,136 @@ class SecureStore {
 
 			return this.loadFromDisk(encryptionKey)
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	private async write(data: Record<string, unknown>): Promise<void> {
-		const result = await run(async defer => {
-			await this.rwMutex.acquire()
+		await runOrThrow(() =>
+			this.rwMutex.withPermit(async () => {
+				this.ensureDirectories()
 
-			defer(() => {
-				this.rwMutex.release()
-			})
+				const encryptionKey = await this.getEncryptionKey()
+				// IV ++ ciphertext ++ authTag, pinned by the hardening suite against an independent decryptor.
+				const payload = sealAesGcm(Buffer.from(encryptionKey, "hex"), Buffer.from(serialize(data), "utf-8"))
 
-			this.ensureDirectories()
+				// Stage the new payload in the SAME directory as the destination so the final
+				// move is an atomic intra-volume rename (not a cross-volume copy, which would
+				// widen the crash window). We deliberately move the OLD file ASIDE to a backup
+				// before promoting the staged payload — not to dodge an overwrite limitation
+				// (File.move() does take a RelocationOptions { overwrite }, but a single
+				// overwriting rename would still leave a window with zero intact copies if the
+				// process dies mid-rename) — so that on any failure during the swap the backup
+				// can be restored and the store never reaches a state with zero copies.
+				const parentDirectory = this.secureStoreFile.parentDirectory
+				const destinationUri = this.secureStoreFile.uri
+				const tmpFile = new FileSystem.File(parentDirectory, `.securestore.tmp.${crypto.randomUUID()}`)
+				const backupUri = FileSystem.Paths.join(parentDirectory.uri, `.securestore.bak.${crypto.randomUUID()}`)
 
-			const encryptionKey = await this.getEncryptionKey()
-			// IV ++ ciphertext ++ authTag, pinned by the hardening suite against an independent decryptor.
-			const payload = sealAesGcm(Buffer.from(encryptionKey, "hex"), Buffer.from(serialize(data), "utf-8"))
+				let backedUp = false
+				let promoted = false
 
-			// Stage the new payload in the SAME directory as the destination so the final
-			// move is an atomic intra-volume rename (not a cross-volume copy, which would
-			// widen the crash window). We deliberately move the OLD file ASIDE to a backup
-			// before promoting the staged payload — not to dodge an overwrite limitation
-			// (File.move() does take a RelocationOptions { overwrite }, but a single
-			// overwriting rename would still leave a window with zero intact copies if the
-			// process dies mid-rename) — so that on any failure during the swap the backup
-			// can be restored and the store never reaches a state with zero copies.
-			const parentDirectory = this.secureStoreFile.parentDirectory
-			const destinationUri = this.secureStoreFile.uri
-			const tmpFile = new FileSystem.File(parentDirectory, `.securestore.tmp.${crypto.randomUUID()}`)
-			const backupUri = FileSystem.Paths.join(parentDirectory.uri, `.securestore.bak.${crypto.randomUUID()}`)
+				try {
+					tmpFile.write(payload)
 
-			let backedUp = false
-			let promoted = false
+					// Move the existing store aside to the backup before clearing the destination.
+					// Use a fresh handle so the shared this.secureStoreFile.uri is never mutated by move().
+					if (this.secureStoreFile.exists) {
+						await new FileSystem.File(destinationUri).move(new FileSystem.File(backupUri))
 
-			try {
-				tmpFile.write(payload)
+						backedUp = true
+					}
 
-				// Move the existing store aside to the backup before clearing the destination.
-				// Use a fresh handle so the shared this.secureStoreFile.uri is never mutated by move().
-				if (this.secureStoreFile.exists) {
-					await new FileSystem.File(destinationUri).move(new FileSystem.File(backupUri))
+					// Promote the staged payload into place. Use a fresh destination handle so the
+					// shared this.secureStoreFile instance keeps its identity.
+					await tmpFile.move(new FileSystem.File(destinationUri))
 
-					backedUp = true
-				}
+					// The new payload is now the live store. move() has mutated tmpFile.uri to the
+					// destination, so from here the catch block must NOT delete tmpFile.
+					promoted = true
+					this.readCache = data
 
-				// Promote the staged payload into place. Use a fresh destination handle so the
-				// shared this.secureStoreFile instance keeps its identity.
-				await tmpFile.move(new FileSystem.File(destinationUri))
+					// Best-effort: discard the backup now that the new payload is live. A failure
+					// here only orphans the backup (harmless) and must never surface as a write
+					// failure or reach the catch — the store is already safely committed on disk.
+					if (backedUp) {
+						try {
+							const backupFile = new FileSystem.File(backupUri)
 
-				// The new payload is now the live store. move() has mutated tmpFile.uri to the
-				// destination, so from here the catch block must NOT delete tmpFile.
-				promoted = true
-				this.readCache = data
-
-				// Best-effort: discard the backup now that the new payload is live. A failure
-				// here only orphans the backup (harmless) and must never surface as a write
-				// failure or reach the catch — the store is already safely committed on disk.
-				if (backedUp) {
-					try {
+							if (backupFile.exists) {
+								backupFile.delete()
+							}
+						} catch {
+							// Orphaned backup; harmless.
+						}
+					}
+				} catch (e) {
+					// If the swap failed BEFORE promotion (destination cleared but new payload not
+					// yet in place), restore the backup so the destination is never left empty —
+					// credentials must survive a failed write.
+					if (!promoted && backedUp && !this.secureStoreFile.exists) {
 						const backupFile = new FileSystem.File(backupUri)
 
 						if (backupFile.exists) {
-							backupFile.delete()
+							try {
+								backupFile.moveSync(new FileSystem.File(destinationUri))
+							} catch (restoreErr) {
+								// Best-effort restore; the backup is preserved below for manual recovery.
+								logger.error("secure-store", "Write swap failed AND backup restore failed — destination may be empty", {
+									error: e,
+									restoreError: String(restoreErr)
+								})
+							}
 						}
-					} catch {
-						// Orphaned backup; harmless.
 					}
-				}
-			} catch (e) {
-				// If the swap failed BEFORE promotion (destination cleared but new payload not
-				// yet in place), restore the backup so the destination is never left empty —
-				// credentials must survive a failed write.
-				if (!promoted && backedUp && !this.secureStoreFile.exists) {
+
+					// Only delete the staged tmp when it was NOT promoted — after a successful move
+					// tmpFile.uri points at the live store, so deleting it would wipe credentials.
+					if (!promoted && tmpFile.exists) {
+						tmpFile.delete()
+					}
+
+					// Discard the backup only once the destination is safely back in place — never
+					// when the destination is still missing, or the only surviving copy would be lost.
 					const backupFile = new FileSystem.File(backupUri)
 
-					if (backupFile.exists) {
-						try {
-							backupFile.moveSync(new FileSystem.File(destinationUri))
-						} catch (restoreErr) {
-							// Best-effort restore; the backup is preserved below for manual recovery.
-							logger.error("secure-store", "Write swap failed AND backup restore failed — destination may be empty", { error: e, restoreError: String(restoreErr) })
-						}
+					if (this.secureStoreFile.exists && backupFile.exists) {
+						backupFile.delete()
 					}
+
+					throw e
 				}
-
-				// Only delete the staged tmp when it was NOT promoted — after a successful move
-				// tmpFile.uri points at the live store, so deleting it would wipe credentials.
-				if (!promoted && tmpFile.exists) {
-					tmpFile.delete()
-				}
-
-				// Discard the backup only once the destination is safely back in place — never
-				// when the destination is still missing, or the only surviving copy would be lost.
-				const backupFile = new FileSystem.File(backupUri)
-
-				if (this.secureStoreFile.exists && backupFile.exists) {
-					backupFile.delete()
-				}
-
-				throw e
-			}
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
+			})
+		)
 	}
 
 	public async set(key: string, value: unknown): Promise<void> {
 		await this.waitForInit()
 
-		const result = await run(async defer => {
-			await this.modMutex.acquire()
+		await runOrThrow(() =>
+			this.modMutex.withPermit(async () => {
+				this.ensureDirectories()
 
-			defer(() => {
-				this.modMutex.release()
+				// readExisting() (not read()) so a present-but-unreadable store rejects here WITHOUT ever
+				// reaching write({ [key]: value }) — which would destroy every other stored secret (finding 51).
+				const current = this.readCache ?? (await this.readExisting()) ?? {}
+				// Fresh merged object (never mutate `current`): a failed write() must leave
+				// readCache consistent with what is actually on disk. The spread stays —
+				// benchmarked AGAINST Object.assign at 10k/100k-entry stores and the spread
+				// won (+8%/+42% regressions with assign; engines fast-path object spread).
+				const modified = {
+					...current,
+					[key]: value
+				}
+
+				await this.write(modified)
+
+				cache.secureStore.set(key, value)
+
+				events.emit("secureStoreChange", {
+					key,
+					value
+				})
 			})
-
-			this.ensureDirectories()
-
-			// readExisting() (not read()) so a present-but-unreadable store rejects here WITHOUT ever
-			// reaching write({ [key]: value }) — which would destroy every other stored secret (finding 51).
-			const current = this.readCache ?? (await this.readExisting()) ?? {}
-			// Fresh merged object (never mutate `current`): a failed write() must leave
-			// readCache consistent with what is actually on disk. The spread stays —
-			// benchmarked AGAINST Object.assign at 10k/100k-entry stores and the spread
-			// won (+8%/+42% regressions with assign; engines fast-path object spread).
-			const modified = {
-				...current,
-				[key]: value
-			}
-
-			await this.write(modified)
-
-			cache.secureStore.set(key, value)
-
-			events.emit("secureStoreChange", {
-				key,
-				value
-			})
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
+		)
 	}
 
 	public async get<T>(key: string): Promise<T | null> {
@@ -597,47 +567,39 @@ class SecureStore {
 	public async remove(key: string): Promise<void> {
 		await this.waitForInit()
 
-		const result = await run(async defer => {
-			await this.modMutex.acquire()
+		await runOrThrow(() =>
+			this.modMutex.withPermit(async () => {
+				this.ensureDirectories()
 
-			defer(() => {
-				this.modMutex.release()
-			})
+				// readExisting() (not read()) so a present-but-unreadable store rejects here WITHOUT ever
+				// reaching write({ ...rest }) — which would destroy every other stored secret (finding 51).
+				const current = this.readCache ?? (await this.readExisting()) ?? {}
+				// Single-pass copy skipping the removed key — the rest-destructuring it
+				// replaces paid the destructuring machinery on top of the copy. Store keys
+				// are plain strings (serialized JSON), so for-in covers the full domain.
+				const modified: Record<string, unknown> = {}
 
-			this.ensureDirectories()
-
-			// readExisting() (not read()) so a present-but-unreadable store rejects here WITHOUT ever
-			// reaching write({ ...rest }) — which would destroy every other stored secret (finding 51).
-			const current = this.readCache ?? (await this.readExisting()) ?? {}
-			// Single-pass copy skipping the removed key — the rest-destructuring it
-			// replaces paid the destructuring machinery on top of the copy. Store keys
-			// are plain strings (serialized JSON), so for-in covers the full domain.
-			const modified: Record<string, unknown> = {}
-
-			for (const currentKey in current) {
-				if (currentKey !== key) {
-					modified[currentKey] = current[currentKey]
+				for (const currentKey in current) {
+					if (currentKey !== key) {
+						modified[currentKey] = current[currentKey]
+					}
 				}
-			}
 
-			await this.write(modified)
+				await this.write(modified)
 
-			cache.secureStore.delete(key)
+				cache.secureStore.delete(key)
 
-			events.emit("secureStoreRemove", {
-				key
+				events.emit("secureStoreRemove", {
+					key
+				})
 			})
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
+		)
 	}
 
 	public async clear(): Promise<void> {
 		await this.waitForInit()
 
-		const result = await run(async defer => {
+		await runOrThrow(async defer => {
 			await this.modMutex.acquire()
 
 			defer(() => {
@@ -670,10 +632,6 @@ class SecureStore {
 
 			events.emit("secureStoreClear")
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
 	}
 
 	/**
@@ -713,24 +671,13 @@ class SecureStore {
 
 const secureStore = new SecureStore()
 
-const useSecureStoreFlushMutex = new Map<string, Semaphore>()
-
-function getSecureStoreFlushMutex(key: string): Semaphore {
-	let mutex = useSecureStoreFlushMutex.get(key)
-
-	if (!mutex) {
-		mutex = new Semaphore(1)
-
-		useSecureStoreFlushMutex.set(key, mutex)
-	}
-
-	return mutex
-}
+// Non-pruning: every hook on a key holds the same instance in a ref.
+const secureStoreFlushMutexes = new KeyedSemaphores()
 
 export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((prev: T) => T)) => void] {
 	const [state, setState] = useState<T>(() => (cache.secureStore.get(key) as T | undefined) ?? initialValue)
 	const lastValueRef = useRef<T>(state)
-	const flushMutexRef = useRef<Semaphore>(getSecureStoreFlushMutex(key))
+	const flushMutexRef = useRef<Semaphore>(secureStoreFlushMutexes.for(key))
 	const isLocalUpdateRef = useRef<boolean>(false)
 	const initialValueRef = useRef<T>(initialValue)
 
@@ -748,19 +695,15 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 	)
 
 	const retrieve = async () => {
-		const result = await run(async defer => {
-			await flushMutexRef.current.acquire()
+		const result = await run(() =>
+			flushMutexRef.current.withPermit(async () => {
+				const value = await secureStore.get<T>(key)
 
-			defer(() => {
-				flushMutexRef.current.release()
+				if (value !== null) {
+					setStateChecked(value)
+				}
 			})
-
-			const value = await secureStore.get<T>(key)
-
-			if (value !== null) {
-				setStateChecked(value)
-			}
-		})
+		)
 
 		if (!result.success) {
 			logger.error("secure-store", "useSecureStore: retrieve failed", { key, error: result.error })
@@ -771,27 +714,23 @@ export function useSecureStore<T>(key: string, initialValue: T): [T, (fn: T | ((
 		(fn: T | ((prev: T) => T)): void => {
 			isLocalUpdateRef.current = true
 			;(async () => {
-				const result = await run(async defer => {
-					await flushMutexRef.current.acquire()
+				const result = await run(() =>
+					flushMutexRef.current.withPermit(async () => {
+						// For the functional form re-read the freshest persisted value as the merge base
+						// (inside the flush mutex, so a concurrent instance's prior write is already
+						// committed) instead of this instance's optimistic lastValueRef. Otherwise two
+						// overlapping cross-instance sets on the same key compute from a stale base and
+						// the loser silently clobbers the winner — the self-echo flag (isLocalUpdateRef)
+						// drops the winner's secureStoreChange echo while this set() is in flight, so
+						// lastValueRef never catches up (CU-06). The direct-value form needs no re-read.
+						const now =
+							typeof fn === "function" ? (fn as (prev: T) => T)((await secureStore.get<T>(key)) ?? lastValueRef.current) : fn
 
-					defer(() => {
-						flushMutexRef.current.release()
+						setStateChecked(now)
+
+						await secureStore.set(key, now)
 					})
-
-					// For the functional form re-read the freshest persisted value as the merge base
-					// (inside the flush mutex, so a concurrent instance's prior write is already
-					// committed) instead of this instance's optimistic lastValueRef. Otherwise two
-					// overlapping cross-instance sets on the same key compute from a stale base and
-					// the loser silently clobbers the winner — the self-echo flag (isLocalUpdateRef)
-					// drops the winner's secureStoreChange echo while this set() is in flight, so
-					// lastValueRef never catches up (CU-06). The direct-value form needs no re-read.
-					const now =
-						typeof fn === "function" ? (fn as (prev: T) => T)((await secureStore.get<T>(key)) ?? lastValueRef.current) : fn
-
-					setStateChecked(now)
-
-					await secureStore.set(key, now)
-				})
+				)
 
 				isLocalUpdateRef.current = false
 

@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system"
 import { ManagedFuture, EmbeddedPreviewResult_Tags, type EmbeddedPreviewResult } from "@filen/sdk-rs"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore, run, runOrThrow } from "@filen/shared"
 import { type DriveItemFileExtracted } from "@/types"
 import auth from "@/lib/auth"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo } from "@/lib/paths"
@@ -56,20 +56,14 @@ export class RawPreviewCache extends DiskCache {
 	public async get({ item, signal }: { item: DriveItemFileExtracted; signal?: AbortSignal }): Promise<RawPreviewResult> {
 		const uuid = item.data.uuid
 
-		const result = await run(async defer => {
+		return await runOrThrow(async defer => {
 			await this.clearBarrier.enter()
 
 			defer(() => {
 				this.clearBarrier.leave()
 			})
 
-			const mutex = this.getMutexForKey(uuid)
-
-			await mutex.acquire()
-
-			defer(() => {
-				mutex.release()
-			})
+			defer(await this.keyMutexes.acquire(uuid))
 
 			const file = this.previewFile(uuid)
 
@@ -189,12 +183,6 @@ export class RawPreviewCache extends DiskCache {
 				uri: normalizeFilePathForExpo(file.uri)
 			} satisfies RawPreviewResult
 		})
-
-		if (!result.success) {
-			throw result.error
-		}
-
-		return result.data
 	}
 
 	protected async runGc(age?: number): Promise<void> {
@@ -244,13 +232,7 @@ export class RawPreviewCache extends DiskCache {
 					})
 
 					const uuid = name.endsWith(PREVIEW_EXTENSION) ? name.slice(0, -PREVIEW_EXTENSION.length) : name
-					const mutex = this.getMutexForKey(uuid)
-
-					await mutex.acquire()
-
-					defer(() => {
-						mutex.release()
-					})
+					defer(await this.keyMutexes.acquire(uuid))
 
 					const file = new FileSystem.File(FileSystem.Paths.join(DIRECTORY.uri, name))
 

@@ -7,7 +7,6 @@ vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))
 
-import { filterHiddenItems } from "@filen/shared"
 import { isHiddenDriveItem, DEFAULT_HIDE_HIDDEN_ITEMS, HIDE_HIDDEN_ITEMS_SECURE_STORE_KEY } from "@/features/drive/driveHiddenItems"
 import type { DriveItem } from "@/types"
 
@@ -81,52 +80,5 @@ describe("isHiddenDriveItem", () => {
 
 	it("keeps an item with no decrypted name visible rather than guessing", () => {
 		expect(isHiddenDriveItem(file("f1", null))).toBe(false)
-	})
-})
-
-// filterHiddenItems itself is shared (see @filen/shared's hiddenItems.test.ts); these cases exercise
-// it against mobile's real DriveItem shapes and call convention.
-describe("filterHiddenItems", () => {
-	const items = [file("f1", ".env"), file("f2", "notes.txt"), dir("d1", ".thumb"), dir("d2", "Documents")]
-
-	it("returns the input untouched — same reference — when the preference is off", () => {
-		expect(filterHiddenItems({ items, hide: false })).toBe(items)
-	})
-
-	it("drops every dot-prefixed entry when the preference is on", () => {
-		expect(filterHiddenItems({ items, hide: true }).map(item => item.data.uuid)).toEqual(["f2", "d2"])
-	})
-
-	it("can empty a listing whose entries are all hidden", () => {
-		expect(filterHiddenItems({ items: [file("f1", ".env"), dir("d1", ".git")], hide: true })).toEqual([])
-	})
-
-	it("keeps an undecryptable item visible — its display name is its uuid, never dotted", () => {
-		expect(filterHiddenItems({ items: [file("f1", null, true)], hide: true })).toEqual([file("f1", null, true)])
-	})
-
-	// Search is recursive: hiding `.thumb` from the browser while its contents flood the results
-	// would defeat the point, and the search row prints the hidden directory's name in the path.
-	it("drops a visibly-named search hit that lives inside a hidden directory", () => {
-		const hits = [file("a", "cover.jpg"), file("b", "notes.txt")]
-		const paths = new Map([
-			["a", ".thumb"],
-			["b", "Documents"]
-		])
-
-		expect(filterHiddenItems({ items: hits, hide: true, searchParentPaths: paths }).map(item => item.data.uuid)).toEqual(["b"])
-	})
-
-	it("keeps a hit whose path is absent from the map (not a search result)", () => {
-		const hits = [file("a", "cover.jpg")]
-
-		expect(filterHiddenItems({ items: hits, hide: true, searchParentPaths: new Map() }).map(item => item.data.uuid)).toEqual(["a"])
-	})
-
-	it("ignores ancestry entirely when the preference is off", () => {
-		const hits = [file("a", "cover.jpg")]
-		const paths = new Map([["a", ".thumb"]])
-
-		expect(filterHiddenItems({ items: hits, hide: false, searchParentPaths: paths })).toBe(hits)
 	})
 })

@@ -18,62 +18,58 @@ export class Sync extends OutboxSync<InflightChatMessages> {
 	}
 
 	protected override async restoreFromDisk(): Promise<void> {
-		const result = await run(async defer => {
-			await this.mutex.acquire()
+		const result = await run(() =>
+			this.mutex.withPermit(async () => {
+				const fromDisk = await sqlite.kvAsync.get<InflightChatMessages>(this.sqliteKvKey)
 
-			defer(() => {
-				this.mutex.release()
-			})
+				if (!fromDisk || Object.keys(fromDisk).length === 0) {
+					return false
+				}
 
-			const fromDisk = await sqlite.kvAsync.get<InflightChatMessages>(this.sqliteKvKey)
+				// D1: capture the live pre-merge state so the best-effort prune below can only ever
+				// drop chats that were seeded purely from THIS disk snapshot — a chat the user
+				// created/messaged during restore must survive the prune.
+				const liveBeforeMerge = useChatsStore.getState().inflightMessages
 
-			if (!fromDisk || Object.keys(fromDisk).length === 0) {
-				return false
-			}
+				// Hydrate the store FIRST, before any network call, via a functional MERGE (M4: a new
+				// object every update so zustand notifies subscribers; never mutate the disk snapshot
+				// or the live state in place). This must work offline: the persisted queue has to
+				// become visible and deliverable for the session even when the chats-list fetch below
+				// throws (offline launch). Pruning is a best-effort refinement layered on top, never a
+				// gate on hydration.
+				useChatsStore.getState().setInflightMessages(prev => mergeInflightQueuesByUnion(prev, fromDisk))
 
-			// D1: capture the live pre-merge state so the best-effort prune below can only ever
-			// drop chats that were seeded purely from THIS disk snapshot — a chat the user
-			// created/messaged during restore must survive the prune.
-			const liveBeforeMerge = useChatsStore.getState().inflightMessages
+				// Best-effort prune of messages for chats that no longer exist. On a fetch failure
+				// (e.g. offline) keep the unpruned queue rather than dropping everything. The prune
+				// only applies to keys present in the disk snapshot AND absent from the live pre-merge
+				// state: a chat that gained live messages before/during the restore is never pruned
+				// here (chat removal is handled by purgeChatInflightState on the removal paths).
+				try {
+					const chatsList = await chatsQueryFetch()
+					const existingChatUuids = new Set(chatsList.map(chat => chat.uuid))
 
-			// Hydrate the store FIRST, before any network call, via a functional MERGE (M4: a new
-			// object every update so zustand notifies subscribers; never mutate the disk snapshot
-			// or the live state in place). This must work offline: the persisted queue has to
-			// become visible and deliverable for the session even when the chats-list fetch below
-			// throws (offline launch). Pruning is a best-effort refinement layered on top, never a
-			// gate on hydration.
-			useChatsStore.getState().setInflightMessages(prev => mergeInflightQueuesByUnion(prev, fromDisk))
-
-			// Best-effort prune of messages for chats that no longer exist. On a fetch failure
-			// (e.g. offline) keep the unpruned queue rather than dropping everything. The prune
-			// only applies to keys present in the disk snapshot AND absent from the live pre-merge
-			// state: a chat that gained live messages before/during the restore is never pruned
-			// here (chat removal is handled by purgeChatInflightState on the removal paths).
-			try {
-				const chatsList = await chatsQueryFetch()
-				const existingChatUuids = new Set(chatsList.map(chat => chat.uuid))
-
-				useChatsStore.getState().setInflightMessages(prev => {
-					const updated = {
-						...prev
-					}
-
-					for (const chatUuid of Object.keys(fromDisk)) {
-						if (existingChatUuids.has(chatUuid) || liveBeforeMerge[chatUuid]) {
-							continue
+					useChatsStore.getState().setInflightMessages(prev => {
+						const updated = {
+							...prev
 						}
 
-						delete updated[chatUuid]
-					}
+						for (const chatUuid of Object.keys(fromDisk)) {
+							if (existingChatUuids.has(chatUuid) || liveBeforeMerge[chatUuid]) {
+								continue
+							}
 
-					return updated
-				})
-			} catch (e) {
-				logger.error("chats-sync", "failed to prune restored inflight queue", { error: e })
-			}
+							delete updated[chatUuid]
+						}
 
-			return true
-		})
+						return updated
+					})
+				} catch (e) {
+					logger.error("chats-sync", "failed to prune restored inflight queue", { error: e })
+				}
+
+				return true
+			})
+		)
 
 		if (!result.success) {
 			logger.error("chats-sync", "restoreFromDisk failed", { error: result.error })

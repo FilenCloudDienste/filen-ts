@@ -1,6 +1,5 @@
 import { DriveEvent_Tags, NonRootItem_Tags, SocketEvent_Tags, type SocketEvent, type ParentUuid, type File, type Dir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
-import { favoritesListingUpdater } from "@/features/drive/driveMetadata"
 import {
 	driveItemsQueryUpdateGlobal,
 	driveItemsQueryUpdateRoot,
@@ -11,7 +10,7 @@ import {
 	driveItemsQueryMarkAllStale
 } from "@/features/drive/queries/useDriveItems.query"
 import { unwrapParentUuid, unwrapFileMeta, unwrappedFileIntoDriveItem, unwrapDirMeta, unwrappedDirIntoDriveItem } from "@/lib/sdkUnwrap"
-import { upsertItem } from "@filen/shared"
+import { applyMembershipPatch, upsertItem } from "@filen/shared"
 import cache from "@/lib/cache"
 import useDriveStore from "@/features/drive/store/useDrive.store"
 import { markDirectorySizesStale } from "@/features/drive/queries/useDirectorySize.query"
@@ -75,9 +74,8 @@ function applyFavoriteEcho(driveItem: DriveItem, parent: ParentUuid, favorited: 
 	}
 
 	// The Favorites virtual root needs insert/remove semantics the replace-only global patch can't provide:
-	// a newly-favorited item isn't a row there yet and an unfavorited one must leave — favoritesListingUpdater
-	// (the local path's updater) handles both.
-	driveItemsQueryUpdateRoot("favorites", prev => favoritesListingUpdater(prev, driveItem, favorited))
+	// a newly-favorited item isn't a row there yet and an unfavorited one must leave.
+	driveItemsQueryUpdateRoot("favorites", prev => applyMembershipPatch(prev, driveItem, favorited))
 }
 
 // Builds the row for a raw normal file/directory and writes both through the session caches.

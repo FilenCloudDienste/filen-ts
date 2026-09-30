@@ -13,18 +13,16 @@ import { selectPlaylists } from "@/features/audio/playlistsSelect"
 import { replaceQueueAndPlay } from "@/features/audio/components/playlistMenuButtons"
 import Menu, { type MenuButton } from "@/components/ui/menu"
 import EllipsisMenuTrigger from "@/components/ui/ellipsisMenuTrigger"
-import usePlaylistTracksStore from "@/features/audio/store/usePlaylistTracks.store"
+import usePlaylistTracksStore, { type PlaylistTrack } from "@/features/audio/store/usePlaylistTracks.store"
 import { useShallow } from "zustand/shallow"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useTranslation } from "react-i18next"
 import { type TFunction } from "i18next"
 import logger from "@/lib/logger"
 
-type TrackType = PlaylistWithItems["files"][number]
-
 // Replaces the queue with the track's playlist (starting at the track) and starts playback.
 // Shared by the row tap (primary action) and the trailing dropdown's "play" button.
-async function playTrack({ t, track, playlist }: { t: TFunction; track: TrackType; playlist: PlaylistWithItems }): Promise<void> {
+async function playTrack({ t, track, playlist }: { t: TFunction; track: PlaylistTrack; playlist: PlaylistWithItems }): Promise<void> {
 	const result = await runWithLoading(async () => {
 		const index = playlist.files.findIndex(f => f.uuid === track.uuid)
 
@@ -43,7 +41,7 @@ async function playTrack({ t, track, playlist }: { t: TFunction; track: TrackTyp
 	}
 }
 
-function selectButton({ t, track }: { t: TFunction; track: TrackType }): MenuButton {
+function selectButton({ t, track }: { t: TFunction; track: PlaylistTrack }): MenuButton {
 	return {
 		id: "select",
 		title: t("select"),
@@ -54,7 +52,7 @@ function selectButton({ t, track }: { t: TFunction; track: TrackType }): MenuBut
 	}
 }
 
-function removeFromPlaylistButton({ t, track, playlist }: { t: TFunction; track: TrackType; playlist: PlaylistWithItems }): MenuButton {
+function removeFromPlaylistButton({ t, track, playlist }: { t: TFunction; track: PlaylistTrack; playlist: PlaylistWithItems }): MenuButton {
 	return {
 		id: "removeFromPlaylist",
 		title: t("remove_from_playlist"),
@@ -85,13 +83,13 @@ export function buildUndecryptableTrackButtons({
 	playlist
 }: {
 	t: TFunction
-	track: TrackType
+	track: PlaylistTrack
 	playlist: PlaylistWithItems
 }): MenuButton[] {
 	return [selectButton({ t, track }), removeFromPlaylistButton({ t, track, playlist })]
 }
 
-export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track: TrackType; playlist: PlaylistWithItems }): MenuButton[] {
+export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track: PlaylistTrack; playlist: PlaylistWithItems }): MenuButton[] {
 	return [
 		{
 			id: "play",
@@ -165,21 +163,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 						selectedPlaylists.map(selectedPlaylist =>
 							audio.addTracksToPlaylist({
 								playlist: selectedPlaylist,
-								tracks: [
-									{
-										uuid: track.uuid,
-										name: track.name,
-										mime: track.mime,
-										size: track.size,
-										bucket: track.bucket,
-										key: track.key,
-										version: track.version,
-										chunks: track.chunks,
-										region: track.region,
-										playlist: selectedPlaylist.uuid,
-										item: track.item
-									}
-								]
+								tracks: [track]
 							})
 						)
 					)
@@ -198,7 +182,7 @@ export function buildTrackButtons({ t, track, playlist }: { t: TFunction; track:
 	]
 }
 
-export function Track({ track, playlist, reorderDisabled }: { track: TrackType; playlist: PlaylistWithItems; reorderDisabled?: boolean }) {
+export function Track({ track, playlist, reorderDisabled }: { track: PlaylistTrack; playlist: PlaylistWithItems; reorderDisabled?: boolean }) {
 	const { t } = useTranslation()
 	const drag = useReorderableDrag()
 	const isCurrent = useIsCurrentTrack(track.item.data.uuid, playlist.uuid)

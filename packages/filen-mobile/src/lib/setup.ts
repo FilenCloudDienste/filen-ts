@@ -92,165 +92,161 @@ const setup = {
 	async setup(options?: { background?: boolean }): Promise<{
 		isAuthed: boolean
 	}> {
-		const result = await run(async defer => {
-			await setupMutex.acquire()
+		const result = await run(() =>
+			setupMutex.withPermit(async () => {
+				const now = performance.now()
 
-			defer(() => {
-				setupMutex.release()
-			})
-
-			const now = performance.now()
-
-			// Bound expo-image's iOS disk cache (SDWebImage) to match Android's Glide default
-			// (~250MB). Without it iOS is size-unbounded — only a 1-week age cap — which is the
-			// main driver of the "temporary cache" (sandbox) growth. iOS only: there is no
-			// Android configureCache, and the JS call would throw on the missing native function.
-			// Idempotent and pure native config, so it's safe to re-run on every setup().
-			if (Platform.OS === "ios") {
-				try {
-					Image.configureCache({
-						maxDiskSize: CACHE_MAX_SIZE_BYTES
-					})
-				} catch (e) {
-					logger.error("setup", "Image.configureCache failed", { error: e })
-				}
-			}
-
-			// Crash-orphan sweeps (filen-tmp/ staging + stray .filendl partials) are NOT run
-			// at boot — the stray-file walk scales with the offline store (measured 1.9s with
-			// a heavily offline-marked drive). They live in Settings → Advanced ("Clean up
-			// temporary files"), gated on the transfers/sync stores so they can't race
-			// in-flight downloads.
-
-			const isAuthed = await timed("auth.isAuthed", () => auth.isAuthed())
-			const stringifiedClient = isAuthed.isAuthed && isAuthed.stringifiedClient ? isAuthed.stringifiedClient : null
-
-			if (stringifiedClient) {
-				cache.rootUuid = stringifiedClient.rootUuid
-			}
-
-			// Refresh the SDK transfer config (concurrency/memory/bandwidth) from persisted prefs
-			// BEFORE the client is built in the Promise.all below. Sequenced here (not inside the
-			// Promise.all) so the secureStore reads can't race secureStore.init(); auth.isAuthed()
-			// above already proved a pre-init secureStore read is safe.
-			await auth.loadTransferConfig()
-
-			// Rebuild the disk-derived thumbnail availability Set (sync, once-per-process). Unconditional:
-			// not auth-gated (filenames are uuids, no decrypted data) and safe in headless background
-			// setups — the once-flag makes the foreground re-run free, and generate paths keep it coherent.
-			thumbnails.restore()
-
-			// initI18n / initTheme only read the persisted language / theme from secureStore, which
-			// auth.isAuthed() above already initialized — so they run inside this Promise.all to overlap
-			// with the SQLite restore instead of serializing after it. They stay awaited: RootLayout
-			// renders null until setup resolves, so i18n and the theme override are applied before first
-			// paint (no flash of raw keys or the wrong theme). initTheme is a no-op when following the
-			// system (uniwind already defaults to it on import).
-			//
-			// auth.setSdkClients only needs the auth result — nothing else in this block touches the SDK
-			// client (the restore only deserializes, and the reconnect listener attaches after the block),
-			// so the Rust client construction overlaps the restore instead of serializing before it. The
-			// session-scoped metadata maps need no restore; the warm-seed below rebuilds them from the
-			// restored listing queries.
-			await Promise.all([
-				stringifiedClient
-					? timed("auth.setSdkClients", async () => {
-							await auth.setSdkClients(stringifiedClient)
+				// Bound expo-image's iOS disk cache (SDWebImage) to match Android's Glide default
+				// (~250MB). Without it iOS is size-unbounded — only a 1-week age cap — which is the
+				// main driver of the "temporary cache" (sandbox) growth. iOS only: there is no
+				// Android configureCache, and the JS call would throw on the missing native function.
+				// Idempotent and pure native config, so it's safe to re-run on every setup().
+				if (Platform.OS === "ios") {
+					try {
+						Image.configureCache({
+							maxDiskSize: CACHE_MAX_SIZE_BYTES
 						})
-					: Promise.resolve(),
-				secureStore.init(),
-				timed("sqlite.init", () => sqlite.init()),
-				restoreQueries(),
-				timed("initI18n", () => initI18n()),
-				initTheme()
-			])
-
-			// One-time sweep of the dead cache:v1:* rows left by the removed persistent-map layer —
-			// decrypted names must not linger on disk for a user who never logs out; a no-op range seek
-			// once clean. Unconditional (the rows are dead regardless of auth); fire-and-forget.
-			sqlite.kvAsync.removeByPrefixRange("cache:v1:").catch(e => {
-				logger.warn("setup", "legacy cache row sweep failed", { error: e })
-			})
-
-			// Rebuilds the session-scoped uuid indexes from the restored listing queries so socket patches,
-			// breadcrumbs, and shared-context resolution keep their pre-fetch coverage.
-			if (isAuthed.isAuthed) {
-				await timed("warmSeedDriveCaches", () => warmSeedDriveCaches())
-			}
-
-			// Wire the reconnect-replay listener after the query cache is hydrated.
-			// Idempotent — only attaches the onlineManager subscription on first call.
-			startReconnectListener()
-
-			// fileCache/audioCache gc no longer runs at boot — both caches schedule a
-			// debounced gc after writes and gc on app-background, so reclamation happens
-			// where growth happens instead of competing with startup.
-			if (isAuthed.isAuthed && !options?.background) {
-				foregroundService.init().catch(e => {
-					logger.error("setup", "foregroundService.init failed", { error: e })
-				})
-
-				// configureCache is pure storage (opens no DB until the first search), so this is
-				// fire-and-forget and cheap. Gated like foregroundService: never in a headless
-				// background run (no search worker there), and only when authed.
-				driveSearch.init().catch(e => {
-					logger.error("setup", "driveSearch.init failed", { error: e })
-				})
-
-				// One-time (per launch) beta migration: re-encrypt a legacy plaintext auth.json if the
-				// provider is enabled. No-op once auth.json is already encrypted or the provider is off.
-				// Then reconcile the domain: "provider enabled" and "domain registered" are separate
-				// one-shot states, and the update path from the pre-replicated build (readable
-				// auth.json, so ensureEncrypted no-ops) otherwise never registers the new domain —
-				// the Filen location silently vanishes from Files.app while the app reports the
-				// provider as enabled. Sequenced after ensureEncrypted so a just-migrated auth.json
-				// is what the reconcile reads.
-				fileProvider
-					.ensureEncrypted()
-					.catch(e => {
-						logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e })
-
-						return { freshlyRegistered: false }
-					})
-					.then(async ({ freshlyRegistered: migrationRegistered }) => {
-						const { freshlyRegistered } = await fileProvider.reconcileDomainRegistration()
-
-						// The migration's enable() may have done the first registration itself, in
-						// which case the reconcile's already-registered early-return reports false —
-						// the hint must fire for either.
-						if (migrationRegistered || freshlyRegistered) {
-							// A freshly added domain lands disabled in Files.app; without this hint the
-							// user has to discover the Browse → Locations toggle themselves.
-							alerts.normal(t("file_provider_enable_in_files_app"))
-						}
-					})
-					.catch(e => {
-						logger.error("setup", "fileProvider.reconcileDomainRegistration failed", { error: e })
-					})
-
-				// globalThis read, not bare __DEV__ — undefined-at-eval in the test runner (see the
-				// console polyfill's module-eval gate). Tests (undefined) skip it like production.
-				if ((globalThis as { __DEV__?: boolean }).__DEV__ === true) {
-					// Fire-and-forget: reads run against a page cache the restores just warmed.
-					logKvStats()
+					} catch (e) {
+						logger.error("setup", "Image.configureCache failed", { error: e })
+					}
 				}
-			}
 
-			const duration = performance.now() - now
+				// Crash-orphan sweeps (filen-tmp/ staging + stray .filendl partials) are NOT run
+				// at boot — the stray-file walk scales with the offline store (measured 1.9s with
+				// a heavily offline-marked drive). They live in Settings → Advanced ("Clean up
+				// temporary files"), gated on the transfers/sync stores so they can't race
+				// in-flight downloads.
 
-			if (duration > SLOW_SETUP_WARN_MS) {
-				logger.warn("setup", "Setup was slow", {
-					durationMs: duration.toFixed(2),
-					background: options?.background === true
+				const isAuthed = await timed("auth.isAuthed", () => auth.isAuthed())
+				const stringifiedClient = isAuthed.isAuthed && isAuthed.stringifiedClient ? isAuthed.stringifiedClient : null
+
+				if (stringifiedClient) {
+					cache.rootUuid = stringifiedClient.rootUuid
+				}
+
+				// Refresh the SDK transfer config (concurrency/memory/bandwidth) from persisted prefs
+				// BEFORE the client is built in the Promise.all below. Sequenced here (not inside the
+				// Promise.all) so the secureStore reads can't race secureStore.init(); auth.isAuthed()
+				// above already proved a pre-init secureStore read is safe.
+				await auth.loadTransferConfig()
+
+				// Rebuild the disk-derived thumbnail availability Set (sync, once-per-process). Unconditional:
+				// not auth-gated (filenames are uuids, no decrypted data) and safe in headless background
+				// setups — the once-flag makes the foreground re-run free, and generate paths keep it coherent.
+				thumbnails.restore()
+
+				// initI18n / initTheme only read the persisted language / theme from secureStore, which
+				// auth.isAuthed() above already initialized — so they run inside this Promise.all to overlap
+				// with the SQLite restore instead of serializing after it. They stay awaited: RootLayout
+				// renders null until setup resolves, so i18n and the theme override are applied before first
+				// paint (no flash of raw keys or the wrong theme). initTheme is a no-op when following the
+				// system (uniwind already defaults to it on import).
+				//
+				// auth.setSdkClients only needs the auth result — nothing else in this block touches the SDK
+				// client (the restore only deserializes, and the reconnect listener attaches after the block),
+				// so the Rust client construction overlaps the restore instead of serializing before it. The
+				// session-scoped metadata maps need no restore; the warm-seed below rebuilds them from the
+				// restored listing queries.
+				await Promise.all([
+					stringifiedClient
+						? timed("auth.setSdkClients", async () => {
+								await auth.setSdkClients(stringifiedClient)
+							})
+						: Promise.resolve(),
+					secureStore.init(),
+					timed("sqlite.init", () => sqlite.init()),
+					restoreQueries(),
+					timed("initI18n", () => initI18n()),
+					initTheme()
+				])
+
+				// One-time sweep of the dead cache:v1:* rows left by the removed persistent-map layer —
+				// decrypted names must not linger on disk for a user who never logs out; a no-op range seek
+				// once clean. Unconditional (the rows are dead regardless of auth); fire-and-forget.
+				sqlite.kvAsync.removeByPrefixRange("cache:v1:").catch(e => {
+					logger.warn("setup", "legacy cache row sweep failed", { error: e })
 				})
-			} else {
-				logger.info("setup", "Setup completed", { durationMs: duration.toFixed(2) })
-			}
 
-			return {
-				isAuthed: isAuthed.isAuthed
-			}
-		})
+				// Rebuilds the session-scoped uuid indexes from the restored listing queries so socket patches,
+				// breadcrumbs, and shared-context resolution keep their pre-fetch coverage.
+				if (isAuthed.isAuthed) {
+					await timed("warmSeedDriveCaches", () => warmSeedDriveCaches())
+				}
+
+				// Wire the reconnect-replay listener after the query cache is hydrated.
+				// Idempotent — only attaches the onlineManager subscription on first call.
+				startReconnectListener()
+
+				// fileCache/audioCache gc no longer runs at boot — both caches schedule a
+				// debounced gc after writes and gc on app-background, so reclamation happens
+				// where growth happens instead of competing with startup.
+				if (isAuthed.isAuthed && !options?.background) {
+					foregroundService.init().catch(e => {
+						logger.error("setup", "foregroundService.init failed", { error: e })
+					})
+
+					// configureCache is pure storage (opens no DB until the first search), so this is
+					// fire-and-forget and cheap. Gated like foregroundService: never in a headless
+					// background run (no search worker there), and only when authed.
+					driveSearch.init().catch(e => {
+						logger.error("setup", "driveSearch.init failed", { error: e })
+					})
+
+					// One-time (per launch) beta migration: re-encrypt a legacy plaintext auth.json if the
+					// provider is enabled. No-op once auth.json is already encrypted or the provider is off.
+					// Then reconcile the domain: "provider enabled" and "domain registered" are separate
+					// one-shot states, and the update path from the pre-replicated build (readable
+					// auth.json, so ensureEncrypted no-ops) otherwise never registers the new domain —
+					// the Filen location silently vanishes from Files.app while the app reports the
+					// provider as enabled. Sequenced after ensureEncrypted so a just-migrated auth.json
+					// is what the reconcile reads.
+					fileProvider
+						.ensureEncrypted()
+						.catch(e => {
+							logger.error("setup", "fileProvider.ensureEncrypted failed", { error: e })
+
+							return { freshlyRegistered: false }
+						})
+						.then(async ({ freshlyRegistered: migrationRegistered }) => {
+							const { freshlyRegistered } = await fileProvider.reconcileDomainRegistration()
+
+							// The migration's enable() may have done the first registration itself, in
+							// which case the reconcile's already-registered early-return reports false —
+							// the hint must fire for either.
+							if (migrationRegistered || freshlyRegistered) {
+								// A freshly added domain lands disabled in Files.app; without this hint the
+								// user has to discover the Browse → Locations toggle themselves.
+								alerts.normal(t("file_provider_enable_in_files_app"))
+							}
+						})
+						.catch(e => {
+							logger.error("setup", "fileProvider.reconcileDomainRegistration failed", { error: e })
+						})
+
+					// globalThis read, not bare __DEV__ — undefined-at-eval in the test runner (see the
+					// console polyfill's module-eval gate). Tests (undefined) skip it like production.
+					if ((globalThis as { __DEV__?: boolean }).__DEV__ === true) {
+						// Fire-and-forget: reads run against a page cache the restores just warmed.
+						logKvStats()
+					}
+				}
+
+				const duration = performance.now() - now
+
+				if (duration > SLOW_SETUP_WARN_MS) {
+					logger.warn("setup", "Setup was slow", {
+						durationMs: duration.toFixed(2),
+						background: options?.background === true
+					})
+				} else {
+					logger.info("setup", "Setup completed", { durationMs: duration.toFixed(2) })
+				}
+
+				return {
+					isAuthed: isAuthed.isAuthed
+				}
+			})
+		)
 
 		if (!result.success) {
 			logger.error("setup", "setup pipeline failed", { error: result.error })

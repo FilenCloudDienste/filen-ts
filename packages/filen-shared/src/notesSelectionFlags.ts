@@ -96,7 +96,8 @@ export function aggregateNoteSelectionFlags<
 			everyArchivedOrTrashed = false
 		}
 
-		// Look up the participant once and reuse it for both the write-access and leave-gate checks.
+		// The isNoteOwner / hasNoteWriteAccess rule, inlined so one participant lookup serves both the
+		// write-access and leave-gate checks.
 		const isOwner = note.ownerId === userId
 		const participant = note.participants.find(p => p.userId === userId)
 		const hasWrite = isOwner || (participant?.permissionsWrite ?? false)
@@ -127,4 +128,20 @@ export function aggregateNoteSelectionFlags<
 		hasWriteAccessToAll,
 		participantOfEveryAndNotOwner
 	}
+}
+
+type NoteAccessShape = {
+	ownerId: bigint
+	participants: readonly { userId: bigint; permissionsWrite: boolean }[]
+}
+
+// An unresolved user id is "not the owner", the safer default; the SDK is the final authority anyway.
+export function isNoteOwner(note: NoteAccessShape, userId: bigint | undefined): boolean {
+	return userId !== undefined && note.ownerId === userId
+}
+
+// Write access: the owner, or a participant carrying permissionsWrite. An unresolved user id is "no
+// access", the same fail-safe direction as isNoteOwner.
+export function hasNoteWriteAccess(note: NoteAccessShape, userId: bigint | undefined): boolean {
+	return isNoteOwner(note, userId) || (note.participants.find(p => p.userId === userId)?.permissionsWrite ?? false)
 }

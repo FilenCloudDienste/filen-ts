@@ -24,8 +24,7 @@ const {
 
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
-	createNotePreviewFromContentText: vi.fn().mockReturnValue("preview-text"),
-	sortParams: vi.fn(x => x)
+	createNotePreviewFromContentText: vi.fn().mockReturnValue("preview-text")
 }))
 
 vi.mock("@/lib/auth", () => ({

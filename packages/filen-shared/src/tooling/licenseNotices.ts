@@ -320,6 +320,47 @@ export function describeLicensing(dir: string | null, declared: string): { copyr
 	return { copyright: [...new Set(copyright)], terms }
 }
 
+/** One package's attribution as the generated payload stores it. */
+export type NoticeEntry<E extends string = string> = {
+	name: string
+	version: string
+	license: string
+	ecosystem: E
+	copyright: string[]
+	repository: string | null
+	/** Indices into the deduplicated boilerplate table. Empty when no license file was found. */
+	texts: number[]
+}
+
+/** An entry before its terms are pooled — carries the verbatim texts the dedup pass replaces. */
+export type CollectedNotice<E extends string = string> = NoticeEntry<E> & { terms: string[] }
+
+/**
+ * A collected entry for the package whose license files live in `dir`. Key order is fixed: it is the
+ * payload's field order, and callers compare entries through JSON.stringify.
+ */
+export function describedNotice<E extends string>(fields: {
+	name: string
+	version: string
+	license: string
+	ecosystem: E
+	dir: string | null
+	repository: string | null
+}): CollectedNotice<E> {
+	const licensing = describeLicensing(fields.dir, fields.license)
+
+	return {
+		name: fields.name,
+		version: fields.version,
+		license: fields.license,
+		ecosystem: fields.ecosystem,
+		copyright: licensing.copyright,
+		repository: fields.repository,
+		texts: [],
+		terms: licensing.terms
+	}
+}
+
 export function readJson(path: string): Record<string, unknown> | null {
 	try {
 		return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>

@@ -16,15 +16,7 @@ const { mockGetSdkClients, mockListFileVersions, cacheFileUuidToNormalFile } = v
 	}
 })
 
-vi.mock("@filen/shared", async () => {
-	const real = await import("@/tests/mocks/filenShared")
-	const { sortParams } = await import("@filen/shared")
-
-	return {
-		...real,
-		sortParams
-	}
-})
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/queries/client", () => ({
 	queryUpdater: {

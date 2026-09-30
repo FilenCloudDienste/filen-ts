@@ -1,6 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import queryClient, { queryUpdater, getCachedQuery, type QueryUpdater } from "@/queries/client"
-import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
@@ -87,27 +86,22 @@ export async function fetchData(
 // (features/notes/notesOffline) has to address the same entry to evict it from both the in-memory
 // cache and the persisted store, and a key built by hand there would silently miss on any change here.
 export function noteContentQueryKey(params: UseNoteContentQueryParams): unknown[] {
-	return [BASE_QUERY_KEY, sortParams(params)]
+	return [BASE_QUERY_KEY, params]
 }
 
 export function useNoteContentQuery(
 	params: UseNoteContentQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = sortParams(params)
-
 	const query = useQuery({
 		// A reopened note whose body is still current defers to staleTime (the editor passes Infinity),
 		// which only an invalidation beats. Anything else re-reads, as every mount did before.
-		refetchOnMount: cached => (noteContentReadIsCurrent(sortedParams.uuid, cached.state) ? true : "always"),
+		refetchOnMount: cached => (noteContentReadIsCurrent(params.uuid, cached.state) ? true : "always"),
 		...options,
-		// Built from `sortedParams` rather than `params` so the exhaustive-deps rule can see that the
-		// key covers everything the queryFn closes over. sortParams is idempotent, so routing the
-		// already-sorted object back through the shared builder is a no-op.
-		queryKey: noteContentQueryKey(sortedParams),
+		queryKey: noteContentQueryKey(params),
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...params,
 				signal
 			})
 	})

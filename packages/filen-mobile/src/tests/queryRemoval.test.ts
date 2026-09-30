@@ -17,8 +17,6 @@ vi.mock("react-native", async () => {
 	}
 })
 
-// @filen/shared is deliberately REAL: sortParams is what shapes the query key this suite is pinning,
-// so a stub would make the assertions circular.
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@/lib/utils", () => ({}))
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
@@ -75,7 +73,7 @@ beforeEach(() => {
 describe("removeQueryEverywhere", () => {
 	// The eviction path behind "remove this note from offline". A silent no-op here would look like
 	// the feature works while reclaiming nothing.
-	it("removes a query written under a sortParams-shaped key", () => {
+	it("removes a query written under the note content key", () => {
 		const queryKey = noteContentQueryKey({ uuid: "note-a" })
 
 		queryClient.setQueryData(queryKey, "body")

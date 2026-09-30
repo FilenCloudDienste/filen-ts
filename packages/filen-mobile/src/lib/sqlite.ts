@@ -1,5 +1,5 @@
 import { open, type DB } from "@op-engineering/op-sqlite"
-import { Semaphore, run } from "@filen/shared"
+import { Semaphore, run, runOrThrow } from "@filen/shared"
 import { serialize, deserialize } from "@/lib/serializer"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SQLITE_DB_FILE_NAME, SQLITE_DB_FILE_DIRECTORY } from "@/lib/storageRoots"
@@ -137,35 +137,27 @@ class Sqlite {
 	}
 
 	public async init(): Promise<void> {
-		const result = await run(async defer => {
-			await this.initMutex.acquire()
+		await runOrThrow(() =>
+			this.initMutex.withPermit(async () => {
+				if (this.initDone) {
+					return
+				}
 
-			defer(() => {
-				this.initMutex.release()
+				if (!this.db) {
+					ensureDirectory(SQLITE_DB_FILE_DIRECTORY)
+
+					// Changing the on-disk database file format requires bumping SQLITE_VERSION in storageRoots.ts.
+					this.db = open({
+						name: SQLITE_DB_FILE_NAME,
+						location: normalizeFilePathForSdk(SQLITE_DB_FILE_DIRECTORY.uri)
+					})
+				}
+
+				await this.db.execute(initQueries(FileSystem.Paths.cache.uri).join("; "))
+
+				this.initDone = true
 			})
-
-			if (this.initDone) {
-				return
-			}
-
-			if (!this.db) {
-				ensureDirectory(SQLITE_DB_FILE_DIRECTORY)
-
-				// Changing the on-disk database file format requires bumping SQLITE_VERSION in storageRoots.ts.
-				this.db = open({
-					name: SQLITE_DB_FILE_NAME,
-					location: normalizeFilePathForSdk(SQLITE_DB_FILE_DIRECTORY.uri)
-				})
-			}
-
-			await this.db.execute(initQueries(FileSystem.Paths.cache.uri).join("; "))
-
-			this.initDone = true
-		})
-
-		if (!result.success) {
-			throw result.error
-		}
+		)
 	}
 
 	/**

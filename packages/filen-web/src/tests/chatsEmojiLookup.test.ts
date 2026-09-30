@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { CUSTOM_EMOJIS, customEmojiImageForShortcode, emojiForShortcode, searchEmoji } from "@/features/chats/lib/emoji"
 
-// The full custom pack (CDN-sourced, shared with mobile via customEmojis.json) legitimately collides
+// The full custom pack (CDN-sourced, shared with mobile via @filen/shared/emojis) legitimately collides
 // with a handful of ids in the curated standard-unicode table below — mobile has no textual
 // standard-shortcode lookup at all, so for any id its custom pack defines, the custom pack IS mobile's
 // answer. Matching that means: on a collision, the custom pack always wins (emoji.ts's emojiForShortcode

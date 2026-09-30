@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { run, runEffect, runTimeout, TimeoutError } from "@filen/shared"
+import { run, runEffect, runOrThrow, runTimeout, TimeoutError } from "@filen/shared"
 
 describe("run", () => {
 	describe("basic functionality", () => {
@@ -228,6 +228,49 @@ describe("run", () => {
 			expect(connection.rollback).toHaveBeenCalled()
 			expect(connection.close).toHaveBeenCalled()
 		})
+	})
+})
+
+describe("runOrThrow", () => {
+	it("resolves the bare data on success", async () => {
+		await expect(runOrThrow(async () => "value")).resolves.toBe("value")
+	})
+
+	it("rethrows the original error after running deferred cleanups LIFO", async () => {
+		const order: string[] = []
+		const error = new Error("failed")
+
+		await expect(
+			runOrThrow(defer => {
+				defer(() => {
+					order.push("first")
+				})
+
+				defer(() => {
+					order.push("second")
+				})
+
+				throw error
+			})
+		).rejects.toBe(error)
+
+		expect(order).toEqual(["second", "first"])
+	})
+
+	it("runs deferred cleanups before resolving", async () => {
+		const order: string[] = []
+
+		const data = await runOrThrow(defer => {
+			defer(() => {
+				order.push("cleanup")
+			})
+
+			return 1
+		})
+
+		order.push(`resolved ${data}`)
+
+		expect(order).toEqual(["cleanup", "resolved 1"])
 	})
 })
 

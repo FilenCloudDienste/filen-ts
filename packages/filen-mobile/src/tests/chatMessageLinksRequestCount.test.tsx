@@ -65,7 +65,6 @@ import useChatMessageLinksQuery, {
 	LINK_PREVIEW_STALE_TIME,
 	type LinkResult
 } from "@/features/chats/queries/useChatMessageLinks.query"
-import { sortParams } from "@filen/shared"
 
 const FILE_LINK = { url: "https://app.filen.io/file/f1", start: 0, end: 30 }
 const DIR_LINK = { url: "https://app.filen.io/dir/d1", start: 31, end: 60 }
@@ -118,7 +117,7 @@ describe("useChatMessageLinksQuery request counts", () => {
 	})
 
 	it("a persisted entry older than an hour re-resolves once on first mount", async () => {
-		const key = [BASE_QUERY_KEY, sortParams({ links: [FILE_LINK] })]
+		const key = [BASE_QUERY_KEY, { links: [FILE_LINK] }]
 
 		queryClient.setQueryData(key, [{ type: "internal", success: false }], { updatedAt: Date.now() - LINK_PREVIEW_STALE_TIME - 1000 })
 
@@ -137,7 +136,7 @@ describe("useChatMessageLinksQuery request counts", () => {
 
 	it("an entry resolved within the hour is served from cache", async () => {
 		queryClient.setQueryData(
-			[BASE_QUERY_KEY, sortParams({ links: [DIR_LINK] })],
+			[BASE_QUERY_KEY, { links: [DIR_LINK] }],
 			[{ type: "internal", success: true, data: { type: "directory", info: { uuid: "d1" } } }],
 			{ updatedAt: Date.now() - 10 * 60 * 1000 }
 		)

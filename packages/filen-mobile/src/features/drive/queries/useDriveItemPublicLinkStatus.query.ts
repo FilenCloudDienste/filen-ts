@@ -1,6 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { queryUpdater, type QueryUpdater } from "@/queries/client"
-import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
@@ -81,7 +80,7 @@ export function publicLinkStatusQueryKey(params: UseDriveItemPublicLinkStatusQue
 }
 
 export function publicLinkStatusQueryFullKey(params: UseDriveItemPublicLinkStatusQueryParams): unknown[] {
-	return [BASE_QUERY_KEY, sortParams(publicLinkStatusQueryKey(params))]
+	return [BASE_QUERY_KEY, publicLinkStatusQueryKey(params)]
 }
 
 export function useDriveItemPublicLinkStatusQuery(

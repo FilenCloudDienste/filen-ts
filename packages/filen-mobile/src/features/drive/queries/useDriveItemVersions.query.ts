@@ -1,6 +1,5 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { queryUpdater, type QueryUpdater } from "@/queries/client"
-import { sortParams } from "@filen/shared"
 import cache from "@/lib/cache"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
@@ -37,14 +36,12 @@ export function useDriveItemVersionsQuery(
 	params: UseDriveItemVersionsQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = sortParams(params)
-
 	const query = useQuery({
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		queryKey: [BASE_QUERY_KEY, params],
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...params,
 				signal
 			})
 	})
@@ -62,10 +59,8 @@ export function driveItemVersionsQueryUpdate({
 	updater: QueryUpdater<Awaited<ReturnType<typeof fetchData>>>
 	dataUpdatedAt?: number
 }): void {
-	const sortedParams = sortParams(params)
-
 	queryUpdater.set<Awaited<ReturnType<typeof fetchData>>>(
-		[BASE_QUERY_KEY, sortedParams],
+		[BASE_QUERY_KEY, params],
 		prev => {
 			const currentData = prev ?? ([] satisfies Awaited<ReturnType<typeof fetchData>>)
 

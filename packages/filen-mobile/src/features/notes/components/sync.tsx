@@ -236,91 +236,89 @@ export class Sync extends OutboxSync<InflightContent> {
 		// store/disk without the sync mutex). We now: (1) hydrate unconditionally via
 		// a functional MERGE before any network call, then (2) reconcile against the
 		// cloud best-effort only when online.
-		const result = await run(async defer => {
-			await this.mutex.acquire()
+		const result = await run(() =>
+			this.mutex.withPermit(async () => {
+				const fromDisk = await sqlite.kvAsync.get<InflightContent>(this.sqliteKvKey)
 
-			defer(() => {
-				this.mutex.release()
-			})
-
-			const fromDisk = await sqlite.kvAsync.get<InflightContent>(this.sqliteKvKey)
-
-			if (!fromDisk || Object.keys(fromDisk).length === 0) {
-				return false
-			}
-
-			// (1) Hydrate UNCONDITIONALLY, before any network call, merging into the
-			// current store so a concurrent edit isn't lost.
-			useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, fromDisk))
-
-			// (2) Reconcile against the cloud best-effort, only when online. A failure
-			// here (offline, transient) must NOT undo the hydration above.
-			if (!onlineManager.isOnline()) {
-				return true
-			}
-
-			const reconcile = await run(async () => {
-				const signal = this.abortController.signal
-
-				// Metadata-only list: tells us which disk-seeded notes still exist in the cloud.
-				// Content is no longer carried by the list — fetch it on demand below, and ONLY
-				// for the notes that actually have disk-seeded inflight (never the whole account;
-				// the old bulk per-note getNoteContent fan-out is exactly what we removed).
-				const cloudNotes = await notesQueryFetch({ signal })
-				const cloudByUuid = new Map<string, Note>()
-
-				for (const note of cloudNotes) {
-					cloudByUuid.set(note.uuid, note)
+				if (!fromDisk || Object.keys(fromDisk).length === 0) {
+					return false
 				}
 
-				// Per-note content, fetched only for disk-inflight notes that still exist. A
-				// failed fetch leaves the entry untouched (availability beats reconcile — the
-				// next sync pass re-pushes it) rather than being pruned or dropped.
-				const contentByUuid = new Map<string, string>()
+				// (1) Hydrate UNCONDITIONALLY, before any network call, merging into the
+				// current store so a concurrent edit isn't lost.
+				useNotesInflightStore.getState().setInflightContent(prev => mergeInflight(prev, fromDisk))
 
-				await Promise.all(
-					Object.keys(fromDisk).map(async noteUuid => {
-						const note = cloudByUuid.get(noteUuid)
+				// (2) Reconcile against the cloud best-effort, only when online. A failure
+				// here (offline, transient) must NOT undo the hydration above.
+				if (!onlineManager.isOnline()) {
+					return true
+				}
 
-						if (!note) {
-							return
-						}
+				const reconcile = await run(async () => {
+					const signal = this.abortController.signal
 
-						try {
-							const cloudContent = await notes.getContent({ note, signal })
+					// Metadata-only list: tells us which disk-seeded notes still exist in the cloud.
+					// Content is no longer carried by the list — fetch it on demand below, and ONLY
+					// for the notes that actually have disk-seeded inflight (never the whole account;
+					// the old bulk per-note getNoteContent fan-out is exactly what we removed).
+					const cloudNotes = await notesQueryFetch({ signal })
+					const cloudByUuid = new Map<string, Note>()
 
-							// `undefined` means the body EXISTS but could not be decrypted — an empty
-							// note returns "". Coalescing it to "" would make the prune below read a
-							// deliberate "I cleared this note" draft as already-synced and discard it.
-							// Treat it like a failed fetch: keep the entry, let the next pass decide.
-							if (typeof cloudContent === "string") {
-								contentByUuid.set(noteUuid, cloudContent)
+					for (const note of cloudNotes) {
+						cloudByUuid.set(note.uuid, note)
+					}
+
+					// Per-note content, fetched only for disk-inflight notes that still exist. A
+					// failed fetch leaves the entry untouched (availability beats reconcile — the
+					// next sync pass re-pushes it) rather than being pruned or dropped.
+					const contentByUuid = new Map<string, string>()
+
+					await Promise.all(
+						Object.keys(fromDisk).map(async noteUuid => {
+							const note = cloudByUuid.get(noteUuid)
+
+							if (!note) {
+								return
 							}
-						} catch (e) {
-							logger.warn("notes-sync", "restore reconcile: getContent failed; keeping inflight entry", {
-								noteUuid,
-								error: e
-							})
-						}
-					})
-				)
 
-				// #4 principle applied to restore: drop a disk-seeded inflight entry already synced with
-				// the cloud or orphaned (note gone) — see notesOutboxReconcile.ts for the full rule. Applied
-				// as a functional update so any edit made during the fetch is preserved.
-				useNotesInflightStore.getState().setInflightContent(prev =>
-					reconcileNoteOutboxAgainstCloud(prev, Object.keys(fromDisk), new Set(cloudByUuid.keys()), contentByUuid)
-				)
-			})
+							try {
+								const cloudContent = await notes.getContent({ note, signal })
 
-			if (!reconcile.success) {
-				logger.warn("notes-sync", "cloud reconcile after restore failed; stale inflight entries may persist", {
-					error: reconcile.error
+								// `undefined` means the body EXISTS but could not be decrypted — an empty
+								// note returns "". Coalescing it to "" would make the prune below read a
+								// deliberate "I cleared this note" draft as already-synced and discard it.
+								// Treat it like a failed fetch: keep the entry, let the next pass decide.
+								if (typeof cloudContent === "string") {
+									contentByUuid.set(noteUuid, cloudContent)
+								}
+							} catch (e) {
+								logger.warn("notes-sync", "restore reconcile: getContent failed; keeping inflight entry", {
+									noteUuid,
+									error: e
+								})
+							}
+						})
+					)
+
+					// #4 principle applied to restore: drop a disk-seeded inflight entry already synced with
+					// the cloud or orphaned (note gone) — see notesOutboxReconcile.ts for the full rule. Applied
+					// as a functional update so any edit made during the fetch is preserved.
+					useNotesInflightStore
+						.getState()
+						.setInflightContent(prev =>
+							reconcileNoteOutboxAgainstCloud(prev, Object.keys(fromDisk), new Set(cloudByUuid.keys()), contentByUuid)
+						)
 				})
-			}
 
-			return true
-		})
+				if (!reconcile.success) {
+					logger.warn("notes-sync", "cloud reconcile after restore failed; stale inflight entries may persist", {
+						error: reconcile.error
+					})
+				}
+
+				return true
+			})
+		)
 
 		if (!result.success) {
 			logger.error("notes-sync", "restoreFromDisk failed; unsaved edits from previous session may be lost", { error: result.error })

@@ -52,7 +52,15 @@ vi.mock("@/features/drive/store/useDrive.store", () => ({
 	clearDriveSelection: () => mockClearSelectedItems()
 }))
 
-vi.mock("@/features/drive/driveSelectors", () => ({}))
+vi.mock("@/features/drive/driveSelectors", async () => {
+	const actual = await vi.importActual<typeof import("@/features/drive/driveSelectors")>("@/features/drive/driveSelectors")
+
+	return {
+		isOwnEditableView: actual.isOwnEditableView,
+		isReadableView: actual.isReadableView,
+		offersBulkFavoriteShare: actual.offersBulkFavoriteShare
+	}
+})
 vi.mock("@/features/drive/driveDownload", () => ({
 	downloadDriveItemToDevice: vi.fn(),
 	ensureSaveToPhotosPermission: vi.fn(),

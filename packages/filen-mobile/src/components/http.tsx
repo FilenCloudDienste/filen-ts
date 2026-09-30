@@ -160,21 +160,17 @@ function scheduleGraceDestroy(): void {
 	graceDestroyTimer = setTimeout(() => {
 		graceDestroyTimer = null
 
-		run(async defer => {
-			await mutex.acquire()
+		run(() =>
+			mutex.withPermit(() => {
+				// Re-check under the mutex: the timer may thaw-fire on Android resume (timers freeze
+				// while the activity is paused), or a PiP session may have started since scheduling.
+				if (AppState.currentState === "active" || usePipStore.getState().activeKey !== null) {
+					return
+				}
 
-			defer(() => {
-				mutex.release()
+				destroyProviderLocked()
 			})
-
-			// Re-check under the mutex: the timer may thaw-fire on Android resume (timers freeze
-			// while the activity is paused), or a PiP session may have started since scheduling.
-			if (AppState.currentState === "active" || usePipStore.getState().activeKey !== null) {
-				return
-			}
-
-			destroyProviderLocked()
-		}).then(result => {
+		).then(result => {
 			if (!result.success) {
 				logger.error("http", "HTTP provider grace teardown failed", { error: result.error })
 			}
@@ -277,15 +273,7 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 				return
 			}
 
-			const result = await run(async defer => {
-				await mutex.acquire()
-
-				defer(() => {
-					mutex.release()
-				})
-
-				await startProviderLocked(sdkClient)
-			})
+			const result = await run(() => mutex.withPermit(() => startProviderLocked(sdkClient)))
 
 			if (!result.success) {
 				logger.error("http", "HTTP provider lifecycle failed", { nextAppState, error: result.error })
@@ -339,15 +327,7 @@ const InnerHttp = ({ sdkClient }: { sdkClient: JsClientInterface }) => {
 				// it and leaving a zombie provider re-published against a destroyed SDK client
 				// (post-implementation review finding 9). doLogout's reloadAsync rebuilds the JS
 				// realm shortly after, which bounds anything that slips through.
-				run(async innerDefer => {
-					await mutex.acquire()
-
-					innerDefer(() => {
-						mutex.release()
-					})
-
-					destroyProviderLocked()
-				}).then(result => {
+				run(() => mutex.withPermit(destroyProviderLocked)).then(result => {
 					if (!result.success) {
 						logger.error("http", "HTTP provider unmount teardown failed", { error: result.error })
 					}

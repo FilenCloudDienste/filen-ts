@@ -1,4 +1,5 @@
 import { NoteType } from "@filen/sdk-rs"
+import { hasNoteWriteAccess, isNoteOwner } from "@filen/shared"
 import { type Note as TNote } from "@/types"
 import { noteDisplayTitle } from "@/lib/decryption"
 import { Menu as MenuComponent, type MenuButton } from "@/components/ui/menu"
@@ -631,11 +632,8 @@ const Menu = ({
 	const isInflight = useNoteHasInflight(note.uuid)
 	const isAvailableOffline = useNotesOfflineStore(state => state.marked[note.uuid] === true)
 
-	const writeAccess =
-		note.ownerId === stringifiedClient?.userId ||
-		note.participants.some(p => p.userId === stringifiedClient?.userId && p.permissionsWrite)
-
-	const isOwner = note.ownerId === stringifiedClient?.userId
+	const writeAccess = hasNoteWriteAccess(note, stringifiedClient?.userId)
+	const isOwner = isNoteOwner(note, stringifiedClient?.userId)
 
 	const onOpenMenu = () => {
 		useNotesStore.getState().setActiveNote(note)

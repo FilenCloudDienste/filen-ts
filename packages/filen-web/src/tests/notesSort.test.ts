@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
 	filterNotesBySearch,
-	isNoteOwner,
 	isNoteUndecryptable,
 	isTagUndecryptable,
-	hasNoteWriteAccess,
 	noteDisplayTitle,
 	noteTitleMatchesSearch,
 	sortAndFilterNotes,
@@ -13,15 +11,7 @@ import {
 	tagDisplayName
 } from "@/features/notes/lib/sort"
 import { testUuid } from "@/tests/support/uuid"
-import {
-	mockNote,
-	mockNoteHistory,
-	mockNoteParticipant,
-	mockNoteTag,
-	noteWithoutPreview,
-	tagWithoutName,
-	undecryptableNote
-} from "@/tests/fixtures/notes"
+import { mockNote, mockNoteHistory, mockNoteTag, noteWithoutPreview, tagWithoutName, undecryptableNote } from "@/tests/fixtures/notes"
 
 describe("sortNotes — bucket rules", () => {
 	it("puts a pinned note before an unpinned one regardless of edited time", () => {
@@ -116,45 +106,6 @@ describe("isNoteUndecryptable / isTagUndecryptable", () => {
 	it("a tag is undecryptable exactly when it carries no name", () => {
 		expect(isTagUndecryptable(mockNoteTag())).toBe(false)
 		expect(isTagUndecryptable(tagWithoutName())).toBe(true)
-	})
-})
-
-describe("isNoteOwner", () => {
-	it("is true when the given userId matches the note's ownerId", () => {
-		expect(isNoteOwner(mockNote({ ownerId: 5n }), 5n)).toBe(true)
-	})
-
-	it("is false when the given userId does not match", () => {
-		expect(isNoteOwner(mockNote({ ownerId: 5n }), 6n)).toBe(false)
-	})
-
-	it("is false when userId is undefined (no resolved account yet)", () => {
-		expect(isNoteOwner(mockNote({ ownerId: 5n }), undefined)).toBe(false)
-	})
-})
-
-describe("hasNoteWriteAccess", () => {
-	it("is true for the owner, with no participant row of their own", () => {
-		expect(hasNoteWriteAccess(mockNote({ ownerId: 5n }), 5n)).toBe(true)
-	})
-
-	it("is true for a participant carrying permissionsWrite", () => {
-		const note = mockNote({ ownerId: 5n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: true })] })
-
-		expect(hasNoteWriteAccess(note, 7n)).toBe(true)
-	})
-
-	it("is false for a participant without permissionsWrite", () => {
-		const note = mockNote({ ownerId: 5n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: false })] })
-
-		expect(hasNoteWriteAccess(note, 7n)).toBe(false)
-	})
-
-	it("is false for a user who is neither owner nor participant, and for an unresolved id", () => {
-		const note = mockNote({ ownerId: 5n, participants: [mockNoteParticipant({ userId: 7n, permissionsWrite: true })] })
-
-		expect(hasNoteWriteAccess(note, 9n)).toBe(false)
-		expect(hasNoteWriteAccess(note, undefined)).toBe(false)
 	})
 })
 

@@ -1,6 +1,6 @@
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
-import { run } from "@filen/shared"
+import { run, errorMessage } from "@filen/shared"
 import * as FileSystem from "expo-file-system"
 import { extnameOf } from "@/lib/previewType"
 import {
@@ -170,11 +170,7 @@ function finishedTransferErrorMessage(error: unknown): string | null {
 		return inner.message()
 	}
 
-	if (error instanceof Error) {
-		return error.message
-	}
-
-	return String(error)
+	return errorMessage(error)
 }
 
 // Removes the transfer entry from the store, optionally waiting for an external completion gate

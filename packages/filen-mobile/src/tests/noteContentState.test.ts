@@ -194,7 +194,7 @@ describe("computeNoteFetchError", () => {
 	})
 })
 
-// ── M1 + D3 — inflight entry builder (per-note monotonic timestamps + session base) ──────
+// ── D3 — session base hash (the builder itself is tested in @filen/shared) ──────
 
 describe("sessionBaseHashForNewSession", () => {
 	// Regression #79-adjacent solo-toast bug: the base was maintained by a render-keyed effect
@@ -232,77 +232,6 @@ describe("sessionBaseHashForNewSession", () => {
 		const base = sessionBaseHashForNewSession(undefined, "v1")
 
 		expect(base).toBe(hashNoteContent("v1"))
-	})
-})
-
-describe("buildInflightEntries", () => {
-	const note = { uuid: "note-1" } as Note
-
-	it("M1: a backward clock step still produces a strictly newer timestamp — the newest text wins and the prune cannot discard it", () => {
-		const first = buildInflightEntries({
-			previous: undefined,
-			note,
-			content: "typed-before-step",
-			now: 5000,
-			sessionBaseHash: null
-		})
-
-		// An NTP correction steps the wall clock BACK mid-editing: Date.now() now yields 3000.
-		const second = buildInflightEntries({
-			previous: first,
-			note,
-			content: "typed-after-step",
-			now: 3000,
-			sessionBaseHash: null
-		})
-
-		// The newest TEXT carries the strictly-largest timestamp (5001), so sync's
-		// max-timestamp pick pushes it — the stale pre-step entry can never outrank it.
-		const newest = second.reduce((acc, c) => (c.timestamp > acc.timestamp ? c : acc))
-
-		expect(newest.content).toBe("typed-after-step")
-		expect(newest.timestamp).toBe(5001)
-
-		// And after sync pushes it, the `> syncedUpTo` prune (local-vs-local) removes only
-		// superseded entries — the newest text was the push, nothing stale resurrects.
-		const remainingAfterPrune = second.filter(c => c.timestamp > newest.timestamp)
-
-		expect(remainingAfterPrune).toHaveLength(0)
-	})
-
-	it("M1: a forward-moving clock keeps using the wall-clock timestamp", () => {
-		const first = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: null })
-		const second = buildInflightEntries({ previous: first, note, content: "v2", now: 9000, sessionBaseHash: null })
-
-		expect(second[0]!.timestamp).toBe(9000)
-		expect(second[0]!.content).toBe("v2")
-	})
-
-	it("D3: a fresh session stamps the session base hash onto its first entry", () => {
-		const entries = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: "h(base)" })
-
-		expect(entries).toHaveLength(1)
-		expect(entries[0]!.baseContentHash).toBe("h(base)")
-	})
-
-	it("D3: an ongoing session carries ITS base forward even when the session ref moved on", () => {
-		const first = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: "h(orig)" })
-		const second = buildInflightEntries({ previous: first, note, content: "v2", now: 2000, sessionBaseHash: "h(newer)" })
-
-		expect(second[0]!.baseContentHash).toBe("h(orig)")
-	})
-
-	it("D3: a legacy session (entries without a hash) stays hash-less — one-pass grace, never mid-session stamping", () => {
-		const legacy = [{ timestamp: 1000, content: "restored-from-old-version", note }]
-		const next = buildInflightEntries({ previous: legacy, note, content: "v2", now: 2000, sessionBaseHash: "h(now-known)" })
-
-		expect(next[0]!.baseContentHash).toBeUndefined()
-	})
-
-	it("D3: a fresh session without a known synced seed records no base (pushes unchecked)", () => {
-		const entries = buildInflightEntries({ previous: undefined, note, content: "v1", now: 1000, sessionBaseHash: null })
-
-		expect(entries[0]!.baseContentHash).toBeUndefined()
 	})
 })
 

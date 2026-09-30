@@ -1,5 +1,4 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
-import { sortParams } from "@filen/shared"
 import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { notesQueryGet } from "@/features/notes/queries/useNotesQuery"
@@ -38,14 +37,12 @@ export function useNoteHistoryQuery(
 	params: UseNoteHistoryQueryParams,
 	options?: Omit<UseQueryOptions, "queryKey" | "queryFn">
 ): UseQueryResult<Awaited<ReturnType<typeof fetchData>>, Error> {
-	const sortedParams = sortParams(params)
-
 	const query = useQuery({
 		...options,
-		queryKey: [BASE_QUERY_KEY, sortedParams],
+		queryKey: [BASE_QUERY_KEY, params],
 		queryFn: ({ signal }) =>
 			fetchData({
-				...sortedParams,
+				...params,
 				signal
 			})
 	})

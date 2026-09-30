@@ -1,5 +1,5 @@
 import {
-	Semaphore,
+	KeyedSemaphores,
 	driveItemName,
 	parsePlaylist,
 	serializePlaylist,
@@ -329,18 +329,7 @@ async function savePlaylist(playlist: Playlist, patchCache: boolean): Promise<vo
 	}
 }
 
-const writeLocks = new Map<string, Semaphore>()
-
-function lockFor(uuid: string): Semaphore {
-	let lock = writeLocks.get(uuid)
-
-	if (lock === undefined) {
-		lock = new Semaphore(1)
-		writeLocks.set(uuid, lock)
-	}
-
-	return lock
-}
+const writeLocks = new KeyedSemaphores()
 
 function freshestPlaylist(uuid: string, fallback: Playlist): Playlist {
 	const entries = playlistsQueryGet()
@@ -360,9 +349,7 @@ async function mutatePlaylist(
 	mutate: (current: Playlist) => Playlist | null,
 	{ patchCache = true }: { patchCache?: boolean } = {}
 ): Promise<Playlist | null> {
-	const lock = lockFor(uuid)
-
-	await lock.acquire()
+	const release = await writeLocks.acquire(uuid)
 
 	try {
 		const next = mutate(freshestPlaylist(uuid, fallback))
@@ -375,7 +362,7 @@ async function mutatePlaylist(
 
 		return next
 	} finally {
-		lock.release()
+		release()
 	}
 }
 
@@ -434,9 +421,7 @@ export function reorderPlaylistFileAction(playlist: Playlist, movedUuid: string,
 // (mirrors mobile's own re-list-then-delete). A playlist whose file is already gone (a concurrent
 // delete from elsewhere) is treated as success: the query row is removed either way.
 export async function deletePlaylistAction(playlist: Playlist): Promise<void> {
-	const lock = lockFor(playlist.uuid)
-
-	await lock.acquire()
+	const release = await writeLocks.acquire(playlist.uuid)
 
 	try {
 		const dirUuid = await getPlaylistsDirectoryUuid()
@@ -453,10 +438,7 @@ export async function deletePlaylistAction(playlist: Playlist): Promise<void> {
 
 		playlistsQueryRemove(playlist.uuid)
 	} finally {
-		lock.release()
-		// The uuid is gone for good (a new playlist never reuses a deleted one's uuid) — drop its lock so
-		// a long session creating/deleting many playlists doesn't grow this map unbounded.
-		writeLocks.delete(playlist.uuid)
+		release()
 	}
 }
 

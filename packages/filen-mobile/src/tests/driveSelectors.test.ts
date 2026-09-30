@@ -30,7 +30,12 @@ import {
 	resolveDriveContainingDirectoryTarget,
 	hiddenFilterAppliesTo,
 	keepAgainstIncomingDriveItem,
-	driveItemHasLeadingCheckbox
+	driveItemHasLeadingCheckbox,
+	isOwnEditableView,
+	isOwnItemView,
+	offersItemInfo,
+	isReadableView,
+	offersBulkFavoriteShare
 } from "@/features/drive/driveSelectors"
 import type { DriveItem } from "@/types"
 import type { DrivePath, DrivePathType, SelectOptions } from "@/hooks/useDrivePath"
@@ -1063,5 +1068,41 @@ describe("everyItemAlreadyIn (Move here disabled)", () => {
 	it("nothing selected, or shared items, never count as already there", () => {
 		expect(everyItemAlreadyIn([], "p", parentOf)).toBe(false)
 		expect(everyItemAlreadyIn([{ type: "sharedFile", data: { uuid: "s", parentUuid: "p" } } as unknown as DriveItem], "p", parentOf)).toBe(false)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Variant view predicates
+// ---------------------------------------------------------------------------
+
+describe("variant view predicates", () => {
+	// A full Record, so a new DrivePathType fails to compile here until its answers are stated.
+	const ALL_TYPES = Object.keys({
+		drive: true,
+		sharedIn: true,
+		recents: true,
+		favorites: true,
+		trash: true,
+		sharedOut: true,
+		offline: true,
+		links: true,
+		photos: true,
+		linked: true
+	} satisfies Record<DrivePathType, true>) as DrivePathType[]
+
+	const cases: [string, (path: DrivePath) => boolean, DrivePathType[]][] = [
+		["isOwnEditableView", isOwnEditableView, ["drive", "sharedOut", "favorites", "links", "recents"]],
+		["isOwnItemView", isOwnItemView, ["drive", "sharedOut", "favorites", "links", "recents", "photos"]],
+		["offersItemInfo", offersItemInfo, ["drive", "sharedOut", "favorites", "links", "recents", "photos", "offline"]],
+		["isReadableView", isReadableView, ["drive", "sharedOut", "favorites", "links", "recents", "sharedIn"]],
+		["offersBulkFavoriteShare", offersBulkFavoriteShare, ["drive", "recents", "favorites", "sharedOut"]]
+	]
+
+	it.each(cases)("%s admits exactly its variants", (_name, predicate, expected) => {
+		for (const type of ALL_TYPES) {
+			expect(predicate(drivePath(type, { uuid: null }))).toBe(expected.includes(type))
+		}
+
+		expect(predicate({ type: null, uuid: null })).toBe(false)
 	})
 })
