@@ -218,10 +218,26 @@ describe("React Compiler coverage", () => {
 	it("compiles ThreadRowContent, leaving only ThreadList to the virtualizer", () => {
 		const events = compile("src/features/chats/components/thread/messageThread.tsx")
 
-		expect(
-			events.some(event => event.kind === "CompileSuccess" && event.fnName === "ThreadRowContent" && (event.memoSlots ?? 0) > 0)
-		).toBe(true)
+		for (const fnName of ["ThreadRowContent", "TimeHeader", "UnreadDivider"]) {
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+
 		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
+	})
+
+	// Every thread row renders through these, and the typing bubble through the last.
+	it.each([
+		["src/features/chats/components/thread/messageRow.tsx", "MessageRow"],
+		["src/features/chats/components/thread/messageRow.tsx", "BubbleTail"],
+		["src/features/chats/components/thread/messageContent.tsx", "MessageContent"],
+		["src/features/chats/components/thread/typingIndicator.tsx", "TypingIndicator"]
+	])("compiles %s's %s", (file, fnName) => {
+		const events = compile(file)
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
 	})
 
 	// A destructuring default is what the compiler cannot lower; each of these had one.
@@ -264,7 +280,10 @@ describe("React Compiler coverage", () => {
 		["src/features/notes/components/markdownSplitPane.tsx", "MarkdownSplitPane"],
 		["src/features/notes/components/noteContentBody.tsx", "NoteContentBody"],
 		["src/features/notes/components/editor/checklistEditor.tsx", "ChecklistEditor"],
-		["src/features/chats/components/thread/chatsPlaceholder.tsx", "ChatsPlaceholder"]
+		["src/features/chats/components/thread/chatsPlaceholder.tsx", "ChatsPlaceholder"],
+		["src/features/chats/components/thread/composerSuggestions.tsx", "ComposerSuggestions"],
+		["src/features/chats/components/thread/composerModeBanner.tsx", "ComposerModeBanner"],
+		["src/features/chats/components/thread/composerModeBanner.tsx", "ReplyTarget"]
 	])("compiles %s", (file, fnName) => {
 		const events = compile(file)
 

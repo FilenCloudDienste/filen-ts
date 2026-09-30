@@ -28,9 +28,9 @@ import { ListFilterInput } from "@/components/listFilterInput"
 import { SidebarNotice } from "@/components/sidebarNotice"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 
-// Fixed row height — the single virtualizer needs no measureElement pass (both lines are pinned to a known
-// height), same as notesSidebar's constant-height rows.
-const CHAT_ROW_HEIGHT = 60
+// Fixed row height — the single virtualizer needs no measureElement pass (the name line and the two-line
+// preview clamp are pinned to a known height), same as notesSidebar's constant-height rows.
+const CHAT_ROW_HEIGHT = 72
 
 // The URL owns the selected conversation: /chats/<uuid> is a selection key. The sidebar renders in the app
 // shell (outside the chats route match), so it reads the raw pathname rather than route params. Empty at
@@ -325,6 +325,7 @@ function ChatsVirtualList({
 							chat={chat}
 							selected={chat.uuid === selectedUuid}
 							multiSelected={liveSelectedUuids.has(chat.uuid)}
+							beforeSelected={rows[virtualRow.index + 1]?.uuid === selectedUuid}
 							posInSet={virtualRow.index + 1}
 							setSize={rows.length}
 							currentUserId={currentUserId}

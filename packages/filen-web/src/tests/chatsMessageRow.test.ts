@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { cleanup, render, screen, fireEvent, within } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
@@ -50,10 +50,20 @@ const message: ChatMessage = {
 
 const descriptors = messageMenuActions(message, 1n, "confirmed")
 
-function renderRow(showHeader = true) {
+function renderRow(overrides: { runStart?: boolean; runEnd?: boolean; group?: boolean; currentUserId?: bigint } = {}) {
 	useMessageActions.mockReturnValue({ descriptors, runAction })
 
-	return render(createElement(MessageRow, { chat, message, showHeader, currentUserId: 1n, blocked: deriveBlockedUsers([]) }))
+	return render(
+		createElement(MessageRow, {
+			chat,
+			message,
+			runStart: overrides.runStart ?? true,
+			runEnd: overrides.runEnd ?? true,
+			group: overrides.group ?? false,
+			currentUserId: overrides.currentUserId ?? 1n,
+			blocked: deriveBlockedUsers([])
+		})
+	)
 }
 
 function dispatched(): MessageActionDescriptor["id"][] {
@@ -101,22 +111,62 @@ describe("MessageRow action model", () => {
 	})
 })
 
-// jsdom has no layout, so this pins the classes that keep it out of the row's height; the heights
-// themselves (a one-line continuation row at 24px) were measured in Chromium, Firefox and WebKit.
-describe("MessageRow continuation timestamp", () => {
-	it("takes no layout height and never wraps inside the avatar gutter", () => {
-		renderRow(false)
+// jsdom has no layout, so this pins the classes that keep the row's height at its estimate; the heights
+// themselves were measured in Chromium, Firefox and WebKit (thread.logic.ts).
+describe("MessageRow bubble layout", () => {
+	it("keeps the hover time and action bar out of the row's height, beside the bubble's inner side", () => {
+		renderRow({ runEnd: false })
 
 		const stamp = screen.getByText(formatClockTime(message.sentTimestamp))
+		const aside = stamp.parentElement
 
-		expect(stamp.classList).toContain("absolute")
 		expect(stamp.classList).toContain("whitespace-nowrap")
-		expect(stamp.parentElement?.classList).toContain("relative")
+		expect(aside?.classList).toContain("absolute")
+		expect(aside?.classList).toContain("right-full")
+		expect(aside?.contains(screen.getByRole("toolbar", { name: "Message actions" }))).toBe(true)
 	})
 
-	it("sizes the body block's own lines to the body text", () => {
-		renderRow(false)
+	it("puts own messages on the right in the brand bubble and others on the left", () => {
+		renderRow()
 
-		expect(screen.getByText("hello").closest(".min-w-0")?.classList).toContain("text-sm")
+		const own = screen.getByText("hello").closest(".rounded-\\[18px\\]")
+
+		expect(own?.classList).toContain("bg-chat-own")
+		expect(screen.getByText("hello").closest(".group")?.classList).toContain("items-end")
+		cleanup()
+
+		renderRow({ currentUserId: 2n })
+
+		expect(screen.getByText("hello").closest(".rounded-\\[18px\\]")?.classList).toContain("bg-chat-other")
+		expect(screen.getByText("hello").closest(".group")?.classList).toContain("items-start")
+	})
+
+	it("sizes the bubble's lines to the body text", () => {
+		renderRow()
+
+		expect(screen.getByText("hello").closest(".rounded-\\[18px\\]")?.classList).toContain("text-sm")
+	})
+
+	it("draws the tail only on a run's newest bubble", () => {
+		const { container, unmount } = renderRow({ runEnd: false })
+
+		expect(container.querySelector("svg.fill-current")).toBeNull()
+		unmount()
+
+		expect(renderRow().container.querySelector("svg.fill-current")).not.toBeNull()
+	})
+
+	it("names and pictures someone else's run in a group chat, never in a 1:1 or on own messages", () => {
+		renderRow({ currentUserId: 2n })
+		expect(screen.queryByText("a@example.com")).toBeNull()
+		cleanup()
+
+		renderRow({ currentUserId: 2n, group: true })
+		expect(screen.getByText("a@example.com")).toBeTruthy()
+		expect(screen.getByText("A")).toBeTruthy()
+		cleanup()
+
+		renderRow({ group: true })
+		expect(screen.queryByText("a@example.com")).toBeNull()
 	})
 })

@@ -1,7 +1,7 @@
 import type { MessageActionDescriptor, MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
 
-// The quick-access inline icons the hover action bar surfaces — the direct, non-destructive actions that
-// read as one-tap on Discord's own hover bar. Destructive/low-frequency entries (delete/remove/block/
+// The quick-access inline icons the hover action bar surfaces — the direct, non-destructive actions worth
+// one click. Destructive/low-frequency entries (delete/remove/block/
 // disableEmbed) live only behind the ⋯ overflow. Reply/Copy/Edit are confirmed-only; Retry is failed-
 // only, so at most three ever coexist.
 export const INLINE_PRIMARY: readonly MessageActionId[] = ["reply", "copy", "edit", "retry"]

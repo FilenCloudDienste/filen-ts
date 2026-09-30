@@ -22,7 +22,16 @@ import { ExternalAnchor } from "@/features/chats/components/thread/externalAncho
 // "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
 // heuristic (@filen/shared's isEmojiOnly).
 // `segments` is segmentMessage(text), tokenized once by MessageRow, which also derives the embeds from it.
-export function MessageContent({ participants, segments }: { participants: readonly ChatParticipant[]; segments: MessageSegment[] }) {
+// Colours inherit from the bubble; `own` picks the link and code-block treatment that reads on it.
+export function MessageContent({
+	participants,
+	segments,
+	own
+}: {
+	participants: readonly ChatParticipant[]
+	segments: MessageSegment[]
+	own: boolean
+}) {
 	const { t } = useTranslation("chats")
 	const jumbo = isEmojiOnly(segments)
 
@@ -31,7 +40,9 @@ export function MessageContent({ participants, segments }: { participants: reado
 	}
 
 	return (
-		<span className="text-sm break-words whitespace-pre-wrap text-foreground">
+		// wrap-anywhere, not break-words: the bubble shrinks to its content, and only `anywhere` lets a long
+		// unbroken link lower that content's min-content width instead of pushing the bubble past its cap.
+		<span className="text-sm wrap-anywhere whitespace-pre-wrap">
 			{segments.map((segment, index) => {
 				switch (segment.kind) {
 					case "text":
@@ -44,7 +55,10 @@ export function MessageContent({ participants, segments }: { participants: reado
 						return (
 							<code
 								key={index}
-								className="my-0.5 block rounded-md bg-muted px-2 py-1 font-mono text-xs whitespace-pre-wrap text-foreground"
+								className={cn(
+									"my-1 block rounded-lg px-2 py-1 font-mono text-xs whitespace-pre-wrap",
+									own ? "bg-chat-own-strong" : "bg-chat-other-strong"
+								)}
 							>
 								{segment.code}
 							</code>
@@ -60,7 +74,7 @@ export function MessageContent({ participants, segments }: { participants: reado
 							return <Fragment key={index}>{segment.raw}</Fragment>
 						}
 
-						const linkClassName = "text-primary underline underline-offset-2 hover:no-underline"
+						const linkClassName = cn("underline underline-offset-2 hover:no-underline", own ? "text-current" : "text-chat-link")
 
 						// A Filen public link is this app's own domain — no external-navigation trust gate,
 						// same posture as the embed card below it (filenLinkCard.tsx) opens with.
@@ -101,7 +115,7 @@ export function MessageContent({ participants, segments }: { participants: reado
 						return (
 							<span
 								key={index}
-								className={cn("rounded px-0.5 font-medium text-primary")}
+								className="font-medium"
 							>
 								@{label}
 							</span>
@@ -119,7 +133,7 @@ export function MessageContent({ participants, segments }: { participants: reado
 							return (
 								<span
 									key={index}
-									className={jumbo ? "text-3xl leading-none" : undefined}
+									className={jumbo ? "text-5xl leading-none" : undefined}
 								>
 									{glyph}
 								</span>
@@ -141,7 +155,7 @@ export function MessageContent({ participants, segments }: { participants: reado
 									// allowlist. crossOrigin makes this a CORS-mode request instead, which the CDN's
 									// Access-Control-Allow-Origin: * already satisfies (verified against a live response).
 									crossOrigin="anonymous"
-									className={cn("inline-block object-contain align-text-bottom", jumbo ? "size-8" : "size-5")}
+									className={cn("inline-block object-contain align-text-bottom", jumbo ? "size-12" : "size-5")}
 								/>
 							)
 						}

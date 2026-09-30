@@ -56,6 +56,10 @@ export const chats = {
 	chatThreadEmpty: "No messages in this conversation yet.",
 	/** Thread — accessible label on the older-messages loading spinner at the top of the list */
 	chatLoadingOlder: "Loading earlier messages…",
+	/** Thread header — participant count under a group conversation's name (singular) */
+	chatHeaderParticipants_one: "{{count}} participant",
+	/** Thread header — participant count under a group conversation's name (plural) */
+	chatHeaderParticipants_other: "{{count}} participants",
 	/** Thread — label on the one-time "New" divider inserted at the first unread message; click marks read */
 	chatUnreadDivider: "New",
 	/** Thread — accessible label on the floating scroll-to-bottom pill (singular) */
@@ -66,8 +70,8 @@ export const chats = {
 	chatNewMessagesCount_one: "{{count}} new",
 	/** Thread — visible text on the floating scroll-to-bottom pill (plural) */
 	chatNewMessagesCount_other: "{{count}} new",
-	/** Message — trailing marker on an edited message */
-	chatMessageEdited: "(edited)",
+	/** Message — small marker under an edited message's bubble */
+	chatMessageEdited: "Edited",
 	/** Message — placeholder body for a message that could not be decrypted */
 	chatMessageUndecryptable: "Message could not be decrypted",
 	/** Message — sub-line under an own message whose send is still queued/in flight (send outbox) */
@@ -76,6 +80,12 @@ export const chats = {
 	chatMessageFailed: "Not sent",
 	/** Message — prefix on the compact reply-to reference line above a reply */
 	chatReplyingTo: "Replying to {{name}}",
+	/** Message — sender label on the reply reference above a reply's bubble, followed by a snippet of the quoted message */
+	chatReplyReferenceSender: "{{name}}:",
+	/** Message — stands in for the sender's name when the quoted message is your own */
+	chatSenderYou: "You",
+	/** Composer — reply banner title when replying to one of your own messages */
+	chatReplyingToSelf: "Replying to yourself",
 	/** Message row / conversation row — replaces a blocked sender's message body and the list preview line */
 	chatMessageHiddenBlocked: "Message hidden",
 	/** Message row — reveals a hidden blocked-sender message for this session */
@@ -91,11 +101,13 @@ export const chats = {
 	/** Message — rendered mention label for an unresolved participant */
 	chatMentionUnknown: "unknown",
 
-	// ── Day separators ─────────────────────────────────────────────────────────
-	/** Thread — day separator label for messages sent today */
-	chatDayToday: "Today",
-	/** Thread — day separator label for messages sent yesterday */
-	chatDayYesterday: "Yesterday",
+	// ── Time headers ───────────────────────────────────────────────────────────
+	/** Thread — time header above messages sent today; {{time}} is the clock time */
+	chatTimeHeaderToday: "Today {{time}}",
+	/** Thread — time header above messages sent yesterday; {{time}} is the clock time */
+	chatTimeHeaderYesterday: "Yesterday {{time}}",
+	/** Thread — time header above older messages; {{date}} is the full localized date, {{time}} the clock time */
+	chatTimeHeaderDate: "{{date}} {{time}}",
 
 	// ── Composer ──────────────────────────────────────────────────────────────────
 	/** Composer — textarea placeholder + accessible label */

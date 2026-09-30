@@ -9,18 +9,26 @@ import {
 	scrollDistanceFromBottom,
 	scrollDistanceFromTop,
 	toBottomUpRows,
+	estimateThreadRowSize,
+	isGroupChat,
+	TIME_ROW_ESTIMATE,
+	UNREAD_ROW_ESTIMATE,
+	RUN_START_ROW_ESTIMATE,
+	RUN_CONTINUATION_ROW_ESTIMATE,
+	RUN_START_NAMED_ROW_ESTIMATE,
 	nextAnnouncement,
 	nextScrollAffordanceState,
 	INITIAL_SCROLL_AFFORDANCE,
 	type ThreadRow,
+	type ThreadMessageRow,
 	type ScrollAffordanceState
 } from "@/features/chats/components/thread/thread.logic"
-import { deriveBlockedUsers } from "@filen/shared"
+import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { testUuid } from "@/tests/support/uuid"
 
 // Local-calendar timestamp so the day-boundary tests are deterministic regardless of the runner's TZ
-// (buildThreadRows uses local getFullYear/Month/Date, matching how the day label renders).
+// (buildThreadRows uses local getFullYear/Month/Date, matching how the time-header label renders).
 function ts(year: number, month: number, day: number, hour: number, minute: number): bigint {
 	return BigInt(new Date(year, month - 1, day, hour, minute, 0, 0).getTime())
 }
@@ -56,69 +64,136 @@ function mockMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
 	}
 }
 
-function messageHeaderFlags(rows: ThreadRow[]): { key: string; showHeader: boolean }[] {
+function runFlags(rows: ThreadRow[]): { key: string; runStart: boolean; runEnd: boolean }[] {
 	return rows
-		.filter((r): r is Extract<ThreadRow, { kind: "message" }> => r.kind === "message")
-		.map(r => ({ key: r.key, showHeader: r.showHeader }))
+		.filter((r): r is ThreadMessageRow => r.kind === "message")
+		.map(r => ({ key: r.key, runStart: r.runStart, runEnd: r.runEnd }))
 }
 
-describe("buildThreadRows — burst grouping (dense grouped flat rows)", () => {
-	it("emits a leading day separator + a header row for a single message", () => {
+describe("buildThreadRows — bubble runs", () => {
+	it("emits a leading time header and a lone message that both opens and closes its run", () => {
 		const m = mockMessage()
 		const rows = buildThreadRows([m])
 
-		expect(rows[0]?.kind).toBe("day")
-		expect(messageHeaderFlags(rows)).toEqual([{ key: m.uuid, showHeader: true }])
+		expect(rows[0]?.kind).toBe("time")
+		expect(runFlags(rows)).toEqual([{ key: m.uuid, runStart: true, runEnd: true }])
 	})
 
-	it("collapses consecutive same-sender messages within 2 minutes (subsequent rows hide the header)", () => {
+	it("runs consecutive same-sender messages within 2 minutes: the tail only on the newest", () => {
 		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 0) })
 		const b = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 1) })
-		const rows = buildThreadRows([a, b])
+		const c = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 2) })
+		const rows = buildThreadRows([a, b, c])
 
-		expect(messageHeaderFlags(rows)).toEqual([
-			{ key: a.uuid, showHeader: true },
-			{ key: b.uuid, showHeader: false }
+		expect(runFlags(rows)).toEqual([
+			{ key: a.uuid, runStart: true, runEnd: false },
+			{ key: b.uuid, runStart: false, runEnd: false },
+			{ key: c.uuid, runStart: false, runEnd: true }
 		])
 	})
 
-	it("starts a new burst when the sender changes", () => {
+	it("starts a new run when the sender changes", () => {
 		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 0) })
 		const b = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 1, 12, 1) })
 		const rows = buildThreadRows([a, b])
 
-		expect(messageHeaderFlags(rows)).toEqual([
-			{ key: a.uuid, showHeader: true },
-			{ key: b.uuid, showHeader: true }
+		expect(runFlags(rows)).toEqual([
+			{ key: a.uuid, runStart: true, runEnd: true },
+			{ key: b.uuid, runStart: true, runEnd: true }
 		])
 	})
 
-	it("starts a new burst when the gap exceeds 2 minutes even for the same sender", () => {
+	it("starts a new run when the gap exceeds 2 minutes, without a time header under an hour", () => {
 		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 0) })
 		const b = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 3) })
 		const rows = buildThreadRows([a, b])
 
-		expect(messageHeaderFlags(rows)).toEqual([
-			{ key: a.uuid, showHeader: true },
-			{ key: b.uuid, showHeader: true }
+		expect(rows.map(r => r.kind)).toEqual(["time", "message", "message"])
+		expect(runFlags(rows)).toEqual([
+			{ key: a.uuid, runStart: true, runEnd: true },
+			{ key: b.uuid, runStart: true, runEnd: true }
 		])
 	})
 
-	it("inserts a day separator and forces a header at a calendar-day boundary", () => {
+	it("emits a time header keyed on the message after a quiet hour on the same day", () => {
+		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 0) })
+		const b = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 59) })
+		const c = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 13, 59) })
+		const rows = buildThreadRows([a, b, c])
+
+		expect(rows.map(r => r.key)).toEqual([rows[0]?.key, a.uuid, b.uuid, `gap-${c.uuid}`, c.uuid])
+		expect(rows[3]).toMatchObject({ kind: "time", timestamp: c.sentTimestamp })
+	})
+
+	it("emits a time header and starts a run at a calendar-day boundary", () => {
 		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 23, 59) })
 		const b = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 2, 0, 0) })
 		const rows = buildThreadRows([a, b])
 
-		expect(rows.map(r => r.kind)).toEqual(["day", "message", "day", "message"])
-		expect(messageHeaderFlags(rows)).toEqual([
-			{ key: a.uuid, showHeader: true },
-			{ key: b.uuid, showHeader: true }
+		expect(rows.map(r => r.kind)).toEqual(["time", "message", "time", "message"])
+		expect(runFlags(rows)).toEqual([
+			{ key: a.uuid, runStart: true, runEnd: true },
+			{ key: b.uuid, runStart: true, runEnd: true }
+		])
+	})
+
+	// Loading an older page moves a day's first message; its header must keep its key so the virtualizer
+	// and React reuse the row rather than remounting it.
+	it("keys a day's header on the day, stable when older messages of that day prepend", () => {
+		const a = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 10, 0) })
+		const b = mockMessage({ senderId: 1, sentTimestamp: ts(2021, 1, 1, 12, 0) })
+
+		expect(buildThreadRows([b])[0]?.key).toBe(buildThreadRows([a, b])[0]?.key)
+	})
+
+	it("breaks a run at the unread divider", () => {
+		const a = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 1, 12, 0) })
+		const b = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 1, 12, 1) })
+		const rows = buildThreadRows([a, b], { lastFocus: a.sentTimestamp, currentUserId: 1n })
+
+		expect(rows.map(r => r.kind)).toEqual(["time", "message", "unread", "message"])
+		expect(runFlags(rows)).toEqual([
+			{ key: a.uuid, runStart: true, runEnd: true },
+			{ key: b.uuid, runStart: true, runEnd: true }
 		])
 	})
 })
 
+describe("estimateThreadRowSize", () => {
+	const own = mockMessage({ senderId: 1 })
+	const other = mockMessage({ senderId: 2 })
+
+	function messageRow(message: ChatMessage, runStart: boolean): ThreadRow {
+		return { kind: "message", key: message.uuid, message, runStart, runEnd: true }
+	}
+
+	it("sizes headers, the divider and bubbles by kind", () => {
+		expect(estimateThreadRowSize({ kind: "time", key: "t", timestamp: 0n }, 1n, false, EMPTY_BLOCKED_USERS)).toBe(TIME_ROW_ESTIMATE)
+		expect(estimateThreadRowSize({ kind: "unread", key: "unread-divider" }, 1n, false, EMPTY_BLOCKED_USERS)).toBe(UNREAD_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(other, true), 1n, false, EMPTY_BLOCKED_USERS)).toBe(RUN_START_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(other, false), 1n, false, EMPTY_BLOCKED_USERS)).toBe(RUN_CONTINUATION_ROW_ESTIMATE)
+	})
+
+	it("adds the sender name only to the first bubble of someone else's run in a group", () => {
+		expect(estimateThreadRowSize(messageRow(other, true), 1n, true, EMPTY_BLOCKED_USERS)).toBe(RUN_START_NAMED_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(own, true), 1n, true, EMPTY_BLOCKED_USERS)).toBe(RUN_START_ROW_ESTIMATE)
+		expect(estimateThreadRowSize(messageRow(other, false), 1n, true, EMPTY_BLOCKED_USERS)).toBe(RUN_CONTINUATION_ROW_ESTIMATE)
+	})
+
+	it("sizes a blocked sender's run start as its unnamed tombstone", () => {
+		const blocked = deriveBlockedUsers([mockBlockedContact({ userId: 2n, email: "a@example.com" })])
+
+		expect(estimateThreadRowSize(messageRow(other, true), 1n, true, blocked)).toBe(RUN_START_ROW_ESTIMATE)
+	})
+
+	it("treats more than two participants as a group", () => {
+		expect(isGroupChat(2)).toBe(false)
+		expect(isGroupChat(3)).toBe(true)
+	})
+})
+
 describe("toBottomUpRows", () => {
-	it("puts the newest message at index 0 and each separator right after the message it heads", () => {
+	it("puts the newest message at index 0 and each header right after the message it heads", () => {
 		const lastFocus = ts(2021, 1, 2, 8, 0)
 		const a = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 1, 12, 0) })
 		const b = mockMessage({ senderId: 2, sentTimestamp: ts(2021, 1, 2, 12, 0) })
@@ -126,8 +201,8 @@ describe("toBottomUpRows", () => {
 
 		const rows = toBottomUpRows(buildThreadRows([a, b, c], { lastFocus, currentUserId: 1n }))
 
-		expect(rows.map(row => row.kind)).toEqual(["message", "message", "unread", "day", "message", "day"])
-		expect(messageHeaderFlags(rows).map(row => row.key)).toEqual([c.uuid, b.uuid, a.uuid])
+		expect(rows.map(row => row.kind)).toEqual(["message", "message", "unread", "time", "message", "time"])
+		expect(runFlags(rows).map(row => row.key)).toEqual([c.uuid, b.uuid, a.uuid])
 	})
 
 	it("leaves the ascending input untouched", () => {
@@ -165,7 +240,7 @@ describe("buildThreadRows — unread divider (old-web NewDivider placement/guard
 		const rows = buildThreadRows([a, b, c], { lastFocus: ts(2021, 1, 1, 12, 1), currentUserId: BigInt(SELF) })
 
 		const kinds = rows.map(r => (r.kind === "message" ? r.key : r.kind))
-		expect(kinds).toEqual(["day", a.uuid, "unread", b.uuid, c.uuid])
+		expect(kinds).toEqual(["time", a.uuid, "unread", b.uuid, c.uuid])
 	})
 
 	it("never inserts a second divider even with multiple qualifying messages", () => {
@@ -227,7 +302,7 @@ describe("buildThreadRows — unread divider (old-web NewDivider placement/guard
 		const rows = buildThreadRows([a, b], { lastFocus: ts(2021, 1, 1, 11, 0), currentUserId: BigInt(SELF), blocked: blockedUsers })
 
 		const kinds = rows.map(r => (r.kind === "message" ? r.key : r.kind))
-		expect(kinds).toEqual(["day", a.uuid, "unread", b.uuid])
+		expect(kinds).toEqual(["time", a.uuid, "unread", b.uuid])
 	})
 
 	it("behaves exactly as before when `blocked` is omitted (fail-open)", () => {

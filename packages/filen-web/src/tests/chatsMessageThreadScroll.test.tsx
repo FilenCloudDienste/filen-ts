@@ -50,10 +50,12 @@ vi.mock("@/lib/i18n/errorLabel", () => ({ errorLabel: () => "Could not mark as r
 
 import "@/lib/i18n"
 import { MessageThread } from "@/features/chats/components/thread/messageThread"
+import { RUN_CONTINUATION_ROW_ESTIMATE } from "@/features/chats/components/thread/thread.logic"
 import { testUuid } from "@/tests/support/uuid"
 
 const CLIENT_HEIGHT = 300
-const ROW_HEIGHT = 24
+// A run's bubbles measure at their estimate, as they do in a browser.
+const ROW_HEIGHT = RUN_CONTINUATION_ROW_ESTIMATE
 const geometry = { scrollHeight: 1000 }
 
 function scrollContainer(): HTMLElement {

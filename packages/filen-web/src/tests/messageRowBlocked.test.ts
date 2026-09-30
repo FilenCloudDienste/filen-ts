@@ -27,7 +27,7 @@ const MESSAGE_UUID = "22222222-2222-2222-2222-222222222222"
 const chat = {
 	uuid: "11111111-1111-1111-1111-111111111111",
 	ownerId: 1n,
-	participants: [{ userId: 1n }, { userId: BLOCKED_ID }]
+	participants: [{ userId: 1n }, { userId: BLOCKED_ID }, { userId: 7n }]
 } as unknown as Chat
 
 const blocked: BlockedUsers = deriveBlockedUsers([{ userId: BLOCKED_ID, email: BLOCKED_EMAIL, uuid: "b", timestamp: 0n }] as never)
@@ -59,7 +59,10 @@ function renderRow(overrides: Partial<ChatMessage> = {}, blockedUsers: BlockedUs
 		createElement(MessageRow, {
 			chat,
 			message: message(overrides),
-			showHeader: true,
+			runStart: true,
+			runEnd: true,
+			// A group chat, so an unhidden row shows its sender's name and avatar.
+			group: true,
 			currentUserId: 1n,
 			blocked: blockedUsers
 		}),
@@ -134,7 +137,7 @@ describe("MessageRow — reply to a blocked sender", () => {
 
 		expect(screen.getByText("Message hidden")).toBeDefined()
 		expect(screen.queryByText("quoted secret")).toBeNull()
-		expect(screen.queryByText(/Replying to/)).toBeNull()
+		expect(screen.queryByText("Mallory:")).toBeNull()
 		// The row's own message still renders — only the quote is redacted.
 		expect(screen.getByText("secret payload")).toBeDefined()
 	})

@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it } from "vitest"
 import { render, cleanup } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement } from "react"
 import type { Chat } from "@filen/sdk-rs"
 import "@/lib/i18n"
@@ -26,8 +27,13 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 	}
 }
 
-function content(chat: Chat, text: string) {
-	return createElement(MessageContent, { participants: chat.participants, segments: segmentMessage(text) })
+// External links read their domain trust through a query.
+function content(chat: Chat, text: string, own = false) {
+	return createElement(
+		QueryClientProvider,
+		{ client: new QueryClient() },
+		createElement(MessageContent, { participants: chat.participants, segments: segmentMessage(text), own })
+	)
 }
 
 // A custom-pack shortcode renders as its image, and a message that's entirely emoji
@@ -41,7 +47,7 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 		expect(img).not.toBeNull()
 		expect(img?.getAttribute("src")).toBe(customEmojiImageForShortcode("kekw"))
 		expect(img?.className).toContain("size-5")
-		expect(img?.className).not.toContain("size-8")
+		expect(img?.className).not.toContain("size-12")
 	})
 
 	it("renders a message that is ENTIRELY emoji shortcodes at jumbo size", () => {
@@ -51,7 +57,7 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 		expect(imgs).toHaveLength(2)
 
 		for (const img of imgs) {
-			expect(img.className).toContain("size-8")
+			expect(img.className).toContain("size-12")
 			expect(img.className).not.toContain("size-5")
 		}
 	})
@@ -73,7 +79,7 @@ describe("MessageContent — custom emoji pack + jumbo sizing", () => {
 	it("renders a standard unicode shortcode at jumbo text size when the message is emoji-only", () => {
 		const { container } = render(content(mockChat(), ":joy:"))
 
-		const jumboSpan = container.querySelector(".text-3xl")
+		const jumboSpan = container.querySelector(".text-5xl")
 		expect(jumboSpan?.textContent).toBe("😂")
 	})
 
@@ -123,5 +129,39 @@ describe("MessageContent — mentions", () => {
 
 		expect(container.textContent).toContain("@gone@example.com")
 		expect(container.textContent).not.toContain("unknown")
+	})
+})
+
+// Colours come from the bubble: an own bubble is brand blue with white text, so links there take the text
+// colour, and blue links would vanish into it.
+describe("MessageContent — bubble side", () => {
+	it("keeps the message text a text node of its own, with no colour of its own", () => {
+		const { container } = render(content(mockChat(), "hello"))
+		const span = container.firstElementChild
+
+		expect(span?.textContent).toBe("hello")
+		expect(span?.className).not.toMatch(/text-(foreground|primary)/)
+	})
+
+	it("underlines links in the bubble's own text colour on an own bubble, in blue on anyone else's", () => {
+		const own = render(content(mockChat(), "see https://example.com/a", true))
+
+		expect(own.getByRole("link").className).toContain("text-current")
+		cleanup()
+
+		const other = render(content(mockChat(), "see https://example.com/a"))
+
+		expect(other.getByRole("link").className).toContain("text-chat-link")
+	})
+
+	it("fills code blocks with the stronger shade of the bubble's own surface", () => {
+		const own = render(content(mockChat(), "```\nconst a = 1\n```", true))
+
+		expect(own.container.querySelector("code")?.className).toContain("bg-chat-own-strong")
+		cleanup()
+
+		const other = render(content(mockChat(), "```\nconst a = 1\n```"))
+
+		expect(other.container.querySelector("code")?.className).toContain("bg-chat-other-strong")
 	})
 })

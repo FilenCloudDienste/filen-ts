@@ -62,6 +62,14 @@
     --color-rail-chip: var(--rail-chip);
     --color-rail-chip-foreground: var(--rail-chip-foreground);
     --color-rail-hover: var(--rail-hover);
+    --color-chat-own: var(--chat-own);
+    --color-chat-own-foreground: var(--chat-own-foreground);
+    --color-chat-own-strong: var(--chat-own-strong);
+    --color-chat-other: var(--chat-other);
+    --color-chat-other-strong: var(--chat-other-strong);
+    --color-chat-link: var(--chat-link);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -102,6 +110,19 @@
     --rail-chip: oklch(1 0 0);
     --rail-chip-foreground: oklch(0.205 0 0);
     --rail-hover: oklch(0 0 0 / 6%);
+    /* Chat bubbles: own messages ride the brand blue in both themes (as on mobile); others sit on a neutral gray
+       a step off the white panel. The -strong shades fill code blocks and cards inside a bubble. */
+    --chat-own: oklch(0.623 0.214 259.815);
+    --chat-own-foreground: oklch(1 0 0);
+    --chat-own-strong: oklch(0.546 0.245 262.881);
+    --chat-other: oklch(0.93 0.002 286);
+    --chat-other-strong: oklch(0.88 0.003 286);
+    /* Links on the gray bubbles: a blue dark or light enough to keep 4.5:1 on chat-other in each theme. */
+    --chat-link: oklch(0.488 0.243 264.376);
+    /* Transient-degradation notices (e.g. the chat reconnect strip): a tint of --warning behind
+       --warning-foreground text. */
+    --warning: oklch(0.769 0.188 70.08);
+    --warning-foreground: oklch(0.555 0.163 48.998);
     /* Thin overlay scrollbar thumb, tuned per theme (index.css base layer below). */
     --scrollbar-thumb: oklch(0 0 0 / 15%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 28%);
@@ -131,6 +152,10 @@
     --rail-chip: oklch(0.27 0 0);
     --rail-chip-foreground: oklch(0.985 0 0);
     --rail-hover: oklch(1 0 0 / 7%);
+    --chat-other: oklch(0.32 0.003 286);
+    --chat-other-strong: oklch(0.38 0.004 286);
+    --chat-link: oklch(0.707 0.165 254.624);
+    --warning-foreground: oklch(0.828 0.189 84.429);
     --scrollbar-thumb: oklch(1 0 0 / 15%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 25%);
 }

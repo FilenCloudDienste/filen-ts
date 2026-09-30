@@ -15,7 +15,7 @@ export function UserAvatar({
 	name: string
 	size?: "default" | "sm" | "lg"
 	className?: string
-	fallbackClassName?: string
+	fallbackClassName?: string | undefined
 	alt?: string
 }) {
 	return (

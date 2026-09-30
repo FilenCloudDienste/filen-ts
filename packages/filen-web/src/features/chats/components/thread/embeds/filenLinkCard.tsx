@@ -16,8 +16,9 @@ import { noop } from "@/lib/utils"
 import { formatShortDate } from "@/lib/formatDate"
 import { EXTERNAL_LINK_REL } from "@/features/chats/components/thread/externalAnchor"
 
+// Cards sit under the bubble on the same neutral surface as other people's bubbles; media sits bare.
 const CARD_CLASS =
-	"mt-1 flex max-w-sm min-w-0 items-center gap-2.5 rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm transition-colors hover:bg-muted/70"
+	"flex max-w-sm min-w-0 items-center gap-2.5 rounded-2xl bg-chat-other px-3 py-2 text-sm focus-ring transition-colors outline-none hover:bg-chat-other-strong"
 
 // Icon + name + subtitle, either a plain new-tab anchor (`href`) or a click-to-preview button
 // (`onClick`) — the one shared shell every FilenLinkCard branch below renders through, so the visual
@@ -163,7 +164,7 @@ function FilenStreamedInlineMedia({
 		return (
 			<LoadingState
 				size="sm"
-				className="mt-1 h-40 w-64 flex-none rounded-xl border border-border"
+				className="h-40 w-64 flex-none rounded-2xl bg-chat-other"
 			/>
 		)
 	}
@@ -180,7 +181,7 @@ function FilenStreamedInlineMedia({
 				controlsList={mediaControlsList(downloadable)}
 				preload="metadata"
 				aria-label={name}
-				className="mt-1 max-h-72 max-w-sm rounded-xl border border-border"
+				className="max-h-72 max-w-sm rounded-2xl"
 			/>
 		)
 	}
@@ -193,7 +194,7 @@ function FilenStreamedInlineMedia({
 				controlsList={mediaControlsList(downloadable)}
 				preload="metadata"
 				aria-label={name}
-				className="mt-1 w-64"
+				className="w-64"
 			/>
 		)
 	}
@@ -208,7 +209,7 @@ function FilenStreamedInlineMedia({
 				onClick={() => {
 					setPreviewOpen(true)
 				}}
-				className="mt-1 block max-w-sm overflow-hidden rounded-xl border border-border"
+				className="block max-w-sm overflow-hidden rounded-2xl focus-ring outline-none"
 			>
 				<img
 					src={result.url}

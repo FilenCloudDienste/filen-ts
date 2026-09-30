@@ -17,7 +17,7 @@ export function ChatConnectionBanner() {
 	return (
 		<div
 			role="status"
-			className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/15 px-4 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400"
+			className="flex shrink-0 items-center justify-center gap-2 bg-warning/15 px-4 py-1.5 text-xs font-medium text-warning-foreground"
 		>
 			<WifiOffIcon
 				aria-hidden="true"

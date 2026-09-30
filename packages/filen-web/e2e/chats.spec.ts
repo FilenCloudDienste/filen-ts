@@ -343,11 +343,11 @@ test.describe("chats", () => {
 		await expect(emptyState.or(sidebar.getByRole("link").first())).toBeVisible()
 	})
 
-	test("the index route shows the select prompt (no auto-selected conversation)", async ({ page }) => {
+	test("the index route shows the select prompt (no remembered conversation)", async ({ page }) => {
 		await gotoChats(page)
 
-		// Chats does not auto-redirect into a thread (unlike notes) — the main card shows the select prompt,
-		// and the URL stays on bare /chats.
+		// A fresh context has no remembered conversation, so the index shows the select prompt and the URL
+		// stays on bare /chats.
 		await expect(page).toHaveURL(/\/chats$/)
 		await expect(page.getByText("Select a conversation", { exact: true })).toBeVisible()
 	})
@@ -584,11 +584,11 @@ test.describe("chats", () => {
 		await sendViaComposer(page, replyText)
 
 		await expect(thread.getByText(replyText, { exact: true }).first()).toBeVisible()
-		await expect(thread.getByText(/Replying to/).first()).toBeVisible()
+		await expect(thread.locator('[data-slot="reply-reference"]', { hasText: text }).first()).toBeVisible()
 		await expect(sending).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await expectServerHas(page, uuid, replyText, 30_000)
 
-		// Edit that reply via the menu → the edited body + the (edited) marker.
+		// Edit that reply via the menu → the edited body + the Edited marker.
 		await clickMessageMenuItem(page, thread.getByText(replyText, { exact: true }).last(), "Edit")
 
 		const editedText = uniqueMessage("ui-edited")
@@ -597,7 +597,7 @@ test.describe("chats", () => {
 		await input.press("Enter")
 
 		await expect(thread.getByText(editedText, { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-		await expect(thread.getByText("(edited)", { exact: true }).first()).toBeVisible()
+		await expect(thread.getByText("Edited", { exact: true }).first()).toBeVisible()
 	})
 
 	// Kill-path THROUGH THE UI: type + Enter while offline (the composer enqueues + persists, never sends),
@@ -736,6 +736,19 @@ test.describe("chats", () => {
 		// Empty at rest — catches a regression that seeds an announcement from the initial load rather
 		// than only from a tail growth, which the structural attributes alone cannot see.
 		await expect(liveRegion).toHaveText("")
+	})
+
+	test("the rail reopens the last opened conversation (shared self-chat)", async ({ page }) => {
+		const uuid = sharedChat()
+
+		await gotoChats(page)
+		await openSharedChatThread(page, uuid)
+
+		// Leave for another module, then come back through the rail: bare /chats redirects to the last chat.
+		await page.getByRole("link", { name: "Notes", exact: true }).click()
+		await page.waitForURL(/\/notes(\/|$)/)
+		await page.getByRole("link", { name: "Chats", exact: true }).click()
+		await expect(page).toHaveURL(new RegExp(`/chats/${uuid}$`))
 	})
 
 	// TEARDOWN — the one and only delete this file performs, best-effort. A HOOK, not a trailing test:

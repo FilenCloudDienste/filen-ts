@@ -1,15 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { ArrowUpIcon, XIcon, CornerUpLeftIcon, PencilIcon, PaperclipIcon, UploadIcon, HardDriveIcon } from "lucide-react"
+import { ArrowUpIcon, PlusIcon, UploadIcon, HardDriveIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
-import { cn, contactDisplayName } from "@filen/shared"
+import { cn } from "@filen/shared"
 import { noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { signalTyping, signalStopped } from "@/features/chats/lib/typing"
-import { messageSenderName } from "@/features/chats/lib/sort"
 import { editMessage } from "@/features/chats/lib/messageActions"
 import { preflightAttachments, uploadAttachment } from "@/features/chats/lib/attachments"
 import {
@@ -37,11 +35,14 @@ import { useChatComposerEntry, useChatComposerStore } from "@/features/chats/sto
 import { loadDraft, saveDraftDebounced } from "@/features/chats/lib/drafts"
 import { beginMessageEdit, endMessageEdit } from "@/features/chats/lib/composerEdit"
 import { AttachDriveDialog } from "@/features/chats/components/thread/attachDriveDialog"
+import { ComposerModeBanner } from "@/features/chats/components/thread/composerModeBanner"
+import { ComposerSuggestions, type ComposerSuggestionList } from "@/features/chats/components/thread/composerSuggestions"
+import { suggestionOptionId } from "@/features/chats/components/thread/composerSuggestions.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { useAccountQuery } from "@/queries/account"
 import { Button } from "@/components/ui/button"
-import { UserAvatar } from "@/components/userAvatar"
+import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
 // Grow the input with its content up to this many px, then scroll internally (mobile caps at a quarter
@@ -115,14 +116,16 @@ export function Composer({
 		mention !== null ? filterMentionParticipants(chat.participants, mention.query, sender?.id).slice(0, MENTION_LIMIT) : []
 	const emoji = mention === null ? activeEmojiQuery(draft, caret) : null
 	const emojiItems: EmojiSuggestion[] = emoji !== null ? searchEmoji(emoji.query, EMOJI_LIMIT) : []
-	const suggestKind: "mention" | "emoji" | null =
-		!manualClose && mention !== null && mentionItems.length > 0
-			? "mention"
-			: !manualClose && emoji !== null && emojiItems.length > 0
-				? "emoji"
+	const suggestList: ComposerSuggestionList | null = manualClose
+		? null
+		: mention !== null && mentionItems.length > 0
+			? { kind: "mention", items: mentionItems }
+			: emoji !== null && emojiItems.length > 0
+				? { kind: "emoji", items: emojiItems }
 				: null
-	const suggestCount = suggestKind === "mention" ? mentionItems.length : suggestKind === "emoji" ? emojiItems.length : 0
+	const suggestCount = suggestList !== null ? suggestList.items.length : 0
 	const safeIndex = suggestCount > 0 ? Math.min(activeIndex, suggestCount - 1) : 0
+	const listboxId = useId()
 
 	const overLimit = isOverLimit(draft)
 	// Why attaching is refused (trigger tooltip, drop toast). Offline wins when both apply: going online fixes
@@ -252,7 +255,7 @@ export function Composer({
 	}
 
 	function selectActive(): void {
-		if (suggestKind === "mention" && mention !== null) {
+		if (suggestList?.kind === "mention" && mention !== null) {
 			const participant = mentionItems[safeIndex]
 
 			if (participant !== undefined) {
@@ -262,7 +265,7 @@ export function Composer({
 			return
 		}
 
-		if (suggestKind === "emoji" && emoji !== null) {
+		if (suggestList?.kind === "emoji" && emoji !== null) {
 			const suggestion = emojiItems[safeIndex]
 
 			if (suggestion !== undefined) {
@@ -413,7 +416,7 @@ export function Composer({
 	}
 
 	function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
-		if (suggestKind !== null && suggestCount > 0) {
+		if (suggestCount > 0) {
 			if (event.key === "ArrowDown") {
 				event.preventDefault()
 				setActiveIndex(index => (index + 1) % suggestCount)
@@ -473,7 +476,7 @@ export function Composer({
 	return (
 		<div
 			ref={toastObstructionRef}
-			className="relative shrink-0 p-3"
+			className="shrink-0 px-4 pt-2 pb-4"
 			onDragOver={event => {
 				event.preventDefault()
 			}}
@@ -493,184 +496,120 @@ export function Composer({
 					event.target.value = ""
 				}}
 			/>
-			{suggestKind !== null && suggestCount > 0 ? (
-				<div className="absolute right-3 bottom-full left-3 z-10 mb-1 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-md">
-					{suggestKind === "mention"
-						? mentionItems.map((participant, index) => {
-								const name = contactDisplayName(participant)
-								const avatarUrl = safeAvatarUrl(participant.avatar)
-
-								return (
-									<button
-										key={participant.userId.toString()}
-										type="button"
-										className={cn(
-											"flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left",
-											index === safeIndex ? "bg-accent" : "hover:bg-accent/50"
-										)}
-										onMouseDown={event => {
-											// Keep textarea focus (mousedown fires before blur).
-											event.preventDefault()
-
-											if (mention !== null) {
-												selectMention(participant, mention)
-											}
-										}}
-									>
-										<UserAvatar
-											src={avatarUrl}
-											name={name}
-											className="size-7 shrink-0"
-										/>
-										<span className="flex min-w-0 flex-col">
-											<span className="truncate text-sm">{name}</span>
-											<span className="truncate text-xs text-muted-foreground">{participant.email}</span>
-										</span>
-									</button>
-								)
-							})
-						: emojiItems.map((suggestion, index) => (
-								<button
-									key={`${suggestion.kind}-${suggestion.name}`}
-									type="button"
-									className={cn(
-										"flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left",
-										index === safeIndex ? "bg-accent" : "hover:bg-accent/50"
-									)}
-									onMouseDown={event => {
-										event.preventDefault()
-
-										if (emoji !== null) {
-											selectEmoji(suggestion, emoji)
-										}
-									}}
-								>
-									{suggestion.kind === "custom" ? (
-										<img
-											src={suggestion.imageUrl}
-											alt=""
-											loading="lazy"
-											// require-corp COEP needs a CORS-mode request for a cross-origin image (the CDN
-											// sends Access-Control-Allow-Origin: * but no Cross-Origin-Resource-Policy) —
-											// see messageContent.tsx's matching comment for the verified detail.
-											crossOrigin="anonymous"
-											className="size-7 shrink-0 object-contain"
-										/>
-									) : (
-										<span className="w-7 shrink-0 text-center text-lg">{suggestion.char}</span>
-									)}
-									<span className="truncate text-sm text-muted-foreground">:{suggestion.name}:</span>
-								</button>
-							))}
+			{mode.kind !== "new" ? (
+				<div className="mb-2 ml-11">
+					<ComposerModeBanner
+						kind={mode.kind}
+						message={mode.message}
+						currentUserId={sender?.id}
+						onCancel={cancelMode}
+					/>
 				</div>
 			) : null}
-
-			{/* Reply/edit banner + input field are one visually-joined docked unit — a single rounded,
-			softly-bordered field (Discord's own composer treatment, lighter than the surrounding thread)
-			with the active reply/edit strip flush atop the textarea, separated only by a thin rule. */}
-			<div className="rounded-2xl border border-input bg-background transition-colors focus-within:border-ring/60">
-				{mode.kind === "reply" ? (
-					<div className="flex items-center gap-2 border-b border-input px-3 py-1.5 text-sm">
-						<CornerUpLeftIcon className="size-3.5 shrink-0 text-muted-foreground" />
-						<span className="shrink-0 font-medium">{t("chatReplyingTo", { name: messageSenderName(mode.message) })}</span>
-						{mode.message.message !== undefined && mode.message.message.length > 0 ? (
-							<span className="min-w-0 flex-1 truncate text-muted-foreground">{mode.message.message}</span>
-						) : (
-							<span className="flex-1" />
-						)}
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							className="size-6 shrink-0"
-							aria-label={t("chatComposerCancelReply")}
-							onClick={cancelMode}
-						>
-							<XIcon />
-						</Button>
-					</div>
-				) : null}
-
-				{mode.kind === "edit" ? (
-					<div className="flex items-center gap-2 border-b border-input px-3 py-1.5 text-sm">
-						<PencilIcon className="size-3.5 shrink-0 text-muted-foreground" />
-						<span className="flex-1 font-medium">{t("chatComposerEditing")}</span>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							className="size-6 shrink-0"
-							aria-label={t("chatComposerCancelEdit")}
-							onClick={cancelMode}
-						>
-							<XIcon />
-						</Button>
-					</div>
-				) : null}
-
-				<div className="flex items-end gap-2 px-3 py-2">
-					<DropdownMenu>
-						<DropdownMenuTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-sm"
-									className="size-8 shrink-0 self-end rounded-full"
-									// Attach-menu pre-gate — both entries need network right away (an upload/
-									// drive-attach start, not a durably-queued send), unlike the send button below,
-									// which stays enabled offline by design (its outbox queues and flushes later).
-									// Also pre-gated on Pro status.
-									disabled={isAttachDisabled(uploadingCount, isOnline, isPremium)}
-									aria-label={t("chatComposerAttach")}
-									title={attachGateReason}
-								>
-									<PaperclipIcon />
-								</Button>
-							}
-						/>
-						<DropdownMenuContent align="start">
-							<DropdownMenuItem
-								onClick={() => {
-									fileInputRef.current?.click()
-								}}
+			<div className="flex items-end gap-2">
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-lg"
+								className={cn("rounded-full text-muted-foreground", GLASS_SURFACE_CLASS)}
+								// Attach-menu pre-gate — both entries need network right away (an upload/
+								// drive-attach start, not a durably-queued send), unlike the send button below,
+								// which stays enabled offline by design (its outbox queues and flushes later).
+								// Also pre-gated on Pro status.
+								disabled={isAttachDisabled(uploadingCount, isOnline, isPremium)}
+								aria-label={t("chatComposerAttach")}
+								title={attachGateReason}
 							>
-								<UploadIcon aria-hidden="true" />
-								{t("chatComposerAttachUpload")}
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								onClick={() => {
-									setAttachDriveOpen(true)
-								}}
-							>
-								<HardDriveIcon aria-hidden="true" />
-								{t("chatComposerAttachFromDrive")}
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-					<textarea
-						ref={textareaRef}
-						value={draft}
-						onChange={onChange}
-						onKeyDown={onKeyDown}
-						onKeyUp={syncCaret}
-						onClick={syncCaret}
-						onSelect={syncCaret}
-						onBlur={() => {
-							// Leaving the input ends the typing burst (mobile fires "up" onBlur).
-							signalStopped(chat)
-						}}
-						rows={1}
-						aria-label={t("chatComposerPlaceholder")}
-						placeholder={t("chatComposerPlaceholder")}
-						className="max-h-[200px] min-h-6 flex-1 resize-none bg-transparent text-sm leading-6 outline-none placeholder:text-muted-foreground"
+								<PlusIcon className="size-5" />
+							</Button>
+						}
 					/>
-					<div className="flex shrink-0 items-center gap-2">
+					<DropdownMenuContent
+						align="start"
+						side="top"
+						sideOffset={8}
+						className="w-auto"
+					>
+						<DropdownMenuItem
+							onClick={() => {
+								fileInputRef.current?.click()
+							}}
+						>
+							<UploadIcon aria-hidden="true" />
+							{t("chatComposerAttachUpload")}
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() => {
+								setAttachDriveOpen(true)
+							}}
+						>
+							<HardDriveIcon aria-hidden="true" />
+							{t("chatComposerAttachFromDrive")}
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
+				{/* The popover is the pill's sibling, not its child, so the pill's rounded clip never cuts it off. */}
+				<div className="relative min-w-0 flex-1">
+					{suggestList !== null ? (
+						<ComposerSuggestions
+							listboxId={listboxId}
+							list={suggestList}
+							activeIndex={safeIndex}
+							onSelectMention={participant => {
+								if (mention !== null) {
+									selectMention(participant, mention)
+								}
+							}}
+							onSelectEmoji={suggestion => {
+								if (emoji !== null) {
+									selectEmoji(suggestion, emoji)
+								}
+							}}
+						/>
+					) : null}
+					<div
+						className={cn(
+							"flex items-end gap-2 rounded-[20px] py-1 pr-1 pl-4 transition-shadow focus-within:ring-ring/50 dark:focus-within:ring-ring/50",
+							GLASS_SURFACE_CLASS
+						)}
+					>
+						<textarea
+							ref={textareaRef}
+							value={draft}
+							onChange={onChange}
+							onKeyDown={onKeyDown}
+							onKeyUp={syncCaret}
+							onClick={syncCaret}
+							onSelect={syncCaret}
+							onBlur={() => {
+								// Leaving the input ends the typing burst (mobile fires "up" onBlur).
+								signalStopped(chat)
+							}}
+							rows={1}
+							aria-label={t("chatComposerPlaceholder")}
+							aria-autocomplete="list"
+							aria-expanded={suggestList !== null}
+							aria-controls={suggestList !== null ? listboxId : undefined}
+							aria-activedescendant={suggestList !== null ? suggestionOptionId(listboxId, safeIndex) : undefined}
+							aria-invalid={overLimit}
+							placeholder={t("chatComposerPlaceholder")}
+							className="max-h-[200px] min-h-7 flex-1 resize-none bg-transparent py-1 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+						/>
 						{shouldShowCounter(draft) ? (
-							<span className={cn("text-xs tabular-nums", overLimit ? "text-destructive" : "text-muted-foreground")}>
+							<span
+								className={cn(
+									"shrink-0 text-xs leading-7 tabular-nums",
+									overLimit ? "font-medium text-destructive" : "text-muted-foreground"
+								)}
+							>
 								{remainingChars(draft)}
 							</span>
 						) : null}
 						<Button
 							size="icon-sm"
-							className="size-8 rounded-full"
+							className="rounded-full bg-chat-own text-chat-own-foreground hover:bg-chat-own-strong"
 							// No sender until the account has loaded, and submit() cannot send without one: an enabled
 							// button (or Enter) would do nothing, silently, keeping the text.
 							disabled={!canSend(draft) || sender === undefined}
@@ -679,14 +618,14 @@ export function Composer({
 								void submit()
 							}}
 						>
-							<ArrowUpIcon />
+							<ArrowUpIcon className="size-4" />
 						</Button>
 					</div>
 				</div>
 			</div>
 
 			{overLimit ? (
-				<p className="mt-1 px-1 text-xs text-destructive">{t("chatComposerOverLimit", { max: MAX_CHAT_MESSAGE_LENGTH })}</p>
+				<p className="mt-1.5 ml-11 px-4 text-xs text-destructive">{t("chatComposerOverLimit", { max: MAX_CHAT_MESSAGE_LENGTH })}</p>
 			) : null}
 
 			{attachDriveOpen ? (
