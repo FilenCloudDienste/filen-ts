@@ -130,7 +130,23 @@ describe("React Compiler coverage", () => {
 		// A selection toggle re-renders only the toggled add-tracks row.
 		["src/features/audio/components/addPlaylistTracksDialog.tsx", "AddTrackRow"],
 		// A current-page change skips every PdfPage.
-		["src/features/preview/components/pdfViewer.tsx", "PdfPages"]
+		["src/features/preview/components/pdfViewer.tsx", "PdfPages"],
+		// The media players: a playhead tick re-renders only the parts that read the playhead.
+		["src/lib/media/useMediaState.ts", "useMediaValue"],
+		["src/lib/media/useMediaState.ts", "useSyncedMediaVolume"],
+		["src/components/media/sliderVisual.tsx", "SliderVisual"],
+		["src/components/media/mediaScrubber.tsx", "MediaScrubber"],
+		["src/components/media/mediaScrubber.tsx", "MediaElementScrubber"],
+		["src/components/media/mediaTime.tsx", "MediaCurrentTime"],
+		["src/components/media/mediaTime.tsx", "MediaDuration"],
+		["src/components/media/volumeControl.tsx", "VolumeControl"],
+		["src/features/preview/components/videoPlayer.tsx", "VideoPlayer"],
+		["src/features/preview/components/videoPlayer.tsx", "PlaybackSpeedMenu"],
+		["src/features/preview/components/videoPlayer.tsx", "PictureInPictureButton"],
+		["src/features/preview/components/videoPlayer.tsx", "FullscreenButton"],
+		["src/features/audio/components/audioPlayerBar.tsx", "AudioPlayerBar"],
+		["src/features/audio/components/audioPlayerBar.tsx", "PlayerBarTimeline"],
+		["src/features/audio/components/audioPlayerBar.tsx", "TrackTitle"]
 	])("compiles %s's %s", (file, fnName) => {
 		const events = compile(file)
 

@@ -3,7 +3,7 @@ import type { AnyFile } from "@filen/sdk-rs"
 
 // The engine imports the store, which imports the kv adapter → leader (real election needs
 // navigator.locks/BroadcastChannel/workers, absent under node). Replace leader with a Map-backed fake,
-// exactly like adapter.test.ts, so the store + output-prefs persistence work end to end.
+// exactly like adapter.test.ts, so the store + prefs persistence work end to end.
 const { fakeStore } = vi.hoisted(() => ({ fakeStore: new Map<string, string>() }))
 
 vi.mock("@/lib/storage/leader", () => ({
@@ -28,11 +28,10 @@ vi.mock("@/lib/storage/leader", () => ({
 		})
 }))
 
-import { kvGetJson } from "@/lib/storage/adapter"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
+import { setMediaVolume, toggleMediaMuted, useMediaVolumeStore } from "@/lib/media/mediaVolume"
 import {
 	AudioEngine,
-	audioOutputPrefsSchema,
 	type AudioElementAdapter,
 	type AudioElementEvents,
 	type AudioEngineDeps,
@@ -183,10 +182,9 @@ function resetStore(): void {
 		shuffleEnabled: false,
 		loopMode: "off",
 		shuffleOrder: [],
-		volume: 1,
-		muted: false,
 		lastError: null
 	})
+	useMediaVolumeStore.setState({ volume: 1, muted: false })
 }
 
 beforeEach(() => {
@@ -616,46 +614,30 @@ describe("position throttle", () => {
 	})
 })
 
-describe("output prefs", () => {
-	it("clamps and persists volume, reading back a schema-valid blob", async () => {
-		const h = makeHarness()
+describe("shared media volume", () => {
+	it("gives a new element the shared level", async () => {
+		setMediaVolume(0.4)
+		toggleMediaMuted()
 
-		h.engine.setVolume(1.7)
-		await flush()
-
-		await expect(kvGetJson("audio.v1.output", audioOutputPrefsSchema)).resolves.toEqual({ volume: 1, muted: false })
-	})
-
-	it("persists muted alongside volume", async () => {
-		const h = makeHarness()
-
-		h.engine.setVolume(0.4)
-		h.engine.setMuted(true)
-		await flush()
-
-		await expect(kvGetJson("audio.v1.output", audioOutputPrefsSchema)).resolves.toEqual({ volume: 0.4, muted: true })
-	})
-
-	it("raising the volume while muted unmutes, so the slider does not snap back to 0", async () => {
 		const h = makeHarness()
 
 		await h.engine.enqueueAndPlay([track("a")], 0)
-		h.engine.setMuted(true)
-		h.engine.setVolume(0.6)
-		await flush()
 
-		expect(useAudioStore.getState()).toMatchObject({ volume: 0.6, muted: false })
-		expect(h.fake.calls.muted.at(-1)).toBe(false)
-		await expect(kvGetJson("audio.v1.output", audioOutputPrefsSchema)).resolves.toEqual({ volume: 0.6, muted: false })
+		expect(h.fake.calls.volume.at(-1)).toBe(0.4)
+		expect(h.fake.calls.muted.at(-1)).toBe(true)
 	})
 
-	it("setting the volume to 0 while muted stays muted", () => {
+	it("follows a change made by any player to the element it holds", async () => {
 		const h = makeHarness()
 
-		h.engine.setMuted(true)
-		h.engine.setVolume(0)
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		setMediaVolume(0.25)
 
-		expect(useAudioStore.getState()).toMatchObject({ volume: 0, muted: true })
+		expect(h.fake.calls.volume.at(-1)).toBe(0.25)
+
+		toggleMediaMuted()
+
+		expect(h.fake.calls.muted.at(-1)).toBe(true)
 	})
 })
 

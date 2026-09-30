@@ -283,5 +283,27 @@ export const preview = {
 	/** Markdown viewer — toolbar button shown while viewing the raw-text source; switches back to the rendered output */
 	previewMarkdownViewRenderedAction: "View rendered",
 	/** Markdown viewer — native tooltip on the disabled rendered/source toggle: switching views unmounts the editor buffer, so the toggle is locked until the edit is saved or discarded */
-	previewMarkdownToggleDirtyHint: "Save or discard your changes before switching views."
+	previewMarkdownToggleDirtyHint: "Save or discard your changes before switching views.",
+
+	// ── Video player ─────────────────────────────────────────────────────────
+	/** Video player — the browser could not play the file (an unsupported codec, a damaged file) */
+	previewMediaPlaybackFailed: "This file can't be played in the browser.",
+	/** Video player — accessible label of the floating control bar */
+	previewMediaControls: "Playback controls",
+	/** Video player — heading of the playback-speed menu */
+	previewMediaPlaybackSpeed: "Playback speed",
+	/** Video player — accessible label of the playback-speed button; {{rate}} is the current speed as shown on the button, e.g. 1.5× */
+	previewMediaPlaybackSpeedLabel: "Playback speed {{rate}}",
+	/** Video player — one playback speed, e.g. 1.5× */
+	previewMediaSpeedRate: "{{rate}}×",
+	/** Video player — the 1× entry of the playback-speed menu */
+	previewMediaNormalSpeed: "Normal",
+	/** Video player — enters picture-in-picture */
+	previewMediaPictureInPicture: "Picture in picture",
+	/** Video player — leaves picture-in-picture */
+	previewMediaExitPictureInPicture: "Exit picture in picture",
+	/** Video player — fullscreens the player */
+	previewMediaFullscreen: "Full screen",
+	/** Video player — leaves full screen */
+	previewMediaExitFullscreen: "Exit full screen"
 } as const

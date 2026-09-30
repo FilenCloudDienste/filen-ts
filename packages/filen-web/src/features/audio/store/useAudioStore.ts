@@ -11,7 +11,8 @@ import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 // singleton, following useTransfersStore's conventions exactly: an in-memory-only store (the queue is
 // deliberately NOT persisted across reloads), pure setters the engine calls imperatively, and
 // useShallow selector hooks for React-Compiler-safe stable identities. Only shuffle/loop persist, via
-// the kv adapter (the keymap registry's load-once idiom), not zustand middleware.
+// the kv adapter (the keymap registry's load-once idiom), not zustand middleware. Volume is not playback
+// state of this module: every player shares it (lib/media/mediaVolume.ts).
 
 // Shuffle+loop are the only playback prefs that outlive a reload (mobile parity). Stored under one
 // per-tab kv blob (kv is wiped on logout, so no per-account prefix is needed — same as
@@ -29,10 +30,6 @@ interface AudioStore {
 	shuffleEnabled: boolean
 	loopMode: LoopMode
 	shuffleOrder: number[]
-	// Output-device settings, owned here; written only by the engine, which forwards them to the element
-	// and persists them via its own kv blob (not through the store's prefs).
-	volume: number
-	muted: boolean
 	// LABEL-FIRST error surface: the last playback failure as a structured DTO (errorLabel(dto) renders
 	// it). Cleared on the next successful play. Never a spinner-forever state — a failure that exhausts
 	// the auto-skip budget settles the status AND leaves this set.
@@ -50,8 +47,6 @@ interface AudioStore {
 	// current index and shuffle order while leaving position/duration/status/error exactly as they are,
 	// unlike loadQueue/setCurrent which reset them.
 	setQueueState: (queue: QueueTrack[], currentIndex: number, shuffleOrder: number[]) => void
-	// Mirrors the engine's output prefs into the store for the bar's reactive controls.
-	setOutput: (volume: number, muted: boolean) => void
 	setStatus: (status: AudioPlaybackStatus) => void
 	setPosition: (positionMs: number) => void
 	setDuration: (durationMs: number) => void
@@ -78,8 +73,6 @@ export const useAudioStore = create<AudioStore>(set => ({
 	shuffleEnabled: false,
 	loopMode: "off",
 	shuffleOrder: [],
-	volume: 1,
-	muted: false,
 	lastError: null,
 	coverUrlsByUuid: {},
 	loadQueue: (queue, currentIndex, shuffleOrder) => {
@@ -90,9 +83,6 @@ export const useAudioStore = create<AudioStore>(set => ({
 	},
 	setQueueState: (queue, currentIndex, shuffleOrder) => {
 		set({ queue, currentIndex, shuffleOrder })
-	},
-	setOutput: (volume, muted) => {
-		set({ volume, muted })
 	},
 	setStatus: status => {
 		set({ status })
@@ -158,16 +148,14 @@ function persistPrefs(): Promise<void> {
 }
 
 // Now-playing selector for the mini-player / now-playing bar — a stable-identity slice of the transport
-// state plus the resolved current track's display fields. `title` falls back to the filename until tags
-// resolve (or forever, for a tag-less file); `artist`/`coverUrl` stay null until then. Tags come
-// from the persisted track-tag store, the one source every surface reads. useShallow keeps the transport
-// slice from re-rendering on store updates that don't touch it (same rationale as
-// useTransfersAggregate); the returned object merges in the tag fields and is not identity-stable, so
-// callers destructure it rather than depend on it.
+// state plus the resolved current track's display fields. The playhead is left out: the bar's scrubber
+// reads it itself, so the bar does not re-render with every position write. `title` falls back to the
+// filename until tags resolve (or forever, for a tag-less file); `artist`/`coverUrl` stay null until
+// then. Tags come from the persisted track-tag store, the one source every surface reads. useShallow
+// keeps the transport slice from re-rendering on store updates that don't touch it; the returned object
+// merges in the tag fields and is not identity-stable, so callers destructure it rather than depend on it.
 export function useAudioNowPlaying(): {
 	status: AudioPlaybackStatus
-	positionMs: number
-	durationMs: number
 	track: QueueTrack | null
 	title: string
 	artist: string | null
@@ -179,8 +167,6 @@ export function useAudioNowPlaying(): {
 
 			return {
 				status: state.status,
-				positionMs: state.positionMs,
-				durationMs: state.durationMs,
 				track,
 				coverUrl: track ? (state.coverUrlsByUuid[track.uuid] ?? null) : null
 			}
@@ -205,16 +191,6 @@ export function useAudioQueue(): { queue: QueueTrack[]; currentIndex: number; co
 			queue: state.queue,
 			currentIndex: state.currentIndex,
 			coverUrlsByUuid: state.coverUrlsByUuid
-		}))
-	)
-}
-
-// Volume + mute for the bar's output controls, mirrored from the engine.
-export function useAudioOutput(): { volume: number; muted: boolean } {
-	return useAudioStore(
-		useShallow(state => ({
-			volume: state.volume,
-			muted: state.muted
 		}))
 	)
 }

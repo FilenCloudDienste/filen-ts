@@ -3,6 +3,7 @@ import { createDomAudioAdapter, createDomPrefetchAdapter, resolveTrackSource } f
 import { bindMediaSessionActions, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
 import { trackMetadata } from "@/features/audio/lib/trackMetadata"
 import { hydrateAudioPrefs, useAudioStore } from "@/features/audio/store/useAudioStore"
+import { warmMediaVolume } from "@/lib/media/mediaVolume"
 
 // The app-lifetime audio engine singleton, wired with the real DOM element adapter + SW/blob source
 // resolver + OS Media Session bridge + one-track-ahead prefetch + the track-metadata service's covers. One instance
@@ -21,7 +22,7 @@ export const audioEngine = new AudioEngine({
 // Restore persisted prefs and bind the foreground-reconcile lifecycle once, at first import. All
 // best-effort — never blocks or throws into a caller.
 void hydrateAudioPrefs()
-void audioEngine.hydrateOutputPrefs()
+void warmMediaVolume()
 audioEngine.bindLifecycle()
 
 // Wire OS media keys / lock-screen controls back into the engine (OS → engine). Feature-detected inside

@@ -28,9 +28,13 @@ function DropdownMenuContent({
 	alignOffset: alignOffsetProp,
 	side: sideProp,
 	sideOffset: sideOffsetProp,
+	container,
 	className,
 	...props
-}: MenuPrimitive.Popup.Props & Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+}: MenuPrimitive.Popup.Props &
+	Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset"> &
+	// A fullscreen element shows only its own subtree, so a menu opened inside one portals into it.
+	Pick<MenuPrimitive.Portal.Props, "container">) {
 	// Not destructuring defaults, which the React Compiler cannot lower.
 	const align = alignProp ?? "start"
 	const alignOffset = alignOffsetProp ?? 0
@@ -38,7 +42,7 @@ function DropdownMenuContent({
 	const sideOffset = sideOffsetProp ?? 4
 
 	return (
-		<MenuPrimitive.Portal>
+		<MenuPrimitive.Portal container={container}>
 			<MenuPrimitive.Positioner
 				className="isolate z-50 outline-none"
 				align={align}

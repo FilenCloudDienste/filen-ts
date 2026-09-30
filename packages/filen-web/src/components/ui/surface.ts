@@ -6,6 +6,14 @@ export const SURFACE_RING = "ring-1 ring-foreground/5 dark:ring-foreground/10"
 // Translucent blurred surface for controls floating over content (chat composer, attach button, floating cards).
 export const GLASS_SURFACE_CLASS = `bg-popover/70 shadow-sm ${SURFACE_RING} backdrop-blur-2xl backdrop-saturate-150`
 
+// Video controls, which sit over any frame: near-black in both themes so they read over white, dark and
+// colourful pictures alike. `dark` scopes the theme tokens inside to their dark values, so everything
+// drawn with them (icons, muted text, rails, hovers) comes out light. The tone alone is for a surface
+// that blurs its own backdrop (the menu popup).
+export const MEDIA_GLASS_TONE_CLASS = "dark bg-black/65 text-foreground shadow-lg ring-1 ring-white/15"
+
+export const MEDIA_GLASS_SURFACE_CLASS = `${MEDIA_GLASS_TONE_CLASS} backdrop-blur-xl`
+
 export const SCRIM_CLASS =
 	"fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 

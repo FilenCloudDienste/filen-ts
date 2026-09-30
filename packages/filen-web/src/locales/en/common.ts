@@ -204,5 +204,11 @@ export const common = {
 	/** Participants dialogs — add-mode submit button */
 	participantsAddSubmit: "Add",
 	/** Participants dialogs — add-mode empty state when every contact is already a participant, or the account has no contacts */
-	participantsAddEmpty: "No contacts available to add"
+	participantsAddEmpty: "No contacts available to add",
+
+	// ── Media controls (shared by every player) ──────────────────────────────
+	/** Seek slider — spoken position; {{current}} and {{total}} are clock times such as 1:05 */
+	mediaTimeOf: "{{current}} of {{total}}",
+	/** Volume slider — spoken level; {{percent}} is 0-100 */
+	mediaVolumePercent: "{{percent}}%"
 } as const

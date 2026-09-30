@@ -136,7 +136,7 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	})
 	await expect.poll(() => video.evaluate(el => !(el as HTMLVideoElement).paused), { timeout: 15_000 }).toBe(true)
 
-	// ---- a focused native scrubber owns ArrowRight as a seek — the overlay's pager must not steal
+	// ---- inside the focused player ArrowRight is a seek — the overlay's pager must not steal
 	// it. nameAsc sort (mp3 < mp4 < png) puts the video at the MIDDLE pager index, so Next is enabled
 	// and a real pager advance (a regression) would be observable as the heading switching to the
 	// image. getByText (raw textContent) rather than getByRole("heading", {name}) — PreviewName
@@ -148,7 +148,7 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	await expect(heading).toBeVisible()
 	// Paused first, and the seek asserted POSITIVELY: while the clip is playing currentTime climbs on its
 	// own, so an advance would prove nothing, and "the heading is still there" is instantly true whether
-	// the scrubber consumed the key or nothing did at all. Paused, only a real seek moves the playhead.
+	// the player consumed the key or nothing did at all. Paused, only a real seek moves the playhead.
 	await video.evaluate(el => {
 		const videoEl = el as HTMLVideoElement
 
@@ -159,9 +159,7 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 
 	const timeBeforeSeek = await video.evaluate(el => (el as HTMLVideoElement).currentTime)
 
-	// The key must reach the video with its default intact on every engine. Whether the native control
-	// then seeks is the engine's own choice: Chromium's and Firefox's bind the arrow keys, Safari's inline
-	// controls do not, so there the untouched default and the pager standing still are the whole proof.
+	// The player handles the key itself (default prevented) and seeks on every engine.
 	await video.evaluate(el => {
 		el.addEventListener(
 			"keydown",
@@ -178,13 +176,9 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 
 			return event === undefined ? null : { key: event.key, defaultPrevented: event.defaultPrevented }
 		})
-	).toEqual({ key: "ArrowRight", defaultPrevented: false })
+	).toEqual({ key: "ArrowRight", defaultPrevented: true })
 
-	if (browserName !== "webkit") {
-		await expect
-			.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime), { timeout: 15_000 })
-			.toBeGreaterThan(timeBeforeSeek)
-	}
+	await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime), { timeout: 15_000 }).toBeGreaterThan(timeBeforeSeek)
 
 	await expect(heading).toBeVisible()
 

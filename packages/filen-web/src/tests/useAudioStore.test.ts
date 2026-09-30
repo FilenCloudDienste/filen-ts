@@ -145,3 +145,49 @@ describe("prefs persistence round-trip", () => {
 		await expect(kvGetJson("audio.v1.prefs", audioPrefsSchema)).resolves.toEqual({ shuffleEnabled: true, loopMode: "all" })
 	})
 })
+
+describe("restoring the player's settings", () => {
+	// hydrateAudioPrefs and warmMediaVolume load once per tab, so each test gets fresh modules.
+	async function freshModules() {
+		vi.resetModules()
+
+		const adapter = await import("@/lib/storage/adapter")
+		const store = await import("@/features/audio/store/useAudioStore")
+		const volume = await import("@/lib/media/mediaVolume")
+
+		return { adapter, store, volume }
+	}
+
+	it("restores shuffle, loop and the shared volume without starting playback", async () => {
+		const { adapter, store, volume } = await freshModules()
+
+		await adapter.kvSetJson("audio.v1.prefs", { shuffleEnabled: true, loopMode: "one" })
+		await adapter.kvSetJson("media.volume.v1", { volume: 0.35, muted: true })
+		await Promise.all([store.hydrateAudioPrefs(), volume.warmMediaVolume()])
+
+		expect(store.useAudioStore.getState()).toMatchObject({ shuffleEnabled: true, loopMode: "one", status: "idle", queue: [] })
+		expect(volume.useMediaVolumeStore.getState()).toEqual({ volume: 0.35, muted: true })
+	})
+
+	it("keeps a toggle made before the stored prefs arrived", async () => {
+		const { adapter, store } = await freshModules()
+
+		await adapter.kvSetJson("audio.v1.prefs", { shuffleEnabled: true, loopMode: "all" })
+
+		const hydrating = store.hydrateAudioPrefs()
+
+		store.useAudioStore.getState().setLoop("one")
+		await hydrating
+
+		expect(store.useAudioStore.getState()).toMatchObject({ shuffleEnabled: false, loopMode: "one" })
+	})
+
+	it("falls back to the defaults for a malformed blob", async () => {
+		const { adapter, store } = await freshModules()
+
+		await adapter.kvSetJson("audio.v1.prefs", { shuffleEnabled: "yes", loopMode: "sometimes" })
+		await store.hydrateAudioPrefs()
+
+		expect(store.useAudioStore.getState()).toMatchObject({ shuffleEnabled: false, loopMode: "off" })
+	})
+})

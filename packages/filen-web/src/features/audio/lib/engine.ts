@@ -1,6 +1,5 @@
-import { type } from "arktype"
-import { kvLoadOnce, kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { useMediaVolumeStore, type MediaVolume } from "@/lib/media/mediaVolume"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import {
 	buildShuffleOrder,
@@ -32,12 +31,6 @@ import { COVER_THUMBNAIL_TYPE } from "@/features/audio/lib/trackTags.logic"
 // several times a second, and a scrubber does not need more than ~4Hz. End-detection rides the `ended`
 // event, never this throttle, so a coarser cadence costs nothing.
 const POSITION_WRITE_THROTTLE_MS = 250
-
-// Volume/muted persist separately from the queue prefs: they are output-device settings the engine
-// persists (desktop needs an in-app volume), not queue state. Same per-tab kv rationale as the queue prefs.
-const OUTPUT_PREFS_KV_KEY = "audio.v1.output"
-
-export const audioOutputPrefsSchema = type({ volume: "number", muted: "boolean" })
 
 // The event callbacks the engine hands to the adapter factory; the adapter wires them to the concrete
 // element's listeners (or, in a test, exposes them so the harness can fire them).
@@ -110,12 +103,9 @@ function defaultRevoke(url: string): void {
 	}
 }
 
-function clampVolume(volume: number): number {
-	if (!Number.isFinite(volume)) {
-		return 1
-	}
-
-	return Math.max(0, Math.min(1, volume))
+function applyOutput(element: AudioElementAdapter, output: MediaVolume): void {
+	element.setVolume(output.volume)
+	element.setMuted(output.muted)
 }
 
 export class AudioEngine {
@@ -140,21 +130,6 @@ export class AudioEngine {
 	// Consecutive failed-track auto-skips; reset to 0 on any successful play. Bounds the auto-skip pass.
 	private skipGuard = 0
 	private lastPositionWriteAt = 0
-	// Load-once persisted volume/muted, memoized per engine instance. Output prefs are a nicety, never a
-	// blocker, so a failed read leaves the defaults in place.
-	private readonly loadOutputPrefs = kvLoadOnce(
-		OUTPUT_PREFS_KV_KEY,
-		audioOutputPrefsSchema,
-		loaded => {
-			const volume = clampVolume(loaded.volume)
-
-			this.element?.setVolume(volume)
-			this.element?.setMuted(loaded.muted)
-			useAudioStore.getState().setOutput(volume, loaded.muted)
-		},
-		"audio",
-		"audio output prefs"
-	)
 	private visibilityHandler: (() => void) | null = null
 	// The one-track-ahead warm-up element + which queue index it holds, if any. `null` index means
 	// "nothing warmed" (no prefetch dep, queue end, or the warm-up itself failed/was superseded).
@@ -176,6 +151,18 @@ export class AudioEngine {
 
 	public constructor(deps: AudioEngineDeps) {
 		this.deps = deps
+
+		// The shared media volume, whichever player changed it. The warm-up element follows too: a promoted
+		// one keeps playing at the level it was given.
+		useMediaVolumeStore.subscribe(output => {
+			if (this.element) {
+				applyOutput(this.element, output)
+			}
+
+			if (this.prefetchElement) {
+				applyOutput(this.prefetchElement, output)
+			}
+		})
 	}
 
 	private now(): number {
@@ -259,11 +246,7 @@ export class AudioEngine {
 
 		const element = this.deps.createElement(this.playbackEvents())
 
-		// Re-apply the persisted output prefs to a freshly-created element.
-		const { volume, muted } = useAudioStore.getState()
-
-		element.setVolume(volume)
-		element.setMuted(muted)
+		applyOutput(element, useMediaVolumeStore.getState())
 		this.element = element
 
 		return element
@@ -288,6 +271,7 @@ export class AudioEngine {
 			}
 		})
 
+		applyOutput(element, useMediaVolumeStore.getState())
 		this.prefetchElement = element
 
 		return element
@@ -922,7 +906,7 @@ export class AudioEngine {
 
 	// Empty the queue and stop — the mini-player disappears (the shell renders it only for a non-empty
 	// queue). Supersedes any in-flight load, revokes the live blob URL, and clears the OS metadata; the
-	// persisted shuffle/loop/output prefs survive (store.reset keeps them).
+	// persisted shuffle/loop prefs survive (store.reset keeps them).
 	public clearQueue(): void {
 		this.bumpLoadGeneration()
 		this.element?.pause()
@@ -958,45 +942,6 @@ export class AudioEngine {
 	public setLoopMode(mode: LoopMode): void {
 		useAudioStore.getState().setLoop(mode)
 		void this.schedulePrefetch()
-	}
-
-	// Raising the volume while muted unmutes, as in any player: otherwise the slider (which shows 0 while
-	// muted) snaps back on every move and nothing becomes audible.
-	public setVolume(volume: number): void {
-		const state = useAudioStore.getState()
-		const clamped = clampVolume(volume)
-		const unmute = state.muted && clamped > 0
-
-		this.element?.setVolume(clamped)
-
-		if (unmute) {
-			this.element?.setMuted(false)
-		}
-
-		state.setOutput(clamped, state.muted && !unmute)
-		void this.persistOutputPrefs()
-	}
-
-	public setMuted(muted: boolean): void {
-		const state = useAudioStore.getState()
-
-		this.element?.setMuted(muted)
-		state.setOutput(state.volume, muted)
-		void this.persistOutputPrefs()
-	}
-
-	public toggleMuted(): void {
-		this.setMuted(!useAudioStore.getState().muted)
-	}
-
-	public hydrateOutputPrefs(): Promise<void> {
-		return this.loadOutputPrefs()
-	}
-
-	private persistOutputPrefs(): Promise<void> {
-		const { volume, muted } = useAudioStore.getState()
-
-		return kvSetJsonQuiet(OUTPUT_PREFS_KV_KEY, { volume, muted }, "audio", "audio output prefs")
 	}
 
 	// Foreground reconcile: re-derive position/status straight off the element after the tab was
