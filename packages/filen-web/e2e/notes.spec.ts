@@ -27,7 +27,7 @@ async function gotoNotes(page: Page): Promise<void> {
 
 	// The sidebar renders independently of which route currently occupies the main card — a visible row
 	// proves the LIST query has data, but proves NOTHING about whether notes.index.tsx's own
-	// redirect-to-first-note effect has actually fired yet. Landing on bare "/notes" races that effect
+	// redirect effect (last opened note, else the first) has actually fired yet. Landing on bare "/notes" races that effect
 	// against whatever the caller does next (e.g. clicking "New note"): both resolve to a `/notes/<uuid>`
 	// URL, and if the caller's own navigate() wins the race while the index route is STILL mounted, a
 	// later query-cache write (the caller's own create!) can retrigger the index effect's dependency and

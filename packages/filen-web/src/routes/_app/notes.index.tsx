@@ -1,25 +1,32 @@
 import { useEffect } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useNotes } from "@/features/notes/queries/notes"
-import { sortNotes } from "@/features/notes/lib/sort"
+import { notesIndexRedirectTarget } from "@/features/notes/lib/indexRedirect.logic"
+import { readLastOpened, useLastOpened } from "@/features/shell/lib/lastOpened"
 import { NoteEditorPane } from "@/features/notes/components/noteEditorPane"
 
-// The bare /notes index. Like old-web, the uuid is a pure selection key, so the index
-// redirects to the first note in the same sorted order the sidebar shows — the sidebar stays mounted
-// across the redirect (it lives in the app shell). Zero notes falls through to the select/empty prompt.
-export const Route = createFileRoute("/_app/notes/")({ component: NotesIndexPage })
+// The bare /notes index. Like old-web, the uuid is a pure selection key, so the index redirects — to the
+// last opened note while it still exists, else to the first note in the order the sidebar shows. The
+// sidebar stays mounted across the redirect (it lives in the app shell); zero notes falls through to the
+// select/empty prompt. The loader warms the stored value so the decision needs no extra render.
+export const Route = createFileRoute("/_app/notes/")({
+	loader: async () => {
+		await readLastOpened("notes")
+	},
+	component: NotesIndexPage
+})
 
 function NotesIndexPage() {
 	const navigate = useNavigate()
+	const storedUuid = useLastOpened("notes")
 	const notesQuery = useNotes()
-	const notes = notesQuery.data
-	const firstUuid = notes !== undefined && notes.length > 0 ? sortNotes(notes)[0]?.uuid : undefined
+	const target = notesIndexRedirectTarget({ storedUuid, notes: notesQuery.data, pending: notesQuery.isPending })
 
 	useEffect(() => {
-		if (firstUuid !== undefined) {
-			void navigate({ to: "/notes/$uuid", params: { uuid: firstUuid }, replace: true })
+		if (typeof target === "string") {
+			void navigate({ to: "/notes/$uuid", params: { uuid: target }, replace: true })
 		}
-	}, [firstUuid, navigate])
+	}, [target, navigate])
 
-	return <NoteEditorPane loading={notesQuery.isPending} />
+	return <NoteEditorPane loading={target !== null} />
 }
