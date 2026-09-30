@@ -5,33 +5,9 @@ const { mockCacheMap, mockAudioCacheGetMetadata } = vi.hoisted(() => ({
 	mockAudioCacheGetMetadata: vi.fn()
 }))
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	sortParams: (p: Record<string, unknown>) => {
-		const keys = Object.keys(p).sort()
-		const result: Record<string, unknown> = {}
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-		for (const k of keys) {
-			result[k] = p[k]
-		}
-
-		return result
-	}
-}))
-
-vi.mock("@filen/sdk-rs", () => ({
-	AnyFile: {
-		File: class {
-			tag = "File"
-			constructor(public inner: unknown) {}
-		},
-		Shared: class {
-			tag = "Shared"
-			constructor(public inner: unknown) {}
-		}
-	},
-	ManagedFuture: { new: vi.fn(() => ({})) }
-}))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 vi.mock("@/lib/cache", () => ({
 	default: {
@@ -51,6 +27,7 @@ vi.mock("@/features/audio/audioCache", () => ({
 
 import { fetchData } from "@/features/audio/queries/useAudioMetadata.query"
 import { type FileSource } from "@/queries/fileSource"
+import { fileSourceItems } from "@/tests/fixtures/driveItems"
 
 const FAKE_METADATA = {
 	title: "Test Track",
@@ -63,53 +40,10 @@ const FAKE_METADATA = {
 	cachedAt: 1000000
 }
 
-function makeFileItem(uuid = "file-uuid-1") {
-	return {
-		type: "file" as const,
-		data: {
-			uuid,
-			size: 1024n,
-			undecryptable: false,
-			decryptedMeta: { name: "track.mp3", mime: "audio/mpeg", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeSharedFileItem(uuid = "shared-uuid-1") {
-	return {
-		type: "sharedFile" as const,
-		data: {
-			uuid,
-			size: 512n,
-			undecryptable: false,
-			decryptedMeta: { name: "shared.mp3", mime: "audio/mpeg", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeSharedRootFileItem(uuid = "root-uuid-1") {
-	return {
-		type: "sharedRootFile" as const,
-		data: {
-			uuid,
-			size: 256n,
-			undecryptable: false,
-			decryptedMeta: { name: "root.mp3", mime: "audio/mpeg", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeDirectoryItem(uuid = "dir-uuid-1") {
-	return {
-		type: "directory" as const,
-		data: {
-			uuid,
-			size: 0n,
-			undecryptable: false,
-			decryptedMeta: { name: "my-dir", color: null }
-		}
-	}
-}
+const { makeFileItem, makeSharedFileItem, makeSharedRootFileItem, makeDirectoryItem } = fileSourceItems(
+	{ file: "track.mp3", sharedFile: "shared.mp3", sharedRootFile: "root.mp3" },
+	"audio/mpeg"
+)
 
 describe("fetchData (useAudioMetadata.query)", () => {
 	beforeEach(() => {

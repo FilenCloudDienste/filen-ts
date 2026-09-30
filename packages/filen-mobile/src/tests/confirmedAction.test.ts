@@ -12,19 +12,11 @@ const { mockAlert, mockRunWithLoading, mockAlertsError, mockCanGoBack, mockBack,
 
 vi.mock("@/lib/prompts", () => ({ default: { alert: mockAlert } }))
 vi.mock("@/lib/alerts", () => ({ default: { error: mockAlertsError } }))
-vi.mock("@/lib/i18n", () => ({ t: (key: string) => key }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("expo-router", () => ({ router: { canGoBack: mockCanGoBack, back: mockBack } }))
 vi.mock("@/stores/useApp.store", () => ({ default: { getState: mockGetState } }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: mockRunWithLoading }))
-vi.mock("@filen/shared", () => ({
-	run: async (fn: () => Promise<unknown>) => {
-		try {
-			return { success: true, data: await fn() }
-		} catch (error) {
-			return { success: false, error }
-		}
-	}
-}))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 import { confirmedAction } from "@/lib/confirmedAction"
 

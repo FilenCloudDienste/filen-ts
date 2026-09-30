@@ -44,9 +44,7 @@ vi.mock("@/lib/auth", () => ({
 	default: { logout: vi.fn(async () => undefined) }
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: { error: vi.fn(), normal: vi.fn() }
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("@filen/sdk-rs", () => ({
 	ErrorKind: { Unauthenticated: "Unauthenticated" }

@@ -14,40 +14,9 @@
  */
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
-const { mockDb, open, mockPersistQueryByKey } = vi.hoisted(() => {
-	const mockDb = {
-		execute: vi.fn(async (_query: unknown, _params?: unknown) => ({ rows: [] as never[], insertId: undefined, rowsAffected: 0 })),
-		executeRaw: vi.fn(async (_query: unknown, _params?: unknown) => ({ rawRows: [] as unknown[][], columnNames: [] as string[], rowsAffected: 0 })),
-		executeBatch: vi.fn(async (_commands: unknown) => ({ rowsAffected: 0 })),
-		prepareStatement: vi.fn(() => ({
-			bind: vi.fn(),
-			bindSync: vi.fn(),
-			execute: vi.fn(async () => ({ rows: [], insertId: undefined, rowsAffected: 0 }))
-		})),
-		close: vi.fn()
-	}
+const { mockPersistQueryByKey } = vi.hoisted(() => ({ mockPersistQueryByKey: vi.fn(async () => undefined) }))
 
-	return {
-		mockDb,
-		open: vi.fn(() => mockDb),
-		mockPersistQueryByKey: vi.fn(async () => undefined)
-	}
-})
-
-vi.mock("react-native", () => ({
-	AppState: {
-		addEventListener: () => ({ remove: () => {} }),
-		currentState: "active"
-	},
-	Platform: {
-		OS: "ios",
-		select: <T,>(specifics: { ios?: T; android?: T; default?: T }) => specifics["ios"] ?? specifics["default"]
-	}
-}))
-
-vi.mock("@op-engineering/op-sqlite", () => ({
-	open
-}))
+vi.mock("@op-engineering/op-sqlite", async () => await import("@/tests/mocks/opSqlite"))
 
 vi.mock("@/lib/utils", () => ({}))
 
@@ -109,6 +78,7 @@ vi.mock("@/stores/useApp.store", () => ({
 }))
 
 import { QueryPersisterKv, queryUpdater } from "@/queries/client"
+import { mockDb } from "@/tests/mocks/opSqlite"
 
 async function flushMicrotasks(maxTicks = 30): Promise<void> {
 	for (let i = 0; i < maxTicks; i++) {

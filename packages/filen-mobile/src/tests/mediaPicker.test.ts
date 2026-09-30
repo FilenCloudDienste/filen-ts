@@ -11,9 +11,7 @@ vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-vi.mock("@/lib/i18n", () => ({
-	default: { t: (key: string) => key }
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("expo-image-picker", () => ({
 	launchImageLibraryAsync: mockLaunchLibrary,

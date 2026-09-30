@@ -19,9 +19,7 @@ vi.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 }))
 }))
 vi.mock("uniwind", () => ({ useResolveClassNames: vi.fn(() => ({})) }))
-vi.mock("react-i18next", () => ({
-	useTranslation: vi.fn(() => ({ t: (k: string) => k }))
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("@tanstack/react-query", () => ({ onlineManager: { isOnline: vi.fn(() => true) } }))
 vi.mock("@filen/shared", () => ({ run: vi.fn() }))
 vi.mock("@/lib/time", () => ({ simpleDate: vi.fn(() => "") }))

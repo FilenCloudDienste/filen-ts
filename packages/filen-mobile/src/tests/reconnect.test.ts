@@ -37,7 +37,7 @@ vi.mock("@/features/notes/components/sync", () => ({ sync: { executeNow: () => m
 vi.mock("@/features/chats/components/sync", () => ({ sync: { syncNow: () => mockChatsSyncNow() } }))
 // notesOffline reaches SQLite; stubbed wholesale so this suite stays free of native modules.
 vi.mock("@/features/notes/notesOffline", () => ({ default: { sync: (...args: unknown[]) => mockNotesOfflineSync(...args) } }))
-vi.mock("@/lib/logger", () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 function fireOnlineEvent(isOnline: boolean) {
 	for (const sub of capturedSubscribers) {

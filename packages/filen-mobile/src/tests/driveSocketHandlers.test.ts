@@ -111,41 +111,7 @@ vi.mock("@/features/drive/store/useDrive.store", () => ({
 	}
 }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	DriveEvent_Tags: {
-		FileArchiveRestored: "FileArchiveRestored",
-		FileRestore: "FileRestore",
-		FileNew: "FileNew",
-		FileArchived: "FileArchived",
-		FileDeletedPermanent: "FileDeletedPermanent",
-		FolderDeletedPermanent: "FolderDeletedPermanent",
-		FileMetadataChanged: "FileMetadataChanged",
-		FileMove: "FileMove",
-		FolderMove: "FolderMove",
-		FolderMetadataChanged: "FolderMetadataChanged",
-		FileTrash: "FileTrash",
-		FolderTrash: "FolderTrash",
-		FolderColorChanged: "FolderColorChanged",
-		FolderRestore: "FolderRestore",
-		FolderSubCreated: "FolderSubCreated",
-		ItemFavorite: "ItemFavorite",
-		TrashEmpty: "TrashEmpty",
-		DeleteAll: "DeleteAll",
-		DeleteVersioned: "DeleteVersioned"
-	},
-	AnyNormalDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	NonRootItem_Tags: {
-		File: "File",
-		NormalDir: "NormalDir"
-	},
-	SocketEvent_Tags: {
-		Drive: "Drive",
-		Note: "Note"
-	}
-}))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 // ---------------------------------------------------------------------------
 // Import the unit under test AFTER all vi.mock declarations
@@ -155,6 +121,7 @@ import { handleDriveEvent, type DriveSocketEvent } from "@/features/drive/socket
 import { DriveEvent_Tags, AnyNormalDir_Tags, NonRootItem_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
 import logger from "@/lib/logger"
 import events from "@/lib/events"
+import { socketEvent } from "@/tests/fixtures/socketEvents"
 
 // Collects one app event's payloads for the length of `run`.
 async function collect(name: "driveItemUpdated" | "driveFileGone", run: () => Promise<void>): Promise<unknown[]> {
@@ -173,18 +140,11 @@ async function collect(name: "driveItemUpdated" | "driveFileGone", run: () => Pr
 }
 
 // ---------------------------------------------------------------------------
-// Helpers — build minimal socket-event shapes matching the handler's destructure:
-//   const [eventInner] = event.inner
-//   eventInner.inner.tag  → DriveEvent_Tags.*
-//   const [inner] = eventInner.inner.inner
-//   inner.uuid            → item uuid string
+// Helpers
 // ---------------------------------------------------------------------------
 
 function makeEvent(tag: string, inner: unknown): DriveSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Drive,
-		inner: [{ inner: { tag, inner: [inner] } }]
-	} as unknown as DriveSocketEvent
+	return socketEvent(SocketEvent_Tags.Drive, tag, inner)
 }
 
 function makeFolderDeletedPermanentEvent(folderUuid: string): DriveSocketEvent {
@@ -267,10 +227,7 @@ function makeTrashEmptyEvent(): DriveSocketEvent {
 
 // unknown/default event — triggers the throw
 function makeUnknownTagEvent(): DriveSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Drive,
-		inner: [{ inner: { tag: "UnknownEventTag_xyz", inner: [{}] } }]
-	} as unknown as DriveSocketEvent
+	return makeEvent("UnknownEventTag_xyz", {})
 }
 
 // ---------------------------------------------------------------------------

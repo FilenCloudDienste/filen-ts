@@ -11,24 +11,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyNormalDir: {
-		Dir: class {
-			tag = "Dir"
-			inner: unknown[]
-			constructor(v: unknown) {
-				this.inner = [v]
-			}
-		},
-		Root: class {
-			tag = "Root"
-			inner: unknown[]
-			constructor(v: unknown) {
-				this.inner = [v]
-			}
-		}
-	}
-}))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 import { resolveSelectedDriveItemToAnyNormalDir } from "@/features/drive/driveSelectResolve"
 import logger from "@/lib/logger"

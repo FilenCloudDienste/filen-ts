@@ -4,11 +4,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // eventDetails.ts imports @/lib/i18n at module level (only for the default `t` of
 // eventKindToReadable). That chain pulls expo-localization + every locale JSON, so we
 // mock it to a key-echoing translator. Every test passes an explicit `t` anyway.
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // @/lib/time → expo-localization. eventDetails.ts uses simpleDate() for the timestamp row,
 // so the real time module runs; stub the locale source so it resolves deterministically.

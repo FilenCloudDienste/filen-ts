@@ -18,121 +18,19 @@ vi.mock("@/lib/router", () => ({
 
 vi.mock("@/lib/utils", () => ({}))
 
-vi.mock("@/lib/previewType", async () => {
-	const actual = await import("@/tests/mocks/expoFileSystem")
-
-	return {
-		isImagePreviewType(previewType: string): boolean {
-			return previewType === "image" || previewType === "svg" || previewType === "rawImage"
-		},
-		getPreviewType(name: string): string {
-			const ext = actual.Paths.extname(name.trim().toLowerCase())
-
-			if (ext === ".svg") {
-				return "svg"
-			}
-
-			if ([".cr2", ".nef", ".dng"].includes(ext)) {
-				return "rawImage"
-			}
-
-			if ([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic", ".heif", ".webp", ".avif"].includes(ext)) {
-				return "image"
-			}
-
-			if ([".mp4", ".mov", ".m4v", ".3gp", ".webm", ".mkv"].includes(ext)) {
-				return "video"
-			}
-
-			if ([".mp3", ".m4a", ".aac", ".wav", ".flac", ".ogg", ".opus"].includes(ext)) {
-				return "audio"
-			}
-
-			switch (ext) {
-				case ".pdf":
-					return "pdf"
-				case ".txt":
-					return "text"
-				case ".docx":
-					return "docx"
-				case ".js":
-				case ".ts":
-				case ".tsx":
-				case ".py":
-				case ".rs":
-				case ".json":
-					return "code"
-				default:
-					return "unknown"
-			}
-		}
-	}
-})
-
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@filen/sdk-rs", () => ({}))
 
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
-import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
-import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeDrivePath(type: DrivePathType = "drive"): DrivePath {
-	return { type, uuid: "root-uuid" }
-}
-
-function makeDriveGalleryItem(
-	uuid: string,
-	name: string,
-	itemType: string = "file",
-	decryptedMeta: { name: string; size: bigint } | null = { name, size: 0n }
-): GalleryItemTagged {
-	return {
-		type: "drive",
-		data: {
-			type: itemType,
-			data: {
-				uuid,
-				decryptedMeta,
-				size: 0n,
-				undecryptable: false
-			} as never
-		}
-	} as GalleryItemTagged
-}
-
-function makeInitialDriveItem(uuid: string, name: string, drivePath: DrivePath = makeDrivePath()): InitialItem {
-	return {
-		type: "drive",
-		data: {
-			item: makeDriveGalleryItem(uuid, name).data as never,
-			drivePath
-		}
-	}
-}
-
-function makeInitialExternalItem(): InitialItem {
-	return {
-		type: "external",
-		data: { uri: "file:///tmp/ext.jpg", name: "ext.jpg", mimeType: "image/jpeg" } as never
-	}
-}
-
-function resetStore(): void {
-	useDrivePreviewStore.setState({
-		headerHeight: null,
-		currentItem: null,
-		currentIndex: null,
-		items: [],
-		initialScrollIndex: 0,
-		drivePath: null,
-		isLeaving: false,
-		pendingOpen: null
-	})
-}
+import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import type { DrivePath } from "@/hooks/useDrivePath"
+import {
+	makeDrivePath,
+	makeDriveGalleryItem,
+	makeInitialDriveItem,
+	makeInitialExternalItem,
+	resetDrivePreviewStore
+} from "@/tests/fixtures/drivePreview"
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -140,7 +38,7 @@ function resetStore(): void {
 
 describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 	beforeEach(() => {
-		resetStore()
+		resetDrivePreviewStore()
 		mockRouterPush.mockClear()
 	})
 
@@ -348,10 +246,10 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 	})
 
 	describe("regular drive gallery", () => {
-		it("includes a .bmp image classified as image", () => {
-			const bmpItem = makeDriveGalleryItem("bmp1", "photo.bmp")
+		it("includes a non-jpg image classified as image", () => {
+			const gifItem = makeDriveGalleryItem("gif1", "photo.gif")
 			const jpgItem = makeDriveGalleryItem("jpg1", "photo.jpg")
-			const items: GalleryItemTagged[] = [bmpItem, jpgItem]
+			const items: GalleryItemTagged[] = [gifItem, jpgItem]
 
 			useDrivePreviewStore.getState().open({
 				items,
@@ -361,7 +259,7 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 			const state = useDrivePreviewStore.getState()
 			const uuids = state.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
 
-			expect(uuids).toContain("bmp1")
+			expect(uuids).toContain("gif1")
 			expect(uuids).toContain("jpg1")
 		})
 	})
@@ -584,7 +482,7 @@ function uuidOf(item: GalleryItemTagged | null): string | null {
 
 describe("useDrivePreviewStore — session handover", () => {
 	beforeEach(() => {
-		resetStore()
+		resetDrivePreviewStore()
 		mockRouterPush.mockClear()
 	})
 
@@ -719,7 +617,7 @@ describe("useDrivePreviewStore — session handover", () => {
 
 describe("useDrivePreviewStore.open — navigation identity", () => {
 	beforeEach(() => {
-		resetStore()
+		resetDrivePreviewStore()
 		mockRouterPush.mockClear()
 	})
 

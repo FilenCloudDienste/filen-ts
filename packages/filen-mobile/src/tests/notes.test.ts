@@ -96,11 +96,7 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("react-native-mmkv", async () => await import("@/tests/mocks/reactNativeMMKV"))
 
@@ -123,32 +119,11 @@ import notes from "@/features/notes/notes"
 import { type Note, type NoteTag, type NoteParticipant } from "@/types"
 import { type NoteType } from "@filen/sdk-rs"
 import { fs } from "@/tests/mocks/expoFileSystem"
+import { makeNote, makeSdkNote } from "@/tests/fixtures/notes"
 
 // ---------------------------------------------------------------------------
 // Factory helpers
 // ---------------------------------------------------------------------------
-
-function makeNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: "note-uuid-1",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "some-key",
-		title: "Test Note",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1000n,
-		editedTimestamp: 2000n,
-		participants: [],
-		undecryptable: false,
-		...overrides
-	} as Note
-}
 
 function makeTag(overrides: Partial<NoteTag> = {}): NoteTag {
 	return {
@@ -172,27 +147,6 @@ function makeParticipant(overrides: Partial<NoteParticipant> = {}): NoteParticip
 		addedTimestamp: 1000n,
 		...overrides
 	} as NoteParticipant
-}
-
-// Simulates the SDK returning an updated Note (wraps with encryptionKey so undecryptable stays false)
-function makeSdkNote(uuid: string, overrides: Partial<Note> = {}) {
-	return {
-		uuid,
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "some-key",
-		title: "Test Note",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1000n,
-		editedTimestamp: 2000n,
-		participants: [],
-		...overrides
-	}
 }
 
 function makeMockSdkClient(overrides: Record<string, unknown> = {}) {

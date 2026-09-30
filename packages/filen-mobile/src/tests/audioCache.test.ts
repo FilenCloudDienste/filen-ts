@@ -36,39 +36,19 @@ vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 import { fs, File, Directory } from "@/tests/mocks/expoFileSystem"
 import { serialize } from "@/lib/serializer"
-import { xxHash32 } from "js-xxhash"
 import { type DriveItem, type CacheItem } from "@/types"
 import { type Metadata } from "@/features/audio/audioCache"
+import { driveFileItem, wrapDrive, makeExternalItem, externalId, extname } from "@/tests/fixtures/driveItems"
 
 const fileCache = (await import("@/lib/fileCache")).default
 const { parseWebStream } = await import("music-metadata")
 const { Image } = await import("expo-image")
 
-function extname(filename: string): string {
-	const dot = filename.lastIndexOf(".")
-
-	return dot === -1 ? "" : filename.slice(dot)
-}
-
 const AUDIO_BASE_DIR = "file:///shared/group.io.filen.app/audioCache/v2"
 const FILE_CACHE_BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
 
 function makeFileItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "file",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 100n,
-				modified: 1000,
-				created: 900,
-				mime: "audio/mpeg"
-			},
-			undecryptable: false,
-			size: 100n
-		}
-	} as unknown as DriveItem
+	return driveFileItem("file", uuid, name, "audio/mpeg")
 }
 
 function makeDirItem(uuid: string): DriveItem {
@@ -80,45 +60,6 @@ function makeDirItem(uuid: string): DriveItem {
 			undecryptable: false
 		}
 	} as unknown as DriveItem
-}
-
-function makeSharedRootFileItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "sharedRootFile",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 100n,
-				modified: 1000,
-				created: 900,
-				mime: "audio/mpeg"
-			},
-			undecryptable: false,
-			size: 100n
-		}
-	} as unknown as DriveItem
-}
-
-function wrapDrive(item: DriveItem): CacheItem {
-	return {
-		type: "drive",
-		data: item
-	}
-}
-
-function makeExternalItem(url: string, name: string): CacheItem {
-	return {
-		type: "external",
-		data: {
-			url,
-			name
-		}
-	}
-}
-
-function externalId(url: string): string {
-	return xxHash32(url).toString(16)
 }
 
 function setupFileCacheGetFiles(): void {
@@ -533,7 +474,7 @@ describe("AudioCache", () => {
 			const cache = await createAudioCache()
 			const uuid = "uuid-shared-root-get"
 			const name = "root-song.mp3"
-			const item = wrapDrive(makeSharedRootFileItem(uuid, name))
+			const item = wrapDrive(driveFileItem("sharedRootFile", uuid, name, "audio/mpeg"))
 
 			const audioPath = `${FILE_CACHE_BASE_DIR}/${uuid}/${uuid}.mp3`
 			const metaPath = `${AUDIO_BASE_DIR}/${uuid}.filenmeta`

@@ -29,11 +29,7 @@
 import { describe, it, expect, afterAll, vi } from "vitest"
 import { writeFileSync } from "node:fs"
 
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("@/lib/time", () => ({
 	intlLanguage: "en-US"

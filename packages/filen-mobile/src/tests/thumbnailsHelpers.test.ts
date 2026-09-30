@@ -1,31 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-// Minimal mock for @filen/sdk-rs — only AnyFile classes are needed here
-vi.mock("@filen/sdk-rs", () => {
-	class TaggedUnion {
-		tag: string
-		inner: unknown[]
-		constructor(tag: string, value: unknown) {
-			this.tag = tag
-			this.inner = [value]
-		}
-	}
-
-	return {
-		AnyFile: {
-			File: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("File", file)
-				}
-			},
-			Shared: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("Shared", file)
-				}
-			}
-		}
-	}
-})
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 // Mock storageRoots — use the mock Directory from the already-mocked expo-file-system
 vi.mock("@/lib/storageRoots", async () => {

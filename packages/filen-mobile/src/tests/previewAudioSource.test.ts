@@ -27,7 +27,7 @@ vi.mock("react-native", async () => {
 		ActivityIndicator: await passthrough("spinner")
 	}
 })
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("@/components/ui/view", async () => ({ default: await passthrough() }))
 vi.mock("@/components/ui/animated", async () => ({ AnimatedView: await passthrough() }))
 vi.mock("@/components/ui/text", async () => ({ default: await passthrough() }))

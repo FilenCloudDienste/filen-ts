@@ -31,17 +31,7 @@ vi.mock("@/features/settings/fileProvider", () => ({
 	}
 }))
 
-// Provide a minimal run() that actually invokes fn() and wraps the result.
-// No defer support needed — biometricButtons.ts never registers deferred cleanups.
-vi.mock("@filen/shared", () => ({
-	run: async (fn: () => Promise<unknown>) => {
-		try {
-			return { success: true, data: await fn() }
-		} catch (error) {
-			return { success: false, error }
-		}
-	}
-}))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 // t() is a pass-through identity so assertions can use raw keys.
 const t = ((key: string) => key) as unknown as TFunction

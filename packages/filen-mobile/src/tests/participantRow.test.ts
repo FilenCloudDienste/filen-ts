@@ -5,9 +5,7 @@ import { vi, describe, it, expect } from "vitest"
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 // react-i18next — not needed for pure builder tests, but participantRow.tsx imports it at module level
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (k: string) => k })
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
 // uniwind — participantRow.tsx imports useResolveClassNames
 vi.mock("uniwind", () => ({

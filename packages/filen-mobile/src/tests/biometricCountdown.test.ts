@@ -33,8 +33,8 @@ vi.mock("@/lib/secureStore", () => ({
 	default: { get: vi.fn(), set: vi.fn() },
 	useSecureStore: vi.fn(() => [{ enabled: false }, vi.fn()])
 }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (k: string) => k } }))
-vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 vi.mock("@/lib/prompts", () => ({ default: { input: vi.fn() } }))
 vi.mock("@/stores/useApp.store", () => ({
 	default: {
@@ -51,9 +51,7 @@ vi.mock("@filen/shared", () => ({
 	run: vi.fn(),
 	runEffect: vi.fn()
 }))
-vi.mock("react-i18next", () => ({
-	useTranslation: vi.fn(() => ({ t: (k: string) => k }))
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
 import {
 	remainingMs,

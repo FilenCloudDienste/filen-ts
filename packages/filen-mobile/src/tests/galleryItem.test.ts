@@ -25,21 +25,9 @@ vi.mock("@/components/drivePreview/previewStatus", async () => {
 	}
 })
 
-// galleryItem reaches the REAL previewType.ts, which reads EXPO_AUDIO_SUPPORTED_EXTENSIONS from
-// @/constants (previewType.ts:5); the shared mock lacks it — spread it in rather than widening the
-// shared file, so classification never depends on which branch evaluates first.
-vi.mock("@/constants", async () => ({
-	...(await import("@/tests/mocks/constants")),
-	EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".wav"])
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (k: string) => k })
-}))
-
-vi.mock("zustand/shallow", () => ({
-	useShallow: (fn: unknown) => fn
-}))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 
 vi.mock("@/stores/useDrivePreview.store", () => ({
 	default: (selector: (state: { currentIndex: number }) => unknown) => selector({ currentIndex: 0 })
@@ -114,7 +102,7 @@ vi.mock("@/components/drivePreview/previewDocx", marker("preview-docx"))
 import GalleryItem from "@/components/drivePreview/galleryItem"
 import { isUnavailableOffline } from "@/components/drivePreview/previewAvailability"
 
-function renderItem(name: string) {
+function renderItem(name: string, index = 0) {
 	return render(
 		createElement(GalleryItem, {
 			info: {
@@ -122,10 +110,10 @@ function renderItem(name: string) {
 					type: "drive" as const,
 					data: {
 						type: "file" as const,
-						data: { uuid: "uuid", size: 1n, canMakeThumbnail: false, undecryptable: false, decryptedMeta: { name } }
+						data: { uuid: "file-uuid", size: 1n, canMakeThumbnail: true, undecryptable: false, decryptedMeta: { name } }
 					}
 				},
-				index: 0,
+				index,
 				target: "Cell",
 				extraData: undefined
 			} as never,
@@ -170,6 +158,57 @@ describe("GalleryItem — URL resolution only for URL-rendered types", () => {
 
 		expect(container.querySelector("[data-testid='offline-notice']")).toBeNull()
 		expect(container.querySelector("[data-testid='preview-pdf']")).not.toBeNull()
+	})
+})
+
+describe("GalleryItem — rawImage", () => {
+	beforeEach(() => {
+		mockUseFileUrlQuery.mockReset().mockReturnValue({ status: "pending", data: undefined })
+	})
+
+	it("disables the file-url query and mounts PreviewRawImage inside PreviewSlot for the active page", () => {
+		const { container } = renderItem("shot.cr2")
+
+		expect(mockUseFileUrlQuery).toHaveBeenCalledWith(expect.objectContaining({ type: "drive" }), { enabled: false })
+
+		const raw = container.querySelector("[data-testid='preview-raw-image']")
+
+		expect(raw?.getAttribute("data-uuid")).toBe("file-uuid")
+		expect(raw?.getAttribute("data-active")).toBe("true")
+		expect(container.querySelector("[data-testid='slot']")?.getAttribute("data-active")).toBe("true")
+	})
+
+	it("keeps a neighbouring RAW page inert (PreviewSlot inactive)", () => {
+		const { container } = renderItem("shot.cr2", 1)
+
+		expect(container.querySelector("[data-testid='slot']")?.getAttribute("data-active")).toBe("false")
+	})
+
+	it("keeps the file-url query enabled for an ordinary image and renders PreviewImage", () => {
+		mockUseFileUrlQuery.mockReturnValue({ status: "success", data: "file:///cache/photo.jpg" })
+
+		const { container } = renderItem("photo.jpg")
+
+		expect(mockUseFileUrlQuery).toHaveBeenCalledWith(expect.objectContaining({ type: "drive" }), { enabled: true })
+		expect(container.querySelector("img[data-testid='preview-image']")?.getAttribute("src")).toBe("file:///cache/photo.jpg")
+		expect(container.querySelector("[data-testid='preview-raw-image']")).toBeNull()
+	})
+
+	it("renders the shared offline notice for an ordinary image the resolver could not serve", () => {
+		mockUseFileUrlQuery.mockReturnValue({ status: "success", data: null })
+
+		const { container } = renderItem("photo.jpg")
+
+		expect(container.querySelector("[data-testid='offline-notice']")).not.toBeNull()
+	})
+
+	it("never shows the offline notice for RAW from the disabled file-url query", () => {
+		mockUseFileUrlQuery.mockReturnValue({ status: "success", data: null })
+
+		const { container } = renderItem("shot.cr2")
+
+		expect(container.querySelector("[data-testid='offline-notice']")).toBeNull()
+		expect(container.querySelector("[data-testid='preview-raw-image']")).not.toBeNull()
 	})
 })
 

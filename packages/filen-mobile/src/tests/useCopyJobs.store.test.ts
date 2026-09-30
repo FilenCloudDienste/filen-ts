@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkCopy"))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/sdkUnwrap", () => ({}))
 
 import useCopyJobsStore, { getCopyJob } from "@/features/copy/store/useCopyJobs.store"

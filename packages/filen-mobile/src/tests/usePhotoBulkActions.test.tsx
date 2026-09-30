@@ -4,12 +4,12 @@ import { act, cleanup, renderHook } from "@testing-library/react"
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("expo-file-system", () => ({}))
 vi.mock("@/lib/bulkOps", () => ({ runBulk: vi.fn() }))
 vi.mock("@/lib/tmp", () => ({ newTmpDir: vi.fn() }))
 vi.mock("@/lib/sdkUnwrap", () => ({ getRealDriveItemParent: vi.fn() }))
-vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 vi.mock("@/features/drive/driveDownload", () => ({
 	downloadDriveItemToDevice: vi.fn(),
 	ensureSaveToPhotosPermission: vi.fn(),

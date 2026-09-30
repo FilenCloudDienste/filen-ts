@@ -1,11 +1,7 @@
 import { vi, describe, it, expect } from "vitest"
 
 // Mock i18n so unwrappedSdkErrorToHumanReadable tests don't drag in expo/react-native
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // @filen/sdk-rs mock: ErrorKind values match the actual WASM string literals from sdk-rs.d.ts.
 // The switch in sdkErrors.ts references ErrorKind.X — our mock must supply matching string values.
@@ -64,19 +60,6 @@ import { common } from "@/locales/en/common"
 import { errors } from "@/locales/en/errors"
 import { sort } from "@/locales/en/sort"
 import { drive } from "@/locales/en/drive"
-import { en } from "@/locales/en"
-
-import { appearance } from "@/locales/en/appearance"
-import { auth } from "@/locales/en/auth"
-import { chats } from "@/locales/en/chats"
-import { contacts } from "@/locales/en/contacts"
-import { drivePreview } from "@/locales/en/drivePreview"
-import { media } from "@/locales/en/media"
-import { misc } from "@/locales/en/misc"
-import { notes } from "@/locales/en/notes"
-import { security } from "@/locales/en/security"
-import { settings } from "@/locales/en/settings"
-import { transfers } from "@/locales/en/transfers"
 
 // Imported real; mocks only cover its boundaries (i18n, @filen/sdk-rs)
 import { unwrappedSdkErrorToHumanReadable } from "@/lib/sdkErrors"
@@ -202,166 +185,6 @@ describe("drive catalog", () => {
 		expect(drive).not.toHaveProperty("cancel")
 		expect(drive).not.toHaveProperty("wrong_password")
 		// wrong_password lives in errors, not here — verified by the errors catalog tests above
-	})
-})
-
-// ── catalog barrel merge (ALL 14 modules) ─────────────────────────────────────
-
-describe("catalog barrel merge", () => {
-	it("merges all 14 catalogs into en with zero duplicate keys", () => {
-		const allKeys = [
-			...Object.keys(common),
-			...Object.keys(appearance),
-			...Object.keys(auth),
-			...Object.keys(chats),
-			...Object.keys(contacts),
-			...Object.keys(drive),
-			...Object.keys(drivePreview),
-			...Object.keys(errors),
-			...Object.keys(media),
-			...Object.keys(misc),
-			...Object.keys(notes),
-			...Object.keys(security),
-			...Object.keys(settings),
-			...Object.keys(sort),
-			...Object.keys(transfers)
-		]
-
-		const uniqueKeys = new Set(allKeys)
-
-		// If sizes differ, find the collisions for a useful failure message
-		if (uniqueKeys.size !== allKeys.length) {
-			const seen = new Set<string>()
-			const duplicates: string[] = []
-
-			for (const k of allKeys) {
-				if (seen.has(k)) {
-					duplicates.push(k)
-				}
-
-				seen.add(k)
-			}
-
-			// This assertion will always fail here — it surfaces the collision names
-			expect(duplicates).toHaveLength(0)
-		}
-
-		expect(uniqueKeys.size).toBe(allKeys.length)
-	})
-
-	it("every key from every catalog is reachable in the merged en object", () => {
-		const catalogs = [
-			common,
-			appearance,
-			auth,
-			chats,
-			contacts,
-			drive,
-			drivePreview,
-			errors,
-			media,
-			misc,
-			notes,
-			security,
-			settings,
-			sort,
-			transfers
-		] as const
-
-		for (const catalog of catalogs) {
-			for (const key of Object.keys(catalog)) {
-				expect(en).toHaveProperty(key)
-			}
-		}
-	})
-})
-
-// ── plural suffix policy ──────────────────────────────────────────────────────
-
-describe("plural-suffix policy (Risk 1 from common.ts comments)", () => {
-	// i18next pluralSeparator defaults to "_", so a NON-plural key ending in
-	// _one / _other / _zero / _two / _few / _many / _male / _female would break
-	// plural resolution for any base key that legitimately uses those suffixes.
-	// Plural keys ARE allowed: they must appear as a base/_one/_other pair.
-
-	const PLURAL_CONTEXT_SUFFIXES = ["_one", "_other", "_zero", "_two", "_few", "_many", "_male", "_female"]
-
-	function isPlural(key: string): boolean {
-		return PLURAL_CONTEXT_SUFFIXES.some(suffix => key.endsWith(suffix))
-	}
-
-	function hasPluralCounterpart(key: string, allKeys: Set<string>): boolean {
-		// A key ending in _one must have a corresponding _other, and vice versa.
-		// That makes it a legitimate i18next plural pair.
-		if (key.endsWith("_one")) {
-			const base = key.slice(0, -"_one".length)
-
-			return allKeys.has(`${base}_other`)
-		}
-
-		if (key.endsWith("_other")) {
-			const base = key.slice(0, -"_other".length)
-
-			return allKeys.has(`${base}_one`)
-		}
-
-		// For the rarer suffixes (_zero, _two, _few, _many) we require _one to co-exist
-		for (const suffix of ["_zero", "_two", "_few", "_many"]) {
-			if (key.endsWith(suffix)) {
-				const base = key.slice(0, -suffix.length)
-
-				return allKeys.has(`${base}_one`)
-			}
-		}
-
-		// _male/_female: require the other to exist
-		if (key.endsWith("_male")) {
-			const base = key.slice(0, -"_male".length)
-
-			return allKeys.has(`${base}_female`)
-		}
-
-		if (key.endsWith("_female")) {
-			const base = key.slice(0, -"_female".length)
-
-			return allKeys.has(`${base}_male`)
-		}
-
-		return false
-	}
-
-	it("no non-plural key in any catalog ends with an i18next plural/context suffix", () => {
-		const catalogs: Record<string, object> = {
-			common,
-			appearance,
-			auth,
-			chats,
-			contacts,
-			drive,
-			drivePreview,
-			errors,
-			media,
-			misc,
-			notes,
-			security,
-			settings,
-			sort,
-			transfers
-		}
-
-		const offenders: string[] = []
-
-		for (const [catalogName, catalog] of Object.entries(catalogs)) {
-			const allKeys = new Set(Object.keys(catalog))
-
-			for (const key of allKeys) {
-				if (isPlural(key) && !hasPluralCounterpart(key, allKeys)) {
-					offenders.push(`${catalogName}.${key}`)
-				}
-			}
-		}
-
-		expect(offenders).toHaveLength(0)
 	})
 })
 

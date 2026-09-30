@@ -15,28 +15,9 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("expo-router", () => ({ useLocalSearchParams: vi.fn(), useNavigation: vi.fn() }))
-vi.mock("@filen/sdk-rs", () => ({
-	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
-	AnyNormalDir: {},
-	AnyDirWithContext: {},
-	AnySharedDir: {},
-	AnySharedDirWithContext: {},
-	AnyLinkedDir: {},
-	NonRootDir_Tags: {},
-	NonRootItem_Tags: { File: "File", NormalDir: "NormalDir" },
-	SharingRole: {},
-	ErrorKind: {},
-	SocketEvent_Tags: { Drive: "Drive" },
-	DriveEvent_Tags: {
-		FileNew: "FileNew",
-		FolderSubCreated: "FolderSubCreated",
-		FileMetadataChanged: "FileMetadataChanged",
-		FolderMetadataChanged: "FolderMetadataChanged",
-		FolderColorChanged: "FolderColorChanged",
-		ItemFavorite: "ItemFavorite",
-		DeleteAll: "DeleteAll",
-		DeleteVersioned: "DeleteVersioned"
-	}
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
+	ErrorKind: {}
 }))
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: vi.fn() } }))
 vi.mock("@/lib/cache", () => ({ default: h.fakeCache }))

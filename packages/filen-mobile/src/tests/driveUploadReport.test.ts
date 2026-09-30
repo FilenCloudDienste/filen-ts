@@ -77,9 +77,7 @@ vi.mock("@/lib/alerts", () => ({
 	}
 }))
 
-vi.mock("@/lib/i18n", () => ({
-	default: { t: (key: string) => key }
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("@/lib/prompts", () => ({
 	default: { input: vi.fn(), alert: vi.fn() }

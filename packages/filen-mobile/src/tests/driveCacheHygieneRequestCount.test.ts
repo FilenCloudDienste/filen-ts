@@ -58,39 +58,9 @@ const h = vi.hoisted(() => {
 
 vi.mock("expo-router", () => ({ useLocalSearchParams: vi.fn(), useNavigation: vi.fn() }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
-	AnyNormalDir: {},
-	AnyDirWithContext: {},
-	AnySharedDir: {},
-	AnySharedDirWithContext: {},
-	AnyLinkedDir: {},
-	NonRootDir_Tags: {},
-	NonRootItem_Tags: { File: "File", NormalDir: "NormalDir" },
-	SharingRole: {},
-	ErrorKind: {},
-	SocketEvent_Tags: { Drive: "Drive" },
-	DriveEvent_Tags: {
-		FileArchiveRestored: "FileArchiveRestored",
-		FileRestore: "FileRestore",
-		FileNew: "FileNew",
-		FileArchived: "FileArchived",
-		FileDeletedPermanent: "FileDeletedPermanent",
-		FolderDeletedPermanent: "FolderDeletedPermanent",
-		FileMetadataChanged: "FileMetadataChanged",
-		FileMove: "FileMove",
-		FolderMove: "FolderMove",
-		FolderMetadataChanged: "FolderMetadataChanged",
-		FileTrash: "FileTrash",
-		FolderTrash: "FolderTrash",
-		FolderColorChanged: "FolderColorChanged",
-		FolderRestore: "FolderRestore",
-		FolderSubCreated: "FolderSubCreated",
-		ItemFavorite: "ItemFavorite",
-		TrashEmpty: "TrashEmpty",
-		DeleteAll: "DeleteAll",
-		DeleteVersioned: "DeleteVersioned"
-	}
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
+	ErrorKind: {}
 }))
 
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: async () => ({ authedSdkClient: h.sdk }) } }))

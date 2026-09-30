@@ -18,35 +18,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-// The real TanStack client with the app's refetch defaults, minus the SQLite persister. queryUpdater
-// honours an explicit dataUpdatedAt and otherwise restamps, like the real one.
-vi.mock("@/queries/client", async () => {
-	const { QueryClient } = await import("@tanstack/react-query")
-
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				refetchOnMount: "always",
-				refetchOnReconnect: "always",
-				retry: false,
-				networkMode: "offlineFirst"
-			}
-		}
-	})
-
-	return {
-		default: queryClient,
-		queryUpdater: {
-			get: (queryKey: unknown[]) => queryClient.getQueryData(queryKey),
-			set: (queryKey: unknown[], updater: unknown, dataUpdatedAt?: number) =>
-				queryClient.setQueryData(
-					queryKey,
-					(prev: unknown) => (typeof updater === "function" ? (updater as (p: unknown) => unknown)(prev) : updater),
-					{ updatedAt: typeof dataUpdatedAt === "number" ? dataUpdatedAt : Date.now() }
-				)
-		}
-	}
-})
+vi.mock("@/queries/client", async () => await (await import("@/tests/mocks/queryClient")).createQueryClientMock())
 
 import { renderHook, waitFor, cleanup } from "@testing-library/react"
 import { QueryClientProvider } from "@tanstack/react-query"

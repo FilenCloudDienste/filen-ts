@@ -12,25 +12,13 @@ vi.mock("expo-router", () => ({
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-vi.mock("@/lib/alerts", () => ({
-	default: { error: vi.fn(), normal: vi.fn() }
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("@/lib/prompts", () => ({
 	default: { alert: vi.fn(), input: vi.fn() }
 }))
 
-vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
-	runWithLoading: vi.fn(async (fn: () => Promise<unknown>) => {
-		try {
-			const data = await fn()
-
-			return { success: true, data }
-		} catch (error) {
-			return { success: false, error }
-		}
-	})
-}))
+vi.mock("@/components/ui/fullScreenLoadingModal", async () => await import("@/tests/mocks/fullScreenLoadingModal"))
 
 // audio singleton — only needs to expose the shapes the builder passes callbacks to
 vi.mock("@/features/audio/audio", () => ({

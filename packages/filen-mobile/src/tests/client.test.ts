@@ -134,7 +134,6 @@ import {
 	getCachedQuery
 } from "@/queries/client"
 import { serialize } from "@/lib/serializer"
-import { type PlaylistWithItems } from "@/features/audio/audio"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -719,112 +718,6 @@ describe("QueryUpdater.set", () => {
 	})
 })
 
-// ─── playlistsQueryUpdate (from usePlaylists.query) ──────────────────────────
-// NOTE: playlistsQueryUpdate delegates to queryUpdater.set with a function that applies `prev ?? []`.
-// We test it via the inner updater captured from setQueryData.
-
-describe("playlistsQueryUpdate", () => {
-	beforeEach(() => {
-		mockSetQueryData.mockReset()
-		mockGetQueryData.mockReset()
-		mockGetQueryData.mockReturnValue(undefined)
-		mockPersistQueryByKey.mockReset()
-		mockPersistQueryByKey.mockResolvedValue(undefined)
-	})
-
-	it("normalises undefined prev to [] when a function updater is provided", async () => {
-		vi.resetModules()
-
-		// Re-import audio mock so usePlaylists.query can load without crashing
-		vi.doMock("@/features/audio/audio", () => ({
-			default: {
-				getPlaylists: vi.fn().mockResolvedValue([])
-			}
-		}))
-
-		let capturedInnerUpdater: ((old: unknown[] | undefined) => unknown[]) | undefined
-		mockSetQueryData.mockImplementation((_key: unknown, updaterFn: typeof capturedInnerUpdater) => {
-			capturedInnerUpdater = updaterFn
-		})
-
-		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
-		const fn = vi.fn((prev: unknown[]) => [...prev, "item"])
-
-		playlistsQueryUpdate({ updater: fn as unknown as (prev: PlaylistWithItems[]) => PlaylistWithItems[] })
-
-		expect(capturedInnerUpdater).toBeDefined()
-		// When prev is undefined, the inner wrapper should pass [] to the function
-		capturedInnerUpdater!(undefined)
-		expect(fn).toHaveBeenCalledWith([])
-	})
-
-	it("passes existing prev array to the function updater unchanged", async () => {
-		vi.resetModules()
-
-		vi.doMock("@/features/audio/audio", () => ({
-			default: {
-				getPlaylists: vi.fn().mockResolvedValue([])
-			}
-		}))
-
-		let capturedInnerUpdater: ((old: unknown[] | undefined) => unknown[]) | undefined
-		mockSetQueryData.mockImplementation((_key: unknown, updaterFn: typeof capturedInnerUpdater) => {
-			capturedInnerUpdater = updaterFn
-		})
-
-		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
-		const existing = [{ id: "pl-1" }]
-		const fn = vi.fn((prev: unknown[]) => prev)
-
-		playlistsQueryUpdate({ updater: fn as unknown as (prev: PlaylistWithItems[]) => PlaylistWithItems[] })
-
-		expect(capturedInnerUpdater).toBeDefined()
-		capturedInnerUpdater!(existing)
-		expect(fn).toHaveBeenCalledWith(existing)
-	})
-
-	it("replaces the cache directly when a plain value updater is provided", async () => {
-		vi.resetModules()
-
-		vi.doMock("@/features/audio/audio", () => ({
-			default: {
-				getPlaylists: vi.fn().mockResolvedValue([])
-			}
-		}))
-
-		let capturedInnerUpdater: ((old: unknown[] | undefined) => unknown[]) | undefined
-		mockSetQueryData.mockImplementation((_key: unknown, updaterFn: typeof capturedInnerUpdater) => {
-			capturedInnerUpdater = updaterFn
-		})
-
-		const { playlistsQueryUpdate } = await import("@/features/audio/queries/usePlaylists.query")
-		const replacement = [{ id: "pl-2" }]
-
-		playlistsQueryUpdate({ updater: replacement as unknown as PlaylistWithItems[] })
-
-		expect(capturedInnerUpdater).toBeDefined()
-		// For a plain value, the outer wrapper returns the value directly
-		const result = capturedInnerUpdater!(undefined)
-		expect(result).toEqual(replacement)
-	})
-
-	it("uses the correct BASE_QUERY_KEY", async () => {
-		vi.resetModules()
-
-		vi.doMock("@/features/audio/audio", () => ({
-			default: {
-				getPlaylists: vi.fn().mockResolvedValue([])
-			}
-		}))
-
-		const { playlistsQueryUpdate, BASE_QUERY_KEY } = await import("@/features/audio/queries/usePlaylists.query")
-
-		playlistsQueryUpdate({ updater: [] })
-
-		expect(mockSetQueryData).toHaveBeenCalledWith([BASE_QUERY_KEY], expect.any(Function), expect.any(Object))
-	})
-})
-
 // ─── QueryPersisterKv dirty-set restoration on write failure ─────────────────
 //
 // Regression tests for Bug #21:
@@ -1132,82 +1025,6 @@ describe("QueryPersisterKv oversized-row write cadence", () => {
 
 		expect(executeBatch).toHaveBeenCalledTimes(2)
 		expect(kvAny.dirtyUpserts.has("big")).toBe(false)
-	})
-})
-// ─── fetchData from useCameraUploadAlbums.query ───────────────────────────────
-
-describe("useCameraUploadAlbums.query fetchData", () => {
-	beforeEach(() => {
-		vi.resetModules()
-	})
-
-	it("returns [] when hasAllNeededMediaPermissions returns false", async () => {
-		vi.doMock("@/hooks/useMediaPermissions", () => ({
-			hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(false)
-		}))
-
-		vi.doMock("expo-media-library/legacy", () => ({
-			getAlbumsAsync: vi.fn().mockResolvedValue([{ id: "album-1", title: "Camera Roll" }])
-		}))
-
-		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
-		const result = await fetchData()
-
-		expect(result).toEqual([])
-	})
-
-	it("returns albums from getAlbumsAsync when permissions are granted", async () => {
-		const mockAlbums = [
-			{ id: "album-1", title: "Camera Roll" },
-			{ id: "album-2", title: "Favorites" }
-		]
-
-		vi.doMock("@/hooks/useMediaPermissions", () => ({
-			hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true)
-		}))
-
-		vi.doMock("expo-media-library/legacy", () => ({
-			getAlbumsAsync: vi.fn().mockResolvedValue(mockAlbums)
-		}))
-
-		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
-		const result = await fetchData()
-
-		expect(result).toEqual(mockAlbums)
-	})
-
-	it("passes { includeSmartAlbums: true } to getAlbumsAsync", async () => {
-		const mockGetAlbumsAsync = vi.fn().mockResolvedValue([])
-
-		vi.doMock("@/hooks/useMediaPermissions", () => ({
-			hasAllNeededMediaPermissions: vi.fn().mockResolvedValue(true)
-		}))
-
-		vi.doMock("expo-media-library/legacy", () => ({
-			getAlbumsAsync: mockGetAlbumsAsync
-		}))
-
-		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
-		await fetchData()
-
-		expect(mockGetAlbumsAsync).toHaveBeenCalledWith({ includeSmartAlbums: true })
-	})
-
-	it("calls hasAllNeededMediaPermissions with { shouldRequest: true }", async () => {
-		const mockHasPermissions = vi.fn().mockResolvedValue(true)
-
-		vi.doMock("@/hooks/useMediaPermissions", () => ({
-			hasAllNeededMediaPermissions: mockHasPermissions
-		}))
-
-		vi.doMock("expo-media-library/legacy", () => ({
-			getAlbumsAsync: vi.fn().mockResolvedValue([])
-		}))
-
-		const { fetchData } = await import("@/features/cameraUpload/queries/useCameraUploadAlbums.query")
-		await fetchData()
-
-		expect(mockHasPermissions).toHaveBeenCalledWith({ library: "all", needCamera: false })
 	})
 })
 

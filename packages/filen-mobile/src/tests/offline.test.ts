@@ -31,13 +31,6 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-// fsUtils (imported by offline.ts) now pulls VERSION from sibling lib modules.
-// Mock them with just the VERSION export so their full transitive deps
-// (expo-image via thumbnails, etc.) don't load in this test.
-vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
-vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
-
 // "Wi-Fi only" offline-sync gate dependencies. Default get → null = setting off, so sync()'s
 // gate is skipped and the existing sync() tests are unaffected. NetInfo is only reached when the
 // setting is on; mock it anyway so an accidental fetch never hits native.
@@ -65,15 +58,6 @@ vi.mock("@/features/offline/store/useOffline.store", () => ({
 
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: vi.fn()
-}))
-
-vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: (p: string) =>
-		p
-			.trim()
-			.replace(/^file:\/+/, "/")
-			.replace(/\/+/g, "/")
-			.replace(/\/$/, "")
 }))
 
 vi.mock("@/lib/utils", () => ({
@@ -160,84 +144,8 @@ vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: vi.fn(() => null)
 }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyDirWithContext: {
-		Normal: class {
-			tag = "Normal"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Shared: class {
-			tag = "Shared"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnyNormalDir: {
-		Dir: class {
-			tag = "Dir"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Root: class {
-			tag = "Root"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnyDirWithContext_Tags: {
-		Normal: "Normal",
-		Shared: "Shared",
-		Linked: "Linked"
-	},
-	AnySharedDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnyNormalDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnyLinkedDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnySharedDir: {
-		Dir: class {
-			tag = "Dir"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Root: class {
-			tag = "Root"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnySharedDirWithContext: {
-		new: (opts: unknown) => opts
-	},
-	SharingRole_Tags: {
-		Sharer: "Sharer",
-		Receiver: "Receiver"
-	},
-	NonRootDir_Tags: {
-		Normal: "Normal",
-		Shared: "Shared",
-		Linked: "Linked"
-	},
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
 	ErrorKind: {
 		FolderNotFound: "FolderNotFound"
 	}
@@ -251,6 +159,7 @@ import { type Index, type FileOrDirectoryOfflineMeta, type DirectoryOfflineMeta 
 import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import type { DriveItem } from "@/types"
+import { makeFileItem, makeDirItem, makeParent, makeListingFile, makeListingDir } from "@/tests/fixtures/offline"
 import { AnyDirWithContext, AnyNormalDir, SharingRole_Tags, NonRootDir_Tags, type Dir } from "@filen/sdk-rs"
 import transfers from "@/features/transfers/transfers"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
@@ -266,58 +175,6 @@ const BASE_DIR_URI = `file:///shared/group.io.filen.app/offline/v${OFFLINE_VERSI
 const FILES_DIR_URI = `${BASE_DIR_URI}/files`
 const DIRECTORIES_DIR_URI = `${BASE_DIR_URI}/directories`
 const INDEX_FILE_URI = `${BASE_DIR_URI}/index`
-
-function makeFileItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "file",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 100n,
-				modified: 1000,
-				created: 900
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
-
-function makeDirItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "directory",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 0n,
-				modified: 1000,
-				created: 900
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
-
-function makeFileItemWithSize(uuid: string, name: string, size: bigint): DriveItem {
-	return {
-		type: "file",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size,
-				modified: 1000,
-				created: 900
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
-
-function makeParent(uuid: string): InstanceType<typeof AnyDirWithContext.Normal> {
-	return new AnyDirWithContext.Normal(new AnyNormalDir.Dir({ uuid } as unknown as Dir))
-}
 
 // Builds a v2 entries map (uuid-keyed, raw root-relative `path` values with a leading "/")
 // from a readable path → item literal. Keys in the input are the RAW listing paths.
@@ -338,40 +195,6 @@ function makeEntries(byPath: Record<string, DriveItem>): DirectoryOfflineMeta["e
 	}
 
 	return entries
-}
-
-// Shapes a remote file entry the way listDirRecursiveWithPaths returns it (path WITHOUT a
-// leading slash — root-relative). The mocked unwrapFileMeta/unwrappedFileIntoDriveItem read
-// exactly these fields.
-function makeListingFile(uuid: string, path: string, name: string, size: bigint) {
-	return {
-		file: {
-			uuid,
-			meta: {
-				tag: "Decoded",
-				inner: [{ name, size, modified: 1000, created: 900 }]
-			}
-		},
-		path
-	}
-}
-
-function makeListingDir(uuid: string, path: string, name: string) {
-	return {
-		dir: {
-			tag: NonRootDir_Tags.Normal,
-			inner: [
-				{
-					uuid,
-					meta: {
-						tag: "Decoded",
-						inner: [{ name }]
-					}
-				}
-			]
-		},
-		path
-	}
 }
 
 // Queues a one-shot SDK client whose recursive listing returns the given dirs/files.
@@ -938,7 +761,7 @@ describe("Offline", () => {
 		// check — so the result is {size: 0, files: 1, dirs: 0}.
 		it("returns size 0 with files count 1 for a stored zero-byte file", async () => {
 			const uuid = "11111111-1111-1111-1111-111111111111"
-			const fileItem = makeFileItemWithSize(uuid, "empty.bin", 0n)
+			const fileItem = makeFileItem(uuid, "empty.bin", 0n)
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
 
 			writeIndex({
@@ -1724,7 +1547,7 @@ describe("Offline", () => {
 			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 			const dirItem = makeDirItem(uuid, "Drifted")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-			const fileItem = makeFileItemWithSize(fileUuid, "short.exe", 10n)
+			const fileItem = makeFileItem(fileUuid, "short.exe", 10n)
 
 			writeDirectoryMeta(uuid, {
 				item: dirItem,
@@ -1763,7 +1586,7 @@ describe("Offline", () => {
 			const fileUuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 			const dirItem = makeDirItem(uuid, "Committed")
 			const parent = makeParent("22222222-2222-2222-2222-222222222222")
-			const fileItem = makeFileItemWithSize(fileUuid, "a.txt", 1n)
+			const fileItem = makeFileItem(fileUuid, "a.txt", 1n)
 
 			// A concurrent call already committed this tree (readable meta + healthy bytes on disk) —
 			// but the index is cold, so this call passed the isItemStored guard before the lock.
@@ -2501,11 +2324,11 @@ describe("Offline", () => {
 				item: makeDirItem(topUuid, "Root"),
 				parent,
 				entries: makeEntries({
-					"/root-file.txt": makeFileItemWithSize("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "root-file.txt", 200n),
+					"/root-file.txt": makeFileItem("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "root-file.txt", 200n),
 					"/sub": makeDirItem(subDirUuid, "sub"),
-					"/sub/inner.txt": makeFileItemWithSize("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "inner.txt", 300n),
+					"/sub/inner.txt": makeFileItem("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "inner.txt", 300n),
 					"/sub/deep": makeDirItem("cccccccc-cccc-cccc-cccc-cccccccccccc", "deep"),
-					"/sub/deep/deep.txt": makeFileItemWithSize("dddddddd-dddd-dddd-dddd-dddddddddddd", "deep.txt", 400n)
+					"/sub/deep/deep.txt": makeFileItem("dddddddd-dddd-dddd-dddd-dddddddddddd", "deep.txt", 400n)
 				})
 			})
 
@@ -2768,8 +2591,8 @@ describe("Offline", () => {
 				entries: makeEntries({
 					"/a": subDirAItem,
 					"/ab": subDirAbItem,
-					"/a/file.txt": makeFileItemWithSize(fileInA, "file.txt", 100n),
-					"/ab/file.txt": makeFileItemWithSize(fileInAb, "file.txt", 200n)
+					"/a/file.txt": makeFileItem(fileInA, "file.txt", 100n),
+					"/ab/file.txt": makeFileItem(fileInAb, "file.txt", 200n)
 				})
 			})
 
@@ -4718,7 +4541,7 @@ describe("Offline", () => {
 		}
 
 		it("is a no-op fixed point when nothing changed (zero downloads, zero writes)", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }
@@ -4747,7 +4570,7 @@ describe("Offline", () => {
 		})
 
 		it("moves a renamed entry in place without downloading (uuid stable ⟹ identical bytes)", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "old.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "old.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/old.txt": fileItem }),
 				disk: { "/old.txt": new Uint8Array([1, 2, 3]) }
@@ -4772,7 +4595,7 @@ describe("Offline", () => {
 
 		it("moves a nested entry into a renamed directory (two-phase, no download)", async () => {
 			const subDirItem = makeDirItem(subDirUuid, "sub")
-			const fileItem = makeFileItemWithSize(fileAUuid, "f.txt", 2n)
+			const fileItem = makeFileItem(fileAUuid, "f.txt", 2n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/sub": subDirItem,
@@ -4807,8 +4630,8 @@ describe("Offline", () => {
 		})
 
 		it("deletes only-local entries when the listing is clean", async () => {
-			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
-			const goneItem = makeFileItemWithSize(fileBUuid, "gone.txt", 1n)
+			const keepItem = makeFileItem(fileAUuid, "keep.txt", 1n)
+			const goneItem = makeFileItem(fileBUuid, "gone.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/keep.txt": keepItem,
@@ -4842,8 +4665,8 @@ describe("Offline", () => {
 		// silently no-ops on the already-gone target, and the commit rewrites the meta without
 		// the uuid. No download, no errors — the tree converges instead of erroring forever.
 		it("converges a crashed delete on an INDEX-ONLY pass — stale meta entry with no bytes and no remote is dropped via a no-op delete", async () => {
-			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
-			const goneItem = makeFileItemWithSize(fileBUuid, "gone.txt", 1n)
+			const keepItem = makeFileItem(fileAUuid, "keep.txt", 1n)
+			const goneItem = makeFileItem(fileBUuid, "gone.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/keep.txt": keepItem,
@@ -4876,7 +4699,7 @@ describe("Offline", () => {
 		// is never touched — no throw), and the commit records the remote path. Pins the
 		// exists-guard executor semantics the design's crash-anywhere convergence relies on.
 		it("converges a crashed move on an INDEX-ONLY pass — re-planned move no-ops on the missing source and the meta lands on the remote path", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "old.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "old.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/old.txt": fileItem }),
 				// The crashed pass already placed the bytes at the destination.
@@ -4909,8 +4732,8 @@ describe("Offline", () => {
 		// move ops at all) and ONE hash-idempotent download heals the tree: A's correct bytes at
 		// /b.bin are skipped untouched, only B transfers to /a.bin.
 		it("converges a crashed swap (different sizes) on a THOROUGH pass — both entries classified missing, exactly one download, meta lands on the swapped remote paths", async () => {
-			const itemA = makeFileItemWithSize(fileAUuid, "a.bin", 3n)
-			const itemB = makeFileItemWithSize(fileBUuid, "b.bin", 5n)
+			const itemA = makeFileItem(fileAUuid, "a.bin", 3n)
+			const itemB = makeFileItem(fileBUuid, "b.bin", 5n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/a.bin": itemA,
@@ -4955,8 +4778,8 @@ describe("Offline", () => {
 		})
 
 		it("skips deletions and returns a degraded marker when the listing reports scan errors (fixed point, no download)", async () => {
-			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
-			const goneItem = makeFileItemWithSize(fileBUuid, "undecryptable.txt", 1n)
+			const keepItem = makeFileItem(fileAUuid, "keep.txt", 1n)
+			const goneItem = makeFileItem(fileBUuid, "undecryptable.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/keep.txt": keepItem,
@@ -4992,8 +4815,8 @@ describe("Offline", () => {
 		// commit forever — that regime re-downloaded/re-hashed the whole tree every pass while new
 		// files never entered the meta (an eternal-resync relative).
 		it("commits the verified union on a degraded pass — new remote file enters the meta, the unlisted local entry survives the sweep, second pass is a no-op", async () => {
-			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
-			const unlistedItem = makeFileItemWithSize(subDirUuid, "undecryptable.txt", 1n)
+			const keepItem = makeFileItem(fileAUuid, "keep.txt", 1n)
+			const unlistedItem = makeFileItem(subDirUuid, "undecryptable.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/keep.txt": keepItem,
@@ -5061,7 +4884,7 @@ describe("Offline", () => {
 		})
 
 		it("still blocks the commit when a degraded pass also collects a non-degraded error (verify failure)", async () => {
-			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
+			const keepItem = makeFileItem(fileAUuid, "keep.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/keep.txt": keepItem }),
 				disk: { "/keep.txt": new Uint8Array([1]) }
@@ -5092,7 +4915,7 @@ describe("Offline", () => {
 		})
 
 		it("treats listed files with unreadable metas as degradation — local bytes survive, no deletions", async () => {
-			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
+			const keepItem = makeFileItem(fileAUuid, "keep.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/keep.txt": keepItem }),
 				disk: { "/keep.txt": new Uint8Array([1]) }
@@ -5122,8 +4945,8 @@ describe("Offline", () => {
 		// never claims absent bytes. (Once the listing reads clean again the entry re-enters via
 		// the normal listing → download path if it is still alive remotely.)
 		it("degraded INDEX-ONLY pass drops a preserved entry whose bytes are gone at the commit re-stat — the committed meta never claims absent bytes", async () => {
-			const keepItem = makeFileItemWithSize(fileAUuid, "keep.txt", 1n)
-			const unlistedItem = makeFileItemWithSize(fileBUuid, "u.txt", 1n)
+			const keepItem = makeFileItem(fileAUuid, "keep.txt", 1n)
+			const unlistedItem = makeFileItem(fileBUuid, "u.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/keep.txt": keepItem,
@@ -5159,7 +4982,7 @@ describe("Offline", () => {
 		// not the stale pre-move path — otherwise the committed meta would lie about the disk.
 		it("replays planner moves on the degraded union — an unlisted child carried inside a renamed directory commits at its current path", async () => {
 			const subDirItem = makeDirItem(subDirUuid, "sub")
-			const unlistedItem = makeFileItemWithSize(fileAUuid, "u.txt", 1n)
+			const unlistedItem = makeFileItem(fileAUuid, "u.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/sub": subDirItem,
@@ -5201,8 +5024,8 @@ describe("Offline", () => {
 		// defers the move instead; the meta commits at the CURRENT path and the next clean pass
 		// (deletes allowed) completes the move.
 		it("defers a degraded-pass move onto a kept occupant — commits at the old path without a store error; the follow-up clean pass completes the move", async () => {
-			const moverItem = makeFileItemWithSize(fileAUuid, "old.txt", 3n)
-			const occupantItem = makeFileItemWithSize(fileBUuid, "new.txt", 2n)
+			const moverItem = makeFileItem(fileAUuid, "old.txt", 3n)
+			const occupantItem = makeFileItem(fileBUuid, "new.txt", 2n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/old.txt": moverItem,
@@ -5258,9 +5081,9 @@ describe("Offline", () => {
 		// its REMOTE path even when its stale meta path differs — the deferred-pass verify/commit
 		// must expect it there (replaying the stale meta path would block the commit forever).
 		it("verifies and commits a missing renamed entry at its REMOTE path on a deferred-move pass", async () => {
-			const moverItem = makeFileItemWithSize(fileAUuid, "old.txt", 3n)
-			const occupantItem = makeFileItemWithSize(fileBUuid, "new.txt", 2n)
-			const renamedMissingItem = makeFileItemWithSize(subDirUuid, "r-old.txt", 1n)
+			const moverItem = makeFileItem(fileAUuid, "old.txt", 3n)
+			const occupantItem = makeFileItem(fileBUuid, "new.txt", 2n)
+			const renamedMissingItem = makeFileItem(subDirUuid, "r-old.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/old.txt": moverItem,
@@ -5353,7 +5176,7 @@ describe("Offline", () => {
 		})
 
 		it("returns a listing error and leaves state untouched when the remote listing fails", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1]) }
@@ -5381,7 +5204,7 @@ describe("Offline", () => {
 		// meta at pass start. Over a committed tree (concurrent-store race) it keeps state and returns
 		// the errors like a sync pass.
 		it("keeps the committed tree when an initialStore pass fails over a readable prior meta", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1]) }
@@ -5410,7 +5233,7 @@ describe("Offline", () => {
 		// trigger). The index-only counterpart is pinned by the paired "INDEX-ONLY pass trusts the
 		// meta" test below.
 		it("re-downloads a truncated file on a THOROUGH pass (size mismatch counts as missing) and commits after verify", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 5n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 5n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				// Truncated: meta says 5 bytes, disk has 2.
@@ -5444,7 +5267,7 @@ describe("Offline", () => {
 		// is detected, downloaded, or written — while a thorough pass stat-checks, detects, and
 		// re-downloads.
 		it("INDEX-ONLY (default) pass trusts the meta: an externally deleted entry with an unchanged remote is a TRUE no-op (no download, no errors, no writes)", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }
@@ -5473,7 +5296,7 @@ describe("Offline", () => {
 		})
 
 		it("THOROUGH pass stat-checks the meta: the same externally deleted entry is detected and re-downloaded", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				// The meta claims /a.txt but its bytes are gone (external deletion).
@@ -5506,7 +5329,7 @@ describe("Offline", () => {
 		// must still write nothing, download nothing, and NOT sweep — the orphan sweep requires a
 		// download or an unreadable meta, never a clean thorough no-op.
 		it("THOROUGH no-op pass over a healthy unchanged tree: stats verify clean, zero writes, no download, no orphan sweep", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }
@@ -5535,7 +5358,7 @@ describe("Offline", () => {
 		})
 
 		it("fails the pass (no commit) when the download reports per-entry errors, resolving the entry by path suffix", async () => {
-			const okItem = makeFileItemWithSize(fileAUuid, "ok.txt", 1n)
+			const okItem = makeFileItem(fileAUuid, "ok.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/ok.txt": okItem }),
 				disk: { "/ok.txt": new Uint8Array([1]) }
@@ -5639,7 +5462,7 @@ describe("Offline", () => {
 		})
 
 		it("deletes a leftover /.sync-tmp-* temp whose uuid the meta does not claim (crash recovery)", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1]) }
@@ -5662,7 +5485,7 @@ describe("Offline", () => {
 		it("a real user file whose name merely starts with .sync-tmp- SURVIVES crash recovery (no delete, no churn)", async () => {
 			// Temps are always /.sync-tmp-{canonical uuid}; a prefix-only name is user content —
 			// deleting it caused a delete/re-download loop with a bogus crash warning every pass.
-			const fileItem = makeFileItemWithSize(fileAUuid, ".sync-tmp-backup", 1n)
+			const fileItem = makeFileItem(fileAUuid, ".sync-tmp-backup", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/.sync-tmp-backup": fileItem }),
 				disk: { "/.sync-tmp-backup": new Uint8Array([7]) }
@@ -5680,7 +5503,7 @@ describe("Offline", () => {
 		})
 
 		it("RESCUES a /.sync-tmp-{uuid} temp back to its free meta path (bytes preserved, no download, temp gone)", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				// The crashed move phase extracted the entry: its meta path is free, the temp holds
@@ -5703,7 +5526,7 @@ describe("Offline", () => {
 		})
 
 		it("deletes a /.sync-tmp-{uuid} temp whose meta path is occupied on disk (no overwrite)", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([7, 8, 9]) }
@@ -5726,8 +5549,8 @@ describe("Offline", () => {
 		})
 
 		it("a leftover temp ESCALATES an automatic pass to the disk-verified view — a missing sibling entry is detected and downloaded", async () => {
-			const okItem = makeFileItemWithSize(fileAUuid, "ok.txt", 1n)
-			const goneItem = makeFileItemWithSize(fileBUuid, "gone.txt", 1n)
+			const okItem = makeFileItem(fileAUuid, "ok.txt", 1n)
+			const goneItem = makeFileItem(fileBUuid, "gone.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({
 					"/ok.txt": okItem,
@@ -5808,7 +5631,7 @@ describe("Offline", () => {
 		// (bytes preserved), an unknown temp is deleted, and — since the rescue restored the only
 		// entry — the escalated disk-verified view finds the tree whole, so nothing downloads.
 		it("handles multiple temps in one pass — rescues the claimed-free one, deletes the unknown one, no download needed", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				// The crashed move phase extracted the entry — its meta path is free.
@@ -5836,7 +5659,7 @@ describe("Offline", () => {
 		})
 
 		it("sweeps unclaimed orphans after a committed pass that downloaded", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: {
@@ -5876,7 +5699,7 @@ describe("Offline", () => {
 		})
 
 		it("does NOT sweep orphans on a no-op pass", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 1n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 1n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1]) }
@@ -5903,7 +5726,7 @@ describe("Offline", () => {
 		// sweep — otherwise crashed .filendl partials linger forever on trees that never change.
 		// Detecting the truncation requires the disk-verified local view, so this is a THOROUGH pass.
 		it("sweeps a stray .filendl partial on a THOROUGH heal pass even when the meta is byte-identical", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }
@@ -6023,7 +5846,7 @@ describe("Offline", () => {
 		})
 
 		it("threads the abort signal into the recursive listing call (4th asyncOpts arg)", async () => {
-			const fileItem = makeFileItemWithSize(fileAUuid, "a.txt", 3n)
+			const fileItem = makeFileItem(fileAUuid, "a.txt", 3n)
 			const { dirItem, parent } = seedTree({
 				entries: makeEntries({ "/a.txt": fileItem }),
 				disk: { "/a.txt": new Uint8Array([1, 2, 3]) }

@@ -64,7 +64,7 @@ vi.mock("@filen/sdk-rs", () => {
 vi.mock("@/lib/auth", () => ({ default: { getSdkClients: async () => ({ authedSdkClient: { listLinkedDir: h.listLinkedDir } }) } }))
 vi.mock("@/lib/cache", () => ({ default: h.fakeCache }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/decryption", () => ({ driveItemDisplayName: (item: { data: { uuid: string } }) => `name-${item.data.uuid}` }))
 vi.mock("@/features/drive/driveSelectSession", () => ({ selectCopyDestination: vi.fn() }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { startCopyItems: vi.fn() } }))

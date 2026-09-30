@@ -9,10 +9,9 @@ import { File } from "@/tests/mocks/expoFileSystem"
  *
  *   vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
  *
- * Like the blob-util mock it replaces, this delegates to the expo-file-system mock's in-memory fs
- * rather than keeping a table of its own, so one seeded file is visible to BOTH the expo File API
- * (which camera upload still uses for `exists` and `copy`) and the hash, and a test that overrides
- * `File.prototype.md5` steers the hash with it. Path resolution mirrors the natives — see
+ * This delegates to the expo-file-system mock's in-memory fs rather than keeping a table of its own,
+ * so one seeded file is visible to BOTH the expo File API (which camera upload still uses for `exists`
+ * and `copy`) and the hash, and a test that overrides `File.prototype.md5` steers the hash with it. Path resolution mirrors the natives — see
  * {@link nativePath}.
  */
 

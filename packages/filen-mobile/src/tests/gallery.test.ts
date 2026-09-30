@@ -5,9 +5,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // gallery.tsx imports many native/heavy modules; stub them all so the pure
 // galleryItemKey export can be loaded in a node vitest environment.
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (k: string) => k })
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
 vi.mock("expo-router", () => ({
 	router: { canGoBack: vi.fn(() => false), back: vi.fn() }
@@ -115,9 +113,7 @@ vi.mock("@/lib/decryption", () => ({
 	driveItemDisplayName: vi.fn((item: unknown) => String(item))
 }))
 
-vi.mock("zustand/shallow", () => ({
-	useShallow: (fn: unknown) => fn
-}))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 
 // ─── Actual import ───────────────────────────────────────────────────────────
 

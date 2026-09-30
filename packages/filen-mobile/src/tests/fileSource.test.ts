@@ -42,6 +42,7 @@ import { resolveFile, fileSourceKey } from "@/queries/fileSource"
 import { type FileSource } from "@/queries/fileSource"
 import { type DriveItemFileExtracted } from "@/types"
 import { File as MockFile } from "@/tests/mocks/expoFileSystem"
+import { fileSourceItems } from "@/tests/fixtures/driveItems"
 
 // The fixture factories return loosely-typed shapes (matching the existing `unknown`
 // cache-map usage); cast to the strict by-value item type at the FileSource boundary.
@@ -49,65 +50,10 @@ function asFileItem(item: unknown): DriveItemFileExtracted {
 	return item as DriveItemFileExtracted
 }
 
-function makeFileItem(uuid = "file-uuid-1") {
-	return {
-		type: "file" as const,
-		data: {
-			uuid,
-			size: 1024n,
-			undecryptable: false,
-			decryptedMeta: { name: "test.txt", mime: "text/plain", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeSharedFileItem(uuid = "shared-uuid-1") {
-	return {
-		type: "sharedFile" as const,
-		data: {
-			uuid,
-			size: 512n,
-			undecryptable: false,
-			decryptedMeta: { name: "shared.txt", mime: "text/plain", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeSharedRootFileItem(uuid = "root-uuid-1") {
-	return {
-		type: "sharedRootFile" as const,
-		data: {
-			uuid,
-			size: 256n,
-			undecryptable: false,
-			decryptedMeta: { name: "root.txt", mime: "text/plain", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeDirectoryItem(uuid = "dir-uuid-1") {
-	return {
-		type: "directory" as const,
-		data: {
-			uuid,
-			size: 0n,
-			undecryptable: false,
-			decryptedMeta: { name: "my-dir", color: null }
-		}
-	}
-}
-
-function makeSharedDirectoryItem(uuid = "shared-dir-1") {
-	return {
-		type: "sharedDirectory" as const,
-		data: {
-			uuid,
-			size: 0n,
-			undecryptable: false,
-			decryptedMeta: { name: "shared-dir", color: null }
-		}
-	}
-}
+const { makeFileItem, makeSharedFileItem, makeSharedRootFileItem, makeDirectoryItem, makeSharedDirectoryItem } = fileSourceItems(
+	{ file: "test.txt", sharedFile: "shared.txt", sharedRootFile: "root.txt" },
+	"text/plain"
+)
 
 describe("resolveFile", () => {
 	beforeEach(() => {

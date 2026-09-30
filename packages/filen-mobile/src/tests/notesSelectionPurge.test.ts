@@ -124,23 +124,14 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { handleNoteEvent, type NoteSocketEvent } from "@/features/notes/socketHandlers"
 import { NoteEvent_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
+import { socketEvent } from "@/tests/fixtures/socketEvents"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function makeDeletedEvent(noteUuid: string): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.Deleted,
-					inner: [{ note: noteUuid }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return socketEvent(SocketEvent_Tags.Note, NoteEvent_Tags.Deleted, { note: noteUuid })
 }
 
 // ---------------------------------------------------------------------------

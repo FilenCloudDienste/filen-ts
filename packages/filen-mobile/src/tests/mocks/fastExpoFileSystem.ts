@@ -21,6 +21,8 @@
  *   import { benchFs } from "@/tests/mocks/fastExpoFileSystem"
  */
 
+import { dirname, toUriString, withRootGetters } from "@/tests/mocks/expoFileSystemPaths"
+
 type FileNode = {
 	file: true
 	size: number
@@ -33,10 +35,6 @@ type DirNode = {
 }
 
 type Node = FileNode | DirNode
-
-const DOCUMENT_URI = "file:///document"
-const CACHE_URI = "file:///cache"
-const BUNDLE_URI = "file:///bundle"
 
 const ROOT: DirNode = {
 	file: false,
@@ -207,10 +205,6 @@ function joinParts(parts: string[]): string {
 	}
 
 	return out
-}
-
-function toUriString(value: string | File | Directory): string {
-	return typeof value === "string" ? value : value.uri
 }
 
 function resolveUri(uris: (string | File | Directory)[]): string {
@@ -509,23 +503,7 @@ export class Directory {
 	}
 }
 
-export const Paths = {
-	get document(): Directory {
-		return new Directory(DOCUMENT_URI)
-	},
-	get cache(): Directory {
-		return new Directory(CACHE_URI)
-	},
-	get bundle(): Directory {
-		return new Directory(BUNDLE_URI)
-	},
-	get appleSharedContainers(): Record<string, Directory> {
-		return new Proxy({} as Record<string, Directory>, {
-			get(_target, prop) {
-				return new Directory(`file:///shared/${String(prop)}`)
-			}
-		})
-	},
+const basePaths = {
 	join(...paths: (string | File | Directory)[]): string {
 		if (paths.length === 2) {
 			// Hot two-arg fast path: base is already clean in this stack.
@@ -552,26 +530,7 @@ export const Paths = {
 		return joinParts(parts)
 	},
 	dirname(path: string | File | Directory): string {
-		const str = toUriString(path)
-		// Mirror the canonical mock: strip the final /segment (with optional trailing slash).
-		let end = str.length
-
-		while (end > 0 && str.charCodeAt(end - 1) === 47) {
-			end--
-		}
-
-		const idx = str.lastIndexOf("/", end - 1)
-		const result = idx === -1 ? "" : str.slice(0, idx)
-
-		if (result.length > 0) {
-			return result
-		}
-
-		if (str.charCodeAt(0) === 47 && !str.startsWith("file://")) {
-			return "/"
-		}
-
-		return DOCUMENT_URI
+		return dirname(toUriString(path))
 	},
 	basename(path: string | File | Directory, ext?: string): string {
 		const str = toUriString(path)
@@ -585,6 +544,8 @@ export const Paths = {
 		return base
 	}
 }
+
+export const Paths = withRootGetters(basePaths, Directory)
 
 /** Benchmark fixture helpers — bypass the public API (and its op counters). */
 export const benchFs = {

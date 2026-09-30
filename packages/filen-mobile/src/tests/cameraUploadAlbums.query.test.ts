@@ -68,6 +68,8 @@ describe("camera upload albums query", () => {
 
 		await fetchData()
 
+		expect(mockHasPermissions).toHaveBeenCalledWith({ library: "all", needCamera: false })
+		expect(mockGetAlbumsAsync).toHaveBeenCalledWith({ includeSmartAlbums: true })
 		expect(mockGetAssetsAsync).toHaveBeenCalledWith(
 			expect.objectContaining({
 				mediaType: ["photo", "video"],

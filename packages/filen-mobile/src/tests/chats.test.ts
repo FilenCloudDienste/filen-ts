@@ -109,55 +109,17 @@ vi.mock("@/features/chats/chatsInflight", () => ({
 
 import chats from "@/features/chats/chats"
 import type { Chat } from "@/types"
-import type { ChatParticipant, Contact } from "@filen/sdk-rs"
+import type { Contact } from "@filen/sdk-rs"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
+import { makeChat, makeChatMessage, makeParticipant } from "@/tests/fixtures/chats"
 
-function makeChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: "chat-1",
-		ownerId: 1n,
-		muted: false,
-		participants: [],
-		undecryptable: false,
-		key: "some-key",
-		created: 1n,
-		lastFocus: 1n,
-		...overrides
-	} as Chat
-}
-
+// `inner` overrides REPLACE the inner object here (callers pass `{ inner: { uuid } }` and rely on it).
 function makeMessage(messageText: string | undefined, overrides: Partial<ChatMessageWithInflightId> = {}): ChatMessageWithInflightId {
 	return {
-		chat: "chat-1",
-		inner: {
-			uuid: "msg-1",
-			message: messageText,
-			senderId: 1n,
-			senderEmail: "test@test.com",
-			senderNickName: undefined
-		},
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: 0n,
-		replyTo: undefined,
-		undecryptable: messageText === undefined,
+		...makeChatMessage({ inner: { message: messageText }, undecryptable: messageText === undefined }),
 		inflightId: "",
 		...overrides
-	} as unknown as ChatMessageWithInflightId
-}
-
-function makeParticipant(userId: bigint, email: string): ChatParticipant {
-	return {
-		userId,
-		email,
-		nickName: undefined,
-		permissionsAdd: true,
-		added: 0n,
-		appearOffline: false,
-		lastActive: 0n,
-		avatar: undefined
-	} as unknown as ChatParticipant
+	} as ChatMessageWithInflightId
 }
 
 // Extract the updater function from mockChatsQueryUpdate's last call

@@ -11,13 +11,9 @@ const segmentMessage = vi.hoisted(() => vi.fn())
 
 // ─── Module boundary mocks ──────────────────────────────────────────────────
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (k: string) => k })
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
-vi.mock("zustand/shallow", () => ({
-	useShallow: (fn: unknown) => fn
-}))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 
 // No in-flight messages for any of these renders — selector reads an always-empty store.
 vi.mock("@/features/chats/store/useChats.store", () => ({

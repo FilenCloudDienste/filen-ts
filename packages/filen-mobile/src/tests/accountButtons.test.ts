@@ -75,10 +75,7 @@ vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: mockGetSdkClients }
 }))
 
-vi.mock("@/lib/i18n", () => ({
-	t: (key: string) => key,
-	default: { t: (key: string) => key }
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("expo-router", () => ({
 	router: { push: mockRouterPush }
@@ -135,6 +132,7 @@ import {
 } from "@/features/settings/accountButtons"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 import type { DriveItem } from "@/types"
+import { run } from "@/tests/mocks/filenShared"
 import type { TFunction } from "i18next"
 
 // ---------------------------------------------------------------------------
@@ -183,15 +181,7 @@ function alwaysConfirm() {
 
 /** Make runWithLoading actually execute its callback. */
 function runWithLoadingPassthrough() {
-	mockRunWithLoading.mockImplementation(async (fn: () => Promise<unknown>) => {
-		try {
-			const data = await fn()
-
-			return { success: true, data }
-		} catch (error) {
-			return { success: false, error }
-		}
-	})
+	mockRunWithLoading.mockImplementation(run)
 }
 
 beforeEach(() => {

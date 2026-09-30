@@ -9,9 +9,7 @@ import { renderHook } from "@testing-library/react"
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("@/lib/logger", () => ({
-	default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }
-}))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 import useChunkedWriteTarget, { SAVE_HEADROOM_BYTES } from "@/hooks/useChunkedWriteTarget"
 import { MAX_RANGE_LENGTH, PDF_MAGIC, bytesToBase64 } from "@/lib/rangeTransfer"

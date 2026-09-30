@@ -116,9 +116,7 @@ vi.mock("@/lib/cache", () => ({
 	default: {}
 }))
 
-vi.mock("@/lib/i18n", () => ({
-	default: { t: (key: string) => key }
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // Provide constants that utils.ts needs at runtime.
 // constants.ts imports Platform from react-native so we stub it to avoid the real file.
@@ -156,7 +154,6 @@ vi.mock("@/constants", () => {
 		PRIVATE_HOST,
 		IOS_APP_GROUP_IDENTIFIER: "group.io.filen.app",
 		EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS: new Set([".jpg", ".jpeg", ".png"]),
-		MUSIC_EXTENSIONS: new Set([".mp3", ".m4a"]),
 		MUSIC_METADATA_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a"])
 	}
 })

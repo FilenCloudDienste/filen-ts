@@ -57,13 +57,9 @@ vi.mock("uniwind", () => ({
 	useResolveClassNames: () => ({ color: "#000" })
 }))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (key: string) => key })
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
-vi.mock("zustand/shallow", () => ({
-	useShallow: (selector: unknown) => selector
-}))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 
 // Component / store / lib modules that content/index.tsx imports but which the pure helpers
 // never touch. Stubbed so the module graph resolves without dragging in their own heavy deps.
@@ -92,10 +88,7 @@ vi.mock("@/features/notes/store/useNotesInflight.store", async () => ({
 vi.mock("@/stores/useTextEditor.store", () => ({ default: () => false }))
 vi.mock("@/lib/events", () => ({ default: { subscribe: () => ({ remove: () => {} }) } }))
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
-vi.mock("@/lib/i18n", () => ({
-	default: { t: (key: string) => key },
-	t: (key: string) => key
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/prompts", () => ({ default: {} }))
 vi.mock("@/features/notes/notes", () => ({ default: {} }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
@@ -105,14 +98,7 @@ vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
 // receives hashes as opaque strings anyway.
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
-	hashNoteContent: (content: string) => `h(${content})`,
-	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {
-		const cleanups: (() => void)[] = []
-
-		fn(cleanup => cleanups.push(cleanup))
-
-		return { cleanup: () => cleanups.forEach(c => c()) }
-	}
+	hashNoteContent: (content: string) => `h(${content})`
 }))
 
 import {

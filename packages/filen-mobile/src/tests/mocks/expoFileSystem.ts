@@ -20,11 +20,9 @@
  *   fs.set("file:///document/test.bin", new Uint8Array([1, 2, 3]))
  */
 
-type Entry = Uint8Array | "dir"
+import { BUNDLE_URI, CACHE_URI, DOCUMENT_URI, dirname, toUriString, withRootGetters } from "@/tests/mocks/expoFileSystemPaths"
 
-const DOCUMENT_URI = "file:///document"
-const CACHE_URI = "file:///cache"
-const BUNDLE_URI = "file:///bundle"
+type Entry = Uint8Array | "dir"
 
 /** The backing store — shared singleton across all tests in the same file. */
 export const fs = new Map<string, Entry>()
@@ -674,10 +672,6 @@ export class Directory {
 	}
 }
 
-function toUriString(path: string | File | Directory): string {
-	return typeof path === "string" ? path : path.uri
-}
-
 /** Mirrors expo-file-system's FileMode. `open()` here ignores the mode; this exists so callers that
  *  name one (the chunked write target) resolve rather than throwing on a missing export. */
 export enum FileMode {
@@ -686,29 +680,7 @@ export enum FileMode {
 	WriteOnly = "w"
 }
 
-export const Paths = {
-	get document(): Directory {
-		return new Directory(DOCUMENT_URI)
-	},
-	get cache(): Directory {
-		return new Directory(CACHE_URI)
-	},
-	get bundle(): Directory {
-		return new Directory(BUNDLE_URI)
-	},
-	get appleSharedContainers(): Record<string, Directory> {
-		return new Proxy({} as Record<string, Directory>, {
-			get(_target, prop) {
-				return new Directory(`file:///shared/${String(prop)}`)
-			}
-		})
-	},
-	get totalDiskSpace(): number {
-		return 256 * 1024 * 1024 * 1024
-	},
-	get availableDiskSpace(): number {
-		return 128 * 1024 * 1024 * 1024
-	},
+const basePaths = {
 	join(...paths: (string | File | Directory)[]): string {
 		return paths
 			.map(p => toUriString(p))
@@ -739,19 +711,7 @@ export const Paths = {
 		return toUriString(path).replace(/\/+/g, "/").replace(/\/$/, "")
 	},
 	dirname(path: string | File | Directory): string {
-		const str = toUriString(path)
-		const result = str.replace(/\/[^/]+\/?$/, "")
-
-		if (result) {
-			return result
-		}
-
-		// For POSIX paths like "/foo", dirname is "/"
-		if (str.startsWith("/") && !str.startsWith("file://")) {
-			return "/"
-		}
-
-		return DOCUMENT_URI
+		return dirname(toUriString(path))
 	},
 	basename(path: string | File | Directory, ext?: string): string {
 		const str = toUriString(path)
@@ -793,3 +753,5 @@ export const Paths = {
 		return { exists: false, type: null }
 	}
 }
+
+export const Paths = withRootGetters(basePaths, Directory)

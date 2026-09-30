@@ -16,25 +16,7 @@ vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn() } }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" },
-	AnyNormalDir: {
-		Root: class {
-			tag = "Root"
-			inner: unknown[]
-			constructor(v: unknown) {
-				this.inner = [v]
-			}
-		},
-		Dir: class {
-			tag = "Dir"
-			inner: unknown[]
-			constructor(v: unknown) {
-				this.inner = [v]
-			}
-		}
-	}
-}))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 vi.mock("@/lib/cache", () => ({
 	default: {
@@ -44,14 +26,9 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: {
-		error: vi.fn(),
-		normal: vi.fn()
-	}
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("@/lib/prompts", () => ({
 	default: {

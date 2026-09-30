@@ -1,117 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
+import { mockDb, open } from "@/tests/mocks/opSqlite"
 
-// In-memory store backing the op-sqlite mock. The real sqlite lib uses one-shot
-// db.execute / db.executeRaw (no shared prepared statements), so the mock parses
-// the handful of SQL patterns the kv layer issues and operates on this Map.
-const { mockDb, open } = vi.hoisted(() => {
-	const store = new Map<string, string>()
-
-	const stripWildcard = (param: unknown): string => (param as string).replace(/%$/, "")
-
-	const executeImpl = async (query: string, params?: unknown[]) => {
-		if (query.startsWith("INSERT")) {
-			store.set(params![0] as string, params![1] as string)
-
-			return { rows: [], insertId: 1, rowsAffected: 1 }
-		}
-
-		if (query.startsWith("DELETE FROM kv WHERE key =")) {
-			const existed = store.delete(params![0] as string)
-
-			return { rows: [], insertId: undefined, rowsAffected: existed ? 1 : 0 }
-		}
-
-		if (query.startsWith("DELETE FROM kv WHERE key >=")) {
-			const lower = params![0] as string
-			const upper = params![1] as string
-			let rowsAffected = 0
-
-			for (const key of [...store.keys()]) {
-				if (key >= lower && key < upper) {
-					store.delete(key)
-					rowsAffected++
-				}
-			}
-
-			return { rows: [], insertId: undefined, rowsAffected }
-		}
-
-		if (query.startsWith("DELETE FROM kv")) {
-			const rowsAffected = store.size
-
-			store.clear()
-
-			return { rows: [], insertId: undefined, rowsAffected }
-		}
-
-		return { rows: [], insertId: undefined, rowsAffected: 0 }
-	}
-
-	const executeRawRowsImpl = async (query: string, params?: unknown[]) => {
-		if (query.startsWith("SELECT value")) {
-			const value = store.get(params![0] as string)
-
-			return value !== undefined ? [[value]] : []
-		}
-
-		if (query.startsWith("SELECT key, value")) {
-			const prefix = stripWildcard(params![0])
-
-			return [...store.entries()].filter(([key]) => key.startsWith(prefix))
-		}
-
-		if (query.startsWith("SELECT key FROM kv WHERE key LIKE")) {
-			const prefix = stripWildcard(params![0])
-
-			return [...store.keys()].filter(key => key.startsWith(prefix)).map(key => [key])
-		}
-
-		return []
-	}
-
-	// op-sqlite 17: executeRaw resolves to { rawRows, columnNames, rowsAffected }.
-	const executeRawImpl = async (query: string, params?: unknown[]) => ({
-		rawRows: await executeRawRowsImpl(query, params),
-		columnNames: [] as string[],
-		rowsAffected: 0
-	})
-
-	const mockDb = {
-		execute: vi.fn(executeImpl),
-		executeSync: vi.fn().mockReturnValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
-		executeRaw: vi.fn(executeRawImpl),
-		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
-		prepareStatement: vi.fn(),
-		close: vi.fn(),
-		_store: store,
-		_reset: () => {
-			store.clear()
-			mockDb.execute.mockImplementation(executeImpl)
-			mockDb.executeRaw.mockImplementation(executeRawImpl)
-		}
-	}
-
-	return { mockDb, open: vi.fn(() => mockDb) }
-})
-
-// Minimal react-native mock — storageRoots (imported transitively) reads Platform at module
-// evaluation. iOS branch keeps the shared-container base distinct from the private base, which
-// is what the relocation tests below exercise.
-vi.mock("react-native", () => ({
-	AppState: {
-		addEventListener: vi.fn(() => ({ remove: vi.fn() }))
-	},
-	Platform: {
-		OS: "ios" as "ios" | "android",
-		select<T>(specifics: { ios?: T; android?: T; default?: T }): T | undefined {
-			return (specifics as any)["ios"] ?? (specifics as any)["default"]
-		}
-	}
-}))
-
-vi.mock("@op-engineering/op-sqlite", () => ({
-	open
-}))
+vi.mock("@op-engineering/op-sqlite", async () => await import("@/tests/mocks/opSqlite"))
 
 vi.mock("@/lib/utils", () => ({}))
 
@@ -120,6 +10,81 @@ vi.mock("@/lib/paths", () => ({
 }))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
+
+// In-memory store backing the op-sqlite mock. The real sqlite lib uses one-shot
+// db.execute / db.executeRaw (no shared prepared statements), so the mock parses
+// the handful of SQL patterns the kv layer issues and operates on this Map.
+const store = new Map<string, string>()
+
+const stripWildcard = (param: unknown): string => (param as string).replace(/%$/, "")
+
+const executeImpl = async (query: string, params?: unknown[]) => {
+	if (query.startsWith("INSERT")) {
+		store.set(params![0] as string, params![1] as string)
+
+		return { rows: [], insertId: 1, rowsAffected: 1 }
+	}
+
+	if (query.startsWith("DELETE FROM kv WHERE key =")) {
+		const existed = store.delete(params![0] as string)
+
+		return { rows: [], insertId: undefined, rowsAffected: existed ? 1 : 0 }
+	}
+
+	if (query.startsWith("DELETE FROM kv WHERE key >=")) {
+		const lower = params![0] as string
+		const upper = params![1] as string
+		let rowsAffected = 0
+
+		for (const key of [...store.keys()]) {
+			if (key >= lower && key < upper) {
+				store.delete(key)
+				rowsAffected++
+			}
+		}
+
+		return { rows: [], insertId: undefined, rowsAffected }
+	}
+
+	if (query.startsWith("DELETE FROM kv")) {
+		const rowsAffected = store.size
+
+		store.clear()
+
+		return { rows: [], insertId: undefined, rowsAffected }
+	}
+
+	return { rows: [], insertId: undefined, rowsAffected: 0 }
+}
+
+const executeRawRowsImpl = async (query: string, params?: unknown[]) => {
+	if (query.startsWith("SELECT value")) {
+		const value = store.get(params![0] as string)
+
+		return value !== undefined ? [[value]] : []
+	}
+
+	if (query.startsWith("SELECT key, value")) {
+		const prefix = stripWildcard(params![0])
+
+		return [...store.entries()].filter(([key]) => key.startsWith(prefix))
+	}
+
+	if (query.startsWith("SELECT key FROM kv WHERE key LIKE")) {
+		const prefix = stripWildcard(params![0])
+
+		return [...store.keys()].filter(key => key.startsWith(prefix)).map(key => [key])
+	}
+
+	return []
+}
+
+// op-sqlite 17: executeRaw resolves to { rawRows, columnNames, rowsAffected }.
+const executeRawImpl = async (query: string, params?: unknown[]) => ({
+	rawRows: await executeRawRowsImpl(query, params),
+	columnNames: [] as string[],
+	rowsAffected: 0
+})
 
 // Shared module references that survive across tests without resetModules.
 // We import them once at the top level — they stay consistent with what
@@ -150,7 +115,9 @@ async function createSqlite(): Promise<Sqlite> {
 // backing map so Directory.exists returns false for a freshly created instance.
 async function resetAll() {
 	vi.clearAllMocks()
-	mockDb._reset()
+	store.clear()
+	mockDb.execute.mockImplementation(executeImpl)
+	mockDb.executeRaw.mockImplementation(executeRawImpl)
 	open.mockReturnValue(mockDb)
 
 	const { expoFsModule } = await getModules()
@@ -291,7 +258,7 @@ describe("Sqlite", () => {
 
 			// Inject raw corrupt data directly into the backing store, bypassing
 			// set() so the serializer never processes it.
-			mockDb._store.set("corrupt-key", "}{not valid json at all")
+			store.set("corrupt-key", "}{not valid json at all")
 
 			await expect(sqlite.kvAsync.get("corrupt-key")).rejects.toThrow()
 		})
@@ -317,7 +284,7 @@ describe("Sqlite", () => {
 
 			await sqlite.clearAsync()
 
-			expect(mockDb._store.size).toBe(0)
+			expect(store.size).toBe(0)
 		})
 	})
 

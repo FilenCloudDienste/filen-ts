@@ -9,7 +9,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
-vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" } }))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 vi.mock("@/constants", () => ({ EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set(), EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set() }))
 vi.mock("@/lib/serializer", () => ({ serialize: (x: unknown) => JSON.stringify(x) }))
 // Fixtures carry their parent uuid as a plain string.
@@ -32,17 +32,9 @@ vi.mock("@/lib/cache", () => ({
 		}
 	}
 }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
-vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
-	runWithLoading: vi.fn(async (fn: () => Promise<unknown>) => {
-		try {
-			return { success: true, data: await fn() }
-		} catch (error) {
-			return { success: false, error }
-		}
-	})
-}))
+vi.mock("@/components/ui/fullScreenLoadingModal", async () => await import("@/tests/mocks/fullScreenLoadingModal"))
 vi.mock("@/features/drive/drive", () => ({ default: { move: vi.fn() } }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 

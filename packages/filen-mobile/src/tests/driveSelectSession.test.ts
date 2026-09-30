@@ -13,7 +13,7 @@ vi.mock("@/lib/router", () => ({ router: { push: h.push } }))
 vi.mock("@/lib/serializer", () => ({ serialize: (value: unknown) => JSON.stringify(value) }))
 vi.mock("expo-crypto", () => ({ randomUUID: () => "session-1" }))
 vi.mock("@/lib/cache", () => ({ default: { rootUuid: "root-uuid", uuidToAnyDriveItem: h.cacheItems } }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: async () => ({ authedSdkClient: { root: () => ({ uuid: "root-uuid" }) } }) }
 }))

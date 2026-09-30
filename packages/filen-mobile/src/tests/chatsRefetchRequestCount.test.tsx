@@ -34,34 +34,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-// The real TanStack client with the app's refetch defaults, minus the SQLite persister.
-vi.mock("@/queries/client", async () => {
-	const { QueryClient } = await import("@tanstack/react-query")
-
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				refetchOnMount: "always",
-				refetchOnReconnect: "always",
-				retry: false,
-				networkMode: "offlineFirst"
-			}
-		}
-	})
-
-	return {
-		default: queryClient,
-		queryClient,
-		getCachedQuery: (queryKey: unknown[]) => queryClient.getQueryCache().find({ queryKey, exact: true }),
-		queryUpdater: {
-			get: (queryKey: unknown[]) => queryClient.getQueryData(queryKey),
-			set: (queryKey: unknown[], updater: unknown) =>
-				queryClient.setQueryData(queryKey, (prev: unknown) =>
-					typeof updater === "function" ? (updater as (p: unknown) => unknown)(prev) : updater
-				)
-		}
-	}
-})
+vi.mock("@/queries/client", async () => await (await import("@/tests/mocks/queryClient")).createQueryClientMock())
 
 import { renderHook, waitFor, cleanup } from "@testing-library/react"
 import { QueryClientProvider } from "@tanstack/react-query"
@@ -71,34 +44,18 @@ import chats from "@/features/chats/chats"
 import useChatsQuery from "@/features/chats/queries/useChats.query"
 import useChatMessagesQuery, { chatMessagesQueryUpdate, chatMessagesQueryGet } from "@/features/chats/queries/useChatMessages.query"
 import type { Chat, ChatMessage } from "@/types"
+import { makeChat, makeChatMessage } from "@/tests/fixtures/chats"
 
-function message(chatUuid: string, uuid: string, sentTimestamp: bigint, overrides: Partial<ChatMessage> = {}): ChatMessage {
-	return {
+function message(chatUuid: string, uuid: string, sentTimestamp: bigint): ChatMessage {
+	return makeChatMessage({
 		chat: chatUuid,
-		inner: { uuid, senderId: 2n, senderEmail: "peer@test", senderAvatar: undefined, senderNickName: undefined, message: `text ${uuid}` },
-		replyTo: undefined,
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
 		sentTimestamp,
-		undecryptable: false,
-		...overrides
-	} as ChatMessage
+		inner: { uuid, senderId: 2n, senderEmail: "peer@test", senderAvatar: undefined, message: `text ${uuid}` }
+	})
 }
 
 function chat(uuid: string, lastMessage: ChatMessage | undefined): Chat {
-	return {
-		uuid,
-		lastMessage,
-		ownerId: 1n,
-		key: "key",
-		name: undefined,
-		participants: [],
-		muted: false,
-		created: 1n,
-		lastFocus: 1n,
-		undecryptable: false
-	} as Chat
+	return makeChat({ uuid, lastMessage, key: "key", name: undefined })
 }
 
 function seedMessages(chatUuid: string, messages: ChatMessage[]): void {

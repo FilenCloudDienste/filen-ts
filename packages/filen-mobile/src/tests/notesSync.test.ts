@@ -13,9 +13,7 @@ const {
 	mockCreateExecutableTimeout,
 	mockNotesWithContentQueryGet,
 	mockNoteContentQueryUpdate,
-	mockNoteContentQueryDataUpdatedAt,
-	ErrorKindMock,
-	sdkErrorState
+	mockNoteContentQueryDataUpdatedAt
 } = vi.hoisted(() => ({
 	mockNoteContentQueryUpdate: vi.fn(),
 	mockNoteContentQueryDataUpdatedAt: vi.fn().mockReturnValue(undefined),
@@ -32,24 +30,7 @@ const {
 	mockNotesGetContent: vi.fn().mockResolvedValue(""),
 	mockFetchNotesWithContent: vi.fn().mockResolvedValue([]),
 	mockCreateExecutableTimeout: vi.fn(),
-	mockNotesWithContentQueryGet: vi.fn().mockReturnValue(null),
-	// Faithful-enough ErrorKind enum (member names mirror @filen/sdk-rs). Numeric values are
-	// irrelevant — the same mock object backs both the call site (kind()) and the real classifier
-	// switch in src/lib/sdkErrors.ts.
-	ErrorKindMock: {
-		Server: "Server",
-		Unauthenticated: "Unauthenticated",
-		Reqwest: "Reqwest",
-		RetryFailed: "RetryFailed",
-		Response: "Response"
-	} as const,
-	// T2: instead of stubbing the classifier verdict, the REAL src/lib/sdkErrors.ts runs against a
-	// mocked @filen/sdk-rs. These cells let each test mark a thrown value as a FilenSdkError of a
-	// chosen kind. By default no value is an SDK error (hasInner → false), so a plain Error follows
-	// the keep-for-retry path.
-	sdkErrorState: {
-		innerOf: new Map<unknown, { kind: () => string; message: () => string }>()
-	}
+	mockNotesWithContentQueryGet: vi.fn().mockReturnValue(null)
 }))
 
 vi.mock("react-native", async () => {
@@ -90,9 +71,7 @@ vi.mock("react-native", async () => {
 
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
-	createExecutableTimeout: (...args: unknown[]) => mockCreateExecutableTimeout(...args),
-	isPermanentRejection: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).isPermanentRejection,
-	MAX_NON_RETRYABLE_REJECTIONS: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).MAX_NON_RETRYABLE_REJECTIONS
+	createExecutableTimeout: (...args: unknown[]) => mockCreateExecutableTimeout(...args)
 }))
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
@@ -144,41 +123,20 @@ vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 // T2: DO NOT mock @/lib/sdkErrors — the real classifier (unwrapSdkError / isNetworkClassError /
 // isRetryableAuthError) runs against this faithful @filen/sdk-rs mock so the VC3 narrowing is
 // exercised end-to-end through the actual sdkErrors.ts code, not a stubbed verdict.
-vi.mock("@filen/sdk-rs", () => {
-	class FilenSdkErrorMock {
-		public static hasInner(error: unknown): boolean {
-			return sdkErrorState.innerOf.has(error)
-		}
-
-		public static getInner(error: unknown): unknown {
-			return sdkErrorState.innerOf.get(error)
-		}
-	}
+vi.mock("@filen/sdk-rs", async () => {
+	const m = await import("@/tests/mocks/sdkErrors")
 
 	return {
-		ErrorKind: ErrorKindMock,
-		FilenSdkError: FilenSdkErrorMock
+		ErrorKind: m.ErrorKind,
+		FilenSdkError: m.FilenSdkError
 	}
 })
 
 // sdkErrors.ts imports @/lib/i18n at module load (used only by the human-readable formatter, not
 // the classifiers under test) — provide a trivial stand-in so the module evaluates.
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
-// Mark a thrown value as a FilenSdkError of a given kind for the duration of a test.
-function asSdkError<E>(error: E, kind: string): E {
-	sdkErrorState.innerOf.set(error, {
-		kind: () => kind,
-		message: () => `mock ${kind}`
-	})
-
-	return error
-}
-
+import { ErrorKind, sdkErrorState, asSdkError } from "@/tests/mocks/sdkErrors"
 import { Sync, SyncHost, sync as singletonSync } from "@/features/notes/components/sync"
 import { hashNoteContent, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import sqlite from "@/lib/sqlite"
@@ -803,7 +761,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 1000, content: "writable-edit", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("transient server error"), ErrorKindMock.Server))
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("transient server error"), ErrorKind.Server))
 			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
 			sync.syncDebounced()
@@ -826,7 +784,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 1000, content: "read-only-edit", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKindMock.Server))
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKind.Server))
 			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
 			// Fire sync MAX times; on each of the first N-1 the entry survives, on the Nth it drops.
@@ -854,7 +812,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 1000, content: "edit-during-reauth", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("api_key_not_found"), ErrorKindMock.Unauthenticated))
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("api_key_not_found"), ErrorKind.Unauthenticated))
 			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
 			// Far more than MAX rejections — the auth error must never advance the drop bound.
@@ -875,7 +833,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 1000, content: "transient", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("network down"), ErrorKindMock.Reqwest))
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("network down"), ErrorKind.Reqwest))
 			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
 			// Even past the bound, a network-class error must never be counted toward the drop.
@@ -897,7 +855,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 1000, content: "v1", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server"), ErrorKindMock.Server))
+			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server"), ErrorKind.Server))
 			mockCreateExecutableTimeout.mockImplementation(timeoutImpl)
 
 			sync.executeNow()
@@ -917,7 +875,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 3000, content: "v2", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKindMock.Server))
+			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKind.Server))
 			sync.executeNow()
 			await new Promise(resolve => setTimeout(resolve, 0))
 
@@ -958,7 +916,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 1000, content: "v1", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("server"), ErrorKindMock.Server))
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("server"), ErrorKind.Server))
 
 			for (let attempt = 1; attempt < MAX_NON_RETRYABLE_REJECTIONS; attempt++) {
 				sync.executeNow()
@@ -977,7 +935,7 @@ describe("Sync (Notes)", () => {
 				"note-1": [{ timestamp: 3000, content: "v2", note: mockNote("note-1") }]
 			}
 
-			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKindMock.Server))
+			mockNotesSetContent.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKind.Server))
 
 			sync.executeNow()
 
@@ -1966,7 +1924,7 @@ describe("Sync (Notes)", () => {
 		})
 
 		it("never re-drives a rejection counted toward the drop bound", async () => {
-			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKindMock.Server))
+			mockNotesSetContent.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKind.Server))
 
 			await pass()
 

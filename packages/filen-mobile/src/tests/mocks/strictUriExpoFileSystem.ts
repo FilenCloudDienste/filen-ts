@@ -30,11 +30,9 @@
  *   import { strictFs } from "@/tests/mocks/strictUriExpoFileSystem"
  */
 
-type Entry = Uint8Array | "dir"
+import { dirname, toUriString, withRootGetters } from "@/tests/mocks/expoFileSystemPaths"
 
-const DOCUMENT_URI = "file:///document"
-const CACHE_URI = "file:///cache"
-const BUNDLE_URI = "file:///bundle"
+type Entry = Uint8Array | "dir"
 
 /** Backing store, keyed by FULLY-ENCODED uri. */
 export const strictFs = new Map<string, Entry>()
@@ -97,10 +95,6 @@ function whatwgPathEncode(uri: string): string {
 
 	// [ ] ^ | deliberately NOT encoded — they reach the "native layer" raw.
 	return out
-}
-
-function toUriString(value: string | File | Directory): string {
-	return typeof value === "string" ? value : value.uri
 }
 
 function trimSlashes(part: string, isFirst: boolean): string {
@@ -371,46 +365,12 @@ export class Directory {
 	}
 }
 
-export const Paths = {
-	get document(): Directory {
-		return new Directory(DOCUMENT_URI)
-	},
-	get cache(): Directory {
-		return new Directory(CACHE_URI)
-	},
-	get bundle(): Directory {
-		return new Directory(BUNDLE_URI)
-	},
-	get appleSharedContainers(): Record<string, Directory> {
-		return new Proxy({} as Record<string, Directory>, {
-			get(_target, prop) {
-				return new Directory(`file:///shared/${String(prop)}`)
-			}
-		})
-	},
+const basePaths = {
 	join(...paths: (string | File | Directory)[]): string {
 		return joinStrict(paths)
 	},
 	dirname(path: string | File | Directory): string {
-		const str = toUriString(path)
-		let end = str.length
-
-		while (end > 0 && str.charCodeAt(end - 1) === 47) {
-			end--
-		}
-
-		const idx = str.lastIndexOf("/", end - 1)
-		const result = idx === -1 ? "" : str.slice(0, idx)
-
-		if (result.length > 0) {
-			return result
-		}
-
-		if (str.startsWith("/") && !str.startsWith("file://")) {
-			return "/"
-		}
-
-		return DOCUMENT_URI
+		return dirname(toUriString(path))
 	},
 	basename(path: string | File | Directory, ext?: string): string {
 		const str = toUriString(path)
@@ -430,6 +390,8 @@ export const Paths = {
 		return dot === -1 ? "" : base.slice(dot)
 	}
 }
+
+export const Paths = withRootGetters(basePaths, Directory)
 
 /** Test helpers. */
 export const strictFsHelpers = {

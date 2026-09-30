@@ -2,25 +2,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyFile: {
-		File: class {
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Shared: class {
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	ManagedFuture: {
-		new: vi.fn().mockReturnValue({})
-	}
-}))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 vi.mock("@filen/shared", async () => {
 	const sharedMock = await import("@/tests/mocks/filenShared")
@@ -32,10 +14,7 @@ vi.mock("@filen/shared", async () => {
 	return {
 		...sharedMock,
 		Semaphore: actual.Semaphore,
-		KeyedSemaphores: actual.KeyedSemaphores,
-		// fileCache.gc() exercises the real eviction planner, so pull it through unmocked (a stub
-		// would silently skip the size-cap pass under test).
-		planSizeCapEviction: actual.planSizeCapEviction
+		KeyedSemaphores: actual.KeyedSemaphores
 	}
 })
 
@@ -49,16 +28,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-vi.mock("@/lib/utils", () => ({}))
-
-vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: (p: string) =>
-		p
-			.trim()
-			.replace(/^file:\/+/, "/")
-			.replace(/\/+/g, "/")
-			.replace(/\/$/, "")
-}))
+vi.mock("@/lib/paths", async () => await import("@/tests/mocks/paths"))
 
 vi.mock("@/lib/signals", () => ({
 	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined),
@@ -73,11 +43,6 @@ vi.mock("@/features/offline/offline", () => ({
 	}
 }))
 
-// fsUtils (imported by fileCache.ts) now pulls VERSION from sibling lib modules.
-// Mock them with just the VERSION export so their full transitive deps don't load.
-vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
-
 import { serialize, deserialize } from "@/lib/serializer"
 import { fs, File } from "@/tests/mocks/expoFileSystem"
 import { type DriveItem, type CacheItem } from "@/types"
@@ -85,63 +50,12 @@ import auth from "@/lib/auth"
 import { wrapAbortSignalForSdk } from "@/lib/signals"
 import { type Metadata } from "@/lib/fileCache"
 import offline from "@/features/offline/offline"
-import { xxHash32 } from "js-xxhash"
+import { driveFileItem, wrapDrive, makeExternalItem, externalId, extname } from "@/tests/fixtures/driveItems"
 
 const BASE_DIR = "file:///shared/group.io.filen.app/fileCache/v1"
 
 function makeFileItem(uuid: string, name: string, size: bigint = 100n, favorited: boolean = false): DriveItem {
-	return {
-		type: "file",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size,
-				modified: 1000,
-				created: 900,
-				mime: "application/octet-stream"
-			},
-			undecryptable: false,
-			size,
-			favorited
-		}
-	} as unknown as DriveItem
-}
-
-function makeSharedFileItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "sharedFile",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 100n,
-				modified: 1000,
-				created: 900,
-				mime: "application/octet-stream"
-			},
-			undecryptable: false,
-			size: 100n
-		}
-	} as unknown as DriveItem
-}
-
-function makeSharedRootFileItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "sharedRootFile",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 100n,
-				modified: 1000,
-				created: 900,
-				mime: "application/octet-stream"
-			},
-			undecryptable: false,
-			size: 100n
-		}
-	} as unknown as DriveItem
+	return driveFileItem("file", uuid, name, undefined, { size, favorited })
 }
 
 function makeDirItem(uuid: string, name: string): DriveItem {
@@ -153,33 +67,6 @@ function makeDirItem(uuid: string, name: string): DriveItem {
 			undecryptable: false
 		}
 	} as unknown as DriveItem
-}
-
-function wrapDrive(item: DriveItem): CacheItem {
-	return {
-		type: "drive",
-		data: item
-	}
-}
-
-function makeExternalItem(url: string, name: string): CacheItem {
-	return {
-		type: "external",
-		data: {
-			url,
-			name
-		}
-	}
-}
-
-function externalId(url: string): string {
-	return xxHash32(url).toString(16)
-}
-
-function extname(filename: string): string {
-	const dot = filename.lastIndexOf(".")
-
-	return dot === -1 ? "" : filename.slice(dot)
 }
 
 function writeFile(uuid: string, name: string, data: Uint8Array = new Uint8Array([1, 2, 3])): void {
@@ -591,7 +478,7 @@ describe("FileCache", () => {
 
 		it("returns true for sharedFile type when file and metadata exist and match", async () => {
 			const cache = await createFileCache()
-			const driveItem = makeSharedFileItem("shared-uuid", "shared.jpg")
+			const driveItem = driveFileItem("sharedFile", "shared-uuid", "shared.jpg")
 			const item = wrapDrive(driveItem)
 
 			writeFile("shared-uuid", "shared.jpg")
@@ -604,7 +491,7 @@ describe("FileCache", () => {
 
 		it("returns true for sharedRootFile type when file and metadata exist and match", async () => {
 			const cache = await createFileCache()
-			const driveItem = makeSharedRootFileItem("sharedroot-uuid", "root.png")
+			const driveItem = driveFileItem("sharedRootFile", "sharedroot-uuid", "root.png")
 			const item = wrapDrive(driveItem)
 
 			writeFile("sharedroot-uuid", "root.png")
@@ -931,7 +818,7 @@ describe("FileCache", () => {
 
 		it("downloads sharedFile type via SDK and caches metadata correctly", async () => {
 			const cache = await createFileCache()
-			const driveItem = makeSharedFileItem("sf-uuid", "shared.bin")
+			const driveItem = driveFileItem("sharedFile", "sf-uuid", "shared.bin")
 			const item = wrapDrive(driveItem)
 
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
@@ -955,7 +842,7 @@ describe("FileCache", () => {
 
 		it("downloads sharedRootFile type via SDK and caches metadata correctly", async () => {
 			const cache = await createFileCache()
-			const driveItem = makeSharedRootFileItem("srf-uuid", "rootshared.bin")
+			const driveItem = driveFileItem("sharedRootFile", "srf-uuid", "rootshared.bin")
 			const item = wrapDrive(driveItem)
 
 			vi.mocked(auth.getSdkClients).mockResolvedValue({
@@ -1009,7 +896,7 @@ describe("FileCache", () => {
 
 		it("removes sharedFile entries without throwing", async () => {
 			const cache = await createFileCache()
-			const driveItem = makeSharedFileItem("rmshared-uuid", "rmshared.txt")
+			const driveItem = driveFileItem("sharedFile", "rmshared-uuid", "rmshared.txt")
 			const item = wrapDrive(driveItem)
 
 			writeFile("rmshared-uuid", "rmshared.txt")
@@ -1022,7 +909,7 @@ describe("FileCache", () => {
 
 		it("removes sharedRootFile entries without throwing", async () => {
 			const cache = await createFileCache()
-			const driveItem = makeSharedRootFileItem("rmsharedroot-uuid", "rmsharedroot.txt")
+			const driveItem = driveFileItem("sharedRootFile", "rmsharedroot-uuid", "rmsharedroot.txt")
 			const item = wrapDrive(driveItem)
 
 			writeFile("rmsharedroot-uuid", "rmsharedroot.txt")

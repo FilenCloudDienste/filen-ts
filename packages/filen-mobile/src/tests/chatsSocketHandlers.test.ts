@@ -139,19 +139,14 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { handleChatEvent, chatTypingTimeoutsRef, type ChatSocketEvent } from "@/features/chats/socketHandlers"
 import { ChatEvent_Tags, ChatTypingType, MaybeEncryptedUniffi_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
+import { socketEvent } from "@/tests/fixtures/socketEvents"
 
 // ---------------------------------------------------------------------------
-// Helpers — build minimal socket-event shapes matching the handler's destructure:
-//   const [eventInner] = event.inner
-//   eventInner.inner.tag  → ChatEvent_Tags.*
-//   const [inner] = eventInner.inner.inner
+// Helpers
 // ---------------------------------------------------------------------------
 
 function makeEvent(tag: string, inner: unknown): ChatSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Chat,
-		inner: [{ inner: { tag, inner: [inner] } }]
-	} as unknown as ChatSocketEvent
+	return socketEvent(SocketEvent_Tags.Chat, tag, inner)
 }
 
 function makeTypingEvent(typingType: ChatTypingType, chatUuid: string, senderId: bigint): ChatSocketEvent {
@@ -220,10 +215,7 @@ function makeConversationParticipantNewEvent(chatUuid: string, participant: Reco
 }
 
 function makeUnknownTagEvent(): ChatSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Chat,
-		inner: [{ inner: { tag: "UnknownTagThatDoesNotExist_xyz", inner: [{}] } }]
-	} as unknown as ChatSocketEvent
+	return makeEvent("UnknownTagThatDoesNotExist_xyz", {})
 }
 
 const USER_ID = 100n

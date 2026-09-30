@@ -8,40 +8,11 @@ const { mockCacheMap, mockHas, mockGet, mockIsOnline, mockOfflineGetLocalFile } 
 	mockOfflineGetLocalFile: vi.fn().mockResolvedValue(null)
 }))
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	sortParams: (p: Record<string, unknown>) => p
-}))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 // The query reaches @/queries/fileSource → @/lib/fileCache → @filen/sdk-rs (whose installer runs at
 // import); stub the same three modules useFileUrl.query.test.ts stubs.
-vi.mock("@filen/sdk-rs", () => {
-	class TaggedUnion {
-		tag: string
-		inner: unknown[]
-
-		constructor(tag: string, value: unknown) {
-			this.tag = tag
-			this.inner = [value]
-		}
-	}
-
-	return {
-		AnyFile: {
-			File: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("File", file)
-				}
-			},
-			Shared: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("Shared", file)
-				}
-			}
-		},
-		ManagedFuture: { new: vi.fn(() => ({})) }
-	}
-})
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 vi.mock("@/lib/fileCache", () => ({
 	default: {}

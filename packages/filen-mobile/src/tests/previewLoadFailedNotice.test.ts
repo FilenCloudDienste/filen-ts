@@ -4,9 +4,7 @@ import { vi, describe, it, expect } from "vitest"
 import { createElement } from "react"
 import { render, fireEvent } from "@testing-library/react"
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (k: string) => k })
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
 vi.mock("@filen/shared", () => ({
 	cn: (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ")

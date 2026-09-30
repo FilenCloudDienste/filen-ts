@@ -12,9 +12,7 @@ import { renderHook, waitFor } from "@testing-library/react"
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("@/lib/logger", () => ({
-	default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }
-}))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 import useRangeSource, { type RangeSource } from "@/hooks/useRangeSource"
 import { PDF_MAGIC, base64ToBytes } from "@/lib/rangeTransfer"

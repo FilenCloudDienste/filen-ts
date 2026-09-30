@@ -46,16 +46,12 @@ vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
 }))
 
 // ── RN ecosystem ─────────────────────────────────────────────────────────────
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (k: string) => k })
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("expo-linking", () => ({ canOpenURL: vi.fn(), openURL: vi.fn() }))
 vi.mock("expo-router", () => ({
 	router: { push: vi.fn(), back: vi.fn(), canGoBack: vi.fn().mockReturnValue(true) }
 }))
-vi.mock("zustand/shallow", () => ({
-	useShallow: (fn: unknown) => fn
-}))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 vi.mock("react-native-reanimated", () => ({
 	FadeIn: {},
 	FadeOut: {},
@@ -130,10 +126,7 @@ vi.mock("@/features/drive/drive", () => ({
 		openLinkedFile: vi.fn()
 	}
 }))
-vi.mock("@/lib/i18n", () => ({
-	default: { t: (k: string) => k },
-	t: (k: string) => k
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/decryption", () => ({
 	messageDisplayBody: (m: unknown) => (m as { inner: { message?: string } }).inner?.message ?? "",
 	chatDisplayName: (chat: unknown, userId: bigint) => {
@@ -243,23 +236,7 @@ import { createMenuButtons } from "@/features/chats/components/list/chat/menu"
 import { flushInflightMessagesWithAlert } from "@/features/chats/components/chat/input"
 import { sync } from "@/features/chats/components/sync"
 import alerts from "@/lib/alerts"
-import type { Chat } from "@/types"
-
-// ─── Factory helpers ──────────────────────────────────────────────────────────
-
-function makeChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: "chat-abc-123",
-		ownerId: 1n,
-		muted: false,
-		participants: [],
-		undecryptable: false,
-		key: "key",
-		created: 0n,
-		lastFocus: 0n,
-		...overrides
-	} as Chat
-}
+import { makeChat } from "@/tests/fixtures/chats"
 
 // ─── customEmojiSrcById ──────────────────────────────────────────────────────
 

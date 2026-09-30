@@ -6,29 +6,33 @@ vi.mock("expo-localization", () => ({
 	getLocales: () => [{ languageTag: "en-US" }]
 }))
 
+async function loadTime(languageTag: string): Promise<typeof import("@/lib/time")> {
+	vi.resetModules()
+
+	vi.doMock("expo-localization", () => ({
+		getLocales: () => [{ languageTag }]
+	}))
+
+	return await import("@/lib/time")
+}
+
 describe("time", () => {
 	// Use a fixed date: 2025-03-15 13:05:09 local time
 	const fixedDate = new Date(2025, 2, 15, 13, 5, 9)
 	const fixedMs = fixedDate.getTime()
 	const fixedSec = fixedMs / 1000
+	const sample = new Date(2025, 0, 15, 14, 30, 45)
 
 	describe("en-US locale (12-hour, MDY)", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
 
 		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-US" }]
-			}))
-
-			const mod = await import("@/lib/time")
+			const mod = await loadTime("en-US")
 
 			simpleDate = mod.simpleDate
 			simpleDateNoTime = mod.simpleDateNoTime
 		})
-
 		it("converts seconds timestamp (< 10000000000) by multiplying by 1000", () => {
 			const result = simpleDate(fixedSec)
 			const resultMs = simpleDate(fixedMs)
@@ -68,7 +72,6 @@ describe("time", () => {
 			expect(result).toBe(`${month}/${day}/${year}`)
 		})
 
-
 		it("12-hour format: hour 0 → 12:XX:XX AM", () => {
 			const midnight = new Date(2025, 0, 1, 0, 7, 3)
 			const result = simpleDate(midnight)
@@ -100,190 +103,30 @@ describe("time", () => {
 		})
 	})
 
-	describe("de-DE locale (24-hour, DMY, dot separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
+	it.each([
+		["de-DE", "15.01.2025, 14:30:45", "15.01.2025"],
+		["nb", "15.01.2025, 14:30:45", "15.01.2025"],
+		["en-GB", "15/01/2025, 02:30:45 PM", "15/01/2025"],
+		["en-AU", "15/01/2025, 02:30:45 PM", "15/01/2025"],
+		["en-CA", "01/15/2025, 02:30:45 PM", "01/15/2025"]
+	])("%s formats as %s", async (tag, expectedDateTime, expectedDate) => {
+		const { simpleDate, simpleDateNoTime } = await loadTime(tag)
 
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "de-DE" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-		})
-
-		it("formats as DMY with dot separator", () => {
-			const result = simpleDate(fixedDate)
-			const month = String(fixedDate.getMonth() + 1).padStart(2, "0")
-			const day = String(fixedDate.getDate()).padStart(2, "0")
-			const year = fixedDate.getFullYear()
-
-			expect(result).toContain(`${day}.${month}.${year}`)
-		})
-
-		it("24-hour format: hour 0 → 00:XX:XX", () => {
-			const midnight = new Date(2025, 0, 1, 0, 7, 3)
-			const result = simpleDate(midnight)
-
-			expect(result).toContain("00:07:03")
-		})
-
-		it("24-hour format: hour 13 → 13:XX:XX", () => {
-			const afternoon = new Date(2025, 0, 1, 13, 7, 3)
-			const result = simpleDate(afternoon)
-
-			expect(result).toContain("13:07:03")
-		})
+		expect(simpleDate(sample)).toBe(expectedDateTime)
+		expect(simpleDateNoTime(sample)).toBe(expectedDate)
 	})
 
-	describe("en-GB locale (12-hour, DMY, slash separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
+	it("24-hour format: hour 0 → 00:XX:XX (de-DE)", async () => {
+		const { simpleDate } = await loadTime("de-DE")
 
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-GB" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as DMY with slash separator", () => {
-			const result = simpleDate(fixedDate)
-			const month = String(fixedDate.getMonth() + 1).padStart(2, "0")
-			const day = String(fixedDate.getDate()).padStart(2, "0")
-			const year = fixedDate.getFullYear()
-
-			expect(result).toContain(`${day}/${month}/${year}`)
-		})
-
-		it("uses 12-hour time with AM/PM", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("02:30:45 PM")
-		})
-
-		it("simpleDateNoTime returns DMY date only", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("15/01/2025")
-		})
-
-	})
-
-	describe("en-AU locale (12-hour, DMY, slash separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-AU" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-		})
-
-		it("formats as DMY with slash separator", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("15/01/2025")
-		})
-
-		it("uses 12-hour time with AM/PM", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("02:30:45 PM")
-		})
-	})
-
-	describe("en-CA locale (12-hour, MDY, slash separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-CA" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-		})
-
-		it("formats as MDY with slash separator", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("01/15/2025")
-		})
-
-		it("uses 12-hour time with AM/PM", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("02:30:45 PM")
-		})
-	})
-
-	describe("nb locale (24-hour, DMY, dot separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "nb" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-		})
-
-		it("formats as DMY with dot separator and 24-hour time", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toBe("15.01.2025, 14:30:45")
-		})
-
-		it("24-hour format in the combined output", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("14:30:45")
-		})
+		expect(simpleDate(new Date(2025, 0, 1, 0, 7, 3))).toBe("01.01.2025, 00:07:03")
 	})
 
 	describe("edge cases", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 
 		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-US" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
+			simpleDate = (await loadTime("en-US")).simpleDate
 		})
 
 		it("midnight (hour 0) shows 12:xx:xx AM in 12-hour format", () => {
@@ -350,329 +193,35 @@ describe("time", () => {
 		})
 	})
 
-	// --- Item #7: YMD locale branches zh/ko/hu/fa/lt/mn ---
-	// Only ja-JP was previously tested. Each prefix is independently evaluated in the
-	// if-chain; a typo (e.g. "zh" → "zh-cn") would break zh-TW silently. hu (Hungarian)
-	// is in SUPPORTED_LANGUAGES and would otherwise fall through to DMY.
-
-	describe("zh-CN locale (24-hour, YMD, dash separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "zh-CN" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("2025-01-15")
-		})
-
-		it("simpleDateNoTime returns YMD date only", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-
-		it("24-hour time in the combined output", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("14:30:45")
-		})
-
-		it("output is distinct from de-DE DMY format", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			// de-DE would be "15.01.2025"; zh-CN must be "2025-01-15"
-			expect(result).not.toBe("15.01.2025")
-			expect(result).toBe("2025-01-15")
-		})
-	})
-
-	describe("ko-KR locale (24-hour, YMD, dash separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "ko-KR" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("2025-01-15")
-		})
-
-		it("simpleDateNoTime returns YMD date only", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-
-		it("output is distinct from de-DE DMY format", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).not.toBe("15.01.2025")
-			expect(result).toBe("2025-01-15")
-		})
-	})
-
-	describe("hu-HU locale (24-hour, YMD, dash separator) — in SUPPORTED_LANGUAGES", () => {
-		// hu is in SUPPORTED_LANGUAGES; without the startsWith("hu") check it would
-		// silently fall through to DMY and display the wrong date order.
-		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "hu-HU" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator (not DMY)", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("2025-01-15")
-			// Explicitly guard against the DMY fallback that would occur if "hu" prefix were missing
-			expect(result).not.toContain("15/01/2025")
-			expect(result).not.toContain("15.01.2025")
-		})
-
-		it("simpleDateNoTime returns YMD date only", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-
-		it("24-hour time in the combined output", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("14:30:45")
-		})
-	})
-
-	describe("sv-SE locale (24-hour, YMD, dash separator) — in SUPPORTED_LANGUAGES", () => {
-		// sv is in SUPPORTED_LANGUAGES; Sweden is the canonical ISO 8601 country (YYYY-MM-DD).
-		// Without the startsWith("sv") check it would silently fall through to DMY and display
-		// the wrong date order — mirrors the hu-HU regression guard above.
-		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "sv-SE" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator (not DMY)", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("2025-01-15")
-			// Explicitly guard against the DMY fallback that would occur if "sv" prefix were missing
-			expect(result).not.toContain("15/01/2025")
-			expect(result).not.toContain("15.01.2025")
-		})
-
-		it("simpleDateNoTime returns YMD date only", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-
-		it("24-hour time in the combined output", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("14:30:45")
-		})
-	})
-
-	describe("fa-IR locale (24-hour, YMD, dash separator)", () => {
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "fa-IR" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-	})
-
-	describe("lt-LT locale (24-hour, YMD, dash separator)", () => {
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "lt-LT" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-	})
-
-	describe("mn-MN locale (24-hour, YMD, dash separator)", () => {
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "mn-MN" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-	})
-
-	describe("ja-JP locale (24-hour, YMD, dash separator)", () => {
-		let simpleDate: typeof import("@/lib/time").simpleDate
-		let simpleDateNoTime: typeof import("@/lib/time").simpleDateNoTime
-
-		beforeEach(async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "ja-JP" }]
-			}))
-
-			const mod = await import("@/lib/time")
-
-			simpleDate = mod.simpleDate
-			simpleDateNoTime = mod.simpleDateNoTime
-		})
-
-		it("formats as YMD with dash separator", () => {
-			const result = simpleDate(fixedDate)
-			const month = String(fixedDate.getMonth() + 1).padStart(2, "0")
-			const day = String(fixedDate.getDate()).padStart(2, "0")
-			const year = fixedDate.getFullYear()
-
-			expect(result).toContain(`${year}-${month}-${day}`)
-		})
-
-		it("simpleDateNoTime returns YMD date only", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDateNoTime(d)
-
-			expect(result).toBe("2025-01-15")
-		})
-
-		it("24-hour format in the combined output", () => {
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = simpleDate(d)
-
-			expect(result).toContain("14:30:45")
-		})
-	})
+	// Each YMD prefix is checked independently; a missing one (hu, sv) silently falls through to DMY.
+	it.each(["zh-CN", "ko-KR", "hu-HU", "sv-SE", "fa-IR", "lt-LT", "mn-MN", "ja-JP"])(
+		"%s formats as YMD with dash separator and 24-hour time",
+		async tag => {
+			const { simpleDate, simpleDateNoTime } = await loadTime(tag)
+
+			expect(simpleDate(sample)).toBe("2025-01-15, 14:30:45")
+			expect(simpleDateNoTime(sample)).toBe("2025-01-15")
+		}
+	)
 
 	describe("setIntlLanguage — live locale switch", () => {
 		it("a format call after setIntlLanguage picks up the new locale without a module reload", async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-US" }]
-			}))
-
-			const mod = await import("@/lib/time")
-			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const mod = await loadTime("en-US")
 
 			// Baseline: en-US → MDY, 12-hour
-			const before = mod.simpleDate(d)
+			const before = mod.simpleDate(sample)
 			expect(before).toBe("01/15/2025, 02:30:45 PM")
 
 			// Switch to de-DE at runtime
 			mod.setIntlLanguage("de-DE")
 
 			// cachedLocaleInfo is null now; next call must re-derive from intlLanguage
-			const after = mod.simpleDate(d)
+			const after = mod.simpleDate(sample)
 			expect(after).toBe("15.01.2025, 14:30:45")
 		})
 
 		it("setIntlLanguage updates the exported intlLanguage binding", async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-US" }]
-			}))
-
-			const mod = await import("@/lib/time")
+			const mod = await loadTime("en-US")
 
 			mod.setIntlLanguage("fr-FR")
 
@@ -696,8 +245,7 @@ describe("time", () => {
 			expect(mod.intlLanguage).toBe("en-US")
 
 			// The formatters must still work (fallback MDY, 12-hour)
-			const d = new Date(2025, 0, 15, 14, 30, 45)
-			const result = mod.simpleDate(d)
+			const result = mod.simpleDate(sample)
 
 			expect(result).toBe("01/15/2025, 02:30:45 PM")
 		})
@@ -705,29 +253,16 @@ describe("time", () => {
 
 	describe("detectLocaleInfo — unknown locale falls back to DMY/slash/24h", () => {
 		it("an unmapped locale tag (xx-XX) produces DMY slash-separated 24-hour output", async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "xx-XX" }]
-			}))
-
-			const mod = await import("@/lib/time")
-			const d = new Date(2025, 0, 15, 14, 30, 45)
+			const mod = await loadTime("xx-XX")
 
 			// Falls into the else branch: DMY, slash, 24-hour
-			const result = mod.simpleDate(d)
+			const result = mod.simpleDate(sample)
 
 			expect(result).toBe("15/01/2025, 14:30:45")
 		})
 
 		it("a bare unknown language code (zz) produces DMY slash-separated 24-hour output", async () => {
-			vi.resetModules()
-
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "zz" }]
-			}))
-
-			const mod = await import("@/lib/time")
+			const mod = await loadTime("zz")
 			const d = new Date(2025, 0, 15, 9, 5, 3)
 
 			const result = mod.simpleDate(d)
@@ -752,15 +287,10 @@ describe("time", () => {
 		let simpleDate: typeof import("@/lib/time").simpleDate
 
 		beforeEach(async () => {
-			vi.resetModules()
 			vi.useFakeTimers()
 			vi.setSystemTime(NOW)
 
-			vi.doMock("expo-localization", () => ({
-				getLocales: () => [{ languageTag: "en-US" }]
-			}))
-
-			const mod = await import("@/lib/time")
+			const mod = await loadTime("en-US")
 
 			formatRelativeTime = mod.formatRelativeTime
 			simpleDate = mod.simpleDate

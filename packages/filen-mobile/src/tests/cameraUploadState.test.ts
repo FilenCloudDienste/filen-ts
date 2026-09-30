@@ -5,14 +5,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 // on the same map.
 const { kvStore } = vi.hoisted(() => ({ kvStore: new Map<string, string>() }))
 
-vi.mock("@/lib/logger", () => ({
-	default: {
-		warn: vi.fn(),
-		error: vi.fn(),
-		info: vi.fn(),
-		debug: vi.fn()
-	}
-}))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 vi.mock("@/lib/sqlite", async () => {
 	const { serialize, deserialize } = await import("@/lib/serializer")

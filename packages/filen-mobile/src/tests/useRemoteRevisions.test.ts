@@ -95,7 +95,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	unwrappedFileIntoDriveItem: (file: unknown) => ({ type: "file", data: file })
 }))
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("@/components/drivePreview/gallery", () => ({
 	galleryItemKey: (item: { data: { data: { uuid: string } } }) => item.data.data.uuid
 }))

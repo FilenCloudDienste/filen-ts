@@ -3,11 +3,7 @@ import { vi, describe, it, expect, beforeAll, afterAll } from "vitest"
 // sort.ts now resolves the fixed group-header labels via the module i18n and derives month
 // names from Intl using `intlLanguage`. Mock both so the pure sorter tests don't drag in
 // expo-localization / react-i18next (which crash in the node test env on `__DEV__`).
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // Getter-backed so a test can flip the language: notesSorter caches its month formatter, and that
 // cache has to invalidate when setIntlLanguage reassigns the binding.

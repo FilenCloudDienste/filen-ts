@@ -26,7 +26,7 @@ vi.mock("@/lib/logger", () => ({ default: loggerMock }))
 
 // Echoes the key back, so the offline-guard assertion can name the string a user would actually see.
 // The real module reaches expo-localization.
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // Sentinel a test can plant to make exactly one row undecodable.
 const CORRUPT_ROW = "__corrupt__"

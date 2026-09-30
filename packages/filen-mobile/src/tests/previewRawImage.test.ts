@@ -26,9 +26,7 @@ vi.mock("@/components/drivePreview/previewStatus", async () => {
 	}
 })
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (k: string) => k })
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
 vi.mock("@/queries/useRawPreview.query", () => ({
 	default: mockUseRawPreviewQuery

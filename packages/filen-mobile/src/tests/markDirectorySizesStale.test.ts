@@ -7,10 +7,7 @@ import { QueryClient } from "@tanstack/react-query"
 
 const holder = vi.hoisted(() => ({ client: null as unknown as import("@tanstack/react-query").QueryClient }))
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	sortParams: (await import("@filen/shared")).sortParams
-}))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 vi.mock("@/queries/client", () => ({
 	get queryClient() {
 		return holder.client

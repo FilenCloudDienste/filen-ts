@@ -6,39 +6,9 @@ const { mockResolveFile } = vi.hoisted(() => ({
 
 vi.mock("react-native-quick-crypto", async () => await import("@/tests/mocks/reactNativeQuickCrypto"))
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	sortParams: (p: Record<string, unknown>) => {
-		const keys = Object.keys(p).sort()
-		const result: Record<string, unknown> = {}
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-		for (const k of keys) {
-			result[k] = p[k]
-		}
-
-		return result
-	}
-}))
-
-vi.mock("@filen/sdk-rs", () => ({
-	AnyFile: {
-		File: class {
-			tag = "File"
-			inner: unknown
-			constructor(v0: unknown) {
-				this.inner = Object.freeze([v0])
-			}
-		},
-		Shared: class {
-			tag = "Shared"
-			inner: unknown
-			constructor(v0: unknown) {
-				this.inner = Object.freeze([v0])
-			}
-		}
-	},
-	ManagedFuture: { new: vi.fn(() => ({})) }
-}))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 vi.mock("@/queries/fileSource", () => ({
 	resolveFile: mockResolveFile

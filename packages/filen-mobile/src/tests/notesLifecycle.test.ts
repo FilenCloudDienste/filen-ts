@@ -61,11 +61,7 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("@/lib/cache", () => ({
 	default: {
@@ -98,34 +94,13 @@ vi.mock("@filen/shared", async () => ({
 
 import { restoreFromHistory, deleteNote } from "@/features/notes/notesLifecycle"
 import { leave } from "@/features/notes/notesParticipants"
-import { type Note, type NoteHistory } from "@/types"
+import { type NoteHistory } from "@/types"
 import useNotesStore from "@/features/notes/store/useNotes.store"
+import { makeNote, makeSdkNote } from "@/tests/fixtures/notes"
 
 // ---------------------------------------------------------------------------
 // Factory helpers
 // ---------------------------------------------------------------------------
-
-function makeNote(overrides: Partial<Note> = {}): Note {
-	return {
-		uuid: "note-uuid-1",
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "some-key",
-		title: "Test Note",
-		preview: "preview",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1000n,
-		editedTimestamp: 2000n,
-		participants: [],
-		undecryptable: false,
-		...overrides
-	} as Note
-}
 
 function makeHistory(overrides: Partial<NoteHistory> = {}): NoteHistory {
 	return {
@@ -135,26 +110,6 @@ function makeHistory(overrides: Partial<NoteHistory> = {}): NoteHistory {
 		editedTimestamp: 3000n,
 		...overrides
 	} as unknown as NoteHistory
-}
-
-function makeSdkNote(uuid: string, overrides: Partial<Note> = {}) {
-	return {
-		uuid,
-		ownerId: 1n,
-		lastEditorId: 1n,
-		favorite: false,
-		pinned: false,
-		tags: [],
-		noteType: "text",
-		encryptionKey: "some-key",
-		title: "Test Note",
-		trash: false,
-		archive: false,
-		createdTimestamp: 1000n,
-		editedTimestamp: 2000n,
-		participants: [],
-		...overrides
-	}
 }
 
 function makeMockSdkClient(overrides: Record<string, unknown> = {}) {

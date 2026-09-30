@@ -4,7 +4,7 @@ vi.mock("expo-image-manipulator", () => ({
 	ImageManipulator: { manipulate: vi.fn() },
 	SaveFormat: { JPEG: "jpeg" }
 }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/constants", () => ({ EXPO_IMAGE_MANIPULATOR_SUPPORTED_EXTENSIONS: new Set([".heic", ".webp"]) }))
 
 import { fs } from "@/tests/mocks/expoFileSystem"

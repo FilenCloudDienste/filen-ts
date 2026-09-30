@@ -2,70 +2,40 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 import logger from "@/lib/logger"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
-const { kvStore, chatsState, mockSendMessage, mockFetchChats, mockSetInflightMessages, mockSetInflightErrors, ErrorKindMock, sdkErrorState } =
-	vi.hoisted(() => {
-		const chatsState = {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			inflightMessages: {} as Record<string, any>,
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			inflightErrors: {} as Record<string, any>
-		}
-
-		return {
-			kvStore: new Map<string, unknown>(),
-			chatsState,
-			mockSendMessage: vi.fn().mockResolvedValue({
-				chat: { uuid: "chat-1" },
-				message: { inner: { uuid: "msg-1" } }
-			}),
-			mockFetchChats: vi.fn().mockResolvedValue([]),
-			mockSetInflightMessages: vi.fn((fn: unknown) => {
-				if (typeof fn === "function") {
-					chatsState.inflightMessages = fn(chatsState.inflightMessages)
-				} else {
-					chatsState.inflightMessages = fn as typeof chatsState.inflightMessages
-				}
-			}),
-			mockSetInflightErrors: vi.fn((fn: unknown) => {
-				if (typeof fn === "function") {
-					chatsState.inflightErrors = fn(chatsState.inflightErrors)
-				} else {
-					chatsState.inflightErrors = fn as typeof chatsState.inflightErrors
-				}
-			}),
-			// Faithful-enough ErrorKind enum (member names mirror @filen/sdk-rs). Numeric values are
-			// irrelevant — the same mock object backs both the call site and the real classifier
-			// switch in src/lib/sdkErrors.ts.
-			ErrorKindMock: {
-				Server: "Server",
-				Unauthenticated: "Unauthenticated",
-				Reqwest: "Reqwest",
-				RetryFailed: "RetryFailed",
-				Response: "Response"
-			} as const,
-			// Instead of stubbing the classifier verdict, the REAL src/lib/sdkErrors.ts runs against a
-			// mocked @filen/sdk-rs. These cells let each test mark a thrown value as a FilenSdkError of
-			// a chosen kind. By default no value is an SDK error (hasInner → false), so a plain Error
-			// follows the keep-for-retry path.
-			sdkErrorState: {
-				innerOf: new Map<unknown, { kind: () => string; message: () => string }>()
-			}
-		}
-	})
-
-// restoreFromDisk delegates the merge to the real @filen/shared mergeInflightQueuesByUnion, and the
-// outbox drop gate to the real isPermanentRejection/MAX_NON_RETRYABLE_REJECTIONS — pull them through
-// via importActual rather than re-implementing the algorithms here.
-vi.mock("@filen/shared", async () => {
-	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
+const { kvStore, chatsState, mockSendMessage, mockFetchChats, mockSetInflightMessages, mockSetInflightErrors } = vi.hoisted(() => {
+	const chatsState = {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		inflightMessages: {} as Record<string, any>,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		inflightErrors: {} as Record<string, any>
+	}
 
 	return {
-		...(await import("@/tests/mocks/filenShared")),
-		mergeInflightQueuesByUnion: actual.mergeInflightQueuesByUnion,
-		isPermanentRejection: actual.isPermanentRejection,
-		MAX_NON_RETRYABLE_REJECTIONS: actual.MAX_NON_RETRYABLE_REJECTIONS
+		kvStore: new Map<string, unknown>(),
+		chatsState,
+		mockSendMessage: vi.fn().mockResolvedValue({
+			chat: { uuid: "chat-1" },
+			message: { inner: { uuid: "msg-1" } }
+		}),
+		mockFetchChats: vi.fn().mockResolvedValue([]),
+		mockSetInflightMessages: vi.fn((fn: unknown) => {
+			if (typeof fn === "function") {
+				chatsState.inflightMessages = fn(chatsState.inflightMessages)
+			} else {
+				chatsState.inflightMessages = fn as typeof chatsState.inflightMessages
+			}
+		}),
+		mockSetInflightErrors: vi.fn((fn: unknown) => {
+			if (typeof fn === "function") {
+				chatsState.inflightErrors = fn(chatsState.inflightErrors)
+			} else {
+				chatsState.inflightErrors = fn as typeof chatsState.inflightErrors
+			}
+		})
 	}
 })
+
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
@@ -104,42 +74,21 @@ vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 // DO NOT mock @/lib/sdkErrors — the real classifier (unwrapSdkError / isNetworkClassError /
 // isRetryableAuthError) runs against this faithful @filen/sdk-rs mock so the D4a narrowing is
 // exercised end-to-end through the actual sdkErrors.ts code, not a stubbed verdict.
-vi.mock("@filen/sdk-rs", () => {
-	class FilenSdkErrorMock {
-		public static hasInner(error: unknown): boolean {
-			return sdkErrorState.innerOf.has(error)
-		}
-
-		public static getInner(error: unknown): unknown {
-			return sdkErrorState.innerOf.get(error)
-		}
-	}
+vi.mock("@filen/sdk-rs", async () => {
+	const m = await import("@/tests/mocks/sdkErrors")
 
 	return {
-		ErrorKind: ErrorKindMock,
-		FilenSdkError: FilenSdkErrorMock
+		ErrorKind: m.ErrorKind,
+		FilenSdkError: m.FilenSdkError
 	}
 })
 
 // sdkErrors.ts imports @/lib/i18n at module load (used only by the human-readable formatter, not
 // the classifiers under test) — provide a trivial stand-in so the module evaluates.
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
-
-// Mark a thrown value as a FilenSdkError of a given kind for the duration of a test.
-function asSdkError<E>(error: E, kind: string): E {
-	sdkErrorState.innerOf.set(error, {
-		kind: () => kind,
-		message: () => `mock ${kind}`
-	})
-
-	return error
-}
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 import { onlineManager } from "@tanstack/react-query"
+import { ErrorKind, sdkErrorState, asSdkError } from "@/tests/mocks/sdkErrors"
 import { Sync } from "@/features/chats/components/sync"
 import { MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
 import sqlite from "@/lib/sqlite"
@@ -996,7 +945,7 @@ describe("Sync (Chats)", () => {
 			// A non-Error thrown value marked as an SDK error: the source extracts getInner(e).
 			const fakeSdkError = { _tag: "FilenSdkError" }
 
-			asSdkError(fakeSdkError, ErrorKindMock.Server)
+			asSdkError(fakeSdkError, ErrorKind.Server)
 
 			mockSendMessage.mockRejectedValueOnce(fakeSdkError)
 
@@ -1083,7 +1032,7 @@ describe("Sync (Chats)", () => {
 					}
 				}
 
-				mockSendMessage.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKindMock.Server))
+				mockSendMessage.mockRejectedValue(asSdkError(new Error("forbidden"), ErrorKind.Server))
 
 				for (let attempt = 1; attempt <= MAX_NON_RETRYABLE_REJECTIONS; attempt++) {
 					sync.syncNow()
@@ -1124,7 +1073,7 @@ describe("Sync (Chats)", () => {
 				}
 			}
 
-			mockSendMessage.mockRejectedValue(asSdkError(new Error("network down"), ErrorKindMock.Reqwest))
+			mockSendMessage.mockRejectedValue(asSdkError(new Error("network down"), ErrorKind.Reqwest))
 
 			for (let attempt = 0; attempt < MAX_NON_RETRYABLE_REJECTIONS + 2; attempt++) {
 				sync.syncNow()
@@ -1149,7 +1098,7 @@ describe("Sync (Chats)", () => {
 				}
 			}
 
-			mockSendMessage.mockRejectedValue(asSdkError(new Error("api_key_not_found"), ErrorKindMock.Unauthenticated))
+			mockSendMessage.mockRejectedValue(asSdkError(new Error("api_key_not_found"), ErrorKind.Unauthenticated))
 
 			for (let attempt = 0; attempt < MAX_NON_RETRYABLE_REJECTIONS + 2; attempt++) {
 				sync.syncNow()
@@ -1199,11 +1148,11 @@ describe("Sync (Chats)", () => {
 			}
 
 			// Two permanent rejections (2/3)...
-			mockSendMessage.mockRejectedValueOnce(asSdkError(new Error("server"), ErrorKindMock.Server))
+			mockSendMessage.mockRejectedValueOnce(asSdkError(new Error("server"), ErrorKind.Server))
 			sync.syncNow()
 			await new Promise(resolve => setTimeout(resolve, 0))
 
-			mockSendMessage.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKindMock.Server))
+			mockSendMessage.mockRejectedValueOnce(asSdkError(new Error("server again"), ErrorKind.Server))
 			sync.syncNow()
 			await new Promise(resolve => setTimeout(resolve, 0))
 
@@ -1225,7 +1174,7 @@ describe("Sync (Chats)", () => {
 				}
 			}
 
-			mockSendMessage.mockRejectedValueOnce(asSdkError(new Error("server once more"), ErrorKindMock.Server))
+			mockSendMessage.mockRejectedValueOnce(asSdkError(new Error("server once more"), ErrorKind.Server))
 			sync.syncNow()
 			await new Promise(resolve => setTimeout(resolve, 0))
 

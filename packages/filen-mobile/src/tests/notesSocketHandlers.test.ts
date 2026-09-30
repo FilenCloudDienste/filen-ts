@@ -122,153 +122,54 @@ import { handleNoteEvent, type NoteSocketEvent } from "@/features/notes/socketHa
 import { NoteEvent_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
 import { hashNoteContent } from "@filen/shared"
 import { rememberNotePush } from "@/features/notes/pushEchoes"
+import { socketEvent } from "@/tests/fixtures/socketEvents"
 
 // ---------------------------------------------------------------------------
-// Helpers — build minimal socket-event shapes matching the handler's destructure:
-//   const [eventInner] = event.inner
-//   eventInner.inner.tag  → NoteEvent_Tags.*
-//   const [inner] = eventInner.inner.inner
-//   inner.note            → note uuid string
+// Helpers
 // ---------------------------------------------------------------------------
+
+function makeEvent(tag: string, inner: unknown): NoteSocketEvent {
+	return socketEvent(SocketEvent_Tags.Note, tag, inner)
+}
 
 function makeArchivedEvent(noteUuid: string): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.Archived,
-					inner: [{ note: noteUuid }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.Archived, { note: noteUuid })
 }
 
 function makeRestoredEvent(noteUuid: string): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.Restored,
-					inner: [{ note: noteUuid }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.Restored, { note: noteUuid })
 }
 
 function makeDeletedEvent(noteUuid: string): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.Deleted,
-					inner: [{ note: noteUuid }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.Deleted, { note: noteUuid })
 }
 
 function makeTitleEditedEvent(noteUuid: string, newTitle: { tag: string; inner: string[] }): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.TitleEdited,
-					inner: [{ note: noteUuid, newTitle }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.TitleEdited, { note: noteUuid, newTitle })
 }
 
 function makeParticipantNewEvent(noteUuid: string, participant: Record<string, unknown>): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.ParticipantNew,
-					inner: [{ note: noteUuid, participant }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.ParticipantNew, { note: noteUuid, participant })
 }
 
 function makeParticipantRemovedEvent(noteUuid: string, userId: bigint): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.ParticipantRemoved,
-					inner: [{ note: noteUuid, userId }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.ParticipantRemoved, { note: noteUuid, userId })
 }
 
 function makeParticipantPermissionsEvent(noteUuid: string, userId: bigint, permissionsWrite: boolean): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.ParticipantPermissions,
-					inner: [{ note: noteUuid, userId, permissionsWrite }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.ParticipantPermissions, { note: noteUuid, userId, permissionsWrite })
 }
 
 function makeNewEvent(noteUuid = "uuid-new"): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.New,
-					inner: [{ note: noteUuid }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.New, { note: noteUuid })
 }
 
 function makeContentEditedEvent(noteUuid: string, contentEdited: Record<string, unknown>): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: NoteEvent_Tags.ContentEdited,
-					inner: [{ note: noteUuid, content: { tag: "Decrypted", inner: ["server text"] }, ...contentEdited }]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent(NoteEvent_Tags.ContentEdited, { note: noteUuid, content: { tag: "Decrypted", inner: ["server text"] }, ...contentEdited })
 }
 
 function makeUnknownEvent(): NoteSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Note,
-		inner: [
-			{
-				inner: {
-					tag: "UnknownEventTagThatDoesNotExist",
-					inner: [{}]
-				}
-			}
-		]
-	} as unknown as NoteSocketEvent
+	return makeEvent("UnknownEventTagThatDoesNotExist", {})
 }
 
 // ---------------------------------------------------------------------------

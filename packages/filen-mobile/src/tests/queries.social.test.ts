@@ -62,49 +62,11 @@ vi.mock("@filen/sdk-rs", () => ({
 	}
 }))
 
-// ---------------------------------------------------------------------------
-// getPreviewType is re-implemented inline (below) only to avoid dragging in
-// expo-localization (__DEV__ not defined in Vitest node env). safeParseUrl, by
-// contrast, runs the REAL implementation via the @/lib/linkParser mock, so the
-// SSRF blocklist (the full fc00::/7 ULA range etc.) is exercised faithfully and
-// can never drift from @/constants PRIVATE_HOST.
-// ---------------------------------------------------------------------------
-const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".svg", ".ico"])
-const VIDEO_EXTS = new Set([".mp4", ".mov", ".m4v", ".3gp"])
-const AUDIO_EXTS = new Set([".mp3", ".m4a", ".aac", ".wav", ".aiff", ".caf", ".flac", ".alac"])
-
-function getExtname(name: string): string {
-	const trimmed = name.trim().toLowerCase()
-	const dot = trimmed.lastIndexOf(".")
-
-	return dot === -1 ? "" : trimmed.slice(dot)
-}
-
-function getPreviewTypeInline(name: string): string {
-	const ext = getExtname(name)
-
-	if (IMAGE_EXTS.has(ext)) return "image"
-	if (VIDEO_EXTS.has(ext)) return "video"
-	if (AUDIO_EXTS.has(ext)) return "audio"
-
-	switch (ext) {
-		case ".pdf":
-			return "pdf"
-		case ".txt":
-			return "text"
-		case ".docx":
-			return "docx"
-		default:
-			return "unknown"
-	}
-}
-
 vi.mock("@/lib/utils", () => ({}))
 
-vi.mock("@/lib/previewType", () => ({
-	getPreviewType: getPreviewTypeInline
-}))
-
+// safeParseUrl runs the REAL implementation via the @/lib/linkParser mock, so the SSRF blocklist
+// (the full fc00::/7 ULA range etc.) is exercised faithfully and can never drift from @/constants
+// PRIVATE_HOST.
 vi.mock("@/lib/linkParser", async () => {
 	const actual = await vi.importActual<typeof import("@/lib/linkParser")>("@/lib/linkParser")
 

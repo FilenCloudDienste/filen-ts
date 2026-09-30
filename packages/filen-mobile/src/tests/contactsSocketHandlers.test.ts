@@ -47,13 +47,10 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { handleContactEvent, type ContactSocketEvent } from "@/features/contacts/socketHandlers"
 import { ContactEvent_Tags, SocketEvent_Tags } from "@filen/sdk-rs"
+import { socketEvent } from "@/tests/fixtures/socketEvents"
 
 // ---------------------------------------------------------------------------
-// Helpers — build minimal socket-event shapes matching the handler's destructure:
-//   const [eventInner] = event.inner
-//   eventInner.inner.tag  → ContactEvent_Tags.*
-//   const [inner] = eventInner.inner.inner
-//   inner.uuid            → contact request uuid string
+// Helpers
 // ---------------------------------------------------------------------------
 
 function makeContactRequestReceivedEvent(requestData: {
@@ -63,31 +60,11 @@ function makeContactRequestReceivedEvent(requestData: {
 	senderAvatar: string | null
 	senderNickName: string | null
 }): ContactSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Contact,
-		inner: [
-			{
-				inner: {
-					tag: ContactEvent_Tags.ContactRequestReceived,
-					inner: [requestData]
-				}
-			}
-		]
-	} as unknown as ContactSocketEvent
+	return socketEvent(SocketEvent_Tags.Contact, ContactEvent_Tags.ContactRequestReceived, requestData)
 }
 
 function makeUnknownTagEvent(): ContactSocketEvent {
-	return {
-		tag: SocketEvent_Tags.Contact,
-		inner: [
-			{
-				inner: {
-					tag: "UnknownEventTagThatDoesNotExist",
-					inner: [{}]
-				}
-			}
-		]
-	} as unknown as ContactSocketEvent
+	return socketEvent(SocketEvent_Tags.Contact, "UnknownEventTagThatDoesNotExist", {})
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ vi.mock("@shopify/flash-list", async () => {
 
 	return { useRecyclingState: (initial: unknown) => useState(initial) }
 })
-vi.mock("zustand/shallow", () => ({ useShallow: (selector: unknown) => selector }))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 vi.mock("@/stores/useDrivePreview.store", () => {
 	const state = { drivePath: { type: "drive", uuid: null }, setCurrentItem: vi.fn() }
 

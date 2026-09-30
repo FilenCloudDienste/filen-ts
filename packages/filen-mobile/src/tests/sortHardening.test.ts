@@ -14,11 +14,7 @@
  */
 import { vi, describe, it, expect, beforeAll, afterAll } from "vitest"
 
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("@/lib/time", () => ({
 	intlLanguage: "en-US"

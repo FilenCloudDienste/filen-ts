@@ -11,25 +11,13 @@ vi.mock("expo-router", () => ({
 	router: { push: vi.fn(), back: vi.fn() }
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: { error: vi.fn(), normal: vi.fn() }
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("@/lib/prompts", () => ({
 	default: { alert: vi.fn(), input: vi.fn() }
 }))
 
-vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
-	runWithLoading: vi.fn(async (fn: () => Promise<unknown>) => {
-		try {
-			const data = await fn()
-
-			return { success: true, data }
-		} catch (error) {
-			return { success: false, error }
-		}
-	})
-}))
+vi.mock("@/components/ui/fullScreenLoadingModal", async () => await import("@/tests/mocks/fullScreenLoadingModal"))
 
 vi.mock("@/features/audio/audio", () => ({
 	default: {
@@ -96,17 +84,13 @@ vi.mock("@/components/ui/checkbox", () => ({
 	Checkbox: () => null
 }))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: vi.fn(() => ({ t: (key: string) => key }))
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 
 vi.mock("@/features/audio/playlistsSelect", () => ({
 	selectPlaylists: vi.fn()
 }))
 
-vi.mock("zustand/shallow", () => ({
-	useShallow: vi.fn(fn => fn)
-}))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 
 // ---------------------------------------------------------------------------
 // Subject under test

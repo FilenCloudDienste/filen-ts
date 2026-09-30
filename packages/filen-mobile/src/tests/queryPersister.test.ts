@@ -1,22 +1,6 @@
 import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest"
 
-const { mockDb, open, mockAppStateListeners } = vi.hoisted(() => {
-	const listeners: Array<(state: string) => void> = []
-
-	const mockDb = {
-		execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 }),
-		executeRaw: vi.fn().mockResolvedValue({ rawRows: [], columnNames: [], rowsAffected: 0 }),
-		executeBatch: vi.fn().mockResolvedValue({ rowsAffected: 0 }),
-		prepareStatement: vi.fn(() => ({
-			bind: vi.fn(),
-			bindSync: vi.fn(),
-			execute: vi.fn().mockResolvedValue({ rows: [], insertId: undefined, rowsAffected: 0 })
-		})),
-		close: vi.fn()
-	}
-
-	return { mockDb, open: vi.fn(() => mockDb), mockAppStateListeners: listeners }
-})
+const { mockAppStateListeners } = vi.hoisted(() => ({ mockAppStateListeners: [] as Array<(state: string) => void> }))
 
 vi.mock("react-native", () => ({
 	AppState: {
@@ -32,9 +16,7 @@ vi.mock("react-native", () => ({
 	}
 }))
 
-vi.mock("@op-engineering/op-sqlite", () => ({
-	open
-}))
+vi.mock("@op-engineering/op-sqlite", async () => await import("@/tests/mocks/opSqlite"))
 
 vi.mock("@/lib/utils", () => ({}))
 
@@ -110,6 +92,7 @@ import queryClient from "@/queries/client"
  * Values are stored as serialized strings just like the real SQLite KV.
  */
 import { isKvRangeScanQuery, kvRangeScanRows } from "@/tests/mocks/kvExecuteRaw"
+import { mockDb } from "@/tests/mocks/opSqlite"
 
 const kvStore = new Map<string, string>()
 

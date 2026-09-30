@@ -219,8 +219,8 @@ vi.mock("@/features/drive/queries/useDriveItemPublicLinkStatus.query", () => ({
 }))
 
 vi.mock("@/lib/prompts", () => ({ default: { confirm: vi.fn() } }))
-vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (k: string) => k } }))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/serializer", () => ({ serialize: vi.fn().mockReturnValue("serialized") }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn(fn => fn()) }))
 vi.mock("expo-router", () => ({ router: { push: vi.fn(), back: vi.fn() } }))

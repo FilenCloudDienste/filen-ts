@@ -4,33 +4,9 @@ const { mockResolveFile } = vi.hoisted(() => ({
 	mockResolveFile: vi.fn()
 }))
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	sortParams: (p: Record<string, unknown>) => {
-		const keys = Object.keys(p).sort()
-		const result: Record<string, unknown> = {}
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-		for (const k of keys) {
-			result[k] = p[k]
-		}
-
-		return result
-	}
-}))
-
-vi.mock("@filen/sdk-rs", () => ({
-	AnyFile: {
-		File: class {
-			tag = "File"
-			constructor(public inner: unknown) {}
-		},
-		Shared: class {
-			tag = "Shared"
-			constructor(public inner: unknown) {}
-		}
-	},
-	ManagedFuture: { new: vi.fn(() => ({})) }
-}))
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 vi.mock("@/queries/fileSource", () => ({
 	resolveFile: mockResolveFile

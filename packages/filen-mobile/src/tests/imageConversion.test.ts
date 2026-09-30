@@ -30,14 +30,7 @@ vi.mock("expo-crypto", () => ({
 	randomUUID: () => "test-uuid"
 }))
 
-vi.mock("@/lib/logger", () => ({
-	default: {
-		warn: vi.fn(),
-		error: vi.fn(),
-		info: vi.fn(),
-		debug: vi.fn()
-	}
-}))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 import { isHeicFile, convertHeicToJpg } from "@/lib/imageConversion"
 import * as ImageManipulator from "expo-image-manipulator"

@@ -12,7 +12,7 @@ vi.mock("expo-crypto", () => ({ randomUUID: vi.fn(() => "mock-uuid") }))
 vi.mock("expo-clipboard", () => ({ setStringAsync: vi.fn() }))
 vi.mock("@/lib/router", () => ({ router: { push: vi.fn() } }))
 vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key } }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/prompts", () => ({ default: { alert: vi.fn(), input: vi.fn() } }))
 vi.mock("@/features/drive/queries/useDriveItemPublicLinkStatus.query", () => ({
 	fetchData: vi.fn(),

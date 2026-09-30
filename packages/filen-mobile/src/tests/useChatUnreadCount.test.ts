@@ -31,47 +31,15 @@ vi.mock("@/features/contacts/hooks/useBlockedUsers", () => ({
 
 import { renderHook } from "@testing-library/react"
 import { useChatUnreadCount } from "@/features/chats/hooks/useChatUnreadCount"
-import type { Chat, ChatMessage } from "@/types"
+import type { Chat } from "@/types"
+import { makeChat, makeChatMessage } from "@/tests/fixtures/chats"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeChat(overrides: Partial<Chat> = {}): Chat {
-	return {
-		uuid: "chat-1",
-		ownerId: 1n,
-		muted: false,
-		participants: [],
-		undecryptable: false,
-		key: "some-key",
-		created: 1n,
-		lastFocus: 100n,
-		lastMessage: {
-			sentTimestamp: 200n,
-			inner: {
-				senderId: 999n
-			}
-		},
-		...overrides
-	} as unknown as Chat
-}
-
-function makeMessage(overrides: Partial<{ senderId: bigint; sentTimestamp: bigint }> = {}): ChatMessage {
-	return {
-		chat: "chat-1",
-		inner: {
-			uuid: "msg-1",
-			message: "hello",
-			senderId: overrides.senderId ?? 999n,
-			senderEmail: "other@test.com",
-			senderNickName: undefined
-		},
-		embedDisabled: false,
-		edited: false,
-		editedTimestamp: 0n,
-		sentTimestamp: overrides.sentTimestamp ?? 200n,
-		replyTo: undefined,
-		undecryptable: false
-	} as unknown as ChatMessage
+// A peer's message newer than the last focus: unread unless an override says otherwise.
+const UNREAD = {
+	lastFocus: 100n,
+	lastMessage: makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } })
 }
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
@@ -92,7 +60,7 @@ describe("useChatUnreadCount", () => {
 		// crashed the row on `.filter` of undefined.
 		mocks.chatMessages = undefined
 
-		const chat = makeChat({ lastFocus: 100n })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -102,7 +70,7 @@ describe("useChatUnreadCount", () => {
 	it("returns 0 while there is genuinely nothing cached yet", () => {
 		mocks.chatMessagesQueryStatus = "pending"
 
-		const chat = makeChat()
+		const chat = makeChat(UNREAD)
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -113,9 +81,9 @@ describe("useChatUnreadCount", () => {
 		// The offline case: the refetch fails and TanStack flips `status` to "error" while KEEPING
 		// the messages. This used to report zero unread for as long as the device was offline.
 		mocks.chatMessagesQueryStatus = "error"
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n, senderId: 999n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } })]
 
-		const chat = makeChat({ lastFocus: 100n })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -126,9 +94,9 @@ describe("useChatUnreadCount", () => {
 		// "Unread by me" has no meaning without a user. Asserted directly now — it used to fall out
 		// of the status gate by accident, which is why replacing that gate exposed it.
 		mocks.stringifiedClient = null
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n, senderId: 999n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } })]
 
-		const chat = makeChat({ lastFocus: 100n })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -138,7 +106,7 @@ describe("useChatUnreadCount", () => {
 	it("returns 0 when messages array is empty", () => {
 		mocks.chatMessages = []
 
-		const chat = makeChat()
+		const chat = makeChat(UNREAD)
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -146,9 +114,9 @@ describe("useChatUnreadCount", () => {
 	})
 
 	it("returns 0 when chat.muted=true regardless of timestamps", () => {
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n, senderId: 999n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } })]
 
-		const chat = makeChat({ muted: true })
+		const chat = makeChat({ ...UNREAD, muted: true })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -156,9 +124,9 @@ describe("useChatUnreadCount", () => {
 	})
 
 	it("returns 0 when chat.lastFocus is null/undefined", () => {
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } })]
 
-		const chat = makeChat({ lastFocus: null as unknown as bigint })
+		const chat = makeChat({ ...UNREAD, lastFocus: null as unknown as bigint })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -166,9 +134,9 @@ describe("useChatUnreadCount", () => {
 	})
 
 	it("returns 0 when chat.lastMessage is null/undefined", () => {
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } })]
 
-		const chat = makeChat({ lastMessage: null as unknown as Chat["lastMessage"] })
+		const chat = makeChat({ ...UNREAD, lastMessage: null as unknown as Chat["lastMessage"] })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -176,10 +144,10 @@ describe("useChatUnreadCount", () => {
 	})
 
 	it("returns 0 when message.sentTimestamp === chat.lastFocus (boundary — strictly greater than required)", () => {
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 100n, senderId: 999n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 100n, inner: { senderId: 999n } })]
 
 		// lastFocus = 100n, sentTimestamp = 100n — NOT strictly greater than
-		const chat = makeChat({ lastFocus: 100n })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -187,9 +155,9 @@ describe("useChatUnreadCount", () => {
 	})
 
 	it("returns 0 when message.sentTimestamp < chat.lastFocus", () => {
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 50n, senderId: 999n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 50n, inner: { senderId: 999n } })]
 
-		const chat = makeChat({ lastFocus: 100n })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -198,9 +166,9 @@ describe("useChatUnreadCount", () => {
 
 	it("returns 1 when a single message has sentTimestamp > lastFocus and sender is not self", () => {
 		// mocks.stringifiedClient.userId = 1n, sender = 999n → not self
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n, senderId: 999n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } })]
 
-		const chat = makeChat({ lastFocus: 100n })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -210,9 +178,9 @@ describe("useChatUnreadCount", () => {
 	it("returns 0 when message is from self (senderId === stringifiedClient.userId) even if newer than lastFocus", () => {
 		// userId = 1n, sender = 1n → self
 		mocks.stringifiedClient = { userId: 1n }
-		mocks.chatMessages = [makeMessage({ sentTimestamp: 200n, senderId: 1n })]
+		mocks.chatMessages = [makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 1n } })]
 
-		const chat = makeChat({ lastFocus: 100n })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n })
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))
 
@@ -222,17 +190,17 @@ describe("useChatUnreadCount", () => {
 	it("counts only messages passing ALL four conditions simultaneously", () => {
 		mocks.stringifiedClient = { userId: 1n }
 
-		const chat = makeChat({ lastFocus: 100n, muted: false })
+		const chat = makeChat({ ...UNREAD, lastFocus: 100n, muted: false })
 
 		mocks.chatMessages = [
 			// Message 1: timestamp > lastFocus AND not self → COUNTS
-			makeMessage({ sentTimestamp: 200n, senderId: 999n }),
+			makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 999n } }),
 			// Message 2: timestamp === lastFocus (boundary, NOT strictly greater) → does NOT count
-			makeMessage({ sentTimestamp: 100n, senderId: 999n }),
+			makeChatMessage({ sentTimestamp: 100n, inner: { senderId: 999n } }),
 			// Message 3: timestamp > lastFocus but self → does NOT count
-			makeMessage({ sentTimestamp: 200n, senderId: 1n }),
+			makeChatMessage({ sentTimestamp: 200n, inner: { senderId: 1n } }),
 			// Message 4: timestamp > lastFocus AND not self → COUNTS
-			makeMessage({ sentTimestamp: 300n, senderId: 888n })
+			makeChatMessage({ sentTimestamp: 300n, inner: { senderId: 888n } })
 		]
 
 		const { result } = renderHook(() => useChatUnreadCount(chat))

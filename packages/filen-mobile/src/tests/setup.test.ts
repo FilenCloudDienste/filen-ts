@@ -126,7 +126,7 @@ vi.mock("@/lib/tmp", () => ({ sweepTmpDir: mockSweepTmpDir }))
 vi.mock("@/lib/fsUtils", () => ({ sweepStrayDownloadFiles: mockSweepStrayDownloadFiles }))
 vi.mock("@/lib/reconnect", () => ({ startReconnectListener: mockStartReconnectListener }))
 vi.mock("@/lib/fileCache", () => ({ default: mockFileCache }))
-vi.mock("@/lib/logger", () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
+vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@/features/audio/audioCache", () => ({ default: mockAudioCache }))
 // `t` too, not just initI18n: setup's Files.app hint calls it, and without it
 // the call threw into the chain's trailing catch — silently skipping the toast

@@ -80,8 +80,7 @@ vi.mock("@filen/shared", async () => {
 
 	return {
 		...sharedMock,
-		KeyedSemaphores: actual.KeyedSemaphores,
-		driveItemName: actual.driveItemName
+		KeyedSemaphores: actual.KeyedSemaphores
 	}
 })
 
@@ -199,27 +198,14 @@ import { createAudioPlayer, setAudioModeAsync } from "expo-audio"
 import { AppState } from "react-native"
 import { type QueueItem } from "@/features/audio/audio"
 import { playlistsQueryUpdate } from "@/features/audio/queries/usePlaylists.query"
+import { driveFileItem } from "@/tests/fixtures/driveItems"
 
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
 
 function makeFileItem(uuid: string, name: string): DriveItemFileExtracted {
-	return {
-		type: "file",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 100n,
-				modified: 1000,
-				created: 900,
-				mime: "audio/mpeg"
-			},
-			undecryptable: false,
-			size: 100n
-		}
-	} as unknown as DriveItemFileExtracted
+	return driveFileItem("file", uuid, name, "audio/mpeg") as DriveItemFileExtracted
 }
 
 function makeQueueItem(uuid: string, name: string): QueueItem {

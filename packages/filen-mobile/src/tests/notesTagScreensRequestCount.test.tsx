@@ -18,36 +18,7 @@ vi.mock("@/lib/auth", () => ({
 	}
 }))
 
-// The real TanStack client with the app's refetch defaults and server-read tracking, minus the SQLite
-// persister.
-vi.mock("@/queries/client", async () => {
-	const { QueryClient } = await import("@tanstack/react-query")
-	const { trackServerReads } = await import("@/queries/socketSession")
-
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				refetchOnMount: "always",
-				refetchOnReconnect: "always",
-				retry: false,
-				networkMode: "offlineFirst"
-			}
-		}
-	})
-
-	trackServerReads(queryClient.getQueryCache())
-
-	return {
-		default: queryClient,
-		queryUpdater: {
-			get: (queryKey: unknown[]) => queryClient.getQueryData(queryKey),
-			set: (queryKey: unknown[], updater: unknown) =>
-				queryClient.setQueryData(queryKey, (prev: unknown) =>
-					typeof updater === "function" ? (updater as (p: unknown) => unknown)(prev) : updater
-				)
-		}
-	}
-})
+vi.mock("@/queries/client", async () => await (await import("@/tests/mocks/queryClient")).createQueryClientMock({ trackServerReads: true }))
 
 import { renderHook, waitFor, cleanup } from "@testing-library/react"
 import { QueryClientProvider } from "@tanstack/react-query"

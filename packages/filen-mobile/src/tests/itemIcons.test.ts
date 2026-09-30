@@ -1,21 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-vi.mock("@filen/shared", async () => {
-	// Use the real isValidHexColor (pure fn, no native deps) and provide cn stub
-	const { isValidHexColor } = await import("@filen/shared")
-
-	// resolveFileIconKey pulls in @/lib/previewType for SDK_RAW_PREVIEW_EXTENSIONS, which builds its
-	// own code-extension set from CODE_FILE_EXTENSIONS at module load — pull the real one through so
-	// that import does not throw.
-	const actual = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
-
-	return {
-		...(await import("@/tests/mocks/filenShared")),
-		isValidHexColor,
-		CODE_FILE_EXTENSIONS: actual.CODE_FILE_EXTENSIONS,
-		cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ")
-	}
-})
+vi.mock("@filen/shared", async () => ({
+	...(await import("@/tests/mocks/filenShared")),
+	cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ")
+}))
 
 vi.mock("@filen/sdk-rs", () => ({
 	DirColor_Tags: {

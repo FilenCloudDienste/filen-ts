@@ -31,7 +31,6 @@ globalThis.__DEV__ = true
 
 vi.mock("expo-media-library/next", async () => await import("@/tests/mocks/expoMediaLibrary"))
 
-vi.mock("react-native-blob-util", async () => await import("@/tests/mocks/reactNativeBlobUtil"))
 vi.mock("@preeternal/react-native-file-hash", async () => await import("@/tests/mocks/reactNativeFileHash"))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
@@ -50,34 +49,7 @@ vi.mock("expo-battery", () => ({
 	isLowPowerModeEnabledAsync: vi.fn(async () => false)
 }))
 
-vi.mock("expo-media-library/legacy", async () => {
-	const next = await import("@/tests/mocks/expoMediaLibrary")
-
-	return {
-		getPermissionsAsync: vi.fn(async () => ({
-			granted: true,
-			status: "granted",
-			accessPrivileges: "all",
-			expires: "never",
-			canAskAgain: true
-		})),
-		requestPermissionsAsync: vi.fn(async () => ({
-			granted: true,
-			status: "granted",
-			accessPrivileges: "all",
-			expires: "never",
-			canAskAgain: true
-		})),
-		getAlbumsAsync: vi.fn(async () => {
-			return Array.from(next.ml.albums.values()).map(stored => ({
-				id: stored.id,
-				title: stored.title,
-				type: "album",
-				assetCount: stored.assetIds.length
-			}))
-		})
-	}
-})
+vi.mock("expo-media-library/legacy", async () => await import("@/tests/mocks/expoMediaLibraryLegacy"))
 
 vi.mock("@/hooks/useMediaPermissions", () => ({
 	hasAllNeededMediaPermissions: vi.fn(async () => true)
@@ -92,28 +64,24 @@ vi.mock("expo-image-manipulator", () => ({
 	}
 }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyNormalDir: {
-		Dir: vi.fn()
-	},
-	AnyNormalDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnyDirWithContext: {
-		Normal: vi.fn()
-	},
-	// Contract-shaped stubs for canonicalRemoteName: parseName throws on rejected names,
-	// passes accepted ones through byte-identical; encodeName maps rejected → valid form.
-	parseName: (name: string) => {
-		if (name.length === 0 || name.length > 255 || /[/\\:*?"<>|]/.test(name) || name.startsWith(" ") || /[. ]$/.test(name)) {
-			throw new Error(`invalid name: ${name}`)
-		}
+vi.mock("@filen/sdk-rs", async () => {
+	const { parseName, encodeName } = await import("@/tests/mocks/sdkName")
 
-		return name
-	},
-	encodeName: (name: string) => name.replace(/:/g, "：").replace(/[/\\*?"<>|]/g, "＿")
-}))
+	return {
+		AnyNormalDir: {
+			Dir: vi.fn()
+		},
+		AnyNormalDir_Tags: {
+			Dir: "Dir",
+			Root: "Root"
+		},
+		AnyDirWithContext: {
+			Normal: vi.fn()
+		},
+		parseName,
+		encodeName
+	}
+})
 
 vi.mock("@filen/shared", async () => {
 	const sharedMock = await import("@/tests/mocks/filenShared")
@@ -136,23 +104,7 @@ vi.mock("@/features/transfers/transfers", () => ({
 	}
 }))
 
-const mockSetSyncing = vi.fn()
-const mockAddError = vi.fn()
-const mockAddSkippedAsset = vi.fn()
-const mockRemoveSkippedAsset = vi.fn()
-const mockClearSkippedAssets = vi.fn()
-
-vi.mock("@/features/cameraUpload/store/useCameraUpload.store", () => ({
-	default: {
-		getState: () => ({
-			setSyncing: mockSetSyncing,
-			addError: mockAddError,
-			addSkippedAsset: mockAddSkippedAsset,
-			removeSkippedAsset: mockRemoveSkippedAsset,
-			clearSkippedAssets: mockClearSkippedAssets
-		})
-	}
-}))
+vi.mock("@/features/cameraUpload/store/useCameraUpload.store", async () => await import("@/tests/mocks/useCameraUploadStore"))
 
 vi.mock("@/lib/secureStore", () => ({
 	default: {
@@ -163,9 +115,7 @@ vi.mock("@/lib/secureStore", () => ({
 	useSecureStore: vi.fn()
 }))
 
-vi.mock("zustand/shallow", () => ({
-	useShallow: (fn: Function) => fn
-}))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 
 vi.mock("@/lib/events", () => ({
 	default: {
@@ -180,74 +130,9 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-// Complete store passthrough — INCLUDING the aborts map. The old cache mock omitted the aborts
-// map entirely, so the source's post-upload `deleteAbort` threw a swallowed TypeError on every
-// successful upload; the full mock closes that hole.
-vi.mock("@/features/cameraUpload/cameraUploadState", () => {
-	const hashes = new Map<string, unknown>()
-	const destination: { current: string | null } = { current: null }
-	const aborts = new Map<string, number>()
+vi.mock("@/features/cameraUpload/cameraUploadState", async () => await import("@/tests/mocks/cameraUploadState"))
 
-	return {
-		default: {
-			hashes,
-			aborts,
-			loadHashes: async () => {},
-			loadAborts: async () => {},
-			getHashSync: (key: string) => hashes.get(key),
-			// Destination pairing: the shield is scoped to one remote directory, so the fake tracks it
-			// the same way — a bare stub would make every pass look like "never recorded".
-			destination,
-			getSyncedDestination: async () => destination.current,
-			setSyncedDestination: async (uuid: string) => {
-				destination.current = uuid
-			},
-			clearHashes: vi.fn(async () => {
-				hashes.clear()
-			}),
-			getHashMany: async (keys: string[]) => {
-				const found = new Map<string, unknown>()
-
-				for (const key of keys) {
-					const value = hashes.get(key)
-
-					if (value !== undefined) {
-						found.set(key, value)
-					}
-				}
-
-				return found
-			},
-			getHash: async (key: string) => hashes.get(key),
-			hashKeys: () => [...hashes.keys()],
-			setHash: async (key: string, entry: unknown) => {
-				hashes.set(key, entry)
-			},
-			getAbort: (id: string) => aborts.get(id),
-			setAbort: async (id: string, count: number) => {
-				aborts.set(id, count)
-			},
-			deleteAbort: async (id: string) => {
-				aborts.delete(id)
-			},
-			applyHashBatch: async ({ upserts, deletes }: { upserts?: [string, unknown][]; deletes?: string[] }) => {
-				for (const [key, value] of upserts ?? []) {
-					hashes.set(key, value)
-				}
-
-				for (const key of deletes ?? []) {
-					hashes.delete(key)
-				}
-			}
-		}
-	}
-})
-
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // REAL floor semantics (src/lib/utils.ts) — the main suite uses identity here, which cannot
 // catch a perf rewrite dropping the normalization from the deltas() comparison.
@@ -260,21 +145,13 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	isTrashParent: (parent: { tag?: string } | null | undefined) => parent?.tag === "Trash"
 }))
 
-vi.mock("@/lib/paths", async () => {
-	// normalizeFilePathForSdk is REAL here, not an identity stub: it is what turns Asset.getUri()'s
-	// percent-encoded file:// url into the plain filesystem path blob-util's hash requires, and the
-	// blob-util mock rejects a scheme-qualified path exactly as iOS' fileExistsAtPath: does. Stubbing
-	// it out would make every hash in this suite ENOENT and every upload silently vanish.
-	const actual = await vi.importActual<typeof import("@/lib/paths")>("@/lib/paths")
-
-	return {
-		normalizeFilePathForSdk: actual.normalizeFilePathForSdk,
-		normalizeFilePathForExpo: (p: string) => p,
-		// Also REAL: it is what reduces Asset.getUri()'s URL to a path before the hash, and an
-		// identity stub would ENOENT every asset whose uri carries a fragment.
-		stripUriFragmentAndQuery: actual.stripUriFragmentAndQuery
-	}
-})
+// normalizeFilePathForSdk and stripUriFragmentAndQuery stay REAL: they turn Asset.getUri()'s
+// percent-encoded, possibly fragment-carrying url into what production hashes, and the file-hash
+// mock resolves that exactly as the natives do.
+vi.mock("@/lib/paths", async () => ({
+	...(await import("@/tests/mocks/paths")),
+	normalizeFilePathForExpo: (p: string) => p
+}))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 

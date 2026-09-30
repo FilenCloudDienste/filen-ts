@@ -31,10 +31,7 @@ const {
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	driveItemName: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).driveItemName
-}))
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
@@ -99,45 +96,7 @@ vi.mock("@/lib/fsUtils", async importOriginal => {
 	}
 })
 
-// normalizeFilePathForBlobUtil is a trivial wrapper around normalizeFilePathForSdk.
-vi.mock("@/lib/paths", () => {
-	function normalizeFilePathForSdk(filePath: string): string {
-		const cleaned = filePath
-			.trim()
-			.replace(/^file:\/+/, "/")
-			.split("/")
-			.map(segment => {
-				if (segment.length === 0) {
-					return segment
-				}
-
-				try {
-					return decodeURIComponent(segment)
-				} catch {
-					return segment
-				}
-			})
-			.join("/")
-
-		let result = cleaned.startsWith("/") ? cleaned : `/${cleaned}`
-
-		if (result.endsWith("/") && result !== "/") {
-			result = result.slice(0, -1)
-		}
-
-		// Simple posix normalize (no external dep needed for tests)
-		return result.replace(/\/+/g, "/")
-	}
-
-	function normalizeFilePathForBlobUtil(filePath: string): string {
-		return `file://${normalizeFilePathForSdk(filePath)}`
-	}
-
-	return {
-		normalizeFilePathForBlobUtil,
-		normalizeFilePathForSdk
-	}
-})
+vi.mock("@/lib/paths", async () => await import("@/tests/mocks/paths"))
 
 vi.mock("@/lib/tmp", async () => {
 	const FileSystem = await import("expo-file-system")

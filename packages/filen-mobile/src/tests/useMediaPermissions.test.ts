@@ -37,14 +37,6 @@ const { mockMediaLibraryPermissions, mockCameraPermissions, mockMediaLibraryRequ
 	}
 })
 
-vi.mock("react-native", () => ({
-	AppState: {
-		addEventListener: (_type: string, _handler: (state: string) => void) => ({
-			remove: () => {}
-		})
-	}
-}))
-
 vi.mock("expo-media-library/legacy", () => ({
 	getPermissionsAsync: async () => ({ ...mockMediaLibraryPermissions }),
 	requestPermissionsAsync: async () => ({ ...mockMediaLibraryRequest })

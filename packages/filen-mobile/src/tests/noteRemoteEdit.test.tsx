@@ -43,8 +43,8 @@ vi.mock("react-native-reanimated", () => ({ FadeOut: {}, default: {} }))
 vi.mock("expo-router/react-navigation", () => ({ useHeaderHeight: () => 0 }))
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }))
 vi.mock("uniwind", () => ({ useResolveClassNames: () => ({ color: "#000" }) }))
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-vi.mock("zustand/shallow", () => ({ useShallow: (selector: unknown) => selector }))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 vi.mock("@/components/ui/view", () => ({ default: ({ children }: { children?: unknown }) => children ?? null }))
 vi.mock("@/components/ui/listEmpty", () => ({ default: () => null }))
 vi.mock("@/components/ui/button", () => ({ default: () => null }))
@@ -134,7 +134,7 @@ vi.mock("@/lib/events", () => ({
 	}
 }))
 vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key }, t: (key: string) => key }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/prompts", () => ({ default: { confirm3 } }))
 vi.mock("@/features/notes/notes", () => ({ default: { create: vi.fn(), getContent } }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
@@ -143,14 +143,7 @@ vi.mock("@/hooks/useIsOnline", () => ({ default: () => true }))
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
 	hashNoteContent: (content: string) => `h(${content})`,
-	conflictCopyStamp: () => "stamp",
-	runEffect: (fn: (defer: (cleanup: () => void) => void) => void) => {
-		const cleanups: (() => void)[] = []
-
-		fn(cleanup => cleanups.push(cleanup))
-
-		return { cleanup: () => cleanups.forEach(c => c()) }
-	}
+	conflictCopyStamp: () => "stamp"
 }))
 
 import { act, cleanup, render } from "@testing-library/react"

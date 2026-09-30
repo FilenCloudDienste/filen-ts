@@ -72,131 +72,16 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
-vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
-vi.mock("@/lib/secureStore", () => ({ default: { get: vi.fn().mockResolvedValue(null) } }))
-vi.mock("@react-native-community/netinfo", () => ({ default: { fetch: vi.fn().mockResolvedValue({ type: "wifi" }) } }))
-vi.mock("@/lib/events", () => ({ default: { subscribe: vi.fn() } }))
-
 vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	driveItemsQueryUpdate: vi.fn()
 }))
 
-// Same stub shapes as the canonical offline.test.ts.
-vi.mock("@/lib/sdkUnwrap", () => ({
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrapFileMeta: (file: any) => {
-		const decoded = file?.meta?.tag === "Decoded" ? (file.meta.inner?.[0] ?? null) : null
-
-		return {
-			file,
-			meta: decoded ?? null,
-			undecryptable: decoded === null,
-			shared: false,
-			root: false
-		}
-	},
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrapAnyDirUuid: (dir: any) => dir?.inner?.[0]?.inner?.[0]?.uuid ?? null,
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrapDirMeta: (dir: any) => {
-		const decoded = dir?.meta?.tag === "Decoded" ? (dir.meta.inner?.[0] ?? null) : null
-
-		return {
-			dir,
-			uuid: dir?.uuid ?? "unknown",
-			meta: decoded ?? null,
-			undecryptable: decoded === null,
-			shared: false
-		}
-	},
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrappedFileIntoDriveItem: (unwrapped: any) => ({
-		type: "file" as const,
-		data: {
-			uuid: unwrapped.file?.uuid ?? "file-uuid",
-			decryptedMeta: unwrapped.meta
-				? {
-						name: unwrapped.meta.name,
-						size: unwrapped.meta.size ?? 100n,
-						modified: unwrapped.meta.modified ?? 1000,
-						created: unwrapped.meta.created ?? 900
-					}
-				: null,
-			undecryptable: unwrapped.meta === null
-		}
-	}),
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrappedDirIntoDriveItem: (unwrapped: any) => ({
-		type: "directory" as const,
-		data: {
-			uuid: unwrapped.uuid ?? "dir-uuid",
-			decryptedMeta: unwrapped.meta
-				? {
-						name: unwrapped.meta.name,
-						size: 0n,
-						modified: 1000,
-						created: 900
-					}
-				: null,
-			undecryptable: unwrapped.meta === null
-		}
-	}),
-	unwrapParentUuid: () => null
-}))
+vi.mock("@/lib/sdkUnwrap", async () => await import("@/tests/mocks/sdkUnwrapSynthetic"))
 
 vi.mock("@/lib/sdkErrors", () => ({ unwrapSdkError: () => null }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyDirWithContext: {
-		Normal: class {
-			tag = "Normal"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnyNormalDir: {
-		Dir: class {
-			tag = "Dir"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnyDirWithContext_Tags: {
-		Normal: "Normal",
-		Shared: "Shared",
-		Linked: "Linked"
-	},
-	AnySharedDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnyNormalDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnyLinkedDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnySharedDir: {},
-	AnySharedDirWithContext: {
-		new: (opts: unknown) => opts
-	},
-	NonRootDir_Tags: {
-		Normal: "Normal",
-		Shared: "Shared",
-		Linked: "Linked"
-	},
-	ParentUuid_Tags: {
-		Uuid: "Uuid",
-		Trash: "Trash"
-	},
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
 	ErrorKind: {
 		FolderNotFound: "FolderNotFound"
 	}
@@ -204,8 +89,8 @@ vi.mock("@filen/sdk-rs", () => ({
 
 import { strictFsHelpers } from "@/tests/mocks/strictUriExpoFileSystem"
 import { Offline, VERSION as OFFLINE_VERSION } from "@/features/offline/offline"
-import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/types"
+import { makeFileItem, makeDirItem, makeParent, makeListingFile } from "@/tests/fixtures/offline"
 import type { OfflineParent } from "@/features/offline/offlineHelpers"
 
 const TREE_UUID = "11111111-1111-4111-8111-111111111111"
@@ -223,65 +108,6 @@ const NASTY_NAMES = [
 	"umlauts äöü ß.txt",
 	'braces {b} `tick` "quotes" <angle>.dat'
 ]
-
-function makeDirItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "directory",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 0n,
-				modified: 1000,
-				created: 900
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
-
-function makeFileItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "file",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 100n,
-				modified: 1000,
-				created: 900
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
-
-function makeParent(uuid: string): OfflineParent {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	return new (AnyDirWithContext as any).Normal(new (AnyNormalDir as any).Dir({ uuid })) as OfflineParent
-}
-
-// Listing entry shapes the mocked sdkUnwrap stubs consume; paths are RAW root-relative
-// WITHOUT a leading slash (offline.ts prefixes "/").
-function makeListingFile(uuid: string, path: string, name: string): { file: unknown; path: string } {
-	return {
-		file: {
-			uuid,
-			meta: {
-				tag: "Decoded",
-				inner: [
-					{
-						name,
-						size: 100n,
-						modified: 1000,
-						created: 900
-					}
-				]
-			}
-		},
-		path
-	}
-}
 
 function fileUuid(index: number): string {
 	const n = (index + 0x10).toString(16).padStart(8, "0")

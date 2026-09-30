@@ -38,11 +38,7 @@ vi.mock("react", async () => {
 	}
 })
 
-vi.mock("@/lib/i18n", () => ({
-	default: {
-		t: (key: string) => key
-	}
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // The message precedence itself is covered in sdkErrorHumanReadable.test.ts.
 vi.mock("@/lib/sdkErrors", () => ({

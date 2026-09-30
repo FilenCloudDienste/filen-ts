@@ -174,82 +174,17 @@ vi.mock("@/queries/useAccount.query", () => ({
 	addAccountStorageUsed: mockAddAccountStorageUsed
 }))
 
-vi.mock("@filen/sdk-rs", () => {
-	class TaggedUnion {
-		tag: string
-		inner: unknown[]
-		constructor(tag: string, value: unknown) {
-			this.tag = tag
-			this.inner = [value]
-		}
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
+	File: class {},
+	FilenSdkError: {
+		hasInner: vi.fn(() => false),
+		getInner: vi.fn(() => new Error("sdk error"))
+	},
+	AnySharedDirWithContext: {
+		new: vi.fn(({ dir, shareInfo }: { dir: unknown; shareInfo: unknown }) => ({ dir, shareInfo }))
 	}
-
-	return {
-		File: class {},
-		FilenSdkError: {
-			hasInner: vi.fn(() => false),
-			getInner: vi.fn(() => new Error("sdk error"))
-		},
-		ManagedFuture: {
-			new: vi.fn(() => ({}))
-		},
-		AnyNormalDir: {
-			Dir: class extends TaggedUnion {
-				constructor(dir: unknown) {
-					super("Dir", dir)
-				}
-			},
-			Root: class extends TaggedUnion {
-				constructor(root: unknown) {
-					super("Root", root)
-				}
-			}
-		},
-		AnyNormalDir_Tags: {
-			Dir: "Dir",
-			Root: "Root"
-		},
-		AnyFile: {
-			File: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("File", file)
-				}
-			},
-			Shared: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("Shared", file)
-				}
-			}
-		},
-		AnyDirWithContext: {
-			Normal: class extends TaggedUnion {
-				constructor(dir: unknown) {
-					super("Normal", dir)
-				}
-			},
-			Shared: class extends TaggedUnion {
-				constructor(shared: unknown) {
-					super("Shared", shared)
-				}
-			}
-		},
-		AnySharedDirWithContext: {
-			new: vi.fn(({ dir, shareInfo }: { dir: unknown; shareInfo: unknown }) => ({ dir, shareInfo }))
-		},
-		AnySharedDir: {
-			Dir: class extends TaggedUnion {
-				constructor(dir: unknown) {
-					super("Dir", dir)
-				}
-			},
-			Root: class extends TaggedUnion {
-				constructor(root: unknown) {
-					super("Root", root)
-				}
-			}
-		}
-	}
-})
+}))
 
 vi.mock("@/lib/auth", () => ({
 	default: {
@@ -325,31 +260,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 // stub decodes for real so the post-upload thumbnail's path assertion means something. ForExpo is
 // that same decode followed by an encode, so an already-encoded URI passes through unchanged while a
 // decoded path carrying a literal `%20` decodes again; an identity stub could express neither.
-vi.mock("@/lib/paths", () => {
-	const forSdk = (path: string) =>
-		path
-			.replace(/^file:\/+/, "/")
-			.split("/")
-			.map(segment => {
-				try {
-					return decodeURIComponent(segment)
-				} catch {
-					return segment
-				}
-			})
-			.join("/")
-
-	return {
-		normalizeFilePathForSdk: vi.fn(forSdk),
-		normalizeFilePathForExpo: vi.fn(
-			(path: string) =>
-				`file://${forSdk(path)
-					.split("/")
-					.map(segment => (segment.length > 0 ? encodeURIComponent(segment) : segment))
-					.join("/")}`
-		)
-	}
-})
+vi.mock("@/lib/paths", async () => await import("@/tests/mocks/paths"))
 
 vi.mock("@/lib/signals", () => ({
 	wrapAbortSignalForSdk: mockWrapAbortSignalForSdk,

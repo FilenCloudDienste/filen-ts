@@ -81,10 +81,6 @@ vi.mock("@/lib/cache", () => ({
 	}
 }))
 
-vi.mock("@/lib/fileCache", () => ({ VERSION: 1 }))
-vi.mock("@/features/audio/audioCache", () => ({ VERSION: 1 }))
-vi.mock("@/lib/thumbnails", () => ({ VERSION: 2 }))
-
 vi.mock("@/lib/secureStore", () => ({
 	default: {
 		get: async () => null
@@ -127,163 +123,14 @@ vi.mock("@/features/drive/queries/useDriveItems.query", () => ({
 	}
 }))
 
-// Same stub shapes as the canonical offline.test.ts — plain functions (NOT vi.fn,
-// whose call recording would distort timings at thousands of calls per run).
-vi.mock("@/lib/sdkUnwrap", () => ({
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrapFileMeta: (file: any) => {
-		const decoded = file?.meta?.tag === "Decoded" ? (file.meta.inner?.[0] ?? null) : null
-
-		return {
-			file,
-			meta: decoded ?? null,
-			undecryptable: decoded === null,
-			shared: false,
-			root: false
-		}
-	},
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrapAnyDirUuid: (dir: any) => {
-		if (!dir || typeof dir !== "object") {
-			return null
-		}
-
-		return dir.inner?.[0]?.inner?.[0]?.uuid ?? null
-	},
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrapDirMeta: (dir: any) => {
-		const decoded = dir?.meta?.tag === "Decoded" ? (dir.meta.inner?.[0] ?? null) : null
-
-		return {
-			dir,
-			uuid: dir?.uuid ?? "unknown",
-			meta: decoded ?? null,
-			undecryptable: decoded === null,
-			shared: false
-		}
-	},
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrappedFileIntoDriveItem: (unwrapped: any) => ({
-		type: "file" as const,
-		data: {
-			uuid: unwrapped.file?.uuid ?? "file-uuid",
-			decryptedMeta: unwrapped.meta
-				? {
-						name: unwrapped.meta.name,
-						size: unwrapped.meta.size ?? 100n,
-						modified: unwrapped.meta.modified ?? 1000,
-						created: unwrapped.meta.created ?? 900
-					}
-				: null,
-			undecryptable: unwrapped.meta === null
-		}
-	}),
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	unwrappedDirIntoDriveItem: (unwrapped: any) => ({
-		type: "directory" as const,
-		data: {
-			uuid: unwrapped.uuid ?? unwrapped.dir?.uuid ?? "dir-uuid",
-			decryptedMeta: unwrapped.meta
-				? {
-						name: unwrapped.meta.name,
-						size: 0n,
-						modified: 1000,
-						created: 900
-					}
-				: null,
-			undecryptable: unwrapped.meta === null
-		}
-	}),
-	unwrapParentUuid: () => null,
-	isTrashParent: (parent: unknown) => (parent as { tag?: string } | null)?.tag === "Trash"
-}))
+vi.mock("@/lib/sdkUnwrap", async () => await import("@/tests/mocks/sdkUnwrapSynthetic"))
 
 vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: () => null
 }))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyDirWithContext: {
-		Normal: class {
-			tag = "Normal"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Shared: class {
-			tag = "Shared"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnyNormalDir: {
-		Dir: class {
-			tag = "Dir"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Root: class {
-			tag = "Root"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnyDirWithContext_Tags: {
-		Normal: "Normal",
-		Shared: "Shared",
-		Linked: "Linked"
-	},
-	AnySharedDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnyNormalDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnyLinkedDir_Tags: {
-		Dir: "Dir",
-		Root: "Root"
-	},
-	AnySharedDir: {
-		Dir: class {
-			tag = "Dir"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Root: class {
-			tag = "Root"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
-	AnySharedDirWithContext: {
-		new: (opts: unknown) => opts
-	},
-	SharingRole_Tags: {
-		Sharer: "Sharer",
-		Receiver: "Receiver"
-	},
-	NonRootDir_Tags: {
-		Normal: "Normal",
-		Shared: "Shared",
-		Linked: "Linked"
-	},
-	ParentUuid_Tags: {
-		Uuid: "Uuid",
-		Trash: "Trash"
-	},
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
 	ErrorKind: {
 		FolderNotFound: "FolderNotFound",
 		WrongPassword: "WrongPassword"
@@ -296,9 +143,9 @@ import offlineSyncSingleton from "@/features/offline/offlineSync"
 import { planTreeReconcile, type RemoteTreeEntry, type LocalTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { parentCacheKey, makeSyncError, type OfflineParent } from "@/features/offline/offlineHelpers"
 import { OFFLINE_FILES_DIRECTORY, OFFLINE_DIRECTORIES_DIRECTORY, OFFLINE_INDEX_FILE } from "@/lib/storageRoots"
-import { AnyDirWithContext, AnyNormalDir } from "@filen/sdk-rs"
 import { validateUuid } from "@/lib/uuid"
 import type { DriveItem } from "@/types"
+import { makeFileItem, makeDirItem, makeParent, makeListingFile, makeListingDir } from "@/tests/fixtures/offline"
 
 const BENCH = process.env["OFFLINE_BENCH"] === "1"
 const SCALE = Number(process.env["OFFLINE_BENCH_SCALE"] ?? "1")
@@ -332,86 +179,6 @@ function makeUuid(): string {
 	const n = ++uuidCounter
 
 	return `${n.toString(16).padStart(8, "0")}-0000-4000-8000-${n.toString(16).padStart(12, "0")}`
-}
-
-function makeFileItem(uuid: string, name: string, size = 100n): DriveItem {
-	return {
-		type: "file",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size,
-				modified: 1000,
-				created: 900
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
-
-function makeDirItem(uuid: string, name: string): DriveItem {
-	return {
-		type: "directory",
-		data: {
-			uuid,
-			decryptedMeta: {
-				name,
-				size: 0n,
-				modified: 1000,
-				created: 900
-			},
-			undecryptable: false
-		}
-	} as unknown as DriveItem
-}
-
-function makeParent(uuid: string): OfflineParent {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	return new (AnyDirWithContext as any).Normal(new (AnyNormalDir as any).Dir({ uuid })) as OfflineParent
-}
-
-// Remote listing entry shapes consumed by the mocked sdkUnwrap stubs.
-function makeListingFile(uuid: string, path: string, name: string, size = 100n): { file: unknown; path: string } {
-	return {
-		file: {
-			uuid,
-			meta: {
-				tag: "Decoded",
-				inner: [
-					{
-						name,
-						size,
-						modified: 1000,
-						created: 900
-					}
-				]
-			}
-		},
-		path
-	}
-}
-
-function makeListingDir(uuid: string, path: string, name: string): { dir: unknown; path: string } {
-	return {
-		dir: {
-			tag: "Normal",
-			inner: [
-				{
-					uuid,
-					meta: {
-						tag: "Decoded",
-						inner: [
-							{
-								name
-							}
-						]
-					}
-				}
-			]
-		},
-		path
-	}
 }
 
 type TreeFixture = {

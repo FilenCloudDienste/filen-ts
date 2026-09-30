@@ -45,17 +45,6 @@ const H = vi.hoisted(() => {
 	return { counters, kvStore }
 })
 
-vi.mock("react-native", () => ({
-	AppState: {
-		addEventListener: () => ({ remove: () => {} }),
-		currentState: "active"
-	},
-	Platform: {
-		OS: "ios",
-		select: <T,>(specifics: { ios?: T; android?: T; default?: T }) => specifics["ios"] ?? specifics["default"]
-	}
-}))
-
 vi.mock("@/lib/sqlite", async () => {
 	const { isKvRangeScanQuery, kvRangeScanRows } = await import("@/tests/mocks/kvExecuteRaw")
 

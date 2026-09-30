@@ -21,47 +21,21 @@ vi.mock("@/lib/confirmedAction", () => ({
 	confirmedAction: mockConfirmedAction
 }))
 
-// driveHiddenItems (reached via components/hiddenNameNotice) is backed by secureStore, which pulls in
-// expo-secure-store. Stub the accessor the code under test touches; the preference is off, so the
-// hidden-name notice never fires here. isHiddenName now comes from @filen/shared (see filenShared mock).
-vi.mock("@/features/drive/driveHiddenItems", () => ({
-	readHideHiddenItems: async () => false
-}))
-
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-vi.mock("@/lib/i18n", () => ({
-	t: (key: string) => key,
-	default: { t: (key: string) => key }
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: vi.fn() }
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: { error: vi.fn(), normal: vi.fn() }
-}))
-
-vi.mock("@/lib/prompts", () => ({
-	default: { alert: vi.fn(), input: vi.fn() }
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("expo-router", () => ({
 	router: { push: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) }
 }))
 
-vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
-	runWithLoading: vi.fn(async (fn: (defer?: (cleanup: () => void) => void) => Promise<unknown>) => {
-		try {
-			const data = await fn()
-
-			return { success: true, data }
-		} catch (error) {
-			return { success: false, error }
-		}
-	})
-}))
+vi.mock("@/components/ui/fullScreenLoadingModal", async () => await import("@/tests/mocks/fullScreenLoadingModal"))
 
 vi.mock("@/features/drive/drive", () => ({
 	default: {
@@ -152,19 +126,6 @@ vi.mock("@/lib/utils", () => ({
 
 vi.mock("@/lib/cache", () => ({
 	default: { directoryUuidToAnyNormalDir: new Map() }
-}))
-
-vi.mock("@/features/drive/driveSelectSession", () => ({
-	selectDriveItems: vi.fn()
-}))
-
-// The resolver imports @filen/sdk-rs for real — stub the module so loading this suite in the
-// node test env never touches the wasm bridge. The import-flow tests pick the root, so the stub
-// keeps the root passthrough and resolves everything else to null.
-vi.mock("@/features/drive/driveSelectResolve", () => ({
-	resolveSelectedDriveItemToAnyNormalDir: vi.fn((selectedItem: { type: string; data: unknown }) =>
-		selectedItem.type === "root" ? selectedItem.data : null
-	)
 }))
 
 vi.mock("@/features/drive/driveDownload", () => ({

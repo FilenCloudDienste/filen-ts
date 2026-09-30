@@ -29,8 +29,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 vi.mock("@/stores/useDrivePreview.store", () => ({
 	default: { getState: vi.fn(() => ({ open: vi.fn() })) }
 }))
-vi.mock("@/lib/alerts", () => ({ default: { normal: vi.fn(), error: vi.fn() } }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (k: string) => k }, t: (k: string) => k }))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // ─── Actual imports ─────────────────────────────────────────────────────────────
 

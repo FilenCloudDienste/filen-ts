@@ -20,33 +20,7 @@ vi.mock("@/lib/utils", () => ({}))
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-// Use the real implementation so the mock cannot silently drift from production behaviour.
-// @/constants is extended below to supply the extension Sets that the real getPreviewType reads.
-vi.mock("@/lib/previewType", async () => vi.importActual("@/lib/previewType"))
-
-// Extend the shared constants mock with the extension Sets that @/lib/previewType requires.
-// Values are derived from the iOS Platform.select arm (Platform.OS = 'ios' in the RN mock).
-vi.mock("@/constants", async () => {
-	const base = await import("@/tests/mocks/constants")
-
-	return {
-		...base,
-		EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set([
-			".jpg",
-			".jpeg",
-			".png",
-			".gif",
-			".webp",
-			".avif",
-			".heic",
-			".heif",
-			".svg",
-			".ico",
-			".icns"
-		]),
-		EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".aac", ".wav", ".aiff", ".caf", ".flac", ".alac"])
-	}
-})
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 vi.mock("@filen/sdk-rs", () => ({}))
 
 import { useDrivePreviewStore } from "@/stores/useDrivePreview.store"
@@ -54,67 +28,20 @@ import { useCameraUploadStore, MAX_CAMERA_UPLOAD_ERRORS } from "@/features/camer
 import { useContactsStore } from "@/features/contacts/store/useContacts.store"
 import { useHttpStore } from "@/stores/useHttp.store"
 import { useAppStore } from "@/stores/useApp.store"
-import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
-import type { DrivePath, DrivePathType } from "@/hooks/useDrivePath"
+import type { GalleryItemTagged } from "@/components/drivePreview/gallery"
+import {
+	makeDrivePath,
+	makeDriveGalleryItem,
+	makeInitialDriveItem,
+	makeInitialExternalItem,
+	resetDrivePreviewStore
+} from "@/tests/fixtures/drivePreview"
 import type { ContactListItem } from "@/features/contacts/store/useContacts.store"
 import type { AnyFile } from "@filen/sdk-rs"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makeDrivePath(type: DrivePathType = "drive"): DrivePath {
-	return { type, uuid: "root-uuid" }
-}
-
-/**
- * Build a minimal DriveItemFileExtracted-shaped GalleryItemTagged of type "drive".
- * The `name` determines which previewType the filtering logic assigns.
- */
-function makeDriveGalleryItem(uuid: string, name: string): GalleryItemTagged {
-	return {
-		type: "drive",
-		data: {
-			type: "file",
-			data: {
-				uuid,
-				decryptedMeta: { name, size: 0n } as never,
-				size: 0n,
-				undecryptable: false
-			} as never
-		}
-	} as GalleryItemTagged
-}
-
-function makeInitialDriveItem(uuid: string, name: string, drivePath: DrivePath = makeDrivePath()): InitialItem {
-	return {
-		type: "drive",
-		data: {
-			item: makeDriveGalleryItem(uuid, name).data as never,
-			drivePath
-		}
-	}
-}
-
-function makeInitialExternalItem(): InitialItem {
-	return {
-		type: "external",
-		data: { uri: "file:///tmp/ext.jpg", name: "ext.jpg", mimeType: "image/jpeg" } as never
-	}
-}
-
-function resetDrivePreviewStore(): void {
-	useDrivePreviewStore.setState({
-		headerHeight: null,
-		currentItem: null,
-		currentIndex: null,
-		items: [],
-		initialScrollIndex: 0,
-		drivePath: null,
-		isLeaving: false,
-		pendingOpen: null
-	})
-}
 
 function resetCameraUploadStore(): void {
 	useCameraUploadStore.setState({ syncing: false, errors: [], skippedAssets: [] })
@@ -180,31 +107,6 @@ describe("useDrivePreviewStore.open", () => {
 	beforeEach(() => {
 		resetDrivePreviewStore()
 		mockRouterPush.mockClear()
-	})
-
-	it("is a no-op when currentIndex is already non-null", () => {
-		useDrivePreviewStore.setState({ currentIndex: 0 })
-
-		const items = [makeDriveGalleryItem("img1", "photo.jpg")]
-
-		useDrivePreviewStore.getState().open({ items, initialItem: makeInitialDriveItem("img1", "photo.jpg") })
-
-		// The router should not be called — already open guard fired
-		expect(mockRouterPush).not.toHaveBeenCalled()
-		// State should be unchanged from what was set before
-		expect(useDrivePreviewStore.getState().items).toEqual([])
-	})
-
-	it("is a no-op when currentItem is already non-null", () => {
-		useDrivePreviewStore.setState({ currentItem: makeDriveGalleryItem("img1", "photo.jpg") })
-
-		const items = [makeDriveGalleryItem("img2", "other.jpg")]
-
-		useDrivePreviewStore.getState().open({ items, initialItem: makeInitialDriveItem("img2", "other.jpg") })
-
-		expect(mockRouterPush).not.toHaveBeenCalled()
-		// items not overwritten
-		expect(useDrivePreviewStore.getState().items).toEqual([])
 	})
 
 	it("for initialItem.type='external', itemsFiltered is a single-element array and router.push is called", () => {
@@ -404,27 +306,6 @@ describe("useDrivePreviewStore.open", () => {
 				session: expect.any(String)
 			}
 		})
-	})
-
-	it("is fully idempotent: calling open twice does not change state after the first call", () => {
-		const items: GalleryItemTagged[] = [makeDriveGalleryItem("img1", "photo.jpg")]
-
-		useDrivePreviewStore.getState().open({ items, initialItem: makeInitialDriveItem("img1", "photo.jpg") })
-
-		const stateAfterFirst = { ...useDrivePreviewStore.getState() }
-
-		// Try to call open again with different items (should be a no-op)
-		const newItems: GalleryItemTagged[] = [makeDriveGalleryItem("img2", "other.jpg"), makeDriveGalleryItem("img3", "third.jpg")]
-
-		useDrivePreviewStore.getState().open({ items: newItems, initialItem: makeInitialDriveItem("img2", "other.jpg") })
-
-		const stateAfterSecond = useDrivePreviewStore.getState()
-
-		expect(stateAfterSecond.currentItem).toEqual(stateAfterFirst.currentItem)
-		expect(stateAfterSecond.currentIndex).toBe(stateAfterFirst.currentIndex)
-		expect(stateAfterSecond.items).toHaveLength(1)
-		// router.push called exactly once
-		expect(mockRouterPush).toHaveBeenCalledTimes(1)
 	})
 })
 

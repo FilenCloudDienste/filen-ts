@@ -13,23 +13,8 @@ const { mockWriteEmbeddedPreviewToPath, mockWriteEmbeddedPreviewFromPath, mockOf
 
 vi.mock("expo-crypto", async () => await import("@/tests/mocks/expoCrypto"))
 
-vi.mock("@filen/sdk-rs", () => ({
-	AnyFile: {
-		File: class {
-			tag = "File"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		},
-		Shared: class {
-			tag = "Shared"
-			inner: unknown[]
-			constructor(inner: unknown) {
-				this.inner = [inner]
-			}
-		}
-	},
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
 	ManagedFuture: {
 		new: mockManagedFutureNew
 	},
@@ -48,11 +33,7 @@ vi.mock("@filen/shared", async () => {
 		...sharedMock,
 		// The real mutexes so the per-uuid serialization is real, as in fileCache.test.ts.
 		Semaphore: actual.Semaphore,
-		KeyedSemaphores: actual.KeyedSemaphores,
-		// gc() exercises the real eviction planner against the tiny RAW_PREVIEW_CACHE_MAX_SIZE_BYTES
-		// override below, so pull it through unmocked (a stub would silently skip the size-cap pass
-		// under test).
-		planSizeCapEviction: actual.planSizeCapEviction
+		KeyedSemaphores: actual.KeyedSemaphores
 	}
 })
 
@@ -69,20 +50,8 @@ vi.mock("@/lib/auth", () => ({
 
 // ForSdk strips the scheme AND percent-DECODES every segment — the form the SDK opens verbatim. The
 // stub decodes for real, or a `%20` would slip past the path assertions unnoticed.
-vi.mock("@/lib/paths", () => ({
-	normalizeFilePathForSdk: (p: string) =>
-		p
-			.trim()
-			.replace(/^file:\/+/, "/")
-			.split("/")
-			.map(segment => {
-				try {
-					return decodeURIComponent(segment)
-				} catch {
-					return segment
-				}
-			})
-			.join("/"),
+vi.mock("@/lib/paths", async () => ({
+	...(await import("@/tests/mocks/paths")),
 	normalizeFilePathForExpo: (p: string) => (p.startsWith("file://") ? p : `file://${p}`)
 }))
 

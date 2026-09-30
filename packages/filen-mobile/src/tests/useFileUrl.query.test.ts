@@ -31,47 +31,9 @@ const {
 	}
 })
 
-vi.mock("@filen/shared", async () => ({
-	...(await import("@/tests/mocks/filenShared")),
-	sortParams: (p: Record<string, unknown>) => {
-		const keys = Object.keys(p).sort()
-		const result: Record<string, unknown> = {}
+vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-		for (const k of keys) {
-			result[k] = p[k]
-		}
-
-		return result
-	}
-}))
-
-vi.mock("@filen/sdk-rs", () => {
-	class TaggedUnion {
-		tag: string
-		inner: unknown[]
-
-		constructor(tag: string, value: unknown) {
-			this.tag = tag
-			this.inner = [value]
-		}
-	}
-
-	return {
-		AnyFile: {
-			File: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("File", file)
-				}
-			},
-			Shared: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("Shared", file)
-				}
-			}
-		},
-		ManagedFuture: { new: vi.fn(() => ({})) }
-	}
-})
+vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 
 vi.mock("@tanstack/react-query", async importOriginal => {
 	const actual = await importOriginal<typeof import("@tanstack/react-query")>()
@@ -126,54 +88,12 @@ vi.mock("@/lib/paths", () => ({
 import { fetchData } from "@/queries/useFileUrl.query"
 import { type UseFileUrlQueryParams } from "@/queries/useFileUrl.query"
 import { File as MockFile, fs } from "@/tests/mocks/expoFileSystem"
+import { fileSourceItems } from "@/tests/fixtures/driveItems"
 
-function makeFileItem(uuid = "file-uuid-1") {
-	return {
-		type: "file" as const,
-		data: {
-			uuid,
-			size: 1024n,
-			undecryptable: false,
-			decryptedMeta: { name: "test.txt", mime: "text/plain", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeSharedFileItem(uuid = "shared-uuid-1") {
-	return {
-		type: "sharedFile" as const,
-		data: {
-			uuid,
-			size: 512n,
-			undecryptable: false,
-			decryptedMeta: { name: "shared.txt", mime: "text/plain", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeSharedRootFileItem(uuid = "root-uuid-1") {
-	return {
-		type: "sharedRootFile" as const,
-		data: {
-			uuid,
-			size: 256n,
-			undecryptable: false,
-			decryptedMeta: { name: "root.txt", mime: "text/plain", modified: 1000, created: 1000 }
-		}
-	}
-}
-
-function makeDirectoryItem(uuid = "dir-uuid-1") {
-	return {
-		type: "directory" as const,
-		data: {
-			uuid,
-			size: 0n,
-			undecryptable: false,
-			decryptedMeta: { name: "my-dir", color: null }
-		}
-	}
-}
+const { makeFileItem, makeSharedFileItem, makeSharedRootFileItem, makeDirectoryItem } = fileSourceItems(
+	{ file: "test.txt", sharedFile: "shared.txt", sharedRootFile: "root.txt" },
+	"text/plain"
+)
 
 describe("fetchData (useFileUrl.query)", () => {
 	beforeEach(() => {

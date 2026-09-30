@@ -108,43 +108,20 @@ vi.mock("expo-video-thumbnails", () => ({
 	getThumbnailAsync: mockGetThumbnailAsync
 }))
 
-// Mirrors the generated bindings: AnyFile variants are classes with `tag` + `inner`, the result
-// enum's tags are string-valued (filen_sdk_rs.ts:12241-12246).
-vi.mock("@filen/sdk-rs", () => {
-	class TaggedUnion {
-		tag: string
-		inner: unknown[]
-		constructor(tag: string, value: unknown) {
-			this.tag = tag
-			this.inner = [value]
-		}
+// The result enum's tags are string-valued (filen_sdk_rs.ts:12241-12246).
+vi.mock("@filen/sdk-rs", async () => ({
+	...(await import("@/tests/mocks/sdkRs")),
+	MakeThumbnailInMemoryResult_Tags: {
+		Thumbnail: "Thumbnail",
+		Unsupported: "Unsupported",
+		OverBudget: "OverBudget",
+		Corrupt: "Corrupt"
+	},
+	// A plain record, not a uniffi handle — nothing to dispose.
+	ManagedFuture: {
+		new: mockManagedFutureNew
 	}
-
-	return {
-		AnyFile: {
-			File: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("File", file)
-				}
-			},
-			Shared: class extends TaggedUnion {
-				constructor(file: unknown) {
-					super("Shared", file)
-				}
-			}
-		},
-		MakeThumbnailInMemoryResult_Tags: {
-			Thumbnail: "Thumbnail",
-			Unsupported: "Unsupported",
-			OverBudget: "OverBudget",
-			Corrupt: "Corrupt"
-		},
-		// A plain record, not a uniffi handle — nothing to dispose.
-		ManagedFuture: {
-			new: mockManagedFutureNew
-		}
-	}
-})
+}))
 
 vi.mock("@/lib/auth", () => ({
 	default: {
@@ -196,31 +173,7 @@ vi.mock("@/lib/utils", () => ({}))
 // decode followed by an encode, NOT an encode alone: an encoded URI is its fixed point, while a
 // decoded path carrying a literal `%20` decodes a second time. A stub that only added the scheme
 // could not express that, so it could not catch it either.
-vi.mock("@/lib/paths", () => {
-	const forSdk = (path: string) =>
-		path
-			.replace(/^file:\/+/, "/")
-			.split("/")
-			.map(segment => {
-				try {
-					return decodeURIComponent(segment)
-				} catch {
-					return segment
-				}
-			})
-			.join("/")
-
-	return {
-		normalizeFilePathForExpo: vi.fn(
-			(path: string) =>
-				`file://${forSdk(path)
-					.split("/")
-					.map(segment => (segment.length > 0 ? encodeURIComponent(segment) : segment))
-					.join("/")}`
-		),
-		normalizeFilePathForSdk: vi.fn(forSdk)
-	}
-})
+vi.mock("@/lib/paths", async () => await import("@/tests/mocks/paths"))
 
 vi.mock("@/lib/signals", () => ({
 	toSignalOpts: (signal?: AbortSignal) => (signal ? { signal } : undefined),
@@ -261,12 +214,7 @@ vi.mock("@/lib/thumbnailsVersionSweep", () => ({
 	sweepStaleThumbnailVersions: mockSweepStaleThumbnailVersions
 }))
 
-// The shared mock (untouched) lacks the audio set that previewType.ts now reaches through
-// thumbnailsHelpers.getThumbnailKind — spread it in here rather than widening the shared file.
-vi.mock("@/constants", async () => ({
-	...(await import("@/tests/mocks/constants")),
-	EXPO_AUDIO_SUPPORTED_EXTENSIONS: new Set([".mp3", ".m4a", ".wav"])
-}))
+vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))
 
 vi.mock("@tanstack/react-query", () => ({
 	onlineManager: {

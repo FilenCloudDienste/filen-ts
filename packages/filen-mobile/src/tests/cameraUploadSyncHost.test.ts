@@ -13,7 +13,7 @@ vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 // es-toolkit/function's debounce is captured so each created debounced fn's trailing body can be
 // invoked deterministically (no fake timers needed) and its .cancel() can be asserted. The module
 // creates syncDebounced (5s) FIRST, then updateBackgroundTask (1s) — captured in that order.
-const { debouncedHandles, RealSemaphore, mockBackgroundTask, mockAuth, mockCameraUpload, offlineBg } = vi.hoisted(() => {
+const { debouncedHandles, mockBackgroundTask, mockAuth, mockCameraUpload, offlineBg } = vi.hoisted(() => {
 	type Handle = {
 		delay: number
 		body: () => void
@@ -24,51 +24,6 @@ const { debouncedHandles, RealSemaphore, mockBackgroundTask, mockAuth, mockCamer
 	}
 
 	const debouncedHandles: Handle[] = []
-
-	// Faithful re-implementation of @filen/shared Semaphore (the shared mock is a no-op, which would
-	// defeat the CU-02 serialization assertion). One-permit acquire/release with a FIFO waiter queue.
-	class RealSemaphore {
-		private counter = 0
-		private waiting: Array<() => void> = []
-		private head = 0
-		private maxCount: number
-
-		constructor(max = 1) {
-			this.maxCount = max
-		}
-
-		acquire(): Promise<void> {
-			if (this.counter < this.maxCount) {
-				this.counter++
-
-				return Promise.resolve()
-			}
-
-			return new Promise<void>(resolve => {
-				this.waiting.push(resolve)
-			})
-		}
-
-		release(): void {
-			if (this.counter <= 0) {
-				return
-			}
-
-			this.counter--
-
-			while (this.head < this.waiting.length && this.counter < this.maxCount) {
-				this.counter++
-
-				const next = this.waiting[this.head]
-
-				this.head++
-
-				if (next) {
-					next()
-				}
-			}
-		}
-	}
 
 	const mockBackgroundTask = {
 		registerBackgroundSync: vi.fn<() => Promise<void>>(async () => {}),
@@ -81,7 +36,7 @@ const { debouncedHandles, RealSemaphore, mockBackgroundTask, mockAuth, mockCamer
 
 	const offlineBg = { value: false as boolean }
 
-	return { debouncedHandles, RealSemaphore, mockBackgroundTask, mockAuth, mockCameraUpload, offlineBg }
+	return { debouncedHandles, mockBackgroundTask, mockAuth, mockCameraUpload, offlineBg }
 })
 
 vi.mock("es-toolkit/function", () => ({
@@ -109,7 +64,10 @@ vi.mock("es-toolkit/function", () => ({
 	}
 }))
 
-vi.mock("@filen/shared", () => ({ Semaphore: RealSemaphore }))
+// The real Semaphore: the shared mock's no-op would defeat the CU-02 serialization assertion.
+vi.mock("@filen/shared", async () => ({
+	Semaphore: (await vi.importActual<typeof import("@filen/shared")>("@filen/shared")).Semaphore
+}))
 
 vi.mock("@/features/cameraUpload/backgroundTask", () => mockBackgroundTask)
 

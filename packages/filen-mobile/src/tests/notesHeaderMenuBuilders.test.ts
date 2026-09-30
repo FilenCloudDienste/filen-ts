@@ -17,10 +17,7 @@ vi.mock("@filen/sdk-rs", () => ({
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
 
-vi.mock("@/lib/i18n", () => ({
-	t: (key: string) => key,
-	default: { t: (key: string) => key }
-}))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 vi.mock("@/lib/auth", () => ({
 	useStringifiedClient: vi.fn().mockReturnValue(null),
@@ -58,9 +55,7 @@ vi.mock("@/lib/prompts", () => ({
 	default: { alert: vi.fn(), input: vi.fn() }
 }))
 
-vi.mock("@/lib/alerts", () => ({
-	default: { error: vi.fn() }
-}))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 
 vi.mock("expo-router", () => ({
 	router: { push: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) }
@@ -72,25 +67,11 @@ vi.mock("@/stores/useApp.store", () => ({
 	}
 }))
 
-vi.mock("expo-sharing", () => ({
-	shareAsync: vi.fn()
-}))
-
 vi.mock("expo-clipboard", () => ({
 	setStringAsync: vi.fn()
 }))
 
-vi.mock("@/components/ui/fullScreenLoadingModal", () => ({
-	runWithLoading: vi.fn(async (fn: () => Promise<unknown>) => {
-		try {
-			const data = await fn()
-
-			return { success: true, data }
-		} catch (error) {
-			return { success: false, error }
-		}
-	})
-}))
+vi.mock("@/components/ui/fullScreenLoadingModal", async () => await import("@/tests/mocks/fullScreenLoadingModal"))
 
 vi.mock("@/lib/decryption", () => ({
 	noteDisplayTitle: vi.fn((note: { title?: string }) => note.title ?? "Untitled")
@@ -108,23 +89,10 @@ vi.mock("@expo/ui/swift-ui", () => ({
 	Image: () => null
 }))
 
-vi.mock("react-native-ios-context-menu", () => ({
-	ContextMenuView: () => null,
-	ContextMenuButton: () => null
-}))
-
-vi.mock("@react-native-menu/menu", () => ({
-	MenuView: () => null
-}))
-
 vi.mock("uniwind", () => ({
 	withUniwind: (c: unknown) => c,
 	useResolveClassNames: () => ({}),
 	useUniwind: () => ({ theme: "dark" })
-}))
-
-vi.mock("@/hooks/useIsOnline", () => ({
-	default: () => true
 }))
 
 vi.mock("@/components/ui/view", () => ({

@@ -60,7 +60,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 }))
 vi.mock("@/stores/useDrivePreview.store", () => ({ default: { getState: () => ({ open: h.open }) } }))
 vi.mock("@/lib/alerts", () => ({ default: { normal: vi.fn(), error: vi.fn() } }))
-vi.mock("@/lib/i18n", () => ({ default: { t: (key: string) => key }, t: (key: string) => key }))
+vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/decryption", () => ({
 	driveItemDisplayName: (item: { data: { uuid: string } }) => `name-${item.data.uuid}`,
 	cannotDecryptPlaceholder: (uuid: string) => uuid

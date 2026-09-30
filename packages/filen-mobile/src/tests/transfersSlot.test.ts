@@ -2,14 +2,14 @@ import { vi } from "vitest"
 
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: () => null }))
 vi.mock("@filen/shared", () => ({ formatBytesPerSecond: (n: number) => String(n) }))
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }))
 vi.mock("uniwind", () => ({ useResolveClassNames: () => ({ color: "#fff" }) }))
 vi.mock("@/components/ui/view", () => ({ default: () => null }))
 vi.mock("@/components/ui/text", () => ({ default: () => null }))
 vi.mock("@/components/ui/pressables", () => ({ PressableScale: () => null }))
 vi.mock("@/components/floatingBar/animatedProgressBar", () => ({ default: () => null }))
-vi.mock("zustand/shallow", () => ({ useShallow: (fn: unknown) => fn }))
+vi.mock("zustand/shallow", async () => await import("@/tests/mocks/zustandShallow"))
 
 import { describe, it, expect } from "vitest"
 import { anyActiveTransfer } from "@/components/floatingBar/transfersSlot"

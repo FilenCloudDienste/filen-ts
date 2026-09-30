@@ -7,9 +7,7 @@ vi.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: vi.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 }))
 }))
 vi.mock("uniwind", () => ({ useResolveClassNames: vi.fn(() => ({})) }))
-vi.mock("react-i18next", () => ({
-	useTranslation: vi.fn(() => ({ t: (k: string) => k }))
-}))
+vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("@filen/shared", () => ({
 	run: vi.fn(),
 	clampedRatio: (numerator: number, denominator: number, scale = 1) =>
@@ -18,7 +16,7 @@ vi.mock("@filen/shared", () => ({
 vi.mock("@filen/sdk-rs", () => ({ DirColor: { Default: { new: vi.fn(() => ({})) } } }))
 vi.mock("@/lib/decryption", () => ({ driveItemDisplayName: vi.fn(() => "") }))
 vi.mock("@/lib/prompts", () => ({ default: { alert: vi.fn() } }))
-vi.mock("@/lib/alerts", () => ({ default: { error: vi.fn() } }))
+vi.mock("@/lib/alerts", async () => await import("@/tests/mocks/alerts"))
 vi.mock("@/features/transfers/transfers", () => ({ default: { cancelAll: vi.fn() } }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { retryFailed: vi.fn() } }))
 vi.mock("@/features/copy/copyCancel", () => ({ stopCopyWithChoice: vi.fn() }))
