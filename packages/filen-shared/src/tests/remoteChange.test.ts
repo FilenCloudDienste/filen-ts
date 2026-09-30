@@ -156,4 +156,33 @@ describe("PushEchoes", () => {
 		expect(echoes.isOwn("a", "c1")).toBe(true)
 		expect(echoes.isOwn("a", "c1")).toBe(false)
 	})
+
+	it("reports a push pending until its echo is heard, its write is forgotten, or the registry is cleared", () => {
+		const echoes = new PushEchoes()
+
+		expect(echoes.hasPending("a")).toBe(false)
+
+		echoes.remember("a", "c0")
+		echoes.remember("a", "c1")
+
+		expect(echoes.hasPending("a")).toBe(true)
+		expect(echoes.hasPending("b")).toBe(false)
+		// Peeking consumes nothing.
+		expect(echoes.hasPending("a")).toBe(true)
+
+		expect(echoes.isOwn("a", "c0")).toBe(true)
+		expect(echoes.hasPending("a")).toBe(true)
+		expect(echoes.isOwn("a", "c1")).toBe(true)
+		expect(echoes.hasPending("a")).toBe(false)
+
+		echoes.remember("a", "c2")
+		echoes.forget("a", "c2")
+
+		expect(echoes.hasPending("a")).toBe(false)
+
+		echoes.remember("a", "c3")
+		echoes.clear()
+
+		expect(echoes.hasPending("a")).toBe(false)
+	})
 })

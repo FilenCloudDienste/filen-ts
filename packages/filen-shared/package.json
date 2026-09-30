@@ -9,6 +9,7 @@
 	},
 	"author": "Filen Cloud Dienste UG",
 	"type": "module",
+	"sideEffects": false,
 	"exports": {
 		".": "./src/index.ts",
 		"./dom": "./src/dom/index.ts",

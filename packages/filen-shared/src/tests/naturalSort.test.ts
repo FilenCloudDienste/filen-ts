@@ -1,26 +1,30 @@
 import { describe, it, expect } from "vitest"
-import { getUuidNumber, getLowerName, getNumericParts, comparePartsNumeric, clearNaturalSortCaches } from "@filen/shared"
+import { getUuidNumber, getNameParts, comparePartsNumeric, clearNaturalSortCaches } from "@filen/shared"
 
-describe("getNumericParts", () => {
+describe("getNameParts", () => {
 	it("splits a name into alternating string/number runs", () => {
-		expect(getNumericParts("img10.png")).toEqual(["img", 10, ".png"])
+		expect(getNameParts("img10.png")).toEqual(["img", 10, ".png"])
 	})
 
 	it("parses a leading digit run", () => {
-		expect(getNumericParts("10img")).toEqual([10, "img"])
+		expect(getNameParts("10img")).toEqual([10, "img"])
 	})
 
 	it("parses an absurdly long digit run the same way parseInt would", () => {
-		expect(getNumericParts("1".repeat(30))).toEqual([parseInt("1".repeat(30), 10)])
+		expect(getNameParts("1".repeat(30))).toEqual([parseInt("1".repeat(30), 10)])
+	})
+
+	it("lowercases before parsing", () => {
+		expect(getNameParts("IMG10.PNG")).toEqual(["img", 10, ".png"])
 	})
 
 	it("returns an empty array for an empty string", () => {
-		expect(getNumericParts("")).toEqual([])
+		expect(getNameParts("")).toEqual([])
 	})
 
-	it("memoizes: repeated calls for the same string return the SAME array reference", () => {
-		const first = getNumericParts("cache-me-10")
-		const second = getNumericParts("cache-me-10")
+	it("memoizes: repeated calls for the same key return the SAME array reference", () => {
+		const first = getNameParts("cache-me-10")
+		const second = getNameParts("cache-me-10")
 
 		expect(first).toBe(second)
 	})
@@ -28,11 +32,11 @@ describe("getNumericParts", () => {
 
 describe("comparePartsNumeric", () => {
 	it("orders digit runs numerically, not lexically", () => {
-		expect(comparePartsNumeric(getNumericParts("img9"), getNumericParts("img10"))).toBeLessThan(0)
+		expect(comparePartsNumeric(getNameParts("img9"), getNameParts("img10"))).toBeLessThan(0)
 	})
 
 	it("orders string runs lexically", () => {
-		expect(comparePartsNumeric(getNumericParts("apple"), getNumericParts("banana"))).toBeLessThan(0)
+		expect(comparePartsNumeric(getNameParts("apple"), getNameParts("banana"))).toBeLessThan(0)
 	})
 
 	it("sorts a number part before a string part at the same position", () => {
@@ -47,20 +51,17 @@ describe("comparePartsNumeric", () => {
 	})
 
 	it("short-circuits to 0 for the same cached parts array (reference equality)", () => {
-		const parts = getNumericParts("same-name")
+		const parts = getNameParts("same-name")
 
 		expect(comparePartsNumeric(parts, parts)).toBe(0)
 	})
 
+	it("returns 0 for keys that differ only by case", () => {
+		expect(comparePartsNumeric(getNameParts("Case10"), getNameParts("cASE10"))).toBe(0)
+	})
+
 	it("returns 0 for equal, distinct arrays", () => {
 		expect(comparePartsNumeric(["a", 1], ["a", 1])).toBe(0)
-	})
-})
-
-describe("getLowerName", () => {
-	it("lowercases and memoizes", () => {
-		expect(getLowerName("ABC")).toBe("abc")
-		expect(getLowerName("ABC")).toBe("abc")
 	})
 })
 
@@ -76,12 +77,12 @@ describe("getUuidNumber", () => {
 })
 
 describe("clearNaturalSortCaches", () => {
-	it("evicts the numeric-parts cache so a later call returns a fresh array", () => {
-		const before = getNumericParts("evict-me-1")
+	it("evicts the name-parts cache so a later call returns a fresh array", () => {
+		const before = getNameParts("evict-me-1")
 
 		clearNaturalSortCaches()
 
-		const after = getNumericParts("evict-me-1")
+		const after = getNameParts("evict-me-1")
 
 		expect(after).not.toBe(before)
 		expect(after).toEqual(before)

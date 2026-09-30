@@ -43,6 +43,37 @@ export function isMessageUnreadCore(
 	return !isSenderBlocked({ userId: message.senderId, email: message.senderEmail })
 }
 
+// Count of messages isMessageUnreadCore accepts, in the same check order, without normalizing each
+// message: the chat gate runs once and the blocked check only for messages that pass the cheap ones.
+export function countUnreadCore<M>(
+	messages: readonly M[],
+	chat: UnreadChat,
+	userId: bigint | undefined,
+	getSentTimestamp: (message: M) => bigint,
+	getSenderId: (message: M) => bigint,
+	isMessageSenderBlocked: (message: M) => boolean
+): number {
+	const lastFocus = chat.lastFocus
+
+	if (userId === undefined || chat.muted || lastFocus === undefined || !chat.hasLastMessage) {
+		return 0
+	}
+
+	let count = 0
+
+	for (const message of messages) {
+		if (getSentTimestamp(message) <= lastFocus || getSenderId(message) === userId) {
+			continue
+		}
+
+		if (!isMessageSenderBlocked(message)) {
+			count++
+		}
+	}
+
+	return count
+}
+
 // Cheaper boolean tier, derived from the chat's own lastMessage instead of a per-chat message list.
 // When that last message is from a blocked sender, falls back to scanning `getMessages()` (already
 // normalized) for an older unread from someone else, so a blocked member posting into a group never

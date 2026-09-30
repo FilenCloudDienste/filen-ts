@@ -1,3 +1,4 @@
+// package.json declares "sideEffects": false so bundlers drop unused modules: keep every shared module free of import-time side effects.
 export * from "./cn"
 export * from "./run"
 export * from "./semaphore"
@@ -51,3 +52,4 @@ export * from "./copyJob"
 export * from "./copyProgress"
 export * from "./remoteChange"
 export * from "./audioTags"
+export * from "./typingSender"

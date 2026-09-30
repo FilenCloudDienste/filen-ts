@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { isMessageUnreadCore, chatHasUnreadCore, type UnreadMessage, type UnreadChat, type IsSenderBlocked } from "@filen/shared"
+import { isMessageUnreadCore, chatHasUnreadCore, countUnreadCore, type UnreadMessage, type UnreadChat, type IsSenderBlocked } from "@filen/shared"
 
 // Consolidates the raw-predicate coverage that used to live three times over: mobile's
 // chatSelectors.test.ts ("isMessageUnread" + "chatHasUnread"), mobile's
@@ -192,5 +192,64 @@ describe("chatHasUnreadCore", () => {
 
 		expect(chatHasUnreadCore({ muted: false, lastFocus: 100n }, lastMessage, SELF, blocked, getMessages)).toBe(true)
 		expect(getMessages).not.toHaveBeenCalled()
+	})
+})
+
+describe("countUnreadCore", () => {
+	const blocked = blockedBy([BLOCKED], ["blocked@x.io"])
+	const messages: UnreadMessage[] = [
+		message({ sentTimestamp: 200n }),
+		message({ sentTimestamp: 300n }),
+		message({ sentTimestamp: 100n }),
+		message({ sentTimestamp: 50n }),
+		message({ senderId: SELF, sentTimestamp: 400n }),
+		message({ senderId: BLOCKED, sentTimestamp: 500n }),
+		message({ senderId: 3n, senderEmail: "blocked@x.io", sentTimestamp: 600n }),
+		message({ senderId: 4n, senderEmail: "fine@x.io", sentTimestamp: 700n })
+	]
+
+	function count(c: UnreadChat, userId: bigint | undefined, isSenderBlocked: IsSenderBlocked): number {
+		return countUnreadCore(
+			messages,
+			c,
+			userId,
+			m => m.sentTimestamp,
+			m => m.senderId,
+			m => isSenderBlocked({ userId: m.senderId, email: m.senderEmail })
+		)
+	}
+
+	const cases: Array<[string, UnreadChat, bigint | undefined, IsSenderBlocked]> = [
+		["plain", chat(), SELF, blocked],
+		["nothing blocked", chat(), SELF, NEVER_BLOCKED],
+		["muted", chat({ muted: true }), SELF, blocked],
+		["no lastFocus", chat({ lastFocus: undefined }), SELF, blocked],
+		["no lastMessage", chat({ hasLastMessage: false }), SELF, blocked],
+		["no user", chat(), undefined, blocked],
+		["other viewer", chat(), OTHER, blocked],
+		["everything older than lastFocus", chat({ lastFocus: 10_000n }), SELF, blocked]
+	]
+
+	it.each(cases)("matches the isMessageUnreadCore filter: %s", (_, c, userId, isSenderBlocked) => {
+		expect(count(c, userId, isSenderBlocked)).toBe(messages.filter(m => isMessageUnreadCore(m, c, userId, isSenderBlocked)).length)
+	})
+
+	it("counts newer messages from unblocked others only", () => {
+		expect(count(chat(), SELF, blocked)).toBe(3)
+	})
+
+	it("asks about blocking only for messages that pass the cheap checks", () => {
+		const isMessageSenderBlocked = vi.fn(() => false)
+
+		countUnreadCore(messages, chat(), SELF, m => m.sentTimestamp, m => m.senderId, isMessageSenderBlocked)
+
+		expect(isMessageSenderBlocked).toHaveBeenCalledTimes(5)
+	})
+
+	it("never reads a message when the chat gate rejects", () => {
+		const getSentTimestamp = vi.fn((m: UnreadMessage) => m.sentTimestamp)
+
+		expect(countUnreadCore(messages, chat({ muted: true }), SELF, getSentTimestamp, m => m.senderId, () => false)).toBe(0)
+		expect(getSentTimestamp).not.toHaveBeenCalled()
 	})
 })

@@ -152,6 +152,11 @@ export class PushEchoes {
 		return true
 	}
 
+	// A push of this item has not been heard back yet. Non-consuming; emptied items are deleted, never kept.
+	public hasPending(id: string): boolean {
+		return this.pushes.has(id)
+	}
+
 	// A write that failed: its content, should another device save the same, is that device's edit.
 	public forget(id: string, hash: string): void {
 		const hashes = this.pushes.get(id)

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { quillV2ToLegacyV1 } from "@filen/shared/dom"
 
 // Realistic Quill v2 markup. The expected outputs below are Quill v1's exact getHTML() form — captured
@@ -147,6 +147,47 @@ describe("quillV2ToLegacyV1", () => {
 			expect(once).not.toContain("data-list")
 			expect(once).not.toContain("ql-ui")
 			expect(once).not.toContain("ql-code-block")
+		})
+	})
+
+	describe("block reuse across calls", () => {
+		const list = `<ol>${v2Item("checked", "A")}${v2Item("bullet", "B")}</ol>`
+		const code = v2CodeBlock(["a &lt; b", "c"])
+		const expectedList = "<ul data-checked=\"true\"><li>A</li></ul><ul><li>B</li></ul>"
+		const expectedCode = "<pre class=\"ql-syntax\" spellcheck=\"false\">a &lt; b\nc\n</pre>"
+
+		it("reuses unchanged blocks from the previous call without re-parsing them", () => {
+			expect(quillV2ToLegacyV1(`<p>x</p>${list}${code}`)).toBe(`<p>x</p>${expectedList}${expectedCode}`)
+
+			const createElement = vi.spyOn(document, "createElement")
+
+			try {
+				expect(quillV2ToLegacyV1(`<p>xy</p>${list}${code}`)).toBe(`<p>xy</p>${expectedList}${expectedCode}`)
+				expect(createElement).not.toHaveBeenCalled()
+			} finally {
+				createElement.mockRestore()
+			}
+		})
+
+		it("reconverts a block whose markup changed", () => {
+			quillV2ToLegacyV1(`${list}${code}`)
+
+			expect(quillV2ToLegacyV1(`<ol>${v2Item("checked", "A")}${v2Item("ordered", "C")}</ol>${v2CodeBlock(["z"])}`)).toBe(
+				"<ul data-checked=\"true\"><li>A</li></ul><ol><li>C</li></ol><pre class=\"ql-syntax\" spellcheck=\"false\">z\n</pre>"
+			)
+		})
+
+		it("converts repeated identical blocks in one document identically", () => {
+			expect(quillV2ToLegacyV1(`${list}<p>m</p>${list}${code}${code}`)).toBe(
+				`${expectedList}<p>m</p>${expectedList}${expectedCode}${expectedCode}`
+			)
+		})
+
+		it("stays correct after a call that takes the early return", () => {
+			quillV2ToLegacyV1(`${list}${code}`)
+
+			expect(quillV2ToLegacyV1("<p>plain</p>")).toBe("<p>plain</p>")
+			expect(quillV2ToLegacyV1(`${list}${code}`)).toBe(`${expectedList}${expectedCode}`)
 		})
 	})
 })

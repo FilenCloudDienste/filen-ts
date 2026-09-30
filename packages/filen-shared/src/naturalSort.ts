@@ -1,21 +1,19 @@
 import { parseNumbersFromString } from "./misc"
 
 // Cached, numeric-aware ("natural sort") string comparator infrastructure used as the core of
-// drive-item sorting on both platforms — digit-run parsing with memoization, uuid-derived tiebreak
-// number, lowercase memoization. Caches are module-level (one set per process, matching both apps).
+// drive-item sorting on both platforms — lowercased digit-run parsing memoized per raw name, and a
+// uuid-derived tiebreak number. Caches are module-level (one set per process, matching both apps).
 //
 // clearNaturalSortCaches() exists because the caches key on decrypted names (and uuids), which must
 // not carry one account's data into the next session. Mobile wires it into its logout flow. Web has
 // no equivalent call: its logout does a full `location.reload()`, which discards the whole module
 // graph (these Maps included) — that is a verified non-gap, not a missing wire-up, so don't add one.
 const uuidCache = new Map<string, number>()
-const lowerCache = new Map<string, string>()
-const numericPartsCache = new Map<string, (string | number)[]>()
+const namePartsCache = new Map<string, (string | number)[]>()
 
 export function clearNaturalSortCaches(): void {
 	uuidCache.clear()
-	lowerCache.clear()
-	numericPartsCache.clear()
+	namePartsCache.clear()
 }
 
 export function getUuidNumber(uuid: string): number {
@@ -30,23 +28,14 @@ export function getUuidNumber(uuid: string): number {
 	return cached
 }
 
-export function getLowerName(name: string): string {
-	let cached = lowerCache.get(name)
-
-	if (cached === undefined) {
-		cached = name.toLowerCase()
-
-		lowerCache.set(name, cached)
-	}
-
-	return cached
-}
-
-export function getNumericParts(str: string): (string | number)[] {
-	let cached = numericPartsCache.get(str)
+// Keyed by the raw key, so a single lookup covers both the lowercasing and the parse.
+export function getNameParts(key: string): (string | number)[] {
+	let cached = namePartsCache.get(key)
 
 	if (!cached) {
 		cached = []
+
+		const str = key.toLowerCase()
 
 		// Run-sliced scan: runs are detected via charCodeAt only and materialized with ONE slice
 		// each, so a name with k runs costs k allocations, not one per character. Digit runs keep
@@ -81,14 +70,14 @@ export function getNumericParts(str: string): (string | number)[] {
 			cached.push(runIsDigit ? parseInt(str.slice(runStart), 10) : str.slice(runStart))
 		}
 
-		numericPartsCache.set(str, cached)
+		namePartsCache.set(key, cached)
 	}
 
 	return cached
 }
 
 export function comparePartsNumeric(aParts: (string | number)[], bParts: (string | number)[]): number {
-	// Identical strings resolve to the SAME cached parts array (numericPartsCache), so reference
+	// Identical keys resolve to the SAME cached parts array (namePartsCache), so reference
 	// equality short-circuits the whole walk — tie-dense comparisons (same type across a group,
 	// duplicated names) become O(1) instead of O(parts).
 	if (aParts === bParts) {

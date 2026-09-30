@@ -1,4 +1,4 @@
-import { getUuidNumber, getLowerName, getNumericParts, comparePartsNumeric } from "./naturalSort"
+import { getUuidNumber, getNameParts, comparePartsNumeric } from "./naturalSort"
 
 // Generic index-array decorate/sort/permute engine behind drive-item sorting on both platforms —
 // three mode kinds (size / timestamp / lexicographic "parts"), a lazy name tiebreak nested inside
@@ -103,10 +103,27 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 			sizes[i] = known !== undefined && Number.isFinite(known) ? BigInt(Math.trunc(known)) : getSize(item)
 		}
 
-		// The name tiebreak stays LAZY here (memoized lower/parts caches, resolved per tie): file
+		// The name tiebreak stays LAZY here (resolved on first tie, then memoized per index): file
 		// sizes are mostly distinct, so precomputing name keys for the whole partition would tax
 		// the common case for the rare tie. The tie-dense case this chain exists for — directories,
-		// whose sizes are all equal/unknown — is the small dirs partition.
+		// whose sizes are all equal/unknown — resolves each index once instead of once per tie.
+		const nameParts: ((string | number)[] | undefined)[] = new Array<(string | number)[] | undefined>(length)
+
+		// Reads the slot directly: at() throws on the unresolved (undefined) slots.
+		const namePartsAt = (i: number): (string | number)[] => {
+			const cached = nameParts[i]
+
+			if (cached !== undefined) {
+				return cached
+			}
+
+			const parts = getNameParts(nameKey(at(partition, i)))
+
+			nameParts[i] = parts
+
+			return parts
+		}
+
 		const compareAsc = (a: number, b: number): number => {
 			const sizeA = at(sizes, a)
 			const sizeB = at(sizes, b)
@@ -115,10 +132,7 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 				return sizeA > sizeB ? 1 : -1
 			}
 
-			const nameDiff = comparePartsNumeric(
-				getNumericParts(getLowerName(nameKey(at(partition, a)))),
-				getNumericParts(getLowerName(nameKey(at(partition, b))))
-			)
+			const nameDiff = comparePartsNumeric(namePartsAt(a), namePartsAt(b))
 
 			if (nameDiff !== 0) {
 				return nameDiff
@@ -169,10 +183,10 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 		for (let i = 0; i < length; i++) {
 			const item = at(partition, i)
 
-			allParts[i] = getNumericParts(getLowerName(stringKey(item)))
+			allParts[i] = getNameParts(stringKey(item))
 
 			if (tieParts) {
-				tieParts[i] = getNumericParts(getLowerName(nameKey(item)))
+				tieParts[i] = getNameParts(nameKey(item))
 			}
 		}
 

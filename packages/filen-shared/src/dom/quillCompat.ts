@@ -136,12 +136,32 @@ function convertCodeBlockContainer(containerHtml: string): string {
 	return pre.outerHTML
 }
 
+// Block conversions from the previous call. Both converters are pure functions of the block markup, and
+// editors re-serialize the whole note on every keystroke, so unchanged blocks skip the DOM parse. Only one
+// generation is kept, which bounds retention to the previous call's blocks. List keys start with <ol/<ul
+// and code keys with <div, so the two converters never share a key.
+let previousBlocks = new Map<string, string>()
+
 // Translate Quill v2 list + code-block markup in an HTML string to the Quill v1 form. All other markup
 // is returned byte-for-byte unchanged. Idempotent: v1 output carries no data-list / ql-code-block, so a
 // second pass is a no-op.
 export function quillV2ToLegacyV1(html: string): string {
 	if (!DATA_LIST.test(html) && !html.includes("ql-code-block-container")) {
+		if (previousBlocks.size > 0) {
+			previousBlocks.clear()
+		}
+
 		return html
+	}
+
+	const blocks = new Map<string, string>()
+
+	const convertOnce = (block: string, convert: (containerHtml: string) => string): string => {
+		const converted = blocks.get(block) ?? previousBlocks.get(block) ?? convert(block)
+
+		blocks.set(block, converted)
+
+		return converted
 	}
 
 	let out = html
@@ -150,15 +170,19 @@ export function quillV2ToLegacyV1(html: string): string {
 	// and <ol>/<ul> only ever come from lists — so each <ol|ul>…</ol|ul> is a self-contained block with an
 	// unambiguous close (user "<" is escaped to &lt; inside, so no literal </ol> can appear in item text).
 	// Rewrite only the blocks that actually carry data-list; leave already-v1 containers untouched.
-	out = out.replace(/<(ol|ul)\b[^>]*>[\s\S]*?<\/\1>/gi, block => (DATA_LIST.test(block) ? convertListContainer(block) : block))
+	out = out.replace(/<(ol|ul)\b[^>]*>[\s\S]*?<\/\1>/gi, block =>
+		DATA_LIST.test(block) ? convertOnce(block, convertListContainer) : block
+	)
 
 	// Code blocks: a <div class="ql-code-block-container"> wraps per-line <div class="ql-code-block">
 	// children with no deeper nesting (CodeBlockContainer.allowedChildren = [CodeBlock]), so the block
 	// ends at the first "</div></div>" (line-close + container-close); middle line-closes are always
 	// followed by "<div", never "</div>".
 	out = out.replace(/<div\b[^>]*\bclass="ql-code-block-container"[^>]*>[\s\S]*?<\/div><\/div>/gi, block =>
-		convertCodeBlockContainer(block)
+		convertOnce(block, convertCodeBlockContainer)
 	)
+
+	previousBlocks = blocks
 
 	return out
 }

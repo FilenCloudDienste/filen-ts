@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { sortPartition, sortItems, type SortMode, type SortEngineAccessors } from "@filen/shared"
 
 // Minimal structural fixture — deliberately NOT a DriveItem: the engine is generic over any
@@ -196,6 +196,23 @@ describe("sortPartition", () => {
 			sortPartition(partition, sizeAsc, accessors)
 
 			expect(names(partition)).toEqual(["apple.txt", "banana.txt", "cherry.txt"])
+		})
+
+		it("resolves each tied item's name key once, with the same order as the name sort", () => {
+			const count = 200
+			const makePartition = (): FakeItem[] =>
+				Array.from({ length: count }, (_, i) =>
+					makeItem({ uuid: `dir-${(i * 37) % count}`, name: `Dir ${(i * 53) % count}`, isDir: true })
+				)
+			const nameKey = vi.fn((item: FakeItem) => item.name)
+			const bySize = makePartition()
+			const byName = makePartition()
+
+			sortPartition(bySize, sizeAsc, { ...accessors, nameKey })
+			sortPartition(byName, nameAsc, accessors)
+
+			expect(nameKey.mock.calls.length).toBeLessThanOrEqual(count)
+			expect(uuids(bySize)).toEqual(uuids(byName))
 		})
 
 		describe("directorySizes substitution", () => {
