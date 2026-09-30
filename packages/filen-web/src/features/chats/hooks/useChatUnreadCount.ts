@@ -1,6 +1,6 @@
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { useChatMessages } from "@/features/chats/queries/chatMessages"
-import { isMessageUnread } from "@/features/chats/lib/unread.logic"
+import { chatLastFocus, isMessageUnread } from "@/features/chats/lib/unread.logic"
 import type { BlockedUsers } from "@filen/shared"
 
 // Pure per-chat unread tally — the number of messages in `messages` that count as unread for `chat`
@@ -12,10 +12,16 @@ export function countUnreadMessages(
 	userId: bigint | undefined,
 	blocked: BlockedUsers
 ): number {
+	// Both prefilters mirror isMessageUnread's own rejections, skipping its per-message allocations.
+	if (userId === undefined || chat.muted) {
+		return 0
+	}
+
+	const lastFocus = chatLastFocus(chat)
 	let count = 0
 
 	for (const message of messages) {
-		if (isMessageUnread(message, chat, userId, blocked)) {
+		if (message.sentTimestamp > lastFocus && isMessageUnread(message, chat, userId, blocked)) {
 			count++
 		}
 	}

@@ -12,6 +12,7 @@ import {
 	resolveListingDisplayItems,
 	resolveSearchDisplayItems
 } from "@/features/drive/components/directoryListing.logic"
+import { DRIVE_SORT_BY, DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { testUuid } from "@/tests/support/uuid"
 
 function sharerRole(id: number, email: string): SharingRole {
@@ -317,6 +318,39 @@ describe("resolveListingDisplayItems", () => {
 		expect(
 			resolveListingDisplayItems({ items: [shown, hidden], sortBy: "nameAsc", directorySizes: NO_SIZES, hide: false }).hiddenUuids
 		).toEqual([])
+	})
+
+	it("reports no hidden uuids when hiding is on but nothing matches", () => {
+		const result = resolveListingDisplayItems({
+			items: [named("none-a", "a"), named("none-b", "b")],
+			sortBy: "nameAsc",
+			directorySizes: NO_SIZES,
+			hide: true
+		})
+
+		expect(result.hiddenUuids).toEqual([])
+		expect(result.hiddenCount).toBe(0)
+	})
+
+	// directoryListing.tsx hands non-size sorts an empty map so streamed sizes do not re-sort the listing.
+	it("only a size sort reads directory sizes", () => {
+		const small = named("sizes-small", "a")
+		const large = named("sizes-large", "b")
+		const sizes: ReadonlyMap<string, number> = new Map([
+			[small.data.uuid, 1],
+			[large.data.uuid, 100]
+		])
+		const order = (sortBy: DriveSortBy, directorySizes: ReadonlyMap<string, number>) =>
+			resolveListingDisplayItems({ items: [large, small], sortBy, directorySizes, hide: false }).items.map(item => item.data.uuid)
+
+		for (const sortBy of DRIVE_SORT_BY) {
+			if (DRIVE_SORT_PARTS[sortBy].field !== "size") {
+				expect(order(sortBy, sizes)).toEqual(order(sortBy, NO_SIZES))
+			}
+		}
+
+		expect(order("sizeDesc", sizes)).toEqual([large.data.uuid, small.data.uuid])
+		expect(order("sizeAsc", sizes)).toEqual([small.data.uuid, large.data.uuid])
 	})
 
 	it("hides a search hit by its ancestor chain, not just its own name", () => {

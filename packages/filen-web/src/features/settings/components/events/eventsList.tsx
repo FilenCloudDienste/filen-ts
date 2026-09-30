@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { HistoryIcon } from "lucide-react"
@@ -41,12 +41,16 @@ export function EventsList() {
 
 	useEffect(() => releaseEventsSlice, [])
 
+	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
+	// re-lays every row when its key function changes, so it must change with the events and nothing else.
+	const getItemKey = useCallback((index: number) => events[index]?.id ?? index, [events])
+
 	const virtualizer = useVirtualizer({
 		count: events.length,
 		getScrollElement: () => scrollElement,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: OVERSCAN,
-		getItemKey: index => events[index]?.id ?? index
+		getItemKey
 	})
 
 	async function handleScroll(el: HTMLDivElement): Promise<void> {

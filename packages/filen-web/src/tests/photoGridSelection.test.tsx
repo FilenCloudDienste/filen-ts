@@ -23,7 +23,9 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 vi.mock("@/features/photos/queries/preferences", () => ({ usePhotosGridDensityQuery: () => ({ data: undefined, refetch: vi.fn() }) }))
-vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({ useMarqueeSelection: () => ({ rect: null, onPointerDown: vi.fn() }) }))
+vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({
+	useMarqueeSelection: () => ({ rectStore: { get: () => null, subscribe: () => () => undefined }, onPointerDown: vi.fn() })
+}))
 vi.mock("@/features/photos/components/photoTile", () => ({ PhotoTile: () => null }))
 vi.mock("@/features/drive/components/searchInput", () => ({ SearchInput: () => null }))
 vi.mock("@/components/ui/tooltip", () => ({

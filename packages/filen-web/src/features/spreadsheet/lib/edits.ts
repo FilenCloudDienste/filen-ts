@@ -70,16 +70,29 @@ export type EditResult =
 	// style table when it grew, empty otherwise.
 	| { type: "cells"; patches: CellPatch[]; styles: CellStyleView[]; state: DocState }
 	// Sheets were added, renamed, or had rows or columns moved: one entry per sheet, the new count of them,
-	// a full view of each sheet that changed and null for one that did not (keep the view held). `styles`
-	// is the whole style table.
+	// a full view of each sheet whose layout changed and null for the rest (keep the view held, named
+	// `names[i]`, with any of `patches` for it folded in and its extent set to any of `extents` for it, as a
+	// full view would report it). `styles` is the whole style table.
 	| {
 			type: "sheets"
 			sheets: (SheetView | null)[]
+			names?: string[]
+			patches?: CellPatch[]
+			extents?: { sheet: number; rowCount: number; colCount: number }[]
 			styles: CellStyleView[]
 			state: DocState
-			// A CSV's rows or columns moved (applied, redone, or undone when `revert`): where, so sizes kept
-			// beside the file follow them.
-			shift?: AxisEdit & { revert: boolean }
+	  }
+	// A CSV's rows or columns moved (applied, redone, or undone when `revert`): the held cells move with
+	// them, `cells` (those an undone delete puts back) land on top, and the sheet's extent becomes
+	// rowCount by colCount. Sizes kept beside the file follow `shift` too.
+	| {
+			type: "shifted"
+			sheet: number
+			shift: AxisEdit & { revert: boolean }
+			cells: [number, CellView][]
+			rowCount: number
+			colCount: number
+			state: DocState
 	  }
 	// Columns or rows were resized: their sizes as the sheet now reads them (null: none of their own).
 	| { type: "sizes"; sheet: number; axis: SizeAxis; sizes: SizeEntry[]; state: DocState }

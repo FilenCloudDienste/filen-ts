@@ -107,7 +107,7 @@ function sharedProps(
 }
 
 function renderRow(item: DriveItem, selected: boolean, onCursorMove: (index: number) => void) {
-	return render(createElement(DriveRow, { ...sharedProps(item, selected, onCursorMove), style: {}, directorySizes: new Map() }))
+	return render(createElement(DriveRow, { ...sharedProps(item, selected, onCursorMove), start: 0, directorySize: undefined }))
 }
 
 function renderTile(item: DriveItem, selected: boolean, onCursorMove: (index: number) => void) {
@@ -175,8 +175,8 @@ describe("New submenu", () => {
 				...sharedProps(item, false, () => undefined),
 				variant,
 				destinationActions,
-				style: {},
-				directorySizes: new Map()
+				start: 0,
+				directorySize: undefined
 			})
 		)
 	}
@@ -247,8 +247,8 @@ describe("Move submenu", () => {
 		const { container } = render(
 			createElement(DriveRow, {
 				...sharedProps(item, false, () => undefined, { onItemAction }),
-				style: {},
-				directorySizes: new Map()
+				start: 0,
+				directorySize: undefined
 			})
 		)
 
@@ -266,8 +266,8 @@ describe("Move submenu", () => {
 		const { container } = render(
 			createElement(DriveRow, {
 				...sharedProps(item, true, () => undefined, { onBulkAction }),
-				style: {},
-				directorySizes: new Map()
+				start: 0,
+				directorySize: undefined
 			})
 		)
 
@@ -290,8 +290,8 @@ describe("Move submenu", () => {
 				...sharedProps(item, false, () => undefined),
 				onPointerSelect,
 				onOpen,
-				style: {},
-				directorySizes: new Map()
+				start: 0,
+				directorySize: undefined
 			})
 		)
 
@@ -342,5 +342,29 @@ describe("cut dimming", () => {
 
 		expect(isDimmed(row.container)).toBe(false)
 		expect(isDimmed(tile.container)).toBe(false)
+	})
+})
+
+describe("row positioning and size", () => {
+	it("places the row at the virtualizer offset and labels a directory with its resolved size", () => {
+		const { container } = render(
+			createElement(DriveRow, { ...sharedProps(dirItem("sized"), false, () => undefined), start: 120, directorySize: 4_096 })
+		)
+		const row = container.querySelector<HTMLElement>('[role="option"]')
+
+		expect(row?.style.position).toBe("absolute")
+		expect(row?.style.top).toBe("0px")
+		expect(row?.style.left).toBe("0px")
+		expect(row?.style.width).toBe("100%")
+		expect(row?.style.transform).toBe("translateY(120px)")
+		expect(row?.textContent).toContain("4 KiB")
+	})
+
+	it("leaves a pending directory's size blank", () => {
+		const { container } = render(
+			createElement(DriveRow, { ...sharedProps(dirItem("pending"), false, () => undefined), start: 0, directorySize: undefined })
+		)
+
+		expect(container.querySelector('[role="option"]')?.textContent).not.toContain("KiB")
 	})
 })

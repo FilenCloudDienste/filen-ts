@@ -182,7 +182,9 @@ describe("XlsxDocument engine edges", () => {
 		const renamed = document.apply({ type: "renameSheet", sheet: 1, name: "Tiny" })
 		const added = document.apply({ type: "addSheet", name: "New" })
 
-		expect(renamed.type === "sheets" ? renamed.sheets.map(sheet => sheet?.name ?? null) : null).toEqual([null, "Tiny"])
+		// A rename changes only a name, which travels without the sheet's view.
+		expect(renamed).toMatchObject({ sheets: [null, null], names: ["Big", "Tiny"], patches: [] })
+		expect(added).toMatchObject({ names: ["Big", "Tiny", "New"], patches: [] })
 		expect(added.type === "sheets" ? added.sheets.map(sheet => sheet?.name ?? null) : null).toEqual([null, null, "New"])
 	})
 

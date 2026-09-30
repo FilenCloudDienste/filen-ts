@@ -117,6 +117,7 @@ export function groupNotesForView(notes: readonly Note[], now: number): NotesSid
 
 // The notes view's full row model: search-filter first (narrowing the set grouping then walks), then
 // partition into the interleaved header + note rows. `now` is injected for deterministic bucketing.
+// `bodies` holds lowercased bodies (see filterNotesBySearch).
 export function buildNotesGroupedRows(
 	notes: readonly Note[],
 	search: string,
@@ -177,8 +178,8 @@ function tagNameMatches(tag: NoteTag, normalized: string): boolean {
 }
 
 // A tag is shown in the tags view when the search matches its NAME or any of its member notes
-// (title or full body — `bodies` is the eager-fetched full-body map from useNoteSearchBodies.ts,
-// undefined outside an active search). Empty search shows all.
+// (title or full body — `bodies` is the eager-fetched, lowercased full-body map from
+// useNoteSearchBodies.ts, undefined outside an active search). Empty search shows all.
 export function filterTagsForView(
 	tags: readonly NoteTag[],
 	notesByTag: Record<string, readonly Note[]>,
@@ -202,7 +203,7 @@ export function filterTagsForView(
 
 // The notes shown inside an expanded tag group: all of them (sorted) when the search is empty or the
 // tag NAME itself matched — a name match reveals the whole group — otherwise only the members that
-// match the search. Always sorted by the shared note sort.
+// match the search. Always sorted by the shared note sort. `bodies` holds lowercased bodies.
 function notesForExpandedTag(
 	tag: NoteTag,
 	notesByTag: Record<string, readonly Note[]>,
@@ -256,7 +257,7 @@ export interface TagsViewParams {
 	sortBy: NoteTagsSortBy
 	// Localized label for the synthesized untagged row (the logic layer stays React-free).
 	untaggedLabel: string
-	// Eager-fetched full-body map, undefined outside an active search (see filterTagsForView).
+	// Eager-fetched, lowercased full-body map, undefined outside an active search (see filterTagsForView).
 	bodies?: ReadonlyMap<string, string | undefined>
 }
 

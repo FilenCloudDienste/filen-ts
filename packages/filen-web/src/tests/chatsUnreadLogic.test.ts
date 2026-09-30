@@ -175,6 +175,19 @@ describe("countUnreadMessages", () => {
 
 		expect(countUnreadMessages(messages, neverFocusedChat(), SELF, EMPTY_BLOCKED_USERS)).toBe(2)
 	})
+
+	it("is zero for a muted chat or an unknown user", () => {
+		const messages = [mockMessage({ senderId: 2, sentTimestamp: 150n })]
+
+		expect(countUnreadMessages(messages, mockChat({ muted: true }), SELF, EMPTY_BLOCKED_USERS)).toBe(0)
+		expect(countUnreadMessages(messages, mockChat(), undefined, EMPTY_BLOCKED_USERS)).toBe(0)
+	})
+
+	it("does not count a message sent exactly at lastFocus", () => {
+		const messages = [mockMessage({ sentTimestamp: 100n })]
+
+		expect(countUnreadMessages(messages, mockChat({ lastFocus: 100n }), SELF, EMPTY_BLOCKED_USERS)).toBe(0)
+	})
 })
 
 describe("sumUnread (global tally + missing-cache self-heal signal)", () => {
@@ -205,6 +218,34 @@ describe("sumUnread (global tally + missing-cache self-heal signal)", () => {
 
 		// chatB's cache is undefined → excluded from the count and flagged for a bulk self-heal.
 		expect(result).toEqual({ count: 1, hasMissingMessages: true })
+	})
+
+	it("reuses a chat's count only while its message array, chat, user and blocked set are unchanged", () => {
+		const messagesA = [mockMessage({ uuid: testUuid("m1"), senderId: 2, sentTimestamp: 150n })]
+		const messagesB = [mockMessage({ uuid: testUuid("m2"), senderId: 2, sentTimestamp: 150n })]
+		const cache = new Map<string, ChatMessage[]>([
+			[chatA.uuid, messagesA],
+			[chatB.uuid, messagesB]
+		])
+		const read = (uuid: string) => cache.get(uuid)
+
+		expect(sumUnread([chatA, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(2)
+
+		// Same inputs: served from the per-chat memo, same total.
+		expect(sumUnread([chatA, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(2)
+
+		// A new array for one chat recounts that chat.
+		cache.set(chatB.uuid, [...messagesB, mockMessage({ uuid: testUuid("m3"), senderId: 2, sentTimestamp: 200n })])
+		expect(sumUnread([chatA, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(3)
+
+		// A new chat object (focus moved) over the same array recounts.
+		expect(sumUnread([{ ...chatA, lastFocus: 150n }, chatB], read, SELF, EMPTY_BLOCKED_USERS).count).toBe(2)
+
+		// A new blocked set over the same arrays recounts.
+		expect(sumUnread([chatA, chatB], read, SELF, deriveBlockedUsers([{ userId: 2n, email: "peer@x.io" }])).count).toBe(0)
+
+		// A different user over the same arrays recounts.
+		expect(sumUnread([chatA, chatB], read, undefined, EMPTY_BLOCKED_USERS).count).toBe(0)
 	})
 
 	it("is a clean zero for no chats", () => {

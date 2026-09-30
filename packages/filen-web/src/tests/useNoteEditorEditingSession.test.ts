@@ -69,22 +69,31 @@ beforeEach(() => {
 
 describe("useNoteEditor — editing session lifecycle", () => {
 	it("opens the session on the first change and cancels the in-flight content read on that edge", () => {
-		const cancelQueries = vi.spyOn(queryClient, "cancelQueries")
 		const { result, unmount } = renderHook(() => useNoteEditor(NOTE, 1n), { wrapper })
+		const query = queryClient.getQueryCache().find({ queryKey: noteContentQueryKey(NOTE.uuid), exact: true })
+
+		if (query === undefined) {
+			throw new Error("content query not mounted")
+		}
+
+		expect(query.state.fetchStatus).toBe("fetching")
+
+		const cancel = vi.spyOn(query, "cancel")
 
 		act(() => {
 			result.current.onChange("x")
 		})
 
 		expect(useNotesInflightStore.getState().editingSessions[NOTE.uuid]).toBe(true)
-		expect(cancelQueries).toHaveBeenCalledExactlyOnceWith({ queryKey: noteContentQueryKey(NOTE.uuid), exact: true })
+		expect(cancel).toHaveBeenCalledExactlyOnceWith({ revert: true })
+		expect(query.state.fetchStatus).toBe("idle")
 
 		// Every later keystroke is inside the same session: no second cancel, no store churn.
 		act(() => {
 			result.current.onChange("xy")
 		})
 
-		expect(cancelQueries).toHaveBeenCalledTimes(1)
+		expect(cancel).toHaveBeenCalledTimes(1)
 
 		unmount()
 	})

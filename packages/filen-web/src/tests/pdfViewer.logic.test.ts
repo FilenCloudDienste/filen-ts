@@ -14,56 +14,53 @@ import {
 	PDF_PAGE_EVICT_MARGIN_PX,
 	PDF_MIN_SCALE,
 	PDF_MAX_SCALE,
-	PDF_ZOOM_STEP,
-	type PageVisibility
+	PDF_ZOOM_STEP
 } from "@/features/preview/components/pdfViewer.logic"
 
 describe("mostVisiblePage", () => {
-	it("picks the entry with the highest ratio", () => {
-		const entries: PageVisibility[] = [
-			{ page: 1, ratio: 0.2 },
-			{ page: 2, ratio: 0.9 },
-			{ page: 3, ratio: 0.5 }
-		]
+	it("picks the page with the highest ratio", () => {
+		const ratios = new Map([
+			[1, 0.2],
+			[2, 0.9],
+			[3, 0.5]
+		])
 
-		expect(mostVisiblePage(entries, 1)).toBe(2)
+		expect(mostVisiblePage(ratios)).toBe(2)
 	})
 
-	it("ignores zero-ratio (non-intersecting) entries", () => {
-		const entries: PageVisibility[] = [
-			{ page: 1, ratio: 0 },
-			{ page: 2, ratio: 0.1 }
-		]
+	it("ignores zero-ratio (non-intersecting) pages", () => {
+		const ratios = new Map([
+			[1, 0],
+			[2, 0.1]
+		])
 
-		expect(mostVisiblePage(entries, 1)).toBe(2)
+		expect(mostVisiblePage(ratios)).toBe(2)
 	})
 
-	it("falls back to the previous page when every entry is at ratio 0", () => {
-		const entries: PageVisibility[] = [
-			{ page: 1, ratio: 0 },
-			{ page: 2, ratio: 0 }
-		]
+	it("returns null when every page is at ratio 0", () => {
+		const ratios = new Map([
+			[1, 0],
+			[2, 0]
+		])
 
-		expect(mostVisiblePage(entries, 5)).toBe(5)
+		expect(mostVisiblePage(ratios)).toBeNull()
 	})
 
-	it("falls back on an empty list", () => {
-		expect(mostVisiblePage([], 3)).toBe(3)
+	it("returns null on an empty map", () => {
+		expect(mostVisiblePage(new Map())).toBeNull()
 	})
 
-	it("keeps the first entry on an exact tie", () => {
-		const entries: PageVisibility[] = [
-			{ page: 1, ratio: 0.5 },
-			{ page: 2, ratio: 0.5 }
-		]
+	it("keeps the first page in iteration order on an exact tie", () => {
+		const ratios = new Map([
+			[1, 0.5],
+			[2, 0.5]
+		])
 
-		expect(mostVisiblePage(entries, 1)).toBe(1)
+		expect(mostVisiblePage(ratios)).toBe(1)
 	})
 
 	it("ignores a negative ratio the same as zero", () => {
-		const entries: PageVisibility[] = [{ page: 1, ratio: -0.1 }]
-
-		expect(mostVisiblePage(entries, 7)).toBe(7)
+		expect(mostVisiblePage(new Map([[1, -0.1]]))).toBeNull()
 	})
 })
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { openXlsx, writeXlsx } from "hucre/xlsx"
 import type { EditResult } from "@/features/spreadsheet/lib/edits"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
-import { proven } from "@/tests/spreadsheetProven"
+import { proven, viewCell } from "@/tests/spreadsheetProven"
 import { CsvDocument } from "@/features/spreadsheet/lib/csvDocument"
 import { parseCsvFile } from "@/features/spreadsheet/lib/csvView"
 import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
@@ -35,15 +35,9 @@ async function workbook(): Promise<XlsxDocument> {
 }
 
 function cell(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
-	if (result.type === "cells") {
-		return result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
-	}
+	const view = result.type === "sheets" ? result.sheets[sheet] : undefined
 
-	if (result.type === "sheets") {
-		return result.sheets[sheet]?.cells.get(cellKey(row, col)) ?? null
-	}
-
-	return undefined
+	return view === null || view === undefined ? viewCell(result, row, col, sheet) : (view.cells.get(cellKey(row, col)) ?? null)
 }
 
 describe("XlsxDocument", () => {
@@ -94,9 +88,7 @@ describe("XlsxDocument", () => {
 		expect(result.type).toBe("sheets")
 		expect(cell(result, 4, 1)).toMatchObject({ text: "1500", input: "=SUM(B3:B4)" })
 
-		if (result.type === "sheets") {
-			expect(result.sheets[1]?.cells.get(cellKey(0, 0))).toMatchObject({ input: "=Budget!B5" })
-		}
+		expect(cell(result, 0, 0, 1)).toMatchObject({ input: "=Budget!B5" })
 
 		expect(cell(document.undo(), 3, 1)).toMatchObject({ input: "=SUM(B2:B3)" })
 	})
@@ -109,9 +101,7 @@ describe("XlsxDocument", () => {
 
 		const renamed = document.apply({ type: "renameSheet", sheet: 0, name: "Costs 2026" })
 
-		expect(renamed.type === "sheets" ? renamed.sheets[1]?.cells.get(cellKey(0, 0)) : undefined).toMatchObject({
-			input: "='Costs 2026'!B4"
-		})
+		expect(cell(renamed, 0, 0, 1)).toMatchObject({ input: "='Costs 2026'!B4" })
 	})
 
 	it("formats a range and saves a file that opens with the edits and the formats", async () => {

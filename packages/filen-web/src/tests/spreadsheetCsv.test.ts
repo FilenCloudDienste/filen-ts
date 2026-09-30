@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { canEncodeWindows1252, parseCsvFile, serializeCsv, type CsvFormat } from "@/features/spreadsheet/lib/csvView"
+import { applyEditResult, gridDoc, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import { CsvDocument } from "@/features/spreadsheet/lib/csvDocument"
-import { MAX_SHEET_CELLS } from "@/features/spreadsheet/lib/edits"
+import { MAX_SHEET_CELLS, type EditOp, type EditResult } from "@/features/spreadsheet/lib/edits"
 import { MAX_COLUMNS } from "@/features/spreadsheet/lib/model"
 import { standardWindows1252Decoding } from "@/tests/whatwgWindows1252"
 
@@ -294,7 +295,7 @@ describe("CsvDocument structural edits", () => {
 			type: "refused",
 			reason: "tooLarge"
 		})
-		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLUMNS - 2 }).type).toBe("sheets")
+		expect(document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: MAX_COLUMNS - 2 }).type).toBe("shifted")
 		expect(document.doc().sheets[0]?.colCount).toBe(MAX_COLUMNS)
 	})
 
@@ -529,5 +530,84 @@ describe("CsvDocument undo-history memory budget", () => {
 		// Only one of the two steps survived the budget, so the version-0 save point is unreachable.
 		expect(last.state.canUndo).toBe(false)
 		expect(last.state.dirty).toBe(true)
+	})
+})
+
+describe("CsvDocument shifted results", () => {
+	function raggedDocument(): CsvDocument {
+		const { rows, format } = parseCsvFile(encoder.encode("a,b,c\n1\n,x,,y\n3,4, 5 ,6\n\n7,8\n9\n"), false)
+
+		return new CsvDocument(rows, format)
+	}
+
+	function sortedCells(sheet: GridDoc["sheets"][number] | undefined): [number, unknown][] {
+		return sheet === undefined ? [] : [...sheet.cells.keys()].sort((a, b) => a - b).map(key => [key, sheet.cells.get(key)])
+	}
+
+	// What the page holds after folding a shift in is exactly a whole new view of the document.
+	function expectHeldMatches(held: GridDoc, document: CsvDocument): void {
+		const fresh = gridDoc(document.doc())
+		const sheet = held.sheets[0]
+		const freshSheet = fresh.sheets[0]
+
+		expect(held.sheets).toHaveLength(1)
+		expect(sortedCells(sheet)).toEqual(sortedCells(freshSheet))
+		expect(sheet?.cells.size).toBe(freshSheet?.cells.size)
+		expect({ ...sheet, cells: null }).toEqual({ ...freshSheet, cells: null })
+		expect({ ...held, sheets: null }).toEqual({ ...fresh, sheets: null })
+	}
+
+	function fold(held: GridDoc, document: CsvDocument, result: EditResult): GridDoc {
+		expect(result.type).toBe("shifted")
+
+		const next = applyEditResult(held, result)
+
+		expectHeldMatches(next, document)
+
+		return next
+	}
+
+	const OPS: EditOp[] = [
+		{ type: "insert", sheet: 0, axis: "rows", at: 1, count: 2 },
+		{ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 },
+		{ type: "delete", sheet: 0, axis: "rows", at: 2, count: 2 },
+		{ type: "delete", sheet: 0, axis: "rows", at: 5, count: 10 },
+		{ type: "delete", sheet: 0, axis: "rows", at: 50, count: 1 },
+		{ type: "insert", sheet: 0, axis: "cols", at: 1, count: 2 },
+		{ type: "insert", sheet: 0, axis: "cols", at: 0, count: 1 },
+		{ type: "delete", sheet: 0, axis: "cols", at: 1, count: 2 },
+		{ type: "delete", sheet: 0, axis: "cols", at: 2, count: 5 },
+		{ type: "delete", sheet: 0, axis: "cols", at: 9, count: 1 }
+	]
+
+	it.each(OPS)("moves the held cells to what a new view shows, through apply, undo, redo and undo: %o", op => {
+		const document = raggedDocument()
+		let held = gridDoc(document.doc())
+
+		held = fold(held, document, document.apply(op))
+		held = fold(held, document, document.undo())
+		held = fold(held, document, document.redo())
+		fold(held, document, document.undo())
+	})
+
+	it("stays in step through mixed edits, and resets an extent a cell undo left grown", () => {
+		const document = raggedDocument()
+		let held = gridDoc(document.doc())
+
+		held = applyEditResult(held, document.apply({ type: "setCells", sheet: 0, cells: [{ row: 9, col: 6, input: "far" }] }))
+		held = applyEditResult(held, document.undo())
+		expect(held.sheets[0]?.rowCount).toBe(10)
+
+		held = fold(held, document, document.apply({ type: "insert", sheet: 0, axis: "cols", at: 1, count: 1 }))
+		held = applyEditResult(held, document.apply({ type: "setCells", sheet: 0, cells: [{ row: 1, col: 1, input: "12" }] }))
+		held = fold(held, document, document.apply({ type: "delete", sheet: 0, axis: "rows", at: 0, count: 2 }))
+		held = fold(held, document, document.apply({ type: "delete", sheet: 0, axis: "cols", at: 0, count: 2 }))
+		held = fold(held, document, document.undo())
+		held = fold(held, document, document.undo())
+		held = applyEditResult(held, document.undo())
+		held = fold(held, document, document.undo())
+		held = fold(held, document, document.redo())
+		held = applyEditResult(held, document.redo())
+		fold(held, document, document.redo())
 	})
 })

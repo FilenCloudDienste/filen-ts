@@ -10,6 +10,7 @@ import {
 	sharedIdentityLabel
 } from "@/features/drive/lib/format"
 import { formatShortDate } from "@/lib/formatDate"
+import { formatBytes } from "@filen/shared"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -83,29 +84,25 @@ describe("formatItemSize", () => {
 		expect(formatItemSize(narrowItem(mockFile({ size: 2_048n })))).toBe("2 KiB")
 	})
 
-	it("returns an empty string for a directory with no directorySizes map at all", () => {
+	it("returns an empty string for a directory with no resolved size (pending)", () => {
 		expect(formatItemSize(narrowItem(mockDir()))).toBe("")
+		expect(formatItemSize(narrowItem(mockDir()), undefined)).toBe("")
 	})
 
-	it("returns an empty string for a directory whose uuid hasn't resolved in the map yet (pending)", () => {
+	it("formats a directory's resolved size", () => {
 		const item = narrowItem(mockDir({ uuid: "11111111-1111-1111-1111-111111111111" }))
-		const directorySizes = new Map([["22222222-2222-2222-2222-222222222222", 4_096]])
 
-		expect(formatItemSize(item, directorySizes)).toBe("")
+		expect(formatItemSize(item, 4_096)).toBe("4 KiB")
 	})
 
-	it("formats a directory's resolved size once its uuid lands in the directorySizes map", () => {
-		const item = narrowItem(mockDir({ uuid: "11111111-1111-1111-1111-111111111111" }))
-		const directorySizes = new Map([["11111111-1111-1111-1111-111111111111", 4_096]])
-
-		expect(formatItemSize(item, directorySizes)).toBe("4 KiB")
+	it("formats a resolved zero-byte directory instead of blanking it", () => {
+		expect(formatItemSize(narrowItem(mockDir()), 0)).toBe(formatBytes(0))
 	})
 
-	it("ignores the directorySizes map for a file — its own byte size always wins", () => {
+	it("ignores a directory size for a file — its own byte size always wins", () => {
 		const item = narrowItem(mockFile({ size: 1_024n }))
-		const directorySizes = new Map([[item.data.uuid, 999_999]])
 
-		expect(formatItemSize(item, directorySizes)).toBe("1 KiB")
+		expect(formatItemSize(item, 999_999)).toBe("1 KiB")
 	})
 })
 
@@ -221,6 +218,13 @@ describe("formatVersionTimestamp", () => {
 		const laterSameDay = formatVersionTimestamp(1_700_000_000_000n + 60n * 60n * 1000n)
 
 		expect(morning).not.toBe(laterSameDay)
+	})
+
+	it("keeps toLocaleString's label for an out-of-range timestamp instead of throwing", () => {
+		const outOfRange = 9_000_000_000_000_000n
+		const expected = new Date(Number(outOfRange)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+
+		expect(formatVersionTimestamp(outOfRange)).toBe(expected)
 	})
 })
 

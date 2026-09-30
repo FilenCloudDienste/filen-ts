@@ -5,6 +5,13 @@ import { fetchTrackedNoteContent, noteContentQueryKey } from "@/features/notes/q
 import { useNotesInflightStore, noteIsEditing } from "@/features/notes/store/useNotesInflight"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
 
+// Module-level so the select reference is stable: react-query then memoizes it per observer, lowering
+// each body once per search instead of on every filter pass. The editor's own observer has no select, so
+// the cache keeps the raw content.
+function lowerCaseBody(content: string): string {
+	return content.toLowerCase()
+}
+
 // Eager, OPT-IN full-body fetch for notes search: title-matching notes never need their body
 // fetched at all (noteSearchBodyCandidates' own doc comment), and the whole set stays empty — no
 // queries, no fetches — the instant the search box is blank, so this never runs a single extra request
@@ -19,6 +26,8 @@ import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/h
 // advance mid-edit, or the editor remounts and blows away in-progress keystrokes). The outbox entry
 // alone is not that test — a push empties it while the user keeps typing. An edited note simply falls
 // back to its `preview` snippet for the duration — see filterNotesBySearch's own fallback.
+//
+// Bodies come back LOWERCASED (lowerCaseBody), the form filterNotesBySearch expects.
 export function useNoteSearchBodies(notes: readonly Note[], search: string): ReadonlyMap<string, string | undefined> {
 	// Shallow-compared slice, not the whole store: `inflightContent` changes identity on every keystroke,
 	// but this only changes when a candidate's editing edge flips (and is a stable [] with no search).
@@ -29,7 +38,8 @@ export function useNoteSearchBodies(notes: readonly Note[], search: string): Rea
 		queries: candidates.map(note => ({
 			queryKey: noteContentQueryKey(note.uuid),
 			queryFn: () => fetchTrackedNoteContent(note),
-			staleTime: Infinity
+			staleTime: Infinity,
+			select: lowerCaseBody
 		})),
 		combine: results => results.map(result => result.data)
 	})

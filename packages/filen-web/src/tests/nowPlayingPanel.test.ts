@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, screen, cleanup, fireEvent } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
 import type { AnyFile } from "@filen/sdk-rs"
@@ -69,5 +69,62 @@ describe("NowPlayingPanel — queue-only popover", () => {
 		fireEvent.click(screen.getByRole("button", { name: /two\.mp3$/ }))
 
 		expect(audioEngine.playIndex).toHaveBeenCalledWith(1)
+	})
+
+	it("removing a row targets its current index, also after the queue shifted", () => {
+		useAudioStore.setState({ queue: [track("t1", "one.mp3"), track("t2", "two.mp3"), track("t3", "three.mp3")], currentIndex: 0 })
+
+		render(createElement(NowPlayingPanel))
+
+		act(() => {
+			useAudioStore.setState({ queue: [track("t1", "one.mp3"), track("t3", "three.mp3")] })
+		})
+
+		const removeButtons = screen.getAllByRole("button", { name: "Remove from queue" })
+		expect(removeButtons).toHaveLength(2)
+
+		const lastRemove = removeButtons.at(-1)
+		expect(lastRemove).toBeDefined()
+
+		if (lastRemove) {
+			fireEvent.click(lastRemove)
+		}
+
+		expect(audioEngine.removeAt).toHaveBeenCalledWith(1)
+		expect(screen.getByRole("button", { name: /three\.mp3$/ }).textContent).toBe("2three.mp3")
+	})
+
+	it("moves the highlight and leading slot with the current index, status, error and covers", () => {
+		const queue = [track("t1", "one.mp3"), track("t2", "two.mp3")]
+
+		useAudioStore.setState({ queue, currentIndex: 0, status: "loading" })
+
+		const { container } = render(createElement(NowPlayingPanel))
+		const rowButton = (name: RegExp) => screen.getByRole("button", { name })
+
+		expect(rowButton(/one\.mp3$/).querySelector("img")).toBeNull()
+		expect(rowButton(/two\.mp3$/).textContent).toBe("2two.mp3")
+
+		act(() => {
+			useAudioStore.setState({ currentIndex: 1, status: "playing", coverUrlsByUuid: { t1: "blob:cover-1" } })
+		})
+
+		expect(rowButton(/one\.mp3$/).getAttribute("aria-current")).toBeNull()
+		expect(
+			rowButton(/one\.mp3$/)
+				.querySelector("img")
+				?.getAttribute("src")
+		).toBe("blob:cover-1")
+		expect(rowButton(/two\.mp3$/).getAttribute("aria-current")).toBe("true")
+		expect(container.querySelectorAll("li.bg-muted")).toHaveLength(1)
+
+		act(() => {
+			useAudioStore.setState({ currentIndex: 0, lastError: { species: "plain", label: "decode", message: "decode" } })
+		})
+
+		// An error on the current row wins over its cached cover.
+		expect(rowButton(/one\.mp3$/).querySelector("img")).toBeNull()
+		expect(rowButton(/one\.mp3$/).querySelector("svg.text-destructive")).not.toBeNull()
+		expect(rowButton(/two\.mp3$/).textContent).toBe("2two.mp3")
 	})
 })

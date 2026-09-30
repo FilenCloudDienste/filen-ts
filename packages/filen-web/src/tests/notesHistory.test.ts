@@ -122,12 +122,11 @@ describe("restoreNoteFromHistory", () => {
 		restoreNoteFromHistoryOp.mockResolvedValueOnce(note)
 		const contentKey = noteContentQueryKey(note.uuid)
 		testQueryClient.setQueryData(contentKey, "still here")
-		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		await restoreNoteFromHistory(note, mockNoteHistory())
 
 		expect(testQueryClient.getQueryData(contentKey)).toBe("still here")
-		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: contentKey })
+		expect(testQueryClient.getQueryState(contentKey)?.isInvalidated).toBe(true)
 	})
 
 	it("logs a warning (but still succeeds) when the outbox flush fails", async () => {

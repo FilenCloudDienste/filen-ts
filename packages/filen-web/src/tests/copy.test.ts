@@ -45,14 +45,8 @@ vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, cu
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type BulkOutcome } from "@/lib/actions/bulk"
-import {
-	pruneSettledCopyJobs,
-	requestCopyCancel,
-	retryFailedCopy,
-	runCopyJob,
-	startCopy,
-	type RunCopyDeps
-} from "@/features/drive/lib/copy"
+import { pruneSettledCopyJobs, retryFailedCopy, runCopyJob, startCopy, type RunCopyDeps } from "@/features/drive/lib/copy"
+import { requestCopyCancel } from "@/features/transfers/lib/control"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import { copyJobStatus, copyJobTitle } from "@/features/transfers/components/copyJobToast.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"

@@ -17,6 +17,8 @@ type Step =
 	| { type: "cells"; before: Map<number, string>; rowCount: number; rowWidths: Map<number, number> }
 	| { type: "structure"; edit: AxisEdit; removed: string[][] }
 
+type StructureStep = Extract<Step, { type: "structure" }>
+
 // How many cells a step's snapshot holds, for the history's total memory budget.
 function stepWeight(step: Step): number {
 	return step.type === "cells" ? step.before.size : step.removed.reduce((total, row) => total + row.length, 0)
@@ -83,7 +85,7 @@ export class CsvDocument {
 		if (step.type === "structure") {
 			this.revertStructure(step)
 
-			return this.sheetsResult({ ...step.edit, revert: true })
+			return this.shiftedResult({ ...step.edit, revert: true }, step.edit.type === "delete" ? this.restoredCells(step) : [])
 		}
 
 		const touched: number[] = []
@@ -252,7 +254,7 @@ export class CsvDocument {
 
 	// Reverses a structural step without re-copying the sheet: an insert's undo just deletes the same run
 	// back out, and a delete's undo re-inserts exactly the cells it removed (touched rows only, on cols).
-	private revertStructure(step: Extract<Step, { type: "structure" }>): void {
+	private revertStructure(step: StructureStep): void {
 		const { type, axis, at, count } = step.edit
 
 		if (axis === "rows") {
@@ -277,7 +279,7 @@ export class CsvDocument {
 
 	private result(op: EditOp, step: Step): EditResult {
 		if (step.type === "structure") {
-			return this.sheetsResult({ ...step.edit, revert: false })
+			return this.shiftedResult({ ...step.edit, revert: false }, [])
 		}
 
 		return op.type !== "setCells" ? this.sheetsResult() : this.cellsResult([...step.before.keys()])
@@ -299,14 +301,30 @@ export class CsvDocument {
 		}
 	}
 
-	// `shift`: where the edit moved rows or columns, for the sizes kept beside the file.
-	private sheetsResult(shift?: AxisEdit & { revert: boolean }): EditResult {
-		return {
-			type: "sheets",
-			sheets: this.doc().sheets,
-			styles: [],
-			state: this.history.state(),
-			...(shift === undefined ? {} : { shift })
-		}
+	private sheetsResult(): EditResult {
+		return { type: "sheets", sheets: this.doc().sheets, styles: [], state: this.history.state() }
+	}
+
+	// A move keeps each cell's text, which alone decides its view, so the page moves the views it holds
+	// rather than taking a whole new sheet.
+	private shiftedResult(shift: AxisEdit & { revert: boolean }, cells: [number, CellView][]): EditResult {
+		return { type: "shifted", sheet: 0, shift, cells, rowCount: this.rows.length, colCount: this.width(), state: this.history.state() }
+	}
+
+	// The filled cells an undone delete put back, where they now sit.
+	private restoredCells({ edit, removed }: StructureStep): [number, CellView][] {
+		const cells: [number, CellView][] = []
+
+		removed.forEach((values, index) => {
+			values.forEach((text, offset) => {
+				const view = csvCellView(text)
+
+				if (view !== null) {
+					cells.push([edit.axis === "rows" ? cellKey(edit.at + index, offset) : cellKey(index, edit.at + offset), view])
+				}
+			})
+		})
+
+		return cells
 	}
 }

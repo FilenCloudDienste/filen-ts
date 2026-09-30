@@ -1,8 +1,11 @@
-import { type MarqueeContentRect } from "@/features/drive/lib/marquee.logic"
+import { useSyncExternalStore } from "react"
+import { type MarqueeRectStore } from "@/features/drive/hooks/useMarqueeSelection"
 
 // Rendered in content space so it stretches as the listing auto-scrolls; pointer-events-none so it never
 // intercepts the ongoing drag.
-export function MarqueeRect({ rect }: { rect: MarqueeContentRect | null }) {
+export function MarqueeRect({ store }: { store: MarqueeRectStore }) {
+	const rect = useSyncExternalStore(store.subscribe, store.get)
+
 	if (!rect) {
 		return null
 	}

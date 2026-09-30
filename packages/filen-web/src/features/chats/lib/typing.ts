@@ -1,15 +1,14 @@
-import { Semaphore } from "@filen/shared"
+import { createTypingSender } from "@filen/shared"
 import type { Chat, ChatTypingType } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { withoutKey } from "@/lib/utils"
 import { useChatTypingStore, type ChatTypingUser } from "@/features/chats/store/useChatTyping"
 
-// Realtime typing — both directions. A faithful port of filen-mobile's chats typing handling
-// (socketHandlers.ts receive watchdog + components/chat/input/index.tsx send cadence), re-expressed on
-// the flat wasm surface. RECEIVE keeps a per-chat list of typing users with an expiry watchdog so a
-// dropped "up" signal can't strand a "typing…" indicator forever; SEND throttles "down" and fires a
-// single "up" when the user goes idle / sends / blurs.
+// Realtime typing — both directions. RECEIVE ports filen-mobile's socketHandlers.ts watchdog onto the flat
+// wasm surface: a per-chat list of typing users with an expiry watchdog so a dropped "up" signal can't
+// strand a "typing…" indicator forever. SEND is @filen/shared's createTypingSender, which mobile uses too:
+// it throttles "down" and fires a single "up" when the user goes idle / sends / blurs.
 
 // ── RECEIVE ──────────────────────────────────────────────────────────────────
 
@@ -146,89 +145,10 @@ export function visibleTypingUsers(users: readonly ChatTypingUser[] | undefined,
 
 // ── SEND ─────────────────────────────────────────────────────────────────────
 
-// Don't emit another "down" within this window of the last one (mobile fires per-keystroke; a fixed
-// throttle keeps the wire quiet without losing the "still typing" signal the receiver's watchdog needs).
-const DOWN_THROTTLE_MS = 2_500
-// Emit a single "up" this long after the last keystroke (idle) — mobile's own 3s idle window, and well
-// short of the receiver's 10s expiry so a real stop lands before the watchdog would guess it.
-const IDLE_UP_MS = 3_000
-
-interface TypingSendState {
-	lastDownAt: number
-	idleTimer: ReturnType<typeof setTimeout> | undefined
-	downActive: boolean
-}
-
-const sendStates = new Map<string, TypingSendState>()
-// Serializes signal sends so an "up" can never overtake the "down" it is meant to follow (mobile's
-// Semaphore(1) around sendTyping).
-const sendSemaphore = new Semaphore(1)
-
-function getSendState(chatUuid: string): TypingSendState {
-	let state = sendStates.get(chatUuid)
-
-	if (state === undefined) {
-		state = { lastDownAt: 0, idleTimer: undefined, downActive: false }
-		sendStates.set(chatUuid, state)
+export const { signalTyping, signalStopped } = createTypingSender<Chat>({
+	keyOf: chat => chat.uuid,
+	send: (chat, typingType) => sdkApi.sendTypingSignal(chat, typingType),
+	onError: (chat, typingType, e) => {
+		log.warn("chats-typing", "sendTypingSignal failed", chat.uuid, typingType, e)
 	}
-
-	return state
-}
-
-function emitSignal(chat: Chat, typingType: ChatTypingType): void {
-	// Fire-and-forget, serialized: a dropped typing signal is never user-visible (the receiver's watchdog
-	// covers a lost "up"), so failures are logged, never surfaced.
-	void sendSemaphore
-		.acquire()
-		.then(async () => {
-			try {
-				await sdkApi.sendTypingSignal(chat, typingType)
-			} finally {
-				sendSemaphore.release()
-			}
-		})
-		.catch((e: unknown) => {
-			log.warn("chats-typing", "sendTypingSignal failed", chat.uuid, typingType, e)
-		})
-}
-
-// Call on every keystroke while composing. Throttles the "down" and (re)arms the idle "up".
-export function signalTyping(chat: Chat): void {
-	const state = getSendState(chat.uuid)
-	const now = Date.now()
-
-	if (state.idleTimer !== undefined) {
-		clearTimeout(state.idleTimer)
-	}
-
-	state.idleTimer = setTimeout(() => {
-		signalStopped(chat)
-	}, IDLE_UP_MS)
-
-	if (now - state.lastDownAt >= DOWN_THROTTLE_MS) {
-		state.lastDownAt = now
-		state.downActive = true
-
-		emitSignal(chat, "down")
-	}
-}
-
-// Call on send / clear / blur / thread teardown. Emits a single "up" iff a "down" is outstanding.
-export function signalStopped(chat: Chat): void {
-	const state = getSendState(chat.uuid)
-
-	if (state.idleTimer !== undefined) {
-		clearTimeout(state.idleTimer)
-		state.idleTimer = undefined
-	}
-
-	state.lastDownAt = 0
-
-	if (!state.downActive) {
-		return
-	}
-
-	state.downActive = false
-
-	emitSignal(chat, "up")
-}
+})

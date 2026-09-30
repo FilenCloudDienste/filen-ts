@@ -86,15 +86,15 @@ export function markAccountStale(): void {
 
 // Confirm-then-patch for a write whose whole effect is known locally. A cache miss is left alone: the
 // first read will carry the write. A read the patch cancels, or a refresh it would clear, runs again
-// after it (patchQuery).
-export function accountQueryUpdate(updater: (prev: UserInfo) => UserInfo): void {
+// after it, at once unless readNow is false (patchQuery).
+export function accountQueryUpdate(updater: (prev: UserInfo) => UserInfo, options?: { readNow?: boolean }): void {
 	accountWrites++
 
 	if (accountQuery()?.state.data === undefined) {
 		return
 	}
 
-	patchQuery<UserInfo>(ACCOUNT_QUERY_KEY, prev => (prev === undefined ? prev : updater(prev)))
+	patchQuery<UserInfo>(ACCOUNT_QUERY_KEY, prev => (prev === undefined ? prev : updater(prev)), options)
 }
 
 async function readAccountFresh(writes: number): Promise<UserInfo> {

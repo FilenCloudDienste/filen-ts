@@ -24,6 +24,7 @@ vi.mock("@/features/drive/lib/thumbCache", () => ({ readThumbnailBlob: readThumb
 import {
 	getThumbnailUrl,
 	invalidateThumbnail,
+	peekThumbnailUrl,
 	registerThumbGenerator,
 	seedThumbnail,
 	defaultThumbnailDeps,
@@ -188,6 +189,30 @@ describe("getThumbnailUrl — objectURL cache", () => {
 		expect(second).toBe(first)
 		expect(deps.readThumbnailBlob).toHaveBeenCalledTimes(1)
 		expect(generator).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("peekThumbnailUrl", () => {
+	it("is null before a url exists and returns the same url getThumbnailUrl resolves after", async () => {
+		const item = imageItem()
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue({ type: "bytes", bytes: new Uint8Array([1, 2, 3]) }))
+
+		expect(peekThumbnailUrl(item.data.uuid)).toBeNull()
+
+		const url = await getThumbnailUrl(item, deps)
+
+		expect(url).not.toBeNull()
+		expect(peekThumbnailUrl(item.data.uuid)).toBe(url)
+	})
+
+	it("is null again once the uuid is invalidated", async () => {
+		const item = imageItem()
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue({ type: "bytes", bytes: new Uint8Array([1, 2, 3]) }))
+
+		await getThumbnailUrl(item, deps)
+		invalidateThumbnail(item.data.uuid, deps)
+
+		expect(peekThumbnailUrl(item.data.uuid)).toBeNull()
 	})
 })
 
@@ -724,6 +749,194 @@ describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 		}
 
 		await Promise.all(slowAttempts)
+	})
+})
+
+// Rows scrolled past during a fling queue a generation each; one whose cells all unmounted before it
+// reached a slot must not download and decode for nobody.
+describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
+	const bytes: ThumbGenerationResult = { type: "bytes", bytes: new Uint8Array([1]) }
+
+	// Holds all three slots with pinned generations until the returned release runs.
+	async function holdSlots(deps: ThumbnailServiceDeps, deferred: ReturnType<typeof deferredCalls<ThumbGenerationResult>>) {
+		const holders = [imageItem(), imageItem(), imageItem()]
+		const attempts = holders.map(item => getThumbnailUrl(item, deps))
+
+		await flushMicrotasks()
+
+		return async (): Promise<void> => {
+			for (const item of holders) {
+				deferred.resolve(item.data.uuid, bytes)
+			}
+
+			await Promise.all(attempts)
+		}
+	}
+
+	function setup() {
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const generator = vi.fn((item: { data: { uuid: string } }) => deferred.fn(item.data.uuid))
+		const deps = depsWithGenerator(generator)
+
+		return { deferred, generator, deps }
+	}
+
+	it("runs the generator only for uuids still wanted once a slot frees", async () => {
+		const { deferred, deps } = setup()
+		const release = await holdSlots(deps, deferred)
+		const scrolledPast = [imageItem(), imageItem(), imageItem(), imageItem()]
+		const kept = imageItem()
+		const scrolledAttempts = scrolledPast.map(item => {
+			const controller = new AbortController()
+			const attempt = getThumbnailUrl(item, deps, controller.signal)
+
+			controller.abort()
+
+			return attempt
+		})
+		const keptAttempt = getThumbnailUrl(kept, deps, new AbortController().signal)
+
+		await flushMicrotasks()
+		await release()
+		await flushMicrotasks()
+
+		for (const item of scrolledPast) {
+			expect(deferred.keys).not.toContain(item.data.uuid)
+		}
+
+		expect(deferred.keys).toContain(kept.data.uuid)
+		deferred.resolve(kept.data.uuid, bytes)
+		await expect(keptAttempt).resolves.not.toBeNull()
+		await expect(Promise.all(scrolledAttempts)).resolves.toEqual([null, null, null, null])
+	})
+
+	it("still generates while any one of several interested callers remains", async () => {
+		const { deferred, deps } = setup()
+		const release = await holdSlots(deps, deferred)
+		const item = imageItem()
+		const gone = new AbortController()
+		const stays = new AbortController()
+		const first = getThumbnailUrl(item, deps, gone.signal)
+		const second = getThumbnailUrl(item, deps, stays.signal)
+
+		gone.abort()
+		await release()
+		await flushMicrotasks()
+
+		expect(deferred.keys).toContain(item.data.uuid)
+		deferred.resolve(item.data.uuid, bytes)
+
+		const [firstUrl, secondUrl] = await Promise.all([first, second])
+
+		expect(secondUrl).not.toBeNull()
+		expect(firstUrl).toBe(secondUrl)
+	})
+
+	it("a remount before the slot frees rejoins the same generation", async () => {
+		const { deferred, generator, deps } = setup()
+		const release = await holdSlots(deps, deferred)
+		const item = imageItem()
+		const unmounted = new AbortController()
+
+		void getThumbnailUrl(item, deps, unmounted.signal)
+		unmounted.abort()
+
+		const remounted = getThumbnailUrl(item, deps, new AbortController().signal)
+
+		await release()
+		await flushMicrotasks()
+		deferred.resolve(item.data.uuid, bytes)
+
+		await expect(remounted).resolves.not.toBeNull()
+		expect(generator.mock.calls.filter(([called]) => called.data.uuid === item.data.uuid)).toHaveLength(1)
+	})
+
+	it("a caller asking again after abandonment gets a real url from a fresh generation", async () => {
+		const { deferred, deps } = setup()
+		const release = await holdSlots(deps, deferred)
+		const item = imageItem()
+		const controller = new AbortController()
+		const abandoned = getThumbnailUrl(item, deps, controller.signal)
+
+		controller.abort()
+		await release()
+
+		await expect(abandoned).resolves.toBeNull()
+		expect(deferred.keys).not.toContain(item.data.uuid)
+
+		const again = getThumbnailUrl(item, deps, new AbortController().signal)
+
+		await flushMicrotasks()
+		deferred.resolve(item.data.uuid, bytes)
+
+		await expect(again).resolves.not.toBeNull()
+	})
+
+	it("a caller without a signal is never abandoned", async () => {
+		const { deferred, deps } = setup()
+		const release = await holdSlots(deps, deferred)
+		const item = imageItem()
+		const controller = new AbortController()
+		const withSignal = getThumbnailUrl(item, deps, controller.signal)
+		const pinned = getThumbnailUrl(item, deps)
+
+		controller.abort()
+		await release()
+		await flushMicrotasks()
+
+		expect(deferred.keys).toContain(item.data.uuid)
+		deferred.resolve(item.data.uuid, bytes)
+
+		await expect(pinned).resolves.not.toBeNull()
+		await expect(withSignal).resolves.not.toBeNull()
+	})
+
+	it("a late abort from a settled generation never abandons a newer one for the same uuid", async () => {
+		const { deferred, deps } = setup()
+		const item = imageItem()
+		const stale = new AbortController()
+		const first = getThumbnailUrl(item, deps, stale.signal)
+
+		await flushMicrotasks()
+		deferred.resolve(item.data.uuid, { type: "failed" })
+		await expect(first).resolves.toBeNull()
+
+		const release = await holdSlots(deps, deferred)
+		const current = getThumbnailUrl(item, deps, new AbortController().signal)
+
+		stale.abort()
+		await release()
+		await flushMicrotasks()
+
+		expect(deferred.keys.filter(key => key === item.data.uuid)).toHaveLength(2)
+		deferred.resolve(item.data.uuid, bytes)
+
+		await expect(current).resolves.not.toBeNull()
+	})
+
+	it("an abandoned generation records no failure strike and no verdict", async () => {
+		const { deferred, generator, deps } = setup()
+		const item = imageItem()
+
+		// Three abandonments in a row: a strike each would blacklist the uuid.
+		for (let i = 0; i < 3; i++) {
+			const release = await holdSlots(deps, deferred)
+			const controller = new AbortController()
+			const attempt = getThumbnailUrl(item, deps, controller.signal)
+
+			controller.abort()
+			await release()
+			await expect(attempt).resolves.toBeNull()
+		}
+
+		expect(generator.mock.calls.filter(([called]) => called.data.uuid === item.data.uuid)).toHaveLength(0)
+
+		const wanted = getThumbnailUrl(item, deps, new AbortController().signal)
+
+		await flushMicrotasks()
+		deferred.resolve(item.data.uuid, bytes)
+
+		await expect(wanted).resolves.not.toBeNull()
 	})
 })
 

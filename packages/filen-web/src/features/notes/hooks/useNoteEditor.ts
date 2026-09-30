@@ -14,7 +14,7 @@ import {
 } from "@/features/notes/store/useNotesInflight"
 import { sync } from "@/features/notes/lib/sync"
 import { forgetTabEditor, seedTabEditor, tabEditorBaseHash, tabEditorChanged, unseedTabEditor } from "@/features/notes/lib/tabEditors"
-import { queryClient } from "@/queries/client"
+import { cancelCached } from "@/queries/patch"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import {
 	deriveEditorSeed,
@@ -143,7 +143,7 @@ export function useNoteEditor(note: Note, currentUserId: bigint | undefined): No
 		// restores the pre-fetch state, so the key does not move — the cancel-before-patch idiom sync.ts
 		// already uses around its own cache writes.
 		if (beginEditingSession(note.uuid)) {
-			void queryClient.cancelQueries({ queryKey: noteContentQueryKey(note.uuid), exact: true })
+			cancelCached(noteContentQueryKey(note.uuid))
 		}
 
 		// Block the ENQUEUE past the cap, never the keystroke — CodeMirror keeps the text on screen, but

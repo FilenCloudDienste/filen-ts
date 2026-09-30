@@ -1,4 +1,3 @@
-import { type CSSProperties } from "react"
 import { useTranslation } from "react-i18next"
 import { StarIcon } from "lucide-react"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
@@ -13,12 +12,12 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 
 export interface DriveRowProps extends DriveItemCellProps {
-	// Absolute-positioning style computed by the virtualizer (position/top/left/width/transform) —
-	// the row owns none of that itself, only its own visual/layout concerns.
-	style: CSSProperties
-	// uuid -> resolved directory bytes, threaded down from the listing's ONE useDriveDirectorySizes call
-	// (never mounted per-row — see directoryListing.tsx) — passed straight through to formatItemSize.
-	directorySizes: ReadonlyMap<string, number>
+	// The virtualizer's offset for this row. A number, not a style object, so the compiled row keeps its
+	// memoized menu subtree across listing re-renders that leave the offset alone.
+	start: number
+	// This directory's resolved bytes from the listing's ONE useDriveDirectorySizes call (never mounted
+	// per-row — see directoryListing.tsx), undefined while pending — passed straight through to formatItemSize.
+	directorySize: number | undefined
 }
 
 export function DriveRow({
@@ -28,10 +27,10 @@ export function DriveRow({
 	selected,
 	active,
 	variant,
-	style,
+	start,
 	splat,
 	searchParentPath,
-	directorySizes,
+	directorySize,
 	selectedItems,
 	onPointerSelect,
 	onCursorMove,
@@ -73,7 +72,13 @@ export function DriveRow({
 						aria-posinset={index + 1}
 						aria-setsize={total}
 						tabIndex={active ? 0 : -1}
-						style={style}
+						style={{
+							position: "absolute",
+							top: 0,
+							left: 0,
+							width: "100%",
+							transform: `translateY(${String(start)}px)`
+						}}
 						className={cn(
 							"group/row flex h-10 items-center gap-3 px-3 text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
 							dropHighlightClass(drop),
@@ -119,7 +124,7 @@ export function DriveRow({
 							</>
 						) : null}
 						<span className="hidden w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
-							{formatItemSize(item, directorySizes)}
+							{formatItemSize(item, directorySize)}
 						</span>
 						<span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground lg:block">
 							{formatModifiedDate(item)}

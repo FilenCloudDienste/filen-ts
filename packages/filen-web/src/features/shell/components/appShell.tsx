@@ -9,6 +9,8 @@ import { subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
 import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
+import { loadHistoryDialog } from "@/features/notes/lib/historyDialogChunk"
+import { preloadNotesExportZip } from "@/features/notes/lib/export"
 import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
 import { SettingsSidebar } from "@/features/settings/components/settingsSidebar"
 import { ContactsSidebar } from "@/features/contacts/components/contactsSidebar"
@@ -86,6 +88,13 @@ export function AppShell() {
 			unsubscribeViewport()
 		}
 	}, [router])
+
+	// Off the first-paint path but resident for the whole session, so notes history and export-all
+	// keep working after the connection drops.
+	useEffect(() => {
+		loadHistoryDialog().catch(() => undefined)
+		preloadNotesExportZip().catch(() => undefined)
+	}, [])
 
 	return (
 		<div className="flex h-svh w-full flex-col overflow-hidden bg-canvas text-foreground">

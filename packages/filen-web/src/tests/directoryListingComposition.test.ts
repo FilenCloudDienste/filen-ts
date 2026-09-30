@@ -58,7 +58,7 @@ vi.mock("@/lib/keymap/useAction", () => ({ useAction }))
 vi.mock("@/features/audio/lib/audioEngine", () => ({ audioEngine: { enqueueAndPlay: vi.fn() } }))
 vi.mock("@/features/drive/hooks/useDriveDirectorySizes", () => ({ useDriveDirectorySizes }))
 vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({
-	useMarqueeSelection: () => ({ rect: null, onPointerDown: vi.fn() })
+	useMarqueeSelection: () => ({ rectStore: { get: () => null, subscribe: () => () => undefined }, onPointerDown: vi.fn() })
 }))
 vi.mock("@/features/drive/hooks/useDriveDialogHost", () => ({
 	useDriveDialogHost: () => ({

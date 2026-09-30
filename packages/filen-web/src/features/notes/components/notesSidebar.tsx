@@ -57,13 +57,14 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { useAction } from "@/lib/keymap/useAction"
+import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { NoteRow } from "@/features/notes/components/noteRow"
 import { NotesBulkActionBar } from "@/features/notes/components/notesBulkActionBar"
 import { canBulkTrashNotes } from "@/features/notes/components/notesBulkActionBar.logic"
 import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
-import { type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
+import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { ListFilterInput } from "@/components/listFilterInput"
@@ -306,7 +307,6 @@ export function NotesSidebar() {
 	// the same "just don't include it" mechanism the selection ghost-purge already relies on, no separate
 	// purge step needed.
 	const allNotes = filterNotesByBlockedOwner(notesQuery.data ?? [], blocked)
-	const allTags = tagsQuery.data ?? []
 	// Eager, opt-in full-body fetch feeding the filters below; see useNoteSearchBodies.ts's own
 	// doc comment for why this never fires a single request outside an active search.
 	const searchBodies = useNoteSearchBodies(allNotes, search)
@@ -320,6 +320,10 @@ export function NotesSidebar() {
 	// so the row model needs a clock — as state, never a `Date.now()` read in this render body (see
 	// useNowMinute).
 	const now = useNowMinute()
+
+	// allTags, rows and both selectable lookups are all built before the next hook: the React Compiler
+	// drops the memo scope of a value that is still mutable across a hook call.
+	const allTags = tagsQuery.data ?? []
 
 	// One flattened row model for BOTH views, so a single virtualizer covers either (never a nested
 	// virtualizer per tag). Notes view: each note as a flat note row. Tags view: tag headers + expanded
@@ -337,28 +341,12 @@ export function NotesSidebar() {
 					bodies: searchBodies
 				})
 
-	const virtualizer = useVirtualizer({
-		count: rows.length,
-		getScrollElement: () => scrollElement,
-		estimateSize: index => {
-			const kind = rows[index]?.kind
-
-			return kind === "tag" ? TAG_ROW_ESTIMATE : kind === "header" ? HEADER_ROW_ESTIMATE : NOTE_ROW_ESTIMATE
-		},
-		overscan: 10,
-		getItemKey: index => {
-			const row = rows[index]
-
-			return row !== undefined ? sidebarRowKey(row) : index
-		}
-	})
-
 	// The ordered, currently-visible note set click-selection ranges walk (search-filtered, spans both
 	// views). A view switch (viewMode) resets the selection/anchor, mirroring how a fresh directory
 	// resets drive's own selection on navigation.
 	const selectableNotes = selectableNotesFromRows(rows)
-	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode })
 	const selectableIndexByRowKey = selectableRowIndexByKey(rows)
+	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode })
 
 	const rawSelectedNotes = useNotesSelectionStore(useShallow(state => state.selectedNotes))
 	// LIVE (ghost-purged) selection: re-derived from the current notes query every render, so a note
@@ -512,7 +500,8 @@ export function NotesSidebar() {
 	const activeQuery = viewMode === "notes" ? notesQuery : tagsQuery
 	const searching = search.trim().length > 0
 
-	function renderBody(): ReactNode {
+	// Null while listing; NotesSidebarList renders the rows then.
+	function renderFallback(): ReactNode {
 		if (activeQuery.isPending) {
 			return <LoadingState size="md" />
 		}
@@ -569,72 +558,7 @@ export function NotesSidebar() {
 			)
 		}
 
-		return (
-			// A plain list, deliberately neither tree nor listbox: both patterns owe a roving-tabindex/
-			// arrow-key focus model this sidebar does not implement, and one flat virtualizer cannot nest
-			// DOM levels anyway — so the grouping stays where it honestly is, in the flat row order, with
-			// each tag row's own aria-expanded as the only disclosure claim (same shape as the drive
-			// sidebar's disclosure list). Positions are threaded per item because virtualization mounts
-			// only a window: the DOM child count here is never the real total.
-			<ul
-				aria-label={t("notesListLabel")}
-				className="relative w-full"
-				style={{ height: virtualizer.getTotalSize() }}
-			>
-				{virtualizer.getVirtualItems().map(virtualRow => {
-					const row = rows[virtualRow.index]
-
-					if (row === undefined) {
-						return null
-					}
-
-					return (
-						<li
-							key={virtualRow.key}
-							data-index={virtualRow.index}
-							aria-posinset={virtualRow.index + 1}
-							aria-setsize={rows.length}
-							ref={element => {
-								virtualizer.measureElement(element)
-							}}
-							className="absolute top-0 left-0 w-full"
-							style={{ transform: `translateY(${String(virtualRow.start)}px)` }}
-						>
-							{row.kind === "header" ? (
-								<NotesGroupHeader row={row} />
-							) : row.kind === "tag" ? (
-								<TagGroupRow
-									row={row}
-									onToggle={() => {
-										toggleTag(row.tag.uuid)
-									}}
-									onTagAction={dialogHost.openTagDialog}
-									onCreateNoteInTag={created => {
-										void openNote(created)
-									}}
-								/>
-							) : (
-								<NoteRow
-									note={row.note}
-									selected={row.note.uuid === selectedUuid}
-									multiSelected={liveSelectedUuids.has(row.note.uuid)}
-									nested={viewMode === "tags"}
-									allTags={allTags}
-									currentUserId={currentUserId}
-									onAction={dialogHost.openNoteDialog}
-									onDuplicated={duplicated => {
-										void openNote(duplicated)
-									}}
-									onPointerSelect={event => {
-										selection.handlePointerSelect(selectableIndexByRowKey.get(sidebarRowKey(row)) ?? -1, event)
-									}}
-								/>
-							)}
-						</li>
-					)
-				})}
-			</ul>
-		)
+		return null
 	}
 
 	return (
@@ -780,7 +704,23 @@ export function NotesSidebar() {
 					ref={setScrollElement}
 					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
 				>
-					{renderBody()}
+					<NotesSidebarList
+						rows={rows}
+						scrollElement={scrollElement}
+						fallback={renderFallback()}
+						label={t("notesListLabel")}
+						selectedUuid={selectedUuid}
+						liveSelectedUuids={liveSelectedUuids}
+						nested={viewMode === "tags"}
+						allTags={allTags}
+						currentUserId={currentUserId}
+						selectableIndexByRowKey={selectableIndexByRowKey}
+						onToggleTag={toggleTag}
+						onOpenNote={openNote}
+						onTagAction={dialogHost.openTagDialog}
+						onNoteAction={dialogHost.openNoteDialog}
+						onPointerSelect={selection.handlePointerSelect}
+					/>
 				</div>
 				{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
 				    nothing in the header. Mirrors directoryListing.tsx's own BulkActionBar placement. Shown
@@ -798,5 +738,132 @@ export function NotesSidebar() {
 			</div>
 			{dialogHost.renderActiveDialog()}
 		</ResizableSidebarPanel>
+	)
+}
+
+interface NotesSidebarListProps {
+	rows: NotesSidebarRow[]
+	scrollElement: HTMLDivElement | null
+	// Rendered instead of the list (loading, error, empty) while non-null.
+	fallback: ReactNode
+	label: string
+	selectedUuid: string
+	liveSelectedUuids: ReadonlySet<string>
+	nested: boolean
+	allTags: readonly NoteTag[]
+	currentUserId: bigint | undefined
+	selectableIndexByRowKey: ReadonlyMap<string, number>
+	onToggleTag: (uuid: string) => void
+	onOpenNote: (note: Note) => Promise<void>
+	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
+	onNoteAction: (kind: NoteActionDialogKind, note: Note) => void
+	onPointerSelect: ListPointerSelection["handlePointerSelect"]
+}
+
+// Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range
+// change while scrolling; split out so NotesSidebar itself compiles and those renders stay here. Mounted in
+// every state, so the virtualizer and its measurement cache live exactly as long as the sidebar.
+function NotesSidebarList({
+	rows,
+	scrollElement,
+	fallback,
+	label,
+	selectedUuid,
+	liveSelectedUuids,
+	nested,
+	allTags,
+	currentUserId,
+	selectableIndexByRowKey,
+	onToggleTag,
+	onOpenNote,
+	onTagAction,
+	onNoteAction,
+	onPointerSelect
+}: NotesSidebarListProps) {
+	const virtualizer = useVirtualizer({
+		count: rows.length,
+		getScrollElement: () => scrollElement,
+		estimateSize: index => {
+			const kind = rows[index]?.kind
+
+			return kind === "tag" ? TAG_ROW_ESTIMATE : kind === "header" ? HEADER_ROW_ESTIMATE : NOTE_ROW_ESTIMATE
+		},
+		overscan: 10,
+		getItemKey: index => {
+			const row = rows[index]
+
+			return row !== undefined ? sidebarRowKey(row) : index
+		}
+	})
+
+	if (fallback !== null) {
+		return fallback
+	}
+
+	return (
+		// A plain list, deliberately neither tree nor listbox: both patterns owe a roving-tabindex/
+		// arrow-key focus model this sidebar does not implement, and one flat virtualizer cannot nest
+		// DOM levels anyway — so the grouping stays where it honestly is, in the flat row order, with
+		// each tag row's own aria-expanded as the only disclosure claim (same shape as the drive
+		// sidebar's disclosure list). Positions are threaded per item because virtualization mounts
+		// only a window: the DOM child count here is never the real total.
+		<ul
+			aria-label={label}
+			className="relative w-full"
+			style={{ height: virtualizer.getTotalSize() }}
+		>
+			{virtualizer.getVirtualItems().map(virtualRow => {
+				const row = rows[virtualRow.index]
+
+				if (row === undefined) {
+					return null
+				}
+
+				return (
+					<li
+						key={virtualRow.key}
+						data-index={virtualRow.index}
+						aria-posinset={virtualRow.index + 1}
+						aria-setsize={rows.length}
+						ref={element => {
+							virtualizer.measureElement(element)
+						}}
+						className="absolute top-0 left-0 w-full"
+						style={{ transform: `translateY(${String(virtualRow.start)}px)` }}
+					>
+						{row.kind === "header" ? (
+							<NotesGroupHeader row={row} />
+						) : row.kind === "tag" ? (
+							<TagGroupRow
+								row={row}
+								onToggle={() => {
+									onToggleTag(row.tag.uuid)
+								}}
+								onTagAction={onTagAction}
+								onCreateNoteInTag={created => {
+									void onOpenNote(created)
+								}}
+							/>
+						) : (
+							<NoteRow
+								note={row.note}
+								selected={row.note.uuid === selectedUuid}
+								multiSelected={liveSelectedUuids.has(row.note.uuid)}
+								nested={nested}
+								allTags={allTags}
+								currentUserId={currentUserId}
+								onAction={onNoteAction}
+								onDuplicated={duplicated => {
+									void onOpenNote(duplicated)
+								}}
+								onPointerSelect={event => {
+									onPointerSelect(selectableIndexByRowKey.get(sidebarRowKey(row)) ?? -1, event)
+								}}
+							/>
+						)}
+					</li>
+				)
+			})}
+		</ul>
 	)
 }

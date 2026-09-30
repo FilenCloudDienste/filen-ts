@@ -11,9 +11,13 @@ interface CompilerEvent {
 }
 
 function compile(file: string): CompilerEvent[] {
+	return compileWithCode(file).events
+}
+
+function compileWithCode(file: string): { events: CompilerEvent[]; code: string } {
 	const events: CompilerEvent[] = []
 
-	transformFileSync(file, {
+	const result = transformFileSync(file, {
 		babelrc: false,
 		configFile: false,
 		presets: ["@babel/preset-typescript"],
@@ -33,7 +37,17 @@ function compile(file: string): CompilerEvent[] {
 		]
 	})
 
-	return events
+	return { events, code: result?.code ?? "" }
+}
+
+// A compiled function can still recompute a value on every render: the compiler drops the memo scope of a
+// value whose mutable range spans a hook call. Guarded statements sit inside an `if ($[n] ...)` block, one
+// indent level below the function body's own.
+function unguardedCalls(code: string, fnName: string, calls: readonly string[]): string[] {
+	const start = code.indexOf(`function ${fnName}(`)
+	const body = code.slice(start, code.indexOf("\n}\n", start))
+
+	return calls.filter(call => body.split("\n").some(line => /^ {2}\S/.test(line) && line.includes(call)))
 }
 
 describe("React Compiler coverage", () => {
@@ -53,6 +67,161 @@ describe("React Compiler coverage", () => {
 		expect(
 			events.some(event => event.kind === "CompileSuccess" && event.fnName === "useDriveClipboard" && (event.memoSlots ?? 0) > 0)
 		).toBe(true)
+	})
+
+	it("compiles useListingOpen, DriveRow and DriveTile, so a listing scroll step reuses each cell's menu subtree", () => {
+		// DirectoryListing itself opts out ("use no memo"); only its module-level open hook must compile.
+		const listing = compile("src/features/drive/components/directoryListing.tsx")
+
+		expect(listing.filter(event => event.kind !== "CompileSuccess" && event.kind !== "CompileSkip")).toEqual([])
+		expect(
+			listing.some(event => event.kind === "CompileSuccess" && event.fnName === "useListingOpen" && (event.memoSlots ?? 0) > 0)
+		).toBe(true)
+
+		for (const [file, fnName] of [
+			["src/features/drive/components/driveRow.tsx", "DriveRow"],
+			["src/features/drive/components/driveTile.tsx", "DriveTile"]
+		] as const) {
+			const events = compile(file)
+
+			expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+	})
+
+	it("compiles useDriveListboxNav, so a listing render reuses its row keys and hands rows stable handlers", () => {
+		const { events, code } = compileWithCode("src/features/drive/hooks/useDriveListboxNav.ts")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(
+			events.some(event => event.kind === "CompileSuccess" && event.fnName === "useDriveListboxNav" && (event.memoSlots ?? 0) > 0)
+		).toBe(true)
+		expect(
+			unguardedCalls(code, "useDriveListboxNav", [
+				"items.map(driveRowKey)",
+				"function handlePointerSelect(",
+				"function handleKeyDown(",
+				"function setCursor("
+			])
+		).toEqual([])
+	})
+
+	it("compiles QueueRow, so a track change re-renders only the queue rows whose props changed", () => {
+		const events = compile("src/features/audio/components/nowPlayingPanel.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "QueueRow" && (event.memoSlots ?? 0) > 0)).toBe(
+			true
+		)
+	})
+
+	it("compiles GridCell, so a scroll step, selection move or keystroke re-renders only the cells that changed", () => {
+		const events = compile("src/features/spreadsheet/components/sheetGrid.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "GridCell" && (event.memoSlots ?? 0) > 0)).toBe(
+			true
+		)
+	})
+
+	it.each([
+		// A selection toggle re-renders only the toggled add-tracks row.
+		["src/features/audio/components/addPlaylistTracksDialog.tsx", "AddTrackRow"],
+		// A current-page change skips every PdfPage.
+		["src/features/preview/components/pdfViewer.tsx", "PdfPages"]
+	])("compiles %s's %s", (file, fnName) => {
+		const events = compile(file)
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
+	})
+
+	// useVirtualizer opts its host out, so it lives in each sidebar's list child; its scroll-driven renders must
+	// not reach the sidebar, and the sidebar's row model must not rebuild on an unrelated render.
+	it.each([
+		[
+			"src/features/notes/components/notesSidebar.tsx",
+			"NotesSidebar",
+			[
+				"filterNotesByBlockedOwner(",
+				"buildNotesGroupedRows(",
+				"buildTagsViewRows(",
+				"selectableNotesFromRows(",
+				"selectableRowIndexByKey(",
+				"new Map(",
+				"new Set("
+			]
+		],
+		[
+			"src/features/chats/components/chatsSidebar.tsx",
+			"ChatsSidebar",
+			["chatsWithoutBlockedOneOnOne(", "filterChats(", "new Map(", ".sort()", "new Set("]
+		]
+	])("compiles %s, leaving only its list child to the virtualizer", (file, fnName, derivations) => {
+		const { events, code } = compileWithCode(file)
+
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
+		expect(unguardedCalls(code, fnName, derivations)).toEqual([])
+	})
+
+	it("compiles DriveSidebar, so non-drive navigations skip the mounted directory tree", () => {
+		const events = compile("src/features/shell/components/driveSidebar.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "DriveSidebar" && (event.memoSlots ?? 0) > 0)).toBe(
+			true
+		)
+	})
+
+	// A try without a catch is what the compiler cannot lower; this re-renders on every keystroke.
+	it("compiles the chat Composer", () => {
+		const events = compile("src/features/chats/components/thread/composer.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "Composer" && (event.memoSlots ?? 0) > 0)).toBe(
+			true
+		)
+	})
+
+	// useVirtualizer opts its host out, so it lives in PhotoGridRows; its scroll-driven renders must not reach PhotoGrid.
+	it("compiles PhotoGrid, leaving only PhotoGridRows to the virtualizer", () => {
+		const events = compile("src/features/photos/components/photoGrid.tsx")
+
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === "PhotoGrid" && (event.memoSlots ?? 0) > 0)).toBe(
+			true
+		)
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
+	})
+
+	it("memoizes PhotoGrid's derivations, so a keystroke, selection change or resize skips re-filtering the library", () => {
+		const grid = compileWithCode("src/features/photos/components/photoGrid.tsx")
+		const filter = compileWithCode("src/features/photos/hooks/usePhotosFilter.ts")
+
+		expect(
+			unguardedCalls(grid.code, "PhotoGrid", [
+				"reconcileSelectedItems(",
+				"new Set(",
+				"buildPhotosTimeline(",
+				"function handleOpenAt(",
+				"function handleTileClick("
+			])
+		).toEqual([])
+		expect(filter.events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(unguardedCalls(filter.code, "usePhotosFilter", ["photoKindsPresent(", "filterPhotos("])).toEqual([])
+	})
+
+	// useVirtualizer opts ThreadList out; the rows it maps must come from compiled ThreadRowContent so a scroll
+	// render skips every unchanged MessageRow.
+	it("compiles ThreadRowContent, leaving only ThreadList to the virtualizer", () => {
+		const events = compile("src/features/chats/components/thread/messageThread.tsx")
+
+		expect(
+			events.some(event => event.kind === "CompileSuccess" && event.fnName === "ThreadRowContent" && (event.memoSlots ?? 0) > 0)
+		).toBe(true)
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
 	})
 
 	// A destructuring default is what the compiler cannot lower; each of these had one.

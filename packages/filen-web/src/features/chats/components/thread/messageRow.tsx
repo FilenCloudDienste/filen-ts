@@ -209,13 +209,13 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 										)}
 									>
 										<MessageContent
-											chat={chat}
+											participants={chat.participants}
 											segments={segments}
 										/>
 										{message.edited ? (
 											<span className="ml-1 text-[11px] text-muted-foreground">{t("chatMessageEdited")}</span>
 										) : null}
-										<MessageEmbeds candidates={embedCandidates} />
+										{hasEmbeds ? <MessageEmbeds candidates={embedCandidates} /> : null}
 									</span>
 								)}
 								{sendState === "pending" || sendState === "sending" ? (

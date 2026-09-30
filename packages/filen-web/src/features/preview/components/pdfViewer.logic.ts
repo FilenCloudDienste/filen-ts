@@ -29,31 +29,28 @@ export function pdfPageAction(withinExtendedView: boolean, rendered: boolean): P
 	return rendered ? "idle" : "render"
 }
 
-// One page's current IntersectionObserver ratio, as reported by pdfViewer.tsx's per-page observer.
-export interface PageVisibility {
-	page: number
-	ratio: number
-}
+// Picks the page with the highest visibility ratio among currently-intersecting pages (ratio > 0) —
+// the page-nav toolbar's "Page X of N" indicator and the value the Prev/Next-page buttons step from.
+// Returns null when nothing is intersecting (e.g. a single observer callback mid-fast-scroll where every
+// page has already left the root's bounds), so the caller keeps the previously-current page. On a tie
+// keeps whichever page iterates first — the Map's insertion order. Reads the live Map directly so an
+// observer callback allocates nothing.
+export function mostVisiblePage(ratios: ReadonlyMap<number, number>): number | null {
+	let bestPage: number | null = null
+	let bestRatio = 0
 
-// Picks the page with the highest visibility ratio among currently-intersecting entries (ratio > 0)
-// — the page-nav toolbar's "Page X of N" indicator and the value the Prev/Next-page buttons step
-// from. Falls back to the previously-current page when nothing is intersecting (e.g. a single
-// observer callback mid-fast-scroll where every entry has already left the root's bounds), and on a
-// tie keeps whichever entry sorts first — stable, since the caller always passes entries in page order.
-export function mostVisiblePage(entries: readonly PageVisibility[], fallback: number): number {
-	let best: PageVisibility | null = null
-
-	for (const entry of entries) {
-		if (entry.ratio <= 0) {
+	for (const [page, ratio] of ratios) {
+		if (ratio <= 0) {
 			continue
 		}
 
-		if (best === null || entry.ratio > best.ratio) {
-			best = entry
+		if (bestPage === null || ratio > bestRatio) {
+			bestPage = page
+			bestRatio = ratio
 		}
 	}
 
-	return best?.page ?? fallback
+	return bestPage
 }
 
 // HiDPI canvas sizing for one page's render — mirrors pdf.js's own recommended recipe: the canvas's

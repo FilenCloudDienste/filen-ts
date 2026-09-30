@@ -1,6 +1,6 @@
-import type { SocketEvent } from "@filen/sdk-rs"
+import type { SocketEvent, UserEventResult } from "@filen/sdk-rs"
 import { registerSocketHandler } from "@/lib/sdk/socket"
-import { queryClient } from "@/queries/client"
+import { cachedQuery, invalidateJoiningInFlight } from "@/queries/patch"
 import { EVENTS_QUERY_KEY } from "@/features/settings/queries/events"
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { log } from "@/lib/log"
@@ -42,8 +42,11 @@ export function handleGeneralEvent(event: GeneralSocketEvent): void {
 			// trigger, never a splice: refetch page one, which merges into the loaded pages (fetchEvents).
 			// Guarded on an existing cache slice — an events list nobody has opened yet has nothing to
 			// refresh, and its first mount reads anyway.
-			if (queryClient.getQueryData(EVENTS_QUERY_KEY) !== undefined) {
-				void queryClient.invalidateQueries({ queryKey: EVENTS_QUERY_KEY })
+			// One read per burst rather than a restart per event, as an account-wide batch sends one each.
+			const query = cachedQuery<UserEventResult[]>(EVENTS_QUERY_KEY)
+
+			if (query?.state.data !== undefined) {
+				invalidateJoiningInFlight(query)
 			}
 
 			break

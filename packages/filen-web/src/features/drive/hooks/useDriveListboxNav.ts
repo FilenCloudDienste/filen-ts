@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react"
+import { useEffect, useEffectEvent, useState, type KeyboardEvent, type MouseEvent } from "react"
 import {
 	clampListboxIndex,
 	clickPointerType,
@@ -125,6 +125,17 @@ export function useDriveListboxNav({
 	// re-fire and steal a click the user made afterwards. A request whose row hasn't landed yet stays
 	// pending — this re-runs when `items` arrives, which is the virtualized/late-fetch case the
 	// destination listing actually hits.
+	const revealAt = useEffectEvent((index: number) => {
+		const item = items[index]
+
+		if (item) {
+			useDriveStore.getState().setSelectedItems([item])
+		}
+
+		useDriveStore.getState().clearPendingReveal()
+		moveActive(index)
+	})
+
 	useEffect(() => {
 		if (pendingReveal?.splat !== splat) {
 			return
@@ -136,16 +147,8 @@ export function useDriveListboxNav({
 			return
 		}
 
-		const item = items[index]
-
-		if (item) {
-			useDriveStore.getState().setSelectedItems([item])
-		}
-
-		useDriveStore.getState().clearPendingReveal()
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot navigation-driven cursor move that clears its own trigger, see above
-		moveActive(index)
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- moveActive is re-created every render; the request above is self-clearing, so re-running on its identity would only add churn
+		revealAt(index)
 	}, [pendingReveal, items, splat])
 
 	function selectRange(anchor: number, active: number) {

@@ -633,11 +633,17 @@ function* sheetItems(sheetData: string, context: Context): Generator<SheetItem> 
 			}
 
 			formula = text
-			formulaAttrs = [...fAttrs]
-				.filter(([name, value]) => name !== "ca" && !isDefault("f", name, normalizeValue(value)))
-				.map(([name, value]) => `${name}=${normalizeValue(value)}`)
-				.sort()
-				.join(" ")
+			let formulaParts: string[] | null = null
+
+			for (const [name, raw] of fAttrs) {
+				if (name === "ca") continue
+
+				const value = normalizeValue(raw)
+
+				if (!isDefault("f", name, value)) (formulaParts ??= []).push(`${name}=${value}`)
+			}
+
+			formulaAttrs = formulaParts === null ? "" : formulaParts.sort().join(" ")
 		}
 
 		let value: string | undefined
@@ -668,11 +674,13 @@ function* sheetItems(sheetData: string, context: Context): Generator<SheetItem> 
 			}
 		}
 
-		const extra = [...attrs]
-			.filter(([name]) => !["r", "s", "t"].includes(name))
-			.map(([name, v]) => `${name}=${v}`)
-			.sort()
-			.join(" ")
+		let extraParts: string[] | null = null
+
+		for (const [name, v] of attrs) {
+			if (name !== "r" && name !== "s" && name !== "t") (extraParts ??= []).push(`${name}=${v}`)
+		}
+
+		const extra = extraParts === null ? "" : extraParts.sort().join(" ")
 
 		yield {
 			kind: "cell",
@@ -815,8 +823,8 @@ const SHEET_DATA = /<(?:[\w.-]+:)?sheetData\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w.-
 
 // A worksheet part without its cells, as an element multiset: columns as runs, hyperlinks with their
 // targets, conditional formats with their formats resolved.
-function sheetElements(xml: string, context: Context, links: Map<string, string>): Map<string, number> {
-	const tree = parseXml(xml.replace(SHEET_DATA, ""))
+function sheetElements(xml: string, sheetData: RegExpExecArray | null, context: Context, links: Map<string, string>): Map<string, number> {
+	const tree = parseXml(sheetData === null ? xml : xml.slice(0, sheetData.index) + xml.slice(sheetData.index + sheetData[0].length))
 	const set = new Map<string, number>()
 
 	for (const child of tree.children) {
@@ -1125,18 +1133,24 @@ export async function saveLosses(input: VerifyInput, cancelled: () => boolean = 
 
 		const beforeParts = sheetParts(original, path.toLowerCase())
 		const afterParts = sheetParts(saved, savedPath)
+		// One scan per side serves both the element and the cell comparison.
+		const beforeSheetData = SHEET_DATA.exec(before)
+		const afterSheetData = SHEET_DATA.exec(after)
 
 		report(
 			path,
-			missing(sheetElements(before, originalContext, beforeParts.links), sheetElements(after, savedContext, afterParts.links))
+			missing(
+				sheetElements(before, beforeSheetData, originalContext, beforeParts.links),
+				sheetElements(after, afterSheetData, savedContext, afterParts.links)
+			)
 		)
 		// The sheets are the bulk of a file: each is let go once compared.
 		original.entries.delete(path.toLowerCase())
 		saved.entries.delete(savedPath)
 
 		const cells = await compareSheetData(
-			SHEET_DATA.exec(before)?.[1] ?? "",
-			SHEET_DATA.exec(after)?.[1] ?? "",
+			beforeSheetData?.[1] ?? "",
+			afterSheetData?.[1] ?? "",
 			originalContext,
 			savedContext,
 			cancelled

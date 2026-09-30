@@ -1,8 +1,8 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState, type MouseEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { SearchXIcon } from "lucide-react"
 import { useShallow } from "zustand/shallow"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -15,27 +15,21 @@ import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { SearchInput } from "@/features/drive/components/searchInput"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { type PhotosListing } from "@/features/photos/queries/photos"
-import {
-	EMPTY_PHOTOS_FILTER,
-	filterPhotos,
-	isPhotosFilterActive,
-	monthNameTable,
-	photoKindsPresent,
-	type PhotosFilter,
-	type PhotosKindFilter
-} from "@/features/photos/lib/search"
+import { EMPTY_PHOTOS_FILTER, isPhotosFilterActive, type PhotosFilter, type PhotosKindFilter } from "@/features/photos/lib/search"
 import {
 	buildPhotosTimeline,
 	formatTimelineMonth,
 	gridCellWidth,
 	timelineIndexAtPoint,
 	timelineMarqueeIndices,
-	timelineRowSize
+	timelineRowSize,
+	type PhotosTimeline
 } from "@/features/photos/lib/timeline"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
-import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
+import { photosPointerSelect } from "@/features/photos/lib/pointerSelect"
+import { usePhotosFilter } from "@/features/photos/hooks/usePhotosFilter"
 import { usePhotosGridNav } from "@/features/photos/hooks/usePhotosGridNav"
-import { useMarqueeSelection } from "@/features/drive/hooks/useMarqueeSelection"
+import { useMarqueeSelection, type MarqueeRectStore } from "@/features/drive/hooks/useMarqueeSelection"
 import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 import { useClickAwayDeselect } from "@/features/drive/hooks/useClickAwayDeselect"
 import { usePhotosDialogHost } from "@/features/photos/hooks/usePhotosDialogHost"
@@ -43,7 +37,7 @@ import { resolveTileClickIntent, previewOpenTarget } from "@/features/photos/com
 import { usePhotosGridDensityQuery } from "@/features/photos/queries/preferences"
 import { DEFAULT_DENSITY_INDEX, tileSizeForDensity } from "@/features/photos/lib/gridDensity"
 import { columnsForWidth } from "@/features/drive/lib/gridLayout"
-import { PhotoTile } from "@/features/photos/components/photoTile"
+import { PhotoTile, type PhotoTileProps } from "@/features/photos/components/photoTile"
 import { setThumbnailVisibleSlots } from "@/features/drive/lib/thumbnails"
 import { PhotosBulkActionBar } from "@/features/photos/components/bulkActionBar"
 import { TimelineScrubber } from "@/features/photos/components/timelineScrubber"
@@ -75,60 +69,34 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 	const { t, i18n } = useTranslation(["drive", "photos"])
 	const isOnline = useIsOnline()
 	const densityQuery = usePhotosGridDensityQuery()
-	const densityIndex = densityQuery.data ?? DEFAULT_DENSITY_INDEX
-	const tileSize = tileSizeForDensity(densityIndex)
-
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const { width: containerWidth, height: containerHeight } = useElementSize(scrollElement)
 	const [anchorUuid, setAnchorUuid] = useState<string | null>(null)
 	const [filter, setFilter] = useState<PhotosFilter>(EMPTY_PHOTOS_FILTER)
-
-	// Typing stays responsive over a large library: the grid re-filters at lower priority than the input.
-	const query = useDeferredValue(filter.query)
-	const favoritesOnly = filter.favoritesOnly
 	const language = i18n.language
-	// Memoized by hand below: useVirtualizer opts this component out of the React Compiler, and the
-	// virtualizer re-renders it on every scroll frame.
-	const kinds = useMemo(() => photoKindsPresent(listing.photos, listing.folders), [listing])
-	// Kind chips only show while the listing holds two kinds or more; a kind that has since vanished (its
-	// last video trashed) must not leave the grid filtered by a chip no longer on screen.
-	const kind = kinds.size > 1 && filter.kind !== "all" && kinds.has(filter.kind) ? filter.kind : "all"
-	const filtered = useMemo(
-		() => filterPhotos(listing.photos, listing.folders, { query, kind, favoritesOnly }, monthNameTable(language)),
-		[listing, query, kind, favoritesOnly, language]
-	)
+	const { query, favoritesOnly, kinds, kind, filtered } = usePhotosFilter(listing, filter, language)
 	const items = filtered.items
-
 	const selection = usePhotosStore(useShallow(state => state.selectedItems))
+
+	// No hook call among these derivations: the compiler drops the memoization of a value created before a
+	// hook call and passed to any call after it, and of every value sharing its scope.
+
 	// Each selected photo as the grid now holds it, not as it was when selected: a rename or favorite
-	// replaces it in the grid, never in the selection (see reconcileSelectedItems). Both inputs hold across
-	// scroll renders, so those do no work proportional to the selection.
-	const selectedItems = useMemo(() => reconcileSelectedItems(selection, items), [selection, items])
-	const selectedUuids = useMemo(() => new Set(selectedItems.map(selected => selected.data.uuid)), [selectedItems])
-	const { handlePointerSelect } = usePhotosSelection(items, anchorUuid, setAnchorUuid)
+	// replaces it in the grid, never in the selection (see reconcileSelectedItems).
+	const selectedItems = reconcileSelectedItems(selection, items)
+	const selectedUuids = new Set(selectedItems.map(selected => selected.data.uuid))
+	const hasSelection = selectedItems.length > 0
+	// The density's tile size only decides how many columns fit; each tile then fills its share of the
+	// width after the gaps, and rows are that tall, so no slack is left anywhere.
+	const tileSize = tileSizeForDensity(densityQuery.data ?? DEFAULT_DENSITY_INDEX)
+	const columns = columnsForWidth(containerWidth, tileSize, GRID_GAP)
+	const cellSize = containerWidth > 0 ? gridCellWidth(containerWidth, columns, GRID_GAP) : tileSize
+	const timeline = buildPhotosTimeline(filtered.entries, columns, cellSize, GRID_GAP)
+
 	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = usePhotosDialogHost({
 		rootUuid,
 		selectedItems
 	})
-
-	// Plain click opens the viewer (browsing is the grid's whole point); once a selection is active a
-	// plain click instead falls through to handlePointerSelect's own plain-click branch (select just this
-	// item, or deselect it when it is the whole selection), exactly matching drive's plain-click
-	// convention. A modifier click always builds/extends the selection regardless of selection state —
-	// see photoGrid.logic.ts's own doc comment on resolveTileClickIntent for the full decision table.
-	function handleTileClick(index: number, event: MouseEvent<HTMLDivElement>): void {
-		const intent = resolveTileClickIntent(event, selectedItems.length > 0)
-
-		if (intent.kind === "open") {
-			handleOpenAt(index)
-
-			return
-		}
-
-		handlePointerSelect(index, event)
-		// The cursor follows the click, exactly as drive's own handlePointerSelect moves activeUuid.
-		setActive(index)
-	}
 
 	// One open path shared by a plain click and Enter.
 	function handleOpenAt(index: number): void {
@@ -145,43 +113,46 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 		usePhotosStore.getState().clearSelectedItems()
 	}, [rootUuid])
 
-	// The density's tile size only decides how many columns fit; each tile then fills its share of the
-	// width after the gaps, and rows are that tall, so no slack is left anywhere.
-	const columns = columnsForWidth(containerWidth, tileSize, GRID_GAP)
-	const cellSize = containerWidth > 0 ? gridCellWidth(containerWidth, columns, GRID_GAP) : tileSize
-	const timeline = useMemo(() => buildPhotosTimeline(filtered.entries, columns, cellSize, GRID_GAP), [filtered, columns, cellSize])
-
 	// This grid lays out its own tiles, so it sizes the shared thumbnail objectURL cache itself: the
 	// visible rows plus one partial row, the cache's headroom covering the overscan rows either side.
 	useEffect(() => {
 		setThumbnailVisibleSlots(columns * (Math.ceil(containerHeight / cellSize) + 1))
 	}, [columns, cellSize, containerHeight])
-	// Changing with the timeline is what makes the virtualizer re-read row sizes (it re-lays rows only
-	// when its key function changes); stable otherwise, so a scroll frame re-lays nothing.
-	const getRowKey = useCallback((index: number) => timeline.rows[index]?.key ?? index, [timeline])
-
-	// Sizes come from the timeline, never from measuring.
-	const virtualizer = useVirtualizer({
-		count: timeline.rows.length,
-		getScrollElement: () => scrollElement,
-		estimateSize: index => {
-			const row = timeline.rows[index]
-
-			return row === undefined ? cellSize : timelineRowSize(timeline, row)
-		},
-		gap: GRID_GAP,
-		overscan: GRID_OVERSCAN,
-		getItemKey: getRowKey
-	})
+	// The virtualizer lives in PhotoGridRows, whose scroll-driven renders it keeps to itself; keyboard
+	// navigation reaches it through this ref, set in a layout effect before any key event can land.
+	const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null)
 
 	const { safeActiveIndex, handleKeyDown, registerRef, setActive, setCursor, resetCursor } = usePhotosGridNav({
 		items,
 		timeline,
-		virtualizer,
+		virtualizer: {
+			scrollToIndex: (index, options) => {
+				virtualizerRef.current?.scrollToIndex(index, options)
+			}
+		},
 		anchorUuid,
 		setAnchorUuid,
 		onOpen: handleOpenAt
 	})
+
+	// Plain click opens the viewer (browsing is the grid's whole point); once a selection is active a
+	// plain click instead falls through to photosPointerSelect's own plain-click branch (select just this
+	// item, or deselect it when it is the whole selection), exactly matching drive's plain-click
+	// convention. A modifier click always builds/extends the selection regardless of selection state —
+	// see photoGrid.logic.ts's own doc comment on resolveTileClickIntent for the full decision table.
+	function handleTileClick(index: number, event: MouseEvent<HTMLDivElement>): void {
+		const intent = resolveTileClickIntent(event, hasSelection)
+
+		if (intent.kind === "open") {
+			handleOpenAt(index)
+
+			return
+		}
+
+		photosPointerSelect(items, anchorUuid, setAnchorUuid, index, event)
+		// The cursor follows the click, exactly as drive's own handlePointerSelect moves activeUuid.
+		setActive(index)
+	}
 
 	// Rubber-band selection over blank grid space — the same hook the drive listing uses, with the
 	// timeline's own hit-test (month headers make rows uneven) and photos' selection store injected.
@@ -373,72 +344,22 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 						onKeyDown={handleKeyDown}
 						onPointerDown={marquee.onPointerDown}
 					>
-						<div style={{ position: "relative", width: "100%", height: virtualizer.getTotalSize() }}>
-							{/* The FIRST child of the sized wrapper so it shares the tiles' own content-space origin. */}
-							<MarqueeRect rect={marquee.rect} />
-							{virtualizer.getVirtualItems().map(virtualRow => {
-								const row = timeline.rows[virtualRow.index]
-
-								if (row === undefined) {
-									return null
-								}
-
-								const rowStyle = {
-									position: "absolute",
-									top: 0,
-									left: 0,
-									width: "100%",
-									height: virtualRow.size,
-									transform: `translateY(${String(virtualRow.start)}px)`
-								} as const
-
-								if (row.kind === "header") {
-									// Hidden from the listbox's own semantics, which only admit options; each tile still
-									// names itself.
-									return (
-										<div
-											key={virtualRow.key}
-											aria-hidden="true"
-											className="flex items-end px-4 pb-2 text-sm font-medium"
-											style={rowStyle}
-										>
-											{formatTimelineMonth(language, row.year, row.month)}
-										</div>
-									)
-								}
-
-								return (
-									<div
-										key={virtualRow.key}
-										style={{
-											...rowStyle,
-											display: "grid",
-											gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`,
-											gap: GRID_GAP
-										}}
-									>
-										{items.slice(row.start, row.end).map((item, column) => {
-											const itemIndex = row.start + column
-
-											return (
-												<PhotoTile
-													key={item.data.uuid}
-													rootUuid={rootUuid}
-													item={item}
-													index={itemIndex}
-													total={items.length}
-													selected={selectedUuids.has(item.data.uuid)}
-													active={itemIndex === safeActiveIndex}
-													registerRef={registerRef}
-													onTileClick={handleTileClick}
-													onItemAction={handleItemAction}
-												/>
-											)
-										})}
-									</div>
-								)
-							})}
-						</div>
+						<PhotoGridRows
+							scrollElement={scrollElement}
+							timeline={timeline}
+							items={items}
+							rootUuid={rootUuid}
+							columns={columns}
+							cellSize={cellSize}
+							language={language}
+							selectedUuids={selectedUuids}
+							safeActiveIndex={safeActiveIndex}
+							registerRef={registerRef}
+							onTileClick={handleTileClick}
+							onItemAction={handleItemAction}
+							rectStore={marquee.rectStore}
+							virtualizerRef={virtualizerRef}
+						/>
 					</div>
 					{scrollElement ? (
 						<TimelineScrubber
@@ -458,6 +379,137 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 				</div>
 			) : null}
 			{renderActiveDialog()}
+		</div>
+	)
+}
+
+interface PhotoGridRowsProps {
+	scrollElement: HTMLDivElement | null
+	timeline: PhotosTimeline
+	items: PhotoItem[]
+	rootUuid: string
+	columns: number
+	cellSize: number
+	language: string
+	selectedUuids: ReadonlySet<string>
+	safeActiveIndex: number
+	registerRef: PhotoTileProps["registerRef"]
+	onTileClick: PhotoTileProps["onTileClick"]
+	onItemAction: PhotoTileProps["onItemAction"]
+	rectStore: MarqueeRectStore
+	virtualizerRef: RefObject<Virtualizer<HTMLDivElement, Element> | null>
+}
+
+// Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range
+// change while scrolling; split out so PhotoGrid itself compiles and those renders stay here.
+function PhotoGridRows({
+	scrollElement,
+	timeline,
+	items,
+	rootUuid,
+	columns,
+	cellSize,
+	language,
+	selectedUuids,
+	safeActiveIndex,
+	registerRef,
+	onTileClick,
+	onItemAction,
+	rectStore,
+	virtualizerRef
+}: PhotoGridRowsProps) {
+	// Changing with the timeline is what makes the virtualizer re-read row sizes (it re-lays rows only
+	// when its key function changes); stable otherwise, so a scroll frame re-lays nothing.
+	const getRowKey = useCallback((index: number) => timeline.rows[index]?.key ?? index, [timeline])
+
+	// Sizes come from the timeline, never from measuring.
+	const virtualizer = useVirtualizer({
+		count: timeline.rows.length,
+		getScrollElement: () => scrollElement,
+		estimateSize: index => {
+			const row = timeline.rows[index]
+
+			return row === undefined ? cellSize : timelineRowSize(timeline, row)
+		},
+		gap: GRID_GAP,
+		overscan: GRID_OVERSCAN,
+		getItemKey: getRowKey
+	})
+
+	useLayoutEffect(() => {
+		virtualizerRef.current = virtualizer
+
+		return () => {
+			virtualizerRef.current = null
+		}
+	}, [virtualizer, virtualizerRef])
+
+	return (
+		<div style={{ position: "relative", width: "100%", height: virtualizer.getTotalSize() }}>
+			{/* The FIRST child of the sized wrapper so it shares the tiles' own content-space origin. */}
+			<MarqueeRect store={rectStore} />
+			{virtualizer.getVirtualItems().map(virtualRow => {
+				const row = timeline.rows[virtualRow.index]
+
+				if (row === undefined) {
+					return null
+				}
+
+				const rowStyle = {
+					position: "absolute",
+					top: 0,
+					left: 0,
+					width: "100%",
+					height: virtualRow.size,
+					transform: `translateY(${String(virtualRow.start)}px)`
+				} as const
+
+				if (row.kind === "header") {
+					// Hidden from the listbox's own semantics, which only admit options; each tile still
+					// names itself.
+					return (
+						<div
+							key={virtualRow.key}
+							aria-hidden="true"
+							className="flex items-end px-4 pb-2 text-sm font-medium"
+							style={rowStyle}
+						>
+							{formatTimelineMonth(language, row.year, row.month)}
+						</div>
+					)
+				}
+
+				return (
+					<div
+						key={virtualRow.key}
+						style={{
+							...rowStyle,
+							display: "grid",
+							gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`,
+							gap: GRID_GAP
+						}}
+					>
+						{items.slice(row.start, row.end).map((item, column) => {
+							const itemIndex = row.start + column
+
+							return (
+								<PhotoTile
+									key={item.data.uuid}
+									rootUuid={rootUuid}
+									item={item}
+									index={itemIndex}
+									total={items.length}
+									selected={selectedUuids.has(item.data.uuid)}
+									active={itemIndex === safeActiveIndex}
+									registerRef={registerRef}
+									onTileClick={onTileClick}
+									onItemAction={onItemAction}
+								/>
+							)
+						})}
+					</div>
+				)
+			})}
 		</div>
 	)
 }

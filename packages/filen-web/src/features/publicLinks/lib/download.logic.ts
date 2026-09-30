@@ -90,9 +90,9 @@ export function createCollectingSink(cap: bigint = PUBLIC_BUFFERED_DOWNLOAD_MAX_
 				throw error
 			}
 
-			// Copy into a fresh buffer: a transferred/pooled chunk's backing ArrayBuffer may be reused
-			// after write() returns, so retaining the view directly could corrupt the assembled Blob.
-			chunks.push(chunk.slice())
+			// Retained as-is: chunks arrive structured-cloned from the worker's transferred stream, so each
+			// is an exact-size buffer nothing else references or reuses.
+			chunks.push(chunk)
 		},
 		close() {
 			resolve(new Blob(chunks as BlobPart[]))

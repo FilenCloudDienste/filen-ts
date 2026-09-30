@@ -68,6 +68,7 @@ import init, {
 import { InFlight, run, runEffect, runTimeout } from "@filen/shared"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
+import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 import {
 	cacheDirs,
 	cacheSharedDirContext,
@@ -87,6 +88,8 @@ import {
 	type SharedPathInFlight
 } from "@/features/drive/lib/sharedPath"
 import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
+import { narrowItem } from "@/features/drive/lib/item"
+import { isPhotoItem } from "@/features/photos/lib/predicate"
 import { FLAT_LISTING_KINDS, type FlatListingKind } from "@/features/drive/lib/flatListing"
 import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY } from "@/features/drive/lib/thumbnails.logic"
 import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
@@ -176,6 +179,31 @@ async function withTransferControls<T>(transferId: string, fn: (managedFuture: M
 	} finally {
 		transferControls.delete(transferId)
 		controls.pause.free()
+	}
+}
+
+// The SDK reports progress every 64 KiB and each call is a round trip to the page, so it is throttled
+// here. finish() posts the last value before the op returns; calls after it (zip progress can land
+// after the op resolves) go straight through.
+function throttledProgress<Args extends unknown[]>(
+	target: (...args: Args) => void
+): { progress: (...args: Args) => void; finish: () => void } {
+	const throttled = throttle(target, PROGRESS_THROTTLE_MS)
+	let done = false
+
+	return {
+		progress: (...args) => {
+			if (done) {
+				target(...args)
+				return
+			}
+
+			throttled(...args)
+		},
+		finish: () => {
+			done = true
+			throttled.flush()
+		}
 	}
 }
 
@@ -280,7 +308,13 @@ function armThumbSweep(): void {
 }
 
 // One range of a file's decrypted bytes, written straight into a buffer of the known size.
-async function readFileRange(c: Client, file: AnyFile, start: number, end: number, signal: AbortSignal): Promise<Uint8Array> {
+async function readFileRange(
+	c: Pick<Client, "downloadFileToWriter">,
+	file: AnyFile,
+	start: number,
+	end: number,
+	signal: AbortSignal
+): Promise<Uint8Array> {
 	const out = new Uint8Array(end - start)
 	let offset = 0
 	const writer = new WritableStream<Uint8Array>({
@@ -423,18 +457,19 @@ async function withLinkedUnauth<T>(fn: (unauth: UnauthClient) => Promise<T>): Pr
 	return r.data
 }
 
+// HEADs run in parallel; the verdict is still the first failure in declaration order.
 async function preflightArtifacts(): Promise<string | null> {
-	for (const a of ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]) {
-		try {
-			const res = await fetch(new URL(a, self.location.href), { method: "HEAD" })
-			if (!res.ok) {
-				return `${a}: HTTP ${String(res.status)}`
+	const verdicts = await Promise.all(
+		["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"].map(async a => {
+			try {
+				const res = await fetch(new URL(a, self.location.href), { method: "HEAD" })
+				return res.ok ? null : `${a}: HTTP ${String(res.status)}`
+			} catch (e) {
+				return `${a}: ${toErrorDTO(e).label}`
 			}
-		} catch (e) {
-			return `${a}: ${toErrorDTO(e).label}`
-		}
-	}
-	return null // snippets/** has hashed dirs — covered by the pool timeout below
+		})
+	)
+	return verdicts.find(v => v !== null) ?? null // snippets/** has hashed dirs — covered by the pool timeout below
 }
 
 // Named (not inlined) so queries/drive.ts's target-mapping helper can import the exact union
@@ -457,12 +492,14 @@ export interface ItemInfoResult {
 // NonRootDirTagged union (the same shape a shared/linked walk returns through this call), so this
 // narrows defensively rather than trusting that by construction. The narrowed arm is structurally a
 // `Dir` (the `type` tag is additive), assignable straight through to NormalDirsAndFiles.
+// Only photo files are returned (every dir is kept and cached for folder paths and isOutsideRoot), so
+// non-photo files of a whole-drive walk are never structured-cloned to the main thread.
 function narrowOwnedWalk({ dirs, files }: { dirs: NonRootDirTagged[]; files: NormalDirsAndFiles["files"] }): NormalDirsAndFiles {
 	const normalDirs = dirs.filter((d): d is Extract<NonRootDirTagged, { type: "normal" }> => d.type === "normal")
 
 	cacheDirs(normalDirs)
 
-	return { dirs: normalDirs, files }
+	return { dirs: normalDirs, files: files.filter(file => isPhotoItem(narrowItem(file))) }
 }
 
 // Cache-first parent resolve shared by createDirectory/moveDirectory/moveFile: `null` maps to
@@ -598,11 +635,14 @@ function asThumbnailResult(result: MakeThumbnailInMemoryResult): SdkThumbnailRes
 
 const api = {
 	async boot({ threads }: { threads: number }): Promise<BootResult> {
+		// The wasm download overlaps the preflight; the preflight verdict still wins over an init failure.
+		const initializing = init({ module_or_path: new URL("sdk-rs_bg.wasm", self.location.href) }) // same base as the runtime spawn — no double download
+		void initializing.catch(() => undefined) // a rejection discarded by a failed preflight is not unhandled
 		const missing = await preflightArtifacts()
 		if (missing !== null) {
 			return { ok: false, reason: "artifacts", detail: missing }
 		}
-		await init({ module_or_path: new URL("sdk-rs_bg.wasm", self.location.href) }) // same base as the runtime spawn — no double download
+		await initializing
 		if (!self.crossOriginIsolated) {
 			return { ok: false, reason: "coi", detail: "crossOriginIsolated=false" }
 		}
@@ -805,6 +845,7 @@ const api = {
 	// as listDirectory's own no-signal note), never a worker-side cancel. `dir` is passed as the plain
 	// resolved `Dir` (AnyDirWithContext's owned-arm member, AnyNormalDir, is `Dir | Root` — a bare
 	// union, not a tagged wrapper — so no context wrapper is built here, unlike a shared/linked walk).
+	// Returns every dir of the root but only its photo files (narrowOwnedWalk).
 	async listPhotosRecursive(rootUuid: string): Promise<NormalDirsAndFiles> {
 		const c = requireClient()
 		const driveRoot = c.root()
@@ -872,18 +913,21 @@ const api = {
 
 		return withTransferControls(transferId, async managedFuture => {
 			const parent = await resolveNormalDirParent(c, parentUuid)
+			const { progress, finish } = throttledProgress(onProgress)
 
-			return await c.uploadFileFromReader({
-				parent,
-				name: file.name,
-				reader: file.stream(),
-				knownSize: file.size,
-				...(file.type ? { mime: file.type } : {}),
-				progress: bytes => {
-					onProgress(bytes)
-				},
-				managedFuture
-			})
+			try {
+				return await c.uploadFileFromReader({
+					parent,
+					name: file.name,
+					reader: file.stream(),
+					knownSize: file.size,
+					...(file.type ? { mime: file.type } : {}),
+					progress,
+					managedFuture
+				})
+			} finally {
+				finish()
+			}
 		})
 	},
 	// Whole-buffer save for the editable text/code preview — the non-streaming sibling of uploadFile
@@ -924,14 +968,13 @@ const api = {
 		const c = requireClient()
 
 		await withTransferControls(transferId, async managedFuture => {
-			await c.downloadFileToWriter({
-				file,
-				writer,
-				progress: bytes => {
-					onProgress(bytes)
-				},
-				managedFuture
-			})
+			const { progress, finish } = throttledProgress(onProgress)
+
+			try {
+				await c.downloadFileToWriter({ file, writer, progress, managedFuture })
+			} finally {
+				finish()
+			}
 		})
 	},
 	// A directory/multi-select zip: the SDK does its own recursion + zip framing in this ONE call, so
@@ -949,14 +992,13 @@ const api = {
 		const c = requireClient()
 
 		await withTransferControls(transferId, async managedFuture => {
-			await c.downloadItemsToZip(
-				items,
-				writer,
-				(bytesWritten, totalBytes, itemsProcessed, totalItems) => {
-					onProgress(bytesWritten, totalBytes, itemsProcessed, totalItems)
-				},
-				managedFuture
-			)
+			const { progress, finish } = throttledProgress(onProgress)
+
+			try {
+				await c.downloadItemsToZip(items, writer, progress, managedFuture)
+			} finally {
+				finish()
+			}
 		})
 	},
 	// ── Transfer control ─────────────────────────────────────────────────────
@@ -1016,9 +1058,9 @@ const api = {
 	},
 	// ── Preview ──────────────────────────────────────────────────────────────
 	// Whole-buffer fetch for the preview overlay (image/pdf/docx/text/code/markdown — never the
-	// streamed media path). No writer/progress plumbing, unlike downloadFileToWriter: downloadFile
-	// hands back the full decrypted Uint8Array in one shot, which crosses back to the caller via
-	// Comlink.transfer (never structured-cloned). Previews are ephemeral reads, not transfers — no
+	// streamed media path). Streamed through readFileRange into a JS buffer rather than downloadFile,
+	// whose whole-file Vec would permanently grow the SDK's shared wasm heap (capped at 1 GiB) by the
+	// file size; the buffer crosses back to the caller via Comlink.transfer (never structured-cloned). Previews are ephemeral reads, not transfers — no
 	// transfers-store row — so this gets its own previewAborts registry rather than reusing
 	// transferControls (no pause concept for a one-shot buffered fetch either).
 	async downloadFileBytes(file: AnyFile, previewToken: string): Promise<Uint8Array> {
@@ -1026,7 +1068,7 @@ const api = {
 		const controller = new AbortController()
 		previewAborts.set(previewToken, controller)
 		try {
-			const bytes = await c.downloadFile(file, { abortSignal: controller.signal })
+			const bytes = await readFileRange(c, file, 0, Number(file.size), controller.signal)
 			return Comlink.transfer(bytes, [bytes.buffer])
 		} finally {
 			previewAborts.delete(previewToken)
@@ -1239,7 +1281,7 @@ const api = {
 			const controller = new AbortController()
 			previewAborts.set(previewToken, controller)
 			try {
-				const bytes = await unauth.downloadFile(file, { abortSignal: controller.signal })
+				const bytes = await readFileRange(unauth, file, 0, Number(file.size), controller.signal)
 				return Comlink.transfer(bytes, [bytes.buffer])
 			} finally {
 				previewAborts.delete(previewToken)
@@ -1261,14 +1303,13 @@ const api = {
 	): Promise<void> {
 		await withLinkedUnauth(async unauth => {
 			await withTransferControls(transferId, async managedFuture => {
-				await unauth.downloadFileToWriter({
-					file,
-					writer,
-					progress: bytes => {
-						onProgress(bytes)
-					},
-					managedFuture
-				})
+				const { progress, finish } = throttledProgress(onProgress)
+
+				try {
+					await unauth.downloadFileToWriter({ file, writer, progress, managedFuture })
+				} finally {
+					finish()
+				}
 			})
 		})
 	},
@@ -1283,14 +1324,13 @@ const api = {
 	): Promise<void> {
 		await withLinkedUnauth(async unauth => {
 			await withTransferControls(transferId, async managedFuture => {
-				await unauth.downloadLinkedDirToZip(
-					dir,
-					writer,
-					(bytesWritten, totalBytes, itemsProcessed, totalItems) => {
-						onProgress(bytesWritten, totalBytes, itemsProcessed, totalItems)
-					},
-					managedFuture
-				)
+				const { progress, finish } = throttledProgress(onProgress)
+
+				try {
+					await unauth.downloadLinkedDirToZip(dir, writer, progress, managedFuture)
+				} finally {
+					finish()
+				}
 			})
 		})
 	},

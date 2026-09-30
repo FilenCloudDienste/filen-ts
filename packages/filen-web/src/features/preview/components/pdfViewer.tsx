@@ -27,7 +27,6 @@ import {
 	PDF_PAGE_EVICT_MARGIN_PX,
 	PDF_MIN_SCALE,
 	PDF_MAX_SCALE,
-	type PageVisibility,
 	type PdfLinkAnnotation
 } from "@/features/preview/components/pdfViewer.logic"
 import { useLatestRef } from "@/lib/useLatestRef"
@@ -529,21 +528,12 @@ function PdfPage({
 function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 	const { t } = useTranslation("preview")
 	const numPages = doc.numPages
-	const pageNumbers = Array.from({ length: numPages }, (_, i) => i + 1)
 
 	const containerRef = useRef<HTMLDivElement | null>(null)
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 	const ratiosRef = useRef<Map<number, number>>(new Map())
 	const [currentPage, setCurrentPage] = useState(1)
 	const [scale, setScale] = useState(BASE_SCALE)
-
-	function handleIntersect(pageNumber: number, ratio: number): void {
-		ratiosRef.current.set(pageNumber, ratio)
-
-		const entries: PageVisibility[] = Array.from(ratiosRef.current, ([page, r]) => ({ page, ratio: r }))
-
-		setCurrentPage(prev => mostVisiblePage(entries, prev))
-	}
 
 	function goToPage(target: number): void {
 		const clamped = clampListboxIndex(target - 1, numPages) + 1
@@ -584,6 +574,18 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 			container.removeEventListener("wheel", handleWheel)
 		}
 	}, [])
+
+	// Declared after the hooks so the compiler memoizes it once, which keeps the PdfPages element (and all
+	// N pages) out of the re-render every currentPage change triggers.
+	function handleIntersect(pageNumber: number, ratio: number): void {
+		ratiosRef.current.set(pageNumber, ratio)
+
+		const visible = mostVisiblePage(ratiosRef.current)
+
+		if (visible !== null) {
+			setCurrentPage(visible)
+		}
+	}
 
 	return (
 		<div className="flex size-full flex-col">
@@ -647,27 +649,59 @@ function PdfPageList({ doc, alt }: { doc: PDFDocumentProxy; alt: string }) {
 				ref={containerRef}
 				className="min-h-0 flex-1 overflow-y-auto"
 			>
-				<div className="flex flex-col items-center gap-4 py-4">
-					{pageNumbers.map(pageNumber => (
-						<PdfPage
-							key={pageNumber}
-							doc={doc}
-							pageNumber={pageNumber}
-							label={`${alt} — ${t("previewPdfPageIndicator", { current: pageNumber, total: numPages })}`}
-							root={containerRef}
-							scale={scale}
-							onIntersect={handleIntersect}
-							wrapperRef={el => {
-								if (el) {
-									pageRefs.current.set(pageNumber, el)
-								} else {
-									pageRefs.current.delete(pageNumber)
-								}
-							}}
-						/>
-					))}
-				</div>
+				<PdfPages
+					doc={doc}
+					alt={alt}
+					root={containerRef}
+					scale={scale}
+					onIntersect={handleIntersect}
+					pageRefs={pageRefs}
+				/>
 			</div>
+		</div>
+	)
+}
+
+// The page column, split out of PdfPageList so its toolbar state (currentPage) never re-renders the N pages.
+function PdfPages({
+	doc,
+	alt,
+	root,
+	scale,
+	onIntersect,
+	pageRefs
+}: {
+	doc: PDFDocumentProxy
+	alt: string
+	root: RefObject<HTMLDivElement | null>
+	scale: number
+	onIntersect: (pageNumber: number, ratio: number) => void
+	pageRefs: RefObject<Map<number, HTMLDivElement>>
+}) {
+	const { t } = useTranslation("preview")
+	const numPages = doc.numPages
+	const pageNumbers = Array.from({ length: numPages }, (_, i) => i + 1)
+
+	return (
+		<div className="flex flex-col items-center gap-4 py-4">
+			{pageNumbers.map(pageNumber => (
+				<PdfPage
+					key={pageNumber}
+					doc={doc}
+					pageNumber={pageNumber}
+					label={`${alt} — ${t("previewPdfPageIndicator", { current: pageNumber, total: numPages })}`}
+					root={root}
+					scale={scale}
+					onIntersect={onIntersect}
+					wrapperRef={el => {
+						if (el) {
+							pageRefs.current.set(pageNumber, el)
+						} else {
+							pageRefs.current.delete(pageNumber)
+						}
+					}}
+				/>
+			))}
 		</div>
 	)
 }

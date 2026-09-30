@@ -4,7 +4,7 @@ import type { StorageApi } from "@/workers/db.worker"
 // The kv ops against a real sqlite (the package's node build, in memory): only the OPFS pool install is
 // swapped out, so the SQL the worker runs is exactly what ships.
 
-const mocks = vi.hoisted(() => ({ expose: vi.fn() }))
+const mocks = vi.hoisted(() => ({ expose: vi.fn(), db: null as { selectValue: (sql: string) => unknown } | null }))
 
 vi.mock("comlink", () => ({ expose: mocks.expose }))
 vi.mock("@sqlite.org/sqlite-wasm", async importOriginal => {
@@ -17,6 +17,7 @@ vi.mock("@sqlite.org/sqlite-wasm", async importOriginal => {
 			class MemoryDb extends sqlite3.oo1.DB {
 				public constructor() {
 					super(":memory:")
+					mocks.db = this
 				}
 			}
 
@@ -38,6 +39,12 @@ beforeAll(async () => {
 
 beforeEach(async () => {
 	await api.kvDeletePrefix("")
+})
+
+describe("db.worker open", () => {
+	it("bounds the journal the connection keeps between writes", () => {
+		expect(mocks.db?.selectValue("PRAGMA journal_size_limit")).toBe(1048576)
+	})
 })
 
 describe("db.worker bulk kv ops", () => {

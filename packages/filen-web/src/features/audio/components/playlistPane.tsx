@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type DragEvent } from "react"
+import { useCallback, useId, useLayoutEffect, useRef, useState, type DragEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -230,13 +230,16 @@ function TrackTableBody({
 	// Where the first row sits within the scrolled content (hero plus table head), so the virtualizer
 	// measures rows from there. Re-measured when the hero reflows (a wrapping name, a narrow window).
 	const [rowsOffset, setRowsOffset] = useState(0)
+	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
+	// re-lays every row when its key function changes, so it must change with the tracks and nothing else.
+	const getItemKey = useCallback((index: number) => playlist.files[index]?.uuid ?? index, [playlist.files])
 	const virtualizer = useVirtualizer({
 		count: playlist.files.length,
 		getScrollElement: () => scrollElement,
 		estimateSize: () => TRACK_ROW_HEIGHT,
 		overscan: TRACK_ROW_OVERSCAN,
 		scrollMargin: rowsOffset,
-		getItemKey: index => playlist.files[index]?.uuid ?? index,
+		getItemKey,
 		// Rows to render before the scroller has been measured (first paint, and jsdom, which never lays out).
 		initialRect: { width: 0, height: INITIAL_VIEWPORT_HEIGHT }
 	})

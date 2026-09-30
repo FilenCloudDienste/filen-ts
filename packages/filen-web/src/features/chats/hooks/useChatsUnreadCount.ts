@@ -19,6 +19,13 @@ export interface GlobalUnread {
 	hasMissingMessages: boolean
 }
 
+// Per-chat counts keyed by message-array identity: cached arrays are immutable (every write builds a new
+// one), so an event recounts only the chat whose array changed.
+const unreadByMessages = new WeakMap<
+	readonly ChatMessage[],
+	{ chat: Chat; userId: bigint | undefined; blocked: BlockedUsers; count: number }
+>()
+
 // Pure global tally — sums each chat's unread over its resident message cache (read imperatively via
 // `getMessages`, NOT a hook, so summing over N chats costs zero extra query observers). A chat with no
 // cached messages is skipped and flags `hasMissingMessages` (not counted as 0), so the caller knows to
@@ -43,7 +50,19 @@ export function sumUnread(
 			continue
 		}
 
-		count += countUnreadMessages(messages, chat, userId, blocked)
+		const cached = unreadByMessages.get(messages)
+
+		if (cached?.chat === chat && cached.userId === userId && cached.blocked === blocked) {
+			count += cached.count
+
+			continue
+		}
+
+		const chatCount = countUnreadMessages(messages, chat, userId, blocked)
+
+		unreadByMessages.set(messages, { chat, userId, blocked, count: chatCount })
+
+		count += chatCount
 	}
 
 	return { count, hasMissingMessages }

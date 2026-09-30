@@ -33,6 +33,17 @@ function persist(uuid: string, record: TrackTagRecord): void {
 	void kvSetJsonQuiet(trackTagsKey(uuid), record, "audio", "track tags")
 }
 
+// byUuid (up to TRACK_TAGS_MAX_RECORDS keys) is written in place to skip an O(n) copy per record: every
+// reader selects per key, and the new partial still yields a new top-level state that notifies.
+// Hydration and reset keep installing fresh objects.
+function writeRecord(uuid: string, record: TrackTagRecord): void {
+	useTrackTagsStore.setState(state => {
+		state.byUuid[uuid] = record
+
+		return { byUuid: state.byUuid }
+	})
+}
+
 export function hydrateTrackTags(): Promise<void> {
 	if (hydration !== null) {
 		return hydration
@@ -83,7 +94,7 @@ export function putTrackTags(uuid: string, record: TrackTagRecord): void {
 	const merged = record.durationSec === null && elementDuration !== undefined ? { ...record, durationSec: elementDuration } : record
 
 	elementDurations.delete(uuid)
-	useTrackTagsStore.setState(state => ({ byUuid: { ...state.byUuid, [uuid]: merged } }))
+	writeRecord(uuid, merged)
 	persist(uuid, merged)
 }
 
@@ -93,7 +104,7 @@ export async function adoptPersistedTrackTags(uuid: string): Promise<TrackTagRec
 	const record = await kvGetJson(trackTagsKey(uuid), trackTagRecordSchema).catch(() => null)
 
 	if (record !== null && getTrackTags(uuid) === undefined) {
-		useTrackTagsStore.setState(state => ({ byUuid: { ...state.byUuid, [uuid]: record } }))
+		writeRecord(uuid, record)
 	}
 
 	return record
@@ -121,7 +132,7 @@ export function backfillTrackDuration(uuid: string, durationSec: number): void {
 
 	const updated = { ...record, durationSec: seconds }
 
-	useTrackTagsStore.setState(state => ({ byUuid: { ...state.byUuid, [uuid]: updated } }))
+	writeRecord(uuid, updated)
 	persist(uuid, updated)
 }
 

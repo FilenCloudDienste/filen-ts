@@ -23,7 +23,7 @@ import {
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
 import { hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
-import { type DriveSortBy } from "@/features/drive/lib/sort"
+import { DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { previewableSiblings } from "@/features/drive/lib/preview.logic"
@@ -95,8 +95,8 @@ const GRID_LISTBOX_STYLE = { padding: GRID_INSET }
 
 const EMPTY_LISTING: DriveItem[] = []
 
-// Stable identity so a disabled/empty directorySizes read never re-triggers row renders — module scope,
-// not recreated per render (a fresh `new Map()` every render would defeat DriveRow's memoization).
+// Stable identity so a disabled/empty directorySizes read never re-derives the display items — module
+// scope, not recreated per render (a fresh `new Map()` every render would bust that useMemo).
 const EMPTY_DIRECTORY_SIZES: ReadonlyMap<string, number> = new Map()
 
 export interface DirectoryListingProps {
@@ -106,6 +106,72 @@ export interface DirectoryListingProps {
 	splat: string
 }
 
+interface ListingOpenOptions {
+	items: DriveItem[]
+	variant: DriveVariant
+	splat: string
+	searchActive: boolean
+	clearSearch: () => void
+	openPreview: (items: DriveItem[], index: number) => void
+}
+
+// Outside DirectoryListing so the React Compiler memoizes the handler on its inputs ("use no memo" is
+// per function): a fresh one each listing render would bust every mounted row's cached menu subtree.
+function useListingOpen({ items, variant, splat, searchActive, clearSearch, openPreview }: ListingOpenOptions): (index: number) => void {
+	const navigate = useNavigate()
+
+	return function handleOpen(index: number) {
+		const item = items[index]
+
+		// The same gate the item menu's Open is offered by: a file without a preview, an undecryptable or
+		// trashed directory and a trashed audio file all open to nothing.
+		if (!item || !canOpenItem(item, variant)) {
+			return
+		}
+
+		// A file opens the preview overlay; a directory falls through to the navigation path below.
+		if (!isDirectoryItem(item)) {
+			// Drive-hosted audio hands off to the persistent player instead of the preview overlay: opening
+			// one audio file enqueues the folder's audio siblings (in this listing's current sort order,
+			// positioned at the opened track) and starts playback. A trashed/undecryptable track stays
+			// non-playable, like mobile — canOpenItem already turned those away, and deriveAudioHandoff
+			// agrees (audio never opens the overlay, whose pager already excludes it via previewableSiblings).
+			if (isAudioItem(item)) {
+				const handoff = deriveAudioHandoff(items, item.data.uuid, variant === "trash")
+
+				if (handoff) {
+					void audioEngine.enqueueAndPlay(handoff.tracks, handoff.startIndex)
+				}
+
+				return
+			}
+
+			const siblings = previewableSiblings(items)
+			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
+
+			openPreview(siblings, siblingIndex === -1 ? 0 : siblingIndex)
+
+			return
+		}
+
+		// A search hit is found via a subtree search rooted at the CURRENT directory, but the hit itself
+		// can be anywhere under it — searchHitNavigationTarget rebuilds a fresh, root-relative target
+		// from the hit's own uuid (never appended to `splat`); the in-place open below stays unchanged
+		// for the normal (non-search) listing.
+		const target = searchActive ? searchHitNavigationTarget(item, variant) : resolveDriveNavigationTarget(item, variant, splat)
+
+		if (target) {
+			void navigate(target)
+
+			// Old-web parity: opening a directory hit always leaves search (the destination is a normal
+			// listing, not another search).
+			if (searchActive) {
+				clearSearch()
+			}
+		}
+	}
+}
+
 // Every drive route (drive.$.tsx, recents/favorites/trash.tsx) renders this one container with its
 // own {variant,splat} — the single place the placeholder body is swapped for the real virtualized
 // list, so no route needs to change again when it does. The current directory's own uuid is always
@@ -113,7 +179,7 @@ export interface DirectoryListingProps {
 export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// Kept out of the React Compiler: the TanStack virtualizers reached through useDriveVirtualizer return
 	// one mutable instance, so row JSX memoized on it would go stale on scroll. The listing re-renders as it
-	// scrolls and on every cursor move and marquee frame, so its derivations below are memoized by hand.
+	// scrolls and on every cursor move and marquee selection change, so its derivations below are memoized by hand.
 	"use no memo"
 
 	const { t } = useTranslation(["drive", "common"])
@@ -207,6 +273,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const directorySizes =
 		useDriveDirectorySizes({ items: sourceItems, enabled: effectiveViewMode === "list", prefetch: !search.active }) ??
 		EMPTY_DIRECTORY_SIZES
+	// Only a size sort reads the map, so every other sort keeps a stable input and does not re-sort the
+	// whole listing each time a streamed size lands. Rows still read the live map for their Size column.
+	const sortDirectorySizes = DRIVE_SORT_PARTS[effectiveSort].field === "size" ? directorySizes : EMPTY_DIRECTORY_SIZES
 	// Order is resolved BEFORE anything is hidden (see resolveListingDisplayItems) — everything
 	// downstream keeps reading `sortedItems` and now sees the post-hide set.
 	const display = useMemo(
@@ -214,11 +283,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			resolveListingDisplayItems({
 				items: sourceItems,
 				sortBy: effectiveSort,
-				directorySizes,
+				directorySizes: sortDirectorySizes,
 				hide: hideHidden,
 				...(search.active ? { search: { total: search.total, parentPaths: search.parentPaths } } : {})
 			}),
-		[sourceItems, effectiveSort, directorySizes, hideHidden, search.active, search.total, search.parentPaths]
+		[sourceItems, effectiveSort, sortDirectorySizes, hideHidden, search.active, search.total, search.parentPaths]
 	)
 	const sortedItems = display.items
 	const hiddenCount = display.hiddenCount
@@ -259,56 +328,14 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } =
 		useDriveVirtualizer(sortedItems, effectiveViewMode)
 
-	function handleOpen(index: number) {
-		const item = sortedItems[index]
-
-		// The same gate the item menu's Open is offered by: a file without a preview, an undecryptable or
-		// trashed directory and a trashed audio file all open to nothing.
-		if (!item || !canOpenItem(item, variant)) {
-			return
-		}
-
-		// A file opens the preview overlay; a directory falls through to the navigation path below.
-		if (!isDirectoryItem(item)) {
-			// Drive-hosted audio hands off to the persistent player instead of the preview overlay: opening
-			// one audio file enqueues the folder's audio siblings (in this listing's current sort order,
-			// positioned at the opened track) and starts playback. A trashed/undecryptable track stays
-			// non-playable, like mobile — canOpenItem already turned those away, and deriveAudioHandoff
-			// agrees (audio never opens the overlay, whose pager already excludes it via previewableSiblings).
-			if (isAudioItem(item)) {
-				const handoff = deriveAudioHandoff(sortedItems, item.data.uuid, variant === "trash")
-
-				if (handoff) {
-					void audioEngine.enqueueAndPlay(handoff.tracks, handoff.startIndex)
-				}
-
-				return
-			}
-
-			const siblings = previewableSiblings(sortedItems)
-			const siblingIndex = siblings.findIndex(sibling => sibling.data.uuid === item.data.uuid)
-
-			openPreview(siblings, siblingIndex === -1 ? 0 : siblingIndex)
-
-			return
-		}
-
-		// A search hit is found via a subtree search rooted at the CURRENT directory, but the hit itself
-		// can be anywhere under it — searchHitNavigationTarget rebuilds a fresh, root-relative target
-		// from the hit's own uuid (never appended to `splat`); the in-place open below stays unchanged
-		// for the normal (non-search) listing.
-		const target = search.active ? searchHitNavigationTarget(item, variant) : resolveDriveNavigationTarget(item, variant, splat)
-
-		if (target) {
-			void navigate(target)
-
-			// Old-web parity: opening a directory hit always leaves search (the destination is a normal
-			// listing, not another search).
-			if (search.active) {
-				search.clear()
-			}
-		}
-	}
+	const handleOpen = useListingOpen({
+		items: sortedItems,
+		variant,
+		splat,
+		searchActive: search.active,
+		clearSearch: search.clear,
+		openPreview
+	})
 
 	const { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor } = useDriveListboxNav({
 		items: sortedItems,
@@ -696,7 +723,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							role="presentation"
 							style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
 						>
-							<MarqueeRect rect={marquee.rect} />
+							<MarqueeRect store={marquee.rectStore} />
 							{effectiveViewMode === "list"
 								? listVirtualizer.getVirtualItems().map(virtualRow => {
 										const item = sortedItems[virtualRow.index]
@@ -719,15 +746,9 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 												active={virtualRow.index === safeActiveIndex}
 												variant={variant}
 												splat={splat}
-												style={{
-													position: "absolute",
-													top: 0,
-													left: 0,
-													width: "100%",
-													transform: `translateY(${String(virtualRow.start)}px)`
-												}}
+												start={virtualRow.start}
 												{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
-												directorySizes={directorySizes}
+												directorySize={directorySizes.get(item.data.uuid)}
 												selectedItems={reconciledSelectedItems}
 												onPointerSelect={handlePointerSelect}
 												onCursorMove={setCursor}

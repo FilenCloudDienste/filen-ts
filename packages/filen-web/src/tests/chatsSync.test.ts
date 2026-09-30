@@ -318,7 +318,7 @@ describe("commit — the conversation row", () => {
 })
 
 describe("commit boundary — the durable dequeue lands BEFORE the best-effort housekeeping", () => {
-	it("persists the drained queue before markChatRead is even called, per committed message", async () => {
+	it("persists every committed message's dequeue before markChatRead, which fires once per chat per pass", async () => {
 		// Both kv writers count as "flush": the first commit leaves one message queued (kvSetJson), the
 		// second drains the chat (kvDelete).
 		const order: string[] = []
@@ -340,6 +340,9 @@ describe("commit boundary — the durable dequeue lands BEFORE the best-effort h
 
 			return Promise.resolve()
 		})
+		sendChatMessage.mockImplementation((chat: Chat, message: string) =>
+			Promise.resolve({ ...chat, lastMessage: makeConfirmed(chat.uuid, `srv-${message}`) })
+		)
 
 		seed("chat-a-a-a", [opt("chat-a-a-a", "inf-1-1-1", 1n, "m1"), opt("chat-a-a-a", "inf-2-2-2", 2n, "m2")])
 
@@ -347,9 +350,12 @@ describe("commit boundary — the durable dequeue lands BEFORE the best-effort h
 		await tick()
 		await tick()
 
-		// The trailing flush is the end-of-pass one; what matters is that neither markChatRead is reached
-		// before its own message is off disk.
-		expect(order).toEqual(["flush", "markChatRead", "flush", "markChatRead", "flush"])
+		// The trailing flush is the end-of-pass one; markChatRead is reached only after both messages are
+		// off disk, and once for the chat's last commit.
+		expect(order).toEqual(["flush", "flush", "markChatRead", "flush"])
+		expect(markChatRead).toHaveBeenCalledTimes(1)
+		// Stamped from the chat the pass's LAST commit returned.
+		expect(updateLastChatFocusTimesNow.mock.calls.map(([chats]) => chats.map(chat => chat.lastMessage?.uuid))).toEqual([["srv-m2"]])
 		expect(queue()["chat-a-a-a"]).toBeUndefined()
 		expect(kvStore.has("inflightChatMessages")).toBe(false)
 	})

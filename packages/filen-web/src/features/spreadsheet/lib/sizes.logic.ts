@@ -73,6 +73,19 @@ export function sheetWithSizes<T extends { colWidths: ReadonlyMap<number, number
 		: { ...sheet, rowHeights: withSizes(sheet.rowHeights, entries) }
 }
 
+// Where a row or column index lands once `count` of them are inserted or deleted at `at` (null: deleted).
+export function shiftIndex(index: number, kind: "insert" | "delete", at: number, count: number): number | null {
+	if (index < at) {
+		return index
+	}
+
+	if (kind === "insert") {
+		return index + count
+	}
+
+	return index < at + count ? null : index - count
+}
+
 export function shiftSizes(
 	sizes: ReadonlyMap<number, number>,
 	kind: "insert" | "delete",
@@ -83,14 +96,12 @@ export function shiftSizes(
 	const removed: [number, number][] = []
 
 	for (const [index, px] of sizes) {
-		if (index < at) {
-			next.set(index, px)
-		} else if (kind === "insert") {
-			next.set(index + count, px)
-		} else if (index < at + count) {
+		const moved = shiftIndex(index, kind, at, count)
+
+		if (moved === null) {
 			removed.push([index - at, px])
 		} else {
-			next.set(index - count, px)
+			next.set(moved, px)
 		}
 	}
 

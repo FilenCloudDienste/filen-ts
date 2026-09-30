@@ -6,7 +6,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query"
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient } from "@/queries/client"
-import { patchQuery, replaceOrAppend } from "@/queries/patch"
+import { cancelCached, invalidateCached, patchQuery, replaceOrAppend } from "@/queries/patch"
 
 const KEY = ["test", "list"] as const
 
@@ -110,6 +110,90 @@ describe("patchQuery", () => {
 
 		patchQuery<string[]>(KEY, prev => [...(prev ?? []), "b"])
 
+		expect(scan).not.toHaveBeenCalled()
+	})
+})
+
+// Both must do exactly what cancelQueries({ exact: true }) / invalidateQueries do for one key.
+describe("cancelCached", () => {
+	it("cancels a refetch in flight and reverts to the data it started from", async () => {
+		const read = Promise.withResolvers<string[]>()
+		queryClient.setQueryData(KEY, ["a"])
+		queryClient.query({ queryKey: KEY, queryFn: () => read.promise }).catch(() => undefined)
+
+		cancelCached(KEY)
+		read.resolve(["late"])
+		await settle()
+
+		expect(queryClient.getQueryState(KEY)?.fetchStatus).toBe("idle")
+		expect(queryClient.getQueryData(KEY)).toEqual(["a"])
+	})
+
+	it("is a no-op for a key with no query, and never scans the query cache", () => {
+		const scan = vi.spyOn(queryClient.getQueryCache(), "getAll")
+
+		cancelCached(KEY)
+
+		expect(queryClient.getQueryState(KEY)).toBeUndefined()
+		expect(scan).not.toHaveBeenCalled()
+	})
+})
+
+describe("invalidateCached", () => {
+	it("marks a mounted query stale and reads it at once, replacing a read in flight", async () => {
+		const stale = Promise.withResolvers<string[]>()
+		const read = vi.fn<() => Promise<string[]>>().mockReturnValueOnce(stale.promise).mockResolvedValue(["fresh"])
+		queryClient.setQueryData(KEY, ["a"])
+		const unmount = mount(read)
+		void queryClient.refetchQueries({ queryKey: KEY })
+		await settle()
+
+		invalidateCached(KEY)
+		stale.resolve(["stale"])
+		await settle()
+
+		expect(read).toHaveBeenCalledTimes(2)
+		expect(queryClient.getQueryData(KEY)).toEqual(["fresh"])
+		unmount()
+	})
+
+	it("only marks an unmounted query stale, for its next mount", async () => {
+		const read = vi.fn(() => Promise.resolve(["server"]))
+		queryClient.setQueryData(KEY, ["a"])
+
+		invalidateCached(KEY)
+		await settle()
+
+		expect(queryClient.getQueryState(KEY)?.isInvalidated).toBe(true)
+		expect(read).not.toHaveBeenCalled()
+
+		const unmount = mount(read)
+		await settle()
+
+		expect(read).toHaveBeenCalledTimes(1)
+		unmount()
+	})
+
+	it("never reads a mounted query that is disabled", async () => {
+		const read = vi.fn(() => Promise.resolve(["server"]))
+		queryClient.setQueryData(KEY, ["a"])
+		const observer = new QueryObserver(queryClient, { queryKey: KEY, queryFn: read, staleTime: Infinity, enabled: false })
+		const unmount = observer.subscribe(() => undefined)
+
+		invalidateCached(KEY)
+		await settle()
+
+		expect(queryClient.getQueryState(KEY)?.isInvalidated).toBe(true)
+		expect(read).not.toHaveBeenCalled()
+		unmount()
+	})
+
+	it("is a no-op for a key with no query, and never scans the query cache", () => {
+		const scan = vi.spyOn(queryClient.getQueryCache(), "getAll")
+
+		invalidateCached(KEY)
+
+		expect(queryClient.getQueryState(KEY)).toBeUndefined()
 		expect(scan).not.toHaveBeenCalled()
 	})
 })

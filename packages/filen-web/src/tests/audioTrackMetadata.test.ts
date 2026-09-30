@@ -226,6 +226,39 @@ describe("useTrackTagsStore", () => {
 
 		expect(useTrackTagsStore.getState()).toMatchObject({ byUuid: {}, hydrated: false })
 	})
+
+	it("notifies subscribers on every write with a new state and only the written record changed", () => {
+		putTrackTags("a", record({ title: "A" }))
+
+		const before = useTrackTagsStore.getState()
+		const recordA = before.byUuid["a"]
+		const seen: (string | null | undefined)[] = []
+		const unsubscribe = useTrackTagsStore.subscribe(state => {
+			seen.push(state.byUuid["b"]?.title)
+		})
+
+		putTrackTags("b", record({ title: "B" }))
+		backfillTrackDuration("b", 10)
+		unsubscribe()
+
+		const after = useTrackTagsStore.getState()
+
+		expect(seen).toEqual(["B", "B"])
+		expect(after).not.toBe(before)
+		expect(after.byUuid["a"]).toBe(recordA)
+		expect(after.byUuid["b"]).toEqual(record({ title: "B", durationSec: 10 }))
+	})
+
+	it("starts from an empty record map after a reset that followed writes", () => {
+		putTrackTags("a", record({ title: "A" }))
+
+		const written = useTrackTagsStore.getState().byUuid
+
+		resetTrackTags()
+
+		expect(useTrackTagsStore.getState().byUuid).toEqual({})
+		expect(useTrackTagsStore.getState().byUuid).not.toBe(written)
+	})
 })
 
 describe("TrackMetadataService", () => {

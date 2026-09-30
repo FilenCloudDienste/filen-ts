@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import { onlineManager } from "@tanstack/react-query"
-import { Semaphore, InFlight } from "@filen/shared"
+import { Semaphore } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { defaultObjectUrlFns, type ObjectUrlFns } from "@/lib/objectUrl"
@@ -114,9 +114,23 @@ onlineManager.subscribe(online => {
 		unavailable.clear()
 	}
 })
+// Who still wants a pending generation. A caller with an AbortSignal counts as interest until it aborts;
+// one without (and every seat) pins the entry. An unpinned generation nobody wants any more is dropped
+// when it reaches a generation slot instead of downloading and decoding for a cell that scrolled away.
+interface PendingClaim {
+	interest: number
+	pinned: boolean
+	abandoned: boolean
+}
+
+interface PendingEntry {
+	promise: Promise<string | null>
+	claim: PendingClaim
+}
+
 // uuid -> the in-flight generation attempt, so two concurrent callers for the same uuid share one
 // generation instead of each starting their own.
-const pending = new InFlight<string, string | null>()
+const pending = new Map<string, PendingEntry>()
 // uuid -> the live state of a SEEDED pending entry (seedThumbnail), for exactly as long as that entry
 // exists. `joined` is flipped by getThumbnailUrl the moment it hands the seat's promise to a caller;
 // the seat reads it to decide whether an unanswered production has anyone left to answer. An ordinary
@@ -124,6 +138,47 @@ const pending = new InFlight<string, string | null>()
 const seats = new Map<string, { joined: boolean }>()
 
 const semaphore = new Semaphore(CONCURRENT_GENERATIONS)
+
+// Registers run's promise as THE pending entry for uuid, removed once settled only while it is still
+// that entry, so a superseded promise never evicts a newer one.
+function startPending(uuid: string, pinned: boolean, run: (claim: PendingClaim) => Promise<string | null>): PendingEntry {
+	const claim: PendingClaim = { interest: 0, pinned, abandoned: false }
+	const entry: PendingEntry = { promise: run(claim), claim }
+	const settle = (): void => {
+		if (pending.get(uuid) === entry) {
+			pending.delete(uuid)
+		}
+	}
+
+	pending.set(uuid, entry)
+	void entry.promise.then(settle, settle)
+
+	return entry
+}
+
+// The abort listener closes over the claim itself, never a uuid lookup: a late abort must not touch a
+// newer generation for the same uuid.
+function registerInterest(claim: PendingClaim, signal: AbortSignal | undefined): void {
+	if (signal === undefined) {
+		claim.pinned = true
+
+		return
+	}
+
+	if (signal.aborted) {
+		return
+	}
+
+	claim.interest++
+
+	signal.addEventListener(
+		"abort",
+		() => {
+			claim.interest--
+		},
+		{ once: true }
+	)
+}
 
 function finalize(deps: ThumbnailServiceDeps, uuid: string, blob: Blob): string {
 	const url = deps.createObjectUrl(blob)
@@ -161,11 +216,14 @@ async function persistAndFinalize(deps: ThumbnailServiceDeps, uuid: string, byte
 // bytes — a thrown error, an empty buffer, or no generator — is LOGGED ONLY (never surfaced to a user:
 // thumbnail generation is silent by design) and counted against the blacklist; a SETTLED
 // "unavailable" verdict instead joins the session-only `unavailable` set above and costs no strike.
+// Work that lost every interested caller while queued is dropped on reaching its slot, as neither a
+// failure nor a verdict.
 async function generate(
 	deps: ThumbnailServiceDeps,
 	item: BaseFileItem,
 	category: Exclude<ThumbnailCategory, "none">,
-	uuid: string
+	uuid: string,
+	claim: PendingClaim
 ): Promise<string | null> {
 	// A read failure beyond the clean miss (readThumbnailBlob only maps NotFoundError to null — e.g. a
 	// quota/permission DOMException, or an eviction sweep racing this read) must degrade to the
@@ -191,6 +249,19 @@ async function generate(
 	}
 
 	await semaphore.acquire()
+
+	// Synchronous with the removal, so no caller can join the entry between the check and the null.
+	if (!claim.pinned && claim.interest <= 0) {
+		claim.abandoned = true
+
+		if (pending.get(uuid)?.claim === claim) {
+			pending.delete(uuid)
+		}
+
+		semaphore.release()
+
+		return null
+	}
 
 	try {
 		let bytes: Uint8Array | undefined
@@ -221,11 +292,22 @@ async function generate(
 	}
 }
 
+// The cached objectURL for a uuid, synchronously, so a mounting cell can render it on its first frame.
+// Touches LRU recency exactly as getThumbnailUrl's own cache hit does.
+export function peekThumbnailUrl(uuid: string): string | null {
+	return urls.get(uuid) ?? null
+}
+
 // The service's one read entry point. Routing order: no category -> null; a live objectURL -> reuse
 // it; blacklisted -> null without touching the cache/semaphore again; an in-flight generation for
 // this uuid -> join it; otherwise start a fresh generation. `deps` defaults to the
-// real worker/OPFS/Blob-URL wiring — pass a fake for tests.
-export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDeps = defaultThumbnailDeps): Promise<string | null> {
+// real worker/OPFS/Blob-URL wiring — pass a fake for tests. `signal` scopes this caller's interest in
+// a generation that has not started yet (see PendingClaim); without one the generation always runs.
+export async function getThumbnailUrl(
+	item: DriveItem,
+	deps: ThumbnailServiceDeps = defaultThumbnailDeps,
+	signal?: AbortSignal
+): Promise<string | null> {
 	const category = thumbnailCategory(item)
 	// The base projection, so a shared file reaches the generators as the same file shape an owned one
 	// does; its data still carries the sharing fields the SDK's AnyFile needs to read it as shared.
@@ -238,9 +320,9 @@ export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDep
 	}
 
 	const uuid = base.data.uuid
-	const cachedUrl = urls.get(uuid)
+	const cachedUrl = peekThumbnailUrl(uuid)
 
-	if (cachedUrl !== undefined) {
+	if (cachedUrl !== null) {
 		return cachedUrl
 	}
 
@@ -248,9 +330,11 @@ export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDep
 		return null
 	}
 
-	const inFlight = pending.get(uuid)
+	let entry = pending.get(uuid)
 
-	if (inFlight !== undefined) {
+	if (entry === undefined || entry.claim.abandoned) {
+		entry = startPending(uuid, false, claim => generate(deps, base, category, uuid, claim))
+	} else {
 		// Marked before the promise is handed over, so a seat that resolves nothing still knows it had
 		// an audience worth falling through for.
 		const seat = seats.get(uuid)
@@ -258,11 +342,11 @@ export async function getThumbnailUrl(item: DriveItem, deps: ThumbnailServiceDep
 		if (seat !== undefined) {
 			seat.joined = true
 		}
-
-		return inFlight
 	}
 
-	return pending.coalesce(uuid, () => generate(deps, base, category, uuid))
+	registerInterest(entry.claim, signal)
+
+	return entry.promise
 }
 
 // Publishes an already-available production as THE in-flight generation for this item's uuid, so any
@@ -317,41 +401,38 @@ export function seedThumbnail(
 	seats.set(uuid, seat)
 
 	// pending.has(uuid) was just checked false above, and this function is synchronous up to here
-	// (no await before this point) — nothing else can touch `pending` for this uuid in between, so
-	// coalesce() can only ever register a fresh entry here, never join an existing one. `seats` is a
-	// web-only side table InFlight does not model, so its cleanup stays a manual .finally() chained
-	// onto coalesce()'s own promise.
-	void pending
-		.coalesce(uuid, async () => {
-			let result: ThumbSeedResult
+	// (no await before this point) — nothing else can touch `pending` for this uuid in between, so this
+	// always registers a fresh entry. Pinned: the production runs outside the semaphore, and its
+	// fall-through serves a caller that joined.
+	void startPending(uuid, true, async claim => {
+		let result: ThumbSeedResult
 
-			try {
-				result = await produce()
-			} catch (e) {
-				log.warn("thumbnails", "seedThumbnail: production failed", uuid, e)
+		try {
+			result = await produce()
+		} catch (e) {
+			log.warn("thumbnails", "seedThumbnail: production failed", uuid, e)
 
-				result = { type: "unanswered" }
-			}
+			result = { type: "unanswered" }
+		}
 
-			if (result.type === "unanswered") {
-				// The fallback the doc comment above describes. It runs INSIDE generate's semaphore — the
-				// download this seat displaced for the caller that joined it would have been gated too — and
-				// inherits that path's whole retry/blacklist accounting, so nothing here counts a failure of
-				// its own. Unjoined, there is no displaced download and no caller: the answer is nobody's.
-				return seat.joined ? await generate(deps, base, category, uuid) : null
-			}
+		if (result.type === "unanswered") {
+			// The fallback the doc comment above describes. It runs INSIDE generate's semaphore — the
+			// download this seat displaced for the caller that joined it would have been gated too — and
+			// inherits that path's whole retry/blacklist accounting, so nothing here counts a failure of
+			// its own. Unjoined, there is no displaced download and no caller: the answer is nobody's.
+			return seat.joined ? await generate(deps, base, category, uuid, claim) : null
+		}
 
-			// An empty buffer is neither bytes to render nor a verdict to report; there is nothing here to
-			// persist either way.
-			if (result.type === "none" || result.bytes.length === 0) {
-				return null
-			}
+		// An empty buffer is neither bytes to render nor a verdict to report; there is nothing here to
+		// persist either way.
+		if (result.type === "none" || result.bytes.length === 0) {
+			return null
+		}
 
-			return persistAndFinalize(deps, uuid, result.bytes, "seedThumbnail")
-		})
-		.finally(() => {
-			seats.delete(uuid)
-		})
+		return persistAndFinalize(deps, uuid, result.bytes, "seedThumbnail")
+	}).promise.finally(() => {
+		seats.delete(uuid)
+	})
 }
 
 // Drops a uuid's rendered thumbnail (revoking its objectURL) and its on-disk cache entry, drops any

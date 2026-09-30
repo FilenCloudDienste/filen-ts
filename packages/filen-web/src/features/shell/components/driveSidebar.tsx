@@ -109,6 +109,11 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 	)
 }
 
+// Outside the component: a hook referenced as a value inside it makes the React Compiler skip DriveSidebar.
+const TREE_DATA = { useChildren: useDirectoryTreeChildrenQuery }
+// Shared so the tree context keeps its identity across non-drive navigations.
+const NO_ACTIVE_PATH: string[] = []
+
 export function DriveSidebar() {
 	const { t } = useTranslation(["drive", "common"])
 	const navigate = useNavigate()
@@ -118,7 +123,7 @@ export function DriveSidebar() {
 	// to the raw splat and split into its uuid chain. Any non-drive route highlights nothing.
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const onDrive = pathIsUnder(pathname, "/drive")
-	const activePath = onDrive ? splatToUuids(pathname.replace(/^\/drive\/?/, "")) : []
+	const activePath = onDrive ? splatToUuids(pathname.replace(/^\/drive\/?/, "")) : NO_ACTIVE_PATH
 
 	const openMap = useDirectoryTreeStore(state => state.open)
 	const toggle = useDirectoryTreeStore(state => state.toggle)
@@ -130,6 +135,7 @@ export function DriveSidebar() {
 	}
 
 	const tree: DirectoryTreeContext = {
+		...TREE_DATA,
 		activePath,
 		isOpen: uuid => isTreeNodeOpen(openMap, uuid),
 		onToggle: (uuid, parentUuid) => {
@@ -138,8 +144,7 @@ export function DriveSidebar() {
 		onLevelLoaded: (parentUuid, childUuids) => {
 			reconcileLevel(parentUuid ?? TREE_ROOT_KEY, childUuids)
 		},
-		onNavigate: navigateTo,
-		useChildren: useDirectoryTreeChildrenQuery
+		onNavigate: navigateTo
 	}
 
 	// Virtual roots in two groups, each under a muted header. Built inside the component rather than as

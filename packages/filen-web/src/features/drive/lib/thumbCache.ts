@@ -1,20 +1,24 @@
 import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_EXT } from "@/features/drive/lib/thumbnails.logic"
-import { isNotFoundError, opfsDirectory } from "@/lib/storage/opfs"
+import { cachedOpfsDirectory, forgetOpfsDirectory, isNotFoundError } from "@/lib/storage/opfs"
 
 // Main-thread read side of the OPFS thumbnail store — async only (no createSyncAccessHandle, which
 // is dedicated-worker-only by spec; see workers/thumbStore.ts for the worker-side write path over
 // the same tree).
 
 // A cache miss (never written, or evicted) resolves null rather than rejecting — the service's own
-// generate-on-miss path treats this as the normal "not cached yet" signal, not an error.
+// generate-on-miss path treats this as the normal "not cached yet" signal, not an error. A NotFoundError
+// may also mean the memoized directory itself is gone, which implies the file is too; forgetting it makes
+// the next call walk afresh.
 export async function readThumbnailBlob(uuid: string): Promise<Blob | null> {
 	try {
-		const dir = await opfsDirectory(THUMB_DIR)
+		const dir = await cachedOpfsDirectory(THUMB_DIR)
 		const fileHandle = await dir.getFileHandle(`${uuid}${THUMB_EXT}`)
 
 		return await fileHandle.getFile()
 	} catch (e) {
 		if (isNotFoundError(e)) {
+			forgetOpfsDirectory(THUMB_DIR)
+
 			return null
 		}
 
@@ -27,10 +31,12 @@ export async function readThumbnailBlob(uuid: string): Promise<Blob | null> {
 // that should allow a fresh regenerate. A missing entry is a clean no-op.
 export async function deleteThumbnail(uuid: string): Promise<void> {
 	try {
-		const dir = await opfsDirectory(THUMB_DIR)
+		const dir = await cachedOpfsDirectory(THUMB_DIR)
 		await dir.removeEntry(`${uuid}${THUMB_EXT}`)
 	} catch (e) {
 		if (isNotFoundError(e)) {
+			forgetOpfsDirectory(THUMB_DIR)
+
 			return
 		}
 
@@ -69,6 +75,8 @@ export async function wipeThumbnailStore(root: Promise<FileSystemDirectoryHandle
 			}
 		}
 	}
+
+	forgetOpfsDirectory(THUMB_DIR)
 
 	if (failure !== null) {
 		throw failure.reason

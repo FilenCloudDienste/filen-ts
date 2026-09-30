@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient, QueryObserver } from "@tanstack/react-query"
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest"
+import { Query, QueryClient, QueryObserver } from "@tanstack/react-query"
 import type { Note, SocketEvent } from "@filen/sdk-rs"
 import { mockNote, mockNoteParticipant } from "@/tests/fixtures/notes"
 
@@ -83,6 +83,22 @@ function setStore(content: InflightContent): void {
 
 function setAccountId(id: bigint): void {
 	testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { id })
+}
+
+// Content reads are invalidated on the cached query itself (queries/patch.ts), so one must exist to be
+// seen: an empty one reads as absent to getQueryData. The prototype spy sees every query's invalidation.
+function seedEmptyContent(uuid: string): void {
+	testQueryClient.getQueryCache().build(testQueryClient, { queryKey: noteContentQueryKey(uuid) })
+}
+
+function watchInvalidations(uuid: string): MockInstance<Query["invalidate"]> {
+	seedEmptyContent(uuid)
+
+	return vi.spyOn(Query.prototype, "invalidate")
+}
+
+function contentInvalidated(uuid: string): boolean | undefined {
+	return testQueryClient.getQueryState(noteContentQueryKey(uuid))?.isInvalidated
 }
 
 beforeEach(() => {
@@ -211,6 +227,43 @@ describe("note socket handlers — metadata", () => {
 		expect(listNotes).toHaveBeenCalledTimes(1)
 	})
 
+	it("new for a listed note this account owns reads nothing: its own create already wrote the row", async () => {
+		seedNotes([makeNote("a"), makeNote("b", { ownerId: 7n })])
+		setAccountId(7n)
+		mountList()
+
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		await settle()
+
+		expect(listNotes).not.toHaveBeenCalled()
+		expect(getNotes().map(n => n.uuid)).toEqual(["a", "b"])
+	})
+
+	// A shared note's row outlives this account's removal from it, so a re-share must refresh it.
+	it("new for a listed note someone else owns still reads the list", async () => {
+		seedNotes([makeNote("a"), makeNote("b", { ownerId: 99n, title: "stale" })])
+		setAccountId(7n)
+		mountList()
+		listNotes.mockResolvedValueOnce([makeNote("a"), makeNote("b", { ownerId: 99n, title: "fresh" })])
+
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		await vi.waitFor(() => {
+			expect(getNotes()[1]?.title).toBe("fresh")
+		})
+
+		expect(listNotes).toHaveBeenCalledTimes(1)
+	})
+
+	it("new for a listed note reads the list while the account id is not known", async () => {
+		seedNotes([makeNote("a"), makeNote("b", { ownerId: 7n })])
+		mountList()
+
+		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
+		await settle()
+
+		expect(listNotes).toHaveBeenCalledTimes(1)
+	})
+
 	// The list is only read once someone opens it, and that first read is fresher than one taken now.
 	it("new reads nothing while the list has never been read", async () => {
 		handleNoteEvent(noteEvt({ type: "new", note: "b" as never }))
@@ -316,7 +369,7 @@ describe("note socket handlers — contentEdited", () => {
 		setAccountId(7n)
 		beginEditingSession("a")
 		rememberNotePush("a", hashNoteContent("server text"))
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		const invalidate = watchInvalidations("a")
 
 		handleNoteEvent(contentEdited("a", 7))
 
@@ -328,7 +381,7 @@ describe("note socket handlers — contentEdited", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
 		rememberNotePush("a", hashNoteContent("server text"))
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		const invalidate = watchInvalidations("a")
 
 		handleNoteEvent(contentEdited("a", 7))
 
@@ -337,7 +390,7 @@ describe("note socket handlers — contentEdited", () => {
 
 		handleNoteEvent(contentEdited("a", 7))
 
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+		expect(contentInvalidated("a")).toBe(true)
 	})
 
 	// The only news a tab that did not push gets of the push: its sidebar row follows the typing.
@@ -399,12 +452,12 @@ describe("note socket handlers — contentEdited", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
 		useNotesRemoteEditStore.getState().setOpenNote("a")
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		seedEmptyContent("a")
 
 		handleNoteEvent(contentEdited("a", 7))
 
 		expect(getNotes()[0]?.editedTimestamp).toBe(999n)
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+		expect(contentInvalidated("a")).toBe(true)
 		expect(toast).toHaveBeenCalledTimes(1)
 	})
 
@@ -450,13 +503,13 @@ describe("note socket handlers — contentEdited", () => {
 	it("clean note (no inflight): patches the row and invalidates the content query", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		seedEmptyContent("a")
 
 		handleNoteEvent(contentEdited("a", 99))
 
 		expect(getNotes()[0]?.editedTimestamp).toBe(999n)
 		expect(getNotes()[0]?.preview).toBe("server text")
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+		expect(contentInvalidated("a")).toBe(true)
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 	})
 
@@ -464,7 +517,7 @@ describe("note socket handlers — contentEdited", () => {
 		seedNotes([makeNote("a", { editedTimestamp: 1n })])
 		setAccountId(7n)
 		setStore({ a: [{ timestamp: Date.now(), content: "local", note: makeNote("a") }] })
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		const invalidate = watchInvalidations("a")
 
 		handleNoteEvent(contentEdited("a", 99))
 
@@ -480,7 +533,7 @@ describe("note socket handlers — contentEdited", () => {
 		setAccountId(7n)
 		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
 		showEditor("a", "old", "old", "typed")
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		const invalidate = watchInvalidations("a")
 
 		handleNoteEvent(contentEdited("a", 99))
 
@@ -497,7 +550,7 @@ describe("note socket handlers — contentEdited", () => {
 		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
 		showEditor("a", "old", "old", "x")
 		tabEditorSynced("a", "x", hashNoteContent("x"))
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		const invalidate = watchInvalidations("a")
 
 		handleNoteEvent(contentEdited("a", 99))
 
@@ -517,7 +570,7 @@ describe("note socket handlers — contentEdited", () => {
 		setAccountId(7n)
 		showEditor("a", "old", "old")
 		beginEditingSession("a")
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		seedEmptyContent("a")
 
 		handleNoteEvent(
 			noteEvt({
@@ -532,7 +585,7 @@ describe("note socket handlers — contentEdited", () => {
 
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
 		expect(useNotesInflightStore.getState().editingSessions["a"]).toBeUndefined()
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+		expect(contentInvalidated("a")).toBe(true)
 	})
 
 	it("skips (and logs) a note not in the list cache without reading when no list read is in flight", async () => {
@@ -719,7 +772,7 @@ describe("note socket handlers — reload/keep actions", () => {
 		setStore({ a: [{ timestamp: Date.now(), content: "local", note: makeNote("a") }] })
 		testQueryClient.setQueryData(noteContentQueryKey("a"), "old", { updatedAt: 1 })
 		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: "server text" })
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		const invalidate = watchInvalidations("a")
 
 		await reloadRemoteEdit(makeNote("a"))
 
@@ -748,7 +801,7 @@ describe("note socket handlers — reload/keep actions", () => {
 	it("load theirs falls back to a refetch when their content cannot be read", async () => {
 		useNotesRemoteEditStore.getState().setRemoteEdited("a", { theirs: undefined })
 		getNoteContent.mockRejectedValueOnce(new Error("offline"))
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
+		seedEmptyContent("a")
 
 		await reloadRemoteEdit(makeNote("a"))
 
@@ -756,7 +809,7 @@ describe("note socket handlers — reload/keep actions", () => {
 		expect(dropEntry).toHaveBeenCalledWith("a")
 		expect(flushToDisk).toHaveBeenCalledTimes(1)
 		expect(useNotesRemoteEditStore.getState().remoteEdited["a"]).toBeUndefined()
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a") })
+		expect(contentInvalidated("a")).toBe(true)
 	})
 
 	it("reload ends the editing session", async () => {

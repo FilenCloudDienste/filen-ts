@@ -7,6 +7,7 @@ import { toastSummary } from "@/lib/actions/bulkToast"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import { queryClient } from "@/queries/client"
+import { cachedQueriesWithPrefix } from "@/queries/patch"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, directorySizeQueryKey, findCachedListingItem, queueListingCreate } from "@/features/drive/queries/drive"
 import { markAccountStale } from "@/queries/account"
@@ -124,7 +125,7 @@ export function invalidateUploadedDirectorySizes(parentUuid: string | null, crea
 
 	const displayed = new Set<string>()
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX, type: "active" })) {
+	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX).filter(query => query.isActive())) {
 		for (const item of queryClient.getQueryData<DriveItem[]>(query.queryKey) ?? []) {
 			if (targets.has(item.data.uuid)) {
 				displayed.add(item.data.uuid)

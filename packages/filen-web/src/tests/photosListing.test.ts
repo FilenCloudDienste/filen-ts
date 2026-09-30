@@ -13,6 +13,7 @@ import { queryClient as testQueryClient } from "@/queries/client"
 import { fetchPhotosListing, photosListingQueryKey, photosListingQueryUpdate, type PhotosListing } from "@/features/photos/queries/photos"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
+import { isPhotoItem } from "@/features/photos/lib/predicate"
 import { testUuid } from "@/tests/support/uuid"
 
 function photoItem(overrides: Partial<File> = {}): PhotoItem {
@@ -126,6 +127,32 @@ describe("fetchPhotosListing", () => {
 		const result = await fetchPhotosListing("root-uuid")
 
 		expect(result.photos.map(item => item.data.uuid)).toEqual([testUuid("newer"), testUuid("older")])
+	})
+
+	it("yields the same listing from a walk the worker already narrowed to photo files", async () => {
+		const root = testUuid("root")
+		const trip = mockDir({ uuid: testUuid("trip"), parent: root, meta: { type: "decoded", data: { name: "Trip" } } })
+		const files = [
+			mockFile({ uuid: testUuid("older"), parent: trip.uuid, timestamp: 1_000n }),
+			mockFile({
+				uuid: testUuid("doc"),
+				meta: {
+					type: "decoded",
+					data: { name: "report.pdf", mime: "application/pdf", modified: 1n, size: 1n, key: "k", version: 2 }
+				}
+			}),
+			mockFile({ uuid: testUuid("undecryptable"), meta: { type: "encrypted", data: "ciphertext" } }),
+			mockFile({ uuid: testUuid("newer"), timestamp: 2_000n })
+		]
+
+		listPhotosRecursive.mockResolvedValueOnce({ dirs: [trip], files })
+		const unfiltered = await fetchPhotosListing(root)
+
+		listPhotosRecursive.mockResolvedValueOnce({ dirs: [trip], files: files.filter(file => isPhotoItem(narrowItem(file))) })
+		const prefiltered = await fetchPhotosListing(root)
+
+		expect(prefiltered).toEqual(unfiltered)
+		expect(prefiltered.photos.map(item => item.data.uuid)).toEqual([testUuid("newer"), testUuid("older")])
 	})
 
 	it("propagates a rejection unchanged (a gone root's error reaches the caller intact)", async () => {

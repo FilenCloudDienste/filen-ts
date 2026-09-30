@@ -39,8 +39,8 @@ import {
 
 // The multi-tab transport (leader-owned outbox): a follower forwards a send to the leader and asks it to
 // flush; the leader broadcasts the authoritative per-chat queue + a hello on takeover. `E` is one forwarded
-// send, `S` the whole queue. A single-tab install attaches NO transport, so every forward/broadcast is a
-// guarded no-op and the leader path stays byte-identical to the pre-multi-tab outbox.
+// send, `S` the whole queue. Without an attached transport (unit tests) every forward/broadcast is a guarded
+// no-op; the real one skips full-state broadcasts until a peer tab exists.
 export type ChatOutboxTransport = OutboxChannelTransport<RemoteChatEnqueue, InflightChatMessages>
 
 // Read the abort flag through a function boundary so an early guard does not narrow later reads to a
@@ -569,96 +569,108 @@ export class Sync {
 					// Sequential per chat, oldest-first — message ORDER is load-bearing for a chat.
 					const sorted = [...messages].sort(compareBySentTimestamp)
 
-					for (const message of sorted) {
-						if (isAborted(signal)) {
-							return
-						}
+					let lastCommitted: Chat | undefined
 
-						if (message.message === undefined) {
-							continue
-						}
-
-						// Mark this inflightId as actually in flight for the whole unrecallable window (the
-						// send call is issued below and cannot be cancelled once started) — cleared in
-						// `finally` regardless of outcome, so a message that stays queued for a later retry
-						// reverts to "pending"/"failed" and one that commits reverts to "confirmed" via dequeue.
-						this.setSending(message.inflightId, true)
-
-						let committedChat: Chat | undefined
-
-						try {
-							committedChat = await this.pushMessage(chat, message)
-
-							// Success: clear any error record for this send.
-							clearInflightError(message.inflightId)
-						} catch (e) {
+					try {
+						for (const message of sorted) {
 							if (isAborted(signal)) {
 								return
 							}
 
-							// Classify the rejection with the shared outbox classifiers (@filen/shared's
-							// sdkRetryPolicy). Network-class, re-auth-recoverable Unauthenticated, and
-							// non-SDK errors are KEEP-for-retry and never advance the drop bound. Any OTHER
-							// SDK error (incl. the `Server` catch-all — the only permanent-rejection signal
-							// the SDK exposes) increments the per-message consecutive-rejection counter.
-							const dto = asErrorDTO(e)
-							const permanent = isPermanentRejection({
-								hasSdkError: dto.species === "sdk",
-								kind: dto.species === "sdk" ? dto.kind : undefined
-							})
-							const previousRejections =
-								useChatsInflightStore.getState().inflightErrors[message.inflightId]?.permanentRejections ?? 0
-							const permanentRejections = permanent ? previousRejections + 1 : previousRejections
-
-							useChatsInflightStore.getState().setInflightErrors(prev => ({
-								...prev,
-								[message.inflightId]: {
-									error: dto,
-									permanentRejections,
-									message
-								}
-							}))
-
-							if (permanentRejections >= MAX_NON_RETRYABLE_REJECTIONS) {
-								// Drop the doomed message from the queue so it is never retried again. The
-								// error record above STAYS (with the snapshot) so the failed bubble remains
-								// visible and actionable (retry/remove) in the thread.
-								log.error(
-									"chats-sync",
-									"dropping inflight message after max permanent rejections",
-									chatUuid,
-									message.inflightId,
-									permanentRejections
-								)
-								dequeueInflightMessage(chatUuid, message.inflightId)
-
+							if (message.message === undefined) {
 								continue
 							}
 
-							// Keep-for-retry (or transient below the bound): leave the entry queued. Stop
-							// this chat's sequential pass so ordering is preserved — a later trigger retries.
-							return
-						} finally {
-							this.setSending(message.inflightId, false)
+							// Mark this inflightId as actually in flight for the whole unrecallable window (the
+							// send call is issued below and cannot be cancelled once started) — cleared in
+							// `finally` regardless of outcome, so a message that stays queued for a later retry
+							// reverts to "pending"/"failed" and one that commits reverts to "confirmed" via dequeue.
+							this.setSending(message.inflightId, true)
+
+							let committedChat: Chat | undefined
+
+							try {
+								committedChat = await this.pushMessage(chat, message)
+
+								// Success: clear any error record for this send.
+								clearInflightError(message.inflightId)
+							} catch (e) {
+								if (isAborted(signal)) {
+									return
+								}
+
+								// Classify the rejection with the shared outbox classifiers (@filen/shared's
+								// sdkRetryPolicy). Network-class, re-auth-recoverable Unauthenticated, and
+								// non-SDK errors are KEEP-for-retry and never advance the drop bound. Any OTHER
+								// SDK error (incl. the `Server` catch-all — the only permanent-rejection signal
+								// the SDK exposes) increments the per-message consecutive-rejection counter.
+								const dto = asErrorDTO(e)
+								const permanent = isPermanentRejection({
+									hasSdkError: dto.species === "sdk",
+									kind: dto.species === "sdk" ? dto.kind : undefined
+								})
+								const previousRejections =
+									useChatsInflightStore.getState().inflightErrors[message.inflightId]?.permanentRejections ?? 0
+								const permanentRejections = permanent ? previousRejections + 1 : previousRejections
+
+								useChatsInflightStore.getState().setInflightErrors(prev => ({
+									...prev,
+									[message.inflightId]: {
+										error: dto,
+										permanentRejections,
+										message
+									}
+								}))
+
+								if (permanentRejections >= MAX_NON_RETRYABLE_REJECTIONS) {
+									// Drop the doomed message from the queue so it is never retried again. The
+									// error record above STAYS (with the snapshot) so the failed bubble remains
+									// visible and actionable (retry/remove) in the thread.
+									log.error(
+										"chats-sync",
+										"dropping inflight message after max permanent rejections",
+										chatUuid,
+										message.inflightId,
+										permanentRejections
+									)
+									dequeueInflightMessage(chatUuid, message.inflightId)
+
+									continue
+								}
+
+								// Keep-for-retry (or transient below the bound): leave the entry queued. Stop
+								// this chat's sequential pass so ordering is preserved — a later trigger retries.
+								return
+							} finally {
+								this.setSending(message.inflightId, false)
+							}
+
+							// Committed: remove from the queue (drop the chat key when empty) and make that durable
+							// immediately. The mark-read housekeeping is two best-effort round trips — running them
+							// first would hold a committed send on disk across both, and a tab closed in that
+							// window replays it as a peer-visible duplicate.
+							dequeueInflightMessage(chatUuid, message.inflightId)
+
+							await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
+
+							// Followers drop the committed send now, not at the end of the pass: until then their mirror
+							// lists it, and a follower promoted meanwhile must not mistake it for queued work.
+							if (!isAborted(signal)) {
+								this.broadcastState()
+							}
+
+							// Both calls stamp "now" per chat, so only the pass's last commit needs them (fired below).
+							lastCommitted = committedChat
 						}
-
-						// Committed: remove from the queue (drop the chat key when empty) and make that durable
-						// immediately. The housekeeping below is two best-effort round trips — running them
-						// first would hold a committed send on disk across both, and a tab closed in that
-						// window replays it as a peer-visible duplicate.
-						dequeueInflightMessage(chatUuid, message.inflightId)
-
-						await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
-
-						// Followers drop the committed send now, not at the end of the pass: until then their mirror
-						// lists it, and a follower promoted meanwhile must not mistake it for queued work.
-						if (!isAborted(signal)) {
-							this.broadcastState()
+					} finally {
+						// Outside the send try so a rejection can never be read as a send failure (which would retry
+						// an already-committed message); allSettled keeps it unhandled-safe.
+						if (lastCommitted !== undefined) {
+							void Promise.allSettled([
+								sdkApi.markChatRead(lastCommitted),
+								sdkApi.updateLastChatFocusTimesNow([lastCommitted])
+							])
 						}
-
-						// Fired OUTSIDE the try so a rejection can never be read as a send failure (which would
-						// retry an already-committed message); allSettled keeps it unhandled-safe.
-						void Promise.allSettled([sdkApi.markChatRead(committedChat), sdkApi.updateLastChatFocusTimesNow([committedChat])])
 					}
 				})
 			)

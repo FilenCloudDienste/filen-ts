@@ -18,10 +18,16 @@ vi.mock("@/lib/downloadBlob", () => ({ downloadBlob }))
 
 // A fake archive recording exactly what entered it, so the assertions are on the zip's contents
 // rather than on generateAsync's opaque output.
-const { zipEntries } = vi.hoisted(() => ({ zipEntries: [] as { name: string; content: string }[] }))
+const { zipEntries, zipSetup } = vi.hoisted(() => ({ zipEntries: [] as { name: string; content: string }[], zipSetup: { fail: false } }))
 
 vi.mock("jszip", () => ({
 	default: class {
+		public constructor() {
+			if (zipSetup.fail) {
+				throw new Error("chunk load failed")
+			}
+		}
+
 		public file(name: string, content: string): void {
 			zipEntries.push({ name, content })
 		}
@@ -41,6 +47,7 @@ import { testUuid } from "@/tests/support/uuid"
 beforeEach(() => {
 	vi.clearAllMocks()
 	zipEntries.length = 0
+	zipSetup.fail = false
 	testQueryClient.clear()
 	useNotesInflightStore.setState({ inflightContent: {} })
 })
@@ -84,6 +91,18 @@ describe("exportNote", () => {
 })
 
 describe("exportAllNotes", () => {
+	// JSZip loads on demand, so a failure to set up the archive must take the error outcome, not reject.
+	it("reports an error and downloads nothing when the archive cannot be set up", async () => {
+		zipSetup.fail = true
+		getNoteContent.mockResolvedValue("body")
+
+		const outcome = await exportAllNotes([mockNote({ uuid: testUuid("a") })])
+
+		expect(outcome.status).toBe("error")
+		expect(getNoteContent).not.toHaveBeenCalled()
+		expect(downloadBlob).not.toHaveBeenCalled()
+	})
+
 	it("skips a note whose content never decrypted and zips only the readable ones", async () => {
 		const readable = mockNote({ uuid: testUuid("a"), title: "readable" })
 		const unreadable = mockNote({ uuid: testUuid("b"), title: "unreadable" })

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import * as Comlink from "comlink"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
@@ -331,10 +331,12 @@ export function useDriveSearch(rootUuid: string | null, enabled: boolean): UseDr
 	// pulled out only because the X-button/Escape callers have no keystroke event to route through
 	// setInput itself. The engine stays warm so the next keystroke retunes instead of
 	// reopening. Real teardown only ever happens via closeSearchEngine (root/enabled change, unmount).
-	function clear(): void {
+	// Memoized by hand (see the useMemo below for why the compiler skips this hook): the listing hands it
+	// into its row open handler, and a fresh one each render would re-render every mounted row's menus.
+	const clear = useCallback((): void => {
 		setInputValue("")
 		activeRef.current = false
-	}
+	}, [])
 
 	// Root/enabled change or unmount: close whatever's active and blank the box — mirrors
 	// useThumbnail.ts's live-flag idiom, generalized to the generation counter above (see its own

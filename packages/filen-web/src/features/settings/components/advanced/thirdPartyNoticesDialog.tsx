@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ArrowLeftIcon, PackageSearchIcon } from "lucide-react"
@@ -30,19 +30,26 @@ function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialog
 	const [query, setQuery] = useState("")
 	const [selected, setSelected] = useState<ThirdPartyNotice | null>(null)
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
-	const notices = filterThirdPartyNotices(THIRD_PARTY_NOTICES, query)
+	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
+	// re-lays every row when its key function changes, so the filtered list and its key function must
+	// change with the query and nothing else, not on every scroll render.
+	const notices = useMemo(() => filterThirdPartyNotices(THIRD_PARTY_NOTICES, query), [query])
 	const repositoryHref = noticeRepositoryHref(selected?.repository ?? null)
+	const getItemKey = useCallback(
+		(index: number) => {
+			const notice = notices[index]
+
+			return notice === undefined ? index : `${notice.ecosystem}:${notice.name}@${notice.version}`
+		},
+		[notices]
+	)
 
 	const virtualizer = useVirtualizer({
 		count: notices.length,
 		getScrollElement: () => scrollElement,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: OVERSCAN,
-		getItemKey: index => {
-			const notice = notices[index]
-
-			return notice === undefined ? index : `${notice.ecosystem}:${notice.name}@${notice.version}`
-		}
+		getItemKey
 	})
 
 	return (

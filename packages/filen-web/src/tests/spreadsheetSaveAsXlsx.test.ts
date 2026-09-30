@@ -6,7 +6,8 @@ import { saveAsXlsx } from "@/features/spreadsheet/lib/saveAsXlsx"
 const { uploadFileBytes } = vi.hoisted(() => ({ uploadFileBytes: vi.fn() }))
 
 vi.mock("@/features/spreadsheet/lib/spreadsheetClient", () => ({
-	spreadsheetWorker: () => ({ xlsToXlsx: (bytes: Uint8Array) => Promise.resolve(bytes) })
+	withSpreadsheetWorker: (run: (remote: { xlsToXlsx: (bytes: Uint8Array) => Promise<Uint8Array> }) => Promise<unknown>) =>
+		run({ xlsToXlsx: bytes => Promise.resolve(bytes) })
 }))
 
 vi.mock("@/lib/sdk/client", () => ({

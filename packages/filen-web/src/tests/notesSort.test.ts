@@ -155,6 +155,15 @@ describe("filterNotesBySearch", () => {
 
 		expect(filterNotesBySearch(notes, "groceries", bodies).map(n => n.title)).toEqual(["Groceries"])
 	})
+
+	// The bodies map arrives pre-lowercased (useNoteSearchBodies' select); only the preview is lowered here.
+	it("matches a mixed-case query against a pre-lowercased body and a mixed-case preview", () => {
+		const bodyNote = mockNote({ uuid: testUuid("d"), title: "delta", preview: "" })
+		const previewNote = mockNote({ uuid: testUuid("e"), title: "echo", preview: "Launch Checklist" })
+		const bodies = new Map([[bodyNote.uuid, "the launch checklist lives here"]])
+
+		expect(filterNotesBySearch([bodyNote, previewNote], "  LAUNCH Checklist ", bodies).map(n => n.title)).toEqual(["delta", "echo"])
+	})
 })
 
 describe("noteTitleMatchesSearch", () => {

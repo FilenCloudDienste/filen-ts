@@ -435,7 +435,7 @@ function afterCopySettled(job: CopyJob, written: readonly string[]): void {
 	flushDeferredRecents()
 
 	if (job.counts.bytesDone > 0) {
-		addAccountStorageUsed(BigInt(job.counts.bytesDone))
+		addAccountStorageUsed(BigInt(job.counts.bytesDone), { readNow: true })
 	}
 
 	if (job.counts.dirsCreated > 0 || job.counts.filesDone > 0) {
@@ -533,18 +533,4 @@ export function retryFailedCopy(jobId: string): string | null {
 	pruneSettledCopyJobs()
 
 	return id
-}
-
-// The job settles as cancelled through its own report; trashCopied then moves its top-level items to
-// the trash (never a permanent delete). The first request stands: its stop is already on its way, and a
-// later one (Cancel all, sign-out) must not turn a "trash" into a "keep".
-export function requestCopyCancel(jobId: string, options: { trashCopied: boolean }): void {
-	const job = getCopyJob(jobId)
-
-	if (job?.outcome.status !== "running" || job.cancelRequest !== null) {
-		return
-	}
-
-	useCopyJobsStore.getState().update(jobId, running => ({ ...running, cancelRequest: options.trashCopied ? "trash" : "keep" }))
-	void sdkApi.cancelTransfer(jobId)
 }

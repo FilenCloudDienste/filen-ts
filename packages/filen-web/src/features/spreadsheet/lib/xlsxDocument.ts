@@ -289,6 +289,13 @@ interface CellAt {
 	key: string
 }
 
+// A cell by its grid sheet index.
+interface GridCell {
+	sheet: number
+	row: number
+	col: number
+}
+
 // A formula cell's stored result before the engine recalculated it.
 interface ResultBefore {
 	sheet: number
@@ -829,7 +836,9 @@ export class XlsxDocument {
 				return this.revertStructure(step)
 			case "addSheet": {
 				this.workbook.sheets.pop()
-				this.recalculate(engine => {
+
+				// Empty unless the engine failed and every result was read back.
+				const recalculated = this.recalculate(engine => {
 					engine.removeLastSheet()
 
 					return []
@@ -838,14 +847,17 @@ export class XlsxDocument {
 				// sheet).
 				this.restoreResults(step.results)
 
-				return this.sheetsResult(this.gridSheets(step.results))
+				const read = this.gridCells(step.results)
+
+				return this.sheetsResult(new Set(), sheetsOf(read), read, recalculated)
 			}
 			case "rename": {
 				const sheet = this.workbook.sheets[step.sheet]
+				let renamed: RecalculatedCell[] = []
 
 				if (sheet !== undefined) {
 					sheet.name = step.name
-					this.recalculate(engine => {
+					renamed = this.recalculate(engine => {
 						engine.renameSheet(this.worksheets().indexOf(sheet), step.name)
 
 						return []
@@ -858,7 +870,7 @@ export class XlsxDocument {
 				else this.workbook.namedRanges = step.names
 
 				// Formulas that named the new name name a missing sheet again: the engine reads them anew.
-				this.recalculate(engine => {
+				const reset = this.recalculate(engine => {
 					this.resetFormulas(engine, step.placeholders)
 
 					return []
@@ -866,11 +878,14 @@ export class XlsxDocument {
 
 				this.restoreResults(step.results)
 
-				const changed = this.gridSheets([...step.formulas, ...step.links, ...step.results])
+				const edited = this.gridCells(step.formulas)
+				const read = this.gridCells(step.results)
+				const reached = sheetsOf(edited, this.gridCells(step.links), read)
 
-				if (sheet !== undefined) changed.add(this.worksheets().indexOf(sheet))
+				if (sheet !== undefined) reached.add(this.worksheets().indexOf(sheet))
 
-				return this.sheetsResult(changed)
+				// The sheet's name comes back with every result; links show in no cell.
+				return this.sheetsResult(new Set(), reached, edited, read, renamed, reset)
 			}
 		}
 	}
@@ -897,16 +912,20 @@ export class XlsxDocument {
 		}
 	}
 
-	// Grid indices of the sheets these workbook-indexed cells are on.
-	private gridSheets(cells: readonly { sheet: number }[]): Set<number> {
+	// These workbook-indexed cells by grid index, those on no worksheet left out.
+	private gridCells(cells: readonly CellAt[]): GridCell[] {
 		const worksheets = this.worksheets()
-		const found = new Set<number>()
+		const found: GridCell[] = []
 
 		for (const cell of cells) {
 			const sheet = this.workbook.sheets[cell.sheet]
 			const index = sheet === undefined ? -1 : worksheets.indexOf(sheet)
 
-			if (index >= 0) found.add(index)
+			if (index >= 0) {
+				const [row, col] = parseCellId(cell.key)
+
+				found.push({ sheet: index, row, col })
+			}
 		}
 
 		return found
@@ -1002,7 +1021,7 @@ export class XlsxDocument {
 		const sheet = this.worksheets()[step.sheet]
 
 		if (sheet === undefined) {
-			return this.sheetsResult(new Set())
+			return this.sheetsResult(new Set(), new Set())
 		}
 
 		const { edit } = step
@@ -1010,8 +1029,6 @@ export class XlsxDocument {
 		if (this.hasFormulas) {
 			this.ensureEngine()
 		}
-
-		const changed = this.gridSheets([...step.formulas, ...step.links]).add(step.sheet)
 
 		if (edit.type === "insert") {
 			shiftSheet(sheet, { ...edit, type: "delete" })
@@ -1088,9 +1105,10 @@ export class XlsxDocument {
 			return recalculatedCells
 		})
 
-		for (const cell of recalculated) changed.add(cell.sheet)
+		const edited = this.gridCells(step.formulas)
 
-		return this.sheetsResult(changed)
+		// Keys on other sheets never moved; links show in no cell.
+		return this.sheetsResult(new Set([step.sheet]), sheetsOf(edited, this.gridCells(step.links), recalculated), edited, recalculated)
 	}
 
 	private run(op: EditOp): { step: Step | null; result: () => EditResult } {
@@ -1473,17 +1491,18 @@ export class XlsxDocument {
 		const { formulas, links } = this.shiftReferences(sheet, op)
 		const removed = shiftSheet(sheet, op)
 
-		const changed = this.gridSheets([...formulas, ...links]).add(op.sheet)
-
 		const recalculated = this.recalculate(current =>
 			op.type === "insert" ? current.insert(op.sheet, op.axis, op.at, op.count) : current.remove(op.sheet, op.axis, op.at, op.count)
 		)
 
-		for (const cell of recalculated) changed.add(cell.sheet)
-
 		return {
 			step: { type: "structure", sheet: op.sheet, edit: op, merges, breaks, removed, formulas, links },
-			result: () => this.sheetsResult(changed)
+			// Keys on other sheets did not move, and those on this one are in its view; links show in no cell.
+			result: () => {
+				const edited = this.gridCells(formulas)
+
+				return this.sheetsResult(new Set([op.sheet]), sheetsOf(edited, this.gridCells(links), recalculated), edited, recalculated)
+			}
 		}
 	}
 
@@ -1501,7 +1520,9 @@ export class XlsxDocument {
 		}
 
 		this.workbook.sheets.push({ name, rows: [] })
-		this.recalculate(engine => {
+
+		// Empty unless the engine failed and every result was read back.
+		const recalculated = this.recalculate(engine => {
 			engine.addSheet(name)
 
 			return []
@@ -1510,10 +1531,16 @@ export class XlsxDocument {
 		// Formulas that already named it now reach it: the engine relinks them without reporting what that
 		// changed, so their results are read back.
 		const results = this.hasFormulas && this.formulasName(name) ? this.syncResults(this.ensureEngine()) : []
+		const added = new Set([this.worksheets().length - 1])
 
-		const changed = this.gridSheets(results).add(this.worksheets().length - 1)
+		return {
+			step: { type: "addSheet", results },
+			result: () => {
+				const read = this.gridCells(results)
 
-		return { step: { type: "addSheet", results }, result: () => this.sheetsResult(changed) }
+				return this.sheetsResult(added, sheetsOf(read), read, recalculated)
+			}
+		}
 	}
 
 	private formulasName(sheetName: string): boolean {
@@ -1620,7 +1647,9 @@ export class XlsxDocument {
 		}
 
 		sheet.name = name
-		this.recalculate(engine => {
+
+		// Empty unless the engine failed and every result was read back.
+		const renamed = this.recalculate(engine => {
 			engine.renameSheet(sheetIndex, name)
 
 			return []
@@ -1629,10 +1658,11 @@ export class XlsxDocument {
 		// The engine reads formulas that named the new name afresh; what that changes is read back, as for
 		// an added sheet.
 		let results: ResultBefore[] = []
+		let reset: RecalculatedCell[] = []
 
 		if (this.hasFormulas && placeholders.length > 0) {
 			this.ensureEngine()
-			this.recalculate(engine => {
+			reset = this.recalculate(engine => {
 				this.resetFormulas(engine, placeholders)
 
 				return []
@@ -1640,23 +1670,26 @@ export class XlsxDocument {
 			results = this.engine === null ? [] : this.syncResults(this.engine)
 		}
 
-		const changed = this.gridSheets([...formulas, ...links, ...results]).add(sheetIndex)
-
 		return {
 			step: { type: "rename", sheet: index, name: oldName, formulas, links, names, placeholders, results },
-			result: () => this.sheetsResult(changed)
+			// The new name travels with every result; links show in no cell.
+			result: () => {
+				const edited = this.gridCells(formulas)
+				const read = this.gridCells(results)
+
+				const reached = sheetsOf(edited, this.gridCells(links), read).add(sheetIndex)
+
+				return this.sheetsResult(new Set(), reached, edited, read, renamed, reset)
+			}
 		}
 	}
 
-	// The cells an edit touched and those recalculated with it, as one patch per sheet.
-	private cellsResult(
-		sheetIndex: number,
-		touched: readonly { row: number; col: number }[],
-		recalculated: readonly RecalculatedCell[]
-	): EditResult {
+	// The views of the cells `collect` adds (grid indices), one patch per sheet with its extent.
+	private patches(collect: (add: (sheet: number, row: number, col: number) => void) => void): CellPatch[] {
 		const worksheets = this.worksheets()
 		const bySheet = new Map<number, Map<number, CellView | null>>()
-		const add = (index: number, row: number, col: number) => {
+
+		collect((index, row, col) => {
 			const sheet = worksheets[index]
 
 			if (sheet === undefined) {
@@ -1671,10 +1704,7 @@ export class XlsxDocument {
 			}
 
 			cells.set(cellKey(row, col), this.views.cell(sheet, row, col))
-		}
-
-		for (const { row, col } of touched) add(sheetIndex, row, col)
-		for (const cell of recalculated) add(cell.sheet, cell.row, cell.col)
+		})
 
 		const patches: CellPatch[] = []
 
@@ -1686,18 +1716,77 @@ export class XlsxDocument {
 			}
 		}
 
+		return patches
+	}
+
+	// The cells an edit touched and those recalculated with it, as one patch per sheet.
+	private cellsResult(
+		sheetIndex: number,
+		touched: readonly { row: number; col: number }[],
+		recalculated: readonly RecalculatedCell[]
+	): EditResult {
+		const patches = this.patches(add => {
+			for (const { row, col } of touched) add(sheetIndex, row, col)
+			for (const cell of recalculated) add(cell.sheet, cell.row, cell.col)
+		})
 		const styles = this.views.styles.styles
 
 		return { type: "cells", patches, styles: styles.length > this.styleMark ? styles : [], state: this.history.state() }
 	}
 
-	// A view of each sheet in `changed` (grid indices), null for the rest.
-	private sheetsResult(changed: ReadonlySet<number>): EditResult {
+	// A view of each sheet in `layout` (grid indices), null for the rest; of the other sheets, only the
+	// `cells` whose view may have changed, every sheet's name, and the exact extent of those `reached`. A
+	// held extent only ever grows, so it can outlast an undone edit that grew the sheet; a reached sheet
+	// once came back in full, which reset it. Nothing else about a sheet outside `layout` changes: its
+	// merges, sizes and lock stay as they were.
+	private sheetsResult(layout: ReadonlySet<number>, reached: ReadonlySet<number>, ...cells: (readonly GridCell[])[]): EditResult {
 		const lockStructure = workbookStructureLocked(this.workbook)
-		const sheets = this.worksheets().map((sheet, index) => (changed.has(index) ? this.views.sheet(sheet, lockStructure) : null))
+		const worksheets = this.worksheets()
+		const sheets = worksheets.map((sheet, index) => (layout.has(index) ? this.views.sheet(sheet, lockStructure) : null))
+		const patches = this.patches(add => {
+			for (const list of cells) {
+				for (const cell of list) {
+					if (!layout.has(cell.sheet)) add(cell.sheet, cell.row, cell.col)
+				}
+			}
+		})
+		const extents: { sheet: number; rowCount: number; colCount: number }[] = []
 
-		return { type: "sheets", sheets, styles: this.views.styles.styles, state: this.history.state() }
+		for (const index of reached) {
+			const sheet = worksheets[index]
+
+			if (sheet !== undefined && !layout.has(index)) extents.push({ sheet: index, ...viewExtent(sheet) })
+		}
+
+		return {
+			type: "sheets",
+			sheets,
+			names: worksheets.map(sheet => sheet.name),
+			patches,
+			extents,
+			styles: this.views.styles.styles,
+			state: this.history.state()
+		}
 	}
+}
+
+// The sheets these cells are on.
+function sheetsOf(...lists: (readonly { sheet: number }[])[]): Set<number> {
+	const sheets = new Set<number>()
+
+	for (const list of lists) {
+		for (const cell of list) sheets.add(cell.sheet)
+	}
+
+	return sheets
+}
+
+// A sheet's extent as its full view reports it: the used area, widened to its longest row.
+function viewExtent(sheet: Sheet): { rowCount: number; colCount: number } {
+	const extent = sheetExtent(sheet)
+
+	// reduce() skips the holes a sparse row list may have, as the view's walk does.
+	return { rowCount: extent.rowCount, colCount: sheet.rows.reduce((width, row) => Math.max(width, row.length), extent.colCount) }
 }
 
 // A column's width in characters or a row's height in points, as the file holds it.

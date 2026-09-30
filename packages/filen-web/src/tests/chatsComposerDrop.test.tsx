@@ -104,6 +104,20 @@ describe("Composer — dropping files", () => {
 		expect(uploadAttachment).toHaveBeenCalledTimes(1)
 		expect(toastError).toHaveBeenCalledWith("Wait for the current attachment to finish uploading")
 	})
+
+	it("accepts the next drop once an upload has settled, and appends its link to the draft", async () => {
+		uploadAttachment.mockImplementation(() => Promise.resolve({ status: "success", url: "https://filen.io/d/link" }))
+
+		const root = renderComposer()
+
+		await dropFile(root)
+		await dropFile(root)
+
+		expect(uploadAttachment).toHaveBeenCalledTimes(2)
+		expect(toastError).not.toHaveBeenCalled()
+		expect(useChatComposerStore.getState().entries[CHAT.uuid]?.draft).toContain("https://filen.io/d/link")
+	})
+
 	it("refuses a second drop while the first one's quota pre-flight is still reading", async () => {
 		preflightAttachments.mockImplementationOnce(() => new Promise(() => undefined))
 

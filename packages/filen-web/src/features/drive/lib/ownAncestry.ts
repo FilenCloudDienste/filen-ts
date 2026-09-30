@@ -2,7 +2,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
 import { type ParentLookup } from "@filen/shared"
 import { ownDirectoryUuids } from "@/features/drive/components/moveTargetDialog.logic"
-import { queryClient } from "@/queries/client"
+import { cachedQueriesWithPrefix } from "@/queries/patch"
 
 // The user's own directory tree as the cached listings record it: a directory's parent is the listing
 // that holds it. My Drive's listings count, and so do nested Shared by me listings (the user's own
@@ -13,29 +13,15 @@ interface OwnListing {
 	directories: ReadonlySet<string>
 }
 
-// A listing is replaced, never mutated, so its index is built once per array.
-const directoryIndexes = new WeakMap<readonly DriveItem[], ReadonlySet<string>>()
-
-function directoriesIn(listing: readonly DriveItem[]): ReadonlySet<string> {
-	let index = directoryIndexes.get(listing)
-
-	if (index === undefined) {
-		index = ownDirectoryUuids(listing)
-		directoryIndexes.set(listing, index)
-	}
-
-	return index
-}
-
 function ownListings(): OwnListing[] {
 	const listings: OwnListing[] = []
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })) {
+	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
 		const { variant, uuid } = query.queryKey[2] as DriveListingParams
 		const data = query.state.data as readonly DriveItem[] | undefined
 
 		if (data !== undefined && (variant === "drive" || (variant === "sharedOut" && uuid !== null))) {
-			listings.push({ parent: uuid, directories: directoriesIn(data) })
+			listings.push({ parent: uuid, directories: ownDirectoryUuids(data) })
 		}
 	}
 

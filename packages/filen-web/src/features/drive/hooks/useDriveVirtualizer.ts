@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useElementSize } from "@/lib/useElementSize"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -35,29 +35,46 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 	const columns = columnsForWidth(containerWidth, TILE_WIDTH)
 	const rowCount = Math.ceil(items.length / columns)
 
-	const listVirtualizer = useVirtualizer({
-		count: items.length,
-		getScrollElement: () => scrollElement,
-		estimateSize: () => ROW_HEIGHT,
-		overscan: LIST_OVERSCAN,
-		// By row, not uuid: the Shared by me root lists one item once per receiver.
-		getItemKey: index => {
+	// By row, not uuid: the Shared by me root lists one item once per receiver. Memoized by hand
+	// (useVirtualizer opts this hook out of the React Compiler): the virtualizer re-lays every row when its
+	// key function changes, so it must change with the items and nothing else.
+	const getListItemKey = useCallback(
+		(index: number) => {
 			const item = items[index]
 
 			return item ? driveRowKey(item) : index
-		}
+		},
+		[items]
+	)
+
+	// Only the active virtualizer listens to the shared scroll element: an enabled inactive one would still
+	// re-render the whole listing on every change of its own visible range. The listbox element persists
+	// across a view toggle but a re-enabled instance does not read its offset on attach, so it starts from
+	// the element's current scrollTop.
+	const initialOffset = () => scrollElement?.scrollTop ?? 0
+
+	const listVirtualizer = useVirtualizer({
+		count: items.length,
+		enabled: viewMode === "list",
+		getScrollElement: () => scrollElement,
+		initialOffset,
+		estimateSize: () => ROW_HEIGHT,
+		overscan: LIST_OVERSCAN,
+		getItemKey: getListItemKey
 	})
 
+	// Keyed by index through the library's default key function, which unlike an inline one is stable.
 	const gridVirtualizer = useVirtualizer({
 		count: rowCount,
+		enabled: viewMode === "grid",
 		getScrollElement: () => scrollElement,
+		initialOffset,
 		estimateSize: () => TILE_ROW_HEIGHT,
 		overscan: GRID_OVERSCAN,
 		// The listbox's CSS padding shifts every row down by GRID_INSET, which the virtualizer's offsets
 		// do not know about: scrolling a row into view at the bottom has to clear that shift plus the
 		// bottom inset, or the row lands half-hidden.
-		scrollPaddingEnd: GRID_INSET * 2,
-		getItemKey: index => index
+		scrollPaddingEnd: GRID_INSET * 2
 	})
 
 	const activeVirtualizer = viewMode === "list" ? listVirtualizer : gridVirtualizer

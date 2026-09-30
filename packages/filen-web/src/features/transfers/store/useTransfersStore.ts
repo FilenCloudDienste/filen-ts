@@ -147,6 +147,8 @@ export interface TransfersStore {
 	// Transfer["paused"]'s own comment). Backs the active-row pause/resume toggle
 	// (features/transfers/lib/control.ts's setTransferPaused).
 	setPaused: (id: string, paused: boolean) => void
+	// setPaused for many rows in one update, so pause-all notifies subscribers once.
+	setPausedMany: (ids: ReadonlySet<string>, paused: boolean) => void
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
 	setItem: (id: string, item: DriveItem) => void
 	remove: (id: string) => void
@@ -190,7 +192,7 @@ export function hasSpeedSamples(state: Pick<TransfersStore, "speedSamples" | "ro
 	return state.speedSamples.length > 0 || Object.keys(state.rowSpeedSamples).length > 0
 }
 
-export const useTransfersStore = create<TransfersStore>(set => ({
+export const useTransfersStore = create<TransfersStore>((set, get) => ({
 	transfers: [],
 	speedSamples: [],
 	rowSpeedSamples: {},
@@ -198,8 +200,11 @@ export const useTransfersStore = create<TransfersStore>(set => ({
 		set(state => ({ transfers: [...state.transfers, { ...transfer, paused: false }] }))
 	},
 	setPaused: (id, paused) => {
+		get().setPausedMany(new Set([id]), paused)
+	},
+	setPausedMany: (ids, paused) => {
 		set(state => ({
-			transfers: state.transfers.map(transfer => (transfer.id === id ? { ...transfer, paused } : transfer))
+			transfers: state.transfers.map(transfer => (ids.has(transfer.id) ? { ...transfer, paused } : transfer))
 		}))
 	},
 	setProgress: (id, bytesTransferred) => {

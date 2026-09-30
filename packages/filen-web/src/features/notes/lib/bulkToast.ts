@@ -1,5 +1,5 @@
 import { toast } from "sonner"
-import { type Note } from "@filen/sdk-rs"
+import type { Note } from "@filen/sdk-rs"
 import { i18n } from "@/lib/i18n"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type BulkOutcome } from "@/lib/actions/bulk"

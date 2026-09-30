@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/react-query"
+import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import type { SocketEvent } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -29,6 +29,11 @@ function newEvent(): Extract<SocketEvent, { type: "general" }>["inner"] {
 	return { type: "newEvent", uuid: testUuid("evt"), eventType: "fileUploaded", timestamp: 1_700_000_000_000n, info: "{}" }
 }
 
+// Mounts the events list the way its screen does, with data fresh so mounting alone reads nothing.
+function mountEvents(queryFn: (context: { signal: AbortSignal }) => Promise<never[]>): () => void {
+	return new QueryObserver(testQueryClient, { queryKey: EVENTS_QUERY_KEY, queryFn, staleTime: Infinity }).subscribe(() => undefined)
+}
+
 beforeEach(() => {
 	testQueryClient.clear()
 	vi.clearAllMocks()
@@ -53,13 +58,67 @@ describe("general socket handlers", () => {
 		expect(logError).toHaveBeenCalledTimes(1)
 	})
 
-	it("newEvent refetches the events cache when it has already been loaded", () => {
+	it("newEvent marks a loaded but unmounted events cache stale without reading", () => {
 		testQueryClient.setQueryData(EVENTS_QUERY_KEY, [])
-		const invalidate = vi.spyOn(testQueryClient, "invalidateQueries")
 
 		handleGeneralEvent(generalEvt(newEvent()))
 
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: EVENTS_QUERY_KEY })
+		const query = testQueryClient.getQueryCache().find({ queryKey: EVENTS_QUERY_KEY, exact: true })
+
+		expect(query?.state.isInvalidated).toBe(true)
+		expect(query?.state.fetchStatus).toBe("idle")
+	})
+
+	it("newEvent refetches a mounted events list", async () => {
+		const queryFn = vi.fn(() => Promise.resolve([]))
+
+		testQueryClient.setQueryData(EVENTS_QUERY_KEY, [])
+		const unsubscribe = mountEvents(queryFn)
+
+		handleGeneralEvent(generalEvt(newEvent()))
+		await vi.waitFor(() => {
+			expect(testQueryClient.getQueryState(EVENTS_QUERY_KEY)?.fetchStatus).toBe("idle")
+		})
+
+		expect(queryFn).toHaveBeenCalledTimes(1)
+		unsubscribe()
+	})
+
+	// A burst must not restart the read in flight per event: it completes, then one read follows the last event.
+	it("newEvent joins a read in flight and reads once more after it, however many events arrive", async () => {
+		const pending: { signal: AbortSignal; resolve: (value: never[]) => void }[] = []
+		const queryFn = vi.fn(
+			({ signal }: { signal: AbortSignal }) =>
+				new Promise<never[]>(resolve => {
+					pending.push({ signal, resolve })
+				})
+		)
+
+		testQueryClient.setQueryData(EVENTS_QUERY_KEY, [])
+		const unsubscribe = mountEvents(queryFn)
+		const firstRead = testQueryClient.refetchQueries({ queryKey: EVENTS_QUERY_KEY, exact: true })
+
+		expect(queryFn).toHaveBeenCalledTimes(1)
+
+		for (let i = 0; i < 5; i++) {
+			handleGeneralEvent(generalEvt(newEvent()))
+		}
+
+		expect(queryFn).toHaveBeenCalledTimes(1)
+		pending[0]?.resolve([])
+		await firstRead
+		await vi.waitFor(() => {
+			expect(queryFn).toHaveBeenCalledTimes(2)
+		})
+
+		expect(pending[0]?.signal.aborted).toBe(false)
+		pending[1]?.resolve([])
+		await vi.waitFor(() => {
+			expect(testQueryClient.getQueryState(EVENTS_QUERY_KEY)?.fetchStatus).toBe("idle")
+		})
+
+		expect(queryFn).toHaveBeenCalledTimes(2)
+		unsubscribe()
 	})
 
 	it("newEvent is a no-op when the events list was never opened (no phantom refetch)", () => {

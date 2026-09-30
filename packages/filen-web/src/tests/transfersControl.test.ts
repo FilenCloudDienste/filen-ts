@@ -8,13 +8,15 @@ vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { cancelTransfer: sdkCancel, pauseTransfer: sdkPause, resumeTransfer: sdkResume }
 }))
 
-const { requestCopyCancel } = vi.hoisted(() => ({ requestCopyCancel: vi.fn() }))
-
-vi.mock("@/features/drive/lib/copy", () => ({ requestCopyCancel }))
-
-import { cancelActiveTransfers, cancelTransfer, setTransferPaused } from "@/features/transfers/lib/control"
+import {
+	cancelActiveTransfers,
+	cancelTransfer,
+	cancelTransfers,
+	setTransferPaused,
+	setTransfersPaused
+} from "@/features/transfers/lib/control"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import { makeTransfer } from "@/tests/fixtures/transfers"
 
@@ -136,12 +138,13 @@ describe("setTransferPaused(id, false)", () => {
 
 describe("copy transfers", () => {
 	it("cancels a copy keeping what it already copied", () => {
+		useCopyJobsStore.setState({ jobs: { c1: createCopyJob("c1", { uuid: null, name: "Cloud Drive" }, 1) } })
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "copying" })] })
 
 		cancelTransfer("c1")
 
-		expect(requestCopyCancel).toHaveBeenCalledWith("c1", { trashCopied: false })
-		expect(sdkCancel).not.toHaveBeenCalled()
+		expect(getCopyJob("c1")?.cancelRequest).toBe("keep")
+		expect(sdkCancel.mock.calls).toEqual([["c1"]])
 	})
 
 	it("pauses and resumes a copy through the copy job", () => {
@@ -164,7 +167,8 @@ describe("copy transfers", () => {
 		cancelTransfer("c1")
 		setTransferPaused("c1", true)
 
-		expect(requestCopyCancel).not.toHaveBeenCalled()
+		expect(sdkCancel).not.toHaveBeenCalled()
+		expect(getCopyJob("c1")?.cancelRequest ?? null).toBeNull()
 		expect(sdkPause).not.toHaveBeenCalled()
 	})
 
@@ -198,10 +202,81 @@ describe("cancelActiveTransfers", () => {
 				makeTransfer({ id: "done", direction: "upload", status: "done" })
 			]
 		})
+		useCopyJobsStore.setState({ jobs: { c: createCopyJob("c", { uuid: null, name: "Cloud Drive" }, 1) } })
 
 		cancelActiveTransfers()
 
-		expect(sdkCancel.mock.calls).toEqual([["u"], ["d"]])
-		expect(requestCopyCancel).toHaveBeenCalledWith("c", { trashCopied: false })
+		expect(sdkCancel.mock.calls).toEqual([["u"], ["d"], ["c"]])
+		expect(getCopyJob("c")?.cancelRequest).toBe("keep")
+	})
+})
+
+describe("setTransfersPaused / cancelTransfers", () => {
+	function seed(): void {
+		useCopyJobsStore.setState({
+			jobs: {
+				ended: { ...createCopyJob("ended", { uuid: null, name: "Cloud Drive" }, 1), outcome: { status: "cancelled" } },
+				c: createCopyJob("c", { uuid: null, name: "Cloud Drive" }, 1)
+			}
+		})
+		useTransfersStore.setState({
+			transfers: [
+				makeTransfer({ id: "u", direction: "upload", status: "uploading" }),
+				makeTransfer({ id: "done", direction: "upload", status: "done" }),
+				makeTransfer({ id: "d", direction: "download", status: "downloading" }),
+				makeTransfer({ id: "ended", direction: "copy", status: "copying" }),
+				makeTransfer({ id: "c", direction: "copy", status: "copying" })
+			]
+		})
+	}
+
+	it("pauses every eligible row in order with one store update, leaving the others as they were", () => {
+		seed()
+
+		const listener = vi.fn()
+		const unsubscribe = useTransfersStore.subscribe(listener)
+
+		setTransfersPaused(["c", "missing", "done", "ended", "u", "d"], true)
+		unsubscribe()
+
+		expect(sdkPause.mock.calls).toEqual([["c"], ["u"], ["d"]])
+		expect(listener).toHaveBeenCalledTimes(1)
+		expect(useTransfersStore.getState().transfers.map(transfer => [transfer.id, transfer.paused])).toEqual([
+			["u", true],
+			["done", false],
+			["d", true],
+			["ended", false],
+			["c", true]
+		])
+
+		setTransfersPaused(["u", "d"], false)
+
+		expect(sdkResume.mock.calls).toEqual([["u"], ["d"]])
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.paused)).toEqual([false, false, false, false, true])
+	})
+
+	it("leaves the store untouched when no row is eligible", () => {
+		seed()
+
+		const before = useTransfersStore.getState().transfers
+		const listener = vi.fn()
+		const unsubscribe = useTransfersStore.subscribe(listener)
+
+		setTransfersPaused(["missing", "done", "ended"], true)
+		unsubscribe()
+
+		expect(sdkPause).not.toHaveBeenCalled()
+		expect(listener).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().transfers).toBe(before)
+	})
+
+	it("cancels every active row in order, a copy keeping what it made", () => {
+		seed()
+
+		cancelTransfers(["d", "done", "missing", "c", "u"])
+
+		expect(sdkCancel.mock.calls).toEqual([["d"], ["c"], ["u"]])
+		expect(getCopyJob("c")?.cancelRequest).toBe("keep")
+		expect(getCopyJob("ended")?.cancelRequest).toBeNull()
 	})
 })

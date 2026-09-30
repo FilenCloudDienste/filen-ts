@@ -2,7 +2,7 @@ import { useQueries, useQuery, type Query, type UseQueryResult } from "@tanstack
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
-import { cachedQuery, setQueryDataKeepInvalidated } from "@/queries/patch"
+import { cachedQueriesWithPrefix, cachedQuery, setQueryDataKeepInvalidated } from "@/queries/patch"
 // Whole-statement `import type` here too — sdk.worker.ts's own top-level code pulls in
 // @filen/sdk-rs as a real value import, same elision hazard as above.
 import type { ListDirectoryTarget, ItemInfoResult } from "@/workers/sdk.worker"
@@ -639,7 +639,7 @@ function patchedQueries(patches: readonly Patch[]): Query[] {
 
 	for (const patch of patches) {
 		if (patch.params === undefined) {
-			return queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })
+			return cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)
 		}
 
 		const id = listingId(patch.params.variant, patch.params.uuid)
@@ -996,7 +996,7 @@ export function driveListingQueryUpdateGlobal(change: ListingRowChange, where?: 
 // web keeps no worker-side item cache (mobile's fileUuidToNormalFile), so a listing row is the only full
 // shape at hand. `undefined` when no cached listing holds the uuid.
 export function findCachedListingItem(uuid: string): DriveItem | undefined {
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })) {
+	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
 		const found = (query.state.data as DriveItem[] | undefined)?.find(item => item.data.uuid === uuid)
 
 		if (found !== undefined) {
@@ -1020,7 +1020,7 @@ export function findOwnedListingItem(uuid: string): { item: DriveItem; current: 
 
 	let outdated: DriveItem | undefined
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })) {
+	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
 		const { variant, uuid: listingUuid } = (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2]
 		const current = !query.state.isInvalidated && listingsReadThisSession.has(listingId(variant, listingUuid))
 

@@ -4,21 +4,19 @@ import { asDirectoryOrFile, getSharerIdentity, isSharedRootDriveItem, lastModifi
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
 // Directories carry no real size on the item itself (synthetic 0n — see narrowItem in
-// @/features/drive/lib/item); their true recursive size lives only in the directorySizes map a caller
-// threads in from useDriveDirectorySizes. `directorySizes` is keyed by uuid and omitted entirely for
-// a directory whose size hasn't resolved yet — that renders as blank, mirroring filen-mobile's own
-// row (its Size component returns null while the query is pending, no loading indicator). A shared file
-// reads as a file, a shared directory as a directory (asDirectoryOrFile).
-export function formatItemSize(item: DriveItem, directorySizes?: ReadonlyMap<string, number>): string {
+// @/features/drive/lib/item); their true recursive size lives only in the useDriveDirectorySizes map, and
+// a caller passes this directory's entry as `directorySize`. Undefined (not resolved yet, or no map at
+// all) renders as blank, mirroring filen-mobile's own row (its Size component returns null while the
+// query is pending, no loading indicator). A shared file reads as a file, a shared directory as a
+// directory (asDirectoryOrFile).
+export function formatItemSize(item: DriveItem, directorySize?: number): string {
 	const base = asDirectoryOrFile(item)
 
 	if (base.type === "file") {
 		return formatBytes(Number(base.data.size))
 	}
 
-	const size = directorySizes?.get(item.data.uuid)
-
-	return size !== undefined ? formatBytes(size) : ""
+	return directorySize !== undefined ? formatBytes(directorySize) : ""
 }
 
 export function formatModifiedDate(item: DriveItem): string {
@@ -44,8 +42,14 @@ export function formatUploadedDate(item: DriveItem): string {
 // The versions panel's own per-row label. Unlike formatModifiedDate/formatCreatedDate this includes
 // the time of day: a file's version history can carry several entries from the same calendar day
 // (autosave, rapid re-uploads), where a date-only label would leave them indistinguishable.
+// Compiled once: toLocaleString with options builds a new formatter per call, and this runs per row.
+const VERSION_TIMESTAMP = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
+
 export function formatVersionTimestamp(timestamp: bigint): string {
-	return new Date(Number(timestamp)).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+	const date = new Date(Number(timestamp))
+
+	// DateTimeFormat.format throws on an Invalid Date where toLocaleString returned a label.
+	return Number.isNaN(date.getTime()) ? date.toLocaleString() : VERSION_TIMESTAMP.format(date)
 }
 
 // The shared counterparty a listing row/tile shows as a muted secondary segment on the two shared

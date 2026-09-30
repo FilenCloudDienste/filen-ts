@@ -9,7 +9,8 @@ import {
 	isMoveConfirmDisabled,
 	isMoveDestinationForbidden,
 	isMoveNoOp,
-	isMoveRowDisabled
+	isMoveRowDisabled,
+	ownDirectoryUuids
 } from "@/features/drive/components/moveTargetDialog.logic"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -75,6 +76,21 @@ function sharedOutNestedDir(uuid: string): DriveItem {
 
 	return narrowItem(dir)
 }
+
+describe("ownDirectoryUuids", () => {
+	it("builds one set per array, so a row or dragover asking again doesn't rescan the payload", () => {
+		const items = [dirItem("a"), fileItem("f"), sharedOutRootDir("s")]
+		const uuids = ownDirectoryUuids(items)
+
+		expect([...uuids]).toEqual([testUuid("a"), testUuid("s")])
+		expect(ownDirectoryUuids(items)).toBe(uuids)
+
+		const copy = items.slice()
+
+		expect(ownDirectoryUuids(copy)).not.toBe(uuids)
+		expect([...ownDirectoryUuids(copy)]).toEqual([...uuids])
+	})
+})
 
 describe("isMoveDestinationForbidden", () => {
 	it("root (empty ancestry) is never forbidden, even with moved items present", () => {

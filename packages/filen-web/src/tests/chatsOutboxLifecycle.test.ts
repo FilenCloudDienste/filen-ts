@@ -334,6 +334,32 @@ describe("outbox transport — payloads cross as structured clones", () => {
 		expect(decoded?.chat.ownerId).toBe(7n)
 	})
 
+	it("skips the full-state broadcast until a peer is heard on the channel, and gates nothing else", async () => {
+		const leader = new BroadcastChannel("filen-web-test-outbox-peer")
+		const peer = new BroadcastChannel("filen-web-test-outbox-peer")
+		const post = vi.spyOn(leader, "postMessage")
+		const transport = makeOutboxChannelTransport<RemoteChatEnqueue, InflightChatMessages>(leader)
+		const heard = new Promise<void>(resolve => {
+			leader.onmessage = () => {
+				resolve()
+			}
+		})
+
+		transport.broadcastState({})
+		transport.broadcastLeaderHello()
+
+		expect(post.mock.calls).toEqual([[{ kind: "leaderHello" }]])
+
+		peer.postMessage({ kind: "stateRequest" } satisfies OutboxChannelMsg)
+		await heard
+		transport.broadcastState({})
+
+		closeOutbox(leader)
+		closeOutbox(peer)
+
+		expect(post.mock.calls).toEqual([[{ kind: "leaderHello" }], [{ kind: "state", payload: {} }]])
+	})
+
 	it("an invalid payload is dropped, never thrown", () => {
 		expect(decodeOutboxPayload({ chat: "nope" }, remoteChatEnqueueSchema, "forwarded send")).toBeNull()
 		expect(decodeOutboxPayload("a string", remoteChatEnqueueSchema, "forwarded send")).toBeNull()

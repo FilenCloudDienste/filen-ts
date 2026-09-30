@@ -77,9 +77,9 @@ export function noteTitleMatchesSearch(note: Note, normalizedSearch: string): bo
 
 // Search filter over title + full decrypted body (mirrors mobile's filterNoteListItemsBySearchQuery
 // parity: matches title + eagerly-fetched content, not just a short summary). `bodies` is the
-// uuid-keyed map useNoteSearchBodies.ts eagerly fetches ONLY while a search is active (opt-in, per its
-// own doc comment) — a note absent from the map (fetch still in flight, or the caller never wired
-// bodies through at all) falls back to `preview`, the SDK's own short summary of the same content, so a
+// uuid-keyed map of ALREADY-LOWERCASED bodies useNoteSearchBodies.ts eagerly fetches ONLY while a
+// search is active (opt-in, per its own doc comment) — a note absent from the map (fetch still in
+// flight, or the caller never wired bodies through at all) falls back to `preview`, the SDK's own short summary of the same content, so a
 // body-only match briefly reads as "not found" rather than crashing or matching everything. Empty/
 // whitespace query returns the list unchanged, same as mobile.
 export function filterNotesBySearch(notes: readonly Note[], search: string, bodies?: ReadonlyMap<string, string | undefined>): Note[] {
@@ -94,10 +94,9 @@ export function filterNotesBySearch(notes: readonly Note[], search: string, bodi
 			return true
 		}
 
-		const body = bodies?.get(note.uuid)
-		const bodyText = body ?? note.preview
+		const bodyText = bodies?.get(note.uuid) ?? note.preview?.toLowerCase()
 
-		return bodyText?.toLowerCase().includes(normalized) ?? false
+		return bodyText?.includes(normalized) ?? false
 	})
 }
 

@@ -1,5 +1,5 @@
 import type { Type } from "arktype"
-import { storageRole, onStorageLeadershipChange } from "@/lib/storage/leader"
+import { storageRole, onStorageLeadershipChange, storageHasPeers } from "@/lib/storage/leader"
 import { storage } from "@/lib/storage/adapter"
 import { decodeValue } from "@/lib/storage/decode"
 
@@ -42,9 +42,8 @@ export type OutboxChannelMsg =
 	| { kind: "answered"; id: string; choice?: AnswerChoice }
 
 // The domain-agnostic transport a Sync class depends on: E is the follower's forwarded-edit shape, S the
-// leader's broadcast-state shape. Both cross the channel as structured clones, which carry bigint as is. A
-// single-tab install attaches NO transport, so every method is a guarded no-op in the Sync class and the
-// leader path stays byte-identical.
+// leader's broadcast-state shape. Both cross the channel as structured clones, which carry bigint as is. The
+// transport is always attached; a lone tab only skips the full-state broadcast (see broadcastState below).
 export interface OutboxChannelTransport<E, S> {
 	// follower → leader
 	sendEnqueue: (msg: E) => void
@@ -70,6 +69,14 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		channel.postMessage(msg)
 	}
 
+	// Registered before the coordinator's onmessage, so a follower's stateRequest marks a peer before it is
+	// answered.
+	let channelPeerSeen = false
+
+	channel.addEventListener("message", () => {
+		channelPeerSeen = true
+	})
+
 	return {
 		sendEnqueue: msg => {
 			post({ kind: "enqueue", payload: msg })
@@ -83,8 +90,12 @@ export function makeOutboxChannelTransport<E, S>(channel: BroadcastChannel): Out
 		requestState: () => {
 			post({ kind: "stateRequest" })
 		},
+		// The whole outbox, cloned and sent to the browser process even when no tab listens: skipped until a
+		// peer has been heard on the db RPC channel or this one. Every follower requests state on start.
 		broadcastState: state => {
-			post({ kind: "state", payload: state })
+			if (channelPeerSeen || storageHasPeers()) {
+				post({ kind: "state", payload: state })
+			}
 		},
 		broadcastLeaderHello: () => {
 			post({ kind: "leaderHello" })

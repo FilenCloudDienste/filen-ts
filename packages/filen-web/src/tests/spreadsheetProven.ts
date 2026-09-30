@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { openXlsx, writeXlsx, type RoundtripWorkbook } from "hucre/xlsx"
 import type { Cell, CellValue, Workbook } from "hucre"
-import type { EditResult } from "@/features/spreadsheet/lib/edits"
+import type { CellPatch, EditResult } from "@/features/spreadsheet/lib/edits"
 import { cellKey, type CellView } from "@/features/spreadsheet/lib/model"
 import { XlsxDocument } from "@/features/spreadsheet/lib/xlsxDocument"
 
@@ -41,13 +41,23 @@ export function formula(text: string, result: CellValue = null): Cell {
 	return { value: result, type: "formula", formula: text, formulaResult: result }
 }
 
-// A cell as an edit result carries it; undefined when the result does not.
+function patchedCell(patches: readonly CellPatch[] | undefined, row: number, col: number, sheet: number): CellView | null | undefined {
+	return patches?.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
+}
+
+// A cell as an edit result carries it, in a sheet's view or a patch; undefined when the result does not.
 export function viewCell(result: EditResult, row: number, col: number, sheet = 0): CellView | null | undefined {
 	if (result.type === "cells") {
-		return result.patches.find(patch => patch.sheet === sheet)?.cells.find(([key]) => key === cellKey(row, col))?.[1]
+		return patchedCell(result.patches, row, col, sheet)
 	}
 
-	return result.type === "sheets" ? result.sheets[sheet]?.cells.get(cellKey(row, col)) : undefined
+	if (result.type !== "sheets") {
+		return undefined
+	}
+
+	const view = result.sheets[sheet]
+
+	return view === null || view === undefined ? patchedCell(result.patches, row, col, sheet) : view.cells.get(cellKey(row, col))
 }
 
 export function shownCell(document: XlsxDocument, row: number, col: number, sheet = 0): CellView | undefined {

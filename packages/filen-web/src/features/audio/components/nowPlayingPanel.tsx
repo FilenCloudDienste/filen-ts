@@ -21,6 +21,7 @@ export function NowPlayingPanel() {
 	const { queue, currentIndex, coverUrlsByUuid } = useAudioQueue()
 	const status = useAudioStore(state => state.status)
 	const lastError = useAudioError()
+	const removeLabel = t("removeFromQueue")
 
 	return (
 		<div className="flex max-h-[min(60vh,28rem)] flex-col overflow-hidden">
@@ -45,61 +46,88 @@ export function NowPlayingPanel() {
 			</div>
 			<ul className="-mx-1 flex min-h-0 flex-col overflow-y-auto">
 				{queue.map((queueTrack, index) => (
-					<li
+					<QueueRow
 						key={queueTrack.uuid}
-						className={cn("group/qrow flex items-center gap-2 rounded-lg px-1 pr-1.5", index === currentIndex && "bg-muted")}
-					>
-						<button
-							type="button"
-							aria-current={index === currentIndex ? "true" : undefined}
-							className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left focus-ring-row outline-none"
-							onClick={() => {
-								void audioEngine.playIndex(index)
-							}}
-						>
-							{/* Leading slot: the current row shows loading/error state; any row with a cached cover
-							    shows a thumb (cached-only — never triggers a fetch); everything else is the plain
-							    track number. */}
-							{index === currentIndex && status === "loading" ? (
-								<Spinner className="size-4 shrink-0 text-primary" />
-							) : index === currentIndex && lastError !== null ? (
-								<AlertCircle className="size-4 shrink-0 text-destructive" />
-							) : coverUrlsByUuid[queueTrack.uuid] ? (
-								<img
-									src={coverUrlsByUuid[queueTrack.uuid]}
-									alt=""
-									className="size-5 shrink-0 rounded object-cover"
-								/>
-							) : (
-								<span
-									className={cn(
-										"w-5 shrink-0 text-right text-xs tabular-nums",
-										index === currentIndex ? "text-primary" : "text-muted-foreground"
-									)}
-								>
-									{index + 1}
-								</span>
-							)}
-							<QueueTrackTitle
-								track={queueTrack}
-								current={index === currentIndex}
-							/>
-						</button>
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							aria-label={t("removeFromQueue")}
-							className="shrink-0 opacity-0 transition-opacity group-hover/qrow:opacity-100 focus-visible:opacity-100"
-							onClick={() => {
-								void audioEngine.removeAt(index)
-							}}
-						>
-							<X />
-						</Button>
-					</li>
+						track={queueTrack}
+						index={index}
+						current={index === currentIndex}
+						loading={index === currentIndex && status === "loading"}
+						failed={index === currentIndex && lastError !== null}
+						coverUrl={coverUrlsByUuid[queueTrack.uuid]}
+						removeLabel={removeLabel}
+					/>
 				))}
 			</ul>
 		</div>
+	)
+}
+
+// Its own component with primitive props so a track change or cover mint re-renders only the rows
+// whose props changed, not every row of an unvirtualized queue.
+function QueueRow({
+	track,
+	index,
+	current,
+	loading,
+	failed,
+	coverUrl,
+	removeLabel
+}: {
+	track: QueueTrack
+	index: number
+	current: boolean
+	loading: boolean
+	failed: boolean
+	coverUrl: string | undefined
+	removeLabel: string
+}) {
+	return (
+		<li className={cn("group/qrow flex items-center gap-2 rounded-lg px-1 pr-1.5", current && "bg-muted")}>
+			<button
+				type="button"
+				aria-current={current ? "true" : undefined}
+				className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left focus-ring-row outline-none"
+				onClick={() => {
+					void audioEngine.playIndex(index)
+				}}
+			>
+				{/* Leading slot: the current row shows loading/error state; any row with a cached cover
+				    shows a thumb (cached-only — never triggers a fetch); everything else is the plain
+				    track number. */}
+				{loading ? (
+					<Spinner className="size-4 shrink-0 text-primary" />
+				) : failed ? (
+					<AlertCircle className="size-4 shrink-0 text-destructive" />
+				) : coverUrl ? (
+					<img
+						src={coverUrl}
+						alt=""
+						className="size-5 shrink-0 rounded object-cover"
+					/>
+				) : (
+					<span
+						className={cn("w-5 shrink-0 text-right text-xs tabular-nums", current ? "text-primary" : "text-muted-foreground")}
+					>
+						{index + 1}
+					</span>
+				)}
+				<QueueTrackTitle
+					track={track}
+					current={current}
+				/>
+			</button>
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				aria-label={removeLabel}
+				className="shrink-0 opacity-0 transition-opacity group-hover/qrow:opacity-100 focus-visible:opacity-100"
+				onClick={() => {
+					void audioEngine.removeAt(index)
+				}}
+			>
+				<X />
+			</Button>
+		</li>
 	)
 }
 

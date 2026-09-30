@@ -73,6 +73,14 @@ export interface ListingDisplayResult {
 	hiddenUuids: string[]
 }
 
+const NO_HIDDEN_UUIDS: string[] = []
+
+function collectHiddenUuids(resolved: DriveItem[], shownItems: DriveItem[]): string[] {
+	const shown = new Set(shownItems.map(item => item.data.uuid))
+
+	return resolved.filter(item => !shown.has(item.data.uuid)).map(item => item.data.uuid)
+}
+
 // Two ordered stages: (1) resolve ORDER — the search arm's convergence gate + sort, or the plain
 // sort; (2) hide. Never the reverse. resolveSearchDisplayItems only sorts once `total <=
 // results.length` (the whole match set is in hand); handing it a pre-hidden array while `total` still
@@ -97,8 +105,8 @@ export function resolveListingDisplayItems(input: {
 		hide: input.hide,
 		...(input.search !== undefined ? { searchParentPaths: input.search.parentPaths } : {})
 	})
-	const shown = new Set(items.map(item => item.data.uuid))
-	const hiddenUuids = resolved.filter(item => !shown.has(item.data.uuid)).map(item => item.data.uuid)
+	// filterHiddenItems returns its input array only when hiding is off, so nothing was removed.
+	const hiddenUuids = items === resolved ? NO_HIDDEN_UUIDS : collectHiddenUuids(resolved, items)
 
 	return { items, resolvedCount: resolved.length, hiddenCount: hiddenUuids.length, hiddenUuids }
 }

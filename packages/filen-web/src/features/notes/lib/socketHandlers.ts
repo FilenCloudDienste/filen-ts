@@ -2,6 +2,7 @@ import { hashNoteContent, newestEntry, run } from "@filen/shared"
 import type { SocketEvent, Note } from "@filen/sdk-rs"
 import { registerSocketHandler, decryptedOrSkip } from "@/lib/sdk/socket"
 import { queryClient } from "@/queries/client"
+import { cancelCached, invalidateCached } from "@/queries/patch"
 import { log } from "@/lib/log"
 import { accountQueryGet } from "@/queries/account"
 import { useNotesInflightStore, endEditingSession, type InflightEntry } from "@/features/notes/store/useNotesInflight"
@@ -112,6 +113,17 @@ export function handleNoteEvent(event: NoteSocketEvent): void {
 		}
 
 		case "new": {
+			// A note this account owns that is already listed was written by its own confirmed create,
+			// import or duplicate (or read after it), and later changes arrive as their own events: a re-list
+			// learns nothing. Someone else's cached row may be the leftover of a removal (participantRemoved
+			// keeps it), which a re-share announces again, so that still reads.
+			const cached = notesQueryFind(inner.note)
+			const userId = accountQueryGet()?.id
+
+			if (cached !== undefined && userId !== undefined && cached.ownerId === userId) {
+				break
+			}
+
 			// The payload is sparse (`{ note: uuid }`, no Note), so a list read is the only source of the
 			// row. It runs through the query, never out of band: a write landing while it is in flight
 			// (createNote's own upsert, the type and title edits that follow a create elsewhere) replaces it
@@ -353,7 +365,7 @@ async function loadTheirs(note: Note, choice: AnswerChoice): Promise<void> {
 			log.warn("notes", "remote-edit reload: outbox flush failed", note.uuid)
 		}
 
-		void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
+		cancelCached(contentKey)
 		queryClient.setQueryData<string>(contentKey, theirs)
 		useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid, choice)
 
@@ -368,7 +380,7 @@ async function loadTheirs(note: Note, choice: AnswerChoice): Promise<void> {
 
 	useNotesRemoteEditStore.getState().clearRemoteEdited(note.uuid, choice)
 
-	void queryClient.invalidateQueries({ queryKey: contentKey })
+	invalidateCached(contentKey)
 }
 
 async function readTheirs(note: Note): Promise<string | undefined> {

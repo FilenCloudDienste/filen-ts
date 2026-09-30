@@ -23,6 +23,56 @@ export interface AddPlaylistTracksDialogProps {
 	onClose: () => void
 }
 
+interface AddTrackRowProps {
+	item: DriveItem
+	alreadyAdded: boolean
+	selected: boolean
+	disabled: boolean
+	alreadyAddedLabel: string
+	onDescend: (uuid: string) => void
+	onToggle: (item: DriveItem) => void
+}
+
+// Its own component so a selection toggle re-renders only the toggled row, not the whole unvirtualized list.
+function AddTrackRow({ item, alreadyAdded, selected, disabled, alreadyAddedLabel, onDescend, onToggle }: AddTrackRowProps) {
+	return (
+		<li>
+			<button
+				type="button"
+				disabled={disabled}
+				onClick={() => {
+					if (item.type === "directory") {
+						onDescend(item.data.uuid)
+						return
+					}
+
+					onToggle(item)
+				}}
+				aria-pressed={item.type === "file" ? selected : undefined}
+				className={cn(PICKER_ROW_CLASS, selected && "bg-accent/70 text-accent-foreground")}
+			>
+				{item.type === "directory" ? (
+					<DirectoryGlyph
+						color={item.data.color}
+						className="size-4 shrink-0"
+					/>
+				) : (
+					<ItemIcon
+						item={item}
+						className="size-4 shrink-0"
+					/>
+				)}
+				<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
+				{alreadyAdded ? (
+					<span className="shrink-0 text-xs text-muted-foreground">{alreadyAddedLabel}</span>
+				) : selected ? (
+					<CheckIcon className="size-4 shrink-0 text-primary" />
+				) : null}
+			</button>
+		</li>
+	)
+}
+
 // Drive audio-file picker for "Add tracks", built on directoryPicker.tsx like the move and chat-attach
 // pickers. Unlike those two single-purpose pickers, selection here is MULTI and persists
 // across navigation — a directory row descends, an audio-file row toggles into a Map keyed by uuid (not
@@ -40,6 +90,7 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 	const browsable = rows.filter(item => item.type === "directory" || isAudioItem(item))
 	const filtered = filterDriveItemsByLocalSearch(browsable, filter)
 	const existingUuids = new Set(playlist.files.map(file => file.uuid))
+	const alreadyAddedLabel = t("alreadyInPlaylist")
 
 	function toggle(item: DriveItem): void {
 		setSelected(prev => {
@@ -120,44 +171,18 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 				>
 					{filtered.map(item => {
 						const alreadyAdded = item.type === "file" && existingUuids.has(item.data.uuid)
-						const isSelected = selected.has(item.data.uuid)
-						const disabled = item.data.undecryptable || alreadyAdded
 
 						return (
-							<li key={item.data.uuid}>
-								<button
-									type="button"
-									disabled={disabled}
-									onClick={() => {
-										if (item.type === "directory") {
-											descend(item.data.uuid)
-											return
-										}
-
-										toggle(item)
-									}}
-									aria-pressed={item.type === "file" ? isSelected : undefined}
-									className={cn(PICKER_ROW_CLASS, isSelected && "bg-accent/70 text-accent-foreground")}
-								>
-									{item.type === "directory" ? (
-										<DirectoryGlyph
-											color={item.data.color}
-											className="size-4 shrink-0"
-										/>
-									) : (
-										<ItemIcon
-											item={item}
-											className="size-4 shrink-0"
-										/>
-									)}
-									<span className="min-w-0 flex-1 truncate">{driveItemName(item)}</span>
-									{alreadyAdded ? (
-										<span className="shrink-0 text-xs text-muted-foreground">{t("alreadyInPlaylist")}</span>
-									) : isSelected ? (
-										<CheckIcon className="size-4 shrink-0 text-primary" />
-									) : null}
-								</button>
-							</li>
+							<AddTrackRow
+								key={item.data.uuid}
+								item={item}
+								alreadyAdded={alreadyAdded}
+								selected={selected.has(item.data.uuid)}
+								disabled={item.data.undecryptable || alreadyAdded}
+								alreadyAddedLabel={alreadyAddedLabel}
+								onDescend={descend}
+								onToggle={toggle}
+							/>
 						)
 					})}
 				</PickerListShell>

@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { log } from "@/lib/log"
-import { isLockConflictError, opfsDirectory } from "@/lib/storage/opfs"
+import { cachedOpfsDirectory, forgetOpfsDirectory, isLockConflictError, isNotFoundError, opfsDirectory } from "@/lib/storage/opfs"
 import { planSizeCapEviction } from "@filen/shared"
 import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_GENERATION, THUMB_EXT, type ThumbCacheEntry } from "@/features/drive/lib/thumbnails.logic"
 
@@ -17,8 +17,20 @@ import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_GENERATION, THUMB_EXT, type ThumbCache
 // Anything else that fails after the handle is acquired (write/flush/quota) propagates, so the
 // caller's own defensive wrapping (see sdk.worker.ts's makeThumbnail/storeThumbnail) logs it once.
 export async function writeThumb(uuid: string, bytes: Uint8Array): Promise<void> {
-	const dir = await opfsDirectory(THUMB_DIR)
-	const fileHandle = await dir.getFileHandle(`${uuid}${THUMB_EXT}`, { create: true })
+	const name = `${uuid}${THUMB_EXT}`
+	let fileHandle: FileSystemFileHandle
+
+	try {
+		fileHandle = await (await cachedOpfsDirectory(THUMB_DIR)).getFileHandle(name, { create: true })
+	} catch (e) {
+		if (!isNotFoundError(e)) {
+			throw e
+		}
+
+		// The memoized directory was removed since (logout wipe, cleared site data): walk again, re-creating it.
+		forgetOpfsDirectory(THUMB_DIR)
+		fileHandle = await (await cachedOpfsDirectory(THUMB_DIR)).getFileHandle(name, { create: true })
+	}
 
 	let handle: FileSystemSyncAccessHandle
 

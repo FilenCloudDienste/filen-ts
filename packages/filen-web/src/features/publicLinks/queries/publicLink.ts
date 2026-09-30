@@ -1,7 +1,7 @@
 import { useQuery, type QueryFunction, type QueryFunctionContext, type QueryKey, type UseQueryResult } from "@tanstack/react-query"
 import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPublicLink, DirSizeResponse } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { queryClient } from "@/queries/client"
+import { cachedQueriesWithPrefix } from "@/queries/patch"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
 import { isNetworkClassError } from "@/lib/sdk/retry"
@@ -128,17 +128,13 @@ export function usePublicVisitorSignedIn(): UseQueryResult<boolean> {
 // An owned drive listing already in the cache that holds the item. "sharedIn" lists other people's
 // items, so it never proves ownership.
 function isInCachedOwnedListing(uuid: string): boolean {
-	return queryClient
-		.getQueryCache()
-		.findAll({ queryKey: DRIVE_LISTING_KEY_PREFIX })
-		.some(query => {
-			const params = query.queryKey[2] as DriveListingParams | undefined
+	return cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX).some(query => {
+		const params = query.queryKey[2] as DriveListingParams | undefined
 
-			return (
-				params?.variant !== "sharedIn" &&
-				(query.state.data as DriveItem[] | undefined)?.some(item => item.data.uuid === uuid) === true
-			)
-		})
+		return (
+			params?.variant !== "sharedIn" && (query.state.data as DriveItem[] | undefined)?.some(item => item.data.uuid === uuid) === true
+		)
+	})
 }
 
 // Whether "Save to Cloud Drive" applies: the visitor is signed in and the link isn't their own. An owned

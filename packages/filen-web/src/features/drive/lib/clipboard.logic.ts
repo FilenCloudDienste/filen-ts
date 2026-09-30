@@ -29,24 +29,10 @@ export interface PasteTarget {
 	online: boolean
 }
 
-// Every row's menu asks on each render, so an entry's directories are derived once.
-const entryDirectories = new WeakMap<DriveClipboardEntry, ReadonlySet<string>>()
-
-function directoriesOf(entry: DriveClipboardEntry): ReadonlySet<string> {
-	let directories = entryDirectories.get(entry)
-
-	if (directories === undefined) {
-		directories = ownDirectoryUuids(entry.items)
-		entryDirectories.set(entry, directories)
-	}
-
-	return directories
-}
-
 // A copied or cut directory can't land in itself or below it. Beyond what the route proves, the chain
 // is walked, and one that can't be resolved is refused.
 function isIntoOwnSubtree(entry: DriveClipboardEntry, target: Pick<PasteTarget, "uuid" | "ancestry" | "readParents">): boolean {
-	const directories = directoriesOf(entry)
+	const directories = ownDirectoryUuids(entry.items)
 
 	if (directories.size === 0 || target.uuid === null) {
 		return false

@@ -27,7 +27,7 @@ function mockChat(overrides: Partial<Chat> = {}): Chat {
 }
 
 function content(chat: Chat, text: string) {
-	return createElement(MessageContent, { chat, segments: segmentMessage(text) })
+	return createElement(MessageContent, { participants: chat.participants, segments: segmentMessage(text) })
 }
 
 // A custom-pack shortcode renders as its image, and a message that's entirely emoji

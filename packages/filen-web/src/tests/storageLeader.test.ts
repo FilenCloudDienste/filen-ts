@@ -162,7 +162,8 @@ describe("acquireStorage", () => {
 		const second = await openTab()
 		const acquired = second.acquireStorage()
 
-		await vi.advanceTimersByTimeAsync(250)
+		// No timer tick: the first handshake ping goes out immediately.
+		await vi.advanceTimersByTimeAsync(0)
 
 		const handle = await acquired
 
@@ -223,7 +224,7 @@ describe("acquireStorage", () => {
 		const handle = await (async () => {
 			const acquired = tab.acquireStorage()
 
-			await vi.advanceTimersByTimeAsync(250)
+			await vi.advanceTimersByTimeAsync(0)
 
 			return await acquired
 		})()
@@ -237,5 +238,62 @@ describe("acquireStorage", () => {
 		expect(handle.role).toBe("leader")
 		expect(tab.storageRole()).toBe("leader")
 		expect(promotions).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe("storageHasPeers", () => {
+	it("stays false for a lone leader", async () => {
+		const tab = await openTab()
+
+		await tab.acquireStorage()
+		await vi.advanceTimersByTimeAsync(1000)
+
+		expect(tab.storageHasPeers()).toBe(false)
+	})
+
+	it("turns true on the leader once a follower reaches it", async () => {
+		const first = await openTab()
+
+		await first.acquireStorage()
+
+		const second = await openTab()
+		const acquired = second.acquireStorage()
+
+		await vi.advanceTimersByTimeAsync(250)
+		await acquired
+
+		expect(first.storageHasPeers()).toBe(true)
+	})
+
+	it("is already true when a promoted follower announces leadership", async () => {
+		const release = locks.holdExternally()
+		const leaderChannel = new FakeChannel("filen-web-db-rpc")
+
+		leaderChannel.onmessage = (ev: MessageEvent<{ kind: string }>) => {
+			if (ev.data.kind === "leader?") {
+				leaderChannel.postMessage({ kind: "leader-ready" })
+			}
+		}
+
+		const tab = await openTab()
+		const seen: [string | null, boolean][] = []
+
+		tab.onStorageLeadershipChange(() => {
+			seen.push([tab.storageRole(), tab.storageHasPeers()])
+		})
+
+		const acquired = tab.acquireStorage()
+
+		await vi.advanceTimersByTimeAsync(250)
+		await acquired
+
+		leaderChannel.close()
+		release()
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(seen).toEqual([
+			["follower", false],
+			["leader", true]
+		])
 	})
 })

@@ -1,8 +1,15 @@
-import { useQuery, type QueryKey, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
-import { cachedQuery, cancelInFlightIfCached, setQueryDataKeepInvalidated } from "@/queries/patch"
+import {
+	cachedQueriesWithPrefix,
+	cachedQuery,
+	cancelInFlightIfCached,
+	invalidateJoiningInFlight,
+	isReadAgainQueued,
+	setQueryDataKeepInvalidated
+} from "@/queries/patch"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isPhotoItem } from "@/features/photos/lib/predicate"
 import { sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
@@ -132,7 +139,7 @@ export function photosListingQueryUpdate(rootUuid: string, updater: (prev: Photo
 	queryClient.setQueryData<PhotosListing>(queryKey, prev => (prev === undefined ? prev : { ...prev, photos: updater(prev.photos) }))
 
 	// A queued rewalk already walks again once the cancelled one settles.
-	if (walking && query.isActive() && !rewalkQueued.has(query.queryHash)) {
+	if (walking && query.isActive() && !isReadAgainQueued(query)) {
 		void queryClient.invalidateQueries({ queryKey, exact: true })
 	} else if (refreshPending) {
 		query.invalidate()
@@ -155,7 +162,7 @@ export function patchPhotosFavorite(item: DriveItem): void {
 		flips.set(item.data.uuid, item.data.favorited)
 	}
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: PHOTOS_LISTING_KEY_PREFIX })) {
+	for (const query of cachedQueriesWithPrefix(PHOTOS_LISTING_KEY_PREFIX)) {
 		const listing = query.state.data as PhotosListing | undefined
 
 		if (listing === undefined) {
@@ -192,7 +199,7 @@ export interface PhotosEventScope {
 export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 	const seq = ++photosEventSeq
 
-	for (const query of queryClient.getQueryCache().findAll({ queryKey: PHOTOS_LISTING_KEY_PREFIX })) {
+	for (const query of cachedQueriesWithPrefix(PHOTOS_LISTING_KEY_PREFIX)) {
 		const queryKey = query.queryKey
 		const rootUuid = queryKey[2]
 		const photos = queryClient.getQueryData<PhotosListing>(queryKey)?.photos
@@ -200,18 +207,12 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 		// Read at call time: a scope check resolving later may find a walk already under way. An inactive
 		// listing is only marked, on the query itself rather than through a filter that scans the cache.
 		const invalidate = (): void => {
-			if (query.state.fetchStatus !== "idle") {
-				// A walk that began after this event arrived already reads what it changed.
-				if (typeof rootUuid === "string" && (walkStartSeq.get(rootUuid) ?? -1) >= seq) {
-					return
-				}
-
-				rewalkAfterCurrentWalk(query.queryHash, queryKey)
-			} else if (query.isActive()) {
-				void queryClient.invalidateQueries({ queryKey, exact: true })
-			} else {
-				query.invalidate()
+			// A walk that began after this event arrived already reads what it changed.
+			if (query.state.fetchStatus !== "idle" && typeof rootUuid === "string" && (walkStartSeq.get(rootUuid) ?? -1) >= seq) {
+				return
 			}
+
+			invalidateJoiningInFlight(query)
 		}
 
 		if (query.state.fetchStatus !== "idle") {
@@ -266,25 +267,6 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 			}
 		}, invalidate)
 	}
-}
-
-// A walk in flight may predate the event, so it walks once more after it settles — once, however many
-// events arrive meanwhile. Restarting it per event instead would never let a walk finish while a copy
-// under the root streams its files in.
-const rewalkQueued = new Set<string>()
-
-function rewalkAfterCurrentWalk(queryHash: string, queryKey: QueryKey): void {
-	if (rewalkQueued.has(queryHash)) {
-		return
-	}
-
-	rewalkQueued.add(queryHash)
-
-	void queryClient.refetchQueries({ queryKey, exact: true }, { cancelRefetch: false }).finally(() => {
-		rewalkQueued.delete(queryHash)
-
-		void queryClient.invalidateQueries({ queryKey, exact: true })
-	})
 }
 
 // A dropped socket may have missed events: mark every listing stale without refetching while the socket

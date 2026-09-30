@@ -313,8 +313,10 @@ describe("dead-track prune (once per session)", () => {
 		const second = await fetchPlaylistEntries()
 		const secondOk = second.find(e => e.status === "ok")
 
-		// Second read within the SAME session: the guard skips the existence check entirely.
+		// Second read within the SAME session: the guard skips the existence check entirely, and the
+		// unchanged file uuid reuses the raw parse instead of downloading it again.
 		expect(getFile).not.toHaveBeenCalled()
+		expect(downloadFileBytes).toHaveBeenCalledTimes(1)
 		expect(secondOk?.status === "ok" ? secondOk.playlist.files.map(f => f.uuid) : null).toEqual(["alive", "dead"])
 	})
 })

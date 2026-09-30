@@ -11,7 +11,7 @@ export interface TileClickIntent {
 // point of a photos grid is browsing, so the FIRST click on a fresh grid should show the photo, not
 // merely highlight its tile. Once ANY selection exists (via a modifier-click or the row menu's own
 // "Select" entry — see itemActions.ts), the grid is in selection mode and a plain click reverts to
-// the web-wide convention instead: replace the selection with just this item (usePhotosSelection's
+// the web-wide convention instead: replace the selection with just this item (photosPointerSelect's
 // own plain-click branch), exactly matching how a plain click behaves on an already-selected drive
 // tile. A modifier held (shift/ctrl/cmd) ALWAYS builds/extends the selection regardless of whether
 // one is already active — the one case a click must never open the viewer, mirroring drive's own
@@ -46,7 +46,7 @@ export function previewOpenTarget(items: PhotoItem[], index: number): PreviewOpe
 
 // The items a shift-extended selection covers: everything between the anchor (or `index` itself when
 // there is no live anchor) and `index`, inclusive. One resolver for both entry points —
-// modifier-click (usePhotosSelection) and Shift+Arrow (usePhotosGridNav).
+// modifier-click (photosPointerSelect) and Shift+Arrow (usePhotosGridNav).
 export function photosRangeSelection(items: readonly PhotoItem[], anchorUuid: string | null, index: number): PhotoItem[] {
 	const anchorIndex = anchorUuid === null ? -1 : items.findIndex(existing => existing.data.uuid === anchorUuid)
 	const resolvedAnchor = anchorIndex === -1 ? index : anchorIndex

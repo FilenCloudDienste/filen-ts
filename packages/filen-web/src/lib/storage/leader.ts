@@ -27,6 +27,14 @@ export function storageRole(): "leader" | "follower" | null {
 // Subscribe to leadership changes (fires on promotion follower→leader). Returns an unsubscribe fn.
 export const onStorageLeadershipChange = leadershipListeners.subscribe
 
+// Whether another tab has ever reached this one's db storage: a follower pings and reads through the leader
+// before it can ask any outbox for state, and a promoted leader had older tabs queued ahead. Never reset.
+let peerSeen = false
+
+export function storageHasPeers(): boolean {
+	return peerSeen
+}
+
 function setStorageRole(role: "leader" | "follower"): void {
 	if (currentRole === role) {
 		return
@@ -129,6 +137,7 @@ function contendForLeadership(resolve: (handle: StorageHandle) => void, reject: 
 		const api = await becomeLeader()
 
 		if (handle) {
+			peerSeen = true
 			handle.role = "leader"
 			handle.api = api
 		} else {
@@ -187,6 +196,8 @@ function contendForLeadership(resolve: (handle: StorageHandle) => void, reject: 
 }
 
 async function serve(msg: Msg, remote: Comlink.Remote<StorageApi>, ch: BroadcastChannel): Promise<void> {
+	peerSeen = true
+
 	if (msg.kind === "leader?") {
 		ch.postMessage({ kind: "leader-ready" } satisfies Hello)
 		return
@@ -222,10 +233,6 @@ async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
 		}
 	})
 
-	const ping = setInterval(() => {
-		ch.postMessage({ kind: "leader?" } satisfies Hello)
-	}, 250)
-
 	ch.addEventListener("message", (ev: MessageEvent<Msg>) => {
 		if (ev.data.kind !== "res") {
 			return
@@ -245,6 +252,13 @@ async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
 			p.reject(ev.data.error ? deserializeError(ev.data.error) : new Error("db rpc failed"))
 		}
 	})
+
+	// The leader announces itself only once, on taking the lock, so ask now; the interval is only the retry.
+	ch.postMessage({ kind: "leader?" } satisfies Hello)
+
+	const ping = setInterval(() => {
+		ch.postMessage({ kind: "leader?" } satisfies Hello)
+	}, 250)
 
 	// Teardown must hang off THIS race, not off `ready` — on the 10s no-leader path the rejection
 	// comes from the race's own timer while `ready` (settled only by a leader-ready message) stays

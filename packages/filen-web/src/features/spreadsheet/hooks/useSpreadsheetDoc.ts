@@ -5,7 +5,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { gridDoc, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
-import { sniffSpreadsheetKind, spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
+import { closeSpreadsheet, openSpreadsheet, sniffSpreadsheetKind } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { spreadsheetFileKind, spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 
@@ -57,11 +57,10 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 		const kind = named ?? sniffSpreadsheetKind(source)
 		const copy = source.slice()
 
-		spreadsheetWorker()
-			.open(Comlink.transfer(copy, [copy.buffer]), kind)
+		openSpreadsheet(Comlink.transfer(copy, [copy.buffer]), kind)
 			.then(result => {
 				if (!live) {
-					void spreadsheetWorker().close(result.id)
+					closeSpreadsheet(result.id)
 
 					return
 				}
@@ -82,7 +81,7 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 			live = false
 
 			if (id !== null) {
-				void spreadsheetWorker().close(id)
+				closeSpreadsheet(id)
 			}
 		}
 	}, [source, named, format])

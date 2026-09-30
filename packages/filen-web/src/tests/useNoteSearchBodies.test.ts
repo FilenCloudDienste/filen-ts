@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { noteSearchBodyCandidates, buildNoteBodiesMap } from "@/features/notes/hooks/useNoteSearchBodies.logic"
 import { testUuid } from "@/tests/support/uuid"
-import { mockNote } from "@/tests/fixtures/notes"
+import { mockNote, undecryptableNote } from "@/tests/fixtures/notes"
 
 describe("noteSearchBodyCandidates", () => {
 	it("returns no candidates at all for a blank query — the whole opt-in gate", () => {
@@ -23,6 +23,13 @@ describe("noteSearchBodyCandidates", () => {
 		const b = mockNote({ uuid: testUuid("b"), title: "Beta" })
 
 		expect(noteSearchBodyCandidates([a, b], "zzz")).toEqual([a, b])
+	})
+
+	it("excludes an undecryptable note — its body read can only fail, so it searches its preview", () => {
+		const locked = undecryptableNote({ uuid: testUuid("locked") })
+		const readable = mockNote({ uuid: testUuid("readable"), title: "Unrelated" })
+
+		expect(noteSearchBodyCandidates([locked, readable], "zzz")).toEqual([readable])
 	})
 })
 

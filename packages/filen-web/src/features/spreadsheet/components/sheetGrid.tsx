@@ -190,6 +190,74 @@ function cellStyle(view: CellView, style: CellStyleView | undefined): CSSPropert
 	return css
 }
 
+interface GridCellProps {
+	col: number
+	top: number
+	left: number
+	width: number
+	height: number
+	view: CellView | undefined
+	style: CellStyleView | undefined
+	merged: boolean
+	selected: boolean
+	active: boolean
+	activeId: string
+	nameId: string
+	spill: number
+	editing: boolean
+	editorNode: ReactNode
+}
+
+// Every prop is a primitive or a stable reference, so the compiler hands back the same element for a cell
+// that did not change and React skips it on a scroll step, a selection move or an editor keystroke.
+function GridCell(props: GridCellProps): ReactNode {
+	const { col, top, left, width, height, view, style, merged, selected, active, activeId, nameId, spill, editing, editorNode } = props
+
+	return (
+		<div
+			id={active ? activeId : undefined}
+			role="gridcell"
+			aria-colindex={col + 2}
+			data-merged={merged ? "" : undefined}
+			aria-selected={selected}
+			aria-describedby={active ? nameId : undefined}
+			className={cn(
+				"absolute flex px-1.5 text-[13px] leading-tight",
+				spill > 0 || editing ? "overflow-visible" : "overflow-hidden",
+				editing && "z-10",
+				merged && "bg-background",
+				view?.error === true && "text-destructive"
+			)}
+			style={{
+				top,
+				left,
+				width: width - 1,
+				height: height - 1,
+				...(view === undefined ? {} : cellStyle(view, style))
+			}}
+		>
+			<span
+				className={cn(
+					spill > 0 ? "shrink-0" : "min-w-0",
+					style?.wrap === true ? "break-words whitespace-pre-wrap" : "truncate whitespace-pre"
+				)}
+				style={spill > 0 ? { maxWidth: width + spill - CELL_PADDING } : undefined}
+			>
+				{view?.text ?? ""}
+			</span>
+			{editing ? (
+				<div
+					data-cell-editor
+					className="absolute top-0 left-0 font-normal text-foreground not-italic"
+					style={{ minWidth: width, height }}
+				>
+					{editorNode}
+				</div>
+			) : null}
+		</div>
+	)
+}
+
 // A spreadsheet grid: column letters and row numbers, frozen panes, merged cells, and a selection moved by
 // mouse or keyboard. Rows and columns are windowed on both axes (only what is on screen, and a few past it,
 // is in the DOM), and the headers and frozen panes are sticky regions of one scrolling box, so they stay put
@@ -641,48 +709,24 @@ export function SheetGrid({
 			}
 
 			list.push(
-				<div
+				<GridCell
 					key={`c${String(col)}`}
-					id={isActive ? activeId : undefined}
-					role="gridcell"
-					aria-colindex={col + 2}
-					data-merged={merge === undefined ? undefined : ""}
-					aria-selected={rangeContains(range, row, col)}
-					aria-describedby={isActive ? nameId : undefined}
-					className={cn(
-						"absolute flex px-1.5 text-[13px] leading-tight",
-						spill > 0 || editing ? "overflow-visible" : "overflow-hidden",
-						editing && "z-10",
-						merge !== undefined && "bg-background",
-						view?.error === true && "text-destructive"
-					)}
-					style={{
-						top: rows.offset(row) - rowOrigin,
-						left: cols.offset(col) - colOrigin,
-						width: width - 1,
-						height: height - 1,
-						...(view === undefined ? {} : cellStyle(view, style))
-					}}
-				>
-					<span
-						className={cn(
-							spill > 0 ? "shrink-0" : "min-w-0",
-							style?.wrap === true ? "break-words whitespace-pre-wrap" : "truncate whitespace-pre"
-						)}
-						style={spill > 0 ? { maxWidth: width + spill - CELL_PADDING } : undefined}
-					>
-						{view?.text ?? ""}
-					</span>
-					{editing ? (
-						<div
-							data-cell-editor
-							className="absolute top-0 left-0 font-normal text-foreground not-italic"
-							style={{ minWidth: width, height }}
-						>
-							{editor.node}
-						</div>
-					) : null}
-				</div>
+					col={col}
+					top={rows.offset(row) - rowOrigin}
+					left={cols.offset(col) - colOrigin}
+					width={width}
+					height={height}
+					view={view}
+					style={style}
+					merged={merge !== undefined}
+					selected={rangeContains(range, row, col)}
+					active={isActive}
+					activeId={activeId}
+					nameId={nameId}
+					spill={spill}
+					editing={editing}
+					editorNode={editing ? editor.node : null}
+				/>
 			)
 		}
 

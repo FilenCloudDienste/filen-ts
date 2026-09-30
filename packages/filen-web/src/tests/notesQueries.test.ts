@@ -48,6 +48,7 @@ import {
 	notesQueryRemove,
 	notesQueryUpdate,
 	notesQueryUpsert,
+	useLiveNote,
 	useNotes
 } from "@/features/notes/queries/notes"
 import {
@@ -99,6 +100,34 @@ describe("useNotes", () => {
 		useNotes()
 
 		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ queryKey: NOTES_QUERY_KEY }))
+	})
+
+	it("keeps the default mount refetch unless opted out", () => {
+		useQuery.mockReturnValue({ status: "pending" })
+
+		useNotes()
+		useNotes({ refetchOnMount: false })
+
+		expect(useQuery).toHaveBeenNthCalledWith(1, expect.objectContaining({ refetchOnMount: true }))
+		expect(useQuery).toHaveBeenNthCalledWith(2, expect.objectContaining({ queryKey: NOTES_QUERY_KEY, refetchOnMount: false }))
+	})
+})
+
+describe("useLiveNote", () => {
+	it("subscribes without a mount refetch and resolves the live row", () => {
+		const initial = mockNote()
+		const live = { ...initial, title: "live" }
+		useQuery.mockReturnValue({ status: "success", data: [live] })
+
+		expect(useLiveNote(initial)).toBe(live)
+		expect(useQuery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ queryKey: NOTES_QUERY_KEY, refetchOnMount: false }))
+	})
+
+	it("falls back to the snapshot until the list has the row", () => {
+		const initial = mockNote()
+		useQuery.mockReturnValue({ status: "pending" })
+
+		expect(useLiveNote(initial)).toBe(initial)
 	})
 })
 

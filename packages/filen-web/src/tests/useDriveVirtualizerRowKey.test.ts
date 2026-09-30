@@ -39,4 +39,26 @@ describe("useDriveVirtualizer list keys", () => {
 
 		expect(result.current.listVirtualizer.options.getItemKey(0)).toBe(item.data.uuid)
 	})
+
+	// A new key function makes the virtualizer re-lay every row, so a render with the same items must
+	// keep it.
+	it("keeps each key function across renders until the items change", () => {
+		const items = [directoryItem("a")]
+		const { result, rerender } = renderHook(({ list }) => useDriveVirtualizer(list, "list"), { initialProps: { list: items } })
+		const listKey = result.current.listVirtualizer.options.getItemKey
+		const gridKey = result.current.gridVirtualizer.options.getItemKey
+
+		rerender({ list: items })
+
+		expect(result.current.listVirtualizer.options.getItemKey).toBe(listKey)
+		expect(result.current.gridVirtualizer.options.getItemKey).toBe(gridKey)
+		expect(gridKey(3)).toBe(3)
+
+		const next = [directoryItem("b")]
+
+		rerender({ list: next })
+
+		expect(result.current.listVirtualizer.options.getItemKey).not.toBe(listKey)
+		expect(result.current.listVirtualizer.options.getItemKey(0)).toBe(next[0]?.data.uuid)
+	})
 })

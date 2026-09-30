@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useLatestRef } from "@/lib/useLatestRef"
-import { spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
+import { withOpenSpreadsheet } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { applyEditResult, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import type { AxisEdit, DocState, EditOp, EditResult } from "@/features/spreadsheet/lib/edits"
 
@@ -53,9 +53,8 @@ export function useSpreadsheetEdits(
 				setState(result.state)
 				setPending(count => count - 1)
 
-				// A CSV is one sheet.
-				if (result.type === "sheets" && result.shift !== undefined) {
-					onShiftRef.current?.(0, result.shift)
+				if (result.type === "shifted") {
+					onShiftRef.current?.(result.sheet, result.shift)
 				}
 
 				return result
@@ -69,12 +68,15 @@ export function useSpreadsheetEdits(
 	}
 
 	async function snapshot(): Promise<SpreadsheetSnapshot> {
-		const { bytes, version } = await enqueue(() => spreadsheetWorker().serialize(id))
+		const { bytes, version } = await enqueue(() => withOpenSpreadsheet(id, (remote, workerId) => remote.serialize(workerId)))
 
 		return {
 			bytes,
 			commit: () => {
-				enqueue(() => spreadsheetWorker().markSaved(id, version)).then(setState, () => undefined)
+				enqueue(() => withOpenSpreadsheet(id, (remote, workerId) => remote.markSaved(workerId, version))).then(
+					setState,
+					() => undefined
+				)
 			}
 		}
 	}
@@ -89,9 +91,9 @@ export function useSpreadsheetEdits(
 		doc,
 		state,
 		pending: pending > 0,
-		apply: op => run(() => spreadsheetWorker().apply(id, op)),
-		undo: () => step(state.canUndo, () => spreadsheetWorker().undo(id)),
-		redo: () => step(state.canRedo, () => spreadsheetWorker().redo(id)),
+		apply: op => run(() => withOpenSpreadsheet<EditResult>(id, (remote, workerId) => remote.apply(workerId, op))),
+		undo: () => step(state.canUndo, () => withOpenSpreadsheet<EditResult>(id, (remote, workerId) => remote.undo(workerId))),
+		redo: () => step(state.canRedo, () => withOpenSpreadsheet<EditResult>(id, (remote, workerId) => remote.redo(workerId))),
 		snapshot
 	}
 }
@@ -117,9 +119,7 @@ export function useSpreadsheetWritability(
 			return
 		}
 
-		void spreadsheetWorker()
-			.viewOnly(id)
-			.catch(() => undefined)
+		void withOpenSpreadsheet(id, (remote, workerId) => remote.viewOnly(workerId)).catch(() => undefined)
 	}, [id, proven, neverEditable])
 
 	useEffect(() => {
@@ -129,20 +129,18 @@ export function useSpreadsheetWritability(
 
 		let live = true
 
-		spreadsheetWorker()
-			.writability(id)
-			.then(
-				writable => {
-					if (live) {
-						setVerdict(writable)
-					}
-				},
-				() => {
-					if (live) {
-						setVerdict(false)
-					}
+		withOpenSpreadsheet(id, (remote, workerId) => remote.writability(workerId)).then(
+			writable => {
+				if (live) {
+					setVerdict(writable)
 				}
-			)
+			},
+			() => {
+				if (live) {
+					setVerdict(false)
+				}
+			}
+		)
 
 		return () => {
 			live = false

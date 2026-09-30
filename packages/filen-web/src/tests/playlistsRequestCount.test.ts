@@ -31,7 +31,7 @@ vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/t
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import { markPlaylistsUnsynced, PLAYLISTS_QUERY_KEY, PLAYLISTS_STALE_TIME, usePlaylistsQuery } from "@/features/audio/queries/playlists"
-import { createPlaylist } from "@/features/audio/lib/playlists"
+import { createPlaylist, forgetPlaylistsDirectory } from "@/features/audio/lib/playlists"
 import { handlePlaylistsDriveEvent, registerPlaylistSocketHandlers } from "@/features/audio/lib/socketHandlers"
 import { socketBridge } from "@/lib/sdk/socket"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
@@ -43,6 +43,9 @@ const DOT_FILEN_UUID = testUuid("dotfilen")
 const PLAYLISTS_DIR_UUID = testUuid("playlistsdir")
 const FIRST_PLAYLIST_FILE_UUID = testUuid("pl1")
 const PLAYLIST_FILE_UUIDS = [FIRST_PLAYLIST_FILE_UUID, testUuid("pl2"), testUuid("pl3")]
+// The first playlist after an edit elsewhere, which rotates its file uuid.
+const EDITED_FILE_UUID = testUuid("pl1edited")
+const EDITED_FILE_UUIDS = [EDITED_FILE_UUID, testUuid("pl2"), testUuid("pl3")]
 
 function fakeDir(uuid: UuidStr): Dir {
 	return { uuid, meta: { type: "decoded", data: { name: uuid } }, timestamp: 0n, color: "default" } as Dir
@@ -124,8 +127,9 @@ beforeEach(() => {
 	downloadFileBytes.mockImplementation((file: SdkFile) => Promise.resolve(playlistBytes(file)))
 	uploadFileBytes.mockImplementation(() => Promise.resolve(fakeJsonFile(testUuid("ownsave"))))
 
-	// The sync markers are module state that outlives a test; a signal starts each one unsynced, as a
-	// page load does, under a live socket.
+	// The sync markers and the parsed-playlist memo are module state that outlives a test; each test
+	// starts from none, as a page load does, under a live socket.
+	forgetPlaylistsDirectory()
 	markPlaylistsUnsynced()
 	socketAuthenticated()
 })
@@ -161,7 +165,7 @@ describe("usePlaylistsQuery request counts", () => {
 		vi.setSystemTime(Date.now() + PLAYLISTS_STALE_TIME + 1)
 		await focus()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		expect(counts()).toEqual({ list: 2, download: 3 })
 	})
 
 	it("a read taken while the socket is down is read again on focus, and until it re-authenticates", async () => {
@@ -170,13 +174,13 @@ describe("usePlaylistsQuery request counts", () => {
 		await mountLoaded()
 		await focus()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		expect(counts()).toEqual({ list: 2, download: 3 })
 
 		socketAuthenticated()
 		await focus()
 		await focus()
 
-		expect(counts()).toEqual({ list: 3, download: 9 })
+		expect(counts()).toEqual({ list: 3, download: 3 })
 	})
 
 	it("a read a drop interrupts is read again on focus after re-authentication", async () => {
@@ -202,19 +206,21 @@ describe("usePlaylistsQuery request counts", () => {
 		await settle()
 		await focus()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		expect(counts()).toEqual({ list: 2, download: 3 })
 	})
 
 	it("a playlist that failed to download is retried on focus even after an earlier clean read", async () => {
 		vi.useFakeTimers({ toFake: ["Date"] })
 		await mountLoaded()
 
+		// Only an edited playlist (a new file uuid) is downloaded again, so that is where the failure lands.
+		listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: EDITED_FILE_UUIDS.map(uuid => fakeJsonFile(uuid)) }))
 		downloadFileBytes.mockImplementationOnce(() => Promise.reject(new Error("network blip")))
 		vi.setSystemTime(Date.now() + PLAYLISTS_STALE_TIME + 1)
 		await focus()
 		await focus()
 
-		expect(counts()).toEqual({ list: 3, download: 9 })
+		expect(counts()).toEqual({ list: 3, download: 5 })
 	})
 
 	it("still reads once per page load when the cache was restored from disk", async () => {
@@ -232,7 +238,20 @@ describe("usePlaylistsQuery request counts", () => {
 		await mountLoaded()
 		await focus()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		// Only the playlist that failed is downloaded again.
+		expect(counts()).toEqual({ list: 2, download: 4 })
+	})
+
+	it("downloads a playlist again only once an edit has given its file a new uuid", async () => {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		await mountLoaded()
+
+		listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: EDITED_FILE_UUIDS.map(uuid => fakeJsonFile(uuid)) }))
+		vi.setSystemTime(Date.now() + PLAYLISTS_STALE_TIME + 1)
+		await focus()
+
+		expect(counts()).toEqual({ list: 2, download: 4 })
+		expect(downloadFileBytes).toHaveBeenLastCalledWith(expect.objectContaining({ uuid: EDITED_FILE_UUID }), expect.any(String))
 	})
 
 	it("a playlist created elsewhere is read on the next focus, not while the list is open", async () => {
@@ -247,7 +266,7 @@ describe("usePlaylistsQuery request counts", () => {
 
 		await focus()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		expect(counts()).toEqual({ list: 2, download: 3 })
 	})
 
 	it.each<{ name: string; inner: DriveEvent }>([
@@ -265,7 +284,7 @@ describe("usePlaylistsQuery request counts", () => {
 		handlePlaylistsDriveEvent(driveEvent(inner))
 		await focus()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		expect(counts()).toEqual({ list: 2, download: 3 })
 	})
 
 	it.each<{ name: string; inner: DriveEvent }>([
@@ -318,7 +337,7 @@ describe("usePlaylistsQuery request counts", () => {
 		await settle()
 		await focus()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		expect(counts()).toEqual({ list: 2, download: 3 })
 	})
 
 	// Through the real bridge, so the registration's categories are what is under test.
@@ -337,7 +356,7 @@ describe("usePlaylistsQuery request counts", () => {
 		await focus()
 		unregister()
 
-		expect(counts()).toEqual({ list: 2, download: 6 })
+		expect(counts()).toEqual({ list: 2, download: 3 })
 	})
 
 	it("ignores this tab's own save echoing back", async () => {

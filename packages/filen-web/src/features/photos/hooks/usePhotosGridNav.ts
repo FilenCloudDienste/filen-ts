@@ -10,7 +10,7 @@ import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 interface UsePhotosGridNavParams {
 	items: PhotoItem[]
 	timeline: PhotosTimeline
-	virtualizer: Virtualizer<HTMLDivElement, Element>
+	virtualizer: Pick<Virtualizer<HTMLDivElement, Element>, "scrollToIndex">
 	anchorUuid: string | null
 	setAnchorUuid: (uuid: string | null) => void
 	onOpen: (index: number) => void
@@ -20,7 +20,7 @@ export interface PhotosGridNav {
 	safeActiveIndex: number
 	handleKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
-	// Cursor only — what a pointer click moves (the anchor stays owned by usePhotosSelection).
+	// Cursor only — what a pointer click moves (the anchor stays owned by photosPointerSelect).
 	setActive: (index: number) => void
 	// Cursor AND anchor — what a marquee drag-end moves, mirroring drive's own setCursor.
 	setCursor: (index: number) => void

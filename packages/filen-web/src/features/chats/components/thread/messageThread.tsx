@@ -139,6 +139,38 @@ function UnreadDivider({ chat }: { chat: Chat }) {
 	)
 }
 
+// ThreadList calls useVirtualizer, so the compiler skips it and every virtualizer notify rebuilds its row
+// elements. Compiled here, a row hands back its cached element and React skips the unchanged row subtree.
+function ThreadRowContent({
+	row,
+	chat,
+	currentUserId,
+	blocked
+}: {
+	row: ThreadRow
+	chat: Chat
+	currentUserId: bigint | undefined
+	blocked: BlockedUsers
+}) {
+	if (row.kind === "day") {
+		return <DaySeparator timestamp={row.timestamp} />
+	}
+
+	if (row.kind === "unread") {
+		return <UnreadDivider chat={chat} />
+	}
+
+	return (
+		<MessageRow
+			chat={chat}
+			message={row.message}
+			showHeader={row.showHeader}
+			currentUserId={currentUserId}
+			blocked={blocked}
+		/>
+	)
+}
+
 // Floating scroll-to-bottom pill — appears once the user has scrolled up AND at least one message has
 // landed below the viewport since (thread.logic.ts's nextScrollAffordanceState). Click scrolls to bottom;
 // the resulting scroll event clears it via the same reducer (no separate "dismiss" path).
@@ -487,19 +519,12 @@ function ThreadList({ ref, chat, labelledBy, messages, rows, isPending, isError,
 									className="absolute bottom-0 left-0 w-full"
 									style={{ transform: `translateY(${String(0 - virtualRow.start)}px)` }}
 								>
-									{row.kind === "day" ? (
-										<DaySeparator timestamp={row.timestamp} />
-									) : row.kind === "unread" ? (
-										<UnreadDivider chat={chat} />
-									) : (
-										<MessageRow
-											chat={chat}
-											message={row.message}
-											showHeader={row.showHeader}
-											currentUserId={currentUserId}
-											blocked={blocked}
-										/>
-									)}
+									<ThreadRowContent
+										row={row}
+										chat={chat}
+										currentUserId={currentUserId}
+										blocked={blocked}
+									/>
 								</div>
 							)
 						})}

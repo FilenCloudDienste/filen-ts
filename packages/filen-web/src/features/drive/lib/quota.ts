@@ -34,8 +34,11 @@ export async function ensureUploadQuota(neededBytes: bigint): Promise<boolean> {
 	return false
 }
 
-// Lets the next pre-flight see this upload without a read. accountQueryUpdate keeps a pending refresh
-// pending, so the server's own figure still replaces this estimate on the next read.
-export function addAccountStorageUsed(bytes: bigint): void {
-	accountQueryUpdate(prev => ({ ...prev, storageUsed: prev.storageUsed + bytes }))
+// Lets the next pre-flight see this upload without a read. The refresh markAccountStale queued stays
+// pending for the next focus, mount or reconnect, so the server's own figure replaces this estimate then
+// rather than with a read per file; readNow reads at once instead.
+export function addAccountStorageUsed(bytes: bigint, options?: { readNow?: boolean }): void {
+	accountQueryUpdate(prev => ({ ...prev, storageUsed: prev.storageUsed + bytes }), {
+		readNow: options?.readNow ?? false
+	})
 }

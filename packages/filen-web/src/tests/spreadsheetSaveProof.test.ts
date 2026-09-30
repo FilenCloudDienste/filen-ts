@@ -64,6 +64,14 @@ describe("proof that saving loses nothing", () => {
 			).some(loss => loss.includes("added"))
 		).toBe(true)
 		expect(await losses(xml => xml.replace(/<pageMargins[^>]*\/>/, ""))).not.toEqual([])
+		expect(await losses(xml => xml)).toEqual([])
+		expect((await losses(xml => xml.replace('<c r="A2">', '<c r="A2" cm="1">'))).some(loss => loss.includes("cell 2,1"))).toBe(true)
+		expect(await losses(xml => xml.replace('<c r="B2"><f t="shared" si="0"/>', '<c r="B2"><f t="shared" si="0" ca="1"/>'))).toEqual([])
+		expect(
+			(await losses(xml => xml.replace('<c r="B2"><f t="shared" si="0"/>', '<c r="B2"><f t="shared" si="0" aca="1"/>'))).some(loss =>
+				loss.includes("cell 2,2")
+			)
+		).toBe(true)
 	})
 
 	it("stops a proof when its workbook closes, resolving false and letting go of the file's parts", async () => {

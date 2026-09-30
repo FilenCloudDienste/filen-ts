@@ -1,6 +1,6 @@
 import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
-import type { Chat } from "@filen/sdk-rs"
+import type { ChatParticipant } from "@filen/sdk-rs"
 import { cn, contactDisplayName, isEmojiOnly, parseFilenPublicLink, type MessageSegment } from "@filen/shared"
 import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode, customEmojiImageForShortcode } from "@/features/chats/lib/emoji"
@@ -22,7 +22,7 @@ import { ExternalAnchor } from "@/features/chats/components/thread/externalAncho
 // "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
 // heuristic (@filen/shared's isEmojiOnly).
 // `segments` is segmentMessage(text), tokenized once by MessageRow, which also derives the embeds from it.
-export function MessageContent({ chat, segments }: { chat: Chat; segments: MessageSegment[] }) {
+export function MessageContent({ participants, segments }: { participants: readonly ChatParticipant[]; segments: MessageSegment[] }) {
 	const { t } = useTranslation("chats")
 	const jumbo = isEmojiOnly(segments)
 
@@ -91,7 +91,7 @@ export function MessageContent({ chat, segments }: { chat: Chat; segments: Messa
 										return t("chatMentionUnknown")
 									}
 
-									const participant = chat.participants.find(p => p.email === segment.email)
+									const participant = participants.find(p => p.email === segment.email)
 
 									// The mention text is the email itself — render it rather than "unknown"
 									// so mentions of users who since left the chat stay attributable.

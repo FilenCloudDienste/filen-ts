@@ -4,12 +4,11 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
-import { usePhotosSelection } from "@/features/photos/hooks/usePhotosSelection"
+import { photosPointerSelect } from "@/features/photos/lib/pointerSelect"
 import { testUuid } from "@/tests/support/uuid"
 
-// usePhotosSelection calls no React hooks of its own (anchor state is threaded in by the caller — see
-// photoGrid.tsx) — it's exercisable as a plain function, no renderHook/jsdom needed, mirroring how
-// listbox.ts's own pure functions are tested directly.
+// photosPointerSelect is a plain function (anchor state is threaded in by the caller — see photoGrid.tsx),
+// so no renderHook/jsdom is needed, mirroring how listbox.ts's own pure functions are tested directly.
 
 function mockFile(uuid: UuidStr): File {
 	return {
@@ -76,29 +75,23 @@ function uuidsOf(list: PhotoItem[]): string[] {
 	return list.map(item => item.data.uuid)
 }
 
-describe("usePhotosSelection — plain click", () => {
+describe("photosPointerSelect — plain click", () => {
 	it("selects exactly the clicked item, replacing any prior selection", () => {
 		usePhotosStore.getState().setSelectedItems([b, c])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(0, clickEvent())
+		photosPointerSelect(items, anchor, setAnchor, 0, clickEvent())
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([a.data.uuid])
 	})
 
 	it("moves the anchor to the clicked item", () => {
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(2, clickEvent())
+		photosPointerSelect(items, anchor, setAnchor, 2, clickEvent())
 
 		expect(anchor).toBe(c.data.uuid)
 	})
 
 	it("deselects the clicked item when it is the whole selection", () => {
 		usePhotosStore.getState().setSelectedItems([b])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(1, clickEvent())
+		photosPointerSelect(items, anchor, setAnchor, 1, clickEvent())
 
 		expect(usePhotosStore.getState().selectedItems).toEqual([])
 		expect(anchor).toBe(b.data.uuid)
@@ -106,86 +99,68 @@ describe("usePhotosSelection — plain click", () => {
 
 	it("narrows to the clicked item when it is one of several selected", () => {
 		usePhotosStore.getState().setSelectedItems([a, b])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(1, clickEvent())
+		photosPointerSelect(items, anchor, setAnchor, 1, clickEvent())
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
 	})
 
 	it("leaves the item selected on the second click of a double-click", () => {
 		usePhotosStore.getState().setSelectedItems([b])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(1, clickEvent({ detail: 2 }))
+		photosPointerSelect(items, anchor, setAnchor, 1, clickEvent({ detail: 2 }))
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
 	})
 
 	it("keeps a touch tap on the sole selected item selected", () => {
 		usePhotosStore.getState().setSelectedItems([b])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(1, clickEvent({ pointerType: "touch" }))
+		photosPointerSelect(items, anchor, setAnchor, 1, clickEvent({ pointerType: "touch" }))
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
 	})
 })
 
-describe("usePhotosSelection — ctrl/cmd click", () => {
+describe("photosPointerSelect — ctrl/cmd click", () => {
 	it("toggles the clicked item into the selection without clearing the rest", () => {
 		usePhotosStore.getState().setSelectedItems([a])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(1, clickEvent({ ctrlKey: true }))
+		photosPointerSelect(items, anchor, setAnchor, 1, clickEvent({ ctrlKey: true }))
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([a.data.uuid, b.data.uuid])
 	})
 
 	it("toggles an already-selected item back OUT", () => {
 		usePhotosStore.getState().setSelectedItems([a, b])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(0, clickEvent({ metaKey: true }))
+		photosPointerSelect(items, anchor, setAnchor, 0, clickEvent({ metaKey: true }))
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
 	})
 })
 
-describe("usePhotosSelection — shift click", () => {
+describe("photosPointerSelect — shift click", () => {
 	it("selects the inclusive range from the anchor to the clicked index", () => {
 		anchor = a.data.uuid
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(2, clickEvent({ shiftKey: true }))
+		photosPointerSelect(items, anchor, setAnchor, 2, clickEvent({ shiftKey: true }))
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([a.data.uuid, b.data.uuid, c.data.uuid])
 	})
 
 	it("handles a range extended BACKWARDS (clicked index before the anchor)", () => {
 		anchor = d.data.uuid
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(1, clickEvent({ shiftKey: true }))
+		photosPointerSelect(items, anchor, setAnchor, 1, clickEvent({ shiftKey: true }))
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid, c.data.uuid, d.data.uuid])
 	})
 
 	it("falls back to the clicked index alone when there is no prior anchor", () => {
-		const { handlePointerSelect } = usePhotosSelection(items, null, setAnchor)
-
-		handlePointerSelect(2, clickEvent({ shiftKey: true }))
+		photosPointerSelect(items, null, setAnchor, 2, clickEvent({ shiftKey: true }))
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([c.data.uuid])
 	})
 })
 
-describe("usePhotosSelection — out-of-range index", () => {
+describe("photosPointerSelect — out-of-range index", () => {
 	it("is a no-op when the clicked index has no matching item", () => {
 		usePhotosStore.getState().setSelectedItems([a])
-		const { handlePointerSelect } = usePhotosSelection(items, anchor, setAnchor)
-
-		handlePointerSelect(99, clickEvent())
+		photosPointerSelect(items, anchor, setAnchor, 99, clickEvent())
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([a.data.uuid])
 	})

@@ -65,7 +65,10 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const listing = usePublicDirListing({ levelUuid: current.uuid, dir: current.dir, link })
 	const sizeInfo = usePublicDirSize({ levelUuid: current.uuid, dir: current.dir, link })
 
-	const entries = listing.data === undefined ? [] : sortEntries(filterEntries(toBrowseEntries(listing.data), filter), sort)
+	// Filtered inside BrowseList, not here: a keystroke then keeps this memo (and every row's entry
+	// identity) instead of re-narrowing and re-sorting the whole level. The sort is stable and the filter
+	// order-preserving, so the visible order is the same either way.
+	const sorted = listing.data === undefined ? [] : sortEntries(toBrowseEntries(listing.data), sort)
 
 	// Navigating clears a finished zip's notice; a running one keeps its progress.
 	function dropZipNotice(): void {
@@ -235,9 +238,10 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 			</div>
 
 			<BrowseList
-				listing={listing}
-				entries={entries}
-				filtered={filter.trim().length > 0}
+				status={listing.status}
+				onRetry={listing.refetch}
+				sorted={sorted}
+				filter={filter}
 				onOpen={openEntry}
 			/>
 		</div>
@@ -288,20 +292,26 @@ function Breadcrumbs({ stack, onJump }: { stack: BrowseCrumb[]; onJump: (index: 
 	)
 }
 
+// Takes the query's status and bound refetch rather than the result itself: useQuery returns a fresh
+// tracked proxy every render, which would defeat this element's memo.
 function BrowseList({
-	listing,
-	entries,
-	filtered,
+	status,
+	onRetry,
+	sorted,
+	filter,
 	onOpen
 }: {
-	listing: ReturnType<typeof usePublicDirListing>
-	entries: BrowseEntry[]
-	filtered: boolean
+	status: ReturnType<typeof usePublicDirListing>["status"]
+	onRetry: ReturnType<typeof usePublicDirListing>["refetch"]
+	sorted: BrowseEntry[]
+	filter: string
 	onOpen: (entry: BrowseEntry) => void
 }) {
 	const { t } = useTranslation("publicLinks")
+	const entries = filterEntries(sorted, filter)
+	const filtered = filter.trim().length > 0
 
-	if (listing.status === "pending") {
+	if (status === "pending") {
 		return (
 			<LoadingState
 				size="md"
@@ -310,11 +320,11 @@ function BrowseList({
 		)
 	}
 
-	if (listing.status === "error") {
+	if (status === "error") {
 		return (
 			<PublicLinkError
 				onRetry={() => {
-					void listing.refetch()
+					void onRetry()
 				}}
 			/>
 		)

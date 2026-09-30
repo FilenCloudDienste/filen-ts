@@ -7,6 +7,8 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
 import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
+// side-effect: registers the generators getThumbnailUrl needs, as useThumbnail.ts does.
+import "@/features/drive/lib/thumbGenerators"
 import { useObjectUrl } from "@/lib/useObjectUrl"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"

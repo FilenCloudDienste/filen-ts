@@ -14,7 +14,7 @@ import {
 import { onlineManager } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { queryClient } from "@/queries/client"
+import { cancelCached } from "@/queries/patch"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
 import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
@@ -97,9 +97,8 @@ function patchRowAfterPush(pushed: Note): void {
 // Multi-tab transport: a follower forwards edits to the leader and asks it to flush; the leader
 // broadcasts authoritative state + a hello on takeover, and a terminal shutdown closes the channel. The
 // seam is the shared one chats rides too — only the payload shapes differ; the wiring over a real
-// BroadcastChannel lives in outboxCoordinator.ts and tests mock it. A single-tab install attaches NO
-// transport, so every call below is a guarded no-op and the leader path stays byte-identical to the
-// pre-multi-tab outbox.
+// BroadcastChannel lives in outboxCoordinator.ts and tests mock it. Without an attached transport (unit
+// tests) every call below is a guarded no-op; the real one skips full-state broadcasts until a peer tab exists.
 export type NotesOutboxTransport = OutboxChannelTransport<RemoteEnqueue, InflightContent>
 
 // Read the abort flag through a function boundary so an early `if (signal.aborted) return` guard does
@@ -803,7 +802,7 @@ export class Sync {
 	private markHydrated(pendingNoteUuids: string[]): void {
 		if (!useNotesInflightStore.getState().outboxHydrated) {
 			for (const noteUuid of pendingNoteUuids) {
-				void queryClient.cancelQueries({ queryKey: noteContentQueryKey(noteUuid), exact: true })
+				cancelCached(noteContentQueryKey(noteUuid))
 			}
 		}
 

@@ -1,6 +1,7 @@
 import type { Note, NoteHistory } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
+import { invalidateCached } from "@/queries/patch"
 import { log } from "@/lib/log"
 import { notesQueryUpsert } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
@@ -55,7 +56,7 @@ export async function restoreNoteFromHistory(note: Note, history: NoteHistory): 
 	} else {
 		// Unknown content (mobile parity: "leave the cached content untouched... let the next per-note
 		// fetch reconcile") — invalidate so the now re-enabled query refetches on its next observer.
-		void queryClient.invalidateQueries({ queryKey: contentKey })
+		invalidateCached(contentKey)
 	}
 
 	return outcome

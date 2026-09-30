@@ -11,6 +11,36 @@ export async function opfsDirectory(segments: readonly string[]): Promise<FileSy
 	return dir
 }
 
+const walkedDirectories = new Map<string, Promise<FileSystemDirectoryHandle>>()
+
+// opfsDirectory memoized per realm, so a hot path skips the root walk. A memoized handle whose directory was
+// removed since (logout wipe, cleared site data) throws NotFoundError; callers then forget it so the next
+// call walks (and re-creates) afresh.
+export function cachedOpfsDirectory(segments: readonly string[]): Promise<FileSystemDirectoryHandle> {
+	const key = segments.join("/")
+	const memo = walkedDirectories.get(key)
+
+	if (memo !== undefined) {
+		return memo
+	}
+
+	const walk = opfsDirectory(segments)
+
+	walkedDirectories.set(key, walk)
+
+	void walk.catch(() => {
+		if (walkedDirectories.get(key) === walk) {
+			walkedDirectories.delete(key)
+		}
+	})
+
+	return walk
+}
+
+export function forgetOpfsDirectory(segments: readonly string[]): void {
+	walkedDirectories.delete(segments.join("/"))
+}
+
 export function isNotFoundError(e: unknown): boolean {
 	return e instanceof DOMException && e.name === "NotFoundError"
 }

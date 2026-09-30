@@ -43,6 +43,7 @@ import { PersonalInfoRow } from "@/features/settings/components/account/personal
 import { AccountPreferencesRows } from "@/features/settings/components/account/accountPreferencesRows"
 import { ExportMasterKeysRow } from "@/features/settings/components/security/exportMasterKeys"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
+import { addAccountStorageUsed } from "@/features/drive/lib/quota"
 
 const EMPTY_PERSONAL: UserPersonalUpdateInfo = {
 	city: undefined,
@@ -242,6 +243,39 @@ describe("account request counts", () => {
 
 		expect(cached()?.nickName).toBe("patched")
 		expect(isInvalidated()).toBe(true)
+	})
+
+	it("per-file storage estimates during a batch read nothing; the next focus reads once", async () => {
+		mountAccount()
+		await drain()
+
+		for (let i = 0; i < 3; i++) {
+			markAccountStale()
+			addAccountStorageUsed(1n)
+		}
+		await drain()
+
+		expect(reads()).toBe(1)
+		expect(cached()?.storageUsed).toBe(ACCOUNT.storageUsed + 3n)
+		expect(isInvalidated()).toBe(true)
+
+		focus()
+		await drain()
+
+		expect(reads()).toBe(2)
+	})
+
+	it("a storage estimate asked to read now reads the server's figure at once", async () => {
+		mountAccount()
+		await drain()
+
+		markAccountStale()
+		addAccountStorageUsed(1n, { readNow: true })
+		await drain()
+
+		expect(reads()).toBe(2)
+		expect(cached()?.storageUsed).toBe(ACCOUNT.storageUsed)
+		expect(isInvalidated()).toBe(false)
 	})
 
 	it("a patch with nothing cached conjures no account", () => {

@@ -17,10 +17,11 @@ export async function fetchNotes(): Promise<Note[]> {
 	return sdkApi.listNotes()
 }
 
-export function useNotes(): UseQueryResult<Note[]> {
+export function useNotes(options?: { refetchOnMount?: boolean }): UseQueryResult<Note[]> {
 	return useQuery({
 		queryKey: NOTES_QUERY_KEY,
-		queryFn: fetchNotes
+		queryFn: fetchNotes,
+		refetchOnMount: options?.refetchOnMount ?? true
 	})
 }
 
@@ -99,9 +100,10 @@ export function notesQueryFind(uuid: string): Note | undefined {
 }
 
 // The live row, re-resolved every render so an in-dialog change or a realtime socket patch landing while
-// the dialog is open repaints immediately; the snapshot the menu held only until the list has it.
+// the dialog is open repaints immediately; the snapshot the menu held only until the list has it. The
+// route's own list observer keeps the list current, so a dialog subscribing must not trigger a list read.
 export function useLiveNote(initial: Note): Note {
-	const notes = useNotes().data
+	const notes = useNotes({ refetchOnMount: false }).data
 
 	return notes?.find(n => n.uuid === initial.uuid) ?? initial
 }

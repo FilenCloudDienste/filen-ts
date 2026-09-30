@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { requestCopyCancel } from "@/features/drive/lib/copy"
+import { requestCopyCancel } from "@/features/transfers/lib/control"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import {
 	AlertDialog,

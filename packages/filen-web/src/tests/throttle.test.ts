@@ -82,6 +82,51 @@ describe("throttle", () => {
 		expect(fn.mock.calls).toEqual([[1], [2], [3], [4]])
 	})
 
+	it("flush delivers the pending value now and cancels the trailing call", () => {
+		const fn = vi.fn()
+		const throttled = throttle(fn, 100)
+
+		throttled(1)
+		throttled(2)
+		throttled(3)
+		throttled.flush()
+
+		expect(fn.mock.calls).toEqual([[1], [3]])
+
+		vi.advanceTimersByTime(100)
+
+		expect(fn).toHaveBeenCalledTimes(2)
+	})
+
+	it("flush is a no-op when nothing is pending", () => {
+		const fn = vi.fn()
+		const throttled = throttle(fn, 100)
+
+		throttled.flush()
+		throttled(1)
+		throttled.flush()
+
+		expect(fn.mock.calls).toEqual([[1]])
+	})
+
+	it("keeps throttling from the flushed call", () => {
+		const fn = vi.fn()
+		const throttled = throttle(fn, 100)
+
+		throttled(1)
+		vi.advanceTimersByTime(50)
+		throttled(2)
+		throttled.flush() // t=50, fires with 2
+		throttled(3) // inside the window restarted by the flush
+		vi.advanceTimersByTime(99)
+
+		expect(fn.mock.calls).toEqual([[1], [2]])
+
+		vi.advanceTimersByTime(1)
+
+		expect(fn.mock.calls).toEqual([[1], [2], [3]])
+	})
+
 	it("works with bigint args (the real onProgress shape)", () => {
 		const fn = vi.fn<(bytes: bigint) => void>()
 		const throttled = throttle(fn, 100)

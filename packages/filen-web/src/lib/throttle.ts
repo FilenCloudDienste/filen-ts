@@ -2,7 +2,10 @@
 // every call inside the window only overwrites a pending buffer, and exactly the LAST one fires at
 // the trailing edge — a transfer's final progress notification (100%) must never be the one a
 // throttle drops. A call once the window has fully elapsed (nothing pending) starts a fresh cycle.
-export function throttle<Args extends unknown[]>(fn: (...args: Args) => void, ms: number): (...args: Args) => void {
+// flush() delivers a pending call now instead of at the trailing edge.
+export type Throttled<Args extends unknown[]> = ((...args: Args) => void) & { flush: () => void }
+
+export function throttle<Args extends unknown[]>(fn: (...args: Args) => void, ms: number): Throttled<Args> {
 	let lastInvoked: number | null = null
 	let timeoutId: ReturnType<typeof setTimeout> | null = null
 	let pendingArgs: Args | null = null
@@ -12,7 +15,20 @@ export function throttle<Args extends unknown[]>(fn: (...args: Args) => void, ms
 		fn(...args)
 	}
 
-	return (...args: Args) => {
+	function flush(): void {
+		if (timeoutId !== null) {
+			clearTimeout(timeoutId)
+			timeoutId = null
+		}
+
+		if (pendingArgs !== null) {
+			const toSend = pendingArgs
+			pendingArgs = null
+			invoke(toSend)
+		}
+	}
+
+	const throttled = (...args: Args) => {
 		const now = Date.now()
 
 		if (lastInvoked === null || now - lastInvoked >= ms) {
@@ -31,14 +47,12 @@ export function throttle<Args extends unknown[]>(fn: (...args: Args) => void, ms
 			const remaining = ms - (now - lastInvoked)
 			timeoutId = setTimeout(() => {
 				timeoutId = null
-				if (pendingArgs !== null) {
-					const toSend = pendingArgs
-					pendingArgs = null
-					invoke(toSend)
-				}
+				flush()
 			}, remaining)
 		}
 	}
+
+	return Object.assign(throttled, { flush })
 }
 
 // ~10 store updates/sec per transfer is plenty for a progress bar and keeps a many-file batch from

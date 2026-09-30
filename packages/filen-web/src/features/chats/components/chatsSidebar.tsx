@@ -5,6 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
 import { SearchIcon, MessagesSquareIcon, PlusIcon } from "lucide-react"
 import type { Chat } from "@filen/sdk-rs"
+import type { BlockedUsers } from "@filen/shared"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { chatsWithoutBlockedOneOnOne, filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
@@ -14,11 +15,13 @@ import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelection
 import { useChatsListSelection } from "@/features/chats/hooks/useChatsListSelection"
 import { ChatRow } from "@/features/chats/components/chatRow"
 import { ChatsBulkActionBar } from "@/features/chats/components/chatsBulkActionBar"
+import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useAction } from "@/lib/keymap/useAction"
+import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { ListFilterInput } from "@/components/listFilterInput"
@@ -68,13 +71,23 @@ export function ChatsSidebar() {
 	const rows = filterChats(visibleChats, search, currentUserId, t("chatJustYou"), blocked)
 	const searching = search.trim().length > 0
 
-	const virtualizer = useVirtualizer({
-		count: rows.length,
-		getScrollElement: () => scrollElement,
-		estimateSize: () => CHAT_ROW_HEIGHT,
-		overscan: 10,
-		getItemKey: index => rows[index]?.uuid ?? index
-	})
+	// Everything derived from visibleChats is built before the hooks below: the React Compiler drops the
+	// memo scope of a value that is still mutable across a hook call.
+	const chatsByUuid = new Map(visibleChats.map(chat => [chat.uuid, chat]))
+	// Active ghost-selection purge (the effect below): the chats list is PUSH-FED (a conversationDeleted/
+	// conversationParticipantLeft socket event, or another tab's delete/leave, can drop a chat with no
+	// navigation involved), so the STORE itself — not just this render's liveSelectedChats view — must
+	// drop a uuid the instant it stops existing, or a stale entry sits there indefinitely until the
+	// sidebar next unmounts. Mirrors directoryListing.tsx's own selection purges: keyed on a
+	// uuid-content signature (stable across unrelated re-renders, since `visibleChats` can be a new
+	// array with unchanged content), not `visibleChats` itself, and the uuids are read back out of that
+	// key rather than off the array — so the effect depends on exactly what it uses. The signature is
+	// over the VISIBLE set, so blocking someone drops their 1:1 from an active selection too — list
+	// membership can change with no chat being deleted.
+	const visibleChatUuidsSignature = visibleChats
+		.map(chat => chat.uuid)
+		.sort()
+		.join(",")
 
 	// The ordered, currently-visible conversation set click-selection ranges walk (search-filtered) —
 	// mirrors notesSidebar's own selection wiring. Clears on mount/unmount (see the hook's own doc
@@ -84,7 +97,6 @@ export function ChatsSidebar() {
 	// LIVE (ghost-purged) selection: re-derived from the current chats query every render, so a
 	// conversation removed from the account (elsewhere, or by another tab) between selection and
 	// dispatch is never targeted or counted towards the bulk bar's "2+ selected" threshold.
-	const chatsByUuid = new Map(visibleChats.map(chat => [chat.uuid, chat]))
 	const liveSelectedChats: Chat[] = []
 	for (const selected of rawSelectedChats) {
 		const live = chatsByUuid.get(selected.uuid)
@@ -94,21 +106,6 @@ export function ChatsSidebar() {
 		}
 	}
 	const liveSelectedUuids = new Set(liveSelectedChats.map(chat => chat.uuid))
-
-	// Active ghost-selection purge: the chats list is PUSH-FED (a conversationDeleted/
-	// conversationParticipantLeft socket event, or another tab's delete/leave, can drop a chat with no
-	// navigation involved), so the STORE itself — not just this render's liveSelectedChats view — must
-	// drop a uuid the instant it stops existing, or a stale entry sits there indefinitely until the
-	// sidebar next unmounts. Mirrors directoryListing.tsx's own selection purges: keyed on a
-	// uuid-content signature (stable across unrelated re-renders, since `visibleChats` is a brand-new
-	// array every render regardless of whether anything actually changed), not `visibleChats` itself,
-	// and the uuids are read back out of that key rather than off the array — so the effect depends on
-	// exactly what it uses. The signature is over the VISIBLE set, so blocking someone drops their 1:1
-	// from an active selection too — list membership can change with no chat being deleted.
-	const visibleChatUuidsSignature = visibleChats
-		.map(chat => chat.uuid)
-		.sort()
-		.join(",")
 
 	useEffect(() => {
 		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, visibleChatUuidsSignature.split(","))
@@ -155,7 +152,8 @@ export function ChatsSidebar() {
 		[dialogHost.isDialogOpen]
 	)
 
-	function renderBody(): ReactNode {
+	// Null while listing; ChatsVirtualList renders the rows then.
+	function renderFallback(): ReactNode {
 		if (chatsQuery.isPending) {
 			return <LoadingState size="md" />
 		}
@@ -186,48 +184,7 @@ export function ChatsSidebar() {
 			)
 		}
 
-		return (
-			<div
-				role="listbox"
-				aria-multiselectable="true"
-				aria-label={t("chatsListLabel")}
-				className="relative w-full"
-				style={{ height: virtualizer.getTotalSize() }}
-			>
-				{virtualizer.getVirtualItems().map(virtualRow => {
-					const chat = rows[virtualRow.index]
-
-					if (chat === undefined) {
-						return null
-					}
-
-					return (
-						// Presentational: this wrapper only positions the row, and a generic container between
-						// listbox and option breaks the owned-element relationship.
-						<div
-							key={virtualRow.key}
-							role="presentation"
-							className="absolute top-0 left-0 w-full"
-							style={{ height: CHAT_ROW_HEIGHT, transform: `translateY(${String(virtualRow.start)}px)` }}
-						>
-							<ChatRow
-								chat={chat}
-								selected={chat.uuid === selectedUuid}
-								multiSelected={liveSelectedUuids.has(chat.uuid)}
-								posInSet={virtualRow.index + 1}
-								setSize={rows.length}
-								currentUserId={currentUserId}
-								blocked={blocked}
-								onAction={dialogHost.openChatDialog}
-								onPointerSelect={event => {
-									selection.handlePointerSelect(virtualRow.index, event)
-								}}
-							/>
-						</div>
-					)
-				})}
-			</div>
-		)
+		return null
 	}
 
 	return (
@@ -267,7 +224,18 @@ export function ChatsSidebar() {
 					ref={setScrollElement}
 					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
 				>
-					{renderBody()}
+					<ChatsVirtualList
+						rows={rows}
+						scrollElement={scrollElement}
+						fallback={renderFallback()}
+						label={t("chatsListLabel")}
+						selectedUuid={selectedUuid}
+						liveSelectedUuids={liveSelectedUuids}
+						currentUserId={currentUserId}
+						blocked={blocked}
+						onAction={dialogHost.openChatDialog}
+						onPointerSelect={selection.handlePointerSelect}
+					/>
 				</div>
 				{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
 					nothing in the header. Mirrors notesSidebar.tsx / directoryListing.tsx's own BulkActionBar
@@ -285,5 +253,90 @@ export function ChatsSidebar() {
 			</div>
 			{dialogHost.renderActiveDialog()}
 		</ResizableSidebarPanel>
+	)
+}
+
+interface ChatsVirtualListProps {
+	rows: Chat[]
+	scrollElement: HTMLDivElement | null
+	// Rendered instead of the list (loading, error, empty) while non-null.
+	fallback: ReactNode
+	label: string
+	selectedUuid: string
+	liveSelectedUuids: ReadonlySet<string>
+	currentUserId: bigint | undefined
+	blocked: BlockedUsers
+	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
+	onPointerSelect: ListPointerSelection["handlePointerSelect"]
+}
+
+// Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range
+// change while scrolling; split out so ChatsSidebar itself compiles and those renders stay here. Mounted in
+// every state, so the virtualizer lives exactly as long as the sidebar.
+function ChatsVirtualList({
+	rows,
+	scrollElement,
+	fallback,
+	label,
+	selectedUuid,
+	liveSelectedUuids,
+	currentUserId,
+	blocked,
+	onAction,
+	onPointerSelect
+}: ChatsVirtualListProps) {
+	const virtualizer = useVirtualizer({
+		count: rows.length,
+		getScrollElement: () => scrollElement,
+		estimateSize: () => CHAT_ROW_HEIGHT,
+		overscan: 10,
+		getItemKey: index => rows[index]?.uuid ?? index
+	})
+
+	if (fallback !== null) {
+		return fallback
+	}
+
+	return (
+		<div
+			role="listbox"
+			aria-multiselectable="true"
+			aria-label={label}
+			className="relative w-full"
+			style={{ height: virtualizer.getTotalSize() }}
+		>
+			{virtualizer.getVirtualItems().map(virtualRow => {
+				const chat = rows[virtualRow.index]
+
+				if (chat === undefined) {
+					return null
+				}
+
+				return (
+					// Presentational: this wrapper only positions the row, and a generic container between
+					// listbox and option breaks the owned-element relationship.
+					<div
+						key={virtualRow.key}
+						role="presentation"
+						className="absolute top-0 left-0 w-full"
+						style={{ height: CHAT_ROW_HEIGHT, transform: `translateY(${String(virtualRow.start)}px)` }}
+					>
+						<ChatRow
+							chat={chat}
+							selected={chat.uuid === selectedUuid}
+							multiSelected={liveSelectedUuids.has(chat.uuid)}
+							posInSet={virtualRow.index + 1}
+							setSize={rows.length}
+							currentUserId={currentUserId}
+							blocked={blocked}
+							onAction={onAction}
+							onPointerSelect={event => {
+								onPointerSelect(virtualRow.index, event)
+							}}
+						/>
+					</div>
+				)
+			})}
+		</div>
 	)
 }

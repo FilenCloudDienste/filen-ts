@@ -16,7 +16,7 @@ import {
 	resumableTransferIds,
 	shouldShowTransfersAggregate
 } from "@/features/transfers/screens/transfers.logic"
-import { cancelTransfer, setTransferPaused } from "@/features/transfers/lib/control"
+import { cancelTransfer, cancelTransfers, setTransfersPaused } from "@/features/transfers/lib/control"
 import { TransferRow } from "@/features/transfers/components/transferRow"
 import { percentFormat, runningPercentFraction } from "@/features/transfers/components/transferRow.logic"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
@@ -79,15 +79,11 @@ export function TransfersScreen() {
 	}
 
 	function handlePauseAll(): void {
-		for (const id of pausable) {
-			setTransferPaused(id, true)
-		}
+		setTransfersPaused(pausable, true)
 	}
 
 	function handleResumeAll(): void {
-		for (const id of resumable) {
-			setTransferPaused(id, false)
-		}
+		setTransfersPaused(resumable, false)
 	}
 
 	return (
@@ -181,10 +177,7 @@ export function TransfersScreen() {
 				destructive
 				onOpenChange={setCancelAllConfirmOpen}
 				onConfirm={() => {
-					for (const id of cancellable) {
-						cancelTransfer(id)
-					}
-
+					cancelTransfers(cancellable)
 					setCancelAllConfirmOpen(false)
 				}}
 			/>
@@ -293,9 +286,7 @@ function TransfersList({
 									key={transfer.id}
 									transfer={transfer}
 									// Only an active row renders its Cancel button (TransferRow's active branch).
-									onRequestCancel={() => {
-										onRequestCancel(transfer)
-									}}
+									onRequestCancel={onRequestCancel}
 									onShowInDirectory={onShowInDirectory}
 								/>
 							))}

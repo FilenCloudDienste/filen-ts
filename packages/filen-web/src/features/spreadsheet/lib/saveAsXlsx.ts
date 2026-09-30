@@ -4,7 +4,7 @@ import { currentRootUuid } from "@/features/drive/lib/actions"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { runPreviewSave } from "@/features/drive/lib/previewSave.logic"
 import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
-import { spreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
+import { withSpreadsheetWorker } from "@/features/spreadsheet/lib/spreadsheetClient"
 import { xlsxCopyName } from "@/features/spreadsheet/lib/xlsConvert"
 import { sdkApi } from "@/lib/sdk/client"
 import type { ErrorDTO } from "@/lib/sdk/errors"
@@ -22,7 +22,7 @@ export async function saveAsXlsx(item: DriveItem, bytes: Uint8Array): Promise<Sa
 	}
 
 	const copy = bytes.slice()
-	const converted = await spreadsheetWorker().xlsToXlsx(Comlink.transfer(copy, [copy.buffer]))
+	const converted = await withSpreadsheetWorker(remote => remote.xlsToXlsx(Comlink.transfer(copy, [copy.buffer])))
 	const rootUuid = currentRootUuid()
 	const parent = normalizeParentUuid(base.data.parent, rootUuid)
 	const name = await xlsxCopyName(driveItemName(base), candidate => sdkApi.nameExistsInDirectory(parent, candidate))

@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { queryClient } from "@/queries/client"
+import { cancelCached, invalidateCached } from "@/queries/patch"
 import { i18n } from "@/lib/i18n"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { endEditingSession, reseedEditor } from "@/features/notes/store/useNotesInflight"
@@ -23,13 +24,13 @@ export function takeRemoteContent(uuid: string, content: string | undefined, ann
 	}
 
 	if (buffer === undefined) {
-		void queryClient.invalidateQueries({ queryKey: contentKey })
+		invalidateCached(contentKey)
 	} else if (content === undefined) {
 		// Re-enables the query, so the invalidation reads.
 		endEditingSession(uuid)
-		void queryClient.invalidateQueries({ queryKey: contentKey })
+		invalidateCached(contentKey)
 	} else {
-		void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
+		cancelCached(contentKey)
 		queryClient.setQueryData<string>(contentKey, content)
 	}
 
@@ -64,6 +65,6 @@ export function writeContentKeepingRemountKey(uuid: string, content: string): vo
 	const contentKey = noteContentQueryKey(uuid)
 	const updatedAt = queryClient.getQueryState<string | undefined>(contentKey)?.dataUpdatedAt
 
-	void queryClient.cancelQueries({ queryKey: contentKey, exact: true })
+	cancelCached(contentKey)
 	queryClient.setQueryData<string>(contentKey, content, updatedAt !== undefined ? { updatedAt } : undefined)
 }

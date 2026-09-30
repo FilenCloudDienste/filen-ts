@@ -81,7 +81,7 @@ function renderNav(items: PhotoItem[] = ITEMS) {
 	const scrollToIndex = vi.fn()
 	const virtualizer = { scrollToIndex } as unknown as Virtualizer<HTMLDivElement, Element>
 	const onOpen = vi.fn()
-	// The anchor lives in photoGrid.tsx (shared with usePhotosSelection), so it is threaded in and out
+	// The anchor lives in photoGrid.tsx (shared with photosPointerSelect), so it is threaded in and out
 	// here exactly as the component does it.
 	const anchor = { uuid: null as string | null }
 	const setAnchorUuid = vi.fn((next: string | null) => {

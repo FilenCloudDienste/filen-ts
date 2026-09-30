@@ -51,8 +51,9 @@ export interface TransferRowProps {
 	// under the user's cursor the instant that happens. The screen instead tracks a stable id (immune
 	// to this component ever remounting) and re-resolves the target transfer by id on every render, so
 	// a transfer that settles naturally while its confirm is open closes the dialog gracefully instead
-	// of losing it. This callback is only ever wired to the active-row branch below.
-	onRequestCancel: () => void
+	// of losing it. This callback is only ever wired to the active-row branch below. It takes the transfer
+	// so the (virtualized, uncompiled) list can pass one stable function instead of a closure per row.
+	onRequestCancel: (transfer: Transfer) => void
 	// Opens the directory `item` landed in, with it selected. Navigation is the screen's.
 	onShowInDirectory: (item: DriveItem) => void
 }
@@ -308,7 +309,9 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 						<TooltipIconButton
 							label={t("transfersRowCancel")}
 							className={ROW_ACTION_CLASS}
-							onClick={onRequestCancel}
+							onClick={() => {
+								onRequestCancel(transfer)
+							}}
 						>
 							<XIcon />
 						</TooltipIconButton>

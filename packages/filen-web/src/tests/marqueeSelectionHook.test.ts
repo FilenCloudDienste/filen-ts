@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, renderHook } from "@testing-library/react"
-import type { PointerEvent as ReactPointerEvent } from "react"
+import { act, cleanup, render, renderHook } from "@testing-library/react"
+import { createElement, type PointerEvent as ReactPointerEvent } from "react"
 import { useMarqueeSelection, type MarqueeItem } from "@/features/drive/hooks/useMarqueeSelection"
+import { MarqueeRect } from "@/features/drive/components/marqueeRect"
 
 afterEach(() => {
 	cleanup()
@@ -39,8 +40,11 @@ function renderMarquee(
 	}: { items?: RowItem[]; preset?: RowItem[]; keyOf?: (item: RowItem) => string } = {}
 ) {
 	const write = vi.fn<(items: RowItem[]) => void>()
-	const { result } = renderHook(() =>
-		useMarqueeSelection({
+	let renders = 0
+	const { result } = renderHook(() => {
+		renders++
+
+		return useMarqueeSelection({
 			items,
 			...(keyOf === undefined ? {} : { keyOf }),
 			viewMode: "list",
@@ -50,9 +54,9 @@ function renderMarquee(
 			scrollElement: el,
 			setCursor: vi.fn()
 		})
-	)
+	})
 
-	return { result, write }
+	return { result, write, renders: () => renders }
 }
 
 // A primary-button press on blank space, as the listbox's onPointerDown receives it.
@@ -101,7 +105,7 @@ describe("useMarqueeSelection — a press that opens a context menu", () => {
 		dragTo(10, 90)
 
 		expect(write).not.toHaveBeenCalled()
-		expect(result.current.rect).toBeNull()
+		expect(result.current.rectStore.get()).toBeNull()
 	})
 })
 
@@ -132,5 +136,38 @@ describe("useMarqueeSelection — additive union identity", () => {
 		dragTo(10, 60)
 
 		expect(write).toHaveBeenLastCalledWith([bob])
+	})
+})
+
+// The rectangle moves on every pointermove; the host (the whole listing) must not re-render for it.
+describe("useMarqueeSelection — rectangle updates", () => {
+	it("moves the rectangle without re-rendering the host, and clears it on release", () => {
+		const el = container()
+		const { result, renders } = renderMarquee(el)
+		const view = render(createElement(MarqueeRect, { store: result.current.rectStore }))
+
+		act(() => {
+			pressAt(el, result.current.onPointerDown)
+		})
+
+		const before = renders()
+
+		dragTo(10, 50)
+
+		const first = result.current.rectStore.get()
+
+		dragTo(20, 90)
+
+		expect(renders()).toBe(before)
+		expect(first).not.toBeNull()
+		expect(result.current.rectStore.get()).not.toBe(first)
+		expect(view.getByTestId("marquee-rect").style.height).toBe("80px")
+
+		act(() => {
+			window.dispatchEvent(new PointerEvent("pointerup", { clientX: 20, clientY: 90 }))
+		})
+
+		expect(result.current.rectStore.get()).toBeNull()
+		expect(view.queryByTestId("marquee-rect")).toBeNull()
 	})
 })

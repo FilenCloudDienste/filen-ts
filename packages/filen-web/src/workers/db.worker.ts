@@ -104,6 +104,11 @@ async function open(): Promise<void> {
 	requireDb().exec({
 		sql: "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID"
 	})
+	// Per connection. The pool VFS pays a header write, a flush and a truncate to create and delete a journal,
+	// so every autocommit write would pay them twice; PERSIST keeps the journal (same atomicity) and the size
+	// limit trims what a large delete leaves in it.
+	requireDb().exec({ sql: "PRAGMA journal_mode=PERSIST" })
+	requireDb().exec({ sql: "PRAGMA journal_size_limit=1048576" })
 }
 
 // A prefix scan as a range on the primary key: no LIKE, so "_" and "%" in a prefix match literally and the

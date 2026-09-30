@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { DriveItem } from "@/features/drive/lib/item"
-import type { SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
+import { cellKey, type SpreadsheetDoc } from "@/features/spreadsheet/lib/model"
 
 const { open, close, undo, redo, apply, writability, viewOnly } = vi.hoisted(() => ({
 	viewOnly: vi.fn(() => Promise.resolve()),
@@ -17,7 +17,10 @@ const { open, close, undo, redo, apply, writability, viewOnly } = vi.hoisted(() 
 
 vi.mock(import("@/features/spreadsheet/lib/spreadsheetClient"), async importOriginal => ({
 	...(await importOriginal()),
-	spreadsheetWorker: () => ({ open, close, undo, redo, apply, writability, viewOnly }) as never,
+	openSpreadsheet: open,
+	closeSpreadsheet: close,
+	withOpenSpreadsheet: (id: number, run: (remote: never, workerId: number) => Promise<unknown>) =>
+		run({ undo, redo, apply, writability, viewOnly } as never, id) as never,
 	sniffSpreadsheetKind: () => "csv"
 }))
 
@@ -30,6 +33,7 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 const { useSpreadsheetDoc } = await import("@/features/spreadsheet/hooks/useSpreadsheetDoc")
 const { useSpreadsheetEdits, useSpreadsheetWritability } = await import("@/features/spreadsheet/hooks/useSpreadsheetEdits")
 const { gridDoc } = await import("@/features/spreadsheet/lib/cellStore.logic")
+const { csvDoc } = await import("@/features/spreadsheet/lib/csvView")
 
 const DOC: SpreadsheetDoc = { kind: "csv", sheets: [], activeSheet: 0, styles: [], writable: true }
 
@@ -118,6 +122,31 @@ describe("useSpreadsheetEdits", () => {
 		})
 		expect(result.current.pending).toBe(false)
 		expect(result.current.state.dirty).toBe(true)
+	})
+
+	it("tells onShift where a CSV's rows or columns moved, and moves the held cells with them", async () => {
+		const shift = { type: "insert", axis: "rows", at: 0, count: 1, revert: false } as const
+		const onShift = vi.fn()
+
+		apply.mockResolvedValue({
+			type: "shifted",
+			sheet: 0,
+			shift,
+			cells: [],
+			rowCount: 2,
+			colCount: 1,
+			state: { dirty: true, canUndo: true, canRedo: false }
+		})
+
+		const { result } = renderHook(() => useSpreadsheetEdits(1, gridDoc(csvDoc([["a"]], true)), onShift))
+
+		await act(async () => {
+			await result.current.apply({ type: "insert", sheet: 0, axis: "rows", at: 0, count: 1 })
+		})
+
+		expect(onShift).toHaveBeenCalledExactlyOnceWith(0, shift)
+		expect(result.current.doc.sheets[0]?.cells.get(cellKey(1, 0))).toEqual({ text: "a" })
+		expect(result.current.doc.sheets[0]?.rowCount).toBe(2)
 	})
 })
 

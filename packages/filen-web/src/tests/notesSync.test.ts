@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient, onlineManager } from "@tanstack/react-query"
+import { QueryClient, onlineManager, type Query } from "@tanstack/react-query"
 import { type } from "arktype"
 import type { Note } from "@filen/sdk-rs"
 import { mockNote } from "@/tests/fixtures/notes"
@@ -100,6 +100,25 @@ function firstCallOrder(spy: { mock: { invocationCallOrder: number[] } }): numbe
 
 async function flushAsync(): Promise<void> {
 	await new Promise(resolve => setTimeout(resolve, 15))
+}
+
+// A content read still running, as the editor's mount read would be; `seed` makes it a refetch over data.
+function startNeverSettlingContentRead(uuid: string, seed?: string): Query<string> {
+	const queryKey = noteContentQueryKey(uuid)
+
+	if (seed !== undefined) {
+		testQueryClient.setQueryData(queryKey, seed)
+	}
+
+	testQueryClient.query({ queryKey, queryFn: () => new Promise<string>(() => undefined) }).catch(() => undefined)
+
+	const query = testQueryClient.getQueryCache().find<string>({ queryKey, exact: true })
+
+	if (query?.state.fetchStatus !== "fetching") {
+		throw new Error("content read not started")
+	}
+
+	return query
 }
 
 // Build + start a fresh Sync whose init has settled (empty disk unless a test pre-seeds kvStore).
@@ -646,14 +665,16 @@ describe("restoreFromDisk — replay-on-launch hydrates before any network, drop
 		setNoteContent.mockResolvedValue(note)
 
 		const s = await startedSync()
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+		const read = startNeverSettlingContentRead("a", "pre-edit")
+		const cancelSpy = vi.spyOn(read, "cancel")
 		const setSpy = vi.spyOn(testQueryClient, "setQueryData")
 
 		s.executeNow()
 		await flushAsync()
 
-		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a"), exact: true })
+		expect(cancelSpy).toHaveBeenCalledWith({ revert: true })
 		expect(firstCallOrder(cancelSpy)).toBeLessThan(firstCallOrder(setSpy))
+		expect(read.state.fetchStatus).toBe("idle")
 		expect(testQueryClient.getQueryData(noteContentQueryKey("a"))).toBe("pushed-text")
 	})
 })
@@ -764,13 +785,13 @@ describe("outbox hydration gate — the editor's seed may never precede the rest
 		getNoteContent.mockResolvedValue("cloud-old")
 		setNoteContent.mockResolvedValue(note)
 
-		const cancelSpy = vi.spyOn(testQueryClient, "cancelQueries")
+		const read = startNeverSettlingContentRead("a")
 		const s = new Sync()
 
 		s.start()
 		await flushAsync()
 
-		expect(cancelSpy).toHaveBeenCalledWith({ queryKey: noteContentQueryKey("a"), exact: true })
+		expect(read.state.fetchStatus).toBe("idle")
 		expect(s.outboxRole).toBe("leader")
 	})
 

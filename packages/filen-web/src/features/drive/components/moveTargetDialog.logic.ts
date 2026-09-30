@@ -14,8 +14,18 @@ function isSharedWithUser(item: DriveItem): boolean {
 	return role !== undefined && "Sharer" in role
 }
 
+// Item arrays (selections, drag payloads, listings, clipboard entries) are replaced, never mutated, and
+// every candidate row and dragover asks again for the same array, so each array's set is built once.
+const ownDirectoryIndexes = new WeakMap<readonly DriveItem[], ReadonlySet<string>>()
+
 // The directories among `items` that can lie on a chain in the user's own tree.
-export function ownDirectoryUuids(items: readonly DriveItem[]): Set<string> {
+export function ownDirectoryUuids(items: readonly DriveItem[]): ReadonlySet<string> {
+	const cached = ownDirectoryIndexes.get(items)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
 	const uuids = new Set<string>()
 
 	for (const item of items) {
@@ -23,6 +33,8 @@ export function ownDirectoryUuids(items: readonly DriveItem[]): Set<string> {
 			uuids.add(item.data.uuid)
 		}
 	}
+
+	ownDirectoryIndexes.set(items, uuids)
 
 	return uuids
 }
@@ -74,7 +86,9 @@ export function isMoveRowDisabled(row: DriveItem, currentAncestry: readonly stri
 		return true
 	}
 
-	return isMoveDestinationForbidden([...currentAncestry, row.data.uuid], movedItems)
+	const movedDirUuids = ownDirectoryUuids(movedItems)
+
+	return movedDirUuids.has(row.data.uuid) || currentAncestry.some(uuid => movedDirUuids.has(uuid))
 }
 
 // A copy may land beside its source (the SDK keeps both names); only self/descendant is illegal.

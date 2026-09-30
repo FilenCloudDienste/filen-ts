@@ -51,6 +51,10 @@ let directoryGeneration = 0
 // uploads since. What lets a uuid-only socket event be tied to a playlist.
 const knownPlaylistFileUuids = new Set<string>()
 
+// Raw (pre-prune) parses from the last listing by drive file uuid. A file's uuid rotates on every
+// content change, so the bytes behind one never change and its parse can be reused.
+let parsedByFileUuid = new Map<string, Playlist>()
+
 async function resolvePlaylistsDirectoryUuid(): Promise<string> {
 	const generation = directoryGeneration
 
@@ -102,6 +106,7 @@ export function forgetPlaylistsDirectory(): void {
 	playlistsDirUuid = null
 	dotFilenDirUuid = null
 	knownPlaylistFileUuids.clear()
+	parsedByFileUuid = new Map()
 	markPlaylistsUnsynced()
 }
 
@@ -235,7 +240,7 @@ async function pruneDeadTracksOnce(playlist: Playlist, existence: TrackExistence
 	return cleaned
 }
 
-async function readOnePlaylistEntry(file: SdkFile, existence: TrackExistence): Promise<PlaylistEntry> {
+async function readOnePlaylistEntry(file: SdkFile, existence: TrackExistence, nextParsed: Map<string, Playlist>): Promise<PlaylistEntry> {
 	const item = narrowItem(file)
 	const base = asDirectoryOrFile(item)
 	const fallbackName = driveItemName(base)
@@ -245,12 +250,15 @@ async function readOnePlaylistEntry(file: SdkFile, existence: TrackExistence): P
 	}
 
 	try {
-		const bytes = await runOp(sdkApi.downloadFileBytes(base.data, crypto.randomUUID()))
-		const parsed = parsePlaylist(safeJsonParse(bytes))
+		const parsed =
+			parsedByFileUuid.get(base.data.uuid) ??
+			parsePlaylist(safeJsonParse(await runOp(sdkApi.downloadFileBytes(base.data, crypto.randomUUID()))))
 
 		if (parsed === null) {
 			return { status: "degraded", fileUuid: base.data.uuid, name: fallbackName }
 		}
+
+		nextParsed.set(base.data.uuid, parsed)
 
 		return { status: "ok", playlist: await pruneDeadTracksOnce(parsed, existence) }
 	} catch (error) {
@@ -277,8 +285,12 @@ export async function fetchPlaylistEntries(): Promise<PlaylistEntry[]> {
 	}
 
 	const existence: TrackExistence = new Map()
+	const nextParsed = new Map<string, Playlist>()
+	const entries = await Promise.all(files.map(file => readOnePlaylistEntry(file, existence, nextParsed)))
 
-	return Promise.all(files.map(file => readOnePlaylistEntry(file, existence)))
+	parsedByFileUuid = nextParsed
+
+	return entries
 }
 
 // Whether a drive event may have changed the Playlists directory's contents behind the query cache. A

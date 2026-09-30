@@ -287,18 +287,17 @@ export function Composer({
 	async function attachLocalFile(file: File): Promise<void> {
 		setUploadingCount(count => count + 1)
 
-		try {
-			const outcome = await uploadAttachment(file, noop)
-
-			if (outcome.status === "error") {
-				toast.error(errorLabel(outcome.dto))
-				return
-			}
-
-			insertAttachmentUrl(outcome.url)
-		} finally {
+		// .finally() rather than try/finally: the compiler can't compile a try without a catch.
+		const outcome = await uploadAttachment(file, noop).finally(() => {
 			setUploadingCount(count => count - 1)
+		})
+
+		if (outcome.status === "error") {
+			toast.error(errorLabel(outcome.dto))
+			return
 		}
+
+		insertAttachmentUrl(outcome.url)
 	}
 
 	async function attachLocalFiles(files: FileList | File[]): Promise<void> {
@@ -387,19 +386,17 @@ export function Composer({
 		// ahead of that paint or the thread's grow-triggered jump-to-bottom effect fires without it.
 		onSent()
 
-		try {
-			const flushed = await enqueueChatMessage({
-				chat,
-				content: normalized,
-				...(replyTo !== undefined ? { replyTo } : {}),
-				sender
-			})
-
-			if (!flushed) {
-				toast.error(t("chatMessageNotSaved"))
-			}
-		} finally {
+		const flushed = await enqueueChatMessage({
+			chat,
+			content: normalized,
+			...(replyTo !== undefined ? { replyTo } : {}),
+			sender
+		}).finally(() => {
 			sendingRef.current = false
+		})
+
+		if (!flushed) {
+			toast.error(t("chatMessageNotSaved"))
 		}
 	}
 

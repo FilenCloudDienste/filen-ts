@@ -14,6 +14,7 @@ import {
 	type MarqueeContentBox,
 	type MarqueeContentRect
 } from "@/features/drive/lib/marquee.logic"
+import { createListenerSet } from "@/lib/listenerSet"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { exceedsDragThreshold, listenWindowDrag } from "@/lib/windowDrag"
 
@@ -76,7 +77,7 @@ function uniformHitTest(itemCount: number, { viewMode, columns, geometry }: Marq
 }
 
 // Live per-drag state. Kept entirely in a ref (not React state): it mutates on every pointermove/frame
-// and must not itself drive renders — only the rendered rectangle does, via `rect` state below. Keeping
+// and must not itself drive renders — only the rendered rectangle does, via the rect store below. Keeping
 // the mutable tracking in a ref is also what keeps this compiler-safe.
 interface MarqueeDrag<T> {
 	// content-space anchor (fixed while the listing scrolls under the pointer)
@@ -103,9 +104,39 @@ interface MarqueeDrag<T> {
 	paddingRight: number
 }
 
+// The rectangle lives outside the host's state: it changes on every pointermove, and as host state it
+// would re-render the whole listing per frame even when the covered set is unchanged. Only <MarqueeRect>
+// subscribes.
+export interface MarqueeRectStore {
+	get: () => MarqueeContentRect | null
+	subscribe: (listener: () => void) => () => void
+}
+
+interface WritableMarqueeRectStore extends MarqueeRectStore {
+	set: (next: MarqueeContentRect | null) => void
+}
+
+function createMarqueeRectStore(): WritableMarqueeRectStore {
+	const listeners = createListenerSet("marqueeRect")
+	let current: MarqueeContentRect | null = null
+
+	return {
+		get: () => current,
+		subscribe: listeners.subscribe,
+		set: next => {
+			if (next === current) {
+				return
+			}
+
+			current = next
+			listeners.emit()
+		}
+	}
+}
+
 export interface MarqueeSelection {
 	onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void
-	rect: MarqueeContentRect | null
+	rectStore: MarqueeRectStore
 }
 
 // Rubber-band selection over a virtualized listbox (the drive listing in list OR grid mode, and the
@@ -116,13 +147,15 @@ export interface MarqueeSelection {
 export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams<T>): MarqueeSelection {
 	const { items, selection, scrollElement, setCursor, keyOf = uuidKey } = params
 	const hitTest = "hitTest" in params ? params.hitTest : uniformHitTest(items.length, params)
-	const [rect, setRect] = useState<MarqueeContentRect | null>(null)
+	const [rectStore] = useState(createMarqueeRectStore)
+	// The store never changes identity; a plain ref lets the mount-only teardown reach it as a stable dep.
+	const rectStoreRef = useRef(rectStore)
 	const dragRef = useRef<MarqueeDrag<T> | null>(null)
 	const rafRef = useRef(0)
 	const detachRef = useRef<(() => void) | null>(null)
 
 	// Latest render values, read by the window-level listeners so they never go stale without re-binding.
-	// One object, so one effect on a hook that re-renders on every pointermove.
+	// One object, so one effect on a hook that re-renders whenever the marqueed selection changes.
 	const latestRef = useLatestRef({ items, hitTest, selection, scrollElement, setCursor })
 
 	// The container's live content box, rebuilt per move from the current clientWidth + the drag's own
@@ -182,7 +215,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		}
 
 		latestRef.current.selection.write(next)
-		setRect(marqueeRect)
+		rectStoreRef.current.set(marqueeRect)
 	}
 
 	// Moves the roving cursor to the item under the drag-end point, or the last covered item.
@@ -221,7 +254,7 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		detachRef.current = null
 
 		dragRef.current = null
-		setRect(null)
+		rectStoreRef.current.set(null)
 	}
 
 	// rAF edge auto-scroll: while the pointer sits in an edge zone, advance scrollTop and re-hit-test at
@@ -393,5 +426,5 @@ export function useMarqueeSelection<T extends MarqueeItem>(params: MarqueeParams
 		}
 	}, [])
 
-	return { onPointerDown, rect }
+	return { onPointerDown, rectStore }
 }

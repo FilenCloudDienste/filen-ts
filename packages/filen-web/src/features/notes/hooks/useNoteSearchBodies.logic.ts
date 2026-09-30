@@ -1,4 +1,4 @@
-import { normalizeSearch, noteTitleMatchesSearch } from "@/features/notes/lib/sort"
+import { isNoteUndecryptable, normalizeSearch, noteTitleMatchesSearch } from "@/features/notes/lib/sort"
 import type { Note } from "@filen/sdk-rs"
 
 // Pure bits pulled out of useNoteSearchBodies.ts so the fetch-scoping decision is table-testable
@@ -7,6 +7,8 @@ import type { Note } from "@filen/sdk-rs"
 // Which notes actually need their body fetched for full-text search: a title hit already
 // qualifies the note (filterNotesBySearch checks title first), so fetching its body too would be pure
 // waste — this is the whole point of keeping the full-body fetch efficient and opt-in, not just gating on `searching`.
+// An undecryptable note's body read always fails in the SDK (MetadataWasNotDecryptedError, after the
+// request), so it is left to its preview without one.
 // Returns every note, unfiltered, for a blank query (the hook itself is what skips fetching then, by
 // passing an empty candidate list into useQueries).
 export function noteSearchBodyCandidates(notes: readonly Note[], search: string): Note[] {
@@ -16,7 +18,7 @@ export function noteSearchBodyCandidates(notes: readonly Note[], search: string)
 		return []
 	}
 
-	return notes.filter(note => !noteTitleMatchesSearch(note, normalized))
+	return notes.filter(note => !isNoteUndecryptable(note) && !noteTitleMatchesSearch(note, normalized))
 }
 
 // Zips the candidate notes back up with their fetched bodies (react-query's useQueries result array is
