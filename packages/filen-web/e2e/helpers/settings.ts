@@ -12,10 +12,14 @@ export async function gotoSettings(page: Page): Promise<void> {
 	await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 }
 
-// Every section's slug is its sidebar label lowercased.
+// Every section's slug is its sidebar label lowercased, and its h1 is that label. The h1 is the barrier,
+// not the URL: the URL flips while the section's code-split chunk is still loading, and until the new
+// route commits the outgoing section stays rendered, so an assertion made at the URL alone runs against
+// the page being left (Account's plan badge and storage legend both read "Free", as Billing's badge does).
 export async function openSettingsSection(page: Page, label: string): Promise<void> {
 	await page.getByRole("link", { name: label, exact: true }).click()
 	await page.waitForURL(new RegExp(`/settings/${label.toLowerCase()}$`))
+	await expect(page.getByRole("heading", { level: 1, name: label, exact: true })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 }
 
 // The Account and Security pages mount their rows only once the live getUserInfo read has settled, and

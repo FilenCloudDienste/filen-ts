@@ -171,15 +171,8 @@ test.describe("settings", () => {
 
 		const sections = ["Account", "Security", "Appearance", "Events", "Billing", "Advanced"]
 
-		// Each section's own heading is waited for before the next click — the URL flips before the route's
-		// component commits, so moving on at the URL alone would click the next link out of a tree that has
-		// not rendered yet. Generously budgeted: several sections fire a live read on mount, and this loop
-		// pays for all six in one test.
 		for (const label of sections) {
 			await openSettingsSection(page, label)
-			await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible({
-				timeout: BOOT_SETTLE_TIMEOUT_MS
-			})
 		}
 
 		expect(consoleErrors, consoleErrors.join("\n")).toEqual([])
