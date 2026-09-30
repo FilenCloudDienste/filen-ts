@@ -2,7 +2,7 @@ import { Fragment, useState } from "react"
 import { Trans, useTranslation } from "react-i18next"
 import useDismissStack from "@/hooks/useDismissStack"
 import { useResolveClassNames } from "uniwind"
-import { cn, isPasswordStrongEnough, isValidEmail, ratePasswordStrength } from "@filen/shared"
+import { cn, isPasswordStrongEnough, isValidEmail, ratePasswordStrength, type PasswordStrength } from "@filen/shared"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import SettingsHeader from "@/components/ui/settingsHeader"
@@ -18,8 +18,6 @@ import useIsOnline from "@/hooks/useIsOnline"
 import useRegisterCheckQuery from "@/features/auth/queries/useRegisterCheck.query"
 import logger from "@/lib/logger"
 import { openTrustedUrl } from "@/lib/openTrustedUrl"
-
-type PasswordStrength = ReturnType<typeof ratePasswordStrength>["strength"]
 
 // Strength → catalog key. Resolved with `t()` at the call site (inside the component, where the
 // hook `t` is in scope), so the labels stay reactive to language switches. The values are catalog
@@ -206,8 +204,8 @@ const Register = () => {
 					{passwordStrength !== null && (
 						<View className="flex-row items-center justify-between px-1 bg-transparent">
 							<Text className="text-muted-foreground text-xs">{t("password_strength")}</Text>
-							<Text className={cn("text-xs font-medium", STRENGTH_TW[passwordStrength.strength])}>
-								{t(STRENGTH_LABEL_KEY[passwordStrength.strength])}
+							<Text className={cn("text-xs font-medium", STRENGTH_TW[passwordStrength])}>
+								{t(STRENGTH_LABEL_KEY[passwordStrength])}
 							</Text>
 						</View>
 					)}

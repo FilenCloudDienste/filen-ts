@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useNavigation } from "expo-router"
-import { validateUuid } from "@/lib/uuid"
+import { validateUuid } from "@filen/shared"
 import type { DriveItem, DriveItemDirectorySharedRoot, DriveItemDirectorySharedNonRoot } from "@/types"
 import { deserializeRouteParam } from "@/lib/serializer"
 import { getDriveSelectSession } from "@/features/drive/store/useDriveSelect.store"

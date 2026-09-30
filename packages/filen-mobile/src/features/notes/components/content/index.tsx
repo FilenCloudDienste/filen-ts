@@ -16,14 +16,13 @@ import TextEditor from "@/components/textEditor"
 import { useStringifiedClient } from "@/lib/auth"
 import useNotesInflightStore, {
 	type InflightContent,
-	newestInflightEntry,
 	useNoteHasInflight
 } from "@/features/notes/store/useNotesInflight.store"
 import useNotesOfflineStore from "@/features/notes/store/useNotesOffline.store"
 import useTextEditorStore from "@/stores/useTextEditor.store"
 import { useShallow } from "zustand/shallow"
 import { useEffect, useCallback, useRef } from "react"
-import { run, conflictCopyStamp, hashNoteContent, buildInflightEntries, hasNoteWriteAccess } from "@filen/shared"
+import { run, conflictCopyStamp, hashNoteContent, buildInflightEntries, hasNoteWriteAccess, newestEntry } from "@filen/shared"
 import events from "@/lib/events"
 import alerts from "@/lib/alerts"
 import i18n from "@/lib/i18n"
@@ -166,13 +165,13 @@ function latestLocalNoteContent(noteUuid: string): string | undefined {
 		uuid: noteUuid
 	})
 
-	return newestInflightEntry(getInflightContentForNote(noteUuid))?.content ?? (typeof cached === "string" ? cached : undefined)
+	return newestEntry(getInflightContentForNote(noteUuid))?.content ?? (typeof cached === "string" ? cached : undefined)
 }
 
 // Whether `cloud` differs from what this device last knew the note to hold: its unsynced edits' base, else
 // the content cache (the last push or read).
 export function movedPastBase(noteUuid: string, cloud: string): boolean {
-	const newest = newestInflightEntry(getInflightContentForNote(noteUuid))
+	const newest = newestEntry(getInflightContentForNote(noteUuid))
 
 	if (newest?.baseContentHash !== undefined) {
 		return hashNoteContent(cloud) !== newest.baseContentHash
@@ -358,7 +357,7 @@ const Content = ({ note, history }: { note: Note; history?: NoteHistory | null }
 			}
 
 			// Already answered: the unsynced edits were kept over exactly this content.
-			if (content !== undefined && newestInflightEntry(getInflightContentForNote(note.uuid))?.baseContentHash === hashNoteContent(content)) {
+			if (content !== undefined && newestEntry(getInflightContentForNote(note.uuid))?.baseContentHash === hashNoteContent(content)) {
 				return
 			}
 

@@ -361,6 +361,31 @@ export function describedNotice<E extends string>(fields: {
 	}
 }
 
+/** A Rust crate unpacked at `dir`, described from its Cargo.toml. A null or manifest-less dir is UNKNOWN. */
+export function describeCargoCrate(name: string, version: string, dir: string | null): CollectedNotice<"rust"> {
+	const manifestPath = dir === null ? null : join(dir, "Cargo.toml")
+	const manifest = manifestPath !== null && existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : ""
+
+	return describedNotice({
+		name,
+		version,
+		license: /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN",
+		ecosystem: "rust",
+		dir,
+		repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null
+	})
+}
+
+/** Pools every entry's terms, then emits the payload entries without them, ordered by name then version. */
+export function finalizeNotices<E extends string>(collected: CollectedNotice<E>[]): { texts: string[]; notices: NoticeEntry<E>[] } {
+	const texts = poolLicenseTexts(collected)
+	const notices = collected
+		.map(({ terms: _terms, ...entry }) => entry)
+		.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
+
+	return { texts, notices }
+}
+
 export function readJson(path: string): Record<string, unknown> | null {
 	try {
 		return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>

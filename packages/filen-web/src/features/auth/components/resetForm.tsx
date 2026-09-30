@@ -214,7 +214,7 @@ function ResetForm({ token }: ResetFormProps) {
 								setPassword(e.target.value)
 							}}
 						>
-							{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+							{passwordStrength && <StrengthMeter tier={passwordStrength} />}
 						</PasswordInput>
 					</Field>
 					<Field>

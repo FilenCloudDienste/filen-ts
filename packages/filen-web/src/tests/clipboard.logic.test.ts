@@ -14,7 +14,7 @@ import {
 	type PasteTarget
 } from "@/features/drive/lib/clipboard.logic"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboardStore"
-import { type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
+import { type ParentLookup } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
 
 function dirItem(label: string, parent: string): DriveItem {

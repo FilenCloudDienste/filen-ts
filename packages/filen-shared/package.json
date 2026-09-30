@@ -9,36 +9,17 @@
 	},
 	"author": "Filen Cloud Dienste UG",
 	"type": "module",
-	"main": "src/index.ts",
-	"types": "src/index.ts",
 	"exports": {
-		".": {
-			"types": "./src/index.ts",
-			"default": "./src/index.ts"
-		},
-		"./dom": {
-			"types": "./src/dom/index.ts",
-			"default": "./src/dom/index.ts"
-		},
-		"./emojis": {
-			"types": "./src/emojis/index.ts",
-			"default": "./src/emojis/index.ts"
-		},
-		"./tooling": {
-			"types": "./src/tooling/licenseNotices.ts",
-			"default": "./src/tooling/licenseNotices.ts"
-		},
-		"./tooling/i18n": {
-			"types": "./src/tooling/i18nPipeline.ts",
-			"default": "./src/tooling/i18nPipeline.ts"
-		}
+		".": "./src/index.ts",
+		"./dom": "./src/dom/index.ts",
+		"./emojis": "./src/emojis/index.ts",
+		"./tooling": "./src/tooling/licenseNotices.ts",
+		"./tooling/i18n": "./src/tooling/i18nPipeline.ts"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.dom.json && tsc --noEmit -p tsconfig.tooling.json",
+		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && tsc -p tsconfig.dom.json && tsc -p tsconfig.tooling.json",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"test:ui": "vitest --ui",
-		"test:coverage": "vitest --coverage",
 		"lint": "eslint src/"
 	},
 	"engines": {
@@ -50,9 +31,9 @@
 		"@types/node": "^24.0.0",
 		"eslint": "^9.39.3",
 		"happy-dom": "^20.14.0",
-		"typescript": "^5.9.3",
+		"typescript": "~6.0.3",
 		"typescript-eslint": "^8.56.1",
-		"vitest": "^3.2.4"
+		"vitest": "^4.1.11"
 	},
 	"dependencies": {
 		"clsx": "^2.1.1",

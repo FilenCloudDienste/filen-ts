@@ -12,32 +12,17 @@ export type Failure<E = unknown> = {
 
 export type Result<T, E = unknown> = Success<T> | Failure<E>
 
-export type GenericFnResult =
-	| number
-	| boolean
-	| string
-	| object
-	| null
-	| undefined
-	| symbol
-	| bigint
-	| void
-	| Promise<number | boolean | string | object | null | undefined | symbol | bigint | void>
-	| Array<number | boolean | string | object | null | undefined | symbol | bigint | void>
-export type DeferFn = (fn: () => GenericFnResult) => void
-export type DeferredFunction = () => GenericFnResult
-export type DeferredFunctions = Array<DeferredFunction>
+export type DeferFn = (fn: () => unknown) => void
 
 export type Options = {
 	throw?: boolean
-	onError?: ((err: unknown) => void) | undefined
 }
 
 export async function run<TResult, E = unknown>(
 	fn: (deferFn: DeferFn) => Promise<TResult> | TResult,
 	options?: Options
 ): Promise<Result<TResult, E>> {
-	const deferredFunctions: DeferredFunctions = []
+	const deferredFunctions: Array<() => unknown> = []
 
 	const defer: DeferFn = deferFn => {
 		deferredFunctions.push(deferFn)
@@ -52,8 +37,6 @@ export async function run<TResult, E = unknown>(
 			error: null
 		}
 	} catch (e) {
-		options?.onError?.(e)
-
 		if (options?.throw) {
 			throw e
 		}
@@ -68,8 +51,8 @@ export async function run<TResult, E = unknown>(
 		for (let i = deferredFunctions.length - 1; i >= 0; i--) {
 			try {
 				await deferredFunctions[i]?.()
-			} catch (e) {
-				options?.onError?.(e)
+			} catch {
+				// A failing deferred fn must not stop the others.
 			}
 		}
 	}
@@ -94,7 +77,7 @@ export function runEffect<TResult, E = unknown>(
 ): Result<TResult, E> & {
 	cleanup: () => void
 } {
-	const deferredFunctions: DeferredFunctions = []
+	const deferredFunctions: Array<() => unknown> = []
 
 	const defer: DeferFn = deferFn => {
 		deferredFunctions.push(deferFn)
@@ -104,8 +87,8 @@ export function runEffect<TResult, E = unknown>(
 		for (let i = deferredFunctions.length - 1; i >= 0; i--) {
 			try {
 				deferredFunctions[i]?.()
-			} catch (e) {
-				options?.onError?.(e)
+			} catch {
+				// A failing deferred fn must not stop the others.
 			}
 		}
 	}
@@ -120,8 +103,6 @@ export function runEffect<TResult, E = unknown>(
 			cleanup
 		}
 	} catch (e) {
-		options?.onError?.(e)
-
 		if (options?.throw) {
 			throw e
 		}
@@ -168,8 +149,6 @@ export async function runTimeout<TResult, E = unknown>(
 
 		return result as Result<TResult, E>
 	} catch (e) {
-		options?.onError?.(e)
-
 		if (options?.throw) {
 			throw e
 		}
@@ -185,5 +164,3 @@ export async function runTimeout<TResult, E = unknown>(
 		}
 	}
 }
-
-export default run

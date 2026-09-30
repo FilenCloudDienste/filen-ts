@@ -58,7 +58,7 @@ describe("fileIconKey", () => {
 
 	// The ninth extension the B39 move changes on mobile: CODE_FILE_EXTENSIONS excludes "markdown" (each
 	// app used to compose it back in independently, and mobile's inline switch never did), but this
-	// classifier's own CODE_EXTENSIONS includes it directly.
+	// classifier's own table includes it directly.
 	it("routes markdown as code", () => {
 		expect(fileIconKey("markdown", stubSets)).toBe("code")
 	})

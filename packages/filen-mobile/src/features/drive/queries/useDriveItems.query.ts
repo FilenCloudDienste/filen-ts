@@ -2,7 +2,7 @@ import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/r
 import { queryUpdater, preserveArrayIdentity, queryClient, getCachedQuery, type QueryUpdater } from "@/queries/client"
 import auth from "@/lib/auth"
 import cache from "@/lib/cache"
-import { run, upsertItems } from "@filen/shared"
+import { ancestryHits, MAX_ANCESTRY_DEPTH, run, upsertItems } from "@filen/shared"
 import {
 	type File,
 	type Dir,
@@ -23,7 +23,7 @@ import {
 } from "@filen/sdk-rs"
 import { type DrivePath, type DrivePathType, type SharedNavContext, DRIVE_PATH_TYPES } from "@/hooks/useDrivePath"
 import { linkPasswordState, linkedRootOf } from "@/features/drive/utils"
-import { ancestryHits, MAX_ANCESTRY_DEPTH } from "@/features/drive/clipboard"
+import { cachedParentOf } from "@/features/drive/clipboard"
 import { queryReadSinceSocketReconnect } from "@/queries/socketSession"
 import { unwrapFileMeta, unwrapDirMeta, unwrappedDirIntoDriveItem, unwrappedFileIntoDriveItem, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { unwrapSdkError } from "@/lib/sdkErrors"
@@ -1354,7 +1354,7 @@ export function driveItemsQuerySocketGapReadsCopyWrites(destinationUuid: string 
 			}
 		}
 
-		if (copy.createdDirs.size > 0 && ancestryHits(destinationUuid, copy.createdDirs, cache.rootUuid) === true) {
+		if (copy.createdDirs.size > 0 && ancestryHits(destinationUuid, copy.createdDirs, cachedParentOf) === true) {
 			return true
 		}
 

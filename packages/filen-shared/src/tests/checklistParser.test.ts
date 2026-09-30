@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { parse, HTMLElement, TextNode } from "node-html-better-parser"
-import { checklistParser, decodeHtmlEntities } from "@filen/shared"
+import { checklistParser, decodeHtmlEntities, parseChecklistOrBlank } from "@filen/shared"
 
 // The rows node-html-better-parser itself reads from the note as stored, on notes it reads quickly.
 function asStored(html: string): [boolean, string][] {
@@ -55,64 +55,31 @@ describe("ChecklistParser", () => {
 		expect(result).toEqual([])
 	})
 
-	it("should parse single unchecked item", () => {
-		const html = "<ul data-checked=\"false\"><li>Item 1</li></ul>"
-		const result = checklistParser.parse(html)
+	it.each([true, false])("should parse and stringify a single item with checked %s", checked => {
+		const html = `<ul data-checked="${checked}"><li>Item 1</li></ul>`
 
-		expect(result).toEqual([
+		expect(checklistParser.parse(html)).toEqual([
 			{
 				id: expect.any(String),
-				checked: false,
+				checked,
 				content: "Item 1"
 			}
 		])
-	})
-
-	it("should parse single checked item", () => {
-		const html = "<ul data-checked=\"true\"><li>Item 1</li></ul>"
-		const result = checklistParser.parse(html)
-
-		expect(result).toEqual([
-			{
-				id: expect.any(String),
-				checked: true,
-				content: "Item 1"
-			}
-		])
+		expect(
+			checklistParser.stringify([
+				{
+					id: "1",
+					checked,
+					content: "Item 1"
+				}
+			])
+		).toBe(html)
 	})
 
 	it("should stringify empty checklist to empty string", () => {
 		const result = checklistParser.stringify([])
 
 		expect(result).toBe("")
-	})
-
-	it("should stringify single unchecked item", () => {
-		const checklist = [
-			{
-				id: "1",
-				checked: false,
-				content: "Item 1"
-			}
-		]
-
-		const result = checklistParser.stringify(checklist)
-
-		expect(result).toBe("<ul data-checked=\"false\"><li>Item 1</li></ul>")
-	})
-
-	it("should stringify single checked item", () => {
-		const checklist = [
-			{
-				id: "1",
-				checked: true,
-				content: "Item 1"
-			}
-		]
-
-		const result = checklistParser.stringify(checklist)
-
-		expect(result).toBe("<ul data-checked=\"true\"><li>Item 1</li></ul>")
 	})
 
 	it("should parse and stringify multiple items correctly", () => {
@@ -198,27 +165,15 @@ describe("ChecklistParser — rows older mobile builds stored unescaped", () => 
 		return checklistParser.parse(`<ul data-checked="false"><li>${rowHtml}</li></ul>`).map(item => item.content)
 	}
 
-	// An "&" followed by a legacy entity name without its ";" must not expand ("cut&copy" -> "cut©").
-	it.each(["cut&copy", "Save&note", "Check&register", "Get&quote", "left&center", "Issue&#42", "R&D", "AT&T", "Tom & Jerry"])(
-		"reads %s back unchanged",
-		raw => {
-			expect(parseRow(raw)).toEqual([raw])
-		}
-	)
+	// Entity decoding itself is pinned in htmlEntities.test.ts; this only checks the parser applies it.
+	it("decodes semicolon entities and leaves legacy names without one literal", () => {
+		expect(parseRow("cut&copy &amp; R&D")).toEqual(["cut&copy & R&D"])
+	})
 
 	it("keeps a legacy row's text when the list is next saved", () => {
 		const saved = checklistParser.stringify(checklistParser.parse("<ul data-checked=\"false\"><li>cut&copy</li><li>Issue&#42</li></ul>"))
 
 		expect(checklistParser.parse(saved).map(item => item.content)).toEqual(["cut&copy", "Issue&#42"])
-	})
-
-	it("still decodes every entity that ends in a semicolon", () => {
-		expect(parseRow("Tom &amp; Jerry")).toEqual(["Tom & Jerry"])
-		expect(parseRow("&amp;lt;")).toEqual(["&lt;"])
-		expect(parseRow("&lt;Header&gt;")).toEqual(["<Header>"])
-		expect(parseRow("a&nbsp;b")).toEqual(["a b"])
-		expect(parseRow("it&#39;s it&#x27;s")).toEqual(["it's it's"])
-		expect(parseRow("&quot;quoted&quot;")).toEqual(["\"quoted\""])
 	})
 
 	// The parser's tag pattern tries every way of splitting the text after such a "<" into attributes, which
@@ -505,5 +460,28 @@ describe("ChecklistParser.firstNonEmptyContent", () => {
 		expect(checklistParser.firstNonEmptyContent(html)).toBe(first)
 		expect(checklistParser.parse(html).find(item => item.content.length > 0)?.content ?? "").toBe(first)
 		expect(asStored(html).find(([, content]) => content.length > 0)?.[1] ?? "").toBe(first)
+	})
+})
+
+describe("parseChecklistOrBlank", () => {
+	it("falls back to a single empty unchecked row for empty or missing content", () => {
+		expect(parseChecklistOrBlank("", () => "fallback")).toEqual([{ id: "fallback", checked: false, content: "" }])
+		expect(parseChecklistOrBlank(undefined, () => "fallback")).toEqual([{ id: "fallback", checked: false, content: "" }])
+	})
+
+	it("falls back to a single empty row when the note yields no rows", () => {
+		expect(parseChecklistOrBlank("<ul data-checked=\"false\">no li", () => "fallback")).toEqual([
+			{ id: "fallback", checked: false, content: "" }
+		])
+	})
+
+	it("parses existing rows and preserves checked state + order", () => {
+		const rows = parseChecklistOrBlank(
+			"<ul data-checked=\"false\"><li>A</li><li>B</li></ul><ul data-checked=\"true\"><li>C</li></ul>",
+			() => "unused"
+		)
+
+		expect(rows.map(r => r.content)).toEqual(["A", "B", "C"])
+		expect(rows.map(r => r.checked)).toEqual([false, false, true])
 	})
 })

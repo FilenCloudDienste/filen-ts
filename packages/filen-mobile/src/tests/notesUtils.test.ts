@@ -13,7 +13,7 @@ vi.mock("@filen/sdk-rs", () => ({
 }))
 
 import { NoteType } from "@filen/sdk-rs"
-import { type Note, type NoteTag, type NoteHistory } from "@/types"
+import { type Note, type NoteTag } from "@/types"
 import {
 	noteCodeTitleExtension,
 	noteExportFileName,
@@ -26,8 +26,7 @@ import {
 	filterNoteTagsBySearchQuery,
 	noteTypeToEditorType,
 	computeTagState,
-	filterNoteListItemsBySearchQuery,
-	sortNoteHistoryNewestFirst
+	filterNoteListItemsBySearchQuery
 } from "@/features/notes/utils"
 import { type ListItem as NoteListItem } from "@/features/notes/components/note"
 
@@ -197,32 +196,6 @@ describe("filterNoteTagsBySearchQuery", () => {
 	})
 })
 
-describe("sortNoteHistoryNewestFirst", () => {
-	function entry(id: number, editedTimestamp: number): NoteHistory {
-		return {
-			id: BigInt(id),
-			editedTimestamp: BigInt(editedTimestamp)
-		} as unknown as NoteHistory
-	}
-
-	it("orders history newest-first by editedTimestamp (latest on top)", () => {
-		const sorted = sortNoteHistoryNewestFirst([entry(1, 1000), entry(2, 3000), entry(3, 2000)])
-
-		expect(sorted.map(h => Number(h.editedTimestamp))).toEqual([3000, 2000, 1000])
-	})
-
-	it("does not mutate the input array", () => {
-		const input = [entry(1, 1000), entry(2, 2000)]
-
-		sortNoteHistoryNewestFirst(input)
-
-		expect(input.map(h => Number(h.editedTimestamp))).toEqual([1000, 2000])
-	})
-
-	it("returns an empty array unchanged", () => {
-		expect(sortNoteHistoryNewestFirst([])).toEqual([])
-	})
-})
 // ── #84 virtual "Untagged" tag ───────────────────────────────────────────────
 
 describe("virtual untagged tag", () => {

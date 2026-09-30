@@ -4,7 +4,7 @@ import { selectAllMenuButton } from "@/components/ui/selectAllMenuButton"
 import { type Icons } from "@/components/ui/menuIcons"
 import { buildSortFieldButton, type SortDirectionOption } from "@/components/ui/sortFieldMenu"
 import { NoteType } from "@filen/sdk-rs"
-import { noteBulkActionAvailability, run, type NoteSelectionFlags } from "@filen/shared"
+import { noteBulkActionAvailability, run, type NoteSelectionFlags, type NoteTagsSortBy } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import { Platform } from "react-native"
 import { router } from "@/lib/router"
@@ -20,7 +20,6 @@ import { runBulk } from "@/lib/bulkOps"
 import notesOffline from "@/features/notes/notesOffline"
 import { createNoteSubButtons, NOTE_TYPE_LABEL_KEY, NOTE_TYPE_OPTIONS, noteTypeToIcon } from "@/features/notes/components/note/menu"
 import { createTagFlow } from "@/features/notes/components/notesActions"
-import { type NotesTagsSortBy } from "@/features/notes/notesTagsSortPreference"
 import { type TFunction } from "i18next"
 import type { Note, NoteTag } from "@/types"
 import { NOTES_VIEW_MODES, NOTES_VIEW_MODE_ORDER, type NotesViewMode } from "@/features/notes/notesViewModes"
@@ -30,13 +29,13 @@ import logger from "@/lib/logger"
 // buildSortFieldButton keeps each field's directions as a nested submenu on iOS and collapses them
 // into a direction ActionSheet on Android (which cannot render a 3rd menu level — see
 // components/ui/sortFieldMenu).
-export function buildTagsSortMenuButton(current: NotesTagsSortBy, setSort: (next: NotesTagsSortBy) => void, t: TFunction): MenuButton {
+export function buildTagsSortMenuButton(current: NoteTagsSortBy, setSort: (next: NoteTagsSortBy) => void, t: TFunction): MenuButton {
 	const field = (
 		id: string,
 		title: string,
 		icon: Icons,
-		first: SortDirectionOption<NotesTagsSortBy>,
-		second: SortDirectionOption<NotesTagsSortBy>
+		first: SortDirectionOption<NoteTagsSortBy>,
+		second: SortDirectionOption<NoteTagsSortBy>
 	): MenuButton => buildSortFieldButton({ id, title, icon, options: [first, second], current, setSort, t })
 
 	return {
@@ -149,8 +148,8 @@ export function buildNotesHeaderRightItems({
 	selectedTags: NoteTag[]
 	notesViewMode: NotesViewMode
 	setNotesViewMode: (fn: NotesViewMode | ((prev: NotesViewMode) => NotesViewMode)) => void
-	tagsSortBy: NotesTagsSortBy
-	setTagsSortBy: (next: NotesTagsSortBy) => void
+	tagsSortBy: NoteTagsSortBy
+	setTagsSortBy: (next: NoteTagsSortBy) => void
 	noteFlags: NoteSelectionFlags
 	// uuid -> true for every note kept on the device. Read reactively by the caller from the
 	// offline-notes store, so the entries below flip the moment the ledger changes.

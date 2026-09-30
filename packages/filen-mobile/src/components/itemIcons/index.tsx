@@ -1,5 +1,5 @@
 import Image from "@/components/ui/image"
-import { isValidHexColor, cn, fileIconKey, type FileIconKey } from "@filen/shared"
+import { cn, directoryFolderTint, fileIconKey, type FileIconKey } from "@filen/shared"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
 import { SDK_RAW_PREVIEW_EXTENSIONS, extnameOf } from "@/lib/previewType"
@@ -69,56 +69,6 @@ export const FileIcon = ({ name, width, height, className }: { name: string; wid
 	)
 }
 
-export function shadeColor(color: string, decimal: number): string {
-	const base = color.startsWith("#") ? 1 : 0
-
-	let r = parseInt(color.substring(base, 3), 16)
-	let g = parseInt(color.substring(base + 2, 5), 16)
-	let b = parseInt(color.substring(base + 4, 7), 16)
-
-	r = Math.round(r / decimal)
-	g = Math.round(g / decimal)
-	b = Math.round(b / decimal)
-
-	r = r < 255 ? r : 255
-	g = g < 255 ? g : 255
-	b = b < 255 ? b : 255
-
-	const rr = r.toString(16).length === 1 ? `0${r.toString(16)}` : r.toString(16)
-	const gg = g.toString(16).length === 1 ? `0${g.toString(16)}` : g.toString(16)
-	const bb = b.toString(16).length === 1 ? `0${b.toString(16)}` : b.toString(16)
-
-	return `#${rr}${gg}${bb}`
-}
-
-export function directoryColorToHex(color: string | null): string {
-	if (!color) {
-		return "#85BCFF"
-	}
-
-	const hexColor = (
-		color === "blue"
-			? "#037AFF"
-			: color === "gray"
-				? "#8F8E93"
-				: color === "green"
-					? "#33C759"
-					: color === "purple"
-						? "#AF52DE"
-						: color === "red"
-							? "#FF3B30"
-							: color.includes("#")
-								? color
-								: "#85BCFF"
-	).toLowerCase()
-
-	if (!isValidHexColor(hexColor)) {
-		return "#85BCFF"
-	}
-
-	return hexColor
-}
-
 export function unwrapDirColor(color?: DirColor): string {
 	if (!color) {
 		return "default"
@@ -161,21 +111,7 @@ export function unwrapDirColor(color?: DirColor): string {
 
 export const directorySvg = memoize(
 	({ color, width, height }: { color?: string | null; width?: string | number; height?: string | number }) => {
-		const colors = (() => {
-			if (!color || color === "default") {
-				return {
-					path1: "#5398DF",
-					path2: "#85BCFF"
-				}
-			}
-
-			const stringToColor = directoryColorToHex(color)
-
-			return {
-				path1: shadeColor(stringToColor, 1.3),
-				path2: stringToColor
-			}
-		})()
+		const colors = directoryFolderTint(color)
 
 		const w = typeof width === "number" ? `${width}px` : (width ?? "32px")
 		const h = typeof height === "number" ? `${height}px` : (height ?? "32px")

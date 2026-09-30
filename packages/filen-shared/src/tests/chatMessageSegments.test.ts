@@ -187,15 +187,32 @@ describe("segmentMessage — where a link ends", () => {
 })
 
 describe("isEmojiOnly", () => {
+	function emojiOnly(text: string | undefined): boolean {
+		return isEmojiOnly(segmentMessage(text))
+	}
+
 	it("is true only when the message is entirely emoji shortcodes (jumbo candidate)", () => {
-		expect(isEmojiOnly(":smile:")).toBe(true)
-		expect(isEmojiOnly(":smile::wave:")).toBe(true)
+		expect(emojiOnly(":smile:")).toBe(true)
+		expect(emojiOnly(":smile::wave:")).toBe(true)
+		expect(emojiOnly(":thumbsup::skin-tone-2:")).toBe(true)
+	})
+
+	it("ignores blank text and line breaks at either end", () => {
+		expect(emojiOnly("  :smile:\t")).toBe(true)
+		expect(emojiOnly("\n :smile::wave: \n")).toBe(true)
+	})
+
+	it("is false when anything but emoji sits between them", () => {
+		expect(emojiOnly(":smile: :wave:")).toBe(false)
+		expect(emojiOnly(":smile:\n:wave:")).toBe(false)
 	})
 
 	it("is false when any non-emoji text remains, or there is no emoji at all", () => {
-		expect(isEmojiOnly(":smile: hi")).toBe(false)
-		expect(isEmojiOnly("hello")).toBe(false)
-		expect(isEmojiOnly("")).toBe(false)
-		expect(isEmojiOnly(undefined)).toBe(false)
+		expect(emojiOnly(":smile: hi")).toBe(false)
+		expect(emojiOnly("```:smile:```")).toBe(false)
+		expect(emojiOnly("hello")).toBe(false)
+		expect(emojiOnly("  \n ")).toBe(false)
+		expect(emojiOnly("")).toBe(false)
+		expect(emojiOnly(undefined)).toBe(false)
 	})
 })

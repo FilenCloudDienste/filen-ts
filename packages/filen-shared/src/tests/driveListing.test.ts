@@ -1,36 +1,40 @@
 import { describe, it, expect } from "vitest"
-import { keepAgainstIncoming, upsertItem, upsertItems, removeByUuid, applyMembershipPatch } from "@filen/shared"
-
-describe("keepAgainstIncoming", () => {
-	it("drops the existing row when its uuid matches the incoming item", () => {
-		expect(keepAgainstIncoming("same", "a.txt", "same", "b.txt")).toBe(false)
-	})
-
-	it("drops an existing same-name (case/space-insensitive) duplicate with a different uuid", () => {
-		expect(keepAgainstIncoming("old", "  Notes.TXT ", "new", "notes.txt")).toBe(false)
-	})
-
-	it("keeps an unrelated decryptable row (different uuid AND different name)", () => {
-		expect(keepAgainstIncoming("old", "other.txt", "new", "notes.txt")).toBe(true)
-	})
-
-	it("keeps an existing undecryptable sibling when the incoming item is also undecryptable", () => {
-		// Both names undefined — must NOT be treated as a same-name collision.
-		expect(keepAgainstIncoming("undec-a", undefined, "incoming", undefined)).toBe(true)
-	})
-
-	it("keeps an existing undecryptable sibling when the incoming item is decryptable", () => {
-		expect(keepAgainstIncoming("undec-a", undefined, "incoming", "notes.txt")).toBe(true)
-	})
-
-	it("keeps a decryptable row when the incoming item is undecryptable (name undefined)", () => {
-		expect(keepAgainstIncoming("old", "notes.txt", "incoming", undefined)).toBe(true)
-	})
-})
+import { upsertItem, upsertItems, removeByUuid, applyMembershipPatch } from "@filen/shared"
 
 function item(uuid: string, name?: string) {
 	return { data: { uuid, decryptedMeta: name !== undefined ? { name } : null } }
 }
+
+describe("upsertItem", () => {
+	function uuidsAfter(existing: ReturnType<typeof item>, incoming: ReturnType<typeof item>): string[] {
+		return upsertItem([existing], incoming).map(row => row.data.uuid)
+	}
+
+	it("drops the existing row when its uuid matches the incoming item", () => {
+		expect(upsertItem([item("same", "a.txt")], item("same", "b.txt"))).toEqual([item("same", "b.txt")])
+	})
+
+	it("drops an existing same-name (case/space-insensitive) duplicate with a different uuid", () => {
+		expect(uuidsAfter(item("old", "  Notes.TXT "), item("new", "notes.txt"))).toEqual(["new"])
+	})
+
+	it("keeps an unrelated decryptable row (different uuid AND different name)", () => {
+		expect(uuidsAfter(item("old", "other.txt"), item("new", "notes.txt"))).toEqual(["old", "new"])
+	})
+
+	it("keeps an existing undecryptable sibling when the incoming item is also undecryptable", () => {
+		// Both names undefined — must NOT be treated as a same-name collision.
+		expect(uuidsAfter(item("undec-a"), item("incoming"))).toEqual(["undec-a", "incoming"])
+	})
+
+	it("keeps an existing undecryptable sibling when the incoming item is decryptable", () => {
+		expect(uuidsAfter(item("undec-a"), item("incoming", "notes.txt"))).toEqual(["undec-a", "incoming"])
+	})
+
+	it("keeps a decryptable row when the incoming item is undecryptable (name undefined)", () => {
+		expect(uuidsAfter(item("old", "notes.txt"), item("incoming"))).toEqual(["old", "incoming"])
+	})
+})
 
 describe("upsertItems", () => {
 	function sequential<T extends ReturnType<typeof item>>(items: T[], incoming: T[]): T[] {

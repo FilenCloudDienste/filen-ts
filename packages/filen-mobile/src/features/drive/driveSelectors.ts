@@ -4,7 +4,6 @@ import type { PreviewType } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { serialize } from "@/lib/serializer"
 import { serializeSelectOptions } from "@/features/drive/driveSelectParams"
-import { keepAgainstIncoming } from "@filen/shared"
 
 // Local extension check — kept inline (rather than calling getPreviewType from
 // src/lib/previewType) so this module doesn't pull in the SDK at test time. IMAGE ∪ VIDEO only:
@@ -82,20 +81,6 @@ export function isPlainDrivePath(drivePath: DrivePath): boolean {
 
 export function isDirectoryItem(item: DriveItem): item is DriveItemDirectoryExtracted {
 	return DIRECTORY_TYPES.has(item.type)
-}
-
-/**
- * Predicate used when inserting an incoming item into a cached parent listing: keeps an
- * existing row unless it is the SAME item (uuid match) or a same-name duplicate that the
- * incoming item supersedes (case-insensitive, trimmed).
- *
- * The name half only fires when BOTH names are actually present. Undecryptable items carry
- * `decryptedMeta === null` (so their name is `undefined`); comparing `undefined !== undefined`
- * used to collapse to a name "match", evicting every undecryptable sibling whenever any
- * undecryptable item arrived. Guarding on presence keeps unrelated undecryptable rows.
- */
-export function keepAgainstIncomingDriveItem(existing: DriveItem, incomingUuid: string, incomingName: string | undefined): boolean {
-	return keepAgainstIncoming(existing.data.uuid, existing.data.decryptedMeta?.name, incomingUuid, incomingName)
 }
 
 export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): DriveSelectionFlags {

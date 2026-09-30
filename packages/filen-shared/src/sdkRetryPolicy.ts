@@ -14,7 +14,7 @@
 
 // Wire/transport failures the SDK already retried internally. A push that fails with one of these
 // keeps its entry and retries forever (offline-safe).
-export const NETWORK_CLASS_ERROR_KINDS: ReadonlySet<string> = new Set(["Reqwest", "RetryFailed", "Response"])
+const NETWORK_CLASS_ERROR_KINDS: ReadonlySet<string> = new Set(["Reqwest", "RetryFailed", "Response"])
 
 export function isNetworkClassErrorKind(kind: string | undefined): boolean {
 	return kind !== undefined && NETWORK_CLASS_ERROR_KINDS.has(kind)

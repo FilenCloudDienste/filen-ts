@@ -7,7 +7,6 @@ import { renderAndSave } from "@/lib/imageManipulator"
 import { transplantMetadata } from "@/modules/filen-exif"
 import secureStore from "@/lib/secureStore"
 import logger from "@/lib/logger"
-import { isHeicFileName, HEIC_EXTENSIONS_UPLOAD } from "@filen/shared"
 
 // JPEG quality for the HEIC→JPG conversion. MAXIMUM (1.0) on purpose: this option
 // exists for cross-device COMPATIBILITY, not size, so it must not throw away quality
@@ -23,16 +22,17 @@ const HEIC_JPG_QUALITY = 1
 export const CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY = "convertHeicToJpgEnabled"
 export const DEFAULT_CONVERT_HEIC_TO_JPG_ENABLED = false
 
+const HEIC_EXTENSIONS: ReadonlySet<string> = new Set(["heic", "heif", "heics", "heifs"])
+
 // Whether a filename or file URI names a HEIC/HEIF image, by its trailing extension.
 // Deliberately a PLAIN string check, NOT FileSystem.Paths.extname — the latter
 // decodeURIComponent()s file:// URIs and throws URIError on a literal/malformed '%'
 // in a picked filename (drive DocumentPicker/ImagePicker hand us raw file:// URIs).
-// Strip any query/fragment locally (the shared predicate does no URI truncation of its own),
-// then hand the rest to @filen/shared's isHeicFileName.
+// Any query/fragment is stripped first; .heics/.heifs are the multi-image burst variants.
 export function isHeicFile(nameOrUri: string): boolean {
-	const bareName = nameOrUri.split(/[?#]/, 1)[0] ?? nameOrUri
+	const bareName = (nameOrUri.split(/[?#]/, 1)[0] ?? nameOrUri).toLowerCase()
 
-	return isHeicFileName(bareName, HEIC_EXTENSIONS_UPLOAD)
+	return HEIC_EXTENSIONS.has(bareName.slice(bareName.lastIndexOf(".") + 1))
 }
 
 // Non-reactive read of the global toggle for lib/sync contexts (no React hook).

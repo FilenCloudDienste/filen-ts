@@ -21,7 +21,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 // test and the caller decides what clock to use. `compareWithinBucket` is likewise injected —
 // each app keeps its own existing within-bucket tie order rather than this module picking one.
 export function partitionNotesByBucket<
-	T extends { id: string; pinned: boolean; favorite: boolean; archive: boolean; trash: boolean; ts: number }
+	T extends { pinned: boolean; favorite: boolean; archive: boolean; trash: boolean; ts: number }
 >(items: readonly T[], now: number, compareWithinBucket: (a: T, b: T) => number): { bucketId: NoteBucketId; notes: T[] }[] {
 	const todayAgo = now - DAY_MS
 	const sevenDaysAgo = now - 7 * DAY_MS

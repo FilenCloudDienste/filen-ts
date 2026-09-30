@@ -1,9 +1,8 @@
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
-import { formatBytes, clampedRatio, storageUsageLevel } from "@filen/shared"
+import { formatBytes, clampedRatio, storageUsageLevel, deriveStorageBreakdown } from "@filen/shared"
 import { useTranslation } from "react-i18next"
 import { useResolveClassNames } from "uniwind"
-import { computeStorageSegments } from "@/features/settings/storageSegments"
 
 // Segmented storage bar + wrapping legend for the More-screen account header. Files is colored by
 // fullness (green → yellow → red), versioned is a fixed blue, free is the track. Colors are resolved
@@ -25,7 +24,11 @@ const StorageUsageBar = ({
 	const blue = useResolveClassNames("text-blue-500")
 	const muted = useResolveClassNames("text-muted-foreground")
 
-	const { files, versioned, free } = computeStorageSegments(storageUsed, versionedStorage, maxStorage)
+	const breakdown = deriveStorageBreakdown(storageUsed, maxStorage, versionedStorage)
+	// Numbers for the flex weights and formatBytes.
+	const files = Number(breakdown.filesBytes)
+	const versioned = Number(breakdown.versionedBytes)
+	const free = Number(breakdown.freeBytes)
 	const level = storageUsageLevel(clampedRatio(Number(storageUsed), Number(maxStorage), 100))
 	const filesColor = (level === "critical" ? red.color : level === "warn" ? yellow.color : green.color) as string
 	const versionedColor = blue.color as string

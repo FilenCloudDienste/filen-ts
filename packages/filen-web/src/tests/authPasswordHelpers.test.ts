@@ -10,7 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
-import { StrengthMeter, type PasswordStrengthTier } from "@/features/auth/components/strengthMeter"
+import type { PasswordStrength } from "@filen/shared"
+import { StrengthMeter } from "@/features/auth/components/strengthMeter"
 
 const { register, login, logout } = vi.hoisted(() => ({ register: vi.fn(), login: vi.fn(), logout: vi.fn() }))
 
@@ -35,11 +36,11 @@ afterEach(() => {
 	cleanup()
 })
 
-const STRENGTH_TIERS: PasswordStrengthTier[] = ["weak", "normal", "strong", "best"]
+const STRENGTH_TIERS: PasswordStrength[] = ["weak", "normal", "strong", "best"]
 
 // The bar's fill is the only inline-styled element (its width steps in quarters); the label is the
 // meter's first paragraph.
-function strengthShades(tier: PasswordStrengthTier): { fill: string; label: string } {
+function strengthShades(tier: PasswordStrength): { fill: string; label: string } {
 	const { container, unmount } = render(createElement(StrengthMeter, { tier }))
 	const fill = container.querySelector("div[style]")
 	const label = container.querySelector("p")

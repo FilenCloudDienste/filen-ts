@@ -103,7 +103,7 @@ vi.mock("@/features/notes/components/sync", () => ({
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => ({ userId: 1 }) }))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
 vi.mock("@/features/notes/store/useNotesInflight.store", async () => {
-	const { hasInflightEntries, newestInflightEntry } = await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>(
+	const { hasInflightEntries } = await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>(
 		"@/features/notes/store/useNotesInflight.store"
 	)
 	const getState = () => ({
@@ -115,7 +115,6 @@ vi.mock("@/features/notes/store/useNotesInflight.store", async () => {
 
 	return {
 		hasInflightEntries,
-		newestInflightEntry,
 		useNoteHasInflight: (uuid: string) => hasInflightEntries(state.inflight as Parameters<typeof hasInflightEntries>[0], uuid),
 		default: Object.assign((selector: (s: ReturnType<typeof getState>) => unknown) => selector(getState()), { getState })
 	}

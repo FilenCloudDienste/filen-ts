@@ -1,25 +1,5 @@
 import { checklistParser, type Checklist } from "@filen/shared"
 
-// Parse the note HTML into rows, falling back to a single empty unchecked row when the content is empty
-// or unparseable (mobile parity: checklistParser.parse returns [] for malformed HTML, and a brand-new
-// checklist note starts as one editable row). `newId` is injected so the component supplies its own
-// id source and the fallback stays deterministic in tests.
-export function parseChecklistSeed(seed: string, newId: () => string): Checklist {
-	const parsed = seed.length > 0 ? checklistParser.parse(seed) : []
-
-	if (parsed.length === 0) {
-		return [
-			{
-				id: newId(),
-				checked: false,
-				content: ""
-			}
-		]
-	}
-
-	return parsed
-}
-
 // Canonical serialization — the `<ul data-checked>` HTML every client stores. Consecutive rows sharing
 // a checked state group under one <ul> (checklistParser.stringify); an empty list serializes to "".
 export function serializeChecklist(rows: Checklist): string {

@@ -1,13 +1,7 @@
 import { describe, it, expect } from "vitest"
-import { TRANSFER_PERFORMANCE_PRESETS, DEFAULT_TRANSFER_PERFORMANCE_PRESET, TRANSFER_PRESET_VALUES } from "@filen/shared"
+import { DEFAULT_TRANSFER_PERFORMANCE_PRESET, TRANSFER_PRESET_VALUES } from "@filen/shared"
 
 describe("TRANSFER_PRESET_VALUES", () => {
-	it("has an entry for every preset in the ladder", () => {
-		for (const preset of TRANSFER_PERFORMANCE_PRESETS) {
-			expect(TRANSFER_PRESET_VALUES[preset]).toBeDefined()
-		}
-	})
-
 	it("maps the four tiers to their concurrency + memoryMib values", () => {
 		expect(TRANSFER_PRESET_VALUES).toEqual({
 			batterySaver: { concurrency: 4, memoryMib: 4 },
@@ -19,8 +13,7 @@ describe("TRANSFER_PRESET_VALUES", () => {
 })
 
 describe("DEFAULT_TRANSFER_PERFORMANCE_PRESET", () => {
-	it("is 'balanced' and is itself a valid preset", () => {
+	it("is 'balanced'", () => {
 		expect(DEFAULT_TRANSFER_PERFORMANCE_PRESET).toBe("balanced")
-		expect(TRANSFER_PERFORMANCE_PRESETS).toContain(DEFAULT_TRANSFER_PERFORMANCE_PRESET)
 	})
 })

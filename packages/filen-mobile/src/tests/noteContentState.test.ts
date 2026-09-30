@@ -79,10 +79,7 @@ vi.mock("@/features/notes/components/sync", () => ({
 }))
 vi.mock("@/lib/auth", () => ({ useStringifiedClient: () => null }))
 vi.mock("@/features/notes/queries/useNotesQuery", () => ({ notesQueryGet: () => [] }))
-vi.mock("@/features/notes/store/useNotesInflight.store", async () => ({
-	newestInflightEntry: (
-		await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>("@/features/notes/store/useNotesInflight.store")
-	).newestInflightEntry,
+vi.mock("@/features/notes/store/useNotesInflight.store", () => ({
 	default: { getState: () => ({ inflightContent: {} }) }
 }))
 vi.mock("@/stores/useTextEditor.store", () => ({ default: () => false }))

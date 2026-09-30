@@ -1,6 +1,7 @@
 import type { DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
-import { ownDirectoryUuids, type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
+import { type ParentLookup } from "@filen/shared"
+import { ownDirectoryUuids } from "@/features/drive/components/moveTargetDialog.logic"
 import { queryClient } from "@/queries/client"
 
 // The user's own directory tree as the cached listings record it: a directory's parent is the listing

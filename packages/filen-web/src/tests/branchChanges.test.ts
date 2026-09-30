@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { emitBranchChange, reroutedPath, reroutedRoute, subscribeBranchChanges } from "@/features/drive/lib/branchChanges"
-import { type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
+import { type ParentLookup } from "@filen/shared"
 
 // root > a > b > c is the route; x sits at the root, y inside x.
 const PARENTS = new Map<string, string | null>([

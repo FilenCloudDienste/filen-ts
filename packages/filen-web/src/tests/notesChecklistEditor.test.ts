@@ -1,30 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Checklist } from "@filen/shared"
-import { parseChecklistSeed, serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
-
-describe("parseChecklistSeed", () => {
-	it("falls back to a single empty unchecked row for empty content", () => {
-		const rows = parseChecklistSeed("", () => "fallback")
-
-		expect(rows).toEqual([{ id: "fallback", checked: false, content: "" }])
-	})
-
-	it("falls back to a single empty row for unparseable HTML (parser returns [])", () => {
-		const rows = parseChecklistSeed('<ul data-checked="false">no li', () => "fallback")
-
-		expect(rows).toEqual([{ id: "fallback", checked: false, content: "" }])
-	})
-
-	it("parses existing rows and preserves checked state + order", () => {
-		const rows = parseChecklistSeed(
-			'<ul data-checked="false"><li>A</li><li>B</li></ul><ul data-checked="true"><li>C</li></ul>',
-			() => "unused"
-		)
-
-		expect(rows.map(r => r.content)).toEqual(["A", "B", "C"])
-		expect(rows.map(r => r.checked)).toEqual([false, false, true])
-	})
-})
+import { checklistParser, type Checklist } from "@filen/shared"
+import { serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
 
 describe("serializeChecklist — multi-run consecutive-state grouping", () => {
 	it("groups consecutive same-checked rows under one <ul> and splits on state change", () => {
@@ -48,7 +24,7 @@ describe("serializeChecklist — multi-run consecutive-state grouping", () => {
 
 	it("round-trips through parse → serialize", () => {
 		const html = '<ul data-checked="false"><li>one</li><li>two</li></ul><ul data-checked="true"><li>three</li></ul>'
-		const rows = parseChecklistSeed(html, () => "unused")
+		const rows = checklistParser.parse(html)
 
 		expect(serializeChecklist(rows)).toBe(html)
 	})

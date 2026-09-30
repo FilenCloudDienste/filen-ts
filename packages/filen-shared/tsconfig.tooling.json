@@ -3,12 +3,6 @@
 	"include": ["src/tooling", "src/tests/tooling"],
 	"exclude": [],
 	"compilerOptions": {
-		"types": ["node"],
-		"noEmit": true,
-		"baseUrl": ".",
-		"paths": {
-			"@filen/shared/tooling/i18n": ["./src/tooling/i18nPipeline.ts"],
-			"@filen/shared/tooling": ["./src/tooling/licenseNotices.ts"]
-		}
+		"types": ["node"]
 	}
 }

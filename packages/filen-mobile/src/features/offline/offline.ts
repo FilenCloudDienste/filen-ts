@@ -1,7 +1,7 @@
 import * as FileSystem from "expo-file-system"
 import logger from "@/lib/logger"
 import type { DriveItem } from "@/types"
-import { run, runOrThrow, Semaphore, KeyedSemaphores, dirnameOf, errorMessage, type DeferFn } from "@filen/shared"
+import { run, runOrThrow, Semaphore, KeyedSemaphores, dirnameOf, errorMessage, validateUuid, type DeferFn } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import { serialize, deserialize, serializeEquals } from "@/lib/serializer"
 import auth from "@/lib/auth"
@@ -24,7 +24,6 @@ import {
 	type OfflineSyncErrorKind
 } from "@/features/offline/offlineHelpers"
 import { planTreeReconcile, uuidFromSyncTmpName, type LocalTreeEntry, type RemoteTreeEntry } from "@/features/offline/offlineSyncPlanner"
-import { validateUuid } from "@/lib/uuid"
 import { driveItemsQueryUpdate } from "@/features/drive/queries/useDriveItems.query"
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 import useOfflineStore from "@/features/offline/store/useOffline.store"

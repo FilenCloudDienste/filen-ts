@@ -25,57 +25,33 @@
 // Needs a DOM (document.createElement), so it lives behind "@filen/shared/dom" and must never be
 // re-exported from the platform-free main barrel.
 
-type LegacyContainer = {
-	tag: "ul" | "ol"
-	// "true" / "false" for a checklist <ul data-checked>; null for a plain bullet <ul> or ordered <ol>.
-	checked: "true" | "false" | null
-}
+const DATA_LIST = /\bdata-list\s*=/
 
-// Map a v2 <li data-list> value to its v1 container. Anything unexpected (missing / empty / unknown —
-// never emitted by real Quill v2 output) defensively falls back to a plain bullet <ul>, matching Quill
-// v1's "a <ul> with no data-checked is a bullet list".
-function dataListToLegacyContainer(dataList: string | null): LegacyContainer {
+// Map a v2 <li data-list> value to its v1 container open tag. Anything unexpected (missing / empty /
+// unknown — never emitted by real Quill v2 output) defensively falls back to a plain bullet <ul>,
+// matching Quill v1's "a <ul> with no data-checked is a bullet list".
+function legacyOpenTag(dataList: string | null): string {
 	switch (dataList) {
 		case "ordered": {
-			return {
-				tag: "ol",
-				checked: null
-			}
+			return "<ol>"
 		}
 
 		case "checked": {
-			return {
-				tag: "ul",
-				checked: "true"
-			}
+			return "<ul data-checked=\"true\">"
 		}
 
 		case "unchecked": {
-			return {
-				tag: "ul",
-				checked: "false"
-			}
+			return "<ul data-checked=\"false\">"
 		}
 
 		default: {
-			return {
-				tag: "ul",
-				checked: null
-			}
+			return "<ul>"
 		}
 	}
 }
 
-function sameContainer(a: LegacyContainer, b: LegacyContainer): boolean {
-	return a.tag === b.tag && a.checked === b.checked
-}
-
-function openTag(container: LegacyContainer): string {
-	if (container.checked !== null) {
-		return `<ul data-checked="${container.checked}">`
-	}
-
-	return `<${container.tag}>`
+function closeTagOf(openTag: string): string {
+	return openTag.startsWith("<ol") ? "</ol>" : "</ul>"
 }
 
 // Build one v1 <li> from a v2 <li>: strip the Quill v2 toggle UI span (class-gated — a user's own inline
@@ -87,7 +63,7 @@ function buildLegacyListItem(li: Element): string {
 	}
 
 	const className = li.getAttribute("class")
-	const classAttr = className && className.length > 0 ? ` class="${className}"` : ""
+	const classAttr = className ? ` class="${className}"` : ""
 	const content = li.textContent && li.textContent.trim().length > 0 ? li.innerHTML : "<br>"
 
 	return `<li${classAttr}>${content}</li>`
@@ -107,29 +83,29 @@ function convertListContainer(containerHtml: string): string {
 	}
 
 	let out = ""
-	let current: LegacyContainer | null = null
+	let current: string | null = null
 
 	for (const li of Array.from(list.children)) {
 		if (li.tagName !== "LI") {
 			continue
 		}
 
-		const container = dataListToLegacyContainer(li.getAttribute("data-list"))
+		const open = legacyOpenTag(li.getAttribute("data-list"))
 
-		if (!current || !sameContainer(current, container)) {
+		if (open !== current) {
 			if (current) {
-				out += `</${current.tag}>`
+				out += closeTagOf(current)
 			}
 
-			out += openTag(container)
-			current = container
+			out += open
+			current = open
 		}
 
 		out += buildLegacyListItem(li)
 	}
 
 	if (current) {
-		out += `</${current.tag}>`
+		out += closeTagOf(current)
 	}
 
 	return out
@@ -164,7 +140,7 @@ function convertCodeBlockContainer(containerHtml: string): string {
 // is returned byte-for-byte unchanged. Idempotent: v1 output carries no data-list / ql-code-block, so a
 // second pass is a no-op.
 export function quillV2ToLegacyV1(html: string): string {
-	if (!/\bdata-list\s*=/.test(html) && !html.includes("ql-code-block-container")) {
+	if (!DATA_LIST.test(html) && !html.includes("ql-code-block-container")) {
 		return html
 	}
 
@@ -174,7 +150,7 @@ export function quillV2ToLegacyV1(html: string): string {
 	// and <ol>/<ul> only ever come from lists — so each <ol|ul>…</ol|ul> is a self-contained block with an
 	// unambiguous close (user "<" is escaped to &lt; inside, so no literal </ol> can appear in item text).
 	// Rewrite only the blocks that actually carry data-list; leave already-v1 containers untouched.
-	out = out.replace(/<(ol|ul)\b[^>]*>[\s\S]*?<\/\1>/gi, block => (/\bdata-list\s*=/.test(block) ? convertListContainer(block) : block))
+	out = out.replace(/<(ol|ul)\b[^>]*>[\s\S]*?<\/\1>/gi, block => (DATA_LIST.test(block) ? convertListContainer(block) : block))
 
 	// Code blocks: a <div class="ql-code-block-container"> wraps per-line <div class="ql-code-block">
 	// children with no deeper nesting (CodeBlockContainer.allowedChildren = [CodeBlock]), so the block
@@ -186,5 +162,3 @@ export function quillV2ToLegacyV1(html: string): string {
 
 	return out
 }
-
-export default quillV2ToLegacyV1

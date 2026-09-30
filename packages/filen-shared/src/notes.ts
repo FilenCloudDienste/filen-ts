@@ -31,3 +31,15 @@ export function createNotePreviewFromContentText(type: "rich" | "checklist" | "o
 		return ""
 	}
 }
+
+// Note history newest first. `id` breaks a timestamp tie: history ids are server-assigned and increasing,
+// so the higher id is the later edit. Bigint throughout; does not mutate the input.
+export function sortNoteHistory<T extends { id: bigint; editedTimestamp: bigint }>(history: readonly T[]): T[] {
+	return [...history].sort((a, b) => {
+		if (a.editedTimestamp !== b.editedTimestamp) {
+			return a.editedTimestamp > b.editedTimestamp ? -1 : 1
+		}
+
+		return a.id === b.id ? 0 : a.id > b.id ? -1 : 1
+	})
+}

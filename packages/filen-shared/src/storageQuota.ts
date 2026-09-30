@@ -1,7 +1,7 @@
 // Storage-usage warning tier — mirrors mobile's segmented storage bar (green under 75%, yellow
-// 75-90%, red 90%+ of quota used). Consumers (web's storageMeter.tsx sidebar meter,
-// storageBreakdownCard.tsx's files segment; mobile's storageUsageBar.tsx) color themselves by this
-// tier rather than each hardcoding its own threshold.
+// 75-90%, red 90%+ of quota used). Consumers (web's storageMeter.tsx sidebar meter and account storage
+// bars; mobile's storageUsageBar.tsx) color themselves by this tier rather than each hardcoding its own
+// threshold.
 export type StorageUsageLevel = "ok" | "warn" | "critical"
 
 const WARN_THRESHOLD_PERCENT = 75
@@ -35,6 +35,35 @@ export function freeBytes(info: StorageCounters): bigint | null {
 	const free = info.maxStorage - info.storageUsed
 
 	return free > 0n ? free : 0n
+}
+
+// The account's quota split into files / versioned / free, which always sum to maxBytes. Used is clamped
+// to the quota (a plan downgrade can report more) and versioned to used (both are independent reads, so a
+// racing versioned figure must not drive files negative). An unresolvable quota (maxStorage <= 0) zeros
+// every segment.
+export interface StorageBreakdown {
+	usedBytes: bigint
+	maxBytes: bigint
+	filesBytes: bigint
+	versionedBytes: bigint
+	freeBytes: bigint
+}
+
+export function deriveStorageBreakdown(storageUsed: bigint, maxStorage: bigint, versionedStorage: bigint): StorageBreakdown {
+	if (maxStorage <= 0n) {
+		return { usedBytes: storageUsed, maxBytes: maxStorage, filesBytes: 0n, versionedBytes: 0n, freeBytes: 0n }
+	}
+
+	const usedClamped = storageUsed >= maxStorage ? maxStorage : storageUsed < 0n ? 0n : storageUsed
+	const versionedClamped = versionedStorage >= usedClamped ? usedClamped : versionedStorage < 0n ? 0n : versionedStorage
+
+	return {
+		usedBytes: usedClamped,
+		maxBytes: maxStorage,
+		filesBytes: usedClamped - versionedClamped,
+		versionedBytes: versionedClamped,
+		freeBytes: maxStorage - usedClamped
+	}
 }
 
 export type QuotaVerdict = { status: "fits" } | { status: "exceeds"; neededBytes: bigint; freeBytes: bigint } | { status: "unknown" }

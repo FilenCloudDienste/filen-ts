@@ -142,7 +142,7 @@ function ChangePasswordRow() {
 								setNewPassword(e.target.value)
 							}}
 						>
-							{passwordStrength && <StrengthMeter tier={passwordStrength.strength} />}
+							{passwordStrength && <StrengthMeter tier={passwordStrength} />}
 						</PasswordInput>
 					</Field>
 					<Field>

@@ -163,7 +163,6 @@ import {
 	resolveMimeType,
 	convertBigInts
 } from "@/lib/utils"
-import { contactDisplayName } from "@filen/shared"
 import { makeDriveItemPublicLink, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import { normalizeFilePathForSdk, normalizeFilePathForExpo, stripUriFragmentAndQuery } from "@/lib/paths"
 import { getPreviewType } from "@/lib/previewType"
@@ -954,32 +953,6 @@ describe("normalizeModificationTimestampForComparison", () => {
 	it("floors fractional result — never rounds up", () => {
 		// 1999 ms → 1 s (not 2)
 		expect(normalizeModificationTimestampForComparison(1999)).toBe(1)
-	})
-})
-
-// ---------------------------------------------------------------------------
-// contactDisplayName
-// ---------------------------------------------------------------------------
-
-describe("contactDisplayName", () => {
-	it("returns nickName when present and non-empty", () => {
-		const contact = { nickName: "Alice", email: "alice@example.com" } as any
-		expect(contactDisplayName(contact)).toBe("Alice")
-	})
-
-	it("falls back to email when nickName is empty string", () => {
-		const contact = { nickName: "", email: "alice@example.com" } as any
-		expect(contactDisplayName(contact)).toBe("alice@example.com")
-	})
-
-	it("falls back to email when nickName is undefined", () => {
-		const contact = { nickName: undefined, email: "alice@example.com" } as any
-		expect(contactDisplayName(contact)).toBe("alice@example.com")
-	})
-
-	it("ignores email when nickName is non-empty", () => {
-		const contact = { nickName: "Bob", email: "bob@example.com" } as any
-		expect(contactDisplayName(contact)).toBe("Bob")
 	})
 })
 

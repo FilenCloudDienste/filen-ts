@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CODE_FILE_EXTENSIONS, extensionStart, HEIC_EXTENSIONS_UPLOAD, isHeicFileName } from "@filen/shared"
+import { CODE_FILE_EXTENSIONS, extensionStart } from "@filen/shared"
 
 describe("CODE_FILE_EXTENSIONS", () => {
 	it("is the verified 53-entry intersection, lowercase and dot-less", () => {
@@ -27,41 +27,6 @@ describe("CODE_FILE_EXTENSIONS", () => {
 
 	it("excludes ahk — left to the icon classifier batch to decide", () => {
 		expect(CODE_FILE_EXTENSIONS.has("ahk")).toBe(false)
-	})
-})
-
-describe("HEIC_EXTENSIONS_UPLOAD", () => {
-	it("is mobile's four HEIC/HEIF variants, lowercase and dot-less", () => {
-		expect(HEIC_EXTENSIONS_UPLOAD).toEqual(new Set(["heic", "heif", "heics", "heifs"]))
-	})
-})
-
-describe("isHeicFileName", () => {
-	it("matches case-insensitively against the given set", () => {
-		expect(isHeicFileName("photo.heic", HEIC_EXTENSIONS_UPLOAD)).toBe(true)
-		expect(isHeicFileName("photo.HEIC", HEIC_EXTENSIONS_UPLOAD)).toBe(true)
-		expect(isHeicFileName("burst.heics", HEIC_EXTENSIONS_UPLOAD)).toBe(true)
-		expect(isHeicFileName("burst.HEIFS", HEIC_EXTENSIONS_UPLOAD)).toBe(true)
-	})
-
-	it("returns false for a non-matching extension", () => {
-		expect(isHeicFileName("photo.jpg", HEIC_EXTENSIONS_UPLOAD)).toBe(false)
-	})
-
-	it("does not match when the target extension is not the final one", () => {
-		expect(isHeicFileName("photo.heic.jpg", HEIC_EXTENSIONS_UPLOAD)).toBe(false)
-	})
-
-	it("performs no URI truncation — a query/fragment or path left in by the caller stays in", () => {
-		expect(isHeicFileName("photo.heic?download=1", HEIC_EXTENSIONS_UPLOAD)).toBe(false)
-		expect(isHeicFileName("var/mobile/photo.heic", HEIC_EXTENSIONS_UPLOAD)).toBe(true)
-	})
-
-	it("is parameterised over the extension set — web's narrower set stays independent", () => {
-		const webHeicExtensions = new Set(["heic", "heif"])
-
-		expect(isHeicFileName("burst.heics", webHeicExtensions)).toBe(false)
-		expect(isHeicFileName("burst.heics", HEIC_EXTENSIONS_UPLOAD)).toBe(true)
 	})
 })
 

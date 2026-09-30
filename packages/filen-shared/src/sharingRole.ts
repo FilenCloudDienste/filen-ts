@@ -27,25 +27,7 @@ export interface ShareIdentity {
 // runtime shapes it actually carries (see SharingRoleLike above). Callers pass their own generated
 // SharingRole value directly — it is structurally assignable to SharingRoleLike on both surfaces.
 export function shareIdentityFromRole(role: SharingRoleLike | undefined): ShareIdentity | null {
-	if (role === undefined) {
-		return null
-	}
+	const info = role?.inner?.[0] ?? role?.Sharer ?? role?.Receiver
 
-	const inner = role.inner
-
-	if (inner !== undefined && inner.length > 0) {
-		const first = inner[0]
-
-		if (first !== undefined) {
-			return { userId: BigInt(first.id), email: first.email }
-		}
-	}
-
-	const info = role.Sharer ?? role.Receiver ?? null
-
-	if (info === null) {
-		return null
-	}
-
-	return { userId: BigInt(info.id), email: info.email }
+	return info === undefined ? null : { userId: BigInt(info.id), email: info.email }
 }

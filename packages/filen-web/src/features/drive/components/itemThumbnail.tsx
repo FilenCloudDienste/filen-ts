@@ -1,10 +1,9 @@
 import { useState } from "react"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { dirColorHex } from "@/features/drive/lib/dirColor"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
 import { useThumbnail } from "@/features/drive/hooks/useThumbnail"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
-import { cn } from "@filen/shared"
+import { cn, dirColorHex } from "@filen/shared"
 
 // The item's thumbnail when the service has one, else its icon. A leaf of its own so a late thumbnail
 // resolve re-renders only this, never the row/tile around it. useThumbnail already yields null for a

@@ -1,4 +1,4 @@
-import { type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
+import { type ParentLookup } from "@filen/shared"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { createListenerSet } from "@/lib/listenerSet"
 

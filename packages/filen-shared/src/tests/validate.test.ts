@@ -35,7 +35,7 @@ describe("isValidEmail", () => {
 	})
 })
 
-// Fixtures run through the REAL ratePasswordStrength (not hand-built rating objects) so the gate is
+// Fixtures run through the REAL ratePasswordStrength (not hand-picked tiers) so the gate is
 // tested against the same tier boundaries the forms see: length >= 10 plus 2 of 3 character classes
 // rates normal, all 3 classes rates strong (>= 16 best), everything below rates weak.
 describe("isPasswordStrongEnough", () => {

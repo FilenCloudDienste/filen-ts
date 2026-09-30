@@ -1,7 +1,7 @@
 import type { DirColor } from "@filen/sdk-rs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { directoryFolderTint, fileIconKey, type FileIconKey } from "@/features/drive/lib/icon.logic"
-import { cn } from "@filen/shared"
+import { fileIconKey, type FileIconKey } from "@/features/drive/lib/icon.logic"
+import { cn, directoryFolderTint } from "@filen/shared"
 import imageUrl from "@/assets/file-icons/image.svg"
 import videoUrl from "@/assets/file-icons/video.svg"
 import audioUrl from "@/assets/file-icons/audio.svg"
@@ -51,8 +51,8 @@ const FOLDER_TAB_PATH =
 const FOLDER_BODY_PATH =
 	"M1128.7,997.9H68.3C30.6,997.9,0,967.3,0,929.6V280.4c0-37.7,30.6-68.3,68.3-68.3h1060.5 c37.7,0,68.3,30.6,68.3,68.3v0v649.2C1197,967.3,1166.4,997.9,1128.7,997.9"
 
-// A folder glyph tinted by a directory's color. The default/uncolored case reuses filen-mobile's exact
-// default pair. `className` sizes the box (the glyph scales to fit, letterboxed to its wider aspect).
+// A folder glyph tinted by a directory's color. `className` sizes the box (the glyph scales to fit,
+// letterboxed to its wider aspect).
 export function DirectoryGlyph({ color, className }: { color: DirColor; className?: string | undefined }) {
 	const tint = directoryFolderTint(color)
 

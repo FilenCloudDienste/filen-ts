@@ -12,7 +12,8 @@ import {
 	markChatMessagesUnsynced
 } from "@/features/chats/queries/chatMessages"
 import { refetchChatsAndMessages } from "@/features/chats/lib/refetchChatsAndMessages"
-import { newestMessage, compareBySentTimestamp } from "@/features/chats/lib/sort"
+import { compareBySentTimestamp } from "@/features/chats/lib/sort"
+import { newestMessage } from "@filen/shared"
 import { useSocketStatusStore } from "@/features/chats/store/useSocketStatus"
 import { purgeChatInflightState } from "@/features/chats/lib/inflight"
 import { applyTypingSignal, clearTypingForSender } from "@/features/chats/lib/typing"

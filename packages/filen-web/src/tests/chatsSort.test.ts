@@ -10,9 +10,7 @@ import {
 	isChatUndecryptable,
 	isLastMessageFromBlocked,
 	messageSenderName,
-	newestMessage,
-	otherParticipants,
-	sortChats
+	otherParticipants
 } from "@/features/chats/lib/sort"
 import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
@@ -93,82 +91,6 @@ function mockUndecryptableMessage(overrides: Omit<Partial<ChatMessage>, "message
 		...overrides
 	}
 }
-
-// Mirrors mobile's `components/list/index.tsx:36-45` sort exactly (verified against source this
-// session).
-describe("sortChats", () => {
-	it("orders by lastMessage.sentTimestamp descending", () => {
-		const older = mockChat({ uuid: testUuid("older"), lastMessage: mockMessage({ sentTimestamp: 100n }) })
-		const newer = mockChat({ uuid: testUuid("newer"), lastMessage: mockMessage({ sentTimestamp: 200n }) })
-
-		expect(sortChats([older, newer]).map(c => c.uuid)).toEqual([newer.uuid, older.uuid])
-	})
-
-	it("treats a chat with no lastMessage as timestamp 0 (sorts to the bottom)", () => {
-		const withMessage = mockChat({ uuid: testUuid("withMessage"), lastMessage: mockMessage({ sentTimestamp: 1n }) })
-		const withoutMessage = mockChat({ uuid: testUuid("withoutMessage") })
-
-		expect(sortChats([withoutMessage, withMessage]).map(c => c.uuid)).toEqual([withMessage.uuid, withoutMessage.uuid])
-	})
-
-	// The comparator converts with Number(), so ADJACENT bigints past MAX_SAFE_INTEGER collapse and fall
-	// through to the uuid tiebreak — accepted, since ms timestamps sit nowhere near that range. What is
-	// pinned here is that a bigint that far out still survives the conversion with its ordering intact.
-	it("orders large bigint sentTimestamps that survive the comparator's Number() conversion", () => {
-		const huge = mockChat({ uuid: testUuid("huge"), lastMessage: mockMessage({ sentTimestamp: 9_007_199_254_740_992n }) })
-		const hugePlusOne = mockChat({
-			uuid: testUuid("hugePlusOne"),
-			lastMessage: mockMessage({ sentTimestamp: 9_007_199_254_740_994n })
-		})
-
-		expect(sortChats([huge, hugePlusOne]).map(c => c.uuid)).toEqual([hugePlusOne.uuid, huge.uuid])
-	})
-
-	it("tiebreaks two chats with equal (or absent) lastMessage timestamps deterministically by uuid, descending", () => {
-		// parseNumbersFromString extracts digits from the uuid; "bbb-..." has no digits at all (both
-		// resolve to 0) — use uuids carrying distinct digit runs so the tiebreak has something to bite.
-		const a = mockChat({ uuid: testUuid("1") })
-		const b = mockChat({ uuid: testUuid("2") })
-
-		const sorted = sortChats([a, b])
-		expect(sorted.map(c => c.uuid)).toEqual([b.uuid, a.uuid])
-		// Stable regardless of input order.
-		expect(sortChats([b, a]).map(c => c.uuid)).toEqual([b.uuid, a.uuid])
-	})
-
-	it("does not mutate the input array", () => {
-		const input = [
-			mockChat({ uuid: testUuid("a"), lastMessage: mockMessage({ sentTimestamp: 1n }) }),
-			mockChat({ uuid: testUuid("b"), lastMessage: mockMessage({ sentTimestamp: 2n }) })
-		]
-		const snapshot = [...input]
-
-		sortChats(input)
-
-		expect(input).toEqual(snapshot)
-	})
-})
-
-describe("newestMessage", () => {
-	const older = mockMessage({ uuid: testUuid("older"), sentTimestamp: 100n })
-	const newer = mockMessage({ uuid: testUuid("newer"), sentTimestamp: 200n })
-
-	it("keeps the shown message over an older one", () => {
-		expect(newestMessage(newer, older)).toBe(newer)
-	})
-
-	it("takes a newer message, and a chat's first", () => {
-		expect(newestMessage(older, newer)).toBe(newer)
-		expect(newestMessage(undefined, older)).toBe(older)
-	})
-
-	// The same message delivered again, as a committed send's own echo is.
-	it("takes a message sent at the same moment", () => {
-		const again = { ...newer }
-
-		expect(newestMessage(newer, again)).toBe(again)
-	})
-})
 
 describe("compareBySentTimestamp", () => {
 	it("orders oldest first, bigint-safe past Number precision", () => {

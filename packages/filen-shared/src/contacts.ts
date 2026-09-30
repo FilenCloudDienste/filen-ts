@@ -10,5 +10,5 @@ export interface ContactLike {
 // A nickname wins over the bare email whenever one is actually set. Guarded, not asserted —
 // nickName is optional precisely because not every contact-like record carries one.
 export function contactDisplayName(contact: ContactLike): string {
-	return contact.nickName && contact.nickName.length > 0 ? contact.nickName : contact.email
+	return contact.nickName ? contact.nickName : contact.email
 }

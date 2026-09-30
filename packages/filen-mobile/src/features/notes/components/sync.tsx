@@ -5,6 +5,7 @@ import {
 	MAX_NON_RETRYABLE_REJECTIONS,
 	hashNoteContent,
 	mergeInflight,
+	newestEntry,
 	pruneAndRebaseNoteOutboxAfterPush,
 	reconcileNoteOutboxAgainstCloud
 } from "@filen/shared"
@@ -17,8 +18,7 @@ import { AppState } from "react-native"
 import useNotesInflightStore, {
 	type InflightContent,
 	INFLIGHT_CONTENT_SQLITE_KV_KEY,
-	hasInflightEntries,
-	newestInflightEntry
+	hasInflightEntries
 } from "@/features/notes/store/useNotesInflight.store"
 import { type Note } from "@/types"
 import sqlite from "@/lib/sqlite"
@@ -32,7 +32,7 @@ import { OutboxSync } from "@/lib/outboxSync"
 
 // The note's newest outbox entry, when it was typed on `base` (none left, or rebased: undefined).
 function newestEntryOnBase(noteUuid: string, base: string): InflightContent[string][number] | undefined {
-	const newest = newestInflightEntry(useNotesInflightStore.getState().inflightContent[noteUuid])
+	const newest = newestEntry(useNotesInflightStore.getState().inflightContent[noteUuid])
 
 	return newest?.baseContentHash === base ? newest : undefined
 }
@@ -369,7 +369,7 @@ export class Sync extends OutboxSync<InflightContent> {
 							return
 						}
 
-						const mostRecentContent = newestInflightEntry(contents)
+						const mostRecentContent = newestEntry(contents)
 
 						if (!mostRecentContent) {
 							return

@@ -54,7 +54,7 @@ import { Sync } from "@/features/notes/lib/sync"
 import { NOTES_QUERY_KEY, notesQueryUpdate } from "@/features/notes/queries/notes"
 import { noteContentQueryKey } from "@/features/notes/queries/noteContent"
 import { useNotesInflightStore, type InflightContent } from "@/features/notes/store/useNotesInflight"
-import { buildInflightEntries, mergeInflight, hashNoteContent } from "@filen/shared"
+import { hashNoteContent } from "@filen/shared"
 import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
 import { holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
@@ -133,67 +133,6 @@ afterEach(() => {
 })
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
-
-describe("buildInflightEntries — monotonic timestamps (NTP-backstep guard)", () => {
-	const note = makeNote("a")
-
-	it("stamps `now` for a fresh session", () => {
-		const entries = buildInflightEntries({ previous: undefined, note, content: "x", now: 1000, sessionBaseHash: null })
-
-		expect(entries).toHaveLength(1)
-		expect(entries[0]?.timestamp).toBe(1000)
-	})
-
-	it("forces newest+1 when the clock steps backward", () => {
-		const previous = [{ timestamp: 5000, content: "old", note }]
-		const entries = buildInflightEntries({ previous, note, content: "new", now: 4000, sessionBaseHash: null })
-
-		// now (4000) < newest existing (5000) → monotonic bump to 5001, never the stale 4000.
-		expect(entries[0]?.timestamp).toBe(5001)
-	})
-
-	it("stamps the session base hash only on a FRESH session, carries it forward after", () => {
-		const fresh = buildInflightEntries({ previous: undefined, note, content: "x", now: 1, sessionBaseHash: "base1" })
-
-		expect(fresh[0]?.baseContentHash).toBe("base1")
-
-		const next = buildInflightEntries({ previous: fresh, note, content: "y", now: 2, sessionBaseHash: "IGNORED" })
-
-		// An ongoing session carries the existing base, never re-stamps the seed.
-		expect(next[0]?.baseContentHash).toBe("base1")
-	})
-
-	it("omits the base hash key entirely for the legacy no-hash grace (exactOptionalPropertyTypes)", () => {
-		const [first] = buildInflightEntries({ previous: undefined, note, content: "x", now: 1, sessionBaseHash: null })
-
-		expect(first).toBeDefined()
-		expect(first !== undefined && "baseContentHash" in first).toBe(false)
-	})
-})
-
-describe("mergeInflight — replay-on-launch merge semantics (#41)", () => {
-	const note = makeNote("a")
-
-	it("seeds uuids the store does not have yet", () => {
-		const merged = mergeInflight({}, { a: [{ timestamp: 10, content: "disk", note }] })
-
-		expect(merged["a"]?.[0]?.content).toBe("disk")
-	})
-
-	it("keeps the store side when its local timestamp is at least as fresh", () => {
-		const current: InflightContent = { a: [{ timestamp: 20, content: "typed-during-fetch", note }] }
-		const merged = mergeInflight(current, { a: [{ timestamp: 10, content: "stale-disk", note }] })
-
-		expect(merged["a"]?.[0]?.content).toBe("typed-during-fetch")
-	})
-
-	it("takes the disk side when it carries the newer local timestamp", () => {
-		const current: InflightContent = { a: [{ timestamp: 5, content: "stale-store", note }] }
-		const merged = mergeInflight(current, { a: [{ timestamp: 30, content: "newer-disk", note }] })
-
-		expect(merged["a"]?.[0]?.content).toBe("newer-disk")
-	})
-})
 
 describe("inflightContentSchema — corrupt persisted outbox dropped (adaptation A)", () => {
 	const note = makeNote("a")

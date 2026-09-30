@@ -22,9 +22,9 @@ import { ExternalAnchor } from "@/features/chats/components/thread/externalAncho
 // "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
 // heuristic (@filen/shared's isEmojiOnly).
 // `segments` is segmentMessage(text), tokenized once by MessageRow, which also derives the embeds from it.
-export function MessageContent({ chat, text, segments }: { chat: Chat; text: string | undefined; segments: MessageSegment[] }) {
+export function MessageContent({ chat, segments }: { chat: Chat; segments: MessageSegment[] }) {
 	const { t } = useTranslation("chats")
-	const jumbo = isEmojiOnly(text)
+	const jumbo = isEmojiOnly(segments)
 
 	if (segments.length === 0) {
 		return null

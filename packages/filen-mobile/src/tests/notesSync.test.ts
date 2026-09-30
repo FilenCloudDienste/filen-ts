@@ -77,7 +77,7 @@ vi.mock("@filen/shared", async () => ({
 vi.mock("@/lib/sqlite", async () => (await import("@/tests/mocks/sqliteKv")).createSqliteKvMock(kvStore))
 
 vi.mock("@/features/notes/store/useNotesInflight.store", async () => {
-	const { hasInflightEntries, newestInflightEntry } = await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>(
+	const { hasInflightEntries } = await vi.importActual<typeof import("@/features/notes/store/useNotesInflight.store")>(
 		"@/features/notes/store/useNotesInflight.store"
 	)
 	const mockSetInflightContent = vi.fn((fn: unknown) => {
@@ -91,7 +91,6 @@ vi.mock("@/features/notes/store/useNotesInflight.store", async () => {
 	return {
 		INFLIGHT_CONTENT_SQLITE_KV_KEY: "inflightNoteContent",
 		hasInflightEntries,
-		newestInflightEntry,
 		default: {
 			getState: () => ({
 				inflightContent: notesState.inflightContent,

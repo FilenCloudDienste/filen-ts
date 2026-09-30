@@ -2,7 +2,16 @@ import { afterEach, describe, expect, it } from "vitest"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describedNotice, describeLicensing, poolLicenseTexts, repositoryOf, spdxOf, type PoolableNotice } from "@filen/shared/tooling"
+import {
+	describeCargoCrate,
+	describedNotice,
+	describeLicensing,
+	finalizeNotices,
+	poolLicenseTexts,
+	repositoryOf,
+	spdxOf,
+	type PoolableNotice
+} from "@filen/shared/tooling"
 
 const APACHE =
 	"Apache License\nVersion 2.0, January 2004\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\nAPPENDIX: How to apply the Apache License to your work."
@@ -70,6 +79,63 @@ describe("describedNotice", () => {
 			texts: [],
 			terms: ["Permission is hereby granted."]
 		})
+	})
+})
+
+describe("describeCargoCrate", () => {
+	it("reads license and repository from Cargo.toml", () => {
+		const dir = packageDir({
+			"Cargo.toml": "[package]\nname = \"crate\"\nlicense = \"MIT OR Apache-2.0\"\nrepository = \"https://github.com/o/crate\"\n",
+			"LICENSE-MIT": "Copyright (c) 2020 Someone\n\nPermission is hereby granted.",
+			"LICENSE-APACHE": APACHE
+		})
+
+		expect(describeCargoCrate("crate", "1.0.0", dir)).toEqual({
+			name: "crate",
+			version: "1.0.0",
+			license: "MIT OR Apache-2.0",
+			ecosystem: "rust",
+			copyright: ["Copyright (c) 2020 Someone"],
+			repository: "https://github.com/o/crate",
+			texts: [],
+			terms: ["Permission is hereby granted."]
+		})
+	})
+
+	it("is UNKNOWN without a directory or manifest", () => {
+		const expected = { license: "UNKNOWN", repository: null, copyright: [], terms: [] }
+
+		expect(describeCargoCrate("crate", "1.0.0", null)).toMatchObject(expected)
+		expect(describeCargoCrate("crate", "1.0.0", packageDir({}))).toMatchObject(expected)
+	})
+})
+
+describe("finalizeNotices", () => {
+	it("pools terms, drops them and sorts by name then version", () => {
+		const entry = (name: string, version: string, license: string, terms: string[]) => ({
+			name,
+			version,
+			license,
+			ecosystem: "npm" as const,
+			copyright: [],
+			repository: null,
+			texts: [],
+			terms
+		})
+
+		const { texts, notices } = finalizeNotices([
+			entry("b", "1.0.0", "Apache-2.0", [APACHE]),
+			entry("a", "2.0.0", "MIT", ["Permission is hereby granted."]),
+			entry("a", "1.0.0", "MIT", [])
+		])
+
+		expect(texts).toEqual([APACHE, "Permission is hereby granted."])
+		expect(notices.map(notice => [notice.name, notice.version, notice.texts])).toEqual([
+			["a", "1.0.0", []],
+			["a", "2.0.0", [1]],
+			["b", "1.0.0", [0]]
+		])
+		expect(notices.every(notice => !("terms" in notice))).toBe(true)
 	})
 })
 

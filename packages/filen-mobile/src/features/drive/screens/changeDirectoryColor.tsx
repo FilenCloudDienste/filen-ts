@@ -6,11 +6,12 @@ import useDismissStack from "@/hooks/useDismissStack"
 import { deserializeRouteParam } from "@/lib/serializer"
 import type { DriveItem } from "@/types"
 import View from "@/components/ui/view"
-import { DirectoryIcon, unwrapDirColor, directoryColorToHex } from "@/components/itemIcons"
+import { DirectoryIcon, unwrapDirColor } from "@/components/itemIcons"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment, useState } from "react"
 import { useResolveClassNames } from "uniwind"
 import { DirColor } from "@filen/sdk-rs"
+import { dirColorHex } from "@filen/shared"
 import ColorPicker, { Panel1, Preview, HueSlider } from "reanimated-color-picker"
 import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -39,13 +40,10 @@ const ChangeDirectoryColor = () => {
 
 	const item = deserializeRouteParam<DriveItem>(itemSerialized)
 
-	const [hexColor, setHexColor] = useState<string>(() => {
-		if (!item || item.type !== "directory") {
-			return directoryColorToHex(unwrapDirColor(DirColor.Default.new()))
-		}
-
-		return directoryColorToHex(unwrapDirColor(item.data.color))
-	})
+	// Lowercase: the hex field below only ever holds lowercase input
+	const [hexColor, setHexColor] = useState<string>(() =>
+		dirColorHex(item && item.type === "directory" ? unwrapDirColor(item.data.color) : null).toLowerCase()
+	)
 
 	const [hexInput, setHexInput] = useState<string>(hexColor)
 

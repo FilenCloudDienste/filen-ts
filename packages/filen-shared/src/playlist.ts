@@ -83,13 +83,3 @@ export function parsePlaylist(value: unknown): Playlist | null {
 
 	return { ...value, uuid, name, created, updated, files }
 }
-
-// Playlist files are read back with plain JSON.parse (never an app's own bigint-envelope local-cache
-// serializer — playlist storage predates and is independent of that format), so the only thing worth
-// centralizing on the write side is dropping any accidental non-JSON-safe value before JSON.stringify
-// would throw on it. Every PlaylistFile field the write path constructs is already a plain
-// string/number by the time it reaches here (callers convert SDK bigints at construction) — this is a
-// cheap, self-documenting guard against that invariant regressing, not a real serializer.
-export function serializePlaylist(playlist: Playlist): string {
-	return JSON.stringify(playlist)
-}

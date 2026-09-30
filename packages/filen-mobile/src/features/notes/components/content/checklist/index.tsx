@@ -3,7 +3,7 @@ import { useHeaderHeight } from "expo-router/react-navigation"
 import { Platform } from "react-native"
 import { useStore } from "zustand"
 import { KeyboardAwareScrollView } from "@/components/ui/view"
-import { checklistParser, patchChecklistItem, type ChecklistItem } from "@filen/shared"
+import { checklistParser, parseChecklistOrBlank, patchChecklistItem, type ChecklistItem } from "@filen/shared"
 import Item from "@/features/notes/components/content/checklist/item"
 import { createChecklistStore, ChecklistStoreContext } from "@/features/notes/store/useChecklist.store"
 import { useShallow } from "zustand/shallow"
@@ -76,17 +76,7 @@ const Checklist = ({
 	}
 
 	useEffect(() => {
-		let parsed = initialValueFrozen ? checklistParser.parse(initialValueFrozen) : []
-
-		if (parsed.length === 0) {
-			parsed = [
-				{
-					id: randomUUID(),
-					checked: false,
-					content: ""
-				}
-			]
-		}
+		const parsed = parseChecklistOrBlank(initialValueFrozen, randomUUID)
 
 		store.getState().setInputRefs({})
 		store.getState().setParsed(parsed)

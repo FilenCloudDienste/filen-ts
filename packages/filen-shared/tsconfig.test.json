@@ -3,11 +3,6 @@
 	"include": ["src/tests", "src/globals.d.ts"],
 	"exclude": ["src/tests/dom", "src/tests/tooling"],
 	"compilerOptions": {
-		"types": ["node"],
-		"noEmit": true,
-		"baseUrl": ".",
-		"paths": {
-			"@filen/shared": ["./src/index.ts"]
-		}
+		"types": ["node"]
 	}
 }

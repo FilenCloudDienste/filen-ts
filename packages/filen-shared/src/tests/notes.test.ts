@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { parse } from "node-html-better-parser"
-import { createNotePreviewFromContentText } from "@filen/shared"
+import { createNotePreviewFromContentText, sortNoteHistory } from "@filen/shared"
 
 vi.mock("node-html-better-parser", async importOriginal => {
 	const actual = await importOriginal<typeof import("node-html-better-parser")>()
@@ -136,5 +136,30 @@ describe("createNotePreviewFromContentText", () => {
 		it("should return empty string for empty content", () => {
 			expect(createNotePreviewFromContentText("rich", "")).toBe("")
 		})
+	})
+})
+
+describe("sortNoteHistory", () => {
+	const entry = (id: bigint, editedTimestamp: bigint) => ({ id, editedTimestamp })
+
+	it("sorts newest-first by editedTimestamp, staying in bigint (never Number())", () => {
+		const oldest = entry(1n, 1_700_000_000_000n)
+		const newest = entry(2n, 1_800_000_000_000n)
+		const middle = entry(3n, 1_750_000_000_000n)
+
+		expect(sortNoteHistory([oldest, newest, middle]).map(h => h.id)).toEqual([2n, 3n, 1n])
+	})
+
+	it("breaks a timestamp tie by the higher (later) id", () => {
+		expect(sortNoteHistory([entry(1n, 5n), entry(2n, 5n)]).map(h => h.id)).toEqual([2n, 1n])
+	})
+
+	it("does not mutate the input array", () => {
+		const input = [entry(1n, 0n), entry(2n, 1n)]
+		const snapshot = [...input]
+
+		sortNoteHistory(input)
+
+		expect(input).toEqual(snapshot)
 	})
 })

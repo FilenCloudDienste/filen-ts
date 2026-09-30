@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { createNotePreviewFromContentText, mergeInflight, newestEntryTimestamp } from "@filen/shared"
+import { createNotePreviewFromContentText, mergeInflight, newestEntry, newestEntryTimestamp } from "@filen/shared"
 import type { NoteType } from "@filen/sdk-rs"
 import { entryIsShowable, type InflightContent, type InflightEntry } from "@/features/notes/store/useNotesInflight"
 
@@ -100,13 +100,7 @@ export function remoteEnqueueToPatch(msg: RemoteEnqueue): InflightContent {
 	return { [msg.note.uuid]: [entry] }
 }
 
-// The newest entry a follower holds for a note, used both to seed the optimistic store write and to
-// pick the single entry it forwards to the leader (older entries are strictly superseded).
-export function newestEntry(entries: readonly InflightEntry[] | undefined): InflightEntry | undefined {
-	return entries?.reduce<InflightEntry | undefined>((acc, c) => (acc === undefined || c.timestamp > acc.timestamp ? c : acc), undefined)
-}
-
-// The same, over the entries this tab's editor may show (entryIsShowable): never another live tab's.
+// The newest entry over the entries this tab's editor may show (entryIsShowable): never another live tab's.
 export function newestShowableEntry(entries: readonly InflightEntry[] | undefined): InflightEntry | undefined {
 	return newestEntry(entries?.filter(entryIsShowable))
 }

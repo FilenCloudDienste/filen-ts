@@ -1,7 +1,8 @@
 import { type DriveItem } from "@/features/drive/lib/item"
 import { canMoveVariant, canWriteVariant, type DriveVariant } from "@/features/drive/lib/preferences"
 import { isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
-import { ancestryHits, isMoveNoOp, ownDirectoryUuids, type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
+import { ancestryHits, type ParentLookup } from "@filen/shared"
+import { isMoveNoOp, ownDirectoryUuids } from "@/features/drive/components/moveTargetDialog.logic"
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboardStore"
 
 // Copy is offered wherever the item menu offers Copy: every listing but the trash, decryptable items only.

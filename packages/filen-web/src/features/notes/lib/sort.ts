@@ -1,4 +1,4 @@
-import type { Note, NoteHistory, NoteTag } from "@filen/sdk-rs"
+import type { Note, NoteTag } from "@filen/sdk-rs"
 
 // Port of mobile's notesSorter.sort (src/lib/sort.ts) onto the wasm Note shape. `editedTimestamp`
 // is a bigint on this surface — every comparison below stays in bigint (`<`/`>`), never Number(): a
@@ -61,20 +61,6 @@ export function isTagUndecryptable(tag: NoteTag): boolean {
 }
 
 export { isNoteOwner, hasNoteWriteAccess } from "@filen/shared"
-
-// History dialog's own sort — newest first by editedTimestamp (mobile's sortNoteHistoryNewestFirst),
-// bigint-safe throughout like compareNotes above. `id` (also bigint) is the deterministic tiebreak for
-// two entries sharing a timestamp — history ids are server-assigned and monotonically increasing, so
-// the higher id is the later edit.
-export function sortNoteHistory(history: readonly NoteHistory[]): NoteHistory[] {
-	return [...history].sort((a, b) => {
-		if (a.editedTimestamp !== b.editedTimestamp) {
-			return a.editedTimestamp > b.editedTimestamp ? -1 : 1
-		}
-
-		return a.id === b.id ? 0 : a.id > b.id ? -1 : 1
-	})
-}
 
 // The one search-term normalization every notes filter shares, so body-fetch scoping can never
 // disagree with the filter it feeds.

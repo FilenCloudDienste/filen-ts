@@ -1,10 +1,10 @@
 import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon } from "lucide-react"
-import { type Checklist, cn, addChecklistLine, removeChecklistItem, patchChecklistItem } from "@filen/shared"
+import { type Checklist, cn, addChecklistLine, removeChecklistItem, patchChecklistItem, parseChecklistOrBlank } from "@filen/shared"
 import { isImeKeydown } from "@/lib/ime"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
-import { parseChecklistSeed, serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
+import { serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
 
 // Custom checklist editor (mirrors mobile's content/checklist screen): one text input per row with a
 // leading toggle. Enter on a non-empty row appends a row and focuses it; Backspace on an empty row
@@ -28,7 +28,7 @@ export function ChecklistEditor({
 	// Not a destructuring default, which the React Compiler cannot lower.
 	const hideCompleted = hideCompletedProp ?? false
 	const { t } = useTranslation("notes")
-	const [rows, setRows] = useState<Checklist>(() => parseChecklistSeed(controller.seed, () => crypto.randomUUID()))
+	const [rows, setRows] = useState<Checklist>(() => parseChecklistOrBlank(controller.seed, () => crypto.randomUUID()))
 	// With every row hidden (all completed, "hide completed" on) no input would render, and every edit hangs
 	// off one. A ghost row stands in: never in `rows` or the content until typed into, then appended under
 	// this same id so the React key (and the focused input) survives the swap; a fresh id serves the next one.

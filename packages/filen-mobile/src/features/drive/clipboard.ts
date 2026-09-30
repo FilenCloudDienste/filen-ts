@@ -1,10 +1,8 @@
+import { ancestryHits } from "@filen/shared"
 import { isDirectoryItem } from "@/features/drive/driveSelectors"
 import type { DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 import { normalParentUuidOf, unwrapParentUuid } from "@/lib/sdkUnwrap"
 import cache from "@/lib/cache"
-
-// Deep enough for any real tree; a longer chain is treated as unresolved.
-export const MAX_ANCESTRY_DEPTH = 64
 
 type PasteGuard = {
 	// The clipboard's directories: a paste can't land in any of them or below.
@@ -45,32 +43,17 @@ function pasteGuardOf(entry: DriveClipboardEntry): PasteGuard {
 	return guard
 }
 
-// Whether `targetUuid` lies inside (or is) one of `dirUuids`, walking the own directories' parent
-// pointers up to the root. The own-directory map, because the uuid→item map holds a shared-out
-// directory as its shared variant. "unresolved" when a link is missing: a directory paste is then
-// refused rather than risked.
-export function ancestryHits(targetUuid: string, dirUuids: ReadonlySet<string>, rootUuid: string | null): boolean | "unresolved" {
-	let uuid: string | null = targetUuid
-
-	for (let depth = 0; depth < MAX_ANCESTRY_DEPTH; depth++) {
-		if (uuid === null || uuid === rootUuid) {
-			return false
-		}
-
-		if (dirUuids.has(uuid)) {
-			return true
-		}
-
-		const dir = cache.getNormalDir(uuid)
-
-		if (!dir) {
-			return "unresolved"
-		}
-
-		uuid = unwrapParentUuid(dir.parent)
+// A directory's parent for ancestryHits, from the own directories' parent pointers: null at the root,
+// undefined when uncached. The own-directory map, because the uuid→item map holds a shared-out
+// directory as its shared variant.
+export function cachedParentOf(uuid: string): string | null | undefined {
+	if (uuid === cache.rootUuid) {
+		return null
 	}
 
-	return "unresolved"
+	const dir = cache.getNormalDir(uuid)
+
+	return dir ? unwrapParentUuid(dir.parent) : undefined
 }
 
 // A paste lands in `targetUuid` (null = the drive root). A directory can't land in itself or below it,
@@ -104,5 +87,5 @@ export function canPasteInto({
 		return true
 	}
 
-	return guard.dirUuids.size === 0 || ancestryHits(target, guard.dirUuids, rootUuid) === false
+	return guard.dirUuids.size === 0 || ancestryHits(target, guard.dirUuids, cachedParentOf) === false
 }

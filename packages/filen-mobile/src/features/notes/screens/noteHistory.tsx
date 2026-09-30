@@ -8,7 +8,7 @@ import { ScreenBody } from "@/components/ui/safeAreaView"
 import ListEmpty, { LoadErrorEmpty } from "@/components/ui/listEmpty"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { Fragment } from "react"
-import { run } from "@filen/shared"
+import { run, sortNoteHistory } from "@filen/shared"
 import VirtualList from "@/components/ui/virtualList"
 import { simpleDate } from "@/lib/time"
 import alerts from "@/lib/alerts"
@@ -18,7 +18,6 @@ import Menu from "@/components/ui/menu"
 import { useCachedNote } from "@/features/notes/queries/useNotesQuery"
 import useNoteHistoryQuery from "@/features/notes/queries/useNoteHistory.query"
 import notes from "@/features/notes/notes"
-import { sortNoteHistoryNewestFirst } from "@/features/notes/utils"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import Icon from "@/features/notes/components/note/icon"
 import DismissStack from "@/components/dismissStack"
@@ -107,7 +106,7 @@ const NoteHistory = () => {
 	)
 
 	// A failed refetch keeps the data and only flips `status` (#103).
-	const history = noteHistoryQuery.data && note ? sortNoteHistoryNewestFirst(noteHistoryQuery.data) : []
+	const history = noteHistoryQuery.data && note ? sortNoteHistory(noteHistoryQuery.data) : []
 
 	const historyEmptyComponent = () => {
 		if (noteHistoryQuery.status === "error") {

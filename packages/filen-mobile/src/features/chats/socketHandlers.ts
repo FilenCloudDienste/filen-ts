@@ -8,6 +8,7 @@ import { purgeChatInflightState } from "@/features/chats/chatsInflight"
 import { dropChatFromCachesDeferred } from "@/features/chats/chats"
 import logger from "@/lib/logger"
 import auth from "@/lib/auth"
+import { newestMessage } from "@filen/shared"
 
 export type ChatSocketEvent = Extract<SocketEvent, { tag: typeof SocketEvent_Tags.Chat }>
 
@@ -158,13 +159,8 @@ export async function handleChatEvent({ event }: { event: ChatSocketEvent }): Pr
 									c.uuid === inner.msg.chat
 										? {
 												...c,
-												// Never regress the preview: the delayed self-delivery (3s)
-												// can land after a peer's newer message already did. Only a
-												// STRICTLY older incoming message keeps the current one.
-												lastMessage:
-													!c.lastMessage || !(inner.msg.sentTimestamp < c.lastMessage.sentTimestamp)
-														? inner.msg
-														: c.lastMessage
+												// The delayed self-delivery (3s) can land after a peer's newer message
+												lastMessage: newestMessage(c.lastMessage, inner.msg)
 											}
 										: c
 								)

@@ -35,5 +35,3 @@ export class InFlight<K, V> {
 		}
 	}
 }
-
-export default InFlight

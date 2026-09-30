@@ -1,6 +1,7 @@
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { isChainForbidden, isMoveDestinationForbidden, type ParentLookup } from "@/features/drive/components/moveTargetDialog.logic"
+import { type ParentLookup } from "@filen/shared"
+import { isChainForbidden, isMoveDestinationForbidden } from "@/features/drive/components/moveTargetDialog.logic"
 
 // Pure drag-to-move logic — framework-free so the unit tests exercise it directly (self/descendant/
 // same-parent target guards, drag-payload assembly). The browser-facing side (module payload ref,

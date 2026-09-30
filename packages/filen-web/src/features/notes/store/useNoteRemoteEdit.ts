@@ -1,7 +1,7 @@
 import { create } from "zustand"
+import { newestEntry } from "@filen/shared"
 import type { AnswerChoice } from "@/lib/storage/outboxChannel"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
-import { newestEntry } from "@/features/notes/lib/sync.logic"
 import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 import { tabEditorDirty } from "@/features/notes/lib/tabEditors"
 import { takeRemoteContent } from "@/features/notes/lib/remoteContent"

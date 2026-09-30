@@ -1,41 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { isTimestampSameMinute, formatSecondsToMediaClock } from "@filen/shared"
-
-describe("isTimestampSameMinute", () => {
-	it("should return true for same timestamp", () => {
-		const ts = Date.now()
-
-		expect(isTimestampSameMinute(ts, ts)).toBe(true)
-	})
-
-	it("should return true for timestamps within 2 minutes", () => {
-		const date1 = new Date(2024, 0, 15, 10, 30, 0)
-		const date2 = new Date(2024, 0, 15, 10, 31, 0)
-
-		expect(isTimestampSameMinute(date1.getTime(), date2.getTime())).toBe(true)
-	})
-
-	it("should return false for timestamps more than 2 minutes apart", () => {
-		const date1 = new Date(2024, 0, 15, 10, 30, 0)
-		const date2 = new Date(2024, 0, 15, 10, 35, 0)
-
-		expect(isTimestampSameMinute(date1.getTime(), date2.getTime())).toBe(false)
-	})
-
-	it("should return false for timestamps on different days", () => {
-		const date1 = new Date(2024, 0, 15, 10, 30, 0)
-		const date2 = new Date(2024, 0, 16, 10, 30, 0)
-
-		expect(isTimestampSameMinute(date1.getTime(), date2.getTime())).toBe(false)
-	})
-
-	it("should return false when diff > 120000ms", () => {
-		const ts1 = 1000000
-		const ts2 = 1200001
-
-		expect(isTimestampSameMinute(ts1, ts2)).toBe(false)
-	})
-})
+import { formatSecondsToMediaClock } from "@filen/shared"
 
 describe("formatSecondsToMediaClock", () => {
 	it("should return 0:00 for 0 seconds", () => {

@@ -1,6 +1,6 @@
 import * as ExpoLocalization from "expo-localization"
 import { type TFunction } from "i18next"
-import { convertTimestampToMs, formatRelativeTimeCore } from "@filen/shared"
+import { formatRelativeTimeCore } from "@filen/shared"
 import logger from "@/lib/logger"
 
 export let intlLanguage: string = "en-US"
@@ -131,11 +131,13 @@ function pad2(num: number): string {
 	return num < 10 ? "0" + num : "" + num
 }
 
-/**
- * Converts various timestamp formats to Date object
- */
+// Numeric timestamps below 10^10 are seconds (anything before year 2286), otherwise ms.
 function toDate(timestamp: number | Date): Date {
-	return timestamp instanceof Date ? timestamp : new Date(convertTimestampToMs(timestamp))
+	if (timestamp instanceof Date) {
+		return timestamp
+	}
+
+	return new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp)
 }
 
 /**

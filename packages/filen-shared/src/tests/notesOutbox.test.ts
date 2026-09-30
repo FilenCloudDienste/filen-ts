@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { hashNoteContent, buildInflightEntries, mergeInflight, newestEntryTimestamp, type InflightEntry } from "@filen/shared"
+import { hashNoteContent, buildInflightEntries, mergeInflight, newestEntry, newestEntryTimestamp, type InflightEntry } from "@filen/shared"
 
 // Plain object standing in for each app's own generated Note type — buildInflightEntries/mergeInflight
 // never read a field off it, only carry it through.
@@ -24,6 +24,20 @@ describe("newestEntryTimestamp", () => {
 
 	it("picks the newest timestamp regardless of order", () => {
 		expect(newestEntryTimestamp([{ timestamp: 2000 }, { timestamp: 5000 }, { timestamp: 3000 }])).toBe(5000)
+	})
+})
+
+describe("newestEntry", () => {
+	it("is undefined for an empty or missing list", () => {
+		expect(newestEntry([])).toBeUndefined()
+		expect(newestEntry(undefined)).toBeUndefined()
+	})
+
+	it("picks the newest entry regardless of order, first of ties", () => {
+		const a = { timestamp: 5000, id: "a" }
+		const b = { timestamp: 5000, id: "b" }
+
+		expect(newestEntry([{ timestamp: 2000, id: "x" }, a, { timestamp: 3000, id: "y" }, b])).toBe(a)
 	})
 })
 

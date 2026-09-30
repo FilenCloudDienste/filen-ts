@@ -7,11 +7,10 @@ import {
 	noteTitleMatchesSearch,
 	sortAndFilterNotes,
 	sortNotes,
-	sortNoteHistory,
 	tagDisplayName
 } from "@/features/notes/lib/sort"
 import { testUuid } from "@/tests/support/uuid"
-import { mockNote, mockNoteHistory, mockNoteTag, noteWithoutPreview, tagWithoutName, undecryptableNote } from "@/tests/fixtures/notes"
+import { mockNote, mockNoteTag, noteWithoutPreview, tagWithoutName, undecryptableNote } from "@/tests/fixtures/notes"
 
 describe("sortNotes — bucket rules", () => {
 	it("puts a pinned note before an unpinned one regardless of edited time", () => {
@@ -201,31 +200,5 @@ describe("sortAndFilterNotes", () => {
 
 		expect(sortAndFilterNotes([note], "buried", bodies).map(n => n.uuid)).toStrictEqual([note.uuid])
 		expect(sortAndFilterNotes([note], "buried")).toHaveLength(0)
-	})
-})
-
-describe("sortNoteHistory", () => {
-	it("sorts newest-first by editedTimestamp, staying in bigint (never Number())", () => {
-		const oldest = mockNoteHistory({ id: 1n, editedTimestamp: 1_700_000_000_000n })
-		const newest = mockNoteHistory({ id: 2n, editedTimestamp: 1_800_000_000_000n })
-		const middle = mockNoteHistory({ id: 3n, editedTimestamp: 1_750_000_000_000n })
-
-		expect(sortNoteHistory([oldest, newest, middle]).map(h => h.id)).toEqual([2n, 3n, 1n])
-	})
-
-	it("breaks a timestamp tie by the higher (later) id", () => {
-		const lowerId = mockNoteHistory({ id: 1n, editedTimestamp: 5n })
-		const higherId = mockNoteHistory({ id: 2n, editedTimestamp: 5n })
-
-		expect(sortNoteHistory([lowerId, higherId]).map(h => h.id)).toEqual([2n, 1n])
-	})
-
-	it("does not mutate the input array", () => {
-		const input = [mockNoteHistory({ id: 1n, editedTimestamp: 0n }), mockNoteHistory({ id: 2n, editedTimestamp: 1n })]
-		const snapshot = [...input]
-
-		sortNoteHistory(input)
-
-		expect(input).toEqual(snapshot)
 	})
 })

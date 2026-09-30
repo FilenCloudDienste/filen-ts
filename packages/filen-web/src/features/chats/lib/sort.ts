@@ -1,56 +1,11 @@
-import {
-	parseNumbersFromString,
-	EMPTY_BLOCKED_USERS,
-	resolveChatParticipantsDisplayName,
-	contactDisplayName,
-	type BlockedUsers
-} from "@filen/shared"
-import type { Chat, ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
+import { EMPTY_BLOCKED_USERS, resolveChatParticipantsDisplayName, contactDisplayName, type BlockedUsers } from "@filen/shared"
+import type { Chat, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
 import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { isSenderBlocked } from "@/features/chats/lib/sender"
-
-// Conversation-list ordering — ported from
-// `filen-mobile/src/features/chats/components/list/index.tsx:36-45`, not a guess. There is no
-// server-side re-sort and no separate "sort" SDK op — `listChats()`
-// returns chats in whatever order the API gives them, and mobile re-sorts client-side, every
-// render, by:
-//   1. the chat's lastMessage.sentTimestamp descending (chats with no lastMessage sort as 0 — to
-//      the bottom, alongside any other chat that has genuinely never had a message);
-//   2. a tiebreak on `parseNumbersFromString(uuid)` descending when the timestamps are equal
-//      (covers the common case of two chats that have never had a message, where the timestamp
-//      tier alone would otherwise leave input order to decide, which is not stable across
-//      refetches).
-// Bigint-safe: sentTimestamp only ever gets Number()-converted for the comparator's arithmetic,
-// exactly as mobile does (`Number(a.lastMessage.sentTimestamp)`) — timestamps sit nowhere near
-// Number.MAX_SAFE_INTEGER, so no precision loss.
-function chatSortTimestamp(chat: Chat): number {
-	return chat.lastMessage ? Number(chat.lastMessage.sentTimestamp) : 0
-}
-
-function compareChats(a: Chat, b: Chat): number {
-	const diff = chatSortTimestamp(b) - chatSortTimestamp(a)
-
-	if (diff !== 0) {
-		return diff
-	}
-
-	return parseNumbersFromString(b.uuid) - parseNumbersFromString(a.uuid)
-}
-
-// Returns a NEW array, never mutates the input.
-export function sortChats(chats: readonly Chat[]): Chat[] {
-	return [...chats].sort(compareChats)
-}
 
 // Oldest-first message order: send order and thread order both rest on it. Bigint-safe three-way compare.
 export function compareBySentTimestamp(a: { sentTimestamp: bigint }, b: { sentTimestamp: bigint }): number {
 	return a.sentTimestamp === b.sentTimestamp ? 0 : a.sentTimestamp < b.sentTimestamp ? -1 : 1
-}
-
-// The lastMessage a chat's row takes from `incoming`: never an older one than it already shows. A parked
-// own echo, or a send's commit, can land after a reply did.
-export function newestMessage(current: ChatMessage | undefined, incoming: ChatMessage): ChatMessage {
-	return current !== undefined && incoming.sentTimestamp < current.sentTimestamp ? current : incoming
 }
 
 // A chat's group key failing to decrypt (`Chat.key === undefined`) is this surface's

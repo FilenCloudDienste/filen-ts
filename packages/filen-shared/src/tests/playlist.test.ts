@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parsePlaylist, serializePlaylist } from "@filen/shared"
+import { parsePlaylist } from "@filen/shared"
 
 function validPlaylistFile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
@@ -90,19 +90,5 @@ describe("parsePlaylist", () => {
 		["missing playlist owner uuid", { playlist: undefined }]
 	])("rejects a playlist whose file entry is malformed — %s", (_label, override) => {
 		expect(parsePlaylist(validPlaylist({ files: [validPlaylistFile(override)] }))).toBeNull()
-	})
-})
-
-describe("serializePlaylist", () => {
-	it("round-trips through JSON.parse + parsePlaylist unchanged", () => {
-		const playlist = parsePlaylist(validPlaylist())
-
-		if (playlist === null) {
-			throw new Error("expected parsePlaylist(validPlaylist()) to succeed")
-		}
-
-		const roundTripped = parsePlaylist(JSON.parse(serializePlaylist(playlist)))
-
-		expect(roundTripped).toEqual(playlist)
 	})
 })

@@ -33,7 +33,6 @@ export function filterNotesByBlockedOwner(notes: readonly Note[], blocked: Block
 // only resolves the shared core's abstract bucket ids into this app's header rows.
 
 interface GroupEntry {
-	id: string
 	pinned: boolean
 	favorite: boolean
 	archive: boolean
@@ -94,7 +93,6 @@ function headerForBucket(bucketId: NoteBucketId): Extract<NotesSidebarRow, { kin
 // deterministic under test.
 export function groupNotesForView(notes: readonly Note[], now: number): NotesSidebarRow[] {
 	const entries: GroupEntry[] = notes.map(note => ({
-		id: note.uuid,
 		pinned: note.pinned,
 		favorite: note.favorite,
 		archive: note.archive,

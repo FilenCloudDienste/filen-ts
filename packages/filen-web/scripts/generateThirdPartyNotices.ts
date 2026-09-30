@@ -3,15 +3,15 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
+	describeCargoCrate,
 	describedNotice,
+	finalizeNotices,
 	listInstalledNpm,
-	poolLicenseTexts,
 	readJson,
 	repositoryOf,
 	spdxOf,
 	type CollectedNotice,
-	type InstalledNpmPackage,
-	type NoticeEntry
+	type InstalledNpmPackage
 } from "@filen/shared/tooling"
 
 /**
@@ -237,17 +237,7 @@ function collectRust(expected: string): { entries: Collected[]; ref: string; sou
 			throw new Error(`no local source for crate ${name}-${version} — run cargo fetch in ${checkout.path}`)
 		}
 
-		const manifestPath = join(dir, "Cargo.toml")
-		const manifest = existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : ""
-		const license = /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN"
-		const entry = describedNotice({
-			name,
-			version,
-			license,
-			ecosystem: "rust",
-			dir,
-			repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null
-		})
+		const entry = describeCargoCrate(name, version, dir)
 
 		// The same crate version can be locked twice — once from crates.io and once from a git fork of it.
 		// Identical attribution is one notice, not two (the payload is keyed by name@version). Attribution
@@ -256,7 +246,9 @@ function collectRust(expected: string): { entries: Collected[]; ref: string; sou
 
 		if (previous !== undefined) {
 			if (JSON.stringify({ ...previous, texts: [] }) !== JSON.stringify(entry)) {
-				throw new Error(`crate ${name}-${version} is locked twice with differing attribution (${previous.license} vs ${license})`)
+				throw new Error(
+					`crate ${name}-${version} is locked twice with differing attribution (${previous.license} vs ${entry.license})`
+				)
 			}
 
 			continue
@@ -289,11 +281,7 @@ const npm = collectNpm(installed)
 const rust = collectRust(expectedSdk)
 const collected = [...npm, ...rust.entries]
 
-const texts = poolLicenseTexts(collected)
-
-const notices: NoticeEntry<Ecosystem>[] = collected
-	.map(({ terms: _terms, ...entry }) => entry)
-	.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
+const { texts, notices } = finalizeNotices(collected)
 
 // No absolute path is ever written into the artifact: it is a committed source file, and a machine path
 // would make regeneration produce a spurious diff on the next machine. The repository, the ref it was

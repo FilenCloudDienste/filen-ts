@@ -32,14 +32,6 @@ export function hasInflightEntries(inflight: InflightContent, uuid: string): boo
 	return (inflight[uuid] ?? []).length > 0
 }
 
-// The entry with the greatest timestamp, first of ties.
-export function newestInflightEntry(entries: InflightContent[string] | undefined): InflightContent[string][number] | undefined {
-	return (entries ?? []).reduce<InflightContent[string][number] | undefined>(
-		(latest, entry) => (latest === undefined || entry.timestamp > latest.timestamp ? entry : latest),
-		undefined
-	)
-}
-
 export function useNoteHasInflight(uuid: string): boolean {
 	return useNotesInflightStore(state => hasInflightEntries(state.inflightContent, uuid))
 }

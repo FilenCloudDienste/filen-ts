@@ -3,15 +3,15 @@ import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
 import {
+	describeCargoCrate,
 	describedNotice,
+	finalizeNotices,
 	listInstalledNpm,
-	poolLicenseTexts,
 	readJson,
 	repositoryOf,
 	spdxOf,
 	type CollectedNotice,
-	type InstalledNpmPackage,
-	type NoticeEntry
+	type InstalledNpmPackage
 } from "@filen/shared/tooling"
 
 /**
@@ -185,18 +185,7 @@ function collectRust(): Collected[] {
 			continue
 		}
 
-		const dir = roots.map(root => join(root, `${name}-${version}`)).find(existsSync) ?? null
-		const manifest = dir && existsSync(join(dir, "Cargo.toml")) ? readFileSync(join(dir, "Cargo.toml"), "utf8") : ""
-		entries.push(
-			describedNotice({
-				name,
-				version,
-				license: /^\s*license\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? "UNKNOWN",
-				ecosystem: "rust",
-				dir,
-				repository: /^\s*repository\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null
-			})
-		)
+		entries.push(describeCargoCrate(name, version, roots.map(root => join(root, `${name}-${version}`)).find(existsSync) ?? null))
 	}
 
 	return entries
@@ -339,11 +328,7 @@ function collectGradle(): Collected[] {
 
 const collected = [...collectNpm(), ...collectRust(), ...collectPods(), ...collectGradle()]
 
-const texts = poolLicenseTexts(collected)
-
-const notices: NoticeEntry<Ecosystem>[] = collected
-	.map(({ terms: _terms, ...entry }) => entry)
-	.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
+const { texts, notices } = finalizeNotices(collected)
 
 const withText = notices.filter(entry => entry.texts.length > 0).length
 

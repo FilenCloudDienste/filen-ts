@@ -210,7 +210,6 @@ export function MessageRow({ chat, message, showHeader, currentUserId, blocked }
 									>
 										<MessageContent
 											chat={chat}
-											text={message.message}
 											segments={segments}
 										/>
 										{message.edited ? (

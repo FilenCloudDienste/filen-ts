@@ -1,11 +1,11 @@
 import type { Note } from "@filen/sdk-rs"
+import { newestEntry } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runOp } from "@/lib/actions/outcome"
 import { queryClient } from "@/queries/client"
 import { noteContentQueryKey, readNoteContent, type NoteContentResult } from "@/features/notes/queries/noteContent"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
-import { newestEntry } from "@/features/notes/lib/sync.logic"
 
 // A note's content AS THIS CLIENT KNOWS IT — the same precedence the editor's seed applies
 // (deriveEditorSeed): an unsynced outbox edit first, then the content query cache, `undefined` when

@@ -1,8 +1,3 @@
-type SemaphoreWaiter = {
-	resolve: (value: void | PromiseLike<void>) => void
-	reject: (reason?: unknown) => void
-}
-
 export class Semaphore {
 	private counter: number = 0
 	// FIFO waiter queue as a head-indexed array: dequeuing advances `waitingHead`
@@ -10,9 +5,9 @@ export class Semaphore {
 	// array per call — O(queue) per release and O(queue²) to drain. With ~100k
 	// queued acquires (camera-roll-scale fan-outs in filen-mobile) the shift-based
 	// queue alone cost multiple seconds per drain.
-	private waiting: Array<SemaphoreWaiter | undefined> = []
+	private waiting: Array<(() => void) | undefined> = []
 	private waitingHead: number = 0
-	private maxCount: number
+	private readonly maxCount: number
 
 	public constructor(max: number = 1) {
 		this.maxCount = max
@@ -25,15 +20,12 @@ export class Semaphore {
 			return Promise.resolve()
 		}
 
-		return new Promise<void>((resolve, reject) => {
-			this.waiting.push({
-				resolve,
-				reject
-			})
+		return new Promise<void>(resolve => {
+			this.waiting.push(resolve)
 		})
 	}
 
-	// Holds a permit for the duration of fn. A purged acquire rejects without running fn.
+	// Holds a permit for the duration of fn.
 	public async withPermit<T>(fn: () => Promise<T> | T): Promise<T> {
 		await this.acquire()
 
@@ -58,32 +50,6 @@ export class Semaphore {
 		return this.counter
 	}
 
-	public setMax(newMax: number): void {
-		this.maxCount = newMax
-
-		this.processQueue()
-	}
-
-	public purge(): number {
-		let unresolved = 0
-
-		for (let i = this.waitingHead; i < this.waiting.length; i++) {
-			const waiter = this.waiting[i]
-
-			if (waiter) {
-				unresolved++
-
-				waiter.reject("Task has been purged")
-			}
-		}
-
-		this.counter = 0
-		this.waiting = []
-		this.waitingHead = 0
-
-		return unresolved
-	}
-
 	private processQueue(): void {
 		while (this.waitingHead < this.waiting.length && this.counter < this.maxCount) {
 			this.counter++
@@ -96,7 +62,7 @@ export class Semaphore {
 			this.waitingHead++
 
 			if (waiter) {
-				waiter.resolve()
+				waiter()
 			}
 		}
 
@@ -158,5 +124,3 @@ export class KeyedSemaphores {
 		}
 	}
 }
-
-export default Semaphore

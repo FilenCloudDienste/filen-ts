@@ -2,7 +2,6 @@ import {
 	KeyedSemaphores,
 	driveItemName,
 	parsePlaylist,
-	serializePlaylist,
 	type Playlist,
 	type PlaylistFile,
 	addTracksToPlaylist as addTracksPure,
@@ -319,7 +318,7 @@ export function isPlaylistsDriveEvent(inner: DriveEvent): boolean {
 
 async function savePlaylist(playlist: Playlist, patchCache: boolean): Promise<void> {
 	const dirUuid = await getPlaylistsDirectoryUuid()
-	const bytes = new TextEncoder().encode(serializePlaylist(playlist))
+	const bytes = new TextEncoder().encode(JSON.stringify(playlist))
 	const file = await runPlaylistsDirectoryOp(sdkApi.uploadFileBytes(dirUuid, bytes, `${playlist.uuid}.json`, "application/json"))
 
 	knownPlaylistFileUuids.add(file.uuid)

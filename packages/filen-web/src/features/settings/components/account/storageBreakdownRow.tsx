@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
-import { cn, formatBytes, storageUsageLevel } from "@filen/shared"
-import { deriveStorageBreakdown, storagePercent, STORAGE_LEVEL_FILL_CLASS } from "@/features/settings/lib/storageBreakdown"
+import { cn, deriveStorageBreakdown, formatBytes, storageUsageLevel } from "@filen/shared"
+import { storagePercent, STORAGE_LEVEL_FILL_CLASS } from "@/features/settings/lib/storageBreakdown"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
@@ -25,9 +25,9 @@ function LegendItem({ swatchClassName, label, bytes }: LegendItemProps) {
 }
 
 // A fuller breakdown than the drive sidebar's own single-bar StorageMeter: three segments (files /
-// versioned / free) using the same `storageUsed/maxStorage/versionedStorage` fields, math straight
-// from old-web's settings/general bar (storageBreakdown.ts). No Progress primitive here — that
-// component only renders ONE indicator; this is a plain proportional-width flex row instead.
+// versioned / free) using the same `storageUsed/maxStorage/versionedStorage` fields, split by
+// @filen/shared's deriveStorageBreakdown. No Progress primitive here — that component only renders
+// ONE indicator; this is a plain proportional-width flex row instead.
 function StorageBreakdownRow({ accountQuery }: StorageBreakdownRowProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const { storageUsed, maxStorage, versionedStorage } = accountQuery.data

@@ -38,7 +38,8 @@ vi.mock("@/components/ui/fullScreenLoadingModal", async () => await import("@/te
 vi.mock("@/features/drive/drive", () => ({ default: { move: vi.fn() } }))
 vi.mock("@/features/copy/copyRunner", () => ({ default: { start: vi.fn(() => "job-1") } }))
 
-import { ancestryHits, canPasteInto } from "@/features/drive/clipboard"
+import { ancestryHits } from "@filen/shared"
+import { cachedParentOf, canPasteInto } from "@/features/drive/clipboard"
 import { copyDestinationOf } from "@/features/drive/copyDestination"
 import { buildPasteHereMenuButtons, buildPasteIntoMenuButton, pasteClipboard } from "@/features/drive/components/clipboardMenu"
 import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
@@ -86,29 +87,31 @@ beforeEach(() => {
 	seedTree()
 })
 
-describe("ancestryHits", () => {
-	it("finds the target itself and every ancestor, but not siblings", () => {
-		expect(ancestryHits("c", new Set(["c"]), "root")).toBe(true)
-		expect(ancestryHits("c", new Set(["a"]), "root")).toBe(true)
-		expect(ancestryHits("a", new Set(["c"]), "root")).toBe(false)
-		expect(ancestryHits("root", new Set(["a"]), "root")).toBe(false)
+describe("cachedParentOf", () => {
+	it("reads own directories' parents, null at the root and undefined when uncached", () => {
+		expect(cachedParentOf("c")).toBe("b")
+		expect(cachedParentOf("a")).toBe("root")
+		expect(cachedParentOf("root")).toBeNull()
+		expect(cachedParentOf("x")).toBeUndefined()
 	})
 
-	it("is unresolved when a link is missing or the chain never ends", () => {
-		expect(ancestryHits("x", new Set(["a"]), "root")).toBe("unresolved")
+	it("drives ancestryHits over the cached tree, loops unresolved", () => {
+		expect(ancestryHits("c", new Set(["a"]), cachedParentOf)).toBe(true)
+		expect(ancestryHits("a", new Set(["c"]), cachedParentOf)).toBe(false)
+		expect(ancestryHits("x", new Set(["a"]), cachedParentOf)).toBe("unresolved")
 
 		ownDir("loop1", "loop2")
 		ownDir("loop2", "loop1")
 
-		expect(ancestryHits("loop1", new Set(["a"]), "root")).toBe("unresolved")
+		expect(ancestryHits("loop1", new Set(["a"]), cachedParentOf)).toBe("unresolved")
 	})
 
 	it("walks through a shared-out directory, which the uuid→item map holds as its shared variant", () => {
 		// A shared-out listing overwrites the own directory's item entry; the own-directory map keeps the Dir.
 		h.items.set("b", { type: "sharedRootDirectory", data: { uuid: "b" } })
 
-		expect(ancestryHits("c", new Set(["x"]), "root")).toBe(false)
-		expect(ancestryHits("c", new Set(["a"]), "root")).toBe(true)
+		expect(ancestryHits("c", new Set(["x"]), cachedParentOf)).toBe(false)
+		expect(ancestryHits("c", new Set(["a"]), cachedParentOf)).toBe(true)
 		expect(canPasteInto({ entry: { mode: "copy", items: [dir("x", "root")] }, targetUuid: "c", allowCut: true })).toBe(true)
 	})
 })

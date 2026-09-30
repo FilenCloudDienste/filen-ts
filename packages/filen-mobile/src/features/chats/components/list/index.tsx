@@ -2,7 +2,7 @@ import useChatsQuery from "@/features/chats/queries/useChats.query"
 import VirtualList, { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty, { NoResultsEmpty } from "@/components/ui/listEmpty"
 import { type Chat as TChat } from "@/types"
-import { parseNumbersFromString, run, contactDisplayName } from "@filen/shared"
+import { compareChats, run, contactDisplayName } from "@filen/shared"
 import alerts from "@/lib/alerts"
 import Chat from "@/features/chats/components/list/chat"
 import { useStringifiedClient } from "@/lib/auth"
@@ -28,16 +28,7 @@ const List = ({ searchQuery }: { searchQuery: string }) => {
 			return []
 		}
 
-		let chats = visibleChats(chatsQuery.data, stringigiedClient?.userId, blocked).sort((a, b) => {
-			const aLastMessageTimestamp = a.lastMessage ? Number(a.lastMessage.sentTimestamp) : 0
-			const bLastMessageTimestamp = b.lastMessage ? Number(b.lastMessage.sentTimestamp) : 0
-
-			if (aLastMessageTimestamp === bLastMessageTimestamp) {
-				return parseNumbersFromString(b.uuid) - parseNumbersFromString(a.uuid)
-			}
-
-			return bLastMessageTimestamp - aLastMessageTimestamp
-		})
+		let chats = visibleChats(chatsQuery.data, stringigiedClient?.userId, blocked).sort(compareChats)
 
 		if (searchQuery && searchQuery.length > 0) {
 			const searchQueryNormalized = searchQuery.toLowerCase().trim()

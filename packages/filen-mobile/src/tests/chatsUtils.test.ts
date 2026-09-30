@@ -42,6 +42,7 @@ import {
 	composeMessageList,
 	shouldSuppressKeyboardSuggestions,
 	attachmentMaxWidth,
+	isTimestampSameMinute,
 	typingNames,
 	typingLabel,
 	type SuccessfulLink
@@ -482,5 +483,45 @@ describe("shouldSuppressKeyboardSuggestions", () => {
 describe("attachmentMaxWidth", () => {
 	it("is the 3/4 bubble width minus the wrapper and bubble paddings", () => {
 		expect(attachmentMaxWidth(400)).toBe(244)
+	})
+})
+
+describe("isTimestampSameMinute", () => {
+	it("returns true for the same timestamp", () => {
+		const ts = Date.now()
+
+		expect(isTimestampSameMinute(ts, ts)).toBe(true)
+	})
+
+	it("returns true for timestamps within 2 minutes", () => {
+		const date1 = new Date(2024, 0, 15, 10, 30, 0)
+		const date2 = new Date(2024, 0, 15, 10, 31, 0)
+
+		expect(isTimestampSameMinute(date1.getTime(), date2.getTime())).toBe(true)
+	})
+
+	it("returns false for timestamps more than 2 minutes apart", () => {
+		const date1 = new Date(2024, 0, 15, 10, 30, 0)
+		const date2 = new Date(2024, 0, 15, 10, 35, 0)
+
+		expect(isTimestampSameMinute(date1.getTime(), date2.getTime())).toBe(false)
+	})
+
+	it("returns false across an hour boundary even within 2 minutes", () => {
+		const date1 = new Date(2024, 0, 15, 10, 59, 30)
+		const date2 = new Date(2024, 0, 15, 11, 0, 30)
+
+		expect(isTimestampSameMinute(date1.getTime(), date2.getTime())).toBe(false)
+	})
+
+	it("returns false for timestamps on different days", () => {
+		const date1 = new Date(2024, 0, 15, 10, 30, 0)
+		const date2 = new Date(2024, 0, 16, 10, 30, 0)
+
+		expect(isTimestampSameMinute(date1.getTime(), date2.getTime())).toBe(false)
+	})
+
+	it("returns false when diff > 120000ms", () => {
+		expect(isTimestampSameMinute(1000000, 1200001)).toBe(false)
 	})
 })

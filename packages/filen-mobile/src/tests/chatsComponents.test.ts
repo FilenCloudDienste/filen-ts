@@ -14,11 +14,6 @@ vi.mock("@filen/sdk-rs", () => ({
 // pure, platform-free logic.
 vi.mock("@filen/shared", async () => ({
 	...(await import("@/tests/mocks/filenShared")),
-	parseNumbersFromString(s: unknown) {
-		const digits = (s as string).replace(/\D/g, "")
-		const n = parseInt(digits, 10)
-		return isNaN(n) ? 0 : n
-	},
 	fastLocaleCompare(a: unknown, b: unknown) {
 		return (a as string).localeCompare(b as string)
 	},

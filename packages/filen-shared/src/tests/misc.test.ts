@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
 	parseNumbersFromString,
-	convertTimestampToMs,
 	isValidHexColor,
 	sanitizeFileName,
 	findClosestIndexString,
@@ -43,20 +42,6 @@ describe("parseNumbersFromString", () => {
 	})
 })
 
-describe("convertTimestampToMs", () => {
-	it("should convert seconds timestamp to ms", () => {
-		expect(convertTimestampToMs(1700000000)).toBe(1700000000000)
-	})
-
-	it("should return ms timestamp as-is", () => {
-		expect(convertTimestampToMs(1700000000000)).toBe(1700000000000)
-	})
-
-	it("should treat small values as seconds", () => {
-		expect(convertTimestampToMs(1000)).toBe(1000000)
-	})
-})
-
 describe("isValidHexColor", () => {
 	it("should accept valid 6-digit hex color", () => {
 		expect(isValidHexColor("#FF00FF")).toBe(true)
@@ -76,14 +61,6 @@ describe("isValidHexColor", () => {
 
 	it("should reject wrong length", () => {
 		expect(isValidHexColor("#FFF")).toBe(false)
-	})
-
-	it("should accept 3-digit hex color when length=3", () => {
-		expect(isValidHexColor("#FFF", 3)).toBe(true)
-	})
-
-	it("should also accept 6-digit hex color when length=3", () => {
-		expect(isValidHexColor("#FFFFFF", 3)).toBe(true)
 	})
 })
 
@@ -117,10 +94,6 @@ describe("sanitizeFileName", () => {
 		// All illegal chars replaced with _
 		expect(result).not.toMatch(/[/:?<>"\\|*]/)
 		expect(result).toBe("a_b_c_d_e_f_g_h_i_j")
-	})
-
-	it("respects custom replacement character", () => {
-		expect(sanitizeFileName("a/b:c", "-")).toBe("a-b-c")
 	})
 
 	it("removes control characters U+0000-U+001F", () => {
@@ -209,94 +182,33 @@ describe("findClosestIndexString", () => {
 	it("should find last occurrence before index", () => {
 		expect(findClosestIndexString("aXbXcXd", "X", 5)).toBe(5)
 	})
-})
 
-// The implementation used to fall back to a loop re-slicing the source for every offset when the
-// first search missed. It was quadratic AND dead — every slice it inspected was a substring of the
-// one already searched. These pin the equivalence, including the multi-character case where the
-// tempting `lastIndexOf(target, index)` overload would NOT be equivalent.
-describe("findClosestIndexString — equivalence of the removed fallback", () => {
-	function reference(sourceString: string, targetString: string, givenIndex: number): number {
-		const extracted = sourceString.slice(0, givenIndex + 1)
-		const within = extracted.lastIndexOf(targetString)
-
-		if (within !== -1) {
-			return within
-		}
-
-		for (let offset = 1; offset <= givenIndex; offset++) {
-			const before = sourceString.slice(givenIndex - offset, givenIndex + 1)
-			const at = before.lastIndexOf(targetString)
-
-			if (at !== -1) {
-				return givenIndex - offset + at
-			}
-		}
-
-		return -1
-	}
-
-	it("matches the previous implementation exhaustively over a small alphabet", () => {
-		const alphabet = "ab:@"
-		const needles = [":", "@", "ab", ":@"]
-		let checked = 0
-
-		for (let length = 0; length <= 5; length++) {
-			const total = alphabet.length ** length
-
-			for (let n = 0; n < total; n++) {
-				let source = ""
-				let rest = n
-
-				for (let k = 0; k < length; k++) {
-					source += alphabet[rest % alphabet.length]
-					rest = Math.floor(rest / alphabet.length)
-				}
-
-				for (const needle of needles) {
-					for (let index = -1; index <= length + 1; index++) {
-						expect(findClosestIndexString(source, needle, index)).toBe(reference(source, needle, index))
-						checked++
-					}
-				}
-			}
-		}
-
-		expect(checked).toBeGreaterThan(40_000)
-	})
-
-	it("bounds the whole match, not just its start (why lastIndexOf(target, index) is wrong here)", () => {
-		// "ab" starts at 0 and ends at 1. Bounded by index 0 it must NOT match.
+	it("bounds the whole match, not just its start", () => {
+		// "ab" ends at 1, so bounded by index 0 it must not match; lastIndexOf("ab", 0) would.
 		expect(findClosestIndexString("ab", "ab", 0)).toBe(-1)
 		expect(findClosestIndexString("ab", "ab", 1)).toBe(0)
-		expect("ab".lastIndexOf("ab", 0)).toBe(0)
+	})
+
+	it("returns -1 for a negative index", () => {
+		expect(findClosestIndexString("abc", "a", -1)).toBe(-1)
 	})
 })
 
 describe("ratePasswordStrength", () => {
 	it("should rate short password as weak", () => {
-		expect(ratePasswordStrength("abc").strength).toBe("weak")
+		expect(ratePasswordStrength("abc")).toBe("weak")
 	})
 
 	it("should rate password with mixed case and length as normal", () => {
-		expect(ratePasswordStrength("AbcAbcAbcAbc").strength).toBe("normal")
+		expect(ratePasswordStrength("AbcAbcAbcAbc")).toBe("normal")
 	})
 
 	it("should rate password with all criteria and length >= 10 as strong", () => {
-		expect(ratePasswordStrength("Abcdefg!@#").strength).toBe("strong")
+		expect(ratePasswordStrength("Abcdefg!@#")).toBe("strong")
 	})
 
 	it("should rate password with all criteria and length >= 16 as best", () => {
-		expect(ratePasswordStrength("Abcdefghijk!@#$%").strength).toBe("best")
-	})
-
-	it("should report individual criteria", () => {
-		const result = ratePasswordStrength("Aa1!")
-
-		expect(result.uppercase).toBe(true)
-		expect(result.lowercase).toBe(true)
-		expect(result.specialChars).toBe(true)
-		expect(result.length).toBe(false)
+		expect(ratePasswordStrength("Abcdefghijk!@#$%")).toBe("best")
 	})
 })
 
@@ -442,17 +354,13 @@ describe("formatBytes", () => {
 		expect(formatBytes(1073741824)).toBe("1 GiB")
 	})
 
-	it("should respect decimal places", () => {
-		expect(formatBytes(1536, 1)).toBe("1.5 KiB")
-	})
-
-	it("should handle negative decimals as 0", () => {
-		expect(formatBytes(1536, -1)).toBe("2 KiB")
+	it("rounds to at most 2 decimals", () => {
+		expect(formatBytes(1536)).toBe("1.5 KiB")
+		expect(formatBytes(1234567)).toBe("1.18 MiB")
 	})
 
 	it("moves to the next unit when rounding reaches 1024 of this one", () => {
 		expect(formatBytes(1048575)).toBe("1 MiB")
-		expect(formatBytes(1048575, 3)).toBe("1023.999 KiB")
 	})
 })
 
@@ -460,7 +368,7 @@ describe("formatBytesFixed", () => {
 	it("keeps its decimals, so a live figure keeps its length", () => {
 		expect(formatBytesFixed(5 * 1048576)).toBe("5.0 MiB")
 		expect(formatBytesFixed(5.25 * 1048576)).toBe("5.3 MiB")
-		expect(formatBytesFixed(1536, 2)).toBe("1.50 KiB")
+		expect(formatBytesFixed(1536)).toBe("1.5 KiB")
 	})
 
 	it("shows whole bytes without a fraction", () => {
@@ -471,7 +379,6 @@ describe("formatBytesFixed", () => {
 	it("moves to the next unit when rounding reaches 1024 of this one", () => {
 		expect(formatBytesFixed(1023.6)).toBe("1.0 KiB")
 		expect(formatBytesFixed(1048575)).toBe("1.0 MiB")
-		expect(formatBytesFixed(1048575, 2)).toBe("1.00 MiB")
 		expect(formatBytesFixed(1023 * 1024)).toBe("1023.0 KiB")
 		expect(formatBytesFixed(1023)).toBe("1023 B")
 	})

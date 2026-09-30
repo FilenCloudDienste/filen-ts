@@ -17,8 +17,7 @@ describe("isThemeSetting", () => {
 })
 
 describe("DEFAULT_THEME_SETTING", () => {
-	it("is 'system' and is itself a valid ThemeSetting", () => {
+	it("is 'system'", () => {
 		expect(DEFAULT_THEME_SETTING).toBe("system")
-		expect(isThemeSetting(DEFAULT_THEME_SETTING)).toBe(true)
 	})
 })

@@ -61,19 +61,6 @@ export const CODE_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
 	"proto"
 ])
 
-// Mobile's HEIC/HEIF + multi-image burst-variant extensions (lowercase, dot-less) — the set its
-// convert-on-upload gate passes to isHeicFileName below. Web keeps its own narrower two-entry set
-// web-local (preview.logic.ts); widening it to this set is a product decision outside this module.
-export const HEIC_EXTENSIONS_UPLOAD: ReadonlySet<string> = new Set(["heic", "heif", "heics", "heifs"])
-
-// Whether a BARE file name — no path, no query or fragment; the caller truncates a URI before calling
-// — ends in one of `extensions`. Lowercases the name and looks up everything after its last ".".
-export function isHeicFileName(bareName: string, extensions: ReadonlySet<string>): boolean {
-	const lower = bareName.toLowerCase()
-
-	return extensions.has(lower.slice(lower.lastIndexOf(".") + 1))
-}
-
 // Index of the dot that starts `name`'s extension, or -1 when it has none: a leading dot (a dotfile) or
 // a trailing one is not an extension. Returns an index so hot callers slice only what they need.
 export function extensionStart(name: string): number {

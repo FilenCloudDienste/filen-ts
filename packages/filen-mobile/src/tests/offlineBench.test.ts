@@ -143,7 +143,7 @@ import offlineSyncSingleton from "@/features/offline/offlineSync"
 import { planTreeReconcile, type RemoteTreeEntry, type LocalTreeEntry } from "@/features/offline/offlineSyncPlanner"
 import { parentCacheKey, makeSyncError, type OfflineParent } from "@/features/offline/offlineHelpers"
 import { OFFLINE_FILES_DIRECTORY, OFFLINE_DIRECTORIES_DIRECTORY, OFFLINE_INDEX_FILE } from "@/lib/storageRoots"
-import { validateUuid } from "@/lib/uuid"
+import { validateUuid } from "@filen/shared"
 import type { DriveItem } from "@/types"
 import { makeFileItem, makeDirItem, makeParent, makeListingFile, makeListingDir } from "@/tests/fixtures/offline"
 

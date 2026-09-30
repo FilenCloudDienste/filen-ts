@@ -141,27 +141,18 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 			keys[i] = timestampKey(at(partition, i))
 		}
 
-		indices.sort(
-			mode.isAsc
-				? (a, b) => {
-						const diff = at(keys, a) - at(keys, b)
+		// A sign multiplier instead of a swapped-operand wrapper keeps one call per comparison.
+		const sign = mode.isAsc ? 1 : -1
 
-						if (diff !== 0) {
-							return diff
-						}
+		indices.sort((a, b) => {
+			const diff = at(keys, a) - at(keys, b)
 
-						return getUuidNumber(getUuid(at(partition, a))) - getUuidNumber(getUuid(at(partition, b)))
-					}
-				: (a, b) => {
-						const diff = at(keys, b) - at(keys, a)
+			if (diff !== 0) {
+				return sign * diff
+			}
 
-						if (diff !== 0) {
-							return diff
-						}
-
-						return getUuidNumber(getUuid(at(partition, b))) - getUuidNumber(getUuid(at(partition, a)))
-					}
-		)
+			return sign * (getUuidNumber(getUuid(at(partition, a))) - getUuidNumber(getUuid(at(partition, b))))
+		})
 	} else {
 		const stringKey = mode.stringKey
 

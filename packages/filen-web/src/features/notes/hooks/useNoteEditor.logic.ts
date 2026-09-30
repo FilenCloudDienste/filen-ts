@@ -1,7 +1,7 @@
 import type { Note } from "@filen/sdk-rs"
-import { hashNoteContent } from "@filen/shared"
+import { hashNoteContent, newestEntry } from "@filen/shared"
 import type { InflightEntry } from "@/features/notes/store/useNotesInflight"
-import { newestEntry, newestShowableEntry } from "@/features/notes/lib/sync.logic"
+import { newestShowableEntry } from "@/features/notes/lib/sync.logic"
 import { hasNoteWriteAccess } from "@/features/notes/lib/sort"
 
 // old-web parity: the client-side note-content cap. A push past this would be rejected server-side and

@@ -32,17 +32,43 @@ export type FileIconSets = {
 	isAudio: (ext: string) => boolean
 }
 
-export const ARCHIVE_EXTENSIONS: ReadonlySet<string> = new Set(["pkg", "rar", "tar", "zip", "7zip"])
-
-// CODE_FILE_EXTENSIONS (the 53-entry preview intersection) plus the extensions this ICON classifier
-// treats as code even where an app's own PREVIEW category splits some of them out (md/markdown/log/
-// ahk — none of which are in the shared preview set; see CODE_FILE_EXTENSIONS' own comment).
-const CODE_EXTENSIONS: ReadonlySet<string> = new Set([...CODE_FILE_EXTENSIONS, "md", "markdown", "log", "ahk"])
+// Every non-media, non-code extension plus the extensions this ICON classifier treats as code even
+// where an app's own PREVIEW category splits them out (md/markdown/log/ahk — none of which are in the
+// shared preview set; see CODE_FILE_EXTENSIONS' own comment). Groups are disjoint, so a single lookup
+// replaces an ordered chain.
+const ICON_KEY_BY_EXTENSION: ReadonlyMap<string, FileIconKey> = new Map<string, FileIconKey>([
+	["pdf", "pdf"],
+	["txt", "txt"],
+	["doc", "doc"],
+	["docx", "doc"],
+	["ppt", "ppt"],
+	["pptx", "ppt"],
+	["xls", "xls"],
+	["xlsx", "xls"],
+	["dmg", "iso"],
+	["iso", "iso"],
+	["cad", "cad"],
+	["psd", "psd"],
+	["apk", "android"],
+	["ipa", "apple"],
+	["pkg", "archive"],
+	["rar", "archive"],
+	["tar", "archive"],
+	["zip", "archive"],
+	["7zip", "archive"],
+	["jar", "exe"],
+	["exe", "exe"],
+	["bin", "exe"],
+	["md", "code"],
+	["markdown", "code"],
+	["log", "code"],
+	["ahk", "code"]
+])
 
 // Resolves an already-normalised extension (lowercase, no leading dot) to its type-icon key.
-// image/video/audio are resolved first via the injected `sets`, then a fixed per-extension table for
-// everything both apps agree on exactly. An extension matching nothing (including "", an undecryptable
-// file with no name to read one from) falls through to "other".
+// image/video/audio are resolved first via the injected `sets`, then the fixed table, then the shared
+// code set. An extension matching nothing (including "", an undecryptable file with no name to read
+// one from) falls through to "other".
 export function fileIconKey(ext: string, sets: FileIconSets): FileIconKey {
 	if (sets.isImage(ext)) {
 		return "image"
@@ -56,57 +82,5 @@ export function fileIconKey(ext: string, sets: FileIconSets): FileIconKey {
 		return "audio"
 	}
 
-	if (ext === "pdf") {
-		return "pdf"
-	}
-
-	if (ext === "txt") {
-		return "txt"
-	}
-
-	if (ext === "doc" || ext === "docx") {
-		return "doc"
-	}
-
-	if (ext === "dmg" || ext === "iso") {
-		return "iso"
-	}
-
-	if (ext === "cad") {
-		return "cad"
-	}
-
-	if (ext === "psd") {
-		return "psd"
-	}
-
-	if (ext === "apk") {
-		return "android"
-	}
-
-	if (ext === "ipa") {
-		return "apple"
-	}
-
-	if (ARCHIVE_EXTENSIONS.has(ext)) {
-		return "archive"
-	}
-
-	if (CODE_EXTENSIONS.has(ext)) {
-		return "code"
-	}
-
-	if (ext === "jar" || ext === "exe" || ext === "bin") {
-		return "exe"
-	}
-
-	if (ext === "ppt" || ext === "pptx") {
-		return "ppt"
-	}
-
-	if (ext === "xls" || ext === "xlsx") {
-		return "xls"
-	}
-
-	return "other"
+	return ICON_KEY_BY_EXTENSION.get(ext) ?? (CODE_FILE_EXTENSIONS.has(ext) ? "code" : "other")
 }

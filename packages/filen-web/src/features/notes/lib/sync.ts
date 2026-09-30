@@ -7,6 +7,7 @@ import {
 	buildInflightEntries,
 	mergeInflight,
 	MAX_NON_RETRYABLE_REJECTIONS,
+	newestEntry,
 	pruneAndRebaseNoteOutboxAfterPush,
 	reconcileNoteOutboxAgainstCloud
 } from "@filen/shared"
@@ -42,7 +43,6 @@ import {
 	notePreviewFor,
 	reconcileFollower,
 	remoteEnqueueToPatch,
-	newestEntry,
 	type RemoteEnqueue
 } from "@/features/notes/lib/sync.logic"
 

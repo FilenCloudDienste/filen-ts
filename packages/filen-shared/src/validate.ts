@@ -1,4 +1,4 @@
-import { type ratePasswordStrength } from "./misc"
+import { type PasswordStrength } from "./misc"
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -9,6 +9,8 @@ export function isValidEmail(email: string): boolean {
 
 // Weak is the only blocked tier, null means no password typed yet. Both credential-creating forms
 // (register, reset) gate their submit on this, so the minimum-strength policy lives in one place.
-export function isPasswordStrongEnough(passwordStrength: ReturnType<typeof ratePasswordStrength> | null): boolean {
-	return passwordStrength !== null && passwordStrength.strength !== "weak"
+export function isPasswordStrongEnough(passwordStrength: PasswordStrength | null): boolean {
+	return passwordStrength !== null && passwordStrength !== "weak"
 }
+
+export { validate as validateUuid } from "uuid"

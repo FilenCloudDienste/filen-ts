@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
-import { freeBytes, quotaVerdict, resolveQuotaVerdict, storageUsageLevel, sumBytes, type StorageCounters } from "@filen/shared"
+import {
+	deriveStorageBreakdown,
+	freeBytes,
+	quotaVerdict,
+	resolveQuotaVerdict,
+	storageUsageLevel,
+	sumBytes,
+	type StorageCounters
+} from "@filen/shared"
 
 describe("storageUsageLevel", () => {
 	it("is ok below the 75% warn threshold", () => {
@@ -34,6 +42,59 @@ describe("freeBytes", () => {
 	it("is null when the quota is unresolvable", () => {
 		expect(freeBytes(counters(30n, 0n))).toBeNull()
 		expect(freeBytes(counters(30n, -1n))).toBeNull()
+	})
+})
+
+describe("deriveStorageBreakdown", () => {
+	it("splits used storage into files + versioned, and the remainder into free", () => {
+		expect(deriveStorageBreakdown(600n, 1000n, 200n)).toEqual({
+			usedBytes: 600n,
+			maxBytes: 1000n,
+			filesBytes: 400n,
+			versionedBytes: 200n,
+			freeBytes: 400n
+		})
+	})
+
+	it("the three segments always sum to maxStorage", () => {
+		const breakdown = deriveStorageBreakdown(733n, 1000n, 111n)
+
+		expect(breakdown.filesBytes + breakdown.versionedBytes + breakdown.freeBytes).toBe(breakdown.maxBytes)
+	})
+
+	it("clamps usedBytes to maxStorage when storageUsed exceeds it (plan downgrade)", () => {
+		const breakdown = deriveStorageBreakdown(1500n, 1000n, 100n)
+
+		expect(breakdown.usedBytes).toBe(1000n)
+		expect(breakdown.freeBytes).toBe(0n)
+		expect(breakdown.filesBytes + breakdown.versionedBytes).toBe(1000n)
+	})
+
+	it("clamps versionedStorage to the clamped used total rather than going negative", () => {
+		const breakdown = deriveStorageBreakdown(500n, 1000n, 5000n)
+
+		expect(breakdown.versionedBytes).toBe(500n)
+		expect(breakdown.filesBytes).toBe(0n)
+	})
+
+	it("clamps negative inputs to zero", () => {
+		expect(deriveStorageBreakdown(-5n, 1000n, -1n)).toEqual({
+			usedBytes: 0n,
+			maxBytes: 1000n,
+			filesBytes: 0n,
+			versionedBytes: 0n,
+			freeBytes: 1000n
+		})
+	})
+
+	it("maxStorage <= 0 (unresolved quota) zeros every derived field but the raw used/max pair", () => {
+		expect(deriveStorageBreakdown(123n, 0n, 10n)).toEqual({
+			usedBytes: 123n,
+			maxBytes: 0n,
+			filesBytes: 0n,
+			versionedBytes: 0n,
+			freeBytes: 0n
+		})
 	})
 })
 

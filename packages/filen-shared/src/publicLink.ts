@@ -1,4 +1,4 @@
-import { validate as validateUUID } from "uuid"
+import { validateUuid } from "./validate"
 
 /**
  * Buffer typed here and read at CALL time: this file is consumed as source by clients whose tsconfig
@@ -16,17 +16,19 @@ function nodeBuffer(): BufferLike {
 
 export const UUID_SUB = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
+const ORIGIN = "^https?://(?:app|drive)\\.filen\\.io/"
+
 // NEW path format (what the current web app builds): <origin>/f|d/<uuid>(#|%23)<hexkey>. Its letters
 // read f = file, d = directory, the opposite of the legacy naming below; the scheme stays as shipped.
 // The key group is hex-only: the builder always hex-encodes.
-const NEW_LINK_RE = new RegExp(`^https?://(?:app|drive)\\.filen\\.io/([fd])/(${UUID_SUB})(?:#|%23)([0-9a-f]+)`, "i")
+const NEW_LINK_RE = new RegExp(`${ORIGIN}([fd])/(${UUID_SUB})(?:#|%23)([0-9a-f]+)`, "i")
 
 // LEGACY hash-router format (old web built these; mobile still does): <origin>/#/d|f/<uuid>(%23|#)<key>,
 // where d = download (a file) and f = folder. Both eras stay recognised so old links keep working.
 // The key group is broader than NEW's:
 // a genuinely raw (non-hex) key of 32+ chars is still a legacy link that must keep being recognized,
 // not just a hex-encoded one.
-const LEGACY_LINK_RE = new RegExp(`^https?://(?:app|drive)\\.filen\\.io/#/([df])/(${UUID_SUB})(?:%23|#)([A-Za-z0-9]{32,})`, "i")
+const LEGACY_LINK_RE = new RegExp(`${ORIGIN}#/([df])/(${UUID_SUB})(?:%23|#)([A-Za-z0-9]{32,})`, "i")
 
 const HEX_64_RE = /^[0-9A-Fa-f]{64}$/
 
@@ -51,66 +53,38 @@ export type FilenPublicLink = {
 	type: "file" | "directory"
 }
 
+function finish(uuid: string | undefined, key: string | null, isFile: boolean): FilenPublicLink | null {
+	if (uuid === undefined || key === null || nodeBuffer().from(key).length !== 32 || !validateUuid(uuid)) {
+		return null
+	}
+
+	return {
+		uuid,
+		key,
+		type: isFile ? "file" : "directory"
+	}
+}
+
 export function parseFilenPublicLink(url: string): FilenPublicLink | null {
-	if (!url || url.length === 0) {
+	if (!url) {
 		return null
 	}
 
 	const nw = NEW_LINK_RE.exec(url)
 
 	if (nw !== null) {
-		const pathType = nw[1]?.toLowerCase()
-		const uuid = nw[2]
-		const hex = nw[3]
-
-		if (pathType === undefined || uuid === undefined || hex === undefined) {
-			return null
-		}
-
-		const key = decodeHexKey(hex)
-
-		if (key === null || nodeBuffer().from(key).length !== 32 || !validateUUID(uuid)) {
-			return null
-		}
-
-		return {
-			uuid,
-			key,
-			type: pathType === "f" ? "file" : "directory"
-		}
+		return finish(nw[2], decodeHexKey(nw[3] ?? ""), nw[1]?.toLowerCase() === "f")
 	}
 
 	const lg = LEGACY_LINK_RE.exec(url)
 
 	if (lg !== null) {
-		const pathType = lg[1]?.toLowerCase()
-		const uuid = lg[2]
-		let key = lg[3]
-
-		if (pathType === undefined || uuid === undefined || key === undefined) {
-			return null
-		}
-
-		if (HEX_64_RE.test(key)) {
-			const decoded = decodeHexKey(key)
-
-			if (decoded === null) {
-				return null
-			}
-
-			key = decoded
-		}
-
-		if (nodeBuffer().from(key).length !== 32 || !validateUUID(uuid)) {
-			return null
-		}
+		const raw = lg[3]
+		// A 64-hex key is hex-encoded; anything else is already the raw key.
+		const key = raw === undefined ? null : HEX_64_RE.test(raw) ? decodeHexKey(raw) : raw
 
 		// Legacy semantics are swapped: `d` = file, `f` = directory.
-		return {
-			uuid,
-			key,
-			type: pathType === "d" ? "file" : "directory"
-		}
+		return finish(lg[2], key, lg[1]?.toLowerCase() === "d")
 	}
 
 	return null

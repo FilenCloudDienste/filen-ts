@@ -223,7 +223,6 @@ function sort(notes: SortableNote[]): SortableNote[] {
 }
 
 type GroupBucketEntry = {
-	id: string
 	pinned: boolean
 	favorite: boolean
 	archive: boolean
@@ -305,7 +304,6 @@ function group(
 		const note = notes[i] as Note
 
 		entries[i] = {
-			id: note.uuid,
 			pinned: note.pinned,
 			favorite: note.favorite,
 			archive: note.archive,

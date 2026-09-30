@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { directoryFolderTint, fileIconKey, shadeColor } from "@/features/drive/lib/icon.logic"
+import { fileIconKey } from "@/features/drive/lib/icon.logic"
 
 // Full extension-routing coverage lives in @filen/shared's fileIcon.test.ts now — fileIconKey here is
 // a thin wrapper (icon.logic.ts) deriving `ext` via extensionOf and delegating to the shared
@@ -26,31 +26,5 @@ describe("fileIconKey", () => {
 	it("falls back to other for an unknown extension or a nameless (undecryptable) file", () => {
 		expect(fileIconKey("mystery.xyz")).toBe("other")
 		expect(fileIconKey("")).toBe("other")
-	})
-})
-
-describe("shadeColor", () => {
-	it("darkens each channel by the divisor and clamps to a padded two-digit hex", () => {
-		expect(shadeColor("#808080", 2)).toBe("#404040")
-		expect(shadeColor("#0f0f0f", 2)).toBe("#080808")
-	})
-})
-
-describe("directoryFolderTint", () => {
-	it("uses filen-mobile's exact default pair for an uncolored directory", () => {
-		expect(directoryFolderTint("default")).toEqual({ path1: "#5398DF", path2: "#85BCFF" })
-	})
-
-	it("derives a darker tab shade from a named color body", () => {
-		const tint = directoryFolderTint("red")
-
-		expect(tint.path2).toBe("#FF3B30")
-		// Literal, not shadeColor("#FF3B30", 1.3): an expected value computed with the function under test
-		// proves only the routing, never the arithmetic on this divisor's own path (255/1.3, 59/1.3, 48/1.3).
-		expect(tint.path1).toBe("#c42d25")
-	})
-
-	it("passes a custom hex through as the body color", () => {
-		expect(directoryFolderTint("#abcdef").path2).toBe("#abcdef")
 	})
 })

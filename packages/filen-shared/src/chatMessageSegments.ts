@@ -135,18 +135,33 @@ export function segmentMessage(text: string | undefined): MessageSegment[] {
 	return segments
 }
 
-// A message is "emoji-only" (jumbo-sizing candidate) when it contains at least one emoji shortcode
-// and, once every shortcode is removed, only whitespace remains.
-export function isEmojiOnly(text: string | undefined): boolean {
-	if (text === undefined || text.length === 0) {
+// A message is "emoji-only" (jumbo-sizing candidate) when, once blank text and line breaks at either
+// end are skipped, what remains is one or more emoji segments and nothing else.
+export function isEmojiOnly(segments: readonly MessageSegment[]): boolean {
+	let start = 0
+	let end = segments.length
+
+	while (start < end && isBlank(segments[start])) {
+		start++
+	}
+
+	while (end > start && isBlank(segments[end - 1])) {
+		end--
+	}
+
+	if (start === end) {
 		return false
 	}
 
-	const emojiMatches = text.match(new RegExp(EMOJI_SOURCE, "gi"))
-
-	if (!emojiMatches) {
-		return false
+	for (let i = start; i < end; i++) {
+		if (segments[i]?.kind !== "emoji") {
+			return false
+		}
 	}
 
-	return emojiMatches.join("").length === text.trim().length
+	return true
+}
+
+function isBlank(segment: MessageSegment | undefined): boolean {
+	return segment?.kind === "linebreak" || (segment?.kind === "text" && segment.value.trim().length === 0)
 }

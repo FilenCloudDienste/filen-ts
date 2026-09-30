@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
-import {
-	chatsWithoutBlockedOneOnOne,
-	filterChats,
-	isOneOnOneWithBlocked,
-	staleChatSelectionUuids
-} from "@/features/chats/components/chatsSidebar.logic"
+import { chatsWithoutBlockedOneOnOne, filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
-import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
+import { deriveBlockedUsers } from "@filen/shared"
 import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -76,7 +71,7 @@ describe("filterChats", () => {
 		const older = mockChat("a", { lastMessage: mockMessage({ sentTimestamp: 100n }) })
 		const newer = mockChat("b", { lastMessage: mockMessage({ sentTimestamp: 200n }) })
 
-		// sortChats orders newest-lastMessage first, independent of input order.
+		// Newest lastMessage first, independent of input order.
 		expect(filterChats([older, newer], "", SELF, SOLO).map(c => c.uuid)).toEqual([newer.uuid, older.uuid])
 	})
 
@@ -184,60 +179,6 @@ describe("chatHasUnread (client-derived)", () => {
 		expect(chatHasUnread(muted, SELF)).toBe(false)
 		expect(chatHasUnread(noMessage, SELF)).toBe(false)
 		expect(chatHasUnread(withUnread, undefined)).toBe(false)
-	})
-})
-
-describe("isOneOnOneWithBlocked", () => {
-	function oneOnOne(other: ChatParticipant): Chat {
-		return mockChat("a", { participants: [mockParticipant({ userId: SELF }), other] })
-	}
-
-	it("is true when the sole other participant is blocked by userId", () => {
-		const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 9n, email: "nomatch@example.com" })])
-
-		expect(isOneOnOneWithBlocked(oneOnOne(mockParticipant({ userId: 9n, email: "other@example.com" })), SELF, blocked)).toBe(true)
-	})
-
-	it("is true when the sole other participant matches only by email, case- and whitespace-insensitively", () => {
-		const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 42n, email: "Zoe@Example.com" })])
-		const chat = oneOnOne(mockParticipant({ userId: 9n, email: "  ZOE@example.COM  " }))
-
-		expect(isOneOnOneWithBlocked(chat, SELF, blocked)).toBe(true)
-	})
-
-	it("is false when the sole other participant is not blocked", () => {
-		const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 9n, email: "b@example.com" })])
-
-		expect(isOneOnOneWithBlocked(oneOnOne(mockParticipant({ userId: 3n, email: "c@example.com" })), SELF, blocked)).toBe(false)
-	})
-
-	it("is false for a group chat even when one member is blocked", () => {
-		const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 9n })])
-		const chat = mockChat("a", {
-			participants: [mockParticipant({ userId: SELF }), mockParticipant({ userId: 9n }), mockParticipant({ userId: 3n })]
-		})
-
-		expect(isOneOnOneWithBlocked(chat, SELF, blocked)).toBe(false)
-	})
-
-	it("is false for a solo chat (no other participants)", () => {
-		const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 9n })])
-		const chat = mockChat("a", { participants: [mockParticipant({ userId: SELF })] })
-
-		expect(isOneOnOneWithBlocked(chat, SELF, blocked)).toBe(false)
-	})
-
-	// Nobody counts as "self" while the account query is unresolved, so a 1:1's participant list reads as
-	// two others — pinned so the unresolved-account posture stays fail-open.
-	it("is false when currentUserId is unresolved", () => {
-		const blocked = deriveBlockedUsers([mockPlainBlockedContact({ userId: 9n })])
-		const chat = oneOnOne(mockParticipant({ userId: 9n }))
-
-		expect(isOneOnOneWithBlocked(chat, undefined, blocked)).toBe(false)
-	})
-
-	it("is false against an empty blocked set (fail-open)", () => {
-		expect(isOneOnOneWithBlocked(oneOnOne(mockParticipant({ userId: 9n })), SELF, EMPTY_BLOCKED_USERS)).toBe(false)
 	})
 })
 

@@ -1,4 +1,4 @@
-import { type Checklist, type ChecklistItem } from "./checklistParser"
+import { blankChecklistItem, type Checklist, type ChecklistItem } from "./checklistParser"
 
 // Pure checklist row mutation transforms for a custom checklist editor. They compute the next list
 // (and which row to focus) without touching any UI state, so a caller applies the result, moves
@@ -39,13 +39,7 @@ export function removeChecklistItem(rows: Checklist, itemId: string, newId: stri
 	if (rows.length === 1) {
 		return {
 			changed: true,
-			next: [
-				{
-					id: newId,
-					checked: false,
-					content: ""
-				}
-			],
+			next: [blankChecklistItem(newId)],
 			focusId: null
 		}
 	}
@@ -87,11 +81,7 @@ export function addChecklistLine(rows: Checklist, afterId: string, newId: string
 
 	const newList = [...rows]
 
-	newList.splice(nextIndex, 0, {
-		id: newId,
-		checked: false,
-		content: ""
-	})
+	newList.splice(nextIndex, 0, blankChecklistItem(newId))
 
 	return {
 		changed: true,

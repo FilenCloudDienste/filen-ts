@@ -18,7 +18,9 @@ describe("decodeHtmlEntities", () => {
 	})
 
 	it("leaves a legacy name without its semicolon literal", () => {
-		expect(decodeHtmlEntities("cut&copy Save&note Get&quote Issue&#42 R&D")).toBe("cut&copy Save&note Get&quote Issue&#42 R&D")
+		const text = "cut&copy Save&note Check&register Get&quote left&center Issue&#42 R&D AT&T"
+
+		expect(decodeHtmlEntities(text)).toBe(text)
 	})
 
 	it("leaves an unknown name literal, even one that starts with a legacy name", () => {

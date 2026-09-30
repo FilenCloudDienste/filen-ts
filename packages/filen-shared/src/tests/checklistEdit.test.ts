@@ -39,6 +39,16 @@ describe("removeChecklistItem", () => {
 		expect(result.next).toEqual([{ id: "fresh", checked: false, content: "" }])
 		expect(result.focusId).toBeNull()
 	})
+
+	// The single-item branch never consults the id, so callers must check membership first or a
+	// stray id wipes the only (possibly checked) row.
+	it("resets a single remaining item even when the id is not in the list", () => {
+		const single: Checklist = [{ id: "a", checked: true, content: "done" }]
+		const result = removeChecklistItem(single, "ghost", "fresh")
+
+		expect(result.changed).toBe(true)
+		expect(result.next).toEqual([{ id: "fresh", checked: false, content: "" }])
+	})
 })
 
 describe("addChecklistLine", () => {

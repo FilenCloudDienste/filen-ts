@@ -37,6 +37,11 @@ export function newestEntryTimestamp(entries: readonly { timestamp: number }[]):
 	return entries.reduce((acc, c) => (c.timestamp > acc ? c.timestamp : acc), Number.NEGATIVE_INFINITY)
 }
 
+// The entry with the greatest local author timestamp, first of ties (undefined for none).
+export function newestEntry<T extends { timestamp: number }>(entries: readonly T[] | undefined): T | undefined {
+	return entries?.reduce<T | undefined>((acc, c) => (acc === undefined || c.timestamp > acc.timestamp ? c : acc), undefined)
+}
+
 // Pure builder for a note's inflight entry list after a keystroke.
 //
 // The author timestamp is PER-NOTE MONOTONIC — `max(now, newest existing + 1)` — so a backward
@@ -65,10 +70,9 @@ export function buildInflightEntries<TNote>({
 	sessionBaseHash: string | null
 }): InflightEntry<TNote>[] {
 	const entries = previous ?? []
-	const newestExisting = newestEntryTimestamp(entries)
-	const timestamp = entries.length > 0 ? Math.max(now, newestExisting + 1) : now
-	const newestEntry = entries.find(c => c.timestamp === newestExisting)
-	const baseContentHash = entries.length > 0 ? newestEntry?.baseContentHash : (sessionBaseHash ?? undefined)
+	const newest = newestEntry(entries)
+	const timestamp = newest !== undefined ? Math.max(now, newest.timestamp + 1) : now
+	const baseContentHash = newest !== undefined ? newest.baseContentHash : (sessionBaseHash ?? undefined)
 
 	// exactOptionalPropertyTypes: an absent base hash must OMIT the key, never set it to `undefined`.
 	const newEntry: InflightEntry<TNote> =

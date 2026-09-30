@@ -55,7 +55,7 @@ export default tseslint.config(
 		}
 	},
 	{
-		// Tests reach the package through the "@filen/shared" alias
+		// Tests reach the package by self-reference as "@filen/shared"
 		files: ["src/tests/**"],
 		rules: {
 			"no-restricted-imports": [

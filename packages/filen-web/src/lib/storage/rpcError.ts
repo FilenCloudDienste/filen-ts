@@ -1,16 +1,15 @@
-export type SerializedError = {
+// Errors crossing the db BroadcastChannel keep name, message and stack; everything else is dropped.
+export interface SerializedError {
 	name: string
 	message: string
 	stack?: string | undefined
-	stringified: string
 }
 
 export function serializeError(error: Error): SerializedError {
 	return {
 		name: error.name,
 		message: error.message,
-		stack: error.stack,
-		stringified: JSON.stringify(error)
+		stack: error.stack
 	}
 }
 
@@ -21,7 +20,6 @@ export function deserializeError(serializedError: SerializedError): Error {
 
 	error.name = serializedError.name
 	writableStack.stack = serializedError.stack
-	error.message = serializedError.message
 
 	return error
 }

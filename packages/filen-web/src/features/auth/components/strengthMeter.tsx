@@ -1,10 +1,7 @@
 import { useTranslation } from "react-i18next"
-import type { ratePasswordStrength } from "@filen/shared"
-import { cn } from "@filen/shared"
+import { cn, type PasswordStrength } from "@filen/shared"
 
-export type PasswordStrengthTier = ReturnType<typeof ratePasswordStrength>["strength"]
-
-const STRENGTH_STEP: Record<PasswordStrengthTier, number> = {
+const STRENGTH_STEP: Record<PasswordStrength, number> = {
 	weak: 1,
 	normal: 2,
 	strong: 3,
@@ -15,14 +12,14 @@ const STRENGTH_STEP: Record<PasswordStrengthTier, number> = {
 // already marks invalid state everywhere else in this app), the rest borrow the same default
 // Tailwind palette entries already used for non-semantic accents elsewhere in this app (e.g.
 // driveRow.tsx's amber-500 favorite star, logsCard.tsx's yellow-500 warn level).
-const STRENGTH_FILL_CLASS: Record<PasswordStrengthTier, string> = {
+const STRENGTH_FILL_CLASS: Record<PasswordStrength, string> = {
 	weak: "bg-destructive",
 	normal: "bg-yellow-500",
 	strong: "bg-blue-500",
 	best: "bg-green-500"
 }
 
-const STRENGTH_TEXT_CLASS: Record<PasswordStrengthTier, string> = {
+const STRENGTH_TEXT_CLASS: Record<PasswordStrength, string> = {
 	weak: "text-destructive",
 	normal: "text-yellow-500",
 	strong: "text-blue-500",
@@ -34,14 +31,14 @@ const STRENGTH_LABEL_KEY = {
 	normal: "passwordStrengthNormal",
 	strong: "passwordStrengthStrong",
 	best: "passwordStrengthBest"
-} as const satisfies Record<PasswordStrengthTier, string>
+} as const satisfies Record<PasswordStrength, string>
 
 // Live strength feedback shared by the register and reset forms. Width steps in quarters rather
 // than a continuous scale, per a simple width-stepped bar. Both consuming forms gate their submit
 // on isPasswordStrongEnough (weak is the only blocked tier), so the weak tier also renders the
 // "choose a stronger password" helper here — the gate's explanation lives in one place and the
 // two forms cannot diverge.
-function StrengthMeter({ tier }: { tier: PasswordStrengthTier }) {
+function StrengthMeter({ tier }: { tier: PasswordStrength }) {
 	const { t } = useTranslation("auth")
 
 	return (

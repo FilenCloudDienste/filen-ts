@@ -53,61 +53,32 @@ export function sortNoteTags<TTag extends NoteTagsSortEntry, TNote extends NoteT
 	notesByTag: Record<string, readonly TNote[]>,
 	getTagDisplayName: (tag: TTag) => string
 ): TTag[] {
-	// Precompute keys once per tag so the comparator stays O(1) per comparison instead of re-walking
-	// notesByTag on every compare.
-	const activity = new Map<string, number>()
-	const count = new Map<string, number>()
+	const byName = (a: TTag, b: TTag): number => fastLocaleCompare(getTagDisplayName(a), getTagDisplayName(b))
+	const sorted = [...tags]
+
+	if (sortBy === "nameAsc") {
+		return sorted.sort(byName)
+	}
+
+	if (sortBy === "nameDesc") {
+		return sorted.sort((a, b) => byName(b, a))
+	}
+
+	// Metric modes; an unrecognized value lands on lastActivityDesc (activity key, sign -1).
+	const byCount = sortBy === "notesCountAsc" || sortBy === "notesCountDesc"
+	const sign = sortBy === "lastActivityAsc" || sortBy === "notesCountAsc" ? 1 : -1
+	// Precompute the one key this mode needs so the comparator stays O(1) per comparison.
+	const keys = new Map<string, number>()
 
 	for (const tag of tags) {
 		const notes = notesByTag[tag.uuid] ?? []
 
-		activity.set(tag.uuid, tagLastActivity(tag, notes))
-		count.set(tag.uuid, notes.length)
+		keys.set(tag.uuid, byCount ? notes.length : tagLastActivity(tag, notes))
 	}
 
-	const byName = (a: TTag, b: TTag): number => fastLocaleCompare(getTagDisplayName(a), getTagDisplayName(b))
-	const sorted = [...tags]
+	return sorted.sort((a, b) => {
+		const diff = sign * ((keys.get(a.uuid) ?? 0) - (keys.get(b.uuid) ?? 0))
 
-	switch (sortBy) {
-		case "nameAsc": {
-			return sorted.sort(byName)
-		}
-
-		case "nameDesc": {
-			return sorted.sort((a, b) => byName(b, a))
-		}
-
-		case "lastActivityAsc": {
-			return sorted.sort((a, b) => {
-				const diff = (activity.get(a.uuid) ?? 0) - (activity.get(b.uuid) ?? 0)
-
-				return diff !== 0 ? diff : byName(a, b)
-			})
-		}
-
-		case "notesCountDesc": {
-			return sorted.sort((a, b) => {
-				const diff = (count.get(b.uuid) ?? 0) - (count.get(a.uuid) ?? 0)
-
-				return diff !== 0 ? diff : byName(a, b)
-			})
-		}
-
-		case "notesCountAsc": {
-			return sorted.sort((a, b) => {
-				const diff = (count.get(a.uuid) ?? 0) - (count.get(b.uuid) ?? 0)
-
-				return diff !== 0 ? diff : byName(a, b)
-			})
-		}
-
-		// lastActivityDesc + any unrecognized value
-		default: {
-			return sorted.sort((a, b) => {
-				const diff = (activity.get(b.uuid) ?? 0) - (activity.get(a.uuid) ?? 0)
-
-				return diff !== 0 ? diff : byName(a, b)
-			})
-		}
-	}
+		return diff !== 0 ? diff : byName(a, b)
+	})
 }

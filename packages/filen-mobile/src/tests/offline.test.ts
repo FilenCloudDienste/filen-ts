@@ -151,7 +151,9 @@ vi.mock("@filen/sdk-rs", async () => ({
 	}
 }))
 
-vi.mock("@/lib/uuid", () => ({
+// Fixture uuids (11111111-1111-...) fail the real version/variant check, so validate shape only.
+vi.mock("@filen/shared", async () => ({
+	...(await vi.importActual<typeof import("@filen/shared")>("@filen/shared")),
 	validateUuid: (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 }))
 

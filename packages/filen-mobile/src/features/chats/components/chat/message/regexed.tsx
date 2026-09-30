@@ -83,9 +83,7 @@ const Regexed = ({ chat, message, fromSelf }: { chat: Chat; message: ChatMessage
 	)
 
 	const segments = segmentMessage(message.inner.message)
-	// isEmojiOnly(text) replaces the old inverted default (jumbo unless mixed content) — equivalent,
-	// since the old default only ever mattered while at least one emoji was present.
-	const emojiSize = isEmojiOnly(message.inner.message) ? 32 : 20
+	const emojiSize = isEmojiOnly(segments) ? 32 : 20
 
 	if (segments.length === 0) {
 		return null

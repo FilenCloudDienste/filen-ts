@@ -39,7 +39,7 @@ describe("run", () => {
 	})
 
 	describe("defer functionality", () => {
-		it("should execute deferred functions in LIFO order", async () => {
+		it("should execute deferred functions in LIFO order after the main function", async () => {
 			const order: number[] = []
 
 			await run(async defer => {
@@ -47,10 +47,12 @@ describe("run", () => {
 				defer(() => order.push(2))
 				defer(() => order.push(3))
 
+				order.push(0)
+
 				return "done"
 			})
 
-			expect(order).toEqual([3, 2, 1])
+			expect(order).toEqual([0, 3, 2, 1])
 		})
 
 		it("should execute deferred functions even when main function throws", async () => {
@@ -87,25 +89,6 @@ describe("run", () => {
 			expect(order).toEqual([2, 1])
 		})
 
-		it("should catch errors in deferred functions", async () => {
-			const onError = vi.fn()
-
-			await run(
-				async defer => {
-					defer(() => {
-						throw new Error("cleanup failed")
-					})
-
-					return "done"
-				},
-				{
-					onError
-				}
-			)
-
-			expect(onError).toHaveBeenCalledWith(expect.any(Error))
-		})
-
 		it("should continue executing other deferred functions if one fails", async () => {
 			const cleanup1 = vi.fn()
 			const cleanup2 = vi.fn()
@@ -128,22 +111,6 @@ describe("run", () => {
 	})
 
 	describe("options", () => {
-		it("should call onError when function throws", async () => {
-			const onError = vi.fn()
-			const error = new Error("test error")
-
-			await run(
-				async () => {
-					throw error
-				},
-				{
-					onError
-				}
-			)
-
-			expect(onError).toHaveBeenCalledWith(error)
-		})
-
 		it("should throw error when throw option is true", async () => {
 			await expect(
 				run(
@@ -447,24 +414,6 @@ describe("runTimeout", () => {
 	})
 
 	describe("error handling", () => {
-		it("should call onError on timeout", async () => {
-			const onError = vi.fn()
-
-			await runTimeout(
-				async () => {
-					await new Promise(resolve => setTimeout(resolve, 100))
-
-					return "done"
-				},
-				20,
-				{
-					onError
-				}
-			)
-
-			expect(onError).toHaveBeenCalledWith(expect.any(TimeoutError))
-		})
-
 		it("should handle errors from function itself", async () => {
 			const result = await runTimeout(async () => {
 				throw new Error("function error")
@@ -492,88 +441,5 @@ describe("integration tests", () => {
 		})
 
 		expect(order).toEqual(["inner-2", "inner-1", "outer-2", "outer-1"])
-	})
-})
-
-function sleep(ms: number): Promise<void> {
-	return new Promise(res => setTimeout(res, ms))
-}
-
-describe("run", () => {
-	it("returns Success result when fn succeeds", async () => {
-		const result = await run(() => 42)
-
-		expect(result.success).toBe(true)
-		expect(result.data).toBe(42)
-		expect(result.error).toBeNull()
-	})
-
-	it("returns Failure result when fn throws", async () => {
-		const result = await run(() => {
-			throw new Error("oops")
-		})
-
-		expect(result.success).toBe(false)
-		expect(result.error).toBeInstanceOf(Error)
-		expect((result.error as Error).message).toBe("oops")
-		expect(result.data).toBeNull()
-	})
-
-	it("rethrows when throw option is true", async () => {
-		await expect(
-			run(
-				() => {
-					throw new Error("rethrown")
-				},
-				{ throw: true }
-			)
-		).rejects.toThrow("rethrown")
-	})
-
-	it("calls onError callback when fn throws", async () => {
-		const onError = vi.fn()
-		await run(
-			() => {
-				throw new Error("err")
-			},
-			{ onError }
-		)
-		expect(onError).toHaveBeenCalledOnce()
-	})
-
-	it("runs deferred functions after success", async () => {
-		const order: string[] = []
-
-		await run(defer => {
-			defer(() => {
-				order.push("cleanup")
-			})
-			order.push("work")
-		})
-
-		expect(order).toEqual(["work", "cleanup"])
-	})
-
-	it("runs deferred functions after failure", async () => {
-		const order: string[] = []
-
-		await run(defer => {
-			defer(() => {
-				order.push("cleanup")
-			})
-			throw new Error("fail")
-		})
-
-		expect(order).toContain("cleanup")
-	})
-
-	it("handles async step functions", async () => {
-		const result = await run(async () => {
-			await sleep(10)
-			return "async result"
-		})
-
-		expect(result.success).toBe(true)
-		expect(result.data).toBe("async result")
 	})
 })

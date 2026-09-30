@@ -1,4 +1,11 @@
-import { run, Semaphore, mergeInflightQueuesByUnion, isPermanentRejection, MAX_NON_RETRYABLE_REJECTIONS } from "@filen/shared"
+import {
+	run,
+	Semaphore,
+	mergeInflightQueuesByUnion,
+	isPermanentRejection,
+	MAX_NON_RETRYABLE_REJECTIONS,
+	newestMessage
+} from "@filen/shared"
 import { onlineManager } from "@tanstack/react-query"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
@@ -9,7 +16,7 @@ import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
 import { chatsQueryUpdate, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate, chatMessagesQueryAppend } from "@/features/chats/queries/chatMessages"
-import { newestMessage, compareBySentTimestamp } from "@/features/chats/lib/sort"
+import { compareBySentTimestamp } from "@/features/chats/lib/sort"
 import { deleteDraft } from "@/features/chats/lib/drafts"
 import {
 	useChatsInflightStore,

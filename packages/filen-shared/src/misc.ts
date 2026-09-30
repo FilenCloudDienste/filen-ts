@@ -1,31 +1,8 @@
 export function parseNumbersFromString(string: string): number {
-	if (!string) {
-		return 0
-	}
-
-	const len = string.length
-
-	if (len < 10) {
-		let result = 0
-		let hasDigit = false
-
-		for (let i = 0; i < len; i++) {
-			const code = string.charCodeAt(i)
-
-			if (code >= 48 && code <= 57) {
-				result = result * 10 + (code - 48)
-				hasDigit = true
-			}
-		}
-
-		return hasDigit ? result : 0
-	}
-
 	let result = 0
 	let digitCount = 0
-	const maxDigits = 16
 
-	for (let i = 0; i < len && digitCount < maxDigits; i++) {
+	for (let i = 0; i < string.length && digitCount < 16; i++) {
 		const code = string.charCodeAt(i)
 
 		if (code >= 48 && code <= 57) {
@@ -38,30 +15,13 @@ export function parseNumbersFromString(string: string): number {
 	return result
 }
 
-export function convertTimestampToMs(timestamp: number): number {
-	// Optimized: avoid two Math.abs calls
-	// Timestamps in seconds are < 10^10, in ms are > 10^12
-	// Simple threshold check is much faster
-	if (timestamp < 10000000000) {
-		// Less than year 2286 in seconds
-		return timestamp * 1000
-	}
-
-	return timestamp
-}
-
-export function isValidHexColor(value: string, length: number = 6): boolean {
-	if (value.length !== (length >= 6 ? 7 : 4) && value.length !== 7) {
+// "#rrggbb", any case
+export function isValidHexColor(value: string): boolean {
+	if (value.length !== 7 || value.charCodeAt(0) !== 35) {
 		return false
 	}
 
-	if (value.charCodeAt(0) !== 35) {
-		return false
-	}
-
-	const len = value.length
-
-	for (let i = 1; i < len; i++) {
+	for (let i = 1; i < 7; i++) {
 		const code = value.charCodeAt(i)
 
 		if (!((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102))) {
@@ -104,13 +64,14 @@ const FAT_ILLEGAL_CHARS_RE = /[<>:"\\|?*]/g
 const LEADING_TRAILING_DOTS_SPACES_RE = /^[. ]+|[. ]+$/g
 const WHITESPACE_RUN_RE = /\s+/g
 const TRUNCATION_EXTENSION_RE = /(\.[^.]{1,10})$/
+const FILE_NAME_REPLACEMENT = "_"
 const MAX_FILE_NAME_BYTES = 255
 const fileNameEncoder = new TextEncoder()
 
 /**
  * Make `filename` safe to write as a single path component on APFS, ext4, F2FS, FAT32 and exFAT:
  * NFC-normalizes, strips control/zero-width characters, replaces the cross-platform-illegal set
- * (`/ : < > " \ | ? *`) and whitespace runs with `replacement`, removes leading/trailing dots and
+ * (`/ : < > " \ | ? *`) and whitespace runs with `_`, removes leading/trailing dots and
  * spaces (a leading dot would hide the file), and truncates to 255 UTF-8 bytes while preserving a
  * trailing extension.
  *
@@ -119,18 +80,18 @@ const fileNameEncoder = new TextEncoder()
  *
  * Does NOT percent-decode or strip `%`, so the result must not reach `decodeURIComponent` unguarded.
  */
-export function sanitizeFileName(filename: string, replacement: string = "_"): string {
+export function sanitizeFileName(filename: string): string {
 	let sanitizedFilename = stripInvisibleChars(filename.normalize("NFC"))
 
-	sanitizedFilename = sanitizedFilename.replace(APFS_ILLEGAL_CHARS_RE, replacement)
-	sanitizedFilename = sanitizedFilename.replace(FAT_ILLEGAL_CHARS_RE, replacement)
+	sanitizedFilename = sanitizedFilename.replace(APFS_ILLEGAL_CHARS_RE, FILE_NAME_REPLACEMENT)
+	sanitizedFilename = sanitizedFilename.replace(FAT_ILLEGAL_CHARS_RE, FILE_NAME_REPLACEMENT)
 	sanitizedFilename = sanitizedFilename.replace(LEADING_TRAILING_DOTS_SPACES_RE, "")
 
 	if (sanitizedFilename.startsWith(".")) {
 		sanitizedFilename = sanitizedFilename.slice(1) || "file"
 	}
 
-	sanitizedFilename = sanitizedFilename.replace(WHITESPACE_RUN_RE, replacement)
+	sanitizedFilename = sanitizedFilename.replace(WHITESPACE_RUN_RE, FILE_NAME_REPLACEMENT)
 
 	// Filesystem limits count bytes, not characters
 	if (fileNameEncoder.encode(sanitizedFilename).length > MAX_FILE_NAME_BYTES) {
@@ -171,37 +132,28 @@ const HAS_UPPERCASE_RE = /[A-Z]/
 const HAS_LOWERCASE_RE = /[a-z]/
 const HAS_SPECIAL_CHARS_RE = /[!@#$%^&*(),.?":{}|<>]/
 
-export function ratePasswordStrength(password: string): {
-	strength: "weak" | "normal" | "strong" | "best"
-	uppercase: boolean
-	lowercase: boolean
-	specialChars: boolean
-	length: boolean
-} {
+export type PasswordStrength = "weak" | "normal" | "strong" | "best"
+
+export function ratePasswordStrength(password: string): PasswordStrength {
+	const length = password.length
+
+	if (length < 10) {
+		return "weak"
+	}
+
 	const hasUppercase = HAS_UPPERCASE_RE.test(password)
 	const hasLowercase = HAS_LOWERCASE_RE.test(password)
 	const hasSpecialChars = HAS_SPECIAL_CHARS_RE.test(password)
-	const length = password.length
 
-	let strength: "weak" | "normal" | "strong" | "best" = "weak"
-
-	if (length >= 10 && hasUppercase && hasLowercase && hasSpecialChars) {
-		if (length >= 16) {
-			strength = "best"
-		} else {
-			strength = "strong"
-		}
-	} else if (length >= 10 && ((hasUppercase && hasLowercase) || (hasUppercase && hasSpecialChars) || (hasLowercase && hasSpecialChars))) {
-		strength = "normal"
+	if (hasUppercase && hasLowercase && hasSpecialChars) {
+		return length >= 16 ? "best" : "strong"
 	}
 
-	return {
-		strength,
-		uppercase: hasUppercase,
-		lowercase: hasLowercase,
-		specialChars: hasSpecialChars,
-		length: length >= 10
+	if ((hasUppercase && hasLowercase) || (hasUppercase && hasSpecialChars) || (hasLowercase && hasSpecialChars)) {
+		return "normal"
 	}
+
+	return "weak"
 }
 
 export function sortParams<T extends Record<string, unknown>>(params: T): T {
@@ -219,26 +171,16 @@ export function sortParams<T extends Record<string, unknown>>(params: T): T {
 }
 
 export function createExecutableTimeout(callback: () => void, delay?: number) {
-	let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(callback, delay)
+	const timeoutId = setTimeout(callback, delay)
+	// Clearing a fired or already-cleared timer is a no-op
+	const cancel = () => clearTimeout(timeoutId)
 
 	return {
-		id: timeoutId,
 		execute: () => {
-			if (timeoutId !== null) {
-				clearTimeout(timeoutId)
-
-				timeoutId = null
-			}
-
+			cancel()
 			callback()
 		},
-		cancel: () => {
-			if (timeoutId !== null) {
-				clearTimeout(timeoutId)
-
-				timeoutId = null
-			}
-		}
+		cancel
 	}
 }
 
@@ -334,9 +276,9 @@ export function fastLocaleCompare(a: string, b: string): number {
 	return caseDiff
 }
 
-export const FORMAT_BYTES_SIZES = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]
+const FORMAT_BYTES_SIZES = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const
 
-export const POWERS_1024 = [1, 1024, 1048576, 1073741824, 1099511627776, 1125899906842624] as const
+const POWERS_1024 = [1, 1024, 1048576, 1073741824, 1099511627776, 1125899906842624] as const
 
 function bytesUnitIndex(bytes: number): number {
 	if (bytes >= POWERS_1024[5]) {
@@ -358,47 +300,41 @@ function bytesUnitIndex(bytes: number): number {
 	return bytes >= POWERS_1024[1] ? 1 : 0
 }
 
-// Rounding can land a value on 1024 of its unit ("1024 KiB" just below 1 MiB), which reads as 1 of the next.
 const MAX_BYTES_UNIT_INDEX = POWERS_1024.length - 1
 
-function bytesInUnit(bytes: number, unitIndex: number): number {
-	return bytes / (POWERS_1024[unitIndex] ?? 1)
+function renderBytesIn(bytes: number, unitIndex: number, fixed: boolean): string {
+	const value = bytes / (POWERS_1024[unitIndex] ?? 1)
+
+	if (!fixed) {
+		return String(Math.round(value * 100) / 100)
+	}
+
+	return unitIndex === 0 ? String(Math.round(value)) : value.toFixed(1)
 }
 
-export function formatBytes(bytes: number, decimals: number = 2): string {
-	if (bytes === 0) {
-		return "0 B"
-	}
-
-	const multiplier = Math.pow(10, decimals < 0 ? 0 : decimals)
-	const roundedIn = (unitIndex: number): number => Math.round(bytesInUnit(bytes, unitIndex) * multiplier) / multiplier
+function formatScaled(bytes: number, fixed: boolean): string {
 	let i = bytesUnitIndex(bytes)
-	let rounded = roundedIn(i)
+	let shown = renderBytesIn(bytes, i, fixed)
 
-	if (rounded >= 1024 && i < MAX_BYTES_UNIT_INDEX) {
+	// Rounding can land a value on 1024 of its unit ("1024 KiB" just below 1 MiB), which reads as 1 of the next.
+	if (Number(shown) >= 1024 && i < MAX_BYTES_UNIT_INDEX) {
 		i++
-		rounded = roundedIn(i)
+		shown = renderBytesIn(bytes, i, fixed)
 	}
 
-	return rounded + " " + FORMAT_BYTES_SIZES[i]
+	return `${shown} ${FORMAT_BYTES_SIZES[i] ?? ""}`
+}
+
+// Up to 2 decimals, trailing zeros dropped
+export function formatBytes(bytes: number): string {
+	return formatScaled(bytes, false)
 }
 
 // formatBytes with its decimals kept ("5.0 MiB", never "5 MiB"), for a figure that updates live: a
 // decimal part that comes and goes would move everything after it on every tick. Whole bytes have no
 // fraction to keep.
-export function formatBytesFixed(bytes: number, decimals: number = 1): string {
-	const places = Math.max(0, decimals)
-	const shownIn = (unitIndex: number): string =>
-		unitIndex === 0 ? String(Math.round(bytes)) : bytesInUnit(bytes, unitIndex).toFixed(places)
-	let i = bytesUnitIndex(bytes)
-	let shown = shownIn(i)
-
-	if (Number(shown) >= 1024 && i < MAX_BYTES_UNIT_INDEX) {
-		i++
-		shown = shownIn(i)
-	}
-
-	return `${shown} ${FORMAT_BYTES_SIZES[i] ?? ""}`
+export function formatBytesFixed(bytes: number): string {
+	return formatScaled(bytes, true)
 }
 
 export function formatBytesPerSecond(bytesPerSecond: number): string {
@@ -409,31 +345,17 @@ export function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error)
 }
 
+// Reads `name` structurally, so it covers DOMException and Error as well as FFI errors
+// (uniffi-bindgen-react-native, wasm-bindgen) that may not be instanceof Error. uniffi's
+// FilenSdkError signals cancellation with kind "Cancelled".
 export function isAbortError(error: unknown): boolean {
-	if (error instanceof DOMException && error.name === "AbortError") {
-		return true
+	if (typeof error !== "object" || error === null) {
+		return false
 	}
 
-	if (error instanceof Error && error.name === "AbortError") {
-		return true
-	}
+	const obj = error as Record<string, unknown>
 
-	// Handle FFI errors (uniffi-bindgen-react-native, wasm-bindgen)
-	// that may not be instanceof Error
-	if (typeof error === "object" && error !== null) {
-		const obj = error as Record<string, unknown>
-
-		if (obj["name"] === "AbortError") {
-			return true
-		}
-
-		// uniffi-bindgen-react-native FilenSdkError with kind "Cancelled"
-		if (obj["kind"] === "Cancelled") {
-			return true
-		}
-	}
-
-	return false
+	return obj["name"] === "AbortError" || obj["kind"] === "Cancelled"
 }
 
 export function trimmedOrUndefined(value: string): string | undefined {

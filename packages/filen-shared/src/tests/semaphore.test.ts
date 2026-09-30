@@ -120,76 +120,6 @@ describe("Semaphore", () => {
 		})
 	})
 
-	describe("setMax", () => {
-		it("should update max count", async () => {
-			const sem = new Semaphore(1)
-
-			await sem.acquire()
-
-			sem.setMax(2)
-
-			const p = sem.acquire()
-			let resolved = false
-
-			p.then(() => {
-				resolved = true
-			})
-
-			await new Promise(resolve => setTimeout(resolve, 10))
-
-			expect(resolved).toBe(true)
-		})
-
-		it("should process multiple waiters when max increases", async () => {
-			const sem = new Semaphore(1)
-
-			await sem.acquire()
-
-			let count = 0
-
-			sem.acquire().then(() => count++)
-			sem.acquire().then(() => count++)
-			sem.acquire().then(() => count++)
-
-			sem.setMax(4)
-
-			await new Promise(resolve => setTimeout(resolve, 10))
-
-			expect(count).toBe(3)
-		})
-	})
-
-	describe("purge", () => {
-		it("should reject all waiting promises", async () => {
-			const sem = new Semaphore(1)
-
-			await sem.acquire()
-
-			const errors: unknown[] = []
-
-			sem.acquire().catch(e => errors.push(e))
-			sem.acquire().catch(e => errors.push(e))
-
-			const purged = sem.purge()
-
-			await new Promise(resolve => setTimeout(resolve, 10))
-
-			expect(purged).toBe(2)
-			expect(errors.length).toBe(2)
-		})
-
-		it("should reset counter to 0", async () => {
-			const sem = new Semaphore(2)
-
-			await sem.acquire()
-			await sem.acquire()
-
-			sem.purge()
-
-			expect(sem.count()).toBe(0)
-		})
-	})
-
 	describe("withPermit", () => {
 		it("should hold a permit while fn runs and return its result", async () => {
 			const sem = new Semaphore(1)
@@ -234,20 +164,6 @@ describe("Semaphore", () => {
 			])
 
 			expect(order).toEqual(["a:start", "a:end", "b"])
-		})
-
-		it("should not run fn when the acquire is purged", async () => {
-			const sem = new Semaphore(1)
-			const fn = vi.fn()
-
-			await sem.acquire()
-
-			const pending = sem.withPermit(fn)
-
-			sem.purge()
-
-			await expect(pending).rejects.toBe("Task has been purged")
-			expect(fn).not.toHaveBeenCalled()
 		})
 	})
 
@@ -320,47 +236,6 @@ describe("Semaphore", () => {
 				expect(elapsed).toBeLessThan(2000)
 			}
 		)
-
-		it("purge rejects exactly the still-queued waiters after a partial drain", async () => {
-			const sem = new Semaphore(1)
-
-			await sem.acquire()
-
-			const total = 1000
-			const drained = 400
-			const errors: unknown[] = []
-			let resolved = 0
-
-			const all: Promise<void>[] = []
-
-			for (let i = 0; i < total; i++) {
-				all.push(
-					sem.acquire().then(
-						() => {
-							resolved++
-						},
-						error => {
-							errors.push(error)
-						}
-					)
-				)
-			}
-
-			// Each release admits exactly one waiter (it stays holding; we drive
-			// externally), consuming the queue head 400 deep before the purge.
-			for (let i = 0; i < drained; i++) {
-				sem.release()
-			}
-
-			const purged = sem.purge()
-
-			await new Promise(resolve => setTimeout(resolve, 10))
-
-			expect(purged).toBe(total - drained)
-			expect(resolved).toBe(drained)
-			expect(errors.length).toBe(total - drained)
-			expect(errors.every(error => error === "Task has been purged")).toBe(true)
-		})
 
 		it(
 			"keeps FIFO order across a deep partial drain followed by new arrivals",

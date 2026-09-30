@@ -69,6 +69,23 @@ export function attachmentMaxWidth(listWidth: number): number {
 	return listWidth * 0.75 - 32 - 24
 }
 
+// Gates the timestamp row between messages: within 2 minutes AND the same local hour.
+export function isTimestampSameMinute(timestamp1: number, timestamp2: number): boolean {
+	if (Math.abs(timestamp1 - timestamp2) > 120000) {
+		return false
+	}
+
+	const date1 = new Date(timestamp1)
+	const date2 = new Date(timestamp2)
+
+	return (
+		date1.getFullYear() === date2.getFullYear() &&
+		date1.getMonth() === date2.getMonth() &&
+		date1.getDate() === date2.getDate() &&
+		date1.getHours() === date2.getHours()
+	)
+}
+
 /**
  * Whether the keyboard's own prediction strip should be suppressed, given what the input is showing.
  *

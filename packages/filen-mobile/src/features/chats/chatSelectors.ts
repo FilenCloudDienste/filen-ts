@@ -1,5 +1,13 @@
 import { type Chat, type ChatMessage } from "@/types"
-import { type BlockedUsers, EMPTY_BLOCKED_USERS, isBlocked, isMessageUnreadCore, chatHasUnreadCore } from "@filen/shared"
+import {
+	type BlockedUsers,
+	EMPTY_BLOCKED_USERS,
+	isBlocked,
+	isMessageUnreadCore,
+	chatHasUnreadCore,
+	isListedChat,
+	isOneOnOneWithBlocked
+} from "@filen/shared"
 import type { ChatMessageWithInflightId } from "@/features/chats/store/useChats.store"
 import { NO_INFLIGHT_ID } from "@/features/chats/chatsWrap"
 
@@ -113,28 +121,11 @@ export function cachedMessagesMatchLastMessage(chat: Chat, messages: readonly Ch
 }
 
 /**
- * A chat is "1:1 with a blocked user" when exactly one participant isn't us and that
- * participant is blocked. Group chats (2+ others) are never hidden wholesale — their
- * blocked members' messages are tombstoned instead.
- */
-export function isOneOnOneWithBlocked(chat: Chat, selfUserId: bigint | undefined, blocked: BlockedUsers): boolean {
-	const others = chat.participants.filter(p => p.userId !== selfUserId)
-
-	if (others.length !== 1) {
-		return false
-	}
-
-	const other = others[0]
-
-	return other !== undefined && isBlocked(other, blocked)
-}
-
-/**
  * The chats the list renders: owned by us or holding a message, minus 1:1s with a blocked user.
  * The header's select-all and flags read the same set, so both call this.
  */
 export function visibleChats(chats: readonly Chat[], selfUserId: bigint | undefined, blocked: BlockedUsers): Chat[] {
-	return chats.filter(chat => (chat.ownerId === selfUserId || chat.lastMessage) && !isOneOnOneWithBlocked(chat, selfUserId, blocked))
+	return chats.filter(chat => isListedChat(chat, selfUserId) && !isOneOnOneWithBlocked(chat, selfUserId, blocked))
 }
 
 /**
