@@ -21,7 +21,7 @@ const { exposed, fakeClient, fakeUnauth } = vi.hoisted(() => {
 		fakeClient: {
 			root: () => ({ uuid: "root" }),
 			getUnauthed: () => fakeUnauth,
-			uploadFileFromReader: vi.fn<(params: { progress: BytesProgress }) => Promise<unknown>>(),
+			uploadFileFromReader: vi.fn<(params: { progress: BytesProgress; knownSize: number | undefined }) => Promise<unknown>>(),
 			downloadFileToWriter: vi.fn<(params: { progress: BytesProgress }) => Promise<void>>(),
 			downloadItemsToZip: vi.fn<(items: unknown, writer: unknown, progress: ZipProgress, managedFuture: unknown) => Promise<void>>(),
 			free: vi.fn()
@@ -113,6 +113,18 @@ describe("sdk worker byte progress", () => {
 
 		await expect(api.uploadFile(null, "t2", file, onProgress)).resolves.toEqual({ uuid: "uploaded" })
 		expect(onProgress.mock.calls).toEqual([[1n], [2n], [3n]])
+	})
+
+	it("leaves an empty file's size unknown, so the SDK reads it to EOF rather than into an empty buffer", async () => {
+		fakeClient.uploadFileFromReader.mockResolvedValue({ uuid: "uploaded" })
+
+		const empty = { name: "empty.txt", size: 0, type: "", stream: () => new ReadableStream() } as unknown as File
+		const sized = { name: "a.txt", size: 3, type: "", stream: () => new ReadableStream() } as unknown as File
+
+		await api.uploadFile(null, "t-empty", empty, vi.fn())
+		await api.uploadFile(null, "t-sized", sized, vi.fn())
+
+		expect(fakeClient.uploadFileFromReader.mock.calls.map(([params]) => params.knownSize)).toEqual([undefined, 3])
 	})
 
 	it("posts the last value before a failed op rejects", async () => {

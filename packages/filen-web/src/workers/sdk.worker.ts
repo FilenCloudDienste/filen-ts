@@ -924,7 +924,10 @@ const api = {
 					parent,
 					name: file.name,
 					reader: file.stream(),
-					knownSize: file.size,
+					// The SDK sizes its read buffer to min(knownSize, 64 KiB): a known size of 0 makes it read
+					// into an empty buffer, which the browser's byte stream rejects, so an empty file's upload
+					// failed even though the (empty) file had been created. Left unknown, it reads to EOF.
+					knownSize: file.size > 0 ? file.size : undefined,
 					...(file.type ? { mime: file.type } : {}),
 					progress,
 					managedFuture
