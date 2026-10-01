@@ -18,6 +18,7 @@ import {
 } from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
+import { toastDownloadStarted } from "@/features/transfers/lib/downloadStartToast"
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
 // save dialog. No `cancel` field: cancelTransfer/setTransferPaused (features/transfers/lib/control.ts) already
@@ -31,6 +32,8 @@ export interface RunZipDownloadDeps {
 		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
 	) => Promise<void>
 	store: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "settle" | "remove">
+	// Optional, as RunDownloadDeps' own (download.ts): tells the user the download started.
+	announceStart?: (name: string, count: number) => void
 }
 
 // One zip attempt: resolve where it saves to FIRST — a picker-cancel is a clean no-op (mirrors
@@ -71,6 +74,7 @@ export async function runZipDownload(
 		startedAt: Date.now(),
 		...(save.kind === "sw" ? { browserManaged: true as const } : {})
 	})
+	deps.announceStart?.(suggestedName, items.length)
 
 	const reportProgress = throttle((bytesWritten: bigint, totalBytes: bigint) => {
 		deps.store.setSize(id, Number(totalBytes))
@@ -117,7 +121,8 @@ export const defaultZipDownloadDeps: RunZipDownloadDeps = {
 					onProgress(BigInt(bytesWritten), BigInt(totalBytes ?? 0), 0n, 0n)
 				})
 			: downloadZipViaFsa(items, transferId, save, onProgress),
-	store: useTransfersStore.getState()
+	store: useTransfersStore.getState(),
+	announceStart: toastDownloadStarted
 }
 
 // A single directory names the archive after itself; anything else (a multi-item selection, mixed

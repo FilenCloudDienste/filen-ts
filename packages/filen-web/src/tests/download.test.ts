@@ -37,6 +37,11 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
+// The start toast renders a router link, which needs the mounted app; this file asserts only that it is said.
+const { toastDownloadStarted } = vi.hoisted(() => ({ toastDownloadStarted: vi.fn() }))
+
+vi.mock("@/features/transfers/lib/downloadStartToast", () => ({ toastDownloadStarted }))
+
 // The real zip orchestration (runZipDownload/narrowToZipItems/etc.) lives in, and is unit-tested by,
 // downloadZip.test.ts — this file only needs to prove startDownloads ROUTES to it, so the whole
 // module is replaced with a spy rather than exercising the real zip path here too.
@@ -466,6 +471,42 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 
 		expect(saveDownloadMock).not.toHaveBeenCalled()
 		expect(startZipDownloadMock).toHaveBeenCalledWith(items)
+	})
+
+	it("says the download started, by name, on the File System Access path", async () => {
+		downloadFileToWriter.mockImplementation(async (_file: AnyFile, _id: string, writer: WritableStream<Uint8Array>) => {
+			await writer.getWriter().close()
+		})
+
+		await startDownloads([fileItem({ name: "report.pdf" })])
+
+		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("report.pdf", 1)
+	})
+
+	it("says the download started on the service-worker path too", async () => {
+		saveDownloadMock.mockResolvedValue({ kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "report.pdf" } satisfies SwSaveTarget)
+		triggerSwDownloadMock.mockResolvedValue(undefined)
+
+		await startDownloads([fileItem({ name: "report.pdf" })])
+
+		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("report.pdf", 1)
+	})
+
+	it("says nothing when the save picker is cancelled — nothing started", async () => {
+		saveDownloadMock.mockRejectedValue(new Error("aborted"))
+		isPickerCancelledMock.mockReturnValue(true)
+
+		await startDownloads([fileItem()])
+
+		expect(toastDownloadStarted).not.toHaveBeenCalled()
+	})
+
+	it("says nothing when the save target fails for a real reason", async () => {
+		saveDownloadMock.mockRejectedValue(new Error("quota"))
+
+		await startDownloads([fileItem()])
+
+		expect(toastDownloadStarted).not.toHaveBeenCalled()
 	})
 
 	it("registers one done transfer in the real transfers store for a single successful download", async () => {

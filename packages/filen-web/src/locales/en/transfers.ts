@@ -129,6 +129,16 @@ export const transfers = {
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
 	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed",
 
+	// ── Download start toast (features/transfers/lib/downloadStartToast.tsx) ────
+	/** Toast shown once a download of a single file or directory has started; {{name}} = the file's name, or the zip's for a directory */
+	transfersDownloadStarted: "Downloading {{name}}",
+	/** Toast shown once a zip download of several items has started; singular */
+	transfersDownloadStartedItems_one: "Downloading {{count}} item",
+	/** Toast shown once a zip download of several items has started; plural */
+	transfersDownloadStartedItems_other: "Downloading {{count}} items",
+	/** Download start toast — action opening the transfers screen */
+	transfersDownloadStartedView: "View",
+
 	// ── Copy (features/drive/lib/copy.ts) ─────────────────────────────────────
 	/** Copy transfer row — name of a copy job holding more than one item (a one-item copy shows that item's own name); singular */
 	transfersCopyRowName_one: "{{count}} item",

@@ -13,6 +13,7 @@ import { saveDownload, triggerSwDownload, isPickerCancelled, type SaveTarget, ty
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
 import { startZipDownload } from "@/features/drive/lib/downloadZip"
+import { toastDownloadStarted } from "@/features/transfers/lib/downloadStartToast"
 
 // Extracts the SDK AnyFile a download op wants from a DriveItem's file arm. A directory item is a
 // contract violation here — startDownloads below routes any directory to the zip path instead — so
@@ -39,6 +40,9 @@ export interface RunDownloadDeps {
 	download: (file: AnyFile, transferId: string, save: SaveTarget, onProgress: (bytes: bigint) => void) => Promise<void>
 	cancel?: (transferId: string) => void
 	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "remove">
+	// Optional for the same DI reason as `cancel`: tells the user the download started, once it has a
+	// place to save to.
+	announceStart?: (name: string, count: number) => void
 }
 
 // One download attempt: resolve where it saves to (a picker-cancel here is a clean no-op, never an
@@ -83,6 +87,7 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 		startedAt: Date.now(),
 		...(save.kind === "sw" ? { browserManaged: true as const } : {})
 	})
+	deps.announceStart?.(name, 1)
 
 	const reportProgress = throttle((bytes: bigint) => {
 		deps.store.setProgress(id, Number(bytes))
@@ -121,7 +126,8 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 	cancel: transferId => {
 		void sdkApi.cancelTransfer(transferId)
 	},
-	store: useTransfersStore.getState()
+	store: useTransfersStore.getState(),
+	announceStart: toastDownloadStarted
 }
 
 // A directory, or more than one item at all, zips into one archive rather than N separate save

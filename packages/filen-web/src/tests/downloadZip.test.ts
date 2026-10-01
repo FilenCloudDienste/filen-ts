@@ -29,6 +29,11 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
+// The start toast renders a router link, which needs the mounted app; this file asserts only that it is said.
+const { toastDownloadStarted } = vi.hoisted(() => ({ toastDownloadStarted: vi.fn() }))
+
+vi.mock("@/features/transfers/lib/downloadStartToast", () => ({ toastDownloadStarted }))
+
 import { runZipDownload, defaultZipDownloadDeps, startZipDownload, type RunZipDownloadDeps } from "@/features/drive/lib/downloadZip"
 import { useTransfersStore, type Transfer, type TerminalStatus } from "@/features/transfers/store/useTransfersStore"
 import { sharerRole } from "@/tests/fixtures/sdk"
@@ -626,6 +631,34 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 
 		expect(toastSuccess).not.toHaveBeenCalled()
 		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	it("says a single directory's zip started, by the zip's name, on the File System Access path", async () => {
+		downloadItemsToZip.mockImplementation(async (_items: AnyItemWithContext[], _id: string, writer: WritableStream<Uint8Array>) => {
+			await writer.getWriter().close()
+		})
+
+		await startZipDownload([dirItem({ name: "Documents" })])
+
+		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("Documents.zip", 1)
+	})
+
+	it("says a multi-item zip started, with its item count, on the service-worker path", async () => {
+		saveDownloadMock.mockResolvedValue({ kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "Filen.zip" } satisfies SwSaveTarget)
+		triggerSwZipDownloadMock.mockResolvedValue(undefined)
+
+		await startZipDownload([fileItem({ name: "a.txt" }), fileItem({ name: "b.txt" }), dirItem()])
+
+		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("Filen.zip", 3)
+	})
+
+	it("says nothing when the save picker is cancelled — nothing started", async () => {
+		saveDownloadMock.mockRejectedValue(new Error("aborted"))
+		isPickerCancelledMock.mockReturnValue(true)
+
+		await startZipDownload([dirItem()])
+
+		expect(toastDownloadStarted).not.toHaveBeenCalled()
 	})
 
 	it("registers one done transfer in the real transfers store for a successful zip", async () => {
