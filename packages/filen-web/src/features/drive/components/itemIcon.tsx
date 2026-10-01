@@ -109,7 +109,7 @@ export function ItemIcon({ item, className }: { item: DriveItem; className?: str
 
 	return (
 		<FileTypeIcon
-			iconKey={fileIconKey(base.data.decryptedMeta?.name ?? "")}
+			iconKey={fileIconKey(base.data.decryptedMeta?.name ?? "", base.data.decryptedMeta?.mime)}
 			className={className}
 		/>
 	)

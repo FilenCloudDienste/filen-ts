@@ -113,7 +113,13 @@ import type { LinkedFile, LinkedRootDir } from "@filen/sdk-rs"
 const LINK_VIEW: DrivePath = { type: "linked", uuid: null }
 
 function linkedFile(uuid: string): LinkedFile {
-	return { uuid, name: { tag: "Decrypted", inner: [`${uuid}.jpg`] }, size: 1n, downloadable: true } as unknown as LinkedFile
+	return {
+		uuid,
+		name: { tag: "Decrypted", inner: [`${uuid}.jpg`] },
+		mime: { tag: "Decrypted", inner: ["image/jpeg"] },
+		size: 1n,
+		downloadable: true
+	} as unknown as LinkedFile
 }
 
 function fileLink(uuid: string): InternalLinkData {

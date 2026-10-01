@@ -20,8 +20,7 @@ export const { get: getHeicUploadConvertPreference, set: setHeicUploadConvertPre
 
 // ── Convert-on-upload ────────────────────────────────────────────────────
 
-// Extension-only (mirrors preview.logic.ts's own needsImageTransform) — never a picked file's mime,
-// which browsers frequently leave blank or wrong for HEIC/HEIF.
+// Extension-only — never a picked file's mime, which browsers frequently leave blank or wrong for HEIC/HEIF.
 export function isHeicUploadCandidate(file: File): boolean {
 	return HEIC_EXTENSIONS.has(extensionOf(file.name))
 }

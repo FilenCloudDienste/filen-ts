@@ -369,7 +369,11 @@ describe("getPreviewType", () => {
 	})
 
 	it("returns 'unknown' for a name with no extension", () => {
-		expect(getPreviewType("README")).toBe("unknown")
+		expect(getPreviewType("notes-final")).toBe("unknown")
+	})
+
+	it("returns 'text' for a well-known extension-less name", () => {
+		expect(getPreviewType("README")).toBe("text")
 	})
 
 	it("handles path separator — extname extracts last segment extension", () => {

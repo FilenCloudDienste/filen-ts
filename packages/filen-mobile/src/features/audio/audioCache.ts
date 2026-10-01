@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system"
-import { extnameOf } from "@/lib/previewType"
+import { fileTypeExtension } from "@/lib/previewType"
 import { Semaphore, run, runOrThrow, normalizeTrackTags } from "@filen/shared"
 import { DiskCache, cacheItemId, gcIdleUntil, planGcCapEviction, type GcSurvivor } from "@/lib/diskCache"
 import { MUSIC_METADATA_SUPPORTED_EXTENSIONS, AUDIO_METADATA_MAX_PARSE_SIZE_BYTES, AUDIO_METADATA_MAX_CONCURRENT_PARSES } from "@/constants"
@@ -213,7 +213,13 @@ export class AudioCache extends DiskCache {
 
 			let metadata: Metadata = null
 
-			if (MUSIC_METADATA_SUPPORTED_EXTENSIONS.has(extnameOf(name).toLowerCase().trim())) {
+			// The type extension the preview reads, so a track typed only by its stored mime still gets its tags.
+			const typeExtension = fileTypeExtension(
+				name,
+				item.type === "drive" && isFileItem(item.data) ? item.data.data.decryptedMeta?.mime : undefined
+			)
+
+			if (MUSIC_METADATA_SUPPORTED_EXTENSIONS.has(`.${typeExtension}`)) {
 				try {
 					if ((!metadataFile.exists || metadataFile.size === 0) && !audioFileTooLargeToParse(audioFile.size)) {
 						if (!audioFile.exists) {
@@ -230,7 +236,7 @@ export class AudioCache extends DiskCache {
 
 						// Loaded on first parse: both are only needed here, and cache hits never reach it.
 						const [{ parseWebStream }, mimeTypes] = await Promise.all([import("music-metadata"), loadMimeTypes()])
-						const mime = mimeTypes.lookup(name)
+						const mime = mimeTypes.lookup(typeExtension)
 
 						const parsedMetadata = await parseWebStream(audioFile.stream(), {
 							mimeType: mime ? mime : undefined,

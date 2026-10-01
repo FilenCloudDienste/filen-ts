@@ -95,8 +95,8 @@ export type ThumbnailKind = "image" | "video"
 // extractor (the SDK flag is about images and does not apply). svg is excluded on purpose: resvg renders
 // <text> and raster <image> as nothing, and a transparent tile on the OLED-black theme is worse
 // than the icon.
-export function getThumbnailKindForName(name: string, canMakeThumbnail: boolean): ThumbnailKind | null {
-	switch (getPreviewType(name)) {
+export function getThumbnailKindForName(name: string, canMakeThumbnail: boolean, mime?: string | null): ThumbnailKind | null {
+	switch (getPreviewType(name, mime)) {
 		case "image":
 		case "rawImage": {
 			return canMakeThumbnail ? "image" : null
@@ -112,7 +112,7 @@ export function getThumbnailKindForName(name: string, canMakeThumbnail: boolean)
 	}
 }
 
-// The upload path knows a name and a flag but has no DriveItem yet, so it calls
+// The upload path knows a name, a mime and a flag but has no DriveItem yet, so it calls
 // getThumbnailKindForName directly. Both entry points must answer identically: a format that
 // thumbnails only on the device that uploaded it is worse than one that never does.
 export function getThumbnailKind(item: DriveItem): ThumbnailKind | null {
@@ -126,7 +126,7 @@ export function getThumbnailKind(item: DriveItem): ThumbnailKind | null {
 		return null
 	}
 
-	return getThumbnailKindForName(name, item.data.canMakeThumbnail === true)
+	return getThumbnailKindForName(name, item.data.canMakeThumbnail === true, item.data.decryptedMeta?.mime)
 }
 
 export function waitForHttpProvider(signal?: AbortSignal): Promise<(file: AnyFile) => string> {

@@ -26,6 +26,8 @@ import { getRealDriveItemParent, normalParentUuidOf } from "@/lib/sdkUnwrap"
 import * as Clipboard from "expo-clipboard"
 import { fetchData as fetchPublicLinkStatus, publicLinkUrlFromStatus } from "@/features/drive/queries/useDriveItemPublicLinkStatus.query"
 import { getPreviewType } from "@/lib/previewType"
+import useDrivePreviewStore from "@/stores/useDrivePreview.store"
+import { MAX_TEXT_BYTES } from "@/components/textEditor/constants"
 import type { DrivePath } from "@/hooks/useDrivePath"
 import { openDriveSelect } from "@/features/drive/driveSelectSession"
 import { serialize } from "@/lib/serializer"
@@ -88,7 +90,7 @@ export function createMenuButtons({
 	}
 
 	const menuButtons: MenuButton[] = []
-	const previewType = isFileItem(item) ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null
+	const previewType = isFileItem(item) ? getPreviewType(item.data.decryptedMeta?.name ?? "", item.data.decryptedMeta?.mime) : null
 
 	const parentForOfflineStorage = getRealDriveItemParent({
 		item,
@@ -161,13 +163,44 @@ export function createMenuButtons({
 		}
 	}
 
+	// A file nothing recognises may still be text (a config with an odd extension, a log): offer the read-only
+	// text viewer, within its size cap. Not inside the preview, which already shows the file.
+	if (
+		!isPreview &&
+		previewType === "unknown" &&
+		isFileItem(item) &&
+		item.data.decryptedMeta &&
+		Number(item.data.decryptedMeta.size) <= MAX_TEXT_BYTES
+	) {
+		menuButtons.push({
+			id: "openAsText",
+			title: t("open_as_text"),
+			icon: "text",
+			onPress: () => {
+				useDrivePreviewStore.getState().open({
+					initialItem: {
+						type: "drive",
+						data: {
+							item,
+							drivePath,
+							asText: true
+						}
+					},
+					items: []
+				})
+			}
+		})
+	}
+
 	// A link that disables downloads offers no way to take its content (see linkAllowsDownload).
 	const downloadSubButtons = linkAllowsDownload(drivePath, item)
 		? buildDownloadSubButtons({
 				item,
 				isStoredOffline,
 				parentForOfflineStorage,
-				previewType,
+				// By name alone: save-to-photos is its one consumer, and the OS photo library reads a file's
+				// type from its extension, so a file typed only by its mime would be refused there.
+				previewType: isFileItem(item) ? getPreviewType(item.data.decryptedMeta?.name ?? "") : null,
 				t
 			})
 		: []

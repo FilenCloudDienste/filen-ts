@@ -111,6 +111,8 @@ export interface PreviewOverlayProps {
 	// False for a public link's file whose owner disallows downloads: nothing here offers to save it.
 	// Downloadable when omitted.
 	downloadable?: boolean
+	// Opened through the item menu's "Open as text": the file shows in the text viewer, view-only.
+	asText?: boolean
 }
 
 // True while focus sits on (or inside) a <video>/<audio> element — its own native controls own
@@ -176,10 +178,12 @@ export function PreviewOverlay({
 	onItemRemoved,
 	onFavoriteToggled,
 	hiddenMenuActionIds,
-	downloadable: downloadableProp
+	downloadable: downloadableProp,
+	asText: asTextProp
 }: PreviewOverlayProps) {
 	// Not a parameter default: the React Compiler skips a component that has one.
 	const downloadable = downloadableProp !== false
+	const asText = asTextProp === true
 	const { t } = useTranslation(["preview", "common", "drive"])
 	const isOnline = useIsOnline()
 	// The drive item at this slot BEFORE any per-slot save override — undefined only for an out-of-range
@@ -231,9 +235,9 @@ export function PreviewOverlay({
 	// Which secondary dialog the header's item menu (below) currently has open, if any — a single slot
 	// since only ever one item (the currently-viewed one) is ever being acted on from in here, unlike
 	// useDriveDialogHost's own activeDialog which also has to carry a whole bulk-selection items[].
-	// "color" is part of the shared ItemActionDialogKind union but unreachable here — driveItemActions
-	// only ever offers Color for a directory, and canPreview already excludes directories from ever
-	// opening this overlay in the first place.
+	// "color" and "openAsText" are part of the shared ItemActionDialogKind union but unreachable here —
+	// driveItemActions only ever offers Color for a directory, which never opens this overlay, and Open
+	// as text only to a surface that opens items (this header menu has its item open already).
 	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
 	const [menuPending, setMenuPending] = useState(false)
 	// The resolved slot the body actually renders, carrying its per-slot save override. Undefined only for
@@ -243,7 +247,7 @@ export function PreviewOverlay({
 	// The drive slot's renderer and save format, as it mounted: a rename never swaps the viewer (and with it
 	// the unsaved edits) out from under the user. Taken again whenever the slot mounts anew, which is only
 	// ever clean (stepping to it, or a new document, see documentKeys): its name as it stands then decides.
-	const derivedPin = driveItem === undefined ? null : slotPin(driveItem, variant)
+	const derivedPin = driveItem === undefined ? null : slotPin(driveItem, variant, asText)
 	const pin = derivedPin === null ? null : pinned?.documentKey === currentDocumentKey ? pinned.pin : derivedPin
 
 	if (derivedPin !== null && pinned?.documentKey !== currentDocumentKey) {
@@ -257,6 +261,7 @@ export function PreviewOverlay({
 		rawDriveItem !== undefined &&
 		driveItem !== undefined &&
 		pin !== null &&
+		!asText &&
 		isEditable(driveItem, variant) &&
 		saveFormat(driveItem) === pin.format &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
@@ -474,6 +479,7 @@ export function PreviewOverlay({
 					/>
 				)
 			case "color":
+			case "openAsText":
 				// Unreachable — see menuDialogKind's own doc comment.
 				return null
 		}
@@ -965,6 +971,7 @@ export function PreviewOverlay({
 									editable={editable}
 									renamedReadOnly={renamedReadOnly}
 									neverEditable={variant !== "drive"}
+									asText={asText}
 									locked={saving}
 									onDirtyChange={setPreviewDirty}
 									contentRef={contentRef}
@@ -1024,7 +1031,6 @@ export function PreviewOverlay({
 											<RemoteFileCompare
 												theirs={remoteTheirs}
 												mine={mine}
-												name={name}
 											/>
 										)
 									: undefined
@@ -1097,7 +1103,12 @@ function saveFormat(item: DriveItem): string {
 	return `spreadsheet:${spreadsheetSaveFormat(extension) ?? extension}`
 }
 
-function slotPin(item: DriveItem, variant: DriveVariant): SlotPin {
+// Opened as text, the slot stays the text viewer and never editable, whatever a rename later says.
+function slotPin(item: DriveItem, variant: DriveVariant, asText: boolean): SlotPin {
+	if (asText) {
+		return { category: "text", format: "", editable: false }
+	}
+
 	return { category: previewType(item), format: saveFormat(item), editable: isEditable(item, variant) }
 }
 
@@ -1118,6 +1129,8 @@ interface PreviewBodyProps {
 	renamedReadOnly: boolean
 	// Outside the drive nothing is ever editable, so a spreadsheet keeps only what it shows.
 	neverEditable: boolean
+	// Opened through "Open as text" (the text viewer guards against a binary file).
+	asText: boolean
 	// A save in flight: text editors go read-only until it settles.
 	locked: boolean
 	onDirtyChange: (dirty: boolean) => void
@@ -1148,6 +1161,7 @@ function PreviewBody({
 	editable,
 	renamedReadOnly,
 	neverEditable,
+	asText,
 	locked,
 	onDirtyChange,
 	contentRef,
@@ -1230,6 +1244,7 @@ function PreviewBody({
 					locked={locked}
 					onDirtyChange={onDirtyChange}
 					contentRef={contentRef}
+					rejectBinary={asText}
 				/>
 			)
 		case "markdown":

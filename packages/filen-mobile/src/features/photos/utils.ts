@@ -1,5 +1,5 @@
 import { type DriveItem, type DriveItemFileExtracted } from "@/types"
-import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
+import { getDriveItemPreviewType, isImagePreviewType } from "@/lib/previewType"
 import { isFileItem } from "@/features/drive/driveSelectors"
 
 /**
@@ -11,7 +11,7 @@ export function isPhotoGridItem(item: DriveItem): item is DriveItemFileExtracted
 		return false
 	}
 
-	const previewType = getPreviewType(item.data.decryptedMeta.name)
+	const previewType = getDriveItemPreviewType(item)
 
 	return isImagePreviewType(previewType) || previewType === "video"
 }

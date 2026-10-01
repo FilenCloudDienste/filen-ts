@@ -126,6 +126,22 @@ describe("FileCache", () => {
 			expect(result.parentDirectory.uri).toBe(`${BASE_DIR}/abc-123`)
 		})
 
+		// Players that resolve a local file's format by extension must see the type the preview classified.
+		it("suffixes a file typed by its name or mime with that type's extension", async () => {
+			const cache = await createFileCache()
+
+			expect(cache.getFiles(wrapDrive(driveFileItem("file", "lic", "LICENSE"))).file.uri).toBe(`${BASE_DIR}/lic/lic.txt`)
+			expect(cache.getFiles(wrapDrive(driveFileItem("file", "clip", "clip", "video/mp4"))).file.uri).toBe(`${BASE_DIR}/clip/clip.mp4`)
+		})
+
+		it("keeps the exact suffix a file's own extension gives it, so existing entries stay valid", async () => {
+			const cache = await createFileCache()
+
+			expect(cache.getFiles(wrapDrive(driveFileItem("file", "up", "MOVIE.MP4", "video/mp4"))).file.uri).toBe(`${BASE_DIR}/up/up.MP4`)
+			expect(cache.getFiles(wrapDrive(driveFileItem("file", "odd", "data.xyz"))).file.uri).toBe(`${BASE_DIR}/odd/odd.xyz`)
+			expect(cache.getFiles(wrapDrive(driveFileItem("file", "bare", "blob"))).file.uri).toBe(`${BASE_DIR}/bare/bare`)
+		})
+
 		it("throws when item has no decryptedMeta", async () => {
 			const cache = await createFileCache()
 			const item: CacheItem = {

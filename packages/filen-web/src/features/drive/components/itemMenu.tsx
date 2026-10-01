@@ -68,11 +68,19 @@ export interface ItemDestination {
 	pasteShortcut: boolean
 }
 
-// Groups the flat descriptor list for readability: a rule after Open, before the reference/reveal
+// Groups the flat descriptor list for readability: a rule after Open (or Open as text), before the reference/reveal
 // action (info) and before whichever removal action closes the list (trash in the normal menu,
 // deletePermanently in the trash/undecryptable-reduced menus) — a pure presentation concern the gating
 // builder itself shouldn't own.
 const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanently"])
+const OPEN_IDS = new Set<ItemActionId>(["open", "openAsText"])
+
+function separatorBefore(descriptors: ItemActionDescriptor[], index: number): boolean {
+	const previous = descriptors[index - 1]
+	const current = descriptors[index]
+
+	return previous !== undefined && current !== undefined && (SEPARATOR_BEFORE.has(current.id) || OPEN_IDS.has(previous.id))
+}
 
 // Shared per-item action list, rendered by BOTH the right-click context menu and the ⋯ dropdown (see
 // DriveContextMenuContent/DriveDropdownMenuContent below) — one descriptor list (driveItemActions),
@@ -196,7 +204,7 @@ function ItemMenuEntries({
 		<>
 			{descriptors.map((descriptor, index) => (
 				<Fragment key={descriptor.id}>
-					{index > 0 && (SEPARATOR_BEFORE.has(descriptor.id) || descriptors[index - 1]?.id === "open") ? <Separator /> : null}
+					{separatorBefore(descriptors, index) ? <Separator /> : null}
 					{/* The Move and Copy submenus open offline too, for their clipboard entries; each gates its own
 					    destinations, so their descriptors' offline flag is not applied to the trigger. */}
 					{descriptor.id === "move" || descriptor.id === "copy" ? (

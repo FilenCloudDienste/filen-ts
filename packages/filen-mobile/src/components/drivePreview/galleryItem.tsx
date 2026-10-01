@@ -1,4 +1,3 @@
-import { getPreviewType } from "@/lib/previewType"
 import { useWindowDimensions } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import PreviewImage from "@/components/drivePreview/previewImage"
@@ -18,7 +17,7 @@ import { PreviewSpinner } from "@/components/drivePreview/previewStatus"
 import View from "@/components/ui/view"
 import { type ListRenderItemInfo } from "@shopify/flash-list"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
-import { galleryItemRenderName, galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
+import { galleryItemPreviewType, galleryItemFileSource } from "@/components/drivePreview/galleryRenderName"
 
 const GalleryItem = ({
 	info,
@@ -39,7 +38,7 @@ const GalleryItem = ({
 	const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
 	// By the name the page opened with: a rename elsewhere keeps the renderer, and an editor's unsaved edits.
-	const previewType = getPreviewType(galleryItemRenderName(info.item))
+	const previewType = galleryItemPreviewType(info.item)
 	const rendersFromUrl = previewType === "image" || previewType === "video"
 
 	const fileUrlQuery = useFileUrlQuery(galleryItemFileSource(info.item), {

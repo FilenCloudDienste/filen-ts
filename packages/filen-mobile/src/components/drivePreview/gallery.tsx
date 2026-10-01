@@ -6,7 +6,7 @@ import { AnimatedView } from "@/components/ui/animated"
 import { useNavigation } from "expo-router"
 import { goBackIfPossible, router } from "@/lib/router"
 import { type DriveItemFileExtracted } from "@/types"
-import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
+import { isImagePreviewType } from "@/lib/previewType"
 import { useWindowDimensions, Platform, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
 import { SystemBars } from "react-native-edge-to-edge"
 import { GestureDetector, Gesture } from "react-native-gesture-handler"
@@ -14,7 +14,7 @@ import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring, interpo
 import { type DrivePath } from "@/hooks/useDrivePath"
 import GalleryHeader from "@/components/drivePreview/header"
 import GalleryItem from "@/components/drivePreview/galleryItem"
-import { galleryItemFollowing, galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
+import { galleryItemFollowing, galleryItemPreviewType } from "@/components/drivePreview/galleryRenderName"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
 import events from "@/lib/events"
 import { runOnJS } from "react-native-worklets"
@@ -92,6 +92,8 @@ export type InitialItem =
 			data: {
 				item: DriveItemFileExtracted
 				drivePath: DrivePath
+				// Open just this file in the text viewer, read-only, whatever its type ("Open as text").
+				asText?: boolean
 			}
 	  }
 	| {
@@ -105,6 +107,8 @@ export type GalleryItemTagged =
 			data: DriveItemFileExtracted
 			// The name the page opened with, once the file it shows was renamed or replaced (galleryRenderName.ts).
 			openedName?: string
+			// Shown in the text viewer, read-only, whatever its type: a file nothing recognised, opened as text.
+			asText?: boolean
 	  }
 	| {
 			type: "external"
@@ -502,7 +506,7 @@ const Gallery = () => {
 				}
 			}
 
-			const previewType = getPreviewType(galleryItemRenderName(state.currentItem))
+			const previewType = galleryItemPreviewType(state.currentItem)
 
 			return {
 				isImage: isImagePreviewType(previewType),

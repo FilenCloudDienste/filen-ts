@@ -93,7 +93,7 @@ describe("isPhotoItem", () => {
 		expect(isPhotoItem(undecryptable)).toBe(false)
 	})
 
-	it("drops an unrecognized extension (falls through previewType's mime fallback to 'other')", () => {
+	it("drops an unrecognized extension (falls through previewType's mime lookup to 'other')", () => {
 		expect(isPhotoItem(fileNamed("archive.zip"))).toBe(false)
 	})
 

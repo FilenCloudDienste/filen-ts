@@ -123,7 +123,12 @@ export async function fetchData(
 
 				const name =
 					result.data.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? result.data.name.inner[0].toLowerCase().trim() : null
-				const previewType = name ? getPreviewType(name) : ("unknown" satisfies ReturnType<typeof getPreviewType>)
+				const previewType = name
+					? getPreviewType(
+							name,
+							result.data.mime.tag === MaybeEncryptedUniffi_Tags.Decrypted ? result.data.mime.inner[0] : undefined
+						)
+					: ("unknown" satisfies ReturnType<typeof getPreviewType>)
 
 				if (!name) {
 					return {

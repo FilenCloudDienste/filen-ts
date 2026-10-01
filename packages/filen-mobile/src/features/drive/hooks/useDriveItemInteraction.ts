@@ -4,8 +4,7 @@ import type { DrivePath } from "@/hooks/useDrivePath"
 import useDriveStore, { isDriveItemInSelection } from "@/features/drive/store/useDrive.store"
 import useDriveSelectStore, { selectDriveSelectSelection } from "@/features/drive/store/useDriveSelect.store"
 import useDrivePreviewStore from "@/stores/useDrivePreview.store"
-import { getPreviewType } from "@/lib/previewType"
-import { driveItemDisplayName } from "@/lib/decryption"
+import { getDriveItemPreviewType } from "@/lib/previewType"
 import {
 	isDriveItemDisabled,
 	isDriveItemNavigateOnly,
@@ -43,7 +42,7 @@ export default function useDriveItemInteraction({
 	const isSelectedFromDriveSelect = useDriveSelectStore(state =>
 		selectDriveSelectSelection(state, selectSessionId).some(i => i.data.uuid === info.item.data.uuid && i.type === info.item.type)
 	)
-	const previewType = isFileItem(info.item) ? getPreviewType(driveItemDisplayName(info.item)) : null
+	const previewType = isFileItem(info.item) ? getDriveItemPreviewType(info.item) : null
 
 	const disabled = isDriveItemDisabled({
 		item: info.item,

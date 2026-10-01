@@ -147,9 +147,10 @@ export default function useEditableTarget(item: GalleryItemTagged): EditableTarg
 			: null
 
 	// An own file stays writable while its directory is being looked up: read-only there would also disarm
-	// the unsaved-edits guard over edits already typed. The save resolves the directory itself.
+	// the unsaved-edits guard over edits already typed. The save resolves the directory itself. A file opened
+	// as text is never written back: saving a binary's decoded bytes as text would corrupt it.
 	const readOnly =
-		!itemToUse || item.type !== "drive"
+		!itemToUse || item.type !== "drive" || item.asText === true
 			? true
 			: itemToUse.type !== "file" ||
 				!itemToUse.data.decryptedMeta ||

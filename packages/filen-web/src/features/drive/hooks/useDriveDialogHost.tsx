@@ -22,7 +22,8 @@ import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
 // with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
 // narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
 // bar's confirm — a single-item restore stays direct/unconfirmed, see itemMenu.logic.ts's RESTORE).
-type ActiveDialogKind = ItemActionDialogKind | "emptyTrash" | "restoreSelected" | "disableLink" | "preview"
+// "openAsText" opens the preview instead (handleItemAction), so it is never a dialog kind of its own.
+type ActiveDialogKind = Exclude<ItemActionDialogKind, "openAsText"> | "emptyTrash" | "restoreSelected" | "disableLink" | "preview"
 
 interface ActiveDialog {
 	kind: ActiveDialogKind
@@ -31,6 +32,8 @@ interface ActiveDialog {
 	// Only meaningful for kind:"preview" — the opened slot's position within `items`. Every other kind
 	// leaves this unset.
 	index?: number
+	// kind:"preview" opened through "Open as text".
+	asText?: boolean
 }
 
 export interface DriveDialogHost {
@@ -71,6 +74,14 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
 	// restore) resolve fully inside itemMenu.tsx and never reach here.
 	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem): void {
+		// Just this file, with no pager: the siblings it would page through are the previewable files,
+		// which it is not one of.
+		if (kind === "openAsText") {
+			setActiveDialog({ kind: "preview", items: [item], index: 0, asText: true })
+
+			return
+		}
+
 		setActiveDialog({ kind, items: [item] })
 	}
 
@@ -337,6 +348,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 						onStep={stepPreview}
 						onClose={closeActiveDialog}
 						onItemRemoved={removeCurrentPreviewItem}
+						asText={activeDialog.asText === true}
 					/>
 				)
 			}

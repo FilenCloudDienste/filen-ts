@@ -215,6 +215,72 @@ describe("useDrivePreviewStore.open — uncovered spec cases", () => {
 		})
 	})
 
+	describe("open as text", () => {
+		it("opens just that file, flagged as text, whatever the list holds", () => {
+			const initialItem = makeInitialDriveItem("bin1", "data.bin")
+
+			useDrivePreviewStore.getState().open({
+				items: [],
+				initialItem: {
+					type: "drive",
+					data: initialItem.type === "drive" ? { ...initialItem.data, asText: true } : (undefined as never)
+				}
+			})
+
+			const state = useDrivePreviewStore.getState()
+
+			expect(state.items).toHaveLength(1)
+			expect(state.items[0]).toMatchObject({ type: "drive", asText: true })
+			expect(state.currentItem).toBe(state.items[0])
+			expect(mockRouterPush).toHaveBeenCalledTimes(1)
+		})
+
+		it("never flags an ordinary open as text", () => {
+			useDrivePreviewStore.getState().open({
+				items: [],
+				initialItem: makeInitialDriveItem("txt1", "notes.txt")
+			})
+
+			const state = useDrivePreviewStore.getState()
+
+			expect(state.items).toHaveLength(1)
+			expect(state.items[0]).not.toHaveProperty("asText")
+		})
+	})
+
+	// Membership reads the same type as the renderer: name first, then the stored mime.
+	describe("mime-typed membership", () => {
+		it("admits an extension-less video by its mime, and still drops an unknown one", () => {
+			const clip = makeDriveGalleryItem("clip1", "clip", "file", { name: "clip", size: 0n, mime: "video/mp4" } as never)
+			const blob = makeDriveGalleryItem("blob1", "blob", "file", {
+				name: "blob",
+				size: 0n,
+				mime: "application/octet-stream"
+			} as never)
+			const photo = makeDriveGalleryItem("img1", "photo.jpg")
+
+			useDrivePreviewStore.getState().open({
+				items: [clip, blob, photo],
+				initialItem: makeInitialDriveItem("img1", "photo.jpg")
+			})
+
+			const uuids = useDrivePreviewStore
+				.getState()
+				.items.map(i => (i as Extract<GalleryItemTagged, { type: "drive" }>).data.data.uuid)
+
+			expect(uuids).toEqual(["clip1", "img1"])
+		})
+
+		it("opens a LICENSE on its own, as the text/code types do", () => {
+			useDrivePreviewStore.getState().open({
+				items: [makeDriveGalleryItem("img1", "photo.jpg"), makeDriveGalleryItem("lic1", "LICENSE")],
+				initialItem: makeInitialDriveItem("lic1", "LICENSE")
+			})
+
+			expect(useDrivePreviewStore.getState().items).toHaveLength(1)
+		})
+	})
+
 	describe("regular drive gallery", () => {
 		it("includes a non-jpg image classified as image", () => {
 			const gifItem = makeDriveGalleryItem("gif1", "photo.gif")

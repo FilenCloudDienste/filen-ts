@@ -556,6 +556,7 @@ class Thumbnails {
 		localUri: string
 		uuid: string
 		name: string
+		mime?: string
 		canMakeThumbnail: boolean
 		width?: number
 		quality?: number
@@ -563,7 +564,7 @@ class Thumbnails {
 		signal?: AbortSignal
 	}): Promise<string | null> {
 		// Ahead of the barrier: a file that gets no thumbnail must not wait out a cache clear to be told so.
-		const kind = getThumbnailKindForName(params.name, params.canMakeThumbnail)
+		const kind = getThumbnailKindForName(params.name, params.canMakeThumbnail, params.mime)
 
 		if (kind === null) {
 			return null

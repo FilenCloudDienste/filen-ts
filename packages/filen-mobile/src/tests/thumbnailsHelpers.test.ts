@@ -334,6 +334,17 @@ describe("getThumbnailKind", () => {
 		expect(getThumbnailKind(fileItem("logo.svg", true))).toBeNull()
 	})
 
+	// The same type the gallery opens it as: an extension-less file reads its stored mime.
+	it("classifies a file with no extension by its stored mime", () => {
+		const withMime = (name: string, mime: string, canMakeThumbnail: boolean) =>
+			({ type: "file", data: { uuid: "u", size: 1n, canMakeThumbnail, decryptedMeta: { name, mime } } }) as never
+
+		expect(getThumbnailKind(withMime("clip", "video/mp4", false))).toBe("video")
+		expect(getThumbnailKind(withMime("photo", "image/jpeg", true))).toBe("image")
+		expect(getThumbnailKind(withMime("photo", "image/jpeg", false))).toBeNull()
+		expect(getThumbnailKind(withMime("photo.pdf", "image/jpeg", true))).toBeNull()
+	})
+
 	it("is null for non-previewable files, directories and undecrypted names", () => {
 		expect(getThumbnailKind(fileItem("doc.pdf"))).toBeNull()
 		expect(getThumbnailKind(fileItem("archive.zip"))).toBeNull()

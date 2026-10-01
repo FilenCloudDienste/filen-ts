@@ -286,6 +286,8 @@ export const drive = {
 	// ── Per-item context menu actions (drive/item/menu.tsx) ───────────────────
 	/** Per-item context menu (search results): navigate to the directory that holds this item */
 	open_containing_directory: "Open containing directory",
+	/** Per-item context menu, files of an unrecognised type only: view the file's content as plain text (read-only) */
+	open_as_text: "Open as text",
 	/** Per-item context menu: download item to the device filesystem */
 	download_to_device: "Download to device",
 	/** Menu action (single and bulk, drive/photos/notes): make the item(s) available when offline */

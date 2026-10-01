@@ -17,12 +17,14 @@ import {
 	DownloadIcon,
 	CopyPlusIcon,
 	EyeIcon,
+	FileTextIcon,
 	FolderOpenIcon
 } from "lucide-react"
 import type { Dir, File, SharedDir, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
+import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
 import { mockSharedFile, mockSharedRootDir, sharerRole } from "@/tests/fixtures/sdk"
 
 // itemMenu.logic.ts's imports reach the query client — unwanted under node vitest.
@@ -86,6 +88,16 @@ function mockFile(overrides: Partial<File> = {}): File {
 		},
 		...overrides
 	}
+}
+
+function unknownFileItem(name = "archive.bin", size = 1_024n): DriveItem {
+	return fileItem({
+		size,
+		meta: {
+			type: "decoded",
+			data: { name, mime: "application/octet-stream", modified: 1_700_000_000_000n, size, key: "key", version: 2 }
+		}
+	})
 }
 
 function dirItem(overrides: Partial<Dir> = {}): DriveItem {
@@ -704,6 +716,45 @@ describe("driveItemActions — Open (listing rows and tiles only)", () => {
 	})
 })
 
+describe("driveItemActions — Open as text (a file nothing recognises)", () => {
+	function openIds(item: DriveItem, variant: DriveVariant): string[] {
+		return driveItemActions(item, variant, { open: true }).map(descriptor => descriptor.id)
+	}
+
+	it("takes Open's place for a file of an unknown type within the preview size cap", () => {
+		expect(openIds(unknownFileItem(), "drive")[0]).toBe("openAsText")
+		expect(openIds(unknownFileItem(), "drive")).not.toContain("open")
+		expect(openIds(unknownFileItem("data.bin", PREVIEW_MAX_BYTES), "recents")[0]).toBe("openAsText")
+		expect(openIds(unknownFileItem(), "trash")[0]).toBe("openAsText")
+	})
+
+	it("is labelled Open as text and opens through the dialog host", () => {
+		expect(driveItemActions(unknownFileItem(), "drive", { open: true })[0]).toMatchObject({
+			labelKey: "driveActionOpenAsText",
+			icon: FileTextIcon,
+			run: "dialog",
+			dialogKind: "openAsText"
+		})
+	})
+
+	it("is never offered for a file over the size cap", () => {
+		expect(openIds(unknownFileItem("huge.bin", PREVIEW_MAX_BYTES + 1n), "drive")).not.toContain("openAsText")
+	})
+
+	it("is never offered for a directory, a file of a known type or an undecryptable file", () => {
+		expect(openIds(dirItem(), "drive")).not.toContain("openAsText")
+		expect(openIds(fileItem(), "drive")).not.toContain("openAsText")
+		// A LICENSE reads as text by its name, so it opens normally.
+		expect(openIds(unknownFileItem("LICENSE"), "drive")[0]).toBe("open")
+		expect(openIds(fileItem({ meta: { type: "encrypted", data: "ciphertext" } }), "drive")).not.toContain("openAsText")
+	})
+
+	// The preview overlay's header menu and the sidebar tree pass no `open`; multi-select uses the bulk menu.
+	it("is absent unless the caller can open the item", () => {
+		expect(driveItemActions(unknownFileItem(), "drive").map(descriptor => descriptor.id)).not.toContain("openAsText")
+	})
+})
+
 describe("canWriteIntoItem (the New submenu and a directory row's Paste)", () => {
 	it("holds for a decryptable directory wherever the listing can write into it", () => {
 		expect(canWriteIntoItem(dirItem(), "drive")).toBe(true)
@@ -737,6 +788,8 @@ describe("applyOfflineGate", () => {
 		// Mirrors the double-click, which isn't gated either: a cached listing or the preview's own error
 		// state takes over offline.
 		open: "readOnly",
+		// The same preview overlay, in its text mode.
+		openAsText: "readOnly",
 		rename: "gated",
 		move: "gated",
 		favorite: "gated",
@@ -764,7 +817,8 @@ describe("applyOfflineGate", () => {
 		sharedDirItem,
 		sharedFileItem,
 		() => dirItem({ meta: { type: "encrypted", data: "ciphertext" } }),
-		() => fileItem({ meta: { type: "encrypted", data: "ciphertext" } })
+		() => fileItem({ meta: { type: "encrypted", data: "ciphertext" } }),
+		() => unknownFileItem()
 	]
 	const EVERY_DESCRIPTOR = VARIANTS.flatMap(variant =>
 		ITEMS.flatMap(item => [true, false].flatMap(searchHit => driveItemActions(item(), variant, { searchHit, open: true })))

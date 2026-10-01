@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { CodeIcon, EyeIcon } from "lucide-react"
-import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { codeMirrorLanguageFor, decodeUtf8, extensionOf } from "@/features/drive/lib/preview.logic"
+import { codeMirrorLanguageFor, decodeUtf8, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
@@ -160,7 +159,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 				{mode === "source" ? (
 					<CodeMirrorSource
 						text={text}
-						tag={codeMirrorLanguageFor(extensionOf(driveItemName(item)))}
+						tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 						alt={alt}
 						editable={editable ?? false}
 						locked={locked ?? false}

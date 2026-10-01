@@ -324,18 +324,38 @@ describe("resolveFileIconKey", () => {
 	})
 
 	// Paths.extname parses the name as a URL first; for a name without a scheme that throws and is caught
-	// on every call, and this runs per icon bind.
-	it("never calls Paths.extname for a name without a colon, and still does for one with a colon", () => {
+	// on every call, and this runs per icon bind. A file name is not a URL, colon or not.
+	it("never calls Paths.extname, and parses a colon-bearing name as a plain name", () => {
 		const extname = vi.spyOn(Paths, "extname")
-		const keys = ["IMG_0001.HEIC", "song.mp3", "report.pdf", "notes.txt", "noextension", ".jpg"].map(resolveFileIconKey)
+		const keys = ["IMG_0001.HEIC", "song.mp3", "report.pdf", "notes.txt", "noextension", ".jpg", "clip 12:30.mp4"].map(name =>
+			resolveFileIconKey(name)
+		)
 
-		expect(extname).not.toHaveBeenCalled()
 		// Same parse as before: a leading-dot name like ".jpg" has no extension.
-		expect(keys).toEqual(["image", "audio", "pdf", "txt", "other", "other"])
-
-		expect(resolveFileIconKey("clip 12:30.mp4")).toBe("video")
-		expect(extname).toHaveBeenCalledTimes(1)
+		expect(keys).toEqual(["image", "audio", "pdf", "txt", "other", "other", "video"])
+		expect(extname).not.toHaveBeenCalled()
 
 		extname.mockRestore()
+	})
+
+	// The icon reads the same type extension as the preview: a well-known name, then the stored mime.
+	it("icons a well-known extension-less name by what it is", () => {
+		expect(resolveFileIconKey("LICENSE")).toBe("txt")
+		expect(resolveFileIconKey(".gitignore")).toBe("txt")
+		expect(resolveFileIconKey("Makefile")).toBe("code")
+		expect(resolveFileIconKey("Dockerfile")).toBe("code")
+		expect(resolveFileIconKey(".bashrc")).toBe("code")
+	})
+
+	it("icons a file with no or an unknown extension by its stored mime", () => {
+		expect(resolveFileIconKey("clip", "video/mp4")).toBe("video")
+		expect(resolveFileIconKey("scan.data", "application/pdf")).toBe("pdf")
+		expect(resolveFileIconKey("notes.cfg", "text/plain; charset=utf-8")).toBe("txt")
+		expect(resolveFileIconKey("blob", "application/octet-stream")).toBe("other")
+	})
+
+	it("keeps a known extension's icon whatever the mime says", () => {
+		expect(resolveFileIconKey("photo.jpg", "video/mp4")).toBe("image")
+		expect(resolveFileIconKey("main.rs", "text/plain")).toBe("code")
 	})
 })

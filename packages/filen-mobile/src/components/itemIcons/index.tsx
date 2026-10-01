@@ -2,7 +2,7 @@ import Image from "@/components/ui/image"
 import { cn, directoryFolderTint, fileIconKey, type FileIconKey } from "@filen/shared"
 import { memoize } from "es-toolkit/function"
 import { type DirColor, DirColor_Tags } from "@filen/sdk-rs"
-import { SDK_RAW_PREVIEW_EXTENSIONS, extnameOf } from "@/lib/previewType"
+import { SDK_RAW_PREVIEW_EXTENSIONS, fileTypeExtension } from "@/lib/previewType"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS } from "@/constants"
 
 const FILE_ICONS = {
@@ -44,21 +44,32 @@ function isAudioIconExtension(ext: string): boolean {
 	return EXPO_AUDIO_SUPPORTED_EXTENSIONS.has(`.${ext}`)
 }
 
-// Resolves a file name to its type-icon key — mobile's existing trim+lowercase extname (unchanged by
-// this move to @filen/shared) feeds the shared classifier's already-normalised signature. Exported for
-// itemIcons.test.ts's diff-check against the old inline two-switch classification. Runs on every icon
-// mount and list recycle, hence extnameOf: Paths.extname throws and catches a URL error per plain name.
-export function resolveFileIconKey(name: string): FileIconKey {
-	const ext = extnameOf(name.trim().toLowerCase()).slice(1)
+const ICON_SETS = { isImage: isImageIconExtension, isVideo: isVideoIconExtension, isAudio: isAudioIconExtension }
 
-	return fileIconKey(ext, { isImage: isImageIconExtension, isVideo: isVideoIconExtension, isAudio: isAudioIconExtension })
+// Resolves a file to its type-icon key by the same type extension its preview reads (fileTypeExtension), so
+// a LICENSE gets the text icon and an extension-less video the video icon. `mime` is the file's stored
+// metadata mime where the caller has one. Exported for itemIcons.test.ts.
+export function resolveFileIconKey(name: string, mime?: string | null): FileIconKey {
+	return fileIconKey(fileTypeExtension(name, mime), ICON_SETS)
 }
 
-export const FileIcon = ({ name, width, height, className }: { name: string; width?: number; height?: number; className?: string }) => {
+export const FileIcon = ({
+	name,
+	mime,
+	width,
+	height,
+	className
+}: {
+	name: string
+	mime?: string | null
+	width?: number
+	height?: number
+	className?: string
+}) => {
 	return (
 		<Image
 			className={cn("shrink-0 bg-transparent", className, "rounded-none")}
-			source={FILE_ICONS[resolveFileIconKey(name)]}
+			source={FILE_ICONS[resolveFileIconKey(name, mime)]}
 			style={{
 				width: width ?? 32,
 				height: height ?? 32

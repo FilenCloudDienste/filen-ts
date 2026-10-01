@@ -1,5 +1,4 @@
 import View from "@/components/ui/view"
-import { getPreviewType } from "@/lib/previewType"
 import TextEditor, { backgroundColors, type TextEditorDocumentStatus } from "@/components/textEditor"
 import { MAX_TEXT_BYTES } from "@/components/textEditor/constants"
 import { useShallow } from "zustand/shallow"
@@ -11,7 +10,7 @@ import { type RangeSource } from "@/hooks/useRangeSource"
 import { useTranslation } from "react-i18next"
 import { useRecyclingState } from "@shopify/flash-list"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
-import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
+import { galleryItemPreviewType, galleryItemTypeExtension } from "@/components/drivePreview/galleryRenderName"
 import useEditableSave from "@/components/drivePreview/useEditableSave"
 import PreviewSaveButton from "@/components/drivePreview/previewSaveButton"
 import { PreviewStatusMessage } from "@/components/drivePreview/previewStatus"
@@ -38,16 +37,17 @@ const PreviewTextInner = ({
 		notSerialised: "The file could not be saved"
 	})
 
-	// The editor's mode and highlighting follow the name the page opened with (galleryItemRenderName), never a
-	// rename that would remount it under unsaved edits.
-	const fileName = galleryItemRenderName(item)
+	// The editor's mode and highlighting follow the type extension of the name the page opened with
+	// (galleryItemRenderName), never a rename that would remount it under unsaved edits — and the same type
+	// extension the preview type was read from, so a Makefile or a .bashrc highlights as one.
+	const typeExtension = galleryItemTypeExtension(item)
 
 	// Rendered-markdown parity with notes (Play review request): markdown files get the
 	// markdown editor + the floating preview toggle instead of the plain code editor. One
 	// shared toggle id for ALL drive markdown files — per-file ids would grow the persisted
 	// toggle record with every file ever previewed, and "show rendered markdown" is a mode
 	// preference, not a per-file one.
-	const isMarkdownFile = /\.(md|markdown)$/i.test(fileName)
+	const isMarkdownFile = typeExtension === "md" || typeExtension === "markdown"
 
 	return (
 		<View
@@ -76,7 +76,7 @@ const PreviewTextInner = ({
 				placeholder={t("placeholder")}
 				type={isMarkdownFile ? "markdown" : previewType === "code" ? "code" : "text"}
 				id={isMarkdownFile ? "drivePreview" : undefined}
-				fileName={fileName}
+				fileName={`file.${typeExtension}`}
 				paddingTop={headerHeight ? headerHeight + 8 : undefined}
 				paddingBottom={insets.bottom}
 			/>
@@ -106,7 +106,7 @@ const PreviewText = ({ item }: { item: GalleryItemTagged }) => {
 	const { t } = useTranslation()
 	const bgBackground = useResolveClassNames("bg-background")
 	const { theme } = useUniwind()
-	const previewType = getPreviewType(galleryItemRenderName(item))
+	const previewType = galleryItemPreviewType(item)
 
 	const containerStyle = {
 		backgroundColor:

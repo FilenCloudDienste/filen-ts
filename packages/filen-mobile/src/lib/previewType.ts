@@ -3,7 +3,8 @@ import * as FileSystem from "expo-file-system"
 // built-in. Both are ports of the same algorithm expo-file-system vendors, so extname is identical.
 import pathModule from "path"
 import { EXPO_IMAGE_SUPPORTED_EXTENSIONS, EXPO_AUDIO_SUPPORTED_EXTENSIONS, EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
-import { CODE_FILE_EXTENSIONS } from "@filen/shared"
+import { CODE_FILE_EXTENSIONS, effectiveExtension } from "@filen/shared"
+import type { DriveItemFileExtracted } from "@/types"
 
 export type PreviewType = "image" | "svg" | "rawImage" | "video" | "unknown" | "pdf" | "text" | "code" | "audio" | "docx"
 
@@ -14,8 +15,8 @@ export type PreviewType = "image" | "svg" | "rawImage" | "video" | "unknown" | "
  * React Native the global `URL` is Expo's pure-JS `whatwg-url-minimum`, not a native parser. A bare
  * filename has no scheme, so EVERY call constructs a TypeError, throws it through that parser, catches
  * it, and then falls through to the plain path parse it was always going to use. Measured ~36-68x the
- * cost of the parse itself, and this runs per drive row, per photo tile, per gallery item and inside
- * whole-directory loops.
+ * cost of the parse itself, and this runs inside per-file loops (camera upload, file-cache paths). A
+ * file's TYPE is read by fileTypeExtension instead.
  *
  * The colon guard is what keeps this an optimization rather than an assumption: WHATWG requires a
  * `:`-terminated scheme when there is no base, so a colon-free string provably cannot construct a URL
@@ -39,64 +40,60 @@ export const SDK_RAW_PREVIEW_EXTENSIONS = new Set<string>([".cr2", ".cr3", ".nef
 
 // @filen/shared's CODE_FILE_EXTENSIONS plus the three extensions this app's single "code" preview
 // category bundles in that web splits into its own markdown/text categories (see CODE_FILE_EXTENSIONS'
-// own comment). Dot-less, matching the shared set's shape; extname.slice(1) adapts the dot-prefixed
-// lookup below to it.
-const MOBILE_CODE_EXTENSIONS = new Set<string>([...CODE_FILE_EXTENSIONS, "md", "markdown", "log"])
+// own comment).
+const MOBILE_CODE_EXTENSIONS = [...CODE_FILE_EXTENSIONS, "md", "markdown", "log"]
 
-export function getPreviewType(name: string): PreviewType {
-	const extname = extnameOf(name.trim().toLowerCase())
+// Dot-less extension → preview type, one lookup per classification. First entry wins, which keeps the
+// precedence the old chain of set checks had: .svg ahead of the image set that also holds it (it renders
+// through react-native-svg, never expo-image — on Android expo-image decodes SVG via the unmaintained
+// androidsvg 1.4, whose pattern rendering can recurse into an uncatchable native OOM abort; gate with
+// isImagePreviewType, not `=== "image"`), image ahead of RAW (never an expo-image input: the gallery
+// renders the JPEG the SDK extracts), video ahead of audio (.3gp is in both on Android), all media ahead of
+// code (.ts is TypeScript, never a video).
+const PREVIEW_TYPES: ReadonlyMap<string, PreviewType> = (() => {
+	const types = new Map<string, PreviewType>([["svg", "svg"]])
+	const add = (extensions: Iterable<string>, type: PreviewType) => {
+		for (const extension of extensions) {
+			const key = extension.startsWith(".") ? extension.slice(1) : extension
 
-	// SVG is a distinct render type but image-equivalent everywhere it's classified (gallery /
-	// photos membership, icon selection, size caps, save-to-photos — gate those with
-	// isImagePreviewType, not `=== "image"`). It only diverges at the render layer, where it
-	// goes through react-native-svg (PreviewSvg) instead of expo-image: on Android expo-image
-	// decodes SVG via the unmaintained androidsvg 1.4, whose pattern rendering can recurse into
-	// an uncatchable native OOM abort (bad_alloc → SIGABRT). Split out before the image set
-	// check below (.svg is still IN that set, for eligibility).
-	if (extname === ".svg") {
-		return "svg"
-	}
-
-	if (EXPO_IMAGE_SUPPORTED_EXTENSIONS.has(extname)) {
-		return "image"
-	}
-
-	// RAW camera files: image-equivalent for classification, but the bytes are never handed to
-	// expo-image — the gallery renders the JPEG the SDK extracts from the container
-	// (useRawPreviewQuery) and the list thumbnail comes from the SDK decode.
-	if (SDK_RAW_PREVIEW_EXTENSIONS.has(extname)) {
-		return "rawImage"
-	}
-
-	if (EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(extname)) {
-		return "video"
-	}
-
-	if (EXPO_AUDIO_SUPPORTED_EXTENSIONS.has(extname)) {
-		return "audio"
-	}
-
-	if (MOBILE_CODE_EXTENSIONS.has(extname.slice(1))) {
-		return "code"
-	}
-
-	switch (extname) {
-		case ".pdf": {
-			return "pdf"
-		}
-
-		case ".txt": {
-			return "text"
-		}
-
-		case ".docx": {
-			return "docx"
-		}
-
-		default: {
-			return "unknown"
+			if (!types.has(key)) {
+				types.set(key, type)
+			}
 		}
 	}
+
+	add(EXPO_IMAGE_SUPPORTED_EXTENSIONS, "image")
+	add(SDK_RAW_PREVIEW_EXTENSIONS, "rawImage")
+	add(EXPO_VIDEO_SUPPORTED_EXTENSIONS, "video")
+	add(EXPO_AUDIO_SUPPORTED_EXTENSIONS, "audio")
+	add(MOBILE_CODE_EXTENSIONS, "code")
+	add(["pdf"], "pdf")
+	add(["txt"], "text")
+	add(["docx"], "docx")
+
+	return types
+})()
+
+function isPreviewableExtension(extension: string): boolean {
+	return PREVIEW_TYPES.has(extension)
+}
+
+// The lowercase, dot-less extension a file's type is read from (@filen/shared's effectiveExtension): its
+// own when this app can preview it, else a well-known name's (LICENSE, Makefile, .bashrc), else its stored
+// mime's. Preview type, icon, editor language, thumbnails and the file-cache suffix all key on this, so
+// they agree. Pure string work: a file name is not a URL, so this never reaches Paths.extname (extnameOf).
+export function fileTypeExtension(name: string, mime?: string | null): string {
+	return effectiveExtension(name, mime, isPreviewableExtension)
+}
+
+// `mime` is the file's stored metadata mime, where the caller has one; without it the name alone decides.
+export function getPreviewType(name: string, mime?: string | null): PreviewType {
+	return PREVIEW_TYPES.get(fileTypeExtension(name, mime)) ?? "unknown"
+}
+
+// An undecryptable file has neither name nor mime, and classifies "unknown".
+export function getDriveItemPreviewType(item: DriveItemFileExtracted): PreviewType {
+	return getPreviewType(item.data.decryptedMeta?.name ?? "", item.data.decryptedMeta?.mime)
 }
 
 // SVG previews render via react-native-svg and RAW camera files via the SDK-extracted JPEG, but

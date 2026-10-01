@@ -1,7 +1,7 @@
 import type { RefObject } from "react"
-import { driveItemName } from "@filen/shared"
-import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, codeMirrorLanguageFor, decodeUtf8 } from "@/features/drive/lib/preview.logic"
+import { useTranslation } from "react-i18next"
+import { type DriveItem } from "@/features/drive/lib/item"
+import { itemTypeExtension, codeMirrorLanguageFor, decodeUtf8, looksBinary } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -25,6 +25,8 @@ export interface TextViewerProps {
 	contentRef?: RefObject<(() => string) | null>
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
+	// Opened through "Open as text": a file whose type is unknown, which may turn out to be binary.
+	rejectBinary?: boolean
 }
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
@@ -33,7 +35,8 @@ export interface TextViewerProps {
 // shared with the notes reader — this component stays the preview-specific shell around it (byte
 // loading, item-derived tag/alt).
 // No parameter defaults: the React Compiler skips a component that has them.
-export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: TextViewerProps) {
+export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, rejectBinary }: TextViewerProps) {
+	const { t } = useTranslation("preview")
 	const result = usePreviewBytes(item)
 
 	if (result.status === "pending") {
@@ -49,14 +52,15 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 		)
 	}
 
-	const base = asDirectoryOrFile(item)
-
-	if (base.type !== "file") {
-		return null
+	if (rejectBinary === true && looksBinary(result.bytes)) {
+		return (
+			<div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+				{t("previewNotText")}
+			</div>
+		)
 	}
 
-	const name = driveItemName(base)
-	const tag = codeMirrorLanguageFor(extensionOf(name))
+	const tag = codeMirrorLanguageFor(itemTypeExtension(item))
 	const text = decodeUtf8(result.bytes)
 
 	return (

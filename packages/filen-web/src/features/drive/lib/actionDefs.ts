@@ -3,6 +3,7 @@ import {
 	CopyPlusIcon,
 	DownloadIcon,
 	EyeIcon,
+	FileTextIcon,
 	FolderInputIcon,
 	FolderOpenIcon,
 	HistoryIcon,
@@ -31,6 +32,7 @@ export const ACTION_DEFS = {
 	// Open is two entries, picked by item type like favorite: a directory navigates, a file previews.
 	openDirectory: { labelKey: "driveActionOpen", icon: FolderOpenIcon },
 	openFile: { labelKey: "driveActionOpen", icon: EyeIcon },
+	openAsText: { labelKey: "driveActionOpenAsText", icon: FileTextIcon },
 	rename: { labelKey: "driveActionRename", icon: PencilIcon },
 	move: { labelKey: "driveActionMove", icon: FolderInputIcon },
 	// Not CopyIcon: that one already means "Copy link".

@@ -8,8 +8,7 @@ import useDirectorySizeQuery from "@/features/drive/queries/useDirectorySize.que
 import useIsItemStoredOffline from "@/features/offline/hooks/useIsItemStoredOffline"
 import { simpleDate } from "@/lib/time"
 import Ionicons from "@expo/vector-icons/Ionicons"
-import { getPreviewType } from "@/lib/previewType"
-import { driveItemDisplayName } from "@/lib/decryption"
+import { getDriveItemPreviewType } from "@/lib/previewType"
 import { useTranslation } from "react-i18next"
 import { isFileItem, isDirectoryItem } from "@/features/drive/driveSelectors"
 import { rawUploadTimestamp, pickDisplayTimestamp, directorySizeTypeForDrivePath } from "@/features/drive/utils"
@@ -69,7 +68,7 @@ function useDriveItemInfoRows(
 							type: "previewType",
 							title: t("preview_type"),
 							value: (() => {
-								const previewType = getPreviewType(driveItemDisplayName(item))
+								const previewType = getDriveItemPreviewType(item)
 
 								switch (previewType) {
 									case "audio": {

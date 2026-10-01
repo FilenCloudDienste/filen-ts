@@ -4,7 +4,7 @@ import { canMoveVariant, canWriteVariant, type DriveVariant } from "@/features/d
 import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/share/gating"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
 import { resolveDriveNavigationTarget } from "@/features/drive/lib/navigate"
-import { canPreview, previewType } from "@/features/drive/lib/preview.logic"
+import { canOpenAsText, canPreview, previewType } from "@/features/drive/lib/preview.logic"
 import { type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
@@ -13,11 +13,13 @@ import { type DriveKey } from "@/lib/i18n"
 // own activeDialog state). "emptyTrash" is a listing-level action (the trash toolbar, no per-item
 // trigger), so it deliberately isn't part of this union — directoryListing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
+// "openAsText" is no dialog: the host opens the preview overlay in its read-only text mode.
 export type ItemActionDialogKind =
-	"rename" | "move" | "copy" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete"
+	"rename" | "move" | "copy" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete" | "openAsText"
 
 export type ItemActionId =
 	| "open"
+	| "openAsText"
 	| "rename"
 	| "move"
 	| "copy"
@@ -85,6 +87,8 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 // shared in, any listing but the trash — since a copy changes nothing about the source. A submenu in the
 // item menus (copySubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
 const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
+// In Open's place for a file nothing recognises (canOpenAsText), which Open never covers.
+const OPEN_AS_TEXT: ItemActionDescriptor = { id: "openAsText", ...ACTION_DEFS.openAsText, run: "dialog", dialogKind: "openAsText" }
 
 // Whether opening the item (double-click, Enter, the menu's Open) does anything: a directory the listing
 // can navigate into (never a trashed or undecryptable one), or a file with a preview. Audio opens the
@@ -141,7 +145,15 @@ export function driveItemActions(
 ): ItemActionDescriptor[] {
 	const actions = itemActionsFor(item, variant, options?.searchHit === true)
 
-	return options?.open === true && canOpenItem(item, variant) ? [openDescriptor(item), ...actions] : actions
+	if (options?.open !== true) {
+		return actions
+	}
+
+	if (canOpenItem(item, variant)) {
+		return [openDescriptor(item), ...actions]
+	}
+
+	return canOpenAsText(item) ? [OPEN_AS_TEXT, ...actions] : actions
 }
 
 function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boolean): ItemActionDescriptor[] {

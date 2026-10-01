@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system"
-import { extnameOf } from "@/lib/previewType"
+import { extnameOf, fileTypeExtension } from "@/lib/previewType"
 import { AnyFile, ManagedFuture } from "@filen/sdk-rs"
 import { Semaphore, run, runOrThrow } from "@filen/shared"
 import type { CacheItem, DriveItemFileExtracted } from "@/types"
@@ -40,6 +40,17 @@ export const PARENT_DIRECTORY = FILE_CACHE_PARENT_DIRECTORY
 
 // Empty or expired. A sidecar without a numeric cachedAt counts as stale: `now >= NaN` is false, so
 // it would survive forever and its NaN would poison the size-cap eviction sort.
+// The cached copy's extension: the name's own, unless the file's type was read from its name or stored mime
+// (a LICENSE, an extension-less video) — then that type's, since players that resolve a local file's format by
+// its extension (iOS AVPlayer) would otherwise refuse the copy the preview classified as playable. Files whose
+// own extension decides keep their exact suffix, so their existing cache paths stay valid.
+function cachedFileSuffix(name: string, mime: string | undefined): string {
+	const own = extnameOf(name)
+	const typeExtension = fileTypeExtension(name, mime)
+
+	return typeExtension === "" || own.slice(1).toLowerCase() === typeExtension ? own : `.${typeExtension}`
+}
+
 function isStaleSidecar(metadata: Metadata, now: number, ttlMs: number): boolean {
 	return Object.keys(metadata).length === 0 || typeof metadata.cachedAt !== "number" || now >= metadata.cachedAt + ttlMs
 }
@@ -118,7 +129,14 @@ export class FileCache extends DiskCache {
 			file: new FileSystem.File(
 				FileSystem.Paths.join(
 					parentDirectory.uri,
-					`${itemId}${extnameOf(item.type === "drive" ? (item.data.data.decryptedMeta?.name ?? "") : item.data.name)}`
+					`${itemId}${
+						item.type === "drive"
+							? cachedFileSuffix(
+									item.data.data.decryptedMeta?.name ?? "",
+									isFileItem(item.data) ? item.data.data.decryptedMeta?.mime : undefined
+								)
+							: cachedFileSuffix(item.data.name, undefined)
+					}`
 				)
 			),
 			metadata: new FileSystem.File(

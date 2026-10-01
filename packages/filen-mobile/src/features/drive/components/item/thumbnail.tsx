@@ -265,6 +265,7 @@ const FileThumbnailWithGenerate = ({
 		return (
 			<FileIcon
 				name={item.data.decryptedMeta?.name ?? ""}
+				mime={item.data.decryptedMeta?.mime}
 				width={size.icon}
 				height={size.icon}
 				className={className}
@@ -338,6 +339,7 @@ const FileThumbnail = ({
 		return (
 			<FileIcon
 				name={item.data.decryptedMeta?.name ?? ""}
+				mime={item.data.decryptedMeta?.mime}
 				width={size.icon}
 				height={size.icon}
 				className={className}

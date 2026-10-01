@@ -5,6 +5,9 @@ import {
 	previewType,
 	canPreview,
 	needsImageTransform,
+	canOpenAsText,
+	fileTypeExtension,
+	looksBinary,
 	isStreamedCategory,
 	previewableSiblings,
 	stepPreviewIndex,
@@ -201,8 +204,31 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed("PHOTO.JPG"))).toBe("image")
 	})
 
-	it("a dotfile with no real extension (leading dot only) resolves via mime, else other", () => {
-		expect(previewType(fileNamed(".gitignore"))).toBe("other")
+	it("an unlisted dotfile with no real extension (leading dot only) resolves via mime, else other", () => {
+		expect(previewType(fileNamed(".DS_Store"))).toBe("other")
+		expect(previewType(fileNamed(".hgignore", { mime: "text/plain" }))).toBe("text")
+	})
+
+	it("a well-known extensionless name resolves like the extension it reads as", () => {
+		expect(previewType(fileNamed("LICENSE"))).toBe("text")
+		expect(previewType(fileNamed("README"))).toBe("text")
+		expect(previewType(fileNamed(".gitignore"))).toBe("text")
+		expect(previewType(fileNamed("Makefile"))).toBe("code")
+		expect(previewType(fileNamed("Dockerfile"))).toBe("code")
+		expect(previewType(fileNamed(".bashrc"))).toBe("code")
+		expect(previewType(fileNamed(".env.local"))).toBe("code")
+	})
+
+	it("a missing extension resolves by mime", () => {
+		expect(previewType(fileNamed("clip", { mime: "video/mp4" }))).toBe("video")
+		expect(previewType(fileNamed("scan", { mime: "application/pdf" }))).toBe("pdf")
+		expect(previewType(fileNamed("table", { mime: "text/tab-separated-values" }))).toBe("spreadsheet")
+	})
+
+	// The mime reads through the shared mime table only: no coarse "any image/*" guess.
+	it("an unlisted mime resolves other", () => {
+		expect(previewType(fileNamed("blob.bin", { mime: "image/x-unknown" }))).toBe("other")
+		expect(previewType(fileNamed("blob", { mime: "application/octet-stream" }))).toBe("other")
 	})
 
 	it("falls back to mime when the extension is unrecognized", () => {
@@ -224,6 +250,7 @@ describe("previewType — extension category map", () => {
 
 	it("extension always wins over a conflicting mime", () => {
 		expect(previewType(fileNamed("photo.jpg", { mime: "application/pdf" }))).toBe("image")
+		expect(previewType(fileNamed("notes.txt", { mime: "video/mp4" }))).toBe("text")
 	})
 
 	it("an undecryptable item (null decryptedMeta) resolves other, never throws", () => {
@@ -278,6 +305,43 @@ describe("needsImageTransform", () => {
 
 	it("is false for an extensionless file with a streamable image mime", () => {
 		expect(needsImageTransform(fileNamed("IMG_0001", { mime: "image/jpeg" }))).toBe(false)
+	})
+})
+
+describe("fileTypeExtension", () => {
+	it("is the own extension when known, else the well-known name's, else the mime's, else the own one", () => {
+		expect(fileTypeExtension("Photo.JPG", "video/mp4")).toBe("jpg")
+		expect(fileTypeExtension("LICENSE", "application/octet-stream")).toBe("txt")
+		expect(fileTypeExtension("clip", "video/mp4")).toBe("mp4")
+		expect(fileTypeExtension("bundle.zip", "application/zip")).toBe("zip")
+		expect(fileTypeExtension("mystery", undefined)).toBe("")
+	})
+})
+
+describe("canOpenAsText", () => {
+	it("holds for a decryptable file of an unknown type within the preview cap", () => {
+		expect(canOpenAsText(fileNamed("data.bin"))).toBe(true)
+		expect(canOpenAsText(fileNamed("data.bin", { size: PREVIEW_MAX_BYTES }))).toBe(true)
+	})
+
+	it("never holds over the cap, for a known type, a directory or an undecryptable file", () => {
+		expect(canOpenAsText(fileNamed("data.bin", { size: PREVIEW_MAX_BYTES + 1n }))).toBe(false)
+		expect(canOpenAsText(fileNamed("notes.txt"))).toBe(false)
+		expect(canOpenAsText(fileNamed("LICENSE"))).toBe(false)
+		expect(canOpenAsText(dirItem())).toBe(false)
+		expect(canOpenAsText(fileNamed("data.bin", { undecryptable: true }))).toBe(false)
+	})
+})
+
+describe("looksBinary", () => {
+	it("flags a NUL byte near the start, and only there", () => {
+		expect(looksBinary(new TextEncoder().encode("plain text\n"))).toBe(false)
+		expect(looksBinary(Uint8Array.of(0x50, 0x4b, 0x03, 0x04, 0x00))).toBe(true)
+
+		const late = new Uint8Array(10_000).fill(0x61)
+		late[9_000] = 0
+
+		expect(looksBinary(late)).toBe(false)
 	})
 })
 

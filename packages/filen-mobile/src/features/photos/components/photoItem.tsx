@@ -3,8 +3,7 @@ import { type DriveItemFileExtracted } from "@/types"
 import { type ListRenderItemInfo } from "@/components/ui/virtualList"
 import { type ViewStyle } from "react-native"
 import { cn } from "@filen/shared"
-import { getPreviewType } from "@/lib/previewType"
-import { driveItemDisplayName } from "@/lib/decryption"
+import { getDriveItemPreviewType } from "@/lib/previewType"
 import Thumbnail from "@/features/drive/components/item/thumbnail"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import useIsItemStoredOffline from "@/features/offline/hooks/useIsItemStoredOffline"
@@ -40,7 +39,7 @@ export const Photo = ({
 	drivePath: DrivePath
 	getListItems: () => DriveItemFileExtracted[]
 }) => {
-	const previewType = getPreviewType(driveItemDisplayName(info.item))
+	const previewType = getDriveItemPreviewType(info.item)
 	const isSelected = useDriveStore(state => isUuidSelected(state.selectedItems, info.item.data.uuid))
 	const arePhotosSelected = useDriveStore(state => state.selectedItems.length > 0)
 

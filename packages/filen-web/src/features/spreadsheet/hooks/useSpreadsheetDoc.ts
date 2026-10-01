@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import * as Comlink from "comlink"
 import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { extensionOf } from "@/features/drive/lib/preview.logic"
+import { extensionOf, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { gridDoc, type GridDoc } from "@/features/spreadsheet/lib/cellStore.logic"
 import { closeSpreadsheet, openSpreadsheet, sniffSpreadsheetKind } from "@/features/spreadsheet/lib/spreadsheetClient"
@@ -43,6 +43,8 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 	const opening = pinned.key === documentKey ? pinned.item : item
 	const bytes = usePreviewBytes(opening)
 	const named = spreadsheetFileKind(extension(opening))
+	// An unnamed file's bytes tell xlsx, xls and delimited text apart; only its stored type can say tab.
+	const unnamedTab = spreadsheetFileKind(itemTypeExtension(opening)) === "tsv"
 	const format = nameFormat(opening)
 	const [opened, setOpened] = useState<{ bytes: Uint8Array; state: Opened } | null>(null)
 	const source = bytes.status === "success" ? bytes.bytes : null
@@ -54,7 +56,8 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 
 		let live = true
 		let id: number | null = null
-		const kind = named ?? sniffSpreadsheetKind(source)
+		const sniffed = sniffSpreadsheetKind(source)
+		const kind = named ?? (unnamedTab && sniffed === "csv" ? "tsv" : sniffed)
 		const copy = source.slice()
 
 		openSpreadsheet(Comlink.transfer(copy, [copy.buffer]), kind)
@@ -84,7 +87,7 @@ export function useSpreadsheetDoc(item: DriveItem, documentKey: string): Spreads
 				closeSpreadsheet(id)
 			}
 		}
-	}, [source, named, format])
+	}, [source, named, unnamedTab, format])
 
 	if (bytes.status === "error") {
 		return { status: "error", dto: bytes.dto, retry: bytes.refetch }

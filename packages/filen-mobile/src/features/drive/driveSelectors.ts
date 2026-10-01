@@ -149,8 +149,8 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
  *   - select: undecryptable items, type/previewType mismatches, already-selected
  *             source items, and (single-select) any row once another is picked.
  *
- * `previewType` is supplied by the caller (computed via getPreviewType over the
- * decrypted name) so this module stays SDK-free for testing.
+ * `previewType` is supplied by the caller (getDriveItemPreviewType over the
+ * decrypted name and mime) so this module stays SDK-free for testing.
  */
 export function isDriveItemDisabled({
 	item,

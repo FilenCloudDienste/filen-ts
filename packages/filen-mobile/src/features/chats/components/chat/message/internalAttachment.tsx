@@ -110,6 +110,7 @@ export const InternalAttachment = ({ data, maxWidth, fromSelf }: { data: Interna
 						width={32}
 						height={32}
 						name={data.file.name.tag === MaybeEncryptedUniffi_Tags.Decrypted ? data.file.name.inner[0] : data.file.uuid}
+						mime={data.file.mime.tag === MaybeEncryptedUniffi_Tags.Decrypted ? data.file.mime.inner[0] : undefined}
 					/>
 					<View className="flex-col w-full h-auto bg-transparent">
 						<Text

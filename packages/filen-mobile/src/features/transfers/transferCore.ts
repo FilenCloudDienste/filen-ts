@@ -2,7 +2,7 @@ import auth from "@/lib/auth"
 import logger from "@/lib/logger"
 import { run, errorMessage } from "@filen/shared"
 import * as FileSystem from "expo-file-system"
-import { extnameOf } from "@/lib/previewType"
+import { getPreviewType } from "@/lib/previewType"
 import {
 	type Dir,
 	File,
@@ -42,7 +42,6 @@ import cache from "@/lib/cache"
 import fileCache from "@/lib/fileCache"
 import drive from "@/features/drive/drive"
 import thumbnails from "@/lib/thumbnails"
-import { EXPO_VIDEO_SUPPORTED_EXTENSIONS } from "@/constants"
 import { randomUUID } from "expo-crypto"
 
 function isTransferOfType<T extends Transfer["type"]>(transfer: Transfer, type: T): transfer is Extract<Transfer, { type: T }> {
@@ -824,14 +823,14 @@ export async function uploadCore(
 	}
 
 	const uploadedFileName = name ?? localFileOrDir.name ?? ""
-	const ext = extnameOf(uploadedFileName).toLowerCase().trim()
+	const uploadedMime = unwrappedFileMeta.meta?.mime
 	const canMakeThumbnail = result.data.canMakeThumbnail === true
 
 	// A cheap superset of the real gate, not a second definition of it: either half can still admit
 	// this file, so it is worth waking the thumbnailer, which decides for real against the same
-	// name classifier every drive row uses. Anything the real gate accepts passes this one — an image
-	// only qualifies there with the flag set, and a video only with an extension from this set.
-	if (canMakeThumbnail || EXPO_VIDEO_SUPPORTED_EXTENSIONS.has(ext)) {
+	// classifier every drive row uses. Anything the real gate accepts passes this one — an image
+	// only qualifies there with the flag set, and a video only by its preview type.
+	if (canMakeThumbnail || getPreviewType(uploadedFileName, uploadedMime) === "video") {
 		// TC-02: thumbnail generation runs AFTER the run() above settles, but run()'s finally already
 		// disposed compositeAbortSignal — and createCompositeAbortSignal.dispose() detaches its parent
 		// listeners, so the disposed composite can never transition to aborted again (the thumbnail would
@@ -852,6 +851,7 @@ export async function uploadCore(
 				localUri: normalizeFilePathForExpo(localFileOrDir.uri),
 				uuid: result.data.uuid,
 				name: uploadedFileName,
+				mime: uploadedMime,
 				canMakeThumbnail,
 				signal: thumbnailAbortSignal
 			})

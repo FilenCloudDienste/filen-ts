@@ -2,7 +2,7 @@ import { create } from "zustand"
 import type { GalleryItemTagged, InitialItem } from "@/components/drivePreview/gallery"
 import { router } from "@/lib/router"
 import type { DrivePath } from "@/hooks/useDrivePath"
-import { getPreviewType, isImagePreviewType } from "@/lib/previewType"
+import { getDriveItemPreviewType, isImagePreviewType } from "@/lib/previewType"
 import { isFileItem } from "@/features/drive/driveSelectors"
 
 export type OpenPreviewParams = {
@@ -161,7 +161,18 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 				]
 			}
 
-			const basePreviewType = getPreviewType(initialItem.data.item.data.decryptedMeta?.name ?? "")
+			// Opened as text from the item menu: a read-only text page of just that file, whatever its type.
+			if (initialItem.data.asText) {
+				return [
+					{
+						type: "drive",
+						data: initialItem.data.item,
+						asText: true
+					}
+				]
+			}
+
+			const basePreviewType = getDriveItemPreviewType(initialItem.data.item)
 
 			// If it's a docx, text, pdf, or code file, we won't show the gallery and just show that file, so we return an array with just that file as the item to render
 			if (basePreviewType === "docx" || basePreviewType === "text" || basePreviewType === "pdf" || basePreviewType === "code") {
@@ -183,7 +194,7 @@ export const useDrivePreviewStore = create<DrivePreviewStore>((set, get) => ({
 					return false
 				}
 
-				const type = getPreviewType(item.data.data.decryptedMeta.name)
+				const type = getDriveItemPreviewType(item.data)
 
 				return isImagePreviewType(type) || type === "video" || type === "audio"
 			})

@@ -77,7 +77,11 @@ beforeEach(() => {
 	onlineManager.setOnline(true)
 	sdk.getLinkedFile.mockReset()
 	sdk.getDirPublicLinkInfo.mockReset()
-	sdk.getLinkedFile.mockResolvedValue({ name: { tag: "Decrypted", inner: ["photo.jpg"] }, size: 10n })
+	sdk.getLinkedFile.mockResolvedValue({
+		name: { tag: "Decrypted", inner: ["photo.jpg"] },
+		mime: { tag: "Decrypted", inner: ["image/jpeg"] },
+		size: 10n
+	})
 	sdk.getDirPublicLinkInfo.mockResolvedValue({ uuid: "d1" })
 })
 

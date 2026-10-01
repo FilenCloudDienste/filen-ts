@@ -13,7 +13,6 @@ import { Platform, StyleSheet } from "react-native"
 import DriveItemMenu from "@/features/drive/components/item/menu"
 import useIsItemStoredOffline from "@/features/offline/hooks/useIsItemStoredOffline"
 import { useShallow } from "zustand/shallow"
-import { getPreviewType } from "@/lib/previewType"
 import { driveItemDisplayName } from "@/lib/decryption"
 import { cn } from "@filen/shared"
 import { useResolveClassNames } from "uniwind"
@@ -21,7 +20,7 @@ import Menu from "@/components/ui/menu"
 import useOpenExternalLink from "@/hooks/useOpenExternalLink"
 import SafeAreaView from "@/components/ui/safeAreaView"
 import HeaderScrim, { drivePreviewHeaderNeedsScrim, SCRIM_FADE_DURATION_MS } from "@/components/drivePreview/headerScrim"
-import { galleryItemRenderName } from "@/components/drivePreview/galleryRenderName"
+import { galleryItemPreviewType } from "@/components/drivePreview/galleryRenderName"
 import logger from "@/lib/logger"
 
 // The plain face (audio previews) has no glass and always draws its icon at 24.
@@ -82,7 +81,7 @@ const GalleryHeader = ({
 	const currentItem = useDrivePreviewStore(useShallow(state => state.currentItem))
 	const drivePath = useDrivePreviewStore(useShallow(state => state.drivePath))
 
-	const currentItemPreviewType = getPreviewType(currentItem ? galleryItemRenderName(currentItem) : "")
+	const currentItemPreviewType = currentItem ? galleryItemPreviewType(currentItem) : "unknown"
 
 	const solidHeader =
 		currentItemPreviewType === "docx" ||

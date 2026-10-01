@@ -12,7 +12,16 @@ vi.mock("@/constants", () => {
 	}
 })
 
-import { getPreviewType, isImagePreviewType, isProbablyBinaryText, SDK_RAW_PREVIEW_EXTENSIONS } from "@/lib/previewType"
+import {
+	getPreviewType,
+	getDriveItemPreviewType,
+	fileTypeExtension,
+	extnameOf,
+	isImagePreviewType,
+	isProbablyBinaryText,
+	SDK_RAW_PREVIEW_EXTENSIONS
+} from "@/lib/previewType"
+import type { DriveItemFileExtracted } from "@/types"
 import { Paths } from "@/tests/mocks/expoFileSystem"
 
 // ---------------------------------------------------------------------------
@@ -250,16 +259,16 @@ describe("isProbablyBinaryText", () => {
 })
 
 // ---------------------------------------------------------------------------
-// extname fast path + binary-text scan
+// Name parse
 //
 // getPreviewType used to route every call through FileSystem.Paths.extname, which runs
 // `new URL(name)` inside a try/catch — and on RN the global URL is Expo's pure-JS parser, so a
-// bare filename ALWAYS threw. The colon guard is what keeps skipping it exact: WHATWG needs a
-// colon-terminated scheme when there is no base, so a colon-free string cannot construct a URL.
+// bare filename ALWAYS threw. It now reads @filen/shared's effectiveExtension, a plain string parse:
+// a file name is not a URL, colon or not (on device Paths.extname would drop everything after a '#').
 // ---------------------------------------------------------------------------
 
-describe("getPreviewType — extname fast path", () => {
-	it("classifies ordinary names identically to the URL-parsing path", () => {
+describe("getPreviewType — name parse", () => {
+	it("classifies ordinary names", () => {
 		expect(getPreviewType("photo.jpg")).toBe("image")
 		expect(getPreviewType("clip.MP4")).toBe("video")
 		expect(getPreviewType("doc.pdf")).toBe("pdf")
@@ -268,40 +277,154 @@ describe("getPreviewType — extname fast path", () => {
 		expect(getPreviewType("logo.svg")).toBe("svg")
 	})
 
-	it("keeps node's extname edge cases rather than a naive lastIndexOf('.')", () => {
+	it("keeps the extname edge cases rather than a naive lastIndexOf('.')", () => {
 		// A leading dot is not an extension, so a file literally named ".jpg" has NO extension and must
-		// stay unknown. A hand-rolled `slice(lastIndexOf("."))` would classify it as an image — which is
-		// exactly why the fast path delegates to the same path algorithm rather than rolling its own.
+		// stay unknown; a trailing dot is not one either.
 		expect(getPreviewType(".jpg")).toBe("unknown")
-		expect(getPreviewType(".bashrc")).toBe("unknown")
 		expect(getPreviewType("archive.")).toBe("unknown")
 		expect(getPreviewType("..")).toBe("unknown")
 		expect(getPreviewType("no-extension")).toBe("unknown")
 	})
 
-	it("still classifies colon-bearing names through the original path", () => {
-		// These take the Paths.extname branch; the classification must not drift.
+	it("classifies colon-bearing names as plain names", () => {
 		expect(getPreviewType("Chapter1: Draft #3.docx")).toBe("docx")
 		expect(getPreviewType("12:30 meeting.pdf")).toBe("pdf")
 	})
 
-	it("routes ONLY colon-bearing names through Paths.extname", () => {
-		// The guard is about which branch runs. Output alone cannot pin it here: the vitest mock of
-		// expo-file-system does no URL decoding, so both branches agree on every input — whereas on
-		// device Paths.extname percent-decodes. Assert the routing directly instead.
+	it("never calls Paths.extname", () => {
 		const extnameSpy = vi.spyOn(Paths, "extname")
 
 		expect(getPreviewType("photo.jpg")).toBe("image")
-		expect(extnameSpy).not.toHaveBeenCalled()
-
 		expect(getPreviewType("12:30 meeting.pdf")).toBe("pdf")
-		expect(extnameSpy).toHaveBeenCalledWith("12:30 meeting.pdf")
+		expect(getPreviewType("LICENSE", "text/plain")).toBe("text")
+		expect(extnameSpy).not.toHaveBeenCalled()
 
 		extnameSpy.mockRestore()
 	})
 
 	it("treats surrounding whitespace and case the same as before", () => {
 		expect(getPreviewType("  PHOTO.JPG  ")).toBe("image")
+	})
+})
+
+describe("extnameOf", () => {
+	it("routes ONLY colon-bearing names through Paths.extname", () => {
+		const extnameSpy = vi.spyOn(Paths, "extname")
+
+		expect(extnameOf("photo.jpg")).toBe(".jpg")
+		expect(extnameSpy).not.toHaveBeenCalled()
+
+		expect(extnameOf("12:30 meeting.pdf")).toBe(".pdf")
+		expect(extnameSpy).toHaveBeenCalledWith("12:30 meeting.pdf")
+
+		extnameSpy.mockRestore()
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Type extension: own extension, then a well-known name, then the stored mime
+// ---------------------------------------------------------------------------
+
+describe("getPreviewType — well-known names", () => {
+	it.each([
+		["LICENSE", "text"],
+		["licence", "text"],
+		["README", "text"],
+		[".gitignore", "text"],
+		["Makefile", "code"],
+		["GNUmakefile", "code"],
+		["Dockerfile", "code"],
+		[".bashrc", "code"],
+		[".zshrc", "code"],
+		[".env", "code"],
+		[".env.local", "code"],
+		["Gemfile", "code"],
+		[".prettierrc", "code"]
+	])("classifies %s as %s", (name, expected) => {
+		expect(getPreviewType(name)).toBe(expected)
+	})
+
+	it("ignores a mime for a well-known name", () => {
+		expect(getPreviewType("LICENSE", "application/octet-stream")).toBe("text")
+		expect(getPreviewType("Makefile", "video/mp4")).toBe("code")
+	})
+
+	it("keeps a binary dotfile unknown", () => {
+		expect(getPreviewType(".DS_Store")).toBe("unknown")
+	})
+})
+
+describe("getPreviewType — stored mime", () => {
+	it("classifies a file with no extension by its mime", () => {
+		expect(getPreviewType("clip", "video/mp4")).toBe("video")
+		expect(getPreviewType("scan", "application/pdf")).toBe("pdf")
+		expect(getPreviewType("song", "audio/mpeg")).toBe("audio")
+		expect(getPreviewType("photo", "image/jpeg")).toBe("image")
+		expect(getPreviewType("vector", "image/svg+xml")).toBe("svg")
+		expect(getPreviewType("notes", "text/plain; charset=utf-8")).toBe("text")
+		expect(getPreviewType("data", "application/json")).toBe("code")
+	})
+
+	it("classifies a file with an unknown extension by its mime", () => {
+		expect(getPreviewType("clip.bin", "video/mp4")).toBe("video")
+		expect(getPreviewType("config.cfg", "text/plain")).toBe("text")
+	})
+
+	it("reads any other text/* mime as plain text", () => {
+		expect(getPreviewType("page", "text/x-unheard-of")).toBe("text")
+	})
+
+	it("stays unknown for a mime the platform cannot preview", () => {
+		// .avi is in neither mocked video set here, so its mime maps to nothing previewable.
+		expect(getPreviewType("clip", "video/x-msvideo")).toBe("unknown")
+		expect(getPreviewType("archive", "application/zip")).toBe("unknown")
+		expect(getPreviewType("blob", "application/octet-stream")).toBe("unknown")
+		// HEIF is not in the mocked image set: its mime maps to "heif", which this platform cannot show.
+		expect(getPreviewType("photo", "image/heif")).toBe("unknown")
+	})
+
+	it("keeps a known extension over a contradicting mime", () => {
+		expect(getPreviewType("photo.jpg", "video/mp4")).toBe("image")
+		expect(getPreviewType("main.ts", "video/mp2t")).toBe("code")
+		expect(getPreviewType("notes.txt", "application/pdf")).toBe("text")
+		expect(getPreviewType("clip.mp4", "text/plain")).toBe("video")
+	})
+
+	it("classifies by name alone where the caller has no mime", () => {
+		expect(getPreviewType("clip")).toBe("unknown")
+		expect(getPreviewType("clip", null)).toBe("unknown")
+		expect(getPreviewType("clip", undefined)).toBe("unknown")
+		expect(getPreviewType("clip.mp4")).toBe("video")
+	})
+})
+
+describe("fileTypeExtension", () => {
+	it("returns the lowercase, dot-less extension the type is read from", () => {
+		expect(fileTypeExtension("Photo.JPG")).toBe("jpg")
+		expect(fileTypeExtension("Makefile")).toBe("makefile")
+		expect(fileTypeExtension("LICENSE")).toBe("txt")
+		expect(fileTypeExtension("clip", "video/mp4")).toBe("mp4")
+		expect(fileTypeExtension("archive.zip", "application/zip")).toBe("zip")
+		expect(fileTypeExtension("noextension")).toBe("")
+	})
+})
+
+describe("getDriveItemPreviewType", () => {
+	function fileItem(decryptedMeta: { name: string; mime: string } | null): DriveItemFileExtracted {
+		return {
+			type: "file",
+			data: { uuid: "u1", decryptedMeta, undecryptable: decryptedMeta === null }
+		} as unknown as DriveItemFileExtracted
+	}
+
+	it("reads the decrypted name and mime", () => {
+		expect(getDriveItemPreviewType(fileItem({ name: "clip", mime: "video/mp4" }))).toBe("video")
+		expect(getDriveItemPreviewType(fileItem({ name: "LICENSE", mime: "application/octet-stream" }))).toBe("text")
+		expect(getDriveItemPreviewType(fileItem({ name: "photo.jpg", mime: "application/pdf" }))).toBe("image")
+	})
+
+	it("classifies an undecryptable file unknown", () => {
+		expect(getDriveItemPreviewType(fileItem(null))).toBe("unknown")
 	})
 })
 

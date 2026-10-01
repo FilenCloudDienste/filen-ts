@@ -133,6 +133,18 @@ describe("useEditableTarget", () => {
 		expect((hook.result.current.itemToUse?.data as { parent?: string } | undefined)?.parent).toBe("moved-to")
 	})
 
+	// Its bytes are whatever they are: saving a binary's decoded text back would corrupt it.
+	it("is read-only for a file opened as text, even an own file whose directory is known", () => {
+		cacheState.dirs.set("dir", { uuid: "dir" })
+
+		const item = { ...(galleryItem("v1", "dir", "data.bin") as object), asText: true } as never
+		const hook = renderHook(() => useEditableTarget(item))
+
+		expect(hook.result.current.readOnly).toBe(true)
+		// The same file opened normally would be writable.
+		expect(renderHook(() => useEditableTarget(galleryItem("v1", "dir", "data.bin"))).result.current.readOnly).toBe(false)
+	})
+
 	it("stays writable while the file's directory is looked up, so unsaved edits stay guarded", () => {
 		getDirOptional.mockReturnValue(new Promise(() => undefined))
 

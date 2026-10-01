@@ -90,6 +90,7 @@ export const {
 	errorMessage,
 	validateUuid,
 	CODE_FILE_EXTENSIONS,
+	effectiveExtension,
 	isNoteOwner,
 	hasNoteWriteAccess,
 	sortParams,

@@ -4,7 +4,7 @@ import { EditorState, type Extension } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
 import { MergeView, unifiedMergeView } from "@codemirror/merge"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { codeMirrorLanguageFor, decodeUtf8, extensionOf } from "@/features/drive/lib/preview.logic"
+import { codeMirrorLanguageFor, decodeUtf8, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { languageExtensionFor, useCodeMirrorTheme } from "@/features/preview/lib/codeMirrorShared"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { LoadingState } from "@/components/loadingState"
@@ -104,7 +104,7 @@ export function RemoteCompare({ theirs, mine, tag }: { theirs: RemoteTheirs; min
 }
 
 // A file's newer version, downloaded here (from the preview cache when it was opened already).
-export function RemoteFileCompare({ theirs, mine, name }: { theirs: DriveItem; mine: string; name: string }) {
+export function RemoteFileCompare({ theirs, mine }: { theirs: DriveItem; mine: string }) {
 	const result = usePreviewBytes(theirs)
 
 	return (
@@ -115,7 +115,7 @@ export function RemoteFileCompare({ theirs, mine, name }: { theirs: DriveItem; m
 					: { status: result.status === "error" ? "failed" : "loading" }
 			}
 			mine={mine}
-			tag={codeMirrorLanguageFor(extensionOf(name))}
+			tag={codeMirrorLanguageFor(itemTypeExtension(theirs))}
 		/>
 	)
 }

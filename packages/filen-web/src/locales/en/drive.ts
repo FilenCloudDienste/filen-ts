@@ -261,6 +261,8 @@ export const drive = {
 	driveActionInfo: "Info",
 	/** Sidebar directory tree's context menu — first entry: navigate into the right-clicked directory */
 	driveActionOpen: "Open",
+	/** Item menu — shown for a file of a type nothing can preview: opens it read-only in the text viewer */
+	driveActionOpenAsText: "Open as text",
 	/** Item menu (search results only) — navigate to the directory a search hit lives in and reveal the row there */
 	driveActionOpenContainingDirectory: "Open containing directory",
 	/** Item menu — download the selected item to disk; disabled for a directory or a multi-selection until zip download ships */

@@ -1,7 +1,7 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
-import { CODE_FILE_EXTENSIONS, extensionStart } from "@filen/shared"
+import { CODE_FILE_EXTENSIONS, effectiveExtension, extensionStart } from "@filen/shared"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
@@ -30,9 +30,6 @@ export const SPREADSHEET_MAX_BYTES = 67_108_864n // 64 MiB
 // streamed route every other image extension uses. "hif" is Fujifilm's extension for the same container,
 // written 10-bit 4:2:2; libheif decodes high-bit-depth HEVC and hands back 8-bit RGBA like any other HEIC.
 export const HEIC_EXTENSIONS = new Set(["heic", "heif", "hif"])
-// Consulted only for a name whose extension resolves no category (previewType's own order), so a
-// mime can pull a file OUT of the streamed branch but never into it.
-const HEIC_MIMES = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"])
 // The camera-RAW families the Rust SDK's own decoder recognizes, listed here so this app's category
 // map, icon routing and photos predicate agree with what `canMakeThumbnail` will actually say for
 // them. Their own category ("rawImage") rather than "image": no browser decodes a RAW container, so
@@ -61,14 +58,6 @@ export const RAW_IMAGE_EXTENSIONS = new Set([
 	"srw",
 	"x3f"
 ])
-const SPREADSHEET_MIMES = new Set([
-	"text/csv",
-	"text/tab-separated-values",
-	"application/vnd.ms-excel",
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-	"application/vnd.ms-excel.sheet.macroenabled.12"
-])
-
 function buildExtensionCategories(entries: [Iterable<string>, PreviewCategory][]): ReadonlyMap<string, PreviewCategory> {
 	const map = new Map<string, PreviewCategory>()
 
@@ -103,8 +92,8 @@ const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensio
 ])
 
 // Lowercased extension with no leading dot; "" when the name has none (including a dotfile like
-// ".gitignore", where the only "." is the leading one — not a real extension). Exported for
-// textViewer.tsx (resolves a CodeMirror language the same way previewType resolves a category).
+// ".gitignore", where the only "." is the leading one — not a real extension). The name's own extension,
+// for what the name itself promises (a spreadsheet's save format); a file's TYPE reads fileTypeExtension.
 export function extensionOf(name: string): string {
 	const dot = extensionStart(name)
 
@@ -115,68 +104,32 @@ export function previewCategoryForExtension(ext: string): PreviewCategory | null
 	return EXTENSION_CATEGORIES.get(ext) ?? null
 }
 
-// Coarse mime fallback for a name whose extension resolved no category — no mime-map dependency
-// exists in this app yet, and a handful of prefix checks doesn't warrant adding one, so this covers
-// the broad strokes only; the extension map above is the primary, exhaustive path.
-function categoryForMime(mime: string): PreviewCategory | null {
-	const normalized = mime.toLowerCase().trim()
-
-	if (normalized.startsWith("image/")) {
-		return "image"
-	}
-
-	if (normalized.startsWith("video/")) {
-		return "video"
-	}
-
-	if (normalized.startsWith("audio/")) {
-		return "audio"
-	}
-
-	if (normalized === "application/pdf") {
-		return "pdf"
-	}
-
-	if (normalized === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-		return "docx"
-	}
-
-	if (normalized === "text/markdown") {
-		return "markdown"
-	}
-
-	// Before the generic text/* arm: text/csv is a table, not prose.
-	if (SPREADSHEET_MIMES.has(normalized)) {
-		return "spreadsheet"
-	}
-
-	if (normalized.startsWith("text/")) {
-		return "text"
-	}
-
-	return null
+function isKnownExtension(ext: string): boolean {
+	return EXTENSION_CATEGORIES.has(ext)
 }
 
-// Extension-first, mime-fallback category resolution. A directory (or a shared-directory arm, which
-// asDirectoryOrFile normalizes to one) always resolves "other" — there is nothing to preview.
-export function previewType(item: DriveItem): PreviewCategory {
+// The extension a file's type is read from (@filen/shared's effectiveExtension): its own when the table
+// above knows it, else a well-known name's (LICENSE, Makefile, .gitignore), else its stored mime's. Icon,
+// preview category, HEIC routing, thumbnails and the editor language all key on this, so they agree.
+export function fileTypeExtension(name: string, mime: string | null | undefined): string {
+	return effectiveExtension(name, mime, isKnownExtension)
+}
+
+// fileTypeExtension for a drive item; "" for a directory or an undecryptable file.
+export function itemTypeExtension(item: DriveItem): string {
 	const base = asDirectoryOrFile(item)
 
-	if (base.type !== "file") {
-		return "other"
+	if (base.type !== "file" || base.data.decryptedMeta === null) {
+		return ""
 	}
 
-	const name = base.data.decryptedMeta?.name
-	const byExtension = name !== undefined ? previewCategoryForExtension(extensionOf(name)) : null
+	return fileTypeExtension(base.data.decryptedMeta.name, base.data.decryptedMeta.mime)
+}
 
-	if (byExtension !== null) {
-		return byExtension
-	}
-
-	const mime = base.data.decryptedMeta?.mime
-	const byMime = mime !== undefined ? categoryForMime(mime) : null
-
-	return byMime ?? "other"
+// A directory (or a shared-directory arm, which asDirectoryOrFile normalizes to one) always resolves
+// "other" — there is nothing to preview.
+export function previewType(item: DriveItem): PreviewCategory {
+	return previewCategoryForExtension(itemTypeExtension(item)) ?? "other"
 }
 
 // image joins video/audio here: all three prefer the SW's inline Range route
@@ -197,32 +150,11 @@ export function isStreamedCategory(category: PreviewCategory): category is Strea
 
 // True for HEIC/HEIF — an "image"-category item that still can't stream, since no browser decodes it
 // inline. imageViewer.tsx checks this before ever considering the SW route, routing these through the
-// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead. Resolved
-// the way previewType resolves category: the extension decides, and the mime only for a name with no
-// recognized extension (an extensionless image/heic upload). A mime can therefore only route a file
-// AWAY from the streamed branch — a spoofed mime can never let a HEIC-named file slip into it
-// (mediaType.ts independently excludes it too, defense-in-depth).
+// buffered download + a client-side transform (features/preview/lib/heicTransform.ts) instead. Keyed on
+// the same type extension as previewType, so a HEIC-named file always routes here whatever its mime says
+// (mediaType.ts independently excludes it from the streamed route too, defense-in-depth).
 export function needsImageTransform(item: DriveItem): boolean {
-	const base = asDirectoryOrFile(item)
-
-	if (base.type !== "file") {
-		return false
-	}
-
-	const name = base.data.decryptedMeta?.name
-	const ext = name !== undefined ? extensionOf(name) : ""
-
-	if (HEIC_EXTENSIONS.has(ext)) {
-		return true
-	}
-
-	if (previewCategoryForExtension(ext) !== null) {
-		return false
-	}
-
-	const mime = base.data.decryptedMeta?.mime
-
-	return mime !== undefined && HEIC_MIMES.has(mime.toLowerCase().trim())
+	return HEIC_EXTENSIONS.has(itemTypeExtension(item))
 }
 
 // Gate for opening a preview: a file, decryptable, resolves to a real category, and — for a
@@ -249,6 +181,14 @@ export function canPreview(item: DriveItem): boolean {
 	const cap = bufferedSizeCap(category)
 
 	return cap === null || base.data.size <= cap
+}
+
+// "Open as text": a file nothing recognises, small enough to load whole, may still be text (a config file
+// under an unknown extension). Its viewer is read-only: saving a binary file back as text would corrupt it.
+export function canOpenAsText(item: DriveItem): boolean {
+	const base = asDirectoryOrFile(item)
+
+	return base.type === "file" && !base.data.undecryptable && previewType(item) === "other" && base.data.size <= PREVIEW_MAX_BYTES
 }
 
 // The JS-memory ceiling for a category previewed from a whole buffer. null for rawImage: it is not
@@ -301,6 +241,14 @@ export function stepPreviewIndex(currentUuid: string, siblings: DriveItem[], del
 // handful of replacement glyphs instead of blocking the preview outright.
 export function decodeUtf8(bytes: Uint8Array): string {
 	return new TextDecoder("utf-8").decode(bytes)
+}
+
+// A NUL byte near the start marks a binary file (text never contains one): a file opened as text that
+// isn't shows a notice instead of a screen of replacement glyphs.
+const BINARY_PROBE_BYTES = 8192
+
+export function looksBinary(bytes: Uint8Array): boolean {
+	return bytes.subarray(0, BINARY_PROBE_BYTES).includes(0)
 }
 
 // ext -> the language tag codeMirrorShared.ts maps to a CodeMirror language package (this file stays

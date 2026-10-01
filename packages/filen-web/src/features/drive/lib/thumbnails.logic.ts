@@ -1,5 +1,5 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
-import { extensionOf, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
+import { itemTypeExtension, previewCategoryForExtension } from "@/features/drive/lib/preview.logic"
 
 // Every category this app can produce a cached thumbnail for. "sdk" is every STILL raster image —
 // plain raster, HEIC and camera RAW alike — decoded by the Rust SDK, which is the only decoder any of
@@ -127,8 +127,7 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 		return "none"
 	}
 
-	const name = base.data.decryptedMeta?.name
-	const ext = name !== undefined ? extensionOf(name) : ""
+	const ext = itemTypeExtension(item)
 
 	if (ext === "svg") {
 		return base.data.size <= THUMB_SVG_SIZE_GATE ? "svg" : "none"

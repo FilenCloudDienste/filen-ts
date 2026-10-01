@@ -211,8 +211,8 @@ export const TextEditor = ({
 	type: TextEditorType
 	readOnly?: boolean
 	id?: string
-	// Real filename of the previewed file, threaded to TextEditorDOM so it can pick the CodeMirror
-	// language by extension (loadLanguage). Without it every code file defaults to "file.tsx" (TSX).
+	// A name carrying the previewed file's type extension, threaded to TextEditorDOM so it can pick the
+	// CodeMirror language by extension (loadLanguage). Without it every code file defaults to "file.tsx" (TSX).
 	fileName?: string
 	/**
 	 * Chunked-document mode, for previewing a file on disk rather than editing a note.

@@ -189,7 +189,8 @@ describe("fetchData (useChatMessageLinks)", () => {
 		mockAuthedSdkClient.getLinkedFile.mockResolvedValue({
 			uuid: "file-uuid",
 			size: BigInt(32 * 1024 * 1024 + 1),
-			name: { tag: "Decrypted", inner: ["big-image.jpg"] }
+			name: { tag: "Decrypted", inner: ["big-image.jpg"] },
+			mime: { tag: "Decrypted", inner: ["image/jpeg"] }
 		})
 
 		const result = await fetchChatMessageLinks({
@@ -207,6 +208,7 @@ describe("fetchData (useChatMessageLinks)", () => {
 			uuid: "file-uuid",
 			size: BigInt(1024),
 			name: { tag: "Decrypted", inner: ["photo.jpg"] },
+			mime: { tag: "Decrypted", inner: ["image/jpeg"] },
 			fileKey: "file-key",
 			canMakeThumbnail: true
 		})
