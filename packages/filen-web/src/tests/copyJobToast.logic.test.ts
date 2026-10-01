@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest"
 import { createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
 import { narrowItem } from "@/features/drive/lib/item"
-import { copyJobNotes, copyJobStatus, copyJobTitle } from "@/features/transfers/components/copyJobToast.logic"
+import { copyCardDuration, copyJobNotes, copyJobStatus, copyJobTitle } from "@/features/transfers/components/copyJobToast.logic"
 
 function job(overrides: Partial<CopyJob> = {}): CopyJob {
 	return { ...createCopyJob("j", { uuid: null, name: "Photos" }, 3), ...overrides }
 }
+
+const copied = narrowItem({
+	uuid: "d-0000-0000-0000-000000000000",
+	parent: "p-0000-0000-0000-000000000000",
+	color: "default",
+	timestamp: 0n,
+	favorited: false,
+	meta: { type: "decoded", data: { name: "d" } }
+})
 
 const COPYING: Partial<CopyJob> = { phase: "copyingFiles", totals: { dirs: 0, files: 40, bytes: 1_000 } }
 
@@ -111,14 +120,6 @@ describe("copyJobStatus", () => {
 	})
 
 	it("says the copies are moving to the trash until that settles, and only when there is something to move", () => {
-		const copied = narrowItem({
-			uuid: "d-0000-0000-0000-000000000000",
-			parent: "p-0000-0000-0000-000000000000",
-			color: "default",
-			timestamp: 0n,
-			favorited: false,
-			meta: { type: "decoded", data: { name: "d" } }
-		})
 		const stopping: Partial<CopyJob> = { outcome: { status: "cancelled" }, cancelRequest: "trash", created: [copied] }
 
 		expect(copyJobStatus(job(stopping))).toEqual({ kind: "key", key: "transfersCopyMovingToTrash" })
@@ -182,5 +183,24 @@ describe("copyJobNotes", () => {
 			{ key: "transfersCopySkippedNote", count: 3 },
 			{ key: "transfersCopySavedAsVersionNote", count: 1 }
 		])
+	})
+})
+
+describe("copyCardDuration", () => {
+	const base = job()
+
+	it("stays while the job runs, paused or not, and while its copies move to the trash", () => {
+		expect(copyCardDuration(base)).toBe(Infinity)
+		expect(copyCardDuration({ ...base, paused: true })).toBe(Infinity)
+		expect(copyCardDuration({ ...base, outcome: { status: "cancelled" }, cancelRequest: "trash", created: [copied] })).toBe(Infinity)
+	})
+
+	it("hides a clean finish quickly and anything else after longer", () => {
+		expect(copyCardDuration({ ...base, outcome: { status: "done" } })).toBe(4_000)
+		expect(copyCardDuration({ ...base, outcome: { status: "doneWithFailures" } })).toBe(8_000)
+		expect(copyCardDuration({ ...base, outcome: { status: "cancelled" }, cancelRequest: "keep" })).toBe(8_000)
+		expect(copyCardDuration({ ...base, outcome: { status: "failed", error: { species: "plain", message: "x", label: "x" } } })).toBe(
+			8_000
+		)
 	})
 })

@@ -34,8 +34,9 @@ async function uploadTextFile(page: Page, name: string): Promise<void> {
 	await uploadFiles(page, [{ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) }])
 }
 
-// A finished copy card stays until hidden, and the teardown's trash waits for toasts to clear; a test
-// that failed after starting a copy would otherwise leak its scratch directory.
+// A finished copy card hides itself after a few seconds, but the teardown's trash waits for toasts to clear
+// and a test that failed mid-copy leaves a running one; hiding them keeps the scratch directory from
+// leaking. Tolerant of a card that already left on its own.
 async function hideCopyCards(page: Page): Promise<void> {
 	const hide = page.getByRole("button", { name: "Hide copy progress" })
 
@@ -92,14 +93,13 @@ test.describe("drive copy", () => {
 
 			// One transfers row for the whole copy, which reopens its card. The hidden card leaves through
 			// its exit animation first; a card reopened meanwhile is a second one beside it (copyToast.ts).
-			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await hideCopyCards(page)
 			await expect(page.getByText(`Copied 1 item → ${targetDirName}`)).toHaveCount(0)
 			await openTransfers(page)
 			await expect(page.getByRole("button", { name: "Show copy progress" })).toHaveCount(1)
 			await page.getByRole("button", { name: "Show copy progress" }).click()
 			await expect(page.getByText(`Copied 1 item → ${targetDirName}`)).toBeVisible()
-			// A finished card stays until dismissed, and the teardown's trash waits for toasts to clear.
-			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await hideCopyCards(page)
 		} finally {
 			await hideCopyCards(page)
 			await trashScratchDirectory(page, scratchName)
@@ -141,7 +141,7 @@ test.describe("drive copy", () => {
 			await expect(listbox.getByRole("option")).toHaveCount(4, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			await expect(listbox.getByRole("option", { name: `first-${runId}` })).toHaveCount(2)
 			await expect(listbox.getByRole("option", { name: `second-${runId}` })).toHaveCount(2)
-			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await hideCopyCards(page)
 		} finally {
 			await hideCopyCards(page)
 			await trashScratchDirectory(page, scratchName)
@@ -190,7 +190,7 @@ test.describe("drive copy", () => {
 			await page.keyboard.press(`${mod}+v`)
 
 			await expect(page.getByText(`Copied 1 item → ${subName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await hideCopyCards(page)
 			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// A copy stays on the clipboard for further pastes until it is cleared.
@@ -249,7 +249,7 @@ test.describe("drive copy", () => {
 			// Onto a directory row: a copy lands there and the source stays.
 			await html5DragCopy(page, { selector: '[role="option"]', text: fileName }, { selector: '[role="option"]', text: subName })
 			await expect(page.getByText(`Copied 1 item → ${subName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await hideCopyCards(page)
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible()
 
 			// From inside the subdirectory back onto its parent's breadcrumb: a second copy there.
@@ -261,7 +261,7 @@ test.describe("drive copy", () => {
 				{ selector: 'nav[aria-label="Breadcrumb"] a', text: scratchName }
 			)
 			await expect(page.getByText(`Copied 1 item → ${scratchName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			await page.getByRole("button", { name: "Hide copy progress" }).click()
+			await hideCopyCards(page)
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible()
 
 			await breadcrumb(page).getByRole("link", { name: scratchName, exact: true }).click()

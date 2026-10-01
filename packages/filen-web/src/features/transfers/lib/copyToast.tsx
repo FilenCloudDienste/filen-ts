@@ -1,6 +1,7 @@
 import { toast } from "sonner"
 import { CopyJobToast } from "@/features/transfers/components/copyJobToast"
 import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { copyCardDuration } from "@/features/transfers/components/copyJobToast.logic"
 import { pruneSettledCopyJobs, startCopy, startLinkedCopy } from "@/features/drive/lib/copy"
 import { type CopyDestination, type CopyJobGlyph } from "@/features/drive/lib/copy.logic"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -11,14 +12,42 @@ import type { AnyItemWithContext } from "@filen/sdk-rs"
 // id meanwhile is merged into it and leaves with it.
 const showingIds = new Map<string, string>()
 let showings = 0
+let watchingSettles = false
 
-// A copy's progress card is a persistent custom toast in the normal stack. Issuing it again while it
-// shows only replaces its element, which is also how a card that changed height gets re-measured by the
-// stack (sonner measures a custom toast when its element changes, not when its content grows).
-export function showCopyToast(jobId: string): void {
-	if (getCopyJob(jobId) === undefined) {
+// A showing card is issued again when its job settles (or starts doing something again), which is what
+// swaps its sticky duration for the timed one. One subscription for every card, looking only at those
+// showing.
+function watchSettles(): void {
+	if (watchingSettles) {
 		return
 	}
+
+	watchingSettles = true
+
+	useCopyJobsStore.subscribe((state, previous) => {
+		for (const jobId of showingIds.keys()) {
+			const job = state.jobs[jobId]
+			const before = previous.jobs[jobId]
+
+			if (job !== undefined && before !== undefined && job !== before && copyCardDuration(job) !== copyCardDuration(before)) {
+				showCopyToast(jobId)
+			}
+		}
+	})
+}
+
+// A copy's progress card is a custom toast in the normal stack, sticky while its job runs and timed once it
+// settled (copyCardDuration). Issuing it again while it shows only replaces its element and duration, which
+// is also how a card that changed height gets re-measured by the stack (sonner measures a custom toast when
+// its element changes, not when its content grows).
+export function showCopyToast(jobId: string): void {
+	const job = getCopyJob(jobId)
+
+	if (job === undefined) {
+		return
+	}
+
+	watchSettles()
 
 	let id = showingIds.get(jobId)
 
@@ -29,6 +58,17 @@ export function showCopyToast(jobId: string): void {
 	}
 
 	const toastId = id
+
+	function onGone(): void {
+		if (showingIds.get(jobId) === toastId) {
+			showingIds.delete(jobId)
+		}
+
+		if (!showingIds.has(jobId)) {
+			useCopyJobsStore.getState().update(jobId, job => ({ ...job, cardVisible: false }))
+			pruneSettledCopyJobs()
+		}
+	}
 
 	useCopyJobsStore.getState().update(jobId, job => (job.cardVisible ? job : { ...job, cardVisible: true }))
 
@@ -53,20 +93,12 @@ export function showCopyToast(jobId: string): void {
 		),
 		{
 			id: toastId,
-			duration: Infinity,
-			// Every way the card goes away — its ✕, a swipe — ends here: the job keeps running, and a
-			// settled one without a transfers row to reopen it is dropped. A card reopened before this
-			// one finished leaving stays visible.
-			onDismiss: () => {
-				if (showingIds.get(jobId) === toastId) {
-					showingIds.delete(jobId)
-				}
-
-				if (!showingIds.has(jobId)) {
-					useCopyJobsStore.getState().update(jobId, job => ({ ...job, cardVisible: false }))
-					pruneSettledCopyJobs()
-				}
-			}
+			duration: copyCardDuration(job),
+			// Every way the card goes away — its ✕, a swipe, its own timeout once settled — ends here: the
+			// job keeps running, and a settled one without a transfers row to reopen it is dropped. A card
+			// reopened before this one finished leaving stays visible.
+			onDismiss: onGone,
+			onAutoClose: onGone
 		}
 	)
 }

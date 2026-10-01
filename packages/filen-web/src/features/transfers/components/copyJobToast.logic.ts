@@ -1,7 +1,21 @@
+import { isCopyJobRunning } from "@filen/shared"
 import { isCopyTrashPending, type CopyJob } from "@/features/drive/lib/copy.logic"
 import { type ErrorDTO } from "@/lib/sdk/errors"
 
 // Pure reads of a copy job for its progress card, so what the card says is testable without rendering.
+
+// How long the card stays: for as long as its job still does something (running, paused, moving its
+// copies to the trash), then a few seconds once it is done, longer when there is something to read.
+const COPY_CARD_DONE_MS = 4_000
+const COPY_CARD_ENDED_MS = 8_000
+
+export function copyCardDuration(job: CopyJob): number {
+	if (isCopyJobRunning(job) || isCopyTrashPending(job)) {
+		return Infinity
+	}
+
+	return job.outcome.status === "done" && job.cancelRequest === null && job.failures.length === 0 ? COPY_CARD_DONE_MS : COPY_CARD_ENDED_MS
+}
 
 export type CopyJobTitle =
 	| { key: "transfersCopyCardTitleRunning" | "transfersCopyCardTitleDone"; count: number; destination: string }

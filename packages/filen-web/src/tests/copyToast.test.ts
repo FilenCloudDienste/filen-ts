@@ -114,4 +114,30 @@ describe("copy toast", () => {
 		expect(lastOptions()?.id).toMatch(new RegExp(`^copy:${id ?? ""}:\\d+$`))
 		expect(startCopyWithCard([], DESTINATION)).toBeNull()
 	})
+
+	it("keeps the card while its job runs and times it once the job settles", () => {
+		useCopyJobsStore.getState().put(createCopyJob("a", DESTINATION, 1))
+		showCopyToast("a")
+
+		expect(lastOptions()?.duration).toBe(Infinity)
+
+		toastCustom.mockClear()
+		useCopyJobsStore.getState().update("a", job => ({ ...job, bytesPerSecond: 10 }))
+
+		expect(toastCustom).not.toHaveBeenCalled()
+
+		useCopyJobsStore.getState().update("a", job => ({ ...job, outcome: { status: "done" } }))
+
+		expect(toastCustom).toHaveBeenCalledTimes(1)
+		expect(lastOptions()?.duration).toBe(4_000)
+	})
+
+	it("forgets a card that hid itself, so a settled job nothing can reopen is dropped", () => {
+		useCopyJobsStore.getState().put({ ...createCopyJob("a", DESTINATION, 1), outcome: { status: "done" } })
+
+		showCopyToast("a")
+		lastOptions()?.onAutoClose?.({ id: "a" })
+
+		expect(getCopyJob("a")).toBeUndefined()
+	})
 })
