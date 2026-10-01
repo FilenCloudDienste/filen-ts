@@ -1,4 +1,5 @@
 import {
+	useCallback,
 	useEffect,
 	useRef,
 	useState,
@@ -9,6 +10,7 @@ import {
 	type RefObject
 } from "react"
 import { useTranslation } from "react-i18next"
+import { useLatestRef } from "@/lib/useLatestRef"
 import { useBlocker, type ShouldBlockFn } from "@tanstack/react-router"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreHorizontalIcon } from "lucide-react"
@@ -542,6 +544,28 @@ export function PreviewOverlay({
 			usePreviewUnsavedGuardStore.getState().clear()
 		}
 	}, [])
+
+	// The browser's Back closes the preview and stays where it was opened, rather than moving the page
+	// underneath it: the overlay is not a history entry, so Back would otherwise leave the listing (or the
+	// route) while the preview stayed up. Registered before the unsaved-changes blocker below so a Back
+	// raises only the close path's own prompt. The close runs through a ref so the blocker registers once.
+	const requestCloseRef = useLatestRef(() => {
+		requestOrRun("close", onClose)
+	})
+	const closeOnBack = useCallback<ShouldBlockFn>(
+		({ action }) => {
+			if (action !== "BACK") {
+				return false
+			}
+
+			requestCloseRef.current()
+
+			return true
+		},
+		[requestCloseRef]
+	)
+
+	useBlocker({ shouldBlockFn: closeOnBack, enableBeforeUnload: false })
 
 	// Browser-level guard for the two vectors the in-app requestOrRun path cannot see: a tab
 	// refresh/close (the app's one leave-page listener, which excuses its own downloads — the router's

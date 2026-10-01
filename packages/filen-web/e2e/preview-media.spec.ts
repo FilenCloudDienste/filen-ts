@@ -247,3 +247,25 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 
 	expect(cspViolations).toEqual([])
 })
+
+// The overlay is not a history entry, so the browser's Back used to move the listing underneath it while the
+// preview stayed up. It now closes the preview and stays where the preview was opened.
+test("the browser's Back closes a preview and stays on its listing", async ({ page }) => {
+	await bootTo(page)
+
+	const {
+		rows: [rowImage]
+	} = await openFixtureRows(page, "preview-image")
+
+	const listingUrl = page.url()
+
+	await rowImage.dblclick()
+	await expect(page.getByRole("dialog")).toBeVisible()
+
+	await page.goBack()
+
+	await expect(page.getByRole("dialog")).toHaveCount(0)
+	// A blocked Back moves the URL and is then put back, so this waits for it to settle.
+	await expect(page).toHaveURL(listingUrl)
+	await expect(rowImage).toBeVisible()
+})
