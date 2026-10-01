@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useShallow } from "zustand/shallow"
@@ -88,8 +88,9 @@ import { reroutedRoute, subscribeBranchChanges } from "@/features/drive/lib/bran
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { ListingDropSurface } from "@/features/drive/components/listingDropSurface"
-import { PendingUploads } from "@/features/drive/components/pendingUploads"
-import { hasPendingUploads } from "@/features/drive/lib/pendingUploads.logic"
+import { PendingUploads, PendingUploadsBar } from "@/features/drive/components/pendingUploads"
+import { pendingRowCount } from "@/features/drive/lib/pendingUploads.logic"
+import { useScrolledAway } from "@/lib/useScrolledAway"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Grid-view inset between the tiles and the pane's edges. A CSS padding on the listbox, not a
@@ -296,11 +297,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const hiddenCount = display.hiddenCount
 	const resolvedCount = display.resolvedCount
 
-	// Uploads running into the directory on screen show as rows pinned above its items: only where an
-	// upload can land, never over search results. Only whether there are any is read here, so a progress
-	// tick never re-renders the listing; the rows subscribe to their own figures.
+	// Uploads and copies running into the directory on screen show as its first rows: only where they can
+	// land, never over search results. Only how many rows there are is read here, so a progress tick never
+	// re-renders the listing; the rows subscribe to their own figures.
 	const pendingParentUuid = canWriteVariant(variant, uuid) && !search.active ? uuid : undefined
-	const hasPendingRows = useTransfersStore(state => pendingParentUuid !== undefined && hasPendingUploads(state, pendingParentUuid))
+	const pendingRows = useTransfersStore(state => (pendingParentUuid === undefined ? 0 : pendingRowCount(state, pendingParentUuid)))
+	const hasPendingRows = pendingRows > 0
+	const [pendingBlock, setPendingBlock] = useState<HTMLDivElement | null>(null)
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
 	// Bulk consumers (the dialog host, the floating bulk bar, the menus and the clipboard below) always
@@ -334,8 +337,39 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		testIdPrefix: "drive-listing-upload"
 	})
 
-	const { setScrollElement, scrollElement, columns, listVirtualizer, gridVirtualizer, activeVirtualizer, registerRef, itemRefs } =
-		useDriveVirtualizer(sortedItems, effectiveViewMode)
+	const {
+		setScrollElement,
+		scrollElement,
+		columns,
+		pendingHeight,
+		listVirtualizer,
+		gridVirtualizer,
+		activeVirtualizer,
+		registerRef,
+		itemRefs
+	} = useDriveVirtualizer(sortedItems, effectiveViewMode, pendingRows)
+	// Scrolled away, the pending rows show as one bar pinned over the listing's top.
+	const pendingScrolledAway = useScrolledAway(pendingBlock, scrollElement)
+
+	// A pending row coming or going while the rows are scrolled away moves every item under the reader's
+	// eye; scrolling by the same amount keeps them where they were. At the top, the new row shows instead.
+	// Keyed by directory: moving to another one restores its own scroll position instead.
+	const anchoredPending = useRef({ parentUuid: pendingParentUuid, height: pendingHeight })
+
+	useLayoutEffect(() => {
+		const previous = anchoredPending.current
+
+		anchoredPending.current = { parentUuid: pendingParentUuid, height: pendingHeight }
+
+		if (
+			scrollElement !== null &&
+			previous.parentUuid === pendingParentUuid &&
+			scrollElement.scrollTop > 0 &&
+			scrollElement.scrollTop >= previous.height
+		) {
+			scrollElement.scrollBy({ top: pendingHeight - previous.height, behavior: "instant" })
+		}
+	}, [pendingHeight, pendingParentUuid, scrollElement])
 
 	const handleOpen = useListingOpen({
 		items: sortedItems,
@@ -368,6 +402,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			rowHeight: effectiveViewMode === "list" ? ROW_HEIGHT : TILE_ROW_HEIGHT,
 			tileWidth: TILE_WIDTH
 		},
+		offsetTop: pendingHeight,
 		selection: {
 			read: () => useDriveStore.getState().selectedItems,
 			write: items => {
@@ -714,121 +749,132 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						disabled={!isSortableVariant(variant)}
 					/>
 				) : null}
-				{hasPendingRows && pendingParentUuid !== undefined ? (
-					<PendingUploads
-						parentUuid={pendingParentUuid}
-						viewMode={effectiveViewMode}
-						columns={columns}
-					/>
-				) : null}
-				{withBackgroundMenu(
-					<div
-						ref={setScrollElement}
-						role="listbox"
-						aria-multiselectable="true"
-						aria-label={t("driveListLabel")}
-						tabIndex={-1}
-						onKeyDown={handleKeyDown}
-						onPointerDown={marquee.onPointerDown}
-						className="min-h-0 flex-1 overflow-y-auto"
-						style={effectiveViewMode === "grid" ? GRID_LISTBOX_STYLE : undefined}
-					>
-						{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps
-						    the owned-element relationship intact (an unlabelled generic in between breaks it). */}
+				<div className="relative flex min-h-0 flex-1 flex-col">
+					{hasPendingRows && pendingParentUuid !== undefined && pendingScrolledAway ? (
+						<PendingUploadsBar
+							parentUuid={pendingParentUuid}
+							onShow={() => {
+								scrollElement?.scrollTo({ top: 0, behavior: "smooth" })
+							}}
+						/>
+					) : null}
+					{withBackgroundMenu(
 						<div
-							role="presentation"
-							style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
+							ref={setScrollElement}
+							role="listbox"
+							aria-multiselectable="true"
+							aria-label={t("driveListLabel")}
+							tabIndex={-1}
+							onKeyDown={handleKeyDown}
+							onPointerDown={marquee.onPointerDown}
+							className="min-h-0 flex-1 overflow-y-auto"
+							style={effectiveViewMode === "grid" ? GRID_LISTBOX_STYLE : undefined}
 						>
-							<MarqueeRect store={marquee.rectStore} />
-							{effectiveViewMode === "list"
-								? listVirtualizer.getVirtualItems().map(virtualRow => {
-										const item = sortedItems[virtualRow.index]
+							{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps
+						    the owned-element relationship intact (an unlabelled generic in between breaks it). */}
+							<div
+								role="presentation"
+								style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
+							>
+								<MarqueeRect store={marquee.rectStore} />
+								{hasPendingRows && pendingParentUuid !== undefined ? (
+									<PendingUploads
+										parentUuid={pendingParentUuid}
+										viewMode={effectiveViewMode}
+										columns={columns}
+										blockRef={setPendingBlock}
+									/>
+								) : null}
+								{effectiveViewMode === "list"
+									? listVirtualizer.getVirtualItems().map(virtualRow => {
+											const item = sortedItems[virtualRow.index]
 
-										if (!item) {
-											return null
-										}
+											if (!item) {
+												return null
+											}
 
-										// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
-										// state from "omitted") — spread it in only when there's a real string to show.
-										const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
+											// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
+											// state from "omitted") — spread it in only when there's a real string to show.
+											const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
 
-										return (
-											<DriveRow
+											return (
+												<DriveRow
+													key={virtualRow.key}
+													item={item}
+													index={virtualRow.index}
+													total={sortedItems.length}
+													selected={selectedRowKeys.has(driveRowKey(item))}
+													active={virtualRow.index === safeActiveIndex}
+													variant={variant}
+													splat={splat}
+													start={virtualRow.start}
+													{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+													directorySize={directorySizes.get(item.data.uuid)}
+													selectedItems={reconciledSelectedItems}
+													onPointerSelect={handlePointerSelect}
+													onCursorMove={setCursor}
+													onOpen={handleOpen}
+													onItemAction={handleItemAction}
+													destinationActions={destination.actionsFor}
+													onBulkAction={handleBulkDialogAction}
+													registerRef={registerRef}
+												/>
+											)
+										})
+									: gridVirtualizer.getVirtualItems().map(virtualRow => (
+											<div
 												key={virtualRow.key}
-												item={item}
-												index={virtualRow.index}
-												total={sortedItems.length}
-												selected={selectedRowKeys.has(driveRowKey(item))}
-												active={virtualRow.index === safeActiveIndex}
-												variant={variant}
-												splat={splat}
-												start={virtualRow.start}
-												{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
-												directorySize={directorySizes.get(item.data.uuid)}
-												selectedItems={reconciledSelectedItems}
-												onPointerSelect={handlePointerSelect}
-												onCursorMove={setCursor}
-												onOpen={handleOpen}
-												onItemAction={handleItemAction}
-												destinationActions={destination.actionsFor}
-												onBulkAction={handleBulkDialogAction}
-												registerRef={registerRef}
-											/>
-										)
-									})
-								: gridVirtualizer.getVirtualItems().map(virtualRow => (
-										<div
-											key={virtualRow.key}
-											role="presentation"
-											style={{
-												position: "absolute",
-												top: 0,
-												left: 0,
-												width: "100%",
-												transform: `translateY(${String(virtualRow.start)}px)`,
-												display: "grid",
-												gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
-											}}
-										>
-											{Array.from({ length: columns }, (_, column) => {
-												const itemIndex = virtualRow.index * columns + column
-												const item = sortedItems[itemIndex]
+												role="presentation"
+												style={{
+													position: "absolute",
+													top: 0,
+													left: 0,
+													width: "100%",
+													transform: `translateY(${String(virtualRow.start)}px)`,
+													display: "grid",
+													gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
+												}}
+											>
+												{Array.from({ length: columns }, (_, column) => {
+													const itemIndex = virtualRow.index * columns + column
+													const item = sortedItems[itemIndex]
 
-												if (!item) {
-													return null
-												}
+													if (!item) {
+														return null
+													}
 
-												// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a
-												// distinct state from "omitted") — spread it in only when there's a real string to show.
-												const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
+													// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a
+													// distinct state from "omitted") — spread it in only when there's a real string to show.
+													const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
 
-												return (
-													<DriveTile
-														key={driveRowKey(item)}
-														item={item}
-														index={itemIndex}
-														total={sortedItems.length}
-														selected={selectedRowKeys.has(driveRowKey(item))}
-														active={itemIndex === safeActiveIndex}
-														variant={variant}
-														splat={splat}
-														{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
-														selectedItems={reconciledSelectedItems}
-														onPointerSelect={handlePointerSelect}
-														onCursorMove={setCursor}
-														onOpen={handleOpen}
-														onItemAction={handleItemAction}
-														destinationActions={destination.actionsFor}
-														onBulkAction={handleBulkDialogAction}
-														registerRef={registerRef}
-													/>
-												)
-											})}
-										</div>
-									))}
+													return (
+														<DriveTile
+															key={driveRowKey(item)}
+															item={item}
+															index={itemIndex}
+															total={sortedItems.length}
+															selected={selectedRowKeys.has(driveRowKey(item))}
+															active={itemIndex === safeActiveIndex}
+															variant={variant}
+															splat={splat}
+															{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+															selectedItems={reconciledSelectedItems}
+															onPointerSelect={handlePointerSelect}
+															onCursorMove={setCursor}
+															onOpen={handleOpen}
+															onItemAction={handleItemAction}
+															destinationActions={destination.actionsFor}
+															onBulkAction={handleBulkDialogAction}
+															registerRef={registerRef}
+														/>
+													)
+												})}
+											</div>
+										))}
+							</div>
 						</div>
-					</div>
-				)}
+					)}
+				</div>
 				{/* One strip, one 32px row — the search progress notes and the hidden-row count share it, so
 				    they can never stack into a second bar. Both search reads compare against the PRE-hide
 				    count: post-hide, "Showing N of M" would render forever and its N would mean the wrong

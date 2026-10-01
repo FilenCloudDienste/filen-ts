@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next"
 import { ArrowDownIcon, ArrowUpIcon } from "lucide-react"
 import { DRIVE_SORT_PARTS, nextColumnSort, type DriveSortBy, type DriveSortField } from "@/features/drive/lib/sort"
 import { cn } from "@filen/shared"
+import { LIST_MODIFIED_COLUMN_CLASS, LIST_SIZE_COLUMN_CLASS, LIST_TRAILING_SLOT_CLASS } from "@/features/drive/lib/listingCells"
 
 export interface ListColumnHeaderProps {
 	sort: DriveSortBy
@@ -78,7 +79,7 @@ export function ListColumnHeader(props: ListColumnHeaderProps) {
 			    the shell puts the sidebar back into the row, so the card is at its narrowest just above
 			    that breakpoint — the row's variant-only labels (driveRow.tsx) ride with modified for
 			    the same reason. */}
-			<div className="hidden w-20 shrink-0 justify-end sm:flex">
+			<div className={cn(LIST_SIZE_COLUMN_CLASS, "justify-end sm:flex")}>
 				<ColumnButton
 					{...props}
 					field="size"
@@ -86,7 +87,7 @@ export function ListColumnHeader(props: ListColumnHeaderProps) {
 					align="end"
 				/>
 			</div>
-			<div className="hidden w-28 shrink-0 justify-end lg:flex">
+			<div className={cn(LIST_MODIFIED_COLUMN_CLASS, "justify-end lg:flex")}>
 				<ColumnButton
 					{...props}
 					field="lastModified"
@@ -97,7 +98,7 @@ export function ListColumnHeader(props: ListColumnHeaderProps) {
 			{/* Holds the row's trailing ⋯ trigger slot (driveRow.tsx), so size/modified sit over their values. */}
 			<span
 				aria-hidden="true"
-				className="size-6 shrink-0 pointer-coarse:size-8"
+				className={LIST_TRAILING_SLOT_CLASS}
 			/>
 		</div>
 	)

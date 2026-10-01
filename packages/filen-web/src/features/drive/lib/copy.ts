@@ -208,7 +208,8 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 		size: 0,
 		bytesTransferred: 0,
 		status: "copying",
-		parentUuid: destination.uuid,
+		// Keyed as the destination's listing is (null for the root), so its pending row finds it.
+		parentUuid: normalizeParentUuid(destination.uuid, currentRootUuid()),
 		startedAt: Date.now()
 	}
 

@@ -7,6 +7,7 @@ import { DriveCellContextMenuContent } from "@/features/drive/components/bulkMen
 import { useDriveItemCell, type DriveItemCellProps } from "@/features/drive/hooks/useDriveItemCell"
 import { dropHighlightClass } from "@/features/drive/hooks/useDriveDropTarget"
 import { cn } from "@filen/shared"
+import { LIST_MODIFIED_COLUMN_CLASS, LIST_NAME_CLASS, LIST_ROW_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
@@ -80,7 +81,8 @@ export function DriveRow({
 							transform: `translateY(${String(start)}px)`
 						}}
 						className={cn(
-							"group/row flex h-10 items-center gap-3 px-3 text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
+							LIST_ROW_CLASS,
+							"group/row focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
 							dropHighlightClass(drop),
 							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
@@ -98,7 +100,7 @@ export function DriveRow({
 							imgClassName="size-6 shrink-0 rounded-md object-cover"
 							iconClassName="size-6 shrink-0"
 						/>
-						<span className="min-w-0 flex-1 truncate">{name}</span>
+						<span className={LIST_NAME_CLASS}>{name}</span>
 						{/* These two ride with the Modified column (see directoryListing.tsx's header): their flex
 						    base size is their own content width while the name's is 0, so every pixel the card is
 						    short comes out of the name first. Non-monotonic on purpose — the card is widest just
@@ -123,10 +125,10 @@ export function DriveRow({
 								<span className="sr-only">{t("driveFavorited")}</span>
 							</>
 						) : null}
-						<span className="hidden w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
+						<span className={cn(LIST_SIZE_COLUMN_CLASS, "text-right text-xs text-muted-foreground tabular-nums")}>
 							{formatItemSize(item, directorySize)}
 						</span>
-						<span className="hidden w-28 shrink-0 text-right text-xs text-muted-foreground lg:block">
+						<span className={cn(LIST_MODIFIED_COLUMN_CLASS, "text-right text-xs text-muted-foreground")}>
 							{formatModifiedDate(item)}
 						</span>
 						<DropdownMenu>

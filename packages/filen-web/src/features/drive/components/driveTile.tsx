@@ -7,6 +7,7 @@ import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useDriveItemCell, type DriveItemCellProps } from "@/features/drive/hooks/useDriveItemCell"
 import { dropHighlightClass } from "@/features/drive/hooks/useDriveDropTarget"
 import { cn } from "@filen/shared"
+import { TILE_CLASS, TILE_FACE_CLASS, TILE_NAME_CLASS, TILE_SUBLINE_CLASS } from "@/features/drive/lib/listingCells"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
@@ -67,7 +68,8 @@ export function DriveTile({
 						// below stays the deterministic square useDriveVirtualizer's row-height estimate
 						// assumes — see gridLayout.ts's own comment on the shared constants.
 						className={cn(
-							"group/tile relative flex w-44 shrink-0 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
+							TILE_CLASS,
+							"group/tile focus-ring-row outline-none select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
 							dropHighlightClass(drop),
 							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
@@ -85,7 +87,7 @@ export function DriveTile({
 						a bare glyph floating on the canvas. An opaque thumbnail paints over the tile's own
 						aria-selected background, so selection needs its own ring here too — see
 						colorDialog.tsx's identical ring-on-a-filled-swatch idiom. */}
-						<div className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl bg-muted/40 group-aria-selected/tile:ring-2 group-aria-selected/tile:ring-ring">
+						<div className={cn(TILE_FACE_CLASS, "group-aria-selected/tile:ring-2 group-aria-selected/tile:ring-ring")}>
 							<ItemThumbnail
 								item={item}
 								imgClassName="size-full object-cover"
@@ -149,7 +151,7 @@ export function DriveTile({
 								/>
 							</DropdownMenu>
 						</div>
-						<span className="line-clamp-2 w-full text-xs break-words">{name}</span>
+						<span className={TILE_NAME_CLASS}>{name}</span>
 						{/* A cross-directory search hit gets the same visible sub-line list view already
 						renders (driveRow.tsx), not just a hover tooltip (the title attr below stays too, for
 						the full untruncated path on hover) — a tile has less room than a row, so this and the
@@ -157,9 +159,9 @@ export function DriveTile({
 						runs in the "drive" variant, where `shared` is never set, so this never actually collides
 						in practice). */}
 						{searchHit ? (
-							<span className="w-full truncate text-[0.7rem] text-muted-foreground">{searchParentPath}</span>
+							<span className={cn(TILE_SUBLINE_CLASS, "text-muted-foreground")}>{searchParentPath}</span>
 						) : shared ? (
-							<span className="w-full truncate text-[0.7rem] text-muted-foreground">
+							<span className={cn(TILE_SUBLINE_CLASS, "text-muted-foreground")}>
 								{t(shared.labelKey, { name: shared.name })}
 							</span>
 						) : null}

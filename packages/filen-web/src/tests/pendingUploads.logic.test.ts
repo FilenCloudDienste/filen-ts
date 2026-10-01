@@ -2,20 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { useTransfersStore, type Transfer, type UploadBatchRef } from "@/features/transfers/store/useTransfersStore"
 import {
-	hasPendingUploads,
 	parsePendingRowKey,
 	pendingCancelSubject,
+	pendingCopyIds,
+	pendingCopySpeed,
 	pendingCancelTargets,
 	pendingDismissTargets,
 	pendingFailedCount,
 	pendingGroupProgress,
 	pendingGroupSpeed,
+	pendingRowCount,
 	pendingRunFigures,
 	pendingSummaryFigures,
 	pendingSummarySamples,
 	pendingUploadRowKeys
 } from "@/features/drive/lib/pendingUploads.logic"
 import { makeTransfer } from "@/tests/fixtures/transfers"
+import { createCopyJob } from "@/features/drive/lib/copy.logic"
 
 const DIR = "dir-uuid"
 const OTHER_DIR = "other-dir-uuid"
@@ -106,7 +109,7 @@ describe("pendingUploadRowKeys — grouping", () => {
 		directoryRun("tree", "Photos")
 
 		expect(keys()).toEqual(["directory:tree"])
-		expect(hasPendingUploads(store(), DIR)).toBe(true)
+		expect(pendingRowCount(store(), DIR) > 0).toBe(true)
 	})
 
 	it("counts a directory upload as one unit toward the summary threshold", () => {
@@ -130,7 +133,7 @@ describe("pendingUploadRowKeys — grouping", () => {
 		store().add({ ...makeTransfer({ id: "download", direction: "download", status: "downloading" }) })
 
 		expect(keys()).toEqual([])
-		expect(hasPendingUploads(store(), DIR)).toBe(false)
+		expect(pendingRowCount(store(), DIR) > 0).toBe(false)
 		expect(keys(OTHER_DIR)).toEqual(["upload:elsewhere"])
 	})
 
@@ -175,7 +178,7 @@ describe("pendingUploadRowKeys — grouping", () => {
 
 		expect(keys()).toEqual(["failed"])
 		expect(pendingFailedCount(store(), DIR)).toBe(4)
-		expect(hasPendingUploads(store(), DIR)).toBe(true)
+		expect(pendingRowCount(store(), DIR) > 0).toBe(true)
 	})
 
 	it("keeps a directory upload that ended with failures as a failed row, and drops one that ended clean", () => {
@@ -217,20 +220,20 @@ describe("pendingUploadRowKeys — grouping", () => {
 		expect(keys()).toEqual(before)
 	})
 
-	it("agrees with hasPendingUploads in every state", () => {
+	it("counts the rows pendingUploadRowKeys gives, in every state", () => {
 		const run = plainRun("run")
 
-		expect(hasPendingUploads(store(), DIR)).toBe(keys().length > 0)
+		expect(pendingRowCount(store(), DIR)).toBe(keys().length)
 
 		addUpload("a", run)
 
-		expect(hasPendingUploads(store(), DIR)).toBe(true)
+		expect(pendingRowCount(store(), DIR) > 0).toBe(true)
 
 		store().settle("a", "done")
 		store().endUploadBatch(run.id)
 
 		expect(keys()).toEqual([])
-		expect(hasPendingUploads(store(), DIR)).toBe(false)
+		expect(pendingRowCount(store(), DIR) > 0).toBe(false)
 	})
 })
 
@@ -240,6 +243,7 @@ describe("parsePendingRowKey", () => {
 		expect(parsePendingRowKey("failedUpload:a")).toEqual({ kind: "failedUpload", id: "a" })
 		expect(parsePendingRowKey("directory:t")).toEqual({ kind: "directory", id: "t" })
 		expect(parsePendingRowKey("failedDirectory:t")).toEqual({ kind: "failedDirectory", id: "t" })
+		expect(parsePendingRowKey("copy:j")).toEqual({ kind: "copy", id: "j" })
 		expect(parsePendingRowKey("uploading")).toEqual({ kind: "uploading", id: "" })
 		expect(parsePendingRowKey("failed")).toEqual({ kind: "failed", id: "" })
 	})
@@ -256,8 +260,8 @@ describe("run totals — the summary and directory rows' figures", () => {
 		store().setProgress("a", 400)
 		store().setProgress("b", 600)
 
-		expect(pendingSummaryFigures(store(), DIR)).toEqual({ files: 2, bytes: 4_000, transferred: 1_000 })
-		expect(pendingRunFigures(store(), tree.id)).toEqual({ files: 1, bytes: 3_000, transferred: 600 })
+		expect(pendingSummaryFigures(store(), DIR)).toEqual({ files: 2, copies: 0, bytes: 4_000, transferred: 1_000 })
+		expect(pendingRunFigures(store(), tree.id)).toEqual({ files: 1, copies: 0, bytes: 3_000, transferred: 600 })
 	})
 
 	it("keeps a finished file's bytes, so the run's progress never moves backwards", () => {
@@ -276,7 +280,7 @@ describe("run totals — the summary and directory rows' figures", () => {
 
 		const after = pendingSummaryFigures(store(), DIR)
 
-		expect(after).toEqual({ files: 1, bytes: 2_000, transferred: 1_100 })
+		expect(after).toEqual({ files: 1, copies: 0, bytes: 2_000, transferred: 1_100 })
 		expect(pendingGroupProgress(after, 0).percent).toBeGreaterThan(before)
 	})
 
@@ -291,7 +295,7 @@ describe("run totals — the summary and directory rows' figures", () => {
 		store().settle("a", "error", sdkDto("Timeout"))
 		store().settle("b", "cancelled")
 
-		expect(pendingSummaryFigures(store(), DIR)).toEqual({ files: 1, bytes: 4_000, transferred: 0 })
+		expect(pendingSummaryFigures(store(), DIR)).toEqual({ files: 1, copies: 0, bytes: 4_000, transferred: 0 })
 		expect(store().uploadBatches[run.id]).toMatchObject({ failed: 1, error: sdkDto("Timeout") })
 	})
 
@@ -338,9 +342,15 @@ describe("run totals — the summary and directory rows' figures", () => {
 	})
 
 	it("reports percent and a stepped time left from the measured speed", () => {
-		expect(pendingGroupProgress({ files: 2, bytes: 4_000, transferred: 1_000 }, 100)).toEqual({ percent: 25, etaSeconds: 30 })
-		expect(pendingGroupProgress({ files: 2, bytes: 4_000, transferred: 1_000 }, 0)).toEqual({ percent: 25, etaSeconds: null })
-		expect(pendingGroupProgress({ files: 0, bytes: 0, transferred: 0 }, 100)).toEqual({ percent: 0, etaSeconds: null })
+		expect(pendingGroupProgress({ files: 2, copies: 0, bytes: 4_000, transferred: 1_000 }, 100)).toEqual({
+			percent: 25,
+			etaSeconds: 30
+		})
+		expect(pendingGroupProgress({ files: 2, copies: 0, bytes: 4_000, transferred: 1_000 }, 0)).toEqual({
+			percent: 25,
+			etaSeconds: null
+		})
+		expect(pendingGroupProgress({ files: 0, copies: 0, bytes: 0, transferred: 0 }, 100)).toEqual({ percent: 0, etaSeconds: null })
 	})
 })
 
@@ -348,7 +358,11 @@ describe("pendingCancelTargets / pendingDismissTargets", () => {
 	it("cancels a single upload by its id", () => {
 		addUpload("a", plainRun("run"))
 
-		expect(pendingCancelTargets(store(), "upload:a", DIR)).toEqual({ transferIds: new Set(["a"]), batchIds: new Set() })
+		expect(pendingCancelTargets(store(), "upload:a", DIR)).toEqual({
+			transferIds: new Set(["a"]),
+			batchIds: new Set(),
+			copyIds: new Set()
+		})
 	})
 
 	it("cancels a directory upload's run and only its running files", () => {
@@ -362,7 +376,8 @@ describe("pendingCancelTargets / pendingDismissTargets", () => {
 
 		expect(pendingCancelTargets(store(), "directory:tree", DIR)).toEqual({
 			transferIds: new Set(["a"]),
-			batchIds: new Set(["tree"])
+			batchIds: new Set(["tree"]),
+			copyIds: new Set()
 		})
 	})
 
@@ -376,12 +391,13 @@ describe("pendingCancelTargets / pendingDismissTargets", () => {
 
 		expect(pendingCancelTargets(store(), "uploading", DIR)).toEqual({
 			transferIds: new Set(["a", "b"]),
-			batchIds: new Set(["first", "tree"])
+			batchIds: new Set(["first", "tree"]),
+			copyIds: new Set()
 		})
 	})
 
 	it("cancels nothing from a failed row", () => {
-		expect(pendingCancelTargets(store(), "failed", DIR)).toEqual({ transferIds: new Set(), batchIds: new Set() })
+		expect(pendingCancelTargets(store(), "failed", DIR)).toEqual({ transferIds: new Set(), batchIds: new Set(), copyIds: new Set() })
 	})
 
 	it("dismisses every failed unit into the directory from the failed summary row", () => {
@@ -396,9 +412,21 @@ describe("pendingCancelTargets / pendingDismissTargets", () => {
 		store().failUploadBatchItems(tree.id, 1)
 		store().endUploadBatch(tree.id)
 
-		expect(pendingDismissTargets(store(), "failed", DIR)).toEqual({ transferIds: new Set(["a"]), batchIds: new Set(["tree"]) })
-		expect(pendingDismissTargets(store(), "failedUpload:a", DIR)).toEqual({ transferIds: new Set(["a"]), batchIds: new Set() })
-		expect(pendingDismissTargets(store(), "failedDirectory:tree", DIR)).toEqual({ transferIds: new Set(), batchIds: new Set(["tree"]) })
+		expect(pendingDismissTargets(store(), "failed", DIR)).toEqual({
+			transferIds: new Set(["a"]),
+			batchIds: new Set(["tree"]),
+			copyIds: new Set()
+		})
+		expect(pendingDismissTargets(store(), "failedUpload:a", DIR)).toEqual({
+			transferIds: new Set(["a"]),
+			batchIds: new Set(),
+			copyIds: new Set()
+		})
+		expect(pendingDismissTargets(store(), "failedDirectory:tree", DIR)).toEqual({
+			transferIds: new Set(),
+			batchIds: new Set(["tree"]),
+			copyIds: new Set()
+		})
 	})
 })
 
@@ -409,9 +437,9 @@ describe("pendingCancelSubject", () => {
 		addUpload("a", plainRun("run"))
 		addUpload("b", tree)
 
-		expect(pendingCancelSubject(store(), "upload:a", DIR)).toBe("a.txt")
-		expect(pendingCancelSubject(store(), "directory:tree", DIR)).toBe("Photos")
-		expect(pendingCancelSubject(store(), "uploading", DIR)).toBe(2)
+		expect(pendingCancelSubject(store(), "upload:a", DIR)).toEqual({ name: "a.txt" })
+		expect(pendingCancelSubject(store(), "directory:tree", DIR)).toEqual({ name: "Photos" })
+		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 2, copies: 0 })
 
 		store().settle("a", "done")
 		store().cancelUploadBatches(new Set([tree.id]))
@@ -439,5 +467,65 @@ describe("store — removeMany and removeUploadBatches", () => {
 		expect(listener).toHaveBeenCalledTimes(2)
 		expect(store().transfers.map(transfer => transfer.id)).toEqual(["c"])
 		expect(store().uploadBatches).toEqual({})
+	})
+})
+
+function addCopy(id: string, parentUuid: string | null = DIR, overrides: Partial<Transfer> = {}): void {
+	store().add(makeTransfer({ id, name: `${id} copy`, direction: "copy", status: "copying", parentUuid, ...overrides }))
+}
+
+describe("copies into the directory", () => {
+	it("gives a running copy its own row, after the uploads, and none once it settles", () => {
+		addUpload("a", plainRun("run"))
+		addCopy("job")
+		addCopy("elsewhere", OTHER_DIR)
+
+		expect(keys()).toEqual(["upload:a", "copy:job"])
+		expect(pendingRowCount(store(), DIR)).toBe(2)
+
+		store().settle("job", "error", sdkDto("Timeout"))
+
+		expect(keys()).toEqual(["upload:a"])
+	})
+
+	it("counts copies toward the summary threshold and its figures", () => {
+		const run = plainRun("run")
+
+		addUpload("a", run, { size: 1_000 })
+		addUpload("b", run, { size: 1_000 })
+		addCopy("job-1", DIR, { size: 4_000 })
+		addCopy("job-2", DIR, { size: 2_000 })
+		store().setProgress("job-1", 1_000)
+
+		expect(keys()).toEqual(["uploading"])
+		expect(pendingSummaryFigures(store(), DIR)).toEqual({ files: 2, copies: 2, bytes: 8_000, transferred: 1_000 })
+		expect(pendingCopyIds(store(), DIR)).toEqual(["job-1", "job-2"])
+		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 2, copies: 2 })
+	})
+
+	it("stops the summary's copies through their own cancel, and a copy row through its prompt", () => {
+		const run = plainRun("run")
+
+		for (const id of ["a", "b", "c"]) {
+			addUpload(id, run)
+		}
+
+		addCopy("job")
+
+		expect(pendingCancelTargets(store(), "uploading", DIR)).toEqual({
+			transferIds: new Set(["a", "b", "c"]),
+			batchIds: new Set([run.id]),
+			copyIds: new Set(["job"])
+		})
+		expect(pendingCancelTargets(store(), "copy:job", DIR)).toEqual({ transferIds: new Set(), batchIds: new Set(), copyIds: new Set() })
+	})
+})
+
+describe("pendingCopySpeed", () => {
+	it("adds up the running jobs' own rates, skipping paused and unknown ones", () => {
+		const running = { ...createCopyJob("a", { uuid: DIR, name: "Dir" }, 1), bytesPerSecond: 100 }
+		const paused = { ...createCopyJob("b", { uuid: DIR, name: "Dir" }, 1), bytesPerSecond: 50, paused: true }
+
+		expect(pendingCopySpeed({ a: running, b: paused }, ["a", "b", "gone"])).toBe(100)
 	})
 })

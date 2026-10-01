@@ -4,7 +4,6 @@ import {
 	CheckIcon,
 	CopyIcon,
 	DownloadIcon,
-	FilesIcon,
 	FolderSearchIcon,
 	PanelBottomOpenIcon,
 	PauseIcon,
@@ -13,31 +12,15 @@ import {
 	UploadIcon,
 	XIcon
 } from "lucide-react"
-import {
-	copyJobRate,
-	formatBytes,
-	formatBytesFixed,
-	formatBytesPerSecond,
-	formatSecondsToMediaClock,
-	isCopyJobRunning,
-	cn
-} from "@filen/shared"
+import { formatBytes, formatBytesFixed, isCopyJobRunning, cn } from "@filen/shared"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import {
-	transferProgress,
-	activeStatusLabelKey,
-	finishedStatusLabelKey,
-	transferIconKey,
-	transferRate,
-	percentFormat,
-	runningPercentFraction,
-	type TransferRate
-} from "@/features/transfers/components/transferRow.logic"
+import { transferProgress, activeStatusLabelKey, finishedStatusLabelKey } from "@/features/transfers/components/transferRow.logic"
 import { setTransferPaused } from "@/features/transfers/lib/control"
 import { showCopyToast } from "@/features/transfers/lib/copyToast"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
-import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
+import { TransferIcon } from "@/features/transfers/components/transferIcon"
+import { useRunningDetails, useTransferRate } from "@/features/transfers/hooks/useTransferFigures"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
@@ -173,42 +156,36 @@ const ROW_ACTION_CLASS = "text-muted-foreground hover:text-foreground"
 // screen confirms the cancel, see onRequestCancel); finished rows can open where the item landed and
 // be removed from the list, which touches nothing but the list.
 export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: TransferRowProps) {
-	const { t, i18n } = useTranslation("transfers")
+	const { t } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
 	const active = isActiveTransfer(transfer.status)
 	const job = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id] : undefined))
-	const rowSamples = useTransfersStore(state => state.rowSpeedSamples[transfer.id])
 	// A stopped copy's row stays active past its job while its copies move to the trash, which can't be
 	// paused or stopped.
 	const trashing = active && job !== undefined && !isCopyJobRunning(job)
-	// A copy's rate comes off its job, which knows the files it has not reached yet.
-	const rate: TransferRate | null =
-		transfer.direction === "copy" ? (job === undefined ? null : copyJobRate(job)) : transferRate(transfer, rowSamples ?? [])
+	const rate = useTransferRate(transfer)
+	const runningDetails = useRunningDetails()
 	// What "Show in directory" opens: a landed upload's file, or the first item a copy created.
 	const revealItem =
 		transfer.status === "done" || transfer.status === "completedWithErrors" ? (transfer.item ?? job?.created[0]) : undefined
 
-	// The running line keeps its figures still without reserving space for them. Live figures keep their
-	// decimals (formatBytesFixed), so a tick never changes their length, and tabular digits their width;
-	// what still changes length does so rarely (9% to 10%, 10:00 to 9:59). The speed is the exception, as
-	// it rises and falls across a digit or a unit all the time, so it goes last, where it has nothing to
-	// push. A finished row's figures no longer move, so they read plainly.
-	const bytes =
-		transfer.size > 0
-			? t("transfersRowBytesProgress", { done: formatBytesFixed(transfer.bytesTransferred), total: formatBytesFixed(transfer.size) })
-			: formatBytesFixed(transfer.bytesTransferred)
+	// The running line keeps its figures still without reserving space for them (useRunningDetails); a
+	// finished row's figures no longer move, so they read plainly.
 	let details: (string | null)[]
 
 	if (trashing) {
 		details = [t("transfersStatusMovingToTrash")]
 	} else if (active && transfer.paused) {
-		details = [t("transfersStatusPaused"), bytes]
+		details = [t("transfersStatusPaused"), formatBytesFixed(transfer.bytesTransferred)]
 	} else if (active) {
 		details = [
-			bytes,
-			transfer.size > 0 ? percentFormat(i18n.language).format(runningPercentFraction(progress)) : null,
-			rate?.etaSeconds == null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(rate.etaSeconds) }),
-			rate === null ? null : formatBytesPerSecond(rate.bytesPerSecond)
+			runningDetails({
+				transferred: transfer.bytesTransferred,
+				size: transfer.size,
+				percent: progress,
+				etaSeconds: rate?.etaSeconds ?? null,
+				bytesPerSecond: rate?.bytesPerSecond ?? null
+			}).full
 		]
 	} else if (transfer.status === "error") {
 		details = [
@@ -219,23 +196,12 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 		details = [t(finishedStatusLabelKey(transfer.status, transfer.direction)), formatBytes(transfer.size)]
 	}
 
-	const icon =
-		job?.glyph === "directory" ? (
-			<DirectoryGlyph
-				color="default"
-				className="size-5"
-			/>
-		) : job?.glyph === "items" ? (
-			<FilesIcon
-				aria-hidden="true"
-				className="size-5 text-muted-foreground"
-			/>
-		) : (
-			<FileTypeIcon
-				iconKey={transferIconKey(transfer)}
-				className="size-5"
-			/>
-		)
+	const icon = (
+		<TransferIcon
+			transfer={transfer}
+			className="size-5"
+		/>
+	)
 
 	return (
 		<li

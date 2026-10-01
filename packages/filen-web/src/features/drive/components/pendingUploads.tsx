@@ -1,19 +1,18 @@
-import { useLayoutEffect, useState, type ReactNode } from "react"
+import { useLayoutEffect, useState, type PointerEvent, type ReactNode, type Ref } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
-import { FilesIcon, XIcon } from "lucide-react"
-import { cn, formatBytesFixed, formatBytesPerSecond, formatSecondsToMediaClock } from "@filen/shared"
-import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
-import {
-	percentFormat,
-	runningPercentFraction,
-	transferIconKey,
-	transferProgress,
-	transferRate
-} from "@/features/transfers/components/transferRow.logic"
+import { ArrowUpIcon, FilesIcon, XIcon } from "lucide-react"
+import { cn, formatBytesFixed } from "@filen/shared"
+import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { transferProgress } from "@/features/transfers/components/transferRow.logic"
+import { TransferIcon } from "@/features/transfers/components/transferIcon"
+import { useRunningDetails, useTransferRate, type RunningDetails } from "@/features/transfers/hooks/useTransferFigures"
 import {
 	parsePendingRowKey,
 	pendingCancelSubject,
+	pendingCopyIds,
+	pendingCopySpeed,
 	pendingFailedCount,
 	pendingGroupProgress,
 	pendingGroupSpeed,
@@ -21,13 +20,24 @@ import {
 	pendingSummaryFigures,
 	pendingSummarySamples,
 	pendingUploadRowKeys,
+	type PendingGroupFigures,
 	type PendingRowKey
 } from "@/features/drive/lib/pendingUploads.logic"
 import { cancelPendingRow, dismissPendingRow } from "@/features/drive/lib/pendingUploads"
-import { GRID_INSET, ROW_HEIGHT, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
+import { TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
+import {
+	LIST_NAME_CLASS,
+	LIST_ROW_CLASS,
+	LIST_SIZE_COLUMN_CLASS,
+	LIST_TRAILING_SLOT_CLASS,
+	TILE_CLASS,
+	TILE_FACE_CLASS,
+	TILE_NAME_CLASS,
+	TILE_SUBLINE_CLASS
+} from "@/features/drive/lib/listingCells"
 import { flushListingCreates } from "@/features/drive/queries/drive"
 import type { DriveViewMode } from "@/features/drive/lib/preferences"
-import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
+import { DirectoryGlyph } from "@/features/drive/components/itemIcon"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
@@ -38,15 +48,24 @@ export interface PendingUploadsProps {
 	viewMode: DriveViewMode
 	// The grid's column count, so pending tiles line up with the items' tiles below them.
 	columns: number
+	// The block's element, which the listing watches to pin the bar once it scrolls away.
+	blockRef: Ref<HTMLDivElement>
 }
 
 type RowAction = (key: PendingRowKey) => void
 
-// Uploads running into the directory on screen, pinned above its items (pendingUploads.logic.ts has the
-// grouping). Outside the listbox, so they are no option, no index, no selection, drag or marquee target,
-// and a progress tick re-renders only the row it moved. List rows are ROW_HEIGHT tall, tiles a full tile
-// row, so the block's height only changes when a row comes or goes.
-export function PendingUploads({ parentUuid, viewMode, columns }: PendingUploadsProps) {
+// The rows sit in the listbox's scrolled layer but are no options: a press on them must not start the
+// listbox's selection or marquee. Keys need no guard, since the listbox leaves keys on buttons alone.
+function stopListboxPress(event: PointerEvent): void {
+	event.stopPropagation()
+}
+
+// Uploads and copies running into the directory on screen, as the first rows of its listing
+// (pendingUploads.logic.ts has the grouping). They scroll with the items, above the virtualized rows,
+// which start below them (the virtualizer's paddingStart); a progress tick re-renders only the row it
+// moved. List rows are ROW_HEIGHT tall and tiles a full tile row, so the block's height only changes when
+// a row comes or goes.
+export function PendingUploads({ parentUuid, viewMode, columns, blockRef }: PendingUploadsProps) {
 	const { t } = useTranslation("drive")
 	const keys = useTransfersStore(useShallow(state => pendingUploadRowKeys(state, parentUuid)))
 	// The row whose Cancel is being confirmed, kept here: a row that settles unmounts, and its confirm with it.
@@ -65,14 +84,26 @@ export function PendingUploads({ parentUuid, viewMode, columns }: PendingUploads
 		[keys]
 	)
 
+	function handleCancel(key: PendingRowKey): void {
+		const { kind, id } = parsePendingRowKey(key)
+
+		// A copy asks keep-or-trash through its own prompt, mounted once at the root.
+		if (kind === "copy") {
+			useCopyJobsStore.getState().setCancelPromptId(id)
+		} else {
+			setCancelKey(key)
+		}
+	}
+
 	function handleDismiss(key: PendingRowKey): void {
 		dismissPendingRow(key, parentUuid)
 	}
 
 	return (
 		<div
-			className={cn("shrink-0", viewMode === "list" && "border-b border-border/50")}
-			style={viewMode === "grid" ? { padding: `${String(GRID_INSET)}px ${String(GRID_INSET)}px 0` } : undefined}
+			ref={blockRef}
+			className="absolute inset-x-0 top-0"
+			onPointerDown={stopListboxPress}
 		>
 			<p
 				role="status"
@@ -97,7 +128,7 @@ export function PendingUploads({ parentUuid, viewMode, columns }: PendingUploads
 						rowKey={key}
 						parentUuid={parentUuid}
 						viewMode={viewMode}
-						onCancel={setCancelKey}
+						onCancel={handleCancel}
 						onDismiss={handleDismiss}
 					/>
 				))}
@@ -125,7 +156,8 @@ function PendingRow(props: RowProps) {
 	switch (parsePendingRowKey(props.rowKey).kind) {
 		case "upload":
 		case "failedUpload":
-			return <PendingUploadRow {...props} />
+		case "copy":
+			return <PendingTransferRow {...props} />
 		case "directory":
 		case "failedDirectory":
 			return <PendingDirectoryRow {...props} />
@@ -136,80 +168,76 @@ function PendingRow(props: RowProps) {
 	}
 }
 
-// The running line, in the transfers screen's order and figures: done of total, percent, time left, and
-// the speed last, as the one figure that keeps changing length.
-function useRunningDetails(): (figures: {
-	transferred: number
-	size: number
-	percent: number
-	etaSeconds: number | null
-	bytesPerSecond: number | null
-}) => string {
-	const { t, i18n } = useTranslation("transfers")
-
-	return ({ transferred, size, percent, etaSeconds, bytesPerSecond }) =>
-		[
-			size > 0
-				? t("transfersRowBytesProgress", { done: formatBytesFixed(transferred), total: formatBytesFixed(size) })
-				: formatBytesFixed(transferred),
-			size > 0 ? percentFormat(i18n.language).format(runningPercentFraction(percent)) : null,
-			etaSeconds === null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(etaSeconds) }),
-			bytesPerSecond === null || bytesPerSecond <= 0 ? null : formatBytesPerSecond(bytesPerSecond)
-		]
-			.filter(part => part !== null)
-			.join(" · ")
-}
-
 function useFailedDetails(): (error: ErrorDTO | undefined) => string {
 	const { t } = useTranslation("transfers")
 
 	return error => [t("transfersStatusError"), error === undefined ? null : errorLabel(error)].filter(part => part !== null).join(" · ")
 }
 
-function PendingUploadRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps) {
+// A failed row's figures: the one line, everywhere.
+function failedLine(text: string): RunningDetails {
+	return { full: text, percent: null, medium: text, short: text }
+}
+
+// The summary's figures, speed and progress, shared by its row and the pinned bar.
+function usePendingSummary(parentUuid: string | null): { figures: PendingGroupFigures; details: RunningDetails; percent: number } {
+	const figures = useTransfersStore(useShallow(state => pendingSummaryFigures(state, parentUuid)))
+	const samples = useTransfersStore(useShallow(state => pendingSummarySamples(state, parentUuid)))
+	const copyIds = useTransfersStore(useShallow(state => pendingCopyIds(state, parentUuid)))
+	const copySpeed = useCopyJobsStore(state => pendingCopySpeed(state.jobs, copyIds))
+	const runningDetails = useRunningDetails()
+	const speed = pendingGroupSpeed(samples) + copySpeed
+	const { percent, etaSeconds } = pendingGroupProgress(figures, speed)
+
+	return {
+		figures,
+		percent,
+		details: runningDetails({ transferred: figures.transferred, size: figures.bytes, percent, etaSeconds, bytesPerSecond: speed })
+	}
+}
+
+// Uploads only name their files; with copies in, the count is of transfers.
+function useSummaryLabel(): (figures: PendingGroupFigures) => string {
+	const { t } = useTranslation("drive")
+
+	return figures =>
+		figures.copies === 0
+			? t("drivePendingUploadsUploading", { count: figures.files })
+			: t("drivePendingTransfersRunning", { count: figures.files + figures.copies })
+}
+
+function RowButton({ label, onClick }: { label: string; onClick: () => void }) {
+	return (
+		<TooltipIconButton
+			label={label}
+			className={cn(LIST_TRAILING_SLOT_CLASS, "text-muted-foreground hover:text-foreground")}
+			onClick={onClick}
+		>
+			<XIcon />
+		</TooltipIconButton>
+	)
+}
+
+// One upload or copy. A copy's figures and glyph come off its job, as on the transfers screen.
+function PendingTransferRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps) {
 	const { t } = useTranslation(["transfers", "drive"])
 	const { kind, id } = parsePendingRowKey(rowKey)
 	const transfer = useTransfersStore(state => state.transfers.find(candidate => candidate.id === id))
-	const samples = useTransfersStore(state => state.rowSpeedSamples[id])
-	const runningDetails = useRunningDetails()
-	const failedDetails = useFailedDetails()
 
 	if (transfer === undefined) {
 		return null
 	}
 
 	const failed = kind === "failedUpload"
-	const progress = transferProgress(transfer)
-	const rate = transferRate(transfer, samples ?? [])
-	const details = failed
-		? failedDetails(transfer.error)
-		: transfer.paused
-			? [t("transfersStatusPaused"), formatBytesFixed(transfer.bytesTransferred)].join(" · ")
-			: runningDetails({
-					transferred: transfer.bytesTransferred,
-					size: transfer.size,
-					percent: progress,
-					etaSeconds: rate?.etaSeconds ?? null,
-					bytesPerSecond: rate?.bytesPerSecond ?? null
-				})
 
 	return (
-		<PendingCell
-			viewMode={viewMode}
-			icon={className => (
-				<FileTypeIcon
-					iconKey={transferIconKey(transfer)}
-					className={className}
-				/>
-			)}
-			name={transfer.name}
-			details={details}
-			progress={failed ? null : progress}
+		<PendingTransferCell
+			transfer={transfer}
 			failed={failed}
+			viewMode={viewMode}
 			action={
-				<TooltipIconButton
+				<RowButton
 					label={failed ? t("drive:drivePendingUploadsDismiss") : t("transfersRowCancel")}
-					className="text-muted-foreground hover:text-foreground"
 					onClick={() => {
 						if (failed) {
 							onDismiss(rowKey)
@@ -217,10 +245,70 @@ function PendingUploadRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps) {
 							onCancel(rowKey)
 						}
 					}}
-				>
-					<XIcon />
-				</TooltipIconButton>
+				/>
 			}
+		/>
+	)
+}
+
+function PendingTransferCell({
+	transfer,
+	failed,
+	viewMode,
+	action
+}: {
+	transfer: Transfer
+	failed: boolean
+	viewMode: DriveViewMode
+	action: ReactNode
+}) {
+	const { t } = useTranslation("transfers")
+	const rate = useTransferRate(transfer)
+	const runningDetails = useRunningDetails()
+	const failedDetails = useFailedDetails()
+	const progress = transferProgress(transfer)
+	let details: RunningDetails
+
+	if (failed) {
+		details = failedLine(failedDetails(transfer.error))
+	} else if (transfer.paused) {
+		const paused = t("transfersStatusPaused")
+
+		details = {
+			full: [paused, formatBytesFixed(transfer.bytesTransferred)].join(" · "),
+			percent: paused,
+			medium: paused,
+			short: paused
+		}
+	} else if (transfer.size === 0) {
+		// Nothing to measure yet (a copy still scanning what it copies): say what it is doing.
+		const status = t(transfer.direction === "copy" ? "transfersStatusCopying" : "transfersStatusUploading")
+
+		details = { full: status, percent: status, medium: status, short: status }
+	} else {
+		details = runningDetails({
+			transferred: transfer.bytesTransferred,
+			size: transfer.size,
+			percent: progress,
+			etaSeconds: rate?.etaSeconds ?? null,
+			bytesPerSecond: rate?.bytesPerSecond ?? null
+		})
+	}
+
+	return (
+		<PendingCell
+			viewMode={viewMode}
+			icon={className => (
+				<TransferIcon
+					transfer={transfer}
+					className={className}
+				/>
+			)}
+			name={transfer.name}
+			details={details}
+			progress={failed ? null : progress}
+			failed={failed}
+			action={action}
 		/>
 	)
 }
@@ -250,7 +338,7 @@ function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps
 			name={name}
 			details={
 				failed
-					? failedDetails(error)
+					? failedLine(failedDetails(error))
 					: runningDetails({
 							transferred: figures.transferred,
 							size: figures.bytes,
@@ -262,9 +350,8 @@ function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps
 			progress={failed ? null : percent}
 			failed={failed}
 			action={
-				<TooltipIconButton
+				<RowButton
 					label={failed ? t("drive:drivePendingUploadsDismiss") : t("transfersRowCancel")}
-					className="text-muted-foreground hover:text-foreground"
 					onClick={() => {
 						if (failed) {
 							onDismiss(rowKey)
@@ -272,21 +359,16 @@ function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps
 							onCancel(rowKey)
 						}
 					}}
-				>
-					<XIcon />
-				</TooltipIconButton>
+				/>
 			}
 		/>
 	)
 }
 
 function PendingSummaryRow({ rowKey, parentUuid, viewMode, onCancel }: RowProps) {
-	const { t } = useTranslation(["drive", "transfers"])
-	const figures = useTransfersStore(useShallow(state => pendingSummaryFigures(state, parentUuid)))
-	const samples = useTransfersStore(useShallow(state => pendingSummarySamples(state, parentUuid)))
-	const runningDetails = useRunningDetails()
-	const speed = pendingGroupSpeed(samples)
-	const { percent, etaSeconds } = pendingGroupProgress(figures, speed)
+	const { t } = useTranslation("transfers")
+	const { figures, details, percent } = usePendingSummary(parentUuid)
+	const summaryLabel = useSummaryLabel()
 
 	return (
 		<PendingCell
@@ -297,26 +379,17 @@ function PendingSummaryRow({ rowKey, parentUuid, viewMode, onCancel }: RowProps)
 					className={cn(className, "text-muted-foreground")}
 				/>
 			)}
-			name={t("drivePendingUploadsUploading", { count: figures.files })}
-			details={runningDetails({
-				transferred: figures.transferred,
-				size: figures.bytes,
-				percent,
-				etaSeconds,
-				bytesPerSecond: speed
-			})}
+			name={summaryLabel(figures)}
+			details={details}
 			progress={percent}
 			failed={false}
 			action={
-				<TooltipIconButton
-					label={t("transfers:transfersRowCancel")}
-					className="text-muted-foreground hover:text-foreground"
+				<RowButton
+					label={t("transfersRowCancel")}
 					onClick={() => {
 						onCancel(rowKey)
 					}}
-				>
-					<XIcon />
-				</TooltipIconButton>
+				/>
 			}
 		/>
 	)
@@ -336,26 +409,26 @@ function PendingFailedSummaryRow({ rowKey, parentUuid, viewMode, onDismiss }: Ro
 				/>
 			)}
 			name={t("drivePendingUploadsFailed", { count })}
-			details=""
+			details={failedLine("")}
 			progress={null}
 			failed
 			action={
-				<TooltipIconButton
+				<RowButton
 					label={t("drivePendingUploadsDismiss")}
-					className="text-muted-foreground hover:text-foreground"
 					onClick={() => {
 						onDismiss(rowKey)
 					}}
-				>
-					<XIcon />
-				</TooltipIconButton>
+				/>
 			}
 		/>
 	)
 }
 
-// The bar's fill is a transform, so a tick repaints it without laying anything out.
-function ProgressLine({ progress, label, className }: { progress: number; label: string; className: string }) {
+// The progress, filling the row (left to right) or the tile's face (bottom to top) behind its content.
+// A transform, so a tick repaints it without laying anything out.
+function ProgressFill({ progress, label, axis }: { progress: number; label: string; axis: "x" | "y" }) {
+	const fraction = String(progress / 100)
+
 	return (
 		<div
 			role="progressbar"
@@ -363,18 +436,18 @@ function ProgressLine({ progress, label, className }: { progress: number; label:
 			aria-valuemin={0}
 			aria-valuemax={100}
 			aria-valuenow={Math.round(progress)}
-			className={cn("overflow-hidden rounded-full bg-muted", className)}
-		>
-			<div
-				className="h-full origin-left bg-primary transition-transform duration-300 ease-out"
-				style={{ transform: `scaleX(${String(progress / 100)})` }}
-			/>
-		</div>
+			className={cn(
+				"absolute inset-0 -z-10 bg-primary/10 transition-transform duration-300 ease-out",
+				axis === "x" ? "origin-left" : "origin-bottom"
+			)}
+			style={{ transform: axis === "x" ? `scaleX(${fraction})` : `scaleY(${fraction})` }}
+		/>
 	)
 }
 
-// One pending row in either view: a list row the height of an item's row, or a tile the size of an item's
-// tile. A failed one drops its bar and reads in red.
+// One pending row in either view, laid out as an item's row or tile (listingCells.ts) so its columns sit
+// under the header: the figures take the Size and Modified columns together, and only the percent where
+// Modified is hidden. The name reads muted and the progress fills behind it; a failed one reads in red.
 function PendingCell({
 	viewMode,
 	icon,
@@ -387,31 +460,40 @@ function PendingCell({
 	viewMode: DriveViewMode
 	icon: (className: string) => ReactNode
 	name: string
-	details: string
+	details: RunningDetails
 	progress: number | null
 	failed: boolean
 	action: ReactNode
 }) {
-	const detailsClass = cn("truncate tabular-nums", failed ? "text-destructive" : "text-muted-foreground")
+	const tone = failed ? "text-destructive" : "text-muted-foreground"
 
 	if (viewMode === "list") {
 		return (
 			<li
 				aria-label={name}
-				className="relative flex shrink-0 items-center gap-3 px-3 text-sm"
-				style={{ height: ROW_HEIGHT }}
+				className={cn(LIST_ROW_CLASS, "relative isolate")}
 			>
-				{icon("size-6 shrink-0")}
-				<span className={cn("min-w-0 flex-1 truncate", failed && "text-destructive")}>{name}</span>
-				<span className={cn("max-w-[55%] shrink-0 text-right text-xs", detailsClass)}>{details}</span>
-				{action}
 				{progress === null ? null : (
-					<ProgressLine
+					<ProgressFill
 						progress={progress}
 						label={name}
-						className="absolute inset-x-3 bottom-0.5 h-0.5"
+						axis="x"
 					/>
 				)}
+				{icon("size-6 shrink-0")}
+				<span className={cn(LIST_NAME_CLASS, tone)}>{name}</span>
+				<span className={cn(LIST_SIZE_COLUMN_CLASS, "truncate text-right text-xs tabular-nums lg:hidden", tone)}>
+					{details.percent ?? details.short}
+				</span>
+				{/* The Size and Modified columns with the gap between them: w-20 + gap-3 + w-28. */}
+				<span
+					// The whole line, bytes included, for a pointer resting on the column.
+					title={details.full}
+					className={cn("hidden w-51 shrink-0 truncate text-right text-xs tabular-nums lg:block", tone)}
+				>
+					{details.medium}
+				</span>
+				{action}
 			</li>
 		)
 	}
@@ -419,27 +501,62 @@ function PendingCell({
 	return (
 		<li
 			aria-label={name}
-			className="flex w-44 flex-col gap-2 justify-self-center rounded-2xl p-2 text-center text-sm"
+			className={TILE_CLASS}
 		>
-			<div className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl bg-muted/40">
-				{icon("size-14")}
+			<div className={cn(TILE_FACE_CLASS, "isolate")}>
 				{progress === null ? null : (
-					<ProgressLine
+					<ProgressFill
 						progress={progress}
 						label={name}
-						className="absolute inset-x-3 bottom-3 h-1"
+						axis="y"
 					/>
 				)}
+				{icon(cn("size-14", !failed && "opacity-60"))}
 				<div className="absolute top-1 right-1">{action}</div>
 			</div>
-			<span className={cn("line-clamp-2 w-full text-xs break-words", failed && "text-destructive")}>{name}</span>
-			<span className={cn("w-full text-[0.7rem]", detailsClass)}>{details}</span>
+			<span className={cn(TILE_NAME_CLASS, tone)}>{name}</span>
+			<span className={cn(TILE_SUBLINE_CLASS, "tabular-nums", tone)}>{details.short}</span>
 		</li>
 	)
 }
 
-// The one confirm for whichever row's Cancel was pressed: the transfers screen's own for an upload or a
-// directory, a count for the summary. Closes itself once there is nothing left to cancel.
+// Pinned over the top of the listing while the rows are scrolled out of view: what they add up to, and a
+// press brings them back. Running transfers first; with none, the failed count.
+export function PendingUploadsBar({ parentUuid, onShow }: { parentUuid: string | null; onShow: () => void }) {
+	const { t } = useTranslation("drive")
+	const { figures, details, percent } = usePendingSummary(parentUuid)
+	const failedCount = useTransfersStore(state => pendingFailedCount(state, parentUuid))
+	const summaryLabel = useSummaryLabel()
+	const running = figures.files + figures.copies > 0
+
+	return (
+		<button
+			type="button"
+			aria-label={t("drivePendingShowTransfers")}
+			onClick={onShow}
+			className="absolute inset-x-0 top-0 isolate z-10 flex h-8 items-center gap-2 overflow-hidden border-b border-border/50 bg-background/90 px-3 text-xs shadow-sm focus-ring backdrop-blur-sm outline-none"
+		>
+			{running ? (
+				<ProgressFill
+					progress={percent}
+					label={summaryLabel(figures)}
+					axis="x"
+				/>
+			) : null}
+			<ArrowUpIcon
+				aria-hidden="true"
+				className="size-3.5 shrink-0 text-muted-foreground"
+			/>
+			<span className={cn("min-w-0 flex-1 truncate text-left", !running && "text-destructive")}>
+				{running ? summaryLabel(figures) : t("drivePendingUploadsFailed", { count: failedCount })}
+			</span>
+			{running ? <span className="hidden shrink-0 truncate text-muted-foreground tabular-nums sm:block">{details.full}</span> : null}
+		</button>
+	)
+}
+
+// The one confirm for whichever upload row's Cancel was pressed: the transfers screen's own for an upload
+// or a directory, a count for the summary. Closes itself once there is nothing left to cancel.
 function PendingCancelDialog({
 	parentUuid,
 	rowKey,
@@ -450,18 +567,26 @@ function PendingCancelDialog({
 	onClose: () => void
 }) {
 	const { t } = useTranslation(["transfers", "drive"])
-	const subject = useTransfersStore(state => (rowKey === null ? null : pendingCancelSubject(state, rowKey, parentUuid)))
+	const subject = useTransfersStore(useShallow(state => (rowKey === null ? null : pendingCancelSubject(state, rowKey, parentUuid))))
+	let title: string = t("transfersRowCancelConfirmTitle")
+	let body = ""
+
+	if (subject !== null && "name" in subject) {
+		body = t("transfersRowCancelConfirmBody", { name: subject.name })
+	} else if (subject !== null) {
+		title = t("drive:drivePendingUploadsCancelAllTitle")
+		body =
+			subject.copies === 0
+				? t("drive:drivePendingUploadsCancelAllBody", { count: subject.files })
+				: t("drive:drivePendingTransfersCancelAllBody", { count: subject.files + subject.copies })
+	}
 
 	return (
 		<ConfirmDialog
 			open={subject !== null}
 			pending={false}
-			title={typeof subject === "number" ? t("drive:drivePendingUploadsCancelAllTitle") : t("transfersRowCancelConfirmTitle")}
-			body={
-				typeof subject === "number"
-					? t("drive:drivePendingUploadsCancelAllBody", { count: subject })
-					: t("transfersRowCancelConfirmBody", { name: subject ?? "" })
-			}
+			title={title}
+			body={body}
 			confirmLabel={t("transfersRowCancel")}
 			cancelLabel={t("transfersCancelDialogDismiss")}
 			destructive

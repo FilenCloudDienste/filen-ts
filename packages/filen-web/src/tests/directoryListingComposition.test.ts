@@ -682,23 +682,24 @@ describe("DirectoryListing — pending uploads", () => {
 	}
 
 	function pendingList(): HTMLElement | null {
-		return screen.queryByRole("list", { name: "Uploads into this directory" })
+		return screen.queryByRole("list", { name: "Uploads and copies into this directory" })
 	}
 
 	beforeEach(() => {
 		useTransfersStore.setState({ transfers: [], speedSamples: [], rowSpeedSamples: {}, uploadBatches: {}, batchSpeedSamples: {} })
 	})
 
-	it("renders an upload into the directory on screen above the listbox, outside it, with a progress bar", () => {
+	it("renders an upload into the directory on screen as the listbox's first row, before its items, with a progress bar", () => {
 		startUpload(null)
 		renderListing({ items: [narrowItem(mockDir("Documents"))] })
 
 		const pending = pendingList()
 		const listbox = screen.getByRole("listbox")
+		const [firstRow] = within(listbox).getAllByTestId("row")
 
 		expect(pending).not.toBeNull()
-		expect(pending?.compareDocumentPosition(listbox)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-		expect(listbox.contains(pending)).toBe(false)
+		expect(listbox.contains(pending)).toBe(true)
+		expect(firstRow === undefined ? 0 : pending?.compareDocumentPosition(firstRow)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
 
 		const row = within(pending ?? document.body).getByRole("listitem", { name: "upload.txt" })
 

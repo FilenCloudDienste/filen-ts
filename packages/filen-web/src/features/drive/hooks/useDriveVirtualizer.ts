@@ -8,14 +8,16 @@ import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { pendingBlockHeight } from "@/features/drive/lib/pendingUploads.logic"
 
 const LIST_OVERSCAN = 8
 const GRID_OVERSCAN = 3
 
 // The listbox's layout/scroll layer: the list + grid virtualizers, the scroll container ref, the
 // responsive column math, and the per-index DOM ref map the keyboard nav focuses into. Kept separate
-// from the roving-cursor navigation (useDriveListboxNav) that sits on top of it.
-export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode) {
+// from the roving-cursor navigation (useDriveListboxNav) that sits on top of it. `pendingRows` pending
+// transfer rows sit above the items in the scrolled layer, so the items start below them.
+export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode, pendingRows = 0) {
 	// State (not `useRef`) so it's settable from a callback ref below — the pending/error/empty
 	// branches render a ref-less div, so a cold mount whose first render is "pending" would, with a
 	// `useRef` + `[]`-dep effect, never attach an observer for the component's whole lifetime, and a
@@ -35,6 +37,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 
 	const columns = columnsForWidth(containerWidth, TILE_WIDTH)
 	const rowCount = Math.ceil(items.length / columns)
+	const pendingHeight = pendingBlockHeight(pendingRows, viewMode, columns)
 
 	// By row, not uuid: the Shared by me root lists one item once per receiver. Memoized by hand
 	// (useVirtualizer opts this hook out of the React Compiler): the virtualizer re-lays every row when its
@@ -61,6 +64,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		observeElementOffset: observeElementOffsetFromAttach,
 		initialOffset,
 		estimateSize: () => ROW_HEIGHT,
+		paddingStart: pendingHeight,
 		overscan: LIST_OVERSCAN,
 		getItemKey: getListItemKey
 	})
@@ -73,6 +77,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		observeElementOffset: observeElementOffsetFromAttach,
 		initialOffset,
 		estimateSize: () => TILE_ROW_HEIGHT,
+		paddingStart: pendingHeight,
 		overscan: GRID_OVERSCAN,
 		// The listbox's CSS padding shifts every row down by GRID_INSET, which the virtualizer's offsets
 		// do not know about: scrolling a row into view at the bottom has to clear that shift plus the
@@ -86,6 +91,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		setScrollElement,
 		scrollElement,
 		columns,
+		pendingHeight,
 		listVirtualizer,
 		gridVirtualizer,
 		activeVirtualizer,

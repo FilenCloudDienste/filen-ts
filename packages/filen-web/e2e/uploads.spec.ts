@@ -94,10 +94,7 @@ test.describe("uploads", () => {
 	})
 
 	// The SDK's upload chunks leave from its own worker; Playwright routes a worker's requests only in Chromium.
-	test("a running upload shows as a pending row above the listing's items, then gives way to the real row", async ({
-		page,
-		browserName
-	}) => {
+	test("a running upload shows as the listing's first row, then gives way to the real row", async ({ page, browserName }) => {
 		test.skip(browserName !== "chromium", "routing the SDK worker's own requests needs Chromium")
 
 		await withScratchDirectory(page, "upload-pending", async ({ listbox, runId }) => {
@@ -120,12 +117,12 @@ test.describe("uploads", () => {
 					{ name: fileName, mimeType: "application/octet-stream", buffer: Buffer.alloc(2 * 1024 * 1024, 7) }
 				])
 
-				const pending = page.getByRole("main").getByRole("list", { name: "Uploads into this directory" })
+				const pending = listbox.getByRole("list", { name: "Uploads and copies into this directory" })
 				const pendingRow = pending.getByRole("listitem", { name: fileName })
 
 				await expect(pendingRow).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 				await expect(pendingRow.getByRole("progressbar", { name: fileName })).toBeVisible()
-				// A pending row is no item: never an option of the listbox, and pinned above it.
+				// A pending row is no item: never an option of the listbox, and the listing's first row.
 				await expect(listbox.getByRole("option", { name: fileName })).toHaveCount(0)
 
 				const pendingBox = await pendingRow.boundingBox()
@@ -133,7 +130,7 @@ test.describe("uploads", () => {
 
 				expect(pendingBox).not.toBeNull()
 				expect(listboxBox).not.toBeNull()
-				expect((pendingBox?.y ?? 0) + (pendingBox?.height ?? 0)).toBeLessThanOrEqual(listboxBox?.y ?? 0)
+				expect(Math.abs((pendingBox?.y ?? 0) - (listboxBox?.y ?? 0))).toBeLessThan(2)
 
 				// Finished, the real row takes its place and the pending row goes.
 				await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })

@@ -49,6 +49,9 @@ interface MarqueeUniformLayout {
 	columns: number
 	// Replaces the rowHeightFor(viewMode) lookup this hook used to do against drive's own constants.
 	geometry: MarqueeGeometry
+	// Content above the first item in the scrolled layer (drive's pending transfer rows), which the
+	// items start below.
+	offsetTop?: number
 }
 
 type MarqueeParams<T extends MarqueeItem> = {
@@ -67,12 +70,20 @@ function uuidKey(item: MarqueeItem): string {
 	return item.data.uuid
 }
 
-function uniformHitTest(itemCount: number, { viewMode, columns, geometry }: MarqueeUniformLayout): MarqueeHitTest {
+function uniformHitTest(itemCount: number, { viewMode, columns, geometry, offsetTop = 0 }: MarqueeUniformLayout): MarqueeHitTest {
 	return {
 		indices: (rect, contentWidth) =>
-			marqueeIndices(rect, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight),
+			marqueeIndices(
+				{ ...rect, top: rect.top - offsetTop, bottom: rect.bottom - offsetTop },
+				itemCount,
+				viewMode,
+				columns,
+				contentWidth,
+				geometry.tileWidth,
+				geometry.rowHeight
+			),
 		indexAtPoint: (x, y, contentWidth) =>
-			marqueeIndexAtPoint(x, y, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight)
+			marqueeIndexAtPoint(x, y - offsetTop, itemCount, viewMode, columns, contentWidth, geometry.tileWidth, geometry.rowHeight)
 	}
 }
 

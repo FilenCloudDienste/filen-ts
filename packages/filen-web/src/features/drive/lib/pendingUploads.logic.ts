@@ -1,4 +1,5 @@
-import { clampedRatio } from "@filen/shared"
+import { clampedRatio, copyJobRate } from "@filen/shared"
+import type { CopyJob } from "@/features/drive/lib/copy.logic"
 import {
 	computeTransfersSpeed,
 	type SpeedSample,
@@ -7,16 +8,25 @@ import {
 	type UploadBatch
 } from "@/features/transfers/store/useTransfersStore"
 import { steadyEtaSeconds } from "@/features/transfers/components/transferRow.logic"
+import { ROW_HEIGHT, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
+import type { DriveViewMode } from "@/features/drive/lib/preferences"
 
-// Uploads running into a directory, as the rows its listing pins above its items. A unit is one plain
-// upload (a transfer) or one directory upload's top-level directory (a run, however many files it holds).
-// Up to MAX_UNIT_ROWS running units get a row each and more fold into one summary row; failed units the
-// same, below them. Rows are keyed by string so the listing's membership read compares shallowly and
+// Uploads and copies running into a directory, as the rows its listing shows above its items. A unit is
+// one plain upload (a transfer), one directory upload's top-level directory (a run, however many files it
+// holds) or one copy job (its single transfers row). Up to MAX_UNIT_ROWS running units get a row each and
+// more fold into one summary row; failed uploads the same, below them (a failed copy is the copy card's to
+// report). Rows are keyed by string so the listing's membership read compares shallowly and
 // changes only when a row comes, goes, fails or a group crosses the threshold, never on a progress tick.
 export type PendingRowKey =
-	`upload:${string}` | `failedUpload:${string}` | `directory:${string}` | `failedDirectory:${string}` | "uploading" | "failed"
+	| `upload:${string}`
+	| `failedUpload:${string}`
+	| `directory:${string}`
+	| `failedDirectory:${string}`
+	| `copy:${string}`
+	| "uploading"
+	| "failed"
 
-export type PendingRowKind = "upload" | "failedUpload" | "directory" | "failedDirectory" | "uploading" | "failed"
+export type PendingRowKind = "upload" | "failedUpload" | "directory" | "failedDirectory" | "copy" | "uploading" | "failed"
 
 export function parsePendingRowKey(key: PendingRowKey): { kind: PendingRowKind; id: string } {
 	const index = key.indexOf(":")
@@ -28,7 +38,7 @@ export function parsePendingRowKey(key: PendingRowKey): { kind: PendingRowKind; 
 	const kind = key.slice(0, index)
 
 	return {
-		kind: kind === "upload" || kind === "failedUpload" || kind === "directory" ? kind : "failedDirectory",
+		kind: kind === "upload" || kind === "failedUpload" || kind === "directory" || kind === "copy" ? kind : "failedDirectory",
 		id: key.slice(index + 1)
 	}
 }
@@ -41,6 +51,11 @@ function isPlainUploadInto(transfer: Transfer, parentUuid: string | null): boole
 	return transfer.batch !== undefined && transfer.batch.directoryName === undefined && transfer.batch.parentUuid === parentUuid
 }
 
+// A copy's row names its destination, null for the root, as an upload run's does.
+function isRunningCopyInto(transfer: Transfer, parentUuid: string | null): boolean {
+	return transfer.direction === "copy" && transfer.status === "copying" && transfer.parentUuid === parentUuid
+}
+
 function isDirectoryRunInto(batch: UploadBatch, parentUuid: string | null): boolean {
 	return batch.ref.directoryName !== undefined && batch.ref.parentUuid === parentUuid
 }
@@ -50,25 +65,12 @@ function isFailedDirectoryRun(batch: UploadBatch): boolean {
 	return !batch.running && batch.failed > 0
 }
 
-// The cheap gate the listing reads: whether there is any row at all, the same units pendingUploadRowKeys
-// counts. Stops at the first one.
-export function hasPendingUploads(state: PendingUploadsState, parentUuid: string | null): boolean {
-	for (const id in state.uploadBatches) {
-		const batch = state.uploadBatches[id]
-
-		if (batch !== undefined && isDirectoryRunInto(batch, parentUuid) && (batch.running || isFailedDirectoryRun(batch))) {
-			return true
-		}
-	}
-
-	return state.transfers.some(
-		transfer => (transfer.status === "uploading" || transfer.status === "error") && isPlainUploadInto(transfer, parentUuid)
-	)
+interface UnitCounts {
+	running: number
+	failed: number
 }
 
-// The rows, running units first (directory runs, then plain uploads, each in start order), failed after.
-// Two passes over the runs and the transfers, allocating nothing but the result.
-export function pendingUploadRowKeys(state: PendingUploadsState, parentUuid: string | null): PendingRowKey[] {
+function countUnits(state: PendingUploadsState, parentUuid: string | null): UnitCounts {
 	let running = 0
 	let failed = 0
 
@@ -87,17 +89,42 @@ export function pendingUploadRowKeys(state: PendingUploadsState, parentUuid: str
 	}
 
 	for (const transfer of state.transfers) {
-		if (!isPlainUploadInto(transfer, parentUuid)) {
-			continue
-		}
-
-		if (transfer.status === "uploading") {
+		if (isRunningCopyInto(transfer, parentUuid)) {
 			running++
-		} else if (transfer.status === "error") {
-			failed++
+		} else if (isPlainUploadInto(transfer, parentUuid)) {
+			if (transfer.status === "uploading") {
+				running++
+			} else if (transfer.status === "error") {
+				failed++
+			}
 		}
 	}
 
+	return { running, failed }
+}
+
+// The block's height for `rows` rows, which the listing reserves above its items: list rows are ROW_HEIGHT
+// tall, tiles fill tile rows.
+export function pendingBlockHeight(rows: number, viewMode: DriveViewMode, columns: number): number {
+	return viewMode === "list" ? rows * ROW_HEIGHT : Math.ceil(rows / columns) * TILE_ROW_HEIGHT
+}
+
+function rowsFor(units: number): number {
+	return units > MAX_UNIT_ROWS ? 1 : units
+}
+
+// What the listing reads: how many rows there are, which sizes the space they take above the items. A
+// number, so a progress tick never re-renders the listing. Allocates nothing.
+export function pendingRowCount(state: PendingUploadsState, parentUuid: string | null): number {
+	const { running, failed } = countUnits(state, parentUuid)
+
+	return rowsFor(running) + rowsFor(failed)
+}
+
+// The rows, running units first (directory runs, then plain uploads and copies, each in start order),
+// failed after. Two passes over the runs and the transfers, allocating nothing but the result.
+export function pendingUploadRowKeys(state: PendingUploadsState, parentUuid: string | null): PendingRowKey[] {
+	const { running, failed } = countUnits(state, parentUuid)
 	const keys: PendingRowKey[] = []
 
 	if (running > MAX_UNIT_ROWS) {
@@ -131,6 +158,12 @@ function pushUnitRows(state: PendingUploadsState, parentUuid: string | null, key
 	}
 
 	for (const transfer of state.transfers) {
+		if (kind === "running" && isRunningCopyInto(transfer, parentUuid)) {
+			keys.push(`copy:${transfer.id}`)
+
+			continue
+		}
+
 		if (!isPlainUploadInto(transfer, parentUuid)) {
 			continue
 		}
@@ -146,6 +179,8 @@ function pushUnitRows(state: PendingUploadsState, parentUuid: string | null, key
 export interface PendingGroupFigures {
 	// Files still uploading.
 	files: number
+	// Copy jobs still running.
+	copies: number
 	// Bytes of the files still counted, net of failed ones, and how many of them moved.
 	bytes: number
 	transferred: number
@@ -161,11 +196,12 @@ function isRunningInto(batch: UploadBatch | undefined, parentUuid: string | null
 	return batch?.running === true && batch.ref.parentUuid === parentUuid
 }
 
-// The summary row: every running run into the directory (the summary stands only when all of its
-// running units are folded into it). Read off the runs' own totals, so its cost does not grow with
-// the number of files. Speeds are left to the row: they read the clock, which a store selector must not.
+// The summary row and the scrolled-away bar: every running run and copy into the directory (the summary
+// stands only when all of its running units are folded into it). Read off the runs' own totals, so its
+// cost does not grow with the number of files. Speeds are left to the row: they read the clock, which a
+// store selector must not.
 export function pendingSummaryFigures(state: PendingUploadsState, parentUuid: string | null): PendingGroupFigures {
-	const figures: PendingGroupFigures = { files: 0, bytes: 0, transferred: 0 }
+	const figures: PendingGroupFigures = { files: 0, copies: 0, bytes: 0, transferred: 0 }
 
 	for (const id in state.uploadBatches) {
 		const batch = state.uploadBatches[id]
@@ -175,11 +211,19 @@ export function pendingSummaryFigures(state: PendingUploadsState, parentUuid: st
 		}
 	}
 
+	for (const transfer of state.transfers) {
+		if (isRunningCopyInto(transfer, parentUuid)) {
+			figures.copies += 1
+			figures.bytes += transfer.size
+			figures.transferred += transfer.bytesTransferred
+		}
+	}
+
 	return figures
 }
 
-// The summary row's speed windows, one per running run into the directory; each keeps its identity
-// until its own run moves.
+// The summary's upload speed windows, one per running run into the directory; each keeps its identity
+// until its own run moves. Copies carry their rate on their job instead (pendingCopySpeed).
 export function pendingSummarySamples(state: PendingUploadsState, parentUuid: string | null): (readonly SpeedSample[])[] {
 	const samples: (readonly SpeedSample[])[] = []
 
@@ -194,9 +238,36 @@ export function pendingSummarySamples(state: PendingUploadsState, parentUuid: st
 	return samples
 }
 
+// The running copies into the directory, by job id.
+export function pendingCopyIds(state: PendingUploadsState, parentUuid: string | null): string[] {
+	const ids: string[] = []
+
+	for (const transfer of state.transfers) {
+		if (isRunningCopyInto(transfer, parentUuid)) {
+			ids.push(transfer.id)
+		}
+	}
+
+	return ids
+}
+
+// Their combined speed, off each job's own rate, which also counts the files it has not reached yet.
+export function pendingCopySpeed(jobs: Readonly<Record<string, CopyJob>>, ids: readonly string[]): number {
+	let speed = 0
+
+	for (const id of ids) {
+		const job = jobs[id]
+		const rate = job === undefined ? null : copyJobRate(job)
+
+		speed += rate?.bytesPerSecond ?? 0
+	}
+
+	return speed
+}
+
 // One directory run's row.
 export function pendingRunFigures(state: PendingUploadsState, batchId: string): PendingGroupFigures {
-	const figures: PendingGroupFigures = { files: 0, bytes: 0, transferred: 0 }
+	const figures: PendingGroupFigures = { files: 0, copies: 0, bytes: 0, transferred: 0 }
 	const batch = state.uploadBatches[batchId]
 
 	if (batch !== undefined) {
@@ -219,23 +290,7 @@ export function pendingGroupSpeed(samples: readonly (readonly SpeedSample[])[], 
 
 // The failed summary row's count: failed units into the directory.
 export function pendingFailedCount(state: PendingUploadsState, parentUuid: string | null): number {
-	let count = 0
-
-	for (const id in state.uploadBatches) {
-		const batch = state.uploadBatches[id]
-
-		if (batch !== undefined && isDirectoryRunInto(batch, parentUuid) && isFailedDirectoryRun(batch)) {
-			count++
-		}
-	}
-
-	for (const transfer of state.transfers) {
-		if (transfer.status === "error" && isPlainUploadInto(transfer, parentUuid)) {
-			count++
-		}
-	}
-
-	return count
+	return countUnits(state, parentUuid).failed
 }
 
 export interface PendingGroupProgress {
@@ -256,12 +311,19 @@ export function pendingGroupProgress(figures: PendingGroupFigures, speed: number
 export interface PendingTargets {
 	transferIds: Set<string>
 	batchIds: Set<string>
+	// Copy jobs, which stop through their own cancel and keep what they copied.
+	copyIds: Set<string>
+}
+
+function emptyTargets(): PendingTargets {
+	return { transferIds: new Set(), batchIds: new Set(), copyIds: new Set() }
 }
 
 // What a row's Cancel stops: the upload itself, a directory run with its running files, or every running
-// upload into the directory. Runs are marked too, so they start nothing more.
+// upload and copy into the directory. Runs are marked too, so they start nothing more. A copy row's own
+// Cancel asks keep-or-trash instead (CopyCancelDialog).
 export function pendingCancelTargets(state: PendingUploadsState, key: PendingRowKey, parentUuid: string | null): PendingTargets {
-	const targets: PendingTargets = { transferIds: new Set(), batchIds: new Set() }
+	const targets = emptyTargets()
 	const { kind, id } = parsePendingRowKey(key)
 
 	if (kind === "upload") {
@@ -287,6 +349,8 @@ export function pendingCancelTargets(state: PendingUploadsState, key: PendingRow
 	for (const transfer of state.transfers) {
 		if (transfer.status === "uploading" && transfer.batch !== undefined && targets.batchIds.has(transfer.batch.id)) {
 			targets.transferIds.add(transfer.id)
+		} else if (kind === "uploading" && isRunningCopyInto(transfer, parentUuid)) {
+			targets.copyIds.add(transfer.id)
 		}
 	}
 
@@ -296,7 +360,7 @@ export function pendingCancelTargets(state: PendingUploadsState, key: PendingRow
 // What a failed row's Dismiss removes: the failed upload, the failed directory run, or every failed unit
 // into the directory.
 export function pendingDismissTargets(state: PendingUploadsState, key: PendingRowKey, parentUuid: string | null): PendingTargets {
-	const targets: PendingTargets = { transferIds: new Set(), batchIds: new Set() }
+	const targets = emptyTargets()
 	const { kind, id } = parsePendingRowKey(key)
 
 	if (kind === "failedUpload") {
@@ -322,26 +386,34 @@ export function pendingDismissTargets(state: PendingUploadsState, key: PendingRo
 	return targets
 }
 
+export type PendingCancelSubject = { name: string } | { files: number; copies: number }
+
 // What a row's Cancel confirm names: the upload's or directory's name, or for the summary how many files
-// still upload. Null once there is nothing left to cancel, which closes the confirm.
-export function pendingCancelSubject(state: PendingUploadsState, key: PendingRowKey, parentUuid: string | null): string | number | null {
+// still upload and copies still run. Null once there is nothing left to cancel, which closes the confirm.
+export function pendingCancelSubject(
+	state: PendingUploadsState,
+	key: PendingRowKey,
+	parentUuid: string | null
+): PendingCancelSubject | null {
 	const { kind, id } = parsePendingRowKey(key)
 
 	switch (kind) {
 		case "upload": {
 			const transfer = state.transfers.find(candidate => candidate.id === id)
 
-			return transfer?.status === "uploading" ? transfer.name : null
+			return transfer?.status === "uploading" ? { name: transfer.name } : null
 		}
 		case "directory": {
 			const batch = state.uploadBatches[id]
 
-			return batch?.running === true && !batch.cancelled ? (batch.ref.directoryName ?? null) : null
+			return batch?.running === true && !batch.cancelled && batch.ref.directoryName !== undefined
+				? { name: batch.ref.directoryName }
+				: null
 		}
 		case "uploading": {
-			const { files } = pendingSummaryFigures(state, parentUuid)
+			const { files, copies } = pendingSummaryFigures(state, parentUuid)
 
-			return files > 0 ? files : null
+			return files > 0 || copies > 0 ? { files, copies } : null
 		}
 		default:
 			return null
