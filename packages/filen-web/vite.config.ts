@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import babel from "@rolldown/plugin-babel"
-import { sdkArtifacts, COI_HEADERS } from "./vite/sdk-artifacts-plugin"
+import { sdkArtifacts, COI_HEADERS, SDK_ARTIFACTS } from "./vite/sdk-artifacts-plugin"
 
 // preview.headers only reaches the responses the static handler serves with a body: its 304 Not
 // Modified goes out bare, and WebKit then refuses a worker script revalidated on reload for want of
@@ -18,6 +18,40 @@ function previewHeaders(): Plugin {
 				}
 
 				next()
+			})
+		}
+	}
+}
+
+// The deployment's dist/_headers (Cloudflare static assets, README § Deployment), from the same set the
+// preview server sends. Rules apply in file order and a rule's removals run before its own values, so
+// the unhashed SDK artifacts can drop the immutable caching /assets/* grants: their names never change,
+// so they must be revalidated on every load or a client pairs new code with an old SDK.
+// FILEN_WEB_NOINDEX keeps the staging deployment out of search indexes.
+function deployHeaders(): Plugin {
+	const rule = (path: string, lines: string[]) => [path, ...lines.map(line => `  ${line}`)].join("\n")
+	const revalidate = ["! Cache-Control", "Cache-Control: no-cache"]
+
+	return {
+		name: "filen:deploy-headers",
+		apply: "build",
+		generateBundle() {
+			const every = Object.entries(PREVIEW_HEADERS).map(([name, value]) => `${name}: ${value}`)
+
+			if (process.env["FILEN_WEB_NOINDEX"] === "1") {
+				every.push("X-Robots-Tag: noindex")
+			}
+
+			this.emitFile({
+				type: "asset",
+				fileName: "_headers",
+				source:
+					[
+						rule("/*", every),
+						rule("/assets/*", ["Cache-Control: public, max-age=31536000, immutable"]),
+						...SDK_ARTIFACTS.map(name => rule(`/assets/${name}`, revalidate)),
+						rule("/assets/snippets/*", revalidate)
+					].join("\n") + "\n"
 			})
 		}
 	}
@@ -76,6 +110,7 @@ const PREVIEW_HEADERS = {
 export default defineConfig({
 	plugins: [
 		previewHeaders(),
+		deployHeaders(),
 		tanstackRouter({ target: "react", autoCodeSplitting: true }),
 		// @rolldown/plugin-babel's real API (verified against the installed 0.2.3 package:
 		// README + dist/index.d.mts) is a DEFAULT export taking flat `presets`/`plugins`/`include`

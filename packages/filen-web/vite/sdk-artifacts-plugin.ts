@@ -24,7 +24,7 @@ const PKG = join(require.resolve("@filen/sdk-rs"), "..")
 // to a hashed `/assets/workerHelpers-*.js` it then never emits — the SPA fallback answers those worker loads
 // with index.html, so `initThreadPool` never gets `wasm_bindgen_worker_ready` and boot fails with reason
 // "pool". Hence the exact vite pin in package.json; drop it once a release emits that chunk again.
-const ARTIFACTS = ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]
+export const SDK_ARTIFACTS = ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]
 const MIME: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm" }
 export const COI_HEADERS = {
 	"Cross-Origin-Opener-Policy": "same-origin",
@@ -51,7 +51,7 @@ function artifactRel(urlPath: string): string | null {
 		return urlPath.slice(snippetIdx + 1) // "snippets/…" relative to PKG
 	}
 	const base = urlPath.slice(urlPath.lastIndexOf("/") + 1)
-	return ARTIFACTS.includes(base) ? base : null
+	return SDK_ARTIFACTS.includes(base) ? base : null
 }
 
 export function sdkArtifacts(): Plugin {
@@ -101,7 +101,7 @@ export function sdkArtifacts(): Plugin {
 
 			// Prod worker resolves against `<assetsDir>` — copy the artifacts + snippets there.
 			const out = join(config.root, config.build.outDir, config.build.assetsDir)
-			for (const a of ARTIFACTS) {
+			for (const a of SDK_ARTIFACTS) {
 				cpSync(join(PKG, a), join(out, a))
 			}
 			cpSync(join(PKG, "snippets"), join(out, "snippets"), { recursive: true })

@@ -1,23 +1,30 @@
-# Dormant until the web app is finished: this builds dist/ and uploads it as an artifact — there is
-# no deploy step, and deploy wiring is done by hand.
-# Whatever serves dist/ MUST send, on every response:
-#   Cross-Origin-Opener-Policy: same-origin
-#   Cross-Origin-Embedder-Policy: require-corp
-#   Cross-Origin-Resource-Policy: same-origin      (all three, or the SDK's threaded wasm won't load)
-#   Content-Security-Policy: the value of `CSP` in packages/filen-web/vite.config.ts
-#   X-Content-Type-Options: nosniff
-#   Referrer-Policy: no-referrer
-#   Permissions-Policy: camera=(), microphone=(), geolocation=()
-# plus application/wasm for .wasm and the caching rules in packages/filen-web/README.md § Deployment.
-name: Build staging web artifact
+# Rolling staging deploy of filen-web to Cloudflare (the `staging` environment in
+# packages/filen-web/wrangler.jsonc). The build emits dist/_headers, which carries every response
+# header the app needs (packages/filen-web/README.md § Deployment).
+# Secrets: CLOUDFLARE_WORKERS_DEPLOY_TOKEN (an account API token with only Workers Scripts: Edit; wrangler
+# reads it as CLOUDFLARE_API_TOKEN) and CLOUDFLARE_ACCOUNT_ID.
+name: Deploy web staging
 
 on:
   workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/filen-web/**'
+      - 'packages/filen-shared/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'package.json'
+      - '.github/workflows/staging-web.yml'
 
 permissions:
   contents: read
 
 concurrency:
+  # Only the newest main matters on a rolling deploy.
   group: 'staging-web'
   cancel-in-progress: true
 
@@ -27,6 +34,9 @@ env:
 jobs:
   staging-web:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/filen-web
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -38,13 +48,14 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Install dependencies
-        working-directory: packages/filen-web
         run: pnpm install --frozen-lockfile --filter @filen/web...
       - name: Build
-        working-directory: packages/filen-web
+        env:
+          VITE_BUILD_ID: ${{ github.sha }}
+          FILEN_WEB_NOINDEX: '1'
         run: pnpm run build
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: filen-web-dist
-          path: packages/filen-web/dist
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --env staging --message "${GITHUB_SHA}"

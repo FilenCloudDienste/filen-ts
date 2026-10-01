@@ -4,6 +4,7 @@
     "types": ["node"]
   },
   "include": [
+    "cloudflare",
     "e2e",
     "scripts",
     "vite",
