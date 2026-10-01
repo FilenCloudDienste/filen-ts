@@ -158,15 +158,6 @@ test("PDF preview renders multi-page content with a selectable text layer and sa
 		expect((spanBox.x - canvasBox.x) / canvasBox.width).toBeLessThan(0.087)
 	}).toPass({ timeout: 30_000 })
 
-	// A click on a text-layer span selects text; it must never toggle the overlay chrome away. Asserted
-	// on the header's own opacity rather than on any control's visibility: hidden chrome stays in the DOM
-	// with a full bounding box (`pointer-events-none opacity-0`, so focus can still restore it — see
-	// previewOverlay.tsx), which makes a Playwright visibility check true in both states.
-	const header = page.getByRole("dialog").locator("header")
-	await expect(header).toHaveCSS("opacity", "1")
-	await pageOneSpan.click()
-	await expect(header).toHaveCSS("opacity", "1")
-
 	// The page-nav "Next page" button (distinct from the overlay's own file-level "Next file")
 	// scrolls page 2 into view; the indicator is IntersectionObserver-driven, so it follows once
 	// the scroll settles rather than updating synchronously with the click.
