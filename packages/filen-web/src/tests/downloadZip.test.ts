@@ -31,6 +31,7 @@ vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }
 
 import { runZipDownload, defaultZipDownloadDeps, startZipDownload, type RunZipDownloadDeps } from "@/features/drive/lib/downloadZip"
 import { useTransfersStore, type Transfer, type TerminalStatus } from "@/features/transfers/store/useTransfersStore"
+import { sharerRole } from "@/tests/fixtures/sdk"
 
 const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
 let uuidCounter = 0
@@ -84,10 +85,6 @@ function dirItem(params: { uuid?: UuidStr; name?: string } = {}): DriveItem {
 			decryptedMeta: { name }
 		}
 	}
-}
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { id, email } }
 }
 
 // A shared-with-others/shared-with-me ROOT directory — role is required on this arm (see item.ts).

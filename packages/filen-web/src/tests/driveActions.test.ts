@@ -135,6 +135,7 @@ import {
 	type FileItem
 } from "@/features/drive/lib/actions"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole } from "@/tests/fixtures/sdk"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -1109,7 +1110,7 @@ describe("an attribute change reaching a Shared by me row", () => {
 	function sharedRoot(receiverId: number): Extract<DriveItem, { type: "sharedRootDirectory" }> {
 		const raw: SharedRootDir = {
 			inner: { uuid: DIR, color: "default", timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: "Old" } } },
-			sharingRole: { Receiver: { email: `${String(receiverId)}@filen.io`, id: receiverId } },
+			sharingRole: receiverRole(receiverId, `${String(receiverId)}@filen.io`),
 			writeAccess: true
 		}
 		const item = narrowItem(raw)

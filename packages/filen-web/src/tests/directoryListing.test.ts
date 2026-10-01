@@ -14,10 +14,7 @@ import {
 } from "@/features/drive/components/directoryListing.logic"
 import { DRIVE_SORT_BY, DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { testUuid } from "@/tests/support/uuid"
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
+import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -469,7 +466,7 @@ describe("reconcileSelectedItems", () => {
 	it("matches each selected Shared by me root row to its own receiver's live row", () => {
 		const row = (receiver: number, name: string) =>
 			narrowItem({
-				...mockSharedFile(testUuid("reconcile-receivers"), { Receiver: { email: `${String(receiver)}@x.com`, id: receiver } }),
+				...mockSharedFile(testUuid("reconcile-receivers"), receiverRole(receiver, `${String(receiver)}@x.com`)),
 				meta: {
 					type: "decoded",
 					data: { name, mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }

@@ -1,9 +1,17 @@
 import { describe, it, expect } from "vitest"
-import { shareIdentityFromRole } from "@filen/shared"
+import { shareIdentityFromRole, shareRoleKind } from "@filen/shared"
 
 describe("shareIdentityFromRole", () => {
 	it("returns null when the role is absent", () => {
 		expect(shareIdentityFromRole(undefined)).toBeNull()
+	})
+
+	it("reads the wasm runtime's internally tagged shape", () => {
+		expect(shareIdentityFromRole({ type: "sharer", id: 5, email: "flat@filen.io" })).toEqual({ userId: 5n, email: "flat@filen.io" })
+		expect(shareIdentityFromRole({ type: "receiver", id: 6n, email: "flat-out@filen.io" })).toEqual({
+			userId: 6n,
+			email: "flat-out@filen.io"
+		})
 	})
 
 	it("reads the wasm-surface Sharer shape (number id)", () => {
@@ -35,5 +43,27 @@ describe("shareIdentityFromRole", () => {
 
 	it("returns null when no known shape carries an identity", () => {
 		expect(shareIdentityFromRole({})).toBeNull()
+	})
+})
+
+describe("shareRoleKind", () => {
+	it("returns null when the role is absent or unreadable", () => {
+		expect(shareRoleKind(undefined)).toBeNull()
+		expect(shareRoleKind({})).toBeNull()
+	})
+
+	it("reads the wasm runtime's type tag", () => {
+		expect(shareRoleKind({ type: "sharer", id: 1, email: "a@filen.io" })).toBe("sharer")
+		expect(shareRoleKind({ type: "receiver", id: 1, email: "a@filen.io" })).toBe("receiver")
+	})
+
+	it("reads the uniffi runtime's tag", () => {
+		expect(shareRoleKind({ tag: "Sharer", inner: [{ id: 1, email: "a@filen.io" }] })).toBe("sharer")
+		expect(shareRoleKind({ tag: "Receiver", inner: [{ id: 1, email: "a@filen.io" }] })).toBe("receiver")
+	})
+
+	it("reads the .d.ts shape", () => {
+		expect(shareRoleKind({ Sharer: { id: 1, email: "a@filen.io" } })).toBe("sharer")
+		expect(shareRoleKind({ Receiver: { id: 1, email: "a@filen.io" } })).toBe("receiver")
 	})
 })

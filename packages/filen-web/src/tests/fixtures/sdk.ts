@@ -2,12 +2,15 @@ import type { Chat, LinkedFile, SharedFile, SharedRootDir, SharingRole } from "@
 import { linkedFileIntoDriveItem, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { testUuid } from "@/tests/support/uuid"
 
+// The wasm runtime hands a SharingRole over internally tagged, `{ type, email, id }`; the generated
+// .d.ts types it externally tagged, a shape no runtime value has. Fixtures build the runtime one, so
+// every reader is tested against what it actually receives (shareRoleKind/shareIdentityFromRole).
 export function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
+	return { type: "sharer", email, id } as unknown as SharingRole
 }
 
 export function receiverRole(id: number, email: string): SharingRole {
-	return { Receiver: { email, id } }
+	return { type: "receiver", email, id } as unknown as SharingRole
 }
 
 export function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDir {

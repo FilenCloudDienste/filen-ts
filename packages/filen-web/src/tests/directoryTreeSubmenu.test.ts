@@ -44,6 +44,7 @@ import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboard
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FolderInputIcon } from "lucide-react"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole } from "@/tests/fixtures/sdk"
 
 function dirItem(label: string, parent: string, overrides: Partial<Dir> = {}): DriveItem {
 	return narrowItem({
@@ -329,7 +330,7 @@ describe("TransferSubmenu (move)", () => {
 				timestamp: 1_700_000_000_000n,
 				meta: { type: "decoded", data: { name: "docs" } }
 			},
-			sharingRole: { Receiver: { email: "friend@filen.io", id: 7 } },
+			sharingRole: receiverRole(7, "friend@filen.io"),
 			writeAccess: true
 		} satisfies SharedRootDir)
 		renderMove([sharedDocs])

@@ -1,3 +1,4 @@
+import { shareIdentityFromRole } from "@filen/shared"
 import { isSharedRootDriveItem, type DriveItem } from "@/features/drive/lib/item"
 
 // A listing row's identity: the Shared by me root lists an item once per receiver, and each row unshares
@@ -8,7 +9,7 @@ export function driveRowKey(item: DriveItem): string {
 		return item.data.uuid
 	}
 
-	const role = item.data.sharingRole
+	const counterpart = shareIdentityFromRole(item.data.sharingRole)
 
-	return `${item.data.uuid}:${String("Receiver" in role ? role.Receiver.id : role.Sharer.id)}`
+	return counterpart === null ? item.data.uuid : `${item.data.uuid}:${String(counterpart.userId)}`
 }

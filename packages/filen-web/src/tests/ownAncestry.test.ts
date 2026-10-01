@@ -12,9 +12,10 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { cachedOwnParents, targetOwnParents } from "@/features/drive/lib/ownAncestry"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole } from "@/tests/fixtures/sdk"
 
 const ROOT = testUuid("root")
-const RECEIVER: SharingRole = { Receiver: { email: "friend@filen.io", id: 7 } }
+const RECEIVER: SharingRole = receiverRole(7, "friend@filen.io")
 
 function dir(label: string, parent: string): Dir {
 	return {

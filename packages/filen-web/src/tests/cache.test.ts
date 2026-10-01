@@ -15,6 +15,7 @@ import {
 	isOutsideRoot
 } from "@/features/drive/lib/cache"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole } from "@/tests/fixtures/sdk"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -154,10 +155,6 @@ describe("evictDirs", () => {
 		}).not.toThrow()
 	})
 })
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
 
 function mockSharedRootDir(uuid: UuidStr, role: SharingRole): SharedRootDir {
 	return {

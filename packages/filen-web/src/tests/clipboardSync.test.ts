@@ -88,6 +88,7 @@ import { recheckClipboard } from "@/features/drive/lib/clipboardRecheck"
 import { copyToClipboard, cutToClipboard, pasteClipboard } from "@/features/drive/lib/clipboard"
 import { isClipboardCurrent, useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 const HOME = testUuid("home")
 const ELSEWHERE = testUuid("elsewhere")
@@ -423,8 +424,8 @@ describe("a cut being pasted", () => {
 	})
 })
 
-const RECEIVER: SharingRole = { Receiver: { email: "friend@filen.io", id: 7 } }
-const SHARER: SharingRole = { Sharer: { email: "owner@filen.io", id: 8 } }
+const RECEIVER: SharingRole = receiverRole(7, "friend@filen.io")
+const SHARER: SharingRole = sharerRole(8, "owner@filen.io")
 const LINEAGE = testUuid("lineage")
 
 function rawSharedFile(uuid: string, role: SharingRole, meta: FileMeta = fileMeta("report.pdf")): SharedFile {

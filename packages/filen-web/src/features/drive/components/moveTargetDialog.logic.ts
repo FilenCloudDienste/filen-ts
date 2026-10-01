@@ -1,4 +1,4 @@
-import { ancestryHits, type ParentLookup } from "@filen/shared"
+import { ancestryHits, shareRoleKind, type ParentLookup } from "@filen/shared"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import type { DirectoryTreeTarget } from "@/features/drive/components/directoryTreeSubmenu"
 
@@ -11,7 +11,7 @@ import type { DirectoryTreeTarget } from "@/features/drive/components/directoryT
 function isSharedWithUser(item: DriveItem): boolean {
 	const role = item.type === "sharedDirectory" || item.type === "sharedRootDirectory" ? item.data.sharingRole : undefined
 
-	return role !== undefined && "Sharer" in role
+	return shareRoleKind(role) === "sharer"
 }
 
 // Item arrays (selections, drag payloads, listings, clipboard entries) are replaced, never mutated, and

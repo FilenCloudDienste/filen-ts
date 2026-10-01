@@ -130,6 +130,7 @@ import {
 	type ListingChange
 } from "@/features/drive/queries/drive"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole, sharerRole } from "@/tests/fixtures/sdk"
 
 // Unlike account.test.ts (one call-count assertion in the whole file), several tests here assert
 // exact call counts — clear history between tests so an earlier test's calls can't leak in.
@@ -1448,10 +1449,6 @@ describe("toListingTarget", () => {
 	})
 })
 
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
-
 function mockSharedRootDir(uuid: UuidStr): SharedRootDir {
 	return {
 		inner: { uuid, color: "default", timestamp: 1_700_000_000_000n, meta: { type: "decoded", data: { name: "SharedRoot" } } },
@@ -1680,7 +1677,7 @@ describe("appending a row a listing already holds", () => {
 // role; a write into that directory used to reach only its drive listing.
 describe("a write into a directory shared out", () => {
 	const PARENT = testUuid("shared-parent")
-	const role: SharingRole = { Receiver: { email: "receiver@filen.io", id: 7 } }
+	const role: SharingRole = receiverRole(7, "receiver@filen.io")
 	const sharedOut = driveListingQueryKey({ variant: "sharedOut", uuid: PARENT })
 
 	function nestedFile(label: string): DriveItem {

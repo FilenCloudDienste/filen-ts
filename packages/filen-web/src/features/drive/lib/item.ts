@@ -359,8 +359,8 @@ export function narrowToSdkItems(items: readonly DriveItem[]): (AnyFile | AnyDir
 // Resolves the OTHER party's identity for a shared item (in the sharedIn context, the sharer). The
 // root and file arms carry the role directly; a nested sharedDirectory reads its spread `sharingRole`
 // (a SharedDir has no native role). A non-shared arm, a nested directory without the spread, or a
-// role no known shape can be read from, resolves to null. The dual-surface unwrap itself (uniffi `.inner`
-// vs wasm `.Sharer`/`.Receiver`) lives in shareIdentityFromRole (@filen/shared).
+// role no known shape can be read from, resolves to null. Which shape a role arrives in differs by surface
+// and from the generated type, so the unwrap lives in shareIdentityFromRole (@filen/shared).
 export function getSharerIdentity(item: DriveItem): ShareIdentity | null {
 	switch (item.type) {
 		case "sharedRootFile":

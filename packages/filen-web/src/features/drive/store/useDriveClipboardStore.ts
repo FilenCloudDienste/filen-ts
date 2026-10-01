@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { shareRoleKind } from "@filen/shared"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 
@@ -102,7 +103,7 @@ export function lacksStableId(item: DriveItem): boolean {
 	return (
 		(item.type === "sharedFile" || item.type === "sharedRootFile") &&
 		item.data.stableUUID === undefined &&
-		"Receiver" in item.data.sharingRole
+		shareRoleKind(item.data.sharingRole) === "receiver"
 	)
 }
 

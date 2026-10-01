@@ -30,7 +30,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey, driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { shareItems, unshareItems } from "@/features/drive/lib/share/actions"
-import { mockSharedFile, mockSharedRootDir } from "@/tests/fixtures/sdk"
+import { mockSharedFile, mockSharedRootDir, receiverRole } from "@/tests/fixtures/sdk"
 import { testUuid } from "@/tests/support/uuid"
 
 beforeEach(() => {
@@ -342,8 +342,8 @@ describe("unshareItems", () => {
 
 	// The Shared by me root lists an item once per receiver; removing one share leaves the others.
 	it("removes only the unshared receiver's row, leaving the item's other receivers' rows", async () => {
-		const { item: alice } = sharedRootDirFixture({ sharingRole: { Receiver: { email: "alice@filen.io", id: 1 } } })
-		const { item: bob } = sharedRootDirFixture({ sharingRole: { Receiver: { email: "bob@filen.io", id: 2 } } })
+		const { item: alice } = sharedRootDirFixture({ sharingRole: receiverRole(1, "alice@filen.io") })
+		const { item: bob } = sharedRootDirFixture({ sharingRole: receiverRole(2, "bob@filen.io") })
 		testQueryClient.setQueryData(sharedOutRoot(), [alice, bob])
 		removeSharedItem.mockResolvedValue(undefined)
 

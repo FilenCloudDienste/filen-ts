@@ -10,6 +10,7 @@ import {
 	THUMB_SVG_SIZE_GATE
 } from "@/features/drive/lib/thumbnails.logic"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 // Mirrors item.test.ts's own fixture helpers — this file needs the same six-arm coverage to prove
 // thumbnailCategory routes the "file" arm only.
@@ -53,7 +54,7 @@ function mockSharedRootDir(overrides: Partial<SharedRootDir> = {}): SharedRootDi
 			timestamp: 1_700_000_000_000n,
 			meta: { type: "decoded", data: { name: "SharedRoot" } }
 		},
-		sharingRole: { Sharer: { email: "sharer@filen.io", id: 42 } },
+		sharingRole: sharerRole(42, "sharer@filen.io"),
 		writeAccess: true,
 		...overrides
 	}
@@ -80,7 +81,7 @@ function mockSharedFile(overrides: Partial<SharedFile> = {}): SharedFile {
 			type: "decoded",
 			data: { name: "shared.jpg", mime: "image/jpeg", modified: 1_700_000_000_000n, size: 2_048n, key: "k", version: 2 }
 		},
-		sharingRole: { Receiver: { email: "receiver@filen.io", id: 7 } },
+		sharingRole: receiverRole(7, "receiver@filen.io"),
 		sharedTag: true,
 		...overrides
 	}
@@ -203,9 +204,7 @@ describe("thumbnailCategory", () => {
 		})
 
 		it("a nested sharedDirectory", () => {
-			expect(thumbnailCategory(narrowItem({ ...mockSharedDir(), sharingRole: { Sharer: { email: "a@filen.io", id: 1 } } }))).toBe(
-				"none"
-			)
+			expect(thumbnailCategory(narrowItem({ ...mockSharedDir(), sharingRole: sharerRole(1, "a@filen.io") }))).toBe("none")
 		})
 	})
 
@@ -221,7 +220,7 @@ describe("thumbnailCategory", () => {
 		function nestedSharedFile(name: string, canMakeThumbnail: boolean): DriveItem {
 			return narrowItem({
 				...mockFile({ uuid: testUuid("nested"), canMakeThumbnail, meta: sharedMeta(name) }),
-				sharingRole: { Sharer: { email: "b@filen.io", id: 2 } }
+				sharingRole: sharerRole(2, "b@filen.io")
 			})
 		}
 

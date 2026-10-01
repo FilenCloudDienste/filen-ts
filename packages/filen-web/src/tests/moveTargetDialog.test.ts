@@ -13,6 +13,7 @@ import {
 	ownDirectoryUuids
 } from "@/features/drive/components/moveTargetDialog.logic"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole } from "@/tests/fixtures/sdk"
 
 // Local fixtures mirror itemMenu.test.ts's own per-file convention (each test file owns its minimal
 // Dir/File shape rather than sharing one across files).
@@ -56,7 +57,7 @@ function fileItem(uuid: string, overrides: Partial<File> = {}): DriveItem {
 	return narrowItem(mockFile({ uuid: testUuid(uuid), ...overrides }))
 }
 
-const RECEIVER: SharingRole = { Receiver: { email: "friend@filen.io", id: 7 } }
+const RECEIVER: SharingRole = receiverRole(7, "friend@filen.io")
 
 // The user's own directory as Shared by me lists it: at the share root, and one level below it.
 function sharedOutRootDir(uuid: string): DriveItem {

@@ -5,6 +5,7 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
+import type { SharingRoleLike } from "@filen/shared"
 
 // Every ingredient below is exhaustively tested as a function (directoryListing.test.ts, hiddenItems.test.ts,
 // preferences.test.ts). What is NOT tested anywhere is that the listing COMBINES them correctly: which
@@ -141,38 +142,46 @@ vi.mock("@/features/drive/components/uploadDropzone", () => ({
 	UploadDropzone: (props: { disabled?: boolean; children: ReactNode }) =>
 		createElement("div", { "data-testid": "upload-dropzone", "data-disabled": String(props.disabled === true) }, props.children)
 }))
-vi.mock("@/features/drive/components/driveRow", () => ({
-	DriveRow: (props: {
-		item: { data: { uuid: string; decryptedMeta?: { name?: string } | null; sharingRole?: { Receiver?: { email: string } } } }
-		selected: boolean
-	}) =>
-		createElement(
-			"div",
-			{
-				"data-testid": "row",
-				"data-uuid": props.item.data.uuid,
-				"data-receiver": props.item.data.sharingRole?.Receiver?.email ?? "",
-				"data-selected": String(props.selected)
-			},
-			props.item.data.decryptedMeta?.name ?? ""
-		)
-}))
+vi.mock("@/features/drive/components/driveRow", async () => {
+	const { shareIdentityFromRole } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
+
+	return {
+		DriveRow: (props: {
+			item: { data: { uuid: string; decryptedMeta?: { name?: string } | null; sharingRole?: SharingRoleLike } }
+			selected: boolean
+		}) =>
+			createElement(
+				"div",
+				{
+					"data-testid": "row",
+					"data-uuid": props.item.data.uuid,
+					"data-receiver": shareIdentityFromRole(props.item.data.sharingRole)?.email ?? "",
+					"data-selected": String(props.selected)
+				},
+				props.item.data.decryptedMeta?.name ?? ""
+			)
+	}
+})
 vi.mock("@/features/drive/components/driveTile", () => ({ DriveTile: () => null }))
-vi.mock("@/features/drive/components/bulkActionBar", () => ({
-	BulkActionBar: (props: {
-		selectedItems: {
-			data: { uuid: string; decryptedMeta?: { name?: string } | null; sharingRole?: { Receiver?: { email: string } } }
-		}[]
-	}) =>
-		createElement(
-			"div",
-			{
-				"data-testid": "bulk-bar",
-				"data-receivers": props.selectedItems.map(item => item.data.sharingRole?.Receiver?.email ?? "").join("|")
-			},
-			props.selectedItems.map(item => item.data.decryptedMeta?.name ?? item.data.uuid).join("|")
-		)
-}))
+vi.mock("@/features/drive/components/bulkActionBar", async () => {
+	const { shareIdentityFromRole } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")
+
+	return {
+		BulkActionBar: (props: {
+			selectedItems: {
+				data: { uuid: string; decryptedMeta?: { name?: string } | null; sharingRole?: SharingRoleLike }
+			}[]
+		}) =>
+			createElement(
+				"div",
+				{
+					"data-testid": "bulk-bar",
+					"data-receivers": props.selectedItems.map(item => shareIdentityFromRole(item.data.sharingRole)?.email ?? "").join("|")
+				},
+				props.selectedItems.map(item => item.data.decryptedMeta?.name ?? item.data.uuid).join("|")
+			)
+	}
+})
 
 const { listingQuery, hiddenPref } = vi.hoisted(() => ({
 	listingQuery: { current: { data: [] as unknown[] | undefined, status: "success", isRefetchError: false, error: null as Error | null } },
@@ -195,10 +204,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { DirectoryListing } from "@/features/drive/components/directoryListing"
 import { NewDirectory } from "@/features/drive/components/newDirectory"
 import { testUuid } from "@/tests/support/uuid"
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
+import { receiverRole, sharerRole } from "@/tests/fixtures/sdk"
 
 function mockDir(name: string, uuid = testUuid(name)): Dir {
 	return {
@@ -506,7 +512,7 @@ describe("DirectoryListing — selection reconcile", () => {
 
 	// The Shared by me root lists an item once per receiver, and each row unshares only its own receiver.
 	it("hands the bulk bar the Shared by me root row that was selected, not another receiver's", () => {
-		const row = (id: number, email: string) => narrowItem(mockSharedFile("Report", { Receiver: { email, id } }))
+		const row = (id: number, email: string) => narrowItem(mockSharedFile("Report", receiverRole(id, email)))
 		const carol = row(2, "carol@x.com")
 		const { select } = renderListing({ variant: "sharedOut", items: [row(1, "bob@x.com"), carol] })
 
@@ -573,7 +579,7 @@ describe("DirectoryListing — search-driven selection reconcile", () => {
 // Shared by me lists an item once per receiver: each row is its own row, never a copy of another's state.
 describe("DirectoryListing — per-receiver rows on the Shared by me root", () => {
 	it("highlights only the receiver row that was selected", () => {
-		const row = (id: number, email: string) => narrowItem(mockSharedFile("Report", { Receiver: { email, id } }))
+		const row = (id: number, email: string) => narrowItem(mockSharedFile("Report", receiverRole(id, email)))
 		const carol = row(2, "carol@x.com")
 		const { select } = renderListing({ variant: "sharedOut", items: [row(1, "bob@x.com"), carol] })
 

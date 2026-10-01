@@ -18,6 +18,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { DriveRow } from "@/features/drive/components/driveRow"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole } from "@/tests/fixtures/sdk"
 
 const OWNED = narrowItem({
 	uuid: testUuid("owned"),
@@ -39,7 +40,7 @@ const SHARED_DIR: SharedDir & { sharingRole: SharingRole } = {
 		meta: { type: "decoded", data: { name: "shared" } }
 	},
 	sharedTag: true,
-	sharingRole: { Receiver: { email: "friend@filen.io", id: 7 } }
+	sharingRole: receiverRole(7, "friend@filen.io")
 }
 const SHARED_OUT = narrowItem(SHARED_DIR)
 

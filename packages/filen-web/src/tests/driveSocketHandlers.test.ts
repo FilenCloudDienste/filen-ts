@@ -40,6 +40,7 @@ import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole } from "@/tests/fixtures/sdk"
 
 const ROOT_UUID = testUuid("root")
 const PARENT_A = testUuid("parent-a")
@@ -619,7 +620,7 @@ describe("drive socket handlers — trash listing membership", () => {
 	it("never moves a shared-in row into this account's trash listing", () => {
 		const shared = narrowItem({
 			...mockFile({ stableUUID: undefined }),
-			sharingRole: { Receiver: { email: "sharer@filen.io", id: 7 } }
+			sharingRole: receiverRole(7, "sharer@filen.io")
 		})
 		testQueryClient.setQueryData(driveListingQueryKey({ variant: "sharedIn", uuid: null }), [shared])
 		seedTrash([])
@@ -934,7 +935,7 @@ describe("drive socket handlers — itemFavorite on Shared by me rows", () => {
 				timestamp: 1_700_000_000_000n,
 				meta: { type: "decoded", data: { name: "Documents" } }
 			},
-			sharingRole: { Receiver: { email: `${String(receiverId)}@filen.io`, id: receiverId } },
+			sharingRole: receiverRole(receiverId, `${String(receiverId)}@filen.io`),
 			writeAccess: true
 		}
 

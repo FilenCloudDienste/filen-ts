@@ -4,6 +4,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { driveRouteIdFor, parentNavigationTarget, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 // Built through the real narrowItem (item.test.ts covers its own correctness) rather than
 // hand-rolled DriveItem literals, so this fixture can't silently drift from the actual narrowed
@@ -70,7 +71,7 @@ function sharedDirectoryItem(uuid: UuidStr): DriveItem {
 			meta: { type: "decoded", data: { name: "Shared" } }
 		},
 		sharedTag: true,
-		sharingRole: { Sharer: { email: "sharer@filen.io", id: 42 } }
+		sharingRole: sharerRole(42, "sharer@filen.io")
 	}
 	return narrowItem(sharedDir)
 }
@@ -89,7 +90,7 @@ function sharedFileItem(uuid: UuidStr): DriveItem {
 			type: "decoded",
 			data: { name: "shared.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 2_048n, key: "key", version: 2 }
 		},
-		sharingRole: { Receiver: { email: "receiver@filen.io", id: 7 } },
+		sharingRole: receiverRole(7, "receiver@filen.io"),
 		sharedTag: true,
 		canMakeThumbnail: false
 	}

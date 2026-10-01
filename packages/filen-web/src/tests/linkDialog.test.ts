@@ -10,6 +10,7 @@ import {
 	resolvePremiumGateState
 } from "@/features/drive/components/linkDialog.logic"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole } from "@/tests/fixtures/sdk"
 
 function mockDirLink(overrides: Partial<DirPublicLinkRW> = {}): DirPublicLinkRW {
 	return {
@@ -85,7 +86,7 @@ function fileItem(overrides: Partial<File> = {}): DriveItem {
 	return narrowItem(mockFile(overrides))
 }
 
-const SHARER: SharingRole = { Sharer: { email: "receiver@filen.io", id: 7 } }
+const SHARER: SharingRole = sharerRole(7, "receiver@filen.io")
 
 // Shared-by-me arms: a root share narrows to sharedRootFile/sharedRootDirectory, a nested one (role
 // spread on by the fetcher) to sharedFile/sharedDirectory.

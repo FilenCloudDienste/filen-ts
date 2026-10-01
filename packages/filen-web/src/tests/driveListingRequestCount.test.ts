@@ -37,6 +37,7 @@ import {
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { testUuid } from "@/tests/support/uuid"
+import { receiverRole } from "@/tests/fixtures/sdk"
 
 function mockFile(label: string, parent: UuidStr): File {
 	return {
@@ -699,7 +700,7 @@ describe("drive listing patches that land during a read", () => {
 					timestamp,
 					canMakeThumbnail,
 					sharedTag: true,
-					sharingRole: { Receiver: { email: "friend@filen.io", id: 7 } }
+					sharingRole: receiverRole(7, "friend@filen.io")
 				}
 			]
 		})

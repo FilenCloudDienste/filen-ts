@@ -5,6 +5,7 @@ import type { MouseEvent as ReactMouseEvent } from "react"
 import { act, renderHook } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir } from "@filen/sdk-rs"
+import { shareIdentityFromRole } from "@filen/shared"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -169,7 +170,7 @@ describe("useDriveListboxNav — one shared item's per-receiver rows", () => {
 		return useDriveStore
 			.getState()
 			.selectedItems.map(selected =>
-				selected.type === "sharedRootFile" && "Receiver" in selected.data.sharingRole ? selected.data.sharingRole.Receiver.id : -1
+				selected.type === "sharedRootFile" ? Number(shareIdentityFromRole(selected.data.sharingRole)?.userId ?? -1) : -1
 			)
 	}
 

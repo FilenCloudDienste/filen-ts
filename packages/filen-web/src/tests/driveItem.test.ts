@@ -10,6 +10,7 @@ import {
 	type DriveItem
 } from "@/features/drive/lib/item"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -306,14 +307,6 @@ describe("DriveItem.data assignability to the plain SDK shapes the worker's acti
 		expect(asWorkerParam.uuid).toBe(item.data.uuid)
 	})
 })
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
-}
-
-function receiverRole(id: number, email: string): SharingRole {
-	return { Receiver: { email, id } }
-}
 
 // The uniffi-style runtime shape the .d.ts doesn't model ({ tag, inner: [ShareInfo] }) — cast in so
 // shareIdentityFromRole's dual-surface read can be exercised against a SharingRole-typed value.

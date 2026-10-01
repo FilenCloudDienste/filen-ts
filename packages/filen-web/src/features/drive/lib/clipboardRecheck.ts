@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { CancelledError } from "@tanstack/react-query"
+import { shareRoleKind } from "@filen/shared"
 import type { ParentUuid, SharingRole } from "@filen/sdk-rs"
 import { i18n } from "@/lib/i18n"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -35,7 +36,7 @@ import {
 
 // The other party's role: the receiver's for an item shared out, so the user owns it.
 function sharedOut(role: SharingRole | undefined): boolean {
-	return role !== undefined && "Receiver" in role
+	return shareRoleKind(role) === "receiver"
 }
 
 // A parent may name a flat view instead of a directory.

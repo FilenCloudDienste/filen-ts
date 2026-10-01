@@ -23,9 +23,10 @@ import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole } from "@/tests/fixtures/sdk"
 
 const ROOT = "root-0000-0000-0000-000000000000" as UuidStr
-const ROLE: SharingRole = { Sharer: { email: "owner@filen.io", id: 42 } }
+const ROLE: SharingRole = sharerRole(42, "owner@filen.io")
 
 // The account's directories as the server holds them; getDirOptional and listDir answer from it.
 const tree = new Map<string, Dir>()

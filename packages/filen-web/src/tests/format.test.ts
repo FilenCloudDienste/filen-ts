@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Dir, File, SharedDir, SharedFile, SharingRole } from "@filen/sdk-rs"
+import type { Dir, File, SharedDir, SharedFile } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
 	formatCreatedDate,
@@ -11,6 +11,7 @@ import {
 } from "@/features/drive/lib/format"
 import { formatShortDate } from "@/lib/formatDate"
 import { formatBytes } from "@filen/shared"
+import { sharerRole } from "@/tests/fixtures/sdk"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
 	return {
@@ -42,10 +43,6 @@ function mockFile(overrides: Partial<File> = {}): File {
 		},
 		...overrides
 	}
-}
-
-function sharerRole(id: number, email: string): SharingRole {
-	return { Sharer: { email, id } }
 }
 
 // A SharedFile has no `favorited` field, so narrowItem resolves it to a sharedRootFile — one of the

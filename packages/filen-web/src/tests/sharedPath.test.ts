@@ -7,8 +7,9 @@ import {
 	resolveSharedDirContext,
 	type SharedPathDeps
 } from "@/features/drive/lib/sharedPath"
+import { sharerRole } from "@/tests/fixtures/sdk"
 
-const ROLE: SharingRole = { Sharer: { email: "owner@filen.io", id: 42 } }
+const ROLE: SharingRole = sharerRole(42, "owner@filen.io")
 
 function sharedRootDir(uuid: string): SharedRootDir {
 	return {

@@ -39,8 +39,9 @@ import { getThumbnailUrl, defaultThumbnailDeps, type ThumbnailServiceDeps } from
 import { THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY, THUMB_SDK_MAX_HEIGHT } from "@/features/drive/lib/thumbnails.logic"
 // Side effect: registers the real generators, as useThumbnail does.
 import "@/features/drive/lib/thumbGenerators"
+import { sharerRole } from "@/tests/fixtures/sdk"
 
-const ROLE: SharingRole = { Sharer: { email: "sharer@filen.io", id: 42 } }
+const ROLE: SharingRole = sharerRole(42, "sharer@filen.io")
 
 let uuidCounter = 0
 

@@ -1,15 +1,24 @@
-// DUAL-SURFACE (see project memory "SDK-rs dual surface"): the SDK's wasm `.d.ts` types SharingRole
-// as the externally-tagged `{ Sharer: ShareInfo } | { Receiver: ShareInfo }`, but a uniffi-style
-// runtime instead surfaces a `{ tag, inner: [ShareInfo] }` shape. SharingRoleLike widens every
-// possible carrier to optional so shareIdentityFromRole reads whichever is actually present, without
-// importing either surface's generated SharingRole/ShareInfo type. ShareInfo.id is `number` on the
-// wasm .d.ts but `bigint` at the uniffi runtime — id below accepts either.
+// DUAL-SURFACE (see project memory "SDK-rs dual surface"): a SharingRole reaches JS in one of three
+// shapes, and readers must not assume the one their generated type names.
+// - The wasm runtime: the Rust enum is internally tagged (`#[serde(tag = "type", rename_all =
+//   "camelCase")]`), so it arrives flat as `{ type: "sharer" | "receiver", email, id }`. The published
+//   wasm `.d.ts` still types it as the externally-tagged `{ Sharer: ShareInfo } | { Receiver: ShareInfo }`,
+//   which no runtime value has.
+// - The uniffi runtime: `{ tag: "Sharer" | "Receiver", inner: [ShareInfo] }`.
+// - The `.d.ts` shape itself, which test fixtures still build.
+// SharingRoleLike widens every carrier to optional so the readers below take whichever is present,
+// without importing either surface's generated SharingRole/ShareInfo type. ShareInfo.id is a Rust u64:
+// a number or a bigint depending on the surface, so id below accepts either.
 interface ShareInfoLike {
 	id: number | bigint
 	email: string
 }
 
 export interface SharingRoleLike {
+	type?: string
+	email?: string
+	id?: number | bigint
+	tag?: string
 	inner?: readonly ShareInfoLike[]
 	Sharer?: ShareInfoLike
 	Receiver?: ShareInfoLike
@@ -23,11 +32,31 @@ export interface ShareIdentity {
 	email: string
 }
 
-// Reads the OTHER party's identity out of a SharingRole value, whichever of the two SDK surfaces'
-// runtime shapes it actually carries (see SharingRoleLike above). Callers pass their own generated
-// SharingRole value directly — it is structurally assignable to SharingRoleLike on both surfaces.
+// Which party the role names — always the OTHER one: "sharer" on an item shared with the user,
+// "receiver" on an item the user shared out.
+export type ShareRoleKind = "sharer" | "receiver"
+
+export function shareRoleKind(role: SharingRoleLike | undefined): ShareRoleKind | null {
+	if (role === undefined) {
+		return null
+	}
+
+	if (role.type === "sharer" || role.tag === "Sharer" || role.Sharer !== undefined) {
+		return "sharer"
+	}
+
+	if (role.type === "receiver" || role.tag === "Receiver" || role.Receiver !== undefined) {
+		return "receiver"
+	}
+
+	return null
+}
+
+// Reads the OTHER party's identity out of a SharingRole value, whichever shape it carries (see
+// SharingRoleLike above). Callers pass their own generated SharingRole value directly.
 export function shareIdentityFromRole(role: SharingRoleLike | undefined): ShareIdentity | null {
-	const info = role?.inner?.[0] ?? role?.Sharer ?? role?.Receiver
+	const flat = role?.email !== undefined && role.id !== undefined ? { id: role.id, email: role.email } : undefined
+	const info = flat ?? role?.inner?.[0] ?? role?.Sharer ?? role?.Receiver
 
 	return info === undefined ? null : { userId: BigInt(info.id), email: info.email }
 }

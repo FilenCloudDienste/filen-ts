@@ -16,6 +16,7 @@ import {
 import { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboardStore"
 import { type ParentLookup } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
+import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 function dirItem(label: string, parent: string): DriveItem {
 	return narrowItem({
@@ -135,7 +136,7 @@ describe("canPaste", () => {
 	it("refuses a directory cut or copied from Shared by me as its own destination or below it", () => {
 		const sharedDocs = narrowItem({
 			inner: { uuid: testUuid("docs"), color: "default", timestamp: 0n, meta: { type: "decoded", data: { name: "docs" } } },
-			sharingRole: { Receiver: { email: "friend@filen.io", id: 7 } },
+			sharingRole: receiverRole(7, "friend@filen.io"),
 			writeAccess: true
 		} satisfies SharedRootDir)
 		const insideDocs = target({ uuid: testUuid("inner"), ancestry: [testUuid("docs"), testUuid("inner")] })
@@ -167,7 +168,7 @@ describe("canPaste", () => {
 	it("pastes a directory copied from Shared with me where the chain can't be resolved", () => {
 		const received = narrowItem({
 			inner: { uuid: testUuid("received"), color: "default", timestamp: 0n, meta: { type: "decoded", data: { name: "received" } } },
-			sharingRole: { Sharer: { email: "owner@filen.io", id: 9 } },
+			sharingRole: sharerRole(9, "owner@filen.io"),
 			writeAccess: false
 		} satisfies SharedRootDir)
 
