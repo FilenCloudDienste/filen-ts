@@ -77,7 +77,26 @@ export function cancelTransfer(id: string): void {
 // Sign-out: nothing may keep writing with the session being torn down. A copy keeps what it made unless
 // its stop already asked for the trash.
 export function cancelActiveTransfers(): void {
+	cancelUploadRuns()
 	cancelTransfers(useTransfersStore.getState().transfers.map(transfer => transfer.id))
+}
+
+// Stops every running upload run from starting anything more: a directory upload's files that are still
+// waiting on their directory (or on a HEIC conversion) are not transfers yet, so cancelling the transfers
+// alone would let them start afterwards. For Cancel all and sign-out, never for one row's Cancel.
+export function cancelUploadRuns(): void {
+	const { uploadBatches, cancelUploadBatches } = useTransfersStore.getState()
+	const running = new Set<string>()
+
+	for (const id in uploadBatches) {
+		if (uploadBatches[id]?.running === true) {
+			running.add(id)
+		}
+	}
+
+	if (running.size > 0) {
+		cancelUploadBatches(running)
+	}
 }
 
 // Direction-agnostic pause/resume entry point for the active-row toggle (transferRow.tsx) and pause/resume

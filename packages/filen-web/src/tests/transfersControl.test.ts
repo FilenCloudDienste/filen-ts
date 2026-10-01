@@ -15,6 +15,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/features/drive/lib/saveDownload", () => ({ cancelSwDownload }))
 
 import {
+	cancelUploadRuns,
 	cancelActiveTransfers,
 	cancelTransfer,
 	cancelTransfers,
@@ -29,7 +30,7 @@ import { makeTransfer } from "@/tests/fixtures/transfers"
 beforeEach(() => {
 	vi.clearAllMocks()
 	cancelSwDownload.mockImplementation(() => false)
-	useTransfersStore.setState({ transfers: [] })
+	useTransfersStore.setState({ transfers: [], uploadBatches: {} })
 	useCopyJobsStore.setState({ jobs: {} })
 })
 
@@ -310,5 +311,30 @@ describe("a browser-managed download", () => {
 
 		expect(sdkPause).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
+	})
+})
+
+describe("cancelUploadRuns", () => {
+	it("marks every running upload run cancelled so nothing more starts, and leaves ended runs alone", () => {
+		const { startUploadBatch, endUploadBatch } = useTransfersStore.getState()
+
+		startUploadBatch({ id: "running", parentUuid: null })
+		startUploadBatch({ id: "ended", parentUuid: null })
+		endUploadBatch("ended")
+
+		cancelUploadRuns()
+
+		const { uploadBatches } = useTransfersStore.getState()
+
+		expect(uploadBatches["running"]?.cancelled).toBe(true)
+		expect(uploadBatches["ended"]?.cancelled ?? false).toBe(false)
+	})
+
+	it("runs as part of sign-out's cancel", () => {
+		useTransfersStore.getState().startUploadBatch({ id: "run", parentUuid: null })
+
+		cancelActiveTransfers()
+
+		expect(useTransfersStore.getState().uploadBatches["run"]?.cancelled).toBe(true)
 	})
 })

@@ -178,6 +178,32 @@ export const drive = {
 	// ── Listing ──────────────────────────────────────────────────────────────
 	/** Drive listing — accessible name for the list/grid region (ARIA listbox) */
 	driveListLabel: "Directory contents",
+
+	// ── Pending uploads (components/pendingUploads.tsx) ───────────────────────
+	// Rows pinned above a directory's items while uploads into it run: up to three uploads get a row
+	// each, more fold into one summary row; failed uploads stay, in red, until dismissed.
+	/** Pending uploads — accessible name of the list of uploads pinned above a directory's items */
+	drivePendingUploadsLabel: "Uploads into this directory",
+	/** Pending uploads — screen-reader status while uploads into the directory on screen run */
+	drivePendingUploadsRunningStatus: "Uploading into this directory",
+	/** Pending uploads — screen-reader status while failed uploads into the directory on screen are listed */
+	drivePendingUploadsFailedStatus: "Some uploads into this directory failed",
+	/** Pending uploads — summary row standing for four or more running uploads; {{count}} = files still uploading; singular */
+	drivePendingUploadsUploading_one: "Uploading {{count}} file",
+	/** Pending uploads — summary row standing for four or more running uploads; {{count}} = files still uploading; plural */
+	drivePendingUploadsUploading_other: "Uploading {{count}} files",
+	/** Pending uploads — summary row standing for four or more failed uploads; singular */
+	drivePendingUploadsFailed_one: "{{count}} upload failed",
+	/** Pending uploads — summary row standing for four or more failed uploads; plural */
+	drivePendingUploadsFailed_other: "{{count}} uploads failed",
+	/** Pending uploads — accessible label on a failed row's button removing it (and its transfer) from the list */
+	drivePendingUploadsDismiss: "Dismiss",
+	/** Pending uploads — title of the confirm dialog the summary row's Cancel opens */
+	drivePendingUploadsCancelAllTitle: "Cancel uploads?",
+	/** Pending uploads — body of the summary row's Cancel confirm; {{count}} = files still uploading into this directory; singular */
+	drivePendingUploadsCancelAllBody_one: "{{count}} file still uploading into this directory will stop. This can't be undone.",
+	/** Pending uploads — body of the summary row's Cancel confirm; {{count}} = files still uploading into this directory; plural */
+	drivePendingUploadsCancelAllBody_other: "{{count}} files still uploading into this directory will stop. This can't be undone.",
 	/** Drive listing — title shown when a directory listing fails to load */
 	driveLoadError: "Couldn't load this directory",
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */

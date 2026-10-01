@@ -88,6 +88,9 @@ import { reroutedRoute, subscribeBranchChanges } from "@/features/drive/lib/bran
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { ListingDropSurface } from "@/features/drive/components/listingDropSurface"
+import { PendingUploads } from "@/features/drive/components/pendingUploads"
+import { hasPendingUploads } from "@/features/drive/lib/pendingUploads.logic"
+import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 // Grid-view inset between the tiles and the pane's edges. A CSS padding on the listbox, not a
 // virtualizer padding, because the marquee reads the listbox's computed paddings for its hit math.
@@ -292,6 +295,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const sortedItems = display.items
 	const hiddenCount = display.hiddenCount
 	const resolvedCount = display.resolvedCount
+
+	// Uploads running into the directory on screen show as rows pinned above its items: only where an
+	// upload can land, never over search results. Only whether there are any is read here, so a progress
+	// tick never re-renders the listing; the rows subscribe to their own figures.
+	const pendingParentUuid = canWriteVariant(variant, uuid) && !search.active ? uuid : undefined
+	const hasPendingRows = useTransfersStore(state => pendingParentUuid !== undefined && hasPendingUploads(state, pendingParentUuid))
 
 	const selectedItems = useDriveStore(useShallow(state => state.selectedItems))
 	// Bulk consumers (the dialog host, the floating bulk bar, the menus and the clipboard below) always
@@ -705,6 +714,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 						disabled={!isSortableVariant(variant)}
 					/>
 				) : null}
+				{hasPendingRows && pendingParentUuid !== undefined ? (
+					<PendingUploads
+						parentUuid={pendingParentUuid}
+						viewMode={effectiveViewMode}
+						columns={columns}
+					/>
+				) : null}
 				{withBackgroundMenu(
 					<div
 						ref={setScrollElement}
@@ -965,7 +981,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 									}}
 								/>
 							</div>
-						) : sortedItems.length === 0 ? (
+						) : sortedItems.length === 0 && !hasPendingRows ? (
 							withBackgroundMenu(<div className="flex flex-1 overflow-y-auto">{renderEmptyListing()}</div>)
 						) : (
 							renderListboxContent()

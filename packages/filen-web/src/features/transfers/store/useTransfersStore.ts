@@ -35,6 +35,38 @@ export interface Transfer {
 	// The browser's download manager streams this one (the service-worker path): it can be cancelled,
 	// never paused.
 	browserManaged?: true
+	// The drive upload run this belongs to, which the target directory's listing shows while it runs.
+	batch?: UploadBatchRef
+}
+
+// One drive upload run as the listing it targets shows it: a plain pick or drop of files, or one
+// top-level directory of a directory upload (`directoryName`). Every transfer of the run holds the same
+// object, so tagging one allocates nothing.
+export interface UploadBatchRef {
+	id: string
+	// The directory whose listing shows the run, null for the root however the upload named it.
+	parentUuid: string | null
+	directoryName?: string
+}
+
+// A run's running totals, kept here rather than summed from its transfers: finished rows are capped and
+// can be cleared, and a run's progress must not move backwards when one goes.
+export interface UploadBatch {
+	ref: UploadBatchRef
+	// False once the run returned; only a directory run that ended with failures is kept then, until dismissed.
+	running: boolean
+	// A cancel from the listing: the run starts nothing more.
+	cancelled: boolean
+	// The files started and still counted (a cancelled one leaves the run), their size, and how many settled.
+	files: number
+	bytes: number
+	settledFiles: number
+	// Bytes moved for the counted files: a done file's whole size, a failed one's nothing.
+	transferred: number
+	failedBytes: number
+	// Failed items, including those a directory run never started because their directory failed.
+	failed: number
+	error?: ErrorDTO
 }
 
 // Every terminal state settle() can drive a transfer to. Kept separate from Transfer["status"]
@@ -143,6 +175,10 @@ export interface TransfersStore {
 	// The same rolling window per active transfer, over its own bytesTransferred, for the row's speed and
 	// time left. Dropped once the transfer settles or its window empties; a copy's row reads its job instead.
 	rowSpeedSamples: Readonly<Record<string, SpeedSample[]>>
+	// Upload runs by id, insertion-ordered (string keys), and the same rolling window per run over its
+	// cumulative bytes, for the listing's directory and summary rows.
+	uploadBatches: Readonly<Record<string, UploadBatch>>
+	batchSpeedSamples: Readonly<Record<string, SpeedSample[]>>
 	// Omits `paused` — every newly added transfer starts unpaused, enforced here rather than trusted
 	// to each call site (features/drive/lib/upload.ts's runUpload, features/drive/lib/download.ts's runDownload).
 	add: (transfer: Omit<Transfer, "paused">) => void
@@ -162,6 +198,14 @@ export interface TransfersStore {
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
 	setItem: (id: string, item: DriveItem) => void
 	remove: (id: string) => void
+	// remove for many rows in one update.
+	removeMany: (ids: ReadonlySet<string>) => void
+	startUploadBatch: (ref: UploadBatchRef) => void
+	// Items a directory run could not start: a directory it failed to create and everything under it.
+	failUploadBatchItems: (id: string, count: number, error?: ErrorDTO) => void
+	cancelUploadBatches: (ids: ReadonlySet<string>) => void
+	endUploadBatch: (id: string) => void
+	removeUploadBatches: (ids: ReadonlySet<string>) => void
 	// Drops every finished (non-active) row; active transfers are left untouched. Backs the
 	// transfers panel's "clear finished" control.
 	clearFinished: () => void
@@ -182,6 +226,21 @@ function samplesSince(samples: SpeedSample[], windowStart: number): SpeedSample[
 	return firstKept === -1 ? [] : samples.slice(firstKept)
 }
 
+// samplesSince over every window of a record, dropping the emptied ones; the same object when none aged out.
+function samplesRecordSince(record: Readonly<Record<string, SpeedSample[]>>, windowStart: number): Readonly<Record<string, SpeedSample[]>> {
+	let out = record
+
+	for (const [id, samples] of Object.entries(record)) {
+		const kept = samplesSince(samples, windowStart)
+
+		if (kept !== samples) {
+			out = kept.length === 0 ? withoutKey(out, id) : { ...out, [id]: kept }
+		}
+	}
+
+	return out
+}
+
 // Keeps only the samples of transfers that are still active; the same object when nothing goes.
 function rowSamplesOfActive(
 	record: Readonly<Record<string, SpeedSample[]>>,
@@ -198,16 +257,83 @@ function rowSamplesOfActive(
 	return out
 }
 
-export function hasSpeedSamples(state: Pick<TransfersStore, "speedSamples" | "rowSpeedSamples">): boolean {
-	return state.speedSamples.length > 0 || Object.keys(state.rowSpeedSamples).length > 0
+export function hasSpeedSamples(state: Pick<TransfersStore, "speedSamples" | "rowSpeedSamples" | "batchSpeedSamples">): boolean {
+	return state.speedSamples.length > 0 || Object.keys(state.rowSpeedSamples).length > 0 || Object.keys(state.batchSpeedSamples).length > 0
+}
+
+// Applies `update` to a run's totals; the same object when the run is gone.
+function withBatch(
+	batches: Readonly<Record<string, UploadBatch>>,
+	id: string,
+	update: (batch: UploadBatch) => UploadBatch
+): Readonly<Record<string, UploadBatch>> {
+	const batch = batches[id]
+
+	return batch === undefined ? batches : { ...batches, [id]: update(batch) }
+}
+
+// A settling file's effect on its run: a done file counts whole, a failed one moves its size out of what
+// is left to send, a cancelled one leaves the run.
+function settledBatch(batch: UploadBatch, transfer: Transfer, status: TerminalStatus, error: ErrorDTO | undefined): UploadBatch {
+	switch (status) {
+		case "done":
+			return {
+				...batch,
+				settledFiles: batch.settledFiles + 1,
+				transferred: batch.transferred + Math.max(0, transfer.size - transfer.bytesTransferred)
+			}
+		case "cancelled":
+			return {
+				...batch,
+				files: batch.files - 1,
+				bytes: batch.bytes - transfer.size,
+				transferred: batch.transferred - transfer.bytesTransferred
+			}
+		default:
+			return {
+				...batch,
+				settledFiles: batch.settledFiles + 1,
+				transferred: batch.transferred - transfer.bytesTransferred,
+				failedBytes: batch.failedBytes + transfer.size,
+				failed: batch.failed + 1,
+				...(batch.error === undefined && error !== undefined ? { error } : {})
+			}
+	}
+}
+
+function withoutKeys<T>(record: Readonly<Record<string, T>>, ids: ReadonlySet<string>): Readonly<Record<string, T>> {
+	let out = record
+
+	for (const id of ids) {
+		out = withoutKey(out, id)
+	}
+
+	return out
 }
 
 export const useTransfersStore = create<TransfersStore>((set, get) => ({
 	transfers: [],
 	speedSamples: [],
 	rowSpeedSamples: {},
+	uploadBatches: {},
+	batchSpeedSamples: {},
 	add: transfer => {
-		set(state => ({ transfers: [...state.transfers, { ...transfer, paused: false }] }))
+		set(state => {
+			const transfers = [...state.transfers, { ...transfer, paused: false }]
+
+			if (transfer.batch === undefined) {
+				return { transfers }
+			}
+
+			return {
+				transfers,
+				uploadBatches: withBatch(state.uploadBatches, transfer.batch.id, batch => ({
+					...batch,
+					files: batch.files + 1,
+					bytes: batch.bytes + transfer.size
+				}))
+			}
+		})
 	},
 	setPaused: (id, paused) => {
 		get().setPausedMany(new Set([id]), paused)
@@ -230,7 +356,8 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 			const transfers = state.transfers.map(transfer => (transfer === target ? { ...transfer, bytesTransferred } : transfer))
 			const now = Date.now()
 			// A restarted transfer reporting fewer bytes moved none.
-			const totalBytes = (state.speedSamples.at(-1)?.totalBytes ?? 0) + Math.max(0, bytesTransferred - target.bytesTransferred)
+			const moved = Math.max(0, bytesTransferred - target.bytesTransferred)
+			const totalBytes = (state.speedSamples.at(-1)?.totalBytes ?? 0) + moved
 			const windowStart = now - SPEED_WINDOW_MS
 			const speedSamples = samplesSince([...state.speedSamples, { timestamp: now, totalBytes }], windowStart)
 
@@ -242,8 +369,29 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 				[...(state.rowSpeedSamples[id] ?? []), { timestamp: now, totalBytes: bytesTransferred }],
 				windowStart
 			)
+			const rowSpeedSamples = { ...state.rowSpeedSamples, [id]: rowSamples }
+			const batchId = target.batch?.id
 
-			return { transfers, speedSamples, rowSpeedSamples: { ...state.rowSpeedSamples, [id]: rowSamples } }
+			if (batchId === undefined || state.uploadBatches[batchId] === undefined) {
+				return { transfers, speedSamples, rowSpeedSamples }
+			}
+
+			const batchSamples = state.batchSpeedSamples[batchId] ?? []
+			const batchTotal = (batchSamples.at(-1)?.totalBytes ?? 0) + moved
+
+			return {
+				transfers,
+				speedSamples,
+				rowSpeedSamples,
+				uploadBatches: withBatch(state.uploadBatches, batchId, batch => ({
+					...batch,
+					transferred: batch.transferred + bytesTransferred - target.bytesTransferred
+				})),
+				batchSpeedSamples: {
+					...state.batchSpeedSamples,
+					[batchId]: samplesSince([...batchSamples, { timestamp: now, totalBytes: batchTotal }], windowStart)
+				}
+			}
 		})
 	},
 	setSize: (id, size) => {
@@ -253,9 +401,16 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 	},
 	settle: (id, status, error) => {
 		set(state => {
+			const target = state.transfers.find(transfer => transfer.id === id)
 			const transfers = state.transfers.map(transfer =>
-				transfer.id === id ? (error === undefined ? { ...transfer, status } : { ...transfer, status, error }) : transfer
+				transfer === target ? (error === undefined ? { ...transfer, status } : { ...transfer, status, error }) : transfer
 			)
+			// Only the first settle of an active row counts toward its run.
+			const batchId = target !== undefined && isActiveTransfer(target.status) ? target.batch?.id : undefined
+			const uploadBatches =
+				target === undefined || batchId === undefined
+					? state.uploadBatches
+					: withBatch(state.uploadBatches, batchId, batch => settledBatch(batch, target, status, error))
 
 			// "cancelled" never joins history — every caller removes the row immediately after settling it
 			// (runDownload/runZipDownload/runUpload's own Cancelled branch) — so it must never count toward
@@ -263,7 +418,8 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 			// row an instant before it is itself removed.
 			return {
 				transfers: status === "cancelled" ? transfers : capFinishedTransfers(transfers),
-				rowSpeedSamples: rowSamplesOfActive(state.rowSpeedSamples, transfers)
+				rowSpeedSamples: rowSamplesOfActive(state.rowSpeedSamples, transfers),
+				uploadBatches
 			}
 		})
 	},
@@ -273,9 +429,72 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 		}))
 	},
 	remove: id => {
+		get().removeMany(new Set([id]))
+	},
+	removeMany: ids => {
 		set(state => ({
-			transfers: state.transfers.filter(transfer => transfer.id !== id),
-			rowSpeedSamples: withoutKey(state.rowSpeedSamples, id)
+			transfers: state.transfers.filter(transfer => !ids.has(transfer.id)),
+			rowSpeedSamples: withoutKeys(state.rowSpeedSamples, ids)
+		}))
+	},
+	startUploadBatch: ref => {
+		set(state => ({
+			uploadBatches: {
+				...state.uploadBatches,
+				[ref.id]: {
+					ref,
+					running: true,
+					cancelled: false,
+					files: 0,
+					bytes: 0,
+					settledFiles: 0,
+					transferred: 0,
+					failedBytes: 0,
+					failed: 0
+				}
+			}
+		}))
+	},
+	failUploadBatchItems: (id, count, error) => {
+		set(state => ({
+			uploadBatches: withBatch(state.uploadBatches, id, batch => ({
+				...batch,
+				failed: batch.failed + count,
+				...(batch.error === undefined && error !== undefined ? { error } : {})
+			}))
+		}))
+	},
+	cancelUploadBatches: ids => {
+		set(state => {
+			let uploadBatches = state.uploadBatches
+
+			for (const id of ids) {
+				uploadBatches = withBatch(uploadBatches, id, batch => ({ ...batch, cancelled: true }))
+			}
+
+			return { uploadBatches }
+		})
+	},
+	endUploadBatch: id => {
+		set(state => {
+			const batch = state.uploadBatches[id]
+
+			if (batch === undefined) {
+				return state
+			}
+
+			// A plain run's failures stay as its own failed rows; a directory run's only as the run.
+			if (batch.ref.directoryName !== undefined && batch.failed > 0 && !batch.cancelled) {
+				return { uploadBatches: { ...state.uploadBatches, [id]: { ...batch, running: false } } }
+			}
+
+			return { uploadBatches: withoutKey(state.uploadBatches, id) }
+		})
+	},
+	removeUploadBatches: ids => {
+		set(state => ({
+			uploadBatches: withoutKeys(state.uploadBatches, ids),
+			batchSpeedSamples: withoutKeys(state.batchSpeedSamples, ids)
 		}))
 	},
 	clearFinished: () => {
@@ -289,19 +508,14 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 		set(state => {
 			const windowStart = Date.now() - SPEED_WINDOW_MS
 			const speedSamples = samplesSince(state.speedSamples, windowStart)
-			let rowSpeedSamples = state.rowSpeedSamples
+			const rowSpeedSamples = samplesRecordSince(state.rowSpeedSamples, windowStart)
+			const batchSpeedSamples = samplesRecordSince(state.batchSpeedSamples, windowStart)
 
-			for (const [id, samples] of Object.entries(state.rowSpeedSamples)) {
-				const kept = samplesSince(samples, windowStart)
-
-				if (kept !== samples) {
-					rowSpeedSamples = kept.length === 0 ? withoutKey(rowSpeedSamples, id) : { ...rowSpeedSamples, [id]: kept }
-				}
-			}
-
-			return speedSamples === state.speedSamples && rowSpeedSamples === state.rowSpeedSamples
+			return speedSamples === state.speedSamples &&
+				rowSpeedSamples === state.rowSpeedSamples &&
+				batchSpeedSamples === state.batchSpeedSamples
 				? state
-				: { speedSamples, rowSpeedSamples }
+				: { speedSamples, rowSpeedSamples, batchSpeedSamples }
 		})
 	}
 }))

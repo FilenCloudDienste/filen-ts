@@ -3,7 +3,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTransfersStore"
+import type { Transfer, TerminalStatus, UploadBatchRef } from "@/features/transfers/store/useTransfersStore"
 
 // The real sdk client/query client modules import a Vite `?worker` / touch an OPFS-backed
 // persister, unresolvable/unwanted under node vitest — mock both down to what this module actually
@@ -422,6 +422,47 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 		await startUploads([mockBrowserFile("a.txt", 1_024)], null)
 
 		expect(useTransfersStore.getState().transfers[0]?.bytesTransferred).toBe(512)
+	})
+})
+
+// The run the target listing shows while the pick uploads (pendingUploads.logic.ts).
+describe("startUploads — listing run", () => {
+	it("tags every file with one run keyed to the listing, the root named null however the upload named it", async () => {
+		const rootDirUuid = testUuid("root")
+		const runs: (UploadBatchRef | undefined)[] = []
+
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 1n << 40n, rootDirUuid })
+		uploadFile.mockImplementation((_parentUuid, transferId) => {
+			runs.push(useTransfersStore.getState().transfers.find(transfer => transfer.id === transferId)?.batch)
+
+			return Promise.resolve(mockSdkFile())
+		})
+
+		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt")], rootDirUuid)
+
+		expect(uploadFile).toHaveBeenCalledWith(rootDirUuid, expect.any(String), expect.anything(), expect.any(Function))
+		expect(runs).toHaveLength(2)
+		expect(runs[0]?.parentUuid).toBeNull()
+		expect(runs[0]?.directoryName).toBeUndefined()
+		expect(runs[1]).toBe(runs[0])
+		// Ended clean: nothing left for the listing to show.
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+	})
+
+	it("starts no file of a run cancelled while it was still being prepared", async () => {
+		maybeConvertHeicUploadMock.mockImplementation((_deps, file) => {
+			const runIds = Object.keys(useTransfersStore.getState().uploadBatches)
+
+			useTransfersStore.getState().cancelUploadBatches(new Set(runIds))
+
+			return Promise.resolve(file)
+		})
+
+		await startUploads([mockBrowserFile("a.txt")], null)
+
+		expect(uploadFile).not.toHaveBeenCalled()
+		expect(toastSuccess).not.toHaveBeenCalled()
+		expect(toastError).not.toHaveBeenCalled()
 	})
 })
 

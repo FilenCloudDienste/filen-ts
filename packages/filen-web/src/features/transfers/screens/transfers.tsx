@@ -16,7 +16,7 @@ import {
 	resumableTransferIds,
 	shouldShowTransfersAggregate
 } from "@/features/transfers/screens/transfers.logic"
-import { cancelTransfer, cancelTransfers, setTransfersPaused } from "@/features/transfers/lib/control"
+import { cancelTransfer, cancelTransfers, cancelUploadRuns, setTransfersPaused } from "@/features/transfers/lib/control"
 import { TransferRow } from "@/features/transfers/components/transferRow"
 import { percentFormat, runningPercentFraction } from "@/features/transfers/components/transferRow.logic"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
@@ -178,6 +178,7 @@ export function TransfersScreen() {
 				destructive
 				onOpenChange={setCancelAllConfirmOpen}
 				onConfirm={() => {
+					cancelUploadRuns()
 					cancelTransfers(cancellable)
 					setCancelAllConfirmOpen(false)
 				}}

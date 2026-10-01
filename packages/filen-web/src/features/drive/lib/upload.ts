@@ -4,14 +4,20 @@ import { sumBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { toastSummary } from "@/lib/actions/bulkToast"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import { queryClient } from "@/queries/client"
 import { cachedQueriesWithPrefix } from "@/queries/patch"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { DRIVE_LISTING_KEY_PREFIX, directorySizeQueryKey, findCachedListingItem, queueListingCreate } from "@/features/drive/queries/drive"
-import { markAccountStale } from "@/queries/account"
-import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
+import {
+	DRIVE_LISTING_KEY_PREFIX,
+	directorySizeQueryKey,
+	findCachedListingItem,
+	normalizeParentUuid,
+	queueListingCreate
+} from "@/features/drive/queries/drive"
+import { accountQueryGet, markAccountStale } from "@/queries/account"
+import { useTransfersStore, type TransfersStore, type UploadBatchRef } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
 import { defaultHeicUploadDeps, heicUploadConversionEnabled, maybeConvertHeicUpload } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
@@ -55,8 +61,11 @@ export type UploadOutcome = VoidActionOutcome | { status: "cancelled" }
 // via runOp/asErrorDTO, mirroring every VoidActionOutcome helper in features/drive/lib/actions.ts and
 // features/contacts/lib/actions.ts, plus a "cancelled" arm so a summary never counts a cancelled file
 // as uploaded.
-export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string | null; file: File }): Promise<UploadOutcome> {
-	const { parentUuid, file } = args
+export async function runUpload(
+	deps: RunUploadDeps,
+	args: { parentUuid: string | null; file: File; batch?: UploadBatchRef | undefined }
+): Promise<UploadOutcome> {
+	const { parentUuid, file, batch } = args
 	const id = crypto.randomUUID()
 
 	deps.store.add({
@@ -67,7 +76,8 @@ export async function runUpload(deps: RunUploadDeps, args: { parentUuid: string 
 		bytesTransferred: 0,
 		status: "uploading",
 		parentUuid,
-		startedAt: Date.now()
+		startedAt: Date.now(),
+		...(batch !== undefined ? { batch } : {})
 	})
 
 	const reportProgress = throttle((bytes: bigint) => {
@@ -161,6 +171,40 @@ export const defaultUploadDeps: RunUploadDeps = {
 	warmThumbnail: warmUploadThumbnail
 }
 
+// The run side of the transfers store's upload runs (UploadBatch), which the target directory's listing
+// shows while they run. Injected into the directory upload; plain uploads use it directly.
+export interface UploadBatchControl {
+	start: (ref: UploadBatchRef) => void
+	isCancelled: (id: string) => boolean
+	fail: (id: string, count: number, error?: ErrorDTO) => void
+	end: (id: string) => void
+}
+
+export const uploadBatchControl: UploadBatchControl = {
+	start: ref => {
+		useTransfersStore.getState().startUploadBatch(ref)
+	},
+	isCancelled: id => useTransfersStore.getState().uploadBatches[id]?.cancelled === true,
+	fail: (id, count, error) => {
+		useTransfersStore.getState().failUploadBatchItems(id, count, error)
+	},
+	end: id => {
+		useTransfersStore.getState().endUploadBatch(id)
+	}
+}
+
+// A new run into `parentUuid`. Keyed to the listing that shows it, which names the root null: a drop on
+// the sidebar's root names it by uuid.
+export function newUploadBatchRef(parentUuid: string | null, directoryName?: string): UploadBatchRef {
+	const listingParentUuid = normalizeParentUuid(parentUuid, accountQueryGet()?.rootDirUuid ?? "")
+
+	return {
+		id: crypto.randomUUID(),
+		parentUuid: listingParentUuid,
+		...(directoryName !== undefined ? { directoryName } : {})
+	}
+}
+
 // Fan out every file in parallel — no JS queue/semaphore: the SDK's own Tower layer throttles actual
 // upload concurrency (CLAUDE.md rule: never reimplement concurrency/retry limits in JS). Each file is
 // fully independent (its own transfer row, its own outcome), so one failing upload never blocks or
@@ -177,14 +221,24 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 	}
 
 	const convertHeic = await heicUploadConversionEnabled(defaultHeicUploadDeps, files)
+	const batch = newUploadBatchRef(parentUuid)
+
+	uploadBatchControl.start(batch)
 
 	const outcomes = await Promise.all(
-		files.map(async file => {
+		files.map(async (file): Promise<UploadOutcome> => {
 			const prepared = await maybeConvertHeicUpload(defaultHeicUploadDeps.convert, file, convertHeic)
 
-			return await runUpload(defaultUploadDeps, { parentUuid, file: prepared })
+			// Cancelled from the listing while this one was still being prepared.
+			if (uploadBatchControl.isCancelled(batch.id)) {
+				return { status: "cancelled" }
+			}
+
+			return await runUpload(defaultUploadDeps, { parentUuid, file: prepared, batch })
 		})
 	)
+
+	uploadBatchControl.end(batch.id)
 	const succeeded = outcomes.filter(outcome => outcome.status === "success").length
 	const failed = outcomes.filter(outcome => outcome.status === "error").length
 

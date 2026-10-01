@@ -6,7 +6,16 @@ import { log } from "@/lib/log"
 import { toastSummary } from "@/lib/actions/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
-import { runUpload, defaultUploadDeps, type RunUploadDeps, type UploadOutcome } from "@/features/drive/lib/upload"
+import {
+	runUpload,
+	defaultUploadDeps,
+	newUploadBatchRef,
+	uploadBatchControl,
+	type RunUploadDeps,
+	type UploadBatchControl,
+	type UploadOutcome
+} from "@/features/drive/lib/upload"
+import type { UploadBatchRef } from "@/features/transfers/store/useTransfersStore"
 import {
 	defaultHeicUploadDeps,
 	heicUploadConversionEnabled,
@@ -226,6 +235,17 @@ export interface RunDirectoryUploadDeps {
 	createDirectory: CreateDirectoryDeps
 	upload: RunUploadDeps
 	heic: HeicUploadDeps
+	// Optional for the same DI reason as RunUploadDeps' own: one run per top-level directory (and one for
+	// the files picked beside them), which the target listing shows as one row each and can cancel.
+	batches?: UploadBatchControl
+}
+
+// The top-level segment of a picked path: the directory a file or sub-directory lands under in the
+// target listing, or null for an entry at the top level itself.
+function topLevelOf(relPath: string): string | null {
+	const index = relPath.indexOf("/")
+
+	return index === -1 ? null : relPath.slice(0, index)
 }
 
 export async function runDirectoryUpload(
@@ -252,6 +272,41 @@ export async function runDirectoryUpload(
 	const nameClaims = new Map<string, Promise<unknown>>()
 	const createdUuids: string[] = []
 	let failedDirs = 0
+	const batches = deps.batches
+	// Each top-level directory's run, and one for the files picked at the top level. Started before anything
+	// is created, so the row shows while the tree is still being made.
+	const directoryRuns = new Map<string, UploadBatchRef>()
+	let topLevelFilesRun: UploadBatchRef | undefined
+
+	if (batches !== undefined) {
+		for (const relPath of dirs) {
+			if (topLevelOf(relPath) === null) {
+				const ref = newUploadBatchRef(rootParentUuid, relPath)
+
+				directoryRuns.set(relPath, ref)
+				batches.start(ref)
+			}
+		}
+
+		if (files.some(entry => topLevelOf(entry.relPath) === null)) {
+			topLevelFilesRun = newUploadBatchRef(rootParentUuid)
+			batches.start(topLevelFilesRun)
+		}
+	}
+
+	function directoryRunOf(relPath: string): UploadBatchRef | undefined {
+		return directoryRuns.get(topLevelOf(relPath) ?? relPath)
+	}
+
+	function fileRunOf(relPath: string): UploadBatchRef | undefined {
+		const top = topLevelOf(relPath)
+
+		return top === null ? topLevelFilesRun : directoryRuns.get(top)
+	}
+
+	function isCancelled(run: UploadBatchRef | undefined): boolean {
+		return run !== undefined && batches?.isCancelled(run.id) === true
+	}
 
 	function parentUuidOf(relPath: string): Promise<string | null | undefined> {
 		const parentPath = dirnameOf(relPath)
@@ -266,11 +321,22 @@ export async function runDirectoryUpload(
 		const claimKey = relPath.toLowerCase()
 		const earlierClaim = nameClaims.get(claimKey)
 
+		const run = directoryRunOf(relPath)
+
 		const created = (async (): Promise<string | undefined> => {
 			const parentUuid = await parentUuidOf(relPath)
 
+			// Cancelled from the listing: nothing more is created, and nothing under it counts as failed.
+			if (isCancelled(run)) {
+				return undefined
+			}
+
 			if (parentUuid === undefined) {
 				failedDirs += 1
+
+				if (run !== undefined) {
+					batches?.fail(run.id, 1)
+				}
 
 				return undefined
 			}
@@ -281,6 +347,10 @@ export async function runDirectoryUpload(
 
 			if (outcome.status === "error") {
 				failedDirs += 1
+
+				if (run !== undefined) {
+					batches?.fail(run.id, 1, outcome.dto)
+				}
 
 				return undefined
 			}
@@ -307,21 +377,42 @@ export async function runDirectoryUpload(
 	const [fileOutcomes] = await Promise.all([
 		Promise.all(
 			files.map(async ({ file, relPath }): Promise<UploadOutcome["status"]> => {
+				const run = fileRunOf(relPath)
 				const parentUuid = await parentUuidOf(relPath)
 
+				if (isCancelled(run)) {
+					return "cancelled"
+				}
+
 				if (parentUuid === undefined) {
+					if (run !== undefined) {
+						batches?.fail(run.id, 1)
+					}
+
 					return "error"
 				}
 
 				// renameToJpg only rewrites file.name; `relPath` is untouched and still resolved the parent above.
 				const prepared = await maybeConvertHeicUpload(deps.heic.convert, file, await convertHeic)
 
-				return (await runUpload(deps.upload, { parentUuid, file: prepared })).status
+				if (isCancelled(run)) {
+					return "cancelled"
+				}
+
+				return (await runUpload(deps.upload, { parentUuid, file: prepared, batch: run })).status
 			})
 		),
 		// A directory with no file under it is still awaited, so its outcome is counted.
 		Promise.all(dirUuids.values())
 	])
+
+	for (const ref of directoryRuns.values()) {
+		batches?.end(ref.id)
+	}
+
+	if (topLevelFilesRun !== undefined) {
+		batches?.end(topLevelFilesRun.id)
+	}
 
 	const uploadedFiles = fileOutcomes.filter(status => status === "success").length
 
@@ -350,7 +441,8 @@ const defaultDirectoryUploadDeps: RunDirectoryUploadDeps = {
 		patchListing: driveListingQueryUpdate
 	},
 	upload: defaultUploadDeps,
-	heic: defaultHeicUploadDeps
+	heic: defaultHeicUploadDeps,
+	batches: uploadBatchControl
 }
 
 // Both call sites (uploadMenu.tsx's directory picker, uploadDropzone.tsx's DnD drop) fire this

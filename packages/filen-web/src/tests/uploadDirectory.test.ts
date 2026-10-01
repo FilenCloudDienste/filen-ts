@@ -43,6 +43,7 @@ import {
 	type RunDirectoryUploadDeps
 } from "@/features/drive/lib/uploadDirectory"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { uploadBatchControl } from "@/features/drive/lib/upload"
 import { testUuid } from "@/tests/support/uuid"
 
 // ---------------------------------------------------------------------------
@@ -862,5 +863,123 @@ describe("startDirectoryUpload (real wiring)", () => {
 
 		expect(toastLoading).toHaveBeenCalledTimes(1)
 		expect(toastLoading).toHaveBeenCalledWith(expect.any(String))
+	})
+})
+
+// The runs the target listing shows (pendingUploads.logic.ts): one per top-level directory, one for the
+// files picked beside them, each cancellable before its files start.
+describe("runDirectoryUpload — listing runs", () => {
+	function makeHarness() {
+		const create = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>()
+		const upload =
+			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		const deps: RunDirectoryUploadDeps = {
+			createDirectory: { createDirectory: create, patchListing: vi.fn() },
+			upload: { upload, store: useTransfersStore.getState(), patchCreated: vi.fn() },
+			heic: { convert: { transform: vi.fn() }, readPreference: vi.fn<() => Promise<boolean>>().mockResolvedValue(false) },
+			batches: uploadBatchControl
+		}
+
+		create.mockImplementation((_parentUuid, name) =>
+			Promise.resolve(mockDir({ uuid: testUuid(name), meta: { type: "decoded", data: { name } } }))
+		)
+
+		return { deps, create, upload }
+	}
+
+	beforeEach(() => {
+		useTransfersStore.setState({ transfers: [], uploadBatches: {}, batchSpeedSamples: {} })
+	})
+
+	it("tags every file with its top-level directory's run, and the top-level files with a plain run, all keyed to the target", async () => {
+		const h = makeHarness()
+		const seen: Record<string, { directoryName?: string; parentUuid: string | null; running: boolean } | undefined> = {}
+
+		h.upload.mockImplementation((_parentUuid, transferId) => {
+			const transfer = useTransfersStore.getState().transfers.find(candidate => candidate.id === transferId)
+			const batch = transfer?.batch === undefined ? undefined : useTransfersStore.getState().uploadBatches[transfer.batch.id]
+
+			seen[transfer?.name ?? ""] =
+				batch === undefined
+					? undefined
+					: {
+							...(batch.ref.directoryName !== undefined ? { directoryName: batch.ref.directoryName } : {}),
+							parentUuid: batch.ref.parentUuid,
+							running: batch.running
+						}
+
+			return Promise.resolve(mockSdkFile())
+		})
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: "target",
+			dirs: ["a", "a/sub", "b"],
+			files: [
+				{ file: mockBrowserFile("x.txt"), relPath: "a/x.txt" },
+				{ file: mockBrowserFile("y.txt"), relPath: "a/sub/y.txt" },
+				{ file: mockBrowserFile("z.txt"), relPath: "b/z.txt" },
+				{ file: mockBrowserFile("top.txt"), relPath: "top.txt" }
+			]
+		})
+
+		expect(seen).toEqual({
+			"x.txt": { directoryName: "a", parentUuid: "target", running: true },
+			"y.txt": { directoryName: "a", parentUuid: "target", running: true },
+			"z.txt": { directoryName: "b", parentUuid: "target", running: true },
+			"top.txt": { parentUuid: "target", running: true }
+		})
+		// Every run ended clean, so none is left behind.
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+	})
+
+	it("keeps a directory's run as failed, with the error, when a sub-directory under it could not be created", async () => {
+		const h = makeHarness()
+
+		// "a" first, then "sub" under it.
+		h.create.mockResolvedValueOnce(mockDir({ uuid: testUuid("a") })).mockRejectedValueOnce(sdkDto("Timeout"))
+		h.upload.mockResolvedValue(mockSdkFile())
+
+		await runDirectoryUpload(h.deps, {
+			rootParentUuid: "target",
+			dirs: ["a", "a/sub"],
+			files: [{ file: mockBrowserFile("y.txt"), relPath: "a/sub/y.txt" }]
+		})
+
+		const runs = Object.values(useTransfersStore.getState().uploadBatches)
+
+		expect(runs).toHaveLength(1)
+		expect(runs[0]).toMatchObject({ ref: { directoryName: "a" }, running: false, failed: 2, error: { kind: "Timeout" } })
+	})
+
+	it("starts nothing more once its run is cancelled, counting nothing as failed", async () => {
+		const h = makeHarness()
+		let releaseCreate: () => void = () => undefined
+
+		h.create.mockImplementation(
+			(_parentUuid, name) =>
+				new Promise(resolve => {
+					releaseCreate = () => {
+						resolve(mockDir({ uuid: testUuid(name), meta: { type: "decoded", data: { name } } }))
+					}
+				})
+		)
+
+		const promise = runDirectoryUpload(h.deps, {
+			rootParentUuid: "target",
+			dirs: ["a"],
+			files: [{ file: mockBrowserFile("x.txt"), relPath: "a/x.txt" }]
+		})
+
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		const [run] = Object.keys(useTransfersStore.getState().uploadBatches)
+
+		useTransfersStore.getState().cancelUploadBatches(new Set([run ?? ""]))
+		releaseCreate()
+		await promise
+
+		expect(h.upload).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+		expect(toastError).not.toHaveBeenCalled()
 	})
 })

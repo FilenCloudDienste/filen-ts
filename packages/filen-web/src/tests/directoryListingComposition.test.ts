@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
 import type { SharingRoleLike } from "@filen/shared"
@@ -205,6 +205,8 @@ import { DirectoryListing } from "@/features/drive/components/directoryListing"
 import { NewDirectory } from "@/features/drive/components/newDirectory"
 import { testUuid } from "@/tests/support/uuid"
 import { receiverRole, sharerRole } from "@/tests/fixtures/sdk"
+import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { makeTransfer } from "@/tests/fixtures/transfers"
 
 function mockDir(name: string, uuid = testUuid(name)): Dir {
 	return {
@@ -665,5 +667,122 @@ describe("DirectoryListing — Empty trash trigger", () => {
 		renderListing({ variant: "trash", items: [] })
 
 		expect(screen.queryByTestId("empty-trash")).toBeNull()
+	})
+})
+
+// Pending upload rows sit above the listbox, not in it: nothing that indexes, selects or counts items may
+// see them, and a progress tick must not reach the listing.
+describe("DirectoryListing — pending uploads", () => {
+	function startUpload(parentUuid: string | null, id = "upload"): void {
+		const batch = { id: `run-${id}`, parentUuid }
+		act(() => {
+			useTransfersStore.getState().startUploadBatch(batch)
+			useTransfersStore.getState().add(makeTransfer({ id, name: `${id}.txt`, size: 1_000, batch }))
+		})
+	}
+
+	function pendingList(): HTMLElement | null {
+		return screen.queryByRole("list", { name: "Uploads into this directory" })
+	}
+
+	beforeEach(() => {
+		useTransfersStore.setState({ transfers: [], speedSamples: [], rowSpeedSamples: {}, uploadBatches: {}, batchSpeedSamples: {} })
+	})
+
+	it("renders an upload into the directory on screen above the listbox, outside it, with a progress bar", () => {
+		startUpload(null)
+		renderListing({ items: [narrowItem(mockDir("Documents"))] })
+
+		const pending = pendingList()
+		const listbox = screen.getByRole("listbox")
+
+		expect(pending).not.toBeNull()
+		expect(pending?.compareDocumentPosition(listbox)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+		expect(listbox.contains(pending)).toBe(false)
+
+		const row = within(pending ?? document.body).getByRole("listitem", { name: "upload.txt" })
+
+		expect(within(row).queryAllByRole("option")).toEqual([])
+		expect(within(row).getByRole("progressbar", { name: "upload.txt" }).getAttribute("aria-valuenow")).toBe("0")
+		expect(renderedNames()).toEqual(["Documents"])
+	})
+
+	it("keeps the pending row out of the items the virtualizer, the keyboard nav and select-all read", () => {
+		const documents = narrowItem(mockDir("Documents"))
+
+		startUpload(null)
+		renderListing({ items: [documents] })
+
+		expect(virtualizerItems.at(-1)).toEqual([documents])
+
+		const registration = useAction.mock.calls.findLast(call => call[0] === "drive.selectAll")
+		const selectAll = registration?.[1] as ((event: { preventDefault: () => void }) => void) | undefined
+
+		act(() => {
+			selectAll?.({ preventDefault: vi.fn() })
+		})
+
+		expect(useDriveStore.getState().selectedItems).toEqual([documents])
+	})
+
+	it("shows the pending row instead of the empty state in an otherwise empty directory", () => {
+		startUpload(null)
+		renderListing({ items: [] })
+
+		expect(pendingList()).not.toBeNull()
+		expect(EmptyState).not.toHaveBeenCalled()
+		expect(screen.getByRole("listbox")).not.toBeNull()
+	})
+
+	it("does not re-render the listing on a progress tick; only the row moves", () => {
+		startUpload(null)
+		renderListing({ items: [narrowItem(mockDir("Documents"))] })
+
+		const renders = virtualizerItems.length
+
+		act(() => {
+			useTransfersStore.getState().setProgress("upload", 500)
+		})
+
+		expect(virtualizerItems.length).toBe(renders)
+		expect(screen.getByRole("progressbar", { name: "upload.txt" }).getAttribute("aria-valuenow")).toBe("50")
+	})
+
+	it("drops the row, and brings the empty state back, once the upload finishes", () => {
+		startUpload(null)
+		renderListing({ items: [] })
+
+		act(() => {
+			useTransfersStore.getState().settle("upload", "done")
+			useTransfersStore.getState().endUploadBatch("run-upload")
+		})
+
+		expect(pendingList()).toBeNull()
+		expect(EmptyState).toHaveBeenCalled()
+	})
+
+	it("shows nothing for an upload into another directory", () => {
+		startUpload(testUuid("elsewhere"))
+		renderListing({ items: [] })
+
+		expect(pendingList()).toBeNull()
+		expect(EmptyState).toHaveBeenCalled()
+	})
+
+	it("shows nothing where no upload can land, nor over search results", () => {
+		startUpload(null)
+
+		for (const variant of ["trash", "recents", "favorites", "sharedIn", "links"] as const) {
+			renderListing({ variant, items: [narrowItem(mockFile("report.pdf"))] })
+
+			expect(pendingList()).toBeNull()
+
+			cleanup()
+		}
+
+		searchState.current = { ...searchState.current, input: "r", active: true, results: [], total: 0n, status: "settled" }
+		renderListing({ variant: "drive", items: [narrowItem(mockFile("report.pdf"))] })
+
+		expect(pendingList()).toBeNull()
 	})
 })
