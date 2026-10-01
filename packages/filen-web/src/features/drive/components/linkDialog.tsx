@@ -26,6 +26,7 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secretInput"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
@@ -317,8 +318,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 										<FieldLabel>{t("driveLinkPasswordLabel")}</FieldLabel>
 										{passwordEditing ? (
 											<div className="flex items-center gap-2">
-												<Input
-													type="password"
+												<SecretInput
 													autoFocus
 													value={passwordDraft}
 													disabled={pending || !isOnline}

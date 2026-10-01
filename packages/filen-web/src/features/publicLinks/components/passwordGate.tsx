@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { LockIcon } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secretInput"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { CenteredSurface } from "@/features/publicLinks/components/publicLinkStates"
@@ -68,11 +68,9 @@ export function PasswordGate({ state, onSubmit }: { state: "prompt" | "checking"
 					>
 						<Field>
 							<FieldLabel htmlFor="public-link-password">{t("passwordLabel")}</FieldLabel>
-							<Input
+							<SecretInput
 								id="public-link-password"
 								ref={inputRef}
-								type="password"
-								autoComplete="current-password"
 								autoFocus={true}
 								placeholder={t("passwordPlaceholder")}
 								aria-invalid={state === "wrong"}

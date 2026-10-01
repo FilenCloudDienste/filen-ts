@@ -2,6 +2,7 @@ import { type ComponentProps, type SubmitEvent } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secretInput"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
@@ -18,6 +19,9 @@ interface InputDialogProps {
 	// the always-blank default; the field is also re-selected on open (see the Input's onFocus below)
 	// so typing immediately overwrites it. Omitted keeps the original always-blank behavior.
 	initialValue?: string | undefined
+	// A secret that is not the user's Filen login (a PDF's password): masked, and never offered to or
+	// saved by a password manager (SecretInput). type/autoComplete do not apply to it.
+	secret?: boolean
 	// Optional input-attribute passthroughs (e.g. type="password" + autoComplete="current-password",
 	// or inputMode="numeric" + maxLength for a one-time code). The DOM attribute types already carry
 	// `| undefined`, so possibly-undefined caller state passes through directly under
@@ -48,6 +52,7 @@ function InputDialog({
 	label,
 	placeholder,
 	initialValue,
+	secret,
 	type,
 	inputMode,
 	autoComplete,
@@ -70,6 +75,25 @@ function InputDialog({
 		onSubmit(value)
 	}
 
+	const fieldProps: ComponentProps<"input"> = {
+		id: "input-dialog-value",
+		inputMode,
+		maxLength,
+		value,
+		autoFocus: true,
+		placeholder,
+		disabled: pending,
+		onChange: e => {
+			setValue(e.target.value)
+		},
+		onFocus: e => {
+			// Base UI's Dialog re-focuses the popup's initial-focus target (this input, via
+			// FloatingFocusManager) on every open, not just first mount — so this reliably
+			// selects the pre-filled value each time, not only once.
+			e.target.select()
+		}
+	}
+
 	return (
 		<Dialog
 			open={open}
@@ -86,26 +110,15 @@ function InputDialog({
 					</DialogHeader>
 					<Field>
 						<FieldLabel htmlFor="input-dialog-value">{label}</FieldLabel>
-						<Input
-							id="input-dialog-value"
-							type={type}
-							inputMode={inputMode}
-							autoComplete={autoComplete}
-							maxLength={maxLength}
-							value={value}
-							autoFocus
-							placeholder={placeholder}
-							disabled={pending}
-							onChange={e => {
-								setValue(e.target.value)
-							}}
-							onFocus={e => {
-								// Base UI's Dialog re-focuses the popup's initial-focus target (this input, via
-								// FloatingFocusManager) on every open, not just first mount — so this reliably
-								// selects the pre-filled value each time, not only once.
-								e.target.select()
-							}}
-						/>
+						{secret === true ? (
+							<SecretInput {...fieldProps} />
+						) : (
+							<Input
+								type={type}
+								autoComplete={autoComplete}
+								{...fieldProps}
+							/>
+						)}
 					</Field>
 					<DialogFooter>
 						<Button

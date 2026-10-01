@@ -168,8 +168,7 @@ function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAttempt; on
 				title={t("previewPdfPasswordTitle")}
 				body={attempt === "retry" ? t("previewPdfPasswordRetryBody") : t("previewPdfPasswordBody")}
 				label={t("previewPdfPasswordLabel")}
-				type="password"
-				autoComplete="current-password"
+				secret
 				submitLabel={t("previewPdfPasswordSubmit")}
 				validate={value => value.length > 0}
 				onOpenChange={open => {
