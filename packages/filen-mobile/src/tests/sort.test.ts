@@ -1028,6 +1028,17 @@ describe("clearSortCaches", () => {
 // ---------------------------------------------------------------------------
 
 describe("notesSorter.group — month header formatter", () => {
+	// Two months before this is January, whose name differs between the two languages compared below. An
+	// unpinned clock made the test fail whenever that month was spelled alike (April, August, …).
+	beforeAll(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date("2025-03-15T12:00:00.000Z"))
+	})
+
+	afterAll(() => {
+		vi.useRealTimers()
+	})
+
 	function previousMonthTitle(): string | undefined {
 		const twoMonthsAgo = new Date()
 
