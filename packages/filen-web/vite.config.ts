@@ -57,6 +57,30 @@ function deployHeaders(): Plugin {
 	}
 }
 
+// ArkType decides whether it may compile its validators by evaluating `new Function` when its schema
+// module loads. The CSP below never allows eval, so the answer is fixed: the probe only throws, which
+// Firefox reports as a CSP violation on every load. The build states the answer instead, and fails if
+// ArkType stops deciding it this way, so an upgrade cannot silently bring the probe back.
+function arkTypeJitless(): Plugin {
+	const probe = "jitless: envHasCsp()"
+
+	return {
+		name: "filen:arktype-jitless",
+		apply: "build",
+		transform(code, id) {
+			if (!/[\\/]@ark[\\/]schema[\\/]out[\\/]kinds\.js$/.test(id)) {
+				return null
+			}
+
+			if (!code.includes(probe)) {
+				this.error(`@ark/schema no longer sets "${probe}"; revisit filen:arktype-jitless`)
+			}
+
+			return code.replace(probe, "jitless: true")
+		}
+	}
+}
+
 // Hardened CSP, preview/prod only (the dev server needs HMR inline/eval).
 // connect-src: the JS glue (sdk-rs.js) contains NO literal hosts, but the wasm BINARY does —
 // confirmed by running `strings` over sdk-rs_bg.wasm: egest/gateway/ingest hosts across
@@ -118,6 +142,7 @@ export default defineConfig({
 	plugins: [
 		previewHeaders(),
 		deployHeaders(),
+		arkTypeJitless(),
 		tanstackRouter({ target: "react", autoCodeSplitting: false }),
 		// @rolldown/plugin-babel's real API (verified against the installed 0.2.3 package:
 		// README + dist/index.d.mts) is a DEFAULT export taking flat `presets`/`plugins`/`include`
