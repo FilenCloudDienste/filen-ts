@@ -2,6 +2,7 @@ import * as Comlink from "comlink"
 import HeicWorker from "@/features/preview/workers/heic.worker.ts?worker"
 import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 import { idleResource } from "@/lib/idleResource"
+import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 // libheif's wasm memory grows to fit the largest image it has decoded and can never shrink, so the
 // worker is torn down once it has sat idle; a later HEIC spins up a fresh one.
@@ -14,6 +15,10 @@ const HEIC_WORKER_IDLE_MS = 30_000
 const heicWorker = idleResource(
 	() => {
 		const worker = new HeicWorker()
+		// A deploy that changed this worker removes its old file (appUpdate.ts).
+		worker.addEventListener("error", () => {
+			recoverIfNewerBuild()
+		})
 
 		return { worker, remote: Comlink.wrap<HeicWorkerApi>(worker) }
 	},

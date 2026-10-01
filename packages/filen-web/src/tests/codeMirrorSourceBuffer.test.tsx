@@ -7,8 +7,8 @@ import { EditorView } from "@codemirror/view"
 import { ExternalChange } from "@uiw/react-codemirror"
 
 vi.mock("@/features/preview/lib/codeMirrorShared", () => ({
+	languageExtensionFor: () => null,
 	useCodeMirrorTheme: () => [],
-	useLanguageExtension: () => null,
 	useEditorKeymap: () => []
 }))
 

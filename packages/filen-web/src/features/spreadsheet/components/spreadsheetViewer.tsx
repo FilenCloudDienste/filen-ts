@@ -935,7 +935,7 @@ function ResetSizeItems({
 // recalculate, rows and columns, sheets, formats, undo. The file is parsed and edited in the spreadsheet
 // worker, which keeps it (useSpreadsheetDoc, useSpreadsheetEdits); `saveRef` hands the overlay its bytes
 // as edited.
-function SpreadsheetViewer({
+export function SpreadsheetViewer({
 	item,
 	documentKey,
 	alt,
@@ -1012,5 +1012,3 @@ function SpreadsheetViewer({
 			)
 	}
 }
-
-export default SpreadsheetViewer

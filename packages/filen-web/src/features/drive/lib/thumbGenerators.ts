@@ -18,8 +18,9 @@ import { previewStreamUrl, waitForMediaStream } from "@/features/preview/lib/pre
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { narrowItem, type BaseFileItem } from "@/features/drive/lib/item"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
-import type { PDFWorker } from "pdfjs-dist"
+import { getDocument, GlobalWorkerOptions, PDFWorker } from "pdfjs-dist"
 import { idleResource, type IdleResource } from "@/lib/idleResource"
+import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 // pdf and svg are the generators that pull a whole file into JS memory, through the same buffered
 // download the preview overlay uses (usePreviewBytes). There is no unmount to hook a cancellation
@@ -361,17 +362,12 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 		return { type: "failed" }
 	}
 
-	// Lazy: keeps pdf.js's ~1 MB bundle out of every session that never opens or generates a PDF
-	// thumbnail — pdfViewer.tsx can import it statically because that whole component is itself
-	// route/lazy-split, which this plain module is not.
-	const pdfjs = await import("pdfjs-dist")
-
 	// Mirrors pdfViewer.tsx's own worker-src setup (duplicated rather than imported: that file is a
 	// React component this module must not depend on). Read when the shared worker is constructed.
-	pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
+	GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
 
 	pdfThumbWorker ??= idleResource(
-		() => new pdfjs.PDFWorker(),
+		() => new PDFWorker(),
 		worker => {
 			worker.destroy()
 		},
@@ -379,7 +375,7 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 	)
 
 	return await pdfThumbWorker.use<ThumbGenerationResult>(async worker => {
-		const task = pdfjs.getDocument({ data: bytes, worker })
+		const task = getDocument({ data: bytes, worker })
 
 		try {
 			// No onPassword handler is registered — pdf.js rejects task.promise with the password exception
@@ -405,6 +401,8 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 			return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
 		} catch (e) {
 			log.warn("thumb-generators", "generatePdfThumb: render failed", item.data.uuid, e)
+			// pdf.worker is its own file: a deploy that changed it fails documents in older tabs.
+			recoverIfNewerBuild()
 
 			return { type: "failed" }
 		} finally {

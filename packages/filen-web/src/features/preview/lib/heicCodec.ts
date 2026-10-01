@@ -1,3 +1,4 @@
+import initLibheifBundle from "libheif-js/libheif-wasm/libheif-bundle.mjs"
 import { log } from "@/lib/log"
 
 // Pure decode (HEIC/HEIF bytes -> RGBA) + encode (RGBA -> JPEG Blob) logic, dependency-injected so
@@ -128,10 +129,9 @@ async function decodeHeic(bytes: Uint8Array, lib: HeicDecoderModule): Promise<De
 	}
 }
 
-// Dynamic import: keeps the ~1.4 MB WASM bundle out of this worker's own eagerly-evaluated chunk,
-// fetched only once a HEIC file is actually opened.
+// The wasm is instantiated here, on the first decode, not at import: this worker only exists to decode,
+// so the module itself evaluating at spin-up costs nothing a decode would not.
 async function initLibheifDecoder(): Promise<HeicDecoderModule> {
-	const { default: initLibheifBundle } = await import("libheif-js/libheif-wasm/libheif-bundle.mjs")
 	// Return shape isn't typed anywhere upstream (see the ambient shim) — cast against our own
 	// hand-written interface, scoped to exactly the surface decodeHeic uses; not a null-strip.
 	const lib = initLibheifBundle() as HeicDecoderModule

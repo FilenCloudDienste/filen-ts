@@ -111,7 +111,7 @@ export default defineConfig({
 	plugins: [
 		previewHeaders(),
 		deployHeaders(),
-		tanstackRouter({ target: "react", autoCodeSplitting: true }),
+		tanstackRouter({ target: "react", autoCodeSplitting: false }),
 		// @rolldown/plugin-babel's real API (verified against the installed 0.2.3 package:
 		// README + dist/index.d.mts) is a DEFAULT export taking flat `presets`/`plugins`/`include`
 		// options — no named `{ babel }` export and no `babelConfig` wrapper. plugin-react v6 has
@@ -156,9 +156,16 @@ export default defineConfig({
 	// No built-in HTML minifier exists in Vite 8 (checked); the ~0.5kB index.html shell
 	// isn't worth a new plugin dependency for it. 'terser' would trade build speed for a
 	// historically marginal size win over oxc — not worth it unless profiling says otherwise.
+	// One main-thread script and one stylesheet (workers and wasm stay separate files, as they must):
+	// with code splitting, the first visit to a route waited on its chunks, and boot waited on a chain
+	// of lazy imports. Measured in throttled Chromium against split, the whole bundle (~1.5 MB
+	// compressed) still booted faster at 50 Mbps and to the signed-in shell at 10 Mbps, made first
+	// route visits ~10-50 ms instead of 100-300 ms, and cost ~4 MB more JS heap. The router's own
+	// splitting is off above for the same reason.
 	build: {
 		minify: "oxc",
-		cssMinify: "lightningcss"
+		cssMinify: "lightningcss",
+		rolldownOptions: { output: { codeSplitting: false } }
 	},
 	server: {
 		headers: {
@@ -171,5 +178,6 @@ export default defineConfig({
 		}
 	},
 	// The preview headers are set by previewHeaders() (plugins above), not preview.headers.
-	worker: { format: "es" }
+	// Each worker is one file too, for the same reason as the page's bundle.
+	worker: { format: "es", rolldownOptions: { output: { codeSplitting: false } } }
 })

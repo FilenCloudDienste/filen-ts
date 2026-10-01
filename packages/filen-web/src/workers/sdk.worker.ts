@@ -94,7 +94,12 @@ import { FLAT_LISTING_KINDS, type FlatListingKind } from "@/features/drive/lib/f
 import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY } from "@/features/drive/lib/thumbnails.logic"
 import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
-import type { AudioMetadataDeps, AudioMetadataResult } from "@/workers/audioMetadata"
+import {
+	readAudioMetadata as parseAudioMetadata,
+	readAudioMetadataFromBlob as parseAudioMetadataFromBlob,
+	type AudioMetadataDeps,
+	type AudioMetadataResult
+} from "@/workers/audioMetadata"
 import { createMemorySink, toRawPreviewResult, type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
@@ -341,19 +346,18 @@ async function readFileRange(
 	return offset === out.length ? out : out.subarray(0, offset)
 }
 
-// The shared frame of both audio-metadata entry points: the abort registry, the lazily loaded parser
-// module, the cover thumbnail's decode and persist, and the transfer of the thumbnail back.
+// The shared frame of both audio-metadata entry points: the abort registry, the cover thumbnail's decode
+// and persist, and the transfer of the thumbnail back.
 async function runAudioMetadata(
 	c: Client,
 	uuid: string,
 	previewToken: string,
-	run: (module: typeof import("@/workers/audioMetadata"), deps: AudioMetadataDeps) => Promise<AudioMetadataResult>
+	run: (deps: AudioMetadataDeps) => Promise<AudioMetadataResult>
 ): Promise<AudioMetadataResult> {
 	const controller = new AbortController()
 	previewAborts.set(previewToken, controller)
 	try {
-		const module = await import("@/workers/audioMetadata")
-		const result = await run(module, {
+		const result = await run({
 			signal: controller.signal,
 			makeThumbnail: async cover => {
 				const thumbnail = await c.makeThumbnailFromStream({
@@ -1658,8 +1662,8 @@ const api = {
 	async readAudioMetadata(file: AnyFile, uuid: string, mime: string, previewToken: string): Promise<AudioMetadataResult> {
 		const c = requireClient()
 
-		return runAudioMetadata(c, uuid, previewToken, (module, deps) =>
-			module.readAudioMetadata(Number(file.size), mime, (start, end) => readFileRange(c, file, start, end, deps.signal), deps)
+		return runAudioMetadata(c, uuid, previewToken, deps =>
+			parseAudioMetadata(Number(file.size), mime, (start, end) => readFileRange(c, file, start, end, deps.signal), deps)
 		)
 	},
 	// The same for bytes the page already holds (the player's whole-file fallback source): the Blob
@@ -1667,7 +1671,7 @@ const api = {
 	async readAudioMetadataFromBlob(blob: Blob, uuid: string, previewToken: string): Promise<AudioMetadataResult> {
 		const c = requireClient()
 
-		return runAudioMetadata(c, uuid, previewToken, (module, deps) => module.readAudioMetadataFromBlob(blob, deps))
+		return runAudioMetadata(c, uuid, previewToken, deps => parseAudioMetadataFromBlob(blob, deps))
 	},
 	// ── Search ───────────────────────────────────────────────────────────────
 	// Thin pass-throughs onto the single searchEngine instance (searchEngine.ts owns the actual

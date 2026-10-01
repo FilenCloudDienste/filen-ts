@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react"
 import { oneDarkHighlightStyle } from "@uiw/react-codemirror"
 import { EditorView, keymap, type Command, type KeyBinding } from "@codemirror/view"
 import { Prec, type Extension } from "@codemirror/state"
@@ -7,93 +6,108 @@ import { useComboFor } from "@/lib/keymap/registry"
 import { codeMirrorKeys } from "@/features/preview/lib/editorKeys.logic"
 import { insertLink, MARKDOWN_MARKERS, toggleInlineMarker, toggleItalic } from "@/features/preview/lib/markdownCommands"
 import { StreamLanguage, syntaxHighlighting } from "@codemirror/language"
+import { javascript } from "@codemirror/lang-javascript"
+import { json } from "@codemirror/lang-json"
+import { html } from "@codemirror/lang-html"
+import { css } from "@codemirror/lang-css"
+import { xml } from "@codemirror/lang-xml"
+import { sql } from "@codemirror/lang-sql"
+import { python } from "@codemirror/lang-python"
+import { rust } from "@codemirror/lang-rust"
+import { cpp } from "@codemirror/lang-cpp"
+import { java } from "@codemirror/lang-java"
+import { php } from "@codemirror/lang-php"
+import { markdown } from "@codemirror/lang-markdown"
+import { yaml } from "@codemirror/lang-yaml"
+import { sass } from "@codemirror/lang-sass"
+import { less } from "@codemirror/lang-less"
+import { go } from "@codemirror/lang-go"
+import { coffeeScript } from "@codemirror/legacy-modes/mode/coffeescript"
+import { shell } from "@codemirror/legacy-modes/mode/shell"
+import { ruby } from "@codemirror/legacy-modes/mode/ruby"
+import { lua } from "@codemirror/legacy-modes/mode/lua"
+import { toml } from "@codemirror/legacy-modes/mode/toml"
+import { dockerFile } from "@codemirror/legacy-modes/mode/dockerfile"
+import { cmake } from "@codemirror/legacy-modes/mode/cmake"
+import { swift } from "@codemirror/legacy-modes/mode/swift"
+import { cobol } from "@codemirror/legacy-modes/mode/cobol"
+import { vbScript } from "@codemirror/legacy-modes/mode/vbscript"
+import { protobuf } from "@codemirror/legacy-modes/mode/protobuf"
+import { properties } from "@codemirror/legacy-modes/mode/properties"
+import { powerShell } from "@codemirror/legacy-modes/mode/powershell"
+import { groovy } from "@codemirror/legacy-modes/mode/groovy"
+import { csharp, kotlin, dart } from "@codemirror/legacy-modes/mode/clike"
 import { resolveTheme, useTheme } from "@/providers/themeProvider"
 import type { CodeMirrorTag } from "@/features/drive/lib/preview.logic"
 
 // The language and theme plumbing every CodeMirror surface shares: the editor/reader
 // (codeMirrorSource.tsx) and the remote-change comparison (remoteCompare.tsx).
 
-// tag -> a loader for the matching CodeMirror language Extension, one dynamic import() per entry so
-// each grammar (and, for the legacy StreamParser ones, its own @codemirror/legacy-modes/mode/* submodule)
-// becomes its own chunk — opening one text file only ever fetches the ONE language it actually needs,
-// never the other ~35. @codemirror/language itself (StreamLanguage) is a static import above: it's
-// core CodeMirror machinery every language needs, not a per-language grammar, so splitting it out would
-// buy nothing. Keyed by CodeMirrorTag so tsc keeps the keys in step with codeMirrorLanguageFor.
-const LANGUAGE_LOADERS: Readonly<Record<CodeMirrorTag, () => Promise<Extension>>> = {
-	javascript: async () => (await import("@codemirror/lang-javascript")).javascript(),
-	jsx: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true }),
-	typescript: async () => (await import("@codemirror/lang-javascript")).javascript({ typescript: true }),
-	tsx: async () => (await import("@codemirror/lang-javascript")).javascript({ jsx: true, typescript: true }),
-	json: async () => (await import("@codemirror/lang-json")).json(),
-	html: async () => (await import("@codemirror/lang-html")).html(),
-	css: async () => (await import("@codemirror/lang-css")).css(),
-	xml: async () => (await import("@codemirror/lang-xml")).xml(),
-	sql: async () => (await import("@codemirror/lang-sql")).sql(),
-	python: async () => (await import("@codemirror/lang-python")).python(),
-	rust: async () => (await import("@codemirror/lang-rust")).rust(),
-	cpp: async () => (await import("@codemirror/lang-cpp")).cpp(),
-	java: async () => (await import("@codemirror/lang-java")).java(),
-	php: async () => (await import("@codemirror/lang-php")).php(),
-	markdown: async () => (await import("@codemirror/lang-markdown")).markdown(),
-	yaml: async () => (await import("@codemirror/lang-yaml")).yaml(),
-	sass: async () => (await import("@codemirror/lang-sass")).sass({ indented: true }),
-	less: async () => (await import("@codemirror/lang-less")).less(),
-	go: async () => (await import("@codemirror/lang-go")).go(),
-	coffeescript: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/coffeescript")).coffeeScript),
-	shell: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/shell")).shell),
-	ruby: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/ruby")).ruby),
-	lua: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/lua")).lua),
-	toml: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/toml")).toml),
-	dockerfile: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/dockerfile")).dockerFile),
-	cmake: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/cmake")).cmake),
-	swift: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/swift")).swift),
-	cobol: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/cobol")).cobol),
-	vbscript: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/vbscript")).vbScript),
-	protobuf: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/protobuf")).protobuf),
-	ini: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/properties")).properties),
-	powershell: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/powershell")).powerShell),
-	groovy: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/groovy")).groovy),
-	csharp: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/clike")).csharp),
-	kotlin: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/clike")).kotlin),
-	dart: async () => StreamLanguage.define((await import("@codemirror/legacy-modes/mode/clike")).dart)
+// tag -> the matching CodeMirror language Extension, built on first use. Keyed by CodeMirrorTag so tsc
+// keeps the keys in step with codeMirrorLanguageFor.
+const LANGUAGES: Readonly<Record<CodeMirrorTag, () => Extension>> = {
+	javascript: () => javascript(),
+	jsx: () => javascript({ jsx: true }),
+	typescript: () => javascript({ typescript: true }),
+	tsx: () => javascript({ jsx: true, typescript: true }),
+	json: () => json(),
+	html: () => html(),
+	css: () => css(),
+	xml: () => xml(),
+	sql: () => sql(),
+	python: () => python(),
+	rust: () => rust(),
+	cpp: () => cpp(),
+	java: () => java(),
+	php: () => php(),
+	markdown: () => markdown(),
+	yaml: () => yaml(),
+	sass: () => sass({ indented: true }),
+	less: () => less(),
+	go: () => go(),
+	coffeescript: () => StreamLanguage.define(coffeeScript),
+	shell: () => StreamLanguage.define(shell),
+	ruby: () => StreamLanguage.define(ruby),
+	lua: () => StreamLanguage.define(lua),
+	toml: () => StreamLanguage.define(toml),
+	dockerfile: () => StreamLanguage.define(dockerFile),
+	cmake: () => StreamLanguage.define(cmake),
+	swift: () => StreamLanguage.define(swift),
+	cobol: () => StreamLanguage.define(cobol),
+	vbscript: () => StreamLanguage.define(vbScript),
+	protobuf: () => StreamLanguage.define(protobuf),
+	ini: () => StreamLanguage.define(properties),
+	powershell: () => StreamLanguage.define(powerShell),
+	groovy: () => StreamLanguage.define(groovy),
+	csharp: () => StreamLanguage.define(csharp),
+	kotlin: () => StreamLanguage.define(kotlin),
+	dart: () => StreamLanguage.define(dart)
 }
 
-// Resolves `tag` (from codeMirrorLanguageFor) to a loaded Extension, or null while pending / for a tag
-// with no wired grammar ("" or an unmapped one — the content still renders, just unhighlighted). The
-// `loaded.tag === tag` guard is a render-time derivation, not a second effect: it discards a
-// still-resolving or already-resolved extension from a PREVIOUS tag rather than flashing stale
-// highlighting, with no extra commit for what both branches ultimately return synchronously anyway.
-export function useLanguageExtension(tag: string): Extension | null {
-	const [loaded, setLoaded] = useState<{ tag: string; extension: Extension } | null>(null)
+// One instance per tag for the session: a new identity would reconfigure every editor showing it.
+const languageCache = new Map<string, Extension>()
 
-	useEffect(() => {
-		const loaders: Readonly<Partial<Record<string, () => Promise<Extension>>>> = LANGUAGE_LOADERS
-		const loader = loaders[tag]
+// `tag` (from codeMirrorLanguageFor) as its language Extension, or null for a tag with no wired grammar
+// ("" or an unmapped one: the content still renders, just unhighlighted).
+export function languageExtensionFor(tag: string): Extension | null {
+	const cached = languageCache.get(tag)
 
-		if (!loader) {
-			return undefined
-		}
+	if (cached !== undefined) {
+		return cached
+	}
 
-		let live = true
+	const languages: Readonly<Partial<Record<string, () => Extension>>> = LANGUAGES
+	const build = languages[tag]
 
-		loader()
-			.then(extension => {
-				if (live) {
-					setLoaded({ tag, extension })
-				}
-			})
-			.catch(() => {
-				// A language chunk failing to fetch (offline mid-load, CDN hiccup) degrades to
-				// unhighlighted plain text via the stale-guard below — never blocks the content, which
-				// is already decoded and rendering.
-			})
+	if (build === undefined) {
+		return null
+	}
 
-		return () => {
-			live = false
-		}
-	}, [tag])
+	const extension = build()
 
-	return loaded?.tag === tag ? loaded.extension : null
+	languageCache.set(tag, extension)
+
+	return extension
 }
 
 // The editor chrome reads the app's color tokens, so it follows the palette in both themes; only

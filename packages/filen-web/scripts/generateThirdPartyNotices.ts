@@ -314,9 +314,7 @@ export const THIRD_PARTY_NOTICES_SDK_VERSION = "${expectedSdk}"
 
 export const THIRD_PARTY_NOTICES_FILEN_RS_REF = "${rust.ref}"
 
-export const LICENSE_TEXTS: readonly string[] = ${JSON.stringify(texts, null, 0)}
-
-export const THIRD_PARTY_NOTICES: readonly ThirdPartyNotice[] = ${JSON.stringify(notices, null, 0)}
+export const THIRD_PARTY_NOTICES_PAYLOAD = ${JSON.stringify(JSON.stringify({ texts, notices }))}
 `
 
 writeFileSync(OUTPUT, output, "utf8")

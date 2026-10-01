@@ -80,7 +80,7 @@ class FakeIntersectionObserver {
 	}
 }
 
-const { default: PdfViewer } = await import("@/features/preview/components/pdfViewer")
+const { PdfViewer } = await import("@/features/preview/components/pdfViewer")
 
 const item = linkedFileItem("doc.pdf", { uuid: "aaaaaaaa-0000-0000-0000-000000000001", mime: { Decrypted: "application/pdf" }, size: 1n })
 

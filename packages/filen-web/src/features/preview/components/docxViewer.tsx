@@ -124,7 +124,7 @@ function DocxRender({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
 // category) — DocxRender above owns everything docx-preview-specific once bytes are in hand.
-function DocxViewer({ item, alt }: DocxViewerProps) {
+export function DocxViewer({ item, alt }: DocxViewerProps) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
 			{ready => (
@@ -136,5 +136,3 @@ function DocxViewer({ item, alt }: DocxViewerProps) {
 		</PreviewGate>
 	)
 }
-
-export default DocxViewer

@@ -1,4 +1,5 @@
 import type { Note } from "@filen/sdk-rs"
+import JSZip from "jszip"
 import { i18n } from "@/lib/i18n"
 import { downloadBlob } from "@/lib/downloadBlob"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -6,10 +7,6 @@ import type { VoidActionOutcome } from "@/lib/actions/outcome"
 import { resolveLocalFirstContent, noteUndecryptableError } from "@/features/notes/lib/localContent"
 import { isNoteUndecryptable } from "@/features/notes/lib/sort"
 import { exportFilename, exportContent, exportMimeType, dedupeExportNames } from "@/features/notes/lib/export.logic"
-
-// Loaded on demand so JSZip stays out of the shell chunk; AppShell warms it after mount, so export-all
-// still works offline.
-export const preloadNotesExportZip = () => import("jszip")
 
 // The impure shell around export.logic.ts's pure transforms: resolve a note's content, then trigger
 // a real browser download. Never calls toast itself — same convention as lib/actions.ts, the caller
@@ -59,7 +56,6 @@ export async function exportAllNotes(notes: readonly Note[]): Promise<ExportAllO
 	let written = 0
 
 	try {
-		const { default: JSZip } = await preloadNotesExportZip()
 		const zip = new JSZip()
 
 		for (let index = 0; index < exportable.length; index += 1) {

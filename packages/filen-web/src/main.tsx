@@ -11,7 +11,6 @@ import { bootSdk } from "@/lib/sdk/boot"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
 import { useReminderStore } from "@/features/shell/store/useReminderStore"
-import { installStaleChunkRecovery } from "@/lib/appUpdate"
 
 // notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
 // rendering it inside whichever ancestor layout happened to match, and makes the root match the
@@ -29,12 +28,8 @@ const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScree
 // ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
 void bootSdk()
 
-// Before any route chunk loads: a tab that outlives a deploy recovers on its first missing chunk.
-installStaleChunkRecovery()
-
 // Every keyboard action, registered before the first render — the defs are static data, so `comboFor`
-// and `<Kbd>` are correct from the very first paint instead of only once each feature's lazily
-// imported route chunk has loaded.
+// and `<Kbd>` are correct from the very first paint.
 registerAllActions()
 
 // Type-level router registration — makes `Link`/`redirect`/`navigate` paths across the app fully typed

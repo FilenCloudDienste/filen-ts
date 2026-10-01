@@ -29,11 +29,11 @@ export interface TextViewerProps {
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
 // category), then a non-fatal UTF-8 decode (decodeUtf8 — never throws) and a per-extension language
-// lookup. The actual CodeMirror surface (language-loader + theme plumbing) lives in codeMirrorSource.tsx,
+// lookup. The actual CodeMirror surface (language + theme plumbing) lives in codeMirrorSource.tsx,
 // shared with the notes reader — this component stays the preview-specific shell around it (byte
 // loading, item-derived tag/alt).
 // No parameter defaults: the React Compiler skips a component that has them.
-function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: TextViewerProps) {
+export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: TextViewerProps) {
 	const result = usePreviewBytes(item)
 
 	if (result.status === "pending") {
@@ -73,5 +73,3 @@ function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: 
 		/>
 	)
 }
-
-export default TextViewer

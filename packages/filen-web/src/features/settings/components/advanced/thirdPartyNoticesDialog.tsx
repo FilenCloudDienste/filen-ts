@@ -5,7 +5,7 @@ import { ArrowLeftIcon, PackageSearchIcon } from "lucide-react"
 import {
 	filterThirdPartyNotices,
 	thirdPartyLicenseTexts,
-	THIRD_PARTY_NOTICES,
+	thirdPartyNoticesPayload,
 	type ThirdPartyNotice
 } from "@/features/settings/lib/thirdPartyNotices"
 import { noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
@@ -23,9 +23,8 @@ const ROW_HEIGHT = 52
 const OVERSCAN = 10
 
 // Both panes live in ONE dialog, swapped by local state — a nested dialog would fight the shared
-// dismissal gate. Reached only through the lazy boundary in thirdPartyNoticesRow.tsx, which is what
-// keeps the ~800 KB generated payload out of the entry chunk.
-function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialogProps) {
+// dismissal gate.
+export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialogProps) {
 	const { t } = useTranslation("settings")
 	const [query, setQuery] = useState("")
 	const [selected, setSelected] = useState<ThirdPartyNotice | null>(null)
@@ -33,7 +32,7 @@ function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialog
 	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
 	// re-lays every row when its key function changes, so the filtered list and its key function must
 	// change with the query and nothing else, not on every scroll render.
-	const notices = useMemo(() => filterThirdPartyNotices(THIRD_PARTY_NOTICES, query), [query])
+	const notices = useMemo(() => filterThirdPartyNotices(thirdPartyNoticesPayload().notices, query), [query])
 	const repositoryHref = noticeRepositoryHref(selected?.repository ?? null)
 	const getItemKey = useCallback(
 		(index: number) => {
@@ -174,6 +173,3 @@ function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNoticesDialog
 		</Dialog>
 	)
 }
-
-export { ThirdPartyNoticesDialog }
-export default ThirdPartyNoticesDialog

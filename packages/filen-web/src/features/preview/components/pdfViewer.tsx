@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import "@/features/preview/components/pdfLayers.css"
+import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 export interface PdfViewerProps {
 	item: DriveItem
@@ -106,6 +107,9 @@ function usePdfDocument(bytes: Uint8Array): { state: DocumentState; submitPasswo
 				}
 			})
 			.catch(() => {
+				// pdf.worker is its own file: a deploy that changed it fails documents in older tabs.
+				recoverIfNewerBuild()
+
 				if (live) {
 					setState({ status: "error" })
 				}
@@ -742,7 +746,7 @@ function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
 // category) — PdfDocument above owns everything pdf.js-specific once bytes are in hand.
-function PdfViewer({ item, alt }: PdfViewerProps) {
+export function PdfViewer({ item, alt }: PdfViewerProps) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
 			{ready => (
@@ -754,5 +758,3 @@ function PdfViewer({ item, alt }: PdfViewerProps) {
 		</PreviewGate>
 	)
 }
-
-export default PdfViewer

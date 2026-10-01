@@ -97,8 +97,8 @@ export function registerSW(onUpdateReady: () => void): void {
 export function applyUpdate(): void {
 	const waiting = registration?.waiting
 
-	// No waiting worker: the prompt came from a chunk the deploy removed (appUpdate.ts) before the
-	// worker update was found, and the page reload alone picks up the new build.
+	// No waiting worker: the prompt came from a newer build found another way (appUpdate.ts) before the
+	// worker update was, and the page reload alone picks up the new build.
 	if (!waiting) {
 		window.location.reload()
 		return

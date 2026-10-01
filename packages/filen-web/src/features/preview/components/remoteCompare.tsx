@@ -5,7 +5,7 @@ import { EditorView } from "@codemirror/view"
 import { MergeView, unifiedMergeView } from "@codemirror/merge"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { codeMirrorLanguageFor, decodeUtf8, extensionOf } from "@/features/drive/lib/preview.logic"
-import { useCodeMirrorTheme, useLanguageExtension } from "@/features/preview/lib/codeMirrorShared"
+import { languageExtensionFor, useCodeMirrorTheme } from "@/features/preview/lib/codeMirrorShared"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { LoadingState } from "@/components/loadingState"
 import { isNarrowViewport } from "@/features/shell/lib/breakpoints"
@@ -19,13 +19,12 @@ const DIFF_CONFIG = { scanLimit: 10_000, timeout: 500 }
 export type RemoteTheirs = { status: "loading" } | { status: "failed" } | { status: "ready"; text: string }
 
 // Read-only comparison of a newer version saved elsewhere (`theirs`) with the unsaved edits (`mine`), shown inside the remote-change
-// dialog before the user picks. `tag` is the CodeMirror language (codeMirrorLanguageFor). Its own chunk,
-// with @codemirror/merge, as most conflicts are settled without it.
+// dialog before the user picks. `tag` is the CodeMirror language (codeMirrorLanguageFor).
 export function RemoteCompare({ theirs, mine, tag }: { theirs: RemoteTheirs; mine: string; tag: string }) {
 	const { t } = useTranslation("preview")
 	const theirsText = theirs.status === "ready" ? theirs.text : null
 	const theme = useCodeMirrorTheme()
-	const language = useLanguageExtension(tag)
+	const language = languageExtensionFor(tag)
 	const hostRef = useRef<HTMLDivElement>(null)
 	// Side by side needs the width; a narrow window gets one column with both versions interleaved.
 	const [sideBySide] = useState(() => !isNarrowViewport())
@@ -120,5 +119,3 @@ export function RemoteFileCompare({ theirs, mine, name }: { theirs: DriveItem; m
 		/>
 	)
 }
-
-export default RemoteFileCompare

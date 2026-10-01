@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // idle, and never reached by a call on a document that has closed. The worker and its Comlink proxy are
 // plain fakes; spreadsheet.worker.ts itself is covered by the engine tests.
 
-const { WorkerCtor, wrap, terminate, release } = vi.hoisted(() => ({
+const { WorkerCtor, wrap, terminate, release, recoverIfNewerBuild } = vi.hoisted(() => ({
+	recoverIfNewerBuild: vi.fn(),
 	WorkerCtor: vi.fn(),
 	wrap: vi.fn(),
 	terminate: vi.fn(),
@@ -12,6 +13,7 @@ const { WorkerCtor, wrap, terminate, release } = vi.hoisted(() => ({
 }))
 
 vi.mock("@/features/spreadsheet/workers/spreadsheet.worker.ts?worker", () => ({ default: WorkerCtor }))
+vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild }))
 vi.mock("comlink", async importOriginal => ({ ...(await importOriginal<typeof import("comlink")>()), wrap }))
 
 const IDLE_MS = 30_000
@@ -38,8 +40,9 @@ async function freshClient() {
 	wrap.mockReset()
 	terminate.mockReset()
 	release.mockReset()
+	recoverIfNewerBuild.mockReset()
 	WorkerCtor.mockImplementation(function FakeWorker() {
-		return { terminate }
+		return Object.assign(new EventTarget(), { terminate })
 	})
 	wrap.mockImplementation(() => {
 		// Like the real worker, each one numbers its documents from 1.
@@ -86,6 +89,18 @@ describe("spreadsheetClient", () => {
 		await vi.advanceTimersByTimeAsync(IDLE_MS)
 		expect(release).toHaveBeenCalledOnce()
 		expect(terminate).toHaveBeenCalledOnce()
+	})
+
+	it("checks for a newer build when the worker fails to start", async () => {
+		const client = await freshClient()
+
+		await client.openSpreadsheet(new Uint8Array([1]), "csv")
+
+		const worker = WorkerCtor.mock.results[0]?.value as EventTarget | undefined
+
+		expect(recoverIfNewerBuild).not.toHaveBeenCalled()
+		worker?.dispatchEvent(new Event("error"))
+		expect(recoverIfNewerBuild).toHaveBeenCalledOnce()
 	})
 
 	it("never tears the worker down under an open still parsing past the idle window", async () => {

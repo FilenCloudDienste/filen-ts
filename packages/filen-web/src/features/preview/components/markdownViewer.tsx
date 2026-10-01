@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useRef, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { CodeIcon, EyeIcon } from "lucide-react"
 import { driveItemName } from "@filen/shared"
@@ -6,6 +6,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { codeMirrorLanguageFor, decodeUtf8, extensionOf } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
+import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
@@ -24,13 +25,6 @@ export interface MarkdownViewerProps {
 	// Read-only while the overlay saves: see CodeMirrorSource's own prop.
 	locked?: boolean
 }
-
-// "View source" mounts the SAME CodeMirror surface TextViewer renders — a nested lazy() (not a plain
-// import) so opening a markdown file never pulls CodeMirror's chunk in; it fetches only when the
-// toggle is actually used.
-const CodeMirrorSource = lazy(async () => ({
-	default: (await import("@/features/preview/components/codeMirrorSource")).CodeMirrorSource
-}))
 
 function MarkdownToolbar({
 	mode,
@@ -92,7 +86,7 @@ function MarkdownToolbar({
 // editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
 // save rotates the uuid, remounting this whole viewer onto the new bytes.
 // No parameter defaults: the React Compiler skips a component that has them.
-function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: MarkdownViewerProps) {
+export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: MarkdownViewerProps) {
 	const result = usePreviewBytes(item)
 	const [mode, setMode] = useState<"rendered" | "source">("rendered")
 	// Where focus goes after a keyboard toggle: into the source editor, or onto the toolbar toggle when
@@ -164,20 +158,18 @@ function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked
 			/>
 			<div className="min-h-0 flex-1">
 				{mode === "source" ? (
-					<Suspense fallback={<PreviewLoading />}>
-						<CodeMirrorSource
-							text={text}
-							tag={codeMirrorLanguageFor(extensionOf(driveItemName(item)))}
-							alt={alt}
-							editable={editable ?? false}
-							locked={locked ?? false}
-							autoFocus={focusAfterToggle === "editor"}
-							// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely
-							// rather than forward an explicit `undefined`.
-							{...(onDirtyChange !== undefined ? { onDirtyChange } : {})}
-							{...(contentRef !== undefined ? { contentRef } : {})}
-						/>
-					</Suspense>
+					<CodeMirrorSource
+						text={text}
+						tag={codeMirrorLanguageFor(extensionOf(driveItemName(item)))}
+						alt={alt}
+						editable={editable ?? false}
+						locked={locked ?? false}
+						autoFocus={focusAfterToggle === "editor"}
+						// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely
+						// rather than forward an explicit `undefined`.
+						{...(onDirtyChange !== undefined ? { onDirtyChange } : {})}
+						{...(contentRef !== undefined ? { contentRef } : {})}
+					/>
 				) : (
 					<MarkdownRenderer
 						text={text}
@@ -188,5 +180,3 @@ function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked
 		</div>
 	)
 }
-
-export default MarkdownViewer

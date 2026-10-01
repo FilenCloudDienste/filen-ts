@@ -1,4 +1,4 @@
-import { Suspense, type ReactNode } from "react"
+import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
@@ -15,7 +15,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { type NoteBulkDialogActionKind } from "@/features/notes/components/notesBulkActionBar.logic"
 import { ParticipantsDialog } from "@/features/notes/components/participantsDialog"
-import { HistoryDialog } from "@/features/notes/components/lazyHistoryDialog"
+import { HistoryDialog } from "@/features/notes/components/historyDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 
@@ -322,12 +322,10 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 				)
 			case "history":
 				return (
-					<Suspense fallback={null}>
-						<HistoryDialog
-							note={activeDialog.note}
-							onClose={closeActiveDialog}
-						/>
-					</Suspense>
+					<HistoryDialog
+						note={activeDialog.note}
+						onClose={closeActiveDialog}
+					/>
 				)
 			case "trashSelected":
 				return (

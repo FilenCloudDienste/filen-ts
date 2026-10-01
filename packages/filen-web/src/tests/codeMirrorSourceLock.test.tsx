@@ -5,8 +5,8 @@ import { act, render } from "@testing-library/react"
 import { EditorView } from "@codemirror/view"
 
 vi.mock("@/features/preview/lib/codeMirrorShared", () => ({
+	languageExtensionFor: () => null,
 	useCodeMirrorTheme: () => [],
-	useLanguageExtension: () => null,
 	useEditorKeymap: () => []
 }))
 

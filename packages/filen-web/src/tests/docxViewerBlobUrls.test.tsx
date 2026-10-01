@@ -17,7 +17,7 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: new Uint8Array([1]), refetch: () => undefined })
 }))
 
-const { default: DocxViewer } = await import("@/features/preview/components/docxViewer")
+const { DocxViewer } = await import("@/features/preview/components/docxViewer")
 
 const item = linkedFileItem("doc.docx", {
 	uuid: "aaaaaaaa-0000-0000-0000-000000000001",

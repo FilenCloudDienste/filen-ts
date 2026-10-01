@@ -2,11 +2,18 @@ import { toast } from "sonner"
 import { i18n } from "@/lib/i18n"
 import { applyUpdate } from "@/lib/sw/register"
 import { hasUnloadHold } from "@/lib/unloadGuard"
-import { staleChunkAction } from "@/lib/appUpdate.logic"
+import { isBuildStillDeployed, staleBuildAction } from "@/lib/appUpdate.logic"
 
-// One id, so a service-worker update and a stale chunk in the same tab raise a single prompt.
+// One id, so a service-worker update and a failed worker start in the same tab raise a single prompt.
 const UPDATE_TOAST_ID = "app-update"
-const RELOAD_AT_KEY = "filen.staleChunkReloadAt"
+const RELOAD_AT_KEY = "filen.staleBuildReloadAt"
+// A run of failures (a directory of broken PDFs) asks the server once, not once per file.
+const CHECK_INTERVAL_MS = 60_000
+
+// The page is one bundle, so the file this module was loaded from names the running build.
+const RUNNING_BUNDLE = new URL(import.meta.url).pathname
+
+let lastCheckAt = 0
 
 export function showUpdateReadyToast(): void {
 	toast(i18n.t("updateReadyTitle"), {
@@ -35,18 +42,37 @@ function writeReloadAt(now: number): void {
 	}
 }
 
-// Vite raises vite:preloadError when a lazily imported chunk fails to load. Left uncancelled, the import
-// still rejects, so whatever renders the failure stays in place until the reload replaces the page.
-export function installStaleChunkRecovery(): void {
-	window.addEventListener("vite:preloadError", () => {
-		const now = Date.now()
-		const action = staleChunkAction({ online: navigator.onLine, busy: hasUnloadHold(), lastReloadAt: readReloadAt(), now })
+// Called when a worker the page starts after boot (PDF, spreadsheet, HEIC) fails. If index.html no longer
+// loads this tab's bundle, a newer build replaced the worker's file: reload into it, or ask first while
+// something holds the tab. Any other failure (a broken file, no network) leaves the tab as it is. Dev
+// serves source modules rather than one bundle, so only a production build checks.
+export function recoverIfNewerBuild(): void {
+	const now = Date.now()
 
-		if (action === "prompt") {
-			showUpdateReadyToast()
-		} else if (action === "reload") {
-			writeReloadAt(now)
-			location.reload()
-		}
-	})
+	if (!import.meta.env.PROD || now - lastCheckAt < CHECK_INTERVAL_MS) {
+		return
+	}
+
+	lastCheckAt = now
+
+	void fetch("/", { cache: "no-cache" })
+		.then(async response => (response.ok ? await response.text() : null))
+		.then(html => {
+			if (html === null || isBuildStillDeployed(html, RUNNING_BUNDLE)) {
+				return
+			}
+
+			const at = Date.now()
+			const action = staleBuildAction({ busy: hasUnloadHold(), lastReloadAt: readReloadAt(), now: at })
+
+			if (action === "prompt") {
+				showUpdateReadyToast()
+			} else if (action === "reload") {
+				writeReloadAt(at)
+				location.reload()
+			}
+		})
+		.catch(() => {
+			// Unreachable server: nothing to compare against, and a reload could not load either.
+		})
 }

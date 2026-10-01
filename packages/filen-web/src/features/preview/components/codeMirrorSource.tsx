@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, type RefObject } from "react"
 import CodeMirror, { ExternalChange, type ReactCodeMirrorRef } from "@uiw/react-codemirror"
 import { Compartment, EditorState, type Extension } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
-import { useCodeMirrorTheme, useEditorKeymap, useLanguageExtension } from "@/features/preview/lib/codeMirrorShared"
+import { languageExtensionFor, useCodeMirrorTheme, useEditorKeymap } from "@/features/preview/lib/codeMirrorShared"
 
 // Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and the
-// notes editor) reuses the SAME language-loader/theme plumbing (lib/codeMirrorShared.ts) as file preview
+// notes editor) reuses the SAME language/theme plumbing (lib/codeMirrorShared.ts) as file preview
 // rather than a second copy. Preview's own textViewer.tsx is this module's regression net (its e2e/unit coverage did
 // not change shape, only its import path did).
 
@@ -66,8 +66,8 @@ function noopDirtyChange(): void {
 // only ever consumed on the first render) — the EDITOR INVARIANT: a genuinely different piece of
 // content (a different file, a different note) must remount this component (key by its identity) —
 // that is the ONLY path that may ever reseed it; nothing in here ever re-derives the buffer from a
-// later `text` prop change, so a re-render from an unrelated cause (theme flip, language chunk
-// landing) can never clobber in-progress edits or echo-loop.
+// later `text` prop change, so a re-render from an unrelated cause (theme flip, shortcut rebind) can
+// never clobber in-progress edits or echo-loop.
 export function CodeMirrorSource({
 	text,
 	tag,
@@ -82,7 +82,7 @@ export function CodeMirrorSource({
 	const editable = editableProp ?? false
 	const onDirtyChange = onDirtyChangeProp ?? noopDirtyChange
 	const codeMirrorTheme = useCodeMirrorTheme()
-	const languageExtension = useLanguageExtension(tag)
+	const languageExtension = languageExtensionFor(tag)
 	// Find, replace and (in markdown) formatting, on the user's own shortcuts.
 	const editorKeymap = useEditorKeymap(tag === "markdown")
 	const [lock] = useState(emptyCompartment)

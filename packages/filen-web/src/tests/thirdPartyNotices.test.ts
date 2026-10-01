@@ -1,15 +1,16 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { listInstalledNpm, type InstalledNpmPackage } from "@filen/shared/tooling"
-import { LICENSE_TEXTS } from "@/features/settings/thirdPartyNotices.gen"
 import {
 	filterThirdPartyNotices,
 	findThirdPartyNotice,
 	thirdPartyLicenseTexts,
-	THIRD_PARTY_NOTICES,
+	thirdPartyNoticesPayload,
 	THIRD_PARTY_NOTICES_FILEN_RS_REF,
 	THIRD_PARTY_NOTICES_SDK_VERSION
 } from "@/features/settings/lib/thirdPartyNotices"
 import { noticeRepositoryHref } from "@/features/settings/components/advanced/thirdPartyNoticesDialog.logic"
+
+const { notices: THIRD_PARTY_NOTICES, texts: LICENSE_TEXTS } = thirdPartyNoticesPayload()
 
 /**
  * The notices payload discharges a legal obligation, so the failure that matters is a SILENT one: a

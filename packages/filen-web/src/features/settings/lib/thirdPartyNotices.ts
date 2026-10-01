@@ -1,12 +1,29 @@
 import {
-	LICENSE_TEXTS,
-	THIRD_PARTY_NOTICES,
 	THIRD_PARTY_NOTICES_FILEN_RS_REF,
+	THIRD_PARTY_NOTICES_PAYLOAD,
 	THIRD_PARTY_NOTICES_SDK_VERSION,
 	type ThirdPartyNotice
 } from "@/features/settings/thirdPartyNotices.gen"
 
-export { THIRD_PARTY_NOTICES, THIRD_PARTY_NOTICES_SDK_VERSION, THIRD_PARTY_NOTICES_FILEN_RS_REF, type ThirdPartyNotice }
+export { THIRD_PARTY_NOTICES_SDK_VERSION, THIRD_PARTY_NOTICES_FILEN_RS_REF, type ThirdPartyNotice }
+
+interface ThirdPartyNoticesPayload {
+	texts: readonly string[]
+	notices: readonly ThirdPartyNotice[]
+}
+
+let payload: ThirdPartyNoticesPayload | null = null
+
+/**
+ * The attribution data, built on first read. It ships in the bundle as one JSON string: a string literal
+ * costs next to nothing when the bundle is parsed at boot, where the same ~850 KB as object literals would
+ * be parsed and built on every load for a dialog that is rarely opened.
+ */
+export function thirdPartyNoticesPayload(): ThirdPartyNoticesPayload {
+	payload ??= JSON.parse(THIRD_PARTY_NOTICES_PAYLOAD) as ThirdPartyNoticesPayload
+
+	return payload
+}
 
 /**
  * Resolves one package by name AND version: the same package legitimately appears at two versions in
@@ -14,7 +31,7 @@ export { THIRD_PARTY_NOTICES, THIRD_PARTY_NOTICES_SDK_VERSION, THIRD_PARTY_NOTIC
  * regeneration.
  */
 export function findThirdPartyNotice(name: string, version: string): ThirdPartyNotice | null {
-	return THIRD_PARTY_NOTICES.find(notice => notice.name === name && notice.version === version) ?? null
+	return thirdPartyNoticesPayload().notices.find(notice => notice.name === name && notice.version === version) ?? null
 }
 
 /**
@@ -25,7 +42,9 @@ export function findThirdPartyNotice(name: string, version: string): ThirdPartyN
  * than one text means the declared license is a conjunction and every text applies.
  */
 export function thirdPartyLicenseTexts(notice: ThirdPartyNotice): string[] {
-	return notice.texts.map(index => LICENSE_TEXTS[index]).filter((text): text is string => text !== undefined)
+	const { texts } = thirdPartyNoticesPayload()
+
+	return notice.texts.map(index => texts[index]).filter((text): text is string => text !== undefined)
 }
 
 /** Case-insensitive substring over name + SPDX id. An empty query returns the input array identity, so

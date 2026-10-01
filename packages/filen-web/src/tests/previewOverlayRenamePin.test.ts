@@ -44,8 +44,10 @@ function viewerStub(kind: "text" | "spreadsheet") {
 	}
 }
 
-vi.mock("@/features/preview/components/textViewer", () => ({ default: viewerStub("text") }))
-vi.mock("@/features/spreadsheet/components/spreadsheetViewer", () => ({ default: viewerStub("spreadsheet") }))
+vi.mock("@/features/preview/components/textViewer", () => ({ TextViewer: viewerStub("text") }))
+vi.mock("@/features/spreadsheet/components/spreadsheetViewer", () => ({ SpreadsheetViewer: viewerStub("spreadsheet") }))
+// The slot stepped to in between (other.pdf); its own loading is not what these tests are about.
+vi.mock("@/features/preview/components/pdfViewer", () => ({ PdfViewer: () => null }))
 
 import "@/lib/i18n"
 import { narrowItem } from "@/features/drive/lib/item"

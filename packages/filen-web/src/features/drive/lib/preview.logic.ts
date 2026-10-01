@@ -303,10 +303,10 @@ export function decodeUtf8(bytes: Uint8Array): string {
 	return new TextDecoder("utf-8").decode(bytes)
 }
 
-// ext -> the language tag textViewer.tsx's own loader switches on to pick a CodeMirror language
-// package (lazily imported there — this file stays framework-free, so the map value is a plain string,
-// never a CodeMirror Extension). "" means no grammar is wired for that extension; the file still
-// renders as a fully usable read-only, unhighlighted CodeMirror view, never a blocked preview. Every
+// ext -> the language tag codeMirrorShared.ts maps to a CodeMirror language package (this file stays
+// framework-free, so the map value is a plain string, never a CodeMirror Extension). "" means no
+// grammar is wired for that extension; the file still renders as a fully usable read-only,
+// unhighlighted CodeMirror view, never a blocked preview. Every
 // CODE_FILE_EXTENSIONS entry is covered (some intentionally unmapped — no maintained CodeMirror 6
 // grammar exists for a bare Makefile/DOS-batch, and "vue"/"svelte" SFC parsing is out of scope), plus
 // the two markdown extensions for markdownViewer.tsx's view-source editor. Several tags share one

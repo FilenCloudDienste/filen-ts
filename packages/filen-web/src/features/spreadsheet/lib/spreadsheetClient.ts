@@ -3,6 +3,7 @@ import SpreadsheetWorker from "@/features/spreadsheet/workers/spreadsheet.worker
 import type { SpreadsheetDoc, SpreadsheetKind } from "@/features/spreadsheet/lib/model"
 import type { SpreadsheetFileKind, SpreadsheetWorkerApi } from "@/features/spreadsheet/workers/spreadsheet.worker"
 import { idleResource } from "@/lib/idleResource"
+import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 type SpreadsheetRemote = Comlink.Remote<SpreadsheetWorkerApi>
 
@@ -14,6 +15,10 @@ const SPREADSHEET_WORKER_IDLE_MS = 30_000
 const spreadsheetWorker = idleResource(
 	() => {
 		const worker = new SpreadsheetWorker()
+		// A deploy that changed this worker removes its old file (appUpdate.ts).
+		worker.addEventListener("error", () => {
+			recoverIfNewerBuild()
+		})
 
 		return { worker, remote: Comlink.wrap<SpreadsheetWorkerApi>(worker) }
 	},

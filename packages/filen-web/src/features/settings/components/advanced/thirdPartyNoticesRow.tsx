@@ -1,12 +1,8 @@
-import { lazy, Suspense, useState } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
-
-// The generated notices payload is ~800 KB, so it may only ever be reached through this lazy boundary:
-// this row must never import @/features/settings/lib/thirdPartyNotices for any reason (not even a
-// package count), or the whole payload lands in the entry chunk.
-const ThirdPartyNoticesDialog = lazy(() => import("@/features/settings/components/advanced/thirdPartyNoticesDialog"))
+import { ThirdPartyNoticesDialog } from "@/features/settings/components/advanced/thirdPartyNoticesDialog"
 
 function ThirdPartyNoticesRow() {
 	const { t } = useTranslation("settings")
@@ -28,12 +24,10 @@ function ThirdPartyNoticesRow() {
 				{t("settingsNoticesOpen")}
 			</Button>
 			{open ? (
-				<Suspense fallback={null}>
-					<ThirdPartyNoticesDialog
-						open
-						onOpenChange={setOpen}
-					/>
-				</Suspense>
+				<ThirdPartyNoticesDialog
+					open
+					onOpenChange={setOpen}
+				/>
 			) : null}
 		</SettingsRow>
 	)

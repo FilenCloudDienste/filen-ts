@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 // transfer of a private copy, pass-through of the transform result/opts), so both the `?worker` constructor and
 // Comlink.wrap are replaced with plain fakes rather than a second real worker boundary.
 
-const { WorkerCtor, wrap, transformMock, transferSpy, terminateMock, releaseMock } = vi.hoisted(() => ({
+const { WorkerCtor, wrap, transformMock, transferSpy, terminateMock, releaseMock, recoverIfNewerBuild } = vi.hoisted(() => ({
+	recoverIfNewerBuild: vi.fn(),
 	WorkerCtor: vi.fn(),
 	wrap: vi.fn(),
 	transformMock: vi.fn(),
@@ -17,6 +18,7 @@ const { WorkerCtor, wrap, transformMock, transferSpy, terminateMock, releaseMock
 }))
 
 vi.mock("@/features/preview/workers/heic.worker.ts?worker", () => ({ default: WorkerCtor }))
+vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild }))
 
 // wrap() is faked (no real postMessage boundary here — that round trip, including genuine buffer
 // detachment, is already proven by heic.worker.test.ts). transfer() stays real but spied on: it's
@@ -35,13 +37,20 @@ vi.mock("comlink", async importOriginal => {
 	}
 })
 
+// The real worker's EventTarget, so a test can fire the error a missing worker file raises.
+class FakeWorkerTarget extends EventTarget {
+	fake = "worker-instance"
+	terminate = terminateMock
+}
+
 async function freshModule() {
 	vi.resetModules()
 	WorkerCtor.mockReset()
 	wrap.mockReset()
 	transformMock.mockReset()
+	recoverIfNewerBuild.mockReset()
 	WorkerCtor.mockImplementation(function FakeWorker() {
-		return { fake: "worker-instance", terminate: terminateMock }
+		return new FakeWorkerTarget()
 	})
 	const { releaseProxy } = await import("comlink")
 	wrap.mockImplementation(() => ({ transform: transformMock, [releaseProxy]: releaseMock }))
@@ -70,6 +79,19 @@ describe("transformHeicBytes", () => {
 		expect(WorkerCtor).toHaveBeenCalledTimes(1)
 		expect(wrap).toHaveBeenCalledWith(expect.objectContaining({ fake: "worker-instance" }))
 		expect(result).toBe(blob)
+	})
+
+	it("checks for a newer build when the worker fails to start", async () => {
+		const { transformHeicBytes } = await freshModule()
+		transformMock.mockResolvedValue(new Blob())
+
+		await transformHeicBytes(new Uint8Array([1]))
+
+		const worker = WorkerCtor.mock.results[0]?.value as EventTarget | undefined
+
+		expect(recoverIfNewerBuild).not.toHaveBeenCalled()
+		worker?.dispatchEvent(new Event("error"))
+		expect(recoverIfNewerBuild).toHaveBeenCalledTimes(1)
 	})
 
 	it("memoizes the worker across multiple calls — one spin-up for the tab session", async () => {

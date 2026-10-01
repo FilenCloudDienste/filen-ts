@@ -56,7 +56,7 @@ Note that nginx's `add_header` does not inherit into a nested `location`, so eve
 
 - `/assets/*` is content-hashed — `Cache-Control: public, max-age=31536000, immutable`.
 - The SDK artifacts and `/sw.js` are **unhashed by contract** and must be revalidated on every load (`Cache-Control: no-cache`). Long-caching them pins users to a stale SDK or service worker.
-- `index.html` is the SPA fallback for unknown page loads and must never be long-cached. A missing file that is not a page load must get a real 404: a tab opened before a deploy asks for chunks the new build no longer has, and an `index.html` fallback there would be cached as immutable under `/assets/*`.
+- `index.html` is the SPA fallback for unknown page loads and must never be long-cached. A missing file that is not a page load must get a real 404: a tab opened before a deploy can ask for a worker file the new build no longer has, and an `index.html` fallback there would be cached as immutable under `/assets/*`.
 
 ### Cloudflare
 
@@ -66,4 +66,4 @@ The app is deployed as static assets on Cloudflare Workers (`wrangler.jsonc`): t
 - **Production** deploys from a `filen-web@<version>` tag matching `package.json`'s version, after lint, typecheck and unit tests (`.github/workflows/release-web.yml`).
 - Both need the `CLOUDFLARE_WORKERS_DEPLOY_TOKEN` (an account API token with only Workers Scripts: Edit) and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
 
-Open tabs follow a deploy on their own: each deployed build changes `sw.js` (its build id), which raises the update prompt, and a chunk the deploy removed reloads the tab into the new build, or raises the same prompt while transfers or unsaved edits are running (`src/lib/appUpdate.ts`).
+The page ships as one script and one stylesheet, with no lazy loading; workers and wasm are separate files. Open tabs follow a deploy on their own: each deployed build changes `sw.js` (its build id), which raises the update prompt, and a worker the deploy replaced, failing to start in an older tab, reloads the tab into the new build, or raises the same prompt while transfers or unsaved edits are running (`src/lib/appUpdate.ts`).

@@ -8,12 +8,9 @@ import { PHOTOS_ACTIONS } from "@/features/photos/lib/keymap"
 import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
 import { AUDIO_ACTIONS } from "@/features/audio/lib/keymap"
 
-// The app's complete action set, assembled eagerly from each feature's data-only keymap module.
-// Registration used to sit at module scope next to each handler, which meant half the actions only
-// existed once their lazily-imported route chunk had loaded (autoCodeSplitting, vite.config.ts) — a
-// shortcuts catalog opened from /settings would then be missing Cloud Drive and Photos entirely.
-// The defs are plain objects whose only import is an erased type, so nothing heavy joins the entry
-// chunk; the handlers stay exactly where they were, in their own components.
+// The app's complete action set, assembled eagerly from each feature's data-only keymap module, so the
+// shortcuts catalog never depends on which feature components have mounted. The defs are plain objects
+// whose only import is an erased type; the handlers stay in their own components.
 export const ALL_ACTIONS: readonly ActionDef[] = [
 	...APP_ACTIONS,
 	...DRIVE_ACTIONS,

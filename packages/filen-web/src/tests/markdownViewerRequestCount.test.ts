@@ -70,7 +70,7 @@ vi.mock("@uiw/react-codemirror", async () => {
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
-import MarkdownViewer from "@/features/preview/components/markdownViewer"
+import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
 import { registerAction } from "@/lib/keymap/registry"
 

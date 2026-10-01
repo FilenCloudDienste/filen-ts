@@ -2,8 +2,6 @@ import {
 	useEffect,
 	useRef,
 	useState,
-	lazy,
-	Suspense,
 	Component,
 	type FocusEvent as ReactFocusEvent,
 	type KeyboardEvent,
@@ -44,14 +42,12 @@ import { previewTitleSplitIndex } from "@/features/preview/lib/previewTitle"
 import { cn, driveItemName } from "@filen/shared"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
-import {
-	DocxViewer,
-	MarkdownViewer,
-	PdfViewer,
-	SpreadsheetViewer,
-	TextViewer,
-	ViewerSuspense
-} from "@/features/preview/components/lazyViewers"
+import { DocxViewer } from "@/features/preview/components/docxViewer"
+import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
+import { PdfViewer } from "@/features/preview/components/pdfViewer"
+import { TextViewer } from "@/features/preview/components/textViewer"
+import { SpreadsheetViewer, type SpreadsheetSaveSource } from "@/features/spreadsheet/components/spreadsheetViewer"
+import { RemoteFileCompare } from "@/features/preview/components/remoteCompare"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import {
 	isTextEditingTarget,
@@ -68,7 +64,6 @@ import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from 
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
-import type { SpreadsheetSaveSource } from "@/features/spreadsheet/components/spreadsheetViewer"
 import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
 import { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
@@ -80,13 +75,9 @@ import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Spinner } from "@/components/ui/spinner"
-import { LoadingState } from "@/components/loadingState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
-
-// @codemirror/merge, for the remote-change dialog's comparison only.
-const RemoteFileCompare = lazy(() => import("@/features/preview/components/remoteCompare"))
 
 // Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its own
 // deps, so a per-render identity would unregister/re-register the history blocker on every render.
@@ -1104,13 +1095,11 @@ export function PreviewOverlay({
 							renderCompare={
 								remoteTheirs !== undefined && editable && isTextCategory(pin.category)
 									? mine => (
-											<Suspense fallback={<LoadingState size="lg" />}>
-												<RemoteFileCompare
-													theirs={remoteTheirs}
-													mine={mine}
-													name={name}
-												/>
-											</Suspense>
+											<RemoteFileCompare
+												theirs={remoteTheirs}
+												mine={mine}
+												name={name}
+											/>
 										)
 									: undefined
 							}
@@ -1218,7 +1207,7 @@ interface PreviewBodyProps {
 // level up) on every item change so a viewer's own pending/success/error state never flashes the
 // previous item's content. Bytes are no longer loaded centrally here: image/video/audio each own their
 // own data source (a streamed SW URL or a buffered blob, see imageViewer.tsx/mediaViewer.tsx),
-// pdf/docx each own a lazy chunk plus their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
+// pdf/docx each own their own whole-buffer load (see pdfViewer.tsx/docxViewer.tsx)
 // — a category still rendered by the fallback below (text/code/markdown) has nothing to load yet.
 // `editable`/`onDirtyChange`/`contentRef` only ever reach a CodeMirror surface: the "text"/"code"
 // case's TextViewer, and the "markdown" case's own source-mode editor — every other category
@@ -1278,65 +1267,55 @@ function PreviewBody({
 			)
 		case "pdf":
 			return (
-				<ViewerSuspense>
-					<PdfViewer
-						item={item}
-						alt={alt}
-					/>
-				</ViewerSuspense>
+				<PdfViewer
+					item={item}
+					alt={alt}
+				/>
 			)
 		case "spreadsheet":
 			return (
-				<ViewerSuspense>
-					<SpreadsheetViewer
-						item={item}
-						documentKey={documentKey}
-						alt={alt}
-						editable={editable}
-						{...(renamedReadOnly ? { readOnlyReason: "renamed" as const } : {})}
-						neverEditable={neverEditable}
-						onDirtyChange={onDirtyChange}
-						saveRef={spreadsheetRef}
-						onOpenFile={onOpenFile}
-						canSaveCopy={canSaveCopy}
-					/>
-				</ViewerSuspense>
+				<SpreadsheetViewer
+					item={item}
+					documentKey={documentKey}
+					alt={alt}
+					editable={editable}
+					{...(renamedReadOnly ? { readOnlyReason: "renamed" as const } : {})}
+					neverEditable={neverEditable}
+					onDirtyChange={onDirtyChange}
+					saveRef={spreadsheetRef}
+					onOpenFile={onOpenFile}
+					canSaveCopy={canSaveCopy}
+				/>
 			)
 		case "docx":
 			return (
-				<ViewerSuspense>
-					<DocxViewer
-						item={item}
-						alt={alt}
-					/>
-				</ViewerSuspense>
+				<DocxViewer
+					item={item}
+					alt={alt}
+				/>
 			)
 		case "text":
 		case "code":
 			return (
-				<ViewerSuspense>
-					<TextViewer
-						item={item}
-						alt={alt}
-						editable={editable}
-						locked={locked}
-						onDirtyChange={onDirtyChange}
-						contentRef={contentRef}
-					/>
-				</ViewerSuspense>
+				<TextViewer
+					item={item}
+					alt={alt}
+					editable={editable}
+					locked={locked}
+					onDirtyChange={onDirtyChange}
+					contentRef={contentRef}
+				/>
 			)
 		case "markdown":
 			return (
-				<ViewerSuspense>
-					<MarkdownViewer
-						item={item}
-						alt={alt}
-						editable={editable}
-						locked={locked}
-						onDirtyChange={onDirtyChange}
-						contentRef={contentRef}
-					/>
-				</ViewerSuspense>
+				<MarkdownViewer
+					item={item}
+					alt={alt}
+					editable={editable}
+					locked={locked}
+					onDirtyChange={onDirtyChange}
+					contentRef={contentRef}
+				/>
 			)
 		case "rawImage":
 			return (

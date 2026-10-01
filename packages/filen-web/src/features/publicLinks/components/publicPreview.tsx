@@ -5,14 +5,11 @@ import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
-import {
-	DocxViewer,
-	MarkdownViewer,
-	PdfViewer,
-	SpreadsheetViewer,
-	TextViewer,
-	ViewerSuspense
-} from "@/features/preview/components/lazyViewers"
+import { DocxViewer } from "@/features/preview/components/docxViewer"
+import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
+import { PdfViewer } from "@/features/preview/components/pdfViewer"
+import { TextViewer } from "@/features/preview/components/textViewer"
+import { SpreadsheetViewer } from "@/features/spreadsheet/components/spreadsheetViewer"
 
 // Inline preview for a public-link file, reusing the SAME viewer components the authed app uses — fed
 // a fabricated DriveItem (linkedFileIntoDriveItem / a narrowed listing File) and wrapped in the anon
@@ -70,51 +67,41 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 			)
 		case "pdf":
 			return (
-				<ViewerSuspense>
-					<PdfViewer
-						item={item}
-						alt={alt}
-					/>
-				</ViewerSuspense>
+				<PdfViewer
+					item={item}
+					alt={alt}
+				/>
 			)
 		case "docx":
 			return (
-				<ViewerSuspense>
-					<DocxViewer
-						item={item}
-						alt={alt}
-					/>
-				</ViewerSuspense>
+				<DocxViewer
+					item={item}
+					alt={alt}
+				/>
 			)
 		case "spreadsheet":
 			return (
-				<ViewerSuspense>
-					<SpreadsheetViewer
-						item={item}
-						documentKey={item.data.uuid}
-						neverEditable
-						alt={alt}
-					/>
-				</ViewerSuspense>
+				<SpreadsheetViewer
+					item={item}
+					documentKey={item.data.uuid}
+					neverEditable
+					alt={alt}
+				/>
 			)
 		case "text":
 		case "code":
 			return (
-				<ViewerSuspense>
-					<TextViewer
-						item={item}
-						alt={alt}
-					/>
-				</ViewerSuspense>
+				<TextViewer
+					item={item}
+					alt={alt}
+				/>
 			)
 		case "markdown":
 			return (
-				<ViewerSuspense>
-					<MarkdownViewer
-						item={item}
-						alt={alt}
-					/>
-				</ViewerSuspense>
+				<MarkdownViewer
+					item={item}
+					alt={alt}
+				/>
 			)
 		// Reachable, unlike "other": anonPreviewability admits rawImage. The embedded preview is read
 		// through the anon worker method by the provider this component wraps its viewer in.

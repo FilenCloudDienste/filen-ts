@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
@@ -9,11 +9,8 @@ import { tabNoteContent } from "@/features/notes/lib/tabEditors"
 import { holdNoteForRemoteEdit, releaseNoteHold } from "@/features/notes/lib/remoteEditHolds"
 import { codeMirrorTagForNote } from "@/features/notes/components/reader/reader.logic"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
+import { RemoteCompare } from "@/features/preview/components/remoteCompare"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { LoadingState } from "@/components/loadingState"
-
-// @codemirror/merge, for the comparison only.
-const RemoteCompare = lazy(async () => ({ default: (await import("@/features/preview/components/remoteCompare")).RemoteCompare }))
 
 // Asks what happens to the edits in this note when a newer version of it was saved elsewhere, with the
 // file editors' dialog. Their content came with the socket event, so the comparison needs no download;
@@ -74,13 +71,11 @@ export function NoteRemoteEditDialog({ note }: { note: Note }) {
 			renderCompare={
 				comparable
 					? mine => (
-							<Suspense fallback={<LoadingState size="lg" />}>
-								<RemoteCompare
-									theirs={{ status: "ready", text: theirs }}
-									mine={mine}
-									tag={codeMirrorTagForNote(note)}
-								/>
-							</Suspense>
+							<RemoteCompare
+								theirs={{ status: "ready", text: theirs }}
+								mine={mine}
+								tag={codeMirrorTagForNote(note)}
+							/>
 						)
 					: undefined
 			}

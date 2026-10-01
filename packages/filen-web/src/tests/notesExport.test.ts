@@ -24,7 +24,7 @@ vi.mock("jszip", () => ({
 	default: class {
 		public constructor() {
 			if (zipSetup.fail) {
-				throw new Error("chunk load failed")
+				throw new Error("archive setup failed")
 			}
 		}
 
@@ -91,7 +91,7 @@ describe("exportNote", () => {
 })
 
 describe("exportAllNotes", () => {
-	// JSZip loads on demand, so a failure to set up the archive must take the error outcome, not reject.
+	// A failure to set up the archive must take the error outcome, not reject.
 	it("reports an error and downloads nothing when the archive cannot be set up", async () => {
 		zipSetup.fail = true
 		getNoteContent.mockResolvedValue("body")

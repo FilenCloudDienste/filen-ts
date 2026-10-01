@@ -1,31 +1,38 @@
 import { describe, expect, it } from "vitest"
-import { STALE_RELOAD_COOLDOWN_MS, staleChunkAction } from "@/lib/appUpdate.logic"
+import { isBuildStillDeployed, STALE_RELOAD_COOLDOWN_MS, staleBuildAction } from "@/lib/appUpdate.logic"
 
-const base = { online: true, busy: false, lastReloadAt: null, now: 1_000_000 }
+const base = { busy: false, lastReloadAt: null, now: 1_000_000 }
 
-describe("staleChunkAction", () => {
-	it("reloads an idle online tab", () => {
-		expect(staleChunkAction(base)).toBe("reload")
-	})
-
-	it("does nothing offline, even when busy", () => {
-		expect(staleChunkAction({ ...base, online: false })).toBe("none")
-		expect(staleChunkAction({ ...base, online: false, busy: true })).toBe("none")
+describe("staleBuildAction", () => {
+	it("reloads an idle tab", () => {
+		expect(staleBuildAction(base)).toBe("reload")
 	})
 
 	it("prompts instead of reloading while something holds the tab", () => {
-		expect(staleChunkAction({ ...base, busy: true })).toBe("prompt")
+		expect(staleBuildAction({ ...base, busy: true })).toBe("prompt")
 	})
 
 	it("prompts while busy even right after a reload", () => {
-		expect(staleChunkAction({ ...base, busy: true, lastReloadAt: base.now - 1 })).toBe("prompt")
+		expect(staleBuildAction({ ...base, busy: true, lastReloadAt: base.now - 1 })).toBe("prompt")
 	})
 
 	it("does not reload again within the cooldown", () => {
-		expect(staleChunkAction({ ...base, lastReloadAt: base.now - STALE_RELOAD_COOLDOWN_MS + 1 })).toBe("none")
+		expect(staleBuildAction({ ...base, lastReloadAt: base.now - STALE_RELOAD_COOLDOWN_MS + 1 })).toBe("none")
 	})
 
 	it("reloads again once the cooldown has passed", () => {
-		expect(staleChunkAction({ ...base, lastReloadAt: base.now - STALE_RELOAD_COOLDOWN_MS })).toBe("reload")
+		expect(staleBuildAction({ ...base, lastReloadAt: base.now - STALE_RELOAD_COOLDOWN_MS })).toBe("reload")
+	})
+})
+
+describe("isBuildStillDeployed", () => {
+	const html = '<script type="module" crossorigin src="/assets/index-AbC123.js"></script>'
+
+	it("is true while index.html loads the running bundle", () => {
+		expect(isBuildStillDeployed(html, "/assets/index-AbC123.js")).toBe(true)
+	})
+
+	it("is false once a deploy references another bundle", () => {
+		expect(isBuildStillDeployed(html, "/assets/index-Old999.js")).toBe(false)
 	})
 })

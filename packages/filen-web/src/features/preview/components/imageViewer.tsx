@@ -139,7 +139,7 @@ function ZoomableImage({
 // usePreviewBytes, so it skips the decode too, and each JPEG is dropped along with its source bytes.
 const heicJpegs = new WeakMap<Uint8Array, Blob>()
 
-// HEIC/HEIF byte stage: pipes the already-downloaded buffer through the lazy-loaded transform and
+// HEIC/HEIF byte stage: pipes the already-downloaded buffer through the HEIC worker's transform and
 // mints/revokes a blob URL from the resulting JPEG, mirroring useObjectUrl's lifecycle
 // (minting the URL IS the effect; the cleanup revokes it on unmount/bytes-change).
 function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
