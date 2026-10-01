@@ -73,16 +73,23 @@ function deployHeaders(): Plugin {
 // keeps its unconditional no-unsafe-inline floor). A moving set of sha256 hashes was rejected as too
 // brittle (the hashes shift when either source's literal changes). Replacing (1) with a predefined
 // toggled class was tried and does NOT suffice on its own — (2) still requires 'unsafe-inline'.
+// One Filen host family: its .filen.io host plus the .filen.net and .filen-1.net … .filen-6.net failovers.
+function filenHostFamily(subdomain: string): string[] {
+	return ["filen.io", "filen.net", "filen-1.net", "filen-2.net", "filen-3.net", "filen-4.net", "filen-5.net", "filen-6.net"].map(
+		domain => `https://${subdomain}.${domain}`
+	)
+}
+
 const CSP = [
 	"default-src 'none'",
 	"script-src 'self' 'wasm-unsafe-eval'",
 	"worker-src 'self' blob:",
 	"style-src 'self' 'unsafe-inline'",
 	"font-src 'self'",
-	// cdn.filen.io hosts the custom emoji pack (emoji.ts); the egest.filen.* family (same .net-N
-	// failover set connect-src already carries) hosts avatar pictures (account/contacts/chat rows'
-	// avatarURL) — both are sanctioned first-party hosts, not attacker-reachable third parties.
-	"img-src 'self' blob: data: https://cdn.filen.io https://egest.filen.io https://egest.filen.net https://egest.filen-1.net https://egest.filen-2.net https://egest.filen-3.net https://egest.filen-4.net https://egest.filen-5.net https://egest.filen-6.net",
+	// cdn.filen.io hosts the custom emoji pack (emoji.ts); avatar pictures (account/contacts/chat rows'
+	// avatarURL) come from the API on either the egest or the down family, each with the .net failover set
+	// connect-src already carries — all sanctioned first-party hosts, not attacker-reachable third parties.
+	`img-src 'self' blob: data: https://cdn.filen.io ${[...filenHostFamily("egest"), ...filenHostFamily("down")].join(" ")}`,
 	// <video>/<audio> element sources — 'self' for the SW's inline-preview route (same-origin, never a
 	// cross-origin media host), blob: for the buffered-fallback object URL (dev / SW absent / a failed
 	// stream registration). Was absent from the CSP entirely until the preview feature needed it —
