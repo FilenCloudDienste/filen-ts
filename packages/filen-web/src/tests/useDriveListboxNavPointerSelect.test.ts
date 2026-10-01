@@ -29,22 +29,20 @@ function item(label: string): DriveItem {
 	return narrowItem(dir)
 }
 
-function click(
-	init: { detail?: number; shiftKey?: boolean; ctrlKey?: boolean; pointerType?: string } = {}
-): ReactMouseEvent<HTMLDivElement> {
+function click(init: { detail?: number; shiftKey?: boolean; ctrlKey?: boolean } = {}): ReactMouseEvent<HTMLDivElement> {
 	return {
 		shiftKey: init.shiftKey ?? false,
 		metaKey: false,
 		ctrlKey: init.ctrlKey ?? false,
 		detail: init.detail ?? 1,
-		nativeEvent: init.pointerType === undefined ? {} : { pointerType: init.pointerType }
+		nativeEvent: {}
 	} as ReactMouseEvent<HTMLDivElement>
 }
 
 const first = item("a")
 const items = [first, item("b"), item("c")]
 
-function renderNav(listItems: DriveItem[] = items) {
+function renderNav(listItems: DriveItem[] = items, onOpen: (index: number) => void = vi.fn()) {
 	const virtualizer = { scrollToIndex: vi.fn() } as unknown as DriveVirtualizer["activeVirtualizer"]
 	const itemRefs: DriveVirtualizer["itemRefs"] = { registerRef: vi.fn(), focusItem: vi.fn() }
 
@@ -57,7 +55,7 @@ function renderNav(listItems: DriveItem[] = items) {
 			itemRefs,
 			variant: "drive",
 			splat: "",
-			onOpen: vi.fn()
+			onOpen
 		})
 	)
 }
@@ -75,12 +73,12 @@ describe("useDriveListboxNav — plain click", () => {
 		const { result } = renderNav()
 
 		act(() => {
-			result.current.handlePointerSelect(1, click())
+			result.current.handlePointerSelect(1, click(), "mouse")
 		})
 		expect(selectedLabels()).toEqual(["b"])
 
 		act(() => {
-			result.current.handlePointerSelect(1, click())
+			result.current.handlePointerSelect(1, click(), "mouse")
 		})
 		expect(selectedLabels()).toEqual([])
 		// The cursor stays on the item, as a click puts it there.
@@ -91,10 +89,10 @@ describe("useDriveListboxNav — plain click", () => {
 		const { result } = renderNav()
 
 		act(() => {
-			result.current.handlePointerSelect(2, click({ detail: 1 }))
+			result.current.handlePointerSelect(2, click({ detail: 1 }), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(2, click({ detail: 2 }))
+			result.current.handlePointerSelect(2, click({ detail: 2 }), "mouse")
 		})
 
 		expect(selectedLabels()).toEqual(["c"])
@@ -105,10 +103,10 @@ describe("useDriveListboxNav — plain click", () => {
 		const { result } = renderNav()
 
 		act(() => {
-			result.current.handlePointerSelect(0, click({ detail: 1 }))
+			result.current.handlePointerSelect(0, click({ detail: 1 }), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(0, click({ detail: 2 }))
+			result.current.handlePointerSelect(0, click({ detail: 2 }), "mouse")
 		})
 
 		expect(selectedLabels()).toEqual(["a"])
@@ -118,15 +116,15 @@ describe("useDriveListboxNav — plain click", () => {
 		const { result } = renderNav()
 
 		act(() => {
-			result.current.handlePointerSelect(0, click())
+			result.current.handlePointerSelect(0, click(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(2, click({ shiftKey: true }))
+			result.current.handlePointerSelect(2, click({ shiftKey: true }), "mouse")
 		})
 		expect(selectedLabels()).toEqual(["a", "b", "c"])
 
 		act(() => {
-			result.current.handlePointerSelect(1, click())
+			result.current.handlePointerSelect(1, click(), "mouse")
 		})
 		expect(selectedLabels()).toEqual(["b"])
 	})
@@ -135,30 +133,73 @@ describe("useDriveListboxNav — plain click", () => {
 		const { result } = renderNav()
 
 		act(() => {
-			result.current.handlePointerSelect(0, click())
+			result.current.handlePointerSelect(0, click(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(1, click({ ctrlKey: true }))
+			result.current.handlePointerSelect(1, click({ ctrlKey: true }), "mouse")
 		})
 		expect(selectedLabels()).toEqual(["a", "b"])
 
 		act(() => {
-			result.current.handlePointerSelect(0, click({ ctrlKey: true }))
+			result.current.handlePointerSelect(0, click({ ctrlKey: true }), "mouse")
 		})
 		expect(selectedLabels()).toEqual(["b"])
 	})
 
-	it("keeps a touch tap on the sole selected item selected", () => {
+})
+
+describe("useDriveListboxNav — touch", () => {
+	function tap(result: { current: ReturnType<typeof useDriveListboxNav> }, index: number): void {
+		act(() => {
+			result.current.handlePointerSelect(index, click(), "touch")
+		})
+	}
+
+	it("opens on a tap with nothing selected, moving the cursor but selecting nothing", () => {
+		const onOpen = vi.fn()
+		const { result } = renderNav(items, onOpen)
+
+		tap(result, 2)
+
+		expect(onOpen).toHaveBeenCalledExactlyOnceWith(2)
+		expect(selectedLabels()).toEqual([])
+		expect(result.current.safeActiveIndex).toBe(2)
+	})
+
+	it("toggles on a tap while a selection exists, and opens again once it is empty", () => {
+		const onOpen = vi.fn()
+		const { result } = renderNav(items, onOpen)
+
+		// What a long-press leaves behind (useDriveItemCell), after the mount's own selection reset.
+		act(() => {
+			useDriveStore.setState({ selectedItems: [first] })
+		})
+
+		tap(result, 1)
+		expect(selectedLabels()).toEqual(["a", "b"])
+		expect(result.current.safeActiveIndex).toBe(1)
+
+		tap(result, 0)
+		tap(result, 1)
+		expect(selectedLabels()).toEqual([])
+		expect(onOpen).not.toHaveBeenCalled()
+
+		tap(result, 2)
+		expect(onOpen).toHaveBeenCalledExactlyOnceWith(2)
+	})
+
+	it("ranges a Shift tap from the anchor a toggling tap set", () => {
 		const { result } = renderNav()
 
 		act(() => {
-			result.current.handlePointerSelect(0, click({ pointerType: "touch" }))
+			useDriveStore.setState({ selectedItems: [first] })
 		})
+		tap(result, 1)
 		act(() => {
-			result.current.handlePointerSelect(0, click({ pointerType: "touch" }))
+			result.current.handlePointerSelect(2, click({ shiftKey: true }), "touch")
 		})
 
-		expect(selectedLabels()).toEqual(["a"])
+		expect(selectedLabels()).toEqual(["b", "c"])
 	})
 })
 
@@ -178,10 +219,10 @@ describe("useDriveListboxNav — one shared item's per-receiver rows", () => {
 		const { result } = renderNav([bob, carol])
 
 		act(() => {
-			result.current.handlePointerSelect(0, click())
+			result.current.handlePointerSelect(0, click(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(1, click())
+			result.current.handlePointerSelect(1, click(), "mouse")
 		})
 
 		expect(selectedReceivers()).toEqual([2])
@@ -192,15 +233,15 @@ describe("useDriveListboxNav — one shared item's per-receiver rows", () => {
 		const { result } = renderNav([bob, carol])
 
 		act(() => {
-			result.current.handlePointerSelect(0, click({ ctrlKey: true }))
+			result.current.handlePointerSelect(0, click({ ctrlKey: true }), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(1, click({ ctrlKey: true }))
+			result.current.handlePointerSelect(1, click({ ctrlKey: true }), "mouse")
 		})
 		expect(selectedReceivers()).toEqual([1, 2])
 
 		act(() => {
-			result.current.handlePointerSelect(0, click({ ctrlKey: true }))
+			result.current.handlePointerSelect(0, click({ ctrlKey: true }), "mouse")
 		})
 		expect(selectedReceivers()).toEqual([2])
 		expect(result.current.safeActiveIndex).toBe(0)
@@ -210,10 +251,10 @@ describe("useDriveListboxNav — one shared item's per-receiver rows", () => {
 		const { result } = renderNav([bob, carol, first])
 
 		act(() => {
-			result.current.handlePointerSelect(1, click())
+			result.current.handlePointerSelect(1, click(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(2, click({ shiftKey: true }))
+			result.current.handlePointerSelect(2, click({ shiftKey: true }), "mouse")
 		})
 
 		expect(selectedReceivers()).toEqual([2, -1])

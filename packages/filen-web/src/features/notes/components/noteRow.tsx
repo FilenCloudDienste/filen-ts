@@ -18,6 +18,7 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 import { UserAvatar } from "@/components/userAvatar"
+import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 export interface NoteRowProps {
 	note: Note
@@ -37,10 +38,13 @@ export interface NoteRowProps {
 	onAction: (kind: NoteActionDialogKind, note: Note) => void
 	onDuplicated: (duplicated: Note) => void
 	// Modifier-click selection — mirrors driveRow.tsx's onPointerSelect. Fired from the Link's own
-	// onClick: a plain click lets navigation proceed (see the Link below); Ctrl/Cmd/Shift+click call
-	// preventDefault first (blocking both the SPA navigate AND the browser's native "open in new tab"
-	// on a modified click) and only ever change the selection.
-	onPointerSelect: (event: MouseEvent<HTMLAnchorElement>) => void
+	// onClick with the pointer behind it: a plain click or touch tap lets navigation proceed (see the
+	// Link below); a selection gesture (Ctrl/Cmd/Shift+click, a touch tap in selection mode) returns
+	// true and is preventDefaulted (blocking both the SPA navigate AND the browser's native "open in new
+	// tab" on a modified click), so it only ever changes the selection.
+	onPointerSelect: (event: MouseEvent<HTMLAnchorElement>, pointerType: string) => boolean
+	// A touch long-press: a Ctrl/Cmd+click's toggle, in place of the context menu.
+	onLongPress: () => void
 }
 
 // A left-column circular badge — the type icon, then (stacked below, only when set) pin and favorite —
@@ -68,7 +72,8 @@ export function NoteRow({
 	currentUserId,
 	onAction,
 	onDuplicated,
-	onPointerSelect
+	onPointerSelect,
+	onLongPress
 }: NoteRowProps) {
 	// ["notes", "common"] for the shared cannot-decrypt title; notes stays the default namespace.
 	const { t } = useTranslation(["notes", "common"])
@@ -82,6 +87,7 @@ export function NoteRow({
 	const sharedByEmail = noteRowSharedByEmail(note, currentUserId)
 	const tags = noteRowTags(note)
 	const participants = noteRowParticipants(note, currentUserId)
+	const press = useTouchLongPress<HTMLDivElement>({ onLongPress })
 
 	return (
 		<ContextMenu>
@@ -93,6 +99,7 @@ export function NoteRow({
 			<ContextMenuTrigger
 				render={
 					<div
+						{...press.handlers}
 						className={cn(
 							"group flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors app-region-no-drag",
 							nested && "pl-8",
@@ -107,7 +114,7 @@ export function NoteRow({
 							// rows do the same). The multi-selection is a separate fact with no honest ARIA on a
 							// plain list item — it shows as the ring below, plus the bulk bar's own selected count.
 							aria-current={selected ? "page" : undefined}
-							onClick={selectionAwareLinkClick(onPointerSelect)}
+							onClick={selectionAwareLinkClick((event: MouseEvent<HTMLAnchorElement>) => onPointerSelect(event, press.pointerType(event)))}
 							className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
 							<div className="flex shrink-0 flex-col items-center gap-1.5">

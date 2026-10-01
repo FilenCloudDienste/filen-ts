@@ -14,6 +14,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { LISTING_SPRING } from "@/features/drive/lib/springLoad"
+import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 // The props a listing row (driveRow.tsx) and a grid tile (driveTile.tsx) share.
 export interface DriveItemCellProps {
@@ -34,9 +35,11 @@ export interface DriveItemCellProps {
 	// The listing's already-reconciled selection — right-clicking a cell inside a 2+ selection opens the
 	// BULK menu over exactly these items (freshest metadata, same as the bulk bar reads).
 	selectedItems: DriveItem[]
-	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
+	// `pointerType` is the one behind the click (useTouchLongPress's pointerType): a touch tap opens or
+	// toggles instead of selecting.
+	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => void
 	// Moves the roving cursor + range anchor to a cell (useDriveListboxNav's setCursor) — the retarget
-	// half of a right-click, which never fires onClick and so never reaches onPointerSelect.
+	// half of a right-click or a touch long-press, neither of which reaches onPointerSelect.
 	onCursorMove: (index: number) => void
 	onOpen: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: DriveItem) => void
@@ -113,13 +116,20 @@ export function useDriveItemCell({
 	// Merges with ContextMenuTrigger's own handler (Base UI's mergeProps chains same-name handlers). The
 	// cursor and range anchor move with it — a right-click is a pointer selection, and leaving them
 	// behind would make the next Arrow jump from an unselected cell and Shift+Click range from an anchor
-	// the user never set.
-	const onContextMenu = () => {
-		if (!selected) {
-			useDriveStore.getState().setSelectedItems([item])
+	// the user never set. A touch long-press toggles the cell instead, exactly like a Ctrl/Cmd+click, and
+	// opens no menu (the ⋯ trigger is always shown on a coarse pointer).
+	const press = useTouchLongPress<HTMLDivElement>({
+		onLongPress: () => {
+			useDriveStore.getState().toggleSelectedItem(item)
 			onCursorMove(index)
+		},
+		onContextMenu: () => {
+			if (!selected) {
+				useDriveStore.getState().setSelectedItems([item])
+				onCursorMove(index)
+			}
 		}
-	}
+	})
 
-	return { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, onContextMenu }
+	return { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, press }
 }

@@ -129,9 +129,24 @@ export interface ClickSelectionContract<T> {
 }
 
 export function describeClickSelectionContract<T>({ items, render, selected, seed }: ClickSelectionContract<T>): void {
-	function click(result: { readonly current: ListPointerSelection }, index: number, event: ReactMouseEvent): void {
+	// Whether the click was taken as a selection gesture (so a row's Link must not navigate).
+	function click(result: { readonly current: ListPointerSelection }, index: number, event: ReactMouseEvent, pointerType = "mouse"): boolean {
+		let gesture = false
+
 		act(() => {
-			result.current.handlePointerSelect(index, event)
+			gesture = result.current.handlePointerSelect(index, event, pointerType)
+		})
+
+		return gesture
+	}
+
+	function tap(result: { readonly current: ListPointerSelection }, index: number): boolean {
+		return click(result, index, clickEvent(), "touch")
+	}
+
+	function longPress(result: { readonly current: ListPointerSelection }, index: number): void {
+		act(() => {
+			result.current.toggleAt(index)
 		})
 	}
 
@@ -206,6 +221,61 @@ export function describeClickSelectionContract<T>({ items, render, selected, see
 			click(result, 4, clickEvent({ shiftKey: true }))
 
 			expect(selected()).toEqual(items)
+		})
+	})
+
+	describe("click selection: navigation", () => {
+		it("lets a plain click navigate and blocks a modified one", () => {
+			const result = render()
+
+			expect(click(result, 0, clickEvent())).toBe(false)
+			expect(click(result, 1, clickEvent({ ctrlKey: true }))).toBe(true)
+			expect(click(result, 2, clickEvent({ shiftKey: true }))).toBe(true)
+		})
+
+		it("blocks a modified click on an index with no item", () => {
+			expect(click(render(), 99, clickEvent({ metaKey: true }))).toBe(true)
+		})
+	})
+
+	describe("click selection: touch", () => {
+		it("a tap with nothing selected navigates and leaves the selection empty", () => {
+			const result = render()
+
+			expect(tap(result, 1)).toBe(false)
+			expect(selected()).toEqual([])
+		})
+
+		it("a long-press selects, then each tap toggles without navigating until the selection is empty again", () => {
+			const result = render()
+
+			longPress(result, 1)
+			expect(selected()).toEqual([items[1]])
+
+			expect(tap(result, 3)).toBe(true)
+			expect(selected()).toEqual([items[1], items[3]])
+
+			expect(tap(result, 1)).toBe(true)
+			expect(tap(result, 3)).toBe(true)
+			expect(selected()).toEqual([])
+
+			expect(tap(result, 2)).toBe(false)
+			expect(selected()).toEqual([])
+		})
+
+		it("a long-press in selection mode toggles too, and anchors a later Shift range", () => {
+			const result = render()
+
+			longPress(result, 0)
+			longPress(result, 2)
+			expect(selected()).toEqual([items[0], items[2]])
+
+			longPress(result, 0)
+			expect(selected()).toEqual([items[2]])
+
+			longPress(result, 2)
+			click(result, 4, clickEvent({ shiftKey: true }))
+			expect(selected()).toEqual([items[2], items[3], items[4]])
 		})
 	})
 

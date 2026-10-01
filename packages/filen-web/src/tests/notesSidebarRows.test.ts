@@ -16,11 +16,17 @@ vi.mock("@tanstack/react-router", () => ({
 	useRouterState: () => ""
 }))
 
-import { NoteRow } from "@/features/notes/components/noteRow"
+import { NoteRow, type NoteRowProps } from "@/features/notes/components/noteRow"
+import { touchLongPress, touchTap } from "@/tests/support/touch"
 import { TagGroupRow } from "@/features/notes/components/notesSidebar"
 import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 
-function renderNoteRow(selected: boolean, multiSelected: boolean, note: Note = mockNote()) {
+function renderNoteRow(
+	selected: boolean,
+	multiSelected: boolean,
+	note: Note = mockNote(),
+	handlers: Partial<Pick<NoteRowProps, "onPointerSelect" | "onLongPress">> = {}
+) {
 	return render(
 		createElement(NoteRow, {
 			note,
@@ -30,7 +36,9 @@ function renderNoteRow(selected: boolean, multiSelected: boolean, note: Note = m
 			currentUserId: 1n,
 			onAction: () => undefined,
 			onDuplicated: () => undefined,
-			onPointerSelect: () => undefined
+			onPointerSelect: () => false,
+			onLongPress: () => undefined,
+			...handlers
 		})
 	)
 }
@@ -122,5 +130,41 @@ describe("note row — relative edited time", () => {
 		})
 
 		expect(screen.getByText("5 minutes ago")).toBeTruthy()
+	})
+})
+
+describe("note row — touch", () => {
+	function link(container: HTMLElement): HTMLAnchorElement {
+		const anchor = container.querySelector("a")
+
+		if (!anchor) {
+			throw new Error("no note link rendered")
+		}
+
+		return anchor
+	}
+
+	it("reports a tap as touch and navigates unless the tap was taken as a selection gesture", () => {
+		let gesture = false
+		const onPointerSelect = vi.fn<NoteRowProps["onPointerSelect"]>(() => gesture)
+		const { container } = renderNoteRow(false, false, mockNote(), { onPointerSelect })
+
+		expect(touchTap(link(container))).toBe(true)
+		gesture = true
+		expect(touchTap(link(container))).toBe(false)
+		expect(onPointerSelect.mock.calls.map(call => call[1])).toEqual(["touch", "touch"])
+	})
+
+	it("toggles on a long-press, opening no menu and swallowing the click that ends it", () => {
+		vi.useFakeTimers()
+
+		const onPointerSelect = vi.fn<NoteRowProps["onPointerSelect"]>(() => false)
+		const onLongPress = vi.fn()
+		const { container } = renderNoteRow(false, false, mockNote(), { onPointerSelect, onLongPress })
+
+		expect(touchLongPress(link(container))).toBe(false)
+		expect(onLongPress).toHaveBeenCalledOnce()
+		expect(onPointerSelect).not.toHaveBeenCalled()
+		expect(screen.queryByRole("menu")).toBeNull()
 	})
 })

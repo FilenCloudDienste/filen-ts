@@ -26,7 +26,7 @@ import {
 	type PhotosTimeline
 } from "@/features/photos/lib/timeline"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
-import { photosPointerSelect } from "@/features/photos/lib/pointerSelect"
+import { photosPointerSelect, photosToggleSelect } from "@/features/photos/lib/pointerSelect"
 import { usePhotosFilter } from "@/features/photos/hooks/usePhotosFilter"
 import { usePhotosGridNav } from "@/features/photos/hooks/usePhotosGridNav"
 import { useMarqueeSelection, type MarqueeRectStore } from "@/features/drive/hooks/useMarqueeSelection"
@@ -136,16 +136,33 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 		onOpen: handleOpenAt
 	})
 
+	// A touch long-press, or a touch tap in selection mode: a Ctrl/Cmd+click's toggle.
+	function handleTileToggle(index: number): void {
+		const item = items[index]
+
+		if (item) {
+			photosToggleSelect(item, setAnchorUuid)
+			setActive(index)
+		}
+	}
+
 	// Plain click opens the viewer (browsing is the grid's whole point); once a selection is active a
 	// plain click instead falls through to photosPointerSelect's own plain-click branch (select just this
 	// item, or deselect it when it is the whole selection), exactly matching drive's plain-click
 	// convention. A modifier click always builds/extends the selection regardless of selection state —
-	// see photoGrid.logic.ts's own doc comment on resolveTileClickIntent for the full decision table.
-	function handleTileClick(index: number, event: MouseEvent<HTMLDivElement>): void {
-		const intent = resolveTileClickIntent(event, hasSelection)
+	// see photoGrid.logic.ts's own doc comment on resolveTileClickIntent for the full decision table (a
+	// touch tap in selection mode toggles).
+	function handleTileClick(index: number, event: MouseEvent<HTMLDivElement>, pointerType: string): void {
+		const intent = resolveTileClickIntent(event, hasSelection, pointerType)
 
 		if (intent.kind === "open") {
 			handleOpenAt(index)
+
+			return
+		}
+
+		if (intent.kind === "toggle") {
+			handleTileToggle(index)
 
 			return
 		}
@@ -357,6 +374,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 							safeActiveIndex={safeActiveIndex}
 							registerRef={registerRef}
 							onTileClick={handleTileClick}
+							onTileToggle={handleTileToggle}
 							onItemAction={handleItemAction}
 							rectStore={marquee.rectStore}
 							virtualizerRef={virtualizerRef}
@@ -396,6 +414,7 @@ interface PhotoGridRowsProps {
 	safeActiveIndex: number
 	registerRef: PhotoTileProps["registerRef"]
 	onTileClick: PhotoTileProps["onTileClick"]
+	onTileToggle: PhotoTileProps["onTileToggle"]
 	onItemAction: PhotoTileProps["onItemAction"]
 	rectStore: MarqueeRectStore
 	virtualizerRef: RefObject<Virtualizer<HTMLDivElement, Element> | null>
@@ -415,6 +434,7 @@ function PhotoGridRows({
 	safeActiveIndex,
 	registerRef,
 	onTileClick,
+	onTileToggle,
 	onItemAction,
 	rectStore,
 	virtualizerRef
@@ -505,6 +525,7 @@ function PhotoGridRows({
 									active={itemIndex === safeActiveIndex}
 									registerRef={registerRef}
 									onTileClick={onTileClick}
+									onTileToggle={onTileToggle}
 									onItemAction={onItemAction}
 								/>
 							)

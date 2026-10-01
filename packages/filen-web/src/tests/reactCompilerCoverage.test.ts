@@ -146,7 +146,12 @@ describe("React Compiler coverage", () => {
 		["src/features/preview/components/videoPlayer.tsx", "FullscreenButton"],
 		["src/features/audio/components/audioPlayerBar.tsx", "AudioPlayerBar"],
 		["src/features/audio/components/audioPlayerBar.tsx", "PlayerBarTimeline"],
-		["src/features/audio/components/audioPlayerBar.tsx", "TrackTitle"]
+		["src/features/audio/components/audioPlayerBar.tsx", "TrackTitle"],
+		// Mounted by every row and tile of the click-to-select lists.
+		["src/lib/useTouchLongPress.ts", "useTouchLongPress"],
+		["src/features/photos/components/photoTile.tsx", "PhotoTile"],
+		["src/features/notes/components/noteRow.tsx", "NoteRow"],
+		["src/features/chats/components/chatRow.tsx", "ChatRow"]
 	])("compiles %s's %s", (file, fnName) => {
 		const events = compile(file)
 

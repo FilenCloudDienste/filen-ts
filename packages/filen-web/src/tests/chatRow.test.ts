@@ -20,7 +20,8 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@/features/chats/hooks/useChatUnreadCount", () => ({ useChatUnreadCount: () => unreadCount.value }))
 vi.mock("@/features/chats/hooks/useChatTyping", () => ({ useChatTypingLabel: () => null }))
 
-import { ChatRow } from "@/features/chats/components/chatRow"
+import { ChatRow, type ChatRowProps } from "@/features/chats/components/chatRow"
+import { touchLongPress, touchTap } from "@/tests/support/touch"
 import { testUuid } from "@/tests/support/uuid"
 
 function mockParticipant(userId: bigint, email: string): ChatParticipant {
@@ -37,7 +38,9 @@ const chat: Chat = {
 	lastFocus: 0n
 }
 
-function renderRow(overrides: { selected?: boolean; beforeSelected?: boolean } = {}) {
+function renderRow(
+	overrides: { selected?: boolean; beforeSelected?: boolean } & Partial<Pick<ChatRowProps, "onPointerSelect" | "onLongPress">> = {}
+) {
 	return render(
 		createElement(ChatRow, {
 			chat,
@@ -49,7 +52,8 @@ function renderRow(overrides: { selected?: boolean; beforeSelected?: boolean } =
 			currentUserId: 1n,
 			blocked: EMPTY_BLOCKED_USERS,
 			onAction: () => undefined,
-			onPointerSelect: () => undefined
+			onPointerSelect: overrides.onPointerSelect ?? (() => false),
+			onLongPress: overrides.onLongPress ?? (() => undefined)
 		})
 	)
 }
@@ -57,6 +61,7 @@ function renderRow(overrides: { selected?: boolean; beforeSelected?: boolean } =
 afterEach(() => {
 	cleanup()
 	unreadCount.value = 0
+	vi.useRealTimers()
 })
 
 describe("ChatRow", () => {
@@ -92,5 +97,24 @@ describe("ChatRow", () => {
 
 		expect(option.className).not.toContain("after:hidden")
 		expect(option.className).not.toContain("bg-chat-own")
+	})
+})
+
+describe("ChatRow — touch", () => {
+	it("hands a tap's pointer type to the selection, and a long-press to its toggle without navigating", () => {
+		vi.useFakeTimers()
+
+		const onPointerSelect = vi.fn<ChatRowProps["onPointerSelect"]>(() => false)
+		const onLongPress = vi.fn()
+
+		renderRow({ onPointerSelect, onLongPress })
+
+		const link = screen.getByRole("link")
+
+		expect(touchTap(link)).toBe(true)
+		expect(touchLongPress(link)).toBe(false)
+		expect(onPointerSelect.mock.calls.map(call => call[1])).toEqual(["touch"])
+		expect(onLongPress).toHaveBeenCalledOnce()
+		expect(screen.queryByRole("menu")).toBeNull()
 	})
 })

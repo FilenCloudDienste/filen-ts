@@ -11,6 +11,8 @@ export interface UseNotesListSelectionParams {
 	// the notes and tags views clears any active selection (mobile parity, notesHeaderMenuBuilders.ts's
 	// own view-mode-switch clear).
 	resetKey: string
+	// The live (ghost-purged) selection's size, which puts a touch tap into selection mode.
+	selectionCount: number
 }
 
 const NOTES_SELECTION_ACTIONS: ListPointerSelectionActions<Note> = {
@@ -26,6 +28,6 @@ const NOTES_SELECTION_ACTIONS: ListPointerSelectionActions<Note> = {
 }
 
 // Plain click on a row still lets its Link navigate (see noteRow.tsx).
-export function useNotesListSelection({ notes, resetKey }: UseNotesListSelectionParams): ListPointerSelection {
-	return useListPointerSelection({ items: notes, actions: NOTES_SELECTION_ACTIONS, resetKey })
+export function useNotesListSelection({ notes, resetKey, selectionCount }: UseNotesListSelectionParams): ListPointerSelection {
+	return useListPointerSelection({ items: notes, actions: NOTES_SELECTION_ACTIONS, resetKey, selectionCount })
 }

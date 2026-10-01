@@ -4,7 +4,7 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
-import { photosPointerSelect } from "@/features/photos/lib/pointerSelect"
+import { photosPointerSelect, photosToggleSelect } from "@/features/photos/lib/pointerSelect"
 import { testUuid } from "@/tests/support/uuid"
 
 // photosPointerSelect is a plain function (anchor state is threaded in by the caller — see photoGrid.tsx),
@@ -36,22 +36,16 @@ function photoItem(uuid: UuidStr): PhotoItem {
 	return item
 }
 
-// `detail` is the click count (2 = the second click of a double-click); `pointerType` rides on the
-// native event, as it does where the browser dispatches click as a PointerEvent.
+// `detail` is the click count (2 = the second click of a double-click).
 function clickEvent(
-	modifiers: Partial<Pick<ReactMouseEvent<HTMLDivElement>, "shiftKey" | "metaKey" | "ctrlKey" | "detail">> & {
-		pointerType?: string
-	} = {}
+	modifiers: Partial<Pick<ReactMouseEvent<HTMLDivElement>, "shiftKey" | "metaKey" | "ctrlKey" | "detail">> = {}
 ): ReactMouseEvent<HTMLDivElement> {
-	const { pointerType, ...rest } = modifiers
-
 	return {
 		shiftKey: false,
 		metaKey: false,
 		ctrlKey: false,
 		detail: 1,
-		nativeEvent: pointerType === undefined ? {} : { pointerType },
-		...rest
+		...modifiers
 	} as ReactMouseEvent<HTMLDivElement>
 }
 
@@ -111,11 +105,17 @@ describe("photosPointerSelect — plain click", () => {
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
 	})
 
-	it("keeps a touch tap on the sole selected item selected", () => {
-		usePhotosStore.getState().setSelectedItems([b])
-		photosPointerSelect(items, anchor, setAnchor, 1, clickEvent({ pointerType: "touch" }))
+})
 
-		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
+describe("photosToggleSelect — a touch long-press or selection-mode tap", () => {
+	it("toggles one photo in and out, anchoring on it", () => {
+		photosToggleSelect(b, setAnchor)
+		photosToggleSelect(c, setAnchor)
+		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid, c.data.uuid])
+		expect(anchor).toBe(c.data.uuid)
+
+		photosToggleSelect(b, setAnchor)
+		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([c.data.uuid])
 	})
 })
 

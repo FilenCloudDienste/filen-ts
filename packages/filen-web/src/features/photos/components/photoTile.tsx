@@ -12,6 +12,7 @@ import { driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 export interface PhotoTileProps {
 	rootUuid: string
@@ -29,7 +30,9 @@ export interface PhotoTileProps {
 	// decides open-vs-select (photoGrid.logic.ts's resolveTileClickIntent) before this ever runs, so by
 	// the time it's called the caller has already committed to one outcome; the tile itself stays a
 	// dumb dispatcher with no click-intent logic of its own.
-	onTileClick: (index: number, event: MouseEvent<HTMLDivElement>) => void
+	onTileClick: (index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => void
+	// A touch long-press: toggles the tile like a Ctrl/Cmd+click, where a mouse would right-click.
+	onTileToggle: (index: number) => void
 	onItemAction: (kind: ItemActionDialogKind, item: PhotoItem) => void
 }
 
@@ -39,9 +42,25 @@ export interface PhotoTileProps {
 // bottom-left, offline top-right (no web equivalent), video bottom-right) instead of driveTile's own
 // top-left placement, and no offline badge at all (web has no make-offline concept — see the study's
 // own honest enumeration).
-export function PhotoTile({ rootUuid, item, index, total, selected, active, registerRef, onTileClick, onItemAction }: PhotoTileProps) {
+export function PhotoTile({
+	rootUuid,
+	item,
+	index,
+	total,
+	selected,
+	active,
+	registerRef,
+	onTileClick,
+	onTileToggle,
+	onItemAction
+}: PhotoTileProps) {
 	const { t } = useTranslation(["drive", "photos"])
 	const name = driveItemName(item)
+	const press = useTouchLongPress<HTMLDivElement>({
+		onLongPress: () => {
+			onTileToggle(index)
+		}
+	})
 
 	return (
 		<ContextMenu>
@@ -60,8 +79,9 @@ export function PhotoTile({ rootUuid, item, index, total, selected, active, regi
 						// Fills its grid cell: tiles sit flush, so the focused one is raised to keep its ring above
 						// its neighbors.
 						className="group/tile relative focus-ring-row outline-none select-none focus-visible:z-10"
+						{...press.handlers}
 						onClick={event => {
-							onTileClick(index, event)
+							onTileClick(index, event, press.pointerType(event))
 						}}
 					>
 						<div className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-muted/40">

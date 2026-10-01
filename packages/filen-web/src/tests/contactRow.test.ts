@@ -5,12 +5,14 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
 import type { Contact } from "@filen/sdk-rs"
 import "@/lib/i18n"
-import { ContactRow, ContactActions } from "@/features/contacts/components/contactRow"
+import { ContactRow, ContactActions, type ContactRowProps } from "@/features/contacts/components/contactRow"
+import { touchLongPress, touchTap } from "@/tests/support/touch"
 
 const CHECK_GLYPH = "check-glyph"
 
 afterEach(() => {
 	cleanup()
+	vi.useRealTimers()
 })
 
 function mockContact(overrides: Partial<Contact> = {}): Contact {
@@ -158,5 +160,24 @@ describe("ContactRow — selection contracts", () => {
 
 		fireEvent.click(screen.getByRole("option"))
 		expect(onSelect).toHaveBeenCalledOnce()
+	})
+})
+
+describe("ContactRow — touch (section listbox rows)", () => {
+	it("reports a tap as touch and a long-press to its toggle, swallowing the click after it", () => {
+		vi.useFakeTimers()
+
+		const onSelect = vi.fn<NonNullable<ContactRowProps["onSelect"]>>()
+		const onLongPress = vi.fn()
+
+		render(createElement(ContactRow, { contact: mockContact(), onSelect, onLongPress, active: true }))
+
+		const row = screen.getByRole("option")
+
+		touchTap(row)
+		touchLongPress(row)
+
+		expect(onSelect.mock.calls.map(call => call[1])).toEqual(["touch"])
+		expect(onLongPress).toHaveBeenCalledOnce()
 	})
 })

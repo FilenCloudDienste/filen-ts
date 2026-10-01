@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
-import { clampListboxIndex, isToggleModifier, listboxKeyTarget, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import { clampListboxIndex, isToggleModifier, listboxKeyTarget, resolveCursorIndex, touchTapIntent } from "@/features/drive/lib/listbox"
 import { isActivationKey } from "@/lib/rowKeys"
 import {
 	EMPTY_CONTACT_SELECTION_STATE,
@@ -24,7 +24,9 @@ export interface ContactsListSelection {
 	// silently retarget the cursor (drive's resolveCursorIndex, reused).
 	activeIndexFor: (section: ContactSectionKey, uuids: readonly string[]) => number
 	registerRowRef: (section: ContactSectionKey, uuid: string, element: HTMLDivElement | null) => void
-	handlePointerSelect: (section: ContactSectionKey, uuids: readonly string[], index: number, event: MouseEvent) => void
+	handlePointerSelect: (section: ContactSectionKey, uuids: readonly string[], index: number, event: MouseEvent, pointerType: string) => void
+	// A Ctrl/Cmd+click's toggle, for a touch long-press.
+	toggleAt: (section: ContactSectionKey, uuids: readonly string[], index: number) => void
 	// Listbox-level key handling — bound on the section container, not per row (drive binds its own
 	// handleKeyDown the same way), so a row never needs its own onKeyDown.
 	handleKeyDown: (section: ContactSectionKey, uuids: readonly string[], event: KeyboardEvent<HTMLDivElement>) => void
@@ -82,14 +84,29 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 		setCursors(prev => ({ ...prev, [section]: uuid }))
 	}
 
-	function handlePointerSelect(section: ContactSectionKey, uuids: readonly string[], index: number, event: MouseEvent): void {
+	// A contact opens nothing, so a plain touch tap toggles whether or not a selection exists — the touch
+	// model's selection-mode tap (touchTapIntent), which a lone mouse click replaces the selection with.
+	function handlePointerSelect(section: ContactSectionKey, uuids: readonly string[], index: number, event: MouseEvent, pointerType: string): void {
 		const uuid = uuids[index]
 
 		if (uuid === undefined) {
 			return
 		}
 
-		setState(prev => nextContactSelection(prev, { section, uuids, index, shift: event.shiftKey, toggle: isToggleModifier(event) }))
+		const toggle = isToggleModifier(event) || touchTapIntent(pointerType, event, 0) !== null
+
+		setState(prev => nextContactSelection(prev, { section, uuids, index, shift: event.shiftKey, toggle }))
+		moveCursor(section, uuid)
+	}
+
+	function toggleAt(section: ContactSectionKey, uuids: readonly string[], index: number): void {
+		const uuid = uuids[index]
+
+		if (uuid === undefined) {
+			return
+		}
+
+		setState(prev => nextContactSelection(prev, { section, uuids, index, shift: false, toggle: true }))
 		moveCursor(section, uuid)
 	}
 
@@ -161,6 +178,7 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 		activeIndexFor,
 		registerRowRef,
 		handlePointerSelect,
+		toggleAt,
 		handleKeyDown,
 		clearSelection,
 		pruneSelection

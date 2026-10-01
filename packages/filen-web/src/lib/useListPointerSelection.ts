@@ -1,5 +1,12 @@
 import { useEffect, useState, type MouseEvent } from "react"
-import { clampListboxIndex, isToggleModifier, listboxRangeItems, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import {
+	clampListboxIndex,
+	isSelectionGesture,
+	isToggleModifier,
+	listboxRangeItems,
+	resolveCursorIndex,
+	touchTapIntent
+} from "@/features/drive/lib/listbox"
 
 export interface ListPointerSelectionActions<T> {
 	set: (items: T[]) => void
@@ -16,12 +23,18 @@ export interface UseListPointerSelectionParams<T> {
 	resetKey?: string
 	// Also clear on unmount, so a surface that leaves never strands a selection in its background store.
 	clearOnUnmount?: boolean
+	// The live selection's size: a touch tap toggles while it is non-zero (touchTapIntent).
+	selectionCount: number
 }
 
 export interface ListPointerSelection {
 	// Drive's modifier-click model: plain click replaces the selection with just this item, Ctrl/Cmd+click
-	// toggles it into a multi-selection, Shift+click extends a range from the last non-shift anchor.
-	handlePointerSelect: (index: number, event: MouseEvent) => void
+	// toggles it into a multi-selection, Shift+click extends a range from the last non-shift anchor. A
+	// touch tap leaves the selection alone, or toggles the item in selection mode. True when the click
+	// was a selection gesture, which must not also navigate (selectionAwareLinkClick).
+	handlePointerSelect: (index: number, event: MouseEvent, pointerType: string) => boolean
+	// A Ctrl/Cmd+click's toggle, for a touch long-press.
+	toggleAt: (index: number) => void
 }
 
 // The pointer half of useDriveListboxNav for Link-based row lists: no roving keyboard cursor (the rows
@@ -30,7 +43,8 @@ export function useListPointerSelection<T extends { uuid: string }>({
 	items,
 	actions,
 	resetKey,
-	clearOnUnmount
+	clearOnUnmount,
+	selectionCount
 }: UseListPointerSelectionParams<T>): ListPointerSelection {
 	// Tracked by uuid, not position: a background reorder (a live socket patch, a pin moving an item into
 	// another sort bucket) would otherwise silently retarget the next Shift+click's range. The fallback is
@@ -64,11 +78,26 @@ export function useListPointerSelection<T extends { uuid: string }>({
 		}
 	}, [resetKey, actions, clearOnUnmount])
 
-	function handlePointerSelect(index: number, event: MouseEvent): void {
+	function toggleAt(index: number): void {
+		const item = items[index]
+
+		if (item) {
+			actions.toggle(item)
+			setAnchorUuid(item.uuid)
+		}
+	}
+
+	function handlePointerSelect(index: number, event: MouseEvent, pointerType: string): boolean {
 		const item = items[index]
 
 		if (!item) {
-			return
+			return isSelectionGesture(event)
+		}
+
+		const touch = touchTapIntent(pointerType, event, selectionCount)
+
+		if (touch === "open") {
+			return false
 		}
 
 		if (event.shiftKey) {
@@ -76,19 +105,20 @@ export function useListPointerSelection<T extends { uuid: string }>({
 			// plain/Ctrl+click, like useDriveListboxNav's separate range anchor.
 			actions.set(listboxRangeItems(items, safeAnchorIndex, index))
 
-			return
+			return true
 		}
 
-		if (isToggleModifier(event)) {
-			actions.toggle(item)
-			setAnchorUuid(item.uuid)
+		if (touch === "toggle" || isToggleModifier(event)) {
+			toggleAt(index)
 
-			return
+			return true
 		}
 
 		actions.set([item])
 		setAnchorUuid(item.uuid)
+
+		return false
 	}
 
-	return { handlePointerSelect }
+	return { handlePointerSelect, toggleAt }
 }

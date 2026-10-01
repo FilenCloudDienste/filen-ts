@@ -21,7 +21,10 @@ beforeEach(() => {
 
 describeClickSelectionContract({
 	items: notes,
-	render: () => renderHook(() => useNotesListSelection({ notes, resetKey: "notes" })).result,
+	render: () =>
+		renderHook(() =>
+			useNotesListSelection({ notes, resetKey: "notes", selectionCount: useNotesSelectionStore(state => state.selectedNotes.length) })
+		).result,
 	selected: () => useNotesSelectionStore.getState().selectedNotes,
 	seed: selectedNotes => {
 		useNotesSelectionStore.setState({ selectedNotes })
@@ -34,13 +37,13 @@ describe("useNotesListSelection — Shift+click range", () => {
 		// gives a note its own row (and so its own index) under every expanded tag it belongs to, so the
 		// row array can carry the same Note object at two different positions.
 		const notesWithDuplicateRow = [noteA, noteB, noteA]
-		const { result } = renderHook(() => useNotesListSelection({ notes: notesWithDuplicateRow, resetKey: "notes" }))
+		const { result } = renderHook(() => useNotesListSelection({ notes: notesWithDuplicateRow, resetKey: "notes", selectionCount: 0 }))
 
 		act(() => {
-			result.current.handlePointerSelect(0, clickEvent())
+			result.current.handlePointerSelect(0, clickEvent(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(2, clickEvent({ shiftKey: true }))
+			result.current.handlePointerSelect(2, clickEvent({ shiftKey: true }), "mouse")
 		})
 
 		expect(useNotesSelectionStore.getState().selectedNotes).toEqual([noteA, noteB])
@@ -49,12 +52,12 @@ describe("useNotesListSelection — Shift+click range", () => {
 
 describe("useNotesListSelection — resetKey change clears the selection", () => {
 	it("clears the selection when resetKey changes across a re-render", () => {
-		const { result, rerender } = renderHook(({ resetKey }) => useNotesListSelection({ notes, resetKey }), {
+		const { result, rerender } = renderHook(({ resetKey }) => useNotesListSelection({ notes, resetKey, selectionCount: 0 }), {
 			initialProps: { resetKey: "notes" }
 		})
 
 		act(() => {
-			result.current.handlePointerSelect(0, clickEvent({ ctrlKey: true }))
+			result.current.handlePointerSelect(0, clickEvent({ ctrlKey: true }), "mouse")
 		})
 		expect(useNotesSelectionStore.getState().selectedNotes).toEqual([noteA])
 
@@ -66,18 +69,18 @@ describe("useNotesListSelection — resetKey change clears the selection", () =>
 	})
 
 	it("a shift-click after a resetKey change ranges from the fresh anchor, not a stale one", () => {
-		const { result, rerender } = renderHook(({ resetKey }) => useNotesListSelection({ notes, resetKey }), {
+		const { result, rerender } = renderHook(({ resetKey }) => useNotesListSelection({ notes, resetKey, selectionCount: 0 }), {
 			initialProps: { resetKey: "notes" }
 		})
 
 		act(() => {
-			result.current.handlePointerSelect(3, clickEvent())
+			result.current.handlePointerSelect(3, clickEvent(), "mouse")
 		})
 		act(() => {
 			rerender({ resetKey: "tags" })
 		})
 		act(() => {
-			result.current.handlePointerSelect(1, clickEvent({ shiftKey: true }))
+			result.current.handlePointerSelect(1, clickEvent({ shiftKey: true }), "mouse")
 		})
 
 		// The anchor reset to null on the resetKey change, which resolveCursorIndex falls back to 0 for

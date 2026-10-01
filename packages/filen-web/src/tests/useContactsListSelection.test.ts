@@ -57,20 +57,52 @@ describe("useContactsListSelection — pointer model", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 2, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 2, clickEvent(), "mouse")
 		})
 
 		expect([...result.current.selection.contacts]).toEqual(["c"])
+	})
+
+	it("a touch tap toggles, building a multi-selection with no modifier", () => {
+		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
+
+		act(() => {
+			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent(), "touch")
+		})
+		act(() => {
+			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent(), "touch")
+		})
+		expect([...result.current.selection.contacts]).toEqual(["b", "d"])
+
+		act(() => {
+			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent(), "touch")
+		})
+		expect([...result.current.selection.contacts]).toEqual(["d"])
+	})
+
+	it("a long-press toggles the row and puts the cursor on it", () => {
+		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
+
+		act(() => {
+			result.current.toggleAt("contacts", UUIDS, 2)
+		})
+		expect([...result.current.selection.contacts]).toEqual(["c"])
+		expect(result.current.activeIndexFor("contacts", UUIDS)).toBe(2)
+
+		act(() => {
+			result.current.toggleAt("contacts", UUIDS, 2)
+		})
+		expect([...result.current.selection.contacts]).toEqual([])
 	})
 
 	it("ctrl/cmd click builds a multi-selection", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent({ metaKey: true }))
+			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent({ metaKey: true }), "mouse")
 		})
 
 		expect([...result.current.selection.contacts]).toEqual(["a", "d"])
@@ -80,10 +112,10 @@ describe("useContactsListSelection — pointer model", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent({ shiftKey: true }))
+			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent({ shiftKey: true }), "mouse")
 		})
 
 		expect([...result.current.selection.contacts]).toEqual(["b", "c", "d"])
@@ -93,10 +125,10 @@ describe("useContactsListSelection — pointer model", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect("requests", ["r1"], 0, clickEvent({ ctrlKey: true }))
+			result.current.handlePointerSelect("requests", ["r1"], 0, clickEvent({ ctrlKey: true }), "mouse")
 		})
 		act(() => {
 			result.current.clearSelection()
@@ -109,10 +141,10 @@ describe("useContactsListSelection — pointer model", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent(), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent({ metaKey: true }))
+			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent({ metaKey: true }), "mouse")
 		})
 		act(() => {
 			result.current.pruneSelection("contacts", ["a"])
@@ -127,7 +159,7 @@ describe("useContactsListSelection — pointer model", () => {
 		})
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 3, clickEvent(), "mouse")
 		})
 
 		expect(result.current.activeIndexFor("contacts", UUIDS)).toBe(3)
@@ -139,7 +171,7 @@ describe("useContactsListSelection — pointer model", () => {
 
 		// A shift click after the reset has no anchor left to range from — it collapses to a plain select.
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 2, clickEvent({ shiftKey: true }))
+			result.current.handlePointerSelect("contacts", UUIDS, 2, clickEvent({ shiftKey: true }), "mouse")
 		})
 
 		expect([...result.current.selection.contacts]).toEqual(["c"])
@@ -158,7 +190,7 @@ describe("useContactsListSelection — roving cursor", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent(), "mouse")
 		})
 
 		expect(result.current.activeIndexFor("contacts", UUIDS)).toBe(1)
@@ -169,7 +201,7 @@ describe("useContactsListSelection — roving cursor", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 4, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 4, clickEvent(), "mouse")
 		})
 
 		expect(result.current.activeIndexFor("contacts", ["a", "b"])).toBe(0)
@@ -179,7 +211,7 @@ describe("useContactsListSelection — roving cursor", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 0, clickEvent(), "mouse")
 		})
 
 		const { event, preventDefault } = keyEvent("ArrowDown")
@@ -222,7 +254,7 @@ describe("useContactsListSelection — roving cursor", () => {
 		const { result } = renderHook(() => useContactsListSelection({ resetKey: "all" }))
 
 		act(() => {
-			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent())
+			result.current.handlePointerSelect("contacts", UUIDS, 1, clickEvent(), "mouse")
 		})
 
 		const { event } = keyEvent("ArrowDown", { shiftKey: true })

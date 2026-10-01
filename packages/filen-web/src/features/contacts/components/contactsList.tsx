@@ -377,8 +377,11 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 				rowRef: (element: HTMLDivElement | null) => {
 					selection.registerRowRef(key, uuid, element)
 				},
-				onSelect: (event: MouseEvent<HTMLDivElement>) => {
-					selection.handlePointerSelect(key, uuids, index, event)
+				onSelect: (event: MouseEvent<HTMLDivElement>, pointerType: string) => {
+					selection.handlePointerSelect(key, uuids, index, event, pointerType)
+				},
+				onLongPress: () => {
+					selection.toggleAt(key, uuids, index)
 				}
 			}
 		}

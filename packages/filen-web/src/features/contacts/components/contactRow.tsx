@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn, contactDisplayName, type ContactLike } from "@filen/shared"
 import { onActivateKey } from "@/lib/rowKeys"
+import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 export interface ContactRowProps {
 	// Any contact-like record: a contact, an incoming/outgoing request or a blocked contact.
@@ -22,7 +23,9 @@ export interface ContactRowProps {
 	// scope holding the section's uuid array), so the row takes a click handler, a roving cursor flag and
 	// a ref instead of an onKeyDown. `active` is what makes this row the section's single Tab stop
 	// (driveRow.tsx's identical rule).
-	onSelect?: ((event: MouseEvent<HTMLDivElement>) => void) | undefined
+	// `pointerType` is the one behind the click: a touch tap toggles. onLongPress is a held touch's toggle.
+	onSelect?: ((event: MouseEvent<HTMLDivElement>, pointerType: string) => void) | undefined
+	onLongPress?: (() => void) | undefined
 	active?: boolean | undefined
 	rowRef?: ((element: HTMLDivElement | null) => void) | undefined
 	// Trailing slot: the per-row action buttons/menu (accept/deny, cancel, remove/block, unblock), or a
@@ -30,10 +33,15 @@ export interface ContactRowProps {
 	children?: ReactNode
 }
 
-export function ContactRow({ contact, selected, onToggleSelect, onSelect, active, rowRef, children }: ContactRowProps) {
+export function ContactRow({ contact, selected, onToggleSelect, onSelect, onLongPress, active, rowRef, children }: ContactRowProps) {
 	const displayName = contactDisplayName(contact)
 	const roving = onSelect !== undefined
 	const selectable = roving || onToggleSelect !== undefined
+	const press = useTouchLongPress<HTMLDivElement>({
+		onLongPress: () => {
+			onLongPress?.()
+		}
+	})
 
 	// One Tab stop per section listbox under contract B, the row's own stop under contract A.
 	function resolveTabIndex(): number | undefined {
@@ -54,7 +62,14 @@ export function ContactRow({ contact, selected, onToggleSelect, onSelect, active
 			role={selectable ? "option" : undefined}
 			aria-selected={selectable ? selected === true : undefined}
 			tabIndex={resolveTabIndex()}
-			onClick={onSelect ?? onToggleSelect}
+			{...(roving ? press.handlers : {})}
+			onClick={event => {
+				if (onSelect !== undefined) {
+					onSelect(event, press.pointerType(event))
+				} else {
+					onToggleSelect?.()
+				}
+			}}
 			onKeyDown={onToggleSelect === undefined ? undefined : onActivateKey(onToggleSelect)}
 			className={cn(
 				"flex h-14 items-center gap-3 text-sm",

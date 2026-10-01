@@ -41,6 +41,7 @@ import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboard
 import { DriveRow, type DriveRowProps } from "@/features/drive/components/driveRow"
 import { DriveTile } from "@/features/drive/components/driveTile"
 import { testUuid } from "@/tests/support/uuid"
+import { touchLongPress, touchTap } from "@/tests/support/touch"
 
 function dirItem(label: string): DriveItem {
 	const dir: Dir = {
@@ -366,5 +367,67 @@ describe("row positioning and size", () => {
 		)
 
 		expect(container.querySelector('[role="option"]')?.textContent).not.toContain("KiB")
+	})
+})
+
+describe("touch", () => {
+	function option(container: HTMLElement): HTMLElement {
+		const row = container.querySelector<HTMLElement>('[role="option"]')
+
+		if (!row) {
+			throw new Error("no option row rendered")
+		}
+
+		return row
+	}
+
+	function renderCell(kind: "row" | "tile", props: Partial<DriveRowProps>) {
+		const base = { ...sharedProps(dirItem("target"), false, () => undefined), ...props }
+
+		return render(kind === "row" ? createElement(DriveRow, { ...base, start: 0, directorySize: undefined }) : createElement(DriveTile, base))
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it.each(["row", "tile"] as const)("a %s reports a tap as touch, and a double tap never opens on top of it", kind => {
+		const onPointerSelect = vi.fn<DriveRowProps["onPointerSelect"]>()
+		const onOpen = vi.fn()
+		const { container } = renderCell(kind, { onPointerSelect, onOpen })
+
+		touchTap(option(container))
+		touchTap(option(container))
+		fireEvent.doubleClick(option(container), { detail: 2 })
+
+		expect(onPointerSelect).toHaveBeenCalledTimes(2)
+		expect(onPointerSelect.mock.calls.map(call => call[2])).toEqual(["touch", "touch"])
+		expect(onOpen).not.toHaveBeenCalled()
+
+		fireEvent.pointerDown(option(container), { pointerType: "mouse", pointerId: 2, isPrimary: true, button: 0 })
+		fireEvent.click(option(container), { detail: 1 })
+		fireEvent.doubleClick(option(container), { detail: 2 })
+
+		expect(onPointerSelect.mock.calls[2]?.[2]).toBe("mouse")
+		expect(onOpen).toHaveBeenCalledExactlyOnceWith(ROW_INDEX)
+	})
+
+	it.each(["row", "tile"] as const)("a %s long-press toggles the item like a Ctrl+click, with no menu and no click after it", kind => {
+		const onPointerSelect = vi.fn()
+		const onCursorMove = vi.fn()
+		const other = dirItem("other")
+		const { container } = renderCell(kind, { onPointerSelect, onCursorMove })
+
+		useDriveStore.setState({ selectedItems: [other] })
+		touchLongPress(option(container))
+
+		expect(useDriveStore.getState().selectedItems.map(selected => selected.data.uuid)).toEqual([other.data.uuid, testUuid("target")])
+		expect(onCursorMove).toHaveBeenCalledExactlyOnceWith(ROW_INDEX)
+		expect(onPointerSelect).not.toHaveBeenCalled()
+		expect(screen.queryByRole("menu")).toBeNull()
 	})
 })

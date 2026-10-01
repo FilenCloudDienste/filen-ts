@@ -9,7 +9,8 @@ import {
 	listboxKeyTargetIsInteractive,
 	listboxRangeItems,
 	resolveCursorIndex,
-	selectionAwareLinkClick
+	selectionAwareLinkClick,
+	touchTapIntent
 } from "@/features/drive/lib/listbox"
 
 describe("clampListboxIndex", () => {
@@ -137,33 +138,25 @@ describe("isPlainClickDeselect", () => {
 	const b = { data: { uuid: "b" } }
 
 	it("deselects when the clicked item is the whole selection", () => {
-		expect(isPlainClickDeselect([a], "a", 1, "mouse")).toBe(true)
+		expect(isPlainClickDeselect([a], "a", 1)).toBe(true)
 	})
 
 	it("selects an item that is not selected yet", () => {
-		expect(isPlainClickDeselect([], "a", 1, "mouse")).toBe(false)
-		expect(isPlainClickDeselect([b], "a", 1, "mouse")).toBe(false)
+		expect(isPlainClickDeselect([], "a", 1)).toBe(false)
+		expect(isPlainClickDeselect([b], "a", 1)).toBe(false)
 	})
 
 	it("narrows to the clicked item when several are selected, even if it is one of them", () => {
-		expect(isPlainClickDeselect([a, b], "a", 1, "mouse")).toBe(false)
+		expect(isPlainClickDeselect([a, b], "a", 1)).toBe(false)
 	})
 
 	it("never toggles off on the second click of a double-click, so the open keeps its item selected", () => {
 		// Unselected item: click 1 selects it, click 2 (detail 2) must not undo that.
-		expect(isPlainClickDeselect([a], "a", 2, "mouse")).toBe(false)
+		expect(isPlainClickDeselect([a], "a", 2)).toBe(false)
 		// A triple click is no different.
-		expect(isPlainClickDeselect([a], "a", 3, "mouse")).toBe(false)
+		expect(isPlainClickDeselect([a], "a", 3)).toBe(false)
 	})
 
-	it("keeps tap-to-select for touch", () => {
-		expect(isPlainClickDeselect([a], "a", 1, "touch")).toBe(false)
-	})
-
-	it("treats pen and an unknown pointer type like a mouse", () => {
-		expect(isPlainClickDeselect([a], "a", 1, "pen")).toBe(true)
-		expect(isPlainClickDeselect([a], "a", 1, "")).toBe(true)
-	})
 })
 
 describe("clickPointerType", () => {
@@ -235,18 +228,34 @@ describe("click modifiers", () => {
 	})
 })
 
-describe("selectionAwareLinkClick", () => {
-	const click = (modifiers: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }) => ({
-		shiftKey: false,
-		metaKey: false,
-		ctrlKey: false,
-		...modifiers,
-		preventDefault: vi.fn()
+describe("touchTapIntent", () => {
+	const none = { shiftKey: false, metaKey: false, ctrlKey: false }
+
+	it("opens on a tap with nothing selected and toggles once something is", () => {
+		expect(touchTapIntent("touch", none, 0)).toBe("open")
+		expect(touchTapIntent("touch", none, 1)).toBe("toggle")
+		expect(touchTapIntent("touch", none, 5)).toBe("toggle")
 	})
 
-	it("prevents navigation on a selection gesture and still reports the click", () => {
-		const onPointerSelect = vi.fn()
-		const event = click({ ctrlKey: true })
+	it("leaves a mouse, pen or keyboard click to the file-manager model", () => {
+		for (const pointerType of ["mouse", "pen", ""]) {
+			expect(touchTapIntent(pointerType, none, 0)).toBeNull()
+			expect(touchTapIntent(pointerType, none, 2)).toBeNull()
+		}
+	})
+
+	it("leaves a modified tap to the modifier rules", () => {
+		expect(touchTapIntent("touch", { ...none, shiftKey: true }, 1)).toBeNull()
+		expect(touchTapIntent("touch", { ...none, metaKey: true }, 0)).toBeNull()
+	})
+})
+
+describe("selectionAwareLinkClick", () => {
+	const click = () => ({ preventDefault: vi.fn() })
+
+	it("prevents navigation on a click taken as a selection gesture and still reports it", () => {
+		const onPointerSelect = vi.fn(() => true)
+		const event = click()
 
 		selectionAwareLinkClick(onPointerSelect)(event)
 
@@ -254,9 +263,9 @@ describe("selectionAwareLinkClick", () => {
 		expect(onPointerSelect).toHaveBeenCalledWith(event)
 	})
 
-	it("lets a plain click navigate", () => {
-		const onPointerSelect = vi.fn()
-		const event = click({})
+	it("lets any other click navigate", () => {
+		const onPointerSelect = vi.fn(() => false)
+		const event = click()
 
 		selectionAwareLinkClick(onPointerSelect)(event)
 

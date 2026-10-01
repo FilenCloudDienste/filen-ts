@@ -42,7 +42,7 @@ export function DriveRow({
 	registerRef
 }: DriveRowProps) {
 	const { t } = useTranslation("drive")
-	const { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, onContextMenu } = useDriveItemCell({
+	const { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, press } = useDriveItemCell({
 		item,
 		index,
 		variant,
@@ -61,7 +61,8 @@ export function DriveRow({
 			new wrapper — ContextMenuTrigger's own onContextMenu/touch handlers merge in alongside the
 			row's existing onClick/onDoubleClick/ref (Base UI's mergeProps chains same-name handlers
 			instead of overwriting, and merges the ref array), so select/open/roving-tabindex are
-			unaffected. */}
+			unaffected. The row's own handlers run first, which is how a touch press declines the
+			trigger's long-press menu (useTouchLongPress). */}
 			<ContextMenuTrigger
 				render={
 					<div
@@ -88,11 +89,16 @@ export function DriveRow({
 						)}
 						data-cut={cut ? "" : undefined}
 						{...dragSource}
+						{...press.handlers}
 						onClick={event => {
-							onPointerSelect(index, event)
+							onPointerSelect(index, event, press.pointerType(event))
 						}}
-						onDoubleClick={open}
-						onContextMenu={onContextMenu}
+						// A touch tap already opened it.
+						onDoubleClick={event => {
+							if (press.pointerType(event) !== "touch") {
+								open()
+							}
+						}}
 						{...drop.handlers}
 					>
 						<ItemThumbnail

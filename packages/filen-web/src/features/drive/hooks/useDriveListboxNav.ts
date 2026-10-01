@@ -1,13 +1,13 @@
 import { useEffect, useEffectEvent, useState, type KeyboardEvent, type MouseEvent } from "react"
 import {
 	clampListboxIndex,
-	clickPointerType,
 	isPlainClickDeselect,
 	isToggleModifier,
 	listboxKeyTarget,
 	listboxKeyTargetIsInteractive,
 	listboxRangeItems,
-	resolveCursorIndex
+	resolveCursorIndex,
+	touchTapIntent
 } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
@@ -32,7 +32,7 @@ interface UseDriveListboxNavParams {
 export interface DriveListboxNav {
 	safeActiveIndex: number
 	handleKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void
-	handlePointerSelect: (index: number, event: MouseEvent<HTMLDivElement>) => void
+	handlePointerSelect: (index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => void
 	// Moves the roving cursor + range anchor to `index` without scrolling/focusing — mirrors what a
 	// plain click does (setActive + setAnchor), used by the marquee to land the cursor at drag end.
 	setCursor: (index: number) => void
@@ -155,7 +155,9 @@ export function useDriveListboxNav({
 		useDriveStore.getState().setSelectedItems(listboxRangeItems(items, anchor, active))
 	}
 
-	function handlePointerSelect(index: number, event: MouseEvent<HTMLDivElement>) {
+	// A touch tap opens the item, or toggles it while a selection exists (touchTapIntent); everything
+	// else is the file-manager model.
+	function handlePointerSelect(index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) {
 		const item = items[index]
 
 		if (!item) {
@@ -163,6 +165,16 @@ export function useDriveListboxNav({
 		}
 
 		const key = driveRowKey(item)
+		const store = useDriveStore.getState()
+		const touch = touchTapIntent(pointerType, event, store.selectedItems.length)
+
+		if (touch === "open") {
+			setActiveKey(key)
+			setAnchorKey(key)
+			onOpen(index)
+
+			return
+		}
 
 		if (event.shiftKey) {
 			selectRange(safeAnchorIndex, index)
@@ -171,22 +183,21 @@ export function useDriveListboxNav({
 			return
 		}
 
-		if (isToggleModifier(event)) {
-			useDriveStore.getState().toggleSelectedItem(item)
+		if (touch === "toggle" || isToggleModifier(event)) {
+			store.toggleSelectedItem(item)
 			setActiveKey(key)
 			setAnchorKey(key)
 
 			return
 		}
 
-		const store = useDriveStore.getState()
 		const soleSelected = store.selectedItems.length === 1 ? store.selectedItems[0] : undefined
 
 		// The sole selection must be this very row: another receiver's row of the same item selects instead.
 		if (
 			soleSelected !== undefined &&
 			driveRowKey(soleSelected) === key &&
-			isPlainClickDeselect(store.selectedItems, item.data.uuid, event.detail, clickPointerType(event.nativeEvent))
+			isPlainClickDeselect(store.selectedItems, item.data.uuid, event.detail)
 		) {
 			store.clearSelectedItems()
 		} else {

@@ -33,7 +33,7 @@ export function DriveTile({
 	registerRef
 }: DriveItemCellProps) {
 	const { t } = useTranslation("drive")
-	const { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, onContextMenu } = useDriveItemCell({
+	const { name, open, dragSource, searchHit, destination, drop, shared, bulkMenu, cut, press } = useDriveItemCell({
 		item,
 		index,
 		variant,
@@ -75,11 +75,16 @@ export function DriveTile({
 						)}
 						data-cut={cut ? "" : undefined}
 						{...dragSource}
+						{...press.handlers}
 						onClick={event => {
-							onPointerSelect(index, event)
+							onPointerSelect(index, event, press.pointerType(event))
 						}}
-						onDoubleClick={open}
-						onContextMenu={onContextMenu}
+						// A touch tap already opened it.
+						onDoubleClick={event => {
+							if (press.pointerType(event) !== "touch") {
+								open()
+							}
+						}}
 						{...drop.handlers}
 					>
 						{/* The tile's face: a square that fills the tile's width, thumbnail or icon alike —

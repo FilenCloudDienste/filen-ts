@@ -16,6 +16,7 @@ import { UserAvatar } from "@/components/userAvatar"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 export interface ChatRowProps {
 	chat: Chat
@@ -36,10 +37,11 @@ export interface ChatRowProps {
 	// Threaded straight through to the row's own menu (chatMenu.tsx's onAction) — the sidebar's ONE
 	// dialog host (useChatDialogHost) is the actual dialog-opening implementation, not this row.
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
-	// Modifier-click selection — mirrors noteRow.tsx's own onPointerSelect. Fired from the Link's own
-	// onClick: a plain click lets navigation proceed; Ctrl/Cmd/Shift+click call preventDefault first
-	// (see the Link below) and never navigate.
-	onPointerSelect: (event: MouseEvent<HTMLAnchorElement>) => void
+	// Modifier-click selection — mirrors noteRow.tsx's own onPointerSelect: a plain click or touch tap
+	// lets navigation proceed; a selection gesture returns true and never navigates (see the Link below).
+	onPointerSelect: (event: MouseEvent<HTMLAnchorElement>, pointerType: string) => boolean
+	// A touch long-press: a Ctrl/Cmd+click's toggle, in place of the context menu.
+	onLongPress: () => void
 }
 
 // One conversation row: an unread dot (derived client-side), avatar, display name, relative time, a
@@ -60,7 +62,8 @@ export function ChatRow({
 	currentUserId,
 	blocked,
 	onAction,
-	onPointerSelect
+	onPointerSelect,
+	onLongPress
 }: ChatRowProps) {
 	const { t } = useTranslation("chats")
 	const { t: tCommon } = useTranslation("common")
@@ -78,6 +81,7 @@ export function ChatRow({
 	const unreadCount = useChatUnreadCount(chat, currentUserId, blocked)
 	const unread = unreadCount > 0
 	const timestamp = chat.lastMessage?.sentTimestamp
+	const press = useTouchLongPress<HTMLDivElement>({ onLongPress })
 
 	return (
 		<ContextMenu>
@@ -91,6 +95,7 @@ export function ChatRow({
 						aria-selected={multiSelected}
 						aria-posinset={posInSet}
 						aria-setsize={setSize}
+						{...press.handlers}
 						className={cn(
 							// The separator is inset to the text column (px-2 + dot + gaps + avatar = 78px) and runs
 							// under the ⋯ trigger; the routed row's fill replaces it and the one above it.
@@ -108,7 +113,7 @@ export function ChatRow({
 							// aria-current is a different fact from aria-selected (which lives on the option
 							// container): this is the routed conversation, not necessarily a selected one.
 							aria-current={selected ? "page" : undefined}
-							onClick={selectionAwareLinkClick(onPointerSelect)}
+							onClick={selectionAwareLinkClick((event: MouseEvent<HTMLAnchorElement>) => onPointerSelect(event, press.pointerType(event)))}
 							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
 							{/* Always rendered so the column never shifts; the count lives in its label. */}

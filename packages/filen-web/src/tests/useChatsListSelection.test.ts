@@ -18,7 +18,8 @@ beforeEach(() => {
 
 describeClickSelectionContract({
 	items: chats,
-	render: () => renderHook(() => useChatsListSelection({ chats })).result,
+	render: () =>
+		renderHook(() => useChatsListSelection({ chats, selectionCount: useChatsSelectionStore(state => state.selectedChats.length) })).result,
 	selected: () => useChatsSelectionStore.getState().selectedChats,
 	seed: selectedChats => {
 		useChatsSelectionStore.setState({ selectedChats })
@@ -27,13 +28,13 @@ describeClickSelectionContract({
 
 describe("useChatsListSelection — unmount auto-clear", () => {
 	it("unmounting clears the selection — the web equivalent of mobile's List-screen blur", () => {
-		const { result, unmount } = renderHook(() => useChatsListSelection({ chats }))
+		const { result, unmount } = renderHook(() => useChatsListSelection({ chats, selectionCount: 0 }))
 
 		act(() => {
-			result.current.handlePointerSelect(0, clickEvent({ ctrlKey: true }))
+			result.current.handlePointerSelect(0, clickEvent({ ctrlKey: true }), "mouse")
 		})
 		act(() => {
-			result.current.handlePointerSelect(1, clickEvent({ ctrlKey: true }))
+			result.current.handlePointerSelect(1, clickEvent({ ctrlKey: true }), "mouse")
 		})
 		expect(useChatsSelectionStore.getState().selectedChats).toEqual([chatA, chatB])
 

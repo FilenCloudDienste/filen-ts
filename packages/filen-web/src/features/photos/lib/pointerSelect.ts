@@ -1,5 +1,5 @@
 import { type MouseEvent } from "react"
-import { clickPointerType, isPlainClickDeselect, isToggleModifier } from "@/features/drive/lib/listbox"
+import { isPlainClickDeselect, isToggleModifier } from "@/features/drive/lib/listbox"
 import { photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
@@ -31,19 +31,25 @@ export function photosPointerSelect(
 	}
 
 	if (isToggleModifier(event)) {
-		usePhotosStore.getState().toggleSelectedItem(item)
-		setAnchorUuid(item.data.uuid)
+		photosToggleSelect(item, setAnchorUuid)
 
 		return
 	}
 
 	const store = usePhotosStore.getState()
 
-	if (isPlainClickDeselect(store.selectedItems, item.data.uuid, event.detail, clickPointerType(event.nativeEvent))) {
+	if (isPlainClickDeselect(store.selectedItems, item.data.uuid, event.detail)) {
 		store.clearSelectedItems()
 	} else {
 		store.setSelectedItems([item])
 	}
 
+	setAnchorUuid(item.data.uuid)
+}
+
+// Toggles one photo in or out of the selection and anchors a later Shift range on it: a Ctrl/Cmd+click,
+// and on touch a long-press or a tap in selection mode.
+export function photosToggleSelect(item: PhotoItem, setAnchorUuid: (uuid: string | null) => void): void {
+	usePhotosStore.getState().toggleSelectedItem(item)
 	setAnchorUuid(item.data.uuid)
 }

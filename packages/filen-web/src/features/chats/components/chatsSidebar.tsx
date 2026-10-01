@@ -86,10 +86,6 @@ export function ChatsSidebar() {
 		.sort()
 		.join(",")
 
-	// The ordered, currently-visible conversation set click-selection ranges walk (search-filtered) —
-	// mirrors notesSidebar's own selection wiring. Clears on mount/unmount (see the hook's own doc
-	// comment) rather than a resetKey, since chats has no secondary view mode to key a reset off.
-	const selection = useChatsListSelection({ chats: rows })
 	const rawSelectedChats = useChatsSelectionStore(useShallow(state => state.selectedChats))
 	// LIVE (ghost-purged) selection: re-derived from the current chats query every render, so a
 	// conversation removed from the account (elsewhere, or by another tab) between selection and
@@ -103,6 +99,10 @@ export function ChatsSidebar() {
 		}
 	}
 	const liveSelectedUuids = new Set(liveSelectedChats.map(chat => chat.uuid))
+	// The ordered, currently-visible conversation set click-selection ranges walk (search-filtered) —
+	// mirrors notesSidebar's own selection wiring. Clears on mount/unmount (see the hook's own doc
+	// comment) rather than a resetKey, since chats has no secondary view mode to key a reset off.
+	const selection = useChatsListSelection({ chats: rows, selectionCount: liveSelectedChats.length })
 
 	useEffect(() => {
 		const toRemove = staleChatSelectionUuids(useChatsSelectionStore.getState().selectedChats, visibleChatUuidsSignature.split(","))
@@ -232,6 +232,7 @@ export function ChatsSidebar() {
 						blocked={blocked}
 						onAction={dialogHost.openChatDialog}
 						onPointerSelect={selection.handlePointerSelect}
+						onToggleSelect={selection.toggleAt}
 					/>
 				</div>
 				{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
@@ -265,6 +266,7 @@ interface ChatsVirtualListProps {
 	blocked: BlockedUsers
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
 	onPointerSelect: ListPointerSelection["handlePointerSelect"]
+	onToggleSelect: ListPointerSelection["toggleAt"]
 }
 
 // Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range
@@ -280,7 +282,8 @@ function ChatsVirtualList({
 	currentUserId,
 	blocked,
 	onAction,
-	onPointerSelect
+	onPointerSelect,
+	onToggleSelect
 }: ChatsVirtualListProps) {
 	const virtualizer = useVirtualizer({
 		count: rows.length,
@@ -329,8 +332,9 @@ function ChatsVirtualList({
 							currentUserId={currentUserId}
 							blocked={blocked}
 							onAction={onAction}
-							onPointerSelect={event => {
-								onPointerSelect(virtualRow.index, event)
+							onPointerSelect={(event, pointerType) => onPointerSelect(virtualRow.index, event, pointerType)}
+							onLongPress={() => {
+								onToggleSelect(virtualRow.index)
 							}}
 						/>
 					</div>

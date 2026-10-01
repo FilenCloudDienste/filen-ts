@@ -337,7 +337,6 @@ export function NotesSidebar() {
 	// resets drive's own selection on navigation.
 	const selectableNotes = selectableNotesFromRows(rows)
 	const selectableIndexByRowKey = selectableRowIndexByKey(rows)
-	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode })
 
 	const rawSelectedNotes = useNotesSelectionStore(useShallow(state => state.selectedNotes))
 	// LIVE (ghost-purged) selection: re-derived from the current notes query every render, so a note
@@ -353,6 +352,7 @@ export function NotesSidebar() {
 		}
 	}
 	const liveSelectedUuids = new Set(liveSelectedNotes.map(note => note.uuid))
+	const selection = useNotesListSelection({ notes: selectableNotes, resetKey: viewMode, selectionCount: liveSelectedNotes.length })
 
 	async function handleViewModeChange(next: NotesViewMode): Promise<void> {
 		if (next === viewMode) {
@@ -709,6 +709,7 @@ export function NotesSidebar() {
 						onTagAction={dialogHost.openTagDialog}
 						onNoteAction={dialogHost.openNoteDialog}
 						onPointerSelect={selection.handlePointerSelect}
+						onToggleSelect={selection.toggleAt}
 					/>
 				</div>
 				{/* Bottom-anchored floating selection bar — overlays the scroll container, replacing
@@ -747,6 +748,7 @@ interface NotesSidebarListProps {
 	onTagAction: (kind: NoteTagDialogKind, tag: NoteTag) => void
 	onNoteAction: (kind: NoteActionDialogKind, note: Note) => void
 	onPointerSelect: ListPointerSelection["handlePointerSelect"]
+	onToggleSelect: ListPointerSelection["toggleAt"]
 }
 
 // Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range
@@ -767,7 +769,8 @@ function NotesSidebarList({
 	onOpenNote,
 	onTagAction,
 	onNoteAction,
-	onPointerSelect
+	onPointerSelect,
+	onToggleSelect
 }: NotesSidebarListProps) {
 	const virtualizer = useVirtualizer({
 		count: rows.length,
@@ -846,8 +849,11 @@ function NotesSidebarList({
 								onDuplicated={duplicated => {
 									void onOpenNote(duplicated)
 								}}
-								onPointerSelect={event => {
-									onPointerSelect(selectableIndexByRowKey.get(sidebarRowKey(row)) ?? -1, event)
+								onPointerSelect={(event, pointerType) =>
+									onPointerSelect(selectableIndexByRowKey.get(sidebarRowKey(row)) ?? -1, event, pointerType)
+								}
+								onLongPress={() => {
+									onToggleSelect(selectableIndexByRowKey.get(sidebarRowKey(row)) ?? -1)
 								}}
 							/>
 						)}

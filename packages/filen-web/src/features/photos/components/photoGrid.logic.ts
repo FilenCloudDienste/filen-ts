@@ -1,10 +1,10 @@
-import { isSelectionGesture, listboxRangeItems, type ClickModifiers } from "@/features/drive/lib/listbox"
+import { isSelectionGesture, listboxRangeItems, touchTapIntent, type ClickModifiers } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
 import { timelineKeyTarget, type PhotosTimeline } from "@/features/photos/lib/timeline"
 
 export interface TileClickIntent {
-	kind: "open" | "select"
+	kind: "open" | "select" | "toggle"
 }
 
 // A plain click (no modifier) opens the viewer when the grid has no active selection — the whole
@@ -16,8 +16,13 @@ export interface TileClickIntent {
 // tile. A modifier held (shift/ctrl/cmd) ALWAYS builds/extends the selection regardless of whether
 // one is already active — the one case a click must never open the viewer, mirroring drive's own
 // modifier-click-never-opens rule (driveTile.tsx only ever opens on a doubleClick, never a modified
-// single one).
-export function resolveTileClickIntent(modifiers: ClickModifiers, hasSelection: boolean): TileClickIntent {
+// single one). A touch tap opens the same way but toggles in selection mode (touchTapIntent), where a
+// click would replace the selection.
+export function resolveTileClickIntent(modifiers: ClickModifiers, hasSelection: boolean, pointerType: string): TileClickIntent {
+	if (touchTapIntent(pointerType, modifiers, hasSelection ? 1 : 0) === "toggle") {
+		return { kind: "toggle" }
+	}
+
 	if (isSelectionGesture(modifiers)) {
 		return { kind: "select" }
 	}

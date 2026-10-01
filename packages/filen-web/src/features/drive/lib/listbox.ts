@@ -97,18 +97,14 @@ export function listboxKeyTargetIsInteractive(target: EventTarget | null): boole
 // A plain click on the item that already IS the whole selection deselects it. Only the first click of a
 // sequence (`clickCount` is the event's `detail`): the second click of a double-click lands on the item
 // the first one just selected or deselected, and has to leave it selected for the open that follows.
-// Touch is left as it was: a tap always selects.
-export function isPlainClickDeselect(
-	selected: readonly { data: { uuid: string } }[],
-	uuid: string,
-	clickCount: number,
-	pointerType: string
-): boolean {
-	return clickCount === 1 && pointerType !== "touch" && selected.length === 1 && selected[0]?.data.uuid === uuid
+// A touch tap never gets here (touchTapIntent decides it).
+export function isPlainClickDeselect(selected: readonly { data: { uuid: string } }[], uuid: string, clickCount: number): boolean {
+	return clickCount === 1 && selected.length === 1 && selected[0]?.data.uuid === uuid
 }
 
-// The pointer type behind a click, or "" where the browser still dispatches click as a plain MouseEvent
-// (read as a mouse by isPlainClickDeselect).
+// The pointer type a click reports itself, or "" where the browser still dispatches click as a plain
+// MouseEvent. Not trusted alone: some iOS Safari builds report a tap's click as "mouse" (see
+// useTouchLongPress's pointerType).
 export function clickPointerType(event: MouseEvent): string {
 	return "pointerType" in event && typeof event.pointerType === "string" ? event.pointerType : ""
 }
@@ -131,16 +127,26 @@ export function isSelectionGesture(modifiers: ClickModifiers): boolean {
 	return modifiers.shiftKey || isToggleModifier(modifiers)
 }
 
-// Click handler for a row's navigating Link. A selection gesture preventDefaults, blocking both the
-// router's SPA navigate and the browser's native open-in-new-tab; a plain click still navigates.
-export function selectionAwareLinkClick<E extends ClickModifiers & { preventDefault: () => void }>(
-	onPointerSelect: (event: E) => void
-): (event: E) => void {
+// What a plain touch tap does to an item of a click-to-select list: opens it while nothing is selected,
+// and toggles it once something is (selection mode, entered by a long-press). null for a mouse, pen or
+// keyboard click and for a modified tap, which keep the file-manager model: a click selects, a double
+// click opens.
+export function touchTapIntent(pointerType: string, modifiers: ClickModifiers, selectionCount: number): "open" | "toggle" | null {
+	if (pointerType !== "touch" || isSelectionGesture(modifiers)) {
+		return null
+	}
+
+	return selectionCount > 0 ? "toggle" : "open"
+}
+
+// Click handler for a row's navigating Link. `onPointerSelect` returns true when it took the click as a
+// selection gesture (a modified click, or a touch tap in selection mode): that click is preventDefaulted,
+// blocking both the router's SPA navigate and the browser's native open-in-new-tab. Any other click still
+// navigates.
+export function selectionAwareLinkClick<E extends { preventDefault: () => void }>(onPointerSelect: (event: E) => boolean): (event: E) => void {
 	return event => {
-		if (isSelectionGesture(event)) {
+		if (onPointerSelect(event)) {
 			event.preventDefault()
 		}
-
-		onPointerSelect(event)
 	}
 }

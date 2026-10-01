@@ -5,6 +5,8 @@ import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelection
 export interface UseChatsListSelectionParams {
 	// chatsSidebar.tsx's own search-filtered `rows`, in render order.
 	chats: readonly Chat[]
+	// The live (ghost-purged) selection's size, which puts a touch tap into selection mode.
+	selectionCount: number
 }
 
 const CHATS_SELECTION_ACTIONS: ListPointerSelectionActions<Chat> = {
@@ -23,6 +25,6 @@ const CHATS_SELECTION_ACTIONS: ListPointerSelectionActions<Chat> = {
 // unmount: ChatsSidebar only mounts while routed under /chats* (appShell.tsx swaps the contextual
 // sidebar out off that route), the web equivalent of mobile's List-screen useFocusEffect clearing
 // `selectedChats` on focus and blur, so leaving the module never strands a selection in the store.
-export function useChatsListSelection({ chats }: UseChatsListSelectionParams): ListPointerSelection {
-	return useListPointerSelection({ items: chats, actions: CHATS_SELECTION_ACTIONS, clearOnUnmount: true })
+export function useChatsListSelection({ chats, selectionCount }: UseChatsListSelectionParams): ListPointerSelection {
+	return useListPointerSelection({ items: chats, actions: CHATS_SELECTION_ACTIONS, clearOnUnmount: true, selectionCount })
 }

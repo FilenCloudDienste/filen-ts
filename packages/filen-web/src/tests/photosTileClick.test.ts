@@ -34,21 +34,30 @@ function modifiers(overrides: Partial<ClickModifiers> = {}): ClickModifiers {
 
 describe("resolveTileClickIntent", () => {
 	it("opens on a plain click when nothing is selected", () => {
-		expect(resolveTileClickIntent(modifiers(), false)).toEqual({ kind: "open" })
+		expect(resolveTileClickIntent(modifiers(), false, "mouse")).toEqual({ kind: "open" })
 	})
 
 	it("selects (never opens) on a plain click once a selection is already active", () => {
-		expect(resolveTileClickIntent(modifiers(), true)).toEqual({ kind: "select" })
+		expect(resolveTileClickIntent(modifiers(), true, "mouse")).toEqual({ kind: "select" })
 	})
 
 	it("always selects on a shift-click, selection empty or not", () => {
-		expect(resolveTileClickIntent(modifiers({ shiftKey: true }), false)).toEqual({ kind: "select" })
-		expect(resolveTileClickIntent(modifiers({ shiftKey: true }), true)).toEqual({ kind: "select" })
+		expect(resolveTileClickIntent(modifiers({ shiftKey: true }), false, "mouse")).toEqual({ kind: "select" })
+		expect(resolveTileClickIntent(modifiers({ shiftKey: true }), true, "mouse")).toEqual({ kind: "select" })
+	})
+
+	it("opens on a touch tap with nothing selected and toggles on one once a selection is active", () => {
+		expect(resolveTileClickIntent(modifiers(), false, "touch")).toEqual({ kind: "open" })
+		expect(resolveTileClickIntent(modifiers(), true, "touch")).toEqual({ kind: "toggle" })
+	})
+
+	it("keeps the modifier rules for a modified touch tap", () => {
+		expect(resolveTileClickIntent(modifiers({ shiftKey: true }), true, "touch")).toEqual({ kind: "select" })
 	})
 
 	it("always selects on a ctrl/cmd-click, selection empty or not", () => {
-		expect(resolveTileClickIntent(modifiers({ ctrlKey: true }), false)).toEqual({ kind: "select" })
-		expect(resolveTileClickIntent(modifiers({ metaKey: true }), true)).toEqual({ kind: "select" })
+		expect(resolveTileClickIntent(modifiers({ ctrlKey: true }), false, "mouse")).toEqual({ kind: "select" })
+		expect(resolveTileClickIntent(modifiers({ metaKey: true }), true, "mouse")).toEqual({ kind: "select" })
 	})
 })
 
