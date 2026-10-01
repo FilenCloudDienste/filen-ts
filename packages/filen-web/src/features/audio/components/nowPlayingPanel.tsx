@@ -1,7 +1,7 @@
 import { Trash2, X, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
-import { useAudioStore, useAudioQueue, useAudioError } from "@/features/audio/store/useAudioStore"
+import { useAudioStore, useAudioQueue } from "@/features/audio/store/useAudioStore"
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
@@ -20,7 +20,8 @@ export function NowPlayingPanel() {
 	const { t } = useTranslation("audio")
 	const { queue, currentIndex, coverUrlsByUuid } = useAudioQueue()
 	const status = useAudioStore(state => state.status)
-	const lastError = useAudioError()
+	// The track the last failure is about, which an auto-skip has already moved past.
+	const failedUuid = useAudioStore(state => state.lastErrorTrack?.uuid)
 	const removeLabel = t("removeFromQueue")
 
 	return (
@@ -52,7 +53,7 @@ export function NowPlayingPanel() {
 						index={index}
 						current={index === currentIndex}
 						loading={index === currentIndex && status === "loading"}
-						failed={index === currentIndex && lastError !== null}
+						failed={queueTrack.uuid === failedUuid}
 						coverUrl={coverUrlsByUuid[queueTrack.uuid]}
 						removeLabel={removeLabel}
 					/>

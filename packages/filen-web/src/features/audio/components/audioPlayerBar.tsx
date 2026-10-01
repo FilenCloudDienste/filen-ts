@@ -4,10 +4,11 @@ import { Play, Pause, SkipForward, SkipBack, ListMusic, Music } from "lucide-rea
 import { useShallow } from "zustand/shallow"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { useAudioStore, useAudioNowPlaying, useAudioError } from "@/features/audio/store/useAudioStore"
+import { playbackErrorLabel } from "@/features/audio/lib/formatFailureNotice"
+import { MEDIA_FORMAT_UNSUPPORTED } from "@/lib/media/mediaFailure"
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
 import { ShuffleToggleButton, LoopToggleButton } from "@/features/audio/components/queueToggles"
 import { useAction } from "@/lib/keymap/useAction"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
 import { MediaScrubber } from "@/components/media/mediaScrubber"
 import { VolumeControl } from "@/components/media/volumeControl"
@@ -29,6 +30,7 @@ export function AudioPlayerBar() {
 	const { status, track, title, artist, coverUrl } = useAudioNowPlaying()
 	const hasQueue = useAudioStore(state => state.queue.length > 0)
 	const lastError = useAudioError()
+	const lastErrorTrack = useAudioStore(state => state.lastErrorTrack)
 	const [queueOpen, setQueueOpen] = useState(false)
 
 	// Transport keyboard shortcuts — bound whenever the bar is mounted (i.e. whenever a queue exists).
@@ -63,17 +65,22 @@ export function AudioPlayerBar() {
 					role="alert"
 					className="flex items-center gap-2 px-1"
 				>
-					<p className="min-w-0 flex-1 truncate text-xs text-destructive">{errorLabel(lastError)}</p>
-					<Button
-						variant="ghost"
-						size="sm"
-						className="h-6 shrink-0 px-2 text-xs"
-						onClick={() => {
-							void audioEngine.playCurrent()
-						}}
-					>
-						{t("common:tryAgain")}
-					</Button>
+					<p className="min-w-0 flex-1 truncate text-xs text-destructive">
+						{playbackErrorLabel(lastError, lastErrorTrack, track)}
+					</p>
+					{/* No retry plays a format the browser cannot decode. */}
+					{lastError.kind !== MEDIA_FORMAT_UNSUPPORTED ? (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-6 shrink-0 px-2 text-xs"
+							onClick={() => {
+								void audioEngine.playCurrent()
+							}}
+						>
+							{t("common:tryAgain")}
+						</Button>
+					) : null}
 				</div>
 			) : null}
 			<div className="flex items-center gap-3">

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { MaximizeIcon, MinimizeIcon, PauseIcon, PictureInPicture2Icon, PlayIcon } from "lucide-react"
+import { MaximizeIcon, MinimizeIcon, PauseIcon, PictureInPicture2Icon, PlayIcon, XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { MediaElementScrubber } from "@/components/media/mediaScrubber"
 import { MediaCurrentTime, MediaDuration } from "@/components/media/mediaTime"
@@ -26,7 +26,6 @@ import {
 	seekMedia,
 	setPlaybackRate,
 	toggleMediaPlayback,
-	useMediaFailed,
 	useMediaPaused,
 	useMediaPictureInPicture,
 	useMediaPlaybackRate,
@@ -34,8 +33,14 @@ import {
 	useMediaWaiting,
 	useSyncedMediaVolume
 } from "@/lib/media/useMediaState"
+import { reportMediaFailure, type MediaFailureKind } from "@/lib/media/mediaFailure"
+import type { BlockSource } from "@/lib/media/blockSource"
 import { mediaControlsList } from "@/features/preview/lib/accessMode"
 import { getVideoPosition, setVideoPosition } from "@/features/preview/lib/videoContinuity"
+import { CODECS, type CodecId } from "@/features/preview/lib/containerTracks"
+import { usePlaybackGap } from "@/features/preview/hooks/usePlaybackGap"
+import { MediaFailureState } from "@/features/preview/components/mediaFailureState"
+import { PreviewDownloadButton } from "@/features/preview/components/previewErrorState"
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const
 
@@ -113,13 +118,16 @@ export function VideoPlayer({
 	alt,
 	downloadable,
 	onError,
-	positionKey
+	positionKey,
+	source
 }: {
 	url: string
 	alt: string
 	downloadable: boolean
 	onError?: (() => void) | undefined
 	positionKey: string
+	// The same file's bytes, read to tell a format failure from a broken stream and to name a codec.
+	source: BlockSource
 }) {
 	const { t } = useTranslation(["preview", "audio"])
 	const [container, setContainer] = useState<HTMLDivElement | null>(null)
@@ -128,8 +136,9 @@ export function VideoPlayer({
 	const waiting = useMediaWaiting(video)
 	const hasMetadata = useMediaValue(video, HAS_METADATA, false)
 	const aspectRatio = useMediaValue(video, ASPECT_RATIO, 0) || DEFAULT_ASPECT_RATIO
-	// The streamed path recovers through onError; only the buffered one has nowhere left to go.
-	const failed = useMediaFailed(video) && onError === undefined
+	const [failure, setFailure] = useState<MediaFailureKind | null>(null)
+	const gap = usePlaybackGap(video, source)
+	const [gapDismissed, setGapDismissed] = useState(false)
 	const [pointerActive, setPointerActive] = useState(false)
 	const [keyboardFocus, setKeyboardFocus] = useState(false)
 	const [menuOpen, setMenuOpen] = useState(false)
@@ -138,7 +147,7 @@ export function VideoPlayer({
 	// A tap on the picture while the controls are hidden only brings them back; it does not also pause.
 	const tapRevealsControls = useRef(false)
 	const fullscreen = useIsFullscreen(container)
-	const loading = !failed && (!hasMetadata || waiting)
+	const loading = failure === null && (!hasMetadata || waiting)
 	const visible = controlsVisible({ paused, waiting: loading, pointerActive, keyboardFocus, menuOpen, scrubbing })
 
 	useSyncedMediaVolume(video)
@@ -189,9 +198,19 @@ export function VideoPlayer({
 	}
 
 	return (
-		<div className="size-full p-4">
-			{/* A size container, so the picture box below can fit itself to both of its dimensions. */}
-			<div className="[container-type:size] flex size-full items-center justify-center">
+		<div className="relative size-full p-4">
+			{failure !== null && video !== null ? (
+				<div className="absolute inset-0">
+					<MediaFailureState
+						kind={failure}
+						media={video}
+						source={source}
+					/>
+				</div>
+			) : null}
+			{/* A size container, so the picture box below can fit itself to both of its dimensions. Hidden, not
+			unmounted, once playback failed: a fresh element would only load and fail again. */}
+			<div className={cn("[container-type:size] flex size-full items-center justify-center", failure !== null && "invisible")}>
 				<div
 					ref={setContainer}
 					// Takes its own clicks and arrow keys, so the preview overlay neither toggles its chrome nor pages.
@@ -240,16 +259,27 @@ export function VideoPlayer({
 										event.preventDefault()
 									}
 						}
-						onError={onError}
+						// The streamed path recovers from a broken stream through onError; a format failure, and
+						// anything on the buffered path, stays here.
+						onError={event => {
+							reportMediaFailure(event.currentTarget, source, kind => {
+								if (kind === "other" && onError !== undefined) {
+									onError()
+								} else {
+									setFailure(kind)
+								}
+							})
+						}}
 					/>
-					{failed ? (
-						<p
-							role="alert"
-							className={cn("absolute rounded-2xl px-4 py-2 text-sm text-destructive", MEDIA_GLASS_SURFACE_CLASS)}
-						>
-							{t("previewMediaPlaybackFailed")}
-						</p>
-					) : loading ? (
+					{gap !== null && !gapDismissed ? (
+						<PlaybackGapNotice
+							codec={gap}
+							onDismiss={() => {
+								setGapDismissed(true)
+							}}
+						/>
+					) : null}
+					{failure !== null ? null : loading ? (
 						<div
 							className={cn(
 								"pointer-events-none absolute flex size-14 items-center justify-center rounded-full",
@@ -435,5 +465,38 @@ function FullscreenButton({ container, fullscreen }: { container: HTMLElement | 
 		>
 			{fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
 		</Button>
+	)
+}
+
+// Over a video that plays without its sound or its picture: names the codec the browser cannot decode,
+// offers the file instead, and leaves playback alone.
+function PlaybackGapNotice({ codec, onDismiss }: { codec: CodecId; onDismiss: () => void }) {
+	const { t } = useTranslation("preview")
+	const { kind, label } = CODECS[codec]
+
+	return (
+		<div
+			role="status"
+			className={cn(
+				"absolute inset-x-3 top-3 mx-auto flex w-fit max-w-full items-center gap-1 rounded-2xl py-1 pr-1 pl-3 text-sm",
+				MEDIA_GLASS_SURFACE_CLASS
+			)}
+		>
+			<p className="min-w-0">
+				{kind === "audio" ? t("previewMediaNoSound", { codec: label }) : t("previewMediaNoPicture", { codec: label })}
+			</p>
+			<PreviewDownloadButton
+				variant="ghost"
+				size="sm"
+			/>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label={t("previewMediaNoticeDismiss")}
+				onClick={onDismiss}
+			>
+				<XIcon />
+			</Button>
+		</div>
 	)
 }

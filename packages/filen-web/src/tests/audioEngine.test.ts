@@ -29,6 +29,8 @@ vi.mock("@/lib/storage/leader", () => ({
 }))
 
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
+import { MEDIA_FORMAT_UNSUPPORTED, mediaFailureDTO } from "@/lib/media/mediaFailure"
+import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { setMediaVolume, toggleMediaMuted, useMediaVolumeStore } from "@/lib/media/mediaVolume"
 import {
 	AudioEngine,
@@ -134,7 +136,7 @@ interface Harness {
 	events: () => AudioElementEvents
 }
 
-function makeHarness(): Harness {
+function makeHarness(extra: Partial<AudioEngineDeps> = {}): Harness {
 	const fake = makeFakeElement()
 	const revoke = vi.fn<(url: string) => void>()
 	const resolveSource = vi.fn<(t: QueueTrack, signal: AbortSignal) => Promise<TrackSource>>(t =>
@@ -151,7 +153,8 @@ function makeHarness(): Harness {
 		},
 		resolveSource,
 		revokeObjectUrl: revoke,
-		now: () => nowValue
+		now: () => nowValue,
+		...extra
 	}
 
 	return {
@@ -182,7 +185,8 @@ function resetStore(): void {
 		shuffleEnabled: false,
 		loopMode: "off",
 		shuffleOrder: [],
-		lastError: null
+		lastError: null,
+		lastErrorTrack: null
 	})
 	useMediaVolumeStore.setState({ volume: 1, muted: false })
 }
@@ -281,6 +285,58 @@ describe("bounded auto-skip", () => {
 		expect(useAudioStore.getState().lastError).not.toBeNull()
 		// Bounded to a single pass (queueLength + 1 attempts), never unbounded.
 		expect(h.resolveSource.mock.calls.length).toBeLessThanOrEqual(4)
+	})
+
+	it("reports a track whose format the browser cannot play as skipped, and the last one as stopped", async () => {
+		const onFormatFailure = vi.fn<(track: QueueTrack, stopped: boolean) => void>()
+		const h = makeHarness({ onFormatFailure })
+
+		h.fake.setPlayImpl(() => Promise.reject(new ErrorWithDTO(mediaFailureDTO("format"))))
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		expect(onFormatFailure.mock.calls.map(([failed, stopped]) => [failed.uuid, stopped])).toEqual([
+			["a", false],
+			["b", true]
+		])
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().lastError?.kind).toBe(MEDIA_FORMAT_UNSUPPORTED)
+		expect(useAudioStore.getState().lastErrorTrack?.uuid).toBe("b")
+	})
+
+	it("reports an element's format failure once, and keeps other failures off the format notice", async () => {
+		const onFormatFailure = vi.fn<(track: QueueTrack, stopped: boolean) => void>()
+		const h = makeHarness({ onFormatFailure })
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.events().onError(() => Promise.resolve(mediaFailureDTO("format")))
+		await flush()
+
+		expect(onFormatFailure).toHaveBeenCalledOnce()
+		expect(onFormatFailure.mock.calls[0]?.[0].uuid).toBe("a")
+		expect(useAudioStore.getState().currentIndex).toBe(1)
+
+		h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+		await flush()
+
+		expect(onFormatFailure).toHaveBeenCalledOnce()
+	})
+
+	it("ignores an element failure that resolves after the element moved on", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.events().onError(() => Promise.resolve(null))
+		await flush()
+
+		expect(useAudioStore.getState().lastError).toBeNull()
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().status).toBe("playing")
 	})
 
 	it("resets the skip guard and clears the error on a later success", async () => {
@@ -465,7 +521,7 @@ describe("transport", () => {
 		await flush()
 
 		h.engine.pause()
-		h.events().onError()
+		h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
 		await flush()
 
 		expect(useAudioStore.getState().lastError).not.toBeNull()

@@ -91,7 +91,6 @@ const WAITING_EVENTS = [
 const BUFFERED_EVENTS = ["progress", "durationchange", "loadedmetadata", "emptied", "seeked"] as const
 const RATE_EVENTS = ["ratechange", "loadedmetadata"] as const
 const PIP_EVENTS = ["enterpictureinpicture", "leavepictureinpicture"] as const
-const ERROR_EVENTS = ["error", "loadstart", "emptied"] as const
 
 function readCurrentTime(media: HTMLMediaElement): number {
 	return media.currentTime
@@ -130,10 +129,6 @@ function readRate(media: HTMLMediaElement): number {
 	return media.playbackRate
 }
 
-function readFailed(media: HTMLMediaElement): boolean {
-	return media.error !== null
-}
-
 function readPictureInPicture(media: HTMLMediaElement): boolean {
 	return typeof document !== "undefined" && document.pictureInPictureElement === media
 }
@@ -146,7 +141,6 @@ const WAITING = mediaValue(WAITING_EVENTS, readWaiting)
 const BUFFERED = mediaValue(BUFFERED_EVENTS, readBuffered)
 const RATE = mediaValue(RATE_EVENTS, readRate)
 const PICTURE_IN_PICTURE = mediaValue(PIP_EVENTS, readPictureInPicture)
-const FAILED = mediaValue(ERROR_EVENTS, readFailed)
 
 export function useMediaCurrentTime(media: HTMLMediaElement | null): number {
 	return useMediaValue(media, CURRENT_TIME, 0)
@@ -179,11 +173,6 @@ export function useMediaPlaybackRate(media: HTMLMediaElement | null): number {
 
 export function useMediaPictureInPicture(media: HTMLMediaElement | null): boolean {
 	return useMediaValue(media, PICTURE_IN_PICTURE, false)
-}
-
-// The element gave up on its source (a decode error, a failed fetch).
-export function useMediaFailed(media: HTMLMediaElement | null): boolean {
-	return useMediaValue(media, FAILED, false)
 }
 
 // Starts playback, leaving the element paused where the browser refuses (an autoplay policy).

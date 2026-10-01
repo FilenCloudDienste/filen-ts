@@ -28,6 +28,7 @@ vi.mock("@/lib/storage/leader", () => ({
 }))
 
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
+import { mediaFailureDTO } from "@/lib/media/mediaFailure"
 import {
 	AudioEngine,
 	type AudioElementAdapter,
@@ -97,7 +98,11 @@ function makeFakeElement(initialEvents: AudioElementEvents): FakeElement {
 		adapter,
 		calls,
 		fire: name => {
-			events[name]()
+			if (name === "onError") {
+				events.onError(() => Promise.resolve(mediaFailureDTO("other")))
+			} else {
+				events[name]()
+			}
 		},
 		setSample: next => {
 			sample = { ...sample, ...next }

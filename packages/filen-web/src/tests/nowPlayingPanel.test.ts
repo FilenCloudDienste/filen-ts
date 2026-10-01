@@ -32,7 +32,7 @@ function track(uuid: string, name: string): QueueTrack {
 afterEach(() => {
 	cleanup()
 	vi.clearAllMocks()
-	useAudioStore.setState({ queue: [], currentIndex: 0, status: "idle", lastError: null, coverUrlsByUuid: {} })
+	useAudioStore.setState({ queue: [], currentIndex: 0, status: "idle", lastError: null, lastErrorTrack: null, coverUrlsByUuid: {} })
 })
 
 // The popover's Queue/Playlists tab bar is gone entirely (playlists moved to their
@@ -119,10 +119,14 @@ describe("NowPlayingPanel — queue-only popover", () => {
 		expect(container.querySelectorAll("li.bg-muted")).toHaveLength(1)
 
 		act(() => {
-			useAudioStore.setState({ currentIndex: 0, lastError: { species: "plain", label: "decode", message: "decode" } })
+			useAudioStore.setState({
+				currentIndex: 0,
+				lastError: { species: "plain", label: "decode", message: "decode" },
+				lastErrorTrack: queue[0] ?? null
+			})
 		})
 
-		// An error on the current row wins over its cached cover.
+		// An error on the failed row wins over its cached cover.
 		expect(rowButton(/one\.mp3$/).querySelector("img")).toBeNull()
 		expect(rowButton(/one\.mp3$/).querySelector("svg.text-destructive")).not.toBeNull()
 		expect(rowButton(/two\.mp3$/).textContent).toBe("2two.mp3")

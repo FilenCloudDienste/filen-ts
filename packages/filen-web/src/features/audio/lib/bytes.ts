@@ -1,6 +1,9 @@
 import { isMediaStreamAvailable, previewStreamUrl } from "@/features/preview/lib/previewStream"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
+import { ErrorWithDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { classifyMediaError, mediaFailureDTO } from "@/lib/media/mediaFailure"
+import type { BlockSource } from "@/lib/media/blockSource"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
 import type { AudioElementAdapter, AudioElementEvents, TrackSource } from "@/features/audio/lib/engine"
 import type { ElementSample } from "@/features/audio/store/audioQueue"
@@ -54,6 +57,24 @@ export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal)
 function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, preload: "metadata" | "auto"): AudioElementAdapter {
 	const element = document.createElement("audio")
 	let events = initialEvents
+	let bytes: BlockSource | null = null
+	let failure: { error: MediaError; dto: Promise<ErrorDTO> } | null = null
+
+	// One classification per failure of the loaded source, shared by the error event and the play() the
+	// failure rejects, so whichever reaches the engine first carries the kind and the other is superseded.
+	function classifyFailure(): Promise<ErrorDTO> | null {
+		const error = element.error
+
+		if (error === null || bytes === null) {
+			return null
+		}
+
+		if (failure?.error !== error) {
+			failure = { error, dto: classifyMediaError(error.code, bytes).then(mediaFailureDTO) }
+		}
+
+		return failure.dto
+	}
 
 	element.preload = preload
 	element.addEventListener("timeupdate", () => {
@@ -66,7 +87,14 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 		events.onEnded()
 	})
 	element.addEventListener("error", () => {
-		events.onError()
+		const error = element.error
+
+		events.onError(async () => {
+			const dto = await classifyFailure()
+
+			// Null once the element has been handed another source: the failure is of bytes nothing plays.
+			return element.error === error ? dto : null
+		})
 	})
 
 	function sample(): ElementSample {
@@ -79,11 +107,17 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 	}
 
 	return {
-		load: src => {
+		load: (src, source) => {
+			bytes = source
 			element.src = src
 			element.load()
 		},
-		play: () => element.play(),
+		// A rejection carries the element's own classified failure where there is one, so a source the
+		// browser cannot play reports its format, whichever of this and the error event comes first.
+		play: () =>
+			element.play().catch(async () => {
+				throw new ErrorWithDTO((await classifyFailure()) ?? mediaFailureDTO("other"))
+			}),
 		pause: () => {
 			element.pause()
 		},

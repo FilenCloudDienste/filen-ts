@@ -2,6 +2,7 @@ import { AudioEngine } from "@/features/audio/lib/engine"
 import { createDomAudioAdapter, createDomPrefetchAdapter, resolveTrackSource } from "@/features/audio/lib/bytes"
 import { bindMediaSessionActions, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
 import { trackMetadata } from "@/features/audio/lib/trackMetadata"
+import { notifyFormatFailure } from "@/features/audio/lib/formatFailureNotice"
 import { hydrateAudioPrefs, useAudioStore } from "@/features/audio/store/useAudioStore"
 import { warmMediaVolume } from "@/lib/media/mediaVolume"
 
@@ -16,7 +17,8 @@ export const audioEngine = new AudioEngine({
 	createPrefetchElement: createDomPrefetchAdapter,
 	resolveSource: resolveTrackSource,
 	mediaSession: createMediaSessionPublisher(),
-	resolveCover: (track, source) => trackMetadata.playbackCover(track, source.kind === "blob" ? source.blob : undefined)
+	resolveCover: (track, source) => trackMetadata.playbackCover(track, source.kind === "blob" ? source.blob : undefined),
+	onFormatFailure: notifyFormatFailure
 })
 
 // Restore persisted prefs and bind the foreground-reconcile lifecycle once, at first import. All

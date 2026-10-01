@@ -13,7 +13,8 @@ import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/previ
 
 // Renders the element for a resolved URL. `onError` is set only on the streamed path — the buffered
 // blob path has nowhere further to fall back to, so it keeps the browser's own native error state.
-export type RenderPreviewUrl = (url: string, onError: (() => void) | undefined) => ReactNode
+// `bytes` is the buffered path's whole file, the blob's own contents.
+export type RenderPreviewUrl = (url: string, onError: (() => void) | undefined, bytes: Uint8Array | undefined) => ReactNode
 
 // Streamed mode: registers against the SW's inline route and renders once a URL resolves. A
 // registration failure hands control back to the parent (onFallback) for the buffered fallback ONLY
@@ -73,16 +74,22 @@ function StreamedPreview({
 		return <PreviewLoading />
 	}
 
-	return render(result.url, () => {
-		// A mid-consumption failure (network drop mid-load/seek, an SW-side decrypt abort, a lifecycle
-		// hiccup) — unlike the registration-failure effect above, retrying buffered here would
-		// re-download the whole file, so an oversize item gets the labeled error instead.
-		if (streamFailureAction(item) === "buffer") {
-			onFallback()
-		} else {
-			setCapExceeded(true)
-		}
-	})
+	return render(
+		result.url,
+		() => {
+			// A mid-consumption failure (network drop mid-load/seek, an SW-side decrypt abort, a lifecycle
+			// hiccup) — unlike the registration-failure effect above, retrying buffered here would
+			// re-download the whole file, so an oversize item gets the labeled error instead. A media
+			// element never reports a format failure here (lib/media/mediaFailure.ts): the buffered copy
+			// would fail the same way.
+			if (streamFailureAction(item) === "buffer") {
+				onFallback()
+			} else {
+				setCapExceeded(true)
+			}
+		},
+		undefined
+	)
 }
 
 function BufferedPreviewBytes({ bytes, mime, render }: { bytes: Uint8Array; mime: string | undefined; render: RenderPreviewUrl }) {
@@ -92,7 +99,7 @@ function BufferedPreviewBytes({ bytes, mime, render }: { bytes: Uint8Array; mime
 		return null
 	}
 
-	return render(url, undefined)
+	return render(url, undefined, bytes)
 }
 
 // Buffered mode: a whole-file download played back from a blob URL, minted/revoked by useObjectUrl so

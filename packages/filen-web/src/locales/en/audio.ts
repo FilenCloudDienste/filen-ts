@@ -49,6 +49,20 @@ export const audio = {
 	/** Sub-count under the panel heading, plural */
 	queueCount_other: "{{count}} tracks",
 
+	// ── Unplayable formats (toast + the bar's error line) ──────────────────
+	/** The player skipped a track because the browser can't decode its format; {{name}} is the file name */
+	formatSkipped: "Skipped {{name}} — its format isn't supported by your browser",
+	/** Playback stopped on a track because the browser can't decode its format (nothing left to skip to, or paused); {{name}} is the file name */
+	formatStopped: "Couldn't play {{name}} — its format isn't supported by your browser",
+	/** One notice covering several skipped tracks whose format the browser can't decode, singular */
+	formatSkippedCount_one: "Skipped {{count}} track — its format isn't supported by your browser",
+	/** One notice covering several skipped tracks whose format the browser can't decode, plural */
+	formatSkippedCount_other: "Skipped {{count}} tracks — their format isn't supported by your browser",
+	/** One notice covering several tracks whose format the browser can't decode, after which playback stopped, singular */
+	formatStoppedCount_one: "Couldn't play {{count}} track — its format isn't supported by your browser",
+	/** One notice covering several tracks whose format the browser can't decode, after which playback stopped, plural */
+	formatStoppedCount_other: "Couldn't play {{count}} tracks — their format isn't supported by your browser",
+
 	// ── Keyboard-shortcut descriptions (keymap registry) ───────────────────
 	/** Toggle play/pause via keyboard */
 	commandPlayPause: "Play / pause",

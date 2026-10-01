@@ -127,13 +127,13 @@ describe("media controls", () => {
 		const { container, rerender } = render(
 			createElement(PreviewDownloadableProvider, {
 				downloadable: false,
-				children: createElement(MediaElement, { category: "audio", url: "blob:audio", alt: "a", positionKey: "a" })
+				children: createElement(MediaElement, { category: "audio", url: "blob:audio", alt: "a", positionKey: "a", size: 0 })
 			})
 		)
 
 		expect(container.querySelector("audio")?.getAttribute("controlslist")).toBe("nodownload")
 
-		rerender(createElement(MediaElement, { category: "video", url: "blob:video", alt: "v", positionKey: "v" }))
+		rerender(createElement(MediaElement, { category: "video", url: "blob:video", alt: "v", positionKey: "v", size: 0 }))
 
 		expect(container.querySelector("video")?.hasAttribute("controlslist")).toBe(false)
 	})

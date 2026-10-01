@@ -1,4 +1,5 @@
 import { type SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
+import type { MediaErrorKind } from "@/lib/media/mediaFailure"
 
 // English source catalog — "errors" namespace, keyed by the SDK's finite `SdkErrorKind` taxonomy
 // (@/lib/sdk/errorKinds.gen, generated from @filen/sdk-rs@0.4.29's ErrorKind enum) so a lookup is
@@ -7,7 +8,8 @@ import { type SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
 // seeds only a few representative kinds while still catching a typo'd key at compile
 // time; every unseeded SdkErrorKind member (and any error with no `kind` at all — plain
 // marshalling errors) falls back to `labelFirst`'s LABEL-FIRST server/inner/message chain, never a
-// raw untranslated technical string.
+// raw untranslated technical string. The app's own media failure kinds (lib/media/mediaFailure.ts) are
+// labelled here too, so every player shows one wording.
 export const errors = {
 	/** Fires when the server rejects a call because the session is no longer authenticated; surfaces via errorLabel wherever the failing operation reports */
 	Unauthenticated: "You're not signed in. Please sign in again.",
@@ -45,5 +47,9 @@ export const errors = {
 	Conversion: "Something went wrong while processing your data.",
 	/** Fires when the SDK rejects a file/directory name (rename, create directory, new text file, move-picker create, upload). The SDK collapses several distinct causes into this one kind, so this message summarises the whole rule set instead of naming one cause; it replaces the raw, English-only detail string that surfaced through labelFirst before */
 	InvalidName:
-		"That name can't be used. A name can't contain \\ / : * ? \" < > |, can't start or end with a space, can't end with a dot, and must be 255 bytes or shorter."
-} as const satisfies Partial<Record<SdkErrorKind, string>>
+		"That name can't be used. A name can't contain \\ / : * ? \" < > |, can't start or end with a space, can't end with a dot, and must be 255 bytes or shorter.",
+	/** Raised by the app (not the SDK) when the browser can't decode a video/audio file's format or codec; shown in the preview, a chat embed and the music player's error line */
+	MediaFormatUnsupported: "Your browser can't play this file's format.",
+	/** Raised by the app (not the SDK) when a video/audio file stopped playing for any other reason (the stream broke, the file couldn't be read); shown wherever the player reports */
+	MediaPlaybackFailed: "This file couldn't be played."
+} as const satisfies Partial<Record<SdkErrorKind | MediaErrorKind, string>>

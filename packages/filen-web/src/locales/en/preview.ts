@@ -288,8 +288,14 @@ export const preview = {
 	previewMarkdownToggleDirtyHint: "Save or discard your changes before switching views.",
 
 	// ── Video player ─────────────────────────────────────────────────────────
-	/** Video player — the browser could not play the file (an unsupported codec, a damaged file) */
-	previewMediaPlaybackFailed: "This file can't be played in the browser.",
+	/** Video/audio preview — the browser can't decode the file; {{codecs}} lists the formats it reported it can't play, e.g. "HEVC, AC-3" (format names, not translated). Shown with a Download button */
+	previewMediaFormatUnsupportedCodecs: "Your browser can't play this file's format ({{codecs}}).",
+	/** Video player — notice over a video that plays without sound because the browser can't decode its audio; {{codec}} is the audio format's name, e.g. AC-3 */
+	previewMediaNoSound: "No sound: your browser can't play this video's {{codec}} audio.",
+	/** Video player — notice over a video that plays its sound without a picture because the browser can't decode its video; {{codec}} is the video format's name, e.g. HEVC */
+	previewMediaNoPicture: "No picture: your browser can't play this video's {{codec}} video.",
+	/** Video player — accessible label of the button closing the no-sound/no-picture notice */
+	previewMediaNoticeDismiss: "Dismiss",
 	/** Video player — accessible label of the floating control bar */
 	previewMediaControls: "Playback controls",
 	/** Video player — heading of the playback-speed menu */

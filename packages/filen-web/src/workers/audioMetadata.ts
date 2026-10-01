@@ -8,7 +8,8 @@ import {
 } from "music-metadata"
 import { normalizeTrackTags } from "@filen/shared"
 import { log } from "@/lib/log"
-import { BlockSource, BlockTokenizer, type ReadRange } from "@/features/audio/lib/blockTokenizer"
+import { BlockTokenizer } from "@/features/audio/lib/blockTokenizer"
+import { BlockSource, type ReadRange } from "@/lib/media/blockSource"
 
 // Tag + cover extraction for one audio file, run inside the sdk worker so the parser's many small reads
 // go straight to the SDK (no page round trip per read) and the embedded cover never leaves the worker at

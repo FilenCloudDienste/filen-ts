@@ -866,6 +866,13 @@ export function PreviewOverlay({
 	}
 
 	const name = driveItemName(driveItem)
+	// The header's Download, also handed to the viewers for a file they cannot show.
+	const download =
+		variant !== "trash" && downloadable
+			? () => {
+					void startDownloads([driveItem])
+				}
+			: null
 	// The newer version the remote-change dialog asks about, for its comparison.
 	const remoteTheirs = remote.prompt?.kind === "revised" ? remote.prompt.theirs : undefined
 
@@ -922,16 +929,14 @@ export function PreviewOverlay({
 						>
 							<ChevronRightIcon />
 						</Button>
-						{variant !== "trash" && downloadable ? (
+						{download !== null ? (
 							<Button
 								variant="ghost"
 								size="icon-sm"
 								disabled={!isOnline}
 								aria-label={t("previewDownloadAction")}
 								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-								onClick={() => {
-									void startDownloads([driveItem])
-								}}
+								onClick={download}
 							>
 								<DownloadIcon />
 							</Button>
@@ -987,7 +992,10 @@ export function PreviewOverlay({
 					</header>
 					<div className="min-h-0 flex-1">
 						<PreviewErrorBoundary key={slotKey}>
-							<PreviewDownloadableProvider downloadable={downloadable}>
+							<PreviewDownloadableProvider
+								downloadable={downloadable}
+								onDownload={download}
+							>
 								<PreviewBody
 									item={driveItem}
 									category={pin?.category}

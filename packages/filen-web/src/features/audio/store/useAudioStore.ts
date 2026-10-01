@@ -34,6 +34,8 @@ interface AudioStore {
 	// it). Cleared on the next successful play. Never a spinner-forever state — a failure that exhausts
 	// the auto-skip budget settles the status AND leaves this set.
 	lastError: ErrorDTO | null
+	// The track `lastError` is about; after an auto-skip that is no longer the current one.
+	lastErrorTrack: QueueTrack | null
 	// Cover-art blob URLs, keyed by track uuid — a live mirror of the engine's cover cache (the LRU
 	// itself lives in the engine; this is purely the reactive read side for the bar/panel). A missing key
 	// means "no cached cover", never triggers a fetch on read.
@@ -50,7 +52,7 @@ interface AudioStore {
 	setStatus: (status: AudioPlaybackStatus) => void
 	setPosition: (positionMs: number) => void
 	setDuration: (durationMs: number) => void
-	setError: (lastError: ErrorDTO | null) => void
+	setError: (lastError: ErrorDTO | null, track?: QueueTrack | null) => void
 	// Persists (fire-and-forget). The engine passes the freshly rebuilt shuffle order alongside.
 	setShuffle: (shuffleEnabled: boolean, shuffleOrder: number[]) => void
 	// Persists (fire-and-forget).
@@ -74,9 +76,10 @@ export const useAudioStore = create<AudioStore>(set => ({
 	loopMode: "off",
 	shuffleOrder: [],
 	lastError: null,
+	lastErrorTrack: null,
 	coverUrlsByUuid: {},
 	loadQueue: (queue, currentIndex, shuffleOrder) => {
-		set({ queue, currentIndex, shuffleOrder, positionMs: 0, durationMs: 0, lastError: null })
+		set({ queue, currentIndex, shuffleOrder, positionMs: 0, durationMs: 0, lastError: null, lastErrorTrack: null })
 	},
 	setCurrent: (currentIndex, shuffleOrder) => {
 		set({ currentIndex, shuffleOrder, positionMs: 0, durationMs: 0 })
@@ -93,8 +96,8 @@ export const useAudioStore = create<AudioStore>(set => ({
 	setDuration: durationMs => {
 		set({ durationMs })
 	},
-	setError: lastError => {
-		set({ lastError })
+	setError: (lastError, track) => {
+		set({ lastError, lastErrorTrack: lastError === null ? null : (track ?? null) })
 	},
 	setShuffle: (shuffleEnabled, shuffleOrder) => {
 		markPrefsUserModified()
@@ -110,7 +113,16 @@ export const useAudioStore = create<AudioStore>(set => ({
 		set({ coverUrlsByUuid })
 	},
 	reset: () => {
-		set({ queue: [], currentIndex: 0, status: "idle", positionMs: 0, durationMs: 0, shuffleOrder: [], lastError: null })
+		set({
+			queue: [],
+			currentIndex: 0,
+			status: "idle",
+			positionMs: 0,
+			durationMs: 0,
+			shuffleOrder: [],
+			lastError: null,
+			lastErrorTrack: null
+		})
 	},
 	resetMetadata: () => {
 		set({ coverUrlsByUuid: {} })

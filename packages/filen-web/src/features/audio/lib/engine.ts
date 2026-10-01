@@ -1,5 +1,7 @@
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { useMediaVolumeStore, type MediaVolume } from "@/lib/media/mediaVolume"
+import { BlockSource, blobReadRange, urlReadRange } from "@/lib/media/blockSource"
+import { MEDIA_FORMAT_UNSUPPORTED } from "@/lib/media/mediaFailure"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import {
 	buildShuffleOrder,
@@ -33,12 +35,14 @@ import { COVER_THUMBNAIL_TYPE } from "@/features/audio/lib/trackTags.logic"
 const POSITION_WRITE_THROTTLE_MS = 250
 
 // The event callbacks the engine hands to the adapter factory; the adapter wires them to the concrete
-// element's listeners (or, in a test, exposes them so the harness can fire them).
+// element's listeners (or, in a test, exposes them so the harness can fire them). `onError` hands over
+// the failure unclassified: telling a format the browser cannot play from a broken stream may read the
+// file, which only a failure that is reported is worth. It resolves null once the element has moved on.
 export interface AudioElementEvents {
 	onTimeUpdate: () => void
 	onDurationChange: () => void
 	onEnded: () => void
-	onError: () => void
+	onError: (failure: () => Promise<ErrorDTO | null>) => void
 }
 
 // The thin seam over a media element. Everything the engine needs and nothing more, so a fake is
@@ -48,7 +52,8 @@ export interface AudioElementEvents {
 // to the real playback events at the instant it is promoted to "now playing", preserving whatever the
 // browser already buffered/decoded instead of reloading from scratch.
 export interface AudioElementAdapter {
-	load: (src: string) => void
+	// `bytes` reads the same file, for classifying a failure of it.
+	load: (src: string, bytes: BlockSource) => void
 	play: () => Promise<void>
 	pause: () => void
 	seek: (seconds: number) => void
@@ -91,6 +96,9 @@ export interface AudioEngineDeps {
 	// pattern as createPrefetchElement — absent in tests that don't care about metadata. `null` means the
 	// track could not be read this time (not "no cover"), so a later load asks again.
 	resolveCover?: (track: QueueTrack, source: TrackSource) => Promise<{ cover: Blob | null } | null>
+	// A track failed because the browser cannot play its format; `stopped` when playback stopped on it
+	// rather than skipping past it.
+	onFormatFailure?: (track: QueueTrack, stopped: boolean) => void
 }
 
 // Cover-art blob URLs are held only for the current + one-ahead prefetched track, so this is headroom
@@ -101,6 +109,13 @@ function defaultRevoke(url: string): void {
 	if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
 		URL.revokeObjectURL(url)
 	}
+}
+
+// The track's bytes: the blob already in memory, or ranges of the stream the element plays.
+function trackBytes(source: TrackSource, track: QueueTrack): BlockSource {
+	return source.kind === "blob"
+		? new BlockSource(source.blob.size, blobReadRange(source.blob))
+		: new BlockSource(Number(track.file.size), urlReadRange(source.url))
 }
 
 function applyOutput(element: AudioElementAdapter, output: MediaVolume): void {
@@ -211,8 +226,12 @@ export class AudioEngine {
 			onEnded: () => {
 				void this.handleTrackEnd()
 			},
-			onError: () => {
-				this.onPlaybackFailure(asErrorDTO(new Error("audio element playback error")))
+			onError: failure => {
+				void failure().then(error => {
+					if (error !== null) {
+						this.onPlaybackFailure(error)
+					}
+				})
 			}
 		}
 	}
@@ -372,7 +391,7 @@ export class AudioEngine {
 			this.prefetchBlobUrl = source.url
 		}
 
-		element.load(source.url)
+		element.load(source.url, trackBytes(source, track))
 		this.prefetchIndex = advance.index
 	}
 
@@ -594,7 +613,7 @@ export class AudioEngine {
 		const element = this.ensureElement()
 
 		this.swapBlobUrl(source)
-		element.load(source.url)
+		element.load(source.url, trackBytes(source, track))
 		this.loadedTrackUuid = track.uuid
 
 		// Paused while this was resolving: the bytes stay on the element — that is what gives the paused
@@ -623,24 +642,25 @@ export class AudioEngine {
 	// guard, and once a full pass over the queue is exhausted settle instead of spinning. Otherwise
 	// advance to the next track and try it.
 	private onPlaybackFailure(error: ErrorDTO): void {
-		useAudioStore.getState().setError(error)
+		const state = useAudioStore.getState()
+		const track = state.queue[state.currentIndex] ?? null
+
+		state.setError(error, track)
 
 		// The auto-skip exists to get playback past a broken track. A paused transport is not asking for
 		// audio, so a failure reaching it here (a stray element error on the loaded-but-paused track) stops
 		// at the error instead of advancing the queue into playback the user did not ask for.
-		if (useAudioStore.getState().status === "paused") {
+		if (state.status === "paused") {
+			this.reportFormatFailure(error, track, true)
+
 			return
 		}
 
 		this.skipGuard += 1
 
-		if (!withinSkipBudget(this.skipGuard, useAudioStore.getState().queue.length)) {
-			this.settleStopped()
+		const advance = withinSkipBudget(this.skipGuard, state.queue.length) ? computeNext(this.nav()) : null
 
-			return
-		}
-
-		const advance = computeNext(this.nav())
+		this.reportFormatFailure(error, track, advance === null)
 
 		if (advance === null) {
 			this.settleStopped()
@@ -650,6 +670,12 @@ export class AudioEngine {
 
 		this.applyAdvance(advance)
 		void this.loadAndPlay(advance.index)
+	}
+
+	private reportFormatFailure(error: ErrorDTO, track: QueueTrack | null, stopped: boolean): void {
+		if (error.kind === MEDIA_FORMAT_UNSUPPORTED && track !== null) {
+			this.deps.onFormatFailure?.(track, stopped)
+		}
 	}
 
 	private applyAdvance(advance: AdvanceResult): void {
@@ -783,14 +809,16 @@ export class AudioEngine {
 			return
 		}
 
+		const generation = this.loadGeneration
 		const pauseGeneration = this.pauseGeneration
 
 		state.setStatus("playing")
 		this.deps.mediaSession?.setPlaybackState("playing")
 		void this.element.play().catch((error: unknown) => {
 			// A pause landing before this settles rejects it with AbortError; that is the user's own doing,
-			// not a broken track, so it must not surface an error or trigger the auto-skip.
-			if (this.pauseGeneration !== pauseGeneration) {
+			// not a broken track, so it must not surface an error or trigger the auto-skip. Nor may a
+			// failure the element's error event already reported (and skipped past) count twice.
+			if (this.superseded(generation, pauseGeneration)) {
 				return
 			}
 

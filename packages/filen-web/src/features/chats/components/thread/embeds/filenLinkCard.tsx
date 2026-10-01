@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from "react"
+import { useState, type ReactNode, type SyntheticEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { FileIcon, FolderIcon } from "lucide-react"
 import { formatBytes, type FilenPublicLink } from "@filen/shared"
 import type { ChatLinkResolution } from "@/features/chats/queries/chatMessageLinks"
-import { linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, linkedFileIntoDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { DirectoryGlyph, ItemIcon } from "@/features/drive/components/itemIcon"
 import { isStreamedCategory, type StreamedCategory } from "@/features/drive/lib/preview.logic"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
@@ -12,6 +12,9 @@ import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUr
 import { mediaControlsList } from "@/features/preview/lib/accessMode"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { LoadingState } from "@/components/loadingState"
+import { BlockSource, urlReadRange } from "@/lib/media/blockSource"
+import { mediaFailureDTO, reportMediaFailure, type MediaFailureKind } from "@/lib/media/mediaFailure"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { noop } from "@/lib/utils"
 import { formatShortDate } from "@/lib/formatDate"
 import { EXTERNAL_LINK_REL } from "@/features/chats/components/thread/externalAnchor"
@@ -173,28 +176,16 @@ function FilenStreamedInlineMedia({
 		return <>{fallback}</>
 	}
 
-	if (category === "video") {
+	if (category === "video" || category === "audio") {
 		return (
-			<video
-				src={result.url}
-				controls
-				controlsList={mediaControlsList(downloadable)}
-				preload="metadata"
-				aria-label={name}
-				className="max-h-72 max-w-sm rounded-2xl"
-			/>
-		)
-	}
-
-	if (category === "audio") {
-		return (
-			<audio
-				src={result.url}
-				controls
-				controlsList={mediaControlsList(downloadable)}
-				preload="metadata"
-				aria-label={name}
-				className="w-64"
+			<FilenInlinePlayer
+				key={result.url}
+				category={category}
+				url={result.url}
+				size={Number(asDirectoryOrFile(item).data.size)}
+				name={name}
+				downloadable={downloadable}
+				fallback={fallback}
 			/>
 		)
 	}
@@ -228,6 +219,70 @@ function FilenStreamedInlineMedia({
 				/>
 			) : null}
 		</>
+	)
+}
+
+// The inline video/audio element. A playback failure swaps in the rich card, whose overlay offers the
+// file; one the browser cannot decode also says so, where a bare broken player would say nothing.
+function FilenInlinePlayer({
+	category,
+	url,
+	size,
+	name,
+	downloadable,
+	fallback
+}: {
+	category: "video" | "audio"
+	url: string
+	size: number
+	name: string
+	downloadable: boolean
+	fallback: ReactNode
+}) {
+	const [source] = useState(() => new BlockSource(size, urlReadRange(url)))
+	const [failure, setFailure] = useState<MediaFailureKind | null>(null)
+
+	function handleError(event: SyntheticEvent<HTMLMediaElement>): void {
+		reportMediaFailure(event.currentTarget, source, setFailure)
+	}
+
+	if (failure === "other") {
+		return <>{fallback}</>
+	}
+
+	if (failure === "format") {
+		return (
+			<div className="flex max-w-sm flex-col gap-1">
+				{fallback}
+				<p className="px-3 text-xs text-destructive">{errorLabel(mediaFailureDTO("format"))}</p>
+			</div>
+		)
+	}
+
+	if (category === "video") {
+		return (
+			<video
+				onError={handleError}
+				src={url}
+				controls
+				controlsList={mediaControlsList(downloadable)}
+				preload="metadata"
+				aria-label={name}
+				className="max-h-72 max-w-sm rounded-2xl"
+			/>
+		)
+	}
+
+	return (
+		<audio
+			onError={handleError}
+			src={url}
+			controls
+			controlsList={mediaControlsList(downloadable)}
+			preload="metadata"
+			aria-label={name}
+			className="w-64"
+		/>
 	)
 }
 
