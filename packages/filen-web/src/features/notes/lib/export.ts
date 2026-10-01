@@ -1,6 +1,8 @@
 import type { Note } from "@filen/sdk-rs"
 import JSZip from "jszip"
+import { toast } from "sonner"
 import { i18n } from "@/lib/i18n"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadBlob } from "@/lib/downloadBlob"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { VoidActionOutcome } from "@/lib/actions/outcome"
@@ -9,8 +11,8 @@ import { isNoteUndecryptable } from "@/features/notes/lib/sort"
 import { exportFilename, exportContent, exportMimeType, dedupeExportNames } from "@/features/notes/lib/export.logic"
 
 // The impure shell around export.logic.ts's pure transforms: resolve a note's content, then trigger
-// a real browser download. Never calls toast itself — same convention as lib/actions.ts, the caller
-// (noteMenu.tsx / notesSidebar.tsx) resolves the outcome and surfaces `errorLabel(dto)`.
+// a real browser download. The exports themselves never toast — same convention as lib/actions.ts, the
+// caller (noteMenu.tsx / notesSidebar.tsx) resolves the outcome (toastNotesExportOutcome for an archive).
 
 export async function exportNote(note: Note): Promise<VoidActionOutcome> {
 	try {
@@ -92,4 +94,17 @@ export async function exportAllNotes(notes: readonly Note[]): Promise<ExportAllO
 	}
 
 	return { status: "success", skipped }
+}
+
+// A file save, not a server write: no activity toast, only what went wrong or was left out.
+export function toastNotesExportOutcome(outcome: ExportAllOutcome): void {
+	if (outcome.status === "error") {
+		toast.error(errorLabel(outcome.dto))
+
+		return
+	}
+
+	if (outcome.skipped > 0) {
+		toast.warning(i18n.t("notes:notesExportSkippedUndecryptable", { count: outcome.skipped }))
+	}
 }

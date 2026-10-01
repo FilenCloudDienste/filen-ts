@@ -2,7 +2,7 @@ import { createElement, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { aggregateNoteSelectionFlags } from "@filen/shared"
-import { type BulkOutcome } from "@/lib/actions/bulk"
+import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { isNoteUndecryptable, tagDisplayName } from "@/features/notes/lib/sort"
 import {
 	setPinnedNotes,
@@ -13,8 +13,20 @@ import {
 	restoreNotes,
 	setTagOnNotes
 } from "@/features/notes/lib/bulk"
-import { exportAllNotes } from "@/features/notes/lib/export"
-import { toastNotesBulkOutcome, toastNotesExportOutcome } from "@/features/notes/lib/bulkToast"
+import { exportAllNotes, toastNotesExportOutcome } from "@/features/notes/lib/export"
+import {
+	NOTES_ARCHIVE,
+	NOTES_CHANGE_TYPE,
+	NOTES_DUPLICATE,
+	NOTES_FAVORITE,
+	NOTES_PIN,
+	NOTES_RESTORE,
+	NOTES_TAG,
+	NOTES_UNFAVORITE,
+	NOTES_UNPIN,
+	NOTES_UNTAG,
+	notesActivity
+} from "@/features/notes/lib/activity"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import {
@@ -66,9 +78,9 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 	// duplicated or exported from content that predates them. Boolean-collapsed, so a keystroke re-renders
 	// this bar only on the edge.
 	const anyInflight = useNotesInflightStore(state => selectedNotes.some(note => (state.inflightContent[note.uuid] ?? []).length > 0))
-	// One bulk run at a time: the bar stays up until a run's outcome prunes the selection, and a second
-	// click meanwhile would run it again (a duplicate twice over). The ref shuts the gate synchronously,
-	// the state disables the controls.
+	// One bulk run at a time: the bar stays up until a run's activity ends and prunes the selection, and a
+	// second click meanwhile would run it again (a duplicate twice over). The ref shuts the gate
+	// synchronously, the state disables the controls.
 	const runningRef = useRef(false)
 	const [running, setRunning] = useState(false)
 	const blocked = running || anyInflight
@@ -90,23 +102,26 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 		}
 	}
 
-	async function runOutcome(start: () => Promise<BulkOutcome<Note>>): Promise<void> {
+	async function runSelectionActivity(spec: BulkActivitySpec<Note>): Promise<void> {
 		await runExclusive(async () => {
-			const outcome = await start()
-
-			toastNotesBulkOutcome(outcome)
-			// Mirrors the dialog-routed bulk actions' own cleanup — a succeeded note is pruned from the
-			// selection, a failed one stays selected so the user can retry.
-			useNotesSelectionStore.getState().removeFromSelection(outcome.succeeded.map(note => note.uuid))
+			await runBulkActivity(spec)
 		})
 	}
 
-	async function handleTypeSelect(noteType: NoteType): Promise<void> {
-		await runOutcome(() => setTypeNotes(selectedNotes, noteType))
+	async function handleTypeSelect(noteType: NoteType, label: string): Promise<void> {
+		await runSelectionActivity(
+			notesActivity(selectedNotes, NOTES_CHANGE_TYPE, (notes, onSettled) => setTypeNotes(notes, noteType, onSettled), { type: label })
+		)
 	}
 
 	async function handleTagToggle(tag: NoteTag, checked: boolean): Promise<void> {
-		await runOutcome(() => setTagOnNotes(selectedNotes, tag, checked))
+		const keys = checked ? NOTES_TAG : NOTES_UNTAG
+
+		await runSelectionActivity(
+			notesActivity(selectedNotes, keys, (notes, onSettled) => setTagOnNotes(notes, tag, checked, onSettled), {
+				tag: tagDisplayName(tag)
+			})
+		)
 	}
 
 	async function handleExportSelected(): Promise<void> {
@@ -119,23 +134,37 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 
 	function runDescriptor(descriptor: Extract<NoteBulkActionDescriptor, { run: "direct" }>): void {
 		switch (descriptor.id) {
-			case "pin":
-				void runOutcome(() => setPinnedNotes(selectedNotes, !flags.includesPinned))
+			case "pin": {
+				const pinned = !flags.includesPinned
+
+				void runSelectionActivity(
+					notesActivity(selectedNotes, pinned ? NOTES_PIN : NOTES_UNPIN, (notes, onSettled) =>
+						setPinnedNotes(notes, pinned, onSettled)
+					)
+				)
 				return
-			case "favorite":
-				void runOutcome(() => setFavoritedNotes(selectedNotes, !flags.includesFavorited))
+			}
+			case "favorite": {
+				const favorited = !flags.includesFavorited
+
+				void runSelectionActivity(
+					notesActivity(selectedNotes, favorited ? NOTES_FAVORITE : NOTES_UNFAVORITE, (notes, onSettled) =>
+						setFavoritedNotes(notes, favorited, onSettled)
+					)
+				)
 				return
+			}
 			case "duplicate":
-				void runOutcome(() => duplicateNotes(selectedNotes))
+				void runSelectionActivity(notesActivity(selectedNotes, NOTES_DUPLICATE, duplicateNotes))
 				return
 			case "export":
 				void handleExportSelected()
 				return
 			case "archive":
-				void runOutcome(() => archiveNotes(selectedNotes))
+				void runSelectionActivity(notesActivity(selectedNotes, NOTES_ARCHIVE, archiveNotes))
 				return
 			case "restore":
-				void runOutcome(() => restoreNotes(selectedNotes))
+				void runSelectionActivity(notesActivity(selectedNotes, NOTES_RESTORE, restoreNotes))
 				return
 		}
 	}
@@ -171,7 +200,7 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 									<DropdownMenuItem
 										key={entry.noteType}
 										onClick={() => {
-											void handleTypeSelect(entry.noteType)
+											void handleTypeSelect(entry.noteType, t(entry.labelKey))
 										}}
 									>
 										{t(entry.labelKey)}

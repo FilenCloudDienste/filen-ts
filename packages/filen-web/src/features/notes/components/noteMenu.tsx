@@ -6,6 +6,8 @@ import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { copyText } from "@/lib/copyText"
 import type { VoidActionOutcome } from "@/lib/actions/outcome"
+import { runOutcomeActivity } from "@/lib/activity/activity"
+import type { ActivityKeys, ActivityValues } from "@/lib/activity/activity.logic"
 import {
 	togglePinned,
 	toggleFavorited,
@@ -20,6 +22,22 @@ import {
 import { exportNote } from "@/features/notes/lib/export"
 import { tagDisplayName } from "@/features/notes/lib/sort"
 import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
+import {
+	NOTES_ARCHIVE,
+	NOTES_CHANGE_TYPE,
+	NOTES_DUPLICATE,
+	NOTES_FAVORITE,
+	NOTES_PIN,
+	NOTES_RESTORE,
+	NOTES_TAG,
+	NOTES_TRASH,
+	NOTES_UNFAVORITE,
+	NOTES_UNPIN,
+	NOTES_UNTAG,
+	createFailedAs,
+	noteActivityName,
+	runNoteCreateActivity
+} from "@/features/notes/lib/activity"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import {
@@ -85,20 +103,20 @@ interface MenuFamily {
 // (archive/restore/trash/leave) and before the trashed-variant's own deletePermanently.
 const SEPARATOR_BEFORE = new Set<NoteActionId>(["archive", "restore", "trash", "leave", "deletePermanently"])
 
-// Direct actions whose only follow-up is an error toast.
-const OUTCOME_ACTIONS: Partial<Record<NoteActionId, (note: Note) => Promise<VoidActionOutcome>>> = {
-	export: exportNote,
-	pin: togglePinned,
-	favorite: toggleFavorited,
-	archive: archiveNote,
-	restore: restoreNote,
-	trash: trashNote
+// Direct server writes, each run as an activity in its own words. Keyed off the note as the menu saw it:
+// a pin or favorite says which way it flips.
+const ACTIVITY_ACTIONS: Partial<
+	Record<NoteActionId, { keys: (note: Note) => ActivityKeys; run: (note: Note) => Promise<VoidActionOutcome> }>
+> = {
+	pin: { keys: note => (note.pinned ? NOTES_UNPIN : NOTES_PIN), run: togglePinned },
+	favorite: { keys: note => (note.favorite ? NOTES_UNFAVORITE : NOTES_FAVORITE), run: toggleFavorited },
+	archive: { keys: () => NOTES_ARCHIVE, run: archiveNote },
+	restore: { keys: () => NOTES_RESTORE, run: restoreNote },
+	trash: { keys: () => NOTES_TRASH, run: trashNote }
 }
 
-function toastOutcomeError(outcome: VoidActionOutcome): void {
-	if (outcome.status === "error") {
-		toast.error(errorLabel(outcome.dto))
-	}
+function runNoteActivity(note: Note, keys: ActivityKeys, run: (note: Note) => Promise<VoidActionOutcome>, values?: ActivityValues): void {
+	void runOutcomeActivity(note, { keys, name: noteActivityName, run, ...(values !== undefined ? { values } : {}) })
 }
 
 // Shared per-note action list, rendered by BOTH the sidebar row's right-click menu and the editor
@@ -124,23 +142,34 @@ function NoteMenuEntries({
 	const { Item, Separator, Sub, SubTrigger, SubContent, CheckboxItem } = family
 
 	async function runDirect(descriptor: Extract<NoteActionDescriptor, { run: "direct" }>): Promise<void> {
-		const action = OUTCOME_ACTIONS[descriptor.id]
+		const activity = ACTIVITY_ACTIONS[descriptor.id]
 
-		if (action) {
-			toastOutcomeError(await action(note))
+		if (activity) {
+			runNoteActivity(note, activity.keys(note), activity.run)
 			return
 		}
 
 		switch (descriptor.id) {
 			case "duplicate": {
-				const outcome = await duplicateNote(note)
+				runNoteActivity(note, NOTES_DUPLICATE, async target => {
+					const outcome = await duplicateNote(target)
+
+					if (outcome.status === "success") {
+						onDuplicated?.(outcome.item)
+					}
+
+					return outcome
+				})
+				return
+			}
+			// A file save, not a server write: only a failure toasts.
+			case "export": {
+				const outcome = await exportNote(note)
 
 				if (outcome.status === "error") {
 					toast.error(errorLabel(outcome.dto))
-					return
 				}
 
-				onDuplicated?.(outcome.item)
 				return
 			}
 			case "copyId": {
@@ -162,16 +191,21 @@ function NoteMenuEntries({
 		}
 	}
 
-	async function handleTagToggle(tag: NoteTag, nextChecked: boolean): Promise<void> {
-		toastOutcomeError(nextChecked ? await addTagToNote(note, tag) : await removeTagFromNote(note, tag))
+	function handleTagToggle(tag: NoteTag, nextChecked: boolean): void {
+		runNoteActivity(
+			note,
+			nextChecked ? NOTES_TAG : NOTES_UNTAG,
+			target => (nextChecked ? addTagToNote(target, tag) : removeTagFromNote(target, tag)),
+			{ tag: tagDisplayName(tag) }
+		)
 	}
 
-	async function handleTypeSelect(noteType: NoteType): Promise<void> {
+	function handleTypeSelect(noteType: NoteType, label: string): void {
 		if (noteType === note.noteType) {
 			return
 		}
 
-		toastOutcomeError(await setNoteType(note, noteType))
+		runNoteActivity(note, NOTES_CHANGE_TYPE, target => setNoteType(target, noteType), { type: label })
 	}
 
 	function renderTagsSubmenu() {
@@ -187,7 +221,7 @@ function NoteMenuEntries({
 							key={tag.uuid}
 							checked={checked}
 							onCheckedChange={next => {
-								void handleTagToggle(tag, next)
+								handleTagToggle(tag, next)
 							}}
 						>
 							{tagDisplayName(tag)}
@@ -240,7 +274,7 @@ function NoteMenuEntries({
 											key={entry.noteType}
 											checked={note.noteType === entry.noteType}
 											onCheckedChange={() => {
-												void handleTypeSelect(entry.noteType)
+												handleTypeSelect(entry.noteType, t(entry.labelKey))
 											}}
 										>
 											{t(entry.labelKey)}
@@ -333,29 +367,36 @@ export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: T
 	const isOnline = useIsOnline()
 	const descriptors = applyTagOfflineGate(tagMenuActions(tag), isOnline)
 
-	async function handleFavoriteToggle(): Promise<void> {
-		toastOutcomeError(await setNoteTagFavorited(tag, !tag.favorite))
+	function handleFavoriteToggle(): void {
+		const favorite = !tag.favorite
+
+		void runOutcomeActivity(tag, {
+			keys: favorite ? NOTES_FAVORITE : NOTES_UNFAVORITE,
+			name: tagDisplayName,
+			run: target => setNoteTagFavorited(target, favorite)
+		})
 	}
 
 	// Untitled, default-type note (mirrors the sidebar header's own "New note" — no type/title prompt),
 	// tagged with THIS tag before the caller navigates to it. addTagToNote failing after a successful
-	// create still leaves a real (untagged) note behind, so both outcomes get their own toast.
+	// create still leaves a real (untagged) note behind, so that failure says the tagging failed.
 	async function handleCreateNoteInTag(): Promise<void> {
-		const created = await createNote()
+		const created = await runNoteCreateActivity(t("notesCreating"), async () => {
+			const outcome = await createNote()
 
-		if (created.status === "error") {
-			toast.error(errorLabel(created.dto))
-			return
+			if (outcome.status === "error") {
+				return createFailedAs(outcome, t("notesCreateError"))
+			}
+
+			return createFailedAs(
+				await addTagToNote(outcome.item, tag),
+				t("notesTagFailed", { count: 1, name: noteActivityName(outcome.item), tag: tagDisplayName(tag) })
+			)
+		})
+
+		if (created !== null) {
+			onCreateNoteInTag(created)
 		}
-
-		const tagged = await addTagToNote(created.item, tag)
-
-		if (tagged.status === "error") {
-			toast.error(errorLabel(tagged.dto))
-			return
-		}
-
-		onCreateNoteInTag(tagged.item)
 	}
 
 	return (
@@ -373,7 +414,7 @@ export function TagContextMenuContent({ tag, onTagAction, onCreateNoteInTag }: T
 								return
 							}
 
-							void handleFavoriteToggle()
+							handleFavoriteToggle()
 							return
 						}
 

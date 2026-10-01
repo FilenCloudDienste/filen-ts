@@ -1,6 +1,7 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useRouter } from "@tanstack/react-router"
+import { selectedNoteUuidFromPath } from "@/features/notes/lib/route"
 import { toast } from "sonner"
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { useDialogHost } from "@/lib/useDialogHost"
@@ -8,9 +9,7 @@ import { setNoteTitle, deleteNote, leaveNote } from "@/features/notes/lib/action
 import { createNoteTag, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
 import { createTagForNote, type CreatedTag } from "@/features/notes/lib/createTagForNote"
 import { trashNotes, deleteNotesPermanently, leaveNotes } from "@/features/notes/lib/bulk"
-import { type BulkOutcome } from "@/lib/actions/bulk"
-import { toastNotesBulkOutcome } from "@/features/notes/lib/bulkToast"
-import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
+import { NOTES_DELETE_PERMANENTLY, NOTES_LEAVE, NOTES_TRASH, notesActivity } from "@/features/notes/lib/activity"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { type NoteBulkDialogActionKind } from "@/features/notes/components/notesBulkActionBar.logic"
@@ -41,24 +40,24 @@ export interface NoteDialogHost {
 	renderActiveDialog: () => ReactNode
 }
 
-export interface UseNoteDialogHostParams {
-	// The uuid currently shown in this surface's editor route ("" when none) — delete/leave navigate
-	// away from THIS uuid before removing the note from cache, so the route never briefly resolves to a
-	// gone note (the router-native equivalent of mobile's deferred-cache-removal nav-race guard). Both
-	// the sidebar and the editor header instantiate their own host with this
-	// param, so a row-triggered delete of the currently-open note still navigates correctly.
-	currentUuid: string
-}
-
 // One instance of whichever dialog is active at a time — the note-menu counterpart to drive's
 // useDriveDialogHost, covering the single-note kinds noteMenu.tsx dispatches (rename/delete/leave),
 // the tags submenu's inline "new tag" entry (createTag), the tag-row menu's own kinds, and the notes
 // bulk-action bar's confirm dialogs (trashSelected/deleteSelected/leaveSelected).
-export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): NoteDialogHost {
+export function useNoteDialogHost(): NoteDialogHost {
 	const { t } = useTranslation(["notes", "common"])
 	const navigate = useNavigate()
-	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
-		useDialogHost<ActiveNoteDialog>()
+	const router = useRouter()
+	const {
+		activeDialog,
+		setActiveDialog,
+		dialogPending,
+		isDialogOpen,
+		closeActiveDialog,
+		runDialogPending,
+		runDialogOutcome,
+		runBulkDialogActivity
+	} = useDialogHost<ActiveNoteDialog>()
 
 	function openNoteDialog(kind: NoteActionDialogKind, note: Note): void {
 		setActiveDialog({ kind, note })
@@ -76,8 +75,11 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 		setActiveDialog({ kind: "createStandaloneTag" })
 	}
 
+	// Delete/leave navigate away from the note on screen before removing it from cache, so the route never
+	// briefly resolves to a gone note. The route is read as each note settles: a handed-off bulk run (or
+	// its Try again) can end after the user opened another note.
 	function navigateAwayIfCurrent(note: Note): void {
-		if (note.uuid === currentUuid) {
+		if (note.uuid === selectedNoteUuidFromPath(router.state.location.pathname)) {
 			void navigate({ to: "/notes" })
 		}
 	}
@@ -106,27 +108,26 @@ export function useNoteDialogHost({ currentUuid }: UseNoteDialogHostParams): Not
 		)
 	}
 
-	// Shared tail for every bulk-dialog confirm (trashSelected/deleteSelected/leaveSelected): runs
-	// `op` against `notes`, tracks the shared dialogPending flag, closes the dialog, toasts the
-	// outcome, and prunes succeeded notes from the selection — a failed one stays selected so the
-	// user can retry without re-selecting. Mirrors useDriveDialogHost's own runBulkDialogAction.
-	async function runBulkDialogAction(notes: Note[], op: (notes: Note[]) => Promise<BulkOutcome<Note>>): Promise<void> {
-		const outcome = await runDialogPending(() => op(notes))
-		closeActiveDialog()
-		toastNotesBulkOutcome(outcome)
-		useNotesSelectionStore.getState().removeFromSelection(outcome.succeeded.map(note => note.uuid))
-	}
-
+	// Every bulk-dialog confirm (trashSelected/deleteSelected/leaveSelected) runs as an activity
+	// (useDialogHost's runBulkDialogActivity) and prunes the succeeded notes from the selection.
 	async function handleTrashSelectedConfirm(notes: Note[]): Promise<void> {
-		await runBulkDialogAction(notes, trashNotes)
+		await runBulkDialogActivity(notesActivity(notes, NOTES_TRASH, trashNotes))
 	}
 
 	async function handleDeleteSelectedConfirm(notes: Note[]): Promise<void> {
-		await runBulkDialogAction(notes, targetNotes => deleteNotesPermanently(targetNotes, { beforeCacheRemoval: navigateAwayIfCurrent }))
+		await runBulkDialogActivity(
+			notesActivity(notes, NOTES_DELETE_PERMANENTLY, (targets, onSettled) =>
+				deleteNotesPermanently(targets, { beforeCacheRemoval: navigateAwayIfCurrent }, onSettled)
+			)
+		)
 	}
 
 	async function handleLeaveSelectedConfirm(notes: Note[]): Promise<void> {
-		await runBulkDialogAction(notes, targetNotes => leaveNotes(targetNotes, { beforeCacheRemoval: navigateAwayIfCurrent }))
+		await runBulkDialogActivity(
+			notesActivity(notes, NOTES_LEAVE, (targets, onSettled) =>
+				leaveNotes(targets, { beforeCacheRemoval: navigateAwayIfCurrent }, onSettled)
+			)
+		)
 	}
 
 	async function handleRenameTagSubmit(tag: NoteTag, value: string): Promise<void> {

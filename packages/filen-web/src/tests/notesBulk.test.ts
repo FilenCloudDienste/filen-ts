@@ -244,3 +244,30 @@ describe("setTagOnNotes — checked true adds, checked false removes", () => {
 		expect(notesQueryGet()).toEqual([{ ...note, tags: [] }])
 	})
 })
+
+describe("onSettled — what an activity toast counts", () => {
+	it("is told once per note as it settles, failures included", async () => {
+		const noteA = mockNote({ uuid: testUuid("a"), trash: true })
+		const noteB = mockNote({ uuid: testUuid("b"), trash: true })
+		deleteNoteOp.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("boom"))
+		const onSettled = vi.fn()
+
+		const outcome = await deleteNotesPermanently([noteA, noteB], undefined, onSettled)
+
+		expect(outcome.failed).toHaveLength(1)
+		expect(onSettled.mock.calls).toEqual([
+			[1, 2],
+			[2, 2]
+		])
+	})
+
+	it("threads through the bulk bar's helpers too", async () => {
+		const note = mockNote({ archive: false, trash: false })
+		trashNoteOp.mockResolvedValueOnce({ ...note, trash: true })
+		const onSettled = vi.fn()
+
+		await trashNotes([note], onSettled)
+
+		expect(onSettled).toHaveBeenCalledExactlyOnceWith(1, 1)
+	})
+})

@@ -1,9 +1,9 @@
 import { useRef, useState, type ReactNode } from "react"
+import { selectedNoteUuidFromPath } from "@/features/notes/lib/route"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
-import { toast } from "sonner"
 import {
 	PlusIcon,
 	SearchIcon,
@@ -44,8 +44,8 @@ import {
 	type NotesGroupIcon
 } from "@/features/notes/components/notesSidebar.logic"
 import { createNote } from "@/features/notes/lib/actions"
-import { exportAllNotes } from "@/features/notes/lib/export"
-import { toastNotesExportOutcome } from "@/features/notes/lib/bulkToast"
+import { exportAllNotes, toastNotesExportOutcome } from "@/features/notes/lib/export"
+import { createFailedAs, runNoteCreateActivity } from "@/features/notes/lib/activity"
 import { importNoteFromFile } from "@/features/notes/lib/import"
 import { importAcceptAttribute } from "@/features/notes/lib/import.logic"
 import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
@@ -53,7 +53,6 @@ import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelection
 import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelection"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
-import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { useAction } from "@/lib/keymap/useAction"
@@ -116,15 +115,6 @@ function NotesGroupHeader({ row }: { row: Extract<NotesSidebarRow, { kind: "head
 			<span className="truncate text-sm font-semibold text-muted-foreground">{label}</span>
 		</div>
 	)
-}
-
-// The URL owns the selected note: /notes/<uuid> is a selection key, not a path hierarchy. The
-// sidebar renders in the app shell (outside the notes route match), so it reads the raw pathname rather
-// than route params. Empty at "/notes" (nothing selected).
-function selectedUuidFromPath(pathname: string): string {
-	const match = /^\/notes\/([^/]+)/.exec(pathname)
-
-	return match?.[1] ?? ""
 }
 
 function segmentClass(active: boolean): string {
@@ -283,7 +273,7 @@ export function NotesSidebar() {
 	const panelVisible = useIsSidebarPanelVisible()
 	const navigate = useNavigate()
 	const pathname = useRouterState({ select: state => state.location.pathname })
-	const selectedUuid = selectedUuidFromPath(pathname)
+	const selectedUuid = selectedNoteUuidFromPath(pathname)
 
 	const notesQuery = useNotes()
 	const tagsQuery = useNoteTags()
@@ -315,7 +305,7 @@ export function NotesSidebar() {
 	// One host for every row's menu (noteRow.tsx never opens a dialog itself — it only calls onAction).
 	// currentUuid drives the delete/leave nav-away guard: a row-triggered delete of the currently-open
 	// note still navigates to /notes before the row disappears out of the cache.
-	const dialogHost = useNoteDialogHost({ currentUuid: selectedUuid })
+	const dialogHost = useNoteDialogHost()
 
 	// The notes view's date groups ("Today", "Previous 7 days", …) cut on rolling windows back from now,
 	// so the row model needs a clock — as state, never a `Date.now()` read in this render body (see
@@ -384,14 +374,13 @@ export function NotesSidebar() {
 	}
 
 	async function handleNewNote(): Promise<void> {
-		const outcome = await createNote()
+		const created = await runNoteCreateActivity(t("notesCreating"), async () =>
+			createFailedAs(await createNote(), t("notesCreateError"))
+		)
 
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
+		if (created !== null) {
+			await openNote(created)
 		}
-
-		await openNote(outcome.item)
 	}
 
 	async function handleExportAll(): Promise<void> {
@@ -403,14 +392,13 @@ export function NotesSidebar() {
 	// the input's value after every pick (success or failure) so choosing the SAME file twice in a row
 	// still fires a change event.
 	async function handleImportFile(file: File): Promise<void> {
-		const outcome = await importNoteFromFile(file)
+		const imported = await runNoteCreateActivity(t("notesImporting", { name: file.name }), async () =>
+			createFailedAs(await importNoteFromFile(file), t("notesImportError", { name: file.name }))
+		)
 
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
-			return
+		if (imported !== null) {
+			await openNote(imported)
 		}
-
-		await openNote(outcome.item)
 	}
 
 	async function handleTagsSortChange(next: NoteTagsSortBy): Promise<void> {

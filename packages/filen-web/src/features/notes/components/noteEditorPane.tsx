@@ -64,7 +64,7 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 	// This host's own dialogs act on `note` alone, and `note` IS the currently-routed note by
 	// construction (notes.$uuid.tsx resolves it from the route param) — so a delete/leave confirmed here
 	// always navigates away, unlike the sidebar's host which also serves rows for OTHER notes.
-	const dialogHost = useNoteDialogHost({ currentUuid: note?.uuid ?? "" })
+	const dialogHost = useNoteDialogHost()
 	// Reactive has/has-not edge for THIS note's outbox. "" (no note) is never inflight. Drives the
 	// header sync spinner + menu suppression, mirroring mobile's header (screens/noteEditor.tsx) and
 	// note-menu (components/note/menu.tsx) inflight gating.

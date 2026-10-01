@@ -354,14 +354,6 @@ export const notes = {
 	notesCommandSelectAll: "Select all notes",
 	/** Keymap — description for the Delete/Backspace action that bulk-trashes the selected notes */
 	notesCommandTrash: "Trash selected notes",
-	/** Bulk-action bar — every action's outcome toast when every selected note succeeded; singular */
-	notesBulkActionComplete_one: "{{count}} note updated",
-	/** Bulk-action bar — every action's outcome toast when every selected note succeeded; plural */
-	notesBulkActionComplete_other: "{{count}} notes updated",
-	/** Bulk-action bar — outcome toast when some selected notes failed; singular */
-	notesBulkActionCompleteWithFailures_one: "{{count}} note updated, {{failed}} failed",
-	/** Bulk-action bar — outcome toast when some selected notes failed; plural */
-	notesBulkActionCompleteWithFailures_other: "{{count}} notes updated, {{failed}} failed",
 	/** Bulk trash confirm dialog — title; the confirm button reuses noteActionTrash */
 	notesTrashSelectedConfirmTitle: "Move to trash?",
 	/** Bulk trash confirm dialog — body; singular */
@@ -379,5 +371,224 @@ export const notes = {
 	/** Bulk leave confirm dialog — body; singular */
 	notesLeaveSelectedConfirmBody_one: "Are you sure you want to leave this note? You will lose access to it.",
 	/** Bulk leave confirm dialog — body; plural */
-	notesLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} notes? You will lose access to them."
+	notesLeaveSelectedConfirmBody_other: "Are you sure you want to leave these {{count}} notes? You will lose access to them.",
+	// ── Activity toasts (lib/activity) ──────────────────────────────────────
+	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// note ({{name}}, its title), `_other` counts them; a partial result counts the ones that succeeded.
+	/** Activity toast — creating a note running; it opens once created, so success shows nothing */
+	notesCreating: "Creating a note",
+	/** Activity toast — creating a note failed; the error follows under it */
+	notesCreateError: "Couldn't create a note",
+	/** Activity toast — importing a file as a note running; {{name}} = the file name */
+	notesImporting: "Importing {{name}}",
+	/** Activity toast — importing a file as a note failed; {{name}} = the file name; the error follows under it */
+	notesImportError: "Couldn't import {{name}}",
+	/** Activity toast — pinning running; one note named ({{name}}) */
+	notesPinRunning_one: "Pinning {{name}}",
+	/** Activity toast — pinning running; {{count}} notes */
+	notesPinRunning_other: "Pinning {{count}} notes",
+	/** Activity toast — pinning finished; one note named ({{name}}) */
+	notesPinDone_one: "Pinned {{name}}",
+	/** Activity toast — pinning finished; {{count}} notes */
+	notesPinDone_other: "Pinned {{count}} notes",
+	/** Activity toast — pinning failed for every note; one note named ({{name}}) */
+	notesPinFailed_one: "Couldn't pin {{name}}",
+	/** Activity toast — pinning failed for every note; {{count}} notes */
+	notesPinFailed_other: "Couldn't pin {{count}} notes",
+	/** Activity toast — pinning partly failed; {{count}} succeeded, {{failed}} failed */
+	notesPinPartial_one: "Pinned {{count}} note, {{failed}} failed",
+	/** Activity toast — pinning partly failed; {{count}} succeeded, {{failed}} failed */
+	notesPinPartial_other: "Pinned {{count}} notes, {{failed}} failed",
+	/** Activity toast — unpinning running; one note named ({{name}}) */
+	notesUnpinRunning_one: "Unpinning {{name}}",
+	/** Activity toast — unpinning running; {{count}} notes */
+	notesUnpinRunning_other: "Unpinning {{count}} notes",
+	/** Activity toast — unpinning finished; one note named ({{name}}) */
+	notesUnpinDone_one: "Unpinned {{name}}",
+	/** Activity toast — unpinning finished; {{count}} notes */
+	notesUnpinDone_other: "Unpinned {{count}} notes",
+	/** Activity toast — unpinning failed for every note; one note named ({{name}}) */
+	notesUnpinFailed_one: "Couldn't unpin {{name}}",
+	/** Activity toast — unpinning failed for every note; {{count}} notes */
+	notesUnpinFailed_other: "Couldn't unpin {{count}} notes",
+	/** Activity toast — unpinning partly failed; {{count}} succeeded, {{failed}} failed */
+	notesUnpinPartial_one: "Unpinned {{count}} note, {{failed}} failed",
+	/** Activity toast — unpinning partly failed; {{count}} succeeded, {{failed}} failed */
+	notesUnpinPartial_other: "Unpinned {{count}} notes, {{failed}} failed",
+	/** Activity toast — adding to favorites running; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
+	notesFavoriteRunning_one: "Adding {{name}} to favorites",
+	/** Activity toast — adding to favorites running; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesFavoriteRunning_other: "Adding {{count}} notes to favorites",
+	/** Activity toast — adding to favorites finished; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
+	notesFavoriteDone_one: "Added {{name}} to favorites",
+	/** Activity toast — adding to favorites finished; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesFavoriteDone_other: "Added {{count}} notes to favorites",
+	/** Activity toast — adding to favorites failed for every note; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
+	notesFavoriteFailed_one: "Couldn't add {{name}} to favorites",
+	/** Activity toast — adding to favorites failed for every note; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesFavoriteFailed_other: "Couldn't add {{count}} notes to favorites",
+	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
+	notesFavoritePartial_one: "Added {{count}} note to favorites, {{failed}} failed",
+	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
+	notesFavoritePartial_other: "Added {{count}} notes to favorites, {{failed}} failed",
+	/** Activity toast — removing from favorites running; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteRunning_one: "Removing {{name}} from favorites",
+	/** Activity toast — removing from favorites running; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteRunning_other: "Removing {{count}} notes from favorites",
+	/** Activity toast — removing from favorites finished; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteDone_one: "Removed {{name}} from favorites",
+	/** Activity toast — removing from favorites finished; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteDone_other: "Removed {{count}} notes from favorites",
+	/** Activity toast — removing from favorites failed for every note; one note named ({{name}}); also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteFailed_one: "Couldn't remove {{name}} from favorites",
+	/** Activity toast — removing from favorites failed for every note; {{count}} notes; also a tag's favorite toggle, naming the tag */
+	notesUnfavoriteFailed_other: "Couldn't remove {{count}} notes from favorites",
+	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
+	notesUnfavoritePartial_one: "Removed {{count}} note from favorites, {{failed}} failed",
+	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed; also a tag's favorite toggle, naming the tag */
+	notesUnfavoritePartial_other: "Removed {{count}} notes from favorites, {{failed}} failed",
+	/** Activity toast — duplicating running; one note named ({{name}}) */
+	notesDuplicateRunning_one: "Duplicating {{name}}",
+	/** Activity toast — duplicating running; {{count}} notes */
+	notesDuplicateRunning_other: "Duplicating {{count}} notes",
+	/** Activity toast — duplicating finished; one note named ({{name}}) */
+	notesDuplicateDone_one: "Duplicated {{name}}",
+	/** Activity toast — duplicating finished; {{count}} notes */
+	notesDuplicateDone_other: "Duplicated {{count}} notes",
+	/** Activity toast — duplicating failed for every note; one note named ({{name}}) */
+	notesDuplicateFailed_one: "Couldn't duplicate {{name}}",
+	/** Activity toast — duplicating failed for every note; {{count}} notes */
+	notesDuplicateFailed_other: "Couldn't duplicate {{count}} notes",
+	/** Activity toast — duplicating partly failed; {{count}} succeeded, {{failed}} failed */
+	notesDuplicatePartial_one: "Duplicated {{count}} note, {{failed}} failed",
+	/** Activity toast — duplicating partly failed; {{count}} succeeded, {{failed}} failed */
+	notesDuplicatePartial_other: "Duplicated {{count}} notes, {{failed}} failed",
+	/** Activity toast — changing the type running; one note named ({{name}}); {{type}} = the new type's label */
+	notesChangeTypeRunning_one: "Changing {{name}} to {{type}}",
+	/** Activity toast — changing the type running; {{count}} notes; {{type}} = the new type's label */
+	notesChangeTypeRunning_other: "Changing {{count}} notes to {{type}}",
+	/** Activity toast — changing the type finished; one note named ({{name}}); {{type}} = the new type's label */
+	notesChangeTypeDone_one: "Changed {{name}} to {{type}}",
+	/** Activity toast — changing the type finished; {{count}} notes; {{type}} = the new type's label */
+	notesChangeTypeDone_other: "Changed {{count}} notes to {{type}}",
+	/** Activity toast — changing the type failed for every note; one note named ({{name}}); {{type}} = the new type's label */
+	notesChangeTypeFailed_one: "Couldn't change {{name}} to {{type}}",
+	/** Activity toast — changing the type failed for every note; {{count}} notes; {{type}} = the new type's label */
+	notesChangeTypeFailed_other: "Couldn't change {{count}} notes to {{type}}",
+	/** Activity toast — changing the type partly failed; {{count}} succeeded, {{failed}} failed; {{type}} = the new type's label */
+	notesChangeTypePartial_one: "Changed {{count}} note to {{type}}, {{failed}} failed",
+	/** Activity toast — changing the type partly failed; {{count}} succeeded, {{failed}} failed; {{type}} = the new type's label */
+	notesChangeTypePartial_other: "Changed {{count}} notes to {{type}}, {{failed}} failed",
+	/** Activity toast — adding a tag running; one note named ({{name}}); {{tag}} = the tag's name */
+	notesTagRunning_one: "Tagging {{name}} with {{tag}}",
+	/** Activity toast — adding a tag running; {{count}} notes; {{tag}} = the tag's name */
+	notesTagRunning_other: "Tagging {{count}} notes with {{tag}}",
+	/** Activity toast — adding a tag finished; one note named ({{name}}); {{tag}} = the tag's name */
+	notesTagDone_one: "Tagged {{name}} with {{tag}}",
+	/** Activity toast — adding a tag finished; {{count}} notes; {{tag}} = the tag's name */
+	notesTagDone_other: "Tagged {{count}} notes with {{tag}}",
+	/** Activity toast — adding a tag failed for every note; one note named ({{name}}); {{tag}} = the tag's name */
+	notesTagFailed_one: "Couldn't tag {{name}} with {{tag}}",
+	/** Activity toast — adding a tag failed for every note; {{count}} notes; {{tag}} = the tag's name */
+	notesTagFailed_other: "Couldn't tag {{count}} notes with {{tag}}",
+	/** Activity toast — adding a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
+	notesTagPartial_one: "Tagged {{count}} note with {{tag}}, {{failed}} failed",
+	/** Activity toast — adding a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
+	notesTagPartial_other: "Tagged {{count}} notes with {{tag}}, {{failed}} failed",
+	/** Activity toast — removing a tag running; one note named ({{name}}); {{tag}} = the tag's name */
+	notesUntagRunning_one: "Removing {{tag}} from {{name}}",
+	/** Activity toast — removing a tag running; {{count}} notes; {{tag}} = the tag's name */
+	notesUntagRunning_other: "Removing {{tag}} from {{count}} notes",
+	/** Activity toast — removing a tag finished; one note named ({{name}}); {{tag}} = the tag's name */
+	notesUntagDone_one: "Removed {{tag}} from {{name}}",
+	/** Activity toast — removing a tag finished; {{count}} notes; {{tag}} = the tag's name */
+	notesUntagDone_other: "Removed {{tag}} from {{count}} notes",
+	/** Activity toast — removing a tag failed for every note; one note named ({{name}}); {{tag}} = the tag's name */
+	notesUntagFailed_one: "Couldn't remove {{tag}} from {{name}}",
+	/** Activity toast — removing a tag failed for every note; {{count}} notes; {{tag}} = the tag's name */
+	notesUntagFailed_other: "Couldn't remove {{tag}} from {{count}} notes",
+	/** Activity toast — removing a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
+	notesUntagPartial_one: "Removed {{tag}} from {{count}} note, {{failed}} failed",
+	/** Activity toast — removing a tag partly failed; {{count}} succeeded, {{failed}} failed; {{tag}} = the tag's name */
+	notesUntagPartial_other: "Removed {{tag}} from {{count}} notes, {{failed}} failed",
+	/** Activity toast — archiving running; one note named ({{name}}) */
+	notesArchiveRunning_one: "Archiving {{name}}",
+	/** Activity toast — archiving running; {{count}} notes */
+	notesArchiveRunning_other: "Archiving {{count}} notes",
+	/** Activity toast — archiving finished; one note named ({{name}}) */
+	notesArchiveDone_one: "Archived {{name}}",
+	/** Activity toast — archiving finished; {{count}} notes */
+	notesArchiveDone_other: "Archived {{count}} notes",
+	/** Activity toast — archiving failed for every note; one note named ({{name}}) */
+	notesArchiveFailed_one: "Couldn't archive {{name}}",
+	/** Activity toast — archiving failed for every note; {{count}} notes */
+	notesArchiveFailed_other: "Couldn't archive {{count}} notes",
+	/** Activity toast — archiving partly failed; {{count}} succeeded, {{failed}} failed */
+	notesArchivePartial_one: "Archived {{count}} note, {{failed}} failed",
+	/** Activity toast — archiving partly failed; {{count}} succeeded, {{failed}} failed */
+	notesArchivePartial_other: "Archived {{count}} notes, {{failed}} failed",
+	/** Activity toast — restoring from archive or trash running; one note named ({{name}}) */
+	notesRestoreRunning_one: "Restoring {{name}}",
+	/** Activity toast — restoring from archive or trash running; {{count}} notes */
+	notesRestoreRunning_other: "Restoring {{count}} notes",
+	/** Activity toast — restoring from archive or trash finished; one note named ({{name}}) */
+	notesRestoreDone_one: "Restored {{name}}",
+	/** Activity toast — restoring from archive or trash finished; {{count}} notes */
+	notesRestoreDone_other: "Restored {{count}} notes",
+	/** Activity toast — restoring from archive or trash failed for every note; one note named ({{name}}) */
+	notesRestoreFailed_one: "Couldn't restore {{name}}",
+	/** Activity toast — restoring from archive or trash failed for every note; {{count}} notes */
+	notesRestoreFailed_other: "Couldn't restore {{count}} notes",
+	/** Activity toast — restoring from archive or trash partly failed; {{count}} succeeded, {{failed}} failed */
+	notesRestorePartial_one: "Restored {{count}} note, {{failed}} failed",
+	/** Activity toast — restoring from archive or trash partly failed; {{count}} succeeded, {{failed}} failed */
+	notesRestorePartial_other: "Restored {{count}} notes, {{failed}} failed",
+	/** Activity toast — moving to trash running; one note named ({{name}}) */
+	notesTrashRunning_one: "Moving {{name}} to trash",
+	/** Activity toast — moving to trash running; {{count}} notes */
+	notesTrashRunning_other: "Moving {{count}} notes to trash",
+	/** Activity toast — moving to trash finished; one note named ({{name}}) */
+	notesTrashDone_one: "Moved {{name}} to trash",
+	/** Activity toast — moving to trash finished; {{count}} notes */
+	notesTrashDone_other: "Moved {{count}} notes to trash",
+	/** Activity toast — moving to trash failed for every note; one note named ({{name}}) */
+	notesTrashFailed_one: "Couldn't move {{name}} to trash",
+	/** Activity toast — moving to trash failed for every note; {{count}} notes */
+	notesTrashFailed_other: "Couldn't move {{count}} notes to trash",
+	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
+	notesTrashPartial_one: "Moved {{count}} note to trash, {{failed}} failed",
+	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
+	notesTrashPartial_other: "Moved {{count}} notes to trash, {{failed}} failed",
+	/** Activity toast — deleting permanently running; one note named ({{name}}) */
+	notesDeletePermanentlyRunning_one: "Deleting {{name}}",
+	/** Activity toast — deleting permanently running; {{count}} notes */
+	notesDeletePermanentlyRunning_other: "Deleting {{count}} notes",
+	/** Activity toast — deleting permanently finished; one note named ({{name}}) */
+	notesDeletePermanentlyDone_one: "Deleted {{name}}",
+	/** Activity toast — deleting permanently finished; {{count}} notes */
+	notesDeletePermanentlyDone_other: "Deleted {{count}} notes",
+	/** Activity toast — deleting permanently failed for every note; one note named ({{name}}) */
+	notesDeletePermanentlyFailed_one: "Couldn't delete {{name}}",
+	/** Activity toast — deleting permanently failed for every note; {{count}} notes */
+	notesDeletePermanentlyFailed_other: "Couldn't delete {{count}} notes",
+	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
+	notesDeletePermanentlyPartial_one: "Deleted {{count}} note, {{failed}} failed",
+	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
+	notesDeletePermanentlyPartial_other: "Deleted {{count}} notes, {{failed}} failed",
+	/** Activity toast — leaving shared notes running; one note named ({{name}}) */
+	notesLeaveRunning_one: "Leaving {{name}}",
+	/** Activity toast — leaving shared notes running; {{count}} notes */
+	notesLeaveRunning_other: "Leaving {{count}} notes",
+	/** Activity toast — leaving shared notes finished; one note named ({{name}}) */
+	notesLeaveDone_one: "Left {{name}}",
+	/** Activity toast — leaving shared notes finished; {{count}} notes */
+	notesLeaveDone_other: "Left {{count}} notes",
+	/** Activity toast — leaving shared notes failed for every note; one note named ({{name}}) */
+	notesLeaveFailed_one: "Couldn't leave {{name}}",
+	/** Activity toast — leaving shared notes failed for every note; {{count}} notes */
+	notesLeaveFailed_other: "Couldn't leave {{count}} notes",
+	/** Activity toast — leaving shared notes partly failed; {{count}} succeeded, {{failed}} failed */
+	notesLeavePartial_one: "Left {{count}} note, {{failed}} failed",
+	/** Activity toast — leaving shared notes partly failed; {{count}} succeeded, {{failed}} failed */
+	notesLeavePartial_other: "Left {{count}} notes, {{failed}} failed"
 } as const
