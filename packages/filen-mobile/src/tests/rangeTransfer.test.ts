@@ -182,7 +182,10 @@ describe("readAllBytes", () => {
 			return inner(offset, length)
 		}
 
-		expect(await readAllBytes(read, bytes.byteLength)).toEqual(bytes)
+		const result = await readAllBytes(read, bytes.byteLength)
+
+		// Compared as bytes: an element-wise deep equal over megabytes takes seconds.
+		expect(result !== null && Buffer.compare(result, bytes) === 0).toBe(true)
 		expect(lengths).toEqual([MAX_RANGE_LENGTH, MAX_RANGE_LENGTH, 3])
 	})
 
