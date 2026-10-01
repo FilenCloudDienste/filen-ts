@@ -201,8 +201,10 @@ export const generateVideoThumb: ThumbGenerator = async item => {
 		video.preload = "auto"
 		video.src = url
 
+		// Removing the attribute empties the element. `src = ""` instead resolves against the page, so
+		// Firefox loads the site root as media (and the service worker reports the failed load).
 		defer(() => {
-			video.src = ""
+			video.removeAttribute("src")
 			video.load()
 		})
 
