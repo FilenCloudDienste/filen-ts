@@ -145,7 +145,6 @@ describe("useDriveListboxNav — plain click", () => {
 		})
 		expect(selectedLabels()).toEqual(["b"])
 	})
-
 })
 
 describe("useDriveListboxNav — touch", () => {

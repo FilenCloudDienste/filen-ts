@@ -113,7 +113,9 @@ export function ChatRow({
 							// aria-current is a different fact from aria-selected (which lives on the option
 							// container): this is the routed conversation, not necessarily a selected one.
 							aria-current={selected ? "page" : undefined}
-							onClick={selectionAwareLinkClick((event: MouseEvent<HTMLAnchorElement>) => onPointerSelect(event, press.pointerType(event)))}
+							onClick={selectionAwareLinkClick((event: MouseEvent<HTMLAnchorElement>) =>
+								onPointerSelect(event, press.pointerType(event))
+							)}
 							className="flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
 							{/* Always rendered so the column never shifts; the count lives in its label. */}

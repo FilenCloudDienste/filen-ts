@@ -156,7 +156,6 @@ describe("isPlainClickDeselect", () => {
 		// A triple click is no different.
 		expect(isPlainClickDeselect([a], "a", 3)).toBe(false)
 	})
-
 })
 
 describe("clickPointerType", () => {

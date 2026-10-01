@@ -114,7 +114,9 @@ export function NoteRow({
 							// rows do the same). The multi-selection is a separate fact with no honest ARIA on a
 							// plain list item — it shows as the ring below, plus the bulk bar's own selected count.
 							aria-current={selected ? "page" : undefined}
-							onClick={selectionAwareLinkClick((event: MouseEvent<HTMLAnchorElement>) => onPointerSelect(event, press.pointerType(event)))}
+							onClick={selectionAwareLinkClick((event: MouseEvent<HTMLAnchorElement>) =>
+								onPointerSelect(event, press.pointerType(event))
+							)}
 							className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg text-left focus-ring-row outline-none"
 						>
 							<div className="flex shrink-0 flex-col items-center gap-1.5">

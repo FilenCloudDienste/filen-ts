@@ -384,7 +384,9 @@ describe("touch", () => {
 	function renderCell(kind: "row" | "tile", props: Partial<DriveRowProps>) {
 		const base = { ...sharedProps(dirItem("target"), false, () => undefined), ...props }
 
-		return render(kind === "row" ? createElement(DriveRow, { ...base, start: 0, directorySize: undefined }) : createElement(DriveTile, base))
+		return render(
+			kind === "row" ? createElement(DriveRow, { ...base, start: 0, directorySize: undefined }) : createElement(DriveTile, base)
+		)
 	}
 
 	beforeEach(() => {

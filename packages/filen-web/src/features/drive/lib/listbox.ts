@@ -143,7 +143,9 @@ export function touchTapIntent(pointerType: string, modifiers: ClickModifiers, s
 // selection gesture (a modified click, or a touch tap in selection mode): that click is preventDefaulted,
 // blocking both the router's SPA navigate and the browser's native open-in-new-tab. Any other click still
 // navigates.
-export function selectionAwareLinkClick<E extends { preventDefault: () => void }>(onPointerSelect: (event: E) => boolean): (event: E) => void {
+export function selectionAwareLinkClick<E extends { preventDefault: () => void }>(
+	onPointerSelect: (event: E) => boolean
+): (event: E) => void {
 	return event => {
 		if (onPointerSelect(event)) {
 			event.preventDefault()

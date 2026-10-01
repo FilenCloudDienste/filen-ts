@@ -19,7 +19,8 @@ beforeEach(() => {
 describeClickSelectionContract({
 	items: chats,
 	render: () =>
-		renderHook(() => useChatsListSelection({ chats, selectionCount: useChatsSelectionStore(state => state.selectedChats.length) })).result,
+		renderHook(() => useChatsListSelection({ chats, selectionCount: useChatsSelectionStore(state => state.selectedChats.length) }))
+			.result,
 	selected: () => useChatsSelectionStore.getState().selectedChats,
 	seed: selectedChats => {
 		useChatsSelectionStore.setState({ selectedChats })

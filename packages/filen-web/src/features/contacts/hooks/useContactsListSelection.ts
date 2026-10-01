@@ -24,7 +24,13 @@ export interface ContactsListSelection {
 	// silently retarget the cursor (drive's resolveCursorIndex, reused).
 	activeIndexFor: (section: ContactSectionKey, uuids: readonly string[]) => number
 	registerRowRef: (section: ContactSectionKey, uuid: string, element: HTMLDivElement | null) => void
-	handlePointerSelect: (section: ContactSectionKey, uuids: readonly string[], index: number, event: MouseEvent, pointerType: string) => void
+	handlePointerSelect: (
+		section: ContactSectionKey,
+		uuids: readonly string[],
+		index: number,
+		event: MouseEvent,
+		pointerType: string
+	) => void
 	// A Ctrl/Cmd+click's toggle, for a touch long-press.
 	toggleAt: (section: ContactSectionKey, uuids: readonly string[], index: number) => void
 	// Listbox-level key handling — bound on the section container, not per row (drive binds its own
@@ -86,7 +92,13 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 
 	// A contact opens nothing, so a plain touch tap toggles whether or not a selection exists — the touch
 	// model's selection-mode tap (touchTapIntent), which a lone mouse click replaces the selection with.
-	function handlePointerSelect(section: ContactSectionKey, uuids: readonly string[], index: number, event: MouseEvent, pointerType: string): void {
+	function handlePointerSelect(
+		section: ContactSectionKey,
+		uuids: readonly string[],
+		index: number,
+		event: MouseEvent,
+		pointerType: string
+	): void {
 		const uuid = uuids[index]
 
 		if (uuid === undefined) {

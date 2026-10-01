@@ -104,7 +104,6 @@ describe("photosPointerSelect — plain click", () => {
 
 		expect(uuidsOf(usePhotosStore.getState().selectedItems)).toEqual([b.data.uuid])
 	})
-
 })
 
 describe("photosToggleSelect — a touch long-press or selection-mode tap", () => {

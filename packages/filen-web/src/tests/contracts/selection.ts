@@ -130,7 +130,12 @@ export interface ClickSelectionContract<T> {
 
 export function describeClickSelectionContract<T>({ items, render, selected, seed }: ClickSelectionContract<T>): void {
 	// Whether the click was taken as a selection gesture (so a row's Link must not navigate).
-	function click(result: { readonly current: ListPointerSelection }, index: number, event: ReactMouseEvent, pointerType = "mouse"): boolean {
+	function click(
+		result: { readonly current: ListPointerSelection },
+		index: number,
+		event: ReactMouseEvent,
+		pointerType = "mouse"
+	): boolean {
 		let gesture = false
 
 		act(() => {
