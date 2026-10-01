@@ -391,7 +391,7 @@ describe("defaultDownloadDeps.download — sw branch", () => {
 
 		await defaultDownloadDeps.download(file, "transfer-id", save, vi.fn())
 
-		expect(triggerSwDownloadMock).toHaveBeenCalledWith(file, save)
+		expect(triggerSwDownloadMock).toHaveBeenCalledWith(file, save, "transfer-id", expect.any(Function))
 		expect(downloadFileToWriter).not.toHaveBeenCalled()
 	})
 })

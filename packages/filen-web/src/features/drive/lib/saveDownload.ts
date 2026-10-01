@@ -1,15 +1,20 @@
 import type { AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
 import { isAbortError } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
+import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import {
 	SW_DOWNLOAD_PREFIX,
+	SW_DOWNLOAD_STALL_MS,
 	SW_ERROR_NO_CLIENT,
+	SW_MSG_CANCEL_DOWNLOAD,
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
-	SW_REQUEST_TIMEOUT_MS
+	SW_MSG_WATCH_DOWNLOAD,
+	SW_REQUEST_TIMEOUT_MS,
+	type SwDownloadStatus
 } from "@/lib/sw/protocol"
 
 // The disk mechanism a download writes to, picked once per saveDownload() call by capability —
@@ -196,26 +201,115 @@ export async function saveDownload(suggestedName: string): Promise<SaveTarget> {
 	return prepareSwTarget(suggestedName)
 }
 
+// The row's Cancel for a download the service worker streams: the page's own SDK isn't running it, so
+// cancelTransfers (features/transfers/lib/control.ts) asks here first. Keyed by transfer id.
+const swDownloadCancels = new Map<string, () => void>()
+
+// True when the transfer is a service-worker download, whose cancel has now been sent.
+export function cancelSwDownload(transferId: string): boolean {
+	const cancel = swDownloadCancels.get(transferId)
+
+	cancel?.()
+
+	return cancel !== undefined
+}
+
+// Starts a registered download and settles when the service worker reports how it ended: the browser's
+// download manager owns the save from the navigation on, so without this a failed or cancelled download
+// would read as finished. Rejects with the reported ErrorDTO (kind "Cancelled" for a cancel from the row
+// or from the browser's own download UI), or once the worker has been silent for SW_DOWNLOAD_STALL_MS — it
+// repeats its progress while streaming, so silence means the browser terminated it.
+async function startWatchedSwDownload(
+	save: SwSaveTarget,
+	transferId: string,
+	onProgress: (bytes: number, total: number | null) => void
+): Promise<void> {
+	// An uncontrolled page (after a hard reload) would send the navigation to the network, which answers it
+	// with the app itself in place of a file.
+	if (navigator.serviceWorker.controller === null) {
+		throw new Error("downloads need the page reloaded")
+	}
+
+	const target = await activeServiceWorker()
+	const channel = new MessageChannel()
+
+	const outcome = new Promise<void>((resolve, reject) => {
+		let stall: ReturnType<typeof setTimeout> | undefined
+
+		function finish(): void {
+			clearTimeout(stall)
+			channel.port1.close()
+			swDownloadCancels.delete(transferId)
+		}
+
+		function armStall(): void {
+			clearTimeout(stall)
+			stall = setTimeout(() => {
+				finish()
+				reject(new Error("the download stopped responding"))
+			}, SW_DOWNLOAD_STALL_MS)
+		}
+
+		channel.port1.onmessage = (event: MessageEvent<SwDownloadStatus>) => {
+			const status = event.data
+
+			if (status.type === "progress") {
+				armStall()
+				onProgress(status.bytes, status.total)
+
+				return
+			}
+
+			finish()
+
+			if (status.type === "done") {
+				resolve()
+			} else {
+				reject(new ErrorWithDTO(status.error))
+			}
+		}
+
+		swDownloadCancels.set(transferId, () => {
+			target.postMessage({ type: SW_MSG_CANCEL_DOWNLOAD, id: save.id })
+		})
+		armStall()
+	})
+
+	target.postMessage({ type: SW_MSG_WATCH_DOWNLOAD, id: save.id }, [channel.port2])
+
+	// Starts a download, not a page change: the leave-page prompt must stay out of it.
+	allowNextUnload()
+	window.location.href = save.url
+
+	await outcome
+}
+
 // Finalizes a "sw" SaveTarget once the concrete file is known: registers it against the token
 // saveDownload minted (SW_MSG_REGISTER_DOWNLOAD), then triggers a PLAIN navigation — never `<a
 // download>`, which bypasses the controlling service worker entirely (verified empirically: the
 // download attribute routes the request through the browser's own download manager, never through
 // this origin's SW). The SW's Content-Disposition: attachment response turns the navigation into a
 // browser-native file save without actually leaving the page.
-export async function triggerSwDownload(file: AnyFile, save: SwSaveTarget): Promise<void> {
+export async function triggerSwDownload(
+	file: AnyFile,
+	save: SwSaveTarget,
+	transferId: string,
+	onProgress: (bytes: number) => void
+): Promise<void> {
 	await registerWithSw(SW_MSG_REGISTER_DOWNLOAD, { id: save.id, file, name: save.name, size: Number(file.size) })
-
-	// Starts a download, not a page change: the leave-page prompt must stay out of it.
-	allowNextUnload()
-	window.location.href = save.url
+	await startWatchedSwDownload(save, transferId, bytes => {
+		onProgress(bytes)
+	})
 }
 
 // Zip flavor of triggerSwDownload above — same registration-then-plain-navigation shape, just a
 // different message type and no `size` (a zip's total isn't known until the SW streams it).
-export async function triggerSwZipDownload(items: AnyItemWithContext[], save: SwSaveTarget): Promise<void> {
+export async function triggerSwZipDownload(
+	items: AnyItemWithContext[],
+	save: SwSaveTarget,
+	transferId: string,
+	onProgress: (bytesWritten: number, totalBytes: number | null) => void
+): Promise<void> {
 	await registerWithSw(SW_MSG_REGISTER_ZIP_DOWNLOAD, { id: save.id, items, name: save.name })
-
-	// Starts a download, not a page change: the leave-page prompt must stay out of it.
-	allowNextUnload()
-	window.location.href = save.url
+	await startWatchedSwDownload(save, transferId, onProgress)
 }

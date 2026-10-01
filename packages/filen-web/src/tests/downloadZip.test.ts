@@ -432,7 +432,7 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 
 	// The sw hand-off resolves once the navigation is issued, with no progress and no size: a row there
 	// could only claim a finished "0 B" download while the SW is still streaming.
-	it("adds no transfer row on the sw path, handing the zip to the browser's download manager", async () => {
+	it("gives a sw zip a browser-managed row that settles on the worker's report", async () => {
 		const h = makeHarness()
 		const save: SwSaveTarget = { kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "Documents.zip" }
 		saveDownloadMock.mockResolvedValue(save)
@@ -443,11 +443,11 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 
 		expect(outcome).toEqual({ status: "success" })
 		expect(h.downloadZip).toHaveBeenCalledWith(narrowToSdkItems(items), expect.any(String), save, expect.any(Function))
-		expect(h.add).not.toHaveBeenCalled()
-		expect(h.settle).not.toHaveBeenCalled()
+		expect(h.add).toHaveBeenCalledWith(expect.objectContaining({ name: "Documents.zip", browserManaged: true }))
+		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "done")
 	})
 
-	it("returns an error outcome without a row when the sw hand-off rejects", async () => {
+	it("settles a sw zip the worker reports failed as an error, not done", async () => {
 		const h = makeHarness()
 		const dto = sdkDto("Timeout")
 		saveDownloadMock.mockResolvedValue({ kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "Documents.zip" })
@@ -456,7 +456,8 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 		const outcome = await runZipDownload(h.deps, { items: [dirItem()], suggestedName: "Documents.zip" })
 
 		expect(outcome).toEqual({ status: "error", dto })
-		expect(h.add).not.toHaveBeenCalled()
+		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
+		expect(h.settle).not.toHaveBeenCalledWith(expect.any(String), "done")
 	})
 
 	it("returns an error outcome (not a no-op) when saveDownload rejects for a real reason", async () => {
@@ -550,7 +551,7 @@ describe("defaultZipDownloadDeps.downloadZip — sw branch", () => {
 
 		await defaultZipDownloadDeps.downloadZip(items, "transfer-id", save, vi.fn())
 
-		expect(triggerSwZipDownloadMock).toHaveBeenCalledWith(items, save)
+		expect(triggerSwZipDownloadMock).toHaveBeenCalledWith(items, save, "transfer-id", expect.any(Function))
 		expect(downloadItemsToZip).not.toHaveBeenCalled()
 	})
 

@@ -18,9 +18,13 @@ import {
 	SW_MSG_REGISTER_PREVIEW,
 	SW_ERROR_NO_CLIENT,
 	SW_MSG_LOGOUT,
+	SW_MSG_WATCH_DOWNLOAD,
+	SW_MSG_CANCEL_DOWNLOAD,
 	isAllowedInlineContentType
 } from "@/lib/sw/protocol"
 import { PendingRegistry } from "@/lib/sw/pendingRegistry"
+import { DownloadReporter, type ReportedStream } from "@/lib/sw/downloadReporter"
+import { plainErrorDTO, toErrorDTO } from "@/lib/sdk/errors"
 import { contentDispositionAttachment } from "@/lib/filename"
 import { log } from "@/lib/log"
 
@@ -63,6 +67,8 @@ type PendingDownload = PendingFileDownload | PendingZipDownload | PendingPreview
 // update through a running save would truncate that download.
 const MAX_PENDING_DOWNLOADS = 32
 const downloads = new PendingRegistry<PendingDownload>(MAX_PENDING_DOWNLOADS)
+// How each attachment download ended, for the page that started it (downloadReporter.ts).
+const reporter = new DownloadReporter(MAX_PENDING_DOWNLOADS)
 
 function ensureSdkInit(): Promise<void> {
 	sdkReady ??= initSdk().then(() => undefined)
@@ -163,6 +169,62 @@ function parseRange(header: string, total: number): { start: number; end: number
 	return { start, end }
 }
 
+// A watched download's Response body: the TransformStream's readable, passed through so the worker sees
+// the browser cancel it (the user aborting in the browser's download UI), and can fail it at once when
+// the page cancels instead of waiting for the SDK's next write to notice.
+function watchedBody(readable: ReadableStream<Uint8Array>): {
+	body: ReadableStream<Uint8Array>
+	cancelledByBrowser: () => boolean
+	fail: (reason: unknown) => void
+} {
+	const reader = readable.getReader()
+	let cancelled = false
+	let control: ReadableStreamDefaultController<Uint8Array> | null = null
+
+	const body = new ReadableStream<Uint8Array>(
+		{
+			start(controller) {
+				control = controller
+			},
+			async pull(controller) {
+				const { done, value } = await reader.read()
+
+				if (done) {
+					controller.close()
+				} else {
+					controller.enqueue(value)
+				}
+			},
+			cancel(reason) {
+				cancelled = true
+
+				return reader.cancel(reason)
+			}
+		},
+		{ highWaterMark: 0 }
+	)
+
+	return {
+		body,
+		cancelledByBrowser: () => cancelled,
+		fail: reason => {
+			try {
+				control?.error(reason)
+			} catch {
+				// Already closed or errored.
+			}
+
+			// Errors the writable the SDK writes into, so it stops too.
+			reader.cancel(reason).catch(() => undefined)
+		}
+	}
+}
+
+// The outcome a failed watched stream reports: a cancel from either side is not a failure to show.
+function failedOutcome(e: unknown, cancelled: boolean): { type: "failed"; error: ReturnType<typeof toErrorDTO> } {
+	return { type: "failed", error: cancelled ? plainErrorDTO("download cancelled", "Cancelled") : toErrorDTO(e) }
+}
+
 // Pumps `run` into a Response the caller has ALREADY built: constructing it validates every header value
 // as a ByteString and can throw synchronously, and counting the stream first would leave the in-flight
 // count stuck above zero (the finally never runs because nothing consumes the readable), permanently
@@ -179,7 +241,8 @@ function pumpToResponse(
 	id: string,
 	client: SwClient,
 	writable: WritableStream<Uint8Array>,
-	run: () => Promise<void>
+	run: () => Promise<void>,
+	watch: { stream: ReportedStream; cancelledByBrowser: () => boolean } | null = null
 ): void {
 	downloads.beginStream(id)
 	retainClient(client)
@@ -187,8 +250,10 @@ function pumpToResponse(
 		(async () => {
 			try {
 				await run()
-			} catch {
+				watch?.stream.end({ type: "done" })
+			} catch (e) {
 				await writable.abort().catch(() => undefined)
+				watch?.stream.end(failedOutcome(e, watch.stream.cancelRequested || watch.cancelledByBrowser()))
 			} finally {
 				downloads.endStream(id)
 				releaseClient(client)
@@ -203,9 +268,10 @@ function pumpToResponse(
 // either). Otherwise mirrors the file branch's streaming/failure contract exactly.
 function handleZipDownload(event: FetchEvent, id: string, pending: PendingZipDownload, client: SwClient): Response {
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+	const watched = watchedBody(readable)
 
 	// Built BEFORE pumpToResponse counts the stream (see there).
-	const response = new Response(readable, {
+	const response = new Response(watched.body, {
 		status: 200,
 		headers: {
 			"Content-Type": "application/zip",
@@ -214,10 +280,30 @@ function handleZipDownload(event: FetchEvent, id: string, pending: PendingZipDow
 		}
 	})
 
-	// progress is a no-op: nothing page-side reads it, the browser's own download manager owns the save
-	// from here. This route carries no Content-Length (a generated archive's total isn't known), so a
-	// truncated body looks like a COMPLETE download — which is why the pump's waitUntil matters here.
-	pumpToResponse(event, id, client, writable, () => client.downloadItemsToZip(pending.items, writable, () => undefined, {}))
+	// This route carries no Content-Length (a generated archive's total isn't known), so a truncated body
+	// looks like a COMPLETE download to the browser — which is why the pump's waitUntil matters here, and
+	// why the page hears the outcome from the reporter rather than from the browser.
+	const stream = reporter.begin(id)
+
+	stream.onCancelRequest(() => {
+		watched.fail(new Error("download cancelled"))
+	})
+	pumpToResponse(
+		event,
+		id,
+		client,
+		writable,
+		() =>
+			client.downloadItemsToZip(
+				pending.items,
+				writable,
+				(bytesWritten, totalBytes) => {
+					stream.progress(Number(bytesWritten), Number(totalBytes))
+				},
+				{}
+			),
+		{ stream, cancelledByBrowser: watched.cancelledByBrowser }
+	)
 
 	return response
 }
@@ -238,7 +324,8 @@ function streamFileRange(
 	id: string,
 	pending: { file: SwAnyFile; size: number },
 	client: SwClient,
-	headers: { contentType: string; disposition: string | null; sandbox?: boolean }
+	headers: { contentType: string; disposition: string | null; sandbox?: boolean },
+	reported: boolean
 ): Response {
 	const total = pending.size
 	const rangeHeader = event.request.headers.get("Range")
@@ -252,6 +339,9 @@ function streamFileRange(
 	const length = end - start + 1
 
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
+	// Only the whole file is the download; a ranged request is a probe or a seek.
+	const watched = reported && start === 0 && end === total - 1 ? watchedBody(readable) : null
+	const body = watched?.body ?? readable
 
 	const responseHeaders: Record<string, string> = {
 		"Content-Type": headers.contentType,
@@ -269,11 +359,11 @@ function streamFileRange(
 	if (range !== null) {
 		responseHeaders["Content-Range"] = `bytes ${String(start)}-${String(end)}/${String(total)}`
 		responseHeaders["Content-Length"] = String(length)
-		response = new Response(readable, { status: 206, headers: responseHeaders })
+		response = new Response(body, { status: 206, headers: responseHeaders })
 	} else {
 		responseHeaders["Content-Length"] = String(total)
 		responseHeaders["Accept-Ranges"] = "bytes"
-		response = new Response(readable, { status: 200, headers: responseHeaders })
+		response = new Response(body, { status: 200, headers: responseHeaders })
 	}
 
 	// Stream the decrypted bytes straight into the Response body's writable end. `end` is EXCLUSIVE on
@@ -282,15 +372,31 @@ function streamFileRange(
 	// download must survive repeated GETs. There is no page-side completion signal either, so nothing
 	// ever evicts it on finish — retention is bounded instead (PendingRegistry), which still respects
 	// Safari's repeated-GET need for any recent entry.
-	pumpToResponse(event, id, client, writable, () =>
-		client.downloadFileToWriter({
-			file: pending.file,
-			writer: writable,
-			// progress is REQUIRED at runtime despite `progress?:` in the .d.ts (omitting it rejects the
-			// wasm call mid-stream — same gotcha as the streaming upload).
-			progress: () => undefined,
-			...(range !== null ? { start: BigInt(start), end: BigInt(end + 1) } : {})
+	const stream = watched === null ? null : reporter.begin(id)
+
+	if (watched !== null && stream !== null) {
+		stream.onCancelRequest(() => {
+			watched.fail(new Error("download cancelled"))
 		})
+	}
+
+	pumpToResponse(
+		event,
+		id,
+		client,
+		writable,
+		() =>
+			client.downloadFileToWriter({
+				file: pending.file,
+				writer: writable,
+				// progress is REQUIRED at runtime despite `progress?:` in the .d.ts (omitting it rejects the
+				// wasm call mid-stream — same gotcha as the streaming upload).
+				progress: bytes => {
+					stream?.progress(Number(bytes), total)
+				},
+				...(range !== null ? { start: BigInt(start), end: BigInt(end + 1) } : {})
+			}),
+		watched === null || stream === null ? null : { stream, cancelledByBrowser: watched.cancelledByBrowser }
 	)
 
 	return response
@@ -319,17 +425,17 @@ function handleDownload(event: FetchEvent, url: URL): Response {
 	}
 
 	if (pending.kind === "file") {
-		return streamFileRange(event, id, pending, client, attachmentHeaders(pending.name))
+		return streamFileRange(event, id, pending, client, attachmentHeaders(pending.name), true)
 	}
 
 	// "preview": defense-in-depth re-validation — never trust the page's own registration call alone.
 	// An unrecognized contentType degrades to the same forced-attachment response as a plain file
 	// download rather than ever serving an unvalidated Content-Type inline.
 	if (!isAllowedInlineContentType(pending.contentType)) {
-		return streamFileRange(event, id, pending, client, attachmentHeaders(pending.name))
+		return streamFileRange(event, id, pending, client, attachmentHeaders(pending.name), false)
 	}
 
-	return streamFileRange(event, id, pending, client, { contentType: pending.contentType, disposition: null, sandbox: true })
+	return streamFileRange(event, id, pending, client, { contentType: pending.contentType, disposition: null, sandbox: true }, false)
 }
 
 // A registration is only worth anything with a session Client to stream it: an idle-terminated worker
@@ -361,6 +467,20 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 	}
 
 	const port = event.ports[0] ?? null
+
+	if (type === SW_MSG_WATCH_DOWNLOAD) {
+		const id = (event.data as { id: string }).id
+
+		if (port !== null) {
+			reporter.attach(id, port, downloads.get(id) !== undefined)
+		}
+		return
+	}
+
+	if (type === SW_MSG_CANCEL_DOWNLOAD) {
+		reporter.cancel((event.data as { id: string }).id)
+		return
+	}
 
 	if (type === SW_MSG_INIT_CLIENT) {
 		const blob = (event.data as { blob: SwStringifiedClient }).blob
@@ -417,6 +537,7 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 		logoutEpoch++
 		swClient = null
 		downloads.clear()
+		reporter.clear()
 		retireClient(previous)
 		port?.postMessage({ ok: true })
 	}

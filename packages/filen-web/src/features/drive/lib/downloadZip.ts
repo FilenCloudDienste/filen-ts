@@ -60,19 +60,6 @@ export async function runZipDownload(
 		return { status: "error", dto: asErrorDTO(e) }
 	}
 
-	// The sw hand-off gets no row: it resolves once the navigation is issued, long before the SW has
-	// streamed a byte, reports no progress and knows no size up front, so a row could only read
-	// "Downloaded · 0 B" at once. The browser's own download manager shows that transfer.
-	if (save.kind === "sw") {
-		try {
-			await runOp(deps.downloadZip(narrowToSdkItems(items), id, save, () => undefined))
-		} catch (e) {
-			return { status: "error", dto: asErrorDTO(e) }
-		}
-
-		return { status: "success" }
-	}
-
 	deps.store.add({
 		id,
 		direction: "download",
@@ -81,7 +68,8 @@ export async function runZipDownload(
 		bytesTransferred: 0,
 		status: "downloading",
 		parentUuid: null,
-		startedAt: Date.now()
+		startedAt: Date.now(),
+		...(save.kind === "sw" ? { browserManaged: true as const } : {})
 	})
 
 	const reportProgress = throttle((bytesWritten: bigint, totalBytes: bigint) => {
@@ -119,11 +107,16 @@ function downloadZipViaFsa(
 }
 
 // The real wiring behind RunZipDownloadDeps.downloadZip: fsa streams through the worker directly, sw
-// registers the AnyItemWithContext[] with the service worker and lets a plain navigation trigger the
-// browser's own download manager — mirrors download.ts's defaultDownloadDeps.download split exactly.
+// registers the AnyItemWithContext[] with the service worker, lets a plain navigation hand the save to
+// the browser's own download manager, and settles on the worker's report of it — mirrors download.ts's
+// defaultDownloadDeps.download split exactly.
 export const defaultZipDownloadDeps: RunZipDownloadDeps = {
 	downloadZip: (items, transferId, save, onProgress) =>
-		save.kind === "sw" ? triggerSwZipDownload(items, save) : downloadZipViaFsa(items, transferId, save, onProgress),
+		save.kind === "sw"
+			? triggerSwZipDownload(items, save, transferId, (bytesWritten, totalBytes) => {
+					onProgress(BigInt(bytesWritten), BigInt(totalBytes ?? 0), 0n, 0n)
+				})
+			: downloadZipViaFsa(items, transferId, save, onProgress),
 	store: useTransfersStore.getState()
 }
 

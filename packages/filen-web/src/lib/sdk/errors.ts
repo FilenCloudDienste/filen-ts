@@ -94,8 +94,29 @@ export function plainErrorDTO(message: string, kind?: string): ErrorDTO {
 // plain, structured-clone-safe ErrorDTO, so those pass through untouched — re-running toErrorDTO on
 // one would misclassify it as plain garbage (`String(dto)` → "[object Object]"). Everything else (a
 // live SDK error, a raw Error, a transport failure that never crossed the boundary) is normalized.
+function isErrorDTO(value: unknown): value is ErrorDTO {
+	return typeof value === "object" && value !== null && "species" in value && "label" in value
+}
+
 export function asErrorDTO(e: unknown): ErrorDTO {
-	return typeof e === "object" && e !== null && "species" in e && "label" in e ? (e as ErrorDTO) : toErrorDTO(e)
+	// Read by shape, not class: an ErrorWithDTO from another module instance carries the same dto.
+	if (e instanceof Error && "dto" in e && isErrorDTO(e.dto)) {
+		return e.dto
+	}
+
+	return isErrorDTO(e) ? e : toErrorDTO(e)
+}
+
+// An Error carrying a DTO built elsewhere (the service worker's report of a download it streamed), for a
+// rejection that has to be an Error but must reach the UI as that DTO, kind and label intact.
+export class ErrorWithDTO extends Error {
+	public readonly dto: ErrorDTO
+
+	public constructor(dto: ErrorDTO) {
+		super(dto.message)
+		this.name = dto.kind ?? "Error"
+		this.dto = dto
+	}
 }
 
 // resolveNormalDirParent's own thrown message (sdk.worker.ts) when a create/move/save target's parent

@@ -1,5 +1,5 @@
 import { statSync } from "node:fs"
-import type { Page } from "@playwright/test"
+import type { Page, Route } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { enterFixtureDirectory, FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { bootTo, clickSidebarLink, openTransfers, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
@@ -116,6 +116,34 @@ function readSmokeSink(page: Page): Promise<{ bytes: number; first4: number[] }>
 	return page.evaluate(() => window.__smokeSink)
 }
 
+// The service worker's own requests can only be routed in Chromium, which is what the service-worker
+// failure and cancel tests below need: the chunk requests the SDK makes from inside the worker are failed
+// after the first few, or each held back, so the download is still streaming when the test acts on it.
+async function routeChunkRequests(page: Page, handle: (route: Route, index: number) => Promise<void>): Promise<void> {
+	let index = 0
+
+	await page.context().route(
+		url => url.hostname.startsWith("egest.filen"),
+		async route => {
+			index++
+			await handle(route, index)
+		}
+	)
+}
+
+const SLOW_CHUNK_DELAY_MS = 400
+
+async function slowChunks(page: Page): Promise<void> {
+	await routeChunkRequests(page, async route => {
+		await new Promise<void>(resolve => {
+			setTimeout(resolve, SLOW_CHUNK_DELAY_MS)
+		})
+		await route.continue().catch(() => undefined)
+	})
+}
+
+const SW_ROUTING_CHROMIUM_ONLY = "routing a service worker's own requests needs Chromium"
+
 // The files these tests download live in the shared read-only fixture tree the fixtures-setup project
 // builds once per run (helpers/fixtures.ts), so nothing here uploads. That also retires the
 // "Clear finished" round trip every test used to make first: a transfer row's accessible name is just
@@ -210,11 +238,8 @@ test.describe("downloads", () => {
 		expect(download.suggestedFilename()).toBe(fileName)
 		expect(statSync(await download.path()).size).toBe(Buffer.byteLength(DOWNLOAD_SW_TEXT, "utf8"))
 
-		// The sw path is fire-and-forget once the navigation triggers (saveDownload.ts's
-		// triggerSwDownload; download.ts's runDownload sw branch has no per-byte progress to report,
-		// unlike the fsa branch) -- live-verified against runDownload's own settle call that the row
-		// still reaches Done for a file this size, so that is what this asserts, not an invented
-		// intermediate state.
+		// The row settles on the service worker's own report of the stream (saveDownload.ts's
+		// triggerSwDownload), so Downloaded here means the browser received the whole file.
 		await openTransfers(page)
 		// Scoped to this transfer's own row, not the first status line anywhere on the screen.
 		const swRow = page.getByRole("listitem", { name: fileName })
@@ -294,5 +319,109 @@ test.describe("downloads", () => {
 		// not just that this one specific row happens to still be there.
 		await expect(row).toBeVisible()
 		await expect(listbox.getByRole("option")).toHaveCount(optionCountBeforeCancel)
+	})
+
+	test("a service-worker download whose stream fails settles as Failed, never Downloaded", async ({ page, browserName }) => {
+		test.skip(browserName !== "chromium", SW_ROUTING_CHROMIUM_ONLY)
+		test.setTimeout(240_000)
+		await deleteFsaPicker(page)
+
+		await bootTo(page)
+
+		const [fileName] = FIXTURE_FILES["download-cancel"]
+
+		const {
+			rows: [row]
+		} = await openFixtureRows(page, "download-cancel")
+
+		// The first chunks stream, every later one fails: the download dies partway through.
+		await routeChunkRequests(page, async (route, index) => {
+			await (index <= 3 ? route.continue() : route.abort("failed")).catch(() => undefined)
+		})
+		await row.click()
+
+		const [download] = await Promise.all([
+			page.waitForEvent("download", { timeout: 60_000 }),
+			page.getByRole("button", { name: "Download", exact: true }).click()
+		])
+
+		expect(await download.failure()).not.toBeNull()
+
+		await openTransfers(page)
+
+		const transferRow = page.getByRole("listitem", { name: fileName })
+		await expect(transferRow.getByText(/^Failed · /)).toBeVisible({ timeout: 60_000 })
+		await expect(transferRow.getByText(/^Downloaded · /)).toHaveCount(0)
+	})
+
+	test("cancelling a service-worker download in the browser removes its row", async ({ page, browserName }) => {
+		test.skip(browserName !== "chromium", SW_ROUTING_CHROMIUM_ONLY)
+		test.setTimeout(240_000)
+		await deleteFsaPicker(page)
+
+		await bootTo(page)
+
+		const [fileName] = FIXTURE_FILES["download-cancel"]
+
+		const {
+			rows: [row]
+		} = await openFixtureRows(page, "download-cancel")
+
+		await slowChunks(page)
+		await row.click()
+
+		const [download] = await Promise.all([
+			page.waitForEvent("download", { timeout: 60_000 }),
+			page.getByRole("button", { name: "Download", exact: true }).click()
+		])
+
+		await openTransfers(page)
+
+		const progressbar = page.getByRole("progressbar", { name: fileName })
+		await expect(progressbar).toBeVisible()
+
+		// What the browser's own download UI does when the user aborts there.
+		await download.cancel()
+		expect(await download.failure()).toBe("canceled")
+
+		// A cancelled transfer keeps no history, wherever it was cancelled from.
+		await expect(progressbar).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(page.getByRole("listitem", { name: fileName })).toHaveCount(0)
+	})
+
+	test("the row's Cancel stops a service-worker download in the browser too", async ({ page, browserName }) => {
+		test.skip(browserName !== "chromium", SW_ROUTING_CHROMIUM_ONLY)
+		test.setTimeout(240_000)
+		await deleteFsaPicker(page)
+
+		await bootTo(page)
+
+		const [fileName] = FIXTURE_FILES["download-cancel"]
+
+		const {
+			rows: [row]
+		} = await openFixtureRows(page, "download-cancel")
+
+		await slowChunks(page)
+		await row.click()
+
+		const [download] = await Promise.all([
+			page.waitForEvent("download", { timeout: 60_000 }),
+			page.getByRole("button", { name: "Download", exact: true }).click()
+		])
+
+		await openTransfers(page)
+
+		const progressbar = page.getByRole("progressbar", { name: fileName })
+		await expect(progressbar).toBeVisible()
+		// The browser's download manager streams it, so there is nothing to pause.
+		await expect(page.getByRole("button", { name: "Pause", exact: true })).toHaveCount(0)
+
+		await page.getByRole("button", { name: "Cancel", exact: true }).click()
+		const confirmDialog = page.getByRole("alertdialog", { name: "Cancel transfer?" })
+		await confirmDialog.getByRole("button", { name: "Cancel", exact: true }).click()
+
+		await expect(progressbar).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		expect(await download.failure()).not.toBeNull()
 	})
 })

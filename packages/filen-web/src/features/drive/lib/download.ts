@@ -80,7 +80,8 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 		bytesTransferred: 0,
 		status: "downloading",
 		parentUuid: null,
-		startedAt: Date.now()
+		startedAt: Date.now(),
+		...(save.kind === "sw" ? { browserManaged: true as const } : {})
 	})
 
 	const reportProgress = throttle((bytes: bigint) => {
@@ -107,13 +108,16 @@ function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget, 
 }
 
 // The real wiring behind RunDownloadDeps.download: branches on SaveTarget.kind, applying
-// Comlink.transfer/Comlink.proxy on the fsa branch (mirrors defaultUploadDeps' Comlink.proxy wrap).
-// The sw branch has no per-byte progress to report — the browser's own download manager takes over
-// once the navigation triggers, invisible to page JS from that point on (same as a plain `<a
-// href="file">` download).
+// Comlink.transfer/Comlink.proxy on the fsa branch (mirrors defaultUploadDeps' Comlink.proxy wrap). The
+// sw branch settles on the service worker's own report of the stream, progress included
+// (saveDownload.ts's triggerSwDownload).
 export const defaultDownloadDeps: RunDownloadDeps = {
 	download: (file, transferId, save, onProgress) =>
-		save.kind === "fsa" ? downloadViaFsa(file, transferId, save, onProgress) : triggerSwDownload(file, save),
+		save.kind === "fsa"
+			? downloadViaFsa(file, transferId, save, onProgress)
+			: triggerSwDownload(file, save, transferId, bytes => {
+					onProgress(BigInt(bytes))
+				}),
 	cancel: transferId => {
 		void sdkApi.cancelTransfer(transferId)
 	},

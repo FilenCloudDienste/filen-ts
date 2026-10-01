@@ -1,8 +1,10 @@
+import type { ErrorDTO } from "@/lib/sdk/errors"
+
 // Single source of truth for the service worker's own contract — the version it reports at
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 7
+export const SW_PROTOCOL_VERSION = 8
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
@@ -39,6 +41,26 @@ export const SW_ERROR_NO_CLIENT = "no-client"
 // decrypted key material survives sign-out inside the worker. Sent (and acked) from runLogout before
 // the page reload.
 export const SW_MSG_LOGOUT = "FILEN_SW_LOGOUT"
+
+// page → SW, sent once a download is registered and before its navigation: `event.ports[0]` is the port the
+// SW reports that download's SwDownloadStatus on (no ack). The browser's download manager owns the save
+// once the navigation starts, so this is the page's only way to learn how it ended.
+export const SW_MSG_WATCH_DOWNLOAD = "FILEN_SW_WATCH_DOWNLOAD"
+// page → SW: cut a watched download's stream off (the transfer row's Cancel). Reported back as a
+// Cancelled failure.
+export const SW_MSG_CANCEL_DOWNLOAD = "FILEN_SW_CANCEL_DOWNLOAD"
+
+// What the SW reports on a watched download's port. `total` is null while unknown (a zip's grows as the
+// SDK walks its items). A cancel, from the page or the browser's own download UI, is a failure of kind
+// "Cancelled".
+export type SwDownloadStatus =
+	{ type: "progress"; bytes: number; total: number | null } | { type: "done" } | { type: "failed"; error: ErrorDTO }
+
+// A streaming download repeats its latest progress this often even when no byte moved, and the page
+// fails a watched download that stays silent for SW_DOWNLOAD_STALL_MS: a worker the browser terminated
+// mid-stream sends nothing at all.
+export const SW_DOWNLOAD_HEARTBEAT_MS = 5_000
+export const SW_DOWNLOAD_STALL_MS = 30_000
 
 // How long the page waits for a message's ack before rejecting. Generous enough for the one slow
 // message: INIT_CLIENT compiles the 2 MB wasm on a cold worker before it can reply.

@@ -297,15 +297,17 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 					</>
 				) : trashing ? null : (
 					<>
-						<TooltipIconButton
-							label={t(transfer.paused ? "transfersRowResume" : "transfersRowPause")}
-							className={ROW_ACTION_CLASS}
-							onClick={() => {
-								setTransferPaused(transfer.id, !transfer.paused)
-							}}
-						>
-							{transfer.paused ? <PlayIcon /> : <PauseIcon />}
-						</TooltipIconButton>
+						{transfer.browserManaged === true ? null : (
+							<TooltipIconButton
+								label={t(transfer.paused ? "transfersRowResume" : "transfersRowPause")}
+								className={ROW_ACTION_CLASS}
+								onClick={() => {
+									setTransferPaused(transfer.id, !transfer.paused)
+								}}
+							>
+								{transfer.paused ? <PlayIcon /> : <PauseIcon />}
+							</TooltipIconButton>
+						)}
 						<TooltipIconButton
 							label={t("transfersRowCancel")}
 							className={ROW_ACTION_CLASS}

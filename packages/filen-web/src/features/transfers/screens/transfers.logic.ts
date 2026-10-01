@@ -63,7 +63,9 @@ export function cancellableTransferIds(transfers: Transfer[], endedCopies: Reado
 
 // Pause-all's targets: active AND not yet paused — an already-paused row has nothing left to pause.
 export function pausableTransferIds(transfers: Transfer[], endedCopies: ReadonlySet<string>): string[] {
-	return transfers.filter(transfer => isControllableTransfer(transfer, endedCopies) && !transfer.paused).map(transfer => transfer.id)
+	return transfers
+		.filter(transfer => isControllableTransfer(transfer, endedCopies) && !transfer.paused && transfer.browserManaged !== true)
+		.map(transfer => transfer.id)
 }
 
 // Resume-all's targets: active AND currently paused — the mirror image of pausableTransferIds.

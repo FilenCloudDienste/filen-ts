@@ -2,11 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // Same mock boundary as download.test.ts's own cancel test: the real sdk client module
 // touches a Vite `?worker`, unresolvable/unwanted under node vitest.
-const { sdkCancel, sdkPause, sdkResume } = vi.hoisted(() => ({ sdkCancel: vi.fn(), sdkPause: vi.fn(), sdkResume: vi.fn() }))
+const { sdkCancel, sdkPause, sdkResume, cancelSwDownload } = vi.hoisted(() => ({
+	sdkCancel: vi.fn(),
+	sdkPause: vi.fn(),
+	sdkResume: vi.fn(),
+	cancelSwDownload: vi.fn((_id: string) => false)
+}))
 
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { cancelTransfer: sdkCancel, pauseTransfer: sdkPause, resumeTransfer: sdkResume }
 }))
+vi.mock("@/features/drive/lib/saveDownload", () => ({ cancelSwDownload }))
 
 import {
 	cancelActiveTransfers,
@@ -22,6 +28,7 @@ import { makeTransfer } from "@/tests/fixtures/transfers"
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	cancelSwDownload.mockImplementation(() => false)
 	useTransfersStore.setState({ transfers: [] })
 	useCopyJobsStore.setState({ jobs: {} })
 })
@@ -41,6 +48,18 @@ describe("cancelTransfer", () => {
 		cancelTransfer("t2")
 
 		expect(sdkCancel.mock.calls).toEqual([["t2"]])
+	})
+
+	it("sends a service-worker download's cancel to the worker instead of the page's SDK", () => {
+		useTransfersStore.setState({
+			transfers: [makeTransfer({ id: "sw1", direction: "download", status: "downloading", browserManaged: true })]
+		})
+		cancelSwDownload.mockImplementation(id => id === "sw1")
+
+		cancelTransfer("sw1")
+
+		expect(cancelSwDownload).toHaveBeenCalledWith("sw1")
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 
 	it("is a no-op for an id not present in the store", () => {
@@ -278,5 +297,18 @@ describe("setTransfersPaused / cancelTransfers", () => {
 		expect(sdkCancel.mock.calls).toEqual([["d"], ["c"], ["u"]])
 		expect(getCopyJob("c")?.cancelRequest).toBe("keep")
 		expect(getCopyJob("ended")?.cancelRequest).toBeNull()
+	})
+})
+
+describe("a browser-managed download", () => {
+	it("is never paused: the browser's download manager streams it", () => {
+		useTransfersStore.setState({
+			transfers: [makeTransfer({ id: "sw1", direction: "download", status: "downloading", browserManaged: true })]
+		})
+
+		setTransferPaused("sw1", true)
+
+		expect(sdkPause).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(false)
 	})
 })

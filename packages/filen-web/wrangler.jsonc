@@ -9,7 +9,10 @@
 	"assets": {
 		"directory": "dist",
 		"binding": "ASSETS",
-		"not_found_handling": "single-page-application"
+		"not_found_handling": "single-page-application",
+		// cloudflare/worker.ts answers these itself, page loads included, so a download retry is never
+		// handed the app.
+		"run_worker_first": ["/sw/*"]
 	},
 	"workers_dev": true,
 	"preview_urls": false,

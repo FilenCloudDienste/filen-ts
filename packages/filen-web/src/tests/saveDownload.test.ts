@@ -7,8 +7,13 @@ import {
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
-	SW_MSG_REGISTER_ZIP_DOWNLOAD
+	SW_MSG_REGISTER_ZIP_DOWNLOAD,
+	SW_MSG_WATCH_DOWNLOAD,
+	SW_MSG_CANCEL_DOWNLOAD,
+	SW_DOWNLOAD_STALL_MS,
+	type SwDownloadStatus
 } from "@/lib/sw/protocol"
+import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
 
 // saveDownload.ts keeps its SW-client-ready state in a module-level `let` (mirrors
 // lib/sw/register.ts) — every test that touches the sw path needs its own module instance, so
@@ -56,20 +61,54 @@ type SwReply = { ok: true } | { ok: false; error: string } | null
 
 // A fake controlling service worker — postMessage(msg, [port2]) replies through the transferred
 // port2 per a scripted `reply` callback, exactly mirroring sw.ts's own ack shape. A `null` reply is a
-// worker that never acks at all.
-function fakeServiceWorker(reply: (type: string, payload: Record<string, unknown>) => SwReply) {
+// worker that never acks at all. A download's watch port is handed to `watch`, which by default reports
+// it finished at once; watch and cancel messages are recorded apart from the acked `calls`.
+function fakeServiceWorker(
+	reply: (type: string, payload: Record<string, unknown>) => SwReply,
+	watch: (report: (status: SwDownloadStatus) => void, id: string) => void = report => {
+		report({ type: "done" })
+	}
+) {
 	const calls: { type: string; payload: Record<string, unknown> }[] = []
-	const postMessage = vi.fn((msg: { type: string } & Record<string, unknown>, transfer: [FakeMessagePort]) => {
+	const watches: string[] = []
+	const cancels: string[] = []
+	const postMessage = vi.fn((msg: { type: string } & Record<string, unknown>, transfer?: [FakeMessagePort]) => {
 		const { type, ...payload } = msg
+
+		if (type === SW_MSG_CANCEL_DOWNLOAD) {
+			cancels.push(payload["id"] as string)
+
+			return
+		}
+
+		const port2 = transfer?.[0]
+
+		if (port2 === undefined) {
+			return
+		}
+
+		if (type === SW_MSG_WATCH_DOWNLOAD) {
+			const id = payload["id"] as string
+
+			watches.push(id)
+			// Reported after the navigation, as the real worker's first status follows its fetch.
+			queueMicrotask(() => {
+				watch(status => {
+					port2.postMessage(status)
+				}, id)
+			})
+
+			return
+		}
+
 		calls.push({ type, payload })
-		const [port2] = transfer
 		const ack = reply(type, payload)
 
 		if (ack !== null) {
 			port2.postMessage(ack)
 		}
 	})
-	return { postMessage, calls }
+	return { postMessage, calls, watches, cancels }
 }
 
 function stubServiceWorkerReady(active: ReturnType<typeof fakeServiceWorker> | null): void {
@@ -271,7 +310,7 @@ describe("triggerSwDownload", () => {
 		const file = testFile({ size: 2_048n })
 		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" }
 
-		await triggerSwDownload(file, save)
+		await triggerSwDownload(file, save, "transfer-1", () => undefined)
 
 		expect(sw.calls).toEqual([
 			{ type: SW_MSG_INIT_CLIENT, payload: { blob: { email: "user@filen.io" } } },
@@ -288,7 +327,12 @@ describe("triggerSwDownload", () => {
 		const { consumeUnloadAllowance } = await import("@/lib/unloadGuard")
 
 		consumeUnloadAllowance()
-		await triggerSwDownload(testFile(), { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" })
+		await triggerSwDownload(
+			testFile(),
+			{ kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" },
+			"transfer-1",
+			() => undefined
+		)
 
 		expect(consumeUnloadAllowance()).toBe(true)
 	})
@@ -301,7 +345,148 @@ describe("triggerSwDownload", () => {
 		const { triggerSwDownload } = await freshModule()
 		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" }
 
-		await expect(triggerSwDownload(testFile(), save)).rejects.toThrow("no room")
+		await expect(triggerSwDownload(testFile(), save, "transfer-1", () => undefined)).rejects.toThrow("no room")
+		expect(location.href).toBe("")
+	})
+})
+
+describe("a watched service-worker download", () => {
+	const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" }
+
+	it("reports progress and resolves only once the worker says the stream finished", async () => {
+		let report: (status: SwDownloadStatus) => void = () => undefined
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			send => {
+				report = send
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwDownload } = await freshModule()
+		const progress = vi.fn()
+		let settled = false
+		const running = triggerSwDownload(testFile(), save, "transfer-1", progress).then(() => {
+			settled = true
+		})
+
+		await vi.waitFor(() => {
+			expect(sw.watches).toEqual(["abc-123"])
+		})
+		report({ type: "progress", bytes: 512, total: 1_024 })
+		await Promise.resolve()
+
+		expect(progress).toHaveBeenCalledWith(512)
+		expect(settled).toBe(false)
+
+		report({ type: "done" })
+		await running
+
+		expect(settled).toBe(true)
+	})
+
+	it("rejects with the worker's own error, kind and label intact", async () => {
+		const error = { species: "sdk" as const, kind: "Io", message: "chunk failed", label: "Network error" }
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			report => {
+				report({ type: "failed", error })
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwDownload } = await freshModule()
+		const outcome = await triggerSwDownload(testFile(), save, "transfer-1", () => undefined).then(
+			() => null,
+			(e: unknown) => asErrorDTO(e)
+		)
+
+		expect(outcome).toEqual(error)
+	})
+
+	it("passes a cancel through as kind Cancelled", async () => {
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			report => {
+				report({ type: "failed", error: plainErrorDTO("download cancelled", "Cancelled") })
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwDownload } = await freshModule()
+		const outcome = await triggerSwDownload(testFile(), save, "transfer-1", () => undefined).then(
+			() => null,
+			(e: unknown) => asErrorDTO(e)
+		)
+
+		expect(outcome?.kind).toBe("Cancelled")
+	})
+
+	it("routes the row's Cancel to the worker while the download runs, and only then", async () => {
+		let report: (status: SwDownloadStatus) => void = () => undefined
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			send => {
+				report = send
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwDownload, cancelSwDownload } = await freshModule()
+
+		expect(cancelSwDownload("transfer-1")).toBe(false)
+
+		const running = triggerSwDownload(testFile(), save, "transfer-1", () => undefined)
+
+		await vi.waitFor(() => {
+			expect(sw.watches).toEqual(["abc-123"])
+		})
+		expect(cancelSwDownload("transfer-1")).toBe(true)
+		expect(sw.cancels).toEqual(["abc-123"])
+
+		report({ type: "done" })
+		await running
+
+		expect(cancelSwDownload("transfer-1")).toBe(false)
+	})
+
+	it("fails a download whose worker goes silent", async () => {
+		vi.useFakeTimers()
+
+		try {
+			const sw = fakeServiceWorker(
+				() => ({ ok: true }),
+				() => undefined
+			)
+			stubWindow()
+			stubServiceWorkerReady(sw)
+
+			const { triggerSwDownload } = await freshModule()
+			const outcome = triggerSwDownload(testFile(), save, "transfer-1", () => undefined).then(
+				() => "resolved",
+				(e: unknown) => asErrorDTO(e).message
+			)
+
+			await vi.advanceTimersByTimeAsync(SW_DOWNLOAD_STALL_MS)
+
+			expect(await outcome).toBe("the download stopped responding")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("refuses to navigate from a page no worker controls", async () => {
+		const sw = fakeServiceWorker(() => ({ ok: true }))
+		const location = stubWindow()
+		vi.stubGlobal("navigator", { serviceWorker: { ready: Promise.resolve({ active: sw }), controller: null } })
+
+		const { triggerSwDownload } = await freshModule()
+
+		await expect(triggerSwDownload(testFile(), save, "transfer-1", () => undefined)).rejects.toThrow("reloaded")
 		expect(location.href).toBe("")
 	})
 })
@@ -343,7 +528,7 @@ describe("registration against a restarted worker", () => {
 
 		restart()
 
-		await triggerSwDownload(testFile(), save)
+		await triggerSwDownload(testFile(), save, "transfer-1", () => undefined)
 
 		expect(sw.calls.map(call => call.type)).toEqual([
 			SW_MSG_INIT_CLIENT,
@@ -369,7 +554,7 @@ describe("registration against a restarted worker", () => {
 
 		restart()
 
-		await triggerSwZipDownload([testFile()], save)
+		await triggerSwZipDownload([testFile()], save, "transfer-2", () => undefined)
 
 		expect(sw.calls.filter(call => call.type === SW_MSG_REGISTER_ZIP_DOWNLOAD)).toHaveLength(2)
 		expect(location.href).toBe(save.url)
@@ -390,7 +575,10 @@ describe("registration against a restarted worker", () => {
 
 		restart()
 
-		await Promise.all([triggerSwDownload(testFile(), first), triggerSwZipDownload([testFile()], second)])
+		await Promise.all([
+			triggerSwDownload(testFile(), first, "transfer-1", () => undefined),
+			triggerSwZipDownload([testFile()], second, "transfer-2", () => undefined)
+		])
 
 		// One handoff at boot + exactly one heal, never one per registration: each handoff frees the
 		// worker's previous client, which a stream started in between would still be holding.
@@ -410,7 +598,7 @@ describe("registration against a restarted worker", () => {
 			throw new Error("expected a sw target")
 		}
 
-		await expect(triggerSwDownload(testFile(), save)).rejects.toThrow("no room")
+		await expect(triggerSwDownload(testFile(), save, "transfer-1", () => undefined)).rejects.toThrow("no room")
 
 		expect(sw.calls.filter(call => call.type === SW_MSG_INIT_CLIENT)).toHaveLength(1)
 		expect(sw.calls.filter(call => call.type === SW_MSG_REGISTER_DOWNLOAD)).toHaveLength(1)
@@ -506,7 +694,7 @@ describe("triggerSwZipDownload", () => {
 		const items: AnyItemWithContext[] = [testFile({ size: 2_048n }), testFile({ size: 512n })]
 		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "Filen.zip" }
 
-		await triggerSwZipDownload(items, save)
+		await triggerSwZipDownload(items, save, "transfer-2", () => undefined)
 
 		expect(sw.calls).toEqual([
 			{ type: SW_MSG_INIT_CLIENT, payload: { blob: { email: "user@filen.io" } } },
@@ -523,7 +711,7 @@ describe("triggerSwZipDownload", () => {
 		const { triggerSwZipDownload } = await freshModule()
 		const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "Filen.zip" }
 
-		await expect(triggerSwZipDownload([testFile()], save)).rejects.toThrow("no room")
+		await expect(triggerSwZipDownload([testFile()], save, "transfer-2", () => undefined)).rejects.toThrow("no room")
 		expect(location.href).toBe("")
 	})
 })

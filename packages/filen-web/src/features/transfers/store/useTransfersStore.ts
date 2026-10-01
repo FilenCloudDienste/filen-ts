@@ -32,6 +32,9 @@ export interface Transfer {
 	startedAt: number
 	// A landed upload's own file, which its row's "Show in directory" reveals.
 	item?: DriveItem
+	// The browser's download manager streams this one (the service-worker path): it can be cancelled,
+	// never paused.
+	browserManaged?: true
 }
 
 // Every terminal state settle() can drive a transfer to. Kept separate from Transfer["status"]

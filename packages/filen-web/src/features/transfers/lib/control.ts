@@ -1,5 +1,6 @@
 import { isCopyJobRunning } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
+import { cancelSwDownload } from "@/features/drive/lib/saveDownload"
 import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 
@@ -60,6 +61,11 @@ export function cancelTransfers(ids: readonly string[]): void {
 			continue
 		}
 
+		// A service-worker download is the worker's to stop, not the page's SDK's.
+		if (transfer.direction === "download" && cancelSwDownload(id)) {
+			continue
+		}
+
 		void sdkApi.cancelTransfer(id)
 	}
 }
@@ -85,7 +91,7 @@ export function setTransfersPaused(ids: readonly string[], paused: boolean): voi
 	for (const id of ids) {
 		const transfer = activeIn(byId, id)
 
-		if (transfer === undefined || isSettledCopy(transfer)) {
+		if (transfer === undefined || isSettledCopy(transfer) || transfer.browserManaged === true) {
 			continue
 		}
 
