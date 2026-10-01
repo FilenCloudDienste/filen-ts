@@ -87,7 +87,7 @@ vi.mock("@tanstack/react-query", async importOriginal => {
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
-import { socketAuthenticated } from "@/lib/sdk/socketSession"
+import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import {
 	LISTING_CREATE_FLUSH_MS,
 	applyListingChanges,
@@ -118,6 +118,7 @@ import {
 	flatListingQueryUpdate,
 	flushListingCreates,
 	batchListingPatches,
+	isDriveListingCurrent,
 	itemInfoQueryKey,
 	itemPathQueryKey,
 	markDriveListingStale,
@@ -1417,6 +1418,36 @@ describe("findOwnedListingItem", () => {
 		await readListing("favorites", null, [mockDir({ uuid: wanted, favorited: true })])
 
 		expect(findOwnedListingItem(wanted)?.current).toBe(true)
+	})
+})
+
+describe("isDriveListingCurrent", () => {
+	it("holds only for a listing read this session under the live socket, until a stale mark", async () => {
+		expect(isDriveListingCurrent("parent")).toBe(false)
+
+		// Restored from disk: rows, but no read behind them.
+		testQueryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: "parent" }), [narrowItem(mockDir())])
+
+		expect(isDriveListingCurrent("parent")).toBe(false)
+
+		socketAuthenticated()
+		listDirectory.mockResolvedValueOnce({ dirs: [mockDir()], files: [] })
+		await testQueryClient.query(driveListingQueryOptions("drive", "parent"))
+
+		expect(isDriveListingCurrent("parent")).toBe(true)
+		expect(isDriveListingCurrent(null)).toBe(false)
+
+		markDriveListingStale("parent")
+
+		expect(isDriveListingCurrent("parent")).toBe(false)
+	})
+
+	it("does not count a read the socket was down for", async () => {
+		socketDropped()
+		listDirectory.mockResolvedValueOnce({ dirs: [mockDir()], files: [] })
+		await testQueryClient.query(driveListingQueryOptions("drive", null))
+
+		expect(isDriveListingCurrent(null)).toBe(false)
 	})
 })
 

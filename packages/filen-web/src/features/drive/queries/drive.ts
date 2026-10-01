@@ -319,6 +319,20 @@ function listingQuery(params: DriveListingParams): Query | undefined {
 	return cachedQuery(driveListingQueryKey(params))
 }
 
+// Read this session under the live socket and not marked stale since, so every change has reached its rows.
+function isCurrentListing(query: Query, params: DriveListingParams): boolean {
+	return !query.state.isInvalidated && listingsReadThisSession.has(listingId(params.variant, params.uuid))
+}
+
+// For the sidebar tree: whether a "drive" listing's rows are authoritative, unlike a disk-restored,
+// socketless or stale-marked one, which may still hold directories that are gone.
+export function isDriveListingCurrent(uuid: string | null): boolean {
+	const params: DriveListingParams = { variant: "drive", uuid }
+	const query = listingQuery(params)
+
+	return query !== undefined && isCurrentListing(query, params)
+}
+
 // A read's changes applied to what it returned in as few passes as their order allows, so a burst of k
 // changes to n rows costs O(n + k) instead of a pass each: removals and replacements gather into one
 // pass, with the upserts or appends after them. A change that would act differently once gathered applies
@@ -1021,8 +1035,7 @@ export function findOwnedListingItem(uuid: string): { item: DriveItem; current: 
 	let outdated: DriveItem | undefined
 
 	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
-		const { variant, uuid: listingUuid } = (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2]
-		const current = !query.state.isInvalidated && listingsReadThisSession.has(listingId(variant, listingUuid))
+		const current = isCurrentListing(query, (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2])
 
 		// Past the first match, only a current listing's row is worth a scan.
 		if (!current && outdated !== undefined) {

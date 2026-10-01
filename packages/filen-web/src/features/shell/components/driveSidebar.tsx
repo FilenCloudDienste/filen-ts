@@ -1,12 +1,12 @@
-import { type ComponentType } from "react"
+import { type ComponentType, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
-import { ChevronRightIcon, FolderClosedIcon, ClockIcon, StarIcon, Trash2Icon, UsersIcon, Share2Icon, Link2Icon } from "lucide-react"
+import { FolderClosedIcon, ClockIcon, StarIcon, Trash2Icon, UsersIcon, Share2Icon, Link2Icon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { type DriveRouteId, splatToUuids } from "@/features/drive/lib/navigate"
-import { useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
+import { isDriveListingCurrent, useDirectoryTreeChildrenQuery } from "@/features/drive/queries/drive"
 import { isTreeNodeOpen, TREE_ROOT_KEY, useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
-import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
+import { DirectoryTree, DirectoryTreeChevron, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { DirectoryTreeMenu } from "@/features/drive/components/directoryTreeMenu"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { TREE_EXPAND_SPRING } from "@/features/drive/lib/springLoad"
@@ -66,8 +66,7 @@ function SplatNavItem({ icon: Icon, label, to }: { icon: IconType; label: string
 // The Cloud Drive root row: a chevron disclosing the whole tree, plus a real `<Link>` navigating to
 // the drive root (a Link, not a button, so it keeps TanStack's automatic active status and stays the
 // sidebar's stable "Cloud Drive" landmark link). Its own open flag rides TREE_ROOT_KEY.
-function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
-	const { t } = useTranslation("drive")
+function CloudDriveRoot({ label, open, loading, onToggle }: { label: string; open: boolean; loading: boolean; onToggle: () => void }) {
 	// The drive root as a drag-to-move drop target (empty ancestry). A collapsed root springs open
 	// (expands) on a short rest, same as any node below it.
 	const drop = useDriveDropTarget({
@@ -88,15 +87,13 @@ function CloudDriveRoot({ label, open, onToggle }: { label: string; open: boolea
 				dropHighlightClass(drop)
 			)}
 		>
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: label })}
-				onClick={onToggle}
-				className="ml-2 flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground"
-			>
-				<ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-			</button>
+			<DirectoryTreeChevron
+				name={label}
+				open={open}
+				loading={loading}
+				onToggle={onToggle}
+				className="ml-2"
+			/>
 			<Link
 				to="/drive/$"
 				params={{ _splat: "" }}
@@ -129,6 +126,7 @@ export function DriveSidebar() {
 	const toggle = useDirectoryTreeStore(state => state.toggle)
 	const reconcileLevel = useDirectoryTreeStore(state => state.reconcileLevel)
 	const rootOpen = isTreeNodeOpen(openMap, TREE_ROOT_KEY)
+	const [rootPending, setRootPending] = useState(false)
 
 	function navigateTo(path: string[]): void {
 		void navigate({ to: "/drive/$", params: { _splat: path.join("/") } })
@@ -141,8 +139,12 @@ export function DriveSidebar() {
 		onToggle: (uuid, parentUuid) => {
 			toggle(uuid, parentUuid ?? TREE_ROOT_KEY)
 		},
+		// Only rows read this session under the live socket prune: a disk-restored or otherwise stale listing
+		// may lack a directory opened since, and its refetch reports the level again.
 		onLevelLoaded: (parentUuid, childUuids) => {
-			reconcileLevel(parentUuid ?? TREE_ROOT_KEY, childUuids)
+			if (isDriveListingCurrent(parentUuid)) {
+				reconcileLevel(parentUuid ?? TREE_ROOT_KEY, childUuids)
+			}
 		},
 		onNavigate: navigateTo
 	}
@@ -188,8 +190,9 @@ export function DriveSidebar() {
 				    zeroes its automatic minimum height, so an overflowing tree squeezes it and the first row
 				    paints over its text. */}
 			<h2 className="shrink-0 truncate px-5.5 pt-4 pb-1.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
-			{/* pt-1 keeps the first row's focus ring clear of the scroll area's clipping edge. */}
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-1 pb-3">
+			{/* pt-1 keeps the first row's focus ring clear of the scroll area's clipping edge. A stable gutter:
+				    a scrollbar coming and going as levels open would reflow every row. */}
+			<div className="flex min-h-0 flex-1 [scrollbar-gutter:stable] flex-col overflow-y-auto px-3 pt-1 pb-3">
 				{/* A nested disclosure list, deliberately NOT role="tree": the ARIA tree pattern owes a
 					roving-tabindex/arrow-key focus model this sidebar does not implement, and claiming the
 					role without it sends a screen-reader user into an interaction mode whose items never take
@@ -202,15 +205,24 @@ export function DriveSidebar() {
 							aria-label={t("driveTreeLabel")}
 							className="flex flex-col gap-0.5"
 						>
-							<li className="flex flex-col gap-0.5">
+							<li
+								aria-busy={rootPending || undefined}
+								className="flex flex-col gap-0.5"
+							>
 								<CloudDriveRoot
 									label={t("driveMyDrive")}
 									open={rootOpen}
+									loading={rootPending}
 									onToggle={() => {
 										toggle(TREE_ROOT_KEY, TREE_ROOT_KEY)
 									}}
 								/>
-								{rootOpen ? <DirectoryTree tree={tree} /> : null}
+								{rootOpen ? (
+									<DirectoryTree
+										tree={tree}
+										onPendingChange={setRootPending}
+									/>
+								) : null}
 							</li>
 						</ul>
 					}

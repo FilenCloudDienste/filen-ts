@@ -125,10 +125,36 @@ describe("DirectoryTree — list + disclosure semantics", () => {
 		expect(navButtons("Photos")?.hasAttribute("aria-current")).toBe(false)
 	})
 
-	it("renders the loading level as presentational — a pending fetch is not a list item", () => {
-		const { container } = renderTree({ isOpen: () => false, useChildren: () => pending() })
+	it("shows a loading level on its owner's chevron, adding no row and announcing nothing", () => {
+		const { container } = renderTree({ useChildren: uuid => (uuid === "docs" ? pending() : resolved(CHILDREN[uuid ?? "root"] ?? [])) })
 
-		expect(container.querySelector('[role="presentation"]')).not.toBeNull()
+		const docs = container.querySelector("li")
+
+		expect(docs?.getAttribute("aria-busy")).toBe("true")
+		expect(docs?.querySelectorAll("li")).toHaveLength(0)
+		expect(chevronFor(container, "Docs").querySelector('[data-slot="spinner"]')?.getAttribute("aria-hidden")).toBe("true")
+		expect(chevronFor(container, "Docs").getAttribute("aria-expanded")).toBe("true")
+		expect(chevronFor(container, "Photos").querySelector('[data-slot="spinner"]')).toBeNull()
+		expect(rowFor(container, "Photos").closest("li")?.hasAttribute("aria-busy")).toBe(false)
+	})
+
+	it("reports a level's first load to its owner until it settles", () => {
+		const onPendingChange = vi.fn()
+		const tree: DirectoryTreeContext = {
+			activePath: [],
+			isOpen: () => false,
+			onToggle: () => undefined,
+			onNavigate: () => undefined,
+			useChildren: () => pending()
+		}
+		const { container, rerender } = render(createElement(DirectoryTree, { tree, onPendingChange }))
+
+		expect(container.childElementCount).toBe(0)
+		expect(onPendingChange.mock.calls).toEqual([[true]])
+
+		rerender(createElement(DirectoryTree, { tree: { ...tree, useChildren: () => resolved([]) }, onPendingChange }))
+
+		expect(onPendingChange.mock.calls).toEqual([[true], [false]])
 	})
 
 	it("toggles a node together with its parent, null at the root level", () => {

@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useLayoutEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { ChevronRightIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
@@ -27,7 +27,8 @@ export interface DirectoryTreeContext {
 	isOpen: (uuid: string) => boolean
 	// `parentUuid` is null for a root-level node.
 	onToggle: (uuid: string, parentUuid: string | null) => void
-	// A level's children finished fetching: open state kept for directories no longer among them can go.
+	// A level's children finished fetching: open state kept for directories no longer among them can go,
+	// once the owner knows that fetch's rows are authoritative.
 	onLevelLoaded?: (parentUuid: string | null, childUuids: readonly string[]) => void
 	// Full uuid chain from the drive root down to (and including) the clicked node.
 	onNavigate: (path: string[]) => void
@@ -42,6 +43,8 @@ export interface DirectoryTreeProps {
 	// uuid chain from the drive root down to `parentUuid` (empty for the root level).
 	parentPath?: string[]
 	depth?: number
+	// Whether this level is loading its first listing, for the owner's chevron to show.
+	onPendingChange?: (pending: boolean) => void
 }
 
 // Indentation grows per level but stays shallow; a base inset keeps even level 1 clear of the card edge.
@@ -59,7 +62,7 @@ function isStrictPrefix(path: string[], active: string[]): boolean {
 	return path.length < active.length && path.every((value, index) => value === active[index])
 }
 
-export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth = 0 }: DirectoryTreeProps) {
+export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth = 0, onPendingChange }: DirectoryTreeProps) {
 	const { t } = useTranslation("drive")
 	// Bare identifier so eslint's rules-of-hooks and React Compiler both treat this as the hook it is
 	// (a member call would read as a plain function to the compiler). Called unconditionally per level.
@@ -77,24 +80,28 @@ export function DirectoryTree({ tree, parentUuid = null, parentPath = [], depth 
 		}
 	}, [settledData, parentUuid, onLevelLoaded])
 
-	// Presentational, not a group: these lines are a status/error, not tree nodes. The role also strips
-	// the <li>'s list semantics while leaving the spinner and the error text announced.
-	if (query.status === "pending") {
-		return (
-			<ul
-				role="presentation"
-				className="flex flex-col"
-			>
-				<li
-					style={{ paddingInlineStart: levelInset(depth) + 20 }}
-					className="flex h-8 items-center gap-2 text-sm text-sidebar-foreground/60"
-				>
-					<Spinner className="size-3.5" />
-				</li>
-			</ul>
-		)
+	const pending = query.status === "pending"
+
+	// Layout, not passive: the owner's chevron turns into a spinner before the open state first paints.
+	useLayoutEffect(() => {
+		if (!pending || onPendingChange === undefined) {
+			return
+		}
+
+		onPendingChange(true)
+
+		return () => {
+			onPendingChange(false)
+		}
+	}, [pending, onPendingChange])
+
+	// The owner's chevron shows the load, so a level that turns out empty never changes the tree's height.
+	if (pending) {
+		return null
 	}
 
+	// Presentational, not a group: this line is an error, not a tree node. The role also strips the
+	// <li>'s list semantics while leaving the error text announced.
 	if (query.status === "error") {
 		return (
 			<ul
@@ -137,9 +144,50 @@ interface DirectoryTreeNodeProps {
 	tree: DirectoryTreeContext
 }
 
-function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps) {
+// The disclosure button of a tree row, a node's or the owning surface's root's. While the subtree it
+// discloses loads its first listing, a spinner stands in for the chevron (silent: the row's aria-busy
+// carries it).
+export function DirectoryTreeChevron({
+	name,
+	open,
+	loading,
+	onToggle,
+	className
+}: {
+	name: string
+	open: boolean
+	loading: boolean
+	onToggle: () => void
+	className?: string
+}) {
 	const { t } = useTranslation("drive")
+
+	return (
+		<button
+			type="button"
+			aria-expanded={open}
+			aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name })}
+			onClick={onToggle}
+			className={cn(
+				"flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground",
+				className
+			)}
+		>
+			{loading ? (
+				<Spinner
+					aria-hidden
+					className="size-3.5"
+				/>
+			) : (
+				<ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+			)}
+		</button>
+	)
+}
+
+function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps) {
 	const open = tree.isOpen(child.uuid)
+	const [childrenPending, setChildrenPending] = useState(false)
 	const active = arraysEqual(path, tree.activePath)
 	const onBranch = !active && isStrictPrefix(path, tree.activePath)
 	const parentUuid = path.at(-2) ?? null
@@ -167,7 +215,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 	const cut = useDriveClipboardStore(state => state.cutUuids.has(child.uuid))
 
 	return (
-		<li>
+		<li aria-busy={childrenPending || undefined}>
 			<div
 				// The node's root-to-node chain, for the sidebar's one tree menu and its clipboard shortcuts
 				// (directoryTreeMenu.tsx).
@@ -189,17 +237,14 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 				)}
 			>
 				{/* The chevron owns the disclosure state — it is what expands and collapses the subtree. */}
-				<button
-					type="button"
-					aria-expanded={open}
-					aria-label={t(open ? "driveTreeCollapseNode" : "driveTreeExpandNode", { name: child.name })}
-					onClick={() => {
+				<DirectoryTreeChevron
+					name={child.name}
+					open={open}
+					loading={childrenPending}
+					onToggle={() => {
 						tree.onToggle(child.uuid, parentUuid)
 					}}
-					className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring outline-none hover:text-foreground"
-				>
-					<ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
-				</button>
+				/>
 				<button
 					type="button"
 					// The routed directory, announced on the row that navigates to it — the row itself is a
@@ -226,6 +271,7 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 					parentUuid={child.uuid}
 					parentPath={path}
 					depth={depth + 1}
+					onPendingChange={setChildrenPending}
 				/>
 			) : null}
 		</li>
