@@ -30,9 +30,9 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
 // The start toast renders a router link, which needs the mounted app; this file asserts only that it is said.
-const { toastDownloadStarted } = vi.hoisted(() => ({ toastDownloadStarted: vi.fn() }))
+const { toastTransferStarted } = vi.hoisted(() => ({ toastTransferStarted: vi.fn() }))
 
-vi.mock("@/features/transfers/lib/downloadStartToast", () => ({ toastDownloadStarted }))
+vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted }))
 
 import { runZipDownload, defaultZipDownloadDeps, startZipDownload, type RunZipDownloadDeps } from "@/features/drive/lib/downloadZip"
 import { useTransfersStore, type Transfer, type TerminalStatus } from "@/features/transfers/store/useTransfersStore"
@@ -640,7 +640,12 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 
 		await startZipDownload([dirItem({ name: "Documents" })])
 
-		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("Documents.zip", 1)
+		expect(toastTransferStarted).toHaveBeenCalledExactlyOnceWith({
+			direction: "download",
+			name: "Documents.zip",
+			count: 1,
+			noun: "items"
+		})
 	})
 
 	it("says a multi-item zip started, with its item count, on the service-worker path", async () => {
@@ -649,7 +654,7 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 
 		await startZipDownload([fileItem({ name: "a.txt" }), fileItem({ name: "b.txt" }), dirItem()])
 
-		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("Filen.zip", 3)
+		expect(toastTransferStarted).toHaveBeenCalledExactlyOnceWith({ direction: "download", name: "Filen.zip", count: 3, noun: "items" })
 	})
 
 	it("says nothing when the save picker is cancelled — nothing started", async () => {
@@ -658,7 +663,7 @@ describe("startZipDownload (real runZipDownload + defaultZipDownloadDeps)", () =
 
 		await startZipDownload([dirItem()])
 
-		expect(toastDownloadStarted).not.toHaveBeenCalled()
+		expect(toastTransferStarted).not.toHaveBeenCalled()
 	})
 
 	it("registers one done transfer in the real transfers store for a successful zip", async () => {

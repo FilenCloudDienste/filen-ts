@@ -4,6 +4,7 @@ import { sumBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { toastSummary } from "@/lib/actions/bulkToast"
+import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import { queryClient } from "@/queries/client"
@@ -224,6 +225,7 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 	const batch = newUploadBatchRef(parentUuid)
 
 	uploadBatchControl.start(batch)
+	toastTransferStarted({ direction: "upload", name: files[0]?.name ?? "", count: files.length, noun: "files" })
 
 	const outcomes = await Promise.all(
 		files.map(async (file): Promise<UploadOutcome> => {

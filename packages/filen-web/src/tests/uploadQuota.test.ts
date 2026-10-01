@@ -25,6 +25,8 @@ const { toastSuccess, toastError, toastLoading, toastDismiss } = vi.hoisted(() =
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, loading: toastLoading, dismiss: toastDismiss } }))
 
+vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted: vi.fn() }))
+
 // The convert-on-upload gate reads kv storage (a real ?worker) — same stub as upload.test.ts.
 vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/features/drive/lib/heicUpload")>()

@@ -38,9 +38,9 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
 // The start toast renders a router link, which needs the mounted app; this file asserts only that it is said.
-const { toastDownloadStarted } = vi.hoisted(() => ({ toastDownloadStarted: vi.fn() }))
+const { toastTransferStarted } = vi.hoisted(() => ({ toastTransferStarted: vi.fn() }))
 
-vi.mock("@/features/transfers/lib/downloadStartToast", () => ({ toastDownloadStarted }))
+vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted }))
 
 // The real zip orchestration (runZipDownload/narrowToZipItems/etc.) lives in, and is unit-tested by,
 // downloadZip.test.ts — this file only needs to prove startDownloads ROUTES to it, so the whole
@@ -480,7 +480,7 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 
 		await startDownloads([fileItem({ name: "report.pdf" })])
 
-		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("report.pdf", 1)
+		expect(toastTransferStarted).toHaveBeenCalledExactlyOnceWith({ direction: "download", name: "report.pdf", count: 1, noun: "items" })
 	})
 
 	it("says the download started on the service-worker path too", async () => {
@@ -489,7 +489,7 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 
 		await startDownloads([fileItem({ name: "report.pdf" })])
 
-		expect(toastDownloadStarted).toHaveBeenCalledExactlyOnceWith("report.pdf", 1)
+		expect(toastTransferStarted).toHaveBeenCalledExactlyOnceWith({ direction: "download", name: "report.pdf", count: 1, noun: "items" })
 	})
 
 	it("says nothing when the save picker is cancelled — nothing started", async () => {
@@ -498,7 +498,7 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 
 		await startDownloads([fileItem()])
 
-		expect(toastDownloadStarted).not.toHaveBeenCalled()
+		expect(toastTransferStarted).not.toHaveBeenCalled()
 	})
 
 	it("says nothing when the save target fails for a real reason", async () => {
@@ -506,7 +506,7 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 
 		await startDownloads([fileItem()])
 
-		expect(toastDownloadStarted).not.toHaveBeenCalled()
+		expect(toastTransferStarted).not.toHaveBeenCalled()
 	})
 
 	it("registers one done transfer in the real transfers store for a single successful download", async () => {

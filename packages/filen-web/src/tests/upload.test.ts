@@ -27,6 +27,10 @@ const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), 
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 
+const { toastTransferStarted } = vi.hoisted(() => ({ toastTransferStarted: vi.fn() }))
+
+vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted }))
+
 // The convert-on-upload gate reads kv storage (features/drive/lib/heicUpload.ts -> storage/adapter.ts
 // -> a real ?worker) — unresolvable under node vitest, same rationale as the sdk-client/query-client
 // mocks above. Both cross-module imports startUploads makes are stubbed here so its own wiring (one
@@ -357,6 +361,18 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 		expect(toastSuccess).toHaveBeenCalledTimes(1)
 		expect(toastSuccess).toHaveBeenCalledWith(expect.any(String))
 		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	it("says once that the upload started, naming one file or counting several", async () => {
+		uploadFile.mockImplementation(() => Promise.resolve(mockSdkFile()))
+
+		await startUploads([mockBrowserFile("a.txt")], null)
+		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt")], null)
+
+		expect(toastTransferStarted.mock.calls).toEqual([
+			[{ direction: "upload", name: "a.txt", count: 1, noun: "files" }],
+			[{ direction: "upload", name: "a.txt", count: 2, noun: "files" }]
+		])
 	})
 
 	it("attempts every file concurrently, not one at a time", async () => {

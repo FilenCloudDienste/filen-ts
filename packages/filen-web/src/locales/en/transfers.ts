@@ -129,15 +129,25 @@ export const transfers = {
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
 	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed",
 
-	// ── Download start toast (features/transfers/lib/downloadStartToast.tsx) ────
+	// ── Transfer start toast (features/transfers/lib/transferStartToast.tsx) ───
 	/** Toast shown once a download of a single file or directory has started; {{name}} = the file's name, or the zip's for a directory */
 	transfersDownloadStarted: "Downloading {{name}}",
 	/** Toast shown once a zip download of several items has started; singular */
 	transfersDownloadStartedItems_one: "Downloading {{count}} item",
 	/** Toast shown once a zip download of several items has started; plural */
 	transfersDownloadStartedItems_other: "Downloading {{count}} items",
-	/** Download start toast — action opening the transfers screen */
-	transfersDownloadStartedView: "View",
+	/** Toast shown once an upload of a single file or directory has started; {{name}} = its name */
+	transfersUploadStarted: "Uploading {{name}}",
+	/** Toast shown once an upload of several picked or dropped files has started; singular */
+	transfersUploadStartedFiles_one: "Uploading {{count}} file",
+	/** Toast shown once an upload of several picked or dropped files has started; plural */
+	transfersUploadStartedFiles_other: "Uploading {{count}} files",
+	/** Toast shown once an upload of several dropped files and directories has started; singular */
+	transfersUploadStartedItems_one: "Uploading {{count}} item",
+	/** Toast shown once an upload of several dropped files and directories has started; plural */
+	transfersUploadStartedItems_other: "Uploading {{count}} items",
+	/** Transfer start toast — action opening the transfers screen */
+	transfersStartedView: "View",
 
 	// ── Copy (features/drive/lib/copy.ts) ─────────────────────────────────────
 	/** Copy transfer row — name of a copy job holding more than one item (a one-item copy shows that item's own name); singular */

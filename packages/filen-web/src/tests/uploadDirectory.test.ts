@@ -33,6 +33,10 @@ const { toastSuccess, toastError, toastLoading, toastDismiss } = vi.hoisted(() =
 
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, loading: toastLoading, dismiss: toastDismiss } }))
 
+const { toastTransferStarted } = vi.hoisted(() => ({ toastTransferStarted: vi.fn() }))
+
+vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted }))
+
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
@@ -800,10 +804,13 @@ describe("startDirectoryUpload (real wiring)", () => {
 		expect(uploadFile).toHaveBeenCalledTimes(2)
 		expect(toastSuccess).toHaveBeenCalledWith(expect.any(String))
 
-		// The scanning toast shows for the tree-walk phase, then is dismissed (not left hanging)
-		// once the walk resolves and the real per-item upload/summary toasts take over.
+		// The scanning toast shows for the tree-walk phase, then turns into the upload-started toast in
+		// place (not left hanging, not a second toast) once the walk resolves.
 		expect(toastLoading).toHaveBeenCalledWith(expect.any(String))
-		expect(toastDismiss).toHaveBeenCalledWith("scan-toast-id")
+		expect(toastTransferStarted).toHaveBeenCalledExactlyOnceWith(
+			{ direction: "upload", name: "myfolder", count: 1, noun: "items" },
+			"scan-toast-id"
+		)
 
 		const transfers = useTransfersStore.getState().transfers
 		expect(transfers).toHaveLength(2)
@@ -847,7 +854,10 @@ describe("startDirectoryUpload (real wiring)", () => {
 
 		expect(createDirectory).toHaveBeenCalledTimes(1)
 		expect(uploadFile).toHaveBeenCalledTimes(1)
-		expect(toastDismiss).toHaveBeenCalledWith("scan-toast-id")
+		expect(toastTransferStarted).toHaveBeenCalledExactlyOnceWith(
+			{ direction: "upload", name: "myfolder", count: 1, noun: "items" },
+			"scan-toast-id"
+		)
 		expect(toastError).toHaveBeenCalledExactlyOnceWith(expect.any(String))
 		expect(toastSuccess).not.toHaveBeenCalled()
 	})

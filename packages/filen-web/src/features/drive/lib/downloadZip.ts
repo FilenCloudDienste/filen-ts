@@ -18,7 +18,7 @@ import {
 } from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
-import { toastDownloadStarted } from "@/features/transfers/lib/downloadStartToast"
+import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
 // save dialog. No `cancel` field: cancelTransfer/setTransferPaused (features/transfers/lib/control.ts) already
@@ -122,7 +122,9 @@ export const defaultZipDownloadDeps: RunZipDownloadDeps = {
 				})
 			: downloadZipViaFsa(items, transferId, save, onProgress),
 	store: useTransfersStore.getState(),
-	announceStart: toastDownloadStarted
+	announceStart: (name, count) => {
+		toastTransferStarted({ direction: "download", name, count, noun: "items" })
+	}
 }
 
 // A single directory names the archive after itself; anything else (a multi-item selection, mixed

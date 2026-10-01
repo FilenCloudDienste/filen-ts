@@ -13,7 +13,7 @@ import { saveDownload, triggerSwDownload, isPickerCancelled, type SaveTarget, ty
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
 import { startZipDownload } from "@/features/drive/lib/downloadZip"
-import { toastDownloadStarted } from "@/features/transfers/lib/downloadStartToast"
+import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 
 // Extracts the SDK AnyFile a download op wants from a DriveItem's file arm. A directory item is a
 // contract violation here — startDownloads below routes any directory to the zip path instead — so
@@ -127,7 +127,9 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 		void sdkApi.cancelTransfer(transferId)
 	},
 	store: useTransfersStore.getState(),
-	announceStart: toastDownloadStarted
+	announceStart: (name, count) => {
+		toastTransferStarted({ direction: "download", name, count, noun: "items" })
+	}
 }
 
 // A directory, or more than one item at all, zips into one archive rather than N separate save

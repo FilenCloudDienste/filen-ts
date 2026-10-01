@@ -1,6 +1,7 @@
 import { toast } from "sonner"
 import { dirnameOf, pathSegmentDepth, sumBytes } from "@filen/shared"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 import { i18n } from "@/lib/i18n"
 import { log } from "@/lib/log"
 import { toastSummary } from "@/lib/actions/bulkToast"
@@ -449,10 +450,10 @@ const defaultDirectoryUploadDeps: RunDirectoryUploadDeps = {
 // off with `void`, and the tree walk below (collectDirectoryUploads) can run for a while on a large
 // local directory with nothing else on screen changing — no transfer row exists yet, since none of the
 // files/dirs it discovers are known until the walk finishes. A loading toast is the spinner/indicator
-// for that gap: shown the instant the walk starts, replaced by the real error toast in place (same
-// `id`, so it's a swap, not a second toast) if the walk itself fails, or dismissed once it resolves and
-// the (now known) tree starts actually uploading — runDirectoryUpload's own success/failure summary
-// toast takes over from there.
+// for that gap: shown the instant the walk starts, replaced in place (same `id`, so it's a swap, not a
+// second toast) by the real error toast if the walk itself fails, or by the upload-started toast once the
+// (now known) tree starts actually uploading — runDirectoryUpload's own success/failure summary toast
+// takes over from there.
 export async function startDirectoryUpload(input: DirectoryUploadInput, rootParentUuid: string | null): Promise<void> {
 	const scanningToastId = toast.loading(i18n.t("transfers:transfersScanningDirectory"))
 	let collected: CollectedDirectoryUpload
@@ -476,7 +477,13 @@ export async function startDirectoryUpload(input: DirectoryUploadInput, rootPare
 		return
 	}
 
-	toast.dismiss(scanningToastId)
+	const topLevel = [...collected.dirs, ...collected.files.map(entry => entry.relPath)].filter(path => topLevelOf(path) === null)
+
+	if (topLevel.length === 0) {
+		toast.dismiss(scanningToastId)
+	} else {
+		toastTransferStarted({ direction: "upload", name: topLevel[0] ?? "", count: topLevel.length, noun: "items" }, scanningToastId)
+	}
 
 	await runDirectoryUpload(defaultDirectoryUploadDeps, { rootParentUuid, ...collected })
 }
