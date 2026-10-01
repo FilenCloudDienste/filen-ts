@@ -1,9 +1,9 @@
 import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import type { Chat } from "@filen/sdk-rs"
-import { errorLabel } from "@/lib/i18n/errorLabel"
+import { runOutcomeActivity } from "@/lib/activity/activity"
 import { setChatMuted, markChatRead } from "@/features/chats/lib/actions"
+import { CHATS_MARK_READ, chatActivityName, setMutedKeys } from "@/features/chats/lib/activity"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import type { BlockedUsers } from "@filen/shared"
@@ -25,7 +25,7 @@ export interface ChatMenuContentProps {
 	blocked: BlockedUsers
 	// Fires for every "dialog"-run descriptor (rename/delete/leave/participants) — the mounting
 	// surface's own dialog host (useChatDialogHost) turns this into an open dialog. Every "direct"
-	// descriptor (markRead/mute-toggle) resolves fully in place below.
+	// descriptor (markRead/mute-toggle) runs in place below as an activity toast.
 	onAction: (kind: ChatActionDialogKind, chat: Chat) => void
 }
 
@@ -48,24 +48,19 @@ function ChatMenuEntries({ chat, currentUserId, blocked, onAction, family }: Cha
 	const descriptors = applyOfflineGate(chatMenuActions(chat, currentUserId, unread), isOnline)
 	const { Item, Separator } = family
 
-	async function runDirect(descriptor: Extract<ChatActionDescriptor, { run: "direct" }>): Promise<void> {
+	function runDirect(descriptor: Extract<ChatActionDescriptor, { run: "direct" }>): void {
 		switch (descriptor.id) {
-			case "markRead": {
-				const outcome = await markChatRead(chat)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
+			case "markRead":
+				void runOutcomeActivity(chat, { keys: CHATS_MARK_READ, name: chatActivityName, run: markChatRead })
 				return
-			}
 			case "mute": {
-				const outcome = await setChatMuted(chat, !chat.muted)
+				const mute = !chat.muted
 
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
+				void runOutcomeActivity(chat, {
+					keys: setMutedKeys(mute),
+					name: chatActivityName,
+					run: target => setChatMuted(target, mute)
+				})
 				return
 			}
 		}
@@ -83,7 +78,7 @@ function ChatMenuEntries({ chat, currentUserId, blocked, onAction, family }: Cha
 					title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={() => {
 						if (descriptor.run === "direct") {
-							void runDirect(descriptor)
+							runDirect(descriptor)
 							return
 						}
 

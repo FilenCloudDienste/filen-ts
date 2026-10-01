@@ -4,24 +4,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
+import type { ExternalToast } from "sonner"
 import type { Contact, ContactRequestIn } from "@filen/sdk-rs"
 
 // A bulk contacts op deliberately prunes only what SUCCEEDED, so the failures stay selected and the user
 // can retry them in one click. Drive's analogous helper is pinned (bulkActionBar.test.ts's runBulkFavorite);
 // contacts' two call sites — the accept path and the shared confirm-dialog tail — are not, and pruning the
-// whole selection instead would silently drop the very rows that need another attempt.
+// whole selection instead would silently drop the very rows that need another attempt. Both run as
+// activity toasts, whose words are checked too.
 
-const { acceptRequest, removeContact, useContactsListSelection, pruneSelection, toastSuccess, toastError } = vi.hoisted(() => ({
+const { acceptRequest, removeContact, useContactsListSelection, pruneSelection, toast } = vi.hoisted(() => ({
 	acceptRequest: vi.fn(),
 	removeContact: vi.fn(),
 	useContactsListSelection: vi.fn(),
 	pruneSelection: vi.fn(),
-	toastSuccess: vi.fn(),
-	toastError: vi.fn()
+	toast: Object.assign(
+		vi.fn<(title: string, options?: ExternalToast) => string>(() => "id"),
+		{
+			success: vi.fn<(title: string, options?: ExternalToast) => string>(),
+			error: vi.fn<(title: string, options?: ExternalToast) => string>(),
+			warning: vi.fn(),
+			dismiss: vi.fn()
+		}
+	)
 }))
+const toastSuccess = toast.success
+const toastError = toast.error
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, warning: vi.fn() } }))
+vi.mock("sonner", () => ({ toast }))
 // useDialogHost closes on navigation, so it reads the current href off the router.
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouterState: () => "/contacts" }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
@@ -114,7 +125,41 @@ describe("ContactsList — bulk actions prune only what succeeded", () => {
 		})
 
 		expect(pruneSelection).toHaveBeenCalledWith("requests", [REQUEST_A.uuid])
-		expect(toastError).toHaveBeenCalledTimes(1)
+		expect(toast.mock.calls[0]?.[0]).toBe("Accepting 2 requests")
+		expect(toastError).toHaveBeenCalledExactlyOnceWith("Accepted 1 request, 1 failed", expect.anything())
+	})
+
+	it("accepts one request from its row as an activity naming it, holding its button meanwhile", async () => {
+		const { promise, resolve } = Promise.withResolvers<{ status: "success" }>()
+		acceptRequest.mockReturnValue(promise)
+		useContactsListSelection.mockReturnValue(selectionStub({}))
+
+		render(createElement(ContactsList, { section: "requests" as const }))
+
+		const [accept] = screen.getAllByRole("button", { name: "Accept" })
+
+		if (accept === undefined) {
+			throw new Error("no accept button")
+		}
+
+		fireEvent.click(accept)
+		fireEvent.click(accept)
+
+		expect(toast).toHaveBeenCalledExactlyOnceWith("Accepting the request from ra@example.com", expect.anything())
+		expect(acceptRequest).toHaveBeenCalledExactlyOnceWith(REQUEST_A.uuid)
+		await waitFor(() => {
+			expect(accept.hasAttribute("disabled")).toBe(true)
+		})
+
+		resolve({ status: "success" })
+
+		await waitFor(() => {
+			expect(toastSuccess).toHaveBeenCalledWith("Accepted the request from ra@example.com", expect.anything())
+		})
+		expect(pruneSelection).toHaveBeenCalledWith("requests", [REQUEST_A.uuid])
+		await waitFor(() => {
+			expect(accept.hasAttribute("disabled")).toBe(false)
+		})
 	})
 
 	it("leaves a failed remove selected while dropping the removed one, and still closes the dialog", async () => {
@@ -134,7 +179,8 @@ describe("ContactsList — bulk actions prune only what succeeded", () => {
 		})
 
 		expect(pruneSelection).toHaveBeenCalledWith("contacts", [CONTACT_A.uuid])
-		expect(toastError).toHaveBeenCalledTimes(1)
+		expect(toast.mock.calls[0]?.[0]).toBe("Removing 2 contacts")
+		expect(toastError).toHaveBeenCalledExactlyOnceWith("Removed 1 contact, 1 failed", expect.anything())
 		expect(screen.queryByRole("alertdialog")).toBeNull()
 	})
 
@@ -155,7 +201,7 @@ describe("ContactsList — bulk actions prune only what succeeded", () => {
 		})
 
 		expect(pruneSelection).toHaveBeenCalledWith("contacts", [])
-		expect(toastError).toHaveBeenCalledTimes(1)
+		expect(toastError).toHaveBeenCalledExactlyOnceWith("Couldn't remove 2 contacts", expect.anything())
 		expect(toastSuccess).not.toHaveBeenCalled()
 		expect(screen.queryByRole("alertdialog")).toBeNull()
 	})
@@ -177,6 +223,6 @@ describe("ContactsList — bulk actions prune only what succeeded", () => {
 		})
 
 		expect(pruneSelection).toHaveBeenCalledWith("contacts", [CONTACT_A.uuid, CONTACT_B.uuid])
-		expect(toastSuccess).toHaveBeenCalledTimes(1)
+		expect(toastSuccess).toHaveBeenCalledExactlyOnceWith("Removed 2 contacts", expect.anything())
 	})
 })

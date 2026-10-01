@@ -3,6 +3,15 @@ import { chatDisplayName, chatMessagePreview, isChatUndecryptable, isLastMessage
 import { compareChats, isListedChat, isOneOnOneWithBlocked, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
 
+// The URL owns the selected conversation: /chats/<uuid> is a selection key. The sidebar renders in the app
+// shell (outside the chats route match), so it reads the raw pathname rather than route params. Empty at
+// bare "/chats" (nothing selected).
+export function selectedChatUuidFromPath(pathname: string): string {
+	const match = /^\/chats\/([^/]+)/.exec(pathname)
+
+	return match?.[1] ?? ""
+}
+
 // Conversation-list view model — PURE, unit-tested. Client-side search filter over the sorted list.
 //
 // A search term matches a conversation when it is a case-insensitive substring of the conversation's

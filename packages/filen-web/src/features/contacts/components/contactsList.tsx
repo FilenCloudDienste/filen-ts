@@ -29,7 +29,16 @@ import {
 	type VoidActionOutcome
 } from "@/features/contacts/lib/actions"
 import { runBulkOutcomes } from "@/lib/actions/bulk"
-import { toastContactsBulkOutcome } from "@/features/contacts/lib/bulkToast"
+import { runBulkActivity } from "@/lib/activity/activity"
+import { type ActivityKeys } from "@/lib/activity/activity.logic"
+import {
+	CONTACTS_ACCEPT,
+	CONTACTS_BLOCK,
+	CONTACTS_CANCEL_REQUEST,
+	CONTACTS_DENY,
+	CONTACTS_REMOVE,
+	CONTACTS_UNBLOCK
+} from "@/features/contacts/lib/activity"
 import { resolveSelectedContacts, type ContactSectionKey } from "@/features/contacts/lib/selection"
 import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
 import { useInFlightKeys } from "@/features/contacts/hooks/useInFlightKeys"
@@ -48,7 +57,7 @@ import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { cn } from "@filen/shared"
+import { cn, contactDisplayName, type ContactLike } from "@filen/shared"
 import { SURFACE_RING } from "@/components/ui/surface"
 
 // Every section's rows sit in one of these: a rounded, ringed panel (ui/card.tsx's ring language) with
@@ -83,7 +92,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [search, setSearch] = useState("")
 	const selection = useContactsListSelection({ resetKey: section })
-	const { activeDialog, setActiveDialog, dialogPending, closeActiveDialog, runDialogPending, runDialogOutcome } =
+	const { activeDialog, setActiveDialog, dialogPending, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveContactDialog>()
 	// Accept has no confirm dialog to carry a pending state, and its row stays until the op resolves: a
 	// second click meanwhile would send a duplicate accept for a request the first is consuming.
@@ -145,24 +154,44 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		[selection]
 	)
 
-	// No confirm (mirrors mobile) — silent success, LABEL-FIRST toast on failure, matching every
-	// other singular contact action's convention (see runSingleDialogAction below).
-	async function handleAccept(request: ContactRequestIn): Promise<void> {
-		if (accepting.claim([request.uuid]).length === 0) {
+	// No confirm (mirrors mobile): one request from its row or several from the bar, as an activity. Its
+	// requests stay claimed while it runs, and a Try again from its result claims the ones it re-runs,
+	// skipping any a newer accept has taken meanwhile.
+	function handleAccept(requests: ContactRequestIn[]): void {
+		const claimed = new Set(accepting.claim(requests.map(request => request.uuid)))
+
+		if (claimed.size === 0) {
 			return
 		}
 
-		const outcome = await acceptRequest(request.uuid)
+		let heldByCaller = true
 
-		accepting.release([request.uuid])
+		void runBulkActivity({
+			items: requests.filter(request => claimed.has(request.uuid)),
+			keys: CONTACTS_ACCEPT,
+			name: contactDisplayName,
+			run: async (targets, onSettled) => {
+				const own = heldByCaller ? new Set(claimed) : new Set(accepting.claim(targets.map(request => request.uuid)))
 
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
+				heldByCaller = false
 
-			return
-		}
+				const outcome = await runBulkOutcomes(
+					targets.filter(request => own.has(request.uuid)),
+					request => acceptRequest(request.uuid),
+					onSettled
+				)
 
-		selection.pruneSelection("requests", [request.uuid])
+				accepting.release([...own])
+
+				return outcome
+			},
+			onDone: outcome => {
+				selection.pruneSelection(
+					"requests",
+					outcome.succeeded.map(request => request.uuid)
+				)
+			}
+		})
 	}
 
 	// Row menu "Message": creates-or-opens a 1:1 chat with the contact, then navigates straight into
@@ -180,26 +209,6 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		}
 	}
 
-	async function handleBulkAccept(items: ContactRequestIn[]): Promise<void> {
-		const claimed = new Set(accepting.claim(items.map(request => request.uuid)))
-
-		if (claimed.size === 0) {
-			return
-		}
-
-		const outcome = await runBulkOutcomes(
-			items.filter(request => claimed.has(request.uuid)),
-			request => acceptRequest(request.uuid)
-		)
-
-		accepting.release([...claimed])
-		toastContactsBulkOutcome(outcome)
-		selection.pruneSelection(
-			"requests",
-			outcome.succeeded.map(request => request.uuid)
-		)
-	}
-
 	// Shared tail for a per-row single confirm: run the singular action helper, close silently on
 	// success, toast + stay open (so the user can retry) on failure — mirrors directoryListing.tsx's
 	// rename handler, the closest single-item (non-bulk-shaped) precedent there. Prunes on success for
@@ -215,30 +224,36 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		}
 	}
 
-	// Shared tail for a bulk confirm: run every item independently via runBulkOutcomes, always close
-	// (the toast conveys any partial failure), and prune succeeded uuids from the selection — mirrors
-	// directoryListing.tsx's runBulkDialogAction.
-	async function runBulkDialogAction<T extends { uuid: string }>(
+	// Shared tail for a bulk confirm: every item runs independently as an activity (useDialogHost's
+	// runBulkDialogActivity), and the succeeded uuids leave the selection.
+	async function runBulkDialogAction<T extends ContactLike & { uuid: string }>(
 		section: ContactSectionKey,
 		items: T[],
+		keys: ActivityKeys,
 		op: (item: T) => Promise<VoidActionOutcome>
 	): Promise<void> {
-		const outcome = await runDialogPending(() => runBulkOutcomes(items, op))
-		closeActiveDialog()
-		toastContactsBulkOutcome(outcome)
-		selection.pruneSelection(
-			section,
-			outcome.succeeded.map(item => item.uuid)
-		)
+		await runBulkDialogActivity({
+			items,
+			keys,
+			name: contactDisplayName,
+			run: (targets, onSettled) => runBulkOutcomes(targets, op, onSettled),
+			onDone: outcome => {
+				selection.pruneSelection(
+					section,
+					outcome.succeeded.map(item => item.uuid)
+				)
+			}
+		})
 	}
 
 	// Generic over the item type so each switch case below keeps its own narrowed `items`.
-	function renderConfirm<T extends { uuid: string }>(spec: {
+	function renderConfirm<T extends ContactLike & { uuid: string }>(spec: {
 		title: string
 		body: string
 		confirmLabel: string
 		destructive?: boolean
 		section: ContactSectionKey
+		keys: ActivityKeys
 		items: T[]
 		bulk: boolean
 		op: (item: T) => Promise<VoidActionOutcome>
@@ -259,7 +274,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 				}}
 				onConfirm={() => {
 					if (spec.bulk) {
-						void runBulkDialogAction(spec.section, spec.items, spec.op)
+						void runBulkDialogAction(spec.section, spec.items, spec.keys, spec.op)
 						return
 					}
 
@@ -292,6 +307,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					body: t("contactsDenyConfirmBody", { count }),
 					confirmLabel: t("contactsActionDeny"),
 					section: "requests",
+					keys: CONTACTS_DENY,
 					items: activeDialog.items,
 					bulk: activeDialog.bulk,
 					op: request => denyRequest(request.uuid)
@@ -302,6 +318,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					body: t("contactsCancelConfirmBody", { count }),
 					confirmLabel: t("contactsActionCancelRequest"),
 					section: "pending",
+					keys: CONTACTS_CANCEL_REQUEST,
 					items: activeDialog.items,
 					bulk: activeDialog.bulk,
 					op: request => cancelRequest(request.uuid)
@@ -313,6 +330,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					confirmLabel: t("contactsActionRemove"),
 					destructive: true,
 					section: "contacts",
+					keys: CONTACTS_REMOVE,
 					items: activeDialog.items,
 					bulk: activeDialog.bulk,
 					op: contact => removeContact(contact.uuid)
@@ -324,6 +342,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					confirmLabel: t("contactsActionBlock"),
 					destructive: true,
 					section: "contacts",
+					keys: CONTACTS_BLOCK,
 					items: activeDialog.items,
 					bulk: activeDialog.bulk,
 					op: contact => blockContact(contact)
@@ -334,6 +353,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					body: t("contactsUnblockConfirmBody", { count }),
 					confirmLabel: t("contactsActionUnblock"),
 					section: "blocked",
+					keys: CONTACTS_UNBLOCK,
 					items: activeDialog.items,
 					bulk: activeDialog.bulk,
 					op: contact => unblockContact(contact.uuid)
@@ -377,7 +397,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							title={offlineTitle}
 							tabIndex={index === activeIndex ? 0 : -1}
 							onAccept={item => {
-								void handleAccept(item)
+								handleAccept([item])
 							}}
 							onDeny={item => {
 								setActiveDialog({ kind: "deny", bulk: false, items: [item] })
@@ -542,9 +562,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 							disabled={!isOnline}
 							title={offlineTitle}
 							onClear={selection.clearSelection}
-							onAccept={items => {
-								void handleBulkAccept(items)
-							}}
+							onAccept={handleAccept}
 							onDeny={items => {
 								setActiveDialog({ kind: "deny", bulk: true, items })
 							}}

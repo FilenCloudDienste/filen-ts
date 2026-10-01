@@ -7,7 +7,8 @@ import { cn, contactDisplayName, deriveBlockedUsers, toggleInSet } from "@filen/
 import { isChatOwner } from "@/features/chats/lib/sort"
 import { addChatParticipants, removeChatParticipant, removeChatParticipants } from "@/features/chats/lib/participants"
 import { chatParticipantRows, selectedParticipantsForRemoval } from "@/features/chats/components/chatParticipantsDialog.logic"
-import { toastChatParticipantsBulkRemoveOutcome } from "@/features/chats/lib/bulkToast"
+import { CHAT_PARTICIPANTS_REMOVE } from "@/features/chats/lib/activity"
+import { useDialogHost } from "@/lib/useDialogHost"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
@@ -59,8 +60,10 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
 	const [addPending, setAddPending] = useState(false)
 	const [filter, setFilter] = useState("")
-	const [bulkRemovePending, setBulkRemovePending] = useState(false)
-	const [confirmingBulkRemove, setConfirmingBulkRemove] = useState(false)
+	// The bulk-remove confirm, handed to an activity toast when it removes several (useDialogHost's
+	// runBulkDialogActivity).
+	const bulkRemove = useDialogHost<"bulkRemove">()
+	const bulkRemovePending = bulkRemove.dialogPending
 
 	// Always enabled (not mode-gated like the "add" picker alone would need): list mode's rows need the
 	// blocked set up front for each row's Block/Unblock control and its live state. Shares one query key
@@ -110,28 +113,30 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 
 	async function handleBulkRemoveConfirmed(): Promise<void> {
 		if (selectedForRemoval.length === 0) {
-			setConfirmingBulkRemove(false)
+			bulkRemove.closeActiveDialog()
 			return
 		}
 
-		setBulkRemovePending(true)
-		const { outcome } = await removeChatParticipants(chat, selectedForRemoval)
-		setBulkRemovePending(false)
-		setConfirmingBulkRemove(false)
+		await bulkRemove.runBulkDialogActivity({
+			items: selectedForRemoval,
+			keys: CHAT_PARTICIPANTS_REMOVE,
+			name: contactDisplayName,
+			run: async (participants, onSettled) => (await removeChatParticipants(chat, participants, onSettled)).outcome,
+			// Mirrors the notes/chats bulk-bar convention: a succeeded participant is pruned from the
+			// selection, a failed one stays selected so the user can retry without re-picking it.
+			onDone: outcome => {
+				const removedIds = new Set(outcome.succeeded.map(p => p.userId.toString()))
 
-		toastChatParticipantsBulkRemoveOutcome(outcome)
+				setSelected(prev => {
+					const next = new Set(prev)
 
-		// Mirrors the notes/chats bulk-bar convention: a succeeded participant is pruned from the
-		// selection, a failed one stays selected so the user can retry without re-picking it.
-		const removedIds = new Set(outcome.succeeded.map(p => p.userId.toString()))
-		setSelected(prev => {
-			const next = new Set(prev)
+					for (const id of removedIds) {
+						next.delete(id)
+					}
 
-			for (const id of removedIds) {
-				next.delete(id)
+					return next
+				})
 			}
-
-			return next
 		})
 	}
 
@@ -321,7 +326,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 									disabled={dialogPending || !isOnline}
 									title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 									onClick={() => {
-										setConfirmingBulkRemove(true)
+										bulkRemove.setActiveDialog("bulkRemove")
 									}}
 								>
 									{bulkRemovePending && <Spinner data-icon="inline-start" />}
@@ -403,7 +408,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 			{/* Second nested confirm — same "must stay a child of the outer Dialog" rule, the bulk
 			counterpart of the single-row confirm above. */}
 			<ConfirmDialog
-				open={confirmingBulkRemove}
+				open={bulkRemove.isDialogOpen}
 				pending={bulkRemovePending}
 				title={t("chatParticipantRemoveSelectedDialogTitle")}
 				body={t("chatParticipantRemoveSelectedDialogBody", { count: selectedForRemoval.length })}
@@ -412,7 +417,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				destructive
 				onOpenChange={open => {
 					if (!open) {
-						setConfirmingBulkRemove(false)
+						bulkRemove.closeActiveDialog()
 					}
 				}}
 				onConfirm={() => {

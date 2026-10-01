@@ -1,8 +1,8 @@
 import type { Chat, ChatParticipant, Contact } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import { chatsQueryUpsert } from "@/features/chats/queries/chats"
+import { chatsQueryGet, chatsQueryUpsert } from "@/features/chats/queries/chats"
 import { attemptOp, type ActionOutcome } from "@/lib/actions/outcome"
-import { type BulkFailure, type BulkOutcome } from "@/lib/actions/bulk"
+import { type BulkFailure, type BulkOutcome, type BulkProgress } from "@/lib/actions/bulk"
 
 export type { ActionOutcome }
 
@@ -65,25 +65,29 @@ export async function removeChatParticipant(chat: Chat, participant: ChatPartici
 // would silently restore whichever participants an earlier call already removed — the exact hazard
 // addChatParticipants' own doc comment above describes for adds. One rejected removal does not abort
 // the rest (partial-success, like every other bulk surface in this app) — it just carries the chat
-// state from the last successful step forward into the next attempt.
+// state from the last successful step forward into the next attempt. Each step starts from the cached
+// chat when there is one: the dialog stays usable while a run goes on, so a single remove or a socket
+// event may have changed the chat between two steps.
 export async function removeChatParticipants(
 	chat: Chat,
-	participants: readonly ChatParticipant[]
+	participants: readonly ChatParticipant[],
+	onSettled?: BulkProgress
 ): Promise<{ chat: Chat; outcome: BulkOutcome<ChatParticipant> }> {
 	let current = chat
 	const succeeded: ChatParticipant[] = []
 	const failed: BulkFailure<ChatParticipant>[] = []
 
 	for (const participant of participants) {
-		const outcome = await removeChatParticipant(current, participant)
+		const outcome = await removeChatParticipant(chatsQueryGet()?.find(cached => cached.uuid === chat.uuid) ?? current, participant)
 
 		if (outcome.status === "error") {
 			failed.push({ item: participant, error: outcome.dto })
-			continue
+		} else {
+			current = outcome.item
+			succeeded.push(participant)
 		}
 
-		current = outcome.item
-		succeeded.push(participant)
+		onSettled?.(succeeded.length + failed.length, participants.length)
 	}
 
 	return { chat: current, outcome: { succeeded, failed } }

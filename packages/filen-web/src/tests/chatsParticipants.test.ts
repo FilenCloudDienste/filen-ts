@@ -274,6 +274,46 @@ describe("removeChatParticipants — sequential bulk remove", () => {
 	})
 })
 
+describe("removeChatParticipants — progress and concurrent changes", () => {
+	it("reports each participant as it settles", async () => {
+		const participantA = mockParticipant({ userId: 5n })
+		const participantB = mockParticipant({ userId: 6n })
+		const chat = mockChat({ participants: [participantA, participantB] })
+		const onSettled = vi.fn()
+
+		removeChatParticipantOp.mockRejectedValueOnce(new Error("network"))
+		removeChatParticipantOp.mockResolvedValueOnce(mockChat({ participants: [participantA] }))
+
+		await removeChatParticipants(chat, [participantA, participantB], onSettled)
+
+		expect(onSettled.mock.calls).toEqual([
+			[1, 2],
+			[2, 2]
+		])
+	})
+
+	it("starts each step from the cached chat, so a change landing between steps is not undone", async () => {
+		const participantA = mockParticipant({ userId: 5n })
+		const participantB = mockParticipant({ userId: 6n })
+		const participantC = mockParticipant({ userId: 7n })
+		const chat = mockChat({ participants: [participantA, participantB, participantC] })
+		const afterA = mockChat({ participants: [participantB, participantC] })
+		// C left (a single remove, a socket event) once A's removal had landed.
+		const withoutC = mockChat({ participants: [participantB] })
+
+		removeChatParticipantOp.mockResolvedValueOnce(afterA)
+		removeChatParticipantOp.mockResolvedValueOnce(mockChat({ participants: [] }))
+
+		await removeChatParticipants(chat, [participantA, participantB], settled => {
+			if (settled === 1) {
+				testQueryClient.setQueryData(CHATS_QUERY_KEY, [withoutC])
+			}
+		})
+
+		expect(removeChatParticipantOp).toHaveBeenNthCalledWith(2, withoutC, 6n)
+	})
+})
+
 describe("selectedParticipantsForRemoval", () => {
 	const owner = mockParticipant({ userId: 1n })
 	const participantA = mockParticipant({ userId: 2n })

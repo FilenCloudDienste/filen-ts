@@ -1,11 +1,11 @@
 import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
-import { type BulkOutcome } from "@/lib/actions/bulk"
 import { aggregateChatSelectionFlags } from "@/features/chats/lib/selectionFlags"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import type { BlockedUsers } from "@filen/shared"
 import { markChatsRead, setChatsMuted } from "@/features/chats/lib/bulk"
-import { toastChatsBulkOutcome } from "@/features/chats/lib/bulkToast"
+import { CHATS_MARK_READ, chatsActivity, setMutedKeys } from "@/features/chats/lib/activity"
+import { runBulkActivity } from "@/lib/activity/activity"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
 import {
 	chatBulkActions,
@@ -38,23 +38,19 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 	const flags = aggregateChatSelectionFlags(selectedChats, currentUserId, blocked, chatMessagesQueryGet)
 	const descriptors = chatBulkActions(flags)
 
-	async function runOutcome(pending: Promise<BulkOutcome<Chat>>): Promise<void> {
-		const outcome = await pending
-
-		toastChatsBulkOutcome(outcome)
-		// Mirrors the dialog-routed bulk actions' own cleanup — a succeeded chat is pruned from the
-		// selection, a failed one stays selected so the user can retry.
-		useChatsSelectionStore.getState().removeFromSelection(outcome.succeeded.map(chat => chat.uuid))
-	}
-
 	function runDescriptor(descriptor: Extract<ChatBulkActionDescriptor, { run: "direct" }>): void {
 		switch (descriptor.id) {
 			case "markRead":
-				void runOutcome(markChatsRead(selectedChats))
+				void runBulkActivity(chatsActivity(selectedChats, CHATS_MARK_READ, markChatsRead))
 				return
-			case "mute":
-				void runOutcome(setChatsMuted(selectedChats, !flags.includesMuted))
+			case "mute": {
+				const mute = !flags.includesMuted
+
+				void runBulkActivity(
+					chatsActivity(selectedChats, setMutedKeys(mute), (targets, onSettled) => setChatsMuted(targets, mute, onSettled))
+				)
 				return
+			}
 		}
 	}
 

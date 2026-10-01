@@ -178,3 +178,20 @@ describe("leaveChats — non-owner self-remove, per-chat beforeCacheRemoval", ()
 		expect(outcome.succeeded).toEqual([chatA, chatB])
 	})
 })
+
+describe("bulk chat ops report each chat as it settles", () => {
+	it("counts settled chats, failures included, for the activity toast", async () => {
+		setCurrentUser(1n)
+		const owned = mockChat({ uuid: testUuid("a"), ownerId: 1n })
+		const notOwned = mockChat({ uuid: testUuid("b"), ownerId: 2n })
+		deleteChatOp.mockResolvedValue(undefined)
+		const onSettled = vi.fn()
+
+		await deleteChatsPermanently([owned, notOwned], undefined, onSettled)
+
+		expect(onSettled.mock.calls).toEqual([
+			[1, 2],
+			[2, 2]
+		])
+	})
+})

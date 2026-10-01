@@ -134,16 +134,104 @@ export const contacts = {
 	/** Unblock-contact confirm dialog — body for multiple contacts; {{count}} = contacts being unblocked */
 	contactsUnblockConfirmBody_other: "Are you sure you want to unblock these {{count}} contacts?",
 
-	// ── Bulk action result toast ─────────────────────────────────────────────
-	// Generic across every bulk contact action (accept/deny/cancel/remove/block/unblock) rather than
-	// one pair per action — same "partial success, every item runs independently" rationale as
-	// driveBulkActionComplete_one/_other in locales/en/drive.ts.
-	/** Bulk action result toast — every selected contact succeeded; {{count}} = contacts affected */
-	contactsBulkActionComplete_one: "{{count}} contact updated",
-	/** Bulk action result toast — every selected contact succeeded (plural); {{count}} = contacts affected */
-	contactsBulkActionComplete_other: "{{count}} contacts updated",
-	/** Bulk action result toast — at least one selected contact failed; {{count}} = contacts that succeeded, {{failed}} = contacts that failed */
-	contactsBulkActionCompleteWithFailures_one: "{{count}} contact updated, {{failed}} failed",
-	/** Bulk action result toast — at least one selected contact failed (plural); {{count}} = contacts that succeeded, {{failed}} = contacts that failed */
-	contactsBulkActionCompleteWithFailures_other: "{{count}} contacts updated, {{failed}} failed"
+	// ── Activity toasts (lib/activity) ──────────────────────────────────────
+	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// contact or request (nickname, else email), `_other` counts them; a partial result counts the ones
+	// that succeeded.
+	/** Activity toast — accepting contact requests running; one item named ({{name}}) */
+	contactsAcceptRunning_one: "Accepting the request from {{name}}",
+	/** Activity toast — accepting contact requests running; {{count}} items */
+	contactsAcceptRunning_other: "Accepting {{count}} requests",
+	/** Activity toast — accepting contact requests finished; one item named ({{name}}) */
+	contactsAcceptDone_one: "Accepted the request from {{name}}",
+	/** Activity toast — accepting contact requests finished; {{count}} items */
+	contactsAcceptDone_other: "Accepted {{count}} requests",
+	/** Activity toast — accepting contact requests failed for every item; one item named ({{name}}) */
+	contactsAcceptFailed_one: "Couldn't accept the request from {{name}}",
+	/** Activity toast — accepting contact requests failed for every item; {{count}} items */
+	contactsAcceptFailed_other: "Couldn't accept {{count}} requests",
+	/** Activity toast — accepting contact requests partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsAcceptPartial_one: "Accepted {{count}} request, {{failed}} failed",
+	/** Activity toast — accepting contact requests partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsAcceptPartial_other: "Accepted {{count}} requests, {{failed}} failed",
+	/** Activity toast — denying contact requests running; one item named ({{name}}) */
+	contactsDenyRunning_one: "Denying the request from {{name}}",
+	/** Activity toast — denying contact requests running; {{count}} items */
+	contactsDenyRunning_other: "Denying {{count}} requests",
+	/** Activity toast — denying contact requests finished; one item named ({{name}}) */
+	contactsDenyDone_one: "Denied the request from {{name}}",
+	/** Activity toast — denying contact requests finished; {{count}} items */
+	contactsDenyDone_other: "Denied {{count}} requests",
+	/** Activity toast — denying contact requests failed for every item; one item named ({{name}}) */
+	contactsDenyFailed_one: "Couldn't deny the request from {{name}}",
+	/** Activity toast — denying contact requests failed for every item; {{count}} items */
+	contactsDenyFailed_other: "Couldn't deny {{count}} requests",
+	/** Activity toast — denying contact requests partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsDenyPartial_one: "Denied {{count}} request, {{failed}} failed",
+	/** Activity toast — denying contact requests partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsDenyPartial_other: "Denied {{count}} requests, {{failed}} failed",
+	/** Activity toast — cancelling sent contact requests running; one item named ({{name}}) */
+	contactsCancelRequestRunning_one: "Cancelling the request to {{name}}",
+	/** Activity toast — cancelling sent contact requests running; {{count}} items */
+	contactsCancelRequestRunning_other: "Cancelling {{count}} requests",
+	/** Activity toast — cancelling sent contact requests finished; one item named ({{name}}) */
+	contactsCancelRequestDone_one: "Cancelled the request to {{name}}",
+	/** Activity toast — cancelling sent contact requests finished; {{count}} items */
+	contactsCancelRequestDone_other: "Cancelled {{count}} requests",
+	/** Activity toast — cancelling sent contact requests failed for every item; one item named ({{name}}) */
+	contactsCancelRequestFailed_one: "Couldn't cancel the request to {{name}}",
+	/** Activity toast — cancelling sent contact requests failed for every item; {{count}} items */
+	contactsCancelRequestFailed_other: "Couldn't cancel {{count}} requests",
+	/** Activity toast — cancelling sent contact requests partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsCancelRequestPartial_one: "Cancelled {{count}} request, {{failed}} failed",
+	/** Activity toast — cancelling sent contact requests partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsCancelRequestPartial_other: "Cancelled {{count}} requests, {{failed}} failed",
+	/** Activity toast — removing contacts running; one item named ({{name}}) */
+	contactsRemoveRunning_one: "Removing {{name}}",
+	/** Activity toast — removing contacts running; {{count}} items */
+	contactsRemoveRunning_other: "Removing {{count}} contacts",
+	/** Activity toast — removing contacts finished; one item named ({{name}}) */
+	contactsRemoveDone_one: "Removed {{name}}",
+	/** Activity toast — removing contacts finished; {{count}} items */
+	contactsRemoveDone_other: "Removed {{count}} contacts",
+	/** Activity toast — removing contacts failed for every item; one item named ({{name}}) */
+	contactsRemoveFailed_one: "Couldn't remove {{name}}",
+	/** Activity toast — removing contacts failed for every item; {{count}} items */
+	contactsRemoveFailed_other: "Couldn't remove {{count}} contacts",
+	/** Activity toast — removing contacts partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsRemovePartial_one: "Removed {{count}} contact, {{failed}} failed",
+	/** Activity toast — removing contacts partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsRemovePartial_other: "Removed {{count}} contacts, {{failed}} failed",
+	/** Activity toast — blocking contacts running; one item named ({{name}}) */
+	contactsBlockRunning_one: "Blocking {{name}}",
+	/** Activity toast — blocking contacts running; {{count}} items */
+	contactsBlockRunning_other: "Blocking {{count}} contacts",
+	/** Activity toast — blocking contacts finished; one item named ({{name}}) */
+	contactsBlockDone_one: "Blocked {{name}}",
+	/** Activity toast — blocking contacts finished; {{count}} items */
+	contactsBlockDone_other: "Blocked {{count}} contacts",
+	/** Activity toast — blocking contacts failed for every item; one item named ({{name}}) */
+	contactsBlockFailed_one: "Couldn't block {{name}}",
+	/** Activity toast — blocking contacts failed for every item; {{count}} items */
+	contactsBlockFailed_other: "Couldn't block {{count}} contacts",
+	/** Activity toast — blocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsBlockPartial_one: "Blocked {{count}} contact, {{failed}} failed",
+	/** Activity toast — blocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsBlockPartial_other: "Blocked {{count}} contacts, {{failed}} failed",
+	/** Activity toast — unblocking contacts running; one item named ({{name}}) */
+	contactsUnblockRunning_one: "Unblocking {{name}}",
+	/** Activity toast — unblocking contacts running; {{count}} items */
+	contactsUnblockRunning_other: "Unblocking {{count}} contacts",
+	/** Activity toast — unblocking contacts finished; one item named ({{name}}) */
+	contactsUnblockDone_one: "Unblocked {{name}}",
+	/** Activity toast — unblocking contacts finished; {{count}} items */
+	contactsUnblockDone_other: "Unblocked {{count}} contacts",
+	/** Activity toast — unblocking contacts failed for every item; one item named ({{name}}) */
+	contactsUnblockFailed_one: "Couldn't unblock {{name}}",
+	/** Activity toast — unblocking contacts failed for every item; {{count}} items */
+	contactsUnblockFailed_other: "Couldn't unblock {{count}} contacts",
+	/** Activity toast — unblocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsUnblockPartial_one: "Unblocked {{count}} contact, {{failed}} failed",
+	/** Activity toast — unblocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
+	contactsUnblockPartial_other: "Unblocked {{count}} contacts, {{failed}} failed"
 } as const

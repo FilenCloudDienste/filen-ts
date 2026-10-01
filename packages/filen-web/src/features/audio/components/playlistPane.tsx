@@ -13,6 +13,10 @@ import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import { isTrackReorderDrag, TRACK_DRAG_TYPE } from "@/features/audio/lib/trackDnd"
 import { useKnownCoverUrl, useTrackMetadata } from "@/features/audio/hooks/useTrackMetadata"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
+import { getTrackTags } from "@/features/audio/store/useTrackTagsStore"
+import { runBulk } from "@/lib/actions/bulk"
+import { runBulkActivity } from "@/lib/activity/activity"
+import { activityKeys } from "@/lib/activity/activity.logic"
 import type { Playlist, PlaylistFile } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
@@ -32,6 +36,9 @@ const TRACK_ROW_OVERSCAN = 8
 const INITIAL_VIEWPORT_HEIGHT = 800
 // Every column, the ones hidden at narrow widths included, so a spacer row always spans the table.
 const TRACK_COLUMN_COUNT = 6
+
+// A track moved by drag, in the words its activity toast uses (locales/en/audio.ts, "Activity toasts").
+const PLAYLIST_TRACK_MOVE = activityKeys("audio:playlistTrackMove")
 
 // The selected playlist, inline in the /playlists main pane: a hero (artwork, name as the page's h1,
 // meta, Play/Shuffle/Add tracks/⋯) over its track table. Play-from-row keeps mobile #49 semantics
@@ -366,16 +373,27 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 		setRemovingUuid(null)
 	}
 
-	async function handleReorder(movedUuid: string): Promise<void> {
-		if (movedUuid === file.uuid) {
+	// The row only moves once the save lands, so the wait shows as an activity.
+	function handleReorder(movedUuid: string): void {
+		const moved = playlist.files.find(entry => entry.uuid === movedUuid)
+
+		if (moved === undefined || movedUuid === file.uuid) {
 			return
 		}
 
-		try {
-			await reorderPlaylistFileAction(playlist, movedUuid, file.uuid)
-		} catch (error) {
-			toast.error(errorLabel(error))
-		}
+		void runBulkActivity({
+			items: [moved],
+			keys: PLAYLIST_TRACK_MOVE,
+			name: entry => trackDisplayTitle(getTrackTags(entry.uuid), entry.name),
+			run: (entries, onSettled) =>
+				runBulk(
+					entries,
+					async entry => {
+						await reorderPlaylistFileAction(playlist, entry.uuid, file.uuid)
+					},
+					onSettled
+				)
+		})
 	}
 
 	function handleDragLeave(): void {
@@ -409,7 +427,7 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 		const movedUuid = event.dataTransfer.getData(TRACK_DRAG_TYPE)
 
 		if (movedUuid !== "") {
-			void handleReorder(movedUuid)
+			handleReorder(movedUuid)
 		}
 	}
 

@@ -1,13 +1,12 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useRouter } from "@tanstack/react-router"
 import type { Chat } from "@filen/sdk-rs"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { renameChat, leaveChat, deleteChat } from "@/features/chats/lib/actions"
 import { deleteChatsPermanently, leaveChats } from "@/features/chats/lib/bulk"
-import { toastChatsBulkOutcome } from "@/features/chats/lib/bulkToast"
-import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
-import { type BulkOutcome } from "@/lib/actions/bulk"
+import { CHATS_DELETE, CHATS_LEAVE, chatsActivity } from "@/features/chats/lib/activity"
+import { selectedChatUuidFromPath } from "@/features/chats/components/chatsSidebar.logic"
 import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
 import { type ChatBulkDialogActionKind } from "@/features/chats/components/chatsBulkActionBar.logic"
 import { ChatParticipantsDialog } from "@/features/chats/components/chatParticipantsDialog"
@@ -28,20 +27,14 @@ export interface ChatDialogHost {
 	renderActiveDialog: () => ReactNode
 }
 
-export interface UseChatDialogHostParams {
-	// The uuid currently shown in this surface's thread route ("" when none) — leave/delete navigate
-	// away from THIS uuid before removing the chat from cache, so the route never briefly resolves to a
-	// gone conversation (mirrors notes' useNoteDialogHost currentUuid/navigateAwayIfCurrent).
-	currentUuid: string
-}
-
 // One instance of whichever dialog `ChatActionDialogKind` (or "create") names is rendered at a time —
 // the chat-menu counterpart to notes' useNoteDialogHost, sized to the five kinds the chat surfaces
 // ever dispatch (rename/delete/leave/participants/create).
-export function useChatDialogHost({ currentUuid }: UseChatDialogHostParams): ChatDialogHost {
+export function useChatDialogHost(): ChatDialogHost {
 	const { t } = useTranslation(["chats", "common"])
 	const navigate = useNavigate()
-	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
+	const router = useRouter()
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveChatDialog>()
 
 	function openChatDialog(kind: ChatActionDialogKind, chat: Chat): void {
@@ -56,8 +49,11 @@ export function useChatDialogHost({ currentUuid }: UseChatDialogHostParams): Cha
 		setActiveDialog({ kind, chats })
 	}
 
+	// Leave/delete navigate away from the open conversation before removing it from the cache, so the
+	// route never briefly resolves to a gone conversation. Read live: a bulk run (or its Try again) can
+	// settle after the user has opened another conversation.
 	function navigateAwayIfCurrent(chat: Chat): void {
-		if (chat.uuid === currentUuid) {
+		if (chat.uuid === selectedChatUuidFromPath(router.state.location.pathname)) {
 			void navigate({ to: "/chats" })
 		}
 	}
@@ -86,23 +82,20 @@ export function useChatDialogHost({ currentUuid }: UseChatDialogHostParams): Cha
 		)
 	}
 
-	// Shared tail for both bulk-dialog confirms (deleteSelected/leaveSelected): runs `op` against
-	// `chats`, tracks the shared dialogPending flag, closes the dialog, toasts the outcome, and prunes
-	// succeeded chats from the selection — a failed one stays selected so the user can retry. Mirrors
-	// useNoteDialogHost's own runBulkDialogAction.
-	async function runBulkDialogAction(chats: Chat[], op: (chats: Chat[]) => Promise<BulkOutcome<Chat>>): Promise<void> {
-		const outcome = await runDialogPending(() => op(chats))
-		closeActiveDialog()
-		toastChatsBulkOutcome(outcome)
-		useChatsSelectionStore.getState().removeFromSelection(outcome.succeeded.map(chat => chat.uuid))
-	}
-
 	async function handleDeleteSelectedConfirm(chats: Chat[]): Promise<void> {
-		await runBulkDialogAction(chats, targetChats => deleteChatsPermanently(targetChats, { beforeCacheRemoval: navigateAwayIfCurrent }))
+		await runBulkDialogActivity(
+			chatsActivity(chats, CHATS_DELETE, (targets, onSettled) =>
+				deleteChatsPermanently(targets, { beforeCacheRemoval: navigateAwayIfCurrent }, onSettled)
+			)
+		)
 	}
 
 	async function handleLeaveSelectedConfirm(chats: Chat[]): Promise<void> {
-		await runBulkDialogAction(chats, targetChats => leaveChats(targetChats, { beforeCacheRemoval: navigateAwayIfCurrent }))
+		await runBulkDialogActivity(
+			chatsActivity(chats, CHATS_LEAVE, (targets, onSettled) =>
+				leaveChats(targets, { beforeCacheRemoval: navigateAwayIfCurrent }, onSettled)
+			)
+		)
 	}
 
 	async function handleCreated(chat: Chat): Promise<void> {

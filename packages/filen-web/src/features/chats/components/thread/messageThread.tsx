@@ -660,7 +660,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	// uuids of uncommitted optimistic entries (queued or failed) — their uuid IS their inflightId, so the
 	// composer excludes them from the ArrowUp-edit target (an uncommitted send has no server uuid to edit).
 	const nonConfirmedUuids = new Set<string>([...queuedMessages, ...failedMessages].map(message => message.uuid))
-	const dialogHost = useChatDialogHost({ currentUuid: chatUuid })
+	const dialogHost = useChatDialogHost()
 	const threadListRef = useRef<ThreadListHandle | null>(null)
 	const titleId = useId()
 

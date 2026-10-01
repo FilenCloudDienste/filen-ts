@@ -182,14 +182,6 @@ export const chats = {
 	// ── Multi-select / bulk actions ────────────────────────────────────────────
 	/** Keymap — mod+a: selects every currently-visible conversation */
 	chatsCommandSelectAll: "Select all conversations",
-	/** Bulk-action toast — every targeted conversation succeeded */
-	chatsBulkActionComplete_one: "{{count}} conversation updated",
-	/** Bulk-action toast — every targeted conversation succeeded (plural) */
-	chatsBulkActionComplete_other: "{{count}} conversations updated",
-	/** Bulk-action toast — a partial failure */
-	chatsBulkActionCompleteWithFailures_one: "{{count}} conversation updated, {{failed}} failed",
-	/** Bulk-action toast — a partial failure (plural) */
-	chatsBulkActionCompleteWithFailures_other: "{{count}} conversations updated, {{failed}} failed",
 	/** Bulk delete confirm — heading */
 	chatsDeleteSelectedConfirmTitle: "Delete conversations?",
 	/** Bulk delete confirm — body copy */
@@ -223,14 +215,6 @@ export const chats = {
 	chatParticipantRemoveSelectedDialogBody_one: "{{count}} participant will lose access to this conversation.",
 	/** Bulk remove-participants confirm — body copy (plural) */
 	chatParticipantRemoveSelectedDialogBody_other: "{{count}} participants will lose access to this conversation.",
-	/** Bulk remove-participants toast — every targeted participant succeeded */
-	chatParticipantsBulkRemoveComplete_one: "{{count}} participant removed",
-	/** Bulk remove-participants toast — every targeted participant succeeded (plural) */
-	chatParticipantsBulkRemoveComplete_other: "{{count}} participants removed",
-	/** Bulk remove-participants toast — a partial failure */
-	chatParticipantsBulkRemoveCompleteWithFailures_one: "{{count}} participant removed, {{failed}} failed",
-	/** Bulk remove-participants toast — a partial failure (plural) */
-	chatParticipantsBulkRemoveCompleteWithFailures_other: "{{count}} participants removed, {{failed}} failed",
 
 	// ── Message menu ─────────────────────────────────────────────────────────────
 	/** Hover action bar — accessible label on the floating per-message toolbar */
@@ -298,5 +282,105 @@ export const chats = {
 	/** Typing indicator — exactly two remote users are typing */
 	chatTypingDouble: "{{name}} and {{other}} are typing…",
 	/** Typing indicator — three or more remote users are typing */
-	chatTypingSeveral: "Several people are typing…"
+	chatTypingSeveral: "Several people are typing…",
+
+	// ── Activity toasts (lib/activity) ──────────────────────────────────────
+	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// conversation (or participant), `_other` counts them; a partial result counts the ones that succeeded.
+	/** Activity toast — marking conversations as read running; one item named ({{name}}) */
+	chatsMarkReadRunning_one: "Marking {{name}} as read",
+	/** Activity toast — marking conversations as read running; {{count}} items */
+	chatsMarkReadRunning_other: "Marking {{count}} conversations as read",
+	/** Activity toast — marking conversations as read finished; one item named ({{name}}) */
+	chatsMarkReadDone_one: "Marked {{name}} as read",
+	/** Activity toast — marking conversations as read finished; {{count}} items */
+	chatsMarkReadDone_other: "Marked {{count}} conversations as read",
+	/** Activity toast — marking conversations as read failed for every item; one item named ({{name}}) */
+	chatsMarkReadFailed_one: "Couldn't mark {{name}} as read",
+	/** Activity toast — marking conversations as read failed for every item; {{count}} items */
+	chatsMarkReadFailed_other: "Couldn't mark {{count}} conversations as read",
+	/** Activity toast — marking conversations as read partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsMarkReadPartial_one: "Marked {{count}} conversation as read, {{failed}} failed",
+	/** Activity toast — marking conversations as read partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsMarkReadPartial_other: "Marked {{count}} conversations as read, {{failed}} failed",
+	/** Activity toast — muting conversations running; one item named ({{name}}) */
+	chatsMuteRunning_one: "Muting {{name}}",
+	/** Activity toast — muting conversations running; {{count}} items */
+	chatsMuteRunning_other: "Muting {{count}} conversations",
+	/** Activity toast — muting conversations finished; one item named ({{name}}) */
+	chatsMuteDone_one: "Muted {{name}}",
+	/** Activity toast — muting conversations finished; {{count}} items */
+	chatsMuteDone_other: "Muted {{count}} conversations",
+	/** Activity toast — muting conversations failed for every item; one item named ({{name}}) */
+	chatsMuteFailed_one: "Couldn't mute {{name}}",
+	/** Activity toast — muting conversations failed for every item; {{count}} items */
+	chatsMuteFailed_other: "Couldn't mute {{count}} conversations",
+	/** Activity toast — muting conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsMutePartial_one: "Muted {{count}} conversation, {{failed}} failed",
+	/** Activity toast — muting conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsMutePartial_other: "Muted {{count}} conversations, {{failed}} failed",
+	/** Activity toast — unmuting conversations running; one item named ({{name}}) */
+	chatsUnmuteRunning_one: "Unmuting {{name}}",
+	/** Activity toast — unmuting conversations running; {{count}} items */
+	chatsUnmuteRunning_other: "Unmuting {{count}} conversations",
+	/** Activity toast — unmuting conversations finished; one item named ({{name}}) */
+	chatsUnmuteDone_one: "Unmuted {{name}}",
+	/** Activity toast — unmuting conversations finished; {{count}} items */
+	chatsUnmuteDone_other: "Unmuted {{count}} conversations",
+	/** Activity toast — unmuting conversations failed for every item; one item named ({{name}}) */
+	chatsUnmuteFailed_one: "Couldn't unmute {{name}}",
+	/** Activity toast — unmuting conversations failed for every item; {{count}} items */
+	chatsUnmuteFailed_other: "Couldn't unmute {{count}} conversations",
+	/** Activity toast — unmuting conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsUnmutePartial_one: "Unmuted {{count}} conversation, {{failed}} failed",
+	/** Activity toast — unmuting conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsUnmutePartial_other: "Unmuted {{count}} conversations, {{failed}} failed",
+	/** Activity toast — deleting conversations running; one item named ({{name}}) */
+	chatsDeleteRunning_one: "Deleting {{name}}",
+	/** Activity toast — deleting conversations running; {{count}} items */
+	chatsDeleteRunning_other: "Deleting {{count}} conversations",
+	/** Activity toast — deleting conversations finished; one item named ({{name}}) */
+	chatsDeleteDone_one: "Deleted {{name}}",
+	/** Activity toast — deleting conversations finished; {{count}} items */
+	chatsDeleteDone_other: "Deleted {{count}} conversations",
+	/** Activity toast — deleting conversations failed for every item; one item named ({{name}}) */
+	chatsDeleteFailed_one: "Couldn't delete {{name}}",
+	/** Activity toast — deleting conversations failed for every item; {{count}} items */
+	chatsDeleteFailed_other: "Couldn't delete {{count}} conversations",
+	/** Activity toast — deleting conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsDeletePartial_one: "Deleted {{count}} conversation, {{failed}} failed",
+	/** Activity toast — deleting conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsDeletePartial_other: "Deleted {{count}} conversations, {{failed}} failed",
+	/** Activity toast — leaving conversations running; one item named ({{name}}) */
+	chatsLeaveRunning_one: "Leaving {{name}}",
+	/** Activity toast — leaving conversations running; {{count}} items */
+	chatsLeaveRunning_other: "Leaving {{count}} conversations",
+	/** Activity toast — leaving conversations finished; one item named ({{name}}) */
+	chatsLeaveDone_one: "Left {{name}}",
+	/** Activity toast — leaving conversations finished; {{count}} items */
+	chatsLeaveDone_other: "Left {{count}} conversations",
+	/** Activity toast — leaving conversations failed for every item; one item named ({{name}}) */
+	chatsLeaveFailed_one: "Couldn't leave {{name}}",
+	/** Activity toast — leaving conversations failed for every item; {{count}} items */
+	chatsLeaveFailed_other: "Couldn't leave {{count}} conversations",
+	/** Activity toast — leaving conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsLeavePartial_one: "Left {{count}} conversation, {{failed}} failed",
+	/** Activity toast — leaving conversations partly failed; {{count}} succeeded, {{failed}} failed */
+	chatsLeavePartial_other: "Left {{count}} conversations, {{failed}} failed",
+	/** Activity toast — removing participants from a conversation running; one item named ({{name}}) */
+	chatParticipantsRemoveRunning_one: "Removing {{name}}",
+	/** Activity toast — removing participants from a conversation running; {{count}} items */
+	chatParticipantsRemoveRunning_other: "Removing {{count}} participants",
+	/** Activity toast — removing participants from a conversation finished; one item named ({{name}}) */
+	chatParticipantsRemoveDone_one: "Removed {{name}}",
+	/** Activity toast — removing participants from a conversation finished; {{count}} items */
+	chatParticipantsRemoveDone_other: "Removed {{count}} participants",
+	/** Activity toast — removing participants from a conversation failed for every item; one item named ({{name}}) */
+	chatParticipantsRemoveFailed_one: "Couldn't remove {{name}}",
+	/** Activity toast — removing participants from a conversation failed for every item; {{count}} items */
+	chatParticipantsRemoveFailed_other: "Couldn't remove {{count}} participants",
+	/** Activity toast — removing participants from a conversation partly failed; {{count}} succeeded, {{failed}} failed */
+	chatParticipantsRemovePartial_one: "Removed {{count}} participant, {{failed}} failed",
+	/** Activity toast — removing participants from a conversation partly failed; {{count}} succeeded, {{failed}} failed */
+	chatParticipantsRemovePartial_other: "Removed {{count}} participants, {{failed}} failed"
 } as const

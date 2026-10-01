@@ -152,5 +152,25 @@ export const audio = {
 	/** Toast after successfully adding tracks, singular */
 	tracksAddedToast_one: "Added {{count}} track",
 	/** Toast after successfully adding tracks, plural */
-	tracksAddedToast_other: "Added {{count}} tracks"
+	tracksAddedToast_other: "Added {{count}} tracks",
+
+	// ── Activity toasts (lib/activity) ──────────────────────────────────────
+	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// track, `_other` counts them; a partial result counts the ones that succeeded.
+	/** Activity toast — moving a track within a playlist by drag running; one item named ({{name}}) */
+	playlistTrackMoveRunning_one: "Moving {{name}}",
+	/** Activity toast — moving a track within a playlist by drag running; {{count}} items */
+	playlistTrackMoveRunning_other: "Moving {{count}} tracks",
+	/** Activity toast — moving a track within a playlist by drag finished; one item named ({{name}}) */
+	playlistTrackMoveDone_one: "Moved {{name}}",
+	/** Activity toast — moving a track within a playlist by drag finished; {{count}} items */
+	playlistTrackMoveDone_other: "Moved {{count}} tracks",
+	/** Activity toast — moving a track within a playlist by drag failed for every item; one item named ({{name}}) */
+	playlistTrackMoveFailed_one: "Couldn't move {{name}}",
+	/** Activity toast — moving a track within a playlist by drag failed for every item; {{count}} items */
+	playlistTrackMoveFailed_other: "Couldn't move {{count}} tracks",
+	/** Activity toast — moving a track within a playlist by drag partly failed; {{count}} succeeded, {{failed}} failed */
+	playlistTrackMovePartial_one: "Moved {{count}} track, {{failed}} failed",
+	/** Activity toast — moving a track within a playlist by drag partly failed; {{count}} succeeded, {{failed}} failed */
+	playlistTrackMovePartial_other: "Moved {{count}} tracks, {{failed}} failed"
 } as const

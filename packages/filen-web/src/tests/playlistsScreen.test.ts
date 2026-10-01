@@ -1,11 +1,27 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
-import { render, screen, cleanup, within, waitFor } from "@testing-library/react"
+import { render, screen, cleanup, within, waitFor, fireEvent } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import "@/lib/i18n"
 import type { PlaylistEntry } from "@/features/audio/queries/playlists"
 import type { Playlist, PlaylistFile } from "@filen/shared"
+import type { ExternalToast } from "sonner"
+import { TRACK_DRAG_TYPE } from "@/features/audio/lib/trackDnd"
+import { plainErrorDTO } from "@/lib/sdk/errors"
+
+const { toast } = vi.hoisted(() => ({
+	toast: Object.assign(
+		vi.fn<(title: string, options?: ExternalToast) => string>(() => "id"),
+		{
+			success: vi.fn<(title: string, options?: ExternalToast) => string>(),
+			error: vi.fn<(title: string, options?: ExternalToast) => string>(),
+			dismiss: vi.fn()
+		}
+	)
+}))
+
+vi.mock("sonner", () => ({ toast }))
 
 // Mock boundary: usePlaylistsQuery normally goes through react-query + the real sdk client (a Vite
 // `?worker`, unresolvable under this node/jsdom vitest run) — same rationale as playlists.test.ts's own
@@ -86,6 +102,7 @@ const { useAudioStore } = await import("@/features/audio/store/useAudioStore")
 const { resetTrackTags } = await import("@/features/audio/store/useTrackTagsStore")
 const { stringifyEnvelope } = await import("@/lib/serialize")
 const { trackTagsKey } = await import("@/features/audio/lib/trackTags.logic")
+const { reorderPlaylistFileAction } = await import("@/features/audio/lib/playlists")
 
 function seedTags(
 	uuid: string,
@@ -318,5 +335,43 @@ describe("playlists split view", () => {
 		expect(screen.getByRole("heading", { name: "Playlists" })).toBeTruthy()
 		expect(container.querySelectorAll('[data-slot="spinner"]').length).toBe(2)
 		expect(screen.queryByText("No playlists yet")).toBeNull()
+	})
+
+	describe("drag-reordering a track", () => {
+		function dropOnto(rowButtonName: string, movedUuid: string): void {
+			const row = screen.getByRole("button", { name: rowButtonName }).closest("tr")
+
+			if (row === null) {
+				throw new Error("no row")
+			}
+
+			fireEvent.drop(row, { dataTransfer: { types: [TRACK_DRAG_TYPE], getData: () => movedUuid } })
+		}
+
+		it("shows the move as an activity naming the moved track", async () => {
+			vi.mocked(reorderPlaylistFileAction).mockResolvedValue(null)
+			usePlaylistsQuery.mockReturnValue(success(TWO))
+
+			renderSplitView("p2")
+			dropOnto("Highway.flac", "f3")
+
+			expect(toast.mock.lastCall?.[0]).toBe("Moving Outro.mp3")
+			await waitFor(() => {
+				expect(toast.success).toHaveBeenCalledWith("Moved Outro.mp3", expect.anything())
+			})
+			expect(reorderPlaylistFileAction).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uuid: "p2" }), "f3", "f2")
+		})
+
+		it("says why a move failed", async () => {
+			vi.mocked(reorderPlaylistFileAction).mockRejectedValue(plainErrorDTO("Disk full"))
+			usePlaylistsQuery.mockReturnValue(success(TWO))
+
+			renderSplitView("p2")
+			dropOnto("Highway.flac", "f3")
+
+			await waitFor(() => {
+				expect(toast.error).toHaveBeenCalledWith("Couldn't move Outro.mp3", expect.objectContaining({ description: "Disk full" }))
+			})
+		})
 	})
 })

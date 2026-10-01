@@ -8,7 +8,12 @@ import type { Chat } from "@filen/sdk-rs"
 import type { BlockedUsers } from "@filen/shared"
 import { useChats } from "@/features/chats/queries/chats"
 import { useAccountQuery } from "@/queries/account"
-import { chatsWithoutBlockedOneOnOne, filterChats, staleChatSelectionUuids } from "@/features/chats/components/chatsSidebar.logic"
+import {
+	chatsWithoutBlockedOneOnOne,
+	filterChats,
+	selectedChatUuidFromPath,
+	staleChatSelectionUuids
+} from "@/features/chats/components/chatsSidebar.logic"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
@@ -33,15 +38,6 @@ import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 // preview clamp are pinned to a known height), same as notesSidebar's constant-height rows.
 const CHAT_ROW_HEIGHT = 72
 
-// The URL owns the selected conversation: /chats/<uuid> is a selection key. The sidebar renders in the app
-// shell (outside the chats route match), so it reads the raw pathname rather than route params. Empty at
-// bare "/chats" (nothing selected).
-function selectedUuidFromPath(pathname: string): string {
-	const match = /^\/chats\/([^/]+)/.exec(pathname)
-
-	return match?.[1] ?? ""
-}
-
 // Contextual conversation list — the shell's sidebar slot when on /chats*. Same panel geometry as
 // NotesSidebar/DriveSidebar (w-52, rounded-xl, borderless). A virtualized list + client-side search, a
 // "New chat" button opening the contact picker (createChatDialog.tsx via useChatDialogHost), and per-row
@@ -51,7 +47,7 @@ export function ChatsSidebar() {
 	const isOnline = useIsOnline()
 	const panelVisible = useIsSidebarPanelVisible()
 	const pathname = useRouterState({ select: state => state.location.pathname })
-	const selectedUuid = selectedUuidFromPath(pathname)
+	const selectedUuid = selectedChatUuidFromPath(pathname)
 
 	const chatsQuery = useChats()
 	const accountQuery = useAccountQuery()
@@ -60,7 +56,7 @@ export function ChatsSidebar() {
 	// bulk bar by prop, so no row opens an observer of its own. Must stay inside the component that
 	// renders the rows.
 	const blocked = useBlockedUsers(true)
-	const dialogHost = useChatDialogHost({ currentUuid: selectedUuid })
+	const dialogHost = useChatDialogHost()
 
 	const [search, setSearch] = useState("")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
