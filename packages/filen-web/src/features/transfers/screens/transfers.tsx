@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // Full-page transfers surface, reached from the rail entry (iconRail.tsx's TransfersEntry). One header
 // row carries the live summary and the bulk actions; below it, the active transfers, then the finished
@@ -251,6 +252,7 @@ function TransfersList({
 	const virtualizer = useVirtualizer({
 		count,
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: index => (headings.includes(index) ? SECTION_HEADING_HEIGHT : ROW_STRIDE),
 		overscan: LIST_OVERSCAN
 	})

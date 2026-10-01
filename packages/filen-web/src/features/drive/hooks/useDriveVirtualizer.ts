@@ -7,6 +7,7 @@ import { GRID_INSET, ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT, columnsForWidth } 
 import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 const LIST_OVERSCAN = 8
 const GRID_OVERSCAN = 3
@@ -57,6 +58,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		count: items.length,
 		enabled: viewMode === "list",
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		initialOffset,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: LIST_OVERSCAN,
@@ -68,6 +70,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode)
 		count: rowCount,
 		enabled: viewMode === "grid",
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		initialOffset,
 		estimateSize: () => TILE_ROW_HEIGHT,
 		overscan: GRID_OVERSCAN,

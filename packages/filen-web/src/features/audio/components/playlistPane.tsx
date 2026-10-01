@@ -24,6 +24,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // Fixed row height (a 36px cover plus the cell padding), so the virtualizer never has to measure a row.
 const TRACK_ROW_HEIGHT = 48
@@ -236,6 +237,7 @@ function TrackTableBody({
 	const virtualizer = useVirtualizer({
 		count: playlist.files.length,
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: () => TRACK_ROW_HEIGHT,
 		overscan: TRACK_ROW_OVERSCAN,
 		scrollMargin: rowsOffset,

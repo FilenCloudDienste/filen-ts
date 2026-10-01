@@ -13,6 +13,7 @@ import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 export interface ThirdPartyNoticesDialogProps {
 	open: boolean
@@ -46,6 +47,7 @@ export function ThirdPartyNoticesDialog({ open, onOpenChange }: ThirdPartyNotice
 	const virtualizer = useVirtualizer({
 		count: notices.length,
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: OVERSCAN,
 		getItemKey

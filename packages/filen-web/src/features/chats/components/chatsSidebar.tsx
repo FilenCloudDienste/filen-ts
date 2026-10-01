@@ -27,6 +27,7 @@ import { LoadingState } from "@/components/loadingState"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { SidebarNotice } from "@/components/sidebarNotice"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // Fixed row height — the single virtualizer needs no measureElement pass (the name line and the two-line
 // preview clamp are pinned to a known height), same as notesSidebar's constant-height rows.
@@ -288,6 +289,7 @@ function ChatsVirtualList({
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: () => CHAT_ROW_HEIGHT,
 		overscan: 10,
 		getItemKey: index => rows[index]?.uuid ?? index

@@ -44,6 +44,7 @@ import { TimelineScrubber } from "@/features/photos/components/timelineScrubber"
 import { Button } from "@/components/ui/button"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { EmptyMessage } from "@/components/emptyMessage"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // Spacer between tiles only, never along the grid's outer edges: CSS grid gap separates columns and
 // the virtualizer's gap separates rows. 2px reads as a seam, not as padding.
@@ -426,6 +427,7 @@ function PhotoGridRows({
 	const virtualizer = useVirtualizer({
 		count: timeline.rows.length,
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: index => {
 			const row = timeline.rows[index]
 

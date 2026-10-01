@@ -81,6 +81,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // First-pass size estimates only — note rows now vary in height (optional preview / shared-by /
 // avatar / tag lines), and the notes view interleaves section headers, so real heights come from the
@@ -783,6 +784,7 @@ function NotesSidebarList({
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: index => {
 			const kind = rows[index]?.kind
 

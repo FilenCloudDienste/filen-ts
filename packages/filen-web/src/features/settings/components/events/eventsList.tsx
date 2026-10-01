@@ -16,6 +16,7 @@ import { EmptyMessage } from "@/components/emptyMessage"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "@/features/settings/components/settingsLayout"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 const ROW_HEIGHT = 52
 const OVERSCAN = 10
@@ -48,6 +49,7 @@ export function EventsList() {
 	const virtualizer = useVirtualizer({
 		count: events.length,
 		getScrollElement: () => scrollElement,
+		observeElementOffset: observeElementOffsetFromAttach,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: OVERSCAN,
 		getItemKey

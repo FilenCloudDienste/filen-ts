@@ -13,14 +13,7 @@ import {
 } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import {
-	defaultRangeExtractor,
-	elementScroll,
-	observeElementOffset,
-	useVirtualizer,
-	type Range,
-	type VirtualizerOptions
-} from "@tanstack/react-virtual"
+import { defaultRangeExtractor, elementScroll, useVirtualizer, type Range, type VirtualizerOptions } from "@tanstack/react-virtual"
 import { MoreHorizontalIcon, ArrowDownIcon, AlertCircleIcon, MessagesSquareIcon } from "lucide-react"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import type { BlockedUsers } from "@filen/shared"
@@ -63,6 +56,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { EmptyMessage } from "@/components/emptyMessage"
+import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
 // Load older when the user scrolls within this many px of the top.
 const TOP_THRESHOLD = 120
@@ -74,7 +68,7 @@ const BOTTOM_THRESHOLD = 80
 type ThreadVirtualizerOptions = VirtualizerOptions<HTMLDivElement, HTMLDivElement>
 
 const observeOffsetFromBottom: ThreadVirtualizerOptions["observeElementOffset"] = (instance, callback) =>
-	observeElementOffset(instance, (scrollTop, isScrolling) => {
+	observeElementOffsetFromAttach(instance, (scrollTop, isScrolling) => {
 		callback(scrollDistanceFromBottom(scrollTop), isScrolling)
 	})
 
