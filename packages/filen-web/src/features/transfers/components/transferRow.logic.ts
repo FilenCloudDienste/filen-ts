@@ -94,8 +94,17 @@ export function transferRate(transfer: Transfer, samples: readonly SpeedSample[]
 
 	return {
 		bytesPerSecond,
-		etaSeconds: transfer.size > 0 ? Math.ceil(Math.max(0, transfer.size - transfer.bytesTransferred) / bytesPerSecond) : null
+		etaSeconds: transfer.size > 0 ? steadyEtaSeconds(Math.max(0, transfer.size - transfer.bytesTransferred) / bytesPerSecond) : null
 	}
+}
+
+// The time left, rounded up to a step that grows with it: a long wait read to the second changes on every
+// progress tick even at a steady speed. Seconds under a minute, then 5 s, 30 s past ten minutes, and whole
+// minutes past an hour.
+export function steadyEtaSeconds(seconds: number): number {
+	const step = seconds < 60 ? 1 : seconds < 600 ? 5 : seconds < 3_600 ? 30 : 60
+
+	return Math.ceil(seconds / step) * step
 }
 
 // The row's leading type-icon key, resolved straight from the transfer's own file name — reuses

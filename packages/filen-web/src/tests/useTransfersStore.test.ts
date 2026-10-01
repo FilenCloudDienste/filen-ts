@@ -380,16 +380,35 @@ describe("computeTransfersSpeed", () => {
 		expect(computeTransfersSpeed(samples)).toBe(1_000)
 	})
 
-	it("ignores samples older than the 5s window", () => {
+	it("ignores samples older than the 20s window", () => {
 		const now = Date.now()
 		const samples = [
-			sample({ timestamp: now - 10_000, totalBytes: 0 }), // outside the window entirely
+			sample({ timestamp: now - 25_000, totalBytes: 0 }), // outside the window entirely
 			sample({ timestamp: now - 1_000, totalBytes: 500 }),
 			sample({ timestamp: now, totalBytes: 1_500 })
 		]
 
 		// only the last two count: 1000 bytes over 1s -> 1000 bytes/sec
 		expect(computeTransfersSpeed(samples)).toBe(1_000)
+	})
+
+	it("reads 0 until a second of progress has been measured", () => {
+		const now = Date.now()
+
+		expect(
+			computeTransfersSpeed([sample({ timestamp: now - 500, totalBytes: 0 }), sample({ timestamp: now, totalBytes: 9_000 })])
+		).toBe(0)
+	})
+
+	it("lets a stalled transfer's speed fall off steadily rather than hold it", () => {
+		const start = Date.now()
+		const samples = [sample({ timestamp: start, totalBytes: 0 }), sample({ timestamp: start + 4_000, totalBytes: 4_000 })]
+
+		// Within the grace after the last sample, the gap is the pause between chunks: no change.
+		expect(computeTransfersSpeed(samples, start + 6_000)).toBe(1_000)
+		// Past it, the window ends at the clock, so the speed sinks a little more each second.
+		expect(computeTransfersSpeed(samples, start + 9_000)).toBeCloseTo(4_000 / 6)
+		expect(computeTransfersSpeed(samples, start + 11_000)).toBe(500)
 	})
 
 	it("never goes negative (e.g. totalBytes dropped because a transfer settled between samples)", () => {
@@ -415,11 +434,11 @@ describe("setProgress (speed sample recording)", () => {
 		expect(useTransfersStore.getState().speedSamples).toEqual([{ timestamp: Date.now(), totalBytes: 500 }])
 	})
 
-	it("trims samples older than the 5s window on every call", () => {
+	it("trims samples older than the 20s window on every call", () => {
 		useTransfersStore.getState().add(makeTransfer({ id: "a", status: "uploading" }))
 
 		useTransfersStore.getState().setProgress("a", 100)
-		vi.advanceTimersByTime(6_000)
+		vi.advanceTimersByTime(21_000)
 		useTransfersStore.getState().setProgress("a", 200)
 
 		expect(useTransfersStore.getState().speedSamples).toHaveLength(1)
@@ -554,13 +573,13 @@ describe("pruneSpeedSamples", () => {
 		vi.setSystemTime(11_000)
 		useTransfersStore.getState().setProgress("a", 200)
 
-		vi.setSystemTime(15_500)
+		vi.setSystemTime(30_500)
 		useTransfersStore.getState().pruneSpeedSamples()
 
 		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({ a: [{ timestamp: 11_000, totalBytes: 200 }] })
 		expect(useTransfersStore.getState().speedSamples).toEqual([{ timestamp: 11_000, totalBytes: 200 }])
 
-		vi.setSystemTime(16_500)
+		vi.setSystemTime(31_500)
 		useTransfersStore.getState().pruneSpeedSamples()
 
 		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})

@@ -54,7 +54,7 @@ describe("useSpeedSampleAging", () => {
 		expect(vi.getTimerCount()).toBe(1)
 
 		act(() => {
-			vi.advanceTimersByTime(6_000)
+			vi.advanceTimersByTime(21_000)
 		})
 
 		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})

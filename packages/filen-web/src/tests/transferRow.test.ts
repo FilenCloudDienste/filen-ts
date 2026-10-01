@@ -5,6 +5,7 @@ import {
 	activeStatusLabelKey,
 	finishedStatusLabelKey,
 	transferIconKey,
+	steadyEtaSeconds,
 	transferRate,
 	runningPercentFraction
 } from "@/features/transfers/components/transferRow.logic"
@@ -160,5 +161,18 @@ describe("runningPercentFraction", () => {
 
 	it("does not floor a whole percent a step down on float error", () => {
 		expect(runningPercentFraction((29 / 100) * 100)).toBe(0.29)
+	})
+})
+
+describe("steadyEtaSeconds", () => {
+	it("keeps seconds under a minute", () => {
+		expect(steadyEtaSeconds(42.2)).toBe(43)
+	})
+
+	it("rounds a longer wait up to a coarser step, so a steady speed reads steadily", () => {
+		expect(steadyEtaSeconds(61)).toBe(65)
+		expect(steadyEtaSeconds(64)).toBe(65)
+		expect(steadyEtaSeconds(601)).toBe(630)
+		expect(steadyEtaSeconds(3_601)).toBe(3_660)
 	})
 })

@@ -102,15 +102,22 @@ export interface SpeedSample {
 	totalBytes: number
 }
 
-const SPEED_WINDOW_MS = 5_000
+// Long enough that one chunk's worth of progress landing (progress arrives in bursts, one per finished
+// chunk) moves the speed by a few percent rather than a fifth, which is what made the time left jump.
+const SPEED_WINDOW_MS = 20_000
+// A gap in progress longer than this is a stall, not the pause between two chunks: from then on the window
+// ends at the clock, so a stalled transfer's speed falls off steadily instead of standing until its window
+// empties.
+const STALL_GRACE_MS = 3_000
+// Less measured time than this says nothing honest about the speed yet.
+const MIN_MEASURED_MS = 1_000
 
 // Pure and independently testable (vi.useFakeTimers()/vi.setSystemTime() drives `Date.now()`
-// deterministically in tests, same technique upload.test.ts already uses for the progress
-// throttle). Bytes/sec across the window: the earliest and latest samples still inside the last 5s
-// anchor the rate. Fewer than two in-window samples (transfer just started, or nothing has
-// progressed in the last 5s) reads 0 rather than a NaN/Infinity spike.
-export function computeTransfersSpeed(samples: readonly SpeedSample[]): number {
-	const windowStart = Date.now() - SPEED_WINDOW_MS
+// deterministically in tests, same technique upload.test.ts already uses for the progress throttle).
+// Bytes/sec across the window, from its earliest sample to its latest one (or the clock, once stalled).
+// Reads 0 rather than a NaN/Infinity spike until enough has been measured.
+export function computeTransfersSpeed(samples: readonly SpeedSample[], now: number = Date.now()): number {
+	const windowStart = now - SPEED_WINDOW_MS
 	const inWindow = samples.filter(sample => sample.timestamp >= windowStart)
 	const first = inWindow[0]
 	const last = inWindow[inWindow.length - 1]
@@ -119,9 +126,9 @@ export function computeTransfersSpeed(samples: readonly SpeedSample[]): number {
 		return 0
 	}
 
-	const elapsedMs = last.timestamp - first.timestamp
+	const elapsedMs = Math.max(last.timestamp, now - STALL_GRACE_MS) - first.timestamp
 
-	if (elapsedMs <= 0) {
+	if (elapsedMs < MIN_MEASURED_MS) {
 		return 0
 	}
 
