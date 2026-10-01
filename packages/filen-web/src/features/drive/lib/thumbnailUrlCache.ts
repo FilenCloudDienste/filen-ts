@@ -26,6 +26,8 @@ export function computeThumbnailCapacity(viewportWidth: number, viewportHeight: 
 
 export interface ThumbnailUrlCache {
 	get: (uuid: string) => string | undefined
+	// get() without the recency touch, for a caller that only reads the entry and never renders it.
+	peek: (uuid: string) => string | undefined
 	set: (uuid: string, url: string) => void
 	delete: (uuid: string) => string | undefined
 	setCapacity: (capacity: number) => void
@@ -84,6 +86,9 @@ export function createThumbnailUrlCache(capacity: number, onEvict: (uuid: string
 			map.set(uuid, url)
 
 			return url
+		},
+		peek(uuid) {
+			return map.get(uuid)
 		},
 		set(uuid, url) {
 			map.delete(uuid)

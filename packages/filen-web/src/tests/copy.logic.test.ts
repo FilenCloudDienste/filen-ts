@@ -4,6 +4,7 @@ import { applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
 	canRetryCopy,
+	copiedFileThumbnails,
 	copiedTopLevel,
 	copyErrorDTO,
 	copyGlyphForEntries,
@@ -216,6 +217,25 @@ describe("copyUpdateInput", () => {
 		)
 
 		expect(events).toEqual({ failures: [], savedAsVersion: 0, renamed: 1, propagationFailed: 1 })
+	})
+})
+
+describe("copiedFileThumbnails", () => {
+	it("hands each finished file's source thumbnail to its copy, nothing else", () => {
+		const done = { sourceUuid: testUuid("source"), destUuid: testUuid("copy"), destParent: testUuid("dest"), name: "a.txt", size: 1n }
+
+		expect(
+			copiedFileThumbnails([
+				{
+					type: "dirCreated",
+					sourceUuid: testUuid("dir"),
+					destUuid: testUuid("dir-copy"),
+					destParent: testUuid("dest"),
+					name: "d"
+				},
+				{ type: "fileDone", ...done }
+			])
+		).toEqual([{ from: done.sourceUuid, to: done.destUuid }])
 	})
 })
 

@@ -102,6 +102,7 @@ function makeFakeDeps(overrides: Partial<ThumbnailServiceDeps> = {}): ThumbnailS
 		readThumbnailBlob: vi.fn().mockResolvedValue(null),
 		deleteThumbnail: vi.fn().mockResolvedValue(undefined),
 		storeThumbnail: vi.fn().mockResolvedValue(undefined),
+		copyThumbnails: vi.fn().mockResolvedValue([]),
 		createObjectUrl: vi.fn(() => {
 			urlCounter += 1
 

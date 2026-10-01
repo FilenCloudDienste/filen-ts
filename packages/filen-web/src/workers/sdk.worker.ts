@@ -91,8 +91,8 @@ import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
 import { narrowItem } from "@/features/drive/lib/item"
 import { isPhotoItem } from "@/features/photos/lib/predicate"
 import { FLAT_LISTING_KINDS, type FlatListingKind } from "@/features/drive/lib/flatListing"
-import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY } from "@/features/drive/lib/thumbnails.logic"
-import { removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
+import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY, type ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
+import { copyThumbs, removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
 import {
 	readAudioMetadata as parseAudioMetadata,
@@ -1656,6 +1656,12 @@ const api = {
 	async storeThumbnail(uuid: string, bytes: Uint8Array): Promise<void> {
 		armThumbSweep()
 		await writeThumb(uuid, bytes)
+	},
+	// A copied file's thumbnail from its source's cache entry (see copyThumbs).
+	copyThumbnails(copies: ThumbnailCopy[]): Promise<void> {
+		armThumbSweep()
+
+		return copyThumbs(copies)
 	},
 	// ── Audio metadata ───────────────────────────────────────────────────────
 	// Tags plus a cover thumbnail for one audio file, parsed here so the parser's reads go straight to

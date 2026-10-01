@@ -19,14 +19,16 @@ import type { SdkThumbnailResult } from "@/workers/sdk.worker"
 // vitest) or reach a browser API (document, OffscreenCanvas) this suite's node environment lacks.
 // generateVideoThumb/generatePdfThumb's OWN DOM-touching bodies are proven live (the e2e leg), not
 // here — this file only exercises the branches reachable before any DOM element would be created.
-const { registerThumbGeneratorMock, seedThumbnailMock } = vi.hoisted(() => ({
+const { registerThumbGeneratorMock, seedThumbnailMock, withGenerationSlotMock } = vi.hoisted(() => ({
 	registerThumbGeneratorMock: vi.fn<(category: ThumbGeneratorCategory, generator: ThumbGenerator) => void>(),
-	seedThumbnailMock: vi.fn<(item: DriveItem, produce: () => Promise<ThumbSeedResult>) => void>()
+	seedThumbnailMock: vi.fn<(item: DriveItem, produce: () => Promise<ThumbSeedResult>) => void>(),
+	withGenerationSlotMock: vi.fn(<T>(produce: () => Promise<T>) => produce())
 }))
 
 vi.mock("@/features/drive/lib/thumbnails", () => ({
 	registerThumbGenerator: registerThumbGeneratorMock,
-	seedThumbnail: seedThumbnailMock
+	seedThumbnail: seedThumbnailMock,
+	withGenerationSlot: withGenerationSlotMock
 }))
 
 const { downloadFileBytesMock, makeSdkThumbnailMock, makeSdkThumbnailFromFileMock } = vi.hoisted(() => ({
@@ -320,11 +322,65 @@ describe("warmUploadThumbnail", () => {
 		expect(seedThumbnailMock).not.toHaveBeenCalled()
 	})
 
-	it.each([
-		["clip.mp4", "video/mp4"],
-		["doc.pdf", "application/pdf"]
-	])("does nothing for %s — not the sdk category", (name, mime) => {
-		warmUploadThumbnail(namedFile(name, mime, { canMakeThumbnail: true }), browserFile(name))
+	function seededProduction(): () => Promise<ThumbSeedResult> {
+		const produce = seedThumbnailMock.mock.calls[0]?.[1]
+
+		if (produce === undefined) {
+			throw new Error("expected a seeded production")
+		}
+
+		return produce
+	}
+
+	// A video is played from the local file by the drive-side arm's own frame grab. That grab needs a DOM
+	// this suite lacks, which is what a decode failure looks like here: settled, since the drive-side
+	// arm would grab the same frame from the same bytes, only after downloading them.
+	it("seeds a video from the local file in a generation slot, never streaming it back", async () => {
+		allowedMediaContentTypeMock.mockReturnValue("video/mp4")
+
+		warmUploadThumbnail(namedFile("clip.mp4", "video/mp4"), browserFile("clip.mp4"))
+
+		await expect(seededProduction()()).resolves.toEqual({ type: "none" })
+		expect(withGenerationSlotMock).toHaveBeenCalledTimes(1)
+		expect(previewStreamUrlMock).not.toHaveBeenCalled()
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	it("leaves a video the drive-side arm would never stream unseeded", () => {
+		allowedMediaContentTypeMock.mockReturnValue(null)
+
+		warmUploadThumbnail(namedFile("clip.mp4", "video/mp4"), browserFile("clip.mp4"))
+
+		expect(seedThumbnailMock).not.toHaveBeenCalled()
+	})
+
+	it("renders a pdf from the local file's bytes in a generation slot, never downloading it", async () => {
+		const file = new File([new Uint8Array([7, 8, 9])], "doc.pdf")
+
+		getDocumentMock.mockImplementation(() => ({ promise: Promise.reject(new Error("broken pdf")), destroy: taskDestroyMock }))
+
+		warmUploadThumbnail(namedFile("doc.pdf", "application/pdf"), file)
+
+		await expect(seededProduction()()).resolves.toEqual({ type: "none" })
+		expect(withGenerationSlotMock).toHaveBeenCalledTimes(1)
+		expect((getDocumentMock.mock.calls[0]?.[0] as { data: Uint8Array }).data).toEqual(new Uint8Array([7, 8, 9]))
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	// An unreadable local file says nothing about the file, so a joined row still gets the drive-side arm.
+	it("leaves a pdf whose local file cannot be read unanswered", async () => {
+		const file = browserFile("doc.pdf")
+
+		vi.spyOn(file, "arrayBuffer").mockRejectedValue(new DOMException("gone", "NotReadableError"))
+
+		warmUploadThumbnail(namedFile("doc.pdf", "application/pdf"), file)
+
+		await expect(seededProduction()()).resolves.toEqual({ type: "unanswered" })
+		expect(getDocumentMock).not.toHaveBeenCalled()
+	})
+
+	it("skips a pdf over the whole-buffer gate", () => {
+		warmUploadThumbnail(namedFile("doc.pdf", "application/pdf", { size: THUMB_SIZE_GATE + 1n }), browserFile("doc.pdf"))
 
 		expect(seedThumbnailMock).not.toHaveBeenCalled()
 	})

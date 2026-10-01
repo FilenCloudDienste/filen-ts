@@ -26,6 +26,7 @@ import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/qu
 import { invalidateUploadedDirectorySizes } from "@/features/drive/lib/upload"
 import {
 	canRetryCopy,
+	copiedFileThumbnails,
 	copiedTopLevel,
 	copyGlyphForEntries,
 	copyGlyphForItems,
@@ -39,6 +40,8 @@ import {
 	type CopyJobGlyph,
 	type CopySettlement
 } from "@/features/drive/lib/copy.logic"
+import { reuseCopiedThumbnails } from "@/features/drive/lib/thumbnails"
+import type { ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { getCopyJob, useCopyJobsStore, type CopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 
@@ -74,6 +77,9 @@ export interface RunCopyDeps {
 	trash: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>
 	// `written` names the directories below the destination the job wrote into or created.
 	settled: (job: CopyJob, written: readonly string[]) => void
+	// Optional so tests that don't care about thumbnails omit it: gives each copied file its source's
+	// cached thumbnail instead of letting its row generate one from the new copy.
+	reuseThumbnails?: (copies: ThumbnailCopy[]) => void
 }
 
 export interface CopyJobRequest {
@@ -256,6 +262,12 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 
 	const onEvent: OnCopyEvent = event => {
 		if (event.type === "created") {
+			// Before the patch, whose row asks for its thumbnail on the next commit. Its fileDone can come
+			// after this event.
+			if (event.item.item.type === "file") {
+				deps.reuseThumbnails?.([{ from: event.item.sourceUuid, to: event.item.item.uuid }])
+			}
+
 			const item = narrowItem(event.item.item)
 
 			deps.patchCreated(item)
@@ -268,6 +280,8 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 
 			return
 		}
+
+		deps.reuseThumbnails?.(copiedFileThumbnails(event.update.events))
 
 		const update = copyUpdateInput(event.update)
 
@@ -457,7 +471,8 @@ export const defaultCopyDeps: RunCopyDeps = {
 	account: accountQuotaDeps,
 	patchCreated: patchCopiedItem,
 	trash: trashItems,
-	settled: afterCopySettled
+	settled: afterCopySettled,
+	reuseThumbnails: reuseCopiedThumbnails
 }
 
 // Starts the copy and returns its job id at once; the job outlives whatever started it. The UI shows its

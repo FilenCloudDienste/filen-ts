@@ -99,6 +99,7 @@ function testDeps(): ThumbnailServiceDeps {
 		readThumbnailBlob: vi.fn(() => Promise.resolve(null)),
 		deleteThumbnail: vi.fn(() => Promise.resolve()),
 		storeThumbnail: vi.fn(() => Promise.resolve()),
+		copyThumbnails: vi.fn(() => Promise.resolve()),
 		createObjectUrl: vi.fn(() => "blob:shared-thumb"),
 		revokeObjectUrl: vi.fn(),
 		// The real registry, filled by thumbGenerators' import above.

@@ -144,6 +144,13 @@ export function thumbnailCategory(item: DriveItem): ThumbnailCategory {
 	return base.data.canMakeThumbnail ? "sdk" : "none"
 }
 
+// A thumbnail handed from one uuid to another: a copied file holds its source's content, so its
+// thumbnail is the source's too.
+export interface ThumbnailCopy {
+	from: string
+	to: string
+}
+
 // name/size/lastModified projection of one cached .thumb file — thumbStore.ts's listThumbs() own
 // return shape. Oldest-first eviction over this shape is planSizeCapEviction from @filen/shared
 // (thumbStore.ts maps {name,size,lastModified} to {id,size,timestamp} at the call site).

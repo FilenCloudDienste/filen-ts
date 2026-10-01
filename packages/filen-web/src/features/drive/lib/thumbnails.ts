@@ -5,7 +5,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { defaultObjectUrlFns, type ObjectUrlFns } from "@/lib/objectUrl"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"
-import { thumbnailCategory, type ThumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
+import { thumbnailCategory, type ThumbnailCategory, type ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 import { asDirectoryOrFile, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { createThumbnailUrlCache, capacityForVisibleSlots, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
@@ -67,6 +67,7 @@ export interface ThumbnailServiceDeps extends ObjectUrlFns {
 	readThumbnailBlob: (uuid: string) => Promise<Blob | null>
 	deleteThumbnail: (uuid: string) => Promise<void>
 	storeThumbnail: (uuid: string, bytes: Uint8Array) => Promise<void>
+	copyThumbnails: (copies: ThumbnailCopy[]) => Promise<void>
 	getGenerator: (category: ThumbGeneratorCategory) => ThumbGenerator | undefined
 }
 
@@ -78,6 +79,7 @@ export const defaultThumbnailDeps: ThumbnailServiceDeps = {
 	readThumbnailBlob,
 	deleteThumbnail: deleteThumbnailBlob,
 	storeThumbnail: (uuid, bytes) => sdkApi.storeThumbnail(uuid, Comlink.transfer(bytes, [bytes.buffer])),
+	copyThumbnails: copies => sdkApi.copyThumbnails(copies),
 	...defaultObjectUrlFns,
 	getGenerator: category => generators.get(category)
 }
@@ -138,6 +140,29 @@ const pending = new Map<string, PendingEntry>()
 const seats = new Map<string, { joined: boolean }>()
 
 const semaphore = new Semaphore(CONCURRENT_GENERATIONS)
+
+// Runs a seeded production that decodes in the browser (video, pdf) in one of the generation slots: it
+// costs what the generation it replaces would have, less the download.
+export function withGenerationSlot<T>(produce: () => Promise<T>): Promise<T> {
+	return semaphore.withPermit(produce)
+}
+
+// A copy job's thumbnails go to the worker in batches of at most this many, one batch at a time, so a
+// job of any size keeps one call in flight and the worker's own gate bounds the OPFS work under it.
+const REUSE_BATCH_SIZE = 256
+
+interface ReuseBatch {
+	copies: ThumbnailCopy[]
+	done: Promise<undefined>
+	settle: (value: undefined) => void
+}
+
+// Batches not yet handed to the worker, oldest first; only the last one still takes copies.
+const reuseQueue: ReuseBatch[] = []
+let reuseDraining = false
+// Destination uuid -> the batch that may give it its source's thumbnail. generate() waits on it before
+// reading the cache, so a copied row that mounts meanwhile reads the copy instead of generating one.
+const reusing = new Map<string, Promise<undefined>>()
 
 // Registers run's promise as THE pending entry for uuid, removed once settled only while it is still
 // that entry, so a superseded promise never evicts a newer one.
@@ -230,6 +255,12 @@ async function generate(
 	// ordinary generate path, NOT reject out of the shared pending promise: a rejection would break the
 	// never-throws contract for every caller joined on this uuid AND skip the failure counter below,
 	// bypassing the blacklist into a retry-forever loop.
+	const reuse = reusing.get(uuid)
+
+	if (reuse !== undefined) {
+		await reuse
+	}
+
 	let cached: Blob | null = null
 	try {
 		cached = await deps.readThumbnailBlob(uuid)
@@ -356,9 +387,10 @@ export async function getThumbnailUrl(
 // next commit, and without a pending entry that tile would immediately start DOWNLOADING bytes the
 // client still has in hand — the exact re-download the upload-side thumbnail exists to avoid.
 //
-// The production is deliberately run outside the generation semaphore: the SDK serialises its own
-// decodes internally, so this adds no unbounded CPU demand, and a fifty-file upload batch must not be
-// able to hold all three generation slots against the listing the user is actually looking at.
+// The production runs outside the generation semaphore unless it takes a slot itself
+// (withGenerationSlot): the SDK serialises its own decodes internally, so an SDK production adds no
+// unbounded CPU demand, and a fifty-file upload batch must not be able to hold all three generation
+// slots against the listing the user is actually looking at. A browser decode has no such bound.
 //
 // Its two byte-less outcomes are NOT the same thing (ThumbSeedResult names them). A production that
 // answers "none" has read the local bytes and settled "no thumbnail for this file" — null is the
@@ -433,6 +465,63 @@ export function seedThumbnail(
 	}).promise.finally(() => {
 		seats.delete(uuid)
 	})
+}
+
+async function drainReuseQueue(deps: ThumbnailServiceDeps): Promise<void> {
+	reuseDraining = true
+
+	try {
+		for (let batch = reuseQueue.shift(); batch !== undefined; batch = reuseQueue.shift()) {
+			try {
+				await deps.copyThumbnails(batch.copies)
+			} catch (e) {
+				log.warn("thumbnails", "reuseCopiedThumbnails: batch failed", e)
+			} finally {
+				for (const copy of batch.copies) {
+					reusing.delete(copy.to)
+				}
+
+				batch.settle(undefined)
+			}
+		}
+	} finally {
+		reuseDraining = false
+	}
+}
+
+// Hands each copied file its source's thumbnail with no network: the source's cached bytes are copied
+// under the new uuid on disk, and a settled "unavailable" verdict carries over at once so the copy
+// never attempts what its source could not. A source with nothing cached leaves its copy to the
+// ordinary lazy path. Fire-and-forget; a destination that already has a url, a generation or a copy
+// under way is left alone.
+export function reuseCopiedThumbnails(copies: readonly ThumbnailCopy[], deps: ThumbnailServiceDeps = defaultThumbnailDeps): void {
+	for (const copy of copies) {
+		if (urls.peek(copy.to) !== undefined || pending.has(copy.to) || reusing.has(copy.to)) {
+			continue
+		}
+
+		if (unavailable.has(copy.from)) {
+			unavailable.add(copy.to)
+
+			continue
+		}
+
+		let batch = reuseQueue.at(-1)
+
+		if (batch === undefined || batch.copies.length >= REUSE_BATCH_SIZE) {
+			const { promise, resolve } = Promise.withResolvers<undefined>()
+
+			batch = { copies: [], done: promise, settle: resolve }
+			reuseQueue.push(batch)
+		}
+
+		batch.copies.push(copy)
+		reusing.set(copy.to, batch.done)
+	}
+
+	if (!reuseDraining && reuseQueue.length > 0) {
+		void drainReuseQueue(deps)
+	}
 }
 
 // Drops a uuid's rendered thumbnail (revoking its objectURL) and its on-disk cache entry, drops any

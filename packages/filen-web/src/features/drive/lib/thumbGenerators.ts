@@ -1,10 +1,17 @@
-import { runTimeout, driveItemName, Semaphore } from "@filen/shared"
+import { runTimeout, driveItemName, Semaphore, type DeferFn, type Result } from "@filen/shared"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
-import { registerThumbGenerator, seedThumbnail, type ThumbGenerationResult, type ThumbGenerator } from "@/features/drive/lib/thumbnails"
+import {
+	registerThumbGenerator,
+	seedThumbnail,
+	withGenerationSlot,
+	type ThumbGenerationResult,
+	type ThumbGenerator,
+	type ThumbSeedResult
+} from "@/features/drive/lib/thumbnails"
 import {
 	THUMB_MAX_DIM,
 	THUMB_SDK_MAX_HEIGHT,
@@ -16,7 +23,7 @@ import { fitWithin, encodeCanvasThumb } from "@/features/drive/lib/thumbGenerato
 import { prepareSvgThumb } from "@/features/drive/lib/svgThumb.logic"
 import { previewStreamUrl, waitForMediaStream } from "@/features/preview/lib/previewStream"
 import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
-import { narrowItem, type BaseFileItem } from "@/features/drive/lib/item"
+import { narrowItem, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
 import { getDocument, GlobalWorkerOptions, PDFWorker } from "pdfjs-dist"
 import { idleResource, type IdleResource } from "@/lib/idleResource"
@@ -82,12 +89,11 @@ export const generateSdkThumb: ThumbGenerator = async item => {
 // production instead of racing it with a server-side one.
 //
 // Gated on thumbnailCategory of the uploaded file, not on a local extension guess — that keeps the
-// SDK's own canMakeThumbnail as the single source of truth here too, and drops video/pdf (whose
-// thumbnails are somebody else's job) for free. An svg is rasterised here too, from the local text.
+// SDK's own canMakeThumbnail as the single source of truth here too. An svg, a video and a pdf are
+// made here too, by the very code the drive-side arm runs, from the local file instead of a download.
 //
-// Sequenced AFTER the upload resolves, never overlapped with it. Both legs read the same browser File
-// through their own `.stream()`, and a Blob hands out a FRESH ReadableStream per call, so an overlap
-// would be correct but would have the SDK reading the same local file twice at once for no gain.
+// Sequenced AFTER the upload resolves, never overlapped with it: both legs read the same browser File,
+// and an overlap would be correct but would read the same local file twice at once for no gain.
 // Synchronous and fire-and-forget by design: the transfer is already settled and the row is already
 // in the listing, so blocking either on a cache warm would only delay the upload summary toast.
 export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
@@ -101,6 +107,46 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 			const result = await rasterizeSvgThumb(await file.text())
 
 			return result.type === "bytes" ? result : { type: result.type === "unavailable" ? "none" : "unanswered" }
+		})
+
+		return
+	}
+
+	if (category === "video") {
+		// Typed as the drive-side arm's stream is; a same-type slice is a view of the File, not a copy. An
+		// item that arm would never stream gets no seat: it fails there without a request.
+		const contentType = allowedMediaContentType(item)
+
+		if (contentType !== null) {
+			seedLocalThumb(item, () =>
+				videoThumb(uploaded.uuid, defer => {
+					const url = URL.createObjectURL(file.slice(0, file.size, contentType))
+
+					defer(() => {
+						URL.revokeObjectURL(url)
+					})
+
+					return url
+				})
+			)
+		}
+
+		return
+	}
+
+	if (category === "pdf") {
+		seedLocalThumb(item, async () => {
+			let bytes: Uint8Array
+
+			try {
+				bytes = new Uint8Array(await file.arrayBuffer())
+			} catch (e) {
+				log.warn("thumb-generators", "warmUploadThumbnail: local read failed", uploaded.uuid, e)
+
+				return null
+			}
+
+			return await renderPdfThumb(bytes, uploaded.uuid)
 		})
 
 		return
@@ -138,6 +184,24 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 	})
 }
 
+// A local video or pdf production: a browser decode, so it takes a generation slot like the drive-side
+// one it replaces (see withGenerationSlot). Its failure is settled as "none": the drive-side arm would
+// run this same code over these same bytes, only after downloading them. Null is a local file that
+// could not be read, which says nothing about the file.
+function seedLocalThumb(item: DriveItem, produce: () => Promise<ThumbGenerationResult | null>): void {
+	seedThumbnail(item, () =>
+		withGenerationSlot(async (): Promise<ThumbSeedResult> => {
+			const result = await produce()
+
+			if (result === null) {
+				return { type: "unanswered" }
+			}
+
+			return result.type === "bytes" ? result : { type: "none" }
+		})
+	)
+}
+
 // Resolves once `event` fires, or rejects if the element errors first — a corrupt/unplayable stream
 // must fail promptly rather than sit until runTimeout's own ceiling.
 function waitForVideoEvent(video: HTMLVideoElement, event: "loadeddata" | "seeked"): Promise<void> {
@@ -162,38 +226,19 @@ function waitForVideoEvent(video: HTMLVideoElement, event: "loadeddata" | "seeke
 
 const VIDEO_GENERATE_TIMEOUT_MS = 15_000
 
-// isMediaStreamAvailable/allowedMediaContentType are cheap synchronous gates checked BEFORE the
-// runTimeout below, so an environment that can never stream (SW not yet controlling the tab, or an
-// item whose own mime never clears the inline allowlist) fails instantly instead of occupying a
-// semaphore slot for the full 15s ceiling for no reason.
-export const generateVideoThumb: ThumbGenerator = async item => {
-	// Awaited rather than sampled: this frame comes off the SW's Range stream, and a page is
-	// uncontrolled for a moment after every worker install or update — the ordinary state of a first
-	// load. Sampling it there returned "failed", which counts toward the blacklist, so scrolling a
-	// directory of videos in that window could spend all three strikes and leave them blank for the
-	// rest of the session even once the worker took control. Where no worker is registered at all it
-	// still returns immediately, so nothing ever waits for a stream that is not coming.
-	if (!(await waitForMediaStream())) {
-		return { type: "failed" }
-	}
-
-	const contentType = allowedMediaContentType(item)
-
-	if (contentType === null) {
-		return { type: "failed" }
-	}
-
-	// runTimeout races a timer against this whole callback but cannot actually abort a still-running
-	// video/event-listener chain if it loses the race (verified against @filen/shared' own
-	// implementation: the deferred cleanup below only runs once THIS callback itself settles) — an
-	// unplayable stream that never fires loadeddata/seeked/error leaves a listener chain pending in
-	// the background past the 15s return. That is an accepted, bounded cost: the SW's own pending-
-	// registration table is capped at 32 entries and oldest-evicts, so it cannot accumulate across a
-	// session even if this happens repeatedly.
-	const result = await runTimeout(async defer => {
-		const file = narrowToAnyFile(item)
-		const name = driveItemName(item)
-		const url = await previewStreamUrl(file, name, contentType)
+// One frame of the video `openSource` resolves to, drawn into a thumbnail. Both arms share it: the
+// drive-side one plays the SW's Range stream, the upload warm the local file.
+//
+// runTimeout races a timer against this whole callback but cannot actually abort a still-running
+// video/event-listener chain if it loses the race (verified against @filen/shared' own
+// implementation: the deferred cleanup below only runs once THIS callback itself settles) — an
+// unplayable stream that never fires loadeddata/seeked/error leaves a listener chain pending in
+// the background past the 15s return. That is an accepted, bounded cost: the SW's own pending-
+// registration table is capped at 32 entries and oldest-evicts, so it cannot accumulate across a
+// session even if this happens repeatedly.
+async function videoThumb(uuid: string, openSource: (defer: DeferFn) => Promise<string> | string): Promise<ThumbGenerationResult> {
+	const result: Result<Uint8Array> = await runTimeout(async defer => {
+		const url = await openSource(defer)
 
 		const video = document.createElement("video")
 
@@ -238,12 +283,36 @@ export const generateVideoThumb: ThumbGenerator = async item => {
 	}, VIDEO_GENERATE_TIMEOUT_MS)
 
 	if (!result.success) {
-		log.warn("thumb-generators", "generateVideoThumb failed", item.data.uuid, result.error)
+		log.warn("thumb-generators", "videoThumb failed", uuid, result.error)
 
 		return { type: "failed" }
 	}
 
 	return { type: "bytes", bytes: result.data }
+}
+
+// isMediaStreamAvailable/allowedMediaContentType are cheap synchronous gates checked BEFORE the
+// runTimeout in videoThumb, so an environment that can never stream (SW not yet controlling the tab,
+// or an item whose own mime never clears the inline allowlist) fails instantly instead of occupying a
+// semaphore slot for the full 15s ceiling for no reason.
+export const generateVideoThumb: ThumbGenerator = async item => {
+	// Awaited rather than sampled: this frame comes off the SW's Range stream, and a page is
+	// uncontrolled for a moment after every worker install or update — the ordinary state of a first
+	// load. Sampling it there returned "failed", which counts toward the blacklist, so scrolling a
+	// directory of videos in that window could spend all three strikes and leave them blank for the
+	// rest of the session even once the worker took control. Where no worker is registered at all it
+	// still returns immediately, so nothing ever waits for a stream that is not coming.
+	if (!(await waitForMediaStream())) {
+		return { type: "failed" }
+	}
+
+	const contentType = allowedMediaContentType(item)
+
+	if (contentType === null) {
+		return { type: "failed" }
+	}
+
+	return await videoThumb(item.data.uuid, () => previewStreamUrl(narrowToAnyFile(item), driveItemName(item), contentType))
 }
 
 const SVG_RENDER_TIMEOUT_MS = 10_000
@@ -351,17 +420,9 @@ const PDF_THUMB_WORKER_IDLE_MS = 30_000
 
 let pdfThumbWorker: IdleResource<PDFWorker> | null = null
 
-export const generatePdfThumb: ThumbGenerator = async item => {
-	let bytes: Uint8Array
-
-	try {
-		bytes = await downloadWholeFile(item)
-	} catch (e) {
-		log.warn("thumb-generators", "generatePdfThumb: download failed", item.data.uuid, e)
-
-		return { type: "failed" }
-	}
-
+// Page 1 of a whole pdf, drawn into a thumbnail. Both arms share it: the drive-side one downloads the
+// bytes, the upload warm reads them from the local file.
+async function renderPdfThumb(bytes: Uint8Array, uuid: string): Promise<ThumbGenerationResult> {
 	// Mirrors pdfViewer.tsx's own worker-src setup (duplicated rather than imported: that file is a
 	// React component this module must not depend on). Read when the shared worker is constructed.
 	GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
@@ -400,7 +461,7 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 
 			return { type: "bytes", bytes: new Uint8Array(await blob.arrayBuffer()) }
 		} catch (e) {
-			log.warn("thumb-generators", "generatePdfThumb: render failed", item.data.uuid, e)
+			log.warn("thumb-generators", "renderPdfThumb: render failed", uuid, e)
 			// pdf.worker is its own file: a deploy that changed it fails documents in older tabs.
 			recoverIfNewerBuild()
 
@@ -409,6 +470,20 @@ export const generatePdfThumb: ThumbGenerator = async item => {
 			await task.destroy()
 		}
 	})
+}
+
+export const generatePdfThumb: ThumbGenerator = async item => {
+	let bytes: Uint8Array
+
+	try {
+		bytes = await downloadWholeFile(item)
+	} catch (e) {
+		log.warn("thumb-generators", "generatePdfThumb: download failed", item.data.uuid, e)
+
+		return { type: "failed" }
+	}
+
+	return await renderPdfThumb(bytes, item.data.uuid)
 }
 
 // Module scope, not inside a function: runs exactly once per module evaluation (mirrors

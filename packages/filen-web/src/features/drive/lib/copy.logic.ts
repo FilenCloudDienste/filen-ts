@@ -21,6 +21,7 @@ import {
 } from "@filen/shared"
 import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import type { ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 
 // The wasm side of @filen/shared's copy job: maps the SDK's copy values onto its inputs, and adds what
 // only web's copy card and transfers row use.
@@ -142,6 +143,19 @@ export function copyUpdateInput(update: CopyUpdate): CopyUpdateInput<CopyJobFail
 		cancelling: runState === "cancelling",
 		events: classifyEvents(events)
 	}
+}
+
+// Each file an update reports done, as its source's thumbnail handed to the copy.
+export function copiedFileThumbnails(events: readonly CopyEvent[]): ThumbnailCopy[] {
+	const copies: ThumbnailCopy[] = []
+
+	for (const event of events) {
+		if (event.type === "fileDone") {
+			copies.push({ from: event.sourceUuid, to: event.destUuid })
+		}
+	}
+
+	return copies
 }
 
 export function copyReportInput(report: CopyReport): CopyJobReport {

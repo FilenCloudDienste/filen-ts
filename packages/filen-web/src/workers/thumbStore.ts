@@ -1,8 +1,15 @@
 /// <reference lib="webworker" />
 import { log } from "@/lib/log"
 import { cachedOpfsDirectory, forgetOpfsDirectory, isLockConflictError, isNotFoundError, opfsDirectory } from "@/lib/storage/opfs"
-import { planSizeCapEviction } from "@filen/shared"
-import { THUMB_DIR, THUMB_DIR_ROOT, THUMB_GENERATION, THUMB_EXT, type ThumbCacheEntry } from "@/features/drive/lib/thumbnails.logic"
+import { planSizeCapEviction, Semaphore } from "@filen/shared"
+import {
+	THUMB_DIR,
+	THUMB_DIR_ROOT,
+	THUMB_GENERATION,
+	THUMB_EXT,
+	type ThumbCacheEntry,
+	type ThumbnailCopy
+} from "@/features/drive/lib/thumbnails.logic"
 
 // Worker-only OPFS blob store for cached thumbnails — no wasm import anywhere in this module, so it
 // stays trivially importable from sdk.worker.ts without dragging the SDK's own init/thread-pool
@@ -56,6 +63,52 @@ export async function writeThumb(uuid: string, bytes: Uint8Array): Promise<void>
 	} finally {
 		handle.close()
 	}
+}
+
+// How many thumbnail copies run at once in this worker: a copy job hands its files over in batches,
+// and this bounds the OPFS files open for them however large the job.
+const copyGate = new Semaphore(4)
+
+async function copyThumb(dir: FileSystemDirectoryHandle, copy: ThumbnailCopy): Promise<void> {
+	let source: Blob
+
+	try {
+		source = await (await dir.getFileHandle(`${copy.from}${THUMB_EXT}`)).getFile()
+	} catch (e) {
+		if (isNotFoundError(e)) {
+			return
+		}
+
+		throw e
+	}
+
+	if (source.size > 0) {
+		await writeThumb(copy.to, new Uint8Array(await source.arrayBuffer()))
+	}
+}
+
+// Gives each copy's `to` the bytes cached under its `from`, read and written here so they never cross
+// to the page. A copy with nothing cached to give is left alone. A miss keeps the memoized directory, unlike the page's own read: most sources in a copy miss, and a walk
+// per miss would cost more than the lookups, while a directory removed meanwhile only makes every
+// lookup a miss, which is right for an emptied cache.
+export async function copyThumbs(copies: readonly ThumbnailCopy[]): Promise<void> {
+	if (copies.length === 0) {
+		return
+	}
+
+	const dir = await cachedOpfsDirectory(THUMB_DIR)
+
+	await Promise.all(
+		copies.map(copy =>
+			copyGate.withPermit(async () => {
+				try {
+					await copyThumb(dir, copy)
+				} catch (e) {
+					log.warn("thumb-store", "copyThumbs: copy failed", copy.from, copy.to, e)
+				}
+			})
+		)
+	)
 }
 
 // Enumerates every cached thumbnail with its on-disk size and last-write time — sweepThumbs' own

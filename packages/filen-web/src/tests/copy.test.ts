@@ -354,6 +354,31 @@ describe("runCopyJob", () => {
 		expect(deps.settled).toHaveBeenCalledWith(job, [dir.uuid])
 	})
 
+	// A top-level file before its row is patched in; every finished file, at any depth, as reported.
+	it("hands each copied file's source thumbnail over to the copy", async () => {
+		const deps = { ...makeDeps(), reuseThumbnails: vi.fn<NonNullable<RunCopyDeps["reuseThumbnails"]>>() }
+		const file = mockFile("copied-file")
+		const done = { sourceUuid: testUuid("nested-source"), destUuid: testUuid("nested-copy"), destParent: ROOT, name: "n.txt", size: 1n }
+
+		deps.reuseThumbnails.mockImplementation(() => {
+			expect(deps.patchCreated).not.toHaveBeenCalled()
+		})
+		deps.copyItems.mockImplementation((_id, _items, _dest, _max, onEvent) => {
+			onEvent({ type: "created", item: createdFile(file) })
+			onEvent({ type: "created", item: created(mockDir("copied")) })
+			onEvent({ type: "update", update: update({ events: [{ type: "fileDone", ...done }] }) })
+
+			return Promise.resolve(report())
+		})
+
+		await runCopyJob(deps, request())
+
+		expect(deps.reuseThumbnails.mock.calls).toEqual([
+			[[{ from: testUuid("source"), to: file.uuid }]],
+			[[{ from: done.sourceUuid, to: done.destUuid }]]
+		])
+	})
+
 	// A retried item goes back to where it was meant to land, anywhere below the destination: every
 	// directory from there up to the destination grew.
 	it("hands the settle every directory from a retried item's destination up to the job's destination", async () => {
