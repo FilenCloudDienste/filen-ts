@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import {
@@ -12,16 +13,18 @@ import {
 	DownloadIcon
 } from "lucide-react"
 import type { Dir, File } from "@filen/sdk-rs"
+import { driveItemName } from "@filen/shared"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 
 // bulkActionBar.logic.ts's imports reach the query client — unwanted under node vitest.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
+vi.mock("sonner", () => ({ toast: Object.assign(toast, { success: toastSuccess, error: toastError, dismiss: vi.fn() }) }))
 
-const { setFavoritedItemsMock, toastSuccess, toastError } = vi.hoisted(() => ({
+const { setFavoritedItemsMock, toast, toastSuccess, toastError } = vi.hoisted(() => ({
 	setFavoritedItemsMock: vi.fn(),
+	toast: vi.fn(),
 	toastSuccess: vi.fn(),
 	toastError: vi.fn()
 }))
@@ -51,6 +54,7 @@ vi.mock("@/features/drive/lib/download", async importOriginal => {
 	return { ...actual, startDownloads: startDownloadsMock }
 })
 
+import "@/lib/i18n"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
@@ -476,14 +480,14 @@ describe("runBulkFavorite", () => {
 		await runBulkFavorite(mixed)
 
 		// One item is already favorited, so the SET target for the WHOLE selection is "unfavorite".
-		expect(setFavoritedItemsMock).toHaveBeenCalledExactlyOnceWith(mixed, false)
+		expect(setFavoritedItemsMock).toHaveBeenCalledExactlyOnceWith(mixed, false, expect.any(Function))
 
 		setFavoritedItemsMock.mockResolvedValueOnce({ succeeded: [], failed: [] })
 		const none = [fileItem({ uuid: testUuid("c"), favorited: false })]
 
 		await runBulkFavorite(none)
 
-		expect(setFavoritedItemsMock).toHaveBeenLastCalledWith(none, true)
+		expect(setFavoritedItemsMock).toHaveBeenLastCalledWith(none, true, expect.any(Function))
 	})
 
 	it("prunes only succeeded uuids from the selection", async () => {
@@ -500,18 +504,28 @@ describe("runBulkFavorite", () => {
 		expect(useDriveStore.getState().selectedItems.map(item => item.data.uuid)).toEqual([bad.data.uuid])
 	})
 
-	it("toasts a partial failure", async () => {
+	it("runs as an activity in the words of the SET it applies, ending on a partial failure's result", async () => {
 		const ok = fileItem({ uuid: testUuid("ok2") })
 		const bad = fileItem({ uuid: testUuid("bad2") })
 		setFavoritedItemsMock.mockResolvedValueOnce({
 			succeeded: [ok],
-			failed: [{ item: bad, dto: { species: "plain", message: "no", label: "no" } }]
+			failed: [{ item: bad, error: { species: "plain", message: "no", label: "no" } }]
 		})
 
 		await runBulkFavorite([ok, bad])
 
-		expect(toastError).toHaveBeenCalledTimes(1)
+		expect(toast).toHaveBeenCalledWith("Adding 2 items to favorites", expect.anything())
+		expect(toastError).toHaveBeenCalledExactlyOnceWith("Added 1 item to favorites, 1 failed", expect.anything())
 		expect(toastSuccess).not.toHaveBeenCalled()
+	})
+
+	it("says removing from favorites when the SET unfavorites", async () => {
+		const item = fileItem({ uuid: testUuid("fav2"), favorited: true })
+		setFavoritedItemsMock.mockResolvedValueOnce({ succeeded: [item], failed: [] })
+
+		await runBulkFavorite([item])
+
+		expect(toastSuccess).toHaveBeenCalledExactlyOnceWith(`Removed ${driveItemName(item)} from favorites`, expect.anything())
 	})
 })
 
@@ -545,7 +559,7 @@ describe("runBulkDescriptor", () => {
 
 		runBulkDescriptor(descriptorFor("favorite"), items, onDialogAction)
 
-		expect(setFavoritedItemsMock).toHaveBeenCalledExactlyOnceWith(items, true)
+		expect(setFavoritedItemsMock).toHaveBeenCalledExactlyOnceWith(items, true, expect.any(Function))
 		expect(onDialogAction).not.toHaveBeenCalled()
 	})
 

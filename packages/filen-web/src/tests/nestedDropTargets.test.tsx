@@ -124,7 +124,7 @@ describe("an invalid row inside the listing's own drop target", () => {
 		expect(fire("dragOver", row).defaultPrevented).toBe(true)
 		fire("drop", row)
 
-		expect(performMove).toHaveBeenCalledExactlyOnceWith([REPORT], DEST)
+		expect(performMove).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: DEST, name: "background" })
 		expect(isOver(background)).toBe(false)
 	})
 

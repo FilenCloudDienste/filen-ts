@@ -484,16 +484,6 @@ export const drive = {
 	/** Bulk version-delete confirm dialog — body; {{count}} = versions being deleted */
 	driveVersionsBulkDeleteConfirmBody: "Are you sure you want to permanently delete {{count}} versions? This cannot be undone.",
 
-	// ── Versions bulk-delete result toast ──────────────────────────────────────
-	/** Bulk version-delete result toast — every selected version succeeded; {{count}} = versions deleted */
-	driveVersionsBulkDeleteComplete_one: "{{count}} version deleted",
-	/** Bulk version-delete result toast — every selected version succeeded (plural); {{count}} = versions deleted */
-	driveVersionsBulkDeleteComplete_other: "{{count}} versions deleted",
-	/** Bulk version-delete result toast — at least one selected version failed; {{count}} = versions deleted, {{failed}} = versions that failed */
-	driveVersionsBulkDeleteCompleteWithFailures_one: "{{count}} version deleted, {{failed}} failed",
-	/** Bulk version-delete result toast — at least one selected version failed (plural); {{count}} = versions deleted, {{failed}} = versions that failed */
-	driveVersionsBulkDeleteCompleteWithFailures_other: "{{count}} versions deleted, {{failed}} failed",
-
 	// ── Version delete guard ─────────────────────────────────────────────────
 	/** File-versions defense-in-depth guard — surfaced only if a caller reaches the delete-version action helper directly on the file's own live version (its uuid IS the file's current content, so deleting it would destroy the file, not just history); the panel's own per-row disabled state already keeps the UI from reaching this, so this message is a last-resort backstop */
 	driveVersionsDeleteLiveBlocked: "This is the current version and can't be deleted.",
@@ -606,16 +596,173 @@ export const drive = {
 	/** Public-link dialog — expiration option: 30 days */
 	driveLinkExpirationThirtyDays: "30 days",
 
-	// ── Bulk action result toast ─────────────────────────────────────────────
-	// Partial-success summary (web departs from mobile's fail-fast bulk ops here): every selected item
-	// runs independently, so a bulk trash/restore/favorite/color/delete can partially fail without
-	// aborting the rest. Generic across every bulk action rather than one pair per action.
-	/** Bulk action result toast — every selected item succeeded; {{count}} = items affected */
-	driveBulkActionComplete_one: "{{count}} item updated",
-	/** Bulk action result toast — every selected item succeeded (plural); {{count}} = items affected */
-	driveBulkActionComplete_other: "{{count}} items updated",
-	/** Bulk action result toast — at least one selected item failed; {{count}} = items that succeeded, {{failed}} = items that failed */
-	driveBulkActionCompleteWithFailures_one: "{{count}} item updated, {{failed}} failed",
-	/** Bulk action result toast — at least one selected item failed (plural); {{count}} = items that succeeded, {{failed}} = items that failed */
-	driveBulkActionCompleteWithFailures_other: "{{count}} items updated, {{failed}} failed"
+	// ── Activity toasts (lib/activity) ──────────────────────────────────────
+	// The running line of an action and how it ended, in the toast that shows it. `_one` names the one
+	// item, `_other` counts them; a partial result counts the ones that succeeded.
+	/** Activity toast — moving to trash running; one item named ({{name}}) */
+	driveTrashRunning_one: "Moving {{name}} to trash",
+	/** Activity toast — moving to trash running; {{count}} items */
+	driveTrashRunning_other: "Moving {{count}} items to trash",
+	/** Activity toast — moving to trash finished; one item named ({{name}}) */
+	driveTrashDone_one: "Moved {{name}} to trash",
+	/** Activity toast — moving to trash finished; {{count}} items */
+	driveTrashDone_other: "Moved {{count}} items to trash",
+	/** Activity toast — moving to trash failed for every item; one item named ({{name}}) */
+	driveTrashFailed_one: "Couldn't move {{name}} to trash",
+	/** Activity toast — moving to trash failed for every item; {{count}} items */
+	driveTrashFailed_other: "Couldn't move {{count}} items to trash",
+	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
+	driveTrashPartial_one: "Moved {{count}} item to trash, {{failed}} failed",
+	/** Activity toast — moving to trash partly failed; {{count}} succeeded, {{failed}} failed */
+	driveTrashPartial_other: "Moved {{count}} items to trash, {{failed}} failed",
+	/** Activity toast — deleting permanently running; one item named ({{name}}) */
+	driveDeletePermanentlyRunning_one: "Deleting {{name}}",
+	/** Activity toast — deleting permanently running; {{count}} items */
+	driveDeletePermanentlyRunning_other: "Deleting {{count}} items",
+	/** Activity toast — deleting permanently finished; one item named ({{name}}) */
+	driveDeletePermanentlyDone_one: "Deleted {{name}}",
+	/** Activity toast — deleting permanently finished; {{count}} items */
+	driveDeletePermanentlyDone_other: "Deleted {{count}} items",
+	/** Activity toast — deleting permanently failed for every item; one item named ({{name}}) */
+	driveDeletePermanentlyFailed_one: "Couldn't delete {{name}}",
+	/** Activity toast — deleting permanently failed for every item; {{count}} items */
+	driveDeletePermanentlyFailed_other: "Couldn't delete {{count}} items",
+	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
+	driveDeletePermanentlyPartial_one: "Deleted {{count}} item, {{failed}} failed",
+	/** Activity toast — deleting permanently partly failed; {{count}} succeeded, {{failed}} failed */
+	driveDeletePermanentlyPartial_other: "Deleted {{count}} items, {{failed}} failed",
+	/** Activity toast — restoring from trash running; one item named ({{name}}) */
+	driveRestoreRunning_one: "Restoring {{name}}",
+	/** Activity toast — restoring from trash running; {{count}} items */
+	driveRestoreRunning_other: "Restoring {{count}} items",
+	/** Activity toast — restoring from trash finished; one item named ({{name}}) */
+	driveRestoreDone_one: "Restored {{name}}",
+	/** Activity toast — restoring from trash finished; {{count}} items */
+	driveRestoreDone_other: "Restored {{count}} items",
+	/** Activity toast — restoring from trash failed for every item; one item named ({{name}}) */
+	driveRestoreFailed_one: "Couldn't restore {{name}}",
+	/** Activity toast — restoring from trash failed for every item; {{count}} items */
+	driveRestoreFailed_other: "Couldn't restore {{count}} items",
+	/** Activity toast — restoring from trash partly failed; {{count}} succeeded, {{failed}} failed */
+	driveRestorePartial_one: "Restored {{count}} item, {{failed}} failed",
+	/** Activity toast — restoring from trash partly failed; {{count}} succeeded, {{failed}} failed */
+	driveRestorePartial_other: "Restored {{count}} items, {{failed}} failed",
+	/** Activity toast — stopping a share running; one item named ({{name}}) */
+	driveUnshareRunning_one: "Stopping sharing {{name}}",
+	/** Activity toast — stopping a share running; {{count}} items */
+	driveUnshareRunning_other: "Stopping sharing {{count}} items",
+	/** Activity toast — stopping a share finished; one item named ({{name}}) */
+	driveUnshareDone_one: "Stopped sharing {{name}}",
+	/** Activity toast — stopping a share finished; {{count}} items */
+	driveUnshareDone_other: "Stopped sharing {{count}} items",
+	/** Activity toast — stopping a share failed for every item; one item named ({{name}}) */
+	driveUnshareFailed_one: "Couldn't stop sharing {{name}}",
+	/** Activity toast — stopping a share failed for every item; {{count}} items */
+	driveUnshareFailed_other: "Couldn't stop sharing {{count}} items",
+	/** Activity toast — stopping a share partly failed; {{count}} succeeded, {{failed}} failed */
+	driveUnsharePartial_one: "Stopped sharing {{count}} item, {{failed}} failed",
+	/** Activity toast — stopping a share partly failed; {{count}} succeeded, {{failed}} failed */
+	driveUnsharePartial_other: "Stopped sharing {{count}} items, {{failed}} failed",
+	/** Activity toast — disabling public links running; one item named ({{name}}) */
+	driveDisableLinkRunning_one: "Disabling the link to {{name}}",
+	/** Activity toast — disabling public links running; {{count}} items */
+	driveDisableLinkRunning_other: "Disabling {{count}} links",
+	/** Activity toast — disabling public links finished; one item named ({{name}}) */
+	driveDisableLinkDone_one: "Disabled the link to {{name}}",
+	/** Activity toast — disabling public links finished; {{count}} items */
+	driveDisableLinkDone_other: "Disabled {{count}} links",
+	/** Activity toast — disabling public links failed for every item; one item named ({{name}}) */
+	driveDisableLinkFailed_one: "Couldn't disable the link to {{name}}",
+	/** Activity toast — disabling public links failed for every item; {{count}} items */
+	driveDisableLinkFailed_other: "Couldn't disable {{count}} links",
+	/** Activity toast — disabling public links partly failed; {{count}} succeeded, {{failed}} failed */
+	driveDisableLinkPartial_one: "Disabled {{count}} link, {{failed}} failed",
+	/** Activity toast — disabling public links partly failed; {{count}} succeeded, {{failed}} failed */
+	driveDisableLinkPartial_other: "Disabled {{count}} links, {{failed}} failed",
+	/** Activity toast — moving: stands in for {{destination}} when the target directory's name isn't known */
+	driveMoveDestinationFallback: "another directory",
+	/** Activity toast — moving to a directory ({{destination}}) running; one item named ({{name}}) */
+	driveMoveRunning_one: "Moving {{name}} to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) running; {{count}} items */
+	driveMoveRunning_other: "Moving {{count}} items to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) finished; one item named ({{name}}) */
+	driveMoveDone_one: "Moved {{name}} to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) finished; {{count}} items */
+	driveMoveDone_other: "Moved {{count}} items to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) failed for every item; one item named ({{name}}) */
+	driveMoveFailed_one: "Couldn't move {{name}} to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) failed for every item; {{count}} items */
+	driveMoveFailed_other: "Couldn't move {{count}} items to {{destination}}",
+	/** Activity toast — moving to a directory ({{destination}}) partly failed; {{count}} succeeded, {{failed}} failed */
+	driveMovePartial_one: "Moved {{count}} item to {{destination}}, {{failed}} failed",
+	/** Activity toast — moving to a directory ({{destination}}) partly failed; {{count}} succeeded, {{failed}} failed */
+	driveMovePartial_other: "Moved {{count}} items to {{destination}}, {{failed}} failed",
+	/** Activity toast — adding to favorites running; one item named ({{name}}) */
+	driveFavoriteRunning_one: "Adding {{name}} to favorites",
+	/** Activity toast — adding to favorites running; {{count}} items */
+	driveFavoriteRunning_other: "Adding {{count}} items to favorites",
+	/** Activity toast — adding to favorites finished; one item named ({{name}}) */
+	driveFavoriteDone_one: "Added {{name}} to favorites",
+	/** Activity toast — adding to favorites finished; {{count}} items */
+	driveFavoriteDone_other: "Added {{count}} items to favorites",
+	/** Activity toast — adding to favorites failed for every item; one item named ({{name}}) */
+	driveFavoriteFailed_one: "Couldn't add {{name}} to favorites",
+	/** Activity toast — adding to favorites failed for every item; {{count}} items */
+	driveFavoriteFailed_other: "Couldn't add {{count}} items to favorites",
+	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed */
+	driveFavoritePartial_one: "Added {{count}} item to favorites, {{failed}} failed",
+	/** Activity toast — adding to favorites partly failed; {{count}} succeeded, {{failed}} failed */
+	driveFavoritePartial_other: "Added {{count}} items to favorites, {{failed}} failed",
+	/** Activity toast — removing from favorites running; one item named ({{name}}) */
+	driveUnfavoriteRunning_one: "Removing {{name}} from favorites",
+	/** Activity toast — removing from favorites running; {{count}} items */
+	driveUnfavoriteRunning_other: "Removing {{count}} items from favorites",
+	/** Activity toast — removing from favorites finished; one item named ({{name}}) */
+	driveUnfavoriteDone_one: "Removed {{name}} from favorites",
+	/** Activity toast — removing from favorites finished; {{count}} items */
+	driveUnfavoriteDone_other: "Removed {{count}} items from favorites",
+	/** Activity toast — removing from favorites failed for every item; one item named ({{name}}) */
+	driveUnfavoriteFailed_one: "Couldn't remove {{name}} from favorites",
+	/** Activity toast — removing from favorites failed for every item; {{count}} items */
+	driveUnfavoriteFailed_other: "Couldn't remove {{count}} items from favorites",
+	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed */
+	driveUnfavoritePartial_one: "Removed {{count}} item from favorites, {{failed}} failed",
+	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed */
+	driveUnfavoritePartial_other: "Removed {{count}} items from favorites, {{failed}} failed",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) running; one item named ({{name}}) */
+	driveShareRunning_one: "Sharing {{name}} with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) running; {{count}} items */
+	driveShareRunning_other: "Sharing {{count}} items with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) finished; one item named ({{name}}) */
+	driveShareDone_one: "Shared {{name}} with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) finished; {{count}} items */
+	driveShareDone_other: "Shared {{count}} items with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) failed for every item; one item named ({{name}}) */
+	driveShareFailed_one: "Couldn't share {{name}} with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) failed for every item; {{count}} items */
+	driveShareFailed_other: "Couldn't share {{count}} items with {{recipients}}",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) partly failed; {{count}} succeeded, {{failed}} failed */
+	driveSharePartial_one: "Shared {{count}} item with {{recipients}}, {{failed}} failed",
+	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) partly failed; {{count}} succeeded, {{failed}} failed */
+	driveSharePartial_other: "Shared {{count}} items with {{recipients}}, {{failed}} failed",
+	/** Activity toast — who a share goes to when it is several contacts; {{count}} contacts */
+	driveShareRecipients_one: "{{count}} contact",
+	/** Activity toast — who a share goes to when it is several contacts; {{count}} contacts */
+	driveShareRecipients_other: "{{count}} contacts",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) running; one item named ({{name}}) */
+	driveDeleteVersionsRunning_one: "Deleting the version from {{name}}",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) running; {{count}} items */
+	driveDeleteVersionsRunning_other: "Deleting {{count}} versions",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) finished; one item named ({{name}}) */
+	driveDeleteVersionsDone_one: "Deleted the version from {{name}}",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) finished; {{count}} items */
+	driveDeleteVersionsDone_other: "Deleted {{count}} versions",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) failed for every item; one item named ({{name}}) */
+	driveDeleteVersionsFailed_one: "Couldn't delete the version from {{name}}",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) failed for every item; {{count}} items */
+	driveDeleteVersionsFailed_other: "Couldn't delete {{count}} versions",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) partly failed; {{count}} succeeded, {{failed}} failed */
+	driveDeleteVersionsPartial_one: "Deleted {{count}} version, {{failed}} failed",
+	/** Activity toast — deleting file versions (an item is a version, named by its date) partly failed; {{count}} succeeded, {{failed}} failed */
+	driveDeleteVersionsPartial_other: "Deleted {{count}} versions, {{failed}} failed"
 } as const

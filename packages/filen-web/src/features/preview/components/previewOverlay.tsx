@@ -30,8 +30,9 @@ import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from 
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { DRIVE_DELETE_PERMANENTLY, DRIVE_TRASH, DRIVE_UNSHARE, driveActivity, pruneSelectionByRow } from "@/features/drive/lib/activity"
+import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
+import { type ActivityKeys } from "@/lib/activity/activity.logic"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
@@ -242,6 +243,17 @@ export function PreviewOverlay({
 	// as text only to a surface that opens items (this header menu has its item open already).
 	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
 	const [menuPending, setMenuPending] = useState(false)
+	// A menu action's Try again can land after this overlay closed, where closing it would close whatever
+	// dialog replaced it.
+	const mountedRef = useRef(false)
+
+	useEffect(() => {
+		mountedRef.current = true
+
+		return () => {
+			mountedRef.current = false
+		}
+	}, [])
 	// The resolved slot the body actually renders, carrying its per-slot save override. Undefined only for
 	// an out-of-range index.
 	const driveItem = rawDriveItem !== undefined ? (saved.get(rawDriveItem.data.uuid) ?? rawDriveItem) : undefined
@@ -318,23 +330,44 @@ export function PreviewOverlay({
 		setMenuDialogKind(null)
 	}
 
-	async function removeCurrentItem(remove: typeof trashItems): Promise<void> {
+	// The menu's confirm dialog shows the run, so only its result toasts.
+	async function runMenuActivity(spec: BulkActivitySpec<DriveItem>): Promise<void> {
+		setMenuPending(true)
+		await runBulkActivity({ ...spec, showRunning: false })
+		setMenuPending(false)
+		setMenuDialogKind(null)
+	}
+
+	async function removeCurrentItem(remove: BulkActivitySpec<DriveItem>["run"], keys: ActivityKeys): Promise<void> {
 		if (driveItem === undefined || rawDriveItem === undefined) {
 			return
 		}
 
-		setMenuPending(true)
-		// Its echo can beat the response back: the user's own removal, not one made elsewhere.
-		remote.expectOwnChange(driveItem.data.uuid, "remove")
-		const outcome = await remove([driveItem])
-		remote.forgetOwnChange(driveItem.data.uuid)
-		setMenuPending(false)
-		setMenuDialogKind(null)
-		toastBulkOutcome(outcome)
+		const frozenUuid = rawDriveItem.data.uuid
 
-		if (outcome.succeeded.length > 0) {
-			onItemRemoved(rawDriveItem.data.uuid)
-		}
+		await runMenuActivity(
+			driveActivity(
+				[driveItem],
+				keys,
+				async (targets, onSettled, report) => {
+					// Its echo can beat the response back: the user's own removal, not one made elsewhere.
+					remote.expectOwnChange(driveItem.data.uuid, "remove")
+
+					try {
+						return await remove(targets, onSettled, report)
+					} finally {
+						remote.forgetOwnChange(driveItem.data.uuid)
+					}
+				},
+				{
+					onDone: outcome => {
+						if (outcome.succeeded.length > 0) {
+							onItemRemoved(frozenUuid)
+						}
+					}
+				}
+			)
+		)
 	}
 
 	// Mirrors new mobile's removeShare/stopSharing dismissOnSuccess: isPreview === true — closes the
@@ -346,18 +379,18 @@ export function PreviewOverlay({
 			return
 		}
 
-		setMenuPending(true)
-		const outcome = await unshareItems([driveItem], variant)
-		setMenuPending(false)
-		setMenuDialogKind(null)
-		toastBulkOutcome(outcome)
-
-		if (outcome.succeeded.length > 0) {
-			// Only this receiver's row leaves the listing, and no echo prunes a selected row the way
-			// trash and delete echoes do.
-			useDriveStore.getState().removeRowsFromSelection(outcome.succeeded)
-			onClose()
-		}
+		// Only this receiver's row leaves the listing, and no echo prunes a selected row the way trash and
+		// delete echoes do.
+		await runMenuActivity(
+			driveActivity([driveItem], DRIVE_UNSHARE, (targets, onSettled) => unshareItems(targets, variant, onSettled), {
+				prune: pruneSelectionByRow,
+				onDone: outcome => {
+					if (outcome.succeeded.length > 0 && mountedRef.current) {
+						onClose()
+					}
+				}
+			})
+		)
 	}
 
 	// "favorite" descriptor's onFavoriteToggled — see itemMenu.tsx's own doc comment on why this extension
@@ -456,7 +489,7 @@ export function PreviewOverlay({
 						pending={menuPending}
 						onClose={closeMenuDialog}
 						onConfirm={() => {
-							void removeCurrentItem(trashItems)
+							void removeCurrentItem(trashItems, DRIVE_TRASH)
 						}}
 					/>
 				)
@@ -476,7 +509,7 @@ export function PreviewOverlay({
 							}
 						}}
 						onConfirm={() => {
-							void removeCurrentItem(deleteItemsPermanently)
+							void removeCurrentItem(deleteItemsPermanently, DRIVE_DELETE_PERMANENTLY)
 						}}
 					/>
 				)

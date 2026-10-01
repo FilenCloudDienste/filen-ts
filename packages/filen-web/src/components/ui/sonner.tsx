@@ -1,7 +1,6 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { useTranslation } from "react-i18next"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { TOAST_ICONS } from "@/components/ui/toastIcons"
 import { useTheme } from "@/providers/themeProvider"
 import { useToastClearance } from "@/lib/toastClearance"
 import { TOAST_EDGE_OFFSET_PX, TOAST_MOBILE_EDGE_OFFSET_PX, TOAST_WIDTH_PX, toastBottomOffset } from "@/lib/toastClearance.logic"
@@ -20,15 +19,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
 		<Sonner
 			theme={theme}
 			className="toaster group"
-			icons={{
-				success: <CircleCheckIcon className="size-4" />,
-				info: <InfoIcon className="size-4" />,
-				warning: <TriangleAlertIcon className="size-4" />,
-				error: <OctagonXIcon className="size-4" />,
-				// Spinner's data-slot exempts it from the global reduced-motion freeze (index.css); a frozen
-				// loading toast reads as a hung app.
-				loading: <Spinner />
-			}}
+			icons={TOAST_ICONS}
 			style={
 				{
 					"--normal-bg": "var(--popover)",

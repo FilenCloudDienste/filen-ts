@@ -10,7 +10,8 @@ import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/
 import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { finishBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { DRIVE_RESTORE, driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
+import { runBulkActivity, runOutcomeActivity } from "@/lib/activity/activity"
 import { startDownloads } from "@/features/drive/lib/download"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -122,22 +123,29 @@ function ItemMenuEntries({
 		}
 
 		if (descriptor.id === "favorite") {
-			const outcome = await toggleFavorite(item)
+			await runOutcomeActivity(item, {
+				keys: favoriteKeys(!item.data.favorited),
+				name: driveItemName,
+				run: async target => {
+					const outcome = await toggleFavorite(target)
 
-			if (outcome.status === "error") {
-				toast.error(errorLabel(outcome.dto))
-				return
-			}
+					if (outcome.status === "error") {
+						return outcome
+					}
 
-			// Unfavoriting while the favorites listing is open drops the row from that listing (cache
-			// patch in actions.ts) — mirrors the restore/trash cleanup below so its uuid doesn't linger
-			// in the selection store as a ghost "N selected" count. Favoriting-ON and any non-favorites
-			// variant leave the item visible, so selection is left untouched in both of those cases.
-			if (variant === "favorites" && !outcome.item.data.favorited) {
-				useDriveStore.getState().removeFromSelection([outcome.item.data.uuid])
-			}
+					// Unfavoriting while the favorites listing is open drops the row from that listing (cache
+					// patch in actions.ts) — mirrors the restore/trash cleanup below so its uuid doesn't linger
+					// in the selection store as a ghost "N selected" count. Favoriting-ON and any non-favorites
+					// variant leave the item visible, so selection is left untouched in both of those cases.
+					if (variant === "favorites" && !outcome.item.data.favorited) {
+						useDriveStore.getState().removeFromSelection([outcome.item.data.uuid])
+					}
 
-			onFavoriteToggled?.(outcome.item)
+					onFavoriteToggled?.(outcome.item)
+
+					return outcome
+				}
+			})
 
 			return
 		}
@@ -152,13 +160,16 @@ function ItemMenuEntries({
 
 		// Restore is the remaining direct id. A restored item always vanishes from the trash listing it
 		// was selected in (see actions.ts), so a successful outcome also drops it from selection —
-		// mirrors directoryListing.tsx's identical cleanup after a trash/delete confirm.
-		const outcome = await restoreItems([item])
-		finishBulkOutcome(outcome)
-
-		if (outcome.succeeded.some(succeededItem => succeededItem.data.uuid === item.data.uuid)) {
-			onRestored?.(item)
-		}
+		// mirrors the dialog host's identical cleanup after a trash/delete confirm.
+		await runBulkActivity(
+			driveActivity([item], DRIVE_RESTORE, restoreItems, {
+				onDone: outcome => {
+					if (outcome.succeeded.length > 0) {
+						onRestored?.(item)
+					}
+				}
+			})
+		)
 	}
 
 	// Copy-link's own dispatch — intercepted here, BEFORE the run==="dialog" branch below, since its

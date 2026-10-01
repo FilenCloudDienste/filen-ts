@@ -294,17 +294,16 @@ export function useDriveDropTarget({
 			return
 		}
 
+		const destination = { uuid: targetUuid, name: typeof targetName === "function" ? targetName() : targetName }
+
 		if (dragDropMode(event, MAC) === "copy") {
 			// The payload leaves the module ref on dragend; the copy keeps its own array.
-			startCopyWithCard(getDragPayload().slice(), {
-				uuid: targetUuid,
-				name: typeof targetName === "function" ? targetName() : targetName
-			})
+			startCopyWithCard(getDragPayload().slice(), destination)
 
 			return
 		}
 
-		void performMove(getDragPayload(), targetUuid)
+		void performMove(getDragPayload(), destination)
 	}
 
 	// A drag that ends elsewhere — dropped on another target, dropped outside the page, or cancelled —

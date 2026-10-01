@@ -3,6 +3,8 @@ import { useRouterState } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { resolveDialogNavigationClose } from "@/lib/useDialogHost.logic"
 import { type VoidActionOutcome } from "@/lib/actions/outcome"
+import { type BulkOutcome } from "@/lib/actions/bulk"
+import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 
 // The listing-level "one dialog at a time" state machine, shared by every feature that hosts a
@@ -22,6 +24,9 @@ export interface DialogHost<Dialog> {
 	// The single-target tail: on error toast and keep the dialog open so the user can retry, else close.
 	// Resolves true on success, for callers with a post-close step.
 	runDialogOutcome: (op: () => Promise<VoidActionOutcome>) => Promise<boolean>
+	// A confirmed bulk action: one item keeps the dialog's spinner until it settles, then closes and toasts
+	// its result; several close the dialog at once and hand the run to an activity toast counting them.
+	runBulkDialogActivity: <T>(spec: BulkActivitySpec<T>) => Promise<BulkOutcome<T>>
 }
 
 export interface UseDialogHostOptions<Dialog> {
@@ -100,6 +105,20 @@ export function useDialogHost<Dialog>(options?: UseDialogHostOptions<Dialog>): D
 		return true
 	}
 
+	async function runBulkDialogActivity<T>(spec: BulkActivitySpec<T>): Promise<BulkOutcome<T>> {
+		if (spec.items.length > 1) {
+			closeActiveDialog()
+
+			return await runBulkActivity(spec)
+		}
+
+		const outcome = await runDialogPending(() => runBulkActivity({ ...spec, showRunning: false }))
+
+		closeActiveDialog()
+
+		return outcome
+	}
+
 	return {
 		activeDialog,
 		setActiveDialog,
@@ -107,6 +126,7 @@ export function useDialogHost<Dialog>(options?: UseDialogHostOptions<Dialog>): D
 		isDialogOpen: activeDialog !== null,
 		closeActiveDialog,
 		runDialogPending,
-		runDialogOutcome
+		runDialogOutcome,
+		runBulkDialogActivity
 	}
 }

@@ -9,7 +9,8 @@ import { formatVersionTimestamp } from "@/features/drive/lib/format"
 import { fileVersionsQueryKey, useFileVersionsQuery } from "@/features/drive/queries/drive"
 import { queryClient } from "@/queries/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { toastBulkSummary } from "@/lib/actions/bulkToast"
+import { runBulkActivity } from "@/lib/activity/activity"
+import { DRIVE_DELETE_VERSIONS } from "@/features/drive/lib/activity"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
 import { isRevisionOf } from "@/features/preview/lib/remoteChange.logic"
@@ -136,30 +137,34 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 		)
 	}
 
+	// The panel's own spinner shows the run, so only its result toasts.
 	async function handleBulkDeleteConfirmed(targets: FileVersion[]): Promise<void> {
 		setPending(true)
-		const outcome = await deleteVersions(file, targets)
+		await runBulkActivity({
+			items: targets,
+			keys: DRIVE_DELETE_VERSIONS,
+			name: version => formatVersionTimestamp(version.timestamp),
+			run: (versions, onSettled) => deleteVersions(file, versions, onSettled),
+			onDone: outcome => {
+				// Widened to plain `Set<string>` (not the branded UuidStr the FileVersion arm carries) —
+				// `selected` below is a plain string set (no dependency on the SDK's own uuid brand), so both
+				// `.has` calls need to compare against the same widened type.
+				const succeededUuids = new Set<string>(outcome.succeeded.map(version => version.uuid))
+				queryClient.setQueryData<FileVersion[]>(fileVersionsQueryKey(file.data.uuid), prev =>
+					prev?.filter(existing => !succeededUuids.has(existing.uuid))
+				)
+				// A failed version stays selected so the user can retry just that one; a succeeded one is gone
+				// from the list entirely, so it's dropped from the selection along with it.
+				setSelected(prev => new Set([...prev].filter(uuid => !succeededUuids.has(uuid))))
+
+				if (outcome.failed.length === 0) {
+					exitSelectMode()
+				}
+			},
+			showRunning: false
+		})
 		setPending(false)
 		setConfirming(null)
-		toastBulkSummary(outcome, {
-			complete: "drive:driveVersionsBulkDeleteComplete",
-			withFailures: "drive:driveVersionsBulkDeleteCompleteWithFailures"
-		})
-
-		// Widened to plain `Set<string>` (not the branded UuidStr the FileVersion arm carries) — `selected`
-		// below is a plain string set (no dependency on the SDK's own uuid brand), so both `.has` calls
-		// need to compare against the same widened type.
-		const succeededUuids = new Set<string>(outcome.succeeded.map(version => version.uuid))
-		queryClient.setQueryData<FileVersion[]>(fileVersionsQueryKey(file.data.uuid), prev =>
-			prev?.filter(existing => !succeededUuids.has(existing.uuid))
-		)
-		// A failed version stays selected so the user can retry just that one; a succeeded one is gone
-		// from the list entirely, so it's dropped from the selection along with it.
-		setSelected(prev => new Set([...prev].filter(uuid => !succeededUuids.has(uuid))))
-
-		if (outcome.failed.length === 0) {
-			exitSelectMode()
-		}
 	}
 
 	return (

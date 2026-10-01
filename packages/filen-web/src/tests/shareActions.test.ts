@@ -33,6 +33,8 @@ import { shareItems, unshareItems } from "@/features/drive/lib/share/actions"
 import { mockSharedFile, mockSharedRootDir, receiverRole } from "@/tests/fixtures/sdk"
 import { testUuid } from "@/tests/support/uuid"
 
+const noop = (): undefined => undefined
+
 beforeEach(() => {
 	vi.clearAllMocks()
 	testQueryClient.clear()
@@ -153,7 +155,7 @@ describe("shareItems", () => {
 		shareDirectory.mockResolvedValue(undefined)
 		shareFile.mockResolvedValue(undefined)
 
-		const outcome = await shareItems([dir, file], [alice, bob, carol])
+		const outcome = await shareItems([dir, file], [alice, bob, carol], noop)
 
 		expect(outcome.succeeded).toEqual([dir, file])
 		expect(outcome.failed).toEqual([])
@@ -162,7 +164,7 @@ describe("shareItems", () => {
 		expect(shareDirectory).toHaveBeenCalledTimes(3)
 		expect(shareFile).toHaveBeenCalledTimes(3)
 		for (const contact of [alice, bob, carol]) {
-			expect(shareDirectory).toHaveBeenCalledWith(dir.data, contact)
+			expect(shareDirectory).toHaveBeenCalledWith(dir.data, contact, expect.any(Function))
 			expect(shareFile).toHaveBeenCalledWith(file.data, contact)
 		}
 	})
@@ -176,7 +178,7 @@ describe("shareItems", () => {
 			return Promise.resolve()
 		})
 
-		await shareItems([dir], contacts)
+		await shareItems([dir], contacts, noop)
 
 		expect(seen).toEqual(["a@example.com", "b@example.com", "c@example.com"])
 	})
@@ -191,7 +193,7 @@ describe("shareItems", () => {
 		// technique as driveActions.test.ts's moveItems partial-failure test.
 		shareDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(dto)
 
-		const outcome = await shareItems([ok, bad], [contact])
+		const outcome = await shareItems([ok, bad], [contact], noop)
 
 		expect(outcome.succeeded).toEqual([ok])
 		expect(outcome.failed).toEqual([{ item: bad, error: dto }])
@@ -207,16 +209,16 @@ describe("shareItems", () => {
 		// caught per-contact instead of throwing out of the loop, so alsoGood still gets its turn.
 		shareDirectory.mockResolvedValueOnce(undefined).mockRejectedValueOnce(dto).mockResolvedValueOnce(undefined)
 
-		const outcome = await shareItems([dir], [good, bad, alsoGood])
+		const outcome = await shareItems([dir], [good, bad, alsoGood], noop)
 
 		expect(outcome.succeeded).toEqual([])
 		expect(outcome.failed).toEqual([{ item: dir, error: dto }])
 		// all three contacts were attempted despite bad's mid-list rejection — the item still fails
 		// overall, but alsoGood is never stranded behind bad the way it used to be.
 		expect(shareDirectory).toHaveBeenCalledTimes(3)
-		expect(shareDirectory).toHaveBeenNthCalledWith(1, dir.data, good)
-		expect(shareDirectory).toHaveBeenNthCalledWith(2, dir.data, bad)
-		expect(shareDirectory).toHaveBeenNthCalledWith(3, dir.data, alsoGood)
+		expect(shareDirectory).toHaveBeenNthCalledWith(1, dir.data, good, expect.any(Function))
+		expect(shareDirectory).toHaveBeenNthCalledWith(2, dir.data, bad, expect.any(Function))
+		expect(shareDirectory).toHaveBeenNthCalledWith(3, dir.data, alsoGood, expect.any(Function))
 	})
 
 	it("keeps the FIRST failing contact's error when multiple contacts fail (LABEL-FIRST)", async () => {
@@ -227,7 +229,7 @@ describe("shareItems", () => {
 		const secondDto = sdkDto("RateLimited")
 		shareDirectory.mockRejectedValueOnce(firstDto).mockRejectedValueOnce(secondDto)
 
-		const outcome = await shareItems([dir], [firstBad, secondBad])
+		const outcome = await shareItems([dir], [firstBad, secondBad], noop)
 
 		expect(outcome.succeeded).toEqual([])
 		// secondBad is still attempted (both calls fire), but the item's reported error stays pinned to
@@ -236,12 +238,37 @@ describe("shareItems", () => {
 		expect(outcome.failed).toEqual([{ item: dir, error: firstDto }])
 	})
 
+	it("reports the fraction of item-contact pairs done, a directory's pair following its bytes", async () => {
+		const dir = dirItem({ uuid: testUuid("d") })
+		const file = fileItem({ uuid: testUuid("f") })
+		const fractions: number[] = []
+		shareDirectory.mockImplementation(
+			(_dir: Dir, _contact: Contact, onProgress: (bytes: number, total: number | undefined) => void) => {
+				onProgress(50, 100)
+				// A tick the SDK sends before it knows the total moves nothing.
+				onProgress(10, undefined)
+
+				return Promise.resolve()
+			}
+		)
+		shareFile.mockResolvedValue(undefined)
+
+		await shareItems([dir, file], [mockContact("alice")], fraction => {
+			fractions.push(fraction)
+		})
+
+		// Two pairs: half of the directory's is a quarter of the whole, then each settled pair is half.
+		expect(fractions[0]).toBe(0.25)
+		expect(fractions).toHaveLength(3)
+		expect(fractions.at(-1)).toBe(1)
+	})
+
 	it("invalidates the shared-with-others root listing after at least one item succeeds", async () => {
 		const dir = dirItem({ uuid: testUuid("d") })
 		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 		shareDirectory.mockResolvedValue(undefined)
 
-		await shareItems([dir], [mockContact("alice")])
+		await shareItems([dir], [mockContact("alice")], noop)
 
 		expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: sharedOutRoot() })
 	})
@@ -251,7 +278,7 @@ describe("shareItems", () => {
 		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 		shareDirectory.mockRejectedValue(sdkDto("Forbidden"))
 
-		const outcome = await shareItems([dir], [mockContact("alice")])
+		const outcome = await shareItems([dir], [mockContact("alice")], noop)
 
 		expect(outcome.succeeded).toEqual([])
 		expect(invalidateSpy).not.toHaveBeenCalled()
@@ -260,7 +287,7 @@ describe("shareItems", () => {
 	it("resolves to an empty split on an empty selection without calling the worker or invalidating", async () => {
 		const invalidateSpy = vi.spyOn(testQueryClient, "invalidateQueries")
 
-		const outcome = await shareItems([], [mockContact("alice")])
+		const outcome = await shareItems([], [mockContact("alice")], noop)
 
 		expect(outcome).toEqual({ succeeded: [], failed: [] })
 		expect(shareDirectory).not.toHaveBeenCalled()

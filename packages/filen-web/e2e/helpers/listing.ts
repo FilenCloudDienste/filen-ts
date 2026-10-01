@@ -526,9 +526,9 @@ class RowActionNotConfirmedError extends Error {}
 // attempt against its deadline (playwright-core's raceAgainstDeadline) rather than letting an in-flight
 // one run past it, so a lane budget only ever has to hold confirmTimeoutMs + 40s here.
 //
-// The confirm closing is NOT the outcome, but it IS the write: useDriveDialogHost's runBulkDialogAction
-// keeps the dialog open and pending for the whole bulk operation and then closes it either way, toasting
-// whatever failed — so a server-side rejection (which leaves the item exactly where it was) closed it too
+// The confirm closing is NOT the outcome, but it IS the write: useDriveDialogHost's runBulkDialogActivity
+// keeps a one-item confirm open and pending for the whole operation and then closes it either way,
+// toasting whatever failed — so a server-side rejection (which leaves the item exactly where it was) closed it too
 // and this reported success. The row disappearing is the only proof the write landed, so that is what the
 // attempt now ends on, at the plain expect default rather than the write budget: trashItems patches the
 // row out of the listing query cache BEFORE its own promise resolves, so once the confirm is gone the
@@ -557,7 +557,7 @@ export async function selectAndTrashRow(page: Page, listbox: Locator, name: stri
 	await expect(async () => {
 		if (confirmed) {
 			// Wait the in-flight write out rather than issuing another; only once the confirm has closed
-			// is it settled. Still showing the row then means the server REJECTED it (runBulkDialogAction
+			// is it settled. Still showing the row then means the server REJECTED it (runBulkDialogActivity
 			// closes either way and toasts the failure), and a rejected write is not in flight — so that
 			// one, unlike a slow one, is safe to drive again.
 			await expect(confirm).toHaveCount(0, { timeout: confirmBudgetMs })
@@ -582,8 +582,8 @@ export async function selectAndTrashRow(page: Page, listbox: Locator, name: stri
 			throw confirmed ? error : new RowActionNotConfirmedError(`Trash on "${name}" was never confirmed`, { cause: error })
 		})
 
-	// Awaited ONCE, never retried. useDriveDialogHost's runBulkDialogAction holds the confirm open and
-	// pending for the whole bulk operation and closes it either way, so the close IS the write settling
+	// Awaited ONCE, never retried. useDriveDialogHost's runBulkDialogActivity holds a one-item confirm open
+	// and pending for the whole operation and closes it either way, so the close IS the write settling
 	// — at the write budget, because acquiring the lease is unbounded under contention. Only then is the
 	// row's disappearance a React commit: trashItems patches the listing cache after its SDK call
 	// resolves (features/drive/lib/actions.ts), which is already done by the time the confirm closes.

@@ -233,12 +233,12 @@ test.describe("drive bulk actions", () => {
 			const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 			await expect(trashConfirm).toBeVisible()
 			await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-			// The write budget, not the expect default: runBulkDialogAction holds this open and pending for the
-			// whole trash, so its close is the live write settling on the account-wide lease.
-			await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Several items close the confirm at once and run as an activity toast (runBulkDialogActivity), so
+			// the rows leaving is the live write settling on the account-wide lease: the write budget.
+			await expect(trashConfirm).toHaveCount(0)
 
-			await expect(rowA).toHaveCount(0)
-			await expect(rowB).toHaveCount(0)
+			await expect(rowA).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(rowB).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Trash variant: both items are visible there, gated to Restore/Delete-permanently only — no
 			// Favorite/Move surface (mirrors the /drive gating table, inverted). An in-app sidebar-link
@@ -302,12 +302,12 @@ test.describe("drive bulk actions", () => {
 			// The preserved half of the same tier rule: a reversible confirm still opens on its confirm button.
 			await expect(restoreConfirm.getByRole("button", { name: "Restore", exact: true })).toBeFocused()
 			await restoreConfirm.getByRole("button", { name: "Restore", exact: true }).click()
-			// The write budget, not the expect default: runBulkDialogAction holds this open for the whole
-			// restore, so its close is the live write settling on the account-wide lease, not a UI beat.
-			await expect(restoreConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Closed at once and handed to an activity toast, as the bulk trash above: the rows leaving is the
+			// write settling.
+			await expect(restoreConfirm).toHaveCount(0)
 
-			await expect(trashRowA).toHaveCount(0)
-			await expect(trashRowB).toHaveCount(0)
+			await expect(trashRowA).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(trashRowB).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// restoreItems restores each item to its OWN previous parent — the scratch directory, not root
 			// — so getting back to them means re-descending, not just returning to /drive.
@@ -328,9 +328,9 @@ test.describe("drive bulk actions", () => {
 			const innerFinalTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 			await expect(innerFinalTrashConfirm).toBeVisible()
 			await innerFinalTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-			await expect(innerFinalTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-			await expect(restoredRowA).toHaveCount(0)
-			await expect(restoredRowB).toHaveCount(0)
+			await expect(innerFinalTrashConfirm).toHaveCount(0)
+			await expect(restoredRowA).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(restoredRowB).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Final cleanup: trash the now-empty scratch directory itself — the only other root-level
 			// mutation this test makes, ending everything in Trash (recoverable, net-zero on the live

@@ -8,6 +8,7 @@ import { performMove } from "@/features/drive/lib/dnd"
 import { cachedDirectoryName, cachedListing } from "@/features/drive/queries/drive"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
+import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { createMoveTreeGates } from "@/features/drive/components/moveTargetDialog.logic"
 import {
 	DirectoryTreeSubmenu,
@@ -26,13 +27,14 @@ export interface TransferSubmenuProps {
 	onChooseDestination: (mode: TransferMode) => void
 }
 
-// The picked directory's name for the copy's card, from the listing its level was built from.
+// The picked directory's name for the move's activity and the copy's card, from the listing its level
+// was built from.
 function targetName(target: DirectoryTreeTarget, rootName: string): string {
 	return target.uuid === null ? rootName : (cachedDirectoryName(target.uuid) ?? "")
 }
 
-// A pick runs the drop-to-move path (moveItems, bulk toast, selection prune), which is what the dialog's
-// own confirm runs too. A copy goes through the copy card instead.
+// A pick runs the drop-to-move path (moveItems as an activity, selection prune), which is what the
+// dialog's own confirm runs too. A copy goes through the copy card instead.
 const MODES = {
 	move: {
 		def: ACTION_DEFS.move,
@@ -41,8 +43,8 @@ const MODES = {
 		clipboardLabelKey: "driveClipboardCut",
 		kbdAction: "drive.cut",
 		actionLabelKey: "driveMoveHereAction",
-		select: (items: DriveItem[], target: DirectoryTreeTarget) => {
-			void performMove(items, target.uuid)
+		select: (items: DriveItem[], destination: CopyDestination) => {
+			void performMove(items, destination)
 		}
 	},
 	copy: {
@@ -52,8 +54,8 @@ const MODES = {
 		clipboardLabelKey: "driveClipboardCopy",
 		kbdAction: "drive.copy",
 		actionLabelKey: "driveCopyHereAction",
-		select: (items: DriveItem[], target: DirectoryTreeTarget, rootName: string) => {
-			startCopyWithCard(items, { uuid: target.uuid, name: targetName(target, rootName) })
+		select: (items: DriveItem[], destination: CopyDestination) => {
+			startCopyWithCard(items, destination)
 		}
 	}
 } as const
@@ -110,7 +112,7 @@ export function TransferSubmenu({ mode, family, items, onChooseDestination }: Tr
 			isBrowseDisabled={target => !isOnline || gates.isBrowseDisabled(target)}
 			isTargetDisabled={target => !isOnline || gates.isTargetDisabled(target)}
 			onSelect={target => {
-				config.select(items, target, t("driveMyDrive"))
+				config.select(items, { uuid: target.uuid, name: targetName(target, t("driveMyDrive")) })
 			}}
 		/>
 	)

@@ -33,7 +33,7 @@ import {
 } from "@/features/drive/lib/item"
 import { dropFromClipboard, followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
-import { runBulk, runBulkOutcomes, type BulkOutcome } from "@/lib/actions/bulk"
+import { runBulk, runBulkOutcomes, type BulkOutcome, type BulkProgress } from "@/lib/actions/bulk"
 import { attemptOp, runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { emitBranchChange } from "@/features/drive/lib/branchChanges"
 
@@ -103,21 +103,27 @@ export async function renameItem(item: DriveItem, newName: string): Promise<Acti
 
 // ── Move (bulk) ──────────────────────────────────────────────────────────
 
-export function moveItems(items: DriveItem[], targetParentUuid: string | null): Promise<BulkOutcome<DriveItem>> {
+export function moveItems(items: DriveItem[], targetParentUuid: string | null, onSettled?: BulkProgress): Promise<BulkOutcome<DriveItem>> {
 	const rootUuid = currentRootUuid()
 
 	return batchListingPatches(() =>
-		runBulk(items, async item => {
-			const base = asDirectoryOrFile(item)
-			const moved = await runOp<Dir | File>(
-				base.type === "directory" ? sdkApi.moveDirectory(base.data, targetParentUuid) : sdkApi.moveFile(base.data, targetParentUuid)
-			)
+		runBulk(
+			items,
+			async item => {
+				const base = asDirectoryOrFile(item)
+				const moved = await runOp<Dir | File>(
+					base.type === "directory"
+						? sdkApi.moveDirectory(base.data, targetParentUuid)
+						: sdkApi.moveFile(base.data, targetParentUuid)
+				)
 
-			const movedItem = narrowItem(moved)
+				const movedItem = narrowItem(moved)
 
-			patchMovedItem(movedItem, rootUuid)
-			followClipboardItem(movedItem)
-		})
+				patchMovedItem(movedItem, rootUuid)
+				followClipboardItem(movedItem)
+			},
+			onSettled
+		)
 	)
 }
 
@@ -179,25 +185,29 @@ export function insertIntoTrashListing(item: DriveItem, colorKnown: boolean): vo
 	}
 }
 
-export function trashItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
+export function trashItems<T extends DriveItem>(items: T[], onSettled?: BulkProgress): Promise<BulkOutcome<T>> {
 	return batchListingPatches(() =>
-		runBulk(items, async item => {
-			const base = asDirectoryOrFile(item)
-			const { item: trashed, colorKnown } = withCurrentColor(
-				narrowItem(
-					await runOp<Dir | File>(base.type === "directory" ? sdkApi.trashDirectory(base.data) : sdkApi.trashFile(base.data))
+		runBulk(
+			items,
+			async item => {
+				const base = asDirectoryOrFile(item)
+				const { item: trashed, colorKnown } = withCurrentColor(
+					narrowItem(
+						await runOp<Dir | File>(base.type === "directory" ? sdkApi.trashDirectory(base.data) : sdkApi.trashFile(base.data))
+					)
 				)
-			)
 
-			// Every listing but the trash loses the row, then the SDK's own post-trash shape joins the trash.
-			driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid }, ({ variant }) => variant !== "trash")
-			insertIntoTrashListing(trashed, colorKnown)
-			dropFromClipboard(item)
+				// Every listing but the trash loses the row, then the SDK's own post-trash shape joins the trash.
+				driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid }, ({ variant }) => variant !== "trash")
+				insertIntoTrashListing(trashed, colorKnown)
+				dropFromClipboard(item)
 
-			if (base.type === "directory") {
-				emitBranchChange({ type: "trashed", uuid: item.data.uuid })
-			}
-		})
+				if (base.type === "directory") {
+					emitBranchChange({ type: "trashed", uuid: item.data.uuid })
+				}
+			},
+			onSettled
+		)
 	)
 }
 
@@ -222,35 +232,45 @@ export function patchRestoredItem(restored: DriveItem, rootUuid: string): { item
 	return resolved
 }
 
-export function restoreItems(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
+export function restoreItems(items: DriveItem[], onSettled?: BulkProgress): Promise<BulkOutcome<DriveItem>> {
 	const rootUuid = currentRootUuid()
 
 	return batchListingPatches(() =>
-		runBulk(items, async item => {
-			const base = asDirectoryOrFile(item)
-			const restored = await runOp<Dir | File>(
-				base.type === "directory" ? sdkApi.restoreDirectory(base.data) : sdkApi.restoreFile(base.data)
-			)
+		runBulk(
+			items,
+			async item => {
+				const base = asDirectoryOrFile(item)
+				const restored = await runOp<Dir | File>(
+					base.type === "directory" ? sdkApi.restoreDirectory(base.data) : sdkApi.restoreFile(base.data)
+				)
 
-			patchRestoredItem(narrowItem(restored), rootUuid)
-		})
+				patchRestoredItem(narrowItem(restored), rootUuid)
+			},
+			onSettled
+		)
 	)
 }
 
 // ── Delete permanently (bulk) ────────────────────────────────────────────
 
-export function deleteItemsPermanently(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
+export function deleteItemsPermanently(items: DriveItem[], onSettled?: BulkProgress): Promise<BulkOutcome<DriveItem>> {
 	return batchListingPatches(() =>
-		runBulk(items, async item => {
-			const base = asDirectoryOrFile(item)
-			await runOp(base.type === "directory" ? sdkApi.deleteDirectoryPermanently(base.data) : sdkApi.deleteFilePermanently(base.data))
+		runBulk(
+			items,
+			async item => {
+				const base = asDirectoryOrFile(item)
+				await runOp(
+					base.type === "directory" ? sdkApi.deleteDirectoryPermanently(base.data) : sdkApi.deleteFilePermanently(base.data)
+				)
 
-			// The worker's own deleteDirectoryPermanently already evicts the directory cache worker-side
-			// (that cache is worker-realm private, unreachable from here) — this is only the listing side.
-			driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid })
-			dropFromClipboard(item)
-			markAccountStale()
-		})
+				// The worker's own deleteDirectoryPermanently already evicts the directory cache worker-side
+				// (that cache is worker-realm private, unreachable from here) — this is only the listing side.
+				driveListingQueryUpdateGlobal({ type: "remove", uuid: item.data.uuid })
+				dropFromClipboard(item)
+				markAccountStale()
+			},
+			onSettled
+		)
 	)
 }
 
@@ -323,12 +343,16 @@ export async function toggleFavorite(item: DriveItem): Promise<ActionOutcome> {
 // headerMenuBuilders.ts's buildBulkActionMenu): the bulk-action bar computes one target
 // (`!flags.includesFavorited`) from the whole selection and applies it to every item, rather than
 // each item flipping its own current flag independently.
-export function setFavoritedItems(items: DriveItem[], favorited: boolean): Promise<BulkOutcome<DriveItem>> {
+export function setFavoritedItems<T extends DriveItem>(items: T[], favorited: boolean, onSettled?: BulkProgress): Promise<BulkOutcome<T>> {
 	return batchListingPatches(() =>
-		runBulk(items, async item => {
-			const result = narrowItem(await runOp<Dir | File>(sdkApi.setFavorited(item.data, favorited)))
-			applyFavoritePatch(favorited, result)
-		})
+		runBulk(
+			items,
+			async item => {
+				const result = narrowItem(await runOp<Dir | File>(sdkApi.setFavorited(item.data, favorited)))
+				applyFavoritePatch(favorited, result)
+			},
+			onSettled
+		)
 	)
 }
 
@@ -413,8 +437,8 @@ export async function deleteVersion(file: FileItem, version: FileVersion): Promi
 // though the panel's selection UI never lets the live version be selected in the first place), one
 // failure never aborting the rest — same partial-success shape as every other bulk helper in this
 // file.
-export function deleteVersions(file: FileItem, versions: FileVersion[]): Promise<BulkOutcome<FileVersion>> {
-	return runBulkOutcomes(versions, version => deleteVersion(file, version))
+export function deleteVersions(file: FileItem, versions: FileVersion[], onSettled?: BulkProgress): Promise<BulkOutcome<FileVersion>> {
+	return runBulkOutcomes(versions, version => deleteVersion(file, version), onSettled)
 }
 
 // ── Public link ──────────────────────────────────────────────────────────
@@ -513,35 +537,39 @@ export async function disableLink(item: DriveItem, current: DriveItemLinkStatus)
 // current status read: an item that has lost its link meanwhile (e.g. disabled from another tab/device
 // moments earlier) counts as succeeded — there is nothing left to disable, and the listing still drops
 // it — and a file's link replaced meanwhile is removed as it now is.
-export function disableLinks(items: DriveItem[]): Promise<BulkOutcome<DriveItem>> {
+export function disableLinks(items: DriveItem[], onSettled?: BulkProgress): Promise<BulkOutcome<DriveItem>> {
 	return batchListingPatches(() =>
-		runBulkOutcomes(items, async (item): Promise<VoidActionOutcome> => {
-			const isDirectory = isDirectoryItem(item)
-			const held = isDirectory ? undefined : heldLinkStatus(item)
-			let failure: VoidActionOutcome | undefined
+		runBulkOutcomes(
+			items,
+			async (item): Promise<VoidActionOutcome> => {
+				const isDirectory = isDirectoryItem(item)
+				const held = isDirectory ? undefined : heldLinkStatus(item)
+				let failure: VoidActionOutcome | undefined
 
-			if (isDirectory || held !== undefined) {
-				const outcome = await disableLinkForItem(item, held)
+				if (isDirectory || held !== undefined) {
+					const outcome = await disableLinkForItem(item, held)
 
-				if (outcome.status === "success") {
-					return outcome
+					if (outcome.status === "success") {
+						return outcome
+					}
+
+					failure = outcome
 				}
 
-				failure = outcome
-			}
+				const current = await fetchDriveItemLinkStatus(item)
 
-			const current = await fetchDriveItemLinkStatus(item)
+				if (current === null) {
+					flatListingQueryUpdate("links", { type: "remove", uuid: item.data.uuid })
 
-			if (current === null) {
-				flatListingQueryUpdate("links", { type: "remove", uuid: item.data.uuid })
+					return { status: "success" }
+				}
 
-				return { status: "success" }
-			}
-
-			// Tried again only with a file link replaced meanwhile: a directory's removal takes no status, and
-			// the same link fails the same way.
-			return failure !== undefined && (isDirectory || sameFileLink(held, current)) ? failure : disableLinkForItem(item, current)
-		})
+				// Tried again only with a file link replaced meanwhile: a directory's removal takes no status, and
+				// the same link fails the same way.
+				return failure !== undefined && (isDirectory || sameFileLink(held, current)) ? failure : disableLinkForItem(item, current)
+			},
+			onSettled
+		)
 	)
 }
 

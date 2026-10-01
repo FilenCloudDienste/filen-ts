@@ -36,6 +36,14 @@ export const common = {
 	loading: "Loading",
 	/** Toast primitive — screen-reader label on the dismiss button every toast carries */
 	toastDismiss: "Dismiss notification",
+	/** Activity toast (lib/activity) — accessible name of the bar showing how far a running action is */
+	activityProgress: "Progress",
+	/** Activity toast — how many items of a running bulk action have finished; {{settled}} of {{total}} */
+	activityProgressCount: "{{settled}} of {{total}}",
+	/** Activity toast — button on a result with several failures, opening the list of what failed */
+	activityDetails: "Details",
+	/** Activity details dialog — line under the title, above the list of failed items and why each failed */
+	activityDetailsDescription: "These items failed:",
 	/** /no-coi error page — title shown when the page loaded without the required cross-origin isolation */
 	noCoiTitle: "Unable to start Filen securely",
 	/** /no-coi error page — body explaining the missing isolation and suggesting a reload */

@@ -17,6 +17,19 @@ export interface BulkOutcome<T> {
 
 type Settled<T> = { ok: true; item: T } | { ok: false; item: T; error: unknown }
 
+// Told once per item as it settles, success or failure: how many of the run have settled so far, of how
+// many. What an activity toast counts its progress by.
+export type BulkProgress = (settled: number, total: number) => void
+
+function counter(total: number, onSettled: BulkProgress | undefined): () => void {
+	let settled = 0
+
+	return () => {
+		settled += 1
+		onSettled?.(settled, total)
+	}
+}
+
 function split<T>(settled: Settled<T>[]): BulkOutcome<T> {
 	const succeeded: T[] = []
 	const failed: BulkFailure<T>[] = []
@@ -32,7 +45,13 @@ function split<T>(settled: Settled<T>[]): BulkOutcome<T> {
 	return { succeeded, failed }
 }
 
-export async function runBulk<T>(items: readonly T[], perItem: (item: T) => Promise<void>): Promise<BulkOutcome<T>> {
+export async function runBulk<T>(
+	items: readonly T[],
+	perItem: (item: T) => Promise<void>,
+	onSettled?: BulkProgress
+): Promise<BulkOutcome<T>> {
+	const tick = counter(items.length, onSettled)
+
 	return split(
 		await Promise.all(
 			items.map(async (item): Promise<Settled<T>> => {
@@ -42,6 +61,8 @@ export async function runBulk<T>(items: readonly T[], perItem: (item: T) => Prom
 					return { ok: true, item }
 				} catch (error) {
 					return { ok: false, item, error }
+				} finally {
+					tick()
 				}
 			})
 		)
@@ -50,7 +71,13 @@ export async function runBulk<T>(items: readonly T[], perItem: (item: T) => Prom
 
 // runBulk over the never-throwing outcome-returning action helpers: an error outcome fails its item
 // with the outcome's ErrorDTO, exactly as if perItem had thrown it.
-export async function runBulkOutcomes<T>(items: readonly T[], perItem: (item: T) => Promise<VoidActionOutcome>): Promise<BulkOutcome<T>> {
+export async function runBulkOutcomes<T>(
+	items: readonly T[],
+	perItem: (item: T) => Promise<VoidActionOutcome>,
+	onSettled?: BulkProgress
+): Promise<BulkOutcome<T>> {
+	const tick = counter(items.length, onSettled)
+
 	return split(
 		await Promise.all(
 			items.map(async (item): Promise<Settled<T>> => {
@@ -60,6 +87,8 @@ export async function runBulkOutcomes<T>(items: readonly T[], perItem: (item: T)
 					return outcome.status === "success" ? { ok: true, item } : { ok: false, item, error: outcome.dto }
 				} catch (error) {
 					return { ok: false, item, error }
+				} finally {
+					tick()
 				}
 			})
 		)

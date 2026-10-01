@@ -305,7 +305,7 @@ describe("TransferSubmenu (move)", () => {
 		}
 		fireEvent.click(docsAction)
 
-		expect(performMoveMock).toHaveBeenCalledExactlyOnceWith([REPORT, PHOTOS], DOCS.data.uuid)
+		expect(performMoveMock).toHaveBeenCalledExactlyOnceWith([REPORT, PHOTOS], { uuid: DOCS.data.uuid, name: "docs" })
 	})
 
 	it("disables the moved directory itself (no browsing into it) but keeps its siblings", async () => {

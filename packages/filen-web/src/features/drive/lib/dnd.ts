@@ -4,7 +4,9 @@ import { i18n } from "@/lib/i18n"
 import { canDragVariant, assembleDragPayload } from "@/features/drive/lib/dnd.logic"
 import { moveItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/lib/actions/bulk"
-import { finishBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
+import { DRIVE_MOVE, driveActivity } from "@/features/drive/lib/activity"
+import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { reconcileSelectedItems } from "@/features/drive/components/directoryListing.logic"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -216,21 +218,21 @@ export function buildTreeDragSourceProps(resolveItem: () => DriveItem | undefine
 	}
 }
 
-// Runs the move for a completed drop, a pick in the item menu's directory tree (transferSubmenu.tsx), the
-// move dialog's confirm (moveTargetDialog.tsx) or a pasted cut (clipboard.ts).
-// Reuses moveItems' existing confirm-then-patch machinery (both source and destination listings, a
-// listing read under way included) and the standard bulk toast; a rejection
-// surfaces there via errorLabel. Detaches the payload from the module ref before awaiting so a
-// concurrent dragend clear can't mutate it mid-op.
-export async function performMove(items: readonly DriveItem[], targetUuid: string | null): Promise<BulkOutcome<DriveItem>> {
+// A move of items into a directory as an activity, named by where they go.
+export function moveActivity(items: readonly DriveItem[], destination: CopyDestination): BulkActivitySpec<DriveItem> {
+	return driveActivity(items, DRIVE_MOVE, (targets, onSettled) => moveItems(targets, destination.uuid, onSettled), {
+		// A destination whose name isn't cached (a tree level never listed) still reads as a sentence.
+		values: { destination: destination.name === "" ? i18n.t("drive:driveMoveDestinationFallback") : destination.name }
+	})
+}
+
+// Runs the move for a completed drop, a pick in the item menu's directory tree (transferSubmenu.tsx) or
+// a pasted cut (clipboard.ts), as an activity toast; the move dialog (moveTargetDialog.tsx) runs
+// moveActivity itself.
+export async function performMove(items: readonly DriveItem[], destination: CopyDestination): Promise<BulkOutcome<DriveItem>> {
 	if (items.length === 0) {
 		return { succeeded: [], failed: [] }
 	}
 
-	const moved = items.slice()
-	const outcome = await moveItems(moved, targetUuid)
-
-	finishBulkOutcome(outcome)
-
-	return outcome
+	return await runBulkActivity(moveActivity(items, destination))
 }

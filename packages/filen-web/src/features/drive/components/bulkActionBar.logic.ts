@@ -7,7 +7,8 @@ import { type DriveKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { setFavoritedItems } from "@/features/drive/lib/actions"
 import { startDownloads } from "@/features/drive/lib/download"
-import { finishBulkOutcome } from "@/features/drive/lib/bulkToast"
+import { driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
+import { runBulkActivity } from "@/lib/activity/activity"
 
 // Dialog kinds the bulk-action bar can ask the listing's dialog host to open — a narrow subset of
 // directoryListing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
@@ -142,8 +143,11 @@ export function isBulkActionOfflineDisabled(id: BulkActionDescriptor["id"], isOn
 // The bulk favorite SET, extracted so the floating bar AND the selection-aware context menu
 // (components/bulkMenu.tsx) can never drift on what "Favorite" does to a whole selection.
 export async function runBulkFavorite(items: DriveItem[]): Promise<void> {
-	const outcome = await setFavoritedItems(items, !aggregateDriveSelectionFlags(items).includesFavorited)
-	finishBulkOutcome(outcome)
+	const favorited = !aggregateDriveSelectionFlags(items).includesFavorited
+
+	await runBulkActivity(
+		driveActivity(items, favoriteKeys(favorited), (targets, onSettled) => setFavoritedItems(targets, favorited, onSettled))
+	)
 }
 
 // Shared dispatch for the floating bar and the selection-aware context menu. Download is checked FIRST

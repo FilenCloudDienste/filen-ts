@@ -6,8 +6,15 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { renameItem, trashItems, restoreItems, deleteItemsPermanently, disableLinks, emptyTrash } from "@/features/drive/lib/actions"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
-import { type BulkOutcome } from "@/lib/actions/bulk"
-import { finishBulkOutcome, pruneSelectionByRow, pruneSelectionByUuid } from "@/features/drive/lib/bulkToast"
+import {
+	DRIVE_DELETE_PERMANENTLY,
+	DRIVE_DISABLE_LINK,
+	DRIVE_RESTORE,
+	DRIVE_TRASH,
+	DRIVE_UNSHARE,
+	driveActivity,
+	pruneSelectionByRow
+} from "@/features/drive/lib/activity"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
@@ -60,7 +67,7 @@ interface UseDriveDialogHostParams {
 // boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
 export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies }: UseDriveDialogHostParams): DriveDialogHost {
 	const { t } = useTranslation(["drive", "common"])
-	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
 	const { stepPreview, removeCurrentPreviewItem } = usePreviewDialogState(setActiveDialog)
@@ -96,44 +103,36 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 		notifyIfNameIsHidden(trimmed, "renamed", hiddenNoticeApplies)
 	}
 
-	// Shared tail for every HOST-owned bulk-dialog confirm (trash/delete/restoreSelected): runs `op`
-	// against `items`, tracks the shared dialogPending flag, closes the dialog, toasts the outcome,
-	// and prunes succeeded items from the selection — a no-op for whichever failed (still visible,
-	// correctly still selected, so the user can retry without re-selecting).
-	async function runBulkDialogAction(
-		items: DriveItem[],
-		op: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>,
-		prune: (succeeded: DriveItem[]) => void = pruneSelectionByUuid
-	): Promise<void> {
-		const outcome = await runDialogPending(() => op(items))
-		closeActiveDialog()
-		finishBulkOutcome(outcome, prune)
-	}
-
+	// Every HOST-owned bulk-dialog confirm (trash/delete/restoreSelected/unshare/disable links) runs as an
+	// activity (useDialogHost's runBulkDialogActivity) and prunes the succeeded items from the selection.
 	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, trashItems)
+		await runBulkDialogActivity(driveActivity(items, DRIVE_TRASH, trashItems))
 	}
 
 	async function handleDeleteConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, deleteItemsPermanently)
+		await runBulkDialogActivity(driveActivity(items, DRIVE_DELETE_PERMANENTLY, deleteItemsPermanently))
 	}
 
 	// Bulk restore CONFIRMS (unlike a single item's direct, unconfirmed restore — see
 	// itemMenu.logic.ts's RESTORE descriptor and driveRestoreSelectedConfirmTitle's own doc comment).
 	async function handleRestoreSelectedConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, restoreItems)
+		await runBulkDialogActivity(driveActivity(items, DRIVE_RESTORE, restoreItems))
 	}
 
 	// Root-only (see itemMenu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
 	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
 	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, targetItems => unshareItems(targetItems, variant), pruneSelectionByRow)
+		await runBulkDialogActivity(
+			driveActivity(items, DRIVE_UNSHARE, (targets, onSettled) => unshareItems(targets, variant, onSettled), {
+				prune: pruneSelectionByRow
+			})
+		)
 	}
 
 	// Links-root only (see bulkActionBar.logic.ts's own variant gate) — revokes every selected item's
 	// public link; disableLinks itself drops each succeeded item from the links listing.
 	async function handleDisableLinkConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogAction(items, disableLinks)
+		await runBulkDialogActivity(driveActivity(items, DRIVE_DISABLE_LINK, disableLinks))
 	}
 
 	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —

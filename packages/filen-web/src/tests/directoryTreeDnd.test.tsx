@@ -150,7 +150,7 @@ describe("sidebar tree drag and drop", () => {
 		expect(drag("dragOver", photos, transfer).defaultPrevented).toBe(true)
 		drag("drop", photos, transfer)
 
-		expect(performMove).toHaveBeenCalledExactlyOnceWith([INNER], testUuid("photos"))
+		expect(performMove).toHaveBeenCalledExactlyOnceWith([INNER], { uuid: testUuid("photos"), name: "Photos" })
 		expect(startCopyWithCard).not.toHaveBeenCalled()
 	})
 

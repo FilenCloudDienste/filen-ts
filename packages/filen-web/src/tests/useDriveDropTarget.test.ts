@@ -89,7 +89,7 @@ describe("useDriveDropTarget", () => {
 			result.current.handlers.onDrop(dragEvent(false).event)
 		})
 
-		expect(performMove).toHaveBeenCalledExactlyOnceWith([REPORT], "docs-0000-0000-0000-000000000000")
+		expect(performMove).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: "docs-0000-0000-0000-000000000000", name: "Docs" })
 		expect(startCopyWithCard).not.toHaveBeenCalled()
 	})
 

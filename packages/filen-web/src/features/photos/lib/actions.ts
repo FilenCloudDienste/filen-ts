@@ -1,5 +1,5 @@
 import { setFavoritedItems, trashItems, renameItem, type ActionOutcome } from "@/features/drive/lib/actions"
-import { type BulkOutcome } from "@/lib/actions/bulk"
+import { type BulkOutcome, type BulkProgress } from "@/lib/actions/bulk"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { photosListingQueryUpdate } from "@/features/photos/queries/photos"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
@@ -33,8 +33,13 @@ export function patchPhoto(rootUuid: string, item: DriveItem): void {
 // from the whole selection) — patches every succeeded uuid's `favorited` flag directly rather than
 // re-deriving from each item's own mutation result, since the only field this write can ever change
 // is that one flag.
-export async function setFavoritedPhotos(rootUuid: string, items: PhotoItem[], favorited: boolean): Promise<BulkOutcome<DriveItem>> {
-	const outcome = await setFavoritedItems(items, favorited)
+export async function setFavoritedPhotos(
+	rootUuid: string,
+	items: PhotoItem[],
+	favorited: boolean,
+	onSettled?: BulkProgress
+): Promise<BulkOutcome<PhotoItem>> {
+	const outcome = await setFavoritedItems(items, favorited, onSettled)
 
 	if (outcome.succeeded.length > 0) {
 		const succeededUuids = new Set(outcome.succeeded.map(succeeded => succeeded.data.uuid))
@@ -51,8 +56,8 @@ export async function setFavoritedPhotos(rootUuid: string, items: PhotoItem[], f
 
 // A trashed item leaves the photos listing outright (it's no longer under the root at all) — no
 // listing membership to re-add later, unlike a drive "favorites" toggle which can also ADD a row.
-export async function trashPhotos(rootUuid: string, items: PhotoItem[]): Promise<BulkOutcome<DriveItem>> {
-	const outcome = await trashItems(items)
+export async function trashPhotos(rootUuid: string, items: PhotoItem[], onSettled?: BulkProgress): Promise<BulkOutcome<PhotoItem>> {
+	const outcome = await trashItems(items, onSettled)
 
 	if (outcome.succeeded.length > 0) {
 		const removedUuids = new Set(outcome.succeeded.map(succeeded => succeeded.data.uuid))

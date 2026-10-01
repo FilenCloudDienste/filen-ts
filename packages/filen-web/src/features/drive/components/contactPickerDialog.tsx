@@ -1,10 +1,10 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toggleInSet } from "@filen/shared"
+import { contactDisplayName, toggleInSet } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { shareItems } from "@/features/drive/lib/share/actions"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { DRIVE_SHARE, driveActivity } from "@/features/drive/lib/activity"
+import { runBulkActivity } from "@/lib/activity/activity"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
@@ -18,8 +18,7 @@ export interface ContactPickerDialogProps {
 	items: DriveItem[]
 	onClose: () => void
 	// Post-success selection cleanup, overridable so a non-drive caller (features/photos) can prune ITS
-	// OWN selection store instead of drive's — defaults to the drive listing's own useDriveStore call
-	// below, unchanged for every existing caller.
+	// OWN selection store instead of drive's (driveActivity's default prune).
 	onShared?: (succeededUuids: string[]) => void
 }
 
@@ -49,30 +48,54 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 
 	async function handleShare(): Promise<void> {
 		const chosen = resolveSelectedContacts(contacts, selected)
+		const [onlyContact] = chosen
 
-		if (chosen.length === 0) {
+		if (onlyContact === undefined) {
+			return
+		}
+
+		// A shared item stays visible in its listing (unlike a moved/trashed one), but its uuid is pruned
+		// from the selection all the same — matching every other bulk action's post-success cleanup and
+		// mobile's clear-selection-on-share; a failed item stays selected for the retry.
+		const spec = driveActivity(
+			items,
+			DRIVE_SHARE,
+			(targets, _onSettled, report) =>
+				shareItems(targets, chosen, value => {
+					report({ kind: "fraction", value })
+				}),
+			{
+				values: {
+					recipients: chosen.length === 1 ? contactDisplayName(onlyContact) : t("driveShareRecipients", { count: chosen.length })
+				},
+				...(onShared === undefined
+					? {}
+					: {
+							prune: succeeded => {
+								onShared(succeeded.map(item => item.data.uuid))
+							}
+						})
+			}
+		)
+
+		// The hand-off of a bulk confirm (useDialogHost's runBulkDialogActivity), which a directory's share
+		// joins however few items: re-encrypting its tree for each contact can run long.
+		if (items.length > 1 || items.some(item => item.type === "directory")) {
+			onClose()
+			void runBulkActivity(spec)
+
 			return
 		}
 
 		setPending(true)
-		const outcome = await shareItems(items, chosen)
+
+		const outcome = await runBulkActivity({ ...spec, showRunning: false })
+
 		setPending(false)
-		toastBulkOutcome(outcome)
 
-		// Close on any success (full or partial) — mirrors the rename/new-directory convention: stay open
-		// only on TOTAL failure so the user can retry without re-opening the picker. A shared item stays
-		// visible in its listing (unlike a moved/trashed one), but its uuid is pruned from the selection
-		// all the same — matching every other bulk action's post-success cleanup and mobile's
-		// clear-selection-on-share; a failed item stays selected for the retry.
-		if (outcome.succeeded.length > 0) {
+		// A failure keeps the picker open on the chosen contacts, to try again or change them.
+		if (outcome.failed.length === 0) {
 			onClose()
-			const succeededUuids = outcome.succeeded.map(succeededItem => succeededItem.data.uuid)
-
-			if (onShared) {
-				onShared(succeededUuids)
-			} else {
-				useDriveStore.getState().removeFromSelection(succeededUuids)
-			}
 		}
 	}
 

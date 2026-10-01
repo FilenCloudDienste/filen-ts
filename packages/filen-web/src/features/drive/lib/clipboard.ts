@@ -47,7 +47,7 @@ export async function pasteClipboard(destination: CopyDestination): Promise<void
 		return
 	}
 
-	const outcome = await performMove(paste.items, destination.uuid)
+	const outcome = await performMove(paste.items, destination)
 
 	useDriveClipboardStore.getState().restoreCut(
 		paste,

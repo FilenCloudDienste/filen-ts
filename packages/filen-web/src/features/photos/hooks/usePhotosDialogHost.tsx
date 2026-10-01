@@ -4,8 +4,8 @@ import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
 import { renamePhotoItem, trashPhotos, patchPhoto } from "@/features/photos/lib/actions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
+import { DRIVE_TRASH, driveActivity } from "@/features/drive/lib/activity"
+import { prunePhotoSelection, usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
@@ -45,7 +45,7 @@ interface UsePhotosDialogHostParams {
 // overlay does — the overlay itself and the info dialog — get "drive", see their render-site comments),
 // so there is no photos-specific fork of any of them beyond the preview's one extra favorite-patch prop.
 export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialogHostParams): PhotosDialogHost {
-	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogPending, runDialogOutcome } =
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActivePhotosDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
 	// A removal from the preview patches no photos listing: a remote move can keep the photo under the
@@ -94,10 +94,11 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	}
 
 	async function handleTrashConfirm(items: PhotoItem[]): Promise<void> {
-		const outcome = await runDialogPending(() => trashPhotos(rootUuid, items))
-		closeActiveDialog()
-		toastBulkOutcome(outcome)
-		usePhotosStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+		await runBulkDialogActivity(
+			driveActivity(items, DRIVE_TRASH, (targets, onSettled) => trashPhotos(rootUuid, targets, onSettled), {
+				prune: prunePhotoSelection
+			})
+		)
 	}
 
 	function renderActiveDialog(): ReactNode {

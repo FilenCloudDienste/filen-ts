@@ -2,7 +2,8 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { FolderPlusIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { performMove } from "@/features/drive/lib/dnd"
+import { moveActivity, performMove } from "@/features/drive/lib/dnd"
+import { runBulkActivity } from "@/lib/activity/activity"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -60,10 +61,10 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 	})
 
 	async function handleConfirm(): Promise<void> {
+		const destination = { uuid: targetUuid, name: targetUuid === null ? t("driveMyDrive") : (namesQuery.data?.[targetUuid] ?? "") }
+
 		if (mode === "copy") {
 			// Never awaited: a copy is a transfer, and transfers never sit behind a pending dialog.
-			const destination = { uuid: targetUuid, name: targetUuid === null ? t("driveMyDrive") : (namesQuery.data?.[targetUuid] ?? "") }
-
 			if (onCopy === undefined) {
 				startCopyWithCard(items, destination)
 			} else {
@@ -75,10 +76,25 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 			return
 		}
 
+		// The same hand-off as a bulk confirm (useDialogHost's runBulkDialogActivity): several items close
+		// the picker and run as an activity toast, one keeps its spinner and toasts only its result.
+		if (items.length > 1) {
+			onClose()
+			void performMove(items, destination)
+
+			return
+		}
+
 		setPending(true)
-		await performMove(items, targetUuid)
+
+		const outcome = await runBulkActivity({ ...moveActivity(items, destination), showRunning: false })
+
 		setPending(false)
-		onClose()
+
+		// A failure keeps the picker open on the chosen target, to try again or pick another.
+		if (outcome.failed.length === 0) {
+			onClose()
+		}
 	}
 
 	return (

@@ -1,10 +1,7 @@
 import { toast } from "sonner"
-import type { FlatNamespace, ParseKeys } from "i18next"
 import { i18n } from "@/lib/i18n"
+import type { AppKey } from "@/lib/i18n/appKey"
 import { type BulkOutcome } from "@/lib/actions/bulk"
-
-// Every key i18n.t accepts, namespaced (its own namespace list).
-type AppKey = ParseKeys<["common", ...Exclude<FlatNamespace, "common">[]]>
 
 // Narrowed by naming convention: i18n.t cannot type the options for a union of arbitrary keys.
 export interface SummaryKeys {

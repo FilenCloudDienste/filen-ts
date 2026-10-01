@@ -9,8 +9,9 @@ import {
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { startDownloads } from "@/features/drive/lib/download"
 import { setFavoritedPhotos } from "@/features/photos/lib/actions"
-import { toastBulkOutcome } from "@/features/drive/lib/bulkToast"
-import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
+import { driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
+import { runBulkActivity } from "@/lib/activity/activity"
+import { prunePhotoSelection, usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
@@ -38,9 +39,16 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 	const descriptors = driveBulkActions("drive", flags).filter(descriptor => descriptor.id !== "move")
 
 	async function handleBulkFavorite(): Promise<void> {
-		const outcome = await setFavoritedPhotos(rootUuid, selectedItems, !flags.includesFavorited)
-		toastBulkOutcome(outcome)
-		usePhotosStore.getState().removeFromSelection(outcome.succeeded.map(item => item.data.uuid))
+		const favorited = !flags.includesFavorited
+
+		await runBulkActivity(
+			driveActivity(
+				selectedItems,
+				favoriteKeys(favorited),
+				(targets, onSettled) => setFavoritedPhotos(rootUuid, targets, favorited, onSettled),
+				{ prune: prunePhotoSelection }
+			)
+		)
 	}
 
 	// download is checked first — startDownloads' FSA save picker needs this click's own live user

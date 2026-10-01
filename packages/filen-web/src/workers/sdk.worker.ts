@@ -1554,11 +1554,19 @@ const api = {
 		return requireClient().sendTypingSignal(chat, signalType)
 	},
 	// ── Sharing ──────────────────────────────────────────────────────────────
-	// shareDir's progress callback is a REQUIRED param on the wasm surface, but this app shows no
-	// dir-share progress (mobile parity) — a worker-local no-op stands in. It never crosses the
-	// Comlink boundary (it's created and invoked entirely inside this worker), so no Comlink.proxy.
-	async shareDirectory(dir: Dir, contact: Contact): Promise<void> {
-		await requireClient().shareDir(dir, contact, () => undefined)
+	// shareDir reports the bytes of the tree it re-encrypts for the contact; `onProgress` is the caller's
+	// Comlink.proxy, wrapped in a plain worker-side fn like uploadFile's and throttled the same way, so a
+	// large tree's ticks don't each cross the boundary.
+	async shareDirectory(dir: Dir, contact: Contact, onProgress: (bytes: number, totalBytes: number | undefined) => void): Promise<void> {
+		const { progress, finish } = throttledProgress(onProgress)
+
+		try {
+			await requireClient().shareDir(dir, contact, (bytes, totalBytes) => {
+				progress(bytes, totalBytes)
+			})
+		} finally {
+			finish()
+		}
 	},
 	async shareFile(file: File, contact: Contact): Promise<void> {
 		await requireClient().shareFile(file, contact)
