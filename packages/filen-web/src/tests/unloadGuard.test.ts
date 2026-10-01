@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { allowNextUnload, blockUnloadUnlessAllowed, consumeUnloadAllowance, holdUnload } from "@/lib/unloadGuard"
+import { allowNextUnload, blockUnloadUnlessAllowed, consumeUnloadAllowance, hasUnloadHold, holdUnload } from "@/lib/unloadGuard"
 
 function fakeEvent() {
 	return { preventDefault: vi.fn() }
@@ -107,5 +107,20 @@ describe("holdUnload", () => {
 		expect(unloadIsBlocked()).toBe(true)
 
 		second()
+	})
+})
+
+describe("hasUnloadHold", () => {
+	it("tracks whether any hold is outstanding", () => {
+		expect(hasUnloadHold()).toBe(false)
+
+		const first = holdUnload()
+		const second = holdUnload()
+
+		expect(hasUnloadHold()).toBe(true)
+		first()
+		expect(hasUnloadHold()).toBe(true)
+		second()
+		expect(hasUnloadHold()).toBe(false)
 	})
 })

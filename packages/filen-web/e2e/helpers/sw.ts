@@ -19,5 +19,5 @@ export async function waitForSwReady(page: Page): Promise<void> {
 				}),
 			{ timeout: 30_000 }
 		)
-		.toEqual({ v: SW_PROTOCOL_VERSION })
+		.toMatchObject({ v: SW_PROTOCOL_VERSION })
 }

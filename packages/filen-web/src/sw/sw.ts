@@ -436,7 +436,11 @@ self.addEventListener("fetch", event => {
 	}
 
 	if (url.pathname === "/__sw/version") {
-		event.respondWith(new Response(JSON.stringify({ v: SW_PROTOCOL_VERSION }), { headers: { "Content-Type": "application/json" } }))
+		event.respondWith(
+			new Response(JSON.stringify({ v: SW_PROTOCOL_VERSION, build: import.meta.env.VITE_BUILD_ID }), {
+				headers: { "Content-Type": "application/json" }
+			})
+		)
 		return
 	}
 

@@ -22,6 +22,11 @@ let reloaded = false
 // two routes — so every module request Vite serves passes straight through it.
 const SW_URL = import.meta.env.PROD ? "/sw.js" : "/src/sw/sw.ts"
 
+// Every deployed build changes sw.js (sw.ts reports its build id), so a deploy reaches open tabs as a
+// worker update. The browser looks for one on each full page load, which a long-lived tab never makes,
+// so a tab returning to view checks too: at most hourly, and the check is one conditional request.
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
+
 export function registerSW(onUpdateReady: () => void): void {
 	if (started || !("serviceWorker" in navigator)) {
 		return
@@ -68,6 +73,19 @@ export function registerSW(onUpdateReady: () => void): void {
 					watchInstalling(reg.installing)
 				}
 			})
+
+			let lastUpdateCheck = Date.now()
+
+			document.addEventListener("visibilitychange", () => {
+				if (document.visibilityState !== "visible" || Date.now() - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS) {
+					return
+				}
+
+				lastUpdateCheck = Date.now()
+				reg.update().catch((e: unknown) => {
+					log.warn("sw", "update check failed", e)
+				})
+			})
 		})
 		.catch((e: unknown) => {
 			log.warn("sw", "registration failed", e)
@@ -79,8 +97,10 @@ export function registerSW(onUpdateReady: () => void): void {
 export function applyUpdate(): void {
 	const waiting = registration?.waiting
 
+	// No waiting worker: the prompt came from a chunk the deploy removed (appUpdate.ts) before the
+	// worker update was found, and the page reload alone picks up the new build.
 	if (!waiting) {
-		log.warn("sw", "applyUpdate called with no waiting worker")
+		window.location.reload()
 		return
 	}
 

@@ -55,3 +55,8 @@ export function holdUnload(): () => void {
 		}
 	}
 }
+
+// Whether anything currently holds the tab open — what an automatic reload must not cut short.
+export function hasUnloadHold(): boolean {
+	return holds > 0
+}

@@ -6,4 +6,7 @@ interface ImportMetaEnv {
 	// rolldown constant-folds) so the e2e-hooks dynamic import is dead-code-eliminated from a normal
 	// build — a computed `["VITE_E2E"]` access is NOT folded and would leak the chunk into prod.
 	readonly VITE_E2E?: string
+	// The deployed commit, set by the deploy workflows. Reported by the service worker so that every
+	// deployed build changes sw.js and reaches open tabs as a worker update; absent in local builds.
+	readonly VITE_BUILD_ID?: string
 }

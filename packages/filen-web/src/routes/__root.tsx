@@ -1,7 +1,6 @@
 import { useEffect } from "react"
 import { createRootRoute, HeadContent, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { QueryClientProvider } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { queryClient } from "@/queries/client"
 import { ThemeProvider } from "@/providers/themeProvider"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -9,7 +8,8 @@ import { Toaster } from "@/components/ui/sonner"
 import { onAuthBroadcast } from "@/lib/sdk/session"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
-import { registerSW, applyUpdate } from "@/lib/sw/register"
+import { registerSW } from "@/lib/sw/register"
+import { showUpdateReadyToast } from "@/lib/appUpdate"
 import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/features/shell/components/bootScreen"
 import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
@@ -85,13 +85,7 @@ function BootGate() {
 			return
 		}
 
-		registerSW(() => {
-			toast(i18n.t("updateReadyTitle"), {
-				description: i18n.t("updateReadyBody"),
-				duration: Infinity,
-				action: { label: i18n.t("reload"), onClick: applyUpdate }
-			})
-		})
+		registerSW(showUpdateReadyToast)
 	}, [phase])
 
 	if (onNoCoi || onNoOpfs) {
