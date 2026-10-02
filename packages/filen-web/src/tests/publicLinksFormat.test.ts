@@ -23,6 +23,13 @@ describe("buildPublicLinkUrl", () => {
 		expect(buildPublicLinkUrl("directory", UUID, KEY_PLAINTEXT)).toBe(`https://app.filen.io/d/${UUID}#${KEY_HEX}`)
 	})
 
+	it("points at the origin the app is served from: staging, or a dev server with its port", () => {
+		expect(buildPublicLinkUrl("file", UUID, KEY_PLAINTEXT, "http://localhost:5173")).toBe(`http://localhost:5173/f/${UUID}#${KEY_HEX}`)
+		expect(buildPublicLinkUrl("directory", UUID, KEY_PLAINTEXT, "https://staging.example.com")).toBe(
+			`https://staging.example.com/d/${UUID}#${KEY_HEX}`
+		)
+	})
+
 	it("round-trips through parseFilenPublicLink for a file", () => {
 		expect(parseFilenPublicLink(buildPublicLinkUrl("file", UUID, KEY_PLAINTEXT))).toEqual({
 			type: "file",

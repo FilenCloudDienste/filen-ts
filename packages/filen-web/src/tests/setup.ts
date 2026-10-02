@@ -13,3 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 		disconnect = vi.fn()
 	}
 }
+
+// Node has no location; code that builds links from the page's own origin reads it. Defined, not
+// vi.stubGlobal'd: unstubGlobals would drop it after the first test.
+if (typeof globalThis.location === "undefined") {
+	Object.defineProperty(globalThis, "location", { value: new URL("https://app.filen.io/"), configurable: true, writable: true })
+}

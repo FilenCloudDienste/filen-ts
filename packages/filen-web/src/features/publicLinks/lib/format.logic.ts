@@ -11,33 +11,31 @@ import { UUID_SUB, decodeHexKey } from "@filen/shared"
 // out of the fragment, and no caller may log it.
 //
 // FORMAT ERAS (both recognized; only the NEW one is emitted):
-//   NEW (this app, path-based):   https://app.filen.io/f/<uuid>#<hexkey>   → f = file, d = directory (this app's own scheme)
+//   NEW (this app, path-based):   <origin>/f/<uuid>#<hexkey>              → f = file, d = directory (this app's own scheme)
 //   LEGACY (old-web, hash-router): https://app.filen.io/#/f/<uuid>%23<key> → f = folder, d = download (a file): the legacy naming
 // The letters are DELIBERATELY swapped between eras. PARSING both eras is owned by @filen/shared's
 // parseFilenPublicLink; only the BUILD side (prefixes below) stays app-local, since mobile still
 // builds legacy-format links and web builds NEW-format ones.
 
-// Canonical host every in-app-built link uses. The key stays in the fragment, so this host only
-// pins where the SPA is served, never carries key material.
-export const PUBLIC_LINK_ORIGIN = "https://app.filen.io"
-
-// NEW-format prefixes (path-based; the letters deliberately differ from the legacy naming, where
-// f meant folder and d meant download): /f/ = file, /d/ = directory. The builder
-// appends `<uuid>#<hexkey>` with a LITERAL '#' so the key lands in a real fragment.
-export const FILE_PUBLIC_LINK_URL_PREFIX = `${PUBLIC_LINK_ORIGIN}/f/`
-export const DIRECTORY_PUBLIC_LINK_URL_PREFIX = `${PUBLIC_LINK_ORIGIN}/d/`
+// NEW-format paths (the letters deliberately differ from the legacy naming, where f meant folder and d
+// meant download): /f/ = file, /d/ = directory. The builder appends `<uuid>#<hexkey>` with a LITERAL '#'
+// so the key lands in a real fragment.
+const FILE_PUBLIC_LINK_PATH = "/f/"
+const DIRECTORY_PUBLIC_LINK_PATH = "/d/"
 
 export type PublicLinkKind = "file" | "directory"
 
 const UUID_RE = new RegExp(`^${UUID_SUB}$`, "i")
 
-// The NEW-format link the drive dialog copies to the clipboard: `<prefix><uuid>#<hexkey>`. `keyPlain`
-// is the SDK's plaintext key; it is hex-encoded here purely for URL-safety, decoded back on open. A
-// literal '#' (not encodeURIComponent) so the key is a genuine fragment, never sent to the server.
-export function buildPublicLinkUrl(kind: PublicLinkKind, uuid: string, keyPlain: string): string {
-	const prefix = kind === "file" ? FILE_PUBLIC_LINK_URL_PREFIX : DIRECTORY_PUBLIC_LINK_URL_PREFIX
+// The NEW-format link the drive dialog copies to the clipboard: `<origin>/<f|d>/<uuid>#<hexkey>`. The
+// origin is the one this app is served from (production, staging or a dev server): a link opens in this
+// same app, and the key in the fragment never reaches any server, whichever it is. `keyPlain` is the
+// SDK's plaintext key; it is hex-encoded here purely for URL-safety, decoded back on open. A literal '#'
+// (not encodeURIComponent) so the key is a genuine fragment.
+export function buildPublicLinkUrl(kind: PublicLinkKind, uuid: string, keyPlain: string, origin: string = location.origin): string {
+	const path = kind === "file" ? FILE_PUBLIC_LINK_PATH : DIRECTORY_PUBLIC_LINK_PATH
 
-	return `${prefix}${uuid}#${Buffer.from(keyPlain, "utf-8").toString("hex")}`
+	return `${origin}${path}${uuid}#${Buffer.from(keyPlain, "utf-8").toString("hex")}`
 }
 
 // A too-short fragment is rejected outright ("key invalid or expired" — a real key is 64 hex chars,

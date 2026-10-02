@@ -107,7 +107,6 @@ describe("photos item menu", () => {
 			"Download",
 			"Share",
 			"Public link",
-			"Copy link",
 			"Trash"
 		])
 	})

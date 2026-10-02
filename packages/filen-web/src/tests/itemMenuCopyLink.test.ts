@@ -64,7 +64,7 @@ describe("item menu Copy link", () => {
 					DropdownMenu,
 					{ defaultOpen: true },
 					createElement(DropdownMenuTrigger, null, "menu"),
-					createElement(DriveDropdownMenuContent, { item: FILE, variant: "drive", onItemAction })
+					createElement(DriveDropdownMenuContent, { item: FILE, variant: "links", onItemAction })
 				)
 			)
 

@@ -232,8 +232,10 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 		actions.push(SHARE)
 	}
 
+	// Copy link only where every row is a linked item (the links view); elsewhere the link dialog shows
+	// and copies the link.
 	if (ownerMutable) {
-		actions.push(PUBLIC_LINK, COPY_LINK, TRASH)
+		actions.push(PUBLIC_LINK, ...(variant === "links" ? [COPY_LINK] : []), TRASH)
 	}
 
 	if (isSharedRoot) {

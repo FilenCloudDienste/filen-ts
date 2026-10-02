@@ -364,12 +364,14 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 			}
 
 			// The row/tile ⋯ dropdown's own drive-variant set (itemMenu.test.ts), minus Download — the
-			// header's separate Download button (still present, asserted below) covers that one.
-			for (const label of ["Rename", "Move", "Favorite", "Info", "Share", "Public link", "Copy link", "Trash"]) {
+			// header's separate Download button (still present, asserted below) covers that one. Copy link
+			// is the links view's alone.
+			for (const label of ["Rename", "Move", "Favorite", "Info", "Share", "Public link", "Trash"]) {
 				await expect(menu.getByRole("menuitem", { name: label, exact: true })).toBeVisible({ timeout: 10_000 })
 			}
 
 			await expect(menu.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0)
+			await expect(menu.getByRole("menuitem", { name: "Copy link", exact: true })).toHaveCount(0)
 		}).toPass({ timeout: 60_000 })
 
 		await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeVisible()

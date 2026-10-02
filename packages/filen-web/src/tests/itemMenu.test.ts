@@ -141,7 +141,7 @@ function facts(item: DriveItem, variant: Parameters<typeof driveItemActions>[1])
 }
 
 describe("driveItemActions (item menu gating)", () => {
-	it("drive variant, directory: rename/move/copy/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no versions)", () => {
+	it("drive variant, directory: rename/move/copy/favorite/color/info/download/share/publicLink/trash, in that order (no versions)", () => {
 		expect(ids(dirItem(), "drive")).toEqual([
 			"rename",
 			"move",
@@ -152,12 +152,11 @@ describe("driveItemActions (item menu gating)", () => {
 			"download",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash"
 		])
 	})
 
-	it("drive variant, file: rename/move/copy/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no color)", () => {
+	it("drive variant, file: rename/move/copy/favorite/versions/info/download/share/publicLink/trash, in that order (no color)", () => {
 		expect(ids(fileItem(), "drive")).toEqual([
 			"rename",
 			"move",
@@ -168,7 +167,6 @@ describe("driveItemActions (item menu gating)", () => {
 			"download",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash"
 		])
 	})
@@ -239,10 +237,10 @@ describe("driveItemActions (item menu gating)", () => {
 		expect(dirDescriptors.find(d => d.id === "info")).toMatchObject({ run: "dialog", dialogKind: "info" })
 	})
 
-	it("public link and copy link both dispatch the link dialog kind (the dialog itself owns the clipboard write)", () => {
+	it("public link dispatches the link dialog; copy link is the links view's alone", () => {
 		const descriptors = driveItemActions(dirItem(), "drive")
 		expect(descriptors.find(d => d.id === "publicLink")).toMatchObject({ run: "dialog", dialogKind: "link" })
-		expect(descriptors.find(d => d.id === "copyLink")).toMatchObject({ run: "dialog", dialogKind: "link" })
+		expect(descriptors.find(d => d.id === "copyLink")).toBeUndefined()
 	})
 
 	it("trash is recoverable (non-destructive); deletePermanently is destructive", () => {
@@ -262,7 +260,7 @@ describe("driveItemActions (item menu gating)", () => {
 })
 
 // links lists owned items that carry a public link (listLinkedItems) — an owned surface, so it keeps
-// the full owner-mutating set EXCEPT move (canMoveVariant): a "move" in this cross-tree aggregation
+// the full owner-mutating set EXCEPT move (canMoveVariant), plus Copy link, which only this view offers: a "move" in this cross-tree aggregation
 // would silently reparent an item the user is viewing for its link. Link management (publicLink/
 // copyLink), share, and download/info all behave as on every other owned surface — canShareVariant
 // includes links (the top-level row is the user's own item, same share-with-contact flow as My Drive).
@@ -463,7 +461,6 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"download",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash",
 			"unshare"
 		])
@@ -480,7 +477,6 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"download",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash",
 			"unshare"
 		])
@@ -497,7 +493,6 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"download",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash"
 		])
 	})
@@ -513,7 +508,6 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"download",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash"
 		])
 	})
@@ -560,7 +554,7 @@ describe("driveItemActions — download gating (enabled unconditionally, transpo
 })
 
 // Every descriptor derived from ACTION_DEFS, pinned to its label + icon across the variants that
-// surface it: drive dir (rename/move/copy/favorite/color/info/download/share/publicLink/copyLink/trash),
+// surface it: drive dir (rename/move/copy/favorite/color/info/download/share/publicLink/trash), links (copyLink),
 // drive file (versions), trash (restore/deletePermanently), sharedOut root (unshare), plus the
 // favorited-state toggle. A wrong entry in ACTION_DEFS or a mis-wired builder reference fails here.
 describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift guard)", () => {
@@ -575,9 +569,12 @@ describe("driveItemActions — descriptor label/icon facts (ACTION_DEFS drift gu
 			{ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon },
 			{ id: "share", labelKey: "driveActionShare", icon: UsersIcon },
 			{ id: "publicLink", labelKey: "driveActionPublicLink", icon: LinkIcon },
-			{ id: "copyLink", labelKey: "driveActionCopyLink", icon: CopyIcon },
 			{ id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon }
 		])
+	})
+
+	it("links variant: the copy-link descriptor carries its expected label and icon", () => {
+		expect(facts(dirItem(), "links")).toContainEqual({ id: "copyLink", labelKey: "driveActionCopyLink", icon: CopyIcon })
 	})
 
 	it("drive variant, file: the versions descriptor carries its expected label and icon", () => {

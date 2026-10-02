@@ -126,7 +126,6 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"info",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash"
 		])
 	})
@@ -140,7 +139,6 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"info",
 			"share",
 			"publicLink",
-			"copyLink",
 			"trash"
 		])
 	})
@@ -162,19 +160,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 	})
 
 	it("download is the only id ever stripped — every other descriptor (including a second read-only one) survives", () => {
-		const withDownload = [
-			"rename",
-			"move",
-			"copy",
-			"favorite",
-			"versions",
-			"info",
-			"download",
-			"share",
-			"publicLink",
-			"copyLink",
-			"trash"
-		]
+		const withDownload = ["rename", "move", "copy", "favorite", "versions", "info", "download", "share", "publicLink", "trash"]
 		expect(menuIds(fileItem(), "drive")).toEqual(withDownload.filter(id => id !== "download"))
 	})
 })
