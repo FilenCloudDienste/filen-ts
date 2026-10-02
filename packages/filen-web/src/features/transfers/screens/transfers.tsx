@@ -10,7 +10,9 @@ import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
 import {
 	buildTransfersDisplayList,
+	cancelAllLeavesBrowserPartial,
 	cancellableTransferIds,
+	leavesBrowserPartial,
 	endedCopyIds,
 	pausableTransferIds,
 	resumableTransferIds,
@@ -62,6 +64,8 @@ export function TransfersScreen() {
 	// dialog closes itself gracefully on the next render instead of confirming a no-op or holding a
 	// stale target.
 	const cancelConfirmOpen = cancelTarget !== null && isActiveTransfer(cancelTarget.status)
+	const browserPartialHint = t("transfersBrowserKeptPartialHint")
+	const cancelAllLeavesPartial = cancelAllLeavesBrowserPartial(transfers, endedCopies)
 
 	// A copy asks what to do with what it already copied, in its own prompt.
 	function requestRowCancel(transfer: Transfer): void {
@@ -172,7 +176,10 @@ export function TransfersScreen() {
 				open={cancelAllConfirmOpen}
 				pending={false}
 				title={t("transfersScreenCancelAllConfirmTitle")}
-				body={t("transfersScreenCancelAllConfirmBody", { count: cancellable.length })}
+				body={withHint(
+					t("transfersScreenCancelAllConfirmBody", { count: cancellable.length }),
+					cancelAllLeavesPartial ? browserPartialHint : null
+				)}
 				confirmLabel={t("transfersScreenCancelAll")}
 				cancelLabel={t("transfersCancelDialogDismiss")}
 				destructive
@@ -192,7 +199,10 @@ export function TransfersScreen() {
 				open={cancelConfirmOpen}
 				pending={false}
 				title={t("transfersRowCancelConfirmTitle")}
-				body={t("transfersRowCancelConfirmBody", { name: cancelTarget?.name ?? "" })}
+				body={withHint(
+					t("transfersRowCancelConfirmBody", { name: cancelTarget?.name ?? "" }),
+					cancelTarget !== null && leavesBrowserPartial(cancelTarget) ? browserPartialHint : null
+				)}
 				confirmLabel={t("transfersRowCancel")}
 				cancelLabel={t("transfersCancelDialogDismiss")}
 				destructive
@@ -211,6 +221,10 @@ export function TransfersScreen() {
 			/>
 		</>
 	)
+}
+
+function withHint(body: string, hint: string | null): string {
+	return hint === null ? body : `${body} ${hint}`
 }
 
 // Laid-out heights the virtualizer counts in: a section heading, and a row plus the gap after it. A row

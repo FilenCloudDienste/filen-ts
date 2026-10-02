@@ -194,7 +194,8 @@ describe("saveDownload — FSA branch", () => {
 	it("picks showSaveFilePicker -> createWritable and returns a fsa target", async () => {
 		const writable = { fake: "writable" }
 		const createWritable = vi.fn().mockResolvedValue(writable)
-		const showSaveFilePicker = vi.fn().mockResolvedValue({ kind: "file", name: "report.pdf", createWritable })
+		const handle = { kind: "file", name: "report.pdf", createWritable }
+		const showSaveFilePicker = vi.fn().mockResolvedValue(handle)
 		stubWindow({ showSaveFilePicker })
 
 		const { saveDownload } = await freshModule()
@@ -202,7 +203,7 @@ describe("saveDownload — FSA branch", () => {
 
 		expect(showSaveFilePicker).toHaveBeenCalledWith({ suggestedName: "report.pdf" })
 		expect(createWritable).toHaveBeenCalledTimes(1)
-		expect(target).toEqual({ kind: "fsa", writable })
+		expect(target).toEqual({ kind: "fsa", handle, writable })
 	})
 
 	it("propagates a picker-cancel rejection (caller decides it's a clean no-op)", async () => {

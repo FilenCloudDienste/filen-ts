@@ -17,7 +17,9 @@ const { saveDownloadMock, isPickerCancelledMock, triggerSwZipDownloadMock } = vi
 	triggerSwZipDownloadMock: vi.fn()
 }))
 
-vi.mock("@/features/drive/lib/saveDownload", () => ({
+// The real pipeToPickedFile runs; only the picking and the service-worker hand-off are faked.
+vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()),
 	saveDownload: saveDownloadMock,
 	isPickerCancelled: isPickerCancelledMock,
 	triggerSwZipDownload: triggerSwZipDownloadMock
@@ -188,12 +190,27 @@ function fsaWritable(sink: UnderlyingSink<Uint8Array> = {}): FileSystemWritableF
 	})
 }
 
+// The picked file's handle; `remove` is what discarding a failed download's file calls.
+function fsaHandle(remove = vi.fn(() => Promise.resolve())): FileSystemFileHandle {
+	const unused = () => Promise.reject(new Error("unused"))
+
+	return {
+		kind: "file",
+		name: "picked",
+		createWritable: unused,
+		getFile: unused,
+		createSyncAccessHandle: unused,
+		isSameEntry: unused,
+		remove
+	}
+}
+
 // A genuine per-call fsa SaveTarget rather than a shared module-level one — mirrors download.test.ts's
 // own fix: downloadZipViaFsa's real pipe now runs to actual completion against this default, and a
 // WritableStream is single-use, so a shared instance would already be closed/aborted by whichever
 // test in this file ran first.
 function fsaTarget(): SaveTarget {
-	return { kind: "fsa", writable: fsaWritable() }
+	return { kind: "fsa", handle: fsaHandle(), writable: fsaWritable() }
 }
 
 beforeEach(() => {
@@ -460,7 +477,8 @@ describe("runZipDownload (injected deps, save-download mocked)", () => {
 
 		const outcome = await runZipDownload(h.deps, { items: [dirItem()], suggestedName: "Documents.zip" })
 
-		expect(outcome).toEqual({ status: "error", dto })
+		// Flagged as the browser's save, whose partial file the failure toast tells the user about.
+		expect(outcome).toEqual({ status: "error", dto, browserManaged: true })
 		expect(h.settle).toHaveBeenCalledWith(expect.any(String), "error", dto)
 		expect(h.settle).not.toHaveBeenCalledWith(expect.any(String), "done")
 	})
@@ -486,8 +504,10 @@ describe("defaultZipDownloadDeps.downloadZip — fsa branch", () => {
 	it("pipes bytes written to the transferred writer through to the fsa sink, and forwards all 4 progress args", async () => {
 		const written: Uint8Array[] = []
 		const sinkAbort = vi.fn()
+		const remove = vi.fn(() => Promise.resolve())
 		const save: FsaSaveTarget = {
 			kind: "fsa",
+			handle: fsaHandle(remove),
 			writable: fsaWritable({ write: chunk => void written.push(chunk), abort: sinkAbort })
 		}
 
@@ -512,11 +532,13 @@ describe("defaultZipDownloadDeps.downloadZip — fsa branch", () => {
 		expect(written).toEqual([new Uint8Array([1, 2, 3])])
 		expect(onProgress).toHaveBeenCalledWith(3n, 3n, 1n, 1n)
 		expect(sinkAbort).not.toHaveBeenCalled()
+		expect(remove).not.toHaveBeenCalled()
 	})
 
 	it("tears down (aborts) the fsa sink when the worker call rejects — coordinated teardown", async () => {
 		const sinkAbort = vi.fn()
-		const save: FsaSaveTarget = { kind: "fsa", writable: fsaWritable({ abort: sinkAbort }) }
+		const remove = vi.fn(() => Promise.resolve())
+		const save: FsaSaveTarget = { kind: "fsa", handle: fsaHandle(remove), writable: fsaWritable({ abort: sinkAbort }) }
 		const dto = sdkDto("Cancelled")
 
 		// Mirrors the SDK's own leave-writable-open-on-abort behavior: the worker call rejects without
@@ -526,6 +548,8 @@ describe("defaultZipDownloadDeps.downloadZip — fsa branch", () => {
 		await expect(defaultZipDownloadDeps.downloadZip([testFile()], "transfer-id", save, vi.fn())).rejects.toEqual(dto)
 
 		expect(sinkAbort).toHaveBeenCalledTimes(1)
+		// The picker already created the file; a failed or cancelled download must not leave it empty on disk.
+		expect(remove).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -535,7 +559,12 @@ describe("defaultZipDownloadDeps.downloadZip — fsa branch", () => {
 describe("runZipDownload (real defaultZipDownloadDeps) — fsa sink close failure", () => {
 	it("settles error (not done) and returns an error outcome when the sink's close() rejects after a successful worker resolve", async () => {
 		const closeError = new Error("disk full")
-		const save: FsaSaveTarget = { kind: "fsa", writable: fsaWritable({ close: () => Promise.reject(closeError) }) }
+		const remove = vi.fn(() => Promise.resolve())
+		const save: FsaSaveTarget = {
+			kind: "fsa",
+			handle: fsaHandle(remove),
+			writable: fsaWritable({ close: () => Promise.reject(closeError) })
+		}
 		saveDownloadMock.mockResolvedValue(save)
 		downloadItemsToZip.mockImplementation(async (_items: AnyItemWithContext[], _id: string, writer: WritableStream<Uint8Array>) => {
 			await writer.getWriter().close()
@@ -545,6 +574,7 @@ describe("runZipDownload (real defaultZipDownloadDeps) — fsa sink close failur
 
 		expect(outcome.status).toBe("error")
 		expect(useTransfersStore.getState().transfers[0]?.status).toBe("error")
+		expect(remove).toHaveBeenCalledTimes(1)
 	})
 })
 

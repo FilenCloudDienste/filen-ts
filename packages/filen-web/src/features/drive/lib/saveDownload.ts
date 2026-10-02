@@ -3,6 +3,7 @@ import { isAbortError } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { allowNextUnload } from "@/lib/unloadGuard"
+import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
 import {
 	SW_DOWNLOAD_PREFIX,
 	SW_DOWNLOAD_STALL_MS,
@@ -23,6 +24,7 @@ import {
 // triggerSwDownload to register the concrete file against it once one is known.
 export interface FsaSaveTarget {
 	kind: "fsa"
+	handle: FileSystemFileHandle
 	writable: FileSystemWritableFileStream
 }
 
@@ -57,7 +59,30 @@ export async function pickFsaTarget(suggestedName: string): Promise<FsaSaveTarge
 	const handle = await picker({ suggestedName })
 	const writable = await handle.createWritable()
 
-	return { kind: "fsa", writable }
+	return { kind: "fsa", handle, writable }
+}
+
+// Picking a location already created the file, emptying one the user chose to overwrite, and aborting
+// the write only drops the browser's swap copy. A download that fails or is cancelled therefore
+// deletes the file too, rather than leaving an empty one behind. Best effort: remove() is Chromium
+// 110+ and fails while a writer still holds the file, so the write is aborted first.
+export async function discardPickedFile(target: FsaSaveTarget): Promise<void> {
+	await target.writable.abort().catch(() => undefined)
+	await target.handle.remove?.().catch(() => undefined)
+}
+
+// Streams a worker's output into the picked file, discarding the file if the stream fails.
+export async function pipeToPickedFile(
+	target: FsaSaveTarget,
+	run: (transferred: WritableStream<Uint8Array>) => Promise<void>
+): Promise<void> {
+	try {
+		await pipeWorkerToSink(target.writable, run)
+	} catch (e) {
+		await discardPickedFile(target)
+
+		throw e
+	}
 }
 
 // One MessageChannel round trip to the active service worker: post `{type, ...payload}` with the

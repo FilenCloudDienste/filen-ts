@@ -1,17 +1,21 @@
 import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
 import { driveItemName } from "@filen/shared"
-import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
-import { i18n } from "@/lib/i18n"
-import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
 import { asDirectoryOrFile, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
-import { saveDownload, triggerSwDownload, isPickerCancelled, type SaveTarget, type FsaSaveTarget } from "@/features/drive/lib/saveDownload"
+import {
+	saveDownload,
+	triggerSwDownload,
+	isPickerCancelled,
+	pipeToPickedFile,
+	type SaveTarget,
+	type FsaSaveTarget
+} from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { settleTransferFailure } from "@/features/transfers/lib/settle"
+import { settleTransferFailure, toastDownloadFailed, type DownloadOutcome } from "@/features/transfers/lib/settle"
 import { startZipDownload } from "@/features/drive/lib/downloadZip"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 
@@ -52,7 +56,7 @@ export interface RunDownloadDeps {
 // leaving a finished entry behind (mobile parity: an aborted transfer has no history). Never throws;
 // LABEL-FIRST via runOp/asErrorDTO, mirroring runUpload. No listing patch — downloads don't mutate
 // the drive.
-export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem }): Promise<VoidActionOutcome> {
+export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem }): Promise<DownloadOutcome> {
 	const { item } = args
 
 	let file: AnyFile
@@ -98,7 +102,11 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		return settleTransferFailure(deps.store, id, dto) ? { status: "success" } : { status: "error", dto }
+		if (settleTransferFailure(deps.store, id, dto)) {
+			return { status: "success" }
+		}
+
+		return { status: "error", dto, ...(save.kind === "sw" ? { browserManaged: true as const } : {}) }
 	}
 
 	deps.store.settle(id, "done")
@@ -107,9 +115,7 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 }
 
 function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget, onProgress: (bytes: bigint) => void): Promise<void> {
-	return pipeWorkerToSink(save.writable, transferred =>
-		sdkApi.downloadFileToWriter(file, transferId, transferred, Comlink.proxy(onProgress))
-	)
+	return pipeToPickedFile(save, transferred => sdkApi.downloadFileToWriter(file, transferId, transferred, Comlink.proxy(onProgress)))
 }
 
 // The real wiring behind RunDownloadDeps.download: branches on SaveTarget.kind, applying
@@ -168,6 +174,6 @@ export async function startDownloads(items: DriveItem[]): Promise<void> {
 	const outcome = await runDownload(defaultDownloadDeps, { item })
 
 	if (outcome.status === "error") {
-		toast.error(i18n.t("transfers:transfersDownloadSummaryCompleteWithFailures", { count: 0, failed: 1 }))
+		toastDownloadFailed(outcome)
 	}
 }

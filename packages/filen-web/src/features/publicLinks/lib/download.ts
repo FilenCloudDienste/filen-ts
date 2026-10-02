@@ -3,7 +3,7 @@ import type { AnyFile, AnyLinkedDirWithContext } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
-import { isFsaAvailable, isPickerCancelled, pickFsaTarget } from "@/features/drive/lib/saveDownload"
+import { discardPickedFile, isFsaAvailable, isPickerCancelled, pickFsaTarget, type FsaSaveTarget } from "@/features/drive/lib/saveDownload"
 import { chooseDownloadStrategy, createCollectingSink, type CollectingSink } from "@/features/publicLinks/lib/download.logic"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
 import { joinPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
@@ -40,13 +40,14 @@ function saveBlob(blob: Blob, name: string): void {
 	}, 10_000)
 }
 
-// Picks an FSA writable off the calling user gesture. MUST be the first awaited call in a handler
+// Picks an FSA file off the calling user gesture. MUST be the first awaited call in a handler
 // (showSaveFilePicker has to run synchronously off the gesture) — callers invoke the start* functions
 // directly from the click handler, and this is their first step. Returns null when the user dismisses
-// the picker (a clean no-op, never an error).
-async function pickFsaWritable(suggestedName: string): Promise<FileSystemWritableFileStream | null> {
+// the picker (a clean no-op, never an error). A download that then fails discards the file
+// (discardPickedFile), whichever step failed.
+async function pickFsaFile(suggestedName: string): Promise<FsaSaveTarget | null> {
 	try {
-		return (await pickFsaTarget(suggestedName)).writable
+		return await pickFsaTarget(suggestedName)
 	} catch (e) {
 		if (isPickerCancelled(e)) {
 			return null
@@ -56,16 +57,10 @@ async function pickFsaWritable(suggestedName: string): Promise<FileSystemWritabl
 	}
 }
 
-// Writes a buffer already in memory to the picked file; an aborted write leaves no partial file behind.
+// Writes a buffer already in memory to the picked file.
 async function writeBytes(writable: FileSystemWritableFileStream, bytes: Uint8Array): Promise<void> {
-	try {
-		await writable.write(bytes as Uint8Array<ArrayBuffer>)
-		await writable.close()
-	} catch (e) {
-		await writable.abort().catch(() => undefined)
-
-		throw e
-	}
+	await writable.write(bytes as Uint8Array<ArrayBuffer>)
+	await writable.close()
 }
 
 // Single linked file → disk. FSA path streams; the buffered fallback refuses a file over the in-memory
@@ -87,21 +82,21 @@ export async function startAnonFileDownload(args: {
 	const { file, name, size, linkScope, onProgress } = args
 	const fsaAvailable = isFsaAvailable()
 
-	let writable: FileSystemWritableFileStream | null = null
+	let target: FsaSaveTarget | null = null
 
 	if (fsaAvailable) {
 		try {
-			writable = await pickFsaWritable(name)
+			target = await pickFsaFile(name)
 		} catch (e) {
 			return { status: "error", dto: asErrorDTO(e) }
 		}
 
-		if (writable === null) {
+		if (target === null) {
 			return { status: "cancelled" }
 		}
 	}
 
-	const strategy = chooseDownloadStrategy({ fsaAvailable: writable !== null, size })
+	const strategy = chooseDownloadStrategy({ fsaAvailable: target !== null, size })
 
 	if (strategy.kind === "too-large") {
 		return { status: "too-large" }
@@ -114,17 +109,15 @@ export async function startAnonFileDownload(args: {
 		const previewed = await joinPreviewBytes(scope, file.uuid)
 
 		if (previewed !== undefined) {
-			if (writable !== null) {
-				await writeBytes(writable, previewed)
+			if (target !== null) {
+				await writeBytes(target.writable, previewed)
 			} else {
 				saveBlob(new Blob([previewed as BlobPart]), name)
 			}
 
 			onProgress(Number(size), Number(size))
-		} else if (writable !== null) {
-			const fsaWritable = writable
-
-			await pipeWorkerToSink(fsaWritable, transferred =>
+		} else if (target !== null) {
+			await pipeWorkerToSink(target.writable, transferred =>
 				sdkApi.downloadLinkedFileToWriterAnon(
 					file,
 					transferId,
@@ -149,6 +142,10 @@ export async function startAnonFileDownload(args: {
 			onProgress(Number(size), Number(size))
 		}
 	} catch (e) {
+		if (target !== null) {
+			await discardPickedFile(target)
+		}
+
 		const dto = asErrorDTO(e)
 
 		return dto.kind === "Cancelled" ? { status: "cancelled" } : { status: "error", dto }
@@ -170,17 +167,17 @@ export async function startAnonDirZipDownload(args: {
 	const fileName = `${name}.zip`
 	const transferId = crypto.randomUUID()
 
-	let fsaWritable: FileSystemWritableFileStream | null = null
+	let target: FsaSaveTarget | null = null
 	let sink: CollectingSink | null = null
 
 	if (isFsaAvailable()) {
 		try {
-			fsaWritable = await pickFsaWritable(fileName)
+			target = await pickFsaFile(fileName)
 		} catch (e) {
 			return { status: "error", dto: asErrorDTO(e) }
 		}
 
-		if (fsaWritable === null) {
+		if (target === null) {
 			return { status: "cancelled" }
 		}
 	}
@@ -190,10 +187,8 @@ export async function startAnonDirZipDownload(args: {
 	})
 
 	try {
-		if (fsaWritable !== null) {
-			const destination = fsaWritable
-
-			await pipeWorkerToSink(destination, transferred =>
+		if (target !== null) {
+			await pipeWorkerToSink(target.writable, transferred =>
 				sdkApi.downloadLinkedDirToZipAnon(dir, transferId, transferred, reportProgress)
 			)
 		} else {
@@ -208,6 +203,10 @@ export async function startAnonDirZipDownload(args: {
 			saveBlob(await buffered.done, fileName)
 		}
 	} catch (e) {
+		if (target !== null) {
+			await discardPickedFile(target)
+		}
+
 		if (sink?.capExceeded() === true) {
 			return { status: "too-large" }
 		}

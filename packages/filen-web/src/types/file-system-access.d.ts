@@ -15,6 +15,9 @@ interface FileSystemFileHandle {
 	readonly kind: "file"
 	readonly name: string
 	createWritable(options?: { keepExistingData?: boolean }): Promise<FileSystemWritableFileStream>
+	// Non-standard (Chromium 110+), so optional: deletes the file. Property-typed for the same reason as
+	// showSaveFilePicker below.
+	remove?: () => Promise<void>
 }
 
 interface SaveFilePickerOptions {

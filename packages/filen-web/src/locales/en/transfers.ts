@@ -128,6 +128,8 @@ export const transfers = {
 	transfersDownloadSummaryCompleteWithFailures_one: "{{count}} file downloaded, {{failed}} failed",
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
 	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed",
+	/** Under a failed or cancelled download the browser itself was saving: browsers keep the part already downloaded (for their own retry), and only the browser's downloads list can delete it */
+	transfersBrowserKeptPartialHint: "Your browser may have kept the part already downloaded. Delete it from the browser's downloads list.",
 
 	// ── Transfer start toast (features/transfers/lib/transferStartToast.tsx) ───
 	/** Toast shown once a download of a single file or directory has started; {{name}} = the file's name, or the zip's for a directory */

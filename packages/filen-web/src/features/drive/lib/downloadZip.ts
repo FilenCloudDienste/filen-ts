@@ -1,23 +1,22 @@
 import * as Comlink from "comlink"
 import type { AnyItemWithContext } from "@filen/sdk-rs"
 import { driveItemName } from "@filen/shared"
-import { toast } from "sonner"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
-import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
+import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
 import { isDirectoryItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
 import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
 import {
 	saveDownload,
 	triggerSwZipDownload,
 	isPickerCancelled,
+	pipeToPickedFile,
 	type SaveTarget,
 	type FsaSaveTarget
 } from "@/features/drive/lib/saveDownload"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { settleTransferFailure } from "@/features/transfers/lib/settle"
+import { settleTransferFailure, toastDownloadFailed, type DownloadOutcome } from "@/features/transfers/lib/settle"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 
 // DI mirror of RunDownloadDeps (download.ts) for the zip path — one archive, one transfer row, one
@@ -48,7 +47,7 @@ export interface RunZipDownloadDeps {
 export async function runZipDownload(
 	deps: RunZipDownloadDeps,
 	args: { items: DriveItem[]; suggestedName: string }
-): Promise<VoidActionOutcome> {
+): Promise<DownloadOutcome> {
 	const { items, suggestedName } = args
 	const id = crypto.randomUUID()
 
@@ -86,7 +85,11 @@ export async function runZipDownload(
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		return settleTransferFailure(deps.store, id, dto) ? { status: "success" } : { status: "error", dto }
+		if (settleTransferFailure(deps.store, id, dto)) {
+			return { status: "success" }
+		}
+
+		return { status: "error", dto, ...(save.kind === "sw" ? { browserManaged: true as const } : {}) }
 	}
 
 	// The SDK rejects the WHOLE call on any real per-entry failure (verified against filen-sdk-rs's
@@ -105,9 +108,7 @@ function downloadZipViaFsa(
 	save: FsaSaveTarget,
 	onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
 ): Promise<void> {
-	return pipeWorkerToSink(save.writable, transferred =>
-		sdkApi.downloadItemsToZip(items, transferId, transferred, Comlink.proxy(onProgress))
-	)
+	return pipeToPickedFile(save, transferred => sdkApi.downloadItemsToZip(items, transferId, transferred, Comlink.proxy(onProgress)))
 }
 
 // The real wiring behind RunZipDownloadDeps.downloadZip: fsa streams through the worker directly, sw
@@ -152,6 +153,6 @@ export async function startZipDownload(items: DriveItem[]): Promise<void> {
 	const outcome = await runZipDownload(defaultZipDownloadDeps, { items, suggestedName: resolveSuggestedZipName(items) })
 
 	if (outcome.status === "error") {
-		toast.error(i18n.t("transfers:transfersDownloadSummaryCompleteWithFailures", { count: 0, failed: 1 }))
+		toastDownloadFailed(outcome)
 	}
 }

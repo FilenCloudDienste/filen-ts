@@ -61,6 +61,17 @@ export function cancellableTransferIds(transfers: Transfer[], endedCopies: Reado
 	return transfers.filter(transfer => isControllableTransfer(transfer, endedCopies)).map(transfer => transfer.id)
 }
 
+// A download the browser itself is saving that already holds bytes: stopping it leaves the partial file
+// with the browser, which keeps it for its own retry.
+export function leavesBrowserPartial(transfer: Transfer): boolean {
+	return transfer.browserManaged === true && transfer.bytesTransferred > 0
+}
+
+// Whether Cancel all stops any such download.
+export function cancelAllLeavesBrowserPartial(transfers: Transfer[], endedCopies: ReadonlySet<string>): boolean {
+	return transfers.some(transfer => isControllableTransfer(transfer, endedCopies) && leavesBrowserPartial(transfer))
+}
+
 // Pause-all's targets: active AND not yet paused — an already-paused row has nothing left to pause.
 export function pausableTransferIds(transfers: Transfer[], endedCopies: ReadonlySet<string>): string[] {
 	return transfers

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import { type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import {
+	cancelAllLeavesBrowserPartial,
+	leavesBrowserPartial,
 	buildTransfersDisplayList,
 	cancellableTransferIds,
 	endedCopyIds,
@@ -181,5 +183,21 @@ describe("shouldShowTransfersAggregate", () => {
 	it("true once at least one transfer is active", () => {
 		expect(shouldShowTransfersAggregate(1)).toBe(true)
 		expect(shouldShowTransfersAggregate(5)).toBe(true)
+	})
+})
+
+describe("leavesBrowserPartial", () => {
+	it("is a browser-saved download that already holds bytes", () => {
+		expect(leavesBrowserPartial(transfer({ status: "downloading", browserManaged: true, bytesTransferred: 1 }))).toBe(true)
+		expect(leavesBrowserPartial(transfer({ status: "downloading", browserManaged: true, bytesTransferred: 0 }))).toBe(false)
+		expect(leavesBrowserPartial(transfer({ status: "downloading", bytesTransferred: 1 }))).toBe(false)
+	})
+
+	it("counts toward Cancel all only while the download can still be cancelled", () => {
+		const saving = transfer({ id: "a", status: "downloading", browserManaged: true, bytesTransferred: 1 })
+		const failed = transfer({ id: "b", status: "error", browserManaged: true, bytesTransferred: 1 })
+
+		expect(cancelAllLeavesBrowserPartial([saving], new Set())).toBe(true)
+		expect(cancelAllLeavesBrowserPartial([failed], new Set())).toBe(false)
 	})
 })
