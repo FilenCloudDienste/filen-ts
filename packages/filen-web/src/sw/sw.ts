@@ -543,8 +543,12 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 	}
 })
 
-self.addEventListener("activate", event => {
-	event.waitUntil(self.clients.claim())
+// Claims the page that installed it without holding activation on the claim. Firefox cannot finish a claim
+// while a page worker is blocked in Atomics.wait, which the SDK's idle wasm threads always are; waited on,
+// the worker stays "activating" (about a minute, until Firefox kills it) and every fetch and worker load
+// meanwhile, the SDK's included, waits on it.
+self.addEventListener("activate", () => {
+	void self.clients.claim()
 })
 
 self.addEventListener("fetch", event => {

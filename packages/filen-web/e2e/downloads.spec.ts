@@ -5,7 +5,6 @@ import { enterFixtureDirectory, FIXTURE_FILES, openFixtureRows } from "./helpers
 import { bootTo, clickSidebarLink, openTransfers, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { DOWNLOAD_FSA_TEXT, DOWNLOAD_SW_TEXT } from "./helpers/fixtureBytes"
 import { MOD_KEY } from "./helpers/modkey"
-import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // Neither native picker is drivable by Playwright, so every FSA-path test below stubs
 // window.showSaveFilePicker (installed via addInitScript, before the app's own first script runs, so
@@ -216,8 +215,7 @@ test.describe("downloads", () => {
 		expect(sink.bytes).toBeGreaterThan(100)
 	})
 
-	test("a single file downloads through the service-worker path as a real browser download", async ({ page, browserName }) => {
-		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
+	test("a single file downloads through the service-worker path as a real browser download", async ({ page }) => {
 		await deleteFsaPicker(page)
 
 		await bootTo(page)

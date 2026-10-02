@@ -8,7 +8,6 @@ import {
 } from "@/lib/sw/protocol"
 import { withScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { waitForSwReady } from "./helpers/sw"
-import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // Ceiling for a response the worker itself serves. The zip is a live SDK download of the two files
 // uploaded below, streamed through the worker, so this is sized off that round trip rather than off
@@ -25,8 +24,7 @@ test.describe("service worker", () => {
 	// rather than through a real Download click: Chromium (the only engine this suite trusts for
 	// service workers — see the skip below) always has the File System Access API, so a real click
 	// would take the fsa branch and never reach the sw route under test here.
-	test("registers a real 2-file selection, streams a valid zip response, and drops it on logout", async ({ page, browserName }) => {
-		test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
+	test("registers a real 2-file selection, streams a valid zip response, and drops it on logout", async ({ page }) => {
 		await withScratchDirectory(page, "sw-zip", async () => {
 			await waitForSwReady(page)
 

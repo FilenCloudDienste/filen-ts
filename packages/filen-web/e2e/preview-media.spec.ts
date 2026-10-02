@@ -1,10 +1,9 @@
 import { test, expect } from "./fixtures"
-import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
+import { SW_DOWNLOAD_PREFIX, SW_MSG_LOGOUT } from "@/lib/sw/protocol"
 import { bootTo } from "./helpers/listing"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
-import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // The one live proof the streamed-preview architecture actually works: a service worker is PROD-only
 // (never registered under `vite dev`), so this only ever runs against
@@ -28,10 +27,8 @@ interface SwResponseLog {
 }
 
 test("image/video/audio previews stream over the SW's inline route: range-seekable, inline, allowlisted Content-Type, zero CSP violations", async ({
-	page,
-	browserName
+	page
 }) => {
-	test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
 	// Destructured in the scenario's own nameAsc order (mp3 < mp4 < png) — that order is the reason the
 	// video sits at the MIDDLE pager index, which the ArrowRight leg below depends on.
 	const [nameAudio, nameVideo, nameImage] = FIXTURE_FILES["preview-media"]
@@ -184,16 +181,33 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 
 	// ---- a resolved stream that fails MID-CONSUMPTION (network drop, an SW-side decrypt abort, a
 	// lifecycle hiccup) — never just a registration failure — must still recover, not strand the
-	// browser's own broken-media state on screen. Swapping to a same-prefix, never-registered id and
-	// forcing a reload reproduces exactly that: handleDownload (sw.ts) 404s any unknown id the same
-	// way an aborted/expired one would. Reuses the `video` locator across the ensuing React remount
+	// browser's own broken-media state on screen. The service worker dropping every registration (its
+	// logout message, what a worker restart amounts to) and reloading the same stream reproduces exactly
+	// that: handleDownload (sw.ts) 404s an id it no longer holds, and the stream the element was given is
+	// the one that fails, as in production. Reuses the `video` locator across the ensuing React remount
 	// (StreamedMedia -> BufferedMedia) rather than a stale element handle. ----
-	await video.evaluate((el, prefix) => {
+	await video.evaluate(async (el, logoutType) => {
+		const controller = navigator.serviceWorker.controller
+
+		if (controller === null) {
+			throw new Error("no controlling service worker")
+		}
+
+		const channel = new MessageChannel()
+		const acked = new Promise(resolve => {
+			channel.port1.onmessage = resolve
+		})
+
+		controller.postMessage({ type: logoutType }, [channel.port2])
+		await acked
+
+		// The same stream (the worker routes by path), past Chromium's media cache, which would otherwise
+		// replay this small, fully buffered clip without asking the worker again.
 		const videoEl = el as HTMLVideoElement
 
-		videoEl.src = `${prefix}e2e-stream-failure-probe`
+		videoEl.src = `${videoEl.currentSrc}?reload`
 		videoEl.load()
-	}, SW_DOWNLOAD_PREFIX)
+	}, SW_MSG_LOGOUT)
 
 	// Caught per attempt: expect.poll awaits its callback OUTSIDE the try it retries on, so an element
 	// detached mid-poll throws straight out of the poll instead of being retried — and the remount this

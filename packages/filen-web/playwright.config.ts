@@ -46,10 +46,7 @@ const CHATS_SPEC = /\/chats\.spec\.ts$/
 // Every lane runs on every browser. The three share the setup projects and the one fixture tree, and the
 // writers among them share the one account: a write lane's tests hold that resource's cross-process
 // account lock (e2e/fixtures.ts, keyed by `metadata.accountLock`), so writes to a resource never overlap
-// across browsers while reads still do. Two browser builds need a different context:
-//   - Playwright's Firefox hangs every nested-worker fetch while a service worker controls the page, and
-//     the SDK's network I/O runs in nested workers, so its lanes block service workers
-//     (e2e/helpers/firefox.ts); the few tests that exercise the service worker skip there.
+// across browsers while reads still do. One browser build needs a different context:
 //   - Playwright's WebKit backs OPFS only in an on-disk profile, so its tests run in a persistent context.
 //     It keeps that OPFS machine-wide per origin whatever the profile, so webkit tests also run one at a
 //     time from a wiped origin (e2e/fixtures.ts), and its read lane gets a single worker. Isolation and
@@ -58,7 +55,7 @@ type Browser = "chromium" | "firefox" | "webkit"
 
 const BROWSER_USE = {
 	chromium: { ...devices["Desktop Chrome"] },
-	firefox: { ...devices["Desktop Firefox"], serviceWorkers: "block" },
+	firefox: { ...devices["Desktop Firefox"] },
 	// At 1x like the other two: the helpers stretch the page to 1280x8000 (virtualization), and Linux WebKit
 	// paints in software, so Desktop Safari's 2x (a 2560x16000 surface) runs at a few frames a second, too
 	// slow for actions that wait on a stable element.

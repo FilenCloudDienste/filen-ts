@@ -4,7 +4,6 @@ import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { waitForSwReady } from "./helpers/sw"
-import { FIREFOX_SERVICE_WORKERS_BLOCKED } from "./helpers/firefox"
 
 // The one live proof the whole thumbnail pipeline works end to end: a real SDK decode inside the sdk
 // worker (range reads against the stored file, a webp encode in wasm, nothing ever downloaded into JS),
@@ -139,8 +138,7 @@ test("png, bmp and svg files render real thumbnails in both listing views, the t
 // thumbnail silently fails. Nothing covered it, which is how exactly that state shipped: the worker was
 // registered only in production builds, so this path could not run in dev at all and the failure showed
 // up as a missing image rather than an error. Asserting the rendered blob is what makes it visible.
-test("a video row renders a real thumbnail off the service worker's stream", async ({ page, browserName }) => {
-	test.skip(browserName === "firefox", FIREFOX_SERVICE_WORKERS_BLOCKED)
+test("a video row renders a real thumbnail off the service worker's stream", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 
 	await bootTo(page)
