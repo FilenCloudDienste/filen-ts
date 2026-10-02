@@ -3,13 +3,14 @@ import { useTranslation } from "react-i18next"
 import { CheckIcon, UsersIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
 import type { ContactsQueryData } from "@/features/contacts/queries/contacts"
-import { contactsNotIn, filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
+import { contactsNotIn, filterContactsBySearch, sortContactsByDisplayName } from "@/features/contacts/components/contactsList.logic"
 import { ContactRow } from "@/features/contacts/components/contactRow"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { LoadingState } from "@/components/loadingState"
 import { EmptyMessage, NoResultsMessage } from "@/components/emptyMessage"
 import { SURFACE_RING } from "@/components/ui/surface"
+import { LIST_DIALOG_BODY_CLASS } from "@/components/dialogs/listDialog"
 
 export interface ContactPickerListProps {
 	contactsQuery: UseQueryResult<ContactsQueryData>
@@ -25,7 +26,7 @@ export interface ContactPickerListProps {
 	exclude?: readonly { userId: bigint }[] | undefined
 }
 
-// Filter box plus a fixed-height multi-select listbox of contacts. The caller owns the selection and
+// Filter box plus a multi-select listbox of contacts in name order, filling a LIST_DIALOG_CLASS dialog. The caller owns the selection and
 // filter state; a filter never touches the selection, so a picked row stays picked once filtered out.
 export function ContactPickerList({
 	contactsQuery,
@@ -40,7 +41,7 @@ export function ContactPickerList({
 }: ContactPickerListProps) {
 	const { t } = useTranslation("contacts")
 	const contacts = contactsQuery.data?.contacts ?? []
-	const candidates = exclude === undefined ? contacts : contactsNotIn(contacts, exclude)
+	const candidates = sortContactsByDisplayName(exclude === undefined ? contacts : contactsNotIn(contacts, exclude))
 
 	function renderBody(): ReactNode {
 		if (contactsQuery.status === "pending") {
@@ -115,7 +116,7 @@ export function ContactPickerList({
 					ariaLabel={t("contactsSearchPlaceholder")}
 				/>
 			) : null}
-			<div className={`flex h-72 flex-col overflow-hidden rounded-xl ${SURFACE_RING}`}>{renderBody()}</div>
+			<div className={`flex flex-col overflow-hidden rounded-xl ${SURFACE_RING} ${LIST_DIALOG_BODY_CLASS}`}>{renderBody()}</div>
 		</>
 	)
 }

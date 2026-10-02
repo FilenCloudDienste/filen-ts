@@ -62,6 +62,11 @@ export function contactsNotIn(contacts: readonly Contact[], participants: readon
 	return contacts.filter(contact => !excluded.has(contact.userId))
 }
 
+// By the name a row shows (nickname, else email), for the pickers.
+export function sortContactsByDisplayName<T extends ContactLike>(items: readonly T[]): T[] {
+	return [...items].sort((a, b) => fastLocaleCompare(contactDisplayName(a), contactDisplayName(b)))
+}
+
 function sortByEmail<T extends { email: string }>(items: T[]): T[] {
 	return [...items].sort((a, b) => fastLocaleCompare(a.email, b.email))
 }

@@ -10,6 +10,7 @@ import { EmptyState } from "@/features/drive/components/emptyState"
 import { LoadingState } from "@/components/loadingState"
 import { NoResultsMessage } from "@/components/emptyMessage"
 import { SURFACE_RING } from "@/components/ui/surface"
+import { LIST_DIALOG_BODY_CLASS } from "@/components/dialogs/listDialog"
 
 // Shared UI of the in-dialog drive pickers (move/copy, photos root, chat attach, playlist tracks); their
 // state lives in hooks/useDirectoryPicker.ts. Row gating and selection stay per dialog.
@@ -82,7 +83,7 @@ export interface PickerListShellProps {
 
 export function PickerListShell({ listingQuery, isEmpty, noResults, children }: PickerListShellProps) {
 	return (
-		<div className={`h-72 overflow-y-auto rounded-xl ${SURFACE_RING}`}>
+		<div className={`flex flex-col overflow-y-auto rounded-xl ${SURFACE_RING} ${LIST_DIALOG_BODY_CLASS}`}>
 			{listingQuery.status === "pending" ? (
 				<LoadingState size="md" />
 			) : listingQuery.status === "error" ? (

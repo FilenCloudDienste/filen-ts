@@ -24,6 +24,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { cn } from "@filen/shared"
 import { EmptyMessage } from "@/components/emptyMessage"
+import { LIST_DIALOG_BODY_CLASS, LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface VersionsDialogProps {
 	file: FileItem
@@ -172,7 +173,10 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 			open
 			onOpenChange={handleOpenChange}
 		>
-			<DialogContent closeButtonDisabled={pending}>
+			<DialogContent
+				closeButtonDisabled={pending}
+				className={LIST_DIALOG_CLASS}
+			>
 				<DialogHeader>
 					<DialogTitle>{t("driveVersionsPanelTitle")}</DialogTitle>
 				</DialogHeader>
@@ -225,7 +229,7 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 						title={t("driveVersionsEmpty")}
 					/>
 				) : (
-					<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+					<ul className={`flex flex-col gap-0.5 overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}>
 						{versions.map(version => {
 							// The live version can't be usefully restored (it's already current) nor safely
 							// deleted (its uuid IS the file's own current storage blob — deleting it would

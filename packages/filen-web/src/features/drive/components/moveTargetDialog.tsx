@@ -17,6 +17,7 @@ import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface MoveTargetDialogProps {
 	items: DriveItem[]
@@ -44,11 +45,11 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 	// Both writes in this dialog (the confirm and the in-place create) re-check connectivity here: the
 	// entry point was gated when it was clicked, but the connection can drop while the picker is open.
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
-	const { pathStack, targetUuid, listingQuery, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const { pathStack, targetUuid, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const [pending, setPending] = useState(false)
 	const [newFolderOpen, setNewFolderOpen] = useState(false)
-	const directories = (listingQuery.data ?? []).filter(item => item.type === "directory")
+	const directories = rows.filter(item => item.type === "directory")
 	// Same instant local name filter the non-"drive" listing variants use — this picker is a pure
 	// breadcrumb browser (never wired to the cache-backed engine), so a filtered folder tree is the only
 	// way to search it.
@@ -104,7 +105,7 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 		>
 			<DialogContent
 				closeButtonDisabled={pending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>{t(mode === "copy" ? "driveCopyDialogTitle" : "driveMoveDialogTitle")}</DialogTitle>

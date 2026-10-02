@@ -1,13 +1,16 @@
 import { useState } from "react"
 import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
+import { sortDriveItems } from "@/features/drive/lib/sort"
 
 // Navigation state of the in-dialog drive pickers: a local uuid stack from root, never the "/drive/$"
-// route, so browsing a picker never touches app history. Always browses the "drive" variant.
+// route, so browsing a picker never touches app history. Always browses the "drive" variant. `items` is
+// the listing in name order (directories first), whatever sort the drive itself is set to.
 export function useDirectoryPicker() {
 	const [pathStack, setPathStack] = useState<string[]>([])
 	const targetUuid = pathStack.at(-1) ?? null
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)
+	const items = sortDriveItems(listingQuery.data ?? [], "nameAsc")
 
 	function descend(uuid: string): void {
 		setPathStack(prev => [...prev, uuid])
@@ -21,7 +24,7 @@ export function useDirectoryPicker() {
 		setPathStack(prev => prev.slice(0, index + 1))
 	}
 
-	return { pathStack, targetUuid, listingQuery, namesQuery, descend, goRoot, goTo }
+	return { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo }
 }
 
 // A filter scoped to one directory must never carry over and hide everything in the next, so it resets

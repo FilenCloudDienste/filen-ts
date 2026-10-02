@@ -13,6 +13,7 @@ import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface CreateChatDialogProps {
 	onClose: () => void
@@ -76,7 +77,7 @@ export function CreateChatDialog({ onClose, onCreated }: CreateChatDialogProps) 
 		>
 			<DialogContent
 				closeButtonDisabled={pending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>{t("chatCreateDialogTitle")}</DialogTitle>

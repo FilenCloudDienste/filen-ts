@@ -5,6 +5,7 @@ import {
 	filterContactSections,
 	filterContactsBySearch,
 	contactsNotIn,
+	sortContactsByDisplayName,
 	isContactsSectionFilter,
 	CONTACTS_SECTION_FILTERS,
 	CONTACTS_SECTION_HEADER_KEY,
@@ -241,5 +242,17 @@ describe("contactsNotIn", () => {
 		const contacts = [mockContact({ userId: 1n }), mockContact({ userId: 2n })]
 
 		expect(contactsNotIn(contacts, [])).toEqual(contacts)
+	})
+})
+
+describe("sortContactsByDisplayName", () => {
+	it("orders by the name a row shows: the nickname when set, else the email", () => {
+		const zoe = mockContact({ uuid: "11111111-1111-1111-1111-111111111111", email: "a@example.com", nickName: "Zoe" })
+		const bob = mockContact({ uuid: "22222222-2222-2222-2222-222222222222", email: "bob@example.com", nickName: undefined })
+		const anna = mockContact({ uuid: "33333333-3333-3333-3333-333333333333", email: "z@example.com", nickName: "anna" })
+		const input = [zoe, bob, anna]
+
+		expect(sortContactsByDisplayName(input)).toEqual([anna, bob, zoe])
+		expect(input).toEqual([zoe, bob, anna])
 	})
 })

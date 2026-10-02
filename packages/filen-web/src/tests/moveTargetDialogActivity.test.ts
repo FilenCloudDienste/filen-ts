@@ -27,6 +27,7 @@ vi.mock("@/features/drive/hooks/useDirectoryPicker", () => ({
 		pathStack: [DOCS],
 		targetUuid: DOCS,
 		listingQuery: { status: "success", data: [] },
+		items: [],
 		namesQuery: { data: { [DOCS]: "Docs" } },
 		descend: vi.fn(),
 		goRoot: vi.fn(),

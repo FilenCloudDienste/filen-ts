@@ -29,6 +29,7 @@ import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyMessage } from "@/components/emptyMessage"
+import { LIST_DIALOG_BODY_CLASS, LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface ChatParticipantsDialogProps {
 	chat: Chat
@@ -177,7 +178,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 				role="listbox"
 				aria-multiselectable="true"
 				aria-label={t("common:participantsDialogTitle")}
-				className="flex max-h-80 flex-col gap-0.5 overflow-y-auto"
+				className={`flex flex-col gap-0.5 overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}
 			>
 				{rows.map(({ participant, canManage, isOwner: rowIsOwner, blocked }) => {
 					const displayName = contactDisplayName(participant)
@@ -293,7 +294,7 @@ export function ChatParticipantsDialog({ chat: initialChat, onClose }: ChatParti
 		>
 			<DialogContent
 				closeButtonDisabled={dialogPending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>

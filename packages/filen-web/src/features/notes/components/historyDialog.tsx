@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { EmptyMessage } from "@/components/emptyMessage"
 import { SURFACE_RING } from "@/components/ui/surface"
+import { LIST_DIALOG_BODY_CLASS, LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface HistoryDialogProps {
 	note: Note
@@ -66,7 +67,7 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 
 	function renderPreview(history: NoteHistory) {
 		return (
-			<div className="flex h-80 flex-col gap-3">
+			<div className={`flex flex-col gap-3 ${LIST_DIALOG_BODY_CLASS}`}>
 				<div className="flex items-center gap-2">
 					<Button
 						variant="ghost"
@@ -131,7 +132,7 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 		}
 
 		return (
-			<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+			<ul className={`flex flex-col gap-0.5 overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}>
 				{sorted.map(history => {
 					const { icon: Icon, colorClass } = noteTypeIcon(history.noteType)
 
@@ -181,7 +182,7 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 		>
 			<DialogContent
 				closeButtonDisabled={pending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>{t("noteHistoryDialogTitle")}</DialogTitle>

@@ -9,6 +9,7 @@ import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface DirectoryChooserDialogProps {
 	pending: boolean
@@ -23,11 +24,11 @@ export interface DirectoryChooserDialogProps {
 // out on the spot.
 export function DirectoryChooserDialog({ pending, onChoose, onClose }: DirectoryChooserDialogProps) {
 	const { t } = useTranslation("photos")
-	const { pathStack, targetUuid, listingQuery, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const { pathStack, targetUuid, listingQuery, items, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const accountQuery = useAccountQuery()
 	const choice = photosChooserChoice(targetUuid, accountQuery.data?.rootDirUuid)
-	const directories = (listingQuery.data ?? []).filter(item => item.type === "directory")
+	const directories = items.filter(item => item.type === "directory")
 	const filteredDirectories = filterDriveItemsByLocalSearch(directories, filter)
 
 	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
@@ -43,7 +44,7 @@ export function DirectoryChooserDialog({ pending, onChoose, onClose }: Directory
 		>
 			<DialogContent
 				closeButtonDisabled={pending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>{t("photosChooserTitle")}</DialogTitle>

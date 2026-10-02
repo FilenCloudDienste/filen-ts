@@ -11,6 +11,7 @@ import { PICKER_ROW_CLASS, PickerBreadcrumb, PickerListShell } from "@/features/
 import { useDirectoryPicker } from "@/features/drive/hooks/useDirectoryPicker"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
+import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface AttachDriveDialogProps {
 	onClose: () => void
@@ -26,9 +27,8 @@ export interface AttachDriveDialogProps {
 // carries a public link reuses it (attachExistingDriveItem's own get-then-create) rather than erroring.
 export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProps) {
 	const { t } = useTranslation("chats")
-	const { pathStack, listingQuery, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const { pathStack, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
 	const [attachingUuid, setAttachingUuid] = useState<string | null>(null)
-	const rows = listingQuery.data ?? []
 
 	const handleOpenChange = pendingGuardedOpenChange(attachingUuid !== null, next => {
 		if (!next) {
@@ -60,7 +60,7 @@ export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProp
 		>
 			<DialogContent
 				closeButtonDisabled={attachingUuid !== null}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>{t("chatAttachDriveDialogTitle")}</DialogTitle>

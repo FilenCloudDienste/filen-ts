@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyMessage } from "@/components/emptyMessage"
+import { LIST_DIALOG_BODY_CLASS, LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface ParticipantsDialogProps {
 	note: Note
@@ -144,7 +145,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 		}
 
 		return (
-			<ul className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+			<ul className={`flex flex-col gap-0.5 overflow-y-auto ${LIST_DIALOG_BODY_CLASS}`}>
 				{rows.map(({ participant, canManage, blocked }) => {
 					const displayName = contactDisplayName(participant)
 					// Only picks the row that shows the spinner; every row is disabled while anything is pending.
@@ -227,7 +228,7 @@ export function ParticipantsDialog({ note: initialNote, onClose }: ParticipantsD
 		>
 			<DialogContent
 				closeButtonDisabled={dialogPending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>

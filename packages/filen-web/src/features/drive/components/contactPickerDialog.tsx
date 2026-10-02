@@ -13,6 +13,7 @@ import { ContactPickerList } from "@/features/contacts/components/contactPickerL
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface ContactPickerDialogProps {
 	items: DriveItem[]
@@ -110,7 +111,7 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 		>
 			<DialogContent
 				closeButtonDisabled={pending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>{t("driveShareDialogTitle")}</DialogTitle>

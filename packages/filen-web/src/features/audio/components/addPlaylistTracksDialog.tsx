@@ -17,6 +17,7 @@ import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
 export interface AddPlaylistTracksDialogProps {
 	playlist: Playlist
@@ -82,11 +83,10 @@ function AddTrackRow({ item, alreadyAdded, selected, disabled, alreadyAddedLabel
 // the freshest copy would silently no-op it anyway, so this is purely a click-saving affordance.
 export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracksDialogProps) {
 	const { t } = useTranslation("audio")
-	const { pathStack, listingQuery, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const { pathStack, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const [selected, setSelected] = useState<Map<string, DriveItem>>(new Map())
 	const [pending, setPending] = useState(false)
-	const rows = listingQuery.data ?? []
 	const browsable = rows.filter(item => item.type === "directory" || isAudioItem(item))
 	const filtered = filterDriveItemsByLocalSearch(browsable, filter)
 	const existingUuids = new Set(playlist.files.map(file => file.uuid))
@@ -146,7 +146,7 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 		>
 			<DialogContent
 				closeButtonDisabled={pending}
-				className="sm:max-w-lg"
+				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
 					<DialogTitle>{t("addTracksDialogTitle")}</DialogTitle>
