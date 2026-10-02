@@ -18,8 +18,8 @@ import { SCRIM_CLASS } from "@/components/ui/surface"
 // than a foreign sheet.
 //
 // The root wraps nothing but its own portal; the rail's trigger reaches it through a detached handle.
-// Base UI treats any Dialog/AlertDialog/Drawer root rendered inside another as nested and skips a nested
-// root's Backdrop, so a root wrapping the shell would strip the backdrop from every dialog the app opens.
+// Base UI treats any Dialog/AlertDialog/Drawer root rendered inside another as nested, so a root wrapping
+// the shell would make every dialog the app opens a child of the drawer.
 const sidebarDrawerHandle = DrawerPrimitive.createHandle()
 
 export function SidebarDrawer({

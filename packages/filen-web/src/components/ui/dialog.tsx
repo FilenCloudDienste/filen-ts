@@ -22,6 +22,10 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
 	return (
 		<DialogPrimitive.Backdrop
 			data-slot="dialog-overlay"
+			// Local addition (keep across a shadcn regen): Base UI skips a nested dialog's backdrop, which
+			// left a dialog opened over another (rename over a preview, a confirm over a picker) on an
+			// undimmed parent. Each level brings its own scrim instead.
+			forceRender
 			className={cn(SCRIM_CLASS, className)}
 			{...props}
 		/>
