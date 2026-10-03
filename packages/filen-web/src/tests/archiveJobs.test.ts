@@ -360,6 +360,21 @@ describe("runCompressJob", () => {
 		expect(job?.archive?.data.uuid).toBe(archive.uuid)
 	})
 
+	it("renames the row to the archive's own name, which the SDK's keep-both may have changed", async () => {
+		const deps = makeDeps()
+		const archive = mockFile("photos (1)")
+
+		deps.compressItems.mockImplementation((_id, _params, _password, onEvent) => {
+			onEvent({ type: "archiveCreated", archive })
+
+			return Promise.resolve(compressReport({ archive }))
+		})
+
+		await runCompressJob(deps, compressRequest({ name: "photos.zip" }))
+
+		expect(row()?.name).toBe("photos (1).zip")
+	})
+
 	it("keeps an archive announced just before a rejected call, as stopped after the archive", async () => {
 		const deps = makeDeps()
 		const archive = mockFile("archive")

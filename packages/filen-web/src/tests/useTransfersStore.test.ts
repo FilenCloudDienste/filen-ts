@@ -662,6 +662,16 @@ describe("setItem", () => {
 
 		expect(useTransfersStore.getState().transfers.map(transfer => transfer.item)).toEqual([item, undefined])
 	})
+
+	it("renames the row only when given a name", () => {
+		const item = { type: "file" } as unknown as NonNullable<Transfer["item"]>
+
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a", name: "x.zip" }), makeTransfer({ id: "b", name: "y.zip" })] })
+		useTransfersStore.getState().setItem("a", item, "x (1).zip")
+		useTransfersStore.getState().setItem("b", item)
+
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.name)).toEqual(["x (1).zip", "y.zip"])
+	})
 })
 
 describe("computeTransfersAggregate", () => {

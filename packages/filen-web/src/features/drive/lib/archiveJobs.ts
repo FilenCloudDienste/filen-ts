@@ -389,7 +389,8 @@ export async function runCompressJob(deps: RunArchiveDeps, request: CompressJobR
 			const archive = narrowItem(event.archive)
 
 			deps.patchCreated(archive)
-			deps.transfers.setItem(id, archive)
+			// The SDK keeps both on a clash, so the archive's name can differ from the one asked for.
+			deps.transfers.setItem(id, archive, archive.data.decryptedMeta?.name)
 
 			if (settled.job === undefined) {
 				announced = archive

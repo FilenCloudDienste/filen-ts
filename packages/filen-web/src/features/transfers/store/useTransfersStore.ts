@@ -213,7 +213,8 @@ export interface TransfersStore {
 	// setPaused for many rows in one update, so pause-all notifies subscribers once.
 	setPausedMany: (ids: ReadonlySet<string>, paused: boolean) => void
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
-	setItem: (id: string, item: DriveItem) => void
+	// `name` renames the row too, for a job whose item came out under another name than it asked for.
+	setItem: (id: string, item: DriveItem, name?: string) => void
 	remove: (id: string) => void
 	// remove for many rows in one update.
 	removeMany: (ids: ReadonlySet<string>) => void
@@ -440,9 +441,11 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 			}
 		})
 	},
-	setItem: (id, item) => {
+	setItem: (id, item, name) => {
 		set(state => ({
-			transfers: state.transfers.map(transfer => (transfer.id === id ? { ...transfer, item } : transfer))
+			transfers: state.transfers.map(transfer =>
+				transfer.id === id ? (name === undefined ? { ...transfer, item } : { ...transfer, item, name }) : transfer
+			)
 		}))
 	},
 	remove: id => {

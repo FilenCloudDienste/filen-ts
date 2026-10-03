@@ -33,8 +33,14 @@ export type ArchiveJobTitle =
 			values: { name: string; destination: string }
 	  }
 
+// The archive's own name once it exists: a clash makes the SDK keep both ("x (1).zip").
+export function compressArchiveName(job: CompressJob): string {
+	return job.archive?.data.decryptedMeta?.name ?? job.name
+}
+
 export function compressJobTitle(job: CompressJob): ArchiveJobTitle {
-	const values = { count: job.itemCount, name: job.name }
+	const name = compressArchiveName(job)
+	const values = { count: job.itemCount, name }
 
 	switch (job.outcome.status) {
 		case "running":
@@ -44,7 +50,7 @@ export function compressJobTitle(job: CompressJob): ArchiveJobTitle {
 		case "doneWithIssues":
 			return { key: "transfersCompressCardTitleDone", values }
 		default:
-			return { key: "transfersCompressCardTitleEnded", values: { name: job.name } }
+			return { key: "transfersCompressCardTitleEnded", values: { name } }
 	}
 }
 

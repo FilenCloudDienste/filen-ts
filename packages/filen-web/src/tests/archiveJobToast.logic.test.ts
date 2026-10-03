@@ -9,6 +9,7 @@ import {
 	extractJobSummary,
 	extractJobTitle
 } from "@/features/transfers/components/archiveJobToast.logic"
+import type { CompressJob } from "@/features/drive/lib/archiveJobs.logic"
 import { compressJob, createdDirectory, extractFailure, extractJob } from "@/tests/support/archiveJobFixtures"
 
 const ERROR = { species: "plain" as const, message: "offline", label: "offline" }
@@ -60,6 +61,13 @@ describe("compressJobTitle", () => {
 			key: "transfersCompressCardTitleEnded",
 			values: { name: "photos.zip" }
 		})
+	})
+
+	it("names the archive as it was saved once it exists, the SDK's keep-both name included", () => {
+		const archive = { data: { decryptedMeta: { name: "photos (1).zip" } } } as unknown as NonNullable<CompressJob["archive"]>
+
+		expect(compressJobTitle(compressJob({ outcome: { status: "done" }, archive })).values.name).toBe("photos (1).zip")
+		expect(compressJobTitle(compressJob({ outcome: { status: "cancelled" }, archive })).values.name).toBe("photos (1).zip")
 	})
 })
 
