@@ -1,6 +1,14 @@
 import type { Locator, Page } from "@playwright/test"
 import { expect } from "../fixtures"
-import { clickSidebarLink, reloadToShell, setTallListingViewport, waitForListingSettled } from "./listing"
+import {
+	clickSidebarLink,
+	LAZY_VIEWER_TIMEOUT_MS,
+	LIVE_WRITE_TIMEOUT_MS,
+	reloadToShell,
+	setTallListingViewport,
+	uploadFiles,
+	waitForListingSettled
+} from "./listing"
 import { gotoSettings, openSettingsSection } from "./settings"
 
 // Page objects for compress, extract and the archive browser: the drive menus that start them, their
@@ -9,9 +17,10 @@ import { gotoSettings, openSettingsSection } from "./settings"
 
 // A name as a whole token of an accessible name: a drive row's or an archive row's name is followed by
 // its size and date columns (and preceded, in grid view, by a badge), so `exact` never matches one and
-// a bare substring matches every sibling whose name starts with it.
+// a bare substring matches every sibling whose name starts with it. Never right after a comma, where a
+// Modified date's year ("Jan 1, 2024") would pass for a name.
 export function namePattern(name: string): RegExp {
-	return new RegExp(`(^|\\s)${escapeRegExp(name)}(\\s|$)`)
+	return new RegExp(`(^|(?<!,)\\s)${escapeRegExp(name)}(\\s|$)`)
 }
 
 export function escapeRegExp(text: string): string {
@@ -22,6 +31,23 @@ export function escapeRegExp(text: string): string {
 // so its size and date columns can never match a name such as "2024" the way a token match does.
 export function leadingNamePattern(name: string): RegExp {
 	return new RegExp(`^${escapeRegExp(name)}(\\s|$)`)
+}
+
+// A drive row by its whole leading name. A token match takes a name such as "2024" for a row whose date
+// column reads "Jan 1, 2024", and "x" for its keep-both sibling "x (1)"; this does neither.
+export function itemRow(listbox: Locator, name: string): Locator {
+	return listbox.getByRole("option", {
+		name: new RegExp(`^${escapeRegExp(name)}(?!\\s\\(\\d+\\))(\\s|$)`)
+	})
+}
+
+// Exactly these drive rows, each waited for as long as a write takes to show.
+export async function expectEntries(listbox: Locator, names: readonly string[]): Promise<void> {
+	for (const name of names) {
+		await expect(itemRow(listbox, name)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	}
+
+	await expect(listbox.getByRole("option")).toHaveCount(names.length)
 }
 
 function entryOf(list: Locator, name: string): Locator {
@@ -94,7 +120,8 @@ export async function pickTreeTarget(
 export type PickerTitle = "Extract to" | "Save archive in" | "Copy to"
 
 // Drives the destination picker from the drive root down `path`, then confirms (or, with `confirm`
-// null, closes it again).
+// null, closes it again). The picker opens on the current destination, which may be anywhere, so it is
+// walked back to the root first.
 export async function pickDestination(
 	page: Page,
 	dialogName: PickerTitle,
@@ -102,8 +129,15 @@ export async function pickDestination(
 	confirm: "Extract here" | "Save here" | "Copy here" | null
 ): Promise<void> {
 	const dialog = page.getByRole("dialog", { name: dialogName, exact: true })
+	const root = dialog.getByRole("navigation", { name: "Breadcrumb" }).getByRole("button", { name: "Cloud Drive", exact: true })
 
 	await expect(dialog).toBeVisible()
+
+	if (await root.isEnabled()) {
+		await root.click()
+	}
+
+	await expect(root).toBeDisabled()
 
 	for (const directory of path) {
 		await dialog.getByRole("button", { name: namePattern(directory) }).dblclick()
@@ -172,6 +206,8 @@ export type CompressAfterwards = "Keep the originals" | "Move the originals to t
 export interface CompressDialogPO {
 	dialog: Locator
 	nameInput: Locator
+	// The destination's name, beside "Change…".
+	saveIn: Locator
 	name: (value: string) => Promise<void>
 	// The extension shown after the name.
 	suffix: () => Locator
@@ -203,7 +239,10 @@ export function deleteConfirm(page: Page): Locator {
 	return page.getByRole("alertdialog", { name: "Delete permanently?", exact: true })
 }
 
-function compressDialogPO(page: Page, dialog: Locator): CompressDialogPO {
+// The compress form wherever it opens: "More options…" on drive rows or Photos tiles, or a public
+// directory link's "Save as archive".
+export function compressDialog(page: Page, title: "Compress" | "Save as archive" = "Compress"): CompressDialogPO {
+	const dialog = page.getByRole("dialog", { name: title, exact: true })
 	const nameInput = dialog.getByLabel("Name", { exact: true })
 	const formatTrigger = dialog.getByRole("combobox", { name: "Format", exact: true })
 	const slider = (): Locator => dialog.getByRole("slider")
@@ -212,6 +251,7 @@ function compressDialogPO(page: Page, dialog: Locator): CompressDialogPO {
 	return {
 		dialog,
 		nameInput,
+		saveIn: dialog.getByRole("group", { name: "Save in", exact: true }),
 		name: async value => {
 			await nameInput.fill(value)
 		},
@@ -235,10 +275,7 @@ function compressDialogPO(page: Page, dialog: Locator): CompressDialogPO {
 			await expect(control).toHaveAttribute("aria-valuenow", String(level))
 		},
 		// Base UI's thumb is a native range input: its bounds are min/max, not aria-value*.
-		range: async () => ({
-			min: Number(await slider().getAttribute("min")),
-			max: Number(await slider().getAttribute("max"))
-		}),
+		range: async () => ({ min: Number(await slider().getAttribute("min")), max: Number(await slider().getAttribute("max")) }),
 		levelLine: () => dialog.getByText(/^Level \d+ · uses about .+ while compressing$/),
 		protectSwitch,
 		protect: async (password, confirm = password) => {
@@ -304,11 +341,16 @@ export async function openCompressDialog(
 	await openArchiveEntries(page, listbox, names, "Compress")
 	await page.getByRole("menuitem", { name: "More options…", exact: true }).click()
 
-	const dialog = page.getByRole("dialog", { name: title, exact: true })
+	return waitForCompressDialog(page, title)
+}
 
-	await expect(dialog.getByLabel("Name", { exact: true })).toBeVisible({ timeout: 30_000 })
+// The form once it shows its name (it loads the format catalogue first).
+export async function waitForCompressDialog(page: Page, title: "Compress" | "Save as archive" = "Compress"): Promise<CompressDialogPO> {
+	const dialog = compressDialog(page, title)
 
-	return compressDialogPO(page, dialog)
+	await expect(dialog.nameInput).toBeVisible({ timeout: 30_000 })
+
+	return dialog
 }
 
 // ── Extract ─────────────────────────────────────────────────────────────────────────────────────────
@@ -396,13 +438,65 @@ export async function openExtractDialog(page: Page, listbox: Locator, name: stri
 // `Extract here as “…”`. The labels wait on the archive name's answer, so the entry is matched by
 // pattern and clicked once enabled.
 export async function extractQuick(page: Page, listbox: Locator, name: string, entry: RegExp): Promise<void> {
-	await openRowMenu(page, listbox, name)
-	await openSubmenu(page, "Extract")
+	await openExtractSubmenu(page, listbox, name)
 
 	const item = page.getByRole("menuitem", { name: entry })
 
 	await expect(item).toBeEnabled()
 	await item.click()
+}
+
+export async function openExtractSubmenu(page: Page, listbox: Locator, name: string): Promise<void> {
+	await openRowMenu(page, listbox, name)
+	await openSubmenu(page, "Extract")
+}
+
+// A row's Extract ▸ Extract to ▸ … ▸ Extract here. The last directory of `path` must be empty.
+export async function extractToTree(page: Page, listbox: Locator, name: string, path: readonly string[]): Promise<void> {
+	await openExtractSubmenu(page, listbox, name)
+	await pickTreeTarget(page, "Extract to", path, "Extract here")
+}
+
+// A row's Extract ▸ Choose destination… through the picker.
+export async function extractToPicker(page: Page, listbox: Locator, name: string, path: readonly string[]): Promise<void> {
+	await openExtractSubmenu(page, listbox, name)
+	await page.getByRole("menuitem", { name: "Choose destination…", exact: true }).click()
+	await pickDestination(page, "Extract to", path, "Extract here")
+}
+
+// The directory an extract into a new directory makes: the archive's name without its extension.
+export function archiveStem(archive: string): string {
+	return archive.replace(/\.(zip|7z|tar|tar\.gz)$/, "")
+}
+
+function archiveMimeType(name: string): string {
+	return name.endsWith(".zip") ? "application/zip" : name.endsWith(".gz") ? "application/gzip" : "application/octet-stream"
+}
+
+// Uploads generated archives into the directory shown and waits for each row.
+export async function uploadArchives(page: Page, listbox: Locator, files: readonly { name: string; buffer: Buffer }[]): Promise<void> {
+	await uploadFiles(
+		page,
+		files.map(({ name, buffer }) => ({
+			name,
+			mimeType: archiveMimeType(name),
+			buffer
+		}))
+	)
+
+	for (const { name } of files) {
+		await expect(itemRow(listbox, name)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	}
+}
+
+// Opens a text file's preview, checks its text and closes it again.
+export async function expectTextPreview(page: Page, listbox: Locator, name: string, text: string): Promise<void> {
+	const overlay = previewOverlay(page)
+
+	await itemRow(listbox, name).dblclick()
+	await expect(overlay.locator(".cm-content")).toContainText(text.trimEnd(), { timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await overlay.getByRole("button", { name: "Close", exact: true }).click()
+	await expect(overlay).toHaveCount(0)
 }
 
 // ── Archive browser ─────────────────────────────────────────────────────────────────────────────────
@@ -419,6 +513,8 @@ export interface ArchiveBrowserPO {
 	row: (name: string) => Locator
 	// Clicks a row's checkbox (a decorative span the listbox draws; a click on it toggles).
 	check: (row: Locator) => Promise<void>
+	// Ticks the row's checkbox unless it is ticked already.
+	ensureChecked: (name: string) => Promise<void>
 	selectAll: () => Promise<void>
 	// Double-clicks a directory row and waits for its crumb.
 	into: (directory: string) => Promise<void>
@@ -478,6 +574,15 @@ export function archiveBrowser(page: Page): ArchiveBrowserPO {
 		row,
 		check: async target => {
 			await target.locator('span[aria-hidden="true"]').first().click()
+		},
+		ensureChecked: async name => {
+			const target = row(name)
+
+			if ((await target.getAttribute("aria-selected")) !== "true") {
+				await target.locator('span[aria-hidden="true"]').first().click()
+			}
+
+			await expect(target).toHaveAttribute("aria-selected", "true")
 		},
 		selectAll: async () => {
 			await overlay.getByRole("checkbox", { name: "Select all", exact: true }).click()
@@ -591,14 +696,61 @@ export async function setArchiveMemory(page: Page, mib: 64 | 128 | 256 | 512, in
 	await reloadToShell(page)
 }
 
-// The trash lists every one of `names`.
-export async function expectInTrash(page: Page, names: readonly string[]): Promise<void> {
+// Opens the trash. A run leaves its trashed debris there for hours (the sweep takes only what is
+// older), and directories list before files, so a file just trashed can sit past the rows even a tall
+// viewport renders: find one with revealRow.
+export async function openTrash(page: Page): Promise<Locator> {
 	await setTallListingViewport(page)
 	await clickSidebarLink(page, "Trash", /\/trash$/)
 
 	const { listbox } = await waitForListingSettled(page)
 
+	return listbox
+}
+
+// Scrolls the listing's own scroller a screen at a time from the top until `row` renders: the listing
+// virtualizes its rows, so one far down is not in the DOM until scrolled to.
+export async function revealRow(listbox: Locator, row: Locator, timeout = 30_000): Promise<void> {
+	const scroll = (top: boolean): Promise<boolean> =>
+		listbox.evaluate((element, toTop) => {
+			let scroller: HTMLElement | null = element as HTMLElement
+
+			while (
+				scroller !== null &&
+				!(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))
+			) {
+				scroller = scroller.parentElement
+			}
+
+			if (scroller === null) {
+				return false
+			}
+
+			const before = scroller.scrollTop
+
+			scroller.scrollTop = toTop ? 0 : before + scroller.clientHeight
+
+			return scroller.scrollTop !== before
+		}, top)
+
+	await expect(async () => {
+		await scroll(true)
+
+		for (let step = 0; step < 64 && (await row.count()) === 0; step++) {
+			if (!(await scroll(false))) {
+				break
+			}
+		}
+
+		await expect(row).toBeVisible({ timeout: 1_000 })
+	}).toPass({ timeout })
+}
+
+// The trash lists every one of `names`.
+export async function expectInTrash(page: Page, names: readonly string[]): Promise<void> {
+	const listbox = await openTrash(page)
+
 	for (const name of names) {
-		await expect(rowOf(listbox, name)).toBeVisible({ timeout: 30_000 })
+		await revealRow(listbox, rowOf(listbox, name))
 	}
 }

@@ -324,6 +324,9 @@ function treeEntries(readme: string): ZipEntrySpec[] {
 	]
 }
 
+// What a tree zip (the fixture's, plainTreeZip's) holds at its root.
+export const TREE_ROOT = ["docs", "empty-dir", "photos", "readme.txt"] as const
+
 export function treeZip(): Buffer {
 	return buildZip(treeEntries(TREE_FILES["readme.txt"]))
 }

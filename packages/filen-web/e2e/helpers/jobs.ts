@@ -1,6 +1,9 @@
 import type { Locator, Page, Request, Route } from "@playwright/test"
 import { expect } from "../fixtures"
-import { dismissOverlays, LIVE_WRITE_TIMEOUT_MS, openTransfers, toasts } from "./listing"
+import { escapeRegExp } from "./archive"
+import { trackCspViolations } from "./csp"
+import { boxOf } from "./geometry"
+import { dismissOverlays, LIVE_WRITE_TIMEOUT_MS, openTransfers, setTallListingViewport, toasts, withScratchDirectory } from "./listing"
 
 // The drive-job cards (copy, compress, extract) and everything a spec does with a job: wait for it,
 // read it, pause, cancel, answer its password prompt, open its report, and stop whatever is left in
@@ -33,6 +36,68 @@ export async function expectJobCard(page: Page, title: string | RegExp, timeout:
 	await card.hover()
 
 	return card
+}
+
+// The card whose title is exactly `title`: titles of different jobs can be prefixes of one another
+// (".tar" and ".tar.gz"). Hovered unless the preview overlay is up (its markOthers leaves the card
+// reachable by text only).
+export async function expectExactJobCard(
+	page: Page,
+	title: string,
+	{ timeout = LIVE_WRITE_TIMEOUT_MS, hover = true }: { timeout?: number; hover?: boolean } = {}
+): Promise<Locator> {
+	const card = jobCard(page, title).filter({
+		has: page.getByText(title, { exact: true })
+	})
+
+	await expect(card).toBeVisible({ timeout })
+
+	if (hover) {
+		await card.hover()
+	}
+
+	return card
+}
+
+// A settled extract's card: "Extracted …" when clean, "Extract …" with "Done, with issues" when
+// something was skipped or failed (archiveJobToast.logic.ts). A card that settles any other way (an
+// error, a password) times out naming every text its cards showed meanwhile: a settled card leaves
+// after a few seconds, so the last text alone is often nothing.
+export async function settledExtractCard(page: Page, archive: string, timeout: number = LIVE_WRITE_TIMEOUT_MS): Promise<Locator> {
+	const name = escapeRegExp(archive)
+	const settled = new RegExp(`Extracted ${name} → |Extract ${name} → [\\s\\S]*Done, with issues\\. See the details\\.`)
+	const cards = jobCard(page, new RegExp(`Extract(ed|ing)? ${name} → `))
+	const seen = new Set<string>()
+
+	try {
+		await expect
+			.poll(
+				async () => {
+					const text = (await cards.allInnerTexts()).join("\n---\n")
+
+					if (text.length > 0) {
+						seen.add(text)
+					}
+
+					return text
+				},
+				{ timeout }
+			)
+			.toMatch(settled)
+	} catch (error) {
+		throw new Error(`no settled extract card for ${archive}; its cards showed:\n${[...seen].slice(-4).join("\n===\n")}`, {
+			cause: error
+		})
+	}
+
+	return expectJobCard(page, settled, 10_000)
+}
+
+// Waits for the extract of `archive` to settle, then hides its card. Called with the preview overlay
+// closed: it hides the toaster from the hover.
+export async function extractDone(page: Page, archive: string, timeout?: number): Promise<void> {
+	await settledExtractCard(page, archive, timeout)
+	await hideJobCards(page, ["extract"])
 }
 
 export interface CardSummary {
@@ -72,6 +137,16 @@ export async function hideJobCards(page: Page, kinds: readonly JobKind[] = ["cop
 	}
 }
 
+// hideJobCards, then waits until none is left, so the next job's card is the only one its title can match.
+export async function clearJobCards(page: Page, kinds: readonly JobKind[] = ["copy", "compress", "extract"]): Promise<void> {
+	await hideJobCards(page, kinds)
+	await expect(
+		page.getByRole("button", {
+			name: new RegExp(`^Hide (${kinds.join("|")}) progress$`)
+		})
+	).toHaveCount(0)
+}
+
 export type CardButtonName =
 	"Pause" | "Resume" | "Cancel" | "View report" | "Enter password" | "Try again" | "Retry failed" | "Show in directory"
 
@@ -83,6 +158,71 @@ export function cardButton(card: Locator, name: CardButtonName): Locator {
 export async function pauseFirst(card: Locator): Promise<void> {
 	await cardButton(card, "Pause").click()
 	await expect(card.getByText("Paused", { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+}
+
+const STOP_PROMPT_TITLES = { copy: "Stop copying?", compress: "Stop compressing?", extract: "Stop extracting?" } as const
+
+export type StopChoice =
+	| "Continue copying"
+	| "Move copied items to trash"
+	| "Stop and keep copied items"
+	| "Continue compressing"
+	| "Stop compressing"
+	| "Continue extracting"
+	| "Stop and move extracted items to trash"
+	| "Stop and keep extracted items"
+
+// A job's stop prompt (driveJobCancelDialog.tsx): three ways for copy and extract, two for compress.
+export function stopPrompt(page: Page, kind: JobKind): Locator {
+	return page.getByRole("alertdialog", { name: STOP_PROMPT_TITLES[kind], exact: true })
+}
+
+// The card's Cancel, which asks first.
+export async function openStopPrompt(page: Page, card: Locator, kind: JobKind): Promise<Locator> {
+	await card.hover()
+	await cardButton(card, "Cancel").click()
+
+	const prompt = stopPrompt(page, kind)
+
+	await expect(prompt).toBeVisible()
+
+	return prompt
+}
+
+export async function stopJob(page: Page, card: Locator, kind: JobKind, choice: StopChoice): Promise<void> {
+	const prompt = await openStopPrompt(page, card, kind)
+
+	await prompt.getByRole("button", { name: choice, exact: true }).click()
+	await expect(prompt).toHaveCount(0)
+}
+
+// At 390x844 the prompt's buttons fit whole and sit one above the other, left-aligned. Restores the
+// tall listing viewport afterwards.
+export async function expectStackedAtPhoneWidth(page: Page, prompt: Locator, buttons: readonly StopChoice[]): Promise<void> {
+	await page.setViewportSize({ width: 390, height: 844 })
+
+	try {
+		for (const name of buttons) {
+			// 0.99 for a text-sized box's sub-pixel width (narrow-viewport.spec.ts).
+			await expect(prompt.getByRole("button", { name, exact: true })).toBeInViewport({ ratio: 0.99 })
+		}
+
+		await expect(async () => {
+			const boxes = await Promise.all(buttons.map(name => boxOf(prompt.getByRole("button", { name, exact: true }))))
+			const rows = boxes.sort((a, b) => a.y - b.y)
+
+			for (const [index, box] of rows.entries()) {
+				const above = rows[index - 1]
+
+				if (above !== undefined) {
+					expect(Math.abs(box.x - above.x)).toBeLessThan(1)
+					expect(box.y).toBeGreaterThanOrEqual(above.y + above.height - 1)
+				}
+			}
+		}).toPass({ timeout: 5_000 })
+	} finally {
+		await setTallListingViewport(page)
+	}
 }
 
 export interface ChunkHold {
@@ -225,6 +365,14 @@ export function reportRows(dialog: Locator): Locator {
 	return dialog.locator(".pl-8")
 }
 
+// The rendered report row of one item, by its full path (each row's title). The inner locator of a
+// filter is resolved from each row, hence the page-rooted one.
+export function reportRow(dialog: Locator, title: string): Locator {
+	return reportRows(dialog).filter({
+		has: dialog.page().getByTitle(title, { exact: true })
+	})
+}
+
 // Best effort, never throws: closes what a failed test left standing and stops every job still
 // running or paused, so the scratch directory's trash afterwards meets no lease or beforeunload. Call
 // it in every write test's finally, before trashScratchDirectory.
@@ -253,4 +401,34 @@ export async function stopAllJobs(page: Page, holds: readonly (ChunkHold | null)
 	} catch (error) {
 		console.warn("stopAllJobs: could not stop every job", error)
 	}
+}
+
+export interface ArchiveScratch {
+	listbox: Locator
+	scratchName: string
+	runId: string
+	// Chunk holds the body took; released before the jobs are stopped.
+	holds: (ChunkHold | null)[]
+}
+
+// withScratchDirectory plus what every archive write test needs around it: stopAllJobs before the
+// trash, so a job a failed leg left running or paused cannot block it, and no CSP violation. Pass
+// `cspViolations` when tracking has to start before the scratch directory exists.
+export async function withArchiveScratch(
+	page: Page,
+	label: string,
+	body: (scratch: ArchiveScratch) => Promise<void>,
+	cspViolations: string[] = trackCspViolations(page)
+): Promise<void> {
+	const holds: (ChunkHold | null)[] = []
+
+	await withScratchDirectory(page, label, async scratch => {
+		try {
+			await body({ ...scratch, holds })
+		} finally {
+			await stopAllJobs(page, holds)
+		}
+	})
+
+	expect(cspViolations).toEqual([])
 }

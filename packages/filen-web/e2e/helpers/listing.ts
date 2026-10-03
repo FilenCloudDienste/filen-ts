@@ -84,9 +84,10 @@ export async function waitForListingSettled(page: Page, settleTimeoutMs?: number
 //
 // Anchored on a whitespace boundary instead: the name must be a whole token of the accessible name,
 // and the columns after it are always space-separated. NOT pinned to the string start, because grid
-// view renders an `.sr-only` badge span before the tile's name (driveTile.tsx).
+// view renders an `.sr-only` badge span before the tile's name (driveTile.tsx). Never right after a
+// comma: that is the year of a Modified date ("Jan 1, 2024"), which a directory named "2024" would match.
 function itemNamePattern(name: string): RegExp {
-	return new RegExp(`(^|\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`)
+	return new RegExp(`(^|(?<!,)\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`)
 }
 
 function rowByName(listbox: Locator, name: string): Locator {
@@ -193,9 +194,52 @@ export async function clickLinkUntilUrl(page: Page, link: Locator, urlPattern: R
 // every recent run's debris is the slow one).
 export async function clickSidebarLink(page: Page, name: string, urlPattern: RegExp): Promise<void> {
 	await clickLinkUntilUrl(page, page.getByRole("complementary").getByRole("link", { name, exact: true }), urlPattern)
-	await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(name, {
-		timeout: BOOT_SETTLE_TIMEOUT_MS
-	})
+	await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(name, { timeout: BOOT_SETTLE_TIMEOUT_MS })
+}
+
+// From anywhere, down `path` from the drive root; returns the listbox of the directory reached.
+export async function gotoDirectory(page: Page, path: readonly string[]): Promise<Locator> {
+	await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
+
+	const { listbox } = await waitForListingSettled(page)
+
+	for (const name of path) {
+		await descendInto(page, listbox, name)
+	}
+
+	return listbox
+}
+
+// Up to an ancestor of the directory shown, by its breadcrumb link. A long path clips its oldest crumbs
+// out of the breadcrumb on purpose (breadcrumb.tsx), where no pointer reaches them; the link's own click
+// handler still navigates, so a crumb that fails the hit test gets a dispatched click instead.
+export async function backTo(page: Page, name: string): Promise<void> {
+	const crumbs = breadcrumb(page)
+	const link = crumbs.getByRole("link", { name, exact: true })
+	const reachable = await link
+		.click({ trial: true, timeout: 2_000 })
+		.then(() => true)
+		.catch(() => false)
+
+	await (reachable ? link.click() : link.dispatchEvent("click"))
+	await expect(crumbs.locator('[aria-current="page"]')).toHaveText(name)
+	await waitForListingSettled(page)
+}
+
+// Clears the drive's selection, if there is one.
+export async function clearSelection(page: Page): Promise<void> {
+	const clear = page.getByRole("button", { name: "Clear selection", exact: true })
+
+	if ((await clear.count()) > 0) {
+		await clear.click()
+		await expect(clear).toHaveCount(0)
+	}
+}
+
+// The rail's Photos entry; callers wait on a landmark of the photos screen itself, since the URL flips
+// before React commits the route.
+export async function openPhotos(page: Page): Promise<void> {
+	await clickLinkUntilUrl(page, page.getByRole("link", { name: "Photos", exact: true }).first(), /\/photos$/)
 }
 
 // The Transfers entry lives in the icon rail (a `navigation` landmark), not the sidebar, so
@@ -224,6 +268,10 @@ export interface UploadFile {
 	name: string
 	mimeType: string
 	buffer: Buffer
+}
+
+export function textFile(name: string, text: string): UploadFile {
+	return { name, mimeType: "text/plain", buffer: Buffer.from(text) }
 }
 
 // Uploads through the hidden picker. With `listbox`, also waits for each file's row, which lands on a

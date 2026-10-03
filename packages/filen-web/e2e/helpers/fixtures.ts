@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test"
 import { expect, readFixtureManifest } from "../fixtures"
-import { descendInto, type ListingHandle, setTallListingViewport, waitForListingSettled } from "./listing"
+import { clickSidebarLink, descendInto, type ListingHandle, setTallListingViewport, waitForListingSettled } from "./listing"
 
 // The shared, READ-ONLY fixture tree: one scenario directory per test that only ever LOOKS at its
 // files, each holding the exact set that test expects. Built once per run by setup/fixtures.setup.ts
@@ -125,4 +125,13 @@ export async function openFixtureRows<S extends FixtureScenario>(
 	}
 
 	return { listbox, rows: rows as FixtureRows<S> }
+}
+
+// From anywhere, into a fixture scenario directory.
+export async function gotoFixture(page: Page, scenario: FixtureScenario): Promise<Locator> {
+	await clickSidebarLink(page, "Cloud Drive", /\/drive$/)
+
+	const { listbox } = await openFixtureRows(page, scenario)
+
+	return listbox
 }
