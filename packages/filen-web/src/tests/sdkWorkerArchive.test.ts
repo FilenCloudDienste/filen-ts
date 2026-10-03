@@ -79,10 +79,41 @@ vi.mock("@filen/sdk-rs", () => {
 		}
 	}
 
+	// The wasm class is no Error; this one is only so it can be thrown here.
+	class EntryNameErrorJS extends Error {
+		freed = 0
+		reason: string
+
+		constructor(reason: string) {
+			super(reason)
+			this.reason = reason
+		}
+
+		kind(): string {
+			return this.reason
+		}
+
+		free(): void {
+			this.freed++
+		}
+	}
+
 	return {
 		default: vi.fn(),
 		initThreadPool: vi.fn(),
 		PauseSignal,
+		EntryNameErrorJS,
+		parseName: (name: string) => {
+			if (name === "a:b") {
+				throw new EntryNameErrorJS("ForbiddenChar")
+			}
+
+			if (name === "boom") {
+				throw new Error("wasm gone")
+			}
+
+			return name
+		},
 		UnauthClient: { from_config: () => ({ free: vi.fn(), fromStringified: () => fakeClient }) },
 		...helpers
 	}
@@ -150,7 +181,18 @@ const EXTRACT_REPORT: ExtractReport = {
 	error: undefined
 }
 
-const ENTRY = { id: { archive: testUuid("archive"), index: 0 }, storedPath: "a.txt" } as unknown as ArchiveEntry
+const ENTRY: ArchiveEntry = {
+	id: { archive: testUuid("archive"), index: 0 },
+	storedPath: "a.txt",
+	storedPathTruncated: false,
+	path: { path: "a.txt", rewritten: false, misleading: false },
+	kind: { type: "file" },
+	size: 1n,
+	encrypted: false,
+	method: undefined,
+	skip: undefined,
+	macMetadata: false
+}
 
 const LIST_REPORT: ListReport = {
 	format: { type: "zip" },
@@ -398,48 +440,82 @@ describe("sdk worker archives", () => {
 		await api.releaseJob("wrong")
 	})
 
-	it("posts a listing's entries and drops them from its report unless asked to keep them", async () => {
+	it("packs a listing's batches, posting what it holds before every update and once more at the end", async () => {
 		const onEvent = vi.fn<(event: ListJobEvent) => void>()
-		const update = { phase: "reading", runState: "running", entries: 1n } as unknown as ListUpdate
+		const update = { phase: "reading", runState: "running", entries: 2n } as unknown as ListUpdate
 
 		fakeClient.listArchive.mockImplementation(params => {
 			params.onEntriesBatch?.([ENTRY])
+			params.onEntriesBatch?.([
+				{
+					...ENTRY,
+					id: { ...ENTRY.id, index: 1 },
+					storedPath: "b/c.txt",
+					path: { path: "b/c.txt", rewritten: false, misleading: false }
+				}
+			])
 			params.onUpdate?.(update)
+			params.onUpdate?.(update)
+			params.onEntriesBatch?.([{ ...ENTRY, id: { ...ENTRY.id, index: 2 } }])
 
 			return Promise.resolve(LIST_REPORT)
 		})
 
-		const slim = await api.listArchive("list", { archive: ARCHIVE, skipMacMetadata: undefined, keepReportEntries: false }, "", onEvent)
+		const slim = await api.listArchive(
+			"list",
+			{ archive: ARCHIVE, skipMacMetadata: undefined, deliverEntries: true, keepReportEntries: false },
+			"",
+			onEvent
+		)
+		const events = onEvent.mock.calls.map(([event]) => event)
 
-		expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
-			{ type: "entries", entries: [ENTRY] },
-			{ type: "update", update }
-		])
+		expect(events.map(event => event.type)).toEqual(["entries", "update", "update", "entries"])
+
+		const [first, , , last] = events
+
+		if (first?.type !== "entries" || last?.type !== "entries") {
+			throw new Error("expected entry batches")
+		}
+
+		expect(first.batch.count).toBe(2)
+		expect([...first.batch.index]).toEqual([0, 1])
+		expect(first.batch.name).toEqual(["a.txt", "c.txt"])
+		expect(first.batch.parents).toEqual(["", "b"])
+		expect([...last.batch.index]).toEqual([2])
+		expect(structuredClone(first.batch)).toEqual(first.batch)
+		expect(events[1]).toEqual({ type: "update", update })
 		expect(slim.entries).toEqual([])
 		expect(slim.totals).toEqual(LIST_REPORT.totals)
 		expect(lastCall(fakeClient.listArchive)[0]).not.toHaveProperty("skipMacMetadata")
 		expect(lastCall(fakeClient.listArchive)).toHaveLength(2)
 		expect(lastCall(fakeClient.listArchive)[1]).toBeUndefined()
 
+		await api.releaseJob("list")
+	})
+
+	it("lists without entries when none are wanted, and keeps the report's on request", async () => {
+		const onEvent = vi.fn<(event: ListJobEvent) => void>()
+
 		const kept = await api.listArchive(
 			"list-kept",
-			{ archive: ARCHIVE, skipMacMetadata: false, keepReportEntries: true },
+			{ archive: ARCHIVE, skipMacMetadata: false, deliverEntries: false, keepReportEntries: true },
 			"pw",
-			() => undefined
+			onEvent
 		)
 
 		expect(kept.entries).toEqual([ENTRY])
+		expect(lastCall(fakeClient.listArchive)[0]).not.toHaveProperty("onEntriesBatch")
 		expect(lastCall(fakeClient.listArchive)[0]).toMatchObject({ skipMacMetadata: false })
 		expect(lastCall(fakeClient.listArchive)[1]).toBe("pw")
+		expect(onEvent).not.toHaveBeenCalled()
 
-		await api.releaseJob("list")
 		await api.releaseJob("list-kept")
 	})
 
 	it("frees a job's pause once, however often it is released", async () => {
 		await api.listArchive(
 			"release",
-			{ archive: ARCHIVE, skipMacMetadata: undefined, keepReportEntries: false },
+			{ archive: ARCHIVE, skipMacMetadata: undefined, deliverEntries: true, keepReportEntries: false },
 			undefined,
 			() => undefined
 		)
@@ -482,5 +558,10 @@ describe("sdk worker archives", () => {
 			{ format: { type: "zip" }, defaultName: "photos" },
 			{ format: null, defaultName: "notes.txt" }
 		])
+	})
+
+	it("tells why the SDK refuses each name, and rethrows anything but a name error", async () => {
+		await expect(api.itemNameErrors(["photos.zip", "a:b"])).resolves.toEqual([null, "ForbiddenChar"])
+		await expect(api.itemNameErrors(["boom"])).rejects.toThrow("wasm gone")
 	})
 })

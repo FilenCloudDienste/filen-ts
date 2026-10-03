@@ -121,6 +121,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"rename",
 			"move",
 			"copy",
+			"compress",
 			"favorite",
 			"versions",
 			"info",
@@ -130,7 +131,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 		])
 	})
 
-	it("opened from Photos, drops Move like the Photos grid (the header keeps its own download)", () => {
+	it("opened from Photos, drops Move and Compress like the Photos grid (the header keeps its own download)", () => {
 		expect(menuIds(fileItem(), "drive", PHOTOS_HIDDEN_ACTION_IDS)).toEqual([
 			"rename",
 			"copy",
@@ -148,6 +149,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 		expect(menuIds(fileItem(), "links")).toEqual([
 			"rename",
 			"copy",
+			"compress",
 			"favorite",
 			"versions",
 			"info",
@@ -156,11 +158,23 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"copyLink",
 			"trash"
 		])
-		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "copy"])
+		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "copy", "compress"])
 	})
 
 	it("download is the only id ever stripped — every other descriptor (including a second read-only one) survives", () => {
-		const withDownload = ["rename", "move", "copy", "favorite", "versions", "info", "download", "share", "publicLink", "trash"]
+		const withDownload = [
+			"rename",
+			"move",
+			"copy",
+			"compress",
+			"favorite",
+			"versions",
+			"info",
+			"download",
+			"share",
+			"publicLink",
+			"trash"
+		]
 		expect(menuIds(fileItem(), "drive")).toEqual(withDownload.filter(id => id !== "download"))
 	})
 })

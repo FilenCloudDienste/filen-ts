@@ -1,7 +1,8 @@
-import { useQuery, type QueryFunction, type QueryFunctionContext, type QueryKey, type UseQueryResult } from "@tanstack/react-query"
+import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import type { LinkedFile, DirPublicInfo, LinkedDirsAndFiles, AnyLinkedDir, DirPublicLink, DirSizeResponse } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { cachedQueriesWithPrefix } from "@/queries/patch"
+import { noDiskPersister } from "@/queries/persist"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { DRIVE_LISTING_KEY_PREFIX, type DriveListingParams } from "@/features/drive/queries/drive"
 import { isNetworkClassError } from "@/lib/sdk/retry"
@@ -11,14 +12,8 @@ import { publicLinkQueryKey, secretFingerprint, linkFingerprint } from "@/featur
 // every secret travels ONLY through the queryFn closures below; the key carries a non-secret djb2
 // fingerprint of it (queryKey.logic.ts) so a query re-runs when the fragment key or password changes.
 
-// A passthrough persister runs the queryFn with NO storage round trip: a public resolution must leave
-// nothing on this browser's disk (an explicit `undefined` is rejected under exactOptionalPropertyTypes,
-// so it overrides the client's default persister this way).
-function noDiskPersister<T, K extends QueryKey>(queryFn: QueryFunction<T, K>, context: QueryFunctionContext<K>): T | Promise<T> {
-	return queryFn(context)
-}
-
-// No socket reaches this unauthenticated surface, so a resolved read is a snapshot: a focus or a return
+// A public resolution must leave nothing on this browser's disk, hence noDiskPersister. No socket
+// reaches this unauthenticated surface, so a resolved read is a snapshot: a focus or a return
 // to a visited level serves it, and the error retry or a reload re-reads. With no events to miss while
 // offline, a reconnect only re-runs a read that last failed on the wire.
 const publicQueryOptions = {

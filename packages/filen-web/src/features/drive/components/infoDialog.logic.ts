@@ -26,6 +26,8 @@ export function previewKindLabelKey(category: PreviewCategory): DriveKey | null 
 			return "drivePreviewKindCode"
 		case "markdown":
 			return "drivePreviewKindMarkdown"
+		case "archive":
+			return "drivePreviewKindArchive"
 		case "other":
 			return null
 	}

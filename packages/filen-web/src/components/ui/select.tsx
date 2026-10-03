@@ -18,6 +18,16 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
 	)
 }
 
+function SelectLabel({ className, ...props }: SelectPrimitive.GroupLabel.Props) {
+	return (
+		<SelectPrimitive.GroupLabel
+			data-slot="select-label"
+			className={cn("px-2 py-1 text-xs text-muted-foreground", className)}
+			{...props}
+		/>
+	)
+}
+
 function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
 	return (
 		<SelectPrimitive.Value
@@ -102,6 +112,16 @@ function SelectItem({ className, children, ...props }: SelectPrimitive.Item.Prop
 	)
 }
 
+function SelectSeparator({ className, ...props }: SelectPrimitive.Separator.Props) {
+	return (
+		<SelectPrimitive.Separator
+			data-slot="select-separator"
+			className={cn("pointer-events-none -mx-1 my-1 h-px bg-border/50", className)}
+			{...props}
+		/>
+	)
+}
+
 function SelectScrollUpButton({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.ScrollUpArrow>) {
 	return (
 		<SelectPrimitive.ScrollUpArrow
@@ -132,4 +152,4 @@ function SelectScrollDownButton({ className, ...props }: React.ComponentProps<ty
 	)
 }
 
-export { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue }
+export { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue }

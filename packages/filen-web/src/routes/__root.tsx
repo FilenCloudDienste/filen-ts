@@ -17,6 +17,8 @@ import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
 import { TransfersUnloadGuard } from "@/features/shell/components/transfersUnloadGuard"
 import { ActivityDetailsDialog } from "@/lib/activity/activityDetailsDialog"
 import { DriveJobCancelDialog } from "@/features/transfers/components/driveJobCancelDialog"
+import { ExtractPasswordDialog } from "@/features/transfers/components/extractPasswordDialog"
+import { JobReportDialog } from "@/features/transfers/components/jobReportDialog"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 
@@ -126,8 +128,10 @@ function RootLayout() {
 					    Top positions are no alternative — they intercepted the header buttons and the
 					    listing's first rows. */}
 					<Toaster />
-					{/* Asked from a drive job's progress toast or its transfers row, so it lives beside the toasts. */}
+					{/* Asked from a drive job's progress toast or its transfers row, so they live beside the toasts. */}
 					<DriveJobCancelDialog />
+					<ExtractPasswordDialog />
+					<JobReportDialog />
 					{/* Opened from an activity's result toast. */}
 					<ActivityDetailsDialog />
 				</TooltipProvider>

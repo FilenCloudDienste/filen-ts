@@ -1,6 +1,6 @@
 import { type } from "arktype"
 import { experimental_createQueryPersister, type AsyncStorage, type PersistedQuery } from "@tanstack/react-query-persist-client"
-import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query"
+import { hashKey, type QueryClient, type QueryFunction, type QueryFunctionContext, type QueryKey } from "@tanstack/react-query"
 import { storage } from "@/lib/storage/adapter"
 import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
 import { log } from "@/lib/log"
@@ -219,6 +219,12 @@ export const persister = experimental_createQueryPersister({
 		predicate: query => query.queryHash !== REGISTER_CHECK_QUERY_HASH
 	}
 })
+
+// For a query whose answer must not reach disk: runs the queryFn with no storage round trip (an explicit
+// `undefined` is rejected under exactOptionalPropertyTypes, so this overrides the client's default).
+export function noDiskPersister<T, K extends QueryKey>(queryFn: QueryFunction<T, K>, context: QueryFunctionContext<K>): T | Promise<T> {
+	return queryFn(context)
+}
 
 // Boot-time restore-all (called once, after storage init): walks every `<PERSIST_PREFIX>-*` row via
 // the bridge's `entries()` and `setQueryData`s each fresh, current-buster row back into `client`

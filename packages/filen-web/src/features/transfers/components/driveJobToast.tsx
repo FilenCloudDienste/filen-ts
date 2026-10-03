@@ -16,6 +16,7 @@ import { cn, formatBytes, formatBytesPerSecond, formatSecondsToMediaClock, pause
 import { retryFailedCopy } from "@/features/drive/lib/copy"
 import { rerunCompress, retryFailedExtract } from "@/features/drive/lib/archiveJobs"
 import { setTransferPaused } from "@/features/transfers/lib/control"
+import { promptExtractPassword } from "@/features/transfers/lib/extractPasswordPrompt"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { jobCardModel, type JobCardKeyStatus, type JobCardModel } from "@/features/transfers/components/driveJobCard.logic"
@@ -318,7 +319,7 @@ function JobResultActions({
 					variant="outline"
 					size="xs"
 					onClick={() => {
-						useDriveJobsStore.getState().setPasswordPromptId(jobId)
+						promptExtractPassword(jobId)
 					}}
 				>
 					<KeyRoundIcon data-icon="inline-start" />

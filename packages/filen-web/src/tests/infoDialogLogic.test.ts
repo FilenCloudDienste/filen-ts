@@ -12,6 +12,7 @@ describe("previewKindLabelKey", () => {
 		expect(previewKindLabelKey("text")).toBe("drivePreviewKindText")
 		expect(previewKindLabelKey("code")).toBe("drivePreviewKindCode")
 		expect(previewKindLabelKey("markdown")).toBe("drivePreviewKindMarkdown")
+		expect(previewKindLabelKey("archive")).toBe("drivePreviewKindArchive")
 	})
 
 	it("returns null for a non-previewable file so the Kind row is omitted", () => {
@@ -19,7 +20,20 @@ describe("previewKindLabelKey", () => {
 	})
 
 	it("covers every PreviewCategory (no unmapped arm slips through)", () => {
-		const categories: PreviewCategory[] = ["image", "rawImage", "video", "audio", "pdf", "docx", "text", "code", "markdown", "other"]
+		const categories: PreviewCategory[] = [
+			"image",
+			"rawImage",
+			"video",
+			"audio",
+			"pdf",
+			"docx",
+			"spreadsheet",
+			"text",
+			"code",
+			"markdown",
+			"archive",
+			"other"
+		]
 
 		for (const category of categories) {
 			const key = previewKindLabelKey(category)

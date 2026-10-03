@@ -5,6 +5,7 @@ import { canShareVariant, isReadOnlySharedVariant } from "@/features/drive/lib/s
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
 import { resolveDriveNavigationTarget } from "@/features/drive/lib/navigate"
 import { canOpenAsText, canPreview, previewType } from "@/features/drive/lib/preview.logic"
+import { canExtractItem } from "@/features/drive/lib/archiveTargets"
 import { type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
@@ -14,8 +15,23 @@ import { type DriveKey } from "@/lib/i18n"
 // trigger), so it deliberately isn't part of this union — directoryListing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
 // "openAsText" is no dialog: the host opens the preview overlay in its read-only text mode.
+// "compress" and "extract" open the options dialogs, "extractTo" the extract destination picker.
 export type ItemActionDialogKind =
-	"rename" | "move" | "copy" | "color" | "versions" | "info" | "link" | "share" | "unshare" | "trash" | "delete" | "openAsText"
+	| "rename"
+	| "move"
+	| "copy"
+	| "color"
+	| "versions"
+	| "info"
+	| "link"
+	| "share"
+	| "unshare"
+	| "trash"
+	| "delete"
+	| "openAsText"
+	| "compress"
+	| "extract"
+	| "extractTo"
 
 export type ItemActionId =
 	| "open"
@@ -23,6 +39,8 @@ export type ItemActionId =
 	| "rename"
 	| "move"
 	| "copy"
+	| "compress"
+	| "extract"
 	| "favorite"
 	| "color"
 	| "versions"
@@ -87,6 +105,13 @@ const DELETE_PERMANENTLY: ItemActionDescriptor = {
 // shared in, any listing but the trash — since a copy changes nothing about the source. A submenu in the
 // item menus (copySubmenu.tsx); "dialog" opens the full destination picker in its copy mode.
 const COPY: ItemActionDescriptor = { id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" }
+// Packs the item into an archive. Offered wherever COPY is (it only reads the item), right after it. A
+// submenu in the item menus (archiveSubmenus.tsx) whose presets start the job; "dialog" opens the
+// options dialog.
+const COMPRESS: ItemActionDescriptor = { id: "compress", ...ACTION_DEFS.compress, run: "dialog", dialogKind: "compress" }
+// Unpacks an archive file (canExtractItem). A submenu in the item menus (archiveSubmenus.tsx); "dialog"
+// opens the options dialog.
+const EXTRACT: ItemActionDescriptor = { id: "extract", ...ACTION_DEFS.extract, run: "dialog", dialogKind: "extract" }
 // In Open's place for a file nothing recognises (canOpenAsText), which Open never covers.
 const OPEN_AS_TEXT: ItemActionDescriptor = { id: "openAsText", ...ACTION_DEFS.openAsText, run: "dialog", dialogKind: "openAsText" }
 
@@ -174,7 +199,7 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 	// Every owner-mutating push below (rename/move/favorite/color/versions/publicLink/copyLink/trash)
 	// is gated on ownerMutable, false ONLY for sharedIn — see isReadOnlySharedVariant's own doc comment
 	// for why sharedOut is excluded from this gate (those items are the caller's own). What's left for
-	// sharedIn: INFO always, COPY (below), UNSHARE when isSharedRoot allows it.
+	// sharedIn: INFO always, COPY and COMPRESS (below), EXTRACT, UNSHARE when isSharedRoot allows it.
 	const ownerMutable = !isReadOnlySharedVariant(variant)
 
 	// Download is excluded here (unlike the general branch below): an undecryptable item's meta is the
@@ -202,6 +227,7 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 				RENAME,
 				...(canMoveVariant(variant) ? [MOVE] : []),
 				COPY,
+				COMPRESS,
 				favoriteDescriptor(item),
 				isDirectoryItem(item) ? COLOR : VERSIONS,
 				INFO
@@ -222,7 +248,7 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 
 	// An item the caller can't mutate still copies: it sits with the read actions, right after Download.
 	if (!ownerMutable) {
-		actions.push(COPY)
+		actions.push(COPY, COMPRESS)
 	}
 
 	// Share sits with the other access-granting actions (info/link) after the type-specific group; it
@@ -242,7 +268,30 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 		actions.push(UNSHARE)
 	}
 
+	// An archive's most likely action leads the list, right under Open.
+	if (canExtractItem(variant, item)) {
+		actions.unshift(EXTRACT)
+	}
+
 	return actions
+}
+
+// Groups the flat descriptor list for readability: a rule after the open group (Open or Open as text,
+// then Extract for an archive), before the reference/reveal action (info) and before whichever removal
+// action closes the list (trash in the normal menu, deletePermanently in the trash/undecryptable-reduced
+// menus) — a pure presentation concern the gating builder itself shouldn't own.
+const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanently"])
+const OPEN_GROUP_IDS = new Set<ItemActionId>(["open", "openAsText", "extract"])
+
+export function separatorBefore(descriptors: readonly ItemActionDescriptor[], index: number): boolean {
+	const previous = descriptors[index - 1]
+	const current = descriptors[index]
+
+	return (
+		previous !== undefined &&
+		current !== undefined &&
+		(SEPARATOR_BEFORE.has(current.id) || (OPEN_GROUP_IDS.has(previous.id) && !OPEN_GROUP_IDS.has(current.id)))
+	)
 }
 
 // Every id whose handler awaits an sdkApi call is gated; a read dialog that renders local metadata
@@ -264,7 +313,9 @@ const OFFLINE_GATED_IDS: ReadonlySet<ItemActionId> = new Set([
 	"deletePermanently",
 	"openContainingDirectory",
 	"download",
-	"copy"
+	"copy",
+	"compress",
+	"extract"
 ])
 
 export function applyOfflineGate(actions: ItemActionDescriptor[], isOnline: boolean): ItemActionDescriptor[] {

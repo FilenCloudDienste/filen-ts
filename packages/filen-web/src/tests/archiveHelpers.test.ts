@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { CompressFormat } from "@filen/sdk-rs"
+import type { CompressFormat, EntryNameErrorKindJS } from "@filen/sdk-rs"
 import type { ArchiveFormatInfo, ArchiveNameInfo } from "@/workers/sdk.worker"
 
-const { archiveCodecMemBudget, archiveFormatInfo, archiveNameInfo } = vi.hoisted(() => ({
+const { archiveCodecMemBudget, archiveFormatInfo, archiveNameInfo, itemNameErrors } = vi.hoisted(() => ({
 	archiveCodecMemBudget: vi.fn<() => Promise<number>>(),
 	archiveFormatInfo: vi.fn<(formats: CompressFormat[]) => Promise<ArchiveFormatInfo[]>>(),
-	archiveNameInfo: vi.fn<(names: string[]) => Promise<ArchiveNameInfo[]>>()
+	archiveNameInfo: vi.fn<(names: string[]) => Promise<ArchiveNameInfo[]>>(),
+	itemNameErrors: vi.fn<(names: string[]) => Promise<(EntryNameErrorKindJS | null)[]>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { archiveCodecMemBudget, archiveFormatInfo, archiveNameInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { archiveCodecMemBudget, archiveFormatInfo, archiveNameInfo, itemNameErrors } }))
 
 function formatInfo(extension: string): ArchiveFormatInfo {
 	return { extension, levels: null, maxLevel: null, encoderMemory: null }
@@ -33,6 +34,7 @@ beforeEach(() => {
 	archiveCodecMemBudget.mockReset()
 	archiveFormatInfo.mockReset()
 	archiveNameInfo.mockReset()
+	itemNameErrors.mockReset()
 })
 
 describe("archiveHelpers", () => {
@@ -125,5 +127,20 @@ describe("archiveHelpers", () => {
 		expect(cachedArchiveNameInfo("0.zip")).toBeUndefined()
 		expect(cachedArchiveNameInfo("1.zip")).toBeDefined()
 		expect(cachedArchiveNameInfo("512.zip")).toBeDefined()
+	})
+	it("asks one tick's names for their errors in one call, and remembers a name the SDK takes", async () => {
+		const { itemNameError, cachedItemNameError } = await helpers()
+
+		itemNameErrors.mockImplementation(names => Promise.resolve(names.map(name => (name === "CON" ? "ReservedName" : null))))
+
+		expect(cachedItemNameError("ok.zip")).toBeUndefined()
+		await expect(Promise.all([itemNameError("ok.zip"), itemNameError("CON")])).resolves.toEqual([null, "ReservedName"])
+		expect(itemNameErrors).toHaveBeenCalledExactlyOnceWith(["ok.zip", "CON"])
+		expect(cachedItemNameError("ok.zip")).toBeNull()
+		expect(cachedItemNameError("CON")).toBe("ReservedName")
+
+		await itemNameError("ok.zip")
+
+		expect(itemNameErrors).toHaveBeenCalledTimes(1)
 	})
 })

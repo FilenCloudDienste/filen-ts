@@ -20,6 +20,7 @@ import {
 	canWriteIntoItem,
 	driveItemActions,
 	resolveCopyLinkAction,
+	separatorBefore,
 	type ItemActionDescriptor,
 	type ItemActionDialogKind,
 	type ItemActionId
@@ -30,6 +31,7 @@ import {
 	type DirectoryTreeMenuFamily
 } from "@/features/drive/components/directoryTreeSubmenu"
 import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
+import { CompressSubmenu, ExtractSubmenu } from "@/features/drive/components/archiveSubmenus"
 import { DirectoryDestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { ContextMenuContent } from "@/components/ui/context-menu"
 import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
@@ -69,27 +71,13 @@ export interface ItemDestination {
 	pasteShortcut: boolean
 }
 
-// Groups the flat descriptor list for readability: a rule after Open (or Open as text), before the reference/reveal
-// action (info) and before whichever removal action closes the list (trash in the normal menu,
-// deletePermanently in the trash/undecryptable-reduced menus) — a pure presentation concern the gating
-// builder itself shouldn't own.
-const SEPARATOR_BEFORE = new Set<ItemActionId>(["info", "trash", "deletePermanently"])
-const OPEN_IDS = new Set<ItemActionId>(["open", "openAsText"])
-
-function separatorBefore(descriptors: ItemActionDescriptor[], index: number): boolean {
-	const previous = descriptors[index - 1]
-	const current = descriptors[index]
-
-	return previous !== undefined && current !== undefined && (SEPARATOR_BEFORE.has(current.id) || OPEN_IDS.has(previous.id))
-}
-
 // Shared per-item action list, rendered by BOTH the right-click context menu and the ⋯ dropdown (see
 // DriveContextMenuContent/DriveDropdownMenuContent below) — one descriptor list (driveItemActions),
 // one mapping from descriptor to menu row. Base UI's ContextMenu and DropdownMenu are separate Root
 // families with their own Item/Separator primitives (not interchangeable across triggers even though
 // their props are structurally identical), so the one piece each caller supplies is which family to
-// render rows with. Move and Copy are submenus (transferSubmenu.tsx) that also need the
-// family's submenu parts.
+// render rows with. Move and Copy (transferSubmenu.tsx), Compress and Extract (archiveSubmenus.tsx) are
+// submenus that also need the family's submenu parts.
 function ItemMenuEntries({
 	item,
 	variant,
@@ -226,6 +214,31 @@ function ItemMenuEntries({
 							onChooseDestination={mode => {
 								onItemAction(mode, item)
 							}}
+						/>
+					) : descriptor.id === "compress" ? (
+						<CompressSubmenu
+							family={family}
+							disabled={descriptor.enabled === false}
+							items={[item]}
+							variant={variant}
+							onMoreOptions={() => {
+								onItemAction("compress", item)
+							}}
+						/>
+					) : descriptor.id === "extract" ? (
+						<ExtractSubmenu
+							family={family}
+							disabled={descriptor.enabled === false}
+							item={item}
+							variant={variant}
+							onChooseDestination={() => {
+								onItemAction("extractTo", item)
+							}}
+							onOptions={() => {
+								onItemAction("extract", item)
+							}}
+							// An archive opens into its browser, so browsing is the surface's own Open.
+							onBrowse={onOpen}
 						/>
 					) : (
 						<Item

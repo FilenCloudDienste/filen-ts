@@ -13,6 +13,7 @@ import { driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
 import { runBulkActivity } from "@/lib/activity/activity"
 import { prunePhotoSelection, usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
+import { PHOTOS_HIDDEN_BULK_ACTION_IDS } from "@/features/photos/lib/itemActions"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
 
@@ -35,8 +36,8 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 	const isOnline = useIsOnline()
 	const flags = aggregateDriveSelectionFlags(selectedItems)
 	// A photos selection is always owned, decryptable, non-shared-root files, so the drive variant yields
-	// exactly the photos set once Move is dropped (no directory context to move from, as on mobile).
-	const descriptors = driveBulkActions("drive", flags).filter(descriptor => descriptor.id !== "move")
+	// exactly the photos set once the hidden ids are dropped (PHOTOS_HIDDEN_BULK_ACTION_IDS).
+	const descriptors = driveBulkActions("drive", flags).filter(descriptor => !PHOTOS_HIDDEN_BULK_ACTION_IDS.has(descriptor.id))
 
 	async function handleBulkFavorite(): Promise<void> {
 		const favorited = !flags.includesFavorited

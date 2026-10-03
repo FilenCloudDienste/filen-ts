@@ -4,9 +4,10 @@ import { sortDriveItems } from "@/features/drive/lib/sort"
 
 // Navigation state of the in-dialog drive pickers: a local uuid stack from root, never the "/drive/$"
 // route, so browsing a picker never touches app history. Always browses the "drive" variant. `items` is
-// the listing in name order (directories first), whatever sort the drive itself is set to.
-export function useDirectoryPicker() {
-	const [pathStack, setPathStack] = useState<string[]>([])
+// the listing in name order (directories first), whatever sort the drive itself is set to. `initialPath`
+// (root first, the directory to open last) opens it there instead of at the root; read once, at mount.
+export function useDirectoryPicker(initialPath?: readonly string[]) {
+	const [pathStack, setPathStack] = useState<string[]>(() => (initialPath === undefined ? [] : [...initialPath]))
 	const targetUuid = pathStack.at(-1) ?? null
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)

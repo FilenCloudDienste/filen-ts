@@ -44,7 +44,13 @@ describe("anonPreviewability", () => {
 	})
 
 	it("marks an unknown-category file unpreviewable", () => {
-		expect(anonPreviewability(linkedFileItem("archive.zip", { size: 1024n }))).toBe("unpreviewable")
+		expect(anonPreviewability(linkedFileItem("setup.exe", { size: 1024n }))).toBe("unpreviewable")
+	})
+
+	// The public-link page has no archive browser; with no size cap an archive would otherwise pass.
+	it("marks an archive unpreviewable, small or large", () => {
+		expect(anonPreviewability(linkedFileItem("photos.zip", { size: 1024n }))).toBe("unpreviewable")
+		expect(anonPreviewability(linkedFileItem("backup.tar.gz", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("unpreviewable")
 	})
 })
 

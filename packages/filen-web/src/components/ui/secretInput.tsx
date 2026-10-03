@@ -15,8 +15,13 @@ const PASSWORD_MANAGER_OPT_OUTS = {
 // Masked entry for a secret that is not the user's Filen login: a PDF's password, a shared link's. A
 // password field is what browsers and password managers key on to offer saved logins and to save new
 // ones (the browsers' own managers ignore autocomplete="off" there), so this is a text field masked by
-// CSS instead, which no password manager treats as a credential.
-function SecretInput({ className, ...props }: Omit<React.ComponentProps<"input">, "type" | "autoComplete">) {
+// CSS instead, which no password manager treats as a credential. `revealed` shows the text; the opt-outs
+// stay, so revealing never turns the field into a credential.
+function SecretInput({
+	className,
+	revealed,
+	...props
+}: Omit<React.ComponentProps<"input">, "type" | "autoComplete"> & { revealed?: boolean | undefined }) {
 	return (
 		<Input
 			type="text"
@@ -25,7 +30,7 @@ function SecretInput({ className, ...props }: Omit<React.ComponentProps<"input">
 			autoCorrect="off"
 			spellCheck={false}
 			{...PASSWORD_MANAGER_OPT_OUTS}
-			className={cn("[-webkit-text-security:disc]", className)}
+			className={cn(revealed !== true && "[-webkit-text-security:disc]", className)}
 			{...props}
 		/>
 	)

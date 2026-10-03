@@ -1,4 +1,6 @@
-import { isSharedRootDriveItem, type DriveItem } from "@/features/drive/lib/item"
+import { driveItemName } from "@filen/shared"
+import { isDirectoryItem, isSharedRootDriveItem, type DriveItem } from "@/features/drive/lib/item"
+import { isArchiveCandidateName } from "@/features/drive/lib/archiveFormats"
 
 // Aggregated flags for a Drive multi-selection, computed in a single pass — the bulk-action bar's
 // only source of gating truth (directoryListing.tsx computes this once per render from
@@ -20,6 +22,9 @@ export interface DriveSelectionFlags {
 	// removeSharedItem accepts. Drives the bulk Unshare button's gate, mirroring the per-item menu's own
 	// check (itemMenu.logic.ts).
 	everySharedRoot: boolean
+	// True iff every selected item is a file (shared arms included) whose name looks like an archive —
+	// the bulk Extract gate. The SDK decides the real format once a job runs.
+	everyArchive: boolean
 }
 
 // Returned by reference (not rebuilt) for an empty selection, mirroring mobile's EMPTY_DRIVE_FLAGS —
@@ -30,7 +35,8 @@ const EMPTY_DRIVE_SELECTION_FLAGS: DriveSelectionFlags = Object.freeze({
 	everyFile: false,
 	everyDirectory: false,
 	includesUndecryptable: false,
-	everySharedRoot: false
+	everySharedRoot: false,
+	everyArchive: false
 })
 
 // The set a "select all" builds — every item except the undecryptable ones. Bulk actions gate
@@ -52,6 +58,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 	let everyDirectory = true
 	let includesUndecryptable = false
 	let everySharedRoot = true
+	let everyArchive = true
 
 	for (const item of items) {
 		if (item.data.favorited) {
@@ -73,7 +80,12 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		if (!isSharedRootDriveItem(item)) {
 			everySharedRoot = false
 		}
+
+		// Checked last and only while still true: the name lookup is the one non-trivial test here.
+		if (everyArchive && (isDirectoryItem(item) || !isArchiveCandidateName(driveItemName(item)))) {
+			everyArchive = false
+		}
 	}
 
-	return { count: items.length, includesFavorited, everyFile, everyDirectory, includesUndecryptable, everySharedRoot }
+	return { count: items.length, includesFavorited, everyFile, everyDirectory, includesUndecryptable, everySharedRoot, everyArchive }
 }

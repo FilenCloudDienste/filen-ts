@@ -1,4 +1,5 @@
 import {
+	ArchiveIcon,
 	CopyIcon,
 	CopyPlusIcon,
 	DownloadIcon,
@@ -10,6 +11,7 @@ import {
 	InfoIcon,
 	Link2OffIcon,
 	LinkIcon,
+	PackageOpenIcon,
 	PaletteIcon,
 	PencilIcon,
 	RotateCcwIcon,
@@ -37,6 +39,8 @@ export const ACTION_DEFS = {
 	move: { labelKey: "driveActionMove", icon: FolderInputIcon },
 	// Not CopyIcon: that one already means "Copy link".
 	copy: { labelKey: "driveActionCopy", icon: CopyPlusIcon },
+	compress: { labelKey: "driveActionCompress", icon: ArchiveIcon },
+	extract: { labelKey: "driveActionExtract", icon: PackageOpenIcon },
 	favorite: { labelKey: "driveActionFavorite", icon: StarIcon },
 	unfavorite: { labelKey: "driveActionUnfavorite", icon: StarOffIcon },
 	color: { labelKey: "driveActionColor", icon: PaletteIcon },

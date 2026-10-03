@@ -12,6 +12,7 @@ import {
 } from "@/features/drive/components/bulkActionBar.logic"
 import { CONTEXT_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
+import { BulkExtractSubmenu, CompressSubmenu } from "@/features/drive/components/archiveSubmenus"
 import { DriveContextMenuContent, type ItemDestination } from "@/features/drive/components/itemMenu"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
@@ -49,6 +50,36 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 							family={CONTEXT_TREE_MENU_FAMILY}
 							items={selectedItems}
 							onChooseDestination={onBulkAction}
+						/>
+					)
+				}
+
+				if (descriptor.id === "compress") {
+					return (
+						<CompressSubmenu
+							key={descriptor.id}
+							family={CONTEXT_TREE_MENU_FAMILY}
+							disabled={offlineDisabled}
+							items={selectedItems}
+							variant={variant}
+							onMoreOptions={() => {
+								onBulkAction("compress")
+							}}
+						/>
+					)
+				}
+
+				if (descriptor.id === "extract") {
+					return (
+						<BulkExtractSubmenu
+							key={descriptor.id}
+							family={CONTEXT_TREE_MENU_FAMILY}
+							disabled={offlineDisabled}
+							items={selectedItems}
+							variant={variant}
+							onChooseDestination={() => {
+								onBulkAction("extractTo")
+							}}
 						/>
 					)
 				}

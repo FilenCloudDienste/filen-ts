@@ -313,5 +313,165 @@ export const preview = {
 	/** Video player — fullscreens the player */
 	previewMediaFullscreen: "Full screen",
 	/** Video player — leaves full screen */
-	previewMediaExitFullscreen: "Exit full screen"
+	previewMediaExitFullscreen: "Exit full screen",
+
+	// ── Archive browser ──────────────────────────────────────────────────────
+	/** Archive browser — accessible label of the entry list; {{name}} is the directory shown (the archive's name at its root) */
+	previewArchiveListLabel: "Contents of {{name}}",
+	/** Archive browser gate (a tarball or single compressed file over 8 MiB) — listing it downloads all of it; {{size}} is the archive's size */
+	previewArchiveGateBody: "Listing its contents reads the whole {{size}} archive.",
+	/** Archive browser gate — a listing that would start by itself (a zip, a 7z, a small tarball) was cancelled before it read anything */
+	previewArchiveNotListed: "Its contents weren't listed.",
+	/** Archive browser gate — starts the listing */
+	previewArchiveBrowse: "Browse contents",
+	/** Archive browser — extracts the whole archive; the footer's button and the gate's */
+	previewArchiveExtractAll: "Extract all",
+	/** Archive browser footer — opens the menu of where the selected entries go */
+	previewArchiveExtractSelected: "Extract selected",
+	/** Archive browser footer — accessible label of the arrow beside Extract all that opens its other destinations */
+	previewArchiveExtractAllMore: "More places to extract to",
+	/** Archive browser extract menu — into a new directory next to the archive; {{name}} is that directory's name */
+	previewArchiveExtractBesideNewFolder: "Extract to “{{name}}/” next to the archive",
+	/** Archive browser extract menu — straight into the directory the archive is in */
+	previewArchiveExtractBeside: "Extract next to the archive",
+	/** Archive browser — another compress, extract or listing holds the page's one archive slot, so this listing waits */
+	previewArchiveWaiting: "Waiting for another archive job",
+	/** Archive browser waiting state — the job holding the slot is paused, so it never frees it by itself */
+	previewArchiveWaitingPaused: "A paused job is holding it — resume or cancel it in Transfers.",
+	/** Archive browser — shown while the archive is being read */
+	previewArchiveReading: "Reading the archive…",
+	/** Archive browser reading progress — {{read}} and {{total}} are formatted sizes */
+	previewArchiveReadingBytes: "{{read}} of {{total}}",
+	/** Archive browser reading progress — entries listed so far */
+	previewArchiveEntryCount_one: "{{count}} entry",
+	/** Archive browser reading progress — entries listed so far */
+	previewArchiveEntryCount_other: "{{count}} entries",
+	/** Archive browser reading progress — time left; {{eta}} is a clock like 1:05 */
+	previewArchiveEta: "{{eta}} left",
+	/** Archive browser — stops a running listing; what was read stays browsable */
+	previewArchiveStop: "Stop",
+	/** Archive browser — the user stopped the listing */
+	previewArchiveStopped_one: "Listing stopped after {{count}} entry.",
+	/** Archive browser — the user stopped the listing */
+	previewArchiveStopped_other: "Listing stopped after {{count}} entries.",
+	/** Archive browser — lists the archive again from the start */
+	previewArchiveListAgain: "List again",
+	/** Archive browser — nothing can be listed without the password (a 7-Zip archive whose file names are encrypted) */
+	previewArchiveNeedsPassword: "This archive's contents are encrypted.",
+	/** Archive password prompt — title */
+	previewArchivePasswordTitle: "Archive password",
+	/** Archive password prompt — body; {{name}} is the archive's name */
+	previewArchivePasswordBody: "Enter the password for “{{name}}”.",
+	/** Archive password prompt — body after a wrong password; {{name}} is the archive's name */
+	previewArchivePasswordWrongBody: "That password didn't open “{{name}}”. Try again.",
+	/** Archive password prompt — the field's label */
+	previewArchivePasswordLabel: "Password",
+	/** Archive password prompt — submit button */
+	previewArchivePasswordSubmit: "Unlock",
+	/** Archive browser — reopens a dismissed password prompt, or opens it from the encrypted-entries banner */
+	previewArchiveEnterPassword: "Enter password",
+	/** Archive browser banner — some listed entries are encrypted and no password has been given */
+	previewArchiveEncryptedBanner: "Some entries are encrypted. Extracting them needs the password.",
+	/** Archive browser banner — the password given didn't open the encrypted entries */
+	previewArchiveWrongPasswordBanner: "That password didn't open the encrypted entries.",
+	/** Archive browser banner — the password is being checked against the encrypted entries */
+	previewArchiveCheckingPassword: "Checking the password…",
+	/** Archive browser banner — the password check waits until another archive job frees the page's one archive slot */
+	previewArchiveCheckingPasswordWaiting: "Waiting for another archive job to check the password",
+	/** Archive browser — the listing failed: the format isn't supported */
+	previewArchiveFailedUnsupported: "This archive's format isn't supported.",
+	/** Archive browser — the listing failed: the archive is damaged */
+	previewArchiveFailedCorrupt: "This archive is damaged.",
+	/** Archive browser — the listing failed: too many entries to list in the browser, or it unpacks to an implausible size */
+	previewArchiveFailedTooLarge: "This archive is too large to list in the browser.",
+	/** Archive browser — a damaged archive whose first entries could be read */
+	previewArchivePartial_one: "Showing the {{count}} entry read before the damage.",
+	/** Archive browser — a damaged archive whose first entries could be read */
+	previewArchivePartial_other: "Showing the {{count}} entries read before the damage.",
+	/** Archive browser note — entries the listing found but could not hand to the page */
+	previewArchiveUndelivered_one: "{{count}} entry couldn't be shown; Extract all still extracts everything.",
+	/** Archive browser note — entries the listing found but could not hand to the page */
+	previewArchiveUndelivered_other: "{{count}} entries couldn't be shown; Extract all still extracts everything.",
+	/** Archive browser note — a zip names some entries more than once; only the last of each name is listed and extracted. {{count}} is how many were left out; the names follow in a list */
+	previewArchiveDuplicates_one: "{{count}} entry is left out because a later entry has the same name.",
+	/** Archive browser note — a zip names some entries more than once; only the last of each name is listed and extracted. {{count}} is how many were left out; the names follow in a list */
+	previewArchiveDuplicates_other: "{{count}} entries are left out because a later entry has the same name.",
+	/** Archive browser — the whole archive holds nothing */
+	previewArchiveEmpty: "This archive is empty.",
+	/** Archive browser — the directory shown holds nothing */
+	previewArchiveDirectoryEmpty: "This directory is empty.",
+	/** Archive browser search — nothing below the directory shown matches; {{query}} is the search text */
+	previewArchiveNoResults: "Nothing here matches “{{query}}”.",
+	/** Archive browser search — only the first {{count}} matches are shown */
+	previewArchiveSearchTruncated: "Showing the first {{count}} matches — refine your search.",
+	/** Archive browser search field — placeholder and accessible label */
+	previewArchiveSearchPlaceholder: "Search this directory",
+	/** Archive browser — accessible label of the breadcrumbs */
+	previewArchiveBreadcrumbs: "Location in the archive",
+	/** Archive browser breadcrumbs — accessible label of the "…" menu holding the levels not shown */
+	previewArchiveHiddenLevels: "Show the directories above",
+	/** Archive browser column header — sorts by name */
+	previewArchiveColumnName: "Name",
+	/** Archive browser column header — sorts by size */
+	previewArchiveColumnSize: "Size",
+	/** Archive browser column header — sorts by date modified */
+	previewArchiveColumnModified: "Modified",
+	/** Archive browser — the header checkbox selecting everything in the directory shown, or every search match */
+	previewArchiveSelectAll: "Select all",
+	/** Archive browser row — a directory's size column: how many entries it directly holds */
+	previewArchiveDirItems_one: "{{count}} item",
+	/** Archive browser row — a directory's size column: how many entries it directly holds */
+	previewArchiveDirItems_other: "{{count}} items",
+	/** Archive browser footer — files selected and their size; {{size}} is formatted */
+	previewArchiveSelectedFiles_one: "{{count}} file selected · {{size}}",
+	/** Archive browser footer — files selected and their size; {{size}} is formatted */
+	previewArchiveSelectedFiles_other: "{{count}} files selected · {{size}}",
+	/** Archive browser footer — only directories selected (no files in them) */
+	previewArchiveSelectedItems_one: "{{count}} item selected",
+	/** Archive browser footer — only directories selected (no files in them) */
+	previewArchiveSelectedItems_other: "{{count}} items selected",
+	/** Archive browser row — an encrypted entry */
+	previewArchiveEncrypted: "Encrypted",
+	/** Archive browser row — the name holds invisible or direction-changing characters */
+	previewArchiveMisleading: "This name has invisible or direction-changing characters; it may not be what it looks like.",
+	/** Archive browser row — the name was changed to be usable in the drive; {{path}} is the name as the archive stores it */
+	previewArchiveStoredAs: "Stored as {{path}}",
+	/** Archive browser row — a link's target; {{target}} is the path it points to */
+	previewArchiveLinkTarget: "Points to {{target}}",
+	/** Archive browser row — a symbolic link, which the drive cannot hold */
+	previewArchiveSkip_symlink: "Symbolic link · not extracted",
+	/** Archive browser row — a tar hard link whose file is not in the archive */
+	previewArchiveSkip_hardlink: "Hard link to a missing file · not extracted",
+	/** Archive browser row — a device node or pipe */
+	previewArchiveSkip_device: "Device or pipe · not extracted",
+	/** Archive browser row — a sparse file */
+	previewArchiveSkip_sparse: "Sparse file · not extracted",
+	/** Archive browser row — an entry of a kind that is not extracted */
+	previewArchiveSkip_unsupportedType: "Unsupported entry · not extracted",
+	/** Archive browser row — a path longer than the drive allows */
+	previewArchiveSkip_pathTooLong: "Path too long · not extracted",
+	/** Archive browser row — a path nested too deeply */
+	previewArchiveSkip_pathTooDeep: "Nested too deeply · not extracted",
+	/** Archive browser row — a path leading out of the extract's directory, or not usable as a drive name */
+	previewArchiveSkip_unsafePath: "Unsafe path · not extracted",
+	/** Archive browser row — a ZIP entry whose data overlaps another's (a damaged or crafted archive) */
+	previewArchiveSkip_overlappingData: "Damaged entry · not extracted",
+	/** Archive browser row — compressed or encrypted in a way that cannot be read */
+	previewArchiveSkip_unsupportedMethod: "Unsupported compression or encryption · not extracted",
+	/** Archive browser row — a 7-Zip deletion marker */
+	previewArchiveSkip_antiItem: "Deletion marker · not extracted",
+	/** Archive browser row — macOS metadata, left out like an extract leaves it out */
+	previewArchiveSkip_macMetadata: "macOS metadata · not extracted",
+	/** Hard-link dialog — title: selected hard links point to files outside the directory shown */
+	previewArchiveLinkTargetsTitle: "Linked files outside this directory",
+	/** Hard-link dialog — body; {{base}} is the directory shown */
+	previewArchiveLinkTargetsBody_one:
+		"{{count}} selected hard link points to a file outside “{{base}}”, which an extract from here can't include.",
+	/** Hard-link dialog — body; {{base}} is the directory shown */
+	previewArchiveLinkTargetsBody_other:
+		"{{count}} selected hard links point to files outside “{{base}}”, which an extract from here can't include.",
+	/** Hard-link dialog — extracts the selection without those links */
+	previewArchiveLinkTargetsLeaveOut: "Leave those links out",
+	/** Hard-link dialog — extracts with paths taken from a directory higher up that holds the link targets too; {{name}} is that directory */
+	previewArchiveLinkTargetsFromParent: "Extract from “{{name}}” instead"
 } as const

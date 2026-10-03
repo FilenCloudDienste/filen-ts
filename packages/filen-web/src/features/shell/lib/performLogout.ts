@@ -15,6 +15,7 @@ import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
 import { cancelActiveTransfers } from "@/features/transfers/lib/control"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
+import { clearArchiveListings } from "@/features/archive/lib/listingCache"
 import { releaseHeicWorker } from "@/features/preview/lib/heicTransform"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { clearDirectoryTreeState } from "@/features/drive/store/useDirectoryTreeStore"
@@ -101,9 +102,10 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// Stop playback, revoke the live blob URL, tear down the media element and clear the queue so no
 	// audio from this account survives into the next session.
 	disposeAudioEngine()
-	// Decrypted preview buffers held for pager revisits, and an idle HEIC worker whose heap still holds
-	// this account's decoded photos.
+	// Decrypted preview buffers and archive listings (entry names, passwords) held for pager revisits,
+	// and an idle HEIC worker whose heap still holds this account's decoded photos.
 	clearPreviewCache()
+	clearArchiveListings()
 	releaseHeicWorker()
 	// The drive clipboard's items and the sidebar tree's expanded directories belong to this account.
 	useDriveClipboardStore.getState().clear()

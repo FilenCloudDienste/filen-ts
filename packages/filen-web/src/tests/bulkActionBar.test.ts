@@ -2,6 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import {
+	ArchiveIcon,
+	PackageOpenIcon,
 	StarIcon,
 	StarOffIcon,
 	FolderInputIcon,
@@ -121,6 +123,7 @@ function flags(overrides: Partial<DriveSelectionFlags> = {}): DriveSelectionFlag
 		everyDirectory: false,
 		includesUndecryptable: false,
 		everySharedRoot: false,
+		everyArchive: false,
 		...overrides
 	}
 }
@@ -149,6 +152,7 @@ describe("driveBulkActions — descriptor label/icon facts (ACTION_DEFS drift gu
 			{ id: "favorite", labelKey: "driveActionFavorite", icon: StarIcon },
 			{ id: "move", labelKey: "driveActionMove", icon: FolderInputIcon },
 			{ id: "copy", labelKey: "driveActionCopy", icon: CopyPlusIcon },
+			{ id: "compress", labelKey: "driveActionCompress", icon: ArchiveIcon },
 			{ id: "share", labelKey: "driveActionShare", icon: UsersIcon },
 			{ id: "download", labelKey: "driveActionDownload", icon: DownloadIcon },
 			{ id: "trash", labelKey: "driveActionTrash", icon: Trash2Icon }
@@ -179,6 +183,51 @@ describe("driveBulkActions — descriptor label/icon facts (ACTION_DEFS drift gu
 	})
 })
 
+describe("driveBulkActions — Compress and Extract", () => {
+	it("offers Extract right after Compress only when every item is an archive", () => {
+		expect(driveBulkActions("drive", flags({ everyArchive: true })).map(d => d.id)).toEqual([
+			"favorite",
+			"move",
+			"copy",
+			"compress",
+			"extract",
+			"share",
+			"download",
+			"trash"
+		])
+		expect(driveBulkActions("drive", flags({ everyArchive: false })).map(d => d.id)).not.toContain("extract")
+	})
+
+	it("offers both in Shared with me, neither in the trash nor with an undecryptable item", () => {
+		expect(driveBulkActions("sharedIn", flags({ everyArchive: true })).map(d => d.id)).toEqual([
+			"copy",
+			"compress",
+			"extract",
+			"download"
+		])
+
+		for (const ids of [
+			driveBulkActions("trash", flags({ everyArchive: true })).map(d => d.id),
+			driveBulkActions("drive", flags({ everyArchive: true, includesUndecryptable: true })).map(d => d.id)
+		]) {
+			expect(ids).not.toContain("compress")
+			expect(ids).not.toContain("extract")
+		}
+	})
+
+	it("routes More options to the compress dialog and Choose destination to the extract picker", () => {
+		const descriptors = driveBulkActions("drive", flags({ everyArchive: true }))
+
+		expect(descriptors.find(d => d.id === "compress")).toMatchObject({ run: "dialog", dialogKind: "compress", icon: ArchiveIcon })
+		expect(descriptors.find(d => d.id === "extract")).toMatchObject({
+			run: "dialog",
+			dialogKind: "extractTo",
+			labelKey: "driveActionExtract",
+			icon: PackageOpenIcon
+		})
+	})
+})
+
 describe("driveBulkActions", () => {
 	it("trash variant: exactly restoreSelected then delete, regardless of flags — no favorite/move surface in trash", () => {
 		const descriptors = driveBulkActions("trash", flags({ includesUndecryptable: true, includesFavorited: true }))
@@ -199,18 +248,18 @@ describe("driveBulkActions", () => {
 	})
 
 	it.each(["drive", "recents", "favorites"] as const)(
-		"%s variant, decryptable selection, none favorited: favorite, move, copy, share, download, trash in that order",
+		"%s variant, decryptable selection, none favorited: favorite, move, copy, compress, share, download, trash in that order",
 		variant => {
 			const descriptors = driveBulkActions(variant, flags({ includesFavorited: false, includesUndecryptable: false }))
 
-			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash"])
+			expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "compress", "share", "download", "trash"])
 		}
 	)
 
-	it("links variant, decryptable selection, none favorited: favorite, copy, share, download, trash, disableLink — move dropped (canMoveVariant)", () => {
+	it("links variant, decryptable selection, none favorited: favorite, copy, compress, share, download, trash, disableLink — move dropped (canMoveVariant)", () => {
 		const descriptors = driveBulkActions("links", flags({ includesFavorited: false, includesUndecryptable: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "copy", "share", "download", "trash", "disableLink"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "copy", "compress", "share", "download", "trash", "disableLink"])
 	})
 
 	// The one bulk action unique to the links (root) surface: revokes every selected item's
@@ -340,7 +389,7 @@ describe("driveBulkActions — unshare gating (everySharedRoot)", () => {
 	it("is the last descriptor when present, after favorite/move/copy/share/download/trash — sharedOut keeps bulk trash too", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ everySharedRoot: true, includesUndecryptable: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash", "unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "compress", "share", "download", "trash", "unshare"])
 	})
 })
 
@@ -350,13 +399,13 @@ describe("driveBulkActions — sharedIn safe subset (read-only surface)", () => 
 	it("sharedIn, not everySharedRoot: copy and download only (neither mutates the source, so both survive sharedIn's owner-mutating gate)", () => {
 		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["copy", "download"])
+		expect(descriptors.map(d => d.id)).toEqual(["copy", "compress", "download"])
 	})
 
 	it("sharedIn, everySharedRoot: copy, download, then unshare", () => {
 		const descriptors = driveBulkActions("sharedIn", flags({ includesUndecryptable: false, everySharedRoot: true }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["copy", "download", "unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["copy", "compress", "download", "unshare"])
 	})
 
 	it("never offers favorite/move/trash, undecryptable or everySharedRoot combined any way", () => {
@@ -378,13 +427,13 @@ describe("driveBulkActions — sharedOut full owner toolbar (owned surface)", ()
 	it("sharedOut, not everySharedRoot: favorite, move, copy, share, download, trash — the same set as drive/recents/favorites", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: false }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "compress", "share", "download", "trash"])
 	})
 
 	it("sharedOut, everySharedRoot: the same owner set, plus unshare last", () => {
 		const descriptors = driveBulkActions("sharedOut", flags({ includesUndecryptable: false, everySharedRoot: true }))
 
-		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "share", "download", "trash", "unshare"])
+		expect(descriptors.map(d => d.id)).toEqual(["favorite", "move", "copy", "compress", "share", "download", "trash", "unshare"])
 	})
 
 	it("sharedOut, includesUndecryptable: favorite/move/share/download suppressed, trash and (root) unshare remain — pure-uuid dispositions", () => {
@@ -455,7 +504,8 @@ describe("isBulkActionOfflineDisabled", () => {
 		flags({ includesFavorited: true }),
 		flags({ includesUndecryptable: true }),
 		flags({ everySharedRoot: true }),
-		flags({ includesFavorited: true, everySharedRoot: true })
+		flags({ includesFavorited: true, everySharedRoot: true }),
+		flags({ everyArchive: true })
 	]
 	const everyBulkId = [
 		...new Set(VARIANTS.flatMap(variant => FLAG_COMBINATIONS.flatMap(f => driveBulkActions(variant, f).map(d => d.id))))

@@ -81,6 +81,8 @@ import { consumeUnloadAllowance } from "@/lib/unloadGuard"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { useDirectoryTreeStore } from "@/features/drive/store/useDirectoryTreeStore"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
+import { createListingCache, type CachedListing } from "@/features/archive/lib/listingCache"
+import { createEntryStore } from "@/features/archive/lib/entryStore"
 
 // Stands in for the overlay's unsaved-changes prompt: waits for the request the guard armed, then
 // answers it the way a Cancel click does.
@@ -157,6 +159,38 @@ describe("performLogout", () => {
 		await expect(performLogout()).resolves.toBe(true)
 
 		expect(getPreviewBytes("authed", "file-uuid")).toBeUndefined()
+	})
+
+	it("drops every archive listing an open preview holds, and every one its browsers dispose after", async () => {
+		const cache = createListingCache()
+		const listing: CachedListing = {
+			store: createEntryStore(),
+			summary: {
+				format: { type: "zip" },
+				password: "right",
+				totals: { entries: 1, dirs: 0, files: 1, bytes: 1, skipped: 0, bytesSkipped: 0 },
+				undelivered: 0,
+				duplicates: null,
+				unaccountedBytes: 0,
+				verifying: false,
+				verifyWaiting: false,
+				verifyError: null
+			},
+			password: "secret",
+			lastDirPath: "",
+			entries: 1
+		}
+
+		cache.open()
+		cache.put("archive-uuid", listing)
+
+		await expect(performLogout()).resolves.toBe(true)
+
+		expect(cache.get("archive-uuid")).toBeUndefined()
+
+		cache.put("archive-uuid", listing)
+
+		expect(cache.get("archive-uuid")).toBeUndefined()
 	})
 
 	it("empties the drive clipboard, whose items belong to this account", async () => {

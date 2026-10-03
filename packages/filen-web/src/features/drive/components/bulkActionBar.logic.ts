@@ -14,12 +14,25 @@ import { runBulkActivity } from "@/lib/activity/activity"
 // directoryListing.tsx's own ActiveDialogKind (the per-item-only kinds — rename/color/versions/info/
 // link — can never be bulk-dispatched, so they have no place here). "share"/"unshare" are both
 // bulk-dispatchable (the contact picker / unshare confirm each take the whole selection), unlike the
-// other link/access kinds.
-export type BulkDialogActionKind = "move" | "copy" | "share" | "unshare" | "trash" | "delete" | "restoreSelected" | "disableLink"
+// other link/access kinds. "compress" opens the options dialog, "extractTo" the extract destination
+// picker (bulk extract has no options dialog).
+export type BulkDialogActionKind =
+	"move" | "copy" | "compress" | "extractTo" | "share" | "unshare" | "trash" | "delete" | "restoreSelected" | "disableLink"
 
 export type BulkActionDescriptor = ActionDescriptor<
 	DriveKey,
-	"favorite" | "move" | "copy" | "share" | "unshare" | "trash" | "restoreSelected" | "delete" | "download" | "disableLink",
+	| "favorite"
+	| "move"
+	| "copy"
+	| "compress"
+	| "extract"
+	| "share"
+	| "unshare"
+	| "trash"
+	| "restoreSelected"
+	| "delete"
+	| "download"
+	| "disableLink",
 	BulkDialogActionKind
 >
 
@@ -68,6 +81,15 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		// Copying only reads the selection, so it is offered on every surface it is readable from, shared
 		// in included — the one exception to the owner gate above, as in the per-item menu.
 		descriptors.push({ id: "copy", ...ACTION_DEFS.copy, run: "dialog", dialogKind: "copy" })
+
+		// Compress reads like copy, so it goes wherever copy does; Extract only when every item is an
+		// archive, one queued job each. Both render as submenus (archiveSubmenus.tsx); their dialog kinds
+		// are the options dialog and the destination picker.
+		descriptors.push({ id: "compress", ...ACTION_DEFS.compress, run: "dialog", dialogKind: "compress" })
+
+		if (flags.everyArchive) {
+			descriptors.push({ id: "extract", ...ACTION_DEFS.extract, run: "dialog", dialogKind: "extractTo" })
+		}
 
 		// Share the whole selection with contacts — same undecryptable gate as favorite/move above (an
 		// undecryptable item can't be shared), plus the owned-surface variant gate (canShareVariant
@@ -127,6 +149,8 @@ const OFFLINE_GATED_BULK_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(
 	"favorite",
 	"move",
 	"copy",
+	"compress",
+	"extract",
 	"share",
 	"unshare",
 	"trash",

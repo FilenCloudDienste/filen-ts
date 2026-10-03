@@ -81,7 +81,8 @@ describe("aggregateDriveSelectionFlags", () => {
 			everyFile: false,
 			everyDirectory: false,
 			includesUndecryptable: false,
-			everySharedRoot: false
+			everySharedRoot: false,
+			everyArchive: false
 		})
 		expect(first).toBe(second) // same frozen constant, not a freshly-built object each call
 		expect(Object.isFrozen(first)).toBe(true)
@@ -153,7 +154,8 @@ describe("aggregateDriveSelectionFlags", () => {
 			everyFile: false,
 			everyDirectory: true,
 			includesUndecryptable: false,
-			everySharedRoot: false
+			everySharedRoot: false,
+			everyArchive: false
 		})
 	})
 
@@ -169,7 +171,8 @@ describe("aggregateDriveSelectionFlags", () => {
 			everyFile: false,
 			everyDirectory: false,
 			includesUndecryptable: true,
-			everySharedRoot: false
+			everySharedRoot: false,
+			everyArchive: false
 		})
 	})
 })
@@ -203,6 +206,36 @@ describe("aggregateDriveSelectionFlags — everySharedRoot", () => {
 		const flags = aggregateDriveSelectionFlags([dirItem({ uuid: testUuid("a") }), fileItem({ uuid: testUuid("b") })])
 
 		expect(flags.everySharedRoot).toBe(false)
+	})
+})
+
+describe("aggregateDriveSelectionFlags — everyArchive", () => {
+	function named(label: string, name: string): DriveItem {
+		return fileItem({
+			uuid: testUuid(label),
+			meta: { type: "decoded", data: { name, mime: "application/octet-stream", modified: 0n, size: 1n, key: "key", version: 2 } }
+		})
+	}
+
+	it("everyArchive holds when every item is a file named like an archive, shared arms included", () => {
+		const sharedArchive = narrowItem({
+			...mockFile({
+				uuid: testUuid("shared-zip"),
+				meta: { type: "decoded", data: { name: "in.7z", mime: "", modified: 0n, size: 1n, key: "key", version: 2 } }
+			}),
+			sharingRole: sharerRole(1, "a@filen.io")
+		})
+
+		expect(aggregateDriveSelectionFlags([named("a", "a.zip"), named("b", "b.TAR.GZ"), sharedArchive]).everyArchive).toBe(true)
+	})
+
+	it("everyArchive fails on one other file, a directory named like an archive or an unreadable name", () => {
+		expect(aggregateDriveSelectionFlags([named("a", "a.zip"), named("b", "b.pdf")]).everyArchive).toBe(false)
+		expect(
+			aggregateDriveSelectionFlags([named("a", "a.zip"), dirItem({ meta: { type: "decoded", data: { name: "old.zip" } } })])
+				.everyArchive
+		).toBe(false)
+		expect(aggregateDriveSelectionFlags([undecryptableFile()]).everyArchive).toBe(false)
 	})
 })
 

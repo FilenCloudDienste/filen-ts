@@ -1,12 +1,13 @@
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
+import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
 import { CODE_FILE_EXTENSIONS, effectiveExtension, extensionStart } from "@filen/shared"
 
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
 export type PreviewCategory =
-	"image" | "rawImage" | "video" | "audio" | "pdf" | "docx" | "spreadsheet" | "text" | "code" | "markdown" | "other"
+	"image" | "rawImage" | "video" | "audio" | "pdf" | "docx" | "spreadsheet" | "text" | "code" | "markdown" | "archive" | "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): pdf/docx/text/code/
 // markdown download fully into RAM before rendering, so an oversize file is excluded from canPreview
@@ -88,6 +89,7 @@ const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensio
 	[SPREADSHEET_EXTENSIONS, "spreadsheet"],
 	[["md", "markdown"], "markdown"],
 	[["txt", "log"], "text"],
+	[ARCHIVE_NAME_EXTENSIONS, "archive"],
 	[CODE_FILE_EXTENSIONS, "code"]
 ])
 
@@ -193,9 +195,10 @@ export function canOpenAsText(item: DriveItem): boolean {
 
 // The JS-memory ceiling for a category previewed from a whole buffer. null for rawImage: it is not
 // streamed to the page at all — the SDK reads whatever ranges it needs inside wasm and hands back only
-// a small decoded result, so the file never enters JS memory and there is nothing to protect.
+// a small decoded result, so the file never enters JS memory and there is nothing to protect. null for
+// archive too: the SDK lists it in the worker and the page only ever holds the entry list.
 export function bufferedSizeCap(category: PreviewCategory): bigint | null {
-	if (category === "rawImage") {
+	if (category === "rawImage" || category === "archive") {
 		return null
 	}
 

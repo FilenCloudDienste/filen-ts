@@ -49,6 +49,8 @@ import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { SpreadsheetViewer, type SpreadsheetSaveSource } from "@/features/spreadsheet/components/spreadsheetViewer"
 import { RemoteFileCompare } from "@/features/preview/components/remoteCompare"
+import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
+import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import {
 	isTextEditingTarget,
@@ -454,6 +456,9 @@ export function PreviewOverlay({
 			case "info":
 			case "link":
 			case "share":
+			case "compress":
+			case "extract":
+			case "extractTo":
 				return (
 					<ItemDialog
 						kind={menuDialogKind}
@@ -539,7 +544,8 @@ export function PreviewOverlay({
 	// unmount is precisely "the overlay closed"; clearing here (rather than in onClose, which the header
 	// item-menu's own Trash/Unshare success paths also call, all funneling through the SAME close) keeps
 	// this a single, unconditional cleanup with no risk of missing a dismissal route. The preview
-	// byte cache is scoped the same way, so a closed overlay stops holding file buffers.
+	// byte cache is scoped the same way, so a closed overlay stops holding file buffers; the archive
+	// listings live in the ArchiveListingScope below and go with it.
 	useEffect(() => {
 		return () => {
 			clearVideoPlaybackStates()
@@ -1024,32 +1030,35 @@ export function PreviewOverlay({
 						</DialogPrimitive.Close>
 					</header>
 					<div className="min-h-0 flex-1">
-						<PreviewErrorBoundary key={slotKey}>
-							<PreviewDownloadableProvider
-								downloadable={downloadable}
-								onDownload={download}
-							>
-								<PreviewBody
-									item={driveItem}
-									category={pin?.category}
-									documentKey={currentDocumentKey}
-									editable={editable}
-									renamedReadOnly={renamedReadOnly}
-									neverEditable={variant !== "drive"}
-									asText={asText}
-									locked={saving}
-									onDirtyChange={setPreviewDirty}
-									contentRef={contentRef}
-									spreadsheetRef={spreadsheetRef}
-									canSaveCopy={canSaveCopyBeside(driveItem, variant)}
-									onOpenFile={opened => {
-										if (rawDriveItem !== undefined) {
-											commitSaved(rawDriveItem.data.uuid, opened)
-										}
-									}}
-								/>
-							</PreviewDownloadableProvider>
-						</PreviewErrorBoundary>
+						<ArchiveListingScope>
+							<PreviewErrorBoundary key={slotKey}>
+								<PreviewDownloadableProvider
+									downloadable={downloadable}
+									onDownload={download}
+								>
+									<PreviewBody
+										item={driveItem}
+										variant={variant}
+										category={pin?.category}
+										documentKey={currentDocumentKey}
+										editable={editable}
+										renamedReadOnly={renamedReadOnly}
+										neverEditable={variant !== "drive"}
+										asText={asText}
+										locked={saving}
+										onDirtyChange={setPreviewDirty}
+										contentRef={contentRef}
+										spreadsheetRef={spreadsheetRef}
+										canSaveCopy={canSaveCopyBeside(driveItem, variant)}
+										onOpenFile={opened => {
+											if (rawDriveItem !== undefined) {
+												commitSaved(rawDriveItem.data.uuid, opened)
+											}
+										}}
+									/>
+								</PreviewDownloadableProvider>
+							</PreviewErrorBoundary>
+						</ArchiveListingScope>
 					</div>
 					{/* Nested confirmation dialog — Base UI supports nesting a dialog inside another normally
 					(see versionsDialog.tsx's own identical precedent); this must stay a child of the outer
@@ -1186,6 +1195,7 @@ function bodyKey(item: DriveItem, documentKey: string, pin: SlotPin | null): str
 
 interface PreviewBodyProps {
 	item: DriveItem
+	variant: DriveVariant
 	// The drive slot's pinned renderer (SlotPin).
 	category: PreviewCategory | undefined
 	documentKey: string
@@ -1221,6 +1231,7 @@ interface PreviewBodyProps {
 // the switch is the guard (a return-type annotation is not — `ReactNode` includes `undefined`).
 function PreviewBody({
 	item,
+	variant,
 	category: pinnedCategory,
 	documentKey,
 	editable,
@@ -1328,6 +1339,13 @@ function PreviewBody({
 				<RawImageViewer
 					item={item}
 					alt={alt}
+				/>
+			)
+		case "archive":
+			return (
+				<ArchiveBrowser
+					item={item}
+					variant={variant}
 				/>
 			)
 		// canPreview excludes "other" from ever reaching the overlay; it stays only as the exhaustive

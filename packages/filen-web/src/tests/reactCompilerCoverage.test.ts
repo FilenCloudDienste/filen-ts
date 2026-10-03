@@ -108,6 +108,22 @@ describe("React Compiler coverage", () => {
 		).toEqual([])
 	})
 
+	it("compiles the archive browser, its rows and footer, so a listing notification re-renders only what changed", () => {
+		for (const [file, fnName] of [
+			["src/features/archive/components/archiveBrowser.tsx", "ArchiveBrowser"],
+			["src/features/archive/components/archiveBrowser.tsx", "ArchiveSourceBrowser"],
+			["src/features/archive/components/archiveEntryRow.tsx", "ArchiveEntryRow"],
+			["src/features/archive/components/archiveFooter.tsx", "ArchiveFooter"]
+		] as const) {
+			const events = compile(file)
+
+			expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+	})
+
 	it("compiles QueueRow, so a track change re-renders only the queue rows whose props changed", () => {
 		const events = compile("src/features/audio/components/nowPlayingPanel.tsx")
 

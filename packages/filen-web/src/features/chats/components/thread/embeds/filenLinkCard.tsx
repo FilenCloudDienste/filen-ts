@@ -417,7 +417,8 @@ export function FilenLinkCard({
 		)
 	}
 
-	if (data.previewCategory === "other") {
+	// An archive opens the link's page in a new tab, like a file nothing previews.
+	if (data.previewCategory === "other" || data.previewCategory === "archive") {
 		return (
 			<LinkCardShell
 				icon={icon}

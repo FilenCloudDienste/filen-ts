@@ -10,6 +10,8 @@ import init, {
 	archiveFormatLevels,
 	archiveFormatOfName,
 	archiveMaxLevel,
+	EntryNameErrorJS,
+	parseName,
 	type Client,
 	type AnyFile,
 	type AnyItemWithContext,
@@ -18,6 +20,7 @@ import init, {
 	type ArchiveFormat,
 	type ArchiveLevels,
 	type CompressFormat,
+	type EntryNameErrorKindJS,
 	type CopyEntry,
 	type CopiedTopLevelItem,
 	type ExtractArchiveEntriesParams,
@@ -120,6 +123,8 @@ import { FLAT_LISTING_KINDS, type FlatListingKind } from "@/features/drive/lib/f
 import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY, type ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 import { copyThumbs, removeStaleThumbGenerations, sweepThumbs, writeThumb } from "@/workers/thumbStore"
 import { createSearchEngine, type SearchPush, type SearchSnapshotDTO } from "@/workers/searchEngine"
+import { createListBatcher } from "@/workers/archiveListPacker"
+import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import {
 	readAudioMetadata as parseAudioMetadata,
 	readAudioMetadataFromBlob as parseAudioMetadataFromBlob,
@@ -307,11 +312,13 @@ export type ExtractJobEvent = { type: "update"; update: ExtractJobUpdate } | { t
 export interface ListJobParams {
 	archive: AnyFile
 	skipMacMetadata: boolean | undefined
+	// false leaves the entries out altogether, as a relist that only checks a password does.
+	deliverEntries: boolean
 	// The batches carried every entry already; the report repeats up to 10 000 of them.
 	keepReportEntries: boolean
 }
 
-export type ListJobEvent = { type: "update"; update: ListUpdate } | { type: "entries"; entries: ArchiveEntry[] }
+export type ListJobEvent = { type: "update"; update: ListUpdate } | { type: "entries"; batch: PackedEntryBatch }
 
 export interface ArchiveFormatInfo {
 	extension: string
@@ -1294,26 +1301,42 @@ const api = {
 			jobControls(jobId),
 			onEvent,
 			async (deliver, managedFuture) => {
-				const report = listReportToDTO(
-					await c.listArchive(
-						{
-							archive: params.archive,
-							...(params.skipMacMetadata !== undefined ? { skipMacMetadata: params.skipMacMetadata } : {}),
-							onUpdate: update => {
-								deliver({ type: "update", update })
-							},
-							// Only posts: past a 16 MiB backlog of entries this has not returned from, the SDK drops
-							// the rest.
-							onEntriesBatch: entries => {
-								deliver({ type: "entries", entries })
-							},
-							managedFuture
-						},
-						archivePassword(password)
-					)
-				)
+				const batcher = params.deliverEntries
+					? createListBatcher(batch => {
+							deliver({ type: "entries", batch })
+						})
+					: null
 
-				return params.keepReportEntries ? report : { ...report, entries: [] }
+				try {
+					const report = listReportToDTO(
+						await c.listArchive(
+							{
+								archive: params.archive,
+								...(params.skipMacMetadata !== undefined ? { skipMacMetadata: params.skipMacMetadata } : {}),
+								onUpdate: update => {
+									// The SDK sends a batch before the update that counts it; the buffered ones go first.
+									batcher?.flush()
+									deliver({ type: "update", update })
+								},
+								// Only packs: past a 16 MiB backlog of entries this has not returned from, the SDK
+								// drops the rest.
+								...(batcher !== null
+									? {
+											onEntriesBatch: (entries: ArchiveEntry[]) => {
+												batcher.push(entries)
+											}
+										}
+									: {}),
+								managedFuture
+							},
+							archivePassword(password)
+						)
+					)
+
+					return params.keepReportEntries ? report : { ...report, entries: [] }
+				} finally {
+					batcher?.flush()
+				}
 			},
 			"list"
 		)
@@ -1354,6 +1377,26 @@ const api = {
 	},
 	archiveNameInfo(names: string[]): ArchiveNameInfo[] {
 		return names.map(name => ({ format: archiveFormatOfName(name) ?? null, defaultName: archiveDefaultName(name) }))
+	},
+	// Why the SDK would refuse each name as an item's (null: it takes it), so a form can say so before submit.
+	itemNameErrors(names: string[]): (EntryNameErrorKindJS | null)[] {
+		return names.map(name => {
+			try {
+				parseName(name)
+
+				return null
+			} catch (e) {
+				if (!(e instanceof EntryNameErrorJS)) {
+					throw e
+				}
+
+				const kind = e.kind()
+
+				e.free()
+
+				return kind
+			}
+		})
 	},
 	// ── Preview ──────────────────────────────────────────────────────────────
 	// Whole-buffer fetch for the preview overlay (image/pdf/docx/text/code/markdown — never the

@@ -1,6 +1,6 @@
 import { type ComponentProps, type SubmitEvent } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { SecretInput } from "@/components/ui/secretInput"
 import { Button } from "@/components/ui/button"
@@ -32,6 +32,9 @@ interface InputDialogProps {
 	maxLength?: ComponentProps<"input">["maxLength"]
 	submitLabel: string
 	validate: (value: string) => boolean
+	// Why the value can't be submitted, shown under the field; null while there is nothing to say (an
+	// empty field only disables the submit). Omitted shows nothing.
+	errorFor?: ((value: string) => string | null) | undefined
 	onOpenChange: (open: boolean) => void
 	onSubmit: (value: string) => void
 }
@@ -59,11 +62,13 @@ function InputDialog({
 	maxLength,
 	submitLabel,
 	validate,
+	errorFor,
 	onOpenChange,
 	onSubmit
 }: InputDialogProps) {
 	const [value, setValue] = useSeededOnOpen(open, initialValue ?? "")
 	const valid = validate(value)
+	const error = errorFor?.(value) ?? null
 
 	const handleOpenChange = pendingGuardedOpenChange(pending, onOpenChange)
 
@@ -83,6 +88,8 @@ function InputDialog({
 		autoFocus: true,
 		placeholder,
 		disabled: pending,
+		"aria-invalid": error !== null ? true : undefined,
+		"aria-describedby": error !== null ? "input-dialog-error" : undefined,
 		onChange: e => {
 			setValue(e.target.value)
 		},
@@ -108,7 +115,7 @@ function InputDialog({
 						<DialogTitle>{title}</DialogTitle>
 						<DialogDescription>{body}</DialogDescription>
 					</DialogHeader>
-					<Field>
+					<Field data-invalid={error !== null ? true : undefined}>
 						<FieldLabel htmlFor="input-dialog-value">{label}</FieldLabel>
 						{secret === true ? (
 							<SecretInput {...fieldProps} />
@@ -119,6 +126,7 @@ function InputDialog({
 								{...fieldProps}
 							/>
 						)}
+						{error !== null ? <FieldError id="input-dialog-error">{error}</FieldError> : null}
 					</Field>
 					<DialogFooter>
 						<Button

@@ -8,9 +8,10 @@ import type { File, UuidStr } from "@filen/sdk-rs"
 
 // The item menu's "Open as text" through the drive dialog host, and the text viewer's binary guard.
 
-const { overlayProps, previewBytes } = vi.hoisted(() => ({
+const { overlayProps, previewBytes, archiveDialogs } = vi.hoisted(() => ({
 	overlayProps: { current: null as Record<string, unknown> | null },
-	previewBytes: { current: new Uint8Array() }
+	previewBytes: { current: new Uint8Array() },
+	archiveDialogs: [] as { name: string; props: Record<string, unknown> }[]
 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -19,6 +20,28 @@ vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/drive" }))
 vi.mock("@/features/preview/components/previewOverlay", () => ({
 	PreviewOverlay: (props: Record<string, unknown>) => {
 		overlayProps.current = props
+
+		return null
+	}
+}))
+// The archive dialogs, reduced to which one the host mounted and with what.
+vi.mock("@/features/drive/components/compressDialog", () => ({
+	CompressDialog: (props: Record<string, unknown>) => {
+		archiveDialogs.push({ name: "compress", props })
+
+		return null
+	}
+}))
+vi.mock("@/features/drive/components/extractDialog", () => ({
+	ExtractDialog: (props: Record<string, unknown>) => {
+		archiveDialogs.push({ name: "extract", props })
+
+		return null
+	}
+}))
+vi.mock("@/features/drive/components/extractDestinationDialog", () => ({
+	ExtractDestinationDialog: (props: Record<string, unknown>) => {
+		archiveDialogs.push({ name: "extractTo", props })
 
 		return null
 	}
@@ -54,6 +77,7 @@ function named(name: string) {
 afterEach(() => {
 	cleanup()
 	overlayProps.current = null
+	archiveDialogs.length = 0
 })
 
 describe("useDriveDialogHost — Open as text", () => {
@@ -81,6 +105,38 @@ describe("useDriveDialogHost — Open as text", () => {
 		render(<>{result.current.renderActiveDialog()}</>)
 
 		expect(overlayProps.current).toMatchObject({ asText: false })
+	})
+})
+
+describe("useDriveDialogHost — Compress and Extract", () => {
+	it.each([
+		["compress", "compress", "items"],
+		["extract", "extract", "item"],
+		["extractTo", "extractTo", "items"]
+	] as const)("routes the item menu's %s to its dialog", (kind, name, prop) => {
+		const item = named("backup.zip")
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "sharedIn", selectedItems: [], hiddenNoticeApplies: false }))
+
+		act(() => {
+			result.current.handleItemAction(kind, item)
+		})
+
+		render(<>{result.current.renderActiveDialog()}</>)
+
+		expect(archiveDialogs.at(-1)).toMatchObject({ name, props: { variant: "sharedIn", [prop]: prop === "item" ? item : [item] } })
+	})
+
+	it.each(["compress", "extractTo"] as const)("routes the bulk %s to its dialog on the whole selection", kind => {
+		const selectedItems = [named("a.zip"), named("b.zip")]
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", selectedItems, hiddenNoticeApplies: false }))
+
+		act(() => {
+			result.current.handleBulkDialogAction(kind)
+		})
+
+		render(<>{result.current.renderActiveDialog()}</>)
+
+		expect(archiveDialogs.at(-1)).toMatchObject({ name: kind, props: { items: selectedItems } })
 	})
 })
 

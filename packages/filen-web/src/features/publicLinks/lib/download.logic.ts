@@ -44,7 +44,8 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 
 	const category = previewType(item)
 
-	if (category === "other") {
+	// The public-link page has no archive browser: an archive offers download only.
+	if (category === "other" || category === "archive") {
 		return "unpreviewable"
 	}
 

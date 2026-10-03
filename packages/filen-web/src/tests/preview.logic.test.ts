@@ -15,9 +15,12 @@ import {
 	extensionOf,
 	codeMirrorLanguageFor,
 	decodeUtf8,
+	bufferedSizeCap,
 	PREVIEW_MAX_BYTES,
 	RAW_IMAGE_EXTENSIONS
 } from "@/features/drive/lib/preview.logic"
+import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
+import { CODE_FILE_EXTENSIONS } from "@filen/shared"
 import { testUuid } from "@/tests/support/uuid"
 
 // Local fixtures mirror bulkActionBar.test.ts's own per-file convention.
@@ -195,8 +198,8 @@ describe("previewType — extension category map", () => {
 		expect(previewType(fileNamed(`source.${ext}`))).toBe("code")
 	})
 
-	// An unknown extension with no mime hint lands here.
-	it.each(["exe", "psd", "zip"])("%s -> other", ext => {
+	// An unknown extension with no mime hint lands here. rar and pkg have the archive icon but no reader.
+	it.each(["exe", "psd", "rar", "pkg"])("%s -> other", ext => {
 		expect(previewType(fileNamed(`file.${ext}`))).toBe("other")
 	})
 
@@ -259,6 +262,40 @@ describe("previewType — extension category map", () => {
 
 	it("a directory resolves other", () => {
 		expect(previewType(dirItem())).toBe("other")
+	})
+})
+
+describe("archive category", () => {
+	it.each([...ARCHIVE_NAME_EXTENSIONS])("%s -> archive", ext => {
+		expect(previewType(fileNamed(`bundle.${ext}`))).toBe("archive")
+	})
+
+	// Code is listed after archives, so an extension in both would silently stop being code.
+	it("shares no extension with the code set", () => {
+		for (const ext of ARCHIVE_NAME_EXTENSIONS) {
+			expect(CODE_FILE_EXTENSIONS.has(ext)).toBe(false)
+		}
+	})
+
+	it("reads a compressed tarball by its last extension, case-insensitively", () => {
+		expect(previewType(fileNamed("backup.tar.gz"))).toBe("archive")
+		expect(previewType(fileNamed("PHOTOS.ZIP"))).toBe("archive")
+	})
+
+	// The archive never enters the JS heap: the worker lists it and the page holds only the entries.
+	it("has no buffered size cap, so an archive of any size opens", () => {
+		expect(bufferedSizeCap("archive")).toBeNull()
+		expect(canPreview(fileNamed("disk.tar", { size: 50n * 1024n ** 3n }))).toBe(true)
+		expect(canPreview(fileNamed("bundle.zip", { undecryptable: true }))).toBe(false)
+	})
+
+	it("is not a streamed category", () => {
+		expect(isStreamedCategory("archive")).toBe(false)
+	})
+
+	it("never offers Open as text, whatever the size", () => {
+		expect(canOpenAsText(fileNamed("bundle.zip"))).toBe(false)
+		expect(canOpenAsText(fileNamed("data.gz", { size: 1n }))).toBe(false)
 	})
 })
 
@@ -371,7 +408,7 @@ describe("canPreview", () => {
 	})
 
 	it("is false for an 'other' category — no viewer exists, ever", () => {
-		expect(canPreview(fileNamed("archive.zip"))).toBe(false)
+		expect(canPreview(fileNamed("setup.exe"))).toBe(false)
 	})
 
 	it("is false for a whole-buffer-only category over the size cap", () => {
@@ -452,14 +489,23 @@ describe("previewableSiblings", () => {
 	it("filters to only previewable items, preserving order", () => {
 		const a = fileNamed("a.jpg")
 		const b = dirItem()
-		const c = fileNamed("c.zip")
+		const c = fileNamed("c.exe")
 		const d = fileNamed("d.png")
 
 		expect(previewableSiblings([a, b, c, d])).toEqual([a, d])
 	})
 
 	it("returns an empty array when nothing is previewable", () => {
-		expect(previewableSiblings([dirItem(), fileNamed("a.zip")])).toEqual([])
+		expect(previewableSiblings([dirItem(), fileNamed("a.exe")])).toEqual([])
+	})
+
+	// The preview arrows step onto an archive and open its browser.
+	it("includes archives, whatever their size", () => {
+		const image = fileNamed("a.jpg")
+		const zip = fileNamed("b.zip")
+		const tarball = fileNamed("c.tar.gz", { size: 50n * 1024n ** 3n })
+
+		expect(previewableSiblings([image, zip, tarball])).toEqual([image, zip, tarball])
 	})
 
 	it("returns every item when all are previewable", () => {

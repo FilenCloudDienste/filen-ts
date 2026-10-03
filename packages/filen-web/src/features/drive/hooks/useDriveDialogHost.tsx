@@ -281,6 +281,9 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 			case "info":
 			case "link":
 			case "share":
+			case "compress":
+			case "extract":
+			case "extractTo":
 				return (
 					<ItemDialog
 						kind={activeDialog.kind}

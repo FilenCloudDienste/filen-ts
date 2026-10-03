@@ -306,6 +306,10 @@ export const drive = {
 	driveActionDownload: "Download",
 	/** Item menu — copy the selected item(s) into your own drive: a submenu in the item menus (driveMoveChooseDestination plus a directory tree), the destination picker (driveCopyDialogTitle) from the bulk bar; offered wherever the item can be read */
 	driveActionCopy: "Copy",
+	/** Item menu — submenu packing the selected item(s) into one archive: ZIP, 7-Zip and tarball at once, or every format and option in the compress dialog */
+	driveActionCompress: "Compress",
+	/** Item menu — submenu unpacking the selected archive(s): next to it, into a picked directory, or with options in the extract dialog */
+	driveActionExtract: "Extract",
 	/** Item menu — open the public-link dialog for the selected item */
 	driveActionPublicLink: "Public link",
 	/** Item menu — copy the selected item's existing public-link URL to the clipboard */
@@ -535,6 +539,8 @@ export const drive = {
 	drivePreviewKindCode: "Code",
 	/** Info panel — Kind row value: a Markdown file */
 	drivePreviewKindMarkdown: "Markdown",
+	/** Info panel — Kind row value: an archive or compressed file (zip, 7z, tar, gz, …) */
+	drivePreviewKindArchive: "Archive",
 
 	// ── Public link dialog ───────────────────────────────────────────────────
 	/** Public-link dialog — title (opened via driveActionPublicLink) */

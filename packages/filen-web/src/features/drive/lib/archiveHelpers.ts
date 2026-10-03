@@ -1,6 +1,6 @@
 import type { CompressFormat } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
-import type { ArchiveFormatInfo, ArchiveNameInfo } from "@/workers/sdk.worker"
+import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
 
 // The SDK's archive helpers need wasm, which only the worker loads: each is a worker call, so their
 // answers are kept here. Calls made in one tick (a menu or dialog asking about every format or name at
@@ -113,62 +113,87 @@ export function archiveFormatInfos(formats: readonly CompressFormat[]): Promise<
 	return Promise.all(formats.map(archiveFormatInfo))
 }
 
-const askNameInfo = microBatched((names: string[]) => sdkApi.archiveNameInfo(names))
-// File names are unbounded, so only the most recent are kept.
-const NAME_INFO_CAP = 512
-const nameInfos = new Map<string, ArchiveNameInfo>()
-const askedNames = new Map<string, Promise<ArchiveNameInfo>>()
+// File names are unbounded, so only the most recent answers are kept.
+const NAME_ANSWER_CAP = 512
 
-function rememberNameInfo(name: string, info: ArchiveNameInfo): void {
-	nameInfos.delete(name)
-	nameInfos.set(name, info)
+interface NameMemo<O> {
+	// What an earlier ask already answered, without waiting a tick.
+	cached: (name: string) => O | undefined
+	ask: (name: string) => Promise<O>
+}
 
-	if (nameInfos.size > NAME_INFO_CAP) {
-		const oldest = nameInfos.keys().next()
+// One name answer per name, asked once while in flight and remembered after.
+function nameMemo<O>(call: (names: string[]) => Promise<O[]>): NameMemo<O> {
+	const askBatched = microBatched(call)
+	// Boxed, since an answer may itself be null.
+	const answers = new Map<string, { answer: O }>()
+	const asked = new Map<string, Promise<O>>()
 
-		if (oldest.done !== true) {
-			nameInfos.delete(oldest.value)
+	function remember(name: string, box: { answer: O }): void {
+		answers.delete(name)
+		answers.set(name, box)
+
+		if (answers.size > NAME_ANSWER_CAP) {
+			const oldest = answers.keys().next()
+
+			if (oldest.done !== true) {
+				answers.delete(oldest.value)
+			}
 		}
 	}
-}
 
-// For a menu opened again: what an earlier ask already answered, without waiting a tick.
-export function cachedArchiveNameInfo(name: string): ArchiveNameInfo | undefined {
-	const info = nameInfos.get(name)
+	function known(name: string): { answer: O } | undefined {
+		const box = answers.get(name)
 
-	if (info !== undefined) {
-		rememberNameInfo(name, info)
+		if (box !== undefined) {
+			remember(name, box)
+		}
+
+		return box
 	}
 
-	return info
-}
+	function ask(name: string): Promise<O> {
+		const box = known(name)
 
-export function archiveNameInfo(name: string): Promise<ArchiveNameInfo> {
-	const known = cachedArchiveNameInfo(name)
+		if (box !== undefined) {
+			return Promise.resolve(box.answer)
+		}
 
-	if (known !== undefined) {
-		return Promise.resolve(known)
-	}
+		const pending = asked.get(name)
 
-	const pending = askedNames.get(name)
+		if (pending !== undefined) {
+			return pending
+		}
 
-	if (pending !== undefined) {
-		return pending
-	}
+		const asking = askBatched(name).then(answer => {
+			remember(name, { answer })
 
-	const asked = askNameInfo(name).then(info => {
-		rememberNameInfo(name, info)
-
-		return info
-	})
-
-	askedNames.set(name, asked)
-
-	asked
-		.finally(() => {
-			askedNames.delete(name)
+			return answer
 		})
-		.catch(() => undefined)
 
-	return asked
+		asked.set(name, asking)
+
+		asking
+			.finally(() => {
+				asked.delete(name)
+			})
+			.catch(() => undefined)
+
+		return asking
+	}
+
+	return { cached: name => known(name)?.answer, ask }
 }
+
+const nameInfos = nameMemo((names: string[]) => sdkApi.archiveNameInfo(names))
+
+// For a menu opened again: answered at once when an earlier ask already did.
+export const cachedArchiveNameInfo = nameInfos.cached
+export const archiveNameInfo = nameInfos.ask
+
+const nameErrors = nameMemo((names: string[]) => sdkApi.itemNameErrors(names))
+
+// Why the SDK refuses `name` for an item, null when it takes it: the SDK's own rules, asked rather
+// than copied.
+export const cachedItemNameError = nameErrors.cached
+export const itemNameError = nameErrors.ask

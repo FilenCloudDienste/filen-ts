@@ -6,6 +6,7 @@ import { toastObstructionRef } from "@/lib/toastClearance"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 // Surfaces whose rows carry their own actions mount the floating bar only from two selected up.
 export const BULK_BAR_MIN_SELECTION = 2
@@ -68,5 +69,40 @@ export function BulkActionButton(props: {
 				{props.kbdAction === undefined ? null : <Kbd action={props.kbdAction} />}
 			</TooltipContent>
 		</Tooltip>
+	)
+}
+
+// A BulkActionButton that opens a menu of its `children` (dropdown-family entries) instead of acting.
+export function BulkActionMenuButton(props: {
+	icon: LucideIcon
+	label: string
+	disabled?: boolean | undefined
+	disabledReason?: string | undefined
+	children: ReactNode
+}) {
+	return (
+		<DropdownMenu>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="outline"
+									size="icon-sm"
+									disabled={props.disabled}
+									aria-label={props.label}
+									title={props.disabledReason}
+								>
+									{createElement(props.icon, { "aria-hidden": true })}
+								</Button>
+							}
+						/>
+					}
+				/>
+				<TooltipContent>{props.disabledReason ?? props.label}</TooltipContent>
+			</Tooltip>
+			<DropdownMenuContent align="end">{props.children}</DropdownMenuContent>
+		</DropdownMenu>
 	)
 }

@@ -6,6 +6,7 @@ import { moveActivity, performMove } from "@/features/drive/lib/dnd"
 import { runBulkActivity } from "@/lib/activity/activity"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
+import type { JobDestination } from "@filen/shared"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { isCopyConfirmDisabled, isMoveConfirmDisabled, isMoveRowDisabled } from "@/features/drive/components/moveTargetDialog.logic"
@@ -19,33 +20,53 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
 
-export interface MoveTargetDialogProps {
+interface MoveTargetDialogBaseProps {
 	items: DriveItem[]
 	onClose: () => void
-	// "move" (default) relocates the selection and, on success, clears it from the source listing's
-	// selection (mirrors every other destructive-to-the-source bulk action's own cleanup). "copy" starts
-	// a copy job into the chosen destination and closes at once — the job runs on with its own progress
-	// card — leaving the source and the selection as they were.
-	mode?: "move" | "copy"
-	// Copy mode only: runs the copy instead of starting one over `items` (a public link's own source has
-	// no DriveItem; `items` is then empty and gates nothing).
-	onCopy?: (destination: CopyDestination) => void
+	// Root first, the directory to open last; the root when absent.
+	initialPath?: readonly string[] | undefined
 }
+
+// "move" (default) relocates the selection and, on success, clears it from the source listing's
+// selection (mirrors every other destructive-to-the-source bulk action's own cleanup). "copy" starts a
+// copy job into the chosen destination and closes at once — the job runs on with its own progress card —
+// leaving the source and the selection as they were. "pick" reports the chosen directory to its caller;
+// `items` are the sources it must not land inside. A form that runs its job later (compress, extract)
+// gates its own submit, so its pick works offline; a caller whose pick starts the job (`startsWork`)
+// gets the confirm gated like a copy's.
+export type MoveTargetDialogProps = MoveTargetDialogBaseProps &
+	(
+		| { mode?: "move" | undefined }
+		| {
+				mode: "copy"
+				// Runs the copy instead of starting one over `items` (a public link's own source has no
+				// DriveItem; `items` is then empty and gates nothing).
+				onCopy?: ((destination: CopyDestination) => void) | undefined
+		  }
+		| {
+				mode: "pick"
+				pickLabels: { title: string; confirm: string }
+				onPick: (destination: JobDestination) => void
+				startsWork?: boolean | undefined
+		  }
+	)
 
 // Destination-directory picker — mounted-when-active by the listing's dialog host. Navigation is LOCAL
 // to this dialog (a uuid stack from root, not the "/drive/$" route) so browsing here never disturbs
 // the app's own navigation history; it always browses the "drive" variant regardless of where the
 // move/copy was dispatched from — recents/favorites/trash/sharedIn have no navigable tree of their
 // own to land into (mirrors newDirectory.tsx's identical rule for creating a directory). `mode` is only
-// ever compared against "copy" rather than given a destructuring default, which the React Compiler
-// cannot lower.
-export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDialogProps) {
+// ever compared rather than given a destructuring default, which the React Compiler cannot lower.
+export function MoveTargetDialog(props: MoveTargetDialogProps) {
+	const { items, onClose, mode, initialPath } = props
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	// Both writes in this dialog (the confirm and the in-place create) re-check connectivity here: the
 	// entry point was gated when it was clicked, but the connection can drop while the picker is open.
+	// A form's pick writes nothing; the form gates its own submit.
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
-	const { pathStack, targetUuid, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = useDirectoryPicker()
+	const confirmOfflineGated = !isOnline && (props.mode !== "pick" || props.startsWork === true)
+	const { pathStack, targetUuid, listingQuery, items: rows, namesQuery, descend, goRoot, goTo } = useDirectoryPicker(initialPath)
 	const [filter, setFilter] = useDirectoryPickerFilter(pathStack)
 	const [pending, setPending] = useState(false)
 	const [newFolderOpen, setNewFolderOpen] = useState(false)
@@ -64,12 +85,19 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 	async function handleConfirm(): Promise<void> {
 		const destination = { uuid: targetUuid, name: targetUuid === null ? t("driveMyDrive") : (namesQuery.data?.[targetUuid] ?? "") }
 
-		if (mode === "copy") {
+		if (props.mode === "pick") {
+			props.onPick(destination)
+			onClose()
+
+			return
+		}
+
+		if (props.mode === "copy") {
 			// Never awaited: a copy is a transfer, and transfers never sit behind a pending dialog.
-			if (onCopy === undefined) {
+			if (props.onCopy === undefined) {
 				startCopyWithCard(items, destination)
 			} else {
-				onCopy(destination)
+				props.onCopy(destination)
 			}
 
 			onClose()
@@ -108,7 +136,11 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 				className={LIST_DIALOG_CLASS}
 			>
 				<DialogHeader>
-					<DialogTitle>{t(mode === "copy" ? "driveCopyDialogTitle" : "driveMoveDialogTitle")}</DialogTitle>
+					<DialogTitle>
+						{props.mode === "pick"
+							? props.pickLabels.title
+							: t(mode === "copy" ? "driveCopyDialogTitle" : "driveMoveDialogTitle")}
+					</DialogTitle>
 				</DialogHeader>
 				<PickerBreadcrumb
 					pathStack={pathStack}
@@ -162,19 +194,21 @@ export function MoveTargetDialog({ items, onClose, mode, onCopy }: MoveTargetDia
 					<Button
 						disabled={
 							pending ||
-							!isOnline ||
+							confirmOfflineGated ||
 							listingQuery.status !== "success" ||
-							(mode === "copy"
+							(mode === "copy" || mode === "pick"
 								? isCopyConfirmDisabled(pathStack, items)
 								: isMoveConfirmDisabled(pathStack, items, listingQuery.data))
 						}
-						title={offlineTitle}
+						title={confirmOfflineGated ? offlineTitle : undefined}
 						onClick={() => {
 							void handleConfirm()
 						}}
 					>
 						{pending && <Spinner data-icon="inline-start" />}
-						{t(mode === "copy" ? "driveCopyHereAction" : "driveMoveHereAction")}
+						{props.mode === "pick"
+							? props.pickLabels.confirm
+							: t(mode === "copy" ? "driveCopyHereAction" : "driveMoveHereAction")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

@@ -12,7 +12,9 @@ import {
 	type BulkDialogActionKind
 } from "@/features/drive/components/bulkActionBar.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
+import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
+import { BulkExtractMenuEntries, CompressMenuEntries } from "@/features/drive/components/archiveSubmenus"
+import { BulkActionButton, BulkActionMenuButton, SelectionActionBar } from "@/components/selectionActionBar"
 
 export interface BulkActionBarProps {
 	variant: DriveVariant
@@ -49,6 +51,40 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 				// downloadDescriptor rather than assuming the caller never renders an empty selection.
 				// Every other descriptor stays always-enabled.
 				const disabled = (descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) || offlineDisabled
+				const disabledReason = offlineDisabled ? t("common:offlineActionDisabled") : undefined
+
+				// Compress and Extract open the same entries their submenus hold in the menus.
+				if (descriptor.id === "compress" || descriptor.id === "extract") {
+					return (
+						<BulkActionMenuButton
+							key={descriptor.id}
+							icon={descriptor.icon}
+							label={t(descriptor.labelKey)}
+							disabled={disabled}
+							disabledReason={disabledReason}
+						>
+							{descriptor.id === "compress" ? (
+								<CompressMenuEntries
+									family={DROPDOWN_TREE_MENU_FAMILY}
+									items={selectedItems}
+									variant={variant}
+									onMoreOptions={() => {
+										onDialogAction("compress")
+									}}
+								/>
+							) : (
+								<BulkExtractMenuEntries
+									family={DROPDOWN_TREE_MENU_FAMILY}
+									items={selectedItems}
+									variant={variant}
+									onChooseDestination={() => {
+										onDialogAction("extractTo")
+									}}
+								/>
+							)}
+						</BulkActionMenuButton>
+					)
+				}
 
 				return (
 					<BulkActionButton
@@ -57,7 +93,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 						label={t(descriptor.labelKey)}
 						destructive={descriptor.destructive}
 						disabled={disabled}
-						disabledReason={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+						disabledReason={disabledReason}
 						kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
 						onClick={() => {
 							runBulkDescriptor(descriptor, selectedItems, onDialogAction)
