@@ -56,6 +56,13 @@ describe("fileIconKey", () => {
 		expect(fileIconKey("psd", stubSets)).toBe("psd")
 	})
 
+	it.each("pkg rar tar zip 7zip 7z gz tgz xz txz bz2 tbz tbz2 tb2 zst tzst lz4 br lz lzma tlz".split(" "))(
+		"routes .%s to archive",
+		ext => {
+			expect(fileIconKey(ext, stubSets)).toBe("archive")
+		}
+	)
+
 	// The ninth extension the B39 move changes on mobile: CODE_FILE_EXTENSIONS excludes "markdown" (each
 	// app used to compose it back in independently, and mobile's inline switch never did), but this
 	// classifier's own table includes it directly.
