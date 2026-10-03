@@ -30,6 +30,23 @@ import {
 	PDF_PASSWORD_BYTES,
 	PNG_BYTES
 } from "../helpers/fixtureBytes"
+import {
+	bulkZip,
+	corruptTarGz,
+	dialogZip,
+	emptyZip,
+	garbageZip,
+	gateBigTarGz,
+	gateNextZip,
+	hostileZip,
+	hundredKZip,
+	linksTar,
+	lockedZip,
+	manyLinksZip,
+	noteTxtGz,
+	smallTarGz,
+	treeZip
+} from "../helpers/archiveFixtures"
 
 // Builds the ONE shared, read-only fixture tree every non-mutating spec reads from (helpers/fixtures.ts
 // explains what it is and why it exists). Runs once per suite, after cleanup-setup, in a single browser
@@ -43,18 +60,25 @@ import {
 // the test instead, where it costs one directory rather than twenty-six uploads.
 setup.describe.configure({ retries: 0 })
 
-// Inline bytes, or a size to synthesize on disk. The disk form exists for one file: Playwright reads a
-// path-based file input straight off local disk into the browser, so a 24 MiB payload never has to
-// serialize through the Playwright<->driver bridge as a call argument (the same trick downloads.spec.ts
-// used for the same file before this setup took the upload over).
+// Inline bytes, or a file synthesized on disk: a size to fill, or a generator. The disk forms exist for
+// the big files: Playwright reads a path-based file input straight off local disk into the browser, so a
+// 24 MiB payload never has to serialize through the Playwright<->driver bridge as a call argument (the
+// same trick downloads.spec.ts used for the same file before this setup took the upload over). A
+// generator also runs only here, when its scenario uploads, never at import.
 interface InlineFixture {
 	readonly buffer: Buffer
 	readonly mimeType: string
 }
 
-interface DiskFixture {
+interface FilledFixture {
 	readonly filledBytes: number
 }
+
+interface GeneratedFixture {
+	readonly generate: () => Buffer
+}
+
+type DiskFixture = FilledFixture | GeneratedFixture
 
 type FixturePayload = InlineFixture | DiskFixture
 
@@ -99,22 +123,42 @@ const PAYLOADS = {
 	"download-zip-a.txt": { buffer: Buffer.from(DOWNLOAD_ZIP_A_TEXT, "utf8"), mimeType: "text/plain" },
 	"download-zip-b.txt": { buffer: Buffer.from(DOWNLOAD_ZIP_B_TEXT, "utf8"), mimeType: "text/plain" },
 	"download-sw.txt": { buffer: Buffer.from(DOWNLOAD_SW_TEXT, "utf8"), mimeType: "text/plain" },
-	"download-cancel.bin": { filledBytes: DOWNLOAD_CANCEL_BYTES }
+	"download-cancel.bin": { filledBytes: DOWNLOAD_CANCEL_BYTES },
+	"e2e-arc-corrupt.tar.gz": { buffer: corruptTarGz(), mimeType: "application/gzip" },
+	"e2e-arc-empty.zip": { buffer: emptyZip(), mimeType: "application/zip" },
+	"e2e-arc-garbage.zip": { buffer: garbageZip(), mimeType: "application/zip" },
+	"e2e-arc-hostile.zip": { buffer: hostileZip(), mimeType: "application/zip" },
+	"e2e-arc-links.tar": { buffer: linksTar(), mimeType: "application/x-tar" },
+	"e2e-arc-locked.zip": { buffer: lockedZip(), mimeType: "application/zip" },
+	"e2e-arc-note.txt.gz": { buffer: noteTxtGz(), mimeType: "application/gzip" },
+	"e2e-arc-small.tar.gz": { buffer: smallTarGz(), mimeType: "application/gzip" },
+	"e2e-arc-tree.zip": { buffer: treeZip(), mimeType: "application/zip" },
+	// 8.5 MiB and 9 MB: off disk, like download-cancel.bin.
+	"e2e-arc-gate-big.tar.gz": { generate: gateBigTarGz },
+	"e2e-arc-gate-next.zip": { generate: gateNextZip },
+	"e2e-arc-many-links.zip": { buffer: manyLinksZip(), mimeType: "application/zip" },
+	"e2e-arc-100k.zip": { generate: hundredKZip },
+	"e2e-bulk-a.zip": { buffer: bulkZip("a"), mimeType: "application/zip" },
+	"e2e-bulk-b.zip": { buffer: bulkZip("b"), mimeType: "application/zip" },
+	"e2e-bulk-c.zip": { buffer: bulkZip("c"), mimeType: "application/zip" },
+	"dialog-a.txt": { buffer: Buffer.from("dialog probe a", "utf8"), mimeType: "text/plain" },
+	"dialog-b.txt": { buffer: Buffer.from("dialog probe b", "utf8"), mimeType: "text/plain" },
+	"dialog-c.zip": { buffer: dialogZip(), mimeType: "application/zip" }
 } satisfies Record<FixtureFileName, FixturePayload>
 
 // ONE wall clock for the whole build, the shape cleanup-setup's SWEEP_BUDGET_MS already uses. Each row
 // wait below used to carry a generous pin of its OWN, which across 26 files declared several times the
-// 900s project ceiling (playwright.config.ts, fixtures-setup) — so the ceiling could never be what
+// project ceiling (playwright.config.ts, fixtures-setup) — so the ceiling could never be what
 // stopped a slow build. The harness kill was, and that is the expensive stop: it names nothing, dies
 // before the SDK can release the account-wide `drive-write` lease (leaving it orphaned for its full
 // TTL), and skips every chromium lane depending on this project.
 //
-// 360s is about twice what a healthy build spends between the root create and its last upload, and
-// leaves the ceiling room for the rest: the root-create loop's own declared worst is 495s (3 attempts x
-// 30s goto + 10s settle + 125s create), so 495 + 360 = 855 of 900. The remaining 45s is slack for a
-// directory create or descent still in flight when the budget runs out — those are not pinned to it,
-// they only spend it.
-const UPLOAD_BUDGET_MS = 360_000
+// 420s is about twice what a healthy build spends between the root create and its last upload (the
+// archive scenarios added six directories and ~21 MB to it), and leaves the ceiling room for the rest:
+// the root-create loop's own declared worst is 495s (3 attempts x 30s goto + 10s settle + 125s create),
+// so 495 + 420 = 915 of 960. The remaining 45s is slack for a directory create or descent still in
+// flight when the budget runs out — those are not pinned to it, they only spend it.
+const UPLOAD_BUDGET_MS = 420_000
 
 // Named rather than left to the pin's own timeout text: the point of a self-imposed budget is that the
 // run says which file it was still waiting for, which a harness kill never does.
@@ -132,7 +176,7 @@ async function uploadScenarioFiles(page: Page, scenario: FixtureScenario, workDi
 	// Name and payload carried together rather than as two index-aligned arrays — the two filters below
 	// each drop entries, and an index into the original names would then be pointing at the wrong file.
 	const entries: FixtureEntry<FixturePayload>[] = names.map(name => ({ name, payload: PAYLOADS[name] }))
-	const onDisk = entries.filter((entry): entry is FixtureEntry<DiskFixture> => "filledBytes" in entry.payload)
+	const onDisk = entries.filter((entry): entry is FixtureEntry<DiskFixture> => !("buffer" in entry.payload))
 	const inline = entries.filter((entry): entry is FixtureEntry<InlineFixture> => "buffer" in entry.payload)
 
 	if (onDisk.length > 0 && inline.length > 0) {
@@ -146,7 +190,7 @@ async function uploadScenarioFiles(page: Page, scenario: FixtureScenario, workDi
 			onDisk.map(({ name, payload }) => {
 				const path = join(workDir, name)
 
-				writeFileSync(path, "x".repeat(payload.filledBytes))
+				writeFileSync(path, "generate" in payload ? payload.generate() : "x".repeat(payload.filledBytes))
 
 				return path
 			})

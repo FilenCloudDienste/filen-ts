@@ -1,4 +1,7 @@
 import { test, expect } from "./fixtures"
+import { openArchive, openCompressDialog } from "./helpers/archive"
+import { trackCspViolations } from "./helpers/csp"
+import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { bootTo, openTransfers, waitForListingSettled } from "./helpers/listing"
 import { gotoSettings, openSettingsSection } from "./helpers/settings"
 
@@ -130,5 +133,45 @@ test.describe("narrow viewport", () => {
 			// the last one's box outside a viewport it demonstrably fits.
 			await expect(button).toBeInViewport({ ratio: 0.99 })
 		}
+	})
+
+	// Read-only like the rest: a fixture archive is browsed and a compress dialog opened and cancelled.
+	// The job-cancel prompt needs a running job, which only the write lane may start.
+	test("the archive browser's extracts and the compress dialog fit at 390px", async ({ page }) => {
+		const cspViolations = trackCspViolations(page)
+		const tree = FIXTURE_FILES["archive-browse"][8]
+
+		await bootTo(page)
+
+		// The fixture descent stretches the page for the virtualizer; back to the phone after it.
+		const { listbox } = await openFixtureRows(page, "archive-browse")
+
+		await page.setViewportSize({ width: 390, height: 844 })
+
+		const browser = await openArchive(page, listbox, tree)
+
+		await expect(browser.row("readme.txt")).toBeVisible()
+
+		for (const name of ["Extract selected", "Extract all"]) {
+			await expect(browser.overlay.getByRole("button", { name, exact: true })).toBeInViewport({ ratio: 1 })
+		}
+
+		await browser.close()
+
+		const dialog = await openCompressDialog(page, listbox, [tree])
+
+		// The dialog fits; its form scrolls inside it, the footer at the end of that scroll.
+		await expect(dialog.dialog).toBeInViewport({ ratio: 1 })
+
+		for (const name of ["Compress", "Cancel"]) {
+			const button = dialog.dialog.getByRole("button", { name, exact: true })
+
+			await button.scrollIntoViewIfNeeded()
+			// 0.99 for the transfers toolbar's reason above: a sub-pixel text-sized box.
+			await expect(button).toBeInViewport({ ratio: 0.99 })
+		}
+
+		await dialog.cancel()
+		expect(cspViolations).toEqual([])
 	})
 })

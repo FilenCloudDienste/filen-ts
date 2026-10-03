@@ -51,6 +51,19 @@ interface E2eHooks {
 	enqueueTestChatMessage: (chatUuid: string, content: string) => Promise<boolean>
 	readPersistedInflightChatMessages: (chatUuid: string) => Promise<string[] | null>
 	sweepTestChatsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
+	archiveCatalogueReport: () => Promise<ArchiveCatalogueRow[]>
+}
+
+// One compress-catalogue entry as the real wasm answers it (src/e2e-hooks/index.ts). Plain numbers and
+// strings only, so it crosses the Playwright bridge as it is.
+export interface ArchiveCatalogueRow {
+	choice: string
+	method: string | null
+	extension: string
+	levels: { min: number; max: number; defaultLevel: number } | null
+	maxLevel: number | null
+	probeMemory: number | null
+	levelMemory: (number | null)[]
 }
 
 // Mirrors src/types/desktop.d.ts's DesktopBridge for the same reason as E2eHooks above: this project

@@ -46,7 +46,28 @@ export const FIXTURE_FILES = {
 	"download-fsa": ["download-fsa.txt"],
 	"download-zip": ["download-zip-a.txt", "download-zip-b.txt"],
 	"download-sw": ["download-sw.txt"],
-	"download-cancel": ["download-cancel.bin"]
+	"download-cancel": ["download-cancel.bin"],
+	// The archive browser's read-only subjects (helpers/archiveFixtures.ts builds each). Name order is
+	// the overlay pager's order, which the keyboard and entry-point legs step through. Every archive is
+	// named "e2e-…": an extract of one may be trashed, and its directory takes the archive's base name.
+	"archive-browse": [
+		"e2e-arc-corrupt.tar.gz",
+		"e2e-arc-empty.zip",
+		"e2e-arc-garbage.zip",
+		"e2e-arc-hostile.zip",
+		"e2e-arc-links.tar",
+		"e2e-arc-locked.zip",
+		"e2e-arc-note.txt.gz",
+		"e2e-arc-small.tar.gz",
+		"e2e-arc-tree.zip"
+	],
+	// The gate pair: the big tarball lists only on "Browse contents", the zip after it at once.
+	"archive-gate": ["e2e-arc-gate-big.tar.gz", "e2e-arc-gate-next.zip"],
+	"archive-report": ["e2e-arc-many-links.zip"],
+	"archive-huge": ["e2e-arc-100k.zip"],
+	"archive-bulk": ["e2e-bulk-a.zip", "e2e-bulk-b.zip", "e2e-bulk-c.zip"],
+	// Text files for the compress dialog's naming, and one zip for a mixed archive + file selection.
+	"archive-dialogs": ["dialog-a.txt", "dialog-b.txt", "dialog-c.zip"]
 } as const
 
 export type FixtureScenario = keyof typeof FIXTURE_FILES

@@ -14,6 +14,9 @@ import { enqueueChatMessage } from "@/features/chats/lib/sync"
 import { INFLIGHT_CHAT_MESSAGES_KV_KEY, inflightChatMessagesSchema } from "@/features/chats/lib/sync.logic"
 import { chatsQueryUpsert, chatsQueryGet } from "@/features/chats/queries/chats"
 import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
+import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
+import { archiveFormatInfos } from "@/features/drive/lib/archiveHelpers"
+import { withLevel } from "@/features/drive/lib/archiveFormats"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
 // env condition in main.tsx, so a normal build dead-code-eliminates this whole module — proven by
@@ -172,6 +175,21 @@ interface E2eHooks {
 	// Returns the count removed.
 	// `minAgeMs` age-gates the match against `Chat.created` — see olderThan.
 	sweepTestChatsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
+	// What the real wasm answers for every entry of the compress dialog's format catalogue, at this page's
+	// codec memory budget: the extension, the level range, the highest level the budget runs, the
+	// encoder memory of the catalogue's own probe (level 1 for zip and 7z methods) and of every level
+	// from min to max. Proves each probe and level is one the SDK takes, which the dialog relies on.
+	archiveCatalogueReport: () => Promise<ArchiveCatalogueRow[]>
+}
+
+interface ArchiveCatalogueRow {
+	choice: string
+	method: string | null
+	extension: string
+	levels: { min: number; max: number; defaultLevel: number } | null
+	maxLevel: number | null
+	probeMemory: number | null
+	levelMemory: (number | null)[]
 }
 
 declare global {
@@ -447,6 +465,39 @@ export function installE2eHooks(): void {
 			}
 
 			return matches.length
+		}),
+		archiveCatalogueReport: ready(async () => {
+			const infos = await archiveFormatInfos(CATALOGUE.map(entry => entry.probe))
+
+			return Promise.all(
+				CATALOGUE.map(async (entry, index): Promise<ArchiveCatalogueRow> => {
+					const info = infos[index]
+
+					if (info === undefined) {
+						throw new Error(`no format info for ${entry.choice}`)
+					}
+
+					const { levels } = info
+					const levelInfos =
+						levels === null
+							? []
+							: await archiveFormatInfos(
+									Array.from({ length: levels.max - levels.min + 1 }, (_, offset) =>
+										withLevel(entry.probe, levels.min + offset)
+									)
+								)
+
+					return {
+						choice: entry.choice,
+						method: entry.method,
+						extension: info.extension,
+						levels: levels === null ? null : { min: levels.min, max: levels.max, defaultLevel: levels.defaultLevel },
+						maxLevel: info.maxLevel,
+						probeMemory: info.encoderMemory,
+						levelMemory: levelInfos.map(level => level.encoderMemory)
+					}
+				})
+			)
 		})
 	}
 }

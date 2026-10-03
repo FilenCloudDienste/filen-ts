@@ -31,13 +31,13 @@ const BASE_URL = `http://localhost:${String(PORT)}`
 // writes gets bounded concurrency and NO retries: a retried write re-runs its creates and uploads
 // against an account that is, by the very fact of the first failure, already contended.
 //
-// Most of this lane's newer members (downloads, drive-marquee, preview-media, preview-media-formats,
-// thumbnails) are here because they no longer PROVISION anything: they read a shared, read-only
+// Most of this lane's newer members (archive-browse, archive-dialogs, downloads, drive-marquee,
+// preview-media, preview-media-formats, thumbnails) are here because they no longer PROVISION anything: they read a shared, read-only
 // fixture tree the fixtures-setup project builds once (e2e/helpers/fixtures.ts), instead of each test
 // creating a scratch directory and uploading its own files. Provisioning was the only reason those
 // specs ever took the lock.
 const READ_SPECS =
-	/\/(auth|boot|contacts|downloads|drive|drive-marquee|keymap|narrow-viewport|no-coi|no-opfs|preview-media|preview-media-formats|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch)\.spec\.ts$/
+	/\/(archive-browse|archive-dialogs|auth|boot|contacts|downloads|drive|drive-marquee|keymap|narrow-viewport|no-coi|no-opfs|preview-media|preview-media-formats|public-links|register|reset|settings|shell|shortcuts|storage|sw-version|thumbnails|touch)\.spec\.ts$/
 // Own surfaces, own limits: notes hits the free plan's 10-note cap, chats the conversation-create rate
 // limiter. Neither touches the drive lock, but both race THEMSELVES, so each owns a serial lane.
 const NOTES_SPEC = /\/notes\.spec\.ts$/
@@ -90,9 +90,9 @@ function lanes(browser: Browser): Project[] {
 			// + 10s breadcrumb + 30s settle) + 30s settle = 290s.
 			//
 			// 480s, rather than a ceiling sized off the single most expensive spec in the lane: it holds
-			// that 290s preamble with a body's worth of headroom left over for the five specs that read the
-			// tree (downloads, drive-marquee, preview-media, preview-media-formats, thumbnails), while the
-			// other fifteen here never touch it and would only inherit dead headroom — and none of those
+			// that 290s preamble with a body's worth of headroom left over for the specs that read the tree
+			// (archive-browse, archive-dialogs, downloads, drive-marquee, narrow-viewport, preview-media,
+			// preview-media-formats, thumbnails), while the rest here never touch it and would only inherit dead headroom — and none of those
 			// waits is spent on a healthy run, each closes on a rendered row. A spec whose own pinned waits
 			// need more says so with test.setTimeout, where the cost is visible in the file —
 			// downloads.spec.ts (it enters the tree TWICE, so it pays the whole preamble again) and
@@ -227,7 +227,7 @@ export default defineConfig({
 	// 14 spec files at 900s each, more declared ceiling than any run budget could hold. Those are
 	// per-test worst cases a healthy run never spends; this is the outer bound on the run as a whole.
 	// The mandatory serial chain under it IS additive, though — 600s webServer + 120s auth-setup (suite
-	// default) + 600s cleanup-setup + 900s fixtures-setup + 420s fixtures-teardown = 44 min of budget
+	// default) + 600s cleanup-setup + 960s fixtures-setup + 420s fixtures-teardown = 45 min of budget
 	// before and after any spec at all. WebKit's lanes run one test at a time (its storage lock), which is
 	// most of a full run: this is sized for all three browsers (CI runs it nightly, not per push).
 	globalTimeout: 300 * 60_000,
@@ -286,8 +286,9 @@ export default defineConfig({
 			dependencies: ["cleanup-setup"],
 			teardown: "fixtures-teardown",
 			// Above cleanup-setup's own: this budget has to cover the root create's bounded retries (the
-			// stale-lease case, see fixtures.setup.ts) AND the whole serial build after them.
-			timeout: 900_000
+			// stale-lease case, see fixtures.setup.ts) AND the whole serial build after them (495s + the
+			// 420s upload budget + 45s slack).
+			timeout: 960_000
 		},
 		// Above what the single trash can actually burn, because a KILL here is the expensive outcome: it
 		// orphans the `drive-write` lease the trash was holding AND skips the catch that names the leaked
