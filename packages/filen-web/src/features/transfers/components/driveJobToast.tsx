@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import {
@@ -178,7 +178,8 @@ export function DriveJobToast({ jobId, onHeightChange, onDismiss, onRetried, onS
 								variant="outline"
 								size="xs"
 								disabled={job.cancelRequest !== null}
-								onClick={() => {
+								onClick={event => {
+									leaveToaster(event)
 									useDriveJobsStore.getState().setCancelPromptId(jobId)
 								}}
 							>
@@ -222,6 +223,13 @@ export function RoutedDriveJobToast(props: Omit<DriveJobToastProps, "onShowDirec
 			}}
 		/>
 	)
+}
+
+// Sonner's toaster hands focus back to whatever held it before the toaster whenever focus leaves it, which
+// would pull focus straight back out of a dialog a card button opens. Leaving first lets that happen
+// before the dialog takes focus.
+function leaveToaster(event: MouseEvent<HTMLElement>): void {
+	event.currentTarget.blur()
 }
 
 function JobStatusLine({ model }: { model: JobCardModel }) {
@@ -306,7 +314,8 @@ function JobResultActions({
 				<Button
 					variant="ghost"
 					size="xs"
-					onClick={() => {
+					onClick={event => {
+						leaveToaster(event)
 						useDriveJobsStore.getState().setReportJobId(jobId)
 					}}
 				>
@@ -318,7 +327,8 @@ function JobResultActions({
 				<Button
 					variant="outline"
 					size="xs"
-					onClick={() => {
+					onClick={event => {
+						leaveToaster(event)
 						promptExtractPassword(jobId)
 					}}
 				>

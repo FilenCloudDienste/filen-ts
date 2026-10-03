@@ -180,6 +180,25 @@ describe("DriveJobToast for a copy", () => {
 		expect(useDriveJobsStore.getState().cancelPromptId).toBe("job")
 	})
 
+	// Sonner hands focus back to what held it before the toaster once focus leaves the toaster, which would
+	// pull it out of the dialog: the card lets go before the dialog opens.
+	it("lets go of the focus before opening the stop prompt", () => {
+		seed(COPYING)
+		renderCard()
+
+		const cancel = screen.getByRole("button", { name: "Cancel" })
+		const blurred = vi.fn()
+
+		cancel.focus()
+		cancel.addEventListener("blur", () => {
+			blurred(useDriveJobsStore.getState().cancelPromptId)
+		})
+		fireEvent.click(cancel)
+
+		expect(blurred).toHaveBeenCalledWith(null)
+		expect(document.activeElement).not.toBe(cancel)
+	})
+
 	it("expands details with the files in flight", () => {
 		seed({ ...COPYING, active: [{ destUuid: "d", name: "holiday.jpg", size: 2_048, bytesDone: 1_024 }] })
 		renderCard()
