@@ -6,6 +6,8 @@ import {
 	createCopyJob,
 	isQuotaPreflightFailure,
 	settleCopyJob,
+	toItemCounts,
+	toPlanTotals,
 	type CopyCountsInput,
 	type CopyJob,
 	type CopyReportInput,
@@ -285,5 +287,24 @@ describe("settleCopyJob", () => {
 
 		expect(settled.active).toEqual([])
 		expect(settled.paused).toBe(false)
+	})
+})
+
+describe("toItemCounts and toPlanTotals", () => {
+	it("narrow every field to a number", () => {
+		expect(toItemCounts(counts({ dirsCreated: 1n, filesDone: 2n, bytesDone: 3n, entriesSkipped: 4n, bytesSkipped: 5n }))).toEqual({
+			dirsCreated: 1,
+			dirsFailed: 0,
+			filesDone: 2,
+			filesFailed: 0,
+			bytesDone: 3,
+			bytesFailed: 0,
+			dirsNotAttempted: 0,
+			filesNotAttempted: 0,
+			bytesNotAttempted: 0,
+			entriesSkipped: 4,
+			bytesSkipped: 5
+		})
+		expect(toPlanTotals({ dirs: 1n, files: 2n, bytes: 3n })).toEqual({ dirs: 1, files: 2, bytes: 3 })
 	})
 })

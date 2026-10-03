@@ -185,7 +185,8 @@ export function createCopyJob<TItem, TFailure, TRetryable, TError>(
 	}
 }
 
-function toCounts(counts: CopyCountsInput): CopyJobCounts {
+// Shared with the archive jobs, whose plans and item counts take the same shape.
+export function toItemCounts(counts: CopyCountsInput): CopyJobCounts {
 	return {
 		dirsCreated: Number(counts.dirsCreated),
 		dirsFailed: Number(counts.dirsFailed),
@@ -201,7 +202,7 @@ function toCounts(counts: CopyCountsInput): CopyJobCounts {
 	}
 }
 
-function toTotals(totals: CopyTotalsInput): CopyJobTotals {
+export function toPlanTotals(totals: CopyTotalsInput): CopyJobTotals {
 	return { dirs: Number(totals.dirs), files: Number(totals.files), bytes: Number(totals.bytes) }
 }
 
@@ -218,8 +219,8 @@ export function applyCopyUpdate<TFailure, TJob extends CopyJob<unknown, TFailure
 		paused: update.paused,
 		cancelling: update.cancelling,
 		scan: { sourcesDone: Number(update.scan.sourcesDone), sourcesTotal: Number(update.scan.sourcesTotal) },
-		totals: toTotals(update.totals),
-		counts: toCounts(update.counts),
+		totals: toPlanTotals(update.totals),
+		counts: toItemCounts(update.counts),
 		active: update.active.map(file => ({
 			destUuid: file.destUuid,
 			name: file.name,
@@ -286,8 +287,8 @@ export function settleCopyJob<
 
 	return {
 		...job,
-		totals: toTotals(report.totals),
-		counts: toCounts(report.counts),
+		totals: toPlanTotals(report.totals),
+		counts: toItemCounts(report.counts),
 		active: [],
 		pausing: false,
 		paused: false,
