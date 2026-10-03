@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Remote } from "comlink"
-import type { CopyCounts, CopyReport, CopyUpdate, StringifiedClient } from "@filen/sdk-rs"
+import type { CopyReport, CopyUpdate, ItemCounts, StringifiedClient } from "@filen/sdk-rs"
 import type { CopyJobEvent, SdkWorkerApi } from "@/workers/sdk.worker"
+import { liveSdkError, sdkErrorDTO } from "@/tests/support/sdkError"
+import { testUuid } from "@/tests/support/uuid"
 
 // The worker's copy bridge against a stand-in client: only the wasm module and Comlink's expose are
 // replaced, so the registries, the callback wrapping and the call lifecycle are the real ones.
@@ -73,7 +75,7 @@ await import("@/workers/sdk.worker")
 // What the page sees: every call answers with a promise.
 const api = exposed.get("api") as Remote<SdkWorkerApi>
 
-function counts(): CopyCounts {
+function counts(): ItemCounts {
 	return {
 		dirsCreated: 0n,
 		dirsFailed: 0n,
@@ -220,6 +222,58 @@ describe("sdk worker copy", () => {
 		expect(copyCalls()[2]?.managedFuture.abortSignal.aborted).toBe(true)
 
 		await api.releaseCopy("looking-up")
+	})
+
+	// A live SDK error clones hollow across Comlink: what crosses must already be its DTO, and the live
+	// error is freed rather than left to the finalizer.
+	it("lifts the errors in a copy's updates and report to DTOs and frees them", async () => {
+		const failed = liveSdkError("Server", "Error of kind Server: error: API Error", { serverMessage: "Upload rejected" })
+		const propagation = liveSdkError("Server", "Error of kind Server: error: link")
+		const stopped = liveSdkError("Reqwest", "Error of kind Reqwest: error: offline", { innerMessage: "error: offline" })
+		const reportFailed = liveSdkError("Server", "Error of kind Server: error: API Error", { serverMessage: "Upload rejected" })
+		const failureInfo = {
+			sourceUuid: testUuid("src"),
+			sourcePath: "a.txt",
+			destParent: testUuid("dest"),
+			destParentDir: { uuid: testUuid("dest") },
+			destName: "a.txt",
+			stage: { type: "upload" } as const,
+			affectedFiles: 1n,
+			affectedBytes: 1n
+		}
+		const onEvent = vi.fn<(event: CopyJobEvent) => void>()
+
+		fakeClient.copyItems.mockImplementation(params => {
+			params.onUpdate({
+				...UPDATE,
+				events: [
+					{ type: "fileFailed", ...failureInfo, error: failed },
+					{ type: "propagationFailed", destUuid: testUuid("d"), error: propagation }
+				]
+			})
+
+			return Promise.resolve({
+				...REPORT,
+				failures: [{ item: { uuid: testUuid("dest") }, info: { ...failureInfo, error: reportFailed } }],
+				error: stopped
+			} as unknown as CopyReport)
+		})
+
+		const report = await api.copyItems("lifted", [], null, undefined, onEvent)
+		const [[event]] = onEvent.mock.calls as [[CopyJobEvent]]
+		const rejected = sdkErrorDTO("Server", "Error of kind Server: error: API Error", { serverMessage: "Upload rejected" })
+
+		expect(copyCalls()[0]).not.toHaveProperty("onTopLevelPlanned")
+		expect(event.type === "update" ? event.update.events.map(e => ("error" in e ? e.error : undefined)) : undefined).toEqual([
+			rejected,
+			sdkErrorDTO("Server", "Error of kind Server: error: link")
+		])
+		expect(report.failures[0]?.info.error).toEqual(rejected)
+		expect(report.error).toEqual(sdkErrorDTO("Reqwest", "Error of kind Reqwest: error: offline", { innerMessage: "error: offline" }))
+		expect(structuredClone(report)).toEqual(report)
+		expect([failed, propagation, stopped, reportFailed].map(error => error.freed.mock.calls.length)).toEqual([1, 1, 1, 1])
+
+		await api.releaseCopy("lifted")
 	})
 
 	it("forgets a released job: a later stop, pause or release does nothing", async () => {

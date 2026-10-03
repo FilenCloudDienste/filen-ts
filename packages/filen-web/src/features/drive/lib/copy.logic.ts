@@ -1,13 +1,4 @@
-import type {
-	CopiedTopLevelItem,
-	CopyEntry,
-	CopyError,
-	CopyEvent,
-	CopyFailure,
-	CopyFailureInfo,
-	CopyReport,
-	CopyUpdate
-} from "@filen/sdk-rs"
+import type { CopiedTopLevelItem, CopyEntry } from "@filen/sdk-rs"
 import {
 	copyJobGlyph,
 	createCopyJob as createSharedCopyJob,
@@ -19,7 +10,8 @@ import {
 	type CopyDestination,
 	type CopyJobGlyph
 } from "@filen/shared"
-import { labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
+import type { ErrorDTO } from "@/lib/sdk/errors"
+import type { CopyEventDTO, CopyFailureDTO, CopyFailureInfoDTO, CopyReportDTO, CopyUpdateDTO } from "@/lib/sdk/jobErrors"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 
@@ -48,13 +40,13 @@ export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph
 	return copyJobGlyph(entries.length, only !== undefined && !("chunks" in only.item))
 }
 
-export interface CopyJob extends SharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, ErrorDTO> {
+export interface CopyJob extends SharedCopyJob<DriveItem, CopyJobFailure, CopyFailureDTO, ErrorDTO> {
 	glyph: CopyJobGlyph
 	// The progress card is showing.
 	cardVisible: boolean
 }
 
-export interface CopyJobReport extends CopyReportInput<CopyJobFailure, CopyFailure, ErrorDTO> {
+export interface CopyJobReport extends CopyReportInput<CopyJobFailure, CopyFailureDTO, ErrorDTO> {
 	// The top-level items the report lists as created.
 	topLevel: CopiedTopLevelItem[]
 	// Existing files it registered new versions of: stored, not created, so never trashed as copies.
@@ -65,45 +57,28 @@ export type CopySettlement = { report: CopyJobReport; maxBytes: number | undefin
 
 export function createCopyJob(id: string, destination: CopyDestination, itemCount: number, glyph: CopyJobGlyph = "items"): CopyJob {
 	return {
-		...createSharedCopyJob<DriveItem, CopyJobFailure, CopyFailure, ErrorDTO>(id, destination, itemCount),
+		...createSharedCopyJob<DriveItem, CopyJobFailure, CopyFailureDTO, ErrorDTO>(id, destination, itemCount),
 		glyph,
 		cardVisible: false
 	}
 }
 
-// The SDK's message is developer text, kept for logs; the card words what it shows with errorLabelOr.
-export function copyErrorDTO(error: CopyError): ErrorDTO {
-	const dto: ErrorDTO = {
-		species: "sdk",
-		kind: error.kind,
-		message: error.message,
-		...(error.innerMessage !== undefined ? { innerMessage: error.innerMessage } : {}),
-		...(error.serverMessage !== undefined ? { serverMessage: error.serverMessage } : {}),
-		...(error.serverCode !== undefined ? { serverCode: error.serverCode } : {}),
-		label: ""
-	}
-
-	dto.label = labelFirst(dto)
-
-	return dto
-}
-
 // The file the backend registered this copy as a new version of, if it did.
-function versionTarget(info: CopyFailureInfo): string | undefined {
+function versionTarget(info: CopyFailureInfoDTO): string | undefined {
 	return info.stage.type === "registeredAsVersion" ? info.stage.existingFile : undefined
 }
 
-function toFailure(info: CopyFailureInfo): CopyJobFailure {
+function toFailure(info: CopyFailureInfoDTO): CopyJobFailure {
 	return {
 		sourceUuid: info.sourceUuid,
 		sourcePath: info.sourcePath,
 		destName: info.destName,
-		error: copyErrorDTO(info.error)
+		error: info.error
 	}
 }
 
 // Only the events that name something the user may want to see are kept.
-function classifyEvents(events: readonly CopyEvent[]): CopyUpdateEvents<CopyJobFailure> {
+function classifyEvents(events: readonly CopyEventDTO[]): CopyUpdateEvents<CopyJobFailure> {
 	const classified: CopyUpdateEvents<CopyJobFailure> = { failures: [], savedAsVersion: 0, renamed: 0, propagationFailed: 0 }
 
 	for (const event of events) {
@@ -133,7 +108,7 @@ function classifyEvents(events: readonly CopyEvent[]): CopyUpdateEvents<CopyJobF
 	return classified
 }
 
-export function copyUpdateInput(update: CopyUpdate): CopyUpdateInput<CopyJobFailure> {
+export function copyUpdateInput(update: CopyUpdateDTO): CopyUpdateInput<CopyJobFailure> {
 	const { runState, events, ...rest } = update
 
 	return {
@@ -146,7 +121,7 @@ export function copyUpdateInput(update: CopyUpdate): CopyUpdateInput<CopyJobFail
 }
 
 // Each file an update reports done, as its source's thumbnail handed to the copy.
-export function copiedFileThumbnails(events: readonly CopyEvent[]): ThumbnailCopy[] {
+export function copiedFileThumbnails(events: readonly CopyEventDTO[]): ThumbnailCopy[] {
 	const copies: ThumbnailCopy[] = []
 
 	for (const event of events) {
@@ -158,8 +133,8 @@ export function copiedFileThumbnails(events: readonly CopyEvent[]): ThumbnailCop
 	return copies
 }
 
-export function copyReportInput(report: CopyReport): CopyJobReport {
-	const failures: CopyFailure[] = []
+export function copyReportInput(report: CopyReportDTO): CopyJobReport {
+	const failures: CopyFailureDTO[] = []
 	const versionTargets = new Set<string>()
 
 	for (const failure of report.failures) {
@@ -179,7 +154,7 @@ export function copyReportInput(report: CopyReport): CopyJobReport {
 		failures: failures.map(failure => ({ failure: toFailure(failure.info), retryable: failure })),
 		savedAsVersionCount: report.failures.length - failures.length,
 		renamedCount: report.renamed.length,
-		error: report.error === undefined ? undefined : copyErrorDTO(report.error),
+		error: report.error,
 		topLevel: report.topLevel,
 		versionTargets
 	}
@@ -226,6 +201,6 @@ export function canRetryCopy(job: CopyJob): boolean {
 }
 
 // Each failed item goes back to the directory it was meant for, under the name it was planned with.
-export function retryEntries(failures: readonly CopyFailure[]): CopyEntry[] {
+export function retryEntries(failures: readonly CopyFailureDTO[]): CopyEntry[] {
 	return failures.map(failure => ({ item: failure.item, destination: failure.info.destParentDir, name: failure.info.destName }))
 }

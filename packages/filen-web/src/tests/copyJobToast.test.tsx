@@ -2,24 +2,25 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { CopyFailure, CopyReport } from "@filen/sdk-rs"
+import type { CopyFailureDTO, CopyReportDTO } from "@/lib/sdk/jobErrors"
 import "@/lib/i18n"
 
 const { pauseTransfer, resumeTransfer, copyItemsTo } = vi.hoisted(() => ({
 	pauseTransfer: vi.fn(),
 	resumeTransfer: vi.fn(),
-	copyItemsTo: vi.fn<() => Promise<CopyReport>>()
+	copyItemsTo: vi.fn<() => Promise<CopyReportDTO>>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { pauseTransfer, resumeTransfer, copyItemsTo } }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
 
 import { CopyJobToast } from "@/features/transfers/components/copyJobToast"
-import { copyErrorDTO, createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
+import { createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
 import { narrowItem } from "@/features/drive/lib/item"
 import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { testUuid } from "@/tests/support/uuid"
+import { sdkErrorDTO } from "@/tests/support/sdkError"
 
 function seed(overrides: Partial<CopyJob> = {}): void {
 	const job: CopyJob = { ...createCopyJob("job", { uuid: null, name: "Photos" }, 3), cardVisible: true, ...overrides }
@@ -51,7 +52,7 @@ const COPYING: Partial<CopyJob> = {
 	etaMs: 6_000
 }
 
-function failure(label: string): CopyFailure {
+function failure(label: string): CopyFailureDTO {
 	return {
 		item: {
 			uuid: testUuid(label),
@@ -73,13 +74,10 @@ function failure(label: string): CopyFailure {
 			destParentDir: { uuid: testUuid("root") },
 			destName: label,
 			stage: { type: "upload" },
-			error: {
-				kind: "Server",
-				message: 'Error of kind Server: error: API Error, message: `Some("Upload rejected")`',
+			error: sdkErrorDTO("Server", 'Error of kind Server: error: API Error, message: `Some("Upload rejected")`', {
 				serverMessage: "Upload rejected",
-				serverCode: undefined,
 				innerMessage: 'error: API Error, message: `Some("Upload rejected")`'
-			},
+			}),
 			affectedFiles: 1n,
 			affectedBytes: 1n
 		}
@@ -202,7 +200,7 @@ describe("CopyJobToast", () => {
 				sourceUuid: f.info.sourceUuid,
 				sourcePath: f.info.sourcePath,
 				destName: f.info.destName,
-				error: copyErrorDTO(f.info.error)
+				error: f.info.error
 			})),
 			renamedCount: 1
 		})
@@ -234,20 +232,12 @@ describe("CopyJobToast", () => {
 		const unknown = failure("unknown.txt")
 		const refused = failure("refused.txt")
 
-		network.info.error = {
-			kind: "Reqwest",
-			message: "Error of kind Reqwest: error: error sending request for url (https://gateway.filen.io/v3/upload)",
-			serverMessage: undefined,
-			serverCode: undefined,
-			innerMessage: "error: error sending request for url (https://gateway.filen.io/v3/upload)"
-		}
-		unknown.info.error = {
-			kind: "Walk",
-			message: "Error of kind Walk: error: walk failed",
-			serverMessage: undefined,
-			serverCode: undefined,
-			innerMessage: "error: walk failed"
-		}
+		network.info.error = sdkErrorDTO(
+			"Reqwest",
+			"Error of kind Reqwest: error: error sending request for url (https://gateway.filen.io/v3/upload)",
+			{ innerMessage: "error: error sending request for url (https://gateway.filen.io/v3/upload)" }
+		)
+		unknown.info.error = sdkErrorDTO("Walk", "Error of kind Walk: error: walk failed", { innerMessage: "error: walk failed" })
 
 		const failed = [network, unknown, refused]
 
@@ -258,7 +248,7 @@ describe("CopyJobToast", () => {
 				sourceUuid: f.info.sourceUuid,
 				sourcePath: f.info.sourcePath,
 				destName: f.info.destName,
-				error: copyErrorDTO(f.info.error)
+				error: f.info.error
 			}))
 		})
 		renderCard()
@@ -277,13 +267,13 @@ describe("CopyJobToast", () => {
 			...COPYING,
 			outcome: {
 				status: "failed",
-				error: copyErrorDTO({
-					kind: "MaxStorageReached",
-					message: "Error of kind MaxStorageReached: error: Error of kind MaxStorageReached: error: API Error",
-					serverMessage: undefined,
-					serverCode: undefined,
-					innerMessage: "error: Error of kind MaxStorageReached: error: API Error"
-				})
+				error: sdkErrorDTO(
+					"MaxStorageReached",
+					"Error of kind MaxStorageReached: error: Error of kind MaxStorageReached: error: API Error",
+					{
+						innerMessage: "error: Error of kind MaxStorageReached: error: API Error"
+					}
+				)
 			}
 		})
 		renderCard()
@@ -336,7 +326,7 @@ describe("CopyJobToast", () => {
 					sourceUuid: failed.info.sourceUuid,
 					sourcePath: failed.info.sourcePath,
 					destName: failed.info.destName,
-					error: copyErrorDTO(failed.info.error)
+					error: failed.info.error
 				}
 			]
 		})
@@ -379,13 +369,7 @@ describe("CopyJobToast", () => {
 			...COPYING,
 			outcome: {
 				status: "failed",
-				error: copyErrorDTO({
-					kind: "Reqwest",
-					message: "Error of kind Reqwest: error: offline",
-					serverMessage: undefined,
-					serverCode: undefined,
-					innerMessage: "error: offline"
-				})
+				error: sdkErrorDTO("Reqwest", "Error of kind Reqwest: error: offline", { innerMessage: "error: offline" })
 			},
 			cancelRequest: "trash",
 			trashResult: { moved: 3, failed: 0 }

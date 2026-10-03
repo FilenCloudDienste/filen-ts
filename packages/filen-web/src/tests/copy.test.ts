@@ -1,17 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type {
-	AnyItemWithContext,
-	CopiedTopLevelItem,
-	CopyCounts,
-	CopyFailure,
-	CopyReport,
-	CopyUpdate,
-	Dir,
-	File,
-	UserInfo,
-	UuidStr
-} from "@filen/sdk-rs"
+import type { AnyItemWithContext, CopiedTopLevelItem, Dir, File, ItemCounts, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { CopyFailureDTO, CopyReportDTO, CopyUpdateDTO } from "@/lib/sdk/jobErrors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 
 type SdkCopyItems = (
@@ -20,11 +10,11 @@ type SdkCopyItems = (
 	destinationUuid: string | null,
 	maxBytes: number | undefined,
 	onEvent: (event: CopyJobEvent) => void
-) => Promise<CopyReport>
+) => Promise<CopyReportDTO>
 
 const { copyItems, copyItemsTo, cancelTransfer, releaseCopy, getUserInfo } = vi.hoisted(() => ({
 	copyItems: vi.fn<SdkCopyItems>(),
-	copyItemsTo: vi.fn<(id: string, entries: unknown, maxBytes: number | undefined, onEvent: unknown) => Promise<CopyReport>>(),
+	copyItemsTo: vi.fn<(id: string, entries: unknown, maxBytes: number | undefined, onEvent: unknown) => Promise<CopyReportDTO>>(),
 	cancelTransfer: vi.fn<(id: string) => void>(),
 	releaseCopy: vi.fn<(id: string) => void>(),
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
@@ -56,12 +46,11 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { discardListingPatches, driveListingQueryKey, flushListingCreates } from "@/features/drive/queries/drive"
 import { testUuid } from "@/tests/support/uuid"
+import { sdkErrorDTO } from "@/tests/support/sdkError"
 
 const ROOT = testUuid("root")
 const DESTINATION = { uuid: null, name: "My Drive" }
-const NO_SERVER = { serverMessage: undefined, serverCode: undefined, innerMessage: undefined }
-
-function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
+function counts(overrides: Partial<ItemCounts> = {}): ItemCounts {
 	return {
 		dirsCreated: 0n,
 		dirsFailed: 0n,
@@ -78,7 +67,7 @@ function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
 	}
 }
 
-function update(overrides: Partial<CopyUpdate> = {}): CopyUpdate {
+function update(overrides: Partial<CopyUpdateDTO> = {}): CopyUpdateDTO {
 	return {
 		phase: "copyingFiles",
 		runState: "running",
@@ -94,7 +83,7 @@ function update(overrides: Partial<CopyUpdate> = {}): CopyUpdate {
 	}
 }
 
-function report(overrides: Partial<CopyReport> = {}): CopyReport {
+function report(overrides: Partial<CopyReportDTO> = {}): CopyReportDTO {
 	return {
 		topLevel: [],
 		failures: [],
@@ -110,7 +99,7 @@ function report(overrides: Partial<CopyReport> = {}): CopyReport {
 const QUOTA_REPORT = report({
 	totals: { dirs: 0n, files: 3n, bytes: 900n },
 	counts: counts(),
-	error: { kind: "MaxStorageReached", message: "the copy needs 900 bytes but only 100 are free", ...NO_SERVER }
+	error: sdkErrorDTO("MaxStorageReached", "the copy needs 900 bytes but only 100 are free")
 })
 
 function mockFile(label: string, parent: UuidStr = ROOT): File {
@@ -151,9 +140,9 @@ function createdFile(file: File): CopiedTopLevelItem {
 	return { request: 0n, sourceUuid: testUuid("source"), item: { type: "file", ...file } }
 }
 
-const CANCELLED = { kind: "Cancelled", message: "Error of kind Cancelled: error: copy cancelled", ...NO_SERVER } as const
+const CANCELLED = sdkErrorDTO("Cancelled", "Error of kind Cancelled: error: copy cancelled")
 
-function copyFailure(label: string, stage: CopyFailure["info"]["stage"] = { type: "upload" }): CopyFailure {
+function copyFailure(label: string, stage: CopyFailureDTO["info"]["stage"] = { type: "upload" }): CopyFailureDTO {
 	return {
 		item: mockFile(label),
 		info: {
@@ -163,13 +152,10 @@ function copyFailure(label: string, stage: CopyFailure["info"]["stage"] = { type
 			destParentDir: { uuid: ROOT },
 			destName: `${label}.txt`,
 			stage,
-			error: {
-				kind: "Server",
-				message: "Error of kind Server: error: API Error",
+			error: sdkErrorDTO("Server", "Error of kind Server: error: API Error", {
 				serverMessage: "Upload rejected",
-				serverCode: undefined,
 				innerMessage: "error: API Error"
-			},
+			}),
 			affectedFiles: 1n,
 			affectedBytes: 100n
 		}
@@ -399,7 +385,7 @@ describe("runCopyJob", () => {
 
 	it("settles a copy with failures as completedWithErrors", async () => {
 		const deps = makeDeps()
-		const failure: CopyFailure = {
+		const failure: CopyFailureDTO = {
 			item: mockFile("failed"),
 			info: {
 				sourceUuid: testUuid("failed"),
@@ -408,7 +394,7 @@ describe("runCopyJob", () => {
 				destParentDir: { uuid: ROOT },
 				destName: "failed.txt",
 				stage: { type: "upload" },
-				error: { kind: "Server", message: "x", ...NO_SERVER },
+				error: sdkErrorDTO("Server", "x"),
 				affectedFiles: 1n,
 				affectedBytes: 100n
 			}
@@ -425,7 +411,7 @@ describe("runCopyJob", () => {
 	it("drops the row of a cancelled copy but keeps its job", async () => {
 		const deps = makeDeps()
 
-		deps.copyItems.mockResolvedValue(report({ error: { kind: "Cancelled", message: "copy cancelled", ...NO_SERVER } }))
+		deps.copyItems.mockResolvedValue(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 
 		const job = await runCopyJob(deps, request())
 
@@ -643,7 +629,7 @@ describe("cancel", () => {
 				onEvent({ type: "created", item: created(dir) })
 				requestCopyCancel(id, { trashCopied })
 
-				return Promise.resolve(report({ error: { kind: "Cancelled", message: "copy cancelled", ...NO_SERVER } }))
+				return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 			})
 
 			const job = await runCopyJob(deps, request())
@@ -679,7 +665,7 @@ describe("cancel", () => {
 			unsubscribe()
 			requestCopyCancel(id, { trashCopied: true })
 
-			return Promise.resolve(report({ error: { kind: "Cancelled", message: "copy cancelled", ...NO_SERVER } }))
+			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
 
 		await runCopyJob(deps, request())
@@ -698,7 +684,7 @@ describe("cancel", () => {
 			onEvent({ type: "created", item: created(dir) })
 			requestCopyCancel(id, { trashCopied: true })
 
-			return Promise.resolve(report({ error: { kind: "Cancelled", message: "copy cancelled", ...NO_SERVER } }))
+			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
 
 		const job = await runCopyJob(deps, request())
@@ -713,7 +699,7 @@ describe("cancel", () => {
 		deps.copyItems.mockImplementation(id => {
 			requestCopyCancel(id, { trashCopied: true })
 
-			return Promise.resolve(report({ error: { kind: "Cancelled", message: "copy cancelled", ...NO_SERVER } }))
+			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
 
 		await runCopyJob(deps, request())
@@ -1136,9 +1122,7 @@ describe("startCopy and retryFailedCopy", () => {
 
 	// The card, or the transfers row, is how a copy's end shows.
 	it("announces no ending with a toast, whether the copy finished or failed", async () => {
-		copyItems
-			.mockResolvedValueOnce(report())
-			.mockResolvedValueOnce(report({ error: { kind: "Server", message: "boom", ...NO_SERVER } }))
+		copyItems.mockResolvedValueOnce(report()).mockResolvedValueOnce(report({ error: sdkErrorDTO("Server", "boom") }))
 
 		for (const expected of ["done", "failed"]) {
 			const id = startCopy([narrowItem(mockFile("a"))], DESTINATION) ?? ""
@@ -1153,7 +1137,7 @@ describe("startCopy and retryFailedCopy", () => {
 	})
 
 	it("retries a job's failures as a new job into their own directories", async () => {
-		const failure: CopyFailure = {
+		const failure: CopyFailureDTO = {
 			item: mockFile("failed"),
 			info: {
 				sourceUuid: testUuid("failed"),
@@ -1162,7 +1146,7 @@ describe("startCopy and retryFailedCopy", () => {
 				destParentDir: { uuid: ROOT },
 				destName: "failed.txt",
 				stage: { type: "upload" },
-				error: { kind: "Server", message: "x", ...NO_SERVER },
+				error: sdkErrorDTO("Server", "x"),
 				affectedFiles: 1n,
 				affectedBytes: 100n
 			}

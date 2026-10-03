@@ -1,42 +1,59 @@
 import { describe, expect, it } from "vitest"
 import { toErrorDTO, asErrorDTO, labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
+import { liveSdkError } from "@/tests/support/sdkError"
 
-// Models a live FilenSdkError WITHOUT pinning its class name: production minification mangles the
-// real glue class to an arbitrary identifier, so detection must NOT lean on `constructor.name`. The
-// shape is what matters — a `kind` string field plus the wasm accessor METHODS (message/inner/
-// server) — so the class is deliberately named `X` and does NOT extend Error, proving both.
-class X {
-	kind = "Unauthenticated"
-	message(): string {
-		return "outer"
-	}
-	inner_message(): string {
-		return "inner detail"
-	}
-	server_message(): string {
-		return "API key not found"
-	}
-	server_code(): string {
-		return "api_key_not_found"
-	}
+// Production minification mangles the real glue class to an arbitrary identifier, so detection must NOT
+// lean on `constructor.name`: the stand-in is neither named FilenSdkError nor an Error.
+function live() {
+	return liveSdkError("Unauthenticated", "outer", {
+		innerMessage: "inner detail",
+		serverMessage: "API key not found",
+		serverCode: "api_key_not_found"
+	})
 }
 
 describe("toErrorDTO", () => {
 	it("classifies an SDK error by shape even when its class name is minified (no constructor.name match)", () => {
-		expect(X.name).not.toBe("FilenSdkError")
-		const dto = toErrorDTO(new X())
+		const error = live()
+		expect(error.constructor.name).not.toBe("FilenSdkError")
+		expect(error).not.toBeInstanceOf(Error)
+		const dto = toErrorDTO(error)
 		expect(dto.species).toBe("sdk")
 		expect(dto.kind).toBe("Unauthenticated")
 		expect(dto.serverMessage).toBe("API key not found")
 		expect(dto.label).toBe("API key not found")
+		expect(dto.message).toBe("outer")
+		expect(dto.innerMessage).toBe("inner detail")
+		expect(dto.serverCode).toBe("api_key_not_found")
 		expect(structuredClone(dto)).toEqual(dto)
+	})
+
+	it("reads an accessor that is a method rather than a getter", () => {
+		class Y {
+			kind = "IO"
+			message(): string {
+				return "Error of kind IO: disk full"
+			}
+			inner_message(): string {
+				return "disk full"
+			}
+			server_message(): undefined {
+				return undefined
+			}
+		}
+
+		const dto = toErrorDTO(new Y())
+		expect(dto.species).toBe("sdk")
+		expect(dto.message).toBe("Error of kind IO: disk full")
+		expect(dto.label).toBe("disk full")
+		expect(dto.serverMessage).toBeUndefined()
 	})
 
 	it("classifies a hollow structured clone (accessor METHODS stripped) as plain, not sdk", () => {
 		// structuredClone drops prototype methods and keeps only own data — exactly what crossing
 		// postMessage does to a FilenSdkError. The surviving `kind` data field alone must NOT read as
 		// sdk; the missing `server_message` method is what keeps the duck-check safe.
-		const hollow = structuredClone(new X())
+		const hollow = structuredClone(live())
 		expect(typeof (hollow as { server_message?: unknown }).server_message).not.toBe("function")
 		expect(toErrorDTO(hollow).species).toBe("plain")
 	})

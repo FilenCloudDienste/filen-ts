@@ -9,7 +9,6 @@ import init, {
 	type AnyItemWithContext,
 	type CopyEntry,
 	type CopyReport,
-	type CopyUpdate,
 	type CopiedTopLevelItem,
 	type StringifiedClient,
 	type UserInfo,
@@ -67,6 +66,7 @@ import init, {
 } from "@filen/sdk-rs"
 import { InFlight, run, runEffect, runTimeout } from "@filen/shared"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
+import { copyReportToDTO, copyUpdateToDTO, type CopyReportDTO, type CopyUpdateDTO } from "@/lib/sdk/jobErrors"
 import { log } from "@/lib/log"
 import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 import {
@@ -215,21 +215,20 @@ function throttledProgress<Args extends unknown[]>(
 // A copy's callbacks as one stream to the caller, in the order the SDK makes them. They travel on the
 // callback's own port and the result on the worker's, and two ports keep no order between them, so a
 // call returns only once the caller has taken every event it sent.
-export type CopyJobEvent = { type: "update"; update: CopyUpdate } | { type: "created"; item: CopiedTopLevelItem }
+export type CopyJobEvent = { type: "update"; update: CopyUpdateDTO } | { type: "created"; item: CopiedTopLevelItem }
 
 type CopyJobCall = (
-	callbacks: Pick<Parameters<Client["copyItems"]>[0], "onUpdate" | "onTopLevelPlanned" | "onTopLevelCreated" | "managedFuture">
+	callbacks: Pick<Parameters<Client["copyItems"]>[0], "onUpdate" | "onTopLevelCreated" | "managedFuture">
 ) => Promise<CopyReport>
 
 // Plain worker-side callbacks around the caller's proxy: the wasm layer rejects the proxy object itself.
-// Nothing cleans up after a copy the tab closed on, so the planned items are ignored, but the callback
-// must still be passed: the SDK stands in for a missing one with `new Function("")`, which the
-// production CSP (no 'unsafe-eval') rejects, leaving the copy's promise pending forever.
+// Nothing cleans up after a copy the tab closed on, so the planned items are not asked for. Updates and
+// the report carry live SDK errors, lifted to DTOs here before they cross.
 async function runCopyJob(
 	controls: TransferControls,
 	onEvent: (event: CopyJobEvent) => void | Promise<void>,
 	call: CopyJobCall
-): Promise<CopyReport> {
+): Promise<CopyReportDTO> {
 	// The reply to the last event means the caller ran every earlier one, which came before it on the
 	// same port. Waiting on each instead would cost a round trip per update.
 	let delivered: Promise<void> = Promise.resolve()
@@ -242,10 +241,9 @@ async function runCopyJob(
 	}
 
 	try {
-		return await call({
-			onTopLevelPlanned: () => undefined,
+		const report = await call({
 			onUpdate: update => {
-				deliver({ type: "update", update })
+				deliver({ type: "update", update: copyUpdateToDTO(update) })
 			},
 			onTopLevelCreated: item => {
 				// Resolvable as a parent right away, like a directory createDirectory made.
@@ -257,6 +255,8 @@ async function runCopyJob(
 			},
 			managedFuture: { abortSignal: controls.abort.signal, pauseSignal: controls.pause }
 		})
+
+		return copyReportToDTO(report)
 	} finally {
 		await delivered
 	}
@@ -1030,7 +1030,7 @@ const api = {
 		destinationUuid: string | null,
 		maxBytes: number | undefined,
 		onEvent: (event: CopyJobEvent) => void | Promise<void>
-	): Promise<CopyReport> {
+	): Promise<CopyReportDTO> {
 		const c = requireClient()
 		// Before the destination lookup, which can go to the network: a stop or pause sent meanwhile finds
 		// the job.
@@ -1047,7 +1047,7 @@ const api = {
 		entries: CopyEntry[],
 		maxBytes: number | undefined,
 		onEvent: (event: CopyJobEvent) => void | Promise<void>
-	): Promise<CopyReport> {
+	): Promise<CopyReportDTO> {
 		const c = requireClient()
 
 		return runCopyJob(copyControls(jobId), onEvent, callbacks =>

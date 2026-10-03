@@ -1,5 +1,5 @@
 import * as Comlink from "comlink"
-import type { AnyItemWithContext, CopyEntry, CopyReport } from "@filen/sdk-rs"
+import type { AnyItemWithContext, CopyEntry } from "@filen/sdk-rs"
 import {
 	applyCopyUpdate,
 	copyJobShownBytes,
@@ -16,6 +16,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import type { CopyReportDTO } from "@/lib/sdk/jobErrors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 import { asDirectoryOrFile, narrowItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
 import { findCachedListingItem, normalizeParentUuid, queueListingCreate } from "@/features/drive/queries/drive"
@@ -66,8 +67,8 @@ export interface RunCopyDeps {
 		destinationUuid: string | null,
 		maxBytes: number | undefined,
 		onEvent: OnCopyEvent
-	) => Promise<CopyReport>
-	copyItemsTo: (id: string, entries: CopyEntry[], maxBytes: number | undefined, onEvent: OnCopyEvent) => Promise<CopyReport>
+	) => Promise<CopyReportDTO>
+	copyItemsTo: (id: string, entries: CopyEntry[], maxBytes: number | undefined, onEvent: OnCopyEvent) => Promise<CopyReportDTO>
 	// Frees the worker's stop and pause for the job, which span its calls.
 	release: (id: string) => void
 	transfers: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "setPaused" | "settle" | "remove">

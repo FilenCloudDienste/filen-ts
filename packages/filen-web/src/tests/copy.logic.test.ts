@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest"
-import type { CopyCounts, CopyFailure, CopyFailureInfo, CopyReport, CopyUpdate, Dir, File } from "@filen/sdk-rs"
+import type { Dir, File, ItemCounts } from "@filen/sdk-rs"
 import { applyCopyUpdate, settleCopyJob } from "@filen/shared"
 import { narrowItem } from "@/features/drive/lib/item"
 import {
 	canRetryCopy,
 	copiedFileThumbnails,
 	copiedTopLevel,
-	copyErrorDTO,
 	copyGlyphForEntries,
 	copyGlyphForItems,
 	copyReportInput,
@@ -15,14 +14,16 @@ import {
 	isCopyTrashPending,
 	retryEntries
 } from "@/features/drive/lib/copy.logic"
+import type { CopyFailureDTO, CopyFailureInfoDTO, CopyReportDTO, CopyUpdateDTO } from "@/lib/sdk/jobErrors"
 import { testUuid } from "@/tests/support/uuid"
+import { sdkErrorDTO } from "@/tests/support/sdkError"
 
 const DESTINATION = { uuid: null, name: "My Drive" }
 // The SDK's own message: developer text, kept on the error for logs.
 const SERVER_INNER_MESSAGE = 'error: API Error, message: `Some("Server said no")`'
 const SERVER_MESSAGE = `Error of kind Server: ${SERVER_INNER_MESSAGE}`
 
-function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
+function counts(overrides: Partial<ItemCounts> = {}): ItemCounts {
 	return {
 		dirsCreated: 0n,
 		dirsFailed: 0n,
@@ -39,7 +40,7 @@ function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
 	}
 }
 
-function update(overrides: Partial<CopyUpdate> = {}): CopyUpdate {
+function update(overrides: Partial<CopyUpdateDTO> = {}): CopyUpdateDTO {
 	return {
 		phase: "copyingFiles",
 		runState: "running",
@@ -55,7 +56,7 @@ function update(overrides: Partial<CopyUpdate> = {}): CopyUpdate {
 	}
 }
 
-function failureInfo(overrides: Partial<CopyFailureInfo> = {}): CopyFailureInfo {
+function failureInfo(overrides: Partial<CopyFailureInfoDTO> = {}): CopyFailureInfoDTO {
 	return {
 		sourceUuid: testUuid("src"),
 		sourcePath: "a/b.txt",
@@ -63,13 +64,11 @@ function failureInfo(overrides: Partial<CopyFailureInfo> = {}): CopyFailureInfo 
 		destParentDir: { uuid: testUuid("dest") },
 		destName: "b.txt",
 		stage: { type: "upload" },
-		error: {
-			kind: "Server",
-			message: SERVER_MESSAGE,
+		error: sdkErrorDTO("Server", SERVER_MESSAGE, {
 			serverMessage: "Server said no",
 			serverCode: "code",
 			innerMessage: SERVER_INNER_MESSAGE
-		},
+		}),
 		affectedFiles: 1n,
 		affectedBytes: 100n,
 		...overrides
@@ -95,11 +94,11 @@ function mockFile(label: string): File {
 	}
 }
 
-function failure(overrides: Partial<CopyFailureInfo> = {}): CopyFailure {
+function failure(overrides: Partial<CopyFailureInfoDTO> = {}): CopyFailureDTO {
 	return { item: mockFile("failed"), info: failureInfo(overrides) }
 }
 
-function report(overrides: Partial<CopyReport> = {}): CopyReport {
+function report(overrides: Partial<CopyReportDTO> = {}): CopyReportDTO {
 	return {
 		topLevel: [],
 		failures: [],
@@ -161,7 +160,7 @@ describe("copyUpdateInput", () => {
 	})
 
 	it("reads the run state into the shared job's pause and cancel flags", () => {
-		const flags = (runState: CopyUpdate["runState"]) => {
+		const flags = (runState: CopyUpdateDTO["runState"]) => {
 			const { pausing, paused, cancelling } = copyUpdateInput(update({ runState }))
 
 			return { pausing, paused, cancelling }
@@ -281,13 +280,7 @@ describe("copyReportInput", () => {
 			report({
 				topLevel: [{ request: 0n, sourceUuid: testUuid("s"), item: { type: "dir", ...dir } }],
 				renamed: [{ sourceUuid: testUuid("s"), sourcePath: "x", name: "x (1)", reason: "duplicateName" }],
-				error: {
-					kind: "Server",
-					message: "Error of kind Server: error: API Error",
-					serverMessage: undefined,
-					serverCode: undefined,
-					innerMessage: "error: API Error"
-				}
+				error: sdkErrorDTO("Server", "Error of kind Server: error: API Error", { innerMessage: "error: API Error" })
 			})
 		)
 
@@ -314,13 +307,13 @@ describe("copyReportInput", () => {
 				report({
 					counts: counts(),
 					totals: { dirs: 0n, files: 2n, bytes: 300n },
-					error: {
-						kind: "MaxStorageReached",
-						message: "Error of kind MaxStorageReached: error: the copy needs 300 bytes, 42 are free",
-						serverMessage: undefined,
-						serverCode: undefined,
-						innerMessage: "error: the copy needs 300 bytes, 42 are free"
-					}
+					error: sdkErrorDTO(
+						"MaxStorageReached",
+						"Error of kind MaxStorageReached: error: the copy needs 300 bytes, 42 are free",
+						{
+							innerMessage: "error: the copy needs 300 bytes, 42 are free"
+						}
+					)
 				})
 			),
 			maxBytes: 42
@@ -384,46 +377,6 @@ describe("isCopyTrashPending", () => {
 		expect(canRetryCopy({ ...withRetry, created: [], trashResult: { moved: 2, failed: 0 } })).toBe(true)
 		expect(isCopyTrashPending({ ...stopped, cancelRequest: "keep", created: batch })).toBe(false)
 		expect(isCopyTrashPending({ ...stopped, outcome: { status: "running" }, created: batch })).toBe(false)
-	})
-})
-
-describe("copyErrorDTO", () => {
-	it("labels a copy error server-message first", () => {
-		expect(copyErrorDTO(failureInfo().error)).toEqual({
-			species: "sdk",
-			kind: "Server",
-			message: SERVER_MESSAGE,
-			innerMessage: SERVER_INNER_MESSAGE,
-			serverMessage: "Server said no",
-			serverCode: "code",
-			label: "Server said no"
-		})
-	})
-
-	it("labels one without a server message by its inner message, without the kind wrapper", () => {
-		const innerMessage = "error: No space left on device (os error 28)"
-		const message = `Error of kind IO: ${innerMessage}`
-
-		expect(copyErrorDTO({ kind: "IO", message, serverMessage: undefined, serverCode: undefined, innerMessage })).toEqual({
-			species: "sdk",
-			kind: "IO",
-			message,
-			innerMessage,
-			label: innerMessage
-		})
-	})
-
-	it("falls back to the message and omits absent fields", () => {
-		const message = "Error of kind Cancelled"
-
-		expect(
-			copyErrorDTO({ kind: "Cancelled", message, serverMessage: undefined, serverCode: undefined, innerMessage: undefined })
-		).toEqual({
-			species: "sdk",
-			kind: "Cancelled",
-			message,
-			label: message
-		})
 	})
 })
 

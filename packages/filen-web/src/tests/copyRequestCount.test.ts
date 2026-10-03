@@ -2,7 +2,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import type { CopyCounts, CopyReport, Dir, File, NormalDirsAndFiles, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { Dir, File, ItemCounts, NormalDirsAndFiles, SocketEvent, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { CopyReportDTO } from "@/lib/sdk/jobErrors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
 
 const { listDirectory, copyItems, getUserInfo } = vi.hoisted(() => ({
@@ -15,7 +16,7 @@ const { listDirectory, copyItems, getUserInfo } = vi.hoisted(() => ({
 				destinationUuid: string | null,
 				maxBytes: number | undefined,
 				onEvent: (event: CopyJobEvent) => void
-			) => Promise<CopyReport>
+			) => Promise<CopyReportDTO>
 		>(),
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
@@ -66,7 +67,7 @@ function mockFile(uuid: UuidStr, parent: UuidStr): File {
 	}
 }
 
-function counts(overrides: Partial<CopyCounts> = {}): CopyCounts {
+function counts(overrides: Partial<ItemCounts> = {}): ItemCounts {
 	return {
 		dirsCreated: 0n,
 		dirsFailed: 0n,
@@ -141,7 +142,7 @@ describe("copy request counts", () => {
 
 		const readsBefore = listDirectory.mock.calls.length
 		const keysBefore = listingKeys()
-		const finish = Promise.withResolvers<CopyReport>()
+		const finish = Promise.withResolvers<CopyReportDTO>()
 		const source = narrowItem(mockDir(testUuid("source"), ROOT, "source"))
 
 		expect(readsBefore).toBe(2)

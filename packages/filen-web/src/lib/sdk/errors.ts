@@ -1,7 +1,7 @@
 import { errorMessage } from "@filen/shared"
 
 // Two error species cross the worker boundary: plain `Error` (from wasm-bindgen marshalling /
-// JS) and the SDK's `FilenSdkError` (string `kind` + accessor METHODS). `FilenSdkError` clones
+// JS) and the SDK's `FilenSdkError` (`kind`/`message` getters + accessor METHODS). `FilenSdkError` clones
 // HOLLOW across postMessage (its data lives behind a wasm pointer), so every error must be
 // extracted to this plain, structured-clone-safe DTO BEFORE it crosses Comlink. i18n mapping of
 // `kind` lives main-thread; this module stays worker-safe (no DOM, no i18n).
@@ -22,15 +22,12 @@ export function labelFirst(dto: ErrorDTO): string {
 	return dto.serverMessage ?? dto.innerMessage ?? dto.message
 }
 
-// Call a wasm accessor method by name, tolerating a missing/non-function/throwing accessor and
-// empty strings (a hollow clone's accessors are gone entirely).
-function callAccessor(o: object, m: string): string | undefined {
-	const fn = (o as Record<string, unknown>)[m]
-	if (typeof fn !== "function") {
-		return undefined
-	}
+// Read a wasm accessor by name, a getter (FilenSdkError's `message`) or a method alike, tolerating a
+// missing/throwing accessor and empty strings (a hollow clone's accessors are gone entirely).
+function readAccessor(o: object, m: string): string | undefined {
 	try {
-		const v = (fn as () => unknown).call(o)
+		const accessor = (o as Record<string, unknown>)[m]
+		const v = typeof accessor === "function" ? (accessor as () => unknown).call(o) : accessor
 		return typeof v === "string" && v !== "" ? v : undefined
 	} catch {
 		return undefined
@@ -56,10 +53,10 @@ function isSdkError(e: unknown): e is { kind: string; server_message: () => unkn
 
 export function toErrorDTO(e: unknown): ErrorDTO {
 	if (isSdkError(e)) {
-		const message = callAccessor(e, "message") ?? (e instanceof Error ? e.message : "unknown SDK error")
-		const innerMessage = callAccessor(e, "inner_message")
-		const serverMessage = callAccessor(e, "server_message")
-		const serverCode = callAccessor(e, "server_code")
+		const message = readAccessor(e, "message") ?? (e instanceof Error ? e.message : "unknown SDK error")
+		const innerMessage = readAccessor(e, "inner_message")
+		const serverMessage = readAccessor(e, "server_message")
+		const serverCode = readAccessor(e, "server_code")
 		const dto: ErrorDTO = {
 			species: "sdk",
 			kind: e.kind,

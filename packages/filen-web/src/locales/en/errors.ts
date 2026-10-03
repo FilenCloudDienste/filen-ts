@@ -48,6 +48,18 @@ export const errors = {
 	/** Fires when the SDK rejects a file/directory name (rename, create directory, new text file, move-picker create, upload). The SDK collapses several distinct causes into this one kind, so this message summarises the whole rule set instead of naming one cause; it replaces the raw, English-only detail string that surfaced through labelFirst before */
 	InvalidName:
 		"That name can't be used. A name can't contain \\ / : * ? \" < > |, can't start or end with a space, can't end with a dot, and must be 255 bytes or shorter.",
+	/** Fires when an archive being listed or extracted turns out to be damaged or not what its format claims; shown wherever the archive job reports */
+	ArchiveCorrupt: "This archive is damaged.",
+	/** Fires when an archive uses a format or feature (e.g. a compression method) the extractor can't read; shown wherever the archive job reports */
+	ArchiveUnsupported: "This archive format isn't supported.",
+	/** Fires when extracting would pass a safety limit: more items than allowed, more data than the decompression-bomb guard lets through, or a decoder needing more memory than the browser budget */
+	ArchiveTooLarge: "This archive is too large to extract in the browser.",
+	/** Fires when the background worker running an archive job stopped mid-job (e.g. it ran out of memory) */
+	ArchiveWorkerDied: "The archive worker stopped unexpectedly. Please try again.",
+	/** Fires when an encrypted archive is opened, or a compress asks for encryption, without a password; the extract flow prompts for one on this kind */
+	ArchivePasswordRequired: "This archive needs a password.",
+	/** Fires when the password given for an encrypted archive is wrong; the extract flow prompts again on this kind */
+	ArchiveWrongPassword: "Wrong password. Please try again.",
 	/** Raised by the app (not the SDK) when the browser can't decode a video/audio file's format or codec; shown in the preview, a chat embed and the music player's error line */
 	MediaFormatUnsupported: "Your browser can't play this file's format.",
 	/** Raised by the app (not the SDK) when a video/audio file stopped playing for any other reason (the stream broke, the file couldn't be read); shown wherever the player reports */
