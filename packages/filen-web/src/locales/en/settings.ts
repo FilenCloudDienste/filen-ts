@@ -292,6 +292,22 @@ export const settings = {
 	/** Shown after a preset change — the wasm client only reads these at startup, there is no live setter */
 	settingsAdvancedRestartRequired: "This takes effect the next time Filen loads in this browser tab.",
 
+	// ── Advanced: archives ───────────────────────────────────────────────────
+	/** Advanced group — compressing and extracting archives in this browser tab */
+	settingsAdvancedArchiveTitle: "Archives",
+	settingsAdvancedArchiveDescription: "How this browser tab compresses and extracts archives",
+	/** Select row — the memory one archive job's codecs may use */
+	settingsAdvancedArchiveMemory: "Archive memory",
+	/** Row description; followed by settingsAdvancedRestartRequired. The tab keeps memory it grew into (wasm memory never shrinks) */
+	settingsAdvancedArchiveMemoryDescription:
+		"Memory one archive job may use. More allows higher compression levels and opening archives made with bigger dictionaries. Once used, this tab keeps the memory until it is closed.",
+	/** Select option; {{size}} is a whole number of mebibytes */
+	settingsAdvancedArchiveMemoryOption: "{{size}} MiB",
+	/** Select option for the default value; {{size}} is a whole number of mebibytes */
+	settingsAdvancedArchiveMemoryOptionDefault: "{{size}} MiB (default)",
+	/** Appended to the row description while the saved value awaits the next load; {{size}} is a whole number of mebibytes */
+	settingsAdvancedArchiveMemoryInEffect: "In effect now: {{size}} MiB.",
+
 	// ── Advanced: uploads ────────────────────────────────────────────────────
 	settingsAdvancedUploadsTitle: "Uploads",
 	settingsAdvancedUploadsDescription: "How files are prepared before they are uploaded",

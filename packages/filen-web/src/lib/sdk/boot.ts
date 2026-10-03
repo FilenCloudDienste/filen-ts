@@ -1,4 +1,4 @@
-import type { StringifiedClient } from "@filen/sdk-rs"
+import type { JsClientConfig, StringifiedClient } from "@filen/sdk-rs"
 import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
@@ -12,6 +12,7 @@ import { queryClient } from "@/queries/client"
 import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
 import { getTransferPreferences, buildJsClientConfig } from "@/features/settings/lib/transferConfig"
+import { getArchivePreferences, buildArchiveClientConfig } from "@/features/settings/lib/archiveConfig"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -26,6 +27,15 @@ const bootReady = new Promise<void>(resolve => {
 
 export function whenBootReady(): Promise<void> {
 	return bootReady
+}
+
+// A preference that can't be read leaves its knobs on wasm's own defaults without dropping the other's.
+function readClientConfig<P>(name: string, read: () => Promise<P>, build: (prefs: P) => JsClientConfig): Promise<JsClientConfig> {
+	return read().then(build, (e: unknown) => {
+		log.warn("boot", `failed to read ${name} config; using defaults`, e)
+
+		return {}
+	})
 }
 
 // Drives the worker boot, reflecting each phase into the boot store. There is no separate network
@@ -75,16 +85,21 @@ export async function bootSdk(): Promise<void> {
 			log.error("boot", "opfs unavailable", e)
 			return
 		}
-		// Apply the persisted Advanced-settings transfer config (bandwidth caps + performance preset)
-		// BEFORE the worker ever builds a client: the wasm surface only accepts concurrency/bandwidth/
-		// fileIoMemoryBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's
+		// Apply the persisted Advanced-settings transfer preset and archive codec memory BEFORE the
+		// worker ever builds a client: the wasm surface only accepts concurrency/fileIoMemoryBudget/
+		// archiveCodecMemBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's
 		// `clientConfig`), so this must land before resumeSession/login's first UnauthClient. Never
 		// blocks boot on failure — an unreadable preference just leaves the worker on wasm's own
-		// defaults, same as today.
+		// defaults.
 		try {
-			await sdkApi.setClientConfig(buildJsClientConfig(await getTransferPreferences()))
+			const [transfer, archive] = await Promise.all([
+				readClientConfig("transfer", getTransferPreferences, buildJsClientConfig),
+				readClientConfig("archive", getArchivePreferences, buildArchiveClientConfig)
+			])
+
+			await sdkApi.setClientConfig({ ...transfer, ...archive })
 		} catch (e) {
-			log.warn("boot", "failed to apply transfer config; using defaults", e)
+			log.warn("boot", "failed to apply client config; using defaults", e)
 		}
 		// E2E only: the harness seeds the session through sessionStorage rather than the login form.
 		// Draining it before the resume below makes the very first load already authed, so the route

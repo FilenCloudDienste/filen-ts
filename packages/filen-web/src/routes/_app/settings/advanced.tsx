@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useTranslation } from "react-i18next"
 import { SlidersHorizontalIcon } from "lucide-react"
 import { TransferConfigRow } from "@/features/settings/components/advanced/transferConfigRow"
+import { ArchiveMemoryRow } from "@/features/settings/components/advanced/archiveMemoryRow"
 import { UploadsRow } from "@/features/settings/components/advanced/uploadsRow"
 import { LogsBlock } from "@/features/settings/components/advanced/logsBlock"
 import { AboutRows } from "@/features/settings/components/advanced/aboutRows"
@@ -28,6 +29,12 @@ function AdvancedPage() {
 				description={t("settingsAdvancedTransferDescription")}
 			>
 				<TransferConfigRow />
+			</SettingsGroup>
+			<SettingsGroup
+				title={t("settingsAdvancedArchiveTitle")}
+				description={t("settingsAdvancedArchiveDescription")}
+			>
+				<ArchiveMemoryRow />
 			</SettingsGroup>
 			<SettingsGroup
 				title={t("settingsAdvancedUploadsTitle")}
