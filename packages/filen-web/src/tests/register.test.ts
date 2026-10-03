@@ -39,8 +39,8 @@ function fakeWorker(state: string) {
 
 type FakeWorker = ReturnType<typeof fakeWorker>
 
-function fakeRegistration(waiting: FakeWorker | null = null, installing: FakeWorker | null = null) {
-	return { ...fakeEventTarget(), waiting, installing }
+function fakeRegistration(waiting: FakeWorker | null = null, installing: FakeWorker | null = null, active: FakeWorker | null = null) {
+	return { ...fakeEventTarget(), waiting, installing, active }
 }
 
 type FakeRegistration = ReturnType<typeof fakeRegistration>
@@ -134,24 +134,93 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		await flush()
 
 		const installing = fakeWorker("installing")
+		const active = fakeWorker("activated")
 
 		registration.installing = installing
-		setController(fakeWorker("activated")) // an existing controller: an update, not a first install
+		registration.active = active // an active worker already: an update, not a first install
+		setController(active)
 		registration.dispatch("updatefound")
 
+		registration.installing = null
+		registration.waiting = installing
 		installing.state = "installed"
 		installing.dispatch("statechange")
 
 		expect(onUpdateReady).toHaveBeenCalledTimes(1)
 	})
 
-	it("a worker already waiting when register() resolves fires the update-ready callback exactly once", async () => {
-		const waiting = fakeWorker("installed")
-		const registration = fakeRegistration(waiting)
+	it("first install: the claim reaching the page before the worker's installed state does not prompt", async () => {
+		// Firefox, several tabs opening the origin at once: controllerchange (the worker still
+		// "installing" as the page sees it) lands before that same worker's "installed" statechange.
+		const installing = fakeWorker("installing")
+		const registration = fakeRegistration(null, installing)
+		const { setController, fireControllerChange } = setupBrowser(registration)
+		const onUpdateReady = vi.fn()
+
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(onUpdateReady)
+		await flush()
+
+		setController(installing)
+		fireControllerChange()
+
+		registration.installing = null
+		registration.waiting = installing
+		installing.state = "installed"
+		installing.dispatch("statechange")
+
+		registration.waiting = null
+		registration.active = installing
+		installing.state = "activating"
+		installing.dispatch("statechange")
+
+		expect(onUpdateReady).not.toHaveBeenCalled()
+	})
+
+	it("first install: an installed state change arriving after the worker became active does not prompt", async () => {
+		const installing = fakeWorker("installing")
+		const registration = fakeRegistration(null, installing)
 		const { setController } = setupBrowser(registration)
 		const onUpdateReady = vi.fn()
 
-		setController(fakeWorker("activated"))
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(onUpdateReady)
+		await flush()
+
+		registration.installing = null
+		registration.active = installing
+		setController(installing)
+		installing.state = "installed"
+		installing.dispatch("statechange")
+
+		expect(onUpdateReady).not.toHaveBeenCalled()
+	})
+
+	it("first install: a worker waiting with no active one beside it, the page already claimed, does not prompt", async () => {
+		const waiting = fakeWorker("installed")
+		const { setController } = setupBrowser(fakeRegistration(waiting))
+		const onUpdateReady = vi.fn()
+
+		setController(waiting)
+
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(onUpdateReady)
+		await flush()
+
+		expect(onUpdateReady).not.toHaveBeenCalled()
+	})
+
+	it("a worker already waiting when register() resolves fires the update-ready callback exactly once", async () => {
+		const waiting = fakeWorker("installed")
+		const active = fakeWorker("activated")
+		const registration = fakeRegistration(waiting, null, active)
+		const { setController } = setupBrowser(registration)
+		const onUpdateReady = vi.fn()
+
+		setController(active)
 
 		const { registerSW } = await freshRegisterModule()
 
@@ -163,11 +232,12 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 
 	it("an installing worker found by the sync check plus a later stray updatefound still fires the callback exactly once", async () => {
 		const installing = fakeWorker("installing")
-		const registration = fakeRegistration(null, installing)
+		const active = fakeWorker("activated")
+		const registration = fakeRegistration(null, installing, active)
 		const { setController } = setupBrowser(registration)
 		const onUpdateReady = vi.fn()
 
-		setController(fakeWorker("activated"))
+		setController(active)
 
 		const { registerSW } = await freshRegisterModule()
 
@@ -187,10 +257,11 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 
 	it("applyUpdate posts SKIP_WAITING and the resulting controllerchange reloads exactly once", async () => {
 		const waiting = fakeWorker("installed")
-		const registration = fakeRegistration(waiting)
+		const active = fakeWorker("activated")
+		const registration = fakeRegistration(waiting, null, active)
 		const { reload, setController, fireControllerChange } = setupBrowser(registration)
 
-		setController(fakeWorker("activated"))
+		setController(active)
 
 		const { registerSW, applyUpdate } = await freshRegisterModule()
 
@@ -212,11 +283,12 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 
 	it("ignoring the update prompt (no applyUpdate call) never reloads on a later controllerchange", async () => {
 		const waiting = fakeWorker("installed")
-		const registration = fakeRegistration(waiting)
+		const active = fakeWorker("activated")
+		const registration = fakeRegistration(waiting, null, active)
 		const { reload, setController, fireControllerChange } = setupBrowser(registration)
 		const onUpdateReady = vi.fn()
 
-		setController(fakeWorker("activated"))
+		setController(active)
 
 		const { registerSW } = await freshRegisterModule()
 

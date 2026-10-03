@@ -43,11 +43,13 @@ export function registerSW(onUpdateReady: () => void): void {
 		window.location.reload()
 	})
 
-	// A controller already exists → the worker reaching "installed" is an update, not the page's
-	// first-ever install (which has nothing to prompt for).
-	function watchInstalling(installing: ServiceWorker): void {
+	// An update is a new worker installed beside a different active one; a first install (nothing to
+	// prompt for) has none. The page's controller can't tell them apart: the first worker claims the page
+	// on activating, and Firefox can deliver that claim before the worker's own "installed" state change
+	// (seen with several tabs opening the origin at once).
+	function watchInstalling(reg: ServiceWorkerRegistration, installing: ServiceWorker): void {
 		installing.addEventListener("statechange", () => {
-			if (installing.state === "installed" && navigator.serviceWorker.controller) {
+			if (installing.state === "installed" && reg.active !== null && reg.active !== installing) {
 				onUpdateReady()
 			}
 		})
@@ -62,15 +64,15 @@ export function registerSW(onUpdateReady: () => void): void {
 			// this SDK-boot-gated call ever reaches here — a worker can already be waiting or mid-install
 			// by the time `register()` resolves. Covers that in addition to the forward-looking listener
 			// below, which only catches an update that starts later.
-			if (reg.waiting && navigator.serviceWorker.controller) {
+			if (reg.waiting !== null && reg.active !== null && reg.waiting !== reg.active) {
 				onUpdateReady()
 			} else if (reg.installing) {
-				watchInstalling(reg.installing)
+				watchInstalling(reg, reg.installing)
 			}
 
 			reg.addEventListener("updatefound", () => {
 				if (reg.installing) {
-					watchInstalling(reg.installing)
+					watchInstalling(reg, reg.installing)
 				}
 			})
 
