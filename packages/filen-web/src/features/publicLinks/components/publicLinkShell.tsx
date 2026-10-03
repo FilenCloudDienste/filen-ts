@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { Logo } from "@/features/shell/components/logo"
 import { buttonVariants } from "@/components/ui/button"
 import { usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicLink"
+import { useDismissBootSplash } from "@/lib/bootSplash"
 
 const FILEN_HOME_URL = "https://filen.io"
 const REPORT_ABUSE_MAILTO = "mailto:abuse@filen.io"
@@ -18,6 +19,8 @@ const REPORT_ABUSE_MAILTO = "mailto:abuse@filen.io"
 export function PublicLinkShell({ children }: { children: ReactNode }) {
 	const { t } = useTranslation("publicLinks")
 	const signedIn = usePublicVisitorSignedIn()
+
+	useDismissBootSplash()
 
 	return (
 		<div className="flex min-h-svh flex-col bg-canvas text-foreground">

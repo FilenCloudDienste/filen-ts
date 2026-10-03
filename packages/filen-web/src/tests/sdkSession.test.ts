@@ -31,6 +31,11 @@ vi.mock("@/lib/storage/leader", () => ({
 		})
 }))
 
+// Spied so every session write, delete and resume is checked against the splash's signed-in hint.
+const { writeSignedInHint } = vi.hoisted(() => ({ writeSignedInHint: vi.fn<(signedIn: boolean) => void>() }))
+
+vi.mock("@/lib/signedInHint", () => ({ writeSignedInHint }))
+
 import { persistSession, resumeSession, clearSession, SESSION_KV_KEY } from "@/lib/sdk/session"
 import { log } from "@/lib/log"
 
@@ -51,6 +56,7 @@ beforeEach(() => {
 	vi.restoreAllMocks()
 	injectClient.mockReset()
 	injectClient.mockResolvedValue(undefined)
+	writeSignedInHint.mockReset()
 })
 
 describe("session store (Map-backed fake kv, mocked worker inject)", () => {
@@ -94,5 +100,46 @@ describe("session store (Map-backed fake kv, mocked worker inject)", () => {
 		expect(fakeStore.has(SESSION_KV_KEY)).toBe(false)
 		await expect(resumeSession()).resolves.toBe(false)
 		expect(injectClient).not.toHaveBeenCalled()
+	})
+})
+
+// Login, password reset, the e2e seed and credential changes persist through persistSession; logout and a
+// failed credential-change persist clear through clearSession. Wiring the hint here covers all of them.
+describe("signed-in hint", () => {
+	it("is set once a session is persisted", async () => {
+		await persistSession(sampleBlob())
+
+		expect(writeSignedInHint.mock.calls).toEqual([[true]])
+	})
+
+	it("is not set when the persist fails", async () => {
+		vi.spyOn(fakeStore, "set").mockImplementationOnce(() => {
+			throw new Error("write failed")
+		})
+
+		await expect(persistSession(sampleBlob())).rejects.toThrow("write failed")
+		expect(writeSignedInHint).not.toHaveBeenCalled()
+	})
+
+	it("is cleared with the session", async () => {
+		await clearSession()
+
+		expect(writeSignedInHint.mock.calls).toEqual([[false]])
+	})
+
+	it("is reconciled by every resume outcome", async () => {
+		await resumeSession()
+		expect(writeSignedInHint.mock.lastCall).toEqual([false])
+
+		await persistSession(sampleBlob())
+		writeSignedInHint.mockClear()
+		await resumeSession()
+		expect(writeSignedInHint.mock.calls).toEqual([[true]])
+
+		writeSignedInHint.mockClear()
+		vi.spyOn(log, "warn").mockImplementation(() => undefined)
+		injectClient.mockRejectedValueOnce(new Error("stale session"))
+		await resumeSession()
+		expect(writeSignedInHint.mock.calls).toEqual([[false]])
 	})
 })

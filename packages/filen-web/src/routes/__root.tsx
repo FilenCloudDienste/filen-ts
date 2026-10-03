@@ -12,6 +12,7 @@ import { registerSW } from "@/lib/sw/register"
 import { showUpdateReadyToast } from "@/lib/appUpdate"
 import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/features/shell/components/bootScreen"
+import { useBootSplashShown } from "@/lib/bootSplash"
 import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
 import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
 import { TransfersUnloadGuard } from "@/features/shell/components/transfersUnloadGuard"
@@ -42,6 +43,7 @@ function BootGate() {
 	const error = useBootStore(s => s.error)
 	const pathname = useRouterState({ select: s => s.location.pathname })
 	const navigate = useNavigate()
+	const splashShown = useBootSplashShown()
 	const onNoCoi = pathname === "/no-coi"
 	const onNoOpfs = pathname === "/no-opfs"
 
@@ -105,7 +107,9 @@ function BootGate() {
 			/>
 		)
 	}
-	return <BootScreen />
+	// index.html's splash already covers the page until a real screen dismisses it; BootScreen stands in
+	// only once it is gone.
+	return splashShown ? null : <BootScreen />
 }
 
 function RootLayout() {

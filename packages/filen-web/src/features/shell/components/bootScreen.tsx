@@ -2,9 +2,8 @@ import { useTranslation } from "react-i18next"
 import { Logo } from "@/features/shell/components/logo"
 import { LoadingState } from "@/components/loadingState"
 
-// Full-screen indeterminate boot state shown while the SDK worker downloads + initializes. No
-// determinate progress yet — wasm download progress is a later refinement; this is deliberately a
-// calm, centered brand moment rather than a busy loader.
+// Full-screen indeterminate boot state, shown only when index.html's splash is gone before boot settles
+// (@/lib/bootSplash). A calm, centered brand moment rather than a busy loader.
 export function BootScreen() {
 	const { t } = useTranslation()
 

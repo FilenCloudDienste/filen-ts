@@ -7,7 +7,8 @@ import { createRouter, RouterProvider } from "@tanstack/react-router"
 
 import "@/index.css"
 import { routeTree } from "@/routeTree.gen"
-import { bootSdk } from "@/lib/sdk/boot"
+import { bootSdk, whenBootReady } from "@/lib/sdk/boot"
+import { advanceBootSplash, dismissBootSplash } from "@/lib/bootSplash"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
 import { useReminderStore } from "@/features/shell/store/useReminderStore"
@@ -26,7 +27,15 @@ const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScree
 // NOT live inside a render effect: a guard awaiting boot while boot awaited first paint would
 // deadlock. Not awaited — BootGate observes the zustand boot phases and holds the boot screen until
 // ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
+advanceBootSplash("bundle")
 void bootSdk()
+
+// Each first screen dismisses the splash itself; this only stops one that never does (a router error
+// page) from staying hidden under it. The bundle is a single chunk, so after boot settles the first screen
+// is a render away and the margin is generous.
+void whenBootReady().then(() => {
+	setTimeout(dismissBootSplash, 10_000)
+})
 
 // Every keyboard action, registered before the first render — the defs are static data, so `comboFor`
 // and `<Kbd>` are correct from the very first paint.

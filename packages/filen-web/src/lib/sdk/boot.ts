@@ -11,6 +11,7 @@ import { useBootStore } from "@/stores/boot"
 import { queryClient } from "@/queries/client"
 import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
+import { advanceBootSplash } from "@/lib/bootSplash"
 import { getTransferPreferences, buildJsClientConfig } from "@/features/settings/lib/transferConfig"
 import { getArchivePreferences, buildArchiveClientConfig } from "@/features/settings/lib/archiveConfig"
 
@@ -51,6 +52,7 @@ export async function bootSdk(): Promise<void> {
 			log.error("boot", `${result.reason}: ${result.detail}`)
 			return
 		}
+		advanceBootSplash("engine")
 		// Cheap capability pre-check BEFORE storage() below joins leader election (@/lib/storage/leader) —
 		// catches a browser with no OPFS API at all (Firefox private windows, unsupported/old browsers)
 		// uniformly, for EVERY tab, independent of leader/follower role. Without this, only the LEADER
@@ -85,6 +87,7 @@ export async function bootSdk(): Promise<void> {
 			log.error("boot", "opfs unavailable", e)
 			return
 		}
+		advanceBootSplash("storage")
 		// Apply the persisted Advanced-settings transfer preset and archive codec memory BEFORE the
 		// worker ever builds a client: the wasm surface only accepts concurrency/fileIoMemoryBudget/
 		// archiveCodecMemBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's
@@ -128,6 +131,7 @@ export async function bootSdk(): Promise<void> {
 			// account signs in next — wipe instead of restoring.
 			await purgePersistedQueries()
 		}
+		advanceBootSplash("session")
 		setReady()
 		log.info("boot", `ready (${String(result.threads)} threads)`)
 	} catch (e) {

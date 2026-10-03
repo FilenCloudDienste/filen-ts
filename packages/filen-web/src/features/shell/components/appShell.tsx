@@ -19,6 +19,7 @@ import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
 import { SocketHost } from "@/features/shell/components/socketHost"
 import { AudioPlayerBar } from "@/features/audio/components/audioPlayerBar"
+import { useDismissBootSplash } from "@/lib/bootSplash"
 
 const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 	chats: ChatsSidebar,
@@ -55,6 +56,9 @@ export function AppShell() {
 	const Panel = SIDEBAR_PANEL[sidebarKind]
 	const narrow = useIsNarrowViewport()
 	const [sidebarOpen, setSidebarOpen] = useState(false)
+
+	useDismissBootSplash()
+
 	// The panel is mounted either way (inline in the row, or inside the closed drawer behind display:none),
 	// so the panels themselves cannot tell whether anyone can see them — this is the shell's answer to
 	// that, and it is what keeps a hidden panel's document-level shortcuts from acting on it.

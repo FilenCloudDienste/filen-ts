@@ -4,6 +4,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
+import { writeSignedInHint } from "@/lib/signedInHint"
 
 // The single kv key the persisted SDK session blob lives under, so save/restore and the e2e seed
 // agree on one key. The blob is written via `kvSetJson` (envelope-serialized, bigint-safe — the
@@ -32,23 +33,29 @@ export const sessionSchema = type({
 // The session blob is stored PLAIN at rest, by decision: a best-effort WebCrypto wrap buys no real
 // protection (the unwrap key would have to live beside it), so XSS defense is the CSP, not a storage
 // trick. The blob is secret-equivalent regardless — never log it, never put it in an error/trace.
+// Every session write and delete goes through these two, so the splash's signed-in hint follows them here.
 export async function persistSession(blob: StringifiedClient): Promise<void> {
 	await kvSetJson(SESSION_KV_KEY, blob)
+	writeSignedInHint(true)
 }
 
 export async function clearSession(): Promise<void> {
+	writeSignedInHint(false)
 	await kvDelete(SESSION_KV_KEY)
 }
 
 // Read the persisted blob, validate it, and inject it into the worker. Returns false when there is
-// no session, an unreadable one (kvGetJson already dropped it), or one the SDK rejects.
+// no session, an unreadable one (kvGetJson already dropped it), or one the SDK rejects. Reconciles the
+// signed-in hint either way, so a stale one corrects itself on the next boot.
 export async function resumeSession(): Promise<boolean> {
 	const blob = await kvGetJson(SESSION_KV_KEY, sessionSchema)
 	if (blob === null) {
+		writeSignedInHint(false)
 		return false
 	}
 	try {
 		await sdkApi.injectClient(blob)
+		writeSignedInHint(true)
 		return true
 	} catch (e) {
 		// Schema-valid but the SDK rejected it (stale/tampered internal fields): drop it so the next

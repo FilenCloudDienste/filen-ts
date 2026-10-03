@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "react-i18next"
 import { Logo } from "@/features/shell/components/logo"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { AuthLegalLinks } from "@/features/auth/components/legalLinks"
+import { useDismissBootSplash } from "@/lib/bootSplash"
 
 // Cross-link between the two entry pages; its locale string wraps the link text in <a>.
 interface AuthCardFooter {
@@ -24,6 +25,8 @@ function AuthCard({
 	children: ReactNode
 }) {
 	const { t } = useTranslation("auth")
+
+	useDismissBootSplash()
 
 	return (
 		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 text-foreground">
