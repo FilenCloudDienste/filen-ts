@@ -20,6 +20,7 @@ import {
 	pendingSummaryFigures,
 	pendingSummarySamples,
 	pendingUploadRowKeys,
+	type PendingCancelKept,
 	type PendingGroupFigures,
 	type PendingRowKey
 } from "@/features/drive/lib/pendingUploads.logic"
@@ -561,6 +562,12 @@ export function PendingUploadsBar({ parentUuid, onShow }: { parentUuid: string |
 	)
 }
 
+const KEPT_KEYS = {
+	copied: "drive:drivePendingTransfersCancelKeptCopied",
+	extracted: "drive:drivePendingTransfersCancelKeptExtracted",
+	copiedOrExtracted: "drive:drivePendingTransfersCancelKeptCopiedOrExtracted"
+} as const satisfies Record<NonNullable<PendingCancelKept>, string>
+
 // The one confirm for whichever upload row's Cancel was pressed: the transfers screen's own for an upload
 // or a directory, a count for the summary. Closes itself once there is nothing left to cancel.
 function PendingCancelDialog({
@@ -584,7 +591,13 @@ function PendingCancelDialog({
 		body =
 			subject.jobs === 0
 				? t("drive:drivePendingUploadsCancelAllBody", { count: subject.files })
-				: t("drive:drivePendingTransfersCancelAllBody", { count: subject.files + subject.jobs })
+				: [
+						t("drive:drivePendingTransfersCancelAllBody", { count: subject.files + subject.jobs }),
+						subject.kept === null ? null : t(KEPT_KEYS[subject.kept]),
+						subject.archives === 0 ? null : t("drive:drivePendingTransfersCancelArchiveDiscarded", { count: subject.archives })
+					]
+						.filter(part => part !== null)
+						.join(" ")
 	}
 
 	return (

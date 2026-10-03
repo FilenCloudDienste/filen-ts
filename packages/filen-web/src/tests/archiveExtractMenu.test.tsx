@@ -478,6 +478,23 @@ describe("hard links outside the directory shown", () => {
 		})
 	})
 
+	it("offers no leaving out when the selection holds nothing but those links", async () => {
+		show(fakeSession({ type: "done", summary: SUMMARY }, storeOf(LINKED)), null)
+		press("End")
+		press("Enter")
+		press("End")
+		press(" ")
+		await openMenu("Extract selected")
+		await pick("Extract to “b/” next to the archive")
+
+		expect(screen.getByText(/1 selected hard link points to a file outside/)).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Leave those links out" })).toBeNull()
+
+		fireEvent.click(screen.getByRole("button", { name: "Extract from “photos.tar” instead" }))
+
+		expect(started().request).toMatchObject({ calls: [{ type: "entries", base: "" }] })
+	})
+
 	it("can extract from the directory holding both instead", async () => {
 		await extractLinked()
 

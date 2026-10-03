@@ -192,3 +192,13 @@ export function canRetryExtract(job: ExtractJob): boolean {
 export function canRerunCompress(job: CompressJob): boolean {
 	return job.outcome.status === "failed" || job.outcome.status === "quotaExceeded"
 }
+
+// Whether a settled job's password still has a use: a rerun or retry takes it on, and an extract that
+// stopped for its password keeps it until the prompt's rerun replaces it. Any other is forgotten.
+export function keepsJobPassword(job: CompressJob | ExtractJob): boolean {
+	if (job.kind === "compress") {
+		return canRerunCompress(job)
+	}
+
+	return job.outcome.status === "passwordRequired" || job.outcome.status === "wrongPassword" || canRetryExtract(job)
+}

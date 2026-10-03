@@ -1,4 +1,4 @@
-import { ENTRY_FLAG, ENTRY_KIND, type PackedEntryBatch } from "@/lib/sdk/archiveListing"
+import { ENTRY_FLAG, ENTRY_KIND, MISLEADING_CHARACTER, type PackedEntryBatch } from "@/lib/sdk/archiveListing"
 
 // A listing's entries on the page, append-only. Entries live in chunked typed-array columns (a slot per
 // entry, in arrival order), so growing never copies a column. Directories are nodes (0 the root), made
@@ -46,6 +46,9 @@ export interface EntryStore {
 	dirName: (id: number) => string
 	// -1 for a directory only implied by the paths below it.
 	dirEntrySlot: (id: number) => number
+	// Its entry's flags; for a directory only implied, misleading when its own name has a character the SDK
+	// flags (which an implied directory's paths carry, but nothing of its own).
+	dirFlags: (id: number) => number
 	dirSkip: (id: number) => number
 	dirModified: (id: number) => number
 	childDirs: (id: number) => readonly number[]
@@ -108,6 +111,7 @@ export function createEntryStore(): EntryStore {
 	const dirParents: number[] = [-1]
 	const dirNames: string[] = [""]
 	const dirEntrySlots: number[] = [-1]
+	const impliedDirFlags: number[] = [0]
 	const childDirLists: (number[] | undefined)[] = [undefined]
 	const childEntryLists: (number[] | undefined)[] = [undefined]
 	const aggFileCounts: number[] = [0]
@@ -143,10 +147,12 @@ export function createEntryStore(): EntryStore {
 		const slash = path.lastIndexOf("/")
 		const parentId = slash < 0 ? 0 : ensureDir(path.slice(0, slash))
 		const id = dirParents.length
+		const name = ownString(slash < 0 ? path : path.slice(slash + 1))
 
 		dirParents.push(parentId)
-		dirNames.push(ownString(slash < 0 ? path : path.slice(slash + 1)))
+		dirNames.push(name)
 		dirEntrySlots.push(-1)
+		impliedDirFlags.push(MISLEADING_CHARACTER.test(name) ? ENTRY_FLAG.misleading : 0)
 		childDirLists.push(undefined)
 		childEntryLists.push(undefined)
 		aggFileCounts.push(0)
@@ -346,6 +352,11 @@ export function createEntryStore(): EntryStore {
 		dirParent: id => dirParents[id] ?? -1,
 		dirName: id => dirNames[id] ?? "",
 		dirEntrySlot: id => dirEntrySlots[id] ?? -1,
+		dirFlags: id => {
+			const slot = dirEntrySlots[id] ?? -1
+
+			return slot < 0 ? (impliedDirFlags[id] ?? 0) : (chunkOf(slot).flags[slot & CHUNK_MASK] ?? 0)
+		},
 		dirSkip: id => {
 			const slot = dirEntrySlots[id] ?? -1
 

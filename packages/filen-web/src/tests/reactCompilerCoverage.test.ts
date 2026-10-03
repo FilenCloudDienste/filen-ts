@@ -252,6 +252,16 @@ describe("React Compiler coverage", () => {
 
 	// useVirtualizer opts ThreadList out; the rows it maps must come from compiled ThreadRowContent so a scroll
 	// render skips every unchanged MessageRow.
+	it.each([
+		["src/features/drive/components/compressDialog.tsx", "CompressDialogForm"],
+		["src/features/drive/components/extractDialog.tsx", "ExtractDialog"]
+	])("compiles %s's %s, whose async submit holds no finally", (file, fnName) => {
+		const events = compile(file)
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
+	})
+
 	it("compiles ThreadRowContent, leaving only ThreadList to the virtualizer", () => {
 		const events = compile("src/features/chats/components/thread/messageThread.tsx")
 

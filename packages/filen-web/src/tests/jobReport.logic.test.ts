@@ -30,6 +30,12 @@ describe("revealHiddenCharacters", () => {
 		expect(revealHiddenCharacters("plain/päth.txt")).toBe("plain/päth.txt")
 	})
 
+	it("reveals what the SDK flags, a C1 control and a tag character included, and no other format character", () => {
+		expect(revealHiddenCharacters("a\u0085b")).toBe("a⟨U+0085⟩b")
+		expect(revealHiddenCharacters("a\u{E0041}b")).toBe("a⟨U+E0041⟩b")
+		expect(revealHiddenCharacters("\u0600123")).toBe("\u0600123")
+	})
+
 	it("reveals only the misleading names' rows", () => {
 		const job = extractJob({
 			misleadingNames: capped([{ entry: ENTRY, path: "a‮b" }]),

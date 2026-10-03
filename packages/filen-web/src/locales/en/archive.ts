@@ -128,6 +128,8 @@ export const archive = {
 	archiveLevelSmaller: "Smaller",
 	/** Compress dialog — note under a slider whose top levels are locked; {{from}}–{{to}} = the locked levels, {{budget}} = formatted archive memory setting */
 	archiveLevelLocked: "Levels {{from}}–{{to}} need more than the {{budget}} of archive memory set in Advanced settings",
+	/** Compress dialog — the note above when only the top level is locked; {{level}} = that level, {{budget}} = formatted archive memory setting */
+	archiveLevelLockedOne: "Level {{level}} needs more than the {{budget}} of archive memory set in Advanced settings",
 	/** Compress dialog — replaces the level slider for a format or method that does not compress (plain tar, stored ZIP, copy 7-Zip) */
 	archiveLevelNone: "No compression",
 	/** Compress dialog — switch adding a password to the archive */
@@ -395,8 +397,6 @@ export const archive = {
 	archiveReportRetryFailed: "Retry failed",
 	/** Report — explanation under the Misleading names heading */
 	archiveReportMisleadingExplain: "Names with invisible or direction-changing characters; they may not be what they look like.",
-	/** Report — footer button opening the directory the job wrote to */
-	archiveReportShowDirectory: "Show directory",
 
 	// ── Quick-action errors ──────────────────────────────────────────────────
 	/** Toast when a Compress submenu format cannot run with the archive memory set in Advanced settings; {{format}} = the format's name */

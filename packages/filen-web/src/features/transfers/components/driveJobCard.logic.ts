@@ -238,8 +238,7 @@ export function jobCardModel(job: DriveJob, context: JobCardContext): JobCardMod
 			retry: jobRetryKind(job),
 			report: !running && jobHasReport(job),
 			password: outcome === "passwordRequired" || outcome === "wrongPassword",
-			// What a stop sends to the trash is nothing to go and see.
-			showDirectory: running || job.cancelRequest === "trash" ? null : jobRevealItem(job)
+			showDirectory: running ? null : jobRevealItem(job)
 		}
 	}
 }

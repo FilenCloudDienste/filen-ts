@@ -6,6 +6,7 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import { gateFor } from "@/features/archive/lib/archiveGate.logic"
 import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
 import { ArchiveExtractMenu } from "@/features/archive/components/archiveExtractMenu"
+import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 
 export interface ArchiveGateProps {
@@ -24,7 +25,7 @@ export interface ArchiveGateProps {
 
 // A tarball or single compressed file lists only by reading all of it, so it waits for the user's word:
 // stepping past one in the pager costs nothing. Any archive shows it once its listing was cancelled
-// before reading anything.
+// before reading anything. Listing reads the archive from the cloud, so Browse waits for a connection.
 export function ArchiveGate({
 	source,
 	format,
@@ -35,7 +36,8 @@ export function ArchiveGate({
 	onBrowse,
 	onExtractAll
 }: ArchiveGateProps) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "common"])
+	const isOnline = useIsOnline()
 
 	return (
 		<div className="flex size-full flex-col items-center justify-center gap-4 px-6 text-center">
@@ -49,7 +51,13 @@ export function ArchiveGate({
 					: t("previewArchiveNotListed")}
 			</p>
 			<div className="flex flex-wrap items-center justify-center gap-2">
-				<Button onClick={onBrowse}>{t("previewArchiveBrowse")}</Button>
+				<Button
+					disabled={!isOnline}
+					title={isOnline ? undefined : t("common:offlineActionDisabled")}
+					onClick={onBrowse}
+				>
+					{t("previewArchiveBrowse")}
+				</Button>
 				<ArchiveExtractMenu
 					source={source}
 					newFolderName={newFolderName}

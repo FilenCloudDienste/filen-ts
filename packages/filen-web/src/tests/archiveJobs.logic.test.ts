@@ -12,6 +12,7 @@ import {
 	extractReportInput,
 	extractUpdateInput,
 	isExtractTrashPending,
+	keepsJobPassword,
 	type CompressJobRequest,
 	type ExtractJobRequest
 } from "@/features/drive/lib/archiveJobs.logic"
@@ -307,5 +308,26 @@ describe("retry and rerun", () => {
 		expect(canRerunCompress({ ...job, outcome: { status: "quotaExceeded", neededBytes: null, freeBytes: 0 } })).toBe(true)
 		expect(canRerunCompress({ ...job, outcome: { status: "doneWithIssues" } })).toBe(false)
 		expect(canRerunCompress(job)).toBe(false)
+	})
+
+	it("keeps a settled job's password only while a rerun, a retry or the password prompt can use it", () => {
+		const compress = createWebCompressJob(compressRequest())
+		const extract = createWebExtractJob(extractRequest())
+		const retryable = {
+			...extract,
+			outcome: { status: "doneWithIssues" as const },
+			failures: { items: [failure(1, true)], omitted: 0 }
+		}
+
+		expect(keepsJobPassword({ ...compress, outcome: { status: "failed", error: sdkErrorDTO("Server", "x") } })).toBe(true)
+		expect(keepsJobPassword({ ...compress, outcome: { status: "quotaExceeded", neededBytes: 1, freeBytes: 0 } })).toBe(true)
+		expect(keepsJobPassword({ ...compress, outcome: { status: "done" } })).toBe(false)
+		expect(keepsJobPassword({ ...compress, outcome: { status: "cancelled" } })).toBe(false)
+		expect(keepsJobPassword({ ...extract, outcome: { status: "passwordRequired" } })).toBe(true)
+		expect(keepsJobPassword({ ...extract, outcome: { status: "wrongPassword" } })).toBe(true)
+		expect(keepsJobPassword(retryable)).toBe(true)
+		expect(keepsJobPassword({ ...retryable, failures: { items: [failure(1, false)], omitted: 0 } })).toBe(false)
+		expect(keepsJobPassword({ ...extract, outcome: { status: "done" } })).toBe(false)
+		expect(keepsJobPassword({ ...extract, outcome: { status: "cancelled" } })).toBe(false)
 	})
 })

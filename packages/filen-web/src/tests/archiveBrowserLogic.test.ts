@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { preview } from "@/locales/en/preview"
-import { SKIP_REASONS } from "@/lib/sdk/archiveListing"
+import { ENTRY_FLAG, SKIP_REASONS } from "@/lib/sdk/archiveListing"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { ListingPhase, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
 import { EMPTY_SELECTION, selectAll, setMany } from "@/features/archive/lib/selection"
@@ -13,12 +13,14 @@ import {
 	entryRowKind,
 	failureLabelKey,
 	findRow,
+	hasFlag,
 	headerCheck,
 	holdsSlot,
 	positionIndex,
 	readsWholeArchive,
 	refsView,
 	rowElementId,
+	rowFlags,
 	rowRange,
 	SKIP_LABEL_KEYS,
 	splitCrumbs,
@@ -146,6 +148,19 @@ describe("rows and positions", () => {
 		expect(entryRowKind(links, 2)).toBe("file")
 		expect(entryRowKind(links, 3)).toBe("other")
 		expect(entryRowKind(links, dirRef(links.findDir("d")))).toBe("dir")
+	})
+})
+
+describe("rowFlags", () => {
+	it("flags a directory only implied by its paths when its own name has a character the SDK flags", () => {
+		const store = storeOf(["Invoice\u202Efdp.exe/readme.txt", "plain/a.txt", "zero\u200Bwidth/", "zero\u200Bwidth/b.txt"])
+		const flagged = (path: string): boolean => hasFlag(rowFlags(store, dirRef(store.findDir(path))), ENTRY_FLAG.misleading)
+
+		expect(store.dirEntrySlot(store.findDir("Invoice\u202Efdp.exe"))).toBe(-1)
+		expect(flagged("Invoice\u202Efdp.exe")).toBe(true)
+		expect(flagged("plain")).toBe(false)
+		// A directory with its own entry has the entry's flags, as the SDK set them.
+		expect(flagged("zero\u200Bwidth")).toBe(false)
 	})
 })
 

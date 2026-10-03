@@ -226,7 +226,7 @@ function JobReportBody({ job, onClose }: { job: ArchiveJob; onClose: () => void 
 						}}
 					>
 						<FolderSearchIcon data-icon="inline-start" />
-						{t("archiveReportShowDirectory")}
+						{t("transfers:transfersRowShowInDirectory")}
 					</Button>
 				)}
 				<Button onClick={onClose}>{t("common:close")}</Button>

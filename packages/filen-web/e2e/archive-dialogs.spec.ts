@@ -511,15 +511,12 @@ test.describe("archive dialogs", () => {
 		await dialog.method("Copy (no compression)")
 		await expect(dialog.dialog.getByText("No compression", { exact: true })).toBeVisible()
 
-		// A codec with a single level has nothing to slide.
+		// A codec with a single level has nothing to slide: its level shows on its own.
 		for (const format of [/^Tarball, LZ4 \.tar\.lz4/, /^Tarball, Zstandard \.tar\.zst/]) {
-			const slider = dialog.dialog.getByRole("slider", { includeHidden: true })
-
 			await dialog.format(format)
-			// Its track has no width at all, so the thumb's input is only in the tree as a hidden element.
-			await expect(slider).toBeDisabled()
-			await expect(slider).toHaveAttribute("aria-valuenow", "1")
 			await expect(dialog.levelLine()).toHaveText(/^Level 1 · /)
+			await expect(dialog.dialog.getByRole("slider", { includeHidden: true })).toHaveCount(0)
+			await expect(dialog.dialog.getByText("Faster", { exact: true })).toHaveCount(0)
 		}
 
 		await dialog.cancel()

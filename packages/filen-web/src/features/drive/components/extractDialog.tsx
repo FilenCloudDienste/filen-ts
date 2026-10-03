@@ -2,6 +2,7 @@ import { useId, useReducer, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ChevronRightIcon } from "lucide-react"
+import type { EntryNameErrorKindJS } from "@filen/sdk-rs"
 import { cn, driveItemName } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
@@ -118,25 +119,32 @@ export function ExtractDialog({ item, variant, knownEncrypted, onClose }: Extrac
 
 		submitting.current = true
 
-		try {
-			const checked = validateExtract(state, {
-				disposeAllowed,
-				folderNameError: nameToCheck === null ? null : await itemNameError(nameToCheck)
-			})
+		// No finally, nor a conditional inside the try: the React Compiler skips a component holding either.
+		let folderNameError: EntryNameErrorKindJS | null = null
 
-			// Every error shows at its field already; one only the exact name's answer found shows there too
-			// once it is asked about.
-			if (!checked.ok) {
-				dispatch({ type: "cancelDelete" })
-			} else if (!confirmed && extractSubmitStep(state, checked) === "confirmDelete") {
-				dispatch({ type: "askDeleteConfirm" })
-			} else {
-				start(checked.start)
+		if (nameToCheck !== null) {
+			try {
+				folderNameError = await itemNameError(nameToCheck)
+			} catch (e) {
+				submitting.current = false
+				toast.error(errorLabel(e))
+
+				return
 			}
-		} catch (e) {
-			toast.error(errorLabel(e))
-		} finally {
-			submitting.current = false
+		}
+
+		submitting.current = false
+
+		const checked = validateExtract(state, { disposeAllowed, folderNameError })
+
+		// Every error shows at its field already; one only the exact name's answer found shows there too
+		// once it is asked about.
+		if (!checked.ok) {
+			dispatch({ type: "cancelDelete" })
+		} else if (!confirmed && extractSubmitStep(state, checked) === "confirmDelete") {
+			dispatch({ type: "askDeleteConfirm" })
+		} else {
+			start(checked.start)
 		}
 	}
 

@@ -21,7 +21,7 @@ import { JobReportDialog } from "@/features/transfers/components/jobReportDialog
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import type { DriveJob } from "@/features/drive/lib/driveJobs.logic"
 import type { ExtractSkipped } from "@filen/shared"
-import { compressJob, extractFailure, extractJob } from "@/tests/support/archiveJobFixtures"
+import { compressJob, createdDirectory, extractFailure, extractJob } from "@/tests/support/archiveJobFixtures"
 
 const ENTRY = { archive: "a", index: 0 }
 const ERROR = { species: "plain" as const, message: "m", label: "l" }
@@ -139,6 +139,34 @@ describe("JobReportDialog", () => {
 		open()
 
 		expect(within(await screen.findByRole("dialog")).queryByRole("button", { name: "Retry failed" })).toBeNull()
+	})
+
+	it("shows where the job landed, as the card does, but nothing a stop sent to the trash", async () => {
+		mockListViewport()
+
+		const failures = { items: [extractFailure("a.txt", 0, ERROR)], omitted: 0 }
+
+		seed(extractJob({ outcome: { status: "doneWithIssues" }, failures, firstCreated: createdDirectory("photos") }))
+
+		const view = render(<JobReportDialog />)
+
+		open()
+
+		expect(within(await screen.findByRole("dialog")).getByRole("button", { name: "Show in directory" })).toBeTruthy()
+
+		view.unmount()
+		seed(
+			extractJob({
+				outcome: { status: "doneWithIssues" },
+				failures,
+				firstCreated: createdDirectory("photos"),
+				cancelRequest: "trash"
+			})
+		)
+		render(<JobReportDialog />)
+		open()
+
+		expect(within(await screen.findByRole("dialog")).queryByRole("button", { name: "Show in directory" })).toBeNull()
 	})
 
 	it("renders only the lines in view of a report thousands of lines long", async () => {

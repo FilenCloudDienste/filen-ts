@@ -163,5 +163,7 @@ describe("driveJobs.logic", () => {
 		expect(jobRevealItem(extractJob({ firstCreated: dir }))).toBe(dir)
 		expect(jobRevealItem(copyJob({ created: [dir] }))).toBe(dir)
 		expect(jobRevealItem(extractJob())).toBeNull()
+		expect(jobRevealItem(extractJob({ firstCreated: dir, cancelRequest: "trash" }))).toBeNull()
+		expect(jobRevealItem(copyJob({ created: [dir], cancelRequest: "trash" }))).toBeNull()
 	})
 })

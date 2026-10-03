@@ -67,6 +67,8 @@ interface LinkTargetsAsk extends PendingExtract {
 	resolved: Extract<ResolvedSelection, { kind: "entries" }>
 	// The directory holding the base and every target outside it.
 	common: number
+	// The selection without those links; null when nothing would be left to extract.
+	leaveOut: Selection | null
 }
 
 interface PasswordAsk {
@@ -369,14 +371,25 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 		return resolveSelection(store, next, baseDir, format?.type ?? null, phase.type === "done")
 	}
 
-	function extractResolved(target: ExtractTarget, resolved: ResolvedSelection, baseDir: number): void {
+	function extractResolved(target: ExtractTarget, from: Selection, baseDir: number): void {
+		const resolved = resolveAt(from, baseDir)
+
 		if (resolved.kind === "entries") {
 			if (resolved.indexes.length === 0) {
 				return
 			}
 
 			if (resolved.outsideBase.length > 0) {
-				setLinkAsk({ target, resolved, baseDir, common: commonBaseDir(store, baseDir, resolved.outsideBase) })
+				const leaveOut = setMany(store, from, resolved.outsideLinks, false)
+				const rest = resolveAt(leaveOut, baseDir)
+
+				setLinkAsk({
+					target,
+					resolved,
+					baseDir,
+					common: commonBaseDir(store, baseDir, resolved.outsideBase),
+					leaveOut: rest.kind === "entries" && rest.indexes.length === 0 ? null : leaveOut
+				})
 
 				return
 			}
@@ -386,7 +399,7 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 	}
 
 	function extractSelected(target: ExtractTarget): void {
-		extractResolved(target, resolveAt(selection, dir), dir)
+		extractResolved(target, selection, dir)
 	}
 
 	// The listing holds the page's one archive slot, which the extract needs: it stops first.
@@ -398,12 +411,14 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 		proceed({ target, resolved: { kind: "all" }, baseDir: 0 })
 	}
 
-	function leaveLinksOut(ask: LinkTargetsAsk): void {
-		const next = setMany(store, selection, ask.resolved.outsideLinks, false)
+	function leaveLinksOut({ target, baseDir, leaveOut }: LinkTargetsAsk): void {
+		if (leaveOut === null) {
+			return
+		}
 
 		setLinkAsk(null)
-		select(next)
-		extractResolved(ask.target, resolveAt(next, ask.baseDir), ask.baseDir)
+		select(leaveOut)
+		extractResolved(target, leaveOut, baseDir)
 	}
 
 	function extractFromCommon(ask: LinkTargetsAsk): void {
@@ -627,9 +642,13 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 					count={linkAsk.resolved.outsideLinks.length}
 					baseName={dirName}
 					parentName={linkAsk.common === 0 ? source.name : store.dirName(linkAsk.common)}
-					onLeaveOut={() => {
-						leaveLinksOut(linkAsk)
-					}}
+					onLeaveOut={
+						linkAsk.leaveOut === null
+							? undefined
+							: () => {
+									leaveLinksOut(linkAsk)
+								}
+					}
 					onFromParent={() => {
 						extractFromCommon(linkAsk)
 					}}

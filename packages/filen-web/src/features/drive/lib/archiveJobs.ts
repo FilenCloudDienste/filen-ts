@@ -50,10 +50,11 @@ import {
 	STOPPED,
 	type JobSettledEffects
 } from "@/features/drive/lib/driveJobs"
-import { holdJobPassword, jobPassword } from "@/features/drive/lib/jobSecrets"
+import { forgetJobPassword, holdJobPassword, jobPassword } from "@/features/drive/lib/jobSecrets"
 import {
 	canRerunCompress,
 	canRetryExtract,
+	keepsJobPassword,
 	compressReportInput,
 	compressUpdateInput,
 	createWebCompressJob,
@@ -177,16 +178,13 @@ function quotaDTO(kind: "compress" | "extract", neededBytes: number | null, free
 			? i18n.t("transfers:transfersArchiveQuotaUnknown", { free })
 			: kind === "compress"
 				? i18n.t("transfers:transfersCompressQuotaExceeded", { needed: formatBytes(neededBytes), free })
-				: i18n.t("transfers:transfersExtractQuotaExceeded", { needed: formatBytes(neededBytes), free }),
-		"MaxStorageReached"
+				: i18n.t("transfers:transfersExtractQuotaExceeded", { needed: formatBytes(neededBytes), free })
 	)
 }
 
-// The kind stays, so the row and the card offer the password prompt.
+// Kindless, so the row reads the card's text rather than the kind's generic one; the prompt reads the job's outcome.
 function passwordDTO(wrong: boolean): ErrorDTO {
-	return wrong
-		? plainErrorDTO(i18n.t("transfers:transfersExtractWrongPassword"), "ArchiveWrongPassword")
-		: plainErrorDTO(i18n.t("transfers:transfersExtractPasswordRequired"), "ArchivePasswordRequired")
+	return plainErrorDTO(i18n.t(wrong ? "transfers:transfersExtractWrongPassword" : "transfers:transfersExtractPasswordRequired"))
 }
 
 function settleOutcomeRow(
@@ -478,6 +476,7 @@ export async function runCompressJob(deps: RunArchiveDeps, request: CompressJobR
 
 	writeRowFigures(compressJobRowFigures(job))
 	settleOutcomeRow(deps.transfers, id, "compress", job.outcome)
+	forgetUnusedPassword(job)
 	deps.settled(job, compressEffects(job, sourcesOf))
 
 	return job
@@ -868,12 +867,19 @@ export async function runExtractJob(deps: RunArchiveDeps, request: ExtractJobReq
 	const job = settledJob
 
 	settleExtractRow(deps.transfers, id, job)
+	forgetUnusedPassword(job)
 	deps.settled(job, extractEffects(job, request, writtenDirs))
 
 	return job
 }
 
 // ── Entry points ────────────────────────────────────────────────────────────
+
+function forgetUnusedPassword(job: CompressJob | ExtractJob): void {
+	if (!keepsJobPassword(job)) {
+		forgetJobPassword(job.id)
+	}
+}
 
 function patchLeft(uuids: readonly string[], how: "trash" | "delete", kind: "file" | "directory"): void {
 	for (const uuid of uuids) {
@@ -964,6 +970,7 @@ export function retryFailedExtract(jobId: string): string | null {
 	})
 
 	useDriveJobsStore.getState().update("extract", jobId, retried => ({ ...retried, retriedAway: true }))
+	forgetJobPassword(jobId)
 
 	if ((job.trashResult?.failed ?? 0) === 0) {
 		useTransfersStore.getState().remove(jobId)

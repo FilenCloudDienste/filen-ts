@@ -25,7 +25,7 @@ export const transfers = {
 
 	// ── Screen ───────────────────────────────────────────────────────────────
 	/** Transfers screen — empty-state body under transfersEmptyTitle (names every kind of transfer since the full page has room to) */
-	transfersScreenEmptyBody: "Uploads, downloads and copies will appear here.",
+	transfersScreenEmptyBody: "Uploads, downloads, copies and archive jobs appear here.",
 	/** Transfers screen — heading above the section listing in-flight (uploading/downloading) transfers */
 	transfersScreenSectionActive: "Active",
 	/** Transfers screen — heading above the section listing finished (done/error) transfers */

@@ -42,6 +42,7 @@ import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { directorySizeQueryKey, discardListingPatches, driveListingQueryKey } from "@/features/drive/queries/drive"
 import { testUuid } from "@/tests/support/uuid"
 import { sdkErrorDTO } from "@/tests/support/sdkError"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 
 const ROOT = testUuid("root")
 const DESTINATION = { uuid: null, name: "My Drive" }
@@ -444,8 +445,9 @@ describe("runCompressJob", () => {
 			expect(job?.outcome).toEqual({ status: "quotaExceeded", neededBytes: 900, freeBytes: 50 })
 			expect(row()).toMatchObject({
 				status: "error",
-				error: { kind: "MaxStorageReached", label: "This archive needs 900 B but only 50 B is free." }
+				error: { label: "This archive needs 900 B but only 50 B is free." }
 			})
+			expect(errorLabel(row()?.error)).toBe("This archive needs 900 B but only 50 B is free.")
 		})
 
 		it("ends as the stop it was when stopped meanwhile", async () => {
@@ -791,7 +793,7 @@ describe("runExtractJob", () => {
 		expect(deps.settled.mock.calls[0]?.[1]).toMatchObject({ bytesFreed: 0, sourceParents: [ROOT] })
 	})
 
-	it("settles a missing or wrong password as an error that keeps its kind", async () => {
+	it("settles a missing or wrong password as an error the row reads as the card's text", async () => {
 		const deps = makeDeps()
 
 		deps.extractArchive.mockResolvedValueOnce(
@@ -801,7 +803,9 @@ describe("runExtractJob", () => {
 		const job = await runExtractJob(deps, extractRequest())
 
 		expect(job?.outcome).toEqual({ status: "passwordRequired" })
-		expect(row()).toMatchObject({ status: "error", error: { kind: "ArchivePasswordRequired" } })
+		expect(row()?.status).toBe("error")
+		expect(row()?.error?.kind).toBeUndefined()
+		expect(errorLabel(row()?.error)).toBe("This archive is protected by a password.")
 	})
 
 	it("runs its calls one after another, adds their counts, and stops between them on a stop", async () => {
@@ -1034,9 +1038,13 @@ describe("entry points", () => {
 			expect(getJobOf("extract", id)?.outcome.status).toBe("doneWithIssues")
 		})
 
+		// Retryable failures keep the password for the retry, which takes it on from the job it supersedes.
+		expect(jobPassword(id)).toBe("pw")
+
 		const retryId = retryFailedExtract(id) ?? ""
 
 		expect(jobPassword(retryId)).toBe("pw")
+		expect(jobPassword(id)).toBeUndefined()
 		expect(getJobOf("extract", retryId)).toMatchObject({ retry: true, partial: true, basis: { type: "unknown" }, root: "destination" })
 
 		await vi.waitFor(() => {
@@ -1049,6 +1057,7 @@ describe("entry points", () => {
 		])
 		expect(row(id)).toBeUndefined()
 		expect(retryFailedExtract(id)).toBeNull()
+		expect(jobPassword(retryId)).toBeUndefined()
 	})
 
 	it("reruns a failed compress as a new job with the same request and password", async () => {
@@ -1062,6 +1071,8 @@ describe("entry points", () => {
 			expect(getJobOf("compress", id)?.outcome.status).toBe("failed")
 		})
 
+		expect(jobPassword(id)).toBe("pw")
+
 		const rerunId = rerunCompress(id) ?? ""
 
 		expect(rerunId).not.toBe(id)
@@ -1073,5 +1084,38 @@ describe("entry points", () => {
 		})
 
 		expect(compressItems.mock.calls[1]?.[2]).toBe("pw")
+		expect(jobPassword(rerunId)).toBeUndefined()
+	})
+
+	it("forgets a password once its job can no longer use it, keeping it while the job waits for the right one", async () => {
+		extractArchive
+			.mockResolvedValueOnce(extractReport({ counts: itemCounts(), error: sdkErrorDTO("ArchiveWrongPassword", "wrong") }))
+			.mockResolvedValueOnce(extractReport())
+
+		const id = startExtract(extractFields(), "nope")
+
+		await vi.waitFor(() => {
+			expect(getJobOf("extract", id)?.outcome.status).toBe("wrongPassword")
+		})
+
+		expect(jobPassword(id)).toBe("nope")
+		expect(rerunExtractWithPassword(id, "right")).toBe(true)
+
+		await vi.waitFor(() => {
+			expect(getJobOf("extract", id)?.outcome.status).toBe("done")
+		})
+
+		expect(extractArchive.mock.calls[1]?.[2]).toBe("right")
+		expect(jobPassword(id)).toBeUndefined()
+
+		compressItems.mockResolvedValueOnce(compressReport())
+
+		const compressId = startCompress(compressFields({ encrypted: true }), "pw")
+
+		await vi.waitFor(() => {
+			expect(getJobOf("compress", compressId)?.outcome.status).toBe("done")
+		})
+
+		expect(jobPassword(compressId)).toBeUndefined()
 	})
 })

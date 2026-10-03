@@ -269,13 +269,7 @@ export function rowSkip(store: EntryStore, ref: RowRef): number {
 }
 
 export function rowFlags(store: EntryStore, ref: RowRef): number {
-	if (!isDirRef(ref)) {
-		return store.flags(ref)
-	}
-
-	const slot = store.dirEntrySlot(dirOfRef(ref))
-
-	return slot < 0 ? 0 : store.flags(slot)
+	return isDirRef(ref) ? store.dirFlags(dirOfRef(ref)) : store.flags(ref)
 }
 
 export function hasFlag(flags: number, flag: (typeof ENTRY_FLAG)[keyof typeof ENTRY_FLAG]): boolean {

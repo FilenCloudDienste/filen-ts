@@ -13,6 +13,7 @@ import {
 import type { ArchiveKey } from "@/lib/i18n"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabelOr } from "@/lib/i18n/errorLabel"
+import { MISLEADING_CHARACTER } from "@/lib/sdk/archiveListing"
 
 // The words and sizes of an archive job's report (jobReportDialog.tsx); its sections come from
 // @filen/shared's jobReport.ts.
@@ -136,11 +137,13 @@ export function reportRowPath(row: JobReportRow<unknown>): string {
 	return row.key.startsWith("misleadingNames:") ? revealHiddenCharacters(row.path) : row.path
 }
 
-// Shows every invisible or direction-changing character (a right-to-left override, a zero-width joiner,
-// a byte-order mark) as its code point, so a name reads as what it is.
+const MISLEADING_CHARACTERS = new RegExp(MISLEADING_CHARACTER.source, "gu")
+
+// Shows every invisible or direction-changing character the SDK flags (a right-to-left override, a
+// zero-width joiner, a byte-order mark) as its code point, so a name reads as what it is.
 export function revealHiddenCharacters(value: string): string {
 	return value.replace(
-		/[\p{Cf}\p{Cc}]/gu,
+		MISLEADING_CHARACTERS,
 		character => `⟨U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}⟩`
 	)
 }

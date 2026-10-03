@@ -388,10 +388,30 @@ export function pendingDismissTargets(state: PendingUploadsState, key: PendingRo
 	return targets
 }
 
-export type PendingCancelSubject = { name: string } | { files: number; jobs: number }
+// What the summary's stopped jobs leave: a copy or an extract keeps what it already made, a compress nothing.
+export type PendingCancelKept = "copied" | "extracted" | "copiedOrExtracted" | null
+
+export type PendingCancelSubject = { name: string } | { files: number; jobs: number; kept: PendingCancelKept; archives: number }
+
+function runningJobsInto(state: PendingUploadsState, parentUuid: string | null): { kept: PendingCancelKept; archives: number } {
+	let copied = false
+	let extracted = false
+	let archives = 0
+
+	for (const transfer of state.transfers) {
+		if (isRunningJobInto(transfer, parentUuid)) {
+			copied ||= transfer.direction === "copy"
+			extracted ||= transfer.direction === "extract"
+			archives += transfer.direction === "compress" ? 1 : 0
+		}
+	}
+
+	return { kept: copied && extracted ? "copiedOrExtracted" : copied ? "copied" : extracted ? "extracted" : null, archives }
+}
 
 // What a row's Cancel confirm names: the upload's or directory's name, or for the summary how many files
-// still upload and drive jobs still run. Null once there is nothing left to cancel, which closes the confirm.
+// still upload and drive jobs still run, and what those jobs leave. Null once there is nothing left to
+// cancel, which closes the confirm.
 export function pendingCancelSubject(
 	state: PendingUploadsState,
 	key: PendingRowKey,
@@ -415,7 +435,7 @@ export function pendingCancelSubject(
 		case "uploading": {
 			const { files, jobs } = pendingSummaryFigures(state, parentUuid)
 
-			return files > 0 || jobs > 0 ? { files, jobs } : null
+			return files > 0 || jobs > 0 ? { files, jobs, ...runningJobsInto(state, parentUuid) } : null
 		}
 		default:
 			return null

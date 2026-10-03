@@ -119,8 +119,13 @@ export function jobHasReport(job: DriveJob): boolean {
 	}
 }
 
-// What "show" reveals: the archive, the extracted directory or first item, or a copy's first item.
+// What "Show in directory" reveals: the archive, the extracted directory or first item, or a copy's first
+// item. What a stop sends to the trash is nothing to go and see.
 export function jobRevealItem(job: DriveJob): DriveItem | null {
+	if (job.cancelRequest === "trash") {
+		return null
+	}
+
 	switch (job.kind) {
 		case "copy":
 			return job.created[0] ?? null

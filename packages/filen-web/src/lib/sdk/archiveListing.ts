@@ -31,6 +31,11 @@ export type SkipReason = (typeof SKIP_REASONS)[number]
 
 export const ENTRY_FLAG = { encrypted: 1, macMetadata: 2, rewritten: 4, misleading: 8, pathless: 16, storedTruncated: 32 } as const
 
+// A character the SDK flags a path as misleading for (filen-sdk-rs fs/archive/entry_path.rs, is_suspicious):
+// a control (C0, DEL, C1) or a format character behind bidi overrides and invisible joins.
+export const MISLEADING_CHARACTER =
+	/[\p{Cc}\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB\u{E0001}\u{E0020}-\u{E007F}]/u
+
 export function skipCode(reason: ListedSkipReason["type"]): number {
 	return SKIP_REASONS.indexOf(reason) + 1
 }

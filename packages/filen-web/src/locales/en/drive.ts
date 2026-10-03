@@ -211,10 +211,20 @@ export const drive = {
 	drivePendingUploadsCancelAllBody_one: "{{count}} file still uploading into this directory will stop. This can't be undone.",
 	/** Pending transfers — body of the summary row's Cancel confirm for uploads only; {{count}} = files still uploading into this directory; plural */
 	drivePendingUploadsCancelAllBody_other: "{{count}} files still uploading into this directory will stop. This can't be undone.",
-	/** Pending transfers — body of the summary row's Cancel confirm when copies or archive jobs run too; {{count}} = files uploading plus jobs running; singular */
-	drivePendingTransfersCancelAllBody_one: "{{count}} transfer into this directory will stop. Copied or extracted items are kept.",
-	/** Pending transfers — body of the summary row's Cancel confirm when copies or archive jobs run too; {{count}} = files uploading plus jobs running; plural */
-	drivePendingTransfersCancelAllBody_other: "{{count}} transfers into this directory will stop. Copied or extracted items are kept.",
+	/** Pending transfers — body of the summary row's Cancel confirm when copies or archive jobs run too, followed by what the jobs leave; {{count}} = files uploading plus jobs running; singular */
+	drivePendingTransfersCancelAllBody_one: "{{count}} transfer into this directory will stop.",
+	/** Pending transfers — body of the summary row's Cancel confirm when copies or archive jobs run too, followed by what the jobs leave; {{count}} = files uploading plus jobs running; plural */
+	drivePendingTransfersCancelAllBody_other: "{{count}} transfers into this directory will stop.",
+	/** Pending transfers — appended to the Cancel confirm when only copies run among the jobs */
+	drivePendingTransfersCancelKeptCopied: "Items already copied are kept.",
+	/** Pending transfers — appended to the Cancel confirm when only extracts run among the jobs */
+	drivePendingTransfersCancelKeptExtracted: "Items already extracted are kept.",
+	/** Pending transfers — appended to the Cancel confirm when both copies and extracts run */
+	drivePendingTransfersCancelKeptCopiedOrExtracted: "Items already copied or extracted are kept.",
+	/** Pending transfers — appended to the Cancel confirm when compresses run: a stopped compress leaves nothing; {{count}} = compresses running; singular */
+	drivePendingTransfersCancelArchiveDiscarded_one: "The unfinished archive is discarded.",
+	/** Pending transfers — appended to the Cancel confirm when compresses run: a stopped compress leaves nothing; {{count}} = compresses running; plural */
+	drivePendingTransfersCancelArchiveDiscarded_other: "Unfinished archives are discarded.",
 	/** Drive listing — title shown when a directory listing fails to load */
 	driveLoadError: "Couldn't load this directory",
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */

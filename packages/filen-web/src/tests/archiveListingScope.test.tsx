@@ -32,7 +32,8 @@ vi.mock("@/lib/sdk/client", () => ({
 			}),
 		cancelTransfer: () => Promise.resolve(),
 		releaseJob: () => Promise.resolve(),
-		archiveNameInfo: (names: string[]) => Promise.resolve(names.map(() => ({ format: { type: "zip" }, defaultName: "photos" })))
+		archiveNameInfo: (names: string[]) =>
+			Promise.resolve(names.map(name => ({ format: { type: "zip" }, defaultName: name.replace(/\.zip$/, "") })))
 	}
 }))
 vi.mock("@/queries/client", async () => {
@@ -95,12 +96,12 @@ function zip(uuid: string, name: string): DriveItem {
 
 const ITEMS = [zip(ZIP, "photos.zip"), zip(OTHER, "other.zip")]
 
-function overlay(index: number) {
+function overlay(index: number, items: DriveItem[] = ITEMS) {
 	return (
 		<QueryClientProvider client={queryClient}>
 			<PreviewOverlay
 				variant="drive"
-				items={ITEMS}
+				items={items}
 				index={index}
 				onStep={vi.fn()}
 				onClose={vi.fn()}
@@ -218,6 +219,25 @@ describe("the overlay's archive listings", () => {
 		unmount()
 
 		expect(cache.get(ZIP)).toBeUndefined()
+	})
+
+	it("follow a rename while browsing, reopening the finished listing instead of reading it again", async () => {
+		const { rerender } = render(overlay(0))
+
+		await listWithPassword()
+		rerender(overlay(0, [zip(ZIP, "holiday.zip"), zip(OTHER, "other.zip")]))
+
+		await act(async () => {
+			const more = await screen.findByRole("button", { name: "More places to extract to" })
+
+			more.focus()
+			fireEvent.keyDown(more, { key: "ArrowDown" })
+			await Promise.resolve()
+		})
+
+		expect(await screen.findByRole("menuitem", { name: "Extract to “holiday/” next to the archive" })).toBeTruthy()
+		expect(calls).toHaveLength(2)
+		expect(onlyCache().get(ZIP)?.password).toBe("hunter2")
 	})
 
 	it("are gone at sign-out, and stay gone when the browser is disposed after it", async () => {

@@ -277,24 +277,30 @@ function CompressDialogForm({ subject, heading, prefs, infos, budget, onClose, o
 
 		submitting.current = true
 
+		// No finally: the React Compiler skips a component holding one.
+		let checked: CompressValidation
+
 		try {
-			const checked = await checkedValidation()
-
-			if (!checked.ok) {
-				dispatch({ type: "cancelDelete" })
-			}
-
-			if (!confirmed || !checked.ok) {
-				dispatch({ type: "requestSubmit", valid: checked.ok })
-			}
-
-			if (checked.ok && (confirmed || state.afterwards !== "deletePermanently")) {
-				start(checked.start)
-			}
+			checked = await checkedValidation()
 		} catch (e) {
-			toast.error(errorLabel(e))
-		} finally {
 			submitting.current = false
+			toast.error(errorLabel(e))
+
+			return
+		}
+
+		submitting.current = false
+
+		if (!checked.ok) {
+			dispatch({ type: "cancelDelete" })
+		}
+
+		if (!confirmed || !checked.ok) {
+			dispatch({ type: "requestSubmit", valid: checked.ok })
+		}
+
+		if (checked.ok && (confirmed || state.afterwards !== "deletePermanently")) {
+			start(checked.start)
 		}
 	}
 

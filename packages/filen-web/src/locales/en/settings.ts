@@ -301,6 +301,9 @@ export const settings = {
 	/** Row description; followed by settingsAdvancedRestartRequired. The tab keeps memory it grew into (wasm memory never shrinks) */
 	settingsAdvancedArchiveMemoryDescription:
 		"Memory one archive job may use. More allows higher compression levels and opening archives made with bigger dictionaries. Once used, this tab keeps the memory until it is closed.",
+	/** Row description, after settingsAdvancedArchiveMemoryDescription; {{size}} is the largest option in mebibytes. Filen's memory in one tab is capped at 1 GiB, shared with transfers and thumbnails */
+	settingsAdvancedArchiveMemoryHighHint:
+		"Filen can use at most 1 GiB of memory per tab, so {{size}} MiB next to heavy transfers or thumbnails can run out. Choose it only for archives that need it.",
 	/** Select option; {{size}} is a whole number of mebibytes */
 	settingsAdvancedArchiveMemoryOption: "{{size}} MiB",
 	/** Select option for the default value; {{size}} is a whole number of mebibytes */

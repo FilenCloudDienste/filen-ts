@@ -10,6 +10,8 @@ import { openListingSession, type ListingDeps, type ListingSession, type Listing
 // Re-renders only on the session's notifications: ≤ 5 a second while a listing streams.
 interface ListingHolder {
 	uuid: string
+	// The session resolves what the archive extracts as from its name.
+	name: string
 	subscribe: (listener: () => void) => () => void
 	getSnapshot: () => ListingSnapshot
 	// Null before the first subscription and after the last.
@@ -18,12 +20,19 @@ interface ListingHolder {
 	restoredDirPath: string
 }
 
-function listingHolder(source: ArchiveSource, deps: ListingDeps | undefined, cache: ListingCache | null): ListingHolder {
-	const placeholder: ListingSnapshot = { phase: { type: "resolving" }, store: createEntryStore(), version: 0, info: null }
+// `shown`: what the browser shows until the session opens, the renamed archive's listing so far.
+function listingHolder(
+	source: ArchiveSource,
+	deps: ListingDeps | undefined,
+	cache: ListingCache | null,
+	shown?: ListingSnapshot
+): ListingHolder {
+	const placeholder: ListingSnapshot = shown ?? { phase: { type: "resolving" }, store: createEntryStore(), version: 0, info: null }
 	let session: ListingSession | null = null
 
 	return {
 		uuid: source.uuid,
+		name: source.name,
 		subscribe: listener => {
 			const opened = openListingSession(source, deps, cache)
 			const unsubscribe = opened.subscribe(listener)
@@ -56,8 +65,12 @@ export function useArchiveListing(source: ArchiveSource, deps?: ListingDeps): Ar
 	const cache = useContext(ListingCacheContext)
 	const [holder, setHolder] = useState(() => listingHolder(source, deps, cache))
 
+	// A rename reopens the session for the new name: a finished listing from the host's cache, read again
+	// only when it was still running.
 	if (holder.uuid !== source.uuid) {
 		setHolder(listingHolder(source, deps, cache))
+	} else if (holder.name !== source.name) {
+		setHolder(listingHolder(source, deps, cache, holder.getSnapshot()))
 	}
 
 	const snapshot = useSyncExternalStore(holder.subscribe, holder.getSnapshot)

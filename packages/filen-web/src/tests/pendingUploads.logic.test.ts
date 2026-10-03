@@ -439,7 +439,7 @@ describe("pendingCancelSubject", () => {
 
 		expect(pendingCancelSubject(store(), "upload:a", DIR)).toEqual({ name: "a.txt" })
 		expect(pendingCancelSubject(store(), "directory:tree", DIR)).toEqual({ name: "Photos" })
-		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 2, jobs: 0 })
+		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 2, jobs: 0, kept: null, archives: 0 })
 
 		store().settle("a", "done")
 		store().cancelUploadBatches(new Set([tree.id]))
@@ -507,7 +507,24 @@ describe("drive jobs into the directory", () => {
 		expect(keys()).toEqual(["uploading"])
 		expect(pendingSummaryFigures(store(), DIR)).toEqual({ files: 2, jobs: 2, bytes: 8_000, transferred: 1_000 })
 		expect(pendingJobIds(store(), DIR)).toEqual(["job-1", "job-2"])
-		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 2, jobs: 2 })
+		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 2, jobs: 2, kept: "copiedOrExtracted", archives: 0 })
+	})
+
+	it("tells the summary's confirm what its stopped jobs leave behind", () => {
+		addJob("copy-1")
+		addJob("copy-2")
+		addJob("compress", DIR, { direction: "compress", status: "compressing" })
+		addJob("elsewhere", OTHER_DIR, { direction: "extract", status: "extracting" })
+
+		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 0, jobs: 3, kept: "copied", archives: 1 })
+
+		store().settle("copy-1", "done")
+		store().settle("copy-2", "done")
+		addJob("compress-2", DIR, { direction: "compress", status: "compressing" })
+		addJob("compress-3", DIR, { direction: "compress", status: "compressing" })
+		addJob("extract", DIR, { direction: "extract", status: "extracting" })
+
+		expect(pendingCancelSubject(store(), "uploading", DIR)).toEqual({ files: 0, jobs: 4, kept: "extracted", archives: 3 })
 	})
 
 	it("stops the summary's jobs through their own cancel, and a job row through its prompt", () => {

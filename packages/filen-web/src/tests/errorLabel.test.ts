@@ -26,6 +26,14 @@ describe("errorLabel", () => {
 		)
 	})
 
+	it("points an encoder's memory refusal at the archive memory setting", () => {
+		const dto: ErrorDTO = { species: "sdk", kind: "InsufficientMemory", message: "needs 600 MiB", label: "needs 600 MiB" }
+
+		expect(errorLabel(dto)).toBe(
+			"This needs more archive memory than Advanced settings allow. Raise it there, or choose another format."
+		)
+	})
+
 	it("falls back to labelFirst for a real SdkErrorKind that has no catalog entry", () => {
 		const dto: ErrorDTO = {
 			species: "sdk",

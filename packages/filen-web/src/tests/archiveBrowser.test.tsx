@@ -462,6 +462,23 @@ describe("ArchiveSourceBrowser states", () => {
 		expect(screen.getByRole("button", { name: "Extract all" }).getAttribute("aria-haspopup")).toBe("menu")
 	})
 
+	it("disables the gate's Browse while offline", () => {
+		onlineManager.setOnline(false)
+
+		const fake = fakeSession({ type: "gate", format: { type: "tar", codec: "gzip" } })
+
+		show(fake)
+
+		const browse = screen.getByRole("button", { name: "Browse contents" })
+
+		expect(browse.hasAttribute("disabled")).toBe(true)
+		expect(browse.getAttribute("title")).toBe("Unavailable while offline")
+
+		fireEvent.click(browse)
+
+		expect(fake.session.start).not.toHaveBeenCalled()
+	})
+
 	it("keeps the gate's Browse but not its extract when the link allows no downloads", () => {
 		show(fakeSession({ type: "gate", format: { type: "tar", codec: "gzip" } }), false)
 

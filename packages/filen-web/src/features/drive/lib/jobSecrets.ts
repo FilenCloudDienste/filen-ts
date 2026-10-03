@@ -1,6 +1,7 @@
 // An archive job's password, held only here while its job exists: never in a store, a transfers row, a
-// toast or a log. A rerun with a new password replaces it; pruning the job forgets it. The SDK refuses an
-// empty password, so one counts as none.
+// toast or a log. A rerun with a new password replaces it; settling where nothing can use it again
+// (archiveJobs.logic.ts keepsJobPassword) or pruning the job forgets it. The SDK refuses an empty password,
+// so one counts as none.
 const passwords = new Map<string, string>()
 
 export function holdJobPassword(id: string, password: string | undefined): void {

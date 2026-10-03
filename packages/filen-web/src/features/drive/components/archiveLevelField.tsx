@@ -30,7 +30,8 @@ export interface ArchiveLevelFieldProps {
 }
 
 // Compression level, capped at what the budget runs: the slider's max is `maxLevel` (so its ARIA range
-// and End key stay honest) and the levels above it show as a locked stretch of track with a note.
+// and End key stay honest) and the levels above it show as a locked stretch of track with a note. A
+// format with a single level has nothing to choose: it shows that level alone.
 export function ArchiveLevelField({ probe, levels, maxLevel, value, onChange, budget, disabled }: ArchiveLevelFieldProps) {
 	const { t } = useTranslation("archive")
 	const id = useId()
@@ -45,6 +46,20 @@ export function ArchiveLevelField({ probe, levels, maxLevel, value, onChange, bu
 	const valueText = memory === null ? null : t("archiveLevelValue", { level: value, memory: formatBytes(memory) })
 	const locked = maxLevel < levels.max
 	const span = levels.max - levels.min
+
+	if (span <= 0) {
+		return (
+			<div className="flex flex-col gap-2">
+				<Label id={`${id}-label`}>{t("archiveLevelLabel")}</Label>
+				<p
+					aria-labelledby={`${id}-label`}
+					className="min-h-5 text-sm text-muted-foreground tabular-nums"
+				>
+					{valueText}
+				</p>
+			</div>
+		)
+	}
 
 	return (
 		<div className="flex flex-col gap-2">
@@ -74,7 +89,7 @@ export function ArchiveLevelField({ probe, levels, maxLevel, value, onChange, bu
 						<div
 							aria-hidden
 							className="ml-2 flex h-4 items-center gap-1 text-muted-foreground"
-							style={{ flexGrow: span === 0 ? 1 : levels.max - maxLevel, flexBasis: 0 }}
+							style={{ flexGrow: levels.max - maxLevel, flexBasis: 0 }}
 						>
 							<div className="h-1 flex-1 rounded-2xl bg-[repeating-linear-gradient(90deg,var(--color-input)_0_4px,transparent_4px_8px)]" />
 							<LockIcon className="size-3.5 shrink-0" />
@@ -90,7 +105,9 @@ export function ArchiveLevelField({ probe, levels, maxLevel, value, onChange, bu
 						to="/settings/advanced"
 						className="underline underline-offset-4 hover:text-primary"
 					>
-						{t("archiveLevelLocked", { from: maxLevel + 1, to: levels.max, budget: formatBytes(budget) })}
+						{maxLevel + 1 === levels.max
+							? t("archiveLevelLockedOne", { level: levels.max, budget: formatBytes(budget) })
+							: t("archiveLevelLocked", { from: maxLevel + 1, to: levels.max, budget: formatBytes(budget) })}
 					</Link>
 				</p>
 			) : null}

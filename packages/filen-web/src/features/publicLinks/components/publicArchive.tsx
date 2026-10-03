@@ -52,13 +52,12 @@ export function PublicArchiveActions({ source, downloadable, onBrowse }: PublicA
 	return (
 		<>
 			{downloadable ? <ExtractToDriveButton source={source} /> : null}
-			<Button
-				variant="outline"
+			<LinkActionButton
+				icon={ListTreeIcon}
+				label={t("archiveBrowse")}
+				compact={false}
 				onClick={onBrowse}
-			>
-				<ListTreeIcon data-icon="inline-start" />
-				{t("archiveBrowse")}
-			</Button>
+			/>
 		</>
 	)
 }
@@ -141,7 +140,7 @@ export function SaveAsArchiveButton({ item, name, compact }: SaveAsArchiveButton
 	)
 }
 
-// Offline gated like "Save to Cloud Drive": each starts a job in the visitor's drive.
+// Offline gated like "Save to Cloud Drive": each reads the link or starts a job in the visitor's drive.
 function LinkActionButton({
 	icon: Icon,
 	label,

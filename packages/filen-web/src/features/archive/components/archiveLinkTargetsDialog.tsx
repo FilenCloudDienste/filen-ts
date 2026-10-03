@@ -10,7 +10,8 @@ export interface ArchiveLinkTargetsDialogProps {
 	baseName: string
 	// The nearest directory holding the base and every link target.
 	parentName: string
-	onLeaveOut: () => void
+	// Absent when the selection holds nothing but those links.
+	onLeaveOut?: (() => void) | undefined
 	onFromParent: () => void
 	onCancel: () => void
 }
@@ -50,17 +51,20 @@ export function ArchiveLinkTargetsDialog({
 						{t("common:cancel")}
 					</Button>
 					<Button
-						variant="outline"
+						variant={onLeaveOut === undefined ? "default" : "outline"}
+						autoFocus={onLeaveOut === undefined}
 						onClick={onFromParent}
 					>
 						<span className="min-w-0 truncate">{t("previewArchiveLinkTargetsFromParent", { name: parentName })}</span>
 					</Button>
-					<Button
-						autoFocus
-						onClick={onLeaveOut}
-					>
-						{t("previewArchiveLinkTargetsLeaveOut")}
-					</Button>
+					{onLeaveOut === undefined ? null : (
+						<Button
+							autoFocus
+							onClick={onLeaveOut}
+						>
+							{t("previewArchiveLinkTargetsLeaveOut")}
+						</Button>
+					)}
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

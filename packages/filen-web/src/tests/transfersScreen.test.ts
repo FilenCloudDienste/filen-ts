@@ -90,6 +90,12 @@ describe("TransfersScreen — aggregate readout", () => {
 		expect(header.getByText("1 active · 50% · 976.6 KiB/s")).toBeTruthy()
 	})
 
+	it("names every kind of transfer, archive jobs included, while the list is empty", () => {
+		render(createElement(TransfersScreen))
+
+		expect(screen.getByText("Uploads, downloads, copies and archive jobs appear here.")).toBeTruthy()
+	})
+
 	it("renders no summary while nothing is active", () => {
 		useTransfersStore.setState({ transfers: [transfer({ id: "a", status: "done" })], speedSamples: [] })
 

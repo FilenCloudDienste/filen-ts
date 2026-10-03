@@ -92,6 +92,7 @@ describe("ArchiveMemoryRow", () => {
 		expect(screen.getByText("Archive memory")).toBeDefined()
 		expect(description()).toContain("higher compression levels")
 		expect(description()).toContain("keeps the memory until it is closed")
+		expect(description()).toContain("at most 1 GiB of memory per tab, so 512 MiB")
 		expect(description()).toContain("next time Filen loads")
 		expect(description()).not.toContain("In effect now")
 	})

@@ -52,7 +52,11 @@ function ArchiveMemoryRow() {
 		toast.info(t("settingsAdvancedRestartRequired"))
 	}
 
-	const description: string[] = [t("settingsAdvancedArchiveMemoryDescription"), t("settingsAdvancedRestartRequired")]
+	const description: string[] = [
+		t("settingsAdvancedArchiveMemoryDescription"),
+		t("settingsAdvancedArchiveMemoryHighHint", { size: Math.max(...ARCHIVE_CODEC_MEMORY_MIB) }),
+		t("settingsAdvancedRestartRequired")
+	]
 
 	if (prefs !== undefined && inEffectMib !== undefined && inEffectMib !== prefs.codecMemoryMib) {
 		description.push(t("settingsAdvancedArchiveMemoryInEffect", { size: inEffectMib }))

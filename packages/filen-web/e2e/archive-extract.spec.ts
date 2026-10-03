@@ -367,8 +367,8 @@ test.describe("archive extract", () => {
 			await expect(reportSection(report, "Duplicate names")).toBeVisible()
 			await expect(report.getByTitle("dup.txt", { exact: true })).toBeVisible()
 
-			// Show directory opens where the extract landed, its directory selected.
-			await report.getByRole("button", { name: "Show directory", exact: true }).click()
+			// Show in directory opens where the extract landed, its directory selected.
+			await report.getByRole("button", { name: "Show in directory", exact: true }).click()
 			await expect(report).toHaveCount(0)
 			await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(destName, { timeout: LIVE_WRITE_TIMEOUT_MS })
 

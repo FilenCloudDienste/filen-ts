@@ -101,4 +101,26 @@ describe("ArchiveLevelField", () => {
 		})
 		expect(screen.getByText(/^Levels 2–9 need more than/)).toBeTruthy()
 	})
+
+	it("names the one locked level on its own", () => {
+		renderField({ probe: { type: "tar", compression: { codec: "xz" } }, maxLevel: 8 })
+
+		expect(
+			screen.getByText(`Level 9 needs more than the ${formatBytes(BUDGET)} of archive memory set in Advanced settings`)
+		).toBeTruthy()
+	})
+
+	it("shows a single-level format's level, without a slider", async () => {
+		renderField({
+			probe: { type: "tar", compression: { codec: "lz4" } },
+			levels: { min: 1, max: 1, defaultLevel: 1 },
+			maxLevel: 1,
+			value: 1
+		})
+
+		expect(await screen.findByText(`Level 1 · uses about ${formatBytes(1024 * 1024)} while compressing`)).toBeTruthy()
+		expect(screen.queryByRole("slider", { hidden: true })).toBeNull()
+		expect(screen.queryByText("Faster")).toBeNull()
+		expect(screen.queryByText(/need more than/)).toBeNull()
+	})
 })

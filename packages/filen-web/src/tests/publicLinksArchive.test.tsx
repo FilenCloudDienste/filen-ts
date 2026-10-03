@@ -13,29 +13,40 @@ import "@/lib/i18n"
 // A public link's archive actions: signed-in visitors only, nothing read before a click, extracting only
 // with downloads allowed, and the listings kept for as long as the link stays open.
 
-const { hasClient, ownsItem, listLinkedDirAnon, getLinkedDirSizeAnon, extractArchiveTo, pickProps, compressProps, created, seenCaches } =
-	vi.hoisted(() => ({
-		hasClient: vi.fn<() => Promise<boolean>>(),
-		ownsItem: vi.fn<(kind: "file" | "directory", uuid: string) => Promise<boolean>>(),
-		listLinkedDirAnon: vi.fn<() => Promise<LinkedDirsAndFiles>>(),
-		getLinkedDirSizeAnon: vi.fn<() => Promise<{ size: bigint; files: bigint; dirs: bigint }>>(),
-		extractArchiveTo: vi.fn<(source: ArchiveSource, destination: JobDestination) => Promise<void>>(),
-		pickProps: {
-			current: null as null | {
-				mode?: string
-				startsWork?: boolean
-				onPick: (destination: JobDestination) => void
-				onClose: () => void
-			}
-		},
-		compressProps: { current: null as null | { subject: unknown; onClose: () => void } },
-		created: [] as { cache: ListingCache; closed: () => boolean }[],
-		seenCaches: [] as (ListingCache | null)[]
-	}))
+const {
+	online,
+	hasClient,
+	ownsItem,
+	listLinkedDirAnon,
+	getLinkedDirSizeAnon,
+	extractArchiveTo,
+	pickProps,
+	compressProps,
+	created,
+	seenCaches
+} = vi.hoisted(() => ({
+	online: { current: true },
+	hasClient: vi.fn<() => Promise<boolean>>(),
+	ownsItem: vi.fn<(kind: "file" | "directory", uuid: string) => Promise<boolean>>(),
+	listLinkedDirAnon: vi.fn<() => Promise<LinkedDirsAndFiles>>(),
+	getLinkedDirSizeAnon: vi.fn<() => Promise<{ size: bigint; files: bigint; dirs: bigint }>>(),
+	extractArchiveTo: vi.fn<(source: ArchiveSource, destination: JobDestination) => Promise<void>>(),
+	pickProps: {
+		current: null as null | {
+			mode?: string
+			startsWork?: boolean
+			onPick: (destination: JobDestination) => void
+			onClose: () => void
+		}
+	},
+	compressProps: { current: null as null | { subject: unknown; onClose: () => void } },
+	created: [] as { cache: ListingCache; closed: () => boolean }[],
+	seenCaches: [] as (ListingCache | null)[]
+}))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { hasClient, ownsItem, listLinkedDirAnon, getLinkedDirSizeAnon } }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } }) }))
-vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
+vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => online.current }))
 vi.mock("@/features/drive/lib/archiveActions", () => ({ extractArchiveTo }))
 // The picker and the compress dialog are drive's, tested on their own; here they only have to receive
 // what the public page hands them.
@@ -147,6 +158,7 @@ function queryButton(name: string): HTMLElement | null {
 beforeEach(() => {
 	queryClient.clear()
 	vi.clearAllMocks()
+	online.current = true
 	ownsItem.mockResolvedValue(false)
 	extractArchiveTo.mockResolvedValue(undefined)
 	pickProps.current = null
@@ -210,6 +222,22 @@ describe("FileHero — a linked archive", () => {
 
 		expect(screen.getByText("browsing photos.zip browse-only")).toBeDefined()
 		expect(queryButton("Extract to my Cloud Drive")).toBeNull()
+	})
+
+	it("disables Browse contents and the extract while offline", async () => {
+		online.current = false
+		await renderHero("photos.zip", true, true)
+
+		for (const name of ["Browse contents", "Extract to my Cloud Drive"]) {
+			const button = screen.getByRole("button", { name })
+
+			expect(button.hasAttribute("disabled")).toBe(true)
+			expect(button.getAttribute("title")).toBe("Unavailable while offline")
+		}
+
+		fireEvent.click(screen.getByRole("button", { name: "Browse contents" }))
+
+		expect(screen.queryByText(/^browsing/)).toBeNull()
 	})
 
 	it("keeps the page's listings across Hide contents and Browse contents", async () => {
