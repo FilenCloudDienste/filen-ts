@@ -14,7 +14,7 @@ import { formatChoice, isArchiveCandidateName, type FormatChoiceId } from "@/fea
 // What compress and extract may act on, where their output goes by default and what it is called:
 // shared by the menus, the quick actions (archiveActions.ts) and the dialogs. No SDK calls.
 
-type NameOf = (uuid: string) => string | undefined
+export type NameOf = (uuid: string) => string | undefined
 
 // The flat listings' parent markers name no directory.
 const PARENT_MARKERS: ReadonlySet<string> = new Set(["trash", "recents", "favorites", "links"])
@@ -69,37 +69,59 @@ export function defaultJobDestination(
 	return { uuid: parent, name: destinationName(parent, nameOf) }
 }
 
+// Whose names a common parent directory is read from (the cached drive listings by default), and what
+// items in different directories are named after. Photos knows its directories itself and names a mix of
+// them after itself.
+export interface ParentNaming {
+	nameOf?: NameOf | undefined
+	mixedFallback?: string | undefined
+}
+
+// What an archive's default name is made from: each item's name and whether it is a directory. Items
+// without a drive shape (a public link's) are named by their caller.
+export interface NamingEntry {
+	name: string
+	directory: boolean
+}
+
+export function namingEntries(items: readonly DriveItem[]): NamingEntry[] {
+	return items.map(item => ({ name: driveItemName(item), directory: isDirectoryItem(item) }))
+}
+
 // The common parent directory's name, which several items' archive is named after; null at My Drive's
-// root, for differing parents or when the name is not known.
-export function archiveParentName(items: readonly DriveItem[], nameOf: NameOf): string | null {
+// root or when the name is not known. Items in different directories take `mixedFallback` (Photos names
+// them after itself), else null.
+export function archiveParentName(items: readonly DriveItem[], nameOf: NameOf, mixedFallback?: string): string | null {
 	const parent = commonParent(items)
 
-	return parent === undefined || parent === null ? null : (nameOf(parent) ?? null)
+	if (parent === undefined) {
+		return mixedFallback ?? null
+	}
+
+	return parent === null ? null : (nameOf(parent) ?? null)
 }
 
 // Without the format's extension, which composeArchiveName adds.
 export function defaultArchiveBaseName(
-	items: readonly DriveItem[],
+	entries: readonly NamingEntry[],
 	choice: FormatChoiceId,
 	parentName: string | null,
 	fallback: string
 ): string {
-	const only = items.length === 1 ? items[0] : undefined
+	const only = entries.length === 1 ? entries[0] : undefined
 
 	if (only === undefined) {
 		return parentName ?? fallback
 	}
 
-	const name = driveItemName(only)
-
 	// A single compressed file keeps the whole name: photo.jpg.gz.
-	if (isDirectoryItem(only) || formatChoice(choice).family === "single") {
-		return name
+	if (only.directory || formatChoice(choice).family === "single") {
+		return only.name
 	}
 
-	const dot = extensionStart(name)
+	const dot = extensionStart(only.name)
 
-	return dot === -1 ? name : name.slice(0, dot)
+	return dot === -1 ? only.name : only.name.slice(0, dot)
 }
 
 // A name the user typed with the extension already on it does not get it twice.

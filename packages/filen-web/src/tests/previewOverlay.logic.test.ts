@@ -131,10 +131,11 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 		])
 	})
 
-	it("opened from Photos, drops Move and Compress like the Photos grid (the header keeps its own download)", () => {
+	it("opened from Photos, drops Move like the Photos grid and keeps Compress (the header keeps its own download)", () => {
 		expect(menuIds(fileItem(), "drive", PHOTOS_HIDDEN_ACTION_IDS)).toEqual([
 			"rename",
 			"copy",
+			"compress",
 			"favorite",
 			"versions",
 			"info",

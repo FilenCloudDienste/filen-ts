@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
+import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
@@ -51,6 +52,8 @@ export interface ItemMenuContentProps {
 	// Descriptor ids to omit from the rendered list — the preview drops "download" (its header has its
 	// own download button), photos drops "move" (photos/lib/itemActions.ts).
 	hiddenActionIds?: ReadonlySet<ItemActionId> | undefined
+	// The Compress presets' directory names where a surface knows its own (photos).
+	compressParentNaming?: ParentNaming | undefined
 	// True for a search hit whose parent is not the directory on screen — the only case
 	// "Open containing directory" is offered for. Omitted by every non-listing caller.
 	searchHit?: boolean | undefined
@@ -85,6 +88,7 @@ function ItemMenuEntries({
 	onFavoriteToggled,
 	onRestored,
 	hiddenActionIds,
+	compressParentNaming,
 	searchHit,
 	onOpen,
 	destination,
@@ -221,6 +225,7 @@ function ItemMenuEntries({
 							disabled={descriptor.enabled === false}
 							items={[item]}
 							variant={variant}
+							parentNaming={compressParentNaming}
 							onMoreOptions={() => {
 								onItemAction("compress", item)
 							}}
@@ -293,6 +298,7 @@ export function DriveContextMenuContent({
 	onFavoriteToggled,
 	onRestored,
 	hiddenActionIds,
+	compressParentNaming,
 	searchHit,
 	onOpen,
 	destination
@@ -306,6 +312,7 @@ export function DriveContextMenuContent({
 				onFavoriteToggled={onFavoriteToggled}
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
+				compressParentNaming={compressParentNaming}
 				searchHit={searchHit}
 				onOpen={onOpen}
 				destination={destination}
@@ -324,6 +331,7 @@ export function DriveDropdownMenuContent({
 	onFavoriteToggled,
 	onRestored,
 	hiddenActionIds,
+	compressParentNaming,
 	searchHit,
 	onOpen,
 	destination
@@ -337,6 +345,7 @@ export function DriveDropdownMenuContent({
 				onFavoriteToggled={onFavoriteToggled}
 				onRestored={onRestored}
 				hiddenActionIds={hiddenActionIds}
+				compressParentNaming={compressParentNaming}
 				searchHit={searchHit}
 				onOpen={onOpen}
 				destination={destination}

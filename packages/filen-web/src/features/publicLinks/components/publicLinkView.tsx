@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { resolveRouteLink, type PublicLinkKind } from "@/features/publicLinks/lib/format.logic"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
+import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
 import { PublicLinkShell } from "@/features/publicLinks/components/publicLinkShell"
 import { PublicLinkInvalid } from "@/features/publicLinks/components/publicLinkStates"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
@@ -27,21 +28,25 @@ export function PublicLinkView({ kind, uuid }: { kind: PublicLinkKind; uuid: str
 		}
 	}, [uuid])
 
+	// The archive listings a signed-in visitor browsed live as long as the link: hiding the contents or
+	// stepping between a directory link's files reopens them, and another link starts without them.
 	return (
 		<PublicLinkShell>
-			{resolved === null ? (
-				<PublicLinkInvalid />
-			) : kind === "file" ? (
-				<FileLinkView
-					uuid={resolved.uuid}
-					linkKey={resolved.key}
-				/>
-			) : (
-				<DirectoryLinkView
-					uuid={resolved.uuid}
-					linkKey={resolved.key}
-				/>
-			)}
+			<ArchiveListingScope key={uuid}>
+				{resolved === null ? (
+					<PublicLinkInvalid />
+				) : kind === "file" ? (
+					<FileLinkView
+						uuid={resolved.uuid}
+						linkKey={resolved.key}
+					/>
+				) : (
+					<DirectoryLinkView
+						uuid={resolved.uuid}
+						linkKey={resolved.key}
+					/>
+				)}
+			</ArchiveListingScope>
 		</PublicLinkShell>
 	)
 }

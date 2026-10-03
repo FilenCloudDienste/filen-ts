@@ -72,6 +72,14 @@ export const publicLinks = {
 	downloadDirectory: "Download all",
 	/** File and directory views, signed-in visitors only — copies the linked file or the directory on screen into their own Cloud Drive (a destination picker, then a progress card) */
 	saveToDrive: "Save to Cloud Drive",
+	/** File view, signed-in visitors only — opens the linked archive's contents in place of the hero card */
+	archiveBrowse: "Browse contents",
+	/** File view — closes the archive's contents back to the hero card */
+	archiveHideContents: "Hide contents",
+	/** File view, signed-in visitors only — extracts the linked archive into their own Cloud Drive (a destination picker, then a progress card) */
+	extractToDrive: "Extract to my Cloud Drive",
+	/** Directory view, signed-in visitors only — compresses the directory on screen into an archive saved in their own Cloud Drive (the compress dialog) */
+	saveAsArchive: "Save as archive",
 	/** Directory view — preparing/streaming the zip */
 	preparingDownload: "Preparing download…",
 	/** Directory view — filter box placeholder */

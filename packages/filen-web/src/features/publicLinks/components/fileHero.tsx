@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes, driveItemName } from "@filen/shared"
 import { ArrowLeftIcon, DownloadIcon, EyeIcon, EyeOffIcon } from "lucide-react"
-import type { AnyItemWithContext } from "@filen/sdk-rs"
+import type { AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
@@ -14,8 +14,10 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { anonPreviewability } from "@/features/publicLinks/lib/download.logic"
 import { startAnonFileDownload } from "@/features/publicLinks/lib/download"
+import { linkedArchiveSource } from "@/features/archive/lib/archiveSource"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
+import { PublicArchiveActions, PublicArchiveBrowser } from "@/features/publicLinks/components/publicArchive"
 
 type DownloadUiState =
 	| { status: "idle" }
@@ -26,17 +28,20 @@ type DownloadUiState =
 // The file surface, shared by the /f/ route and the in-directory child file view. Given a resolved
 // DriveItem (fabricated from a LinkedFile or narrowed from a listing File) it shows a hero card —
 // icon, name, size/type — with a flag-gated Download and, when the file is previewable within the
-// memory cap, an inline preview (auto-invoked). `onBack` is present only for the in-dir child view
-// (returns to the listing); the /f/ route omits it. `downloadEnabled` is the link's own flag (a file
-// link's downloadable, a directory link's enableDownload); without it the preview stays and nothing
-// offers to save the file. `linkScope` fingerprints the link's key and password, scoping the bytes the
-// preview loads so Download can reuse them.
+// memory cap, an inline preview (auto-invoked). An archive never opens on its own: a signed-in visitor
+// gets "Browse contents" and, downloads allowed, "Extract to my Cloud Drive" (publicArchive.tsx); a
+// signed-out one only Download. `onBack` is present only for the in-dir child view (returns to the
+// listing); the /f/ route omits it. `downloadEnabled` is the link's own flag (a file link's downloadable,
+// a directory link's enableDownload); without it the preview stays and nothing offers to save the file.
+// `linkScope` fingerprints the link's key and password, scoping the bytes the preview loads so Download
+// can reuse them.
 export function FileHero({
 	item,
 	downloadEnabled,
 	linkScope,
 	onBack,
-	saveItem
+	saveItem,
+	archiveFile
 }: {
 	item: DriveItem
 	downloadEnabled: boolean
@@ -44,6 +49,9 @@ export function FileHero({
 	onBack?: () => void
 	// Offers "Save to Cloud Drive" when present (a signed-in visitor on a saveable link).
 	saveItem?: AnyItemWithContext | undefined
+	// The file as the SDK resolved it (the LinkedFile, or the directory listing's File), which an archive's
+	// browser and extract read through.
+	archiveFile?: AnyFile | undefined
 }) {
 	const { t } = useTranslation("publicLinks")
 	const base = asDirectoryOrFile(item)
@@ -51,7 +59,11 @@ export function FileHero({
 	const size = base.data.size
 	const previewability = anonPreviewability(item)
 	const [showPreview, setShowPreview] = useState(previewability === "previewable")
+	const [showContents, setShowContents] = useState(false)
 	const [download, setDownload] = useState<DownloadUiState>({ status: "idle" })
+	const archiveSource = previewability === "archive" && archiveFile !== undefined ? linkedArchiveSource(item, archiveFile) : null
+	// Contents only ever open from "Browse contents", which a signed-in visitor alone is offered.
+	const pane = showPreview && previewability === "previewable" ? "preview" : showContents && archiveSource !== null ? "contents" : null
 
 	function downloadError(dto: ErrorDTO): string {
 		return `${t("downloadFailed")} ${errorLabel(dto)}`
@@ -92,8 +104,9 @@ export function FileHero({
 		</Button>
 	) : null
 
-	// Preview mode: a slim top bar (back / name / actions) over the inline viewer filling the rest.
-	if (showPreview && previewability === "previewable") {
+	// Preview or contents mode: a slim top bar (back / name / actions) over the inline viewer or the
+	// archive's browser filling the rest.
+	if (pane !== null) {
 		return (
 			<div className="flex flex-1 flex-col">
 				<div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-4">
@@ -123,12 +136,14 @@ export function FileHero({
 					<Button
 						variant="ghost"
 						size="sm"
+						aria-label={pane === "contents" ? t("archiveHideContents") : t("hidePreview")}
 						onClick={() => {
 							setShowPreview(false)
+							setShowContents(false)
 						}}
 					>
 						<EyeOffIcon data-icon="inline-start" />
-						<span className="hidden sm:inline">{t("hidePreview")}</span>
+						<span className="hidden sm:inline">{pane === "contents" ? t("archiveHideContents") : t("hidePreview")}</span>
 					</Button>
 					{saveItem !== undefined && (
 						<SaveToDriveButton
@@ -142,6 +157,7 @@ export function FileHero({
 						<Button
 							variant="outline"
 							size="sm"
+							aria-label={t("download")}
 							onClick={handleDownload}
 							disabled={download.status === "running"}
 						>
@@ -151,11 +167,18 @@ export function FileHero({
 					)}
 				</div>
 				<div className="min-h-0 flex-1">
-					<PublicPreview
-						item={item}
-						linkScope={linkScope}
-						downloadable={downloadEnabled}
-					/>
+					{pane === "contents" && archiveSource !== null ? (
+						<PublicArchiveBrowser
+							source={archiveSource}
+							downloadable={downloadEnabled}
+						/>
+					) : (
+						<PublicPreview
+							item={item}
+							linkScope={linkScope}
+							downloadable={downloadEnabled}
+						/>
+					)}
 				</div>
 			</div>
 		)
@@ -188,6 +211,15 @@ export function FileHero({
 							item={saveItem}
 							name={name}
 							glyph="file"
+						/>
+					)}
+					{archiveSource !== null && (
+						<PublicArchiveActions
+							source={archiveSource}
+							downloadable={downloadEnabled}
+							onBrowse={() => {
+								setShowContents(true)
+							}}
 						/>
 					)}
 					{previewability === "previewable" && (

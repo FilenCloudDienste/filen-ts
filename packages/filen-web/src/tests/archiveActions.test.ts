@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { onlineManager, QueryClient } from "@tanstack/react-query"
-import type { CompressFormat, Dir, File, SharedFile, UserInfo, UuidStr } from "@filen/sdk-rs"
+import type { CompressFormat, Dir, File, LinkedFile, SharedFile, UserInfo, UuidStr } from "@filen/sdk-rs"
 import type { ArchiveFormatInfo, ArchiveNameInfo } from "@/workers/sdk.worker"
 import type { CompressJobRequest, ExtractJobRequest } from "@/features/drive/lib/archiveJobs.logic"
 
@@ -29,7 +29,8 @@ vi.mock("sonner", () => ({ toast: { error: toastError } }))
 vi.mock("@/features/transfers/lib/archiveToast", () => ({ startCompressWithCard, startExtractWithCard, startExtractBatchWithCards }))
 
 import "@/lib/i18n"
-import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { linkedFileIntoDriveItem, narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { linkedArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { CompressPreferences } from "@/features/drive/lib/compressPreferences"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
@@ -219,6 +220,23 @@ describe("compressWithPreset", () => {
 		expect(compressRequest()?.dispose).toBeNull()
 	})
 
+	it("names items from different directories after the caller's fallback, one directory by the caller's own lookup", async () => {
+		const { compressWithPreset } = await load()
+		const work = testUuid("work")
+
+		await compressWithPreset([file("a.jpg"), file("b.jpg", work)], "drive", "zip", { mixedFallback: "Photos" })
+		await compressWithPreset([file("a.jpg"), file("b.jpg")], "drive", "zip", {
+			nameOf: uuid => (uuid === PARENT ? "Italy" : undefined),
+			mixedFallback: "Photos"
+		})
+
+		expect(startCompressWithCard.mock.calls[0]?.[0]).toMatchObject({
+			name: "Photos.zip",
+			destination: { uuid: null, name: "Cloud Drive" }
+		})
+		expect(startCompressWithCard.mock.calls[1]?.[0]).toMatchObject({ name: "Italy.zip", destination: { uuid: PARENT, name: "Italy" } })
+	})
+
 	it("starts nothing when not even the lowest level fits, and points to Advanced settings", async () => {
 		const { compressWithPreset } = await load()
 
@@ -331,6 +349,74 @@ describe("extractQuick", () => {
 		archiveNameInfo.mockRejectedValue(sdkErrorDTO("Unknown", "worker gone"))
 
 		await extractQuick([file("a.zip")], "drive", { type: "hereNewFolder" })
+
+		expect(startExtractWithCard).not.toHaveBeenCalled()
+		expect(toastError).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("extractArchiveTo", () => {
+	const LINKED: LinkedFile = {
+		uuid: testUuid("linked"),
+		name: { Decrypted: "photos.zip" },
+		mime: { Decrypted: "application/zip" },
+		size: 2048n,
+		chunks: 1n,
+		region: "de-1",
+		bucket: "filen-1",
+		version: 2,
+		timestamp: 0n,
+		fileKey: "k",
+		downloadable: true,
+		linkedTag: true,
+		canMakeThumbnail: false
+	}
+	const SOURCE = linkedArchiveSource(linkedFileIntoDriveItem(LINKED), LINKED)
+	const DESTINATION = { uuid: PARENT, name: "parent" }
+
+	it("extracts the whole archive into a new directory there, never removing it, asking for its name once", async () => {
+		const { extractArchiveTo } = await load()
+
+		await extractArchiveTo(SOURCE, DESTINATION)
+		await extractArchiveTo(SOURCE, DESTINATION)
+
+		expect(archiveNameInfo).toHaveBeenCalledTimes(1)
+		expect(startExtractWithCard).toHaveBeenCalledTimes(2)
+		expect(startExtractWithCard.mock.calls[0]).toEqual([
+			{
+				archive: { file: LINKED, uuid: LINKED.uuid, name: "photos.zip" },
+				destination: DESTINATION,
+				root: { type: "newFolder" },
+				rowName: "photos",
+				glyph: "directory",
+				calls: [{ type: "all" }],
+				skipMacMetadata: true,
+				dispose: null,
+				basis: { type: "archiveRead" },
+				formatHint: "zip"
+			},
+			undefined
+		])
+	})
+
+	it("starts nothing offline, saying why", async () => {
+		const { extractArchiveTo } = await load()
+
+		onlineManager.setOnline(false)
+
+		await extractArchiveTo(SOURCE, DESTINATION)
+
+		expect(archiveNameInfo).not.toHaveBeenCalled()
+		expect(startExtractWithCard).not.toHaveBeenCalled()
+		expect(toastError).toHaveBeenCalledTimes(1)
+	})
+
+	it("shows the worker's error", async () => {
+		const { extractArchiveTo } = await load()
+
+		archiveNameInfo.mockRejectedValue(sdkErrorDTO("Unknown", "worker gone"))
+
+		await extractArchiveTo(SOURCE, DESTINATION)
 
 		expect(startExtractWithCard).not.toHaveBeenCalled()
 		expect(toastError).toHaveBeenCalledTimes(1)

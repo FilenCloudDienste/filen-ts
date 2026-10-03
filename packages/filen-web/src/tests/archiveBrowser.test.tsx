@@ -31,10 +31,13 @@ vi.mock("@/features/archive/lib/listingSession", async importOriginal => ({
 
 import { queryClient } from "@/queries/client"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
-import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
+import { archiveSourceOf, type ArchiveSource } from "@/features/archive/lib/archiveSource"
+import { narrowItem } from "@/features/drive/lib/item"
+import { testUuid } from "@/tests/support/uuid"
 import type { ListingPhase, ListingSession, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
 import { createListingCache, ListingCacheContext } from "@/features/archive/lib/listingCache"
 import { ArchiveSourceBrowser } from "@/features/archive/components/archiveBrowser"
+import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { extractJob } from "@/tests/support/archiveJobFixtures"
 import { storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
@@ -138,15 +141,17 @@ function mockListViewport(): void {
 
 const parentKeyDown = vi.fn()
 
-function show(fake: FakeSession) {
+function show(fake: FakeSession, downloadable = true, source: ArchiveSource = SOURCE) {
 	openListingSession.mockReturnValue(fake.session)
 
 	return render(
 		<QueryClientProvider client={queryClient}>
-			{/* Stands in for the overlay's own handler, which pages on Left/Right. */}
-			<div onKeyDown={parentKeyDown}>
-				<ArchiveSourceBrowser source={SOURCE} />
-			</div>
+			<PreviewDownloadableProvider downloadable={downloadable}>
+				{/* Stands in for the overlay's own handler, which pages on Left/Right. */}
+				<div onKeyDown={parentKeyDown}>
+					<ArchiveSourceBrowser source={source} />
+				</div>
+			</PreviewDownloadableProvider>
 		</QueryClientProvider>
 	)
 }
@@ -407,6 +412,61 @@ describe("ArchiveSourceBrowser states", () => {
 
 		expect(screen.getByRole("button", { name: "Extract all" }).hasAttribute("disabled")).toBe(true)
 		expect(screen.getByRole("button", { name: "Extract selected" }).hasAttribute("disabled")).toBe(true)
+	})
+
+	it("browses a link that allows no downloads but extracts nothing, saying why", () => {
+		const reason = "The link's owner doesn't allow downloads, so nothing can be extracted from it."
+
+		mockListViewport()
+		show(fakeSession(done(), storeOf(TREE)), false)
+
+		expect(options()).toHaveLength(3)
+
+		press(" ")
+
+		expect(selectedNames()).toHaveLength(1)
+		expect(screen.getByText(reason)).toBeTruthy()
+
+		for (const name of ["Extract all", "Extract selected"]) {
+			const button = screen.getByRole("button", { name })
+
+			expect(button.hasAttribute("disabled")).toBe(true)
+			expect(button.getAttribute("title")).toBe(reason)
+		}
+	})
+
+	it("offers no extract next to an archive below a directory shared with the user", () => {
+		const shared = narrowItem({
+			uuid: TEST_ARCHIVE,
+			stableUUID: undefined,
+			parent: testUuid("shared-parent"),
+			size: 100n,
+			favorited: false,
+			region: "de-1",
+			bucket: "filen-1",
+			timestamp: 0n,
+			chunks: 1n,
+			canMakeThumbnail: false,
+			meta: {
+				type: "decoded",
+				data: { name: "photos.zip", mime: "application/zip", modified: 0n, size: 100n, key: "k", version: 2 }
+			},
+			sharingRole: { type: "receiver", email: "a@example.com", id: 1 }
+		})
+
+		mockListViewport()
+		show(fakeSession(done(), storeOf(TREE)), true, archiveSourceOf(shared, "sharedIn", testUuid("root")))
+
+		// Extract all opens the places menu itself: there is no default next to the archive.
+		expect(screen.queryByRole("button", { name: "More places to extract to" })).toBeNull()
+		expect(screen.getByRole("button", { name: "Extract all" }).getAttribute("aria-haspopup")).toBe("menu")
+	})
+
+	it("keeps the gate's Browse but not its extract when the link allows no downloads", () => {
+		show(fakeSession({ type: "gate", format: { type: "tar", codec: "gzip" } }), false)
+
+		expect(screen.getByRole("button", { name: "Browse contents" }).hasAttribute("disabled")).toBe(false)
+		expect(screen.getByRole("button", { name: "Extract all" }).hasAttribute("disabled")).toBe(true)
 	})
 })
 

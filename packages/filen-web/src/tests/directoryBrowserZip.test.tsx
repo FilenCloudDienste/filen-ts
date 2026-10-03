@@ -17,7 +17,8 @@ vi.mock("@/features/publicLinks/lib/download", () => ({ startAnonDirZipDownload 
 vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	useLinkSaveable: () => false,
 	usePublicDirListing: () => ({ status: "success", data: LISTING, refetch: vi.fn() }),
-	usePublicDirSize: () => ({ data: undefined })
+	usePublicDirSize: () => ({ data: undefined }),
+	usePublicVisitorSignedIn: () => ({ data: false })
 }))
 vi.mock("@/features/publicLinks/components/fileHero", () => ({ FileHero: () => null }))
 vi.mock("@/features/publicLinks/components/saveToDrive", () => ({ SaveToDriveButton: () => null }))

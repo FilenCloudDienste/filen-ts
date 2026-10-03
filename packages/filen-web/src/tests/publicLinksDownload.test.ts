@@ -47,10 +47,10 @@ describe("anonPreviewability", () => {
 		expect(anonPreviewability(linkedFileItem("setup.exe", { size: 1024n }))).toBe("unpreviewable")
 	})
 
-	// The public-link page has no archive browser; with no size cap an archive would otherwise pass.
-	it("marks an archive unpreviewable, small or large", () => {
-		expect(anonPreviewability(linkedFileItem("photos.zip", { size: 1024n }))).toBe("unpreviewable")
-		expect(anonPreviewability(linkedFileItem("backup.tar.gz", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("unpreviewable")
+	// Never an inline preview: a signed-in visitor browses it on request, at any size.
+	it("marks an archive an archive, small or large, before any cap", () => {
+		expect(anonPreviewability(linkedFileItem("photos.zip", { size: 1024n }))).toBe("archive")
+		expect(anonPreviewability(linkedFileItem("backup.tar.gz", { size: PREVIEW_MAX_BYTES + 1n }))).toBe("archive")
 	})
 })
 

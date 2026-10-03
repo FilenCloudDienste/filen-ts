@@ -31,21 +31,31 @@ function ownParentOf(uuid: string, parent: string, variant: DriveVariant, rootUu
 	return normalizeParentUuid(parent, rootUuid)
 }
 
-export function archiveSourceOf(item: DriveItem, variant: DriveVariant, rootUuid: string = currentRootUuid()): ArchiveSource {
+function fileSource(item: DriveItem, ownParent: string | null | undefined, file?: AnyFile): ArchiveSource {
 	switch (item.type) {
 		case "file":
 		case "sharedFile":
 		case "sharedRootFile":
 			return {
-				file: item.data,
+				file: file ?? item.data,
 				uuid: item.data.uuid,
 				name: driveItemName(item),
 				size: Number(item.data.size),
-				ownParent: ownParentOf(item.data.uuid, item.data.parent, variant, rootUuid)
+				ownParent
 			}
 		case "directory":
 		case "sharedDirectory":
 		case "sharedRootDirectory":
 			throw new Error("an archive is a file")
 	}
+}
+
+export function archiveSourceOf(item: DriveItem, variant: DriveVariant, rootUuid: string = currentRootUuid()): ArchiveSource {
+	return fileSource(item, ownParentOf(item.data.uuid, item.data.parent, variant, rootUuid))
+}
+
+// A public link's or a chat's archive, shown through its drive-shaped stand-in: never in a directory of
+// the user's own. `file` is the SDK's own linked file when the caller holds it.
+export function linkedArchiveSource(item: DriveItem, file?: AnyFile): ArchiveSource {
+	return fileSource(item, undefined, file)
 }

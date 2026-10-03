@@ -4,6 +4,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { archiveSourceOf, type ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingDeps } from "@/features/archive/lib/listingSession"
@@ -106,6 +107,8 @@ export interface ArchiveSourceBrowserProps {
 export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps) {
 	const { t } = useTranslation(["preview", "drive", "common"])
 	const isOnline = useIsOnline()
+	// A public link that allows no downloads can still be browsed, but nothing leaves it.
+	const downloadable = usePreviewDownloadable()
 	const listId = useId()
 	const searchBoxRef = useRef<HTMLDivElement>(null)
 	const listing = useArchiveListing(source, deps)
@@ -150,8 +153,9 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 	const dirName = dir === 0 ? source.name : store.dirName(dir)
 	const baseFolderName = dir === 0 ? (info?.defaultName ?? source.name) : store.dirName(dir)
 	const totals = selectionTotalsOf(snapshot, selection)
-	const extractOff = info === null || !isOnline
-	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
+	const extractOff = info === null || !isOnline || !downloadable
+	const notAllowed = downloadable ? undefined : t("previewArchiveExtractNotAllowed")
+	const extractOffTitle = notAllowed ?? (isOnline ? undefined : t("common:offlineActionDisabled"))
 	const { hidden, shown } = splitCrumbs(crumbTrail(store, dir), ARCHIVE_VISIBLE_CRUMBS)
 
 	// Resolved when a handler runs, not in render, where the React Compiler would memoize the rows together
@@ -460,7 +464,8 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 				format={phase.format}
 				newFolderName={single ? null : (info?.defaultName ?? source.name)}
 				extractDisabled={extractOff}
-				extractDisabledTitle={offlineTitle}
+				extractDisabledTitle={extractOffTitle}
+				note={notAllowed}
 				onBrowse={() => {
 					listing.session()?.start()
 				}}
@@ -600,7 +605,8 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 				allFolderName={single ? null : (info?.defaultName ?? source.name)}
 				selectedDisabled={extractOff || !canExtractSelection(phase, store.entryCount) || totals.entries === 0}
 				allDisabled={extractOff}
-				disabledTitle={offlineTitle}
+				disabledTitle={extractOffTitle}
+				note={notAllowed}
 				onExtractSelected={extractSelected}
 				onExtractAll={extractAll}
 			/>

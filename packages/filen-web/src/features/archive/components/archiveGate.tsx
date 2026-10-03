@@ -15,6 +15,9 @@ export interface ArchiveGateProps {
 	newFolderName: string | null
 	extractDisabled: boolean
 	extractDisabledTitle: string | undefined
+	// Why extracting is off, shown under the buttons: a disabled control's title reaches neither touch nor
+	// assistive tech.
+	note?: string | undefined
 	onBrowse: () => void
 	onExtractAll: (target: ExtractTarget) => void
 }
@@ -28,6 +31,7 @@ export function ArchiveGate({
 	newFolderName,
 	extractDisabled,
 	extractDisabledTitle,
+	note,
 	onBrowse,
 	onExtractAll
 }: ArchiveGateProps) {
@@ -56,6 +60,7 @@ export function ArchiveGate({
 					onPick={onExtractAll}
 				/>
 			</div>
+			{note !== undefined ? <p className="max-w-sm text-xs text-muted-foreground">{note}</p> : null}
 		</div>
 	)
 }

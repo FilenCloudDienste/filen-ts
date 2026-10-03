@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import type { CompressJobRequest } from "@/features/drive/lib/archiveJobs.logic"
-import type { ArchiveFormat, CompressFormat, Dir, File, StreamCodec, UserInfo } from "@filen/sdk-rs"
+import type { AnyLinkedDirWithContext, ArchiveFormat, CompressFormat, Dir, File, StreamCodec, UserInfo } from "@filen/sdk-rs"
 import { i18n } from "@/lib/i18n"
 
 const {
@@ -48,7 +48,7 @@ vi.mock("@tanstack/react-router", () => ({
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { DEFAULT_COMPRESS_PREFERENCES } from "@/features/drive/lib/compressPreferences"
 import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
-import { CompressDialog } from "@/features/drive/components/compressDialog"
+import { CompressDialog, type CompressDialogProps } from "@/features/drive/components/compressDialog"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
@@ -132,10 +132,14 @@ function dir(name: string): DriveItem {
 
 const onClose = vi.fn()
 
-async function renderDialog(items: DriveItem[], variant: DriveVariant = "drive"): Promise<void> {
-	render(createElement(CompressDialog, { items, variant, onClose }), { wrapper: queryClientWrapper(createTestQueryClient()) })
+async function renderSubject(props: Omit<CompressDialogProps, "onClose">): Promise<void> {
+	render(createElement(CompressDialog, { ...props, onClose }), { wrapper: queryClientWrapper(createTestQueryClient()) })
 
 	await screen.findByLabelText("Name")
+}
+
+async function renderDialog(items: DriveItem[], variant: DriveVariant = "drive"): Promise<void> {
+	await renderSubject({ subject: { kind: "drive", items, variant } })
 }
 
 function submitButton(): HTMLButtonElement {
@@ -435,5 +439,66 @@ describe("CompressDialog", () => {
 		await renderDialog([dir("Docs")], "sharedOut")
 
 		expect(screen.queryByText("Afterwards")).toBeNull()
+	})
+
+	it("hands the originals to the host's own cleanup instead of pruning the drive selection", async () => {
+		const item = dir("Docs")
+		const onSourcesDisposing = vi.fn()
+
+		useDriveStore.getState().setSelectedItems([item])
+		await renderSubject({ subject: { kind: "drive", items: [item], variant: "drive" }, onSourcesDisposing })
+
+		fireEvent.click(screen.getByRole("radio", { name: "Move the originals to the trash" }))
+		await submitAndSettle()
+
+		expect(startCompressWithCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ dispose: "trash" }), undefined)
+		expect(onSourcesDisposing).toHaveBeenCalledExactlyOnceWith([item.data.uuid])
+		expect(useDriveStore.getState().selectedItems).toEqual([item])
+	})
+
+	it("saves a public link's directory as an archive in the Cloud Drive's root, never removing it", async () => {
+		const item: AnyLinkedDirWithContext = {
+			dir: {
+				inner: {
+					uuid: testUuid("linked"),
+					parent: testUuid("link-parent"),
+					color: "default",
+					timestamp: 0n,
+					favorited: false,
+					meta: { type: "decoded", data: { name: "Shared" } }
+				},
+				linkedTag: true
+			},
+			link: {
+				linkUuid: testUuid("link"),
+				linkKey: "key",
+				linkKeyVersion: 1,
+				password: { type: "none" },
+				enableDownload: true,
+				salt: ""
+			}
+		}
+
+		await renderSubject({ subject: { kind: "linked", items: [item], naming: [{ name: "Shared", directory: true }] } })
+
+		expect(screen.getByRole("dialog", { name: "Save as archive" }).textContent).toContain("Packs “Shared” into one archive")
+		expect(screen.getByLabelText("Name")).toHaveProperty("value", "Shared")
+		expect(screen.getByRole("group", { name: "Save in" }).textContent).toBe("Cloud Drive")
+		expect(screen.queryByText("Afterwards")).toBeNull()
+
+		await submitAndSettle()
+
+		expect(started()).toEqual([
+			{
+				source: { kind: "linked", items: [item] },
+				destination: { uuid: null, name: "Cloud Drive" },
+				name: "Shared.zip",
+				format: { type: "zip", method: { type: "deflate", level: 5 } },
+				encrypted: false,
+				dispose: null,
+				itemCount: 1
+			},
+			undefined
+		])
 	})
 })

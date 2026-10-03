@@ -15,21 +15,37 @@ import type {
 } from "@filen/sdk-rs"
 import "@/lib/i18n"
 
-const { getLinkedFileAnon, getDirPublicLinkInfoAnon, getLinkedDirSizeAnon, listLinkedDirAnon } = vi.hoisted(() => ({
+const {
+	getLinkedFileAnon,
+	getDirPublicLinkInfoAnon,
+	getLinkedDirSizeAnon,
+	listLinkedDirAnon,
+	hasClient,
+	ownsItem,
+	listArchive,
+	archiveNameInfo
+} = vi.hoisted(() => ({
 	getLinkedFileAnon: vi.fn<(uuid: string, key: string, password: string | undefined) => Promise<unknown>>(),
 	getDirPublicLinkInfoAnon: vi.fn<(uuid: string, key: string) => Promise<DirPublicInfo>>(),
 	getLinkedDirSizeAnon: vi.fn<(args: { dir: AnyLinkedDir; link: DirPublicLink }) => Promise<DirSizeResponse>>(),
-	listLinkedDirAnon: vi.fn<(dir: AnyLinkedDir, link: DirPublicLink) => Promise<LinkedDirsAndFiles>>()
+	listLinkedDirAnon: vi.fn<(dir: AnyLinkedDir, link: DirPublicLink) => Promise<LinkedDirsAndFiles>>(),
+	hasClient: vi.fn<() => Promise<boolean>>(),
+	ownsItem: vi.fn<(kind: "file" | "directory", uuid: string) => Promise<boolean>>(),
+	listArchive: vi.fn<() => Promise<unknown>>(),
+	archiveNameInfo: vi.fn<(names: string[]) => Promise<unknown>>()
 }))
 
-// A signed-out visitor: no "Save to Cloud Drive", so no owner lookup either.
+// A signed-out visitor unless a test says otherwise: no "Save to Cloud Drive", so no owner lookup either.
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
 		getLinkedFileAnon,
 		getDirPublicLinkInfoAnon,
 		getLinkedDirSizeAnon,
 		listLinkedDirAnon,
-		hasClient: () => Promise.resolve(false)
+		hasClient,
+		ownsItem,
+		listArchive,
+		archiveNameInfo
 	}
 }))
 
@@ -44,6 +60,8 @@ import { queryClientWrapper } from "@/tests/testQueryClient"
 import { usePublicFile, publicDirListingQueryKey } from "@/features/publicLinks/queries/publicLink"
 import { linkForBrowsing } from "@/features/publicLinks/lib/password.logic"
 import { DirectoryLinkView } from "@/features/publicLinks/components/directoryLinkView"
+import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
+import { mockLinkedFile } from "@/tests/fixtures/sdk"
 
 type Uuid = `${string}-${string}-${string}-${string}-${string}`
 
@@ -155,6 +173,8 @@ async function submitPassword(password: string): Promise<void> {
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	hasClient.mockResolvedValue(false)
+	ownsItem.mockResolvedValue(false)
 	listLinkedDirAnon.mockImplementation(dir => Promise.resolve(listingFor(dir)))
 	getLinkedDirSizeAnon.mockResolvedValue(SIZE)
 })
@@ -263,5 +283,41 @@ describe("public file link request count", () => {
 		await focusAndReconnect()
 
 		expect(getLinkedFileAnon).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("public archive link request count", () => {
+	// A signed-in visitor: the archive offers its actions, and none of them reads anything before a click.
+	async function openArchiveLink(uuid: Uuid, downloadable: boolean): Promise<void> {
+		hasClient.mockResolvedValue(true)
+		getLinkedFileAnon.mockResolvedValue(mockLinkedFile({ uuid, name: { Decrypted: "photos.zip" }, downloadable }))
+		render(createElement(FileLinkView, { uuid, linkKey: "archive-key" }), { wrapper })
+		await drain()
+	}
+
+	it("reads no listing, name info or owner before Browse contents, downloads off", async () => {
+		await openArchiveLink("f2000000-0000-0000-0000-000000000001", false)
+
+		expect(screen.getByRole("button", { name: "Browse contents" })).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Extract to my Cloud Drive" })).toBeNull()
+		expect(ownsItem).not.toHaveBeenCalled()
+		expect(listArchive).not.toHaveBeenCalled()
+		expect(archiveNameInfo).not.toHaveBeenCalled()
+	})
+
+	it("adds nothing to the save gate's one owner lookup, downloads on", async () => {
+		await openArchiveLink("f2000000-0000-0000-0000-000000000002", true)
+
+		expect(screen.getByRole("button", { name: "Extract to my Cloud Drive" })).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Browse contents" })).toBeTruthy()
+		expect(ownsItem).toHaveBeenCalledTimes(1)
+		expect(listArchive).not.toHaveBeenCalled()
+		expect(archiveNameInfo).not.toHaveBeenCalled()
+
+		await focusAndReconnect()
+
+		expect(ownsItem).toHaveBeenCalledTimes(1)
+		expect(listArchive).not.toHaveBeenCalled()
+		expect(archiveNameInfo).not.toHaveBeenCalled()
 	})
 })

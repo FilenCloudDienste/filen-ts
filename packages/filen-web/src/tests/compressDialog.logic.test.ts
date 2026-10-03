@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import type { Dir, File } from "@filen/sdk-rs"
+import type { Dir, File, LinkedFile, UserInfo, UuidStr } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -14,6 +14,7 @@ import {
 	compressArchiveName,
 	compressDialogReducer,
 	compressNameToCheck,
+	compressSubjectFacts,
 	initCompressDialog,
 	validateCompress,
 	visibleCompressErrors,
@@ -21,16 +22,21 @@ import {
 	type CompressDialogState,
 	type CompressValidationContext
 } from "@/features/drive/components/compressDialog.logic"
+import { namingEntries } from "@/features/drive/lib/archiveTargets"
 import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
+import { queryClient } from "@/queries/client"
+import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { testUuid } from "@/tests/support/uuid"
 
+const ROOT = testUuid("root")
 const PARENT = testUuid("parent")
+const OTHER = testUuid("other")
 
-function file(name: string): DriveItem {
+function file(name: string, parent: UuidStr = PARENT): DriveItem {
 	const raw: File = {
 		uuid: testUuid(name),
 		stableUUID: undefined,
-		parent: PARENT,
+		parent,
 		size: 100n,
 		favorited: false,
 		region: "de-1",
@@ -85,7 +91,7 @@ function init(
 ): CompressDialogState {
 	return initCompressDialog({
 		prefs,
-		naming: { items, parentName: "Photos", fallback: "Archive" },
+		naming: { entries: namingEntries(items), parentName: "Photos", fallback: "Archive" },
 		destination: { uuid: PARENT, name: "Photos" },
 		allowed: allowed ?? FORMAT_CHOICES.map(choice => choice.id)
 	})
@@ -413,5 +419,84 @@ describe("visibleCompressErrors", () => {
 		const state = run(init([dir("Docs")]), { type: "setProtect", value: true })
 
 		expect(visibleCompressErrors(state, { password: "tooLong" })).toEqual({ password: "tooLong" })
+	})
+})
+
+describe("compressSubjectFacts", () => {
+	const NAMES: Record<string, string> = { [PARENT]: "Holiday", [OTHER]: "Work" }
+	const facts = (subject: Parameters<typeof compressSubjectFacts>[0]) =>
+		compressSubjectFacts(subject, { rootName: "My Drive", fallback: "Archive", nameOf: uuid => NAMES[uuid] })
+
+	queryClient.setQueryData<Partial<UserInfo>>(ACCOUNT_QUERY_KEY, { rootDirUuid: ROOT })
+
+	it("compresses own drive items next to them, may remove them and prunes them from the selection", () => {
+		const items = [file("a.txt"), dir("b")]
+
+		expect(facts({ kind: "drive", items, variant: "drive" })).toEqual({
+			naming: { entries: namingEntries(items), parentName: "Holiday", fallback: "Archive" },
+			singleFile: false,
+			disposeAllowed: true,
+			destination: { uuid: PARENT, name: "Holiday" },
+			pickerSources: items,
+			source: { kind: "items", items },
+			itemCount: 2,
+			selectionUuids: items.map(item => item.data.uuid)
+		})
+	})
+
+	it("keeps someone else's items and saves to My Drive's root in Shared with me", () => {
+		const result = facts({ kind: "drive", items: [file("a.txt")], variant: "sharedIn" })
+
+		expect(result.disposeAllowed).toBe(false)
+		expect(result.singleFile).toBe(true)
+		expect(result.destination).toEqual({ uuid: null, name: "My Drive" })
+	})
+
+	it("reads names through the caller's own lookup and names a mix of directories after its fallback", () => {
+		const items = [file("a.jpg"), file("b.jpg", OTHER)]
+		const own = (uuid: string) => (uuid === PARENT ? "Italy" : undefined)
+
+		expect(facts({ kind: "drive", items, variant: "drive", parentNaming: { mixedFallback: "Photos" } }).naming.parentName).toBe(
+			"Photos"
+		)
+		expect(
+			facts({ kind: "drive", items: [file("a.jpg"), file("b.jpg")], variant: "drive", parentNaming: { nameOf: own } })
+		).toMatchObject({
+			naming: { parentName: "Italy" },
+			destination: { uuid: PARENT, name: "Italy" }
+		})
+		// Without the fallback a mix keeps the drive's own rule.
+		expect(facts({ kind: "drive", items, variant: "drive" }).naming.parentName).toBeNull()
+	})
+
+	it("saves a public link's item to My Drive's root, never removing it and pruning nothing", () => {
+		const linked: LinkedFile = {
+			uuid: testUuid("linked"),
+			name: { Decrypted: "photo.jpg" },
+			mime: { Decrypted: "image/jpeg" },
+			size: 1024n,
+			chunks: 1n,
+			region: "de-1",
+			bucket: "filen-1",
+			version: 2,
+			timestamp: 0n,
+			fileKey: "k",
+			downloadable: true,
+			linkedTag: true,
+			canMakeThumbnail: false
+		}
+		const naming = [{ name: "photo.jpg", directory: false }]
+
+		expect(facts({ kind: "linked", items: [linked], naming })).toEqual({
+			naming: { entries: naming, parentName: null, fallback: "Archive" },
+			singleFile: true,
+			disposeAllowed: false,
+			destination: { uuid: null, name: "My Drive" },
+			pickerSources: [],
+			source: { kind: "linked", items: [linked] },
+			itemCount: 1,
+			selectionUuids: []
+		})
+		expect(facts({ kind: "linked", items: [linked], naming: [{ name: "Shared", directory: true }] }).singleFile).toBe(false)
 	})
 })

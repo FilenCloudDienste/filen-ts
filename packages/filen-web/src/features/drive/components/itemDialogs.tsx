@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
+import type { ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { InfoDialog } from "@/features/drive/components/infoDialog"
@@ -83,9 +84,13 @@ export interface ItemDialogProps {
 	onClose: () => void
 	// Overrides the share picker's own drive-selection cleanup (photos prunes its own selection).
 	onShared?: (succeededUuids: string[]) => void
+	// Likewise for the originals a compress is to remove.
+	onSourcesDisposing?: ((uuids: string[]) => void) | undefined
+	// How several items' archive is named after their directory (photos knows its own).
+	compressParentNaming?: ParentNaming | undefined
 }
 
-export function ItemDialog({ kind, items, variant, onClose, onShared }: ItemDialogProps) {
+export function ItemDialog({ kind, items, variant, onClose, onShared, onSourcesDisposing, compressParentNaming }: ItemDialogProps) {
 	const item = items[0]
 
 	if (!item) {
@@ -136,9 +141,9 @@ export function ItemDialog({ kind, items, variant, onClose, onShared }: ItemDial
 		case "compress":
 			return (
 				<CompressDialog
-					items={items}
-					variant={variant}
+					subject={{ kind: "drive", items, variant, parentNaming: compressParentNaming }}
 					onClose={onClose}
+					onSourcesDisposing={onSourcesDisposing}
 				/>
 			)
 		// The options dialog takes one archive; bulk extract only ever picks a destination.

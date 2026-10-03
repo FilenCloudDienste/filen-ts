@@ -192,7 +192,7 @@ describe("CompressSubmenu", () => {
 			fireEvent.click(entry("7-Zip (.7z)"))
 		})
 
-		expect(compressWithPreset).toHaveBeenCalledExactlyOnceWith(items, "drive", "7z")
+		expect(compressWithPreset).toHaveBeenCalledExactlyOnceWith(items, "drive", "7z", undefined)
 	})
 
 	it("opens the options dialog from More options", async () => {
@@ -453,7 +453,7 @@ describe("BulkActionBar — archive menu buttons", () => {
 		act(() => {
 			fireEvent.click(entry("Tarball (.tar.gz)"))
 		})
-		expect(compressWithPreset).toHaveBeenCalledExactlyOnceWith(items, "drive", "tar.gz")
+		expect(compressWithPreset).toHaveBeenCalledExactlyOnceWith(items, "drive", "tar.gz", undefined)
 
 		await act(async () => {
 			fireEvent.click(screen.getByRole("button", { name: "Extract" }))

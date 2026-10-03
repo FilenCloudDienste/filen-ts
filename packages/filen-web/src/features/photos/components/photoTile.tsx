@@ -6,7 +6,7 @@ import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { patchPhoto } from "@/features/photos/lib/actions"
-import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
+import { PHOTOS_HIDDEN_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -54,8 +54,9 @@ export function PhotoTile({
 	onTileToggle,
 	onItemAction
 }: PhotoTileProps) {
-	const { t } = useTranslation(["drive", "photos"])
+	const { t } = useTranslation(["drive", "photos", "common"])
 	const name = driveItemName(item)
+	const compressParentNaming = photosParentNaming(rootUuid, t("common:modulePhotos"))
 	const press = useTouchLongPress<HTMLDivElement>({
 		onLongPress: () => {
 			onTileToggle(index)
@@ -129,6 +130,7 @@ export function PhotoTile({
 									item={item}
 									variant="drive"
 									hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
+									compressParentNaming={compressParentNaming}
 									onItemAction={kind => {
 										onItemAction(kind, item)
 									}}
@@ -145,6 +147,7 @@ export function PhotoTile({
 				item={item}
 				variant="drive"
 				hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
+				compressParentNaming={compressParentNaming}
 				onItemAction={kind => {
 					onItemAction(kind, item)
 				}}

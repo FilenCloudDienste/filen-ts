@@ -101,6 +101,7 @@ describe("photos item menu", () => {
 		expect(screen.getAllByRole("menuitem").map(entry => entry.textContent)).toEqual([
 			"Rename",
 			"Copy",
+			"Compress",
 			"Favorite",
 			"Versions",
 			"Info",

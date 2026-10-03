@@ -94,7 +94,7 @@ function LinkedPreviewOverlay({ item, downloadable, onClose }: { item: DriveItem
 	)
 }
 
-// A resolved Filen file link's rich card (pdf/docx/text/code/markdown, and the fallback for a failed
+// A resolved Filen file link's rich card (pdf/docx/text/code/markdown/archive, and the fallback for a failed
 // image/video/audio inline stream below) — click opens LinkedPreviewOverlay, fed the fabricated linked-file
 // item (linkedFileIntoDriveItem, item.ts) — zero new viewer code for any of these categories. `downloadable`
 // is the link's own flag.
@@ -324,7 +324,7 @@ function FilenInlineMedia({
 
 // Compact card for a Filen public link (file or directory) pasted into a message — the branch point
 // for every resolved category: a previewable image/video/audio gets an inline thumbnail/mini-player, a
-// previewable-but-not-inline-rendered file (pdf/docx/text/code/markdown) gets a rich click-to-preview
+// previewable-but-not-inline-rendered file (pdf/docx/text/code/markdown/archive) gets a rich click-to-preview
 // card showing its real size, and a non-previewable file OR any directory link opens a new tab
 // (target=_blank to the raw link url, which now lands on the unauthenticated public-link viewer at the
 // /f/ /d/ routes — new-format links directly, legacy-format links via the index route's redirect). The
@@ -417,8 +417,7 @@ export function FilenLinkCard({
 		)
 	}
 
-	// An archive opens the link's page in a new tab, like a file nothing previews.
-	if (data.previewCategory === "other" || data.previewCategory === "archive") {
+	if (data.previewCategory === "other") {
 		return (
 			<LinkCardShell
 				icon={icon}
@@ -430,7 +429,8 @@ export function FilenLinkCard({
 		)
 	}
 
-	// pdf | docx | text | code | markdown
+	// pdf | docx | text | code | markdown | archive (the overlay's archive browser, extracting only when the
+	// link allows downloads)
 	return (
 		<FilenPreviewCard
 			item={item}

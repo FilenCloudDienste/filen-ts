@@ -1,7 +1,9 @@
-import type { AesStrength, ArchiveFormat, CompressFormat, EntryNameErrorKindJS } from "@filen/sdk-rs"
+import type { AesStrength, AnyItemWithContext, ArchiveFormat, CompressFormat, EntryNameErrorKindJS } from "@filen/sdk-rs"
 import type { JobDestination, SourceDisposalKind } from "@filen/shared"
 import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
 import type { DriveItem } from "@/features/drive/lib/item"
+import type { DriveVariant } from "@/features/drive/lib/preferences"
+import type { CompressSource } from "@/features/drive/lib/archiveJobs.logic"
 import {
 	buildCompressFormat,
 	effectiveLevel,
@@ -17,7 +19,17 @@ import {
 	type ZipMethodId
 } from "@/features/drive/lib/archiveFormats"
 import { presetOptions, type CompressPreferences } from "@/features/drive/lib/compressPreferences"
-import { composeArchiveName, defaultArchiveBaseName } from "@/features/drive/lib/archiveTargets"
+import {
+	archiveParentName,
+	canDisposeSources,
+	composeArchiveName,
+	defaultArchiveBaseName,
+	defaultJobDestination,
+	namingEntries,
+	type NameOf,
+	type NamingEntry,
+	type ParentNaming
+} from "@/features/drive/lib/archiveTargets"
 import { archivePasswordProblem, type ArchivePasswordProblem } from "@/features/drive/lib/archivePassword"
 import type { AfterwardsValue } from "@/features/drive/components/afterwardsField"
 
@@ -27,9 +39,73 @@ import type { AfterwardsValue } from "@/features/drive/components/afterwardsFiel
 
 // What the name is derived from until the user edits it; fixed for the dialog's life.
 export interface NamingInput {
-	items: readonly DriveItem[]
+	entries: readonly NamingEntry[]
 	parentName: string | null
 	fallback: string
+}
+
+// What the dialog compresses: drive items (own or shared with the user), or what a public link points at,
+// which only ever lands in the user's own drive and is never removed.
+export type CompressSubject =
+	| { kind: "drive"; items: DriveItem[]; variant: DriveVariant; parentNaming?: ParentNaming | undefined }
+	| { kind: "linked"; items: AnyItemWithContext[]; naming: NamingEntry[] }
+
+export interface CompressSubjectFacts {
+	naming: NamingInput
+	singleFile: boolean
+	disposeAllowed: boolean
+	destination: JobDestination
+	// What the destination can't lie inside.
+	pickerSources: DriveItem[]
+	source: CompressSource
+	itemCount: number
+	// Pruned from the selection when the originals are to be removed.
+	selectionUuids: string[]
+}
+
+export interface CompressSubjectContext {
+	rootName: string
+	fallback: string
+	nameOf: NameOf
+}
+
+const NO_ITEMS: DriveItem[] = []
+const NO_UUIDS: string[] = []
+
+function isSingleFile(entries: readonly NamingEntry[]): boolean {
+	const [only] = entries
+
+	return entries.length === 1 && only !== undefined && !only.directory
+}
+
+export function compressSubjectFacts(subject: CompressSubject, ctx: CompressSubjectContext): CompressSubjectFacts {
+	if (subject.kind === "linked") {
+		return {
+			naming: { entries: subject.naming, parentName: null, fallback: ctx.fallback },
+			singleFile: isSingleFile(subject.naming),
+			disposeAllowed: false,
+			destination: { uuid: null, name: ctx.rootName },
+			pickerSources: NO_ITEMS,
+			source: { kind: "linked", items: subject.items },
+			itemCount: subject.items.length,
+			selectionUuids: NO_UUIDS
+		}
+	}
+
+	const { items, variant } = subject
+	const nameOf = subject.parentNaming?.nameOf ?? ctx.nameOf
+	const entries = namingEntries(items)
+
+	return {
+		naming: { entries, parentName: archiveParentName(items, nameOf, subject.parentNaming?.mixedFallback), fallback: ctx.fallback },
+		singleFile: isSingleFile(entries),
+		disposeAllowed: canDisposeSources(variant, items),
+		destination: defaultJobDestination(items, variant, ctx.rootName, nameOf),
+		pickerSources: items,
+		source: { kind: "items", items },
+		itemCount: items.length,
+		selectionUuids: items.map(item => item.data.uuid)
+	}
 }
 
 export interface CompressDialogState {
@@ -162,7 +238,7 @@ export function initCompressDialog({ prefs, naming, destination, allowed }: Comp
 	return {
 		step: "edit",
 		naming,
-		base: defaultArchiveBaseName(naming.items, choice, naming.parentName, naming.fallback),
+		base: defaultArchiveBaseName(naming.entries, choice, naming.parentName, naming.fallback),
 		nameEdited: false,
 		choice,
 		levels,
@@ -194,7 +270,7 @@ export function compressDialogReducer(state: CompressDialogState, action: Compre
 				choice: action.choice,
 				base: state.nameEdited
 					? state.base
-					: defaultArchiveBaseName(state.naming.items, action.choice, state.naming.parentName, state.naming.fallback)
+					: defaultArchiveBaseName(state.naming.entries, action.choice, state.naming.parentName, state.naming.fallback)
 			}
 		case "setLevel":
 			return { ...state, levels: { ...state.levels, [state.choice]: action.level } }

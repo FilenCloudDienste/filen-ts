@@ -15,7 +15,8 @@ import {
 	defaultArchiveBaseName,
 	defaultJobDestination,
 	extractHereDestination,
-	extractRequest
+	extractRequest,
+	namingEntries
 } from "@/features/drive/lib/archiveTargets"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
@@ -154,24 +155,29 @@ describe("defaultJobDestination", () => {
 
 describe("defaultArchiveBaseName", () => {
 	it("takes one file's name without its extension, a dot-file's whole name", () => {
-		expect(defaultArchiveBaseName([file("report.final.pdf")], "zip", "Photos", "Archive")).toBe("report.final")
-		expect(defaultArchiveBaseName([file("README")], "zip", "Photos", "Archive")).toBe("README")
-		expect(defaultArchiveBaseName([file(".bashrc")], "7z", "Photos", "Archive")).toBe(".bashrc")
+		expect(defaultArchiveBaseName(namingEntries([file("report.final.pdf")]), "zip", "Photos", "Archive")).toBe("report.final")
+		expect(defaultArchiveBaseName(namingEntries([file("README")]), "zip", "Photos", "Archive")).toBe("README")
+		expect(defaultArchiveBaseName(namingEntries([file(".bashrc")]), "7z", "Photos", "Archive")).toBe(".bashrc")
 	})
 
 	it("keeps a file's whole name for a single compressed file", () => {
-		expect(defaultArchiveBaseName([file("photo.jpg")], "gz", "Photos", "Archive")).toBe("photo.jpg")
+		expect(defaultArchiveBaseName(namingEntries([file("photo.jpg")]), "gz", "Photos", "Archive")).toBe("photo.jpg")
 	})
 
 	it("takes a directory's name", () => {
-		expect(defaultArchiveBaseName([dir("Holiday.2024")], "tar.gz", "Photos", "Archive")).toBe("Holiday.2024")
+		expect(defaultArchiveBaseName(namingEntries([dir("Holiday.2024")]), "tar.gz", "Photos", "Archive")).toBe("Holiday.2024")
+	})
+
+	it("names entries without a drive shape by their own flags", () => {
+		expect(defaultArchiveBaseName([{ name: "Shared.stuff", directory: true }], "zip", null, "Archive")).toBe("Shared.stuff")
+		expect(defaultArchiveBaseName([{ name: "notes.txt", directory: false }], "zip", null, "Archive")).toBe("notes")
 	})
 
 	it("names several items after their directory, or the fallback", () => {
-		const items = [file("a.txt"), dir("b")]
+		const entries = namingEntries([file("a.txt"), dir("b")])
 
-		expect(defaultArchiveBaseName(items, "zip", "Photos", "Archive")).toBe("Photos")
-		expect(defaultArchiveBaseName(items, "zip", null, "Archive")).toBe("Archive")
+		expect(defaultArchiveBaseName(entries, "zip", "Photos", "Archive")).toBe("Photos")
+		expect(defaultArchiveBaseName(entries, "zip", null, "Archive")).toBe("Archive")
 	})
 
 	it("finds the directory's name only for a shared, known, non-root parent", () => {
@@ -180,6 +186,24 @@ describe("defaultArchiveBaseName", () => {
 		expect(archiveParentName([file("a.txt"), file("b.txt", WORK)], nameOf)).toBeNull()
 		expect(archiveParentName([file("a.txt", testUuid("unknown"))], nameOf)).toBeNull()
 		expect(archiveParentName([file("a.txt", "recents")], nameOf)).toBeNull()
+	})
+
+	it("names items from different directories after the mixed fallback only when one is given", () => {
+		expect(archiveParentName([file("a.txt"), file("b.txt", WORK)], nameOf, "Pictures")).toBe("Pictures")
+		// One directory and the root keep the drive's own rules.
+		expect(archiveParentName([file("a.txt"), dir("b")], nameOf, "Pictures")).toBe("Photos")
+		expect(archiveParentName([file("a.txt", ROOT), dir("b", ROOT)], nameOf, "Pictures")).toBeNull()
+	})
+})
+
+describe("namingEntries", () => {
+	it("carries each item's name and whether it is a directory", () => {
+		expect(namingEntries([file("a.txt"), dir("b"), sharedRootFile("s.zip"), sharedDir("s")])).toEqual([
+			{ name: "a.txt", directory: false },
+			{ name: "b", directory: true },
+			{ name: "s.zip", directory: false },
+			{ name: "s", directory: true }
+		])
 	})
 })
 

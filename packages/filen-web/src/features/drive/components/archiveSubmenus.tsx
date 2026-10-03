@@ -6,7 +6,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { PRESET_FORMATS, type PresetFormat } from "@/features/drive/lib/archiveFormats"
-import { extractHereDestination } from "@/features/drive/lib/archiveTargets"
+import { extractHereDestination, type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { compressWithPreset, extractQuick, type ExtractHow } from "@/features/drive/lib/archiveActions"
 import { cachedDirectoryName } from "@/features/drive/queries/drive"
 import { useArchiveNameInfo } from "@/features/drive/hooks/useArchiveNameInfo"
@@ -83,11 +83,13 @@ export interface CompressMenuEntriesProps {
 	variant: DriveVariant
 	// Opens the options dialog on the same items.
 	onMoreOptions: () => void
+	// The presets' directory names where a surface knows its own (Photos).
+	parentNaming?: ParentNaming | undefined
 }
 
 // The presets (last-used options per format, never a password or a disposal) and the options dialog,
 // which is only a form and opens offline too.
-export function CompressMenuEntries({ family, items, variant, onMoreOptions }: CompressMenuEntriesProps) {
+export function CompressMenuEntries({ family, items, variant, onMoreOptions, parentNaming }: CompressMenuEntriesProps) {
 	const { t } = useTranslation(["archive", "common"])
 	const isOnline = useIsOnline()
 	const { Item, Separator } = family
@@ -100,7 +102,7 @@ export function CompressMenuEntries({ family, items, variant, onMoreOptions }: C
 					disabled={!isOnline}
 					title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 					onClick={() => {
-						void compressWithPreset(items, variant, preset)
+						void compressWithPreset(items, variant, preset, parentNaming)
 					}}
 				>
 					<FileArchiveIcon aria-hidden="true" />

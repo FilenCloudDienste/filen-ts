@@ -69,6 +69,7 @@ import { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemo
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 import { Button } from "@/components/ui/button"
@@ -113,6 +114,10 @@ export interface PreviewOverlayProps {
 	// Header-menu entries the opening surface doesn't offer in its own menus, so the viewer matches them
 	// (Photos hides Move).
 	hiddenMenuActionIds?: ReadonlySet<ItemActionId> | undefined
+	// The header menu's Compress for a surface with its own directory names and selection (Photos); the
+	// drive's when omitted.
+	compressParentNaming?: ParentNaming | undefined
+	onSourcesDisposing?: ((uuids: string[]) => void) | undefined
 	// False for a public link's file whose owner disallows downloads: nothing here offers to save it.
 	// Downloadable when omitted.
 	downloadable?: boolean
@@ -183,6 +188,8 @@ export function PreviewOverlay({
 	onItemRemoved,
 	onFavoriteToggled,
 	hiddenMenuActionIds,
+	compressParentNaming,
+	onSourcesDisposing,
 	downloadable: downloadableProp,
 	asText: asTextProp
 }: PreviewOverlayProps) {
@@ -465,6 +472,8 @@ export function PreviewOverlay({
 						items={[driveItem]}
 						variant={variant}
 						onClose={closeMenuDialog}
+						onSourcesDisposing={onSourcesDisposing}
+						compressParentNaming={compressParentNaming}
 					/>
 				)
 			case "unshare":
@@ -1014,6 +1023,7 @@ export function PreviewOverlay({
 									onFavoriteToggled={handleMenuFavoriteToggled}
 									onRestored={handleMenuRestored}
 									hiddenActionIds={previewMenuHiddenActionIds(hiddenMenuActionIds)}
+									compressParentNaming={compressParentNaming}
 								/>
 							</DropdownMenu>
 						) : null}

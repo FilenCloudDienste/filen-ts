@@ -1,4 +1,5 @@
 import { type ReactNode } from "react"
+import { useTranslation } from "react-i18next"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
@@ -9,16 +10,16 @@ import { prunePhotoSelection, usePhotosStore } from "@/features/photos/store/use
 import { type DriveItem } from "@/features/drive/lib/item"
 import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
-import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
+import { PHOTOS_HIDDEN_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 
 // The photos surface's own dialog kind — narrower than drive's ActiveDialogKind (no move/color/
-// unshare/delete/import/emptyTrash/restoreSelected/disableLink: none of those ever reach a photos item
-// — see itemActions.ts/bulkActions.ts's own doc comments on what's dropped and why). "preview" is the
-// one addition beyond the per-item menu's own seven kinds — opened directly by a tile click, never via
+// unshare/delete/import/emptyTrash/restoreSelected/disableLink/extract: none of those ever reach a photos
+// item — see itemActions.ts's own doc comments on what's dropped and why). "preview" is the one addition
+// beyond the per-item menu's own eight kinds — opened directly by a tile click, never via
 // handleItemAction, mirroring useDriveDialogHost's identical split between menu-dispatched kinds and
 // its own dedicated openPreview entry point.
-type PhotosDialogKind = "rename" | "copy" | "trash" | "versions" | "info" | "link" | "share" | "preview"
+type PhotosDialogKind = "rename" | "copy" | "trash" | "versions" | "info" | "link" | "share" | "compress" | "preview"
 
 // The preview arm holds the frozen pager snapshot + position usePreviewDialogState folds events into
 // — a DriveItem[], since a reconciled rename re-narrows its item.
@@ -38,13 +39,18 @@ interface UsePhotosDialogHostParams {
 	selectedItems: PhotoItem[]
 }
 
-// The photos-scoped counterpart of drive's useDriveDialogHost, trimmed to the eight dialog kinds the
+// The photos-scoped counterpart of drive's useDriveDialogHost, trimmed to the nine dialog kinds the
 // photos menu/bar/grid ever dispatch. rename/trash route through this file's own PhotoItem-cache-
-// patching wrappers (features/photos/lib/actions.ts); copy/versions/info/link/share/preview reuse the EXACT
-// same generic dialog components drive uses unchanged (the two that take the `variant` the preview
-// overlay does — the overlay itself and the info dialog — get "drive", see their render-site comments),
-// so there is no photos-specific fork of any of them beyond the preview's one extra favorite-patch prop.
+// patching wrappers (features/photos/lib/actions.ts); copy/versions/info/link/share/compress/preview
+// reuse the EXACT same generic dialog components drive uses unchanged (the two that take the `variant`
+// the preview overlay does — the overlay itself and the info dialog — get "drive", see their render-site
+// comments), so there is no photos-specific fork of any of them beyond props: the preview's favorite
+// patch, and the photos selection pruning plus directory naming the share and compress dialogs take.
 export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialogHostParams): PhotosDialogHost {
+	const { t } = useTranslation("common")
+	// Compress (its dialog and the preview's menu) reads directory names from what Photos holds and names a
+	// mix of directories after Photos.
+	const compressParentNaming = photosParentNaming(rootUuid, t("modulePhotos"))
 	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActivePhotosDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
@@ -73,7 +79,8 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 			kind !== "versions" &&
 			kind !== "info" &&
 			kind !== "link" &&
-			kind !== "share"
+			kind !== "share" &&
+			kind !== "compress"
 		) {
 			return
 		}
@@ -82,11 +89,16 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	}
 
 	function handleBulkDialogAction(kind: BulkDialogActionKind): void {
-		if (kind !== "copy" && kind !== "trash" && kind !== "share") {
+		if (kind !== "copy" && kind !== "trash" && kind !== "share" && kind !== "compress") {
 			return
 		}
 
 		setActiveDialog({ kind, items: selectedItems })
+	}
+
+	// What a share succeeded on, or a compress is to remove, leaves the photos selection, not drive's.
+	function pruneSelection(uuids: string[]): void {
+		usePhotosStore.getState().removeFromSelection(uuids)
 	}
 
 	async function handleRenameSubmit(item: PhotoItem, value: string): Promise<void> {
@@ -141,17 +153,18 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 			case "info":
 			case "link":
 			case "share":
+			case "compress":
 				return (
 					<ItemDialog
 						kind={activeDialog.kind}
 						items={activeDialog.items}
 						// A photos item is always an owned, non-trashed file under the user's own drive, so it
-						// carries no sharing counterparty row.
+						// carries no sharing counterparty row, and a compress may remove it afterwards.
 						variant="drive"
 						onClose={closeActiveDialog}
-						onShared={succeededUuids => {
-							usePhotosStore.getState().removeFromSelection(succeededUuids)
-						}}
+						onShared={pruneSelection}
+						onSourcesDisposing={pruneSelection}
+						compressParentNaming={compressParentNaming}
 					/>
 				)
 			case "preview":
@@ -171,6 +184,8 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 							patchPhoto(rootUuid, item)
 						}}
 						hiddenMenuActionIds={PHOTOS_HIDDEN_ACTION_IDS}
+						compressParentNaming={compressParentNaming}
+						onSourcesDisposing={pruneSelection}
 					/>
 				)
 		}

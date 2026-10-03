@@ -12,8 +12,6 @@ import { noDiskPersister } from "@/queries/persist"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useDebouncedValue } from "@/lib/useDebouncedValue"
 import type { ArchiveFormatInfo } from "@/workers/sdk.worker"
-import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
-import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { cachedDirectoryName } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { archiveCodecMemBudget, archiveFormatInfos, archiveNameInfo, itemNameError } from "@/features/drive/lib/archiveHelpers"
@@ -37,7 +35,7 @@ import {
 	setCompressPreferences,
 	type CompressPreferences
 } from "@/features/drive/lib/compressPreferences"
-import { archiveParentName, canDisposeSources, defaultJobDestination, ITEM_NAME_ERROR_KEYS } from "@/features/drive/lib/archiveTargets"
+import { ITEM_NAME_ERROR_KEYS } from "@/features/drive/lib/archiveTargets"
 import { useArchiveNameInfo } from "@/features/drive/hooks/useArchiveNameInfo"
 import { NAME_CHECK_DEBOUNCE_MS, useItemNameError } from "@/features/drive/hooks/useItemNameError"
 import {
@@ -45,12 +43,14 @@ import {
 	catalogueLookup,
 	compressDialogReducer,
 	compressNameToCheck,
+	compressSubjectFacts,
 	initCompressDialog,
 	methodOf,
 	PAGE_QUERY_OPTIONS,
 	validateCompress,
 	visibleCompressErrors,
 	type CompressStart,
+	type CompressSubject,
 	type CompressValidation
 } from "@/features/drive/components/compressDialog.logic"
 import { startCompressWithCard } from "@/features/transfers/lib/archiveToast"
@@ -93,15 +93,37 @@ function fetchFormatCatalogue(): Promise<ArchiveFormatInfo[]> {
 }
 
 export interface CompressDialogProps {
-	items: DriveItem[]
-	variant: DriveVariant
+	subject: CompressSubject
 	onClose: () => void
+	// Called with the drive items whose originals the job is to remove; prunes the drive selection unless
+	// given (Photos prunes its own).
+	onSourcesDisposing?: ((uuids: string[]) => void) | undefined
+}
+
+function pruneDriveSelection(uuids: string[]): void {
+	useDriveStore.getState().removeFromSelection(uuids)
+}
+
+// A public link's item is saved as an archive of it, named in the description.
+function useCompressHeading(subject: CompressSubject): { title: string; description: string } {
+	const { t } = useTranslation("archive")
+	const only = subject.kind === "linked" && subject.naming.length === 1 ? subject.naming[0] : undefined
+
+	if (subject.kind === "drive") {
+		return { title: t("archiveCompressTitle"), description: t("archiveCompressDescription") }
+	}
+
+	return {
+		title: t("archiveSaveAsTitle"),
+		description: only === undefined ? t("archiveCompressDescription") : t("archiveSaveAsDescription", { name: only.name })
+	}
 }
 
 // Compress with every option. Mounted only while open (the dialog hosts); waits for the remembered
 // options, the format catalogue and the codec budget, all held for the page after the first open.
-export function CompressDialog({ items, variant, onClose }: CompressDialogProps) {
+export function CompressDialog({ subject, onClose, onSourcesDisposing }: CompressDialogProps) {
 	const { t } = useTranslation(["archive", "common"])
+	const heading = useCompressHeading(subject)
 	// Read again on every open (the memo answers at once), so a submit's write is what the next one sees.
 	const prefsQuery = useQuery({
 		queryKey: ["drive", "compressPreferences"],
@@ -126,12 +148,13 @@ export function CompressDialog({ items, variant, onClose }: CompressDialogProps)
 	if (prefsQuery.data !== undefined && catalogueQuery.data !== undefined && budgetQuery.data !== undefined) {
 		return (
 			<CompressDialogForm
-				items={items}
-				variant={variant}
+				subject={subject}
+				heading={heading}
 				prefs={prefsQuery.data}
 				infos={catalogueQuery.data}
 				budget={budgetQuery.data}
 				onClose={onClose}
+				onSourcesDisposing={onSourcesDisposing}
 			/>
 		)
 	}
@@ -143,8 +166,8 @@ export function CompressDialog({ items, variant, onClose }: CompressDialogProps)
 			open
 			wide
 			pending={false}
-			title={t("archiveCompressTitle")}
-			description={t("archiveCompressDescription")}
+			title={heading.title}
+			description={heading.description}
 			submitLabel={t("archiveCompressSubmit")}
 			cancelLabel={t("common:cancel")}
 			canSubmit={false}
@@ -175,25 +198,29 @@ export function CompressDialog({ items, variant, onClose }: CompressDialogProps)
 }
 
 interface CompressDialogFormProps extends CompressDialogProps {
+	heading: { title: string; description: string }
 	prefs: CompressPreferences
 	infos: readonly ArchiveFormatInfo[]
 	budget: number
 }
 
-function CompressDialogForm({ items, variant, prefs, infos, budget, onClose }: CompressDialogFormProps) {
+function CompressDialogForm({ subject, heading, prefs, infos, budget, onClose, onSourcesDisposing }: CompressDialogFormProps) {
 	const { t } = useTranslation(["archive", "drive", "common"])
 	const isOnline = useIsOnline()
 	const id = useId()
-	const first = items[0]
-	const singleFile = items.length === 1 && first !== undefined && !isDirectoryItem(first)
+	const facts = compressSubjectFacts(subject, {
+		rootName: t("drive:driveMyDrive"),
+		fallback: t("archiveDefaultName"),
+		nameOf: cachedDirectoryName
+	})
+	const { singleFile, disposeAllowed } = facts
 	const choices = choicesFor({ singleFile })
-	const disposeAllowed = canDisposeSources(variant, items)
 	const infoFor = catalogueLookup(infos)
 	const [state, dispatch] = useReducer(compressDialogReducer, undefined, () =>
 		initCompressDialog({
 			prefs,
-			naming: { items, parentName: archiveParentName(items, cachedDirectoryName), fallback: t("archiveDefaultName") },
-			destination: defaultJobDestination(items, variant, t("drive:driveMyDrive"), cachedDirectoryName),
+			naming: facts.naming,
+			destination: facts.destination,
 			allowed: choices.map(choice => choice.id)
 		})
 	)
@@ -274,13 +301,13 @@ function CompressDialogForm({ items, variant, prefs, infos, budget, onClose }: C
 	function start(run: CompressStart): void {
 		startCompressWithCard(
 			{
-				source: { kind: "items", items },
+				source: facts.source,
 				destination: state.destination,
 				name: run.name,
 				format: run.format,
 				encrypted: run.encrypted,
 				dispose: run.dispose,
-				itemCount: items.length
+				itemCount: facts.itemCount
 			},
 			run.password
 		)
@@ -292,7 +319,9 @@ function CompressDialogForm({ items, variant, prefs, infos, budget, onClose }: C
 
 		// The originals leave the listing once checked; a selection kept on them would count ghosts.
 		if (run.dispose !== null) {
-			useDriveStore.getState().removeFromSelection(items.map(item => item.data.uuid))
+			const prune = onSourcesDisposing ?? pruneDriveSelection
+
+			prune(facts.selectionUuids)
 		}
 
 		onClose()
@@ -327,8 +356,8 @@ function CompressDialogForm({ items, variant, prefs, infos, budget, onClose }: C
 			open
 			wide
 			pending={false}
-			title={t("archiveCompressTitle")}
-			description={t("archiveCompressDescription")}
+			title={heading.title}
+			description={heading.description}
 			submitLabel={t("archiveCompressSubmit")}
 			cancelLabel={t("common:cancel")}
 			// Invalid fields say why on submit rather than leaving the button dead.
@@ -391,7 +420,7 @@ function CompressDialogForm({ items, variant, prefs, infos, budget, onClose }: C
 				<DestinationField
 					label={t("archiveSaveInLabel")}
 					destination={state.destination}
-					sources={items}
+					sources={facts.pickerSources}
 					pickLabels={{ title: t("archiveCompressPickTitle"), confirm: t("archiveCompressPickConfirm") }}
 					onChange={destination => {
 						dispatch({ type: "setDestination", destination })
@@ -598,8 +627,8 @@ function CompressDialogForm({ items, variant, prefs, infos, budget, onClose }: C
 				title={t("archiveDeleteConfirmTitle")}
 				body={
 					encrypted
-						? `${t("archiveDeleteConfirmBodyCompress", { count: items.length })} ${t("archiveDeleteConfirmPasswordNote")}`
-						: t("archiveDeleteConfirmBodyCompress", { count: items.length })
+						? `${t("archiveDeleteConfirmBodyCompress", { count: facts.itemCount })} ${t("archiveDeleteConfirmPasswordNote")}`
+						: t("archiveDeleteConfirmBodyCompress", { count: facts.itemCount })
 				}
 				confirmLabel={t("archiveDeleteConfirmAction")}
 				cancelLabel={t("common:cancel")}

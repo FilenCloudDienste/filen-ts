@@ -7,7 +7,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { cachedDirectoryName } from "@/features/drive/queries/drive"
 import type { ExtractJobRequest } from "@/features/drive/lib/archiveJobs.logic"
-import { archiveFormatInfo, archiveNameInfo } from "@/features/drive/lib/archiveHelpers"
+import { archiveFormatInfo, archiveNameInfo, cachedArchiveNameInfo } from "@/features/drive/lib/archiveHelpers"
 import {
 	buildCompressFormat,
 	effectiveLevel,
@@ -24,9 +24,13 @@ import {
 	defaultArchiveBaseName,
 	defaultJobDestination,
 	extractHereDestination,
-	extractRequest
+	extractRequest,
+	namingEntries,
+	type ParentNaming
 } from "@/features/drive/lib/archiveTargets"
 import { startCompressWithCard, startExtractBatchWithCards, startExtractWithCard } from "@/features/transfers/lib/archiveToast"
+import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
+import { fullExtractRequest } from "@/features/archive/lib/extractSelection"
 
 // The Compress and Extract submenus' one-click entries: the only path from a menu to a job. Nothing
 // here runs before the click; preferences and format answers are memoised for the page.
@@ -58,7 +62,12 @@ function presetMethod(
 
 // Never a password, never removes the originals. A format whose lowest level needs more codec memory
 // than the setting allows is not started: the toast says where to raise it.
-export async function compressWithPreset(items: DriveItem[], variant: DriveVariant, preset: PresetFormat): Promise<void> {
+export async function compressWithPreset(
+	items: DriveItem[],
+	variant: DriveVariant,
+	preset: PresetFormat,
+	parentNaming?: ParentNaming
+): Promise<void> {
 	if (refuseOffline()) {
 		return
 	}
@@ -73,17 +82,18 @@ export async function compressWithPreset(items: DriveItem[], variant: DriveVaria
 			return
 		}
 
+		const nameOf = parentNaming?.nameOf ?? cachedDirectoryName
 		const base = defaultArchiveBaseName(
-			items,
+			namingEntries(items),
 			preset,
-			archiveParentName(items, cachedDirectoryName),
+			archiveParentName(items, nameOf, parentNaming?.mixedFallback),
 			i18n.t("archive:archiveDefaultName")
 		)
 
 		startCompressWithCard(
 			{
 				source: { kind: "items", items },
-				destination: defaultJobDestination(items, variant, i18n.t("drive:driveMyDrive"), cachedDirectoryName),
+				destination: defaultJobDestination(items, variant, i18n.t("drive:driveMyDrive"), nameOf),
 				name: composeArchiveName(base, info.extension),
 				format: buildCompressFormat(preset, { ...options, level: effectiveLevel(info, options.level) }, false),
 				encrypted: false,
@@ -133,6 +143,25 @@ export async function extractQuick(items: DriveItem[], variant: DriveVariant, ho
 		} else if (requests.length > 1) {
 			startExtractBatchWithCards(requests)
 		}
+	} catch (error) {
+		toast.error(errorLabel(error))
+	}
+}
+
+// The whole archive into a new directory in `destination`, named by the SDK after it: any readable
+// archive (a public link's, a chat's), never removed afterwards.
+export async function extractArchiveTo(source: ArchiveSource, destination: JobDestination): Promise<void> {
+	if (refuseOffline()) {
+		return
+	}
+
+	try {
+		const info = cachedArchiveNameInfo(source.name) ?? (await archiveNameInfo(source.name))
+
+		startExtractWithCard(
+			fullExtractRequest({ source, info, summary: null, target: { type: "directory", destination }, destination }),
+			undefined
+		)
 	} catch (error) {
 		toast.error(errorLabel(error))
 	}

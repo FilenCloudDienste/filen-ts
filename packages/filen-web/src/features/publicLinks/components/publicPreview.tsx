@@ -112,8 +112,9 @@ function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category:
 					alt={alt}
 				/>
 			)
-		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item or an archive before
-		// FileHero ever renders a preview pane for it.
+		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item and keeps an archive for
+		// FileHero's own browser (publicArchive.tsx), never under this anon provider, before FileHero ever
+		// renders a preview pane for either.
 		case "archive":
 		case "other":
 			return null

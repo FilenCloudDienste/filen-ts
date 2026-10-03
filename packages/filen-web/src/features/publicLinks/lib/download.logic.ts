@@ -29,12 +29,14 @@ export function chooseDownloadStrategy(input: { fsaAvailable: boolean; size: big
 	return { kind: "buffered" }
 }
 
-export type AnonPreviewability = "previewable" | "too-large" | "unpreviewable"
+export type AnonPreviewability = "previewable" | "too-large" | "archive" | "unpreviewable"
 
 // Whether the file-view auto-loads an inline preview. UNLIKE the authed drive gate (canPreview), a
 // streamed category is NOT exempt from the size cap here: anon preview is ALWAYS buffered (no SW
 // stream), so an oversized video/audio/image is capped the same as a pdf/text — the view then offers
-// download instead. A non-file / undecryptable / unknown-category item is simply not previewable.
+// download instead. A non-file / undecryptable / unknown-category item is simply not previewable. An
+// archive is never previewed inline: a signed-in visitor may browse it on request, through the authed
+// client, at any size (its listing is not a buffered read).
 export function anonPreviewability(item: DriveItem): AnonPreviewability {
 	const base = asDirectoryOrFile(item)
 
@@ -44,9 +46,12 @@ export function anonPreviewability(item: DriveItem): AnonPreviewability {
 
 	const category = previewType(item)
 
-	// The public-link page has no archive browser: an archive offers download only.
-	if (category === "other" || category === "archive") {
+	if (category === "other") {
 		return "unpreviewable"
+	}
+
+	if (category === "archive") {
+		return "archive"
 	}
 
 	const cap = bufferedSizeCap(category)

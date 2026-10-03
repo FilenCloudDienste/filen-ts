@@ -103,7 +103,11 @@ export const archive = {
 	/** Compress dialog — title */
 	archiveCompressTitle: "Compress",
 	/** Compress dialog — description under the title */
-	archiveCompressDescription: "Packs the selected items into one archive in your drive.",
+	archiveCompressDescription: "Packs the selected items into one archive in your Cloud Drive.",
+	/** Compress dialog for a public link's item — title */
+	archiveSaveAsTitle: "Save as archive",
+	/** Compress dialog for a public link's item — description; {{name}} is the linked file or directory */
+	archiveSaveAsDescription: "Packs “{{name}}” into one archive in your Cloud Drive.",
 	/** Compress dialog — label of the archive's name field; the format's extension follows the field */
 	archiveCompressNameLabel: "Name",
 	/** Compress dialog — label of the format dropdown */

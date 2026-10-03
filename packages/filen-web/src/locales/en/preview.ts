@@ -328,6 +328,8 @@ export const preview = {
 	previewArchiveExtractAll: "Extract all",
 	/** Archive browser footer — opens the menu of where the selected entries go */
 	previewArchiveExtractSelected: "Extract selected",
+	/** Archive browser — a public link's owner allows no downloads, so the archive can be browsed but not extracted */
+	previewArchiveExtractNotAllowed: "The link's owner doesn't allow downloads, so nothing can be extracted from it.",
 	/** Archive browser footer — accessible label of the arrow beside Extract all that opens its other destinations */
 	previewArchiveExtractAllMore: "More places to extract to",
 	/** Archive browser extract menu — into a new directory next to the archive; {{name}} is that directory's name */

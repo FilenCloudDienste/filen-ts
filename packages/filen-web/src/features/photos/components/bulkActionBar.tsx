@@ -13,9 +13,11 @@ import { driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
 import { runBulkActivity } from "@/lib/activity/activity"
 import { prunePhotoSelection, usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { PHOTOS_HIDDEN_BULK_ACTION_IDS } from "@/features/photos/lib/itemActions"
+import { PHOTOS_HIDDEN_BULK_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { BulkActionButton, SelectionActionBar } from "@/components/selectionActionBar"
+import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
+import { CompressMenuEntries } from "@/features/drive/components/archiveSubmenus"
+import { BulkActionButton, BulkActionMenuButton, SelectionActionBar } from "@/components/selectionActionBar"
 
 export interface PhotosBulkActionBarProps {
 	rootUuid: string
@@ -78,6 +80,31 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 		>
 			{descriptors.map(descriptor => {
 				const offlineDisabled = isBulkActionOfflineDisabled(descriptor.id, isOnline)
+				const disabled = (descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) || offlineDisabled
+				const disabledReason = offlineDisabled ? t("common:offlineActionDisabled") : undefined
+
+				// Compress opens the same entries its submenu holds in the menus, like drive's bar.
+				if (descriptor.id === "compress") {
+					return (
+						<BulkActionMenuButton
+							key={descriptor.id}
+							icon={descriptor.icon}
+							label={t(descriptor.labelKey)}
+							disabled={disabled}
+							disabledReason={disabledReason}
+						>
+							<CompressMenuEntries
+								family={DROPDOWN_TREE_MENU_FAMILY}
+								items={selectedItems}
+								variant="drive"
+								parentNaming={photosParentNaming(rootUuid, t("common:modulePhotos"))}
+								onMoreOptions={() => {
+									onDialogAction("compress")
+								}}
+							/>
+						</BulkActionMenuButton>
+					)
+				}
 
 				return (
 					<BulkActionButton
@@ -85,8 +112,8 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 						icon={descriptor.icon}
 						label={t(descriptor.labelKey)}
 						destructive={descriptor.destructive}
-						disabled={(descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) || offlineDisabled}
-						disabledReason={offlineDisabled ? t("common:offlineActionDisabled") : undefined}
+						disabled={disabled}
+						disabledReason={disabledReason}
 						kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
 						onClick={() => {
 							runDescriptor(descriptor)

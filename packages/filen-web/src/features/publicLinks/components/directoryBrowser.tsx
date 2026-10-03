@@ -6,7 +6,7 @@ import type { DirPublicInfo, DirPublicLink, File as SdkFile } from "@filen/sdk-r
 import { type DriveItem } from "@/features/drive/lib/item"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatItemSize, formatModifiedDate } from "@/features/drive/lib/format"
-import { useLinkSaveable, usePublicDirListing, usePublicDirSize } from "@/features/publicLinks/queries/publicLink"
+import { useLinkSaveable, usePublicDirListing, usePublicDirSize, usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicLink"
 import {
 	rootCrumb,
 	enterCrumb,
@@ -26,6 +26,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
+import { SaveAsArchiveButton } from "@/features/publicLinks/components/publicArchive"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -64,6 +65,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const saveable = useLinkSaveable("directory", link.enableDownload ? info.root.inner.uuid : null)
 	const listing = usePublicDirListing({ levelUuid: current.uuid, dir: current.dir, link })
 	const sizeInfo = usePublicDirSize({ levelUuid: current.uuid, dir: current.dir, link })
+	// Archive actions ask nothing of the link's owner: signed in with downloads allowed is enough.
+	const signedIn = usePublicVisitorSignedIn().data === true
 
 	// Filtered inside BrowseList, not here: a keystroke then keeps this memo (and every row's entry
 	// identity) instead of re-narrowing and re-sorting the whole level. The sort is stable and the filter
@@ -127,6 +130,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 					setSelected(null)
 				}}
 				saveItem={saveable ? selected.file : undefined}
+				archiveFile={selected.file}
 			/>
 		)
 	}
@@ -158,6 +162,13 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 							item={{ dir: current.dir, link }}
 							name={current.name}
 							glyph="directory"
+							compact
+						/>
+					) : null}
+					{signedIn && link.enableDownload ? (
+						<SaveAsArchiveButton
+							item={{ dir: current.dir, link }}
+							name={current.name}
 							compact
 						/>
 					) : null}

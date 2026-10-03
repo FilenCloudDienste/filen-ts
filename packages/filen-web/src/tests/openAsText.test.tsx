@@ -123,7 +123,13 @@ describe("useDriveDialogHost — Compress and Extract", () => {
 
 		render(<>{result.current.renderActiveDialog()}</>)
 
-		expect(archiveDialogs.at(-1)).toMatchObject({ name, props: { variant: "sharedIn", [prop]: prop === "item" ? item : [item] } })
+		const routed = { variant: "sharedIn", [prop]: prop === "item" ? item : [item] }
+
+		// The compress dialog takes its items as a drive subject.
+		expect(archiveDialogs.at(-1)).toMatchObject({
+			name,
+			props: name === "compress" ? { subject: { kind: "drive", ...routed } } : routed
+		})
 	})
 
 	it.each(["compress", "extractTo"] as const)("routes the bulk %s to its dialog on the whole selection", kind => {
@@ -136,7 +142,10 @@ describe("useDriveDialogHost — Compress and Extract", () => {
 
 		render(<>{result.current.renderActiveDialog()}</>)
 
-		expect(archiveDialogs.at(-1)).toMatchObject({ name: kind, props: { items: selectedItems } })
+		expect(archiveDialogs.at(-1)).toMatchObject({
+			name: kind,
+			props: kind === "compress" ? { subject: { kind: "drive", items: selectedItems } } : { items: selectedItems }
+		})
 	})
 })
 

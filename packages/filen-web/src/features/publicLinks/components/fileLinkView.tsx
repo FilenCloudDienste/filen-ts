@@ -11,7 +11,8 @@ import { LinkAccessGate } from "@/features/publicLinks/components/linkAccessGate
 // off the resolve outcome (a protected file throws until the password matches — there is no up-front
 // flag). The typed password lives ONLY in this component's state and the query closure; a reload drops
 // it and re-prompts. A link that disallows downloads offers neither Download nor Save to Cloud Drive, as a
-// directory link without enableDownload doesn't.
+// directory link without enableDownload doesn't; an archive it points at can still be browsed, never
+// extracted.
 export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string }) {
 	const [password, setPassword] = useState<string | undefined>(undefined)
 	const [submitted, setSubmitted] = useState(false)
@@ -56,6 +57,7 @@ export function FileLinkView({ uuid, linkKey }: { uuid: string; linkKey: string 
 			downloadEnabled={linked.downloadable}
 			linkScope={secretFingerprint(linkKey, password)}
 			saveItem={saveable ? linked : undefined}
+			archiveFile={linked}
 		/>
 	)
 }
