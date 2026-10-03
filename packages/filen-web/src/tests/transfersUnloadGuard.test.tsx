@@ -46,15 +46,18 @@ describe("TransfersUnloadGuard", () => {
 		expect(unloadIsBlocked()).toBe(false)
 	})
 
-	it.each(["uploading", "downloading", "copying"] as const)("asks before leaving while a transfer is %s", status => {
-		render(<TransfersUnloadGuard />)
+	it.each(["uploading", "downloading", "copying", "compressing", "extracting"] as const)(
+		"asks before leaving while a transfer is %s",
+		status => {
+			render(<TransfersUnloadGuard />)
 
-		act(() => {
-			useTransfersStore.setState({ transfers: [transfer({ status })] })
-		})
+			act(() => {
+				useTransfersStore.setState({ transfers: [transfer({ status })] })
+			})
 
-		expect(unloadIsBlocked()).toBe(true)
-	})
+			expect(unloadIsBlocked()).toBe(true)
+		}
+	)
 
 	it("stops asking once every transfer has finished", () => {
 		useTransfersStore.setState({ transfers: [transfer()] })

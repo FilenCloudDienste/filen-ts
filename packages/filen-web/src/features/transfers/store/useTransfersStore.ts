@@ -3,24 +3,40 @@ import { create } from "zustand"
 import { useShallow } from "zustand/shallow"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { clampedRatio } from "@filen/shared"
+import { clampedRatio, type DriveJobKind } from "@filen/shared"
 import { withoutKey } from "@/lib/utils"
+
+// A row's direction: an upload, a download, or one whole drive job (copy, compress, extract).
+export type TransferDirection = "upload" | "download" | DriveJobKind
+
+export type ActiveTransferStatus = "uploading" | "downloading" | "copying" | "compressing" | "extracting"
+
+// The active status a drive job's row runs under.
+export const JOB_ACTIVE_STATUS: Readonly<Record<DriveJobKind, ActiveTransferStatus>> = {
+	copy: "copying",
+	compress: "compressing",
+	extract: "extracting"
+}
+
+export function isDriveJobDirection(direction: TransferDirection): direction is DriveJobKind {
+	return direction === "copy" || direction === "compress" || direction === "extract"
+}
 
 // One row per in-flight or finished transfer, in-memory only (no persistence — mirrors
 // useDriveStore's selection state, not a query). "upload" and "download" rows come from
 // features/drive/lib/upload.ts's runUpload and features/drive/lib/download.ts's runDownload (a zip
-// transfer is one row too — features/drive/lib/downloadZip.ts's runZipDownload); a "copy" row is one
-// whole copy job (features/drive/lib/copy.ts), never one row per copied file. "cancelled" is a
-// real, if short-lived, status: a cancel path settles to it then immediately removes the row (mobile
-// parity — no history entry for an aborted transfer), so it is never expected to render.
-// "completedWithErrors" is a copy that finished with some of its items failed.
+// transfer is one row too — features/drive/lib/downloadZip.ts's runZipDownload); a drive job's row is
+// one whole job (features/drive/lib/copy.ts, archiveJobs.ts), never one row per file it touches.
+// "cancelled" is a real, if short-lived, status: a cancel path settles to it then immediately removes
+// the row (mobile parity — no history entry for an aborted transfer), so it is never expected to render.
+// "completedWithErrors" is a job that finished with some of its items failed.
 export interface Transfer {
 	id: string
-	direction: "upload" | "download" | "copy"
+	direction: TransferDirection
 	name: string
 	size: number
 	bytesTransferred: number
-	status: "uploading" | "downloading" | "copying" | "done" | "error" | "cancelled" | "completedWithErrors"
+	status: ActiveTransferStatus | "done" | "error" | "cancelled" | "completedWithErrors"
 	// Suspended-in-place flag for an ACTIVE transfer — set via setPaused, never via settle. Never
 	// implies a status change: a paused transfer keeps its active status (isActiveTransfer
 	// stays true), just not currently receiving bytes/progress until resumed.
@@ -30,7 +46,8 @@ export interface Transfer {
 	error?: ErrorDTO
 	parentUuid: string | null
 	startedAt: number
-	// A landed upload's own file, which its row's "Show in directory" reveals.
+	// What the row's "Show in directory" reveals: a landed upload's own file, a compress job's archive, an
+	// extract job's first created item.
 	item?: DriveItem
 	// The browser's download manager streams this one (the service-worker path): it can be cancelled,
 	// never paused.
@@ -71,21 +88,21 @@ export interface UploadBatch {
 
 // Every terminal state settle() can drive a transfer to. Kept separate from Transfer["status"]
 // (which also carries the ACTIVE states) so a call site can never accidentally settle a transfer to
-// "uploading"/"downloading"/"copying".
+// an active one.
 export type TerminalStatus = "done" | "error" | "cancelled" | "completedWithErrors"
 
 // The single "is this row still in flight" predicate — replaces every direct `status ===
 // "uploading"` sentinel so every active status counts identically.
 export function isActiveTransfer(status: Transfer["status"]): boolean {
-	return status === "uploading" || status === "downloading" || status === "copying"
+	return status === "uploading" || status === "downloading" || status === "copying" || status === "compressing" || status === "extracting"
 }
 
 export function hasActiveTransfers(transfers: readonly Transfer[]): boolean {
 	return transfers.some(transfer => isActiveTransfer(transfer.status))
 }
 
-export function hasActiveCopies(transfers: readonly Transfer[]): boolean {
-	return transfers.some(transfer => transfer.direction === "copy" && isActiveTransfer(transfer.status))
+export function hasActiveDriveJobs(transfers: readonly Transfer[]): boolean {
+	return transfers.some(transfer => isDriveJobDirection(transfer.direction) && isActiveTransfer(transfer.status))
 }
 
 // Drop the OLDEST finished (non-active) rows once the finished count exceeds the cap — active rows
@@ -173,7 +190,7 @@ export interface TransfersStore {
 	// place bytesTransferred actually changes over time; never written to directly by a consumer.
 	speedSamples: SpeedSample[]
 	// The same rolling window per active transfer, over its own bytesTransferred, for the row's speed and
-	// time left. Dropped once the transfer settles or its window empties; a copy's row reads its job instead.
+	// time left. Dropped once the transfer settles or its window empties; a drive job's row reads its job instead.
 	rowSpeedSamples: Readonly<Record<string, SpeedSample[]>>
 	// Upload runs by id, insertion-ordered (string keys), and the same rolling window per run over its
 	// cumulative bytes, for the listing's directory and summary rows.
@@ -361,7 +378,7 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 			const windowStart = now - SPEED_WINDOW_MS
 			const speedSamples = samplesSince([...state.speedSamples, { timestamp: now, totalBytes }], windowStart)
 
-			if (target.direction === "copy") {
+			if (isDriveJobDirection(target.direction)) {
 				return { transfers, speedSamples }
 			}
 

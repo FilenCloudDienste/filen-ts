@@ -4,9 +4,12 @@ import {
 	capFinishedTransfers,
 	computeTransfersAggregate,
 	computeTransfersSpeed,
+	hasActiveDriveJobs,
 	hasActiveTransfers,
 	hasSpeedSamples,
 	isActiveTransfer,
+	isDriveJobDirection,
+	JOB_ACTIVE_STATUS,
 	useTransfersStore,
 	type SpeedSample,
 	type Transfer
@@ -301,10 +304,17 @@ describe("clearFinished", () => {
 })
 
 describe("isActiveTransfer", () => {
-	it("is true for uploading, downloading and copying", () => {
+	it("is true for uploading, downloading and every drive job's active status", () => {
 		expect(isActiveTransfer("uploading")).toBe(true)
 		expect(isActiveTransfer("downloading")).toBe(true)
 		expect(isActiveTransfer("copying")).toBe(true)
+		expect(isActiveTransfer("compressing")).toBe(true)
+		expect(isActiveTransfer("extracting")).toBe(true)
+	})
+
+	it("counts the status each drive job runs under as active", () => {
+		expect(JOB_ACTIVE_STATUS).toEqual({ copy: "copying", compress: "compressing", extract: "extracting" })
+		expect(Object.values(JOB_ACTIVE_STATUS).every(isActiveTransfer)).toBe(true)
 	})
 
 	it("is false for every terminal status", () => {
@@ -328,6 +338,36 @@ describe("hasActiveTransfers", () => {
 		expect(hasActiveTransfers([makeTransfer({ status: "error" }), makeTransfer({ id: "b", status: "completedWithErrors" })])).toBe(
 			false
 		)
+	})
+})
+
+describe("isDriveJobDirection", () => {
+	it("names copy, compress and extract, never an upload or a download", () => {
+		expect(isDriveJobDirection("copy")).toBe(true)
+		expect(isDriveJobDirection("compress")).toBe(true)
+		expect(isDriveJobDirection("extract")).toBe(true)
+		expect(isDriveJobDirection("upload")).toBe(false)
+		expect(isDriveJobDirection("download")).toBe(false)
+	})
+})
+
+describe("hasActiveDriveJobs", () => {
+	it("is true while any drive job's row is active, paused or not", () => {
+		expect(hasActiveDriveJobs([makeTransfer({ id: "c", direction: "copy", status: "copying" })])).toBe(true)
+		expect(hasActiveDriveJobs([makeTransfer({ id: "z", direction: "compress", status: "compressing", paused: true })])).toBe(true)
+		expect(hasActiveDriveJobs([makeTransfer({ id: "x", direction: "extract", status: "extracting" })])).toBe(true)
+	})
+
+	it("is false with only uploads, downloads or finished jobs", () => {
+		expect(hasActiveDriveJobs([])).toBe(false)
+		expect(
+			hasActiveDriveJobs([
+				makeTransfer(),
+				makeTransfer({ id: "d", direction: "download", status: "downloading" }),
+				makeTransfer({ id: "c", direction: "copy", status: "done" }),
+				makeTransfer({ id: "x", direction: "extract", status: "completedWithErrors" })
+			])
+		).toBe(false)
 	})
 })
 
@@ -525,13 +565,26 @@ describe("speed samples never outlive their transfer", () => {
 		expect(useTransfersStore.getState()).toBe(before)
 	})
 
-	it("keeps no row samples for a copy, whose row reads its job's rate", () => {
-		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c", direction: "copy", status: "copying" })] })
+	it("keeps no row samples for a drive job, whose row reads its job's rate", () => {
+		useTransfersStore.setState({
+			transfers: [
+				makeTransfer({ id: "c", direction: "copy", status: "copying" }),
+				makeTransfer({ id: "z", direction: "compress", status: "compressing" }),
+				makeTransfer({ id: "x", direction: "extract", status: "extracting" })
+			]
+		})
 
 		useTransfersStore.getState().setProgress("c", 100)
+		useTransfersStore.getState().setProgress("z", 50)
+		useTransfersStore.getState().setProgress("x", 25)
 
 		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})
-		expect(useTransfersStore.getState().speedSamples).toEqual([{ timestamp: 10_000, totalBytes: 100 }])
+		expect(useTransfersStore.getState().speedSamples).toEqual([
+			{ timestamp: 10_000, totalBytes: 100 },
+			{ timestamp: 10_000, totalBytes: 150 },
+			{ timestamp: 10_000, totalBytes: 175 }
+		])
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.bytesTransferred)).toEqual([100, 50, 25])
 	})
 
 	it("drops the samples of every row the settle leaves inactive, including rows the cap evicts", () => {

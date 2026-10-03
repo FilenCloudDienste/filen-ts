@@ -41,6 +41,7 @@ export function copyGlyphForEntries(entries: readonly CopyEntry[]): CopyJobGlyph
 }
 
 export interface CopyJob extends SharedCopyJob<DriveItem, CopyJobFailure, CopyFailureDTO, ErrorDTO> {
+	kind: "copy"
 	glyph: CopyJobGlyph
 	// The progress card is showing.
 	cardVisible: boolean
@@ -58,6 +59,7 @@ export type CopySettlement = { report: CopyJobReport; maxBytes: number | undefin
 export function createCopyJob(id: string, destination: CopyDestination, itemCount: number, glyph: CopyJobGlyph = "items"): CopyJob {
 	return {
 		...createSharedCopyJob<DriveItem, CopyJobFailure, CopyFailureDTO, ErrorDTO>(id, destination, itemCount),
+		kind: "copy",
 		glyph,
 		cardVisible: false
 	}

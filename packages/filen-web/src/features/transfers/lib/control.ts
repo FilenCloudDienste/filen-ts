@@ -1,14 +1,14 @@
-import { isCopyJobRunning } from "@filen/shared"
+import { isJobRunning } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { cancelSwDownload } from "@/features/drive/lib/saveDownload"
-import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { isActiveTransfer, isDriveJobDirection, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { getDriveJob, useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 
-// A copy's row stays active past its SDK job while its copies move to the trash, which has no pause.
-function isSettledCopy(transfer: Transfer): boolean {
-	const job = transfer.direction === "copy" ? getCopyJob(transfer.id) : undefined
+// A drive job's row stays active past its SDK job while what it made moves to the trash, which has no pause.
+function isSettledJob(transfer: Transfer): boolean {
+	const job = isDriveJobDirection(transfer.direction) ? getDriveJob(transfer.id) : undefined
 
-	return job !== undefined && !isCopyJobRunning(job)
+	return job !== undefined && !isJobRunning(job)
 }
 
 // The rows by id, read once per batch: acting on one row never changes another synchronously (the SDK
@@ -25,17 +25,34 @@ function activeIn(byId: ReadonlyMap<string, Transfer>, id: string): Transfer | u
 	return transfer !== undefined && isActiveTransfer(transfer.status) ? transfer : undefined
 }
 
-// The job settles as cancelled through its own report; trashCopied then moves its top-level items to
-// the trash (never a permanent delete). The first request stands: its stop is already on its way, and a
-// later one (Cancel all, sign-out) must not turn a "trash" into a "keep".
-export function requestCopyCancel(jobId: string, options: { trashCopied: boolean }): void {
-	const job = getCopyJob(jobId)
+export type JobStopMode = "keep" | "trash"
 
-	if (job?.outcome.status !== "running" || job.cancelRequest !== null) {
+// The job settles as cancelled through its own report; "trash" then moves what a copy or an extract made
+// to the trash (never a permanent delete). A compress leaves nothing behind, so it always keeps. The
+// first request stands: its stop is already on its way, and a later one (Cancel all, sign-out) must not
+// turn a "trash" into a "keep".
+export function requestJobCancel(jobId: string, mode: JobStopMode): void {
+	const job = getDriveJob(jobId)
+
+	if (job === undefined || !isJobRunning(job) || job.cancelRequest !== null) {
 		return
 	}
 
-	useCopyJobsStore.getState().update(jobId, running => ({ ...running, cancelRequest: options.trashCopied ? "trash" : "keep" }))
+	const { update } = useDriveJobsStore.getState()
+
+	switch (job.kind) {
+		case "copy":
+			update("copy", jobId, running => ({ ...running, cancelRequest: mode }))
+			break
+		case "extract":
+			update("extract", jobId, running => ({ ...running, cancelRequest: mode }))
+			break
+		case "compress":
+			update("compress", jobId, running => ({ ...running, cancelRequest: "keep" }))
+			break
+	}
+
+	// A paused job needs no resume first: the SDK's pause wait also ends on a stop.
 	void sdkApi.cancelTransfer(jobId)
 }
 
@@ -54,9 +71,9 @@ export function cancelTransfers(ids: readonly string[]): void {
 			continue
 		}
 
-		if (transfer.direction === "copy") {
-			// Keeps what the copy already made; trashing it is an explicit choice made elsewhere.
-			requestCopyCancel(id, { trashCopied: false })
+		if (isDriveJobDirection(transfer.direction)) {
+			// Keeps what the job already made; trashing it is an explicit choice made elsewhere.
+			requestJobCancel(id, "keep")
 
 			continue
 		}
@@ -74,8 +91,8 @@ export function cancelTransfer(id: string): void {
 	cancelTransfers([id])
 }
 
-// Sign-out: nothing may keep writing with the session being torn down. A copy keeps what it made unless
-// its stop already asked for the trash.
+// Sign-out: nothing may keep writing with the session being torn down. A drive job keeps what it made
+// unless its stop already asked for the trash.
 export function cancelActiveTransfers(): void {
 	cancelUploadRuns()
 	cancelTransfers(useTransfersStore.getState().transfers.map(transfer => transfer.id))
@@ -110,7 +127,7 @@ export function setTransfersPaused(ids: readonly string[], paused: boolean): voi
 	for (const id of ids) {
 		const transfer = activeIn(byId, id)
 
-		if (transfer === undefined || isSettledCopy(transfer) || transfer.browserManaged === true) {
+		if (transfer === undefined || isSettledJob(transfer) || transfer.browserManaged === true) {
 			continue
 		}
 

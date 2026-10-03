@@ -32,7 +32,7 @@ import {
 import { markAccountStale } from "@/queries/account"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { markClipboardEventsMissed } from "@/features/drive/store/useDriveClipboardStore"
-import { hasActiveCopies, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { hasActiveDriveJobs, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import {
 	emitPreviewFileMetaChanged,
 	emitPreviewFileRevised,
@@ -114,12 +114,12 @@ export function handleDriveAuthSuccess(): void {
 // Recents is a flat, cross-directory aggregation with its own key, which a new file joins with the batch
 // its parent listing gets (queueListingCreate). Appending is enough for ordering: resolveEffectiveSort
 // forces uploadDateDesc for the recents variant (lib/preferences.ts), so the row sorts to the top at
-// render. A copy lands its files as fileNew events by the thousand; while one runs, recents is read once
-// after the last copy instead.
+// render. A copy or an extract lands its files as fileNew events by the thousand; while one runs, or waits
+// for its turn, recents is read once after the last job instead.
 let recentsDeferred = false
 
 function newFileJoinsRecents(): boolean {
-	if (hasActiveCopies(useTransfersStore.getState().transfers)) {
+	if (hasActiveDriveJobs(useTransfersStore.getState().transfers)) {
 		recentsDeferred = true
 
 		return false
@@ -128,9 +128,9 @@ function newFileJoinsRecents(): boolean {
 	return true
 }
 
-// Called as each copy settles; only the last one standing reads.
+// Called as each drive job settles; only the last one standing reads.
 export function flushDeferredRecents(): void {
-	if (!recentsDeferred || hasActiveCopies(useTransfersStore.getState().transfers)) {
+	if (!recentsDeferred || hasActiveDriveJobs(useTransfersStore.getState().transfers)) {
 		return
 	}
 
@@ -234,6 +234,51 @@ const ACCOUNT_STORAGE_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["type"]
 	"deleteAll",
 	"deleteVersioned"
 ])
+
+// An item a user trashed, here or anywhere else (an archive job's "move originals to trash" included),
+// left every normal listing and JOINED the trash's own listing (actions.ts's trashItems patches both halves
+// the same way). Purged from the selection so the count / select-all toggle / bulk ops never target a
+// ghost. The payload carries no row, so the one for the trash insert is read out of a cached listing BEFORE
+// the removal fan-out strips it — with no cached copy anywhere, only the removal applies and the trash
+// listing refetches on its next mount or focus. A shared-in item its owner trashed leaves the shared
+// listing without ever landing here.
+export function applyItemTrashed(uuid: string, kind: "file" | "directory"): void {
+	useDriveStore.getState().removeFromSelection([uuid])
+
+	// The echo of this client's own trash still queued carries the SDK's post-trash row already, so
+	// neither the lookup (which would land the queue) nor an insert is needed, and the trash keeps it.
+	const ownTrashQueued = queuedTrashHolds(uuid)
+	const trashed = ownTrashQueued ? undefined : findOwnedListingItem(uuid)
+
+	// The trash insert below replaces a same-uuid row itself, and leaves the listing untouched when it
+	// already holds this very row (the echo of this client's own trash), so the trash is not removed
+	// from first.
+	driveListingQueryUpdateGlobal(
+		{ type: "remove", uuid },
+		trashed === undefined && !ownTrashQueued ? undefined : ({ variant }) => variant !== "trash"
+	)
+
+	if (trashed !== undefined) {
+		// A file row carries no colour an outdated listing could have missed.
+		insertIntoTrashListing(trashed.item, trashed.current || trashed.item.type === "file")
+	}
+
+	// A preview open on the trashed item advances to a neighbour or closes.
+	emitPreviewItemRemoved(uuid)
+
+	// A route through the trashed directory leaves it (branchChanges.ts).
+	if (kind === "directory") {
+		emitBranchChange({ type: "trashed", uuid })
+	}
+}
+
+// The item is gone for good — purge selection, strip it from every listing, and drop it from an open
+// preview (advance to a neighbour, or close once it was the only slot).
+export function applyItemDeleted(uuid: string): void {
+	useDriveStore.getState().removeFromSelection([uuid])
+	driveListingQueryUpdateGlobal({ type: "remove", uuid })
+	emitPreviewItemRemoved(uuid)
+}
 
 export function handleDriveEvent(event: DriveSocketEvent): void {
 	const inner = event.inner
@@ -343,43 +388,14 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 			// fileNew. It gets fileArchived's treatment — drop the superseded row and nothing else. Inserting
 			// it into the trash listing would show a just-saved file as trashed, and removing it from the
 			// preview would yank that file out from under the user mid-save.
-			const supersededByEdit = inner.type === "fileTrash" && inner.newUUID !== undefined
+			if (inner.type === "fileTrash" && inner.newUUID !== undefined) {
+				useDriveStore.getState().removeFromSelection([inner.uuid])
+				driveListingQueryUpdateGlobal({ type: "remove", uuid: inner.uuid })
 
-			// The item left every normal listing and JOINED the trash's own listing (actions.ts's trashItems
-			// patches both halves the same way). Purge it from the selection so the count / select-all toggle /
-			// bulk ops never target a ghost. The payload carries no row, so the one for the trash insert is
-			// read out of a cached listing BEFORE the removal fan-out strips it — with no cached copy
-			// anywhere, only the removal applies and the trash listing refetches on its next mount or focus.
-			// A shared-in item its owner trashed leaves the shared listing without ever landing here.
-			useDriveStore.getState().removeFromSelection([inner.uuid])
-
-			// The echo of this client's own trash still queued carries the SDK's post-trash row already, so
-			// neither the lookup (which would land the queue) nor an insert is needed, and the trash keeps it.
-			const ownTrashQueued = !supersededByEdit && queuedTrashHolds(inner.uuid)
-			const trashed = supersededByEdit || ownTrashQueued ? undefined : findOwnedListingItem(inner.uuid)
-
-			// The trash insert below replaces a same-uuid row itself, and leaves the listing untouched when it
-			// already holds this very row (the echo of this client's own trash), so the trash is not removed
-			// from first.
-			driveListingQueryUpdateGlobal(
-				{ type: "remove", uuid: inner.uuid },
-				trashed === undefined && !ownTrashQueued ? undefined : ({ variant }) => variant !== "trash"
-			)
-
-			if (trashed !== undefined) {
-				// A file row carries no colour an outdated listing could have missed.
-				insertIntoTrashListing(trashed.item, trashed.current || trashed.item.type === "file")
+				break
 			}
 
-			// A preview open on the trashed item advances to a neighbour or closes.
-			if (!supersededByEdit) {
-				emitPreviewItemRemoved(inner.uuid)
-			}
-
-			// A route through the trashed directory leaves it (branchChanges.ts).
-			if (inner.type === "folderTrash") {
-				emitBranchChange({ type: "trashed", uuid: inner.uuid })
-			}
+			applyItemTrashed(inner.uuid, inner.type === "fileTrash" ? "file" : "directory")
 
 			break
 		}
@@ -413,11 +429,7 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 				break
 			}
 
-			// The item is gone for good — purge selection, strip it from every listing, and drop it from an
-			// open preview (advance to a neighbour, or close once it was the only slot).
-			useDriveStore.getState().removeFromSelection([inner.uuid])
-			driveListingQueryUpdateGlobal({ type: "remove", uuid: inner.uuid })
-			emitPreviewItemRemoved(inner.uuid)
+			applyItemDeleted(inner.uuid)
 
 			break
 		}

@@ -19,19 +19,23 @@ import {
 	cancelActiveTransfers,
 	cancelTransfer,
 	cancelTransfers,
+	requestJobCancel,
 	setTransferPaused,
 	setTransfersPaused
 } from "@/features/transfers/lib/control"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { getCopyJob, getDriveJob, useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import { makeTransfer } from "@/tests/fixtures/transfers"
+import { compressJob, extractJob } from "@/tests/support/archiveJobFixtures"
+
+const DESTINATION = { uuid: null, name: "Cloud Drive" }
 
 beforeEach(() => {
 	vi.clearAllMocks()
 	cancelSwDownload.mockImplementation(() => false)
 	useTransfersStore.setState({ transfers: [], uploadBatches: {} })
-	useCopyJobsStore.setState({ jobs: {} })
+	useDriveJobsStore.setState({ jobs: {} })
 })
 
 describe("cancelTransfer", () => {
@@ -158,7 +162,7 @@ describe("setTransferPaused(id, false)", () => {
 
 describe("copy transfers", () => {
 	it("cancels a copy keeping what it already copied", () => {
-		useCopyJobsStore.setState({ jobs: { c1: createCopyJob("c1", { uuid: null, name: "Cloud Drive" }, 1) } })
+		useDriveJobsStore.setState({ jobs: { c1: createCopyJob("c1", { uuid: null, name: "Cloud Drive" }, 1) } })
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "copying" })] })
 
 		cancelTransfer("c1")
@@ -194,7 +198,7 @@ describe("copy transfers", () => {
 
 	// Its row stays active while what it copied moves to the trash, which has no pause.
 	it("neither pauses nor resumes a copy whose job already ended", () => {
-		useCopyJobsStore.setState({
+		useDriveJobsStore.setState({
 			jobs: { c1: { ...createCopyJob("c1", { uuid: null, name: "Cloud Drive" }, 1), outcome: { status: "cancelled" } } }
 		})
 		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c1", direction: "copy", status: "copying" })] })
@@ -212,6 +216,99 @@ describe("copy transfers", () => {
 	})
 })
 
+describe("archive transfers", () => {
+	function seed(paused = false): void {
+		useDriveJobsStore.setState({ jobs: { z: compressJob({}, "z"), x: extractJob({}, "x") } })
+		useTransfersStore.setState({
+			transfers: [
+				makeTransfer({ id: "z", direction: "compress", status: "compressing", paused }),
+				makeTransfer({ id: "x", direction: "extract", status: "extracting", paused })
+			]
+		})
+	}
+
+	it("records the stop an extract asked for, and always keeps for a compress, which leaves nothing", () => {
+		seed()
+
+		requestJobCancel("z", "trash")
+		requestJobCancel("x", "trash")
+
+		expect(getDriveJob("z")?.cancelRequest).toBe("keep")
+		expect(getDriveJob("x")?.cancelRequest).toBe("trash")
+		expect(sdkCancel.mock.calls).toEqual([["z"], ["x"]])
+		expect(sdkResume).not.toHaveBeenCalled()
+	})
+
+	it("lets the first request stand", () => {
+		seed()
+
+		requestJobCancel("x", "trash")
+		cancelTransfer("x")
+
+		expect(getDriveJob("x")?.cancelRequest).toBe("trash")
+		expect(sdkCancel.mock.calls).toEqual([["x"]])
+	})
+
+	it("keeps what each job made when cancelled from Cancel all", () => {
+		seed()
+
+		cancelTransfers(["z", "x"])
+
+		expect(getDriveJob("z")?.cancelRequest).toBe("keep")
+		expect(getDriveJob("x")?.cancelRequest).toBe("keep")
+		expect(sdkCancel.mock.calls).toEqual([["z"], ["x"]])
+	})
+
+	// The SDK's pause wait also ends on a stop, so no resume goes first.
+	it("cancels a paused archive job without resuming it", () => {
+		seed(true)
+
+		requestJobCancel("x", "keep")
+
+		expect(sdkCancel.mock.calls).toEqual([["x"]])
+		expect(sdkResume).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.paused)).toEqual([true, true])
+	})
+
+	it("leaves a paused copy paused when cancelling it", () => {
+		useDriveJobsStore.setState({ jobs: { c: createCopyJob("c", DESTINATION, 1) } })
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "c", direction: "copy", status: "copying", paused: true })] })
+
+		requestJobCancel("c", "keep")
+
+		expect(sdkCancel.mock.calls).toEqual([["c"]])
+		expect(sdkResume).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(true)
+	})
+
+	it("does nothing for a job that already ended or is gone", () => {
+		useDriveJobsStore.setState({ jobs: { x: extractJob({ outcome: { status: "cancelled" } }, "x") } })
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "x", direction: "extract", status: "extracting", paused: true })] })
+
+		requestJobCancel("x", "trash")
+		requestJobCancel("gone", "keep")
+
+		expect(getDriveJob("x")?.cancelRequest).toBeNull()
+		expect(sdkCancel).not.toHaveBeenCalled()
+		expect(sdkResume).not.toHaveBeenCalled()
+	})
+
+	it("neither pauses nor resumes an archive job whose job already ended", () => {
+		useDriveJobsStore.setState({ jobs: { x: extractJob({ outcome: { status: "cancelled" } }, "x"), z: compressJob({}, "z") } })
+		useTransfersStore.setState({
+			transfers: [
+				makeTransfer({ id: "x", direction: "extract", status: "extracting" }),
+				makeTransfer({ id: "z", direction: "compress", status: "compressing" })
+			]
+		})
+
+		setTransfersPaused(["x", "z"], true)
+
+		expect(sdkPause.mock.calls).toEqual([["z"]])
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.paused)).toEqual([false, true])
+	})
+})
+
 describe("cancelActiveTransfers", () => {
 	it("cancels every active transfer of every direction and leaves finished ones alone", () => {
 		useTransfersStore.setState({
@@ -222,7 +319,7 @@ describe("cancelActiveTransfers", () => {
 				makeTransfer({ id: "done", direction: "upload", status: "done" })
 			]
 		})
-		useCopyJobsStore.setState({ jobs: { c: createCopyJob("c", { uuid: null, name: "Cloud Drive" }, 1) } })
+		useDriveJobsStore.setState({ jobs: { c: createCopyJob("c", { uuid: null, name: "Cloud Drive" }, 1) } })
 
 		cancelActiveTransfers()
 
@@ -233,7 +330,7 @@ describe("cancelActiveTransfers", () => {
 
 describe("setTransfersPaused / cancelTransfers", () => {
 	function seed(): void {
-		useCopyJobsStore.setState({
+		useDriveJobsStore.setState({
 			jobs: {
 				ended: { ...createCopyJob("ended", { uuid: null, name: "Cloud Drive" }, 1), outcome: { status: "cancelled" } },
 				c: createCopyJob("c", { uuid: null, name: "Cloud Drive" }, 1)

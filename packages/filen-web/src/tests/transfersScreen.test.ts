@@ -16,7 +16,7 @@ vi.mock("@/lib/sdk/client", () => ({
 }))
 
 const { useTransfersStore } = await import("@/features/transfers/store/useTransfersStore")
-const { useCopyJobsStore } = await import("@/features/transfers/store/useCopyJobsStore")
+const { useDriveJobsStore } = await import("@/features/transfers/store/useDriveJobsStore")
 const { createCopyJob } = await import("@/features/drive/lib/copy.logic")
 const { TransfersScreen } = await import("@/features/transfers/screens/transfers")
 
@@ -35,10 +35,29 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	}
 }
 
+// The virtualizer sizes its viewport off offsetHeight, which jsdom leaves at 0: a 600px list.
+function mockListViewport(): void {
+	const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
+
+	Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+		configurable: true,
+		get(this: HTMLElement) {
+			return this.classList.contains("overflow-y-auto") ? 600 : 0
+		}
+	})
+	onTestFinished(() => {
+		if (original === undefined) {
+			Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight")
+		} else {
+			Object.defineProperty(HTMLElement.prototype, "offsetHeight", original)
+		}
+	})
+}
+
 beforeEach(() => {
 	vi.clearAllMocks()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
-	useCopyJobsStore.setState({ jobs: {}, cancelPromptId: null })
+	useDriveJobsStore.setState({ jobs: {}, cancelPromptId: null })
 })
 
 afterEach(() => {
@@ -144,7 +163,7 @@ describe("TransfersScreen — a copy whose job has ended", () => {
 	}
 
 	it("counts in Cancel all only the transfers it stops", () => {
-		useCopyJobsStore.setState({
+		useDriveJobsStore.setState({
 			jobs: { c: { ...createCopyJob("c", destination, 1), outcome: { status: "cancelled" }, cancelRequest: "trash" } }
 		})
 		useTransfersStore.setState({
@@ -164,7 +183,7 @@ describe("TransfersScreen — a copy whose job has ended", () => {
 	})
 
 	it("disables every bulk action once the job ends, while its row is still active", () => {
-		useCopyJobsStore.setState({ jobs: { c: createCopyJob("c", destination, 1) } })
+		useDriveJobsStore.setState({ jobs: { c: createCopyJob("c", destination, 1) } })
 		useTransfersStore.setState({ transfers: [transfer({ id: "c", direction: "copy", status: "copying" })] })
 
 		render(createElement(TransfersScreen))
@@ -173,7 +192,7 @@ describe("TransfersScreen — a copy whose job has ended", () => {
 		expect(button("Cancel all").disabled).toBe(false)
 
 		act(() => {
-			useCopyJobsStore.getState().update("c", job => ({ ...job, outcome: { status: "cancelled" }, cancelRequest: "trash" }))
+			useDriveJobsStore.getState().update("copy", "c", job => ({ ...job, outcome: { status: "cancelled" }, cancelRequest: "trash" }))
 		})
 
 		expect(button("Pause all").disabled).toBe(true)
@@ -182,26 +201,29 @@ describe("TransfersScreen — a copy whose job has ended", () => {
 	})
 })
 
+// Each kind asks in the job's own prompt, mounted at the root, never in the screen's plain confirm.
+describe("TransfersScreen — a drive job row's Cancel", () => {
+	it.each([
+		["copy", "copying"],
+		["compress", "compressing"],
+		["extract", "extracting"]
+	] as const)("opens the job's prompt for a %s", (direction, status) => {
+		mockListViewport()
+		useTransfersStore.setState({ transfers: [transfer({ id: "j", name: "job", direction, status })] })
+
+		render(createElement(TransfersScreen))
+		fireEvent.click(within(screen.getByRole("listitem", { name: "job" })).getByRole("button", { name: "Cancel" }))
+
+		expect(useDriveJobsStore.getState().cancelPromptId).toBe("j")
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(sdkCancel).not.toHaveBeenCalled()
+	})
+})
+
 // A dropped directory adds a row per file up front, and every progress tick re-renders the screen.
 describe("TransfersScreen — a large batch", () => {
 	it("mounts only the rows in view, not one per transfer", () => {
-		// The virtualizer sizes its viewport off offsetHeight, which jsdom leaves at 0: a 600px list.
-		const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
-
-		Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-			configurable: true,
-			get(this: HTMLElement) {
-				return this.classList.contains("overflow-y-auto") ? 600 : 0
-			}
-		})
-		onTestFinished(() => {
-			if (original === undefined) {
-				Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight")
-			} else {
-				Object.defineProperty(HTMLElement.prototype, "offsetHeight", original)
-			}
-		})
-
+		mockListViewport()
 		useTransfersStore.setState({
 			transfers: Array.from({ length: 2_000 }, (_, index) =>
 				transfer({ id: `t${String(index)}`, name: `file${String(index)}.txt`, startedAt: index })

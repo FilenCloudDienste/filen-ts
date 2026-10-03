@@ -1,7 +1,9 @@
 import { useTranslation } from "react-i18next"
-import { copyJobRate, formatBytesFixed, formatBytesPerSecond, formatSecondsToMediaClock } from "@filen/shared"
-import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { useShallow } from "zustand/shallow"
+import { formatBytesFixed, formatBytesPerSecond, formatSecondsToMediaClock } from "@filen/shared"
+import { isDriveJobDirection, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
+import { driveJobRate } from "@/features/drive/lib/driveJobs.logic"
 import { percentFormat, runningPercentFraction, transferRate, type TransferRate } from "@/features/transfers/components/transferRow.logic"
 
 export interface RunningFigures {
@@ -53,14 +55,22 @@ export function useRunningDetails(): (figures: RunningFigures) => RunningDetails
 	}
 }
 
-// A transfer's speed and time left. A copy reads its rate off its job, which also counts the files it
-// has not reached yet; anything else off its own rolling window.
+// A transfer's speed and time left. A drive job reads its rate off its job, which also counts the files
+// it has not reached yet; anything else off its own rolling window. Shallow, so a job update that leaves
+// the rate as it was re-renders nothing.
 export function useTransferRate(transfer: Transfer): TransferRate | null {
-	const job = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id] : undefined))
-	const samples = useTransfersStore(state => state.rowSpeedSamples[transfer.id])
+	const isJob = isDriveJobDirection(transfer.direction)
+	const jobRate = useDriveJobsStore(
+		useShallow(state => {
+			const job = isJob ? state.jobs[transfer.id] : undefined
 
-	if (transfer.direction === "copy") {
-		return job === undefined ? null : copyJobRate(job)
+			return job === undefined ? null : driveJobRate(job)
+		})
+	)
+	const samples = useTransfersStore(state => (isJob ? undefined : state.rowSpeedSamples[transfer.id]))
+
+	if (isJob) {
+		return jobRate
 	}
 
 	return transferRate(transfer, samples ?? [])

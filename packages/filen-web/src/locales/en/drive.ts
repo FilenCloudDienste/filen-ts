@@ -180,12 +180,12 @@ export const drive = {
 	driveListLabel: "Directory contents",
 
 	// ── Pending transfers (components/pendingUploads.tsx) ─────────────────────
-	// Rows above a directory's items while uploads and copies into it run: up to three get a row each,
-	// more fold into one summary row; failed uploads stay, in red, until dismissed. Scrolled out of view,
-	// they show as one bar pinned to the top of the listing.
-	/** Pending transfers — accessible name of the list of uploads and copies shown above a directory's items */
-	drivePendingUploadsLabel: "Uploads and copies into this directory",
-	/** Pending transfers — screen-reader status while uploads or copies into the directory on screen run */
+	// Rows above a directory's items while uploads, copies and archive jobs into it run: up to three get a
+	// row each, more fold into one summary row; failed uploads stay, in red, until dismissed. Scrolled out
+	// of view, they show as one bar pinned to the top of the listing.
+	/** Pending transfers — accessible name of the list of transfers (uploads, copies, compress and extract jobs) shown above a directory's items */
+	drivePendingUploadsLabel: "Transfers into this directory",
+	/** Pending transfers — screen-reader status while uploads, copies or archive jobs into the directory on screen run */
 	drivePendingUploadsRunningStatus: "Transferring into this directory",
 	/** Pending transfers — screen-reader status while failed uploads into the directory on screen are listed */
 	drivePendingUploadsFailedStatus: "Some uploads into this directory failed",
@@ -193,9 +193,9 @@ export const drive = {
 	drivePendingUploadsUploading_one: "Uploading {{count}} file",
 	/** Pending transfers — summary row (or pinned bar) for running uploads only; {{count}} = files still uploading; plural */
 	drivePendingUploadsUploading_other: "Uploading {{count}} files",
-	/** Pending transfers — summary row (or pinned bar) when copies run too; {{count}} = files still uploading plus copies running; singular */
+	/** Pending transfers — summary row (or pinned bar) when copies or archive jobs run too; {{count}} = files still uploading plus jobs running; singular */
 	drivePendingTransfersRunning_one: "{{count}} transfer in progress",
-	/** Pending transfers — summary row (or pinned bar) when copies run too; {{count}} = files still uploading plus copies running; plural */
+	/** Pending transfers — summary row (or pinned bar) when copies or archive jobs run too; {{count}} = files still uploading plus jobs running; plural */
 	drivePendingTransfersRunning_other: "{{count}} transfers in progress",
 	/** Pending transfers — summary row (or pinned bar) for four or more failed uploads; singular */
 	drivePendingUploadsFailed_one: "{{count}} upload failed",
@@ -211,10 +211,10 @@ export const drive = {
 	drivePendingUploadsCancelAllBody_one: "{{count}} file still uploading into this directory will stop. This can't be undone.",
 	/** Pending transfers — body of the summary row's Cancel confirm for uploads only; {{count}} = files still uploading into this directory; plural */
 	drivePendingUploadsCancelAllBody_other: "{{count}} files still uploading into this directory will stop. This can't be undone.",
-	/** Pending transfers — body of the summary row's Cancel confirm when copies run too; {{count}} = files uploading plus copies running; singular */
-	drivePendingTransfersCancelAllBody_one: "{{count}} transfer into this directory will stop. Copies keep what they already copied.",
-	/** Pending transfers — body of the summary row's Cancel confirm when copies run too; {{count}} = files uploading plus copies running; plural */
-	drivePendingTransfersCancelAllBody_other: "{{count}} transfers into this directory will stop. Copies keep what they already copied.",
+	/** Pending transfers — body of the summary row's Cancel confirm when copies or archive jobs run too; {{count}} = files uploading plus jobs running; singular */
+	drivePendingTransfersCancelAllBody_one: "{{count}} transfer into this directory will stop. Copied or extracted items are kept.",
+	/** Pending transfers — body of the summary row's Cancel confirm when copies or archive jobs run too; {{count}} = files uploading plus jobs running; plural */
+	drivePendingTransfersCancelAllBody_other: "{{count}} transfers into this directory will stop. Copied or extracted items are kept.",
 	/** Drive listing — title shown when a directory listing fails to load */
 	driveLoadError: "Couldn't load this directory",
 	/** Drive listing row — visually-hidden label announcing a favorited item's star indicator */

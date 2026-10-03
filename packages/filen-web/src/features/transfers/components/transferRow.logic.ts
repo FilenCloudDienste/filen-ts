@@ -1,6 +1,12 @@
-import { computeTransfersSpeed, isActiveTransfer, type SpeedSample, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import {
+	computeTransfersSpeed,
+	isActiveTransfer,
+	type SpeedSample,
+	type Transfer,
+	type TransferDirection
+} from "@/features/transfers/store/useTransfersStore"
 import { fileIconKey, type FileIconKey } from "@/features/drive/lib/icon.logic"
-import { clampedRatio } from "@filen/shared"
+import { clampedRatio, type DriveJobKind } from "@filen/shared"
 
 // Per-row value fed straight into <Progress value={...}> (Base UI's 0-max range, max defaults to
 // 100 — see ui/progress.tsx), scaled 0-100 same as useTransfersAggregate's own percent.
@@ -20,18 +26,35 @@ export function transferProgress(transfer: Transfer): number {
 	return clampedRatio(transfer.bytesTransferred, transfer.size, 100)
 }
 
-// The active-row status icon's sr-only label key, direction-aware — isActiveTransfer's two members
-// ("uploading"/"downloading") each get their own announcement instead of the row hard-coding the
-// upload one for both directions. `paused` overrides direction: a suspended-in-place transfer (see
-// Transfer["paused"]) isn't currently sending/receiving bytes, so it gets its own label instead of
+export type TransfersActiveKey =
+	| "transfersStatusUploading"
+	| "transfersStatusDownloading"
+	| "transfersStatusCopying"
+	| "transfersStatusCompressing"
+	| "transfersStatusExtracting"
+	| "transfersStatusPaused"
+	| "transfersStatusWaitingForSlot"
+
+export type TransfersFinishedKey =
+	| "transfersStatusUploaded"
+	| "transfersStatusDownloaded"
+	| "transfersStatusCopied"
+	| "transfersStatusCompressed"
+	| "transfersStatusExtracted"
+	| "transfersStatusCompletedWithErrors"
+	| "transfersStatusError"
+
+// An active row's status word, direction-aware. `paused` overrides direction: a suspended-in-place
+// transfer (see Transfer["paused"]) isn't currently moving bytes, so it gets its own label instead of
 // claiming to still be uploading/downloading (mirrors mobile's swap to a pause glyph in place of the
-// live percentage). Defaults to false so every pre-existing direction-only call site is unaffected.
-export function activeStatusLabelKey(
-	direction: Transfer["direction"],
-	paused = false
-): "transfersStatusUploading" | "transfersStatusDownloading" | "transfersStatusCopying" | "transfersStatusPaused" {
+// live percentage). `waiting` is an archive job queued behind the page's one archive slot.
+export function activeStatusLabelKey(direction: TransferDirection, paused = false, waiting = false): TransfersActiveKey {
 	if (paused) {
 		return "transfersStatusPaused"
+	}
+
+	if (waiting) {
+		return "transfersStatusWaitingForSlot"
 	}
 
 	switch (direction) {
@@ -41,20 +64,16 @@ export function activeStatusLabelKey(
 			return "transfersStatusDownloading"
 		case "copy":
 			return "transfersStatusCopying"
+		case "compress":
+			return "transfersStatusCompressing"
+		case "extract":
+			return "transfersStatusExtracting"
 	}
 }
 
-// A finished row's status word: what happened, in the transfer's own direction. A copy that finished
-// with some items failed is not a failed copy.
-export function finishedStatusLabelKey(
-	status: Transfer["status"],
-	direction: Transfer["direction"]
-):
-	| "transfersStatusUploaded"
-	| "transfersStatusDownloaded"
-	| "transfersStatusCopied"
-	| "transfersStatusCompletedWithErrors"
-	| "transfersStatusError" {
+// A finished row's status word: what happened, in the transfer's own direction. A job that finished
+// with some items failed is not a failed job.
+export function finishedStatusLabelKey(status: Transfer["status"], direction: TransferDirection): TransfersFinishedKey {
 	if (status === "completedWithErrors") {
 		return "transfersStatusCompletedWithErrors"
 	}
@@ -70,6 +89,24 @@ export function finishedStatusLabelKey(
 			return "transfersStatusDownloaded"
 		case "copy":
 			return "transfersStatusCopied"
+		case "compress":
+			return "transfersStatusCompressed"
+		case "extract":
+			return "transfersStatusExtracted"
+	}
+}
+
+// The label on a drive job row's button reopening its progress card.
+export function jobDetailsLabelKey(
+	kind: DriveJobKind
+): "transfersRowCopyDetails" | "transfersRowCompressDetails" | "transfersRowExtractDetails" {
+	switch (kind) {
+		case "copy":
+			return "transfersRowCopyDetails"
+		case "compress":
+			return "transfersRowCompressDetails"
+		case "extract":
+			return "transfersRowExtractDetails"
 	}
 }
 
@@ -79,8 +116,8 @@ export interface TransferRate {
 }
 
 // A running transfer's speed over its own rolling window, and the time left at that speed. Null while
-// paused, finished, or before two samples span the window (nothing honest to show yet). A copy reads
-// its rate off its job instead (copyJobRate), which also counts the files it has not reached.
+// paused, finished, or before two samples span the window (nothing honest to show yet). A drive job
+// reads its rate off its job instead (driveJobRate), which also counts the files it has not reached.
 export function transferRate(transfer: Transfer, samples: readonly SpeedSample[]): TransferRate | null {
 	if (!isActiveTransfer(transfer.status) || transfer.paused) {
 		return null

@@ -682,7 +682,7 @@ describe("DirectoryListing — pending uploads", () => {
 	}
 
 	function pendingList(): HTMLElement | null {
-		return screen.queryByRole("list", { name: "Uploads and copies into this directory" })
+		return screen.queryByRole("list", { name: "Transfers into this directory" })
 	}
 
 	beforeEach(() => {

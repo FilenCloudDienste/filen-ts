@@ -169,7 +169,7 @@ describe("sdk worker copy", () => {
 		replies[1]?.()
 
 		await expect(call).resolves.toBe(REPORT)
-		await api.releaseCopy("job")
+		await api.releaseJob("job")
 	})
 
 	it("still returns the report when the caller failed to take an event", async () => {
@@ -180,7 +180,7 @@ describe("sdk worker copy", () => {
 		})
 
 		await expect(api.copyItems("failing", [], null, undefined, () => Promise.reject(new Error("render failed")))).resolves.toBe(REPORT)
-		await api.releaseCopy("failing")
+		await api.releaseJob("failing")
 	})
 
 	// A retry after a storage refusal is the same job: a pause made between its calls must hold.
@@ -195,7 +195,7 @@ describe("sdk worker copy", () => {
 		expect(second?.managedFuture.pauseSignal.isPaused()).toBe(true)
 		expect(first?.managedFuture.pauseSignal.freed).toBe(false)
 
-		await api.releaseCopy("paused")
+		await api.releaseJob("paused")
 
 		expect(first?.managedFuture.pauseSignal.freed).toBe(true)
 	})
@@ -207,7 +207,7 @@ describe("sdk worker copy", () => {
 
 		expect(copyCalls()[1]?.managedFuture.abortSignal.aborted).toBe(true)
 
-		await api.releaseCopy("stopped")
+		await api.releaseJob("stopped")
 
 		const lookup = Promise.withResolvers<unknown>()
 
@@ -221,7 +221,7 @@ describe("sdk worker copy", () => {
 
 		expect(copyCalls()[2]?.managedFuture.abortSignal.aborted).toBe(true)
 
-		await api.releaseCopy("looking-up")
+		await api.releaseJob("looking-up")
 	})
 
 	// A live SDK error clones hollow across Comlink: what crosses must already be its DTO, and the live
@@ -273,7 +273,7 @@ describe("sdk worker copy", () => {
 		expect(structuredClone(report)).toEqual(report)
 		expect([failed, propagation, stopped, reportFailed].map(error => error.freed.mock.calls.length)).toEqual([1, 1, 1, 1])
 
-		await api.releaseCopy("lifted")
+		await api.releaseJob("lifted")
 	})
 
 	it("forgets a released job: a later stop, pause or release does nothing", async () => {
@@ -281,10 +281,10 @@ describe("sdk worker copy", () => {
 
 		const pause = copyCalls()[0]?.managedFuture.pauseSignal
 
-		await api.releaseCopy("released")
+		await api.releaseJob("released")
 		await api.pauseTransfer("released")
 		await api.cancelTransfer("released")
-		await api.releaseCopy("released")
+		await api.releaseJob("released")
 
 		expect(pause?.isPaused()).toBe(false)
 		expect(copyCalls()[0]?.managedFuture.abortSignal.aborted).toBe(false)

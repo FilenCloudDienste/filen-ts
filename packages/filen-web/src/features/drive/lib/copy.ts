@@ -6,11 +6,9 @@ import {
 	copyMaxBytes,
 	driveItemName,
 	formatBytes,
-	isCopyJobRunning,
 	isQuotaPreflightFailure,
 	settleCopyJob,
-	type QuotaCheckDeps,
-	type StorageCounters
+	type QuotaCheckDeps
 } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
@@ -18,13 +16,21 @@ import { runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import type { CopyReportDTO } from "@/lib/sdk/jobErrors"
 import type { CopyJobEvent } from "@/workers/sdk.worker"
-import { asDirectoryOrFile, narrowItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
-import { findCachedListingItem, normalizeParentUuid, queueListingCreate } from "@/features/drive/queries/drive"
+import { narrowItem, narrowToSdkItems, type DriveItem } from "@/features/drive/lib/item"
+import { normalizeParentUuid } from "@/features/drive/queries/drive"
 import { currentRootUuid, trashItems } from "@/features/drive/lib/actions"
 import { type BulkOutcome } from "@/lib/actions/bulk"
 import { flushDeferredRecents } from "@/features/drive/lib/socketHandlers"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { invalidateUploadedDirectorySizes } from "@/features/drive/lib/upload"
+import {
+	addTrashOutcome,
+	directoriesBetween,
+	patchJobCreatedItem,
+	pruneSettledDriveJobs,
+	readFreshAccount,
+	STOPPED
+} from "@/features/drive/lib/driveJobs"
 import {
 	canRetryCopy,
 	copiedFileThumbnails,
@@ -44,7 +50,7 @@ import {
 import { reuseCopiedThumbnails } from "@/features/drive/lib/thumbnails"
 import type { ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { getCopyJob, useCopyJobsStore, type CopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { getCopyJob, jobsAccess, useDriveJobsStore, type JobsAccess } from "@/features/transfers/store/useDriveJobsStore"
 
 // A copy runs as one SDK job with one transfers row, however many items it holds. The SDK owns the
 // scan, concurrency, retries and share/link propagation; this only feeds its progress into the stores
@@ -72,7 +78,7 @@ export interface RunCopyDeps {
 	// Frees the worker's stop and pause for the job, which span its calls.
 	release: (id: string) => void
 	transfers: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "setPaused" | "settle" | "remove">
-	jobs: Pick<CopyJobsStore, "put" | "update"> & { get: (id: string) => CopyJob | undefined }
+	jobs: JobsAccess<CopyJob>
 	account: QuotaCheckDeps
 	patchCreated: (item: DriveItem) => void
 	trash: (items: DriveItem[]) => Promise<BulkOutcome<DriveItem>>
@@ -119,27 +125,12 @@ async function attempt(
 	}
 }
 
-async function readFreshAccount(account: QuotaCheckDeps): Promise<StorageCounters | undefined> {
-	try {
-		return await account.fetchFresh()
-	} catch {
-		return undefined
-	}
-}
-
 function quotaExceededDTO(neededBytes: number, freeBytes: number): ErrorDTO {
 	return plainErrorDTO(i18n.t("transfers:transfersCopyQuotaExceeded", { needed: formatBytes(neededBytes), free: formatBytes(freeBytes) }))
 }
 
-// Settles a job the user stopped as cancelled; never shown.
-const STOPPED: ErrorDTO = { species: "sdk", kind: "Cancelled", message: "", label: "" }
-
 function trashFailedDTO(count: number): ErrorDTO {
 	return plainErrorDTO(i18n.t("transfers:transfersCopyTrashFailedItems", { count }))
-}
-
-function addTrashOutcome(result: CopyJob["trashResult"], outcome: BulkOutcome<DriveItem>): NonNullable<CopyJob["trashResult"]> {
-	return { moved: (result?.moved ?? 0) + outcome.succeeded.length, failed: (result?.failed ?? 0) + outcome.failed.length }
 }
 
 // Outside runCopyJob, so the report isn't kept alive by the callbacks the worker may still hold.
@@ -390,60 +381,22 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	return job
 }
 
-// A settled job stays while its card shows or its transfers row can reopen the card.
-export function pruneSettledCopyJobs(): void {
-	const rows = new Set(useTransfersStore.getState().transfers.map(transfer => transfer.id))
-
-	for (const job of Object.values(useCopyJobsStore.getState().jobs)) {
-		if (!isCopyJobRunning(job) && !job.cardVisible && !rows.has(job.id)) {
-			useCopyJobsStore.getState().remove(job.id)
-		}
-	}
-}
-
 function copyRowName(itemCount: number, firstName: string): string {
 	return itemCount === 1 ? firstName : i18n.t("transfers:transfersCopyRowName", { count: itemCount })
 }
 
-// The destination listing is usually the one on screen; one nobody has read is left to its first read.
-// Batched with the socket echoes, which carry the same items again.
-function patchCopiedItem(item: DriveItem): void {
-	queueListingCreate(normalizeParentUuid(item.data.parent, currentRootUuid()), item)
-}
-
-function cachedParentOf(uuid: string): string | undefined {
-	const cached = findCachedListingItem(uuid)
-
-	return cached === undefined ? undefined : asDirectoryOrFile(cached).data.parent
-}
-
 // The directories below the destination whose recursive size the job moved: the top-level directories it
-// created, and for a retry every directory from where each item was meant to land up to the destination,
-// the first hop read from the entry itself and the rest through the listing cache (no request).
+// created, and for a retry every directory from where each item was meant to land up to the destination.
 function writtenDirectories(source: CopySource, destinationUuid: string | null, delivered: readonly DriveItem[]): string[] {
-	const written = new Set<string>(delivered.flatMap(item => (item.type === "directory" ? [item.data.uuid] : [])))
+	const created = delivered.flatMap(item => (item.type === "directory" ? [item.data.uuid] : []))
 
-	if (source.kind !== "entries") {
-		return [...written]
-	}
-
-	const rootUuid = currentRootUuid()
-
-	for (const { destination } of source.entries) {
-		let uuid = normalizeParentUuid(destination.uuid, rootUuid)
-		let parent: string | undefined = "parent" in destination ? destination.parent : undefined
-
-		while (uuid !== null && uuid !== destinationUuid && !written.has(uuid)) {
-			written.add(uuid)
-
-			const next = parent ?? cachedParentOf(uuid)
-
-			parent = undefined
-			uuid = next === undefined ? null : normalizeParentUuid(next, rootUuid)
-		}
-	}
-
-	return [...written]
+	return source.kind === "entries"
+		? directoriesBetween(
+				source.entries.map(entry => entry.destination),
+				destinationUuid,
+				created
+			)
+		: created
 }
 
 // No toast: the card, or the transfers row, shows how the copy ended.
@@ -458,7 +411,7 @@ function afterCopySettled(job: CopyJob, written: readonly string[]): void {
 		invalidateUploadedDirectorySizes(job.destination.uuid, written)
 	}
 
-	pruneSettledCopyJobs()
+	pruneSettledDriveJobs()
 }
 
 export const defaultCopyDeps: RunCopyDeps = {
@@ -466,12 +419,12 @@ export const defaultCopyDeps: RunCopyDeps = {
 		sdkApi.copyItems(id, items, destinationUuid, maxBytes, Comlink.proxy(onEvent)),
 	copyItemsTo: (id, entries, maxBytes, onEvent) => sdkApi.copyItemsTo(id, entries, maxBytes, Comlink.proxy(onEvent)),
 	release: id => {
-		void sdkApi.releaseCopy(id)
+		void sdkApi.releaseJob(id)
 	},
 	transfers: useTransfersStore.getState(),
-	jobs: { ...useCopyJobsStore.getState(), get: getCopyJob },
+	jobs: jobsAccess("copy"),
 	account: accountQuotaDeps,
-	patchCreated: patchCopiedItem,
+	patchCreated: patchJobCreatedItem,
 	trash: trashItems,
 	settled: afterCopySettled,
 	reuseThumbnails: reuseCopiedThumbnails
@@ -541,13 +494,13 @@ export function retryFailedCopy(jobId: string): string | null {
 		glyph: copyGlyphForEntries(entries)
 	})
 
-	useCopyJobsStore.getState().update(jobId, retried => ({ ...retried, retryable: [] }))
+	useDriveJobsStore.getState().update("copy", jobId, retried => ({ ...retried, retryable: [] }))
 
 	if ((job.trashResult?.failed ?? 0) === 0) {
 		useTransfersStore.getState().remove(jobId)
 	}
 
-	pruneSettledCopyJobs()
+	pruneSettledDriveJobs()
 
 	return id
 }

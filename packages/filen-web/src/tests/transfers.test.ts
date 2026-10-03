@@ -6,7 +6,7 @@ import {
 	leavesBrowserPartial,
 	buildTransfersDisplayList,
 	cancellableTransferIds,
-	endedCopyIds,
+	endedJobIds,
 	pausableTransferIds,
 	resumableTransferIds,
 	shouldShowTransfersAggregate
@@ -145,13 +145,12 @@ describe("resumableTransferIds", () => {
 	})
 })
 
-// Its row stays active while the copies it made move to the trash, which can be neither paused nor
-// stopped.
-describe("a copy whose job has ended", () => {
+// Its row stays active while what it made moves to the trash, which can be neither paused nor stopped.
+describe("a drive job that has ended", () => {
 	const destination = { uuid: null, name: "Cloud Drive" }
 
-	it("is named by endedCopyIds, a running one is not", () => {
-		const ended = endedCopyIds({
+	it("is named by endedJobIds, a running one is not", () => {
+		const ended = endedJobIds({
 			running: createCopyJob("running", destination, 1),
 			stopped: { ...createCopyJob("stopped", destination, 1), outcome: { status: "cancelled" }, cancelRequest: "trash" },
 			finished: { ...createCopyJob("finished", destination, 1), outcome: { status: "done" } }
@@ -161,12 +160,13 @@ describe("a copy whose job has ended", () => {
 	})
 
 	it("is left out of Cancel all, Pause all and Resume all, paused or not", () => {
-		const ended = new Set(["copy", "pausedCopy"])
+		const ended = new Set(["copy", "pausedCopy", "extract"])
 		const transfers = [
 			transfer({ id: "upload", status: "uploading" }),
 			transfer({ id: "pausedUpload", status: "uploading", paused: true }),
 			transfer({ id: "copy", direction: "copy", status: "copying" }),
-			transfer({ id: "pausedCopy", direction: "copy", status: "copying", paused: true })
+			transfer({ id: "pausedCopy", direction: "copy", status: "copying", paused: true }),
+			transfer({ id: "extract", direction: "extract", status: "extracting" })
 		]
 
 		expect(cancellableTransferIds(transfers, ended)).toEqual(["upload", "pausedUpload"])

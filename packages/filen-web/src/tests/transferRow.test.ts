@@ -4,6 +4,7 @@ import {
 	transferProgress,
 	activeStatusLabelKey,
 	finishedStatusLabelKey,
+	jobDetailsLabelKey,
 	transferIconKey,
 	steadyEtaSeconds,
 	transferRate,
@@ -64,14 +65,23 @@ describe("activeStatusLabelKey", () => {
 		expect(activeStatusLabelKey("download")).toBe("transfersStatusDownloading")
 	})
 
-	it("copy direction reads the copying key", () => {
+	it("each drive job direction reads its own key", () => {
 		expect(activeStatusLabelKey("copy")).toBe("transfersStatusCopying")
+		expect(activeStatusLabelKey("compress")).toBe("transfersStatusCompressing")
+		expect(activeStatusLabelKey("extract")).toBe("transfersStatusExtracting")
 	})
 
 	it("paused overrides direction, regardless of which direction", () => {
 		expect(activeStatusLabelKey("upload", true)).toBe("transfersStatusPaused")
 		expect(activeStatusLabelKey("download", true)).toBe("transfersStatusPaused")
 		expect(activeStatusLabelKey("copy", true)).toBe("transfersStatusPaused")
+		expect(activeStatusLabelKey("extract", true, true)).toBe("transfersStatusPaused")
+	})
+
+	it("a job queued for the archive slot reads as waiting", () => {
+		expect(activeStatusLabelKey("compress", false, true)).toBe("transfersStatusWaitingForSlot")
+		expect(activeStatusLabelKey("extract", false, true)).toBe("transfersStatusWaitingForSlot")
+		expect(activeStatusLabelKey("extract", false, false)).toBe("transfersStatusExtracting")
 	})
 
 	it("unpaused (explicit false) behaves the same as the default", () => {
@@ -84,11 +94,23 @@ describe("finishedStatusLabelKey", () => {
 		expect(finishedStatusLabelKey("done", "upload")).toBe("transfersStatusUploaded")
 		expect(finishedStatusLabelKey("done", "download")).toBe("transfersStatusDownloaded")
 		expect(finishedStatusLabelKey("done", "copy")).toBe("transfersStatusCopied")
+		expect(finishedStatusLabelKey("done", "compress")).toBe("transfersStatusCompressed")
+		expect(finishedStatusLabelKey("done", "extract")).toBe("transfersStatusExtracted")
 	})
 
-	it("tells a partly failed copy apart from a failed transfer", () => {
+	it("tells a partly failed job apart from a failed transfer", () => {
 		expect(finishedStatusLabelKey("completedWithErrors", "copy")).toBe("transfersStatusCompletedWithErrors")
+		expect(finishedStatusLabelKey("completedWithErrors", "extract")).toBe("transfersStatusCompletedWithErrors")
 		expect(finishedStatusLabelKey("error", "upload")).toBe("transfersStatusError")
+		expect(finishedStatusLabelKey("error", "compress")).toBe("transfersStatusError")
+	})
+})
+
+describe("jobDetailsLabelKey", () => {
+	it("names the progress card the row reopens by its kind", () => {
+		expect(jobDetailsLabelKey("copy")).toBe("transfersRowCopyDetails")
+		expect(jobDetailsLabelKey("compress")).toBe("transfersRowCompressDetails")
+		expect(jobDetailsLabelKey("extract")).toBe("transfersRowExtractDetails")
 	})
 })
 

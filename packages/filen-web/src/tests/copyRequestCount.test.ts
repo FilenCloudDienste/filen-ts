@@ -21,7 +21,7 @@ const { listDirectory, copyItems, getUserInfo } = vi.hoisted(() => ({
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, copyItems, getUserInfo, releaseCopy: vi.fn() } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listDirectory, copyItems, getUserInfo, releaseJob: vi.fn() } }))
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
@@ -34,7 +34,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { discardListingPatches, driveListingQueryKey, flushListingCreates, useDirectoryListingQuery } from "@/features/drive/queries/drive"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
 import { startCopy } from "@/features/drive/lib/copy"
-import { getCopyJob } from "@/features/transfers/store/useCopyJobsStore"
+import { getCopyJob } from "@/features/transfers/store/useDriveJobsStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
 import { testUuid } from "@/tests/support/uuid"

@@ -117,7 +117,7 @@ test.describe("uploads", () => {
 					{ name: fileName, mimeType: "application/octet-stream", buffer: Buffer.alloc(2 * 1024 * 1024, 7) }
 				])
 
-				const pending = listbox.getByRole("list", { name: "Uploads and copies into this directory" })
+				const pending = listbox.getByRole("list", { name: "Transfers into this directory" })
 				const pendingRow = pending.getByRole("listitem", { name: fileName })
 
 				await expect(pendingRow).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })

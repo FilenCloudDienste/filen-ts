@@ -1,24 +1,39 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
+	ArchiveIcon,
 	CheckIcon,
 	CopyIcon,
 	DownloadIcon,
 	FolderSearchIcon,
+	PackageOpenIcon,
 	PanelBottomOpenIcon,
 	PauseIcon,
 	PlayIcon,
 	Trash2Icon,
 	UploadIcon,
-	XIcon
+	XIcon,
+	type LucideIcon
 } from "lucide-react"
-import { formatBytes, formatBytesFixed, isCopyJobRunning, cn } from "@filen/shared"
-import { isActiveTransfer, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { transferProgress, activeStatusLabelKey, finishedStatusLabelKey } from "@/features/transfers/components/transferRow.logic"
+import { formatBytes, formatBytesFixed, isJobRunning, isWaitingForArchiveSlot, cn } from "@filen/shared"
+import {
+	isActiveTransfer,
+	isDriveJobDirection,
+	useTransfersStore,
+	type Transfer,
+	type TransferDirection
+} from "@/features/transfers/store/useTransfersStore"
+import {
+	transferProgress,
+	activeStatusLabelKey,
+	finishedStatusLabelKey,
+	jobDetailsLabelKey
+} from "@/features/transfers/components/transferRow.logic"
 import { setTransferPaused } from "@/features/transfers/lib/control"
-import { showCopyToast } from "@/features/transfers/lib/copyToast"
-import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
-import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { showJobToast } from "@/features/transfers/lib/jobToast"
+import { pruneSettledDriveJobs } from "@/features/drive/lib/driveJobs"
+import { jobRevealItem } from "@/features/drive/lib/driveJobs.logic"
+import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { TransferIcon } from "@/features/transfers/components/transferIcon"
 import { useRunningDetails, useTransferRate } from "@/features/transfers/hooks/useTransferFigures"
 import type { DriveItem } from "@/features/drive/lib/item"
@@ -44,6 +59,14 @@ export interface TransferRowProps {
 const RING_RADIUS = 18
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
+const DIRECTION_ICONS: Readonly<Record<TransferDirection, LucideIcon>> = {
+	upload: UploadIcon,
+	download: DownloadIcon,
+	copy: CopyIcon,
+	compress: ArchiveIcon,
+	extract: PackageOpenIcon
+}
+
 // The leading glyph: the item's own type icon inside a ring that fills with the transfer's progress, and
 // a badge on its corner for what is happening to it — its direction while it runs, a pause, a check, an
 // alert. A finished row drops the ring: a full circle beside every done row would only be noise. The
@@ -52,16 +75,18 @@ function TransferGlyph({
 	transfer,
 	progress,
 	icon,
-	trashing
+	trashing,
+	waiting
 }: {
 	transfer: Transfer
 	progress: number
 	icon: ReactNode
 	trashing: boolean
+	waiting: boolean
 }) {
 	const { t } = useTranslation("transfers")
 	const active = isActiveTransfer(transfer.status)
-	const DirectionIcon = transfer.direction === "upload" ? UploadIcon : transfer.direction === "download" ? DownloadIcon : CopyIcon
+	const DirectionIcon = DIRECTION_ICONS[transfer.direction]
 
 	let badge: ReactNode
 
@@ -84,7 +109,7 @@ function TransferGlyph({
 					aria-valuemin={0}
 					aria-valuemax={100}
 					aria-valuenow={Math.round(progress)}
-					aria-valuetext={t(activeStatusLabelKey(transfer.direction, transfer.paused))}
+					aria-valuetext={t(activeStatusLabelKey(transfer.direction, transfer.paused, waiting))}
 					className="absolute inset-0"
 				>
 					<svg
@@ -159,15 +184,33 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 	const { t } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
 	const active = isActiveTransfer(transfer.status)
-	const job = useCopyJobsStore(state => (transfer.direction === "copy" ? state.jobs[transfer.id] : undefined))
-	// A stopped copy's row stays active past its job while its copies move to the trash, which can't be
+	const isJob = isDriveJobDirection(transfer.direction)
+	const landed = transfer.status === "done" || transfer.status === "completedWithErrors"
+	// Primitives and stable refs only, so a row re-renders for its own job and only when what it shows moves.
+	const hasJob = useDriveJobsStore(state => isJob && state.jobs[transfer.id] !== undefined)
+	const jobEnded = useDriveJobsStore(state => {
+		const job = isJob ? state.jobs[transfer.id] : undefined
+
+		return job !== undefined && !isJobRunning(job)
+	})
+	const waiting = useDriveJobsStore(state => {
+		const job = isJob ? state.jobs[transfer.id] : undefined
+
+		return job !== undefined && isWaitingForArchiveSlot(job)
+	})
+	// What "Show in directory" opens: a landed upload's file or a job's own result (its archive, or the
+	// first item it created), which the runners also set as the row's item.
+	const jobItem = useDriveJobsStore(state => {
+		const job = isJob && landed && transfer.item === undefined ? state.jobs[transfer.id] : undefined
+
+		return job === undefined ? null : jobRevealItem(job)
+	})
+	// A stopped job's row stays active past its job while what it made moves to the trash, which can't be
 	// paused or stopped.
-	const trashing = active && job !== undefined && !isCopyJobRunning(job)
+	const trashing = active && jobEnded
 	const rate = useTransferRate(transfer)
 	const runningDetails = useRunningDetails()
-	// What "Show in directory" opens: a landed upload's file, or the first item a copy created.
-	const revealItem =
-		transfer.status === "done" || transfer.status === "completedWithErrors" ? (transfer.item ?? job?.created[0]) : undefined
+	const revealItem = landed ? (transfer.item ?? jobItem ?? undefined) : undefined
 
 	// The running line keeps its figures still without reserving space for them (useRunningDetails); a
 	// finished row's figures no longer move, so they read plainly.
@@ -177,6 +220,8 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 		details = [t("transfersStatusMovingToTrash")]
 	} else if (active && transfer.paused) {
 		details = [t("transfersStatusPaused"), formatBytesFixed(transfer.bytesTransferred)]
+	} else if (active && waiting) {
+		details = [t("transfersStatusWaitingForSlot")]
 	} else if (active) {
 		details = [
 			runningDetails({
@@ -213,6 +258,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 				progress={progress}
 				icon={icon}
 				trashing={trashing}
+				waiting={waiting}
 			/>
 			<div className="min-w-0 flex-1">
 				<p className="truncate text-sm font-medium">{transfer.name}</p>
@@ -226,12 +272,12 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 				</p>
 			</div>
 			<div className="flex shrink-0 items-center gap-0.5">
-				{job !== undefined ? (
+				{hasJob && isDriveJobDirection(transfer.direction) ? (
 					<TooltipIconButton
-						label={t("transfersRowCopyDetails")}
+						label={t(jobDetailsLabelKey(transfer.direction))}
 						className={ROW_ACTION_CLASS}
 						onClick={() => {
-							showCopyToast(transfer.id)
+							showJobToast(transfer.id)
 						}}
 					>
 						<PanelBottomOpenIcon />
@@ -255,7 +301,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 							className={ROW_ACTION_CLASS}
 							onClick={() => {
 								useTransfersStore.getState().remove(transfer.id)
-								pruneSettledCopyJobs()
+								pruneSettledDriveJobs()
 							}}
 						>
 							<XIcon />

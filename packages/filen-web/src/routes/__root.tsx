@@ -16,7 +16,7 @@ import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
 import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
 import { TransfersUnloadGuard } from "@/features/shell/components/transfersUnloadGuard"
 import { ActivityDetailsDialog } from "@/lib/activity/activityDetailsDialog"
-import { CopyCancelDialog } from "@/features/transfers/components/copyCancelDialog"
+import { DriveJobCancelDialog } from "@/features/transfers/components/driveJobCancelDialog"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 
@@ -126,8 +126,8 @@ function RootLayout() {
 					    Top positions are no alternative — they intercepted the header buttons and the
 					    listing's first rows. */}
 					<Toaster />
-					{/* Asked from a copy's progress toast or its transfers row, so it lives beside the toasts. */}
-					<CopyCancelDialog />
+					{/* Asked from a drive job's progress toast or its transfers row, so it lives beside the toasts. */}
+					<DriveJobCancelDialog />
 					{/* Opened from an activity's result toast. */}
 					<ActivityDetailsDialog />
 				</TooltipProvider>

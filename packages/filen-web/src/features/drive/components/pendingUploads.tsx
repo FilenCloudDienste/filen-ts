@@ -2,20 +2,20 @@ import { useLayoutEffect, useState, type PointerEvent, type ReactNode, type Ref 
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { ArrowUpIcon, FilesIcon, XIcon } from "lucide-react"
-import { cn, formatBytesFixed } from "@filen/shared"
-import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
-import { transferProgress } from "@/features/transfers/components/transferRow.logic"
+import { cn, formatBytesFixed, isWaitingForArchiveSlot } from "@filen/shared"
+import { isDriveJobDirection, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
+import { activeStatusLabelKey, transferProgress } from "@/features/transfers/components/transferRow.logic"
 import { TransferIcon } from "@/features/transfers/components/transferIcon"
 import { useRunningDetails, useTransferRate, type RunningDetails } from "@/features/transfers/hooks/useTransferFigures"
 import {
 	parsePendingRowKey,
 	pendingCancelSubject,
-	pendingCopyIds,
-	pendingCopySpeed,
 	pendingFailedCount,
 	pendingGroupProgress,
 	pendingGroupSpeed,
+	pendingJobIds,
+	pendingJobSpeed,
 	pendingRunFigures,
 	pendingSummaryFigures,
 	pendingSummarySamples,
@@ -60,7 +60,7 @@ function stopListboxPress(event: PointerEvent): void {
 	event.stopPropagation()
 }
 
-// Uploads and copies running into the directory on screen, as the first rows of its listing
+// Uploads and drive jobs running into the directory on screen, as the first rows of its listing
 // (pendingUploads.logic.ts has the grouping). They scroll with the items, above the virtualized rows,
 // which start below them (the virtualizer's paddingStart); a progress tick re-renders only the row it
 // moved. List rows are ROW_HEIGHT tall and tiles a full tile row, so the block's height only changes when
@@ -87,9 +87,9 @@ export function PendingUploads({ parentUuid, viewMode, columns, blockRef }: Pend
 	function handleCancel(key: PendingRowKey): void {
 		const { kind, id } = parsePendingRowKey(key)
 
-		// A copy asks keep-or-trash through its own prompt, mounted once at the root.
-		if (kind === "copy") {
-			useCopyJobsStore.getState().setCancelPromptId(id)
+		// A drive job asks through its own prompt, mounted once at the root.
+		if (kind === "job") {
+			useDriveJobsStore.getState().setCancelPromptId(id)
 		} else {
 			setCancelKey(key)
 		}
@@ -156,7 +156,7 @@ function PendingRow(props: RowProps) {
 	switch (parsePendingRowKey(props.rowKey).kind) {
 		case "upload":
 		case "failedUpload":
-		case "copy":
+		case "job":
 			return <PendingTransferRow {...props} />
 		case "directory":
 		case "failedDirectory":
@@ -183,10 +183,10 @@ function failedLine(text: string): RunningDetails {
 function usePendingSummary(parentUuid: string | null): { figures: PendingGroupFigures; details: RunningDetails; percent: number } {
 	const figures = useTransfersStore(useShallow(state => pendingSummaryFigures(state, parentUuid)))
 	const samples = useTransfersStore(useShallow(state => pendingSummarySamples(state, parentUuid)))
-	const copyIds = useTransfersStore(useShallow(state => pendingCopyIds(state, parentUuid)))
-	const copySpeed = useCopyJobsStore(state => pendingCopySpeed(state.jobs, copyIds))
+	const jobIds = useTransfersStore(useShallow(state => pendingJobIds(state, parentUuid)))
+	const jobSpeed = useDriveJobsStore(state => pendingJobSpeed(state.jobs, jobIds))
 	const runningDetails = useRunningDetails()
-	const speed = pendingGroupSpeed(samples) + copySpeed
+	const speed = pendingGroupSpeed(samples) + jobSpeed
 	const { percent, etaSeconds } = pendingGroupProgress(figures, speed)
 
 	return {
@@ -196,14 +196,14 @@ function usePendingSummary(parentUuid: string | null): { figures: PendingGroupFi
 	}
 }
 
-// Uploads only name their files; with copies in, the count is of transfers.
+// Uploads only name their files; with drive jobs in, the count is of transfers.
 function useSummaryLabel(): (figures: PendingGroupFigures) => string {
 	const { t } = useTranslation("drive")
 
 	return figures =>
-		figures.copies === 0
+		figures.jobs === 0
 			? t("drivePendingUploadsUploading", { count: figures.files })
-			: t("drivePendingTransfersRunning", { count: figures.files + figures.copies })
+			: t("drivePendingTransfersRunning", { count: figures.files + figures.jobs })
 }
 
 function RowButton({ label, onClick }: { label: string; onClick: () => void }) {
@@ -218,7 +218,7 @@ function RowButton({ label, onClick }: { label: string; onClick: () => void }) {
 	)
 }
 
-// One upload or copy. A copy's figures and glyph come off its job, as on the transfers screen.
+// One upload or drive job. A job's figures and glyph come off its job, as on the transfers screen.
 function PendingTransferRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps) {
 	const { t } = useTranslation(["transfers", "drive"])
 	const { kind, id } = parsePendingRowKey(rowKey)
@@ -264,6 +264,11 @@ function PendingTransferCell({
 }) {
 	const { t } = useTranslation("transfers")
 	const rate = useTransferRate(transfer)
+	const waiting = useDriveJobsStore(state => {
+		const job = isDriveJobDirection(transfer.direction) ? state.jobs[transfer.id] : undefined
+
+		return job !== undefined && isWaitingForArchiveSlot(job)
+	})
 	const runningDetails = useRunningDetails()
 	const failedDetails = useFailedDetails()
 	const progress = transferProgress(transfer)
@@ -280,9 +285,10 @@ function PendingTransferCell({
 			medium: paused,
 			short: paused
 		}
-	} else if (transfer.size === 0) {
-		// Nothing to measure yet (a copy still scanning what it copies): say what it is doing.
-		const status = t(transfer.direction === "copy" ? "transfersStatusCopying" : "transfersStatusUploading")
+	} else if (transfer.size === 0 || waiting) {
+		// Nothing to measure yet (a job still scanning, or queued for the page's one archive slot): say what
+		// it is doing.
+		const status = t(activeStatusLabelKey(transfer.direction, false, waiting))
 
 		details = { full: status, percent: status, medium: status, short: status }
 	} else {
@@ -527,7 +533,7 @@ export function PendingUploadsBar({ parentUuid, onShow }: { parentUuid: string |
 	const { figures, details, percent } = usePendingSummary(parentUuid)
 	const failedCount = useTransfersStore(state => pendingFailedCount(state, parentUuid))
 	const summaryLabel = useSummaryLabel()
-	const running = figures.files + figures.copies > 0
+	const running = figures.files + figures.jobs > 0
 
 	return (
 		<button
@@ -576,9 +582,9 @@ function PendingCancelDialog({
 	} else if (subject !== null) {
 		title = t("drive:drivePendingUploadsCancelAllTitle")
 		body =
-			subject.copies === 0
+			subject.jobs === 0
 				? t("drive:drivePendingUploadsCancelAllBody", { count: subject.files })
-				: t("drive:drivePendingTransfersCancelAllBody", { count: subject.files + subject.copies })
+				: t("drive:drivePendingTransfersCancelAllBody", { count: subject.files + subject.jobs })
 	}
 
 	return (

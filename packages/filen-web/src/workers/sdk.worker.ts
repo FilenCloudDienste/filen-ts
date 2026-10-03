@@ -4,12 +4,27 @@ import init, {
 	initThreadPool,
 	UnauthClient,
 	PauseSignal,
+	archiveDefaultName,
+	archiveEncoderMemory,
+	archiveExtension,
+	archiveFormatLevels,
+	archiveFormatOfName,
+	archiveMaxLevel,
 	type Client,
 	type AnyFile,
 	type AnyItemWithContext,
+	type ArchiveEntry,
+	type ArchiveEntryId,
+	type ArchiveFormat,
+	type ArchiveLevels,
+	type CompressFormat,
 	type CopyEntry,
-	type CopyReport,
 	type CopiedTopLevelItem,
+	type ExtractArchiveEntriesParams,
+	type ExtractedTopLevelItem,
+	type ExtractRoot,
+	type ListUpdate,
+	type SourceDisposal,
 	type StringifiedClient,
 	type UserInfo,
 	type RegisterParams,
@@ -66,7 +81,18 @@ import init, {
 } from "@filen/sdk-rs"
 import { InFlight, run, runEffect, runTimeout } from "@filen/shared"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
-import { copyReportToDTO, copyUpdateToDTO, type CopyReportDTO, type CopyUpdateDTO } from "@/lib/sdk/jobErrors"
+import {
+	compressReportToDTO,
+	copyReportToDTO,
+	copyUpdateToDTO,
+	extractReportToDTO,
+	listReportToDTO,
+	type CompressReportDTO,
+	type CopyReportDTO,
+	type CopyUpdateDTO,
+	type ExtractReportDTO,
+	type ListReportDTO
+} from "@/lib/sdk/jobErrors"
 import { log } from "@/lib/log"
 import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 import {
@@ -101,6 +127,21 @@ import {
 	type AudioMetadataResult
 } from "@/workers/audioMetadata"
 import { createMemorySink, toRawPreviewResult, type RawPreviewResult } from "@/features/preview/lib/rawPreview.logic"
+import {
+	archivePassword,
+	COMPRESS_EVENT_CAPS,
+	createEventCapper,
+	EXTRACT_EVENT_CAPS,
+	runOrderedJob,
+	slimCompressUpdate,
+	slimExtractUpdate,
+	type CompressJobUpdate,
+	type ExtractJobUpdate,
+	type JobControls
+} from "@/workers/driveJobRunner"
+
+export type { CompressJobUpdate, ExtractJobUpdate } from "@/workers/driveJobRunner"
+export type { SlimExtractEvent } from "@/lib/sdk/jobErrors"
 
 // NEITHER a fixed `/` nor `/assets/`: the wasm holds a RELATIVE `./filen-sdk-worker-thread.js`
 // (verified via `strings` over sdk-rs_bg.wasm) which it passes to `new Worker(...)`, so the
@@ -133,20 +174,13 @@ let clientConfig: JsClientConfig = {}
 // supersession, and configure-once guard (searchEngine.ts).
 const searchEngine = createSearchEngine()
 
-// Every transfer's stop and pause, keyed by its id. Upload, download and copy ids are all random uuids,
-// so one map serves every direction. Aborting rejects the SDK call with kind "Cancelled", which the
-// caller maps to a drop; pausing never rejects, resume just continues the same future. The pause is a
-// wasm-heap object and MUST be freed or it leaks wasm memory.
-interface TransferControls {
-	abort: AbortController
-	pause: PauseSignal
-}
+// Every transfer's stop and pause, keyed by its id. Upload, download and drive job ids are all random
+// uuids, so one map serves every direction.
+const transferControls = new Map<string, JobControls>()
 
-const transferControls = new Map<string, TransferControls>()
-
-// A copy job's controls span the job, not one call: a retry after a storage refusal is the same job, so
-// a stop or pause made between its calls still holds. releaseCopy frees them once the job is over.
-function copyControls(jobId: string): TransferControls {
+// A drive job's controls span the job, not one call: a retry after a storage refusal is the same job,
+// so a stop or pause made between its calls still holds. releaseJob frees them once the job is over.
+function jobControls(jobId: string): JobControls {
 	let controls = transferControls.get(jobId)
 
 	if (controls === undefined) {
@@ -176,7 +210,7 @@ function freeSocketListener(): void {
 // One upload/download call's controls: registered before fn's first await, so a stop or pause sent
 // meanwhile finds them, then evicted and freed on any exit.
 async function withTransferControls<T>(transferId: string, fn: (managedFuture: ManagedFuture) => Promise<T>): Promise<T> {
-	const controls: TransferControls = { abort: new AbortController(), pause: new PauseSignal() }
+	const controls: JobControls = { abort: new AbortController(), pause: new PauseSignal() }
 	transferControls.set(transferId, controls)
 
 	try {
@@ -212,53 +246,115 @@ function throttledProgress<Args extends unknown[]>(
 	}
 }
 
-// A copy's callbacks as one stream to the caller, in the order the SDK makes them. They travel on the
-// callback's own port and the result on the worker's, and two ports keep no order between them, so a
-// call returns only once the caller has taken every event it sent.
+// A copy's callbacks as one stream to the caller (runOrderedJob).
 export type CopyJobEvent = { type: "update"; update: CopyUpdateDTO } | { type: "created"; item: CopiedTopLevelItem }
 
-type CopyJobCall = (
-	callbacks: Pick<Parameters<Client["copyItems"]>[0], "onUpdate" | "onTopLevelCreated" | "managedFuture">
-) => Promise<CopyReport>
-
-// Plain worker-side callbacks around the caller's proxy: the wasm layer rejects the proxy object itself.
 // Nothing cleans up after a copy the tab closed on, so the planned items are not asked for. Updates and
 // the report carry live SDK errors, lifted to DTOs here before they cross.
-async function runCopyJob(
-	controls: TransferControls,
-	onEvent: (event: CopyJobEvent) => void | Promise<void>,
-	call: CopyJobCall
-): Promise<CopyReportDTO> {
-	// The reply to the last event means the caller ran every earlier one, which came before it on the
-	// same port. Waiting on each instead would cost a round trip per update.
-	let delivered: Promise<void> = Promise.resolve()
+function copyCallbacks(deliver: (event: CopyJobEvent) => void): Pick<Parameters<Client["copyItems"]>[0], "onUpdate" | "onTopLevelCreated"> {
+	return {
+		onUpdate: update => {
+			deliver({ type: "update", update: copyUpdateToDTO(update) })
+		},
+		onTopLevelCreated: item => {
+			// Resolvable as a parent right away, like a directory createDirectory made.
+			if (item.item.type === "dir") {
+				cacheDirs([item.item])
+			}
 
-	const deliver = (event: CopyJobEvent): void => {
-		// A caller that failed to take an event must not fail the copy.
-		delivered = Promise.resolve(onEvent(event)).catch((e: unknown) => {
-			log.warn("sdk.worker", "copy event delivery failed", e)
-		})
+			deliver({ type: "created", item })
+		}
 	}
+}
 
-	try {
-		const report = await call({
-			onUpdate: update => {
-				deliver({ type: "update", update: copyUpdateToDTO(update) })
-			},
-			onTopLevelCreated: item => {
-				// Resolvable as a parent right away, like a directory createDirectory made.
-				if (item.item.type === "dir") {
-					cacheDirs([item.item])
+// Where a job's result goes: an owned directory by uuid (`null` the root), or one the caller holds, as a
+// failed extract's retry does.
+export type JobDestinationRef = { uuid: string | null } | { dir: AnyNormalDir }
+
+export interface CompressJobParams {
+	items: AnyItemWithContext[]
+	destinationUuid: string | null
+	// Ends in the format's extension (archiveFormatInfo).
+	name: string
+	format: CompressFormat
+	maxBytes: number | undefined
+	dispose: SourceDisposal | undefined
+}
+
+export type CompressJobEvent = { type: "update"; update: CompressJobUpdate } | { type: "archiveCreated"; archive: File }
+
+export interface ExtractJobParams {
+	archive: AnyFile
+	destinationUuid: string | null
+	root: ExtractRoot
+	maxBytes: number | undefined
+	skipMacMetadata: boolean | undefined
+	dispose: SourceDisposal | undefined
+}
+
+export interface ExtractEntriesJobParams {
+	archive: AnyFile
+	entries: ArchiveEntryId[]
+	base: string
+	destination: JobDestinationRef
+	root: ExtractRoot
+	maxBytes: number | undefined
+	skipMacMetadata: boolean | undefined
+}
+
+export type ExtractJobEvent = { type: "update"; update: ExtractJobUpdate } | { type: "topLevelBatch"; items: ExtractedTopLevelItem[] }
+
+export interface ListJobParams {
+	archive: AnyFile
+	skipMacMetadata: boolean | undefined
+	// The batches carried every entry already; the report repeats up to 10 000 of them.
+	keepReportEntries: boolean
+}
+
+export type ListJobEvent = { type: "update"; update: ListUpdate } | { type: "entries"; entries: ArchiveEntry[] }
+
+export interface ArchiveFormatInfo {
+	extension: string
+	levels: ArchiveLevels | null
+	// The highest level the client's codec memory budget runs; null when none does or the format has none.
+	maxLevel: number | null
+	// null for a level the format does not take.
+	encoderMemory: number | null
+}
+
+export interface ArchiveNameInfo {
+	format: ArchiveFormat | null
+	defaultName: string
+}
+
+// What both extract calls share, the update and top-level callbacks bound per SDK call (the event caps
+// count per call, as the SDK's report does).
+function extractJobOptions(
+	maxBytes: number | undefined,
+	skipMacMetadata: boolean | undefined,
+	deliver: (event: ExtractJobEvent) => void
+): Pick<ExtractArchiveEntriesParams, "maxBytes" | "skipMacMetadata" | "onUpdate" | "onTopLevelBatch"> {
+	const capper = createEventCapper(EXTRACT_EVENT_CAPS)
+
+	return {
+		...(maxBytes !== undefined ? { maxBytes } : {}),
+		...(skipMacMetadata !== undefined ? { skipMacMetadata } : {}),
+		onUpdate: update => {
+			deliver({ type: "update", update: slimExtractUpdate(update, capper) })
+		},
+		onTopLevelBatch: items => {
+			// Resolvable as parents right away, like a directory createDirectory made.
+			const dirs: Dir[] = []
+
+			for (const { item } of items) {
+				if (item.type === "dir") {
+					dirs.push(item)
 				}
+			}
 
-				deliver({ type: "created", item })
-			},
-			managedFuture: { abortSignal: controls.abort.signal, pauseSignal: controls.pause }
-		})
-
-		return copyReportToDTO(report)
-	} finally {
-		await delivered
+			cacheDirs(dirs)
+			deliver({ type: "topLevelBatch", items })
+		}
 	}
 }
 
@@ -1009,8 +1105,8 @@ const api = {
 		})
 	},
 	// ── Transfer control ─────────────────────────────────────────────────────
-	// By upload/download transfer id or copy job id; each is a no-op once that transfer has settled or
-	// the copy is released. Pause stops bytes/progress without erroring the call.
+	// By upload/download transfer id or drive job id; each is a no-op once that transfer has settled or
+	// the job is released. Pause stops bytes/progress without erroring the call.
 	cancelTransfer(id: string): void {
 		transferControls.get(id)?.abort.abort()
 	},
@@ -1034,11 +1130,23 @@ const api = {
 		const c = requireClient()
 		// Before the destination lookup, which can go to the network: a stop or pause sent meanwhile finds
 		// the job.
-		const controls = copyControls(jobId)
+		const controls = jobControls(jobId)
 		const destination = await resolveNormalDirParent(c, destinationUuid)
 
-		return runCopyJob(controls, onEvent, callbacks =>
-			c.copyItems({ items, destination, ...(maxBytes !== undefined ? { maxBytes } : {}), ...callbacks })
+		return runOrderedJob(
+			controls,
+			onEvent,
+			async (deliver, managedFuture) =>
+				copyReportToDTO(
+					await c.copyItems({
+						items,
+						destination,
+						...(maxBytes !== undefined ? { maxBytes } : {}),
+						...copyCallbacks(deliver),
+						managedFuture
+					})
+				),
+			"copy"
 		)
 	},
 	// Retrying a report's failures: each entry already carries its own destination directory.
@@ -1050,18 +1158,202 @@ const api = {
 	): Promise<CopyReportDTO> {
 		const c = requireClient()
 
-		return runCopyJob(copyControls(jobId), onEvent, callbacks =>
-			c.copyItemsTo({ entries, ...(maxBytes !== undefined ? { maxBytes } : {}), ...callbacks })
+		return runOrderedJob(
+			jobControls(jobId),
+			onEvent,
+			async (deliver, managedFuture) =>
+				copyReportToDTO(
+					await c.copyItemsTo({
+						entries,
+						...(maxBytes !== undefined ? { maxBytes } : {}),
+						...copyCallbacks(deliver),
+						managedFuture
+					})
+				),
+			"copy"
+		)
+	},
+	// ── Archives ─────────────────────────────────────────────────────────────
+	// Like a copy, each job resolves with its report however it ended. The password is always the second
+	// argument, never "" (archivePassword). One archive job runs per page; later ones wait in the phase
+	// "waitingForWorker", holding their controls.
+	async compressItems(
+		jobId: string,
+		params: CompressJobParams,
+		password: string | undefined,
+		onEvent: (event: CompressJobEvent) => void | Promise<void>
+	): Promise<CompressReportDTO> {
+		const c = requireClient()
+		// Before the destination lookup, as for a copy.
+		const controls = jobControls(jobId)
+		const destination = await resolveNormalDirParent(c, params.destinationUuid)
+
+		return runOrderedJob(
+			controls,
+			onEvent,
+			async (deliver, managedFuture) => {
+				const capper = createEventCapper(COMPRESS_EVENT_CAPS)
+				const report = await c.compressItems(
+					{
+						items: params.items,
+						destination,
+						name: params.name,
+						format: params.format,
+						...(params.maxBytes !== undefined ? { maxBytes: params.maxBytes } : {}),
+						...(params.dispose !== undefined ? { dispose: params.dispose } : {}),
+						onUpdate: update => {
+							deliver({ type: "update", update: slimCompressUpdate(update, capper) })
+						},
+						onArchiveCreated: archive => {
+							deliver({ type: "archiveCreated", archive })
+						},
+						managedFuture
+					},
+					archivePassword(password)
+				)
+
+				return compressReportToDTO(report)
+			},
+			"compress"
+		)
+	},
+	async extractArchive(
+		jobId: string,
+		params: ExtractJobParams,
+		password: string | undefined,
+		onEvent: (event: ExtractJobEvent) => void | Promise<void>
+	): Promise<ExtractReportDTO> {
+		const c = requireClient()
+		const controls = jobControls(jobId)
+		const destination = await resolveNormalDirParent(c, params.destinationUuid)
+
+		return runOrderedJob(
+			controls,
+			onEvent,
+			async (deliver, managedFuture) =>
+				extractReportToDTO(
+					await c.extractArchive(
+						{
+							archive: params.archive,
+							destination,
+							root: params.root,
+							...extractJobOptions(params.maxBytes, params.skipMacMetadata, deliver),
+							...(params.dispose !== undefined ? { dispose: params.dispose } : {}),
+							managedFuture
+						},
+						archivePassword(password)
+					)
+				),
+			"extract"
+		)
+	},
+	// Some entries (a listing's selection, or a failed extract's retry), each landing at its path less
+	// `base`. The archive is never removed afterwards.
+	async extractArchiveEntries(
+		jobId: string,
+		params: ExtractEntriesJobParams,
+		password: string | undefined,
+		onEvent: (event: ExtractJobEvent) => void | Promise<void>
+	): Promise<ExtractReportDTO> {
+		const c = requireClient()
+		const controls = jobControls(jobId)
+		const destination = "dir" in params.destination ? params.destination.dir : await resolveNormalDirParent(c, params.destination.uuid)
+
+		return runOrderedJob(
+			controls,
+			onEvent,
+			async (deliver, managedFuture) =>
+				extractReportToDTO(
+					await c.extractArchiveEntries(
+						{
+							archive: params.archive,
+							entries: params.entries,
+							base: params.base,
+							destination,
+							root: params.root,
+							...extractJobOptions(params.maxBytes, params.skipMacMetadata, deliver),
+							managedFuture
+						},
+						archivePassword(password)
+					)
+				),
+			"extract"
+		)
+	},
+	// A zip's or 7z's index read, a tar's or single compressed file's whole download. It takes the page's
+	// archive slot as an extract does, and its id works with cancel, pause and releaseJob.
+	listArchive(
+		jobId: string,
+		params: ListJobParams,
+		password: string | undefined,
+		onEvent: (event: ListJobEvent) => void | Promise<void>
+	): Promise<ListReportDTO> {
+		const c = requireClient()
+
+		return runOrderedJob(
+			jobControls(jobId),
+			onEvent,
+			async (deliver, managedFuture) => {
+				const report = listReportToDTO(
+					await c.listArchive(
+						{
+							archive: params.archive,
+							...(params.skipMacMetadata !== undefined ? { skipMacMetadata: params.skipMacMetadata } : {}),
+							onUpdate: update => {
+								deliver({ type: "update", update })
+							},
+							// Only posts: past a 16 MiB backlog of entries this has not returned from, the SDK drops
+							// the rest.
+							onEntriesBatch: entries => {
+								deliver({ type: "entries", entries })
+							},
+							managedFuture
+						},
+						archivePassword(password)
+					)
+				)
+
+				return params.keepReportEntries ? report : { ...report, entries: [] }
+			},
+			"list"
 		)
 	},
 	// The caller's job is over: none of its calls runs again.
-	releaseCopy(jobId: string): void {
+	releaseJob(jobId: string): void {
 		const controls = transferControls.get(jobId)
 
 		if (controls !== undefined) {
 			transferControls.delete(jobId)
 			controls.pause.free()
 		}
+	},
+	// Fixed at the client's construction (JsClientConfig.archiveCodecMemBudget).
+	archiveCodecMemBudget(): number {
+		return Number(requireClient().archiveCodecMemBudget())
+	},
+	// One pass over the SDK's synchronous helpers for every format a dialog shows.
+	archiveFormatInfo(formats: CompressFormat[]): ArchiveFormatInfo[] {
+		const budget = requireClient().archiveCodecMemBudget()
+
+		return formats.map(format => {
+			let encoderMemory: number | null
+
+			try {
+				encoderMemory = Number(archiveEncoderMemory(format))
+			} catch {
+				encoderMemory = null
+			}
+
+			return {
+				extension: archiveExtension(format),
+				levels: archiveFormatLevels(format) ?? null,
+				maxLevel: archiveMaxLevel(format, budget) ?? null,
+				encoderMemory
+			}
+		})
+	},
+	archiveNameInfo(names: string[]): ArchiveNameInfo[] {
+		return names.map(name => ({ format: archiveFormatOfName(name) ?? null, defaultName: archiveDefaultName(name) }))
 	},
 	// ── Preview ──────────────────────────────────────────────────────────────
 	// Whole-buffer fetch for the preview overlay (image/pdf/docx/text/code/markdown — never the

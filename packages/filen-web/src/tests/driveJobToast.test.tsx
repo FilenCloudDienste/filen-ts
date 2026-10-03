@@ -5,35 +5,47 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { CopyFailureDTO, CopyReportDTO } from "@/lib/sdk/jobErrors"
 import "@/lib/i18n"
 
-const { pauseTransfer, resumeTransfer, copyItemsTo } = vi.hoisted(() => ({
+const { pauseTransfer, resumeTransfer, copyItemsTo, rerunCompress, retryFailedExtract } = vi.hoisted(() => ({
 	pauseTransfer: vi.fn(),
 	resumeTransfer: vi.fn(),
-	copyItemsTo: vi.fn<() => Promise<CopyReportDTO>>()
+	copyItemsTo: vi.fn<() => Promise<CopyReportDTO>>(),
+	rerunCompress: vi.fn<(jobId: string) => string | null>(),
+	retryFailedExtract: vi.fn<(jobId: string) => string | null>()
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { pauseTransfer, resumeTransfer, copyItemsTo } }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() } }))
+vi.mock("@/features/drive/lib/archiveJobs", () => ({ rerunCompress, retryFailedExtract }))
 
-import { CopyJobToast } from "@/features/transfers/components/copyJobToast"
+import { DriveJobToast } from "@/features/transfers/components/driveJobToast"
 import { createCopyJob, type CopyJob } from "@/features/drive/lib/copy.logic"
 import { narrowItem } from "@/features/drive/lib/item"
-import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
+import type { DriveJob } from "@/features/drive/lib/driveJobs.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { testUuid } from "@/tests/support/uuid"
 import { sdkErrorDTO } from "@/tests/support/sdkError"
+import { ARCHIVE_ITEM, compressJob, extractFailure, extractJob } from "@/tests/support/archiveJobFixtures"
 
 function seed(overrides: Partial<CopyJob> = {}): void {
-	const job: CopyJob = { ...createCopyJob("job", { uuid: null, name: "Photos" }, 3), cardVisible: true, ...overrides }
+	seedJob({ ...createCopyJob("job", { uuid: null, name: "Photos" }, 3), cardVisible: true, ...overrides })
+}
 
-	useCopyJobsStore.setState({ jobs: { job }, cancelPromptId: null })
+function seedJob(job: DriveJob, others: DriveJob[] = []): void {
+	useDriveJobsStore.setState({
+		jobs: Object.fromEntries([job, ...others].map(entry => [entry.id, entry])),
+		cancelPromptId: null,
+		passwordPromptId: null,
+		reportJobId: null
+	})
 	useTransfersStore.setState({
 		transfers: [
 			{
-				id: "job",
-				direction: "copy",
+				id: job.id,
+				direction: job.kind,
 				name: "3 items",
-				size: job.totals.bytes,
-				bytesTransferred: job.counts.bytesDone,
+				size: 0,
+				bytesTransferred: 0,
 				status: job.outcome.status === "running" ? "copying" : "done",
 				paused: false,
 				parentUuid: null,
@@ -88,33 +100,36 @@ function renderCard() {
 	const onDismiss = vi.fn()
 	const onHeightChange = vi.fn()
 	const onRetried = vi.fn<(retryJobId: string) => void>()
+	const onShowDirectory = vi.fn()
 
 	render(
-		<CopyJobToast
+		<DriveJobToast
 			jobId="job"
 			onDismiss={onDismiss}
 			onHeightChange={onHeightChange}
 			onRetried={onRetried}
+			onShowDirectory={onShowDirectory}
 		/>
 	)
 
-	return { onDismiss, onHeightChange, onRetried }
+	return { onDismiss, onHeightChange, onRetried, onShowDirectory }
 }
 
 afterEach(() => {
 	cleanup()
 })
 
-describe("CopyJobToast", () => {
+describe("DriveJobToast for a copy", () => {
 	it("renders nothing for a job that is gone", () => {
-		useCopyJobsStore.setState({ jobs: {}, cancelPromptId: null })
+		useDriveJobsStore.setState({ jobs: {}, cancelPromptId: null })
 
 		const { container } = render(
-			<CopyJobToast
+			<DriveJobToast
 				jobId="job"
 				onDismiss={vi.fn()}
 				onHeightChange={vi.fn()}
 				onRetried={vi.fn()}
+				onShowDirectory={vi.fn()}
 			/>
 		)
 
@@ -162,7 +177,7 @@ describe("CopyJobToast", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
-		expect(useCopyJobsStore.getState().cancelPromptId).toBe("job")
+		expect(useDriveJobsStore.getState().cancelPromptId).toBe("job")
 	})
 
 	it("expands details with the files in flight", () => {
@@ -337,7 +352,7 @@ describe("CopyJobToast", () => {
 		expect(screen.queryByRole("button", { name: "Retry failed" })).toBeNull()
 
 		act(() => {
-			useCopyJobsStore.getState().update("job", job => ({ ...job, created: [], trashResult: { moved: 1, failed: 0 } }))
+			useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, created: [], trashResult: { moved: 1, failed: 0 } }))
 		})
 
 		expect(screen.getByRole("button", { name: "Retry failed" })).toBeTruthy()
@@ -378,5 +393,142 @@ describe("CopyJobToast", () => {
 
 		expect(screen.getByText("Network error. Please check your connection and try again.")).toBeTruthy()
 		expect(screen.getByText("3 copied items were moved to the trash.")).toBeTruthy()
+	})
+})
+
+describe("DriveJobToast for an archive job", () => {
+	const error = sdkErrorDTO("Server", "Error of kind Server: error: API Error", { serverMessage: "Upload rejected" })
+
+	it("shows a running compress with its own labels", () => {
+		seedJob(
+			compressJob({
+				phase: "compressing",
+				totals: { dirs: 0, files: 40, bytes: 4_000_000 },
+				counts: { ...compressJob().counts, filesDone: 12, bytesRead: 1_000_000 }
+			})
+		)
+		renderCard()
+
+		expect(screen.getByText("Compressing 3 items into photos.zip")).toBeTruthy()
+		expect(screen.getByText("12 of 40 files")).toBeTruthy()
+		expect(screen.getByText("25%")).toBeTruthy()
+		expect(screen.getByText("Closing this tab stops compressing.")).toBeTruthy()
+		expect(screen.getByRole("progressbar", { name: "Compress progress" })).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Hide compress progress" })).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+		expect(useDriveJobsStore.getState().cancelPromptId).toBe("job")
+	})
+
+	it("warns that a paused job holds the slot another job waits for", () => {
+		seedJob(compressJob({ phase: "compressing", paused: true }), [extractJob({}, "queued")])
+		renderCard()
+
+		expect(
+			screen.getByText("This paused job holds the only archive slot. Other archive jobs wait until it resumes or stops.")
+		).toBeTruthy()
+	})
+
+	it("doesn't warn about the slot while nothing waits for it", () => {
+		seedJob(compressJob({ phase: "compressing", paused: true }))
+		renderCard()
+
+		expect(screen.queryByText(/holds the only archive slot/)).toBeNull()
+	})
+
+	it("asks for a password through the prompt", () => {
+		seedJob(extractJob({ outcome: { status: "wrongPassword" } }))
+		renderCard()
+
+		expect(screen.getByText("The password is wrong.").className).toContain("text-destructive")
+
+		fireEvent.click(screen.getByRole("button", { name: "Enter password" }))
+
+		expect(useDriveJobsStore.getState().passwordPromptId).toBe("job")
+	})
+
+	it("sums up a finished extract, warns about misleading names and opens its report and directory", () => {
+		const directory = narrowItem({
+			uuid: testUuid("photos"),
+			parent: testUuid("root"),
+			color: "default",
+			timestamp: 0n,
+			favorited: false,
+			meta: { type: "decoded", data: { name: "photos" } }
+		})
+
+		seedJob(
+			extractJob({
+				outcome: { status: "doneWithIssues" },
+				counts: { ...extractJob().counts, filesDone: 7 },
+				failures: { items: [extractFailure("dir/a.txt", 1, error)], omitted: 0 },
+				misleadingNames: { items: [{ entry: { archive: "a", index: 2 }, path: "x" }], omitted: 1 },
+				firstCreated: directory
+			})
+		)
+		retryFailedExtract.mockReturnValue("retry")
+
+		const { onShowDirectory, onRetried } = renderCard()
+
+		expect(screen.getByText("Extract photos.zip → Photos")).toBeTruthy()
+		expect(screen.getByText("1 item couldn't be extracted")).toBeTruthy()
+		expect(screen.getByText("7 extracted · 0 skipped · 1 failed")).toBeTruthy()
+		expect(
+			screen.getByText(
+				"2 extracted names hold hidden characters that can make them look like something else. Check them before opening."
+			)
+		).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "View report" }))
+
+		expect(useDriveJobsStore.getState().reportJobId).toBe("job")
+
+		fireEvent.click(screen.getByRole("button", { name: "Show in directory" }))
+
+		expect(onShowDirectory).toHaveBeenCalledExactlyOnceWith(directory)
+
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+
+		expect(screen.getByText("Couldn't extract")).toBeTruthy()
+		expect(screen.getByText("dir/a.txt")).toBeTruthy()
+		// Beside the other result actions, once.
+		expect(screen.getAllByRole("button", { name: "Retry failed" })).toHaveLength(1)
+
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+		fireEvent.click(screen.getByRole("button", { name: "Retry failed" }))
+
+		expect(retryFailedExtract).toHaveBeenCalledWith("job")
+		expect(onRetried).toHaveBeenCalledExactlyOnceWith("retry")
+	})
+
+	it("reruns a compress that didn't fit, even with an unknown needed size", () => {
+		seedJob(compressJob({ outcome: { status: "quotaExceeded", neededBytes: null, freeBytes: 0 } }))
+		rerunCompress.mockReturnValue("rerun")
+
+		const { onRetried } = renderCard()
+
+		expect(screen.getByText(/^There isn't enough free storage\. Only \S+ \S+ is free\.$/)).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+
+		expect(rerunCompress).toHaveBeenCalledWith("job")
+		expect(onRetried).toHaveBeenCalledExactlyOnceWith("rerun")
+	})
+
+	it("shows a saved archive and the notes of a stop that came after it", () => {
+		seedJob(compressJob({ outcome: { status: "done" }, cancelRequest: "keep", stoppedAfterArchive: true, archive: ARCHIVE_ITEM }))
+
+		const { onShowDirectory } = renderCard()
+
+		expect(screen.getByText("Compressed 3 items into photos.zip")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Details" }))
+
+		expect(screen.getByText("The archive was already saved when the job stopped, so it was kept.")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Show in directory" }))
+
+		expect(onShowDirectory).toHaveBeenCalledExactlyOnceWith(ARCHIVE_ITEM)
 	})
 })

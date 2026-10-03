@@ -5,15 +5,21 @@ import { useNavigate } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ArrowDownUpIcon, BrushCleaningIcon, PauseIcon, PlayIcon, XIcon } from "lucide-react"
 import { formatBytesPerSecond } from "@filen/shared"
-import { isActiveTransfer, useTransfersAggregate, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
-import { useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
-import { pruneSettledCopyJobs } from "@/features/drive/lib/copy"
+import {
+	isActiveTransfer,
+	isDriveJobDirection,
+	useTransfersAggregate,
+	useTransfersStore,
+	type Transfer
+} from "@/features/transfers/store/useTransfersStore"
+import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
+import { pruneSettledDriveJobs } from "@/features/drive/lib/driveJobs"
 import {
 	buildTransfersDisplayList,
 	cancelAllLeavesBrowserPartial,
 	cancellableTransferIds,
 	leavesBrowserPartial,
-	endedCopyIds,
+	endedJobIds,
 	pausableTransferIds,
 	resumableTransferIds,
 	shouldShowTransfersAggregate
@@ -36,14 +42,14 @@ export function TransfersScreen() {
 	const { t, i18n } = useTranslation(["transfers", "common"])
 	const navigate = useNavigate()
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
-	// Changes when a copy's job ends, which takes its row out of the bulk actions.
-	const endedCopies = useCopyJobsStore(useShallow(state => endedCopyIds(state.jobs)))
+	// Changes when a drive job ends, which takes its row out of the bulk actions.
+	const endedJobs = useDriveJobsStore(useShallow(state => endedJobIds(state.jobs)))
 	const { active, finished } = buildTransfersDisplayList(transfers)
 	// Samples age out through the rail's own tick (iconRail.tsx's TransfersEntry), mounted beside this.
 	const { activeCount, percent, speed } = useTransfersAggregate()
-	const cancellable = cancellableTransferIds(transfers, endedCopies)
-	const pausable = pausableTransferIds(transfers, endedCopies)
-	const resumable = resumableTransferIds(transfers, endedCopies)
+	const cancellable = cancellableTransferIds(transfers, endedJobs)
+	const pausable = pausableTransferIds(transfers, endedJobs)
+	const resumable = resumableTransferIds(transfers, endedJobs)
 	const clearable = finished.length > 0
 	const showAggregate = shouldShowTransfersAggregate(activeCount)
 	// Cancel all fires immediately with no confirmation; gate it behind the shared AlertDialog
@@ -65,12 +71,12 @@ export function TransfersScreen() {
 	// stale target.
 	const cancelConfirmOpen = cancelTarget !== null && isActiveTransfer(cancelTarget.status)
 	const browserPartialHint = t("transfersBrowserKeptPartialHint")
-	const cancelAllLeavesPartial = cancelAllLeavesBrowserPartial(transfers, endedCopies)
+	const cancelAllLeavesPartial = cancelAllLeavesBrowserPartial(transfers, endedJobs)
 
-	// A copy asks what to do with what it already copied, in its own prompt.
+	// A drive job asks in its own prompt, which knows what each kind leaves behind.
 	function requestRowCancel(transfer: Transfer): void {
-		if (transfer.direction === "copy") {
-			useCopyJobsStore.getState().setCancelPromptId(transfer.id)
+		if (isDriveJobDirection(transfer.direction)) {
+			useDriveJobsStore.getState().setCancelPromptId(transfer.id)
 			return
 		}
 
@@ -142,7 +148,7 @@ export function TransfersScreen() {
 							// .getState() idiom — the exact store call, outside render (mirrors directoryListing.tsx's
 							// own convention for every store mutation triggered from an event handler).
 							useTransfersStore.getState().clearFinished()
-							pruneSettledCopyJobs()
+							pruneSettledDriveJobs()
 						}}
 					>
 						<BrushCleaningIcon aria-hidden="true" />

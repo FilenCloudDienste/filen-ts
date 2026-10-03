@@ -12,15 +12,15 @@ type SdkCopyItems = (
 	onEvent: (event: CopyJobEvent) => void
 ) => Promise<CopyReportDTO>
 
-const { copyItems, copyItemsTo, cancelTransfer, releaseCopy, getUserInfo } = vi.hoisted(() => ({
+const { copyItems, copyItemsTo, cancelTransfer, releaseJob, getUserInfo } = vi.hoisted(() => ({
 	copyItems: vi.fn<SdkCopyItems>(),
 	copyItemsTo: vi.fn<(id: string, entries: unknown, maxBytes: number | undefined, onEvent: unknown) => Promise<CopyReportDTO>>(),
 	cancelTransfer: vi.fn<(id: string) => void>(),
-	releaseCopy: vi.fn<(id: string) => void>(),
+	releaseJob: vi.fn<(id: string) => void>(),
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { copyItems, copyItemsTo, cancelTransfer, releaseCopy, getUserInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { copyItems, copyItemsTo, cancelTransfer, releaseJob, getUserInfo } }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -35,12 +35,13 @@ vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError, cu
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type BulkOutcome } from "@/lib/actions/bulk"
-import { pruneSettledCopyJobs, retryFailedCopy, runCopyJob, startCopy, type RunCopyDeps } from "@/features/drive/lib/copy"
-import { requestCopyCancel } from "@/features/transfers/lib/control"
+import { retryFailedCopy, runCopyJob, startCopy, type RunCopyDeps } from "@/features/drive/lib/copy"
+import { pruneSettledDriveJobs } from "@/features/drive/lib/driveJobs"
+import { requestJobCancel } from "@/features/transfers/lib/control"
 import { createCopyJob } from "@/features/drive/lib/copy.logic"
 import { copyJobStatus, copyJobTitle } from "@/features/transfers/components/copyJobToast.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
-import { getCopyJob, useCopyJobsStore } from "@/features/transfers/store/useCopyJobsStore"
+import { getCopyJob, jobsAccess, useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
@@ -168,7 +169,7 @@ function makeDeps() {
 		copyItemsTo: vi.fn<RunCopyDeps["copyItemsTo"]>(),
 		release: vi.fn<RunCopyDeps["release"]>(),
 		transfers: useTransfersStore.getState(),
-		jobs: { ...useCopyJobsStore.getState(), get: getCopyJob },
+		jobs: jobsAccess("copy"),
 		account: {
 			cached: vi.fn<RunCopyDeps["account"]["cached"]>(() => undefined),
 			fetchFresh: vi.fn<RunCopyDeps["account"]["fetchFresh"]>()
@@ -198,7 +199,7 @@ function row(id = "job") {
 
 beforeEach(() => {
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
-	useCopyJobsStore.setState({ jobs: {} })
+	useDriveJobsStore.setState({ jobs: {} })
 	queryClient.clear()
 	discardListingPatches()
 })
@@ -521,13 +522,13 @@ describe("runCopyJob quota", () => {
 	// the user no longer wants.
 	it("settles a copy stopped during the fresh read as cancelled, without running again", async () => {
 		for (const cancelRequest of ["keep", "trash"] as const) {
-			useCopyJobsStore.setState({ jobs: {} })
+			useDriveJobsStore.setState({ jobs: {} })
 
 			const deps = makeDeps()
 
 			deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 900n })
 			deps.account.fetchFresh.mockImplementation(() => {
-				useCopyJobsStore.getState().update("job", job => ({ ...job, cancelRequest }))
+				useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cancelRequest }))
 
 				return Promise.resolve({ maxStorage: 1_000n, storageUsed: 0n })
 			})
@@ -547,7 +548,7 @@ describe("runCopyJob quota", () => {
 
 		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 900n })
 		deps.copyItems.mockImplementation(id => {
-			requestCopyCancel(id, { trashCopied: false })
+			requestJobCancel(id, "keep")
 
 			return Promise.resolve(QUOTA_REPORT)
 		})
@@ -621,13 +622,13 @@ describe("cancel", () => {
 		const dir = mockDir("copied")
 
 		for (const trashCopied of [true, false]) {
-			useCopyJobsStore.setState({ jobs: {} })
+			useDriveJobsStore.setState({ jobs: {} })
 
 			const deps = makeDeps()
 
 			deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 				onEvent({ type: "created", item: created(dir) })
-				requestCopyCancel(id, { trashCopied })
+				requestJobCancel(id, trashCopied ? "trash" : "keep")
 
 				return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 			})
@@ -654,7 +655,7 @@ describe("cancel", () => {
 		let writes = 0
 
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
-			const unsubscribe = useCopyJobsStore.subscribe(() => {
+			const unsubscribe = useDriveJobsStore.subscribe(() => {
 				writes++
 			})
 
@@ -663,7 +664,7 @@ describe("cancel", () => {
 			}
 
 			unsubscribe()
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
@@ -682,7 +683,7 @@ describe("cancel", () => {
 		deps.trash.mockResolvedValue({ succeeded: [narrowItem(dir)], failed: [] })
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(dir) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
@@ -697,7 +698,7 @@ describe("cancel", () => {
 		const deps = makeDeps()
 
 		deps.copyItems.mockImplementation(id => {
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ error: sdkErrorDTO("Cancelled", "copy cancelled") }))
 		})
@@ -708,14 +709,14 @@ describe("cancel", () => {
 	})
 
 	it("ignores a cancel for an unknown or finished job", async () => {
-		requestCopyCancel("unknown", { trashCopied: true })
+		requestJobCancel("unknown", "trash")
 
 		const deps = makeDeps()
 
 		deps.copyItems.mockResolvedValue(report())
 
 		await runCopyJob(deps, request())
-		requestCopyCancel("job", { trashCopied: true })
+		requestJobCancel("job", "trash")
 
 		expect(cancelTransfer).not.toHaveBeenCalled()
 		expect(getCopyJob("job")?.cancelRequest).toBeNull()
@@ -728,8 +729,8 @@ describe("cancel", () => {
 
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(dir) })
-			requestCopyCancel(id, { trashCopied: true })
-			requestCopyCancel(id, { trashCopied: false })
+			requestJobCancel(id, "trash")
+			requestJobCancel(id, "keep")
 
 			return Promise.resolve(report({ error: CANCELLED }))
 		})
@@ -749,7 +750,7 @@ describe("cancel", () => {
 		deps.trash.mockReturnValue(trash.promise)
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(dir) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ error: CANCELLED }))
 		})
@@ -781,7 +782,7 @@ describe("cancel", () => {
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(moved) })
 			onEvent({ type: "created", item: created(stuck) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ topLevel: [created(moved), created(stuck)] }))
 		})
@@ -802,7 +803,7 @@ describe("cancel", () => {
 	it("drops a finished copy's row once its stop moved all its copies to the trash, as a stopped copy's", async () => {
 		for (const failures of [[], [copyFailure("failed")]]) {
 			useTransfersStore.setState({ transfers: [], speedSamples: [] })
-			useCopyJobsStore.setState({ jobs: {} })
+			useDriveJobsStore.setState({ jobs: {} })
 
 			const deps = makeDeps()
 			const dir = mockDir("copied")
@@ -810,7 +811,7 @@ describe("cancel", () => {
 			deps.trash.mockImplementation(items => Promise.resolve({ succeeded: items, failed: [] }))
 			deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 				onEvent({ type: "created", item: created(dir) })
-				requestCopyCancel(id, { trashCopied: true })
+				requestJobCancel(id, "trash")
 
 				return Promise.resolve(report({ topLevel: [created(dir)], failures }))
 			})
@@ -835,7 +836,7 @@ describe("cancel", () => {
 		const versioned = mockFile("versioned")
 
 		deps.copyItems.mockImplementation(id => {
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(
 				report({
@@ -861,7 +862,7 @@ describe("cancel", () => {
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(moved) })
 			onEvent({ type: "created", item: created(stuck) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ error: CANCELLED }))
 		})
@@ -872,13 +873,13 @@ describe("cancel", () => {
 		expect(job?.cardVisible).toBe(false)
 		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
 
-		pruneSettledCopyJobs()
+		pruneSettledDriveJobs()
 
 		expect(getCopyJob("job")).toBeDefined()
 
 		// Removing the row still takes the job with it.
 		useTransfersStore.getState().remove("job")
-		pruneSettledCopyJobs()
+		pruneSettledDriveJobs()
 
 		expect(getCopyJob("job")).toBeUndefined()
 	})
@@ -893,7 +894,7 @@ describe("cancel", () => {
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(dir) })
 			useTransfersStore.getState().setPaused(id, true)
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ error: CANCELLED }))
 		})
@@ -923,7 +924,7 @@ describe("events after the result", () => {
 
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(delivered) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(
 				report({
@@ -951,7 +952,7 @@ describe("events after the result", () => {
 		deps.trash.mockImplementation(items => Promise.resolve({ succeeded: items, failed: [] }))
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(early) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			deliverLate = () => {
 				onEvent({
@@ -1000,7 +1001,7 @@ describe("events after the result", () => {
 			.mockResolvedValueOnce({ succeeded: [], failed: [{ item: narrowItem(late), error: new Error("offline") }] })
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(early) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			deliverLate = () => {
 				onEvent({ type: "created", item: created(late) })
@@ -1046,7 +1047,7 @@ describe("events after the result", () => {
 
 		deps.trash.mockResolvedValue({ succeeded: [], failed: [{ item: narrowItem(late), error: new Error("offline") }] })
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			deliverLate = () => {
 				onEvent({ type: "created", item: created(late) })
@@ -1063,7 +1064,7 @@ describe("events after the result", () => {
 		expect(job?.outcome).toEqual({ status: "cancelled" })
 		expect(row()).toBeUndefined()
 
-		useCopyJobsStore.getState().remove("job")
+		useDriveJobsStore.getState().remove("job")
 		deliverLate()
 
 		await vi.waitFor(() => {
@@ -1171,7 +1172,7 @@ describe("startCopy and retryFailedCopy", () => {
 
 		deps.copyItems.mockResolvedValue(report({ failures: [copyFailure("failed")] }))
 		await runCopyJob(deps, request())
-		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: true }))
+		useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cardVisible: true }))
 		copyItemsTo.mockReturnValue(new Promise(() => undefined))
 
 		expect(retryFailedCopy("job")).not.toBeNull()
@@ -1180,8 +1181,8 @@ describe("startCopy and retryFailedCopy", () => {
 		expect(retryFailedCopy("job")).toBeNull()
 		expect(copyItemsTo).toHaveBeenCalledTimes(1)
 
-		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: false }))
-		pruneSettledCopyJobs()
+		useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cardVisible: false }))
+		pruneSettledDriveJobs()
 
 		expect(getCopyJob("job")).toBeUndefined()
 	})
@@ -1195,7 +1196,7 @@ describe("startCopy and retryFailedCopy", () => {
 		deps.trash.mockReturnValue(trash.promise)
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(stuck) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ failures: [copyFailure("failed")], error: CANCELLED }))
 		})
@@ -1206,14 +1207,14 @@ describe("startCopy and retryFailedCopy", () => {
 			expect(deps.trash).toHaveBeenCalledTimes(1)
 		})
 
-		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: true }))
+		useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cardVisible: true }))
 		copyItemsTo.mockReturnValue(new Promise(() => undefined))
 
 		const retried = retryFailedCopy("job")
 
 		// With the card gone, only the row keeps the job until the trash settles.
-		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: false }))
-		pruneSettledCopyJobs()
+		useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cardVisible: false }))
+		pruneSettledDriveJobs()
 
 		expect(row()?.status).toBe("copying")
 
@@ -1233,19 +1234,19 @@ describe("startCopy and retryFailedCopy", () => {
 		deps.trash.mockResolvedValue({ succeeded: [], failed: [{ item: narrowItem(stuck), error: new Error("offline") }] })
 		deps.copyItems.mockImplementation((id, _items, _dest, _max, onEvent) => {
 			onEvent({ type: "created", item: created(stuck) })
-			requestCopyCancel(id, { trashCopied: true })
+			requestJobCancel(id, "trash")
 
 			return Promise.resolve(report({ failures: [copyFailure("failed")], error: CANCELLED }))
 		})
 
 		await runCopyJob(deps, request())
-		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: true }))
+		useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cardVisible: true }))
 		copyItemsTo.mockReturnValue(new Promise(() => undefined))
 
 		expect(retryFailedCopy("job")).not.toBeNull()
 
-		useCopyJobsStore.getState().update("job", job => ({ ...job, cardVisible: false }))
-		pruneSettledCopyJobs()
+		useDriveJobsStore.getState().update("copy", "job", job => ({ ...job, cardVisible: false }))
+		pruneSettledDriveJobs()
 
 		expect(row()).toMatchObject({ status: "error", error: { label: "1 copied item couldn't be moved to the trash" } })
 		expect(getCopyJob("job")).toMatchObject({ retryable: [], trashResult: { moved: 0, failed: 1 } })
@@ -1254,11 +1255,11 @@ describe("startCopy and retryFailedCopy", () => {
 	})
 })
 
-describe("pruneSettledCopyJobs", () => {
+describe("pruneSettledDriveJobs", () => {
 	it("drops only settled jobs with neither a card nor a transfers row", () => {
 		const settled = { outcome: { status: "done" as const } }
 
-		useCopyJobsStore.setState({
+		useDriveJobsStore.setState({
 			jobs: {
 				running: createCopyJob("running", DESTINATION, 1),
 				carded: { ...createCopyJob("carded", DESTINATION, 1), ...settled, cardVisible: true },
@@ -1282,8 +1283,8 @@ describe("pruneSettledCopyJobs", () => {
 			]
 		})
 
-		pruneSettledCopyJobs()
+		pruneSettledDriveJobs()
 
-		expect(Object.keys(useCopyJobsStore.getState().jobs).sort()).toEqual(["carded", "rowed", "running"])
+		expect(Object.keys(useDriveJobsStore.getState().jobs).sort()).toEqual(["carded", "rowed", "running"])
 	})
 })

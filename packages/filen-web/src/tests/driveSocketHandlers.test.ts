@@ -30,6 +30,8 @@ import { insertIntoTrashListing } from "@/features/drive/lib/actions"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
+	applyItemDeleted,
+	applyItemTrashed,
 	flushDeferredRecents,
 	handleDriveAuthSuccess,
 	handleDriveEvent,
@@ -398,6 +400,23 @@ describe("drive socket handlers — favorites rejoin", () => {
 		expect(recentsQuery()?.state.isInvalidated).toBe(true)
 	})
 
+	it("an extract running, or waiting for its turn, defers Recents the same way", () => {
+		seedRecents([])
+		useTransfersStore.setState({ transfers: [{ ...copyRow("extracting"), id: "extract", direction: "extract" }] })
+
+		handleCreated({ type: "fileNew", file: mockFile() })
+
+		expect(getRecents()).toEqual([])
+
+		useTransfersStore.setState({ transfers: [{ ...copyRow("done"), id: "extract", direction: "extract" }] })
+		flushDeferredRecents()
+
+		expect(
+			testQueryClient.getQueryCache().find({ queryKey: driveListingQueryKey({ variant: "recents", uuid: null }) })?.state
+				.isInvalidated
+		).toBe(true)
+	})
+
 	it("flushing with nothing deferred reads nothing", () => {
 		seedRecents([])
 		flushDeferredRecents()
@@ -498,6 +517,32 @@ describe("drive socket handlers — removals + selection purge", () => {
 
 		handleDriveEvent(driveEvt({ type: "fileArchived", uuid: testUuid("file"), stableUUID: STABLE_FILE, newUUID: NEW_FILE }))
 
+		expect(getTrash()).toEqual([])
+	})
+
+	// The path an archive job's own "move originals to trash" takes for its sources, ahead of the echo.
+	it("applyItemTrashed moves an item into the trash listing, and its echo leaves it there once", () => {
+		const item = narrowItem(mockDir())
+		seedListing(PARENT_A, [item])
+		seedTrash([])
+		useDriveStore.setState({ selectedItems: [item] })
+
+		applyItemTrashed(testUuid("dir"), "directory")
+		handleDriveEvent(driveEvt({ type: "folderTrash", parent: PARENT_A, uuid: testUuid("dir") }))
+
+		expect(getListing(PARENT_A)).toEqual([])
+		expect(getTrash()?.map(i => i.data.uuid)).toEqual([testUuid("dir")])
+		expect(useDriveStore.getState().selectedItems).toEqual([])
+	})
+
+	it("applyItemDeleted strips the item from every listing, the trash included", () => {
+		const item = narrowItem(mockFile())
+		seedListing(PARENT_A, [item])
+		seedTrash([item])
+
+		applyItemDeleted(testUuid("file"))
+
+		expect(getListing(PARENT_A)).toEqual([])
 		expect(getTrash()).toEqual([])
 	})
 
