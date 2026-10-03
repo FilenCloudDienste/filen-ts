@@ -23,6 +23,26 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <title>Filen</title>
+    <!-- Paints the canvas colour before the stylesheet loads (theme.js sets the class first); values
+         mirror --canvas in src/index.css. -->
+    <meta name="color-scheme" content="light dark" />
+    <style>
+      html {
+        background: oklch(0.925 0 0);
+        color-scheme: light;
+      }
+      html.dark {
+        background: oklch(0.13 0 0);
+        color-scheme: dark;
+      }
+      @media (prefers-color-scheme: dark) {
+        html:not(.light) {
+          background: oklch(0.13 0 0);
+          color-scheme: dark;
+        }
+      }
+    </style>
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="root"></div>
