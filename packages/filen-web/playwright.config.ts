@@ -51,7 +51,27 @@ const CHATS_SPEC = /\/chats\.spec\.ts$/
 //     It keeps that OPFS machine-wide per origin whatever the profile, so webkit tests also run one at a
 //     time from a wiped origin (e2e/fixtures.ts), and its read lane gets a single worker. Isolation and
 //     SharedArrayBuffer work as in Safari.
-type Browser = "chromium" | "firefox" | "webkit"
+const ALL_BROWSERS = ["chromium", "firefox", "webkit"] as const
+
+type Browser = (typeof ALL_BROWSERS)[number]
+
+// E2E_BROWSER narrows the run to one browser's lanes (CI runs one job per browser, each on its own runner
+// and account); the setup and teardown projects stay, they are browser-agnostic. Unset runs all three.
+function selectedBrowsers(): readonly Browser[] {
+	const selected = process.env["E2E_BROWSER"]
+
+	if (selected === undefined || selected === "") {
+		return ALL_BROWSERS
+	}
+
+	const browser = ALL_BROWSERS.find(name => name === selected)
+
+	if (browser === undefined) {
+		throw new Error(`E2E_BROWSER must be one of ${ALL_BROWSERS.join(", ")}, got "${selected}"`)
+	}
+
+	return [browser]
+}
 
 const BROWSER_USE = {
 	chromium: { ...devices["Desktop Chrome"] },
@@ -240,14 +260,18 @@ export default defineConfig({
 	// Governs UI responsiveness only — a live write opts into LIVE_WRITE_TIMEOUT_MS at its own call
 	// site (helpers/listing.ts), so this budget never has to cover the network.
 	expect: { timeout: 10_000 },
-	// The session blob is secret-equivalent; a trace would capture it as an addInitScript / evaluate
-	// argument, so tracing stays off. Failure screenshots are an acceptable residual: the password
-	// input always renders masked (screenshots capture pixels, not DOM values), and auth-setup /
-	// auth.spec type only the dedicated e2e test account's email — never a customer's, never the
-	// session blob.
+	// Traces record every call's arguments and results, the console, and with DOM snapshots every request
+	// with its headers — the SDK's API key among them. So: no DOM snapshots (that is what records the
+	// network), and the session blob never crosses as an argument or a result (fixtures.ts serves it
+	// through a page binding, whose answer a trace does not keep). The one test that types the account
+	// password and reads the blob back, auth-setup, traces nothing at all. The rest keep actions, aria
+	// snapshots, console and sources, which is what a CI-only failure needs. Screenshots and video capture
+	// pixels, never DOM values: the password input always renders masked.
 	use: {
 		baseURL: BASE_URL,
-		trace: "off",
+		trace: process.env["CI"]
+			? { mode: "retain-on-failure", snapshots: { dom: false, aria: true, screen: false }, screenshots: false, sources: true }
+			: "off",
 		screenshot: "only-on-failure",
 		// Same reasoning as the screenshot above — pixels only, never DOM values or call arguments — and
 		// far and away the best triage tool for a failure that only reproduces on CI.
@@ -264,7 +288,8 @@ export default defineConfig({
 		actionTimeout: 15_000
 	},
 	projects: [
-		{ name: "auth-setup", testMatch: /auth\.setup\.ts/ },
+		// Types the account password and returns the session blob from an evaluate, so it never traces.
+		{ name: "auth-setup", testMatch: /auth\.setup\.ts/, use: { trace: "off" } },
 		// Self-cleaning sweep: removes every drive-root / trash / playlist item matching a retired e2e
 		// scratch-name prefix before any spec project starts (see setup/cleanup.setup.ts). Depends on
 		// auth-setup rather than duplicating its login, and every spec project below depends on THIS
@@ -297,7 +322,7 @@ export default defineConfig({
 		// whose confirm wait this caller widens to 120s for a root holding 13 subdirectories and 26 files)
 		// = 290s. It runs once per run, so the headroom costs a healthy run nothing.
 		{ name: "fixtures-teardown", testMatch: /fixtures\.teardown\.ts/, timeout: 420_000 },
-		...(["chromium", "firefox", "webkit"] as const).flatMap(lanes)
+		...selectedBrowsers().flatMap(lanes)
 	],
 	webServer: {
 		// Build with the e2e hooks, then serve dist with the full COI + hardened-CSP header set. Dev

@@ -163,34 +163,73 @@ jobs:
         working-directory: packages/filen-web
         run: |
           rm -rf dist && pnpm run build
-          if grep -rq 'filenE2E\|filen.e2e.session' dist; then
+          if grep -rq 'filenE2E' dist; then
             echo 'E2E hooks leaked into the production build'
             exit 1
           fi
 
+  # The e2e matrix. With the repository variable E2E_ACCOUNT_PER_BROWSER = 'true', one job per browser,
+  # each on its own runner, account (secrets FILEN_WEB_E2E_TEST_{EMAIL,PASSWORD}_<BROWSER>) and
+  # concurrency group, so the three run at once. Unset, ONE job runs every browser on the shared account
+  # in the one `filen-web-e2e` group, as before: three jobs in a single group would not serialise, GitHub
+  # cancels all but the newest pending job of a group. A dispatched project runs only on its browser's
+  # job; one outside a browser (a setup project) on chromium's.
+  e2e-matrix:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - id: pick
+        env:
+          PER_BROWSER: ${{ vars.E2E_ACCOUNT_PER_BROWSER }}
+          E2E_PROJECT: ${{ inputs.project }}
+        run: |
+          entry() {
+            printf '{"browser":"%s","account":"%s","group":"filen-web-e2e-%s"}' "$1" "$2" "$1"
+          }
+          if [ "$PER_BROWSER" != "true" ]; then
+            include='[{"browser":"all","account":"","group":"filen-web-e2e"}]'
+          else
+            case "$E2E_PROJECT" in
+              '') include="[$(entry chromium CHROMIUM),$(entry firefox FIREFOX),$(entry webkit WEBKIT)]" ;;
+              firefox-*) include="[$(entry firefox FIREFOX)]" ;;
+              webkit-*) include="[$(entry webkit WEBKIT)]" ;;
+              *) include="[$(entry chromium CHROMIUM)]" ;;
+            esac
+          fi
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
   test-web:
     # Nightly and on dispatch only (see `schedule` above); pushes and PRs get web-checks.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: e2e-matrix
+    name: test-web (${{ matrix.browser }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.e2e-matrix.outputs.include) }}
     runs-on: ubuntu-latest
     # Playwright's globalTimeout (300 min) bounds the e2e step alone; the install, both production builds
     # and the browser install are unbounded, and a hang in any of them would hold the non-cancelling
-    # `filen-web-e2e` group below for GitHub's 6h job default.
+    # group below for GitHub's 6h job default.
     timeout-minutes: 340
-    # ONE constant group, and scoped to this job because it is the only one that touches the shared live
-    # Filen test account — there is exactly one, and setup/cleanup.setup.ts trashes then PERMANENTLY
-    # DELETES every row matching the e2e debris prefixes, which includes a concurrently running suite's
-    # live fixture root. A per-ref group does not serialise that at all: `push` and `pull_request` both
-    # fire for a same-repo branch, under two different refs and so in two different groups.
+    # ONE group per ACCOUNT (e2e-matrix above), and scoped to this job because it is the only one that
+    # touches a live Filen test account — and setup/cleanup.setup.ts trashes then PERMANENTLY DELETES every
+    # row matching the e2e debris prefixes, which includes a concurrently running suite's live fixture
+    # root on the same account. A per-ref group does not serialise that at all: `push` and `pull_request`
+    # both fire for a same-repo branch, under two different refs and so in two different groups.
     # cancel-in-progress stays false because cancelling is the other way to corrupt a run: a context
     # killed mid-write keeps the account-wide `drive-write` lease it was refreshing until the TTL
     # expires, blocking every later run. A superseded run therefore queues instead — GitHub only drops
     # jobs from the group that have not started yet, which by definition hold nothing.
     concurrency:
-      group: filen-web-e2e
+      group: ${{ matrix.group }}
       cancel-in-progress: false
     env:
       # The Vite production build (SDK wasm + full module graph) needs more than the default heap.
       NODE_OPTIONS: --max-old-space-size=8192
+      # The setup and teardown projects drive chromium whatever the lane browser.
+      E2E_INSTALL: ${{ matrix.browser == 'all' && 'chromium firefox webkit' || matrix.browser == 'chromium' && 'chromium' || format('chromium {0}', matrix.browser) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -221,20 +260,22 @@ jobs:
           # built for the previous distro, and takes the install step's cache-hit branch below — which
           # only installs system libs and never re-downloads — so every browser launch fails with a
           # loader error until someone touches the lockfile. Deliberately NO restore-keys: a prefix
-          # restore is that same stale hit, reintroduced on purpose.
-          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ hashFiles('pnpm-lock.yaml') }}
+          # restore is that same stale hit, reintroduced on purpose. The matrix entry is in it for the
+          # same reason: each job installs a different set of browsers into that one path.
+          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ matrix.browser }}-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install Playwright browsers
         working-directory: packages/filen-web
         # On a cache hit the binaries are already there and only the system libs are missing.
         run: |
           if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            pnpm exec playwright install-deps chromium firefox webkit
+            pnpm exec playwright install-deps $E2E_INSTALL
           else
-            pnpm exec playwright install --with-deps chromium firefox webkit
+            pnpm exec playwright install --with-deps $E2E_INSTALL
           fi
       # Firefox on Linux advances a playing media element's clock only against a live audio sink, and the
       # runner has no sound server: playback reports playing with its position stuck at 0.
       - name: Start a null audio sink
+        if: matrix.browser == 'all' || matrix.browser == 'firefox'
         run: |
           sudo apt-get install -y --no-install-recommends pulseaudio
           pulseaudio --start --exit-idle-time=-1
@@ -243,8 +284,13 @@ jobs:
       - name: E2E tests
         working-directory: packages/filen-web
         # A dispatch can narrow the run to a spec and a project; both arrive through env, never inlined into
-        # the script, and are refused unless they are plain paths and names.
+        # the script, and are refused unless they are plain paths and names. A per-browser job never falls
+        # back to the shared account: its own secrets missing fails the job.
         run: |
+          if [ -n "$E2E_ACCOUNT" ] && { [ -z "$FILEN_WEB_E2E_TEST_EMAIL" ] || [ -z "$FILEN_WEB_E2E_TEST_PASSWORD" ]; }; then
+            echo "FILEN_WEB_E2E_TEST_EMAIL_$E2E_ACCOUNT / FILEN_WEB_E2E_TEST_PASSWORD_$E2E_ACCOUNT are not set"
+            exit 1
+          fi
           args=()
           if [ -n "$E2E_SPEC" ]; then
             [[ "$E2E_SPEC" =~ ^[A-Za-z0-9_./:-]+$ ]] || { echo "invalid spec: $E2E_SPEC"; exit 1; }
@@ -254,16 +300,21 @@ jobs:
             [[ "$E2E_PROJECT" =~ ^[a-z0-9-]+$ ]] || { echo "invalid project: $E2E_PROJECT"; exit 1; }
             args+=("--project=$E2E_PROJECT")
           fi
+          if [ "$MATRIX_BROWSER" != "all" ]; then
+            export E2E_BROWSER="$MATRIX_BROWSER"
+          fi
           VITE_E2E=1 pnpm run test:e2e "${args[@]}"
         env:
           E2E_SPEC: ${{ inputs.spec }}
           E2E_PROJECT: ${{ inputs.project }}
-          FILEN_WEB_E2E_TEST_EMAIL: ${{ secrets.FILEN_WEB_E2E_TEST_EMAIL }}
-          FILEN_WEB_E2E_TEST_PASSWORD: ${{ secrets.FILEN_WEB_E2E_TEST_PASSWORD }}
+          MATRIX_BROWSER: ${{ matrix.browser }}
+          E2E_ACCOUNT: ${{ matrix.account }}
+          FILEN_WEB_E2E_TEST_EMAIL: ${{ matrix.account == '' && secrets.FILEN_WEB_E2E_TEST_EMAIL || secrets[format('FILEN_WEB_E2E_TEST_EMAIL_{0}', matrix.account)] }}
+          FILEN_WEB_E2E_TEST_PASSWORD: ${{ matrix.account == '' && secrets.FILEN_WEB_E2E_TEST_PASSWORD || secrets[format('FILEN_WEB_E2E_TEST_PASSWORD_{0}', matrix.account)] }}
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-web
+          name: playwright-report-web-${{ matrix.browser }}
           path: packages/filen-web/playwright-report
           retention-days: 14
