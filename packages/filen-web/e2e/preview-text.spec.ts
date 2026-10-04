@@ -3,7 +3,6 @@ import { test, expect } from "./fixtures"
 import {
 	withScratchDirectory,
 	bootTo,
-	descendInto,
 	enterScratchDirectory,
 	trashScratchDirectory,
 	waitForListingSettled,
@@ -22,8 +21,8 @@ import { trackCspViolations } from "./helpers/csp"
 // SPLIT PROVISIONING, on purpose. The two read-only legs (docx, code) read the shared read-only
 // fixture tree (helpers/fixtures.ts) and write nothing. The other three still own a per-test scratch
 // directory, and each for a reason the shared tree cannot serve: the markdown leg SAVES its file, and
-// the two navigation-guard legs assert the exact URL a browser back lands on (`/drive`), which is only
-// true when the file sits ONE descent below the root — the fixture tree is two.
+// the two navigation-guard legs edit a plain .txt (the first beside exactly one .docx sibling), a file
+// the tree does not hold.
 
 // Serialised by the write lane's `workers: 1` today; the directive keeps that true if it is ever widened.
 test.describe.configure({ mode: "default" })
@@ -42,38 +41,31 @@ const MARKDOWN_BYTES = Buffer.from("# Hello Markdown\n\nThis is **bold** text an
 // path, while waiting longer costs nothing on a run where the prompt never opens at all.
 const UNSAVED_PROMPT_TIMEOUT_MS = 15_000
 
-// The exact history tail both navigation-guard legs below depend on — […, /favorites, /drive,
-// /drive/<scratch>] — built with in-app clicks inside ONE document, so every back they drive is a real
-// popstate the router's blocker sees. One same-route back (/drive/<scratch> -> /drive, deliberately NOT
-// blocked: there is a single drive route file, routes/_app/drive.$.tsx, so both share routeId
-// "/_app/drive/$") and one leave-route back (/drive -> /favorites, blocked).
+// The exact history both navigation-guard legs below depend on: the scratch directory current, with
+// /favorites one entry AHEAD of it. Back never navigates under a preview (it closes the overlay, see
+// previewOverlay.tsx's closeOnBack), so the route-leaving pop the unsaved-edits blocker guards is a
+// Forward — built with in-app clicks inside ONE document, so it is a real popstate the router's
+// blocker sees.
 //
-// A separate step run AFTER the scratch directory exists, because its last hop descends into it — and
-// because enterScratchDirectory's own retry path can reload the page, which throws away whatever tail
-// was built before it. The depth is asserted at the end rather than assumed: an entry too many behind
-// /drive is a same-routeId back the guard correctly never blocks, which the leg then reads as a prompt
-// that never opens.
-async function seedLeaveRouteHistory(page: Page, scratchName: string): Promise<void> {
-	const sidebar = page.getByRole("complementary")
+// A separate step run AFTER the scratch directory exists, because it navigates out of it and back —
+// and because enterScratchDirectory's own retry path can reload the page, which throws away whatever
+// history was built before it.
+async function seedLeaveRouteForward(page: Page): Promise<void> {
+	const scratchUrl = page.url()
 	const entriesBefore = await page.evaluate(() => history.length)
 
-	await sidebar.getByRole("link", { name: "Favorites", exact: true }).click()
+	await page.getByRole("complementary").getByRole("link", { name: "Favorites", exact: true }).click()
 	await expect(page).toHaveURL(/\/favorites$/)
 	await waitForListingSettled(page)
 
-	await sidebar.getByRole("link", { name: "Cloud Drive", exact: true }).click()
-	await expect(page).toHaveURL(/\/drive$/)
+	await page.goBack()
+	await expect(page).toHaveURL(scratchUrl)
+	await waitForListingSettled(page)
 
-	const { listbox } = await waitForListingSettled(page)
-
-	await descendInto(page, listbox, scratchName)
-
-	// EXACTLY three pushes — /favorites, /drive, /drive/<scratch> — because the guard legs below step
-	// back through them one for one. A tail with an entry too few or too many puts a different route
-	// under each back, and the leg then waits out its whole budget for a prompt that correctly never
-	// opens (or misses one it should have got), several steps away from the cause.
+	// EXACTLY one push: an entry too many would put a different route under the Forward, and the leg
+	// then waits out its budget for a prompt that never opens, several steps away from the cause.
 	const entriesAfter = await page.evaluate(() => history.length)
-	expect(entriesAfter - entriesBefore).toBe(3)
+	expect(entriesAfter - entriesBefore).toBe(1)
 }
 
 // The one live proof the docx-preview path actually works: real JSZip/DOMParser XML parsing (neither
@@ -106,10 +98,10 @@ test("docx preview renders document content and closes, no CSP console errors", 
 // The one live proof the text path actually works: a real lazy CodeMirror chunk, real UTF-8 decode, in
 // a real browser — unlike preview.logic.test.ts's pure decodeUtf8/codeMirrorLanguageFor unit coverage,
 // none of that is provable without one. A `.txt` in the drive variant is EDITABLE (isEditable), which
-// is what also makes this leg the right host for the unsaved-edits navigation guard below: it drives
-// browser BACK, the vector the guard is actually about (a sidebar click cannot be used — the overlay's
-// backdrop and popup are both `fixed inset-0 z-50`, so the sidebar link is covered and outside the
-// modal's interaction scope, and Playwright's actionability check would simply time out).
+// is what also makes this leg the right host for the unsaved-edits guards below: it drives the browser's
+// Back and Forward, the vectors the guards are actually about (a sidebar click cannot be used — the
+// overlay's backdrop and popup are both `fixed inset-0 z-50`, so the sidebar link is covered and outside
+// the modal's interaction scope, and Playwright's actionability check would simply time out).
 test("text preview renders, edits, and guards unsaved edits against navigation, no CSP console errors", async ({ page }) => {
 	const runId = crypto.randomUUID()
 	const scratchName = `e2e-preview-text-${runId}`
@@ -126,9 +118,11 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		// One same-route back and one leave-route back for the guard legs below — see the helper for why
-		// this cannot run before the scratch directory exists.
-		await seedLeaveRouteHistory(page, scratchName)
+		// A leave-route Forward for the guard leg below — see the helper for why this cannot run before the
+		// scratch directory exists.
+		await seedLeaveRouteForward(page)
+
+		const scratchUrl = page.url()
 
 		await uploadFiles(
 			page,
@@ -200,21 +194,22 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 
 		await dirtyTheBuffer()
 
-		// Same routeId ⇒ NO prompt: the listing re-renders in place with the dialog host, the frozen pager
-		// snapshot and the editor buffer all intact, so prompting here would claim a loss that never
-		// happens. This is the direct proof of the leave-route-only design.
-		await page.goBack()
-		await expect(page).toHaveURL(/\/drive$/)
-		await expect(unsavedPrompt).toHaveCount(0)
-		await expect(line).toBeVisible()
-
-		// Different routeId ⇒ blocked. While the prompt is open the browser URL is ALREADY /favorites (the
-		// pop landed; only the router was held back) — it is the blocker's own go(1) that restores it once
-		// the navigation is reset, hence the retrying toHaveURL rather than a bare page.url() read.
+		// Back closes the preview through its close path, so a dirty buffer prompts. The pop is put back
+		// whatever the answer, hence the retrying toHaveURL; Cancel keeps the overlay and its buffer.
 		await page.goBack()
 		await expect(unsavedPrompt).toBeVisible()
 		await unsavedPrompt.getByRole("button", { name: "Cancel", exact: true }).click()
-		await expect(page).toHaveURL(/\/drive$/)
+		await expect(page).toHaveURL(scratchUrl)
+		await expect(line).toBeVisible()
+		await expect(saveButton).toBeEnabled()
+
+		// A Forward to a different routeId ⇒ blocked by the leave-route guard. While the prompt is open the
+		// browser URL is ALREADY /favorites (the pop landed; only the router was held back) — it is the
+		// blocker's own go(-1) that restores it once the navigation is reset.
+		await page.goForward()
+		await expect(unsavedPrompt).toBeVisible()
+		await unsavedPrompt.getByRole("button", { name: "Cancel", exact: true }).click()
+		await expect(page).toHaveURL(scratchUrl)
 		await expect(line).toBeVisible()
 
 		// The blocked-pop DISCARD leg lives in its own test below. The buffer intentionally ends DIRTY
@@ -344,8 +339,8 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 
 // The blocked pop's DISCARD half — the main test above only proves Cancel/restore. Unlike that leg,
 // this one asserts the DESTINATION a proceed() lands on, which is exactly the entry
-// seedLeaveRouteHistory puts behind /drive.
-test("discarding after a cancelled back on the same pop still proceeds to the destination", async ({ page }) => {
+// seedLeaveRouteForward puts ahead of the scratch directory.
+test("discarding after a cancelled forward on the same pop still proceeds to the destination", async ({ page }) => {
 	const scratchName = `e2e-preview-text-${crypto.randomUUID()}`
 	const nameTxt = `${scratchName}.txt`
 	const unsavedPrompt = page.getByRole("alertdialog", { name: "Unsaved changes" })
@@ -355,7 +350,9 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 	try {
 		const { listbox } = await enterScratchDirectory(page, scratchName)
 
-		await seedLeaveRouteHistory(page, scratchName)
+		await seedLeaveRouteForward(page)
+
+		const scratchUrl = page.url()
 
 		await uploadFiles(page, [{ name: nameTxt, mimeType: "text/plain", buffer: TEXT_BYTES }], listbox)
 		const row = listbox.getByRole("option", { name: nameTxt })
@@ -369,15 +366,12 @@ test("discarding after a cancelled back on the same pop still proceeds to the de
 		// proves the buffer took the edit with no save in flight — see dirtyTheBuffer's note above.
 		await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeEnabled()
 
-		await page.goBack()
-		await expect(page).toHaveURL(/\/drive$/)
-
-		await page.goBack()
+		await page.goForward()
 		await expect(unsavedPrompt).toBeVisible()
 		await unsavedPrompt.getByRole("button", { name: "Cancel", exact: true }).click()
-		await expect(page).toHaveURL(/\/drive$/)
+		await expect(page).toHaveURL(scratchUrl)
 
-		await page.goBack()
+		await page.goForward()
 		await expect(unsavedPrompt).toBeVisible()
 		await unsavedPrompt.getByRole("button", { name: "Discard", exact: true }).click()
 		await expect(page).toHaveURL(/\/favorites$/)

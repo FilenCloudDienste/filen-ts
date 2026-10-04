@@ -35,18 +35,20 @@ function labelsFor(ids: ActionId[]): string[] {
 	return ids.map(labelFor)
 }
 
+// Neither row is an archive, so neither menu has Extract (archive-dialogs.spec.ts covers it), and Copy
+// link is offered in the links view only.
 // Drive-variant directory (itemMenu.test.ts's own "drive variant, directory" case): color, no versions.
 const DIRECTORY_MENU_IDS: ActionId[] = [
 	"rename",
 	"move",
 	"copy",
+	"compress",
 	"favorite",
 	"color",
 	"info",
 	"download",
 	"share",
 	"publicLink",
-	"copyLink",
 	"trash"
 ]
 // Drive-variant file (itemMenu.test.ts's own "drive variant, file" case): versions, no color.
@@ -54,20 +56,20 @@ const FILE_MENU_IDS: ActionId[] = [
 	"rename",
 	"move",
 	"copy",
+	"compress",
 	"favorite",
 	"versions",
 	"info",
 	"download",
 	"share",
 	"publicLink",
-	"copyLink",
 	"trash"
 ]
 // Trash variant, either type (itemMenu.test.ts's own "trash variant" case) — the maximally-reduced set.
 const TRASH_MENU_IDS: ActionId[] = ["restore", "deletePermanently", "info"]
 // Bulk bar, plain drive-variant selection (bulkActionBar.test.ts's own "drive variant" case) — no
 // color/versions id exists in the bulk builder at all, per-type or not.
-const BULK_MENU_IDS: ActionId[] = ["favorite", "move", "copy", "share", "download", "trash"]
+const BULK_MENU_IDS: ActionId[] = ["favorite", "move", "copy", "compress", "share", "download", "trash"]
 // Above an item's own actions: Open for anything that opens (a directory, a previewable file), then a
 // writable directory's New submenu and Paste. Those two are not item actions, so they resolve straight
 // from the catalog.
