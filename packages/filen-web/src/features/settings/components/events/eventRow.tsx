@@ -1,40 +1,106 @@
 import { useTranslation } from "react-i18next"
-import type { UserEvent } from "@filen/sdk-rs"
+import { TriangleAlertIcon } from "lucide-react"
+import { cn } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
-import { useNowMinute } from "@/lib/useNowMinute"
-import { eventKindDisplay } from "@/features/settings/lib/eventKind"
+import { EVENT_ICONS, EVENT_TONE_CLASS } from "@/features/settings/lib/eventIcons"
+import type { EventDescription } from "@/features/settings/lib/eventModel"
+import type { EventEntry } from "@/features/settings/lib/eventsPagination"
+import { entryTimeKnown, eventSecondaryText, eventTitleSegments } from "@/features/settings/components/events/eventsList.logic"
+import { FileTypeIcon } from "@/features/drive/components/itemIcon"
+import { Badge } from "@/components/ui/badge"
 
 export interface EventRowProps {
-	event: UserEvent
-	onOpen: (event: UserEvent) => void
+	entry: EventEntry
+	description: EventDescription
+	newDevice: boolean
+	// Every event of the 30-day window is loaded: the new-device badge's claim reaches that far.
+	historyComplete: boolean
+	// The shared minute tick, read once by the list rather than by every row.
+	now: number
+	onOpen: (entry: EventEntry) => void
 }
 
-// One virtualized row: icon + human-readable label (eventKindDisplay) + relative timestamp (shared
-// lib/relativeTime.ts, same helper the note/chat rows use). The whole row opens the compact detail
-// dialog (EventDetailDialog) — there is no per-row menu, matching how thin this row is on mobile (a
-// plain ListRow → alert). The dialog's own header stays absolute — this row is the "at a glance" list,
-// not the show-everything surface.
-export function EventRow({ event, onOpen }: EventRowProps) {
-	const { t } = useTranslation("settings")
+const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" })
+
+// One virtualized row: the event's sentence over its second line (location · size · device) and the
+// time of day, the day itself being the header above. The whole row opens the detail dialog.
+export function EventRow({ entry, description, newDevice, historyComplete, now, onOpen }: EventRowProps) {
+	const { t } = useTranslation("events")
 	const { t: tCommon } = useTranslation("common")
-	const now = useNowMinute()
-	const { label, icon: Icon } = eventKindDisplay(event.kind.type, t)
+	const Icon = EVENT_ICONS[description.icon]
+	const timestamp = Number(entry.timestamp)
+	const date = new Date(timestamp)
 
 	return (
 		<button
 			type="button"
 			onClick={() => {
-				onOpen(event)
+				onOpen(entry)
 			}}
-			className="flex h-full w-full items-center gap-3 rounded-xl px-2.5 text-left transition-colors hover:bg-sidebar-accent/60"
+			className="flex h-full w-full items-center gap-3 rounded-xl px-2.5 text-left transition-colors outline-none hover:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
 		>
-			<span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground [&_svg]:size-4">
-				<Icon aria-hidden="true" />
+			<span
+				className={cn(
+					"flex size-9 shrink-0 items-center justify-center rounded-full [&_svg]:size-4",
+					EVENT_TONE_CLASS[description.tone]
+				)}
+			>
+				{description.fileIcon !== undefined ? (
+					<FileTypeIcon
+						iconKey={description.fileIcon}
+						className="size-5"
+					/>
+				) : (
+					<Icon aria-hidden="true" />
+				)}
 			</span>
-			<span className="min-w-0 flex-1 truncate text-sm">{label}</span>
-			<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-				{formatRelativeTime(Number(event.timestamp), tCommon, now)}
+			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+				<span className="flex min-w-0 items-center gap-2">
+					<span
+						title={description.misleading === true ? `${description.title}\n${t("eventsMisleadingName")}` : description.title}
+						className="truncate text-sm"
+					>
+						{eventTitleSegments(description, t).map((segment, i) =>
+							segment.strong ? (
+								<strong
+									key={i}
+									className="font-medium"
+								>
+									<bdi>{segment.text}</bdi>
+								</strong>
+							) : (
+								segment.text
+							)
+						)}
+					</span>
+					{description.misleading === true ? (
+						<TriangleAlertIcon
+							aria-label={t("eventsMisleadingName")}
+							className="size-3.5 shrink-0 text-amber-500"
+						/>
+					) : null}
+					{newDevice ? (
+						<Badge
+							variant="secondary"
+							title={t(historyComplete ? "eventsNewDeviceHintWindow" : "eventsNewDeviceHintWeek")}
+						>
+							{t("eventsNewDevice")}
+						</Badge>
+					) : null}
+				</span>
+				<span className="truncate text-xs text-muted-foreground">{eventSecondaryText(description)}</span>
 			</span>
+			{entryTimeKnown(entry) ? (
+				<time
+					dateTime={date.toISOString()}
+					title={formatRelativeTime(timestamp, tCommon, now)}
+					className="shrink-0 text-xs text-muted-foreground tabular-nums"
+				>
+					{TIME_FORMAT.format(date)}
+				</time>
+			) : (
+				<span className="shrink-0 text-xs text-muted-foreground">{t("eventsUnknownTime")}</span>
+			)}
 		</button>
 	)
 }

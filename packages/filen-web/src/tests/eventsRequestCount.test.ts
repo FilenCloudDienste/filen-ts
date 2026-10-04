@@ -3,14 +3,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { focusManager, onlineManager } from "@tanstack/react-query"
-import type { SocketEvent, UserEventResult } from "@filen/sdk-rs"
+import type { SocketEvent, UserEvent, UserEventResult } from "@filen/sdk-rs"
 
-const { getUserEvents, persistQuery } = vi.hoisted(() => ({
+const { getUserEvents, getUserEvent, persistQuery } = vi.hoisted(() => ({
 	getUserEvents: vi.fn<(filter?: unknown, timestamp?: bigint) => Promise<UserEventResult[]>>(),
+	getUserEvent: vi.fn<(uuid: string) => Promise<UserEvent>>(),
 	persistQuery: vi.fn<(query: unknown) => Promise<void>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserEvents } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserEvents, getUserEvent } }))
+
+vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
@@ -29,16 +32,17 @@ import {
 	useEventsQuery
 } from "@/features/settings/queries/events"
 import { handleGeneralEvent } from "@/features/shell/lib/generalSocketHandlers"
+import { eventResultKey } from "@/features/settings/lib/eventsPagination"
+import { testUuid } from "@/tests/support/uuid"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
-function ok(id: bigint): UserEventResult {
-	return {
-		type: "ok",
-		id,
-		timestamp: id,
-		uuid: "11111111-1111-1111-1111-111111111111",
-		kind: { type: "login", ip: "1.2.3.4", userAgent: "ua" }
-	}
+// One event per second.
+function event(id: bigint, timestamp: bigint = id * 1000n): UserEvent {
+	return { id, timestamp, uuid: "11111111-1111-1111-1111-111111111111", kind: { type: "login", ip: "1.2.3.4", userAgent: "ua" } }
+}
+
+function ok(id: bigint, timestamp?: bigint): UserEventResult {
+	return { type: "ok", ...event(id, timestamp) }
 }
 
 // Newest first, like the server's pages.
@@ -70,12 +74,16 @@ function cachedIds(): bigint[] {
 	return (queryClient.getQueryData<UserEventResult[]>(EVENTS_QUERY_KEY) ?? []).flatMap(e => (e.type === "ok" ? [e.id] : []))
 }
 
-function newEvent(): Extract<SocketEvent, { type: "general" }> {
+function cachedKeys(): string[] {
+	return (queryClient.getQueryData<UserEventResult[]>(EVENTS_QUERY_KEY) ?? []).map(eventResultKey)
+}
+
+function newEvent(uuid = testUuid("evt")): Extract<SocketEvent, { type: "general" }> {
 	return {
 		type: "general",
 		inner: {
 			type: "newEvent",
-			uuid: "evt-0000-0000-0000-000000000000",
+			uuid,
 			eventType: "login",
 			timestamp: 31n,
 			info: "{}"
@@ -91,7 +99,7 @@ async function mountWithTwoPages() {
 	const view = mountEvents()
 	await drain()
 	await act(async () => {
-		await loadOlderEvents(28n)
+		await loadOlderEvents(28_000n)
 	})
 
 	expect(reads()).toBe(2)
@@ -107,6 +115,8 @@ beforeEach(() => {
 	releaseEventsSlice()
 	socketAuthenticated()
 	getUserEvents.mockResolvedValue(PAGE_ONE)
+	// An event the SDK can't decode by itself: the fallback read of page one, unless a test says otherwise.
+	getUserEvent.mockRejectedValue(new Error("unknown event kind"))
 })
 
 afterEach(() => {
@@ -131,7 +141,54 @@ describe("account events request counts", () => {
 		expect(cachedIds()).toEqual([30n, 29n, 28n, 27n, 26n])
 	})
 
-	it("a new event refreshes page one into the loaded pages", async () => {
+	it("a new event splices into a mounted list with one single-event read", async () => {
+		await mountWithTwoPages()
+
+		getUserEvent.mockResolvedValueOnce(event(31n))
+		handleGeneralEvent(newEvent(testUuid("evt31")))
+		await drain()
+
+		expect(reads()).toBe(2)
+		expect(getUserEvent).toHaveBeenCalledExactlyOnceWith(testUuid("evt31"))
+		expect(cachedIds()).toEqual([31n, 30n, 29n, 28n, 27n, 26n])
+	})
+
+	it("a new event already in the list changes nothing", async () => {
+		await mountWithTwoPages()
+
+		const before = queryClient.getQueryData(EVENTS_QUERY_KEY)
+
+		getUserEvent.mockResolvedValueOnce(event(30n))
+		handleGeneralEvent(newEvent())
+		await drain()
+
+		expect(queryClient.getQueryData(EVENTS_QUERY_KEY)).toBe(before)
+		expect(reads()).toBe(2)
+	})
+
+	it("a burst of new events reads page one once past a few single-event reads", async () => {
+		mountEvents()
+		await drain()
+
+		const pending = Promise.withResolvers<UserEvent>()
+
+		getUserEvent.mockImplementation(() => pending.promise)
+		getUserEvents.mockResolvedValue([ok(31n), ...PAGE_ONE])
+
+		for (let i = 0; i < 6; i++) {
+			handleGeneralEvent(newEvent())
+		}
+
+		pending.resolve(event(31n))
+		await drain()
+
+		// The fourth event starts a read, the fifth and sixth queue the one read that follows it.
+		expect(getUserEvent).toHaveBeenCalledTimes(3)
+		expect(reads()).toBe(3)
+		expect(cachedIds()).toEqual([31n, 30n, 29n, 28n])
+	})
+
+	it("a new event the SDK can't read by itself refreshes page one into the loaded pages", async () => {
 		await mountWithTwoPages()
 
 		getUserEvents.mockResolvedValueOnce([ok(31n), ...PAGE_ONE.slice(0, 2)])
@@ -177,8 +234,12 @@ describe("account events request counts", () => {
 		const refresh = Promise.withResolvers<UserEventResult[]>()
 		getUserEvents.mockImplementationOnce(() => refresh.promise).mockResolvedValueOnce(PAGE_TWO)
 		handleGeneralEvent(newEvent())
+		// The single-event read fails first, then page one is read.
 		await act(async () => {
-			await loadOlderEvents(28n)
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+		await act(async () => {
+			await loadOlderEvents(28_000n)
 		})
 		refresh.resolve([ok(31n), ...PAGE_ONE])
 		await drain()
@@ -198,6 +259,90 @@ describe("account events request counts", () => {
 		await drain()
 
 		expect(reads()).toBe(2)
+	})
+})
+
+describe("account events older pages", () => {
+	it("read from the second after the oldest event, keeping that second's events the last page left out", async () => {
+		const sameSecond = ok(27n, 28_000n)
+
+		getUserEvents.mockResolvedValueOnce(PAGE_ONE).mockResolvedValueOnce([ok(28n), sameSecond, ok(25n)])
+		mountEvents()
+		await drain()
+
+		let result: { newCount: number; terminate: boolean } | undefined
+
+		await act(async () => {
+			result = await loadOlderEvents(28_000n)
+		})
+
+		expect(getUserEvents).toHaveBeenLastCalledWith(undefined, 29_000n)
+		expect(result).toEqual({ newCount: 2, terminate: false })
+		expect(cachedIds()).toEqual([30n, 29n, 28n, 27n, 25n])
+	})
+
+	it("read past a second that fills a whole page, then stop on an empty page", async () => {
+		// A bulk move logged more events in second 28 than a page holds: page one ends inside it.
+		const bulk = [ok(30n, 28_100n), ok(29n, 28_100n), ok(28n, 28_100n)]
+
+		getUserEvents
+			.mockResolvedValueOnce(bulk)
+			.mockResolvedValueOnce([ok(28n, 28_100n), ok(27n, 28_050n)])
+			.mockResolvedValueOnce([ok(20n)])
+			.mockResolvedValueOnce([])
+		mountEvents()
+		await drain()
+
+		const results: { newCount: number; terminate: boolean }[] = []
+
+		await act(async () => {
+			results.push(await loadOlderEvents(28_100n))
+			results.push(await loadOlderEvents(28_050n))
+			results.push(await loadOlderEvents(20_000n))
+		})
+
+		expect(getUserEvents.mock.calls.slice(1).map(call => call[1])).toEqual([29_000n, 28_000n, 21_000n])
+		expect(results).toEqual([
+			{ newCount: 1, terminate: false },
+			{ newCount: 1, terminate: false },
+			{ newCount: 0, terminate: true }
+		])
+		expect(cachedIds()).toEqual([30n, 29n, 28n, 27n, 20n])
+	})
+
+	it("stop when nothing is older than a second already read past", async () => {
+		mountEvents()
+		await drain()
+		getUserEvents.mockResolvedValueOnce([ok(28n)]).mockResolvedValueOnce([ok(28n)])
+
+		const results: { newCount: number; terminate: boolean }[] = []
+
+		await act(async () => {
+			results.push(await loadOlderEvents(28_000n))
+			results.push(await loadOlderEvents(28_000n))
+		})
+
+		expect(getUserEvents.mock.calls.slice(1).map(call => call[1])).toEqual([29_000n, 28_000n])
+		expect(results).toEqual([
+			{ newCount: 0, terminate: false },
+			{ newCount: 0, terminate: true }
+		])
+	})
+
+	it("keep undecodable events in the slice, deduped and capped like the rest", async () => {
+		const unknown: UserEventResult = { type: "err", message: "unknown variant", raw: '{"id":27,"timestamp":27,"type":"fileArchived"}' }
+
+		getUserEvents.mockResolvedValueOnce([unknown, ...PAGE_ONE]).mockResolvedValueOnce([unknown, ok(26n)])
+		mountEvents()
+		await drain()
+
+		expect(cachedKeys()).toEqual(["30", "29", "28", "27"])
+
+		await act(async () => {
+			await loadOlderEvents(27_000n)
+		})
+
+		expect(cachedKeys()).toEqual(["30", "29", "28", "27", "26"])
 	})
 })
 
@@ -274,7 +419,7 @@ describe("account events slice bound", () => {
 		const view = mountEvents()
 		await drain()
 		await act(async () => {
-			await loadOlderEvents(4998n)
+			await loadOlderEvents(4_998_000n)
 		})
 
 		expect(cachedIds()).toHaveLength(FIRST.length + OLDER.length)
@@ -335,7 +480,7 @@ describe("account events slice bound", () => {
 		getUserEvents.mockImplementationOnce(() => older.promise).mockResolvedValueOnce([ok(40n), ok(39n)])
 
 		let result: { newCount: number; terminate: boolean } | undefined
-		const loading = loadOlderEvents(28n).then(r => {
+		const loading = loadOlderEvents(28_000n).then(r => {
 			result = r
 		})
 

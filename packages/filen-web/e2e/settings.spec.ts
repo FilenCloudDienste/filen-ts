@@ -64,7 +64,7 @@ test.describe("settings", () => {
 		// up front is instantly true while the paginated read is still in flight, which left the row
 		// assertion to close inside the 10s expect default on a live network round trip.
 		const firstEventRow = page.locator('[aria-label="Events"]').getByRole("button").first()
-		const emptyState = page.getByText("No events yet", { exact: true })
+		const emptyState = page.getByText("No events in the last 30 days", { exact: true })
 
 		await expect(firstEventRow.or(emptyState)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(emptyState).toHaveCount(0)

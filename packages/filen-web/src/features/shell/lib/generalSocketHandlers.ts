@@ -1,7 +1,7 @@
 import type { SocketEvent, UserEventResult } from "@filen/sdk-rs"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { cachedQuery, invalidateJoiningInFlight } from "@/queries/patch"
-import { EVENTS_QUERY_KEY } from "@/features/settings/queries/events"
+import { EVENTS_QUERY_KEY, spliceNewEvent } from "@/features/settings/queries/events"
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { log } from "@/lib/log"
 
@@ -37,15 +37,18 @@ export function handleGeneralEvent(event: GeneralSocketEvent): void {
 		}
 
 		case "newEvent": {
-			// The payload carries only a raw eventType string + opaque info — not the typed id/kind the
-			// account-events list renders and dedupes on — so it can act only as a "something changed"
-			// trigger, never a splice: refetch page one, which merges into the loaded pages (fetchEvents).
-			// Guarded on an existing cache slice — an events list nobody has opened yet has nothing to
-			// refresh, and its first mount reads anyway.
-			// One read per burst rather than a restart per event, as an account-wide batch sends one each.
+			// A mounted list reads the one event by its uuid (spliceNewEvent, which falls back to page one).
+			// An events list nobody watches is only marked stale: its next mount reads page one once, however
+			// many events arrived meanwhile. One nobody has opened has nothing to refresh.
 			const query = cachedQuery<UserEventResult[]>(EVENTS_QUERY_KEY)
 
-			if (query?.state.data !== undefined) {
+			if (query?.state.data === undefined) {
+				break
+			}
+
+			if (query.isActive()) {
+				void spliceNewEvent(inner.uuid)
+			} else {
 				invalidateJoiningInFlight(query)
 			}
 

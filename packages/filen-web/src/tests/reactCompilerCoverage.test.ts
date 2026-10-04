@@ -167,7 +167,13 @@ describe("React Compiler coverage", () => {
 		["src/lib/useTouchLongPress.ts", "useTouchLongPress"],
 		["src/features/photos/components/photoTile.tsx", "PhotoTile"],
 		["src/features/notes/components/noteRow.tsx", "NoteRow"],
-		["src/features/chats/components/chatRow.tsx", "ChatRow"]
+		["src/features/chats/components/chatRow.tsx", "ChatRow"],
+		// The events timeline's rows and the page around it.
+		["src/features/settings/components/events/eventRow.tsx", "EventRow"],
+		["src/features/settings/components/events/eventDayHeader.tsx", "EventDayHeader"],
+		["src/features/settings/components/events/eventsSummaryCard.tsx", "EventsSummaryCard"],
+		["src/features/settings/components/events/eventsFilters.tsx", "EventsFilters"],
+		["src/routes/_app/settings/events.tsx", "EventsPage"]
 	])("compiles %s's %s", (file, fnName) => {
 		const events = compile(file)
 
@@ -202,6 +208,28 @@ describe("React Compiler coverage", () => {
 		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
 		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
 		expect(unguardedCalls(code, fnName, derivations)).toEqual([])
+	})
+
+	// useVirtualizer opts its host out, so it lives in eventsTimeline.tsx; a scroll render must not reach the
+	// list, and a keystroke or minute tick must not rebuild the describer or the rows.
+	it("compiles EventsList, leaving only EventsTimeline to the virtualizer", () => {
+		const { events, code } = compileWithCode("src/features/settings/components/events/eventsList.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+
+		for (const fnName of ["EventsList", "useEventDescriber", "useTimelineRows"]) {
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+
+		// isEventsFilterActive and isFillCapped return a boolean off a few fields: cheaper than a memo slot.
+		expect(unguardedCalls(code, "EventsList", ["newDeviceBadgeKeys(", "findEventEntry("])).toEqual([])
+		expect(unguardedCalls(code, "useEventDescriber", ["createEventDescriber("])).toEqual([])
+		expect(unguardedCalls(code, "useTimelineRows", ["groupEventsByDay(", "filterEvents("])).toEqual([])
+		expect(
+			compile("src/features/settings/components/events/eventsTimeline.tsx").filter(event => event.kind !== "CompileSuccess")
+		).toHaveLength(1)
 	})
 
 	it("compiles DriveSidebar, so non-drive navigations skip the mounted directory tree", () => {
@@ -248,6 +276,13 @@ describe("React Compiler coverage", () => {
 		).toEqual([])
 		expect(filter.events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
 		expect(unguardedCalls(filter.code, "usePhotosFilter", ["photoKindsPresent(", "filterPhotos("])).toEqual([])
+	})
+
+	it("memoizes the event dialog's derivations, so a minute tick or a copy skips re-describing the event", () => {
+		const { code } = compileWithCode("src/features/settings/components/events/eventDetailDialog.tsx")
+
+		expect(unguardedCalls(code, "EventDetailBody", ["describeEvent("])).toEqual([])
+		expect(unguardedCalls(code, "EventDetailContent", ["buildEventDetailView(", "eventLocationUuid(", "eventLookupRef("])).toEqual([])
 	})
 
 	// useVirtualizer opts ThreadList out; the rows it maps must come from compiled ThreadRowContent so a scroll
@@ -327,6 +362,15 @@ describe("React Compiler coverage", () => {
 		["src/features/drive/components/uploadMenu.tsx", "UploadMenu"],
 		["src/features/drive/components/uploadMenu.tsx", "UploadContextMenu"],
 		["src/features/drive/components/sortMenu.tsx", "SortMenu"],
+		["src/features/settings/components/events/eventDetailDialog.tsx", "EventDetailDialog"],
+		["src/features/settings/components/events/eventDetailDialog.tsx", "DeepLinkedEvent"],
+		["src/features/settings/components/events/eventDetailDialog.tsx", "EventDetailBody"],
+		["src/features/settings/components/events/eventDetailDialog.tsx", "EventDetailContent"],
+		["src/features/settings/components/events/eventDetailRows.tsx", "EventHeroTile"],
+		["src/features/settings/components/events/eventDetailRows.tsx", "EventDetailSectionView"],
+		["src/features/settings/components/events/eventDetailRows.tsx", "EventDetailRowView"],
+		["src/features/settings/components/events/eventDetailRows.tsx", "RawEventView"],
+		["src/features/settings/hooks/useEventItemActions.ts", "useEventItemActions"],
 		["src/features/drive/components/uploadDropzone.tsx", "UploadDropzone"],
 		["src/features/contacts/components/addContactDialog.tsx", "AddContactDialog"],
 		["src/features/notes/components/markdownSplitPane.tsx", "MarkdownSplitPane"],

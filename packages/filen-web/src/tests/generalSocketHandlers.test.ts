@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
-import type { SocketEvent } from "@filen/sdk-rs"
+import type { SocketEvent, UserEvent } from "@filen/sdk-rs"
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
@@ -11,6 +11,11 @@ const { performLogout } = vi.hoisted(() => ({
 }))
 
 vi.mock("@/features/shell/lib/performLogout", () => ({ performLogout }))
+
+// A mounted list reads a new event by its uuid; rejected, as for a kind the SDK can't decode, it reads page one.
+const { getUserEvent } = vi.hoisted(() => ({ getUserEvent: vi.fn<(uuid: string) => Promise<UserEvent>>() }))
+
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserEvent } }))
 
 const { logError, logWarn } = vi.hoisted(() => ({ logError: vi.fn(), logWarn: vi.fn() }))
 
@@ -37,6 +42,7 @@ function mountEvents(queryFn: (context: { signal: AbortSignal }) => Promise<neve
 beforeEach(() => {
 	testQueryClient.clear()
 	vi.clearAllMocks()
+	getUserEvent.mockRejectedValue(new Error("unknown event kind"))
 })
 
 describe("general socket handlers", () => {
@@ -63,13 +69,38 @@ describe("general socket handlers", () => {
 
 		handleGeneralEvent(generalEvt(newEvent()))
 
+		expect(getUserEvent).not.toHaveBeenCalled()
+
 		const query = testQueryClient.getQueryCache().find({ queryKey: EVENTS_QUERY_KEY, exact: true })
 
 		expect(query?.state.isInvalidated).toBe(true)
 		expect(query?.state.fetchStatus).toBe("idle")
 	})
 
-	it("newEvent refetches a mounted events list", async () => {
+	it("newEvent splices into a mounted events list without reading page one", async () => {
+		const queryFn = vi.fn(() => Promise.resolve([]))
+		const event: UserEvent = {
+			id: 9n,
+			timestamp: 1_700_000_000_000n,
+			uuid: testUuid("evt"),
+			kind: { type: "login", ip: "", userAgent: "" }
+		}
+
+		getUserEvent.mockResolvedValueOnce(event)
+		testQueryClient.setQueryData(EVENTS_QUERY_KEY, [])
+		const unsubscribe = mountEvents(queryFn)
+
+		handleGeneralEvent(generalEvt(newEvent()))
+		await vi.waitFor(() => {
+			expect(testQueryClient.getQueryData(EVENTS_QUERY_KEY)).toEqual([{ type: "ok", ...event }])
+		})
+
+		expect(getUserEvent).toHaveBeenCalledExactlyOnceWith(testUuid("evt"))
+		expect(queryFn).not.toHaveBeenCalled()
+		unsubscribe()
+	})
+
+	it("newEvent a mounted list can't read by itself refetches page one", async () => {
 		const queryFn = vi.fn(() => Promise.resolve([]))
 
 		testQueryClient.setQueryData(EVENTS_QUERY_KEY, [])
@@ -127,6 +158,7 @@ describe("general socket handlers", () => {
 		handleGeneralEvent(generalEvt(newEvent()))
 
 		expect(invalidate).not.toHaveBeenCalled()
+		expect(getUserEvent).not.toHaveBeenCalled()
 		expect(performLogout).not.toHaveBeenCalled()
 	})
 })

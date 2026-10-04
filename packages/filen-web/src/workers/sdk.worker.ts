@@ -79,6 +79,7 @@ import init, {
 	type LinkedDirsAndFiles,
 	type UserPersonalUpdateInfo,
 	type GdprInfo,
+	type UserEvent,
 	type UserEventResult,
 	type JsClientConfig
 } from "@filen/sdk-rs"
@@ -902,6 +903,10 @@ const api = {
 	getUserEvents(filter?: string | null, timestamp?: bigint | null): Promise<UserEventResult[]> {
 		return requireClient().getUserEvents(filter, timestamp)
 	},
+	// One event by its uuid; rejects on a kind this SDK cannot decode.
+	getUserEvent(uuid: string): Promise<UserEvent> {
+		return requireClient().getUserEvent(uuid)
+	},
 	// `listDir`/`getDirOptional`/`createDir` take no cancellation param (unlike mobile's transfer
 	// facade) — a stale response from a fast navigation is simply discarded once the query key
 	// changes under it, so no AbortSignal plumbing is needed here. `Dir.timestamp`/meta bigints
@@ -1003,6 +1008,11 @@ const api = {
 	// entry's drive file may have been trashed/deleted from elsewhere; `undefined` means gone).
 	getFile(uuid: string): Promise<File | undefined> {
 		return requireClient().getFileOptional(uuid)
+	},
+	// A file's current head by its whole-life id, across renames and new versions; a trashed head
+	// resolves with a `trash` parent, a permanently deleted one to `undefined`.
+	getFileByStableUuid(stableUuid: string): Promise<File | undefined> {
+		return requireClient().getFileByStableUuidOptional(stableUuid)
 	},
 	// ── Upload ───────────────────────────────────────────────────────────────
 	// The one seam a browser File and its stream cross into this worker. Parent resolves worker-side

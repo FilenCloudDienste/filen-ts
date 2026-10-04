@@ -1100,6 +1100,33 @@ export function cachedDirectoryName(uuid: string): string | undefined {
 	return item.data.decryptedMeta?.name
 }
 
+// Every directory name the cached listings and breadcrumb entries hold, in one pass: for a caller naming
+// many directories at once, where cachedDirectoryName would scan the listings per uuid. No requests.
+export function cachedDirectoryNames(): Map<string, string> {
+	const names = new Map<string, string>()
+
+	for (const [queryKey, name] of queryClient.getQueriesData<string | null>({ queryKey: ["drive", "names"] })) {
+		const uuid = queryKey[3]
+
+		if (typeof uuid === "string" && typeof name === "string") {
+			names.set(uuid, name)
+		}
+	}
+
+	// Listing rows win: socket renames patch listings, not the breadcrumb entries.
+	for (const query of cachedQueriesWithPrefix(DRIVE_LISTING_KEY_PREFIX)) {
+		for (const item of (query.state.data as DriveItem[] | undefined) ?? []) {
+			const name = isDirectoryItem(item) ? item.data.decryptedMeta?.name : undefined
+
+			if (name !== undefined) {
+				names.set(item.data.uuid, name)
+			}
+		}
+	}
+
+	return names
+}
+
 // `path` is the crumb's ancestor chain, the crumb itself last. Cached listings first, so a
 // click-through never reaches the worker; otherwise one worker call, which is itself cache-first and
 // only then asks the SDK: owned lookup for an owned directory, the share walk (hinted with `path`) for
