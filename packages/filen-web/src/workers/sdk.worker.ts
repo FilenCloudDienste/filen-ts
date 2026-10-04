@@ -2116,7 +2116,8 @@ Comlink.expose(
 				try {
 					return await (v as (...a: unknown[]) => unknown).apply(t, args)
 				} catch (e) {
-					log.error("sdk.worker", e)
+					// The method, so a failure the caller swallows still says which call it was.
+					log.error("sdk.worker", String(p), e)
 					// eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberate: Comlink structured-clones a plain thrown object intact; an Error subclass would lose the DTO's custom fields to Comlink's lossy Error serializer.
 					throw toErrorDTO(e)
 				}

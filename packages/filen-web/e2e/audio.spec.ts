@@ -9,6 +9,7 @@ import {
 	uploadFiles
 } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
+import { html5DragMove } from "./helpers/dnd"
 
 // The drive → persistent-player handoff, end to end: double-clicking a drive audio file enqueues the
 // folder's audio siblings and starts the docked player (no preview overlay), and every transport
@@ -259,15 +260,23 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 		await expect(trackRowA).toBeVisible()
 		await expect(trackRowB).toBeVisible()
 
-		// Drag B above A — the reordered list feeds "Play" below, proving the reorder actually persisted
-		// (not just a local optimistic reshuffle). Re-dragged on a miss rather than dispatched once: a
-		// single dragTo can land on a row the pane re-rendered underneath and move nothing at all. The
-		// gesture means "put B first" either way, so a repeat is idempotent — and the inner budget is
-		// wide enough to ride an ordinary write out, so a slow-but-landing reorder is never re-issued.
+		// Drag B onto A — the reordered list feeds "Play" below, proving the reorder actually persisted
+		// (not just a local optimistic reshuffle). Dispatched (helpers/dnd.ts): both rows are resolved in
+		// the turn that drops, so a pane re-rendering underneath cannot swallow it the way a mouse dragTo
+		// could. The row only moves once the save lands, which on a contended account outlasts an orphaned
+		// lease, hence the live-write budget. A retry (the rows refused the drag mid-save) reads the order
+		// first: dropping B on A again once B already leads would move it back down. The first track row
+		// is aria-rowindex 2 (the header is 1); the tbody's first <tr> can be the virtualizer's padding.
+		const firstTrackRow = detailPane.locator('tbody tr[aria-rowindex="2"]')
+		const trackRow = (name: string) => ({ selector: 'tbody tr[draggable="true"]', text: name })
+
 		await expect(async () => {
-			await trackRowB.dragTo(trackRowA)
-			await expect(detailPane.locator("tbody tr").first().getByText(nameB)).toBeVisible({ timeout: 30_000 })
-		}).toPass({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			if (!((await firstTrackRow.textContent()) ?? "").includes(nameB)) {
+				await html5DragMove(page, trackRow(nameB), trackRow(nameA))
+			}
+
+			await expect(firstTrackRow.getByText(nameB)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		}).toPass({ timeout: 2 * LIVE_WRITE_TIMEOUT_MS })
 
 		await detailPane.getByRole("button", { name: "Play", exact: true }).click()
 		await expect(bar.locator(`[title="${nameB}"]`)).toBeVisible({ timeout: 30_000 })

@@ -1,31 +1,27 @@
-import type { Page } from "@playwright/test"
-import { test, expect, readHarvestedSession } from "./fixtures"
+import type { BrowserContext, Page } from "@playwright/test"
+import { test, expect, readHarvestedSession, seedSession } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, bootToSignIn, reloadToShell, SIGN_IN_HEADING, toasts } from "./helpers/listing"
-import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
 
-// Used with readHarvestedSession instead of the injectedSession fixture: that fixture's addInitScript
-// re-fires on EVERY navigation of its page (Playwright's documented behavior, not just the first),
-// including the reload logout itself triggers — left alone, it would silently re-seed and resurrect
-// the very session this test clears.
+// Used with readHarvestedSession instead of the injectedSession fixture: that fixture serves the blob to
+// EVERY navigation of its page, including the reload logout itself triggers — left alone, it would
+// silently re-seed and resurrect the very session this test clears.
 //
-// Seeds sessionStorage for ONE page's very first navigation only, via a localStorage marker this
-// script owns end-to-end (kvClear never touches localStorage — it only wipes the app's own
-// sqlite-backed kv). Every later navigation of the same page (reload included) finds the marker set
-// and skips re-seeding, so whatever the app's own kv actually holds at that point is what decides
-// whether the page renders authed — not a stale replay of the original blob.
-async function seedOncePerPage(page: Page, session: string): Promise<void> {
-	await page.addInitScript(
-		([slot, blob, markerKey]) => {
-			if (localStorage.getItem(markerKey) === "1") {
-				return
-			}
+// Serves the blob to the context's very first boot only. Every later navigation (the second tab and
+// every reload included) gets none, so whatever the app's own kv actually holds at that point is what
+// decides whether the page renders authed — not a stale replay of the original blob.
+const seededContexts = new WeakSet<BrowserContext>()
 
-			localStorage.setItem(markerKey, "1")
-			sessionStorage.setItem(slot, blob)
-		},
-		[SESSION_SLOT, session, "filen.e2e.session.seeded-once"] as const
-	)
+async function seedOncePerContext(page: Page, session: string): Promise<void> {
+	await seedSession(page, session, context => {
+		if (seededContexts.has(context)) {
+			return false
+		}
+
+		seededContexts.add(context)
+
+		return true
+	})
 }
 
 // The CSP's connect-src allowlist (vite.config.ts) IS the exact host family the SDK ever talks to:
@@ -122,7 +118,7 @@ test.describe("auth", () => {
 		expect(loginRequests, sdkHostRequests.join("\n")).toEqual([])
 	})
 
-	// Seeds itself once per page (seedOncePerPage), so the fixture's re-seeding init script stays off.
+	// Seeds itself once per context (seedOncePerContext), so the fixture's re-seeding binding stays off.
 	test.describe("logout", () => {
 		test.use({ injectSession: false })
 
@@ -137,17 +133,17 @@ test.describe("auth", () => {
 				return
 			}
 
-			await seedOncePerPage(page, session)
+			await seedOncePerContext(page, session)
 			await bootTo(page, "/")
 
 			// A second, already-signed-in tab opened BEFORE logout — the realistic multi-tab scenario the
-			// auth broadcast channel exists to keep coherent. The once-per-page marker lives in localStorage,
-			// which is shared across the context, so this second call is a no-op: `second` renders authed
+			// auth broadcast channel exists to keep coherent. The context was already served its one blob, so
+			// this second binding serves nothing: `second` renders authed
 			// because the first seed already persisted the session into the shared kv. What matters is that
 			// neither page re-seeds on its post-logout reload, so both converge onto the wiped kv state.
 			const second = await context.newPage()
 
-			await seedOncePerPage(second, session)
+			await seedOncePerContext(second, session)
 			await bootTo(second, "/")
 
 			// Each surface asserted before it is clicked: the three steps are one chained interaction, and
@@ -182,7 +178,7 @@ test.describe("auth", () => {
 			expect(sessionStillPresent).toBe(false)
 
 			// The second tab converges by itself: the logout broadcast reloads every other tab (__root.tsx),
-			// and that reload re-reads the now-empty shared kv (seedOncePerPage's marker means it does NOT
+			// and that reload re-reads the now-empty shared kv (seedOncePerContext serves it nothing, so it does NOT
 			// re-seed). Reloading it here as well raced that reload, which Firefox aborts.
 			await expect(second.getByText(SIGN_IN_HEADING)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 

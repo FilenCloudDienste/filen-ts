@@ -274,8 +274,15 @@ export function textFile(name: string, text: string): UploadFile {
 	return { name, mimeType: "text/plain", buffer: Buffer.from(text) }
 }
 
+// The block of running and failed uploads pinned above the rows (pendingUploads.tsx); every row below it
+// sits lower while it stands.
+export function pendingUploadsList(page: Page): Locator {
+	return page.getByRole("list", { name: "Transfers into this directory", exact: true })
+}
+
 // Uploads through the hidden picker. With `listbox`, also waits for each file's row, which lands on a
-// live write.
+// live write, and then for the pending block to unmount: until it does, the rows shift under any
+// coordinate taken from them.
 export async function uploadFiles(page: Page, files: UploadFile[], listbox?: Locator): Promise<void> {
 	await fileInput(page).setInputFiles(files)
 
@@ -286,6 +293,8 @@ export async function uploadFiles(page: Page, files: UploadFile[], listbox?: Loc
 	for (const { name } of files) {
 		await expect(listbox.getByRole("option", { name })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 	}
+
+	await expect(pendingUploadsList(page)).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 }
 
 // Bounded poll for a create that landed after its attempt gave up. Short: it only has to outlast the

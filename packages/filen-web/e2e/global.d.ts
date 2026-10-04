@@ -44,7 +44,8 @@ interface E2eHooks {
 		strayFileNames?: readonly string[]
 	) => Promise<number>
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
-	createTestSelfChat: () => Promise<string>
+	createTestSelfChat: (name?: string) => Promise<string>
+	findTestChatByName: (name: string) => Promise<string | null>
 	deleteTestChatByUuid: (uuid: string) => Promise<void>
 	listTestChatUuids: () => Promise<string[]>
 	readTestChatMessageTexts: (uuid: string) => Promise<string[]>
@@ -52,6 +53,7 @@ interface E2eHooks {
 	readPersistedInflightChatMessages: (chatUuid: string) => Promise<string[] | null>
 	sweepTestChatsByNamePrefix: (prefix: string, minAgeMs?: number) => Promise<number>
 	archiveCatalogueReport: () => Promise<ArchiveCatalogueRow[]>
+	pendingSdkCalls: () => { method: string; ageMs: number }[]
 }
 
 // One compress-catalogue entry as the real wasm answers it (src/e2e-hooks/index.ts). Plain numbers and

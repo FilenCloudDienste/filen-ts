@@ -17,6 +17,7 @@ import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
 import { archiveFormatInfos } from "@/features/drive/lib/archiveHelpers"
 import { withLevel } from "@/features/drive/lib/archiveFormats"
+import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
 
 // Test-only hooks, loaded ONLY when the app is built with VITE_E2E=1 (a dynamic import behind that
 // env condition in main.tsx, so a normal build dead-code-eliminates this whole module — proven by
@@ -148,10 +149,14 @@ interface E2eHooks {
 	// doesn't exist.
 	thumbnailFileStat: (parentUuid: string, name: string) => Promise<{ size: number; lastModified: number } | null>
 	// Creates a ZERO-participant self-chat (createChat([]) — backend-accepted) and immediately renames
-	// it "e2e-chat-<ts>" so a leak is sweepable by prefix. The one way to get a real conversation on the
-	// zero-contacts shared account; the send outbox's real round-trip + kill-path replay are proven
-	// against it. Returns the renamed Chat's uuid for teardown.
-	createTestSelfChat: () => Promise<string>
+	// it `name` (default "e2e-chat-<ts>"; any name a caller passes starts "e2e-chat-" too) so a leak is
+	// sweepable by prefix. The one way to get a real conversation on the zero-contacts shared account;
+	// the send outbox's real round-trip + kill-path replay are proven against it. Returns the renamed
+	// Chat's uuid for teardown.
+	createTestSelfChat: (name?: string) => Promise<string>
+	// The uuid of the conversation named exactly `name`, or null. Lets a spec reuse the conversation it
+	// created before its worker restarted instead of creating another against the create limiter.
+	findTestChatByName: (name: string) => Promise<string | null>
 	// Permanently removes a conversation by uuid (owner delete) — keeps the shared account net-zero.
 	// No-op when the uuid isn't found.
 	deleteTestChatByUuid: (uuid: string) => Promise<void>
@@ -180,6 +185,9 @@ interface E2eHooks {
 	// encoder memory of the catalogue's own probe (level 1 for zip and 7z methods) and of every level
 	// from min to max. Proves each probe and level is one the SDK takes, which the dialog relies on.
 	archiveCatalogueReport: () => Promise<ArchiveCatalogueRow[]>
+	// The SDK worker calls in flight, oldest first, for a failed test's diagnostics. Synchronous and
+	// main-thread only, so it answers even while the worker is stuck.
+	pendingSdkCalls: () => { method: string; ageMs: number }[]
 }
 
 interface ArchiveCatalogueRow {
@@ -388,11 +396,11 @@ export function installE2eHooks(): void {
 
 			return { size: stat.size, lastModified: stat.lastModified }
 		}),
-		createTestSelfChat: ready(async () => {
+		createTestSelfChat: ready(async (name = `e2e-chat-${String(Date.now())}`) => {
 			// Zero participants is backend-accepted; rename immediately so a leaked conversation is
 			// sweepable by the "e2e-chat-" prefix.
 			const chat = await sdkApi.createChat([])
-			const renamed = await sdkApi.renameChat(chat, `e2e-chat-${String(Date.now())}`)
+			const renamed = await sdkApi.renameChat(chat, name)
 
 			// Seed the list cache so enqueueTestChatMessage can resolve the chat WITHOUT a network read
 			// (the kill-path drives the outbox while offline, where listChats would hang).
@@ -409,6 +417,7 @@ export function installE2eHooks(): void {
 
 			await sdkApi.deleteChat(chat)
 		}),
+		findTestChatByName: ready(async name => (await sdkApi.listChats()).find(chat => chat.name === name)?.uuid ?? null),
 		listTestChatUuids: ready(async () => (await sdkApi.listChats()).map(chat => chat.uuid)),
 		readTestChatMessageTexts: ready(async uuid => {
 			const chat = (await sdkApi.listChats()).find(c => c.uuid === uuid)
@@ -498,6 +507,7 @@ export function installE2eHooks(): void {
 					}
 				})
 			)
-		})
+		}),
+		pendingSdkCalls
 	}
 }

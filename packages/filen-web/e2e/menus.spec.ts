@@ -81,8 +81,6 @@ const DIRECTORY_MENU_LABELS = [
 ]
 const FILE_MENU_LABELS = [labelFor("openFile"), ...labelsFor(FILE_MENU_IDS)]
 
-test.describe.configure({ mode: "serial" })
-
 // Right-clicks `name`'s row, asserts the open context menu's menuitem sequence against `labels`, then
 // closes it — one retried unit so a transient miss (row not yet settled after the previous step)
 // doesn't need its own bespoke retry.

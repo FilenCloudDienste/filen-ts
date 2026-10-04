@@ -76,7 +76,10 @@ test.describe("settings", () => {
 
 		await openSettingsSection(page, "Billing")
 
-		await expect(page.getByText("Free", { exact: true })).toBeVisible()
+		// Scoped to the plan row: "Free" also names the free storage elsewhere in settings.
+		const currentPlan = page.locator('[data-slot="settings-group"]').filter({ hasText: "Current plan" })
+
+		await expect(currentPlan.getByText("Free", { exact: true })).toBeVisible()
 		await expect(page.getByText("No subscriptions", { exact: true })).toBeVisible()
 		await expect(page.getByText("No invoices", { exact: true })).toBeVisible()
 		await expect(page.getByRole("button", { name: "Copy link", exact: true })).toBeVisible()

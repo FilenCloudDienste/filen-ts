@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { SPRING_BLINK_ATTRIBUTE, SPRING_LOAD_DELAY_MS } from "@/features/drive/lib/springLoad"
-import { centerOf } from "./helpers/geometry"
+import { hitCenterOf, hitsAt } from "./helpers/geometry"
 import {
 	bootTo,
 	createDirectoryViaDialog,
@@ -52,18 +52,19 @@ test.describe("spring-loaded directories", () => {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
 			await createDirectoryViaDialog(page, targetDirName, listbox)
-			await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("spring-load probe") }])
+			await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("spring-load probe") }], listbox)
 
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			const fileRow = listbox.getByRole("option", { name: fileName })
 			const targetRow = listbox.getByRole("option", { name: targetDirName })
-			const from = await centerOf(fileRow)
-			const to = await centerOf(targetRow)
+			const from = await hitCenterOf(fileRow)
+			const to = await hitCenterOf(targetRow)
 			const scratchUrl = page.url()
 
 			await recordBlinks(page)
 			await page.mouse.move(from.x, from.y)
+			expect(await hitsAt(fileRow, from), "the drag's start point no longer lands on the file row").toBe(true)
 			await page.mouse.down()
 
 			// Taken before the move that arms the target, so it can only precede the arming: the elapsed time
@@ -71,6 +72,9 @@ test.describe("spring-loaded directories", () => {
 			const movedAt = Date.now()
 
 			await page.mouse.move(to.x, to.y, { steps: 10 })
+
+			// Named here rather than as a missing highlight: the drag can only arm the row under it.
+			expect(await hitsAt(targetRow, to), "the drag's end point no longer lands on the target row").toBe(true)
 
 			// The highlight shows at once; nothing opens before the delay.
 			await expect(targetRow).toHaveClass(/ring-primary/)

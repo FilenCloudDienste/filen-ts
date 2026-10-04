@@ -5,19 +5,18 @@ import { fileURLToPath } from "node:url"
 import {
 	test as base,
 	expect,
-	type Browser,
 	type BrowserContext,
 	type BrowserType,
 	type Page,
-	type PlaywrightWorkerArgs,
 	type Request,
 	type TestInfo
 } from "@playwright/test"
-import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
+import { SESSION_BINDING } from "@/e2e-hooks/sessionSeed"
+import { common } from "@/locales/en/common"
 
-// The session blob is secret-equivalent and lives ONLY here (gitignored, mode 0600) and in the
-// sessionStorage seed — it is never typed into a page, so it cannot appear in screenshots or DOM
-// snapshots.
+// The session blob is secret-equivalent and lives ONLY here (gitignored, mode 0600) and in the page
+// binding that serves it (seedSession) — it is never typed into a page, passed as a call argument or
+// returned from one, so it cannot appear in screenshots, DOM or traces.
 export const AUTH_DIR = fileURLToPath(new URL(".auth", import.meta.url))
 export const SESSION_FILE = fileURLToPath(new URL(".auth/session.json", import.meta.url))
 
@@ -47,6 +46,12 @@ export function readFixtureManifest(): FixtureManifest {
 	return JSON.parse(readFileSync(FIXTURES_FILE, "utf8")) as FixtureManifest
 }
 
+// The conversations a run's chats lanes share (chats.spec.ts), one per lane, all named under this. The
+// run's own fixtures-teardown removes them, the next run's cleanup sweep ("e2e-chat-") anything left.
+export function runChatNamePrefix(runId: string): string {
+	return `e2e-chat-${runId}-`
+}
+
 export function readHarvestedSession(): string | null {
 	if (!existsSync(SESSION_FILE)) {
 		return null
@@ -57,14 +62,12 @@ export function readHarvestedSession(): string | null {
 	return session
 }
 
-// addInitScript re-fires on every navigation of the page, reloads included.
-export async function seedSession(page: Page, session: string): Promise<void> {
-	await page.addInitScript(
-		([slot, blob]) => {
-			sessionStorage.setItem(slot, blob)
-		},
-		[SESSION_SLOT, session] as const
-	)
+// Served to every navigation of the page, reloads included: the app's boot asks the binding before it
+// resumes (src/e2e-hooks/sessionSeed.ts). A trace records a binding's registration, never its answer,
+// where an init script's argument or an evaluate's would be kept verbatim. `serve` decides per call, so a
+// spec can serve the blob once and then null.
+export async function seedSession(page: Page, session: string, serve: (context: BrowserContext) => boolean = () => true): Promise<void> {
+	await page.exposeBinding(SESSION_BINDING, ({ context }) => (serve(context) ? session : null))
 }
 
 // Every write serialises on an account-wide lease the SDK takes with `POST …/v3/user/lock`
@@ -254,10 +257,14 @@ export function trackLeaseReleases(page: Page): void {
 // Runs in every page: reports main-thread long tasks, stalled timers (script blocked) and frames that do
 // not come (rendering paused) to the diagnostics. An action stuck on "waiting for element to be …" with
 // no reason logged is Playwright's in-page check never answering, which otherwise leaves no trace.
-function stallProbe(): void {
+// It also watches for the app-update toast. sw.js and the page come from one build here, so that toast
+// is always a false update prompt (src/lib/sw/register.ts), and it blocks the clicks under it for good
+// (duration Infinity): reported, it fails the test by name (failureDiagnostics) instead of as a timeout.
+function stallProbe(updateToastText: string): void {
 	const report = (line: string): void => {
 		void (window as unknown as { __e2eStall?: (line: string) => Promise<void> }).__e2eStall?.(line)
 	}
+	let updateToastSeen = false
 
 	if (PerformanceObserver.supportedEntryTypes.includes("longtask")) {
 		new PerformanceObserver(list => {
@@ -281,6 +288,15 @@ function stallProbe(): void {
 			report(`timers stalled ${String(Math.round(late))}ms`)
 		}
 
+		if (!updateToastSeen) {
+			for (const toast of document.querySelectorAll("[data-sonner-toast]")) {
+				if (toast.textContent.includes(updateToastText)) {
+					updateToastSeen = true
+					void (window as unknown as { __e2eUpdateToast?: () => Promise<void> }).__e2eUpdateToast?.()
+				}
+			}
+		}
+
 		if (document.visibilityState === "visible") {
 			requestAnimationFrame(() => {
 				const waited = performance.now() - now
@@ -293,7 +309,69 @@ function stallProbe(): void {
 	}, 1000)
 }
 
-async function collectDiagnostics(context: BrowserContext): Promise<() => string> {
+// What each open page still had in flight inside the SDK worker. Bounded, because a wedged main thread
+// never answers an evaluate.
+async function pendingSdkCallLines(context: BrowserContext): Promise<string[]> {
+	const lines = await Promise.all(
+		context.pages().map(async (page, index) => {
+			const calls = await Promise.race([
+				page
+					.evaluate(() => {
+						const hooks = (window as unknown as { __filenE2E?: Partial<Window["__filenE2E"]> }).__filenE2E
+
+						// A page without the app (a blank start page) has none to report.
+						return hooks?.pendingSdkCalls?.() ?? []
+					})
+					.catch(() => []),
+				new Promise<null>(resolve => {
+					setTimeout(() => {
+						resolve(null)
+					}, 2_000)
+				})
+			])
+
+			if (calls === null) {
+				return [`tab${String(index)} sdk calls: (the page did not answer)`]
+			}
+
+			return calls.map(({ method, ageMs }) => `tab${String(index)} sdk call ${method} pending ${String(ageMs)}ms`)
+		})
+	)
+
+	return lines.flat()
+}
+
+// Only the top of the page: the helpers stretch the viewport to 8000px for virtualization, and the full
+// capture (and the video) shrinks that to a sliver nobody can read.
+const FAILURE_SCREENSHOT_HEIGHT = 900
+
+async function attachTopScreenshots(context: BrowserContext, testInfo: TestInfo): Promise<void> {
+	for (const [index, page] of context.pages().entries()) {
+		const size = page.viewportSize()
+
+		if (size === null || page.isClosed()) {
+			continue
+		}
+
+		try {
+			const body = await page.screenshot({
+				clip: { x: 0, y: 0, width: size.width, height: Math.min(size.height, FAILURE_SCREENSHOT_HEIGHT) },
+				timeout: 5_000
+			})
+
+			await testInfo.attach(`screenshot-top-tab${String(index)}`, { body, contentType: "image/png" })
+		} catch {
+			// A page that cannot paint any more has nothing to show.
+		}
+	}
+}
+
+interface Diagnostics {
+	report: () => string
+	updateToastSeen: () => boolean
+}
+
+async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics> {
 	const startedAt = Date.now()
 	const lines: string[] = []
 	const log = (line: string) => {
@@ -340,6 +418,12 @@ async function collectDiagnostics(context: BrowserContext): Promise<() => string
 		page.on("close", () => {
 			log(`${tab} closed`)
 		})
+		// A navigation nobody asked for (a drop the page did not cancel, a reload) restarts the app.
+		page.on("framenavigated", frame => {
+			if (frame === page.mainFrame()) {
+				log(`${tab} navigated ${path(frame.url())}`)
+			}
+		})
 		// Requests still unanswered when the test ends: a listing or a stream that never arrives shows up
 		// as a request left hanging, or as none at all.
 		page.on("request", request => {
@@ -359,19 +443,28 @@ async function collectDiagnostics(context: BrowserContext): Promise<() => string
 
 	context.on("page", watch)
 
+	let updateToastSeen = false
+
 	await context.exposeBinding("__e2eStall", ({ page }, line: string) => {
 		log(`tab${String(context.pages().indexOf(page))} ${line}`)
 	})
-	await context.addInitScript(stallProbe)
+	await context.exposeBinding("__e2eUpdateToast", ({ page }) => {
+		updateToastSeen = true
+		log(`tab${String(context.pages().indexOf(page))} app-update toast mounted`)
+	})
+	await context.addInitScript(stallProbe, common.updateReadyBody)
 
-	return () => {
-		const now = Date.now()
-		const pending = [...inFlight].map(
-			([request, { tab, startedAt }]) =>
-				`+${String(now - startedAt).padStart(6)}ms ago ${tab} still in flight ${request.method()} ${path(request.url())}`
-		)
+	return {
+		report: () => {
+			const now = Date.now()
+			const pending = [...inFlight].map(
+				([request, { tab, startedAt }]) =>
+					`+${String(now - startedAt).padStart(6)}ms ago ${tab} still in flight ${request.method()} ${path(request.url())}`
+			)
 
-		return [...lines, ...(pending.length === 0 ? [] : ["-- in flight at the end --", ...pending])].join("\n")
+			return [...lines, ...(pending.length === 0 ? [] : ["-- in flight at the end --", ...pending])].join("\n")
+		},
+		updateToastSeen: () => updateToastSeen
 	}
 }
 
@@ -469,8 +562,13 @@ async function acquireLock(name: string, test: string): Promise<() => void> {
 // tests run one at a time under this lock, each from a wiped origin (wipeWebkitOrigin).
 const WEBKIT_STORAGE_LOCK = "webkit-storage"
 
+// An unregistered worker keeps controlling the document that was open when it went, so the wipe is
+// done only once a fresh load of that document comes up uncontrolled with no registration left.
+const WEBKIT_WIPE_TIMEOUT_MS = 15_000
+
 // Clears what outlives a profile, from a same-origin document that does not boot the app (booting would
-// open the database and lock the very files this removes).
+// open the database and lock the very files this removes). Every test then starts from a real first
+// service-worker install, never beside a worker an earlier test left behind.
 async function wipeWebkitOrigin(context: BrowserContext, baseURL: string): Promise<void> {
 	const page = await context.newPage()
 
@@ -487,6 +585,33 @@ async function wipeWebkitOrigin(context: BrowserContext, baseURL: string): Promi
 		await Promise.all((await navigator.serviceWorker.getRegistrations()).map(registration => registration.unregister()))
 		await Promise.all((await caches.keys()).map(key => caches.delete(key)))
 	})
+
+	const deadline = Date.now() + WEBKIT_WIPE_TIMEOUT_MS
+
+	for (;;) {
+		await page.reload()
+
+		const state = await page.evaluate(async () => ({
+			registrations: (await navigator.serviceWorker.getRegistrations()).length,
+			controlled: navigator.serviceWorker.controller !== null
+		}))
+
+		if (state.registrations === 0 && !state.controlled) {
+			break
+		}
+
+		if (Date.now() > deadline) {
+			throw new Error(
+				`the webkit origin still has a service worker after the wipe (${String(state.registrations)} registrations, controlled: ${String(state.controlled)})`
+			)
+		}
+
+		await page.evaluate(async () => {
+			await Promise.all((await navigator.serviceWorker.getRegistrations()).map(registration => registration.unregister()))
+		})
+		await new Promise(resolve => setTimeout(resolve, 250))
+	}
+
 	await page.close()
 }
 
@@ -510,59 +635,6 @@ async function launchWebkitContext(
 		discard: () => {
 			rmSync(profile, { recursive: true, force: true })
 		}
-	}
-}
-
-// For a hook, which gets no `context` fixture: a context made the way the fixtures make one, under the
-// account lock its project writes with and, on webkit, the storage lock over a persistent wiped profile.
-export async function openHookContext(
-	{ browser, browserName, playwright }: { browser: Browser; browserName: string; playwright: PlaywrightWorkerArgs["playwright"] },
-	testInfo: TestInfo,
-	baseURL: string
-): Promise<{ context: BrowserContext; close: () => Promise<void> }> {
-	const releases: (() => void)[] = []
-	const resource: unknown = testInfo.project.metadata["accountLock"]
-	const owner = `${lockOwner(testInfo)} (hook)`
-
-	if (typeof resource === "string") {
-		releases.push(await acquireLock(resource, owner))
-	}
-
-	const release = () => {
-		for (const releaseLock of releases.reverse()) {
-			releaseLock()
-		}
-	}
-
-	try {
-		if (browserName !== "webkit") {
-			const context = await browser.newContext({ baseURL })
-
-			return {
-				context,
-				close: async () => {
-					await context.close()
-					release()
-				}
-			}
-		}
-
-		releases.push(await acquireLock(WEBKIT_STORAGE_LOCK, owner))
-
-		const { context, discard } = await launchWebkitContext(playwright.webkit, { baseURL })
-
-		return {
-			context,
-			close: async () => {
-				await context.close()
-				discard()
-				release()
-			}
-		}
-	} catch (error) {
-		release()
-
-		throw error
 	}
 }
 
@@ -706,12 +778,26 @@ export const test = base.extend<{
 	},
 	failureDiagnostics: [
 		async ({ context }, use, testInfo) => {
-			const report = await collectDiagnostics(context)
+			const diagnostics = await collectDiagnostics(context)
 
 			await use(undefined)
 
-			if (testInfo.status !== testInfo.expectedStatus) {
-				await testInfo.attach("diagnostics", { body: report() || "(nothing recorded)", contentType: "text/plain" })
+			const failed = testInfo.status !== testInfo.expectedStatus
+
+			if (failed || diagnostics.updateToastSeen()) {
+				const sdkCalls = await pendingSdkCallLines(context)
+				const body = [diagnostics.report(), ...(sdkCalls.length === 0 ? [] : ["-- sdk calls pending at the end --", ...sdkCalls])]
+					.join("\n")
+					.trim()
+
+				await testInfo.attach("diagnostics", { body: body || "(nothing recorded)", contentType: "text/plain" })
+				await attachTopScreenshots(context, testInfo)
+			}
+
+			if (diagnostics.updateToastSeen()) {
+				throw new Error(
+					"the app-update toast mounted, but sw.js and the page come from one build here: a false update prompt (src/lib/sw/register.ts)"
+				)
 			}
 		},
 		{ auto: true }

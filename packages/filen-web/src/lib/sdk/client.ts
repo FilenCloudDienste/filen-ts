@@ -1,6 +1,7 @@
 import * as Comlink from "comlink"
 import SdkWorker from "@/workers/sdk.worker.ts?worker"
 import type { SdkWorkerApi } from "@/workers/sdk.worker"
+import { trackSdkCalls } from "@/e2e-hooks/sdkCalls"
 
 // rayon pool sizing: leave one core for the main thread / UI, and cap at 8 — worker spawn
 // cost and per-worker memory keep growing on many-core machines while our upload/download/crypto
@@ -12,4 +13,7 @@ export function threadCount(): number {
 
 // Exactly one dedicated worker owns the SDK Client for the app's lifetime — the Client never
 // touches the main thread. Comlink turns the worker's `api` into an awaitable remote.
-export const sdkApi: Comlink.Remote<SdkWorkerApi> = Comlink.wrap<SdkWorkerApi>(new SdkWorker())
+// E2E builds count the calls in flight (e2e-hooks/sdkCalls.ts); a normal build drops the branch.
+const remote = Comlink.wrap<SdkWorkerApi>(new SdkWorker())
+
+export const sdkApi: Comlink.Remote<SdkWorkerApi> = import.meta.env.VITE_E2E === "1" ? trackSdkCalls(remote) : remote

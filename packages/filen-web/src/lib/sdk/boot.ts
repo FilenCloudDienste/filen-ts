@@ -3,7 +3,7 @@ import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { parseEnvelope } from "@/lib/serialize"
-import { SESSION_SLOT } from "@/e2e-hooks/sessionSlot"
+import { takeSeededSession } from "@/e2e-hooks/sessionSeed"
 import { storage } from "@/lib/storage/adapter"
 import { isOpfsApiAvailable } from "@/lib/storage/capability"
 import { isOpfsUnavailableError } from "@/lib/storage/errors"
@@ -104,13 +104,12 @@ export async function bootSdk(): Promise<void> {
 		} catch (e) {
 			log.warn("boot", "failed to apply client config; using defaults", e)
 		}
-		// E2E only: the harness seeds the session through sessionStorage rather than the login form.
-		// Draining it before the resume below makes the very first load already authed, so the route
+		// E2E only: the harness serves the session through a page binding rather than the login form.
+		// Persisting it before the resume below makes the very first load already authed, so the route
 		// guards never see an unauthed state and no navigation is needed to correct one.
 		if (import.meta.env.VITE_E2E === "1") {
-			const seeded = sessionStorage.getItem(SESSION_SLOT)
+			const seeded = await takeSeededSession()
 			if (seeded !== null) {
-				sessionStorage.removeItem(SESSION_SLOT)
 				await persistSession(parseEnvelope(seeded) as StringifiedClient)
 			}
 		}

@@ -10,7 +10,8 @@ import {
 	LIVE_WRITE_TIMEOUT_MS,
 	BOOT_SETTLE_TIMEOUT_MS,
 	trashScratchDirectory,
-	setTallListingViewport
+	setTallListingViewport,
+	toasts
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
 
@@ -308,6 +309,9 @@ test.describe("drive bulk actions", () => {
 
 			await expect(trashRowA).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			await expect(trashRowB).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// The rows leave before the activity ends, and its end prunes the selection: settled first, so
+			// it cannot land on the selection made below.
+			await expect(toasts(page).filter({ hasText: "Restored 2 items" })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// restoreItems restores each item to its OWN previous parent — the scratch directory, not root
 			// — so getting back to them means re-descending, not just returning to /drive.
@@ -324,6 +328,7 @@ test.describe("drive bulk actions", () => {
 			// Re-trash both inner items, leaving the scratch directory empty.
 			await restoredRowA.click()
 			await restoredRowB.click({ modifiers: [MOD_KEY] })
+			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 			await page.getByRole("button", { name: "Trash", exact: true }).click()
 			const innerFinalTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 			await expect(innerFinalTrashConfirm).toBeVisible()

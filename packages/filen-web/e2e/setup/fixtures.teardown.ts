@@ -1,5 +1,6 @@
 import { existsSync, rmSync } from "node:fs"
-import { test as teardown, FIXTURES_FILE, readFixtureManifest } from "../fixtures"
+import { test as teardown, FIXTURES_FILE, readFixtureManifest, runChatNamePrefix } from "../fixtures"
+import { waitForE2eHooks } from "../helpers/e2eHooks"
 import { dismissStartupReminders, setTallListingViewport, trashScratchDirectory } from "../helpers/listing"
 
 // Removes the shared fixture tree setup/fixtures.setup.ts built. Wired as `teardown` on the
@@ -26,7 +27,7 @@ teardown("trash the shared read-only fixture tree", async ({ page }) => {
 		return
 	}
 
-	const { fixtureRoot } = readFixtureManifest()
+	const { fixtureRoot, runId } = readFixtureManifest()
 
 	await page.goto("/drive")
 
@@ -48,6 +49,21 @@ teardown("trash the shared read-only fixture tree", async ({ page }) => {
 		await trashScratchDirectory(page, fixtureRoot, TEARDOWN_CONFIRM_TIMEOUT_MS)
 	} catch (error) {
 		console.log(`fixtures-teardown: could not trash "${fixtureRoot}" — left for the next run's sweep (${String(error)})`)
+	}
+
+	// The conversations this run's chats lanes shared: a lane cannot remove its own, because a failure
+	// restarts its worker and the next worker finds the conversation again rather than creating one more
+	// against the create limiter. Best-effort like the trash above.
+	try {
+		await waitForE2eHooks(page)
+
+		const removed = await page.evaluate(prefix => window.__filenE2E.sweepTestChatsByNamePrefix(prefix), runChatNamePrefix(runId))
+
+		console.log(`fixtures-teardown: removed ${String(removed)} shared conversation(s)`)
+	} catch (error) {
+		console.log(
+			`fixtures-teardown: could not remove this run's shared conversations — left for the next run's sweep (${String(error)})`
+		)
 	}
 
 	// Dropped either way: the manifest describes a tree that is gone (or abandoned), and leaving it
