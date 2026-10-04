@@ -41,7 +41,8 @@ export function ListFilterInput({ value, onChange, placeholder, ariaLabel, wrapp
 						onChange("")
 					}
 				}}
-				className="pr-8 pl-8"
+				// The clear button below stands in for the browser's own, which would sit beside it.
+				className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
 			/>
 			{value.length > 0 ? (
 				<Button
