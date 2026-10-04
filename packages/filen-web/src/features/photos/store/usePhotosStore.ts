@@ -47,7 +47,7 @@ export const usePhotosStore = create<PhotosState>(set => ({
 	}
 }))
 
-// The photos counterpart of drive's pruneSelectionByUuid: what an action over the selection succeeded on
+// The photos counterpart of drive's "uuid" prune (features/drive/lib/activity.ts): what an action over the selection succeeded on
 // leaves it, a failed item staying selected for the retry.
 export function prunePhotoSelection(succeeded: readonly PhotoItem[]): void {
 	usePhotosStore.getState().removeFromSelection(succeeded.map(photoItemId))

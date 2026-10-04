@@ -30,7 +30,7 @@ import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from 
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
-import { DRIVE_DELETE_PERMANENTLY, DRIVE_TRASH, DRIVE_UNSHARE, driveActivity, pruneSelectionByRow } from "@/features/drive/lib/activity"
+import { DRIVE_DELETE_PERMANENTLY, DRIVE_TRASH, DRIVE_UNSHARE, driveActivity } from "@/features/drive/lib/activity"
 import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { type ActivityKeys } from "@/lib/activity/activity.logic"
 import { sdkApi } from "@/lib/sdk/client"
@@ -392,7 +392,7 @@ export function PreviewOverlay({
 		// delete echoes do.
 		await runMenuActivity(
 			driveActivity([driveItem], DRIVE_UNSHARE, (targets, onSettled) => unshareItems(targets, variant, onSettled), {
-				prune: pruneSelectionByRow,
+				prune: "row",
 				onDone: outcome => {
 					if (outcome.succeeded.length > 0 && mountedRef.current) {
 						onClose()

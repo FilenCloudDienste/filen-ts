@@ -12,8 +12,7 @@ import {
 	DRIVE_RESTORE,
 	DRIVE_TRASH,
 	DRIVE_UNSHARE,
-	driveActivity,
-	pruneSelectionByRow
+	driveActivity
 } from "@/features/drive/lib/activity"
 import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
@@ -124,7 +123,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
 		await runBulkDialogActivity(
 			driveActivity(items, DRIVE_UNSHARE, (targets, onSettled) => unshareItems(targets, variant, onSettled), {
-				prune: pruneSelectionByRow
+				prune: "row"
 			})
 		)
 	}
