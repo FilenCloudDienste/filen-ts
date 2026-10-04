@@ -1,4 +1,4 @@
-import { SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
+import { SW_MSG_BUILD, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
 import { log } from "@/lib/log"
 
 let started = false
@@ -27,6 +27,36 @@ const SW_URL = import.meta.env.PROD ? "/sw.js" : "/src/sw/sw.ts"
 // so a tab returning to view checks too: at most hourly, and the check is one conditional request.
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 
+// sw.js and the page are built together, so a worker of this page's own build is never an update: a
+// first install, a second registration of the same origin, or the worker a reload into a new deploy
+// already runs. Only a different build prompts. Absent in local builds, where every worker matches.
+const PAGE_BUILD = import.meta.env.VITE_BUILD_ID ?? null
+// A worker answers from its own message handler, so silence this long means it cannot be compared:
+// one older than this protocol, or one gone redundant.
+const BUILD_QUERY_TIMEOUT_MS = 5_000
+
+// Resolves undefined when the worker does not answer.
+function workerBuild(worker: ServiceWorker): Promise<string | null | undefined> {
+	return new Promise(resolve => {
+		const channel = new MessageChannel()
+		const timeout = setTimeout(() => {
+			channel.port1.close()
+			resolve(undefined)
+		}, BUILD_QUERY_TIMEOUT_MS)
+
+		channel.port1.onmessage = (event: MessageEvent<{ build?: unknown } | null>) => {
+			clearTimeout(timeout)
+			channel.port1.close()
+
+			const build = event.data?.build
+
+			resolve(typeof build === "string" ? build : null)
+		}
+
+		worker.postMessage({ type: SW_MSG_BUILD }, [channel.port2])
+	})
+}
+
 export function registerSW(onUpdateReady: () => void): void {
 	if (started || !("serviceWorker" in navigator)) {
 		return
@@ -43,14 +73,36 @@ export function registerSW(onUpdateReady: () => void): void {
 		window.location.reload()
 	})
 
-	// An update is a new worker installed beside a different active one; a first install (nothing to
-	// prompt for) has none. The page's controller can't tell them apart: the first worker claims the page
-	// on activating, and Firefox can deliver that claim before the worker's own "installed" state change
-	// (seen with several tabs opening the origin at once).
+	// Each installed worker is compared once, whichever of the paths below finds it first.
+	const compared = new WeakSet<ServiceWorker>()
+
+	// A worker of another build prompts. One of this page's build waiting beside an older active worker
+	// is the worker this page belongs with (the tab reloaded into a new deploy before the old worker
+	// let go), so it takes over without a reload: the page already runs its build.
+	function compareInstalled(reg: ServiceWorkerRegistration, worker: ServiceWorker): void {
+		if (compared.has(worker)) {
+			return
+		}
+
+		compared.add(worker)
+
+		void workerBuild(worker).then(build => {
+			if (build === undefined) {
+				return
+			}
+
+			if (build !== PAGE_BUILD) {
+				onUpdateReady()
+			} else if (reg.waiting === worker && reg.active !== null && reg.active !== worker) {
+				worker.postMessage({ type: SW_SKIP_WAITING_MESSAGE })
+			}
+		})
+	}
+
 	function watchInstalling(reg: ServiceWorkerRegistration, installing: ServiceWorker): void {
 		installing.addEventListener("statechange", () => {
-			if (installing.state === "installed" && reg.active !== null && reg.active !== installing) {
-				onUpdateReady()
+			if (installing.state === "installed") {
+				compareInstalled(reg, installing)
 			}
 		})
 	}
@@ -64,8 +116,8 @@ export function registerSW(onUpdateReady: () => void): void {
 			// this SDK-boot-gated call ever reaches here — a worker can already be waiting or mid-install
 			// by the time `register()` resolves. Covers that in addition to the forward-looking listener
 			// below, which only catches an update that starts later.
-			if (reg.waiting !== null && reg.active !== null && reg.waiting !== reg.active) {
-				onUpdateReady()
+			if (reg.waiting !== null) {
+				compareInstalled(reg, reg.waiting)
 			} else if (reg.installing) {
 				watchInstalling(reg, reg.installing)
 			}

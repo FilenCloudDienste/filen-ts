@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
+import { SW_MSG_BUILD, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
 
 // register.ts keeps its whole state machine (started/registration/updateRequested/reloaded) in
 // module-level `let`s, so every test needs its own module instance -- `vi.resetModules()` + a
@@ -33,8 +33,43 @@ function fakeEventTarget() {
 	}
 }
 
-function fakeWorker(state: string) {
-	return { ...fakeEventTarget(), state, postMessage: vi.fn() }
+const PAGE_BUILD = "build-a"
+
+// Answers the build query on the transferred port the way sw.ts does; `null` never answers (a worker
+// older than the query).
+function fakeWorker(state: string, build: string | null = PAGE_BUILD) {
+	return {
+		...fakeEventTarget(),
+		state,
+		postMessage: vi.fn((message: { type: string }, ports?: FakePort[]) => {
+			if (message.type === SW_MSG_BUILD && build !== null) {
+				ports?.[0]?.postMessage({ build })
+			}
+		})
+	}
+}
+
+interface FakePort {
+	onmessage: ((event: { data: unknown }) => void) | null
+	postMessage: (data: unknown) => void
+	close: () => void
+}
+
+// Delivers on a microtask, so flush() below covers the round trip.
+class FakeMessageChannel {
+	readonly port1: FakePort = { onmessage: null, postMessage: () => undefined, close: () => undefined }
+	readonly port2: FakePort = {
+		onmessage: null,
+		postMessage: data => {
+			queueMicrotask(() => this.port1.onmessage?.({ data }))
+		},
+		close: () => undefined
+	}
+}
+
+// Only the build queries, so a test can tell them apart from SKIP_WAITING.
+function postedTypes(worker: FakeWorker): string[] {
+	return worker.postMessage.mock.calls.map(([message]) => message.type).filter(type => type !== SW_MSG_BUILD)
 }
 
 type FakeWorker = ReturnType<typeof fakeWorker>
@@ -55,6 +90,7 @@ function setupBrowser(registration: FakeRegistration) {
 
 	vi.stubGlobal("window", { location: { reload } })
 	vi.stubGlobal("navigator", { serviceWorker })
+	vi.stubGlobal("MessageChannel", FakeMessageChannel)
 
 	return {
 		reload,
@@ -83,6 +119,7 @@ beforeEach(() => {
 	// registerSW no-ops outside prod builds (see register.ts's own comment) -- every case here
 	// exercises the real path.
 	vi.stubEnv("PROD", true)
+	vi.stubEnv("VITE_BUILD_ID", PAGE_BUILD)
 })
 
 afterEach(() => {
@@ -133,7 +170,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		registerSW(onUpdateReady)
 		await flush()
 
-		const installing = fakeWorker("installing")
+		const installing = fakeWorker("installing", "build-b")
 		const active = fakeWorker("activated")
 
 		registration.installing = installing
@@ -145,6 +182,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		registration.waiting = installing
 		installing.state = "installed"
 		installing.dispatch("statechange")
+		await flush()
 
 		expect(onUpdateReady).toHaveBeenCalledTimes(1)
 	})
@@ -174,6 +212,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		registration.active = installing
 		installing.state = "activating"
 		installing.dispatch("statechange")
+		await flush()
 
 		expect(onUpdateReady).not.toHaveBeenCalled()
 	})
@@ -194,6 +233,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		setController(installing)
 		installing.state = "installed"
 		installing.dispatch("statechange")
+		await flush()
 
 		expect(onUpdateReady).not.toHaveBeenCalled()
 	})
@@ -214,7 +254,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 	})
 
 	it("a worker already waiting when register() resolves fires the update-ready callback exactly once", async () => {
-		const waiting = fakeWorker("installed")
+		const waiting = fakeWorker("installed", "build-b")
 		const active = fakeWorker("activated")
 		const registration = fakeRegistration(waiting, null, active)
 		const { setController } = setupBrowser(registration)
@@ -231,7 +271,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 	})
 
 	it("an installing worker found by the sync check plus a later stray updatefound still fires the callback exactly once", async () => {
-		const installing = fakeWorker("installing")
+		const installing = fakeWorker("installing", "build-b")
 		const active = fakeWorker("activated")
 		const registration = fakeRegistration(null, installing, active)
 		const { setController } = setupBrowser(registration)
@@ -251,12 +291,13 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		// must not attach a second watcher and double-fire the callback.
 		registration.installing = null
 		registration.dispatch("updatefound")
+		await flush()
 
 		expect(onUpdateReady).toHaveBeenCalledTimes(1)
 	})
 
 	it("applyUpdate posts SKIP_WAITING and the resulting controllerchange reloads exactly once", async () => {
-		const waiting = fakeWorker("installed")
+		const waiting = fakeWorker("installed", "build-b")
 		const active = fakeWorker("activated")
 		const registration = fakeRegistration(waiting, null, active)
 		const { reload, setController, fireControllerChange } = setupBrowser(registration)
@@ -270,8 +311,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 
 		applyUpdate()
 
-		expect(waiting.postMessage).toHaveBeenCalledTimes(1)
-		expect(waiting.postMessage).toHaveBeenCalledWith({ type: SW_SKIP_WAITING_MESSAGE })
+		expect(postedTypes(waiting)).toEqual([SW_SKIP_WAITING_MESSAGE])
 
 		fireControllerChange()
 		expect(reload).toHaveBeenCalledTimes(1)
@@ -282,7 +322,7 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 	})
 
 	it("ignoring the update prompt (no applyUpdate call) never reloads on a later controllerchange", async () => {
-		const waiting = fakeWorker("installed")
+		const waiting = fakeWorker("installed", "build-b")
 		const active = fakeWorker("activated")
 		const registration = fakeRegistration(waiting, null, active)
 		const { reload, setController, fireControllerChange } = setupBrowser(registration)
@@ -300,5 +340,103 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		fireControllerChange()
 
 		expect(reload).not.toHaveBeenCalled()
+	})
+
+	it("a worker of the page's own build installed beside an active one never prompts", async () => {
+		// A second registration of the same build (several tabs, a re-registered origin): same sw.js, so
+		// nothing to update to.
+		const registration = fakeRegistration()
+		const { setController } = setupBrowser(registration)
+		const onUpdateReady = vi.fn()
+
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(onUpdateReady)
+		await flush()
+
+		const installing = fakeWorker("installing")
+		const active = fakeWorker("activated", "build-b")
+
+		registration.installing = installing
+		registration.active = active
+		setController(active)
+		registration.dispatch("updatefound")
+
+		installing.state = "installed"
+		installing.dispatch("statechange")
+		await flush()
+
+		expect(onUpdateReady).not.toHaveBeenCalled()
+	})
+
+	it("a worker of the page's own build waiting beside an older active one takes over without a prompt or a reload", async () => {
+		// The tab reloaded into a new deploy while the old worker still controlled it.
+		const waiting = fakeWorker("installed")
+		const active = fakeWorker("activated", "build-b")
+		const registration = fakeRegistration(waiting, null, active)
+		const { reload, setController, fireControllerChange } = setupBrowser(registration)
+		const onUpdateReady = vi.fn()
+
+		setController(active)
+
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(onUpdateReady)
+		await flush()
+
+		expect(postedTypes(waiting)).toEqual([SW_SKIP_WAITING_MESSAGE])
+		expect(onUpdateReady).not.toHaveBeenCalled()
+
+		fireControllerChange()
+
+		expect(reload).not.toHaveBeenCalled()
+	})
+
+	it("a waiting worker that never answers the build query neither prompts nor takes over", async () => {
+		vi.useFakeTimers()
+
+		try {
+			const waiting = fakeWorker("installed", null)
+			const active = fakeWorker("activated")
+			const { setController } = setupBrowser(fakeRegistration(waiting, null, active))
+			const onUpdateReady = vi.fn()
+
+			setController(active)
+
+			const { registerSW } = await freshRegisterModule()
+
+			registerSW(onUpdateReady)
+			await vi.runAllTimersAsync()
+
+			expect(onUpdateReady).not.toHaveBeenCalled()
+			expect(postedTypes(waiting)).toEqual([])
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("a local build (no build id) never prompts for a worker of a local build", async () => {
+		vi.stubEnv("VITE_BUILD_ID", undefined)
+
+		const waiting = fakeWorker("installed", null)
+		const active = fakeWorker("activated")
+
+		waiting.postMessage.mockImplementation((message: { type: string }, ports?: FakePort[]) => {
+			if (message.type === SW_MSG_BUILD) {
+				ports?.[0]?.postMessage({ build: null })
+			}
+		})
+
+		const { setController } = setupBrowser(fakeRegistration(waiting, null, active))
+		const onUpdateReady = vi.fn()
+
+		setController(active)
+
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(onUpdateReady)
+		await flush()
+
+		expect(onUpdateReady).not.toHaveBeenCalled()
 	})
 })

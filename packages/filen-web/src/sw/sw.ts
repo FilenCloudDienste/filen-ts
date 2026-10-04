@@ -11,6 +11,7 @@ import initSdk, {
 import {
 	SW_PROTOCOL_VERSION,
 	SW_SKIP_WAITING_MESSAGE,
+	SW_MSG_BUILD,
 	SW_DOWNLOAD_PREFIX,
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_REGISTER_DOWNLOAD,
@@ -467,6 +468,11 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 	}
 
 	const port = event.ports[0] ?? null
+
+	if (type === SW_MSG_BUILD) {
+		port?.postMessage({ build: import.meta.env.VITE_BUILD_ID ?? null })
+		return
+	}
 
 	if (type === SW_MSG_WATCH_DOWNLOAD) {
 		const id = (event.data as { id: string }).id

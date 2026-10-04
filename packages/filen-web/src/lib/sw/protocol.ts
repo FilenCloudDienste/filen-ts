@@ -4,11 +4,16 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 9
+export const SW_PROTOCOL_VERSION = 10
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
 export const SW_SKIP_WAITING_MESSAGE = "SKIP_WAITING"
+
+// page → SW: answered on `event.ports[0]` with `{ build: string | null }`, the build the worker was
+// built from. Asked of a worker that is not (yet) the page's controller, which `/__sw/version` cannot
+// reach: the page's own fetches go to its controller.
+export const SW_MSG_BUILD = "FILEN_SW_BUILD"
 
 // ── Download route (SW-hosted trimmed SDK stream) ───────────────────────────────────────────────
 // Virtual URL the SW answers with a streamed, attachment-forced file download. The `<id>` is an
