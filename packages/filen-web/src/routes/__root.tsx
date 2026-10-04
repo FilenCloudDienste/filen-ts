@@ -21,6 +21,7 @@ import { DriveJobCancelDialog } from "@/features/transfers/components/driveJobCa
 import { ExtractPasswordDialog } from "@/features/transfers/components/extractPasswordDialog"
 import { JobReportDialog } from "@/features/transfers/components/jobReportDialog"
 import { allowNextUnload } from "@/lib/unloadGuard"
+import { guardStrayDrops } from "@/lib/dropGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 
 export const Route = createRootRoute({
@@ -113,6 +114,8 @@ function BootGate() {
 }
 
 function RootLayout() {
+	useEffect(guardStrayDrops, [])
+
 	return (
 		<QueryClientProvider client={queryClient}>
 			<ThemeProvider>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react"
+import { useRef, useState, type DragEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
 import { cn } from "@filen/shared"
@@ -28,10 +28,7 @@ export interface UploadDropzoneProps {
 // dragleave boolean: dragenter/dragleave bubble up from every descendant the cursor crosses, and a
 // naive boolean would flicker the highlight off each time it passes over a row inside the zone.
 //
-// A separate window-level guard below preventDefaults dragover/drop globally (not just inside this
-// zone) so a stray drop anywhere on the page can't make the browser navigate away to open the file.
-// Scoped to this component's own mount lifecycle, same as every other subscription effect in this
-// codebase (see themeProvider.tsx's storage listener) — added on mount, removed on unmount.
+// A drop outside every zone is cancelled page-wide by src/lib/dropGuard.ts, mounted at the root.
 export function UploadDropzone({ parentUuid, disabled: disabledProp, children }: UploadDropzoneProps) {
 	// Not a destructuring default, which the React Compiler cannot lower.
 	const disabled = disabledProp ?? false
@@ -43,20 +40,6 @@ export function UploadDropzone({ parentUuid, disabled: disabledProp, children }:
 	// entirely when it holds nothing but directories.
 	const [overStrip, setOverStrip] = useState(false)
 	const stripRef = useRef<HTMLDivElement>(null)
-
-	useEffect(() => {
-		const preventNavigation = (event: globalThis.DragEvent) => {
-			event.preventDefault()
-		}
-
-		window.addEventListener("dragover", preventNavigation)
-		window.addEventListener("drop", preventNavigation)
-
-		return () => {
-			window.removeEventListener("dragover", preventNavigation)
-			window.removeEventListener("drop", preventNavigation)
-		}
-	}, [])
 
 	// An INTERNAL move drag (a row/tile dragged within the drive — see dnd.ts) is never an upload: bow
 	// out entirely so no upload hint overlay shows and no drop starts an upload. The move drop targets
