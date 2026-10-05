@@ -4,6 +4,7 @@ import { ListMusicIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
 import { cn, type Playlist } from "@filen/shared"
 import { usePlaylistsQuery, type PlaylistEntry } from "@/features/audio/queries/playlists"
 import { resolveSelectedPlaylist } from "@/features/audio/lib/playlistSelection"
+import { usePlaylistSelection } from "@/features/audio/hooks/usePlaylistSelection"
 import { openPlaylistDialog } from "@/features/audio/store/usePlaylistDialogStore"
 import { PlaylistArtwork } from "@/features/audio/components/playlistArtwork"
 import { PlaylistMenuContent } from "@/features/audio/components/playlistMenu"
@@ -18,9 +19,9 @@ import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 
 // ContactsSidebar's nav-row idiom, grown to two lines for the thumbnail + meta. Keyed on aria-current
-// rather than TanStack's data-status: with no (or a stale) `playlist` param the view shows the first
-// playlist, which no Link's own search matches, so the row sets aria-current itself (Link only ever adds
-// the same value on an exact match).
+// rather than TanStack's data-status: with no (or a stale) `playlist` param the view shows the last
+// opened or first playlist, which no Link's own search matches, so the row sets aria-current itself (Link
+// only ever adds the same value on an exact match).
 const ROW_CLASS = cn(
 	"flex w-full items-center gap-2.5 rounded-xl px-1.5 py-1.5 text-sm focus-ring transition-colors outline-none app-region-no-drag",
 	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
@@ -38,8 +39,9 @@ export function PlaylistsSidebar() {
 	// Loose: the shell mounts this panel off the pathname, so it reads the param without asserting the
 	// match (the same render can still hold the previous route's).
 	const selectedParam = useSearch({ strict: false, select: search => search.playlist })
+	const selection = usePlaylistSelection(selectedParam)
 	const entries = playlistsQuery.data ?? []
-	const selectedUuid = resolveSelectedPlaylist(entries, selectedParam)?.uuid
+	const selectedUuid = selection.deciding ? undefined : resolveSelectedPlaylist(entries, selection.uuid)?.uuid
 
 	return (
 		<SidebarPanel>

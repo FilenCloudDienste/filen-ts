@@ -5,7 +5,7 @@ import { log } from "@/lib/log"
 
 // The last item opened per selection-keyed module, so the module's bare index route can reopen it —
 // across reloads too. kv is per account and wiped on logout.
-export type LastOpenedModule = "chats" | "notes"
+export type LastOpenedModule = "chats" | "notes" | "playlists"
 
 const lastOpenedSchema: Type<string | null> = type("string | null")
 
@@ -15,7 +15,8 @@ function lastOpenedPreference(module: LastOpenedModule): KvPreference<string | n
 
 const lastOpenedPreferences: Record<LastOpenedModule, KvPreference<string | null>> = {
 	chats: lastOpenedPreference("chats"),
-	notes: lastOpenedPreference("notes")
+	notes: lastOpenedPreference("notes"),
+	playlists: lastOpenedPreference("playlists")
 }
 
 // Session mirror of the stored values: after the first read (or any write) an index visit decides

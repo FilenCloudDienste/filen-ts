@@ -54,6 +54,16 @@ vi.mock("@/features/audio/lib/playlistPlayback", () => ({
 	startShuffledPlaylist: vi.fn()
 }))
 
+// The remembered playlist, controlled per test: null is "nothing remembered", undefined "still reading".
+const { lastOpened } = vi.hoisted(() => ({
+	lastOpened: { stored: null as string | null | undefined, remember: vi.fn<(module: string, uuid: string) => void>() }
+}))
+
+vi.mock("@/features/shell/lib/lastOpened", () => ({
+	useLastOpened: () => lastOpened.stored,
+	rememberLastOpened: lastOpened.remember
+}))
+
 // Persisted track tags are read from kv through the storage leader; a map stands in for it.
 const { fakeKv } = vi.hoisted(() => ({ fakeKv: new Map<string, string>() }))
 
@@ -171,6 +181,7 @@ afterEach(() => {
 	useAudioStore.setState({ queue: [], currentIndex: 0 })
 	resetTrackTags()
 	fakeKv.clear()
+	lastOpened.stored = null
 })
 
 const TWO: PlaylistEntry[] = [
@@ -227,6 +238,47 @@ describe("playlists split view", () => {
 		expect(within(pane).getByRole("button", { name: "Highway.flac" })).toBeTruthy()
 		expect(within(pane).getByRole("button", { name: "Outro.mp3" })).toBeTruthy()
 		expect(screen.getByRole("link", { name: /^Focus/ }).getAttribute("aria-current")).toBe("page")
+	})
+
+	// The rail links here bare, and a reload of the bare route lands here too.
+	it("reopens the playlist shown last when no param is given", () => {
+		lastOpened.stored = "p2"
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+
+		renderSplitView()
+
+		expect(screen.getByRole("heading", { level: 1, name: "Focus" })).toBeTruthy()
+		expect(screen.getByRole("link", { name: /^Focus/ }).getAttribute("aria-current")).toBe("page")
+	})
+
+	it("falls back to the first playlist when the one shown last is gone", () => {
+		lastOpened.stored = "deleted"
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+
+		renderSplitView()
+
+		expect(screen.getByRole("heading", { level: 1, name: "Road trip" })).toBeTruthy()
+		expect(lastOpened.remember).toHaveBeenCalledWith("playlists", "p1")
+	})
+
+	it("remembers the playlist it shows", () => {
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+
+		renderSplitView("p2")
+
+		expect(lastOpened.remember).toHaveBeenCalledWith("playlists", "p2")
+	})
+
+	// Neither the first playlist nor a remembered one is shown, or remembered, before the choice is known.
+	it("waits for the remembered playlist before showing any", () => {
+		lastOpened.stored = undefined
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+
+		renderSplitView()
+
+		expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+		expect(screen.getByRole("link", { name: /^Road trip/ }).getAttribute("aria-current")).toBeNull()
+		expect(lastOpened.remember).not.toHaveBeenCalled()
 	})
 
 	it("falls back to the first playlist for a stale param", () => {

@@ -1,7 +1,10 @@
+import { useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { ListMusicIcon, PlusIcon } from "lucide-react"
 import { usePlaylistsQuery } from "@/features/audio/queries/playlists"
 import { resolveSelectedPlaylist } from "@/features/audio/lib/playlistSelection"
+import { usePlaylistSelection } from "@/features/audio/hooks/usePlaylistSelection"
+import { rememberLastOpened } from "@/features/shell/lib/lastOpened"
 import { openPlaylistDialog } from "@/features/audio/store/usePlaylistDialogStore"
 import { PlaylistPane } from "@/features/audio/components/playlistPane"
 import { PlaylistDialogsHost } from "@/features/audio/components/playlistDialogsHost"
@@ -13,16 +16,25 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyCont
 
 // The main pane of the /playlists split view; the list is the shell's PlaylistsSidebar. `selectedUuid`
 // is the route's raw `playlist` param, resolved here exactly as the sidebar resolves its highlight
-// (resolveSelectedPlaylist) — both read the one playlists query, so neither costs a request.
+// (usePlaylistSelection, then resolveSelectedPlaylist) — both read the one playlists query, so neither
+// costs a request. The playlist shown becomes the one a bare /playlists reopens.
 export function PlaylistsScreen({ selectedUuid }: { selectedUuid: string | undefined }) {
 	const { t } = useTranslation("audio")
 	const isOnline = useIsOnline()
 	const playlistsQuery = usePlaylistsQuery()
-	const playlist = resolveSelectedPlaylist(playlistsQuery.data ?? [], selectedUuid)
+	const selection = usePlaylistSelection(selectedUuid)
+	const playlist = resolveSelectedPlaylist(playlistsQuery.data ?? [], selection.uuid)
+	const shownUuid = selection.deciding ? undefined : playlist?.uuid
+
+	useEffect(() => {
+		if (shownUuid !== undefined) {
+			rememberLastOpened("playlists", shownUuid)
+		}
+	}, [shownUuid])
 
 	return (
 		<>
-			{playlistsQuery.status === "pending" ? (
+			{playlistsQuery.status === "pending" || selection.deciding ? (
 				<LoadingState size="lg" />
 			) : playlistsQuery.status === "error" ? (
 				<p className="px-4 py-10 text-center text-sm text-destructive">{errorLabel(playlistsQuery.error)}</p>
