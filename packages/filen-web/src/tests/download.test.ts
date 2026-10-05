@@ -19,10 +19,11 @@ const { downloadFileToWriter, cancelTransfer, toStringified } = vi.hoisted(() =>
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadFileToWriter, cancelTransfer, toStringified } }))
 
-const { saveDownloadMock, isPickerCancelledMock, triggerSwDownloadMock } = vi.hoisted(() => ({
+const { saveDownloadMock, isPickerCancelledMock, triggerSwDownloadMock, saveBlobMock } = vi.hoisted(() => ({
 	saveDownloadMock: vi.fn(),
 	isPickerCancelledMock: vi.fn(),
-	triggerSwDownloadMock: vi.fn()
+	triggerSwDownloadMock: vi.fn(),
+	saveBlobMock: vi.fn()
 }))
 
 // The real pipeToPickedFile runs; only the picking and the service-worker hand-off are faked.
@@ -30,7 +31,8 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()),
 	saveDownload: saveDownloadMock,
 	isPickerCancelled: isPickerCancelledMock,
-	triggerSwDownload: triggerSwDownloadMock
+	triggerSwDownload: triggerSwDownloadMock,
+	saveBlob: saveBlobMock
 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -60,6 +62,7 @@ import {
 	type RunDownloadDeps
 } from "@/features/drive/lib/download"
 import { useTransfersStore, type Transfer, type TerminalStatus } from "@/features/transfers/store/useTransfersStore"
+import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 
 const PARENT_UUID = "22222222-2222-2222-2222-222222222222" as UuidStr
 let uuidCounter = 0
@@ -427,6 +430,66 @@ describe("defaultDownloadDeps.download — sw branch", () => {
 
 		expect(triggerSwDownloadMock).toHaveBeenCalledWith(file, save, "transfer-id", expect.any(Function))
 		expect(downloadFileToWriter).not.toHaveBeenCalled()
+	})
+})
+
+// A file the open preview holds whole is saved from those bytes, never fetched again.
+describe("defaultDownloadDeps.download — bytes the preview already holds", () => {
+	afterEach(() => {
+		clearPreviewCache()
+	})
+
+	async function held(file: AnyFile): Promise<Uint8Array> {
+		const bytes = new Uint8Array([4, 5, 6])
+
+		await loadPreviewBytes("authed", file.uuid, bytes.length, () => Promise.resolve(bytes))
+
+		return bytes
+	}
+
+	it("writes them to the picked file", async () => {
+		const file = testFile()
+		const bytes = await held(file)
+		const write = vi.fn(() => Promise.resolve())
+		const save: FsaSaveTarget = { kind: "fsa", handle: fsaHandle(), writable: Object.assign(fsaWritable(), { write }) }
+		const onProgress = vi.fn()
+
+		await defaultDownloadDeps.download(file, "transfer-id", save, onProgress)
+
+		expect(write).toHaveBeenCalledWith(bytes)
+		expect(onProgress).toHaveBeenCalledWith(3n)
+		expect(downloadFileToWriter).not.toHaveBeenCalled()
+	})
+
+	it("saves them as a blob where there is no picker, without the service worker", async () => {
+		const file = testFile()
+
+		await held(file)
+		await defaultDownloadDeps.download(
+			file,
+			"transfer-id",
+			{ kind: "sw", id: "id-1", url: "/sw/download/id-1", name: "a.txt" },
+			vi.fn()
+		)
+
+		expect(saveBlobMock).toHaveBeenCalledWith(expect.any(Blob), "a.txt")
+		expect(triggerSwDownloadMock).not.toHaveBeenCalled()
+	})
+
+	it("discards the picked file when the write fails", async () => {
+		const file = testFile()
+
+		await held(file)
+
+		const remove = vi.fn(() => Promise.resolve())
+		const save: FsaSaveTarget = {
+			kind: "fsa",
+			handle: fsaHandle(remove),
+			writable: Object.assign(fsaWritable(), { write: () => Promise.reject(new Error("disk full")) })
+		}
+
+		await expect(defaultDownloadDeps.download(file, "transfer-id", save, vi.fn())).rejects.toThrow("disk full")
+		expect(remove).toHaveBeenCalled()
 	})
 })
 

@@ -16,7 +16,9 @@ const { downloadLinkedDirToZipAnon, downloadLinkedFileBytesAnon, createObjectURL
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadLinkedDirToZipAnon, downloadLinkedFileBytesAnon } }))
-vi.mock("@/features/drive/lib/saveDownload", () => ({
+// The real anchor save runs; only the capability and the picker are faked.
+vi.mock("@/features/drive/lib/saveDownload", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/lib/saveDownload")>()),
 	isFsaAvailable: () => false,
 	isPickerCancelled: () => false,
 	pickFsaTarget: vi.fn()

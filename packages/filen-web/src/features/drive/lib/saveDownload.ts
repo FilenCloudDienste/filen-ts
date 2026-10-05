@@ -71,6 +71,30 @@ export async function discardPickedFile(target: FsaSaveTarget): Promise<void> {
 	await target.handle.remove?.().catch(() => undefined)
 }
 
+// Saves a fully-buffered blob via a transient anchor. The object URL is revoked after a delay so the
+// browser has grabbed the download before it is released (an immediate revoke cancels the save in some
+// browsers).
+export function saveBlob(blob: Blob, name: string): void {
+	const url = URL.createObjectURL(blob)
+	const anchor = document.createElement("a")
+
+	anchor.href = url
+	anchor.download = name
+	document.body.appendChild(anchor)
+	anchor.click()
+	anchor.remove()
+
+	setTimeout(() => {
+		URL.revokeObjectURL(url)
+	}, 10_000)
+}
+
+// Writes a buffer already in memory to the picked file. The buffer is only read, never detached.
+export async function writeBytesToPickedFile(target: FsaSaveTarget, bytes: Uint8Array): Promise<void> {
+	await target.writable.write(bytes as Uint8Array<ArrayBuffer>)
+	await target.writable.close()
+}
+
 // Streams a worker's output into the picked file, discarding the file if the stream fails.
 export async function pipeToPickedFile(
 	target: FsaSaveTarget,

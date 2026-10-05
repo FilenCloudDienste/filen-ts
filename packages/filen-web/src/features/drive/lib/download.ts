@@ -11,9 +11,14 @@ import {
 	triggerSwDownload,
 	isPickerCancelled,
 	pipeToPickedFile,
+	discardPickedFile,
+	saveBlob,
+	writeBytesToPickedFile,
 	type SaveTarget,
 	type FsaSaveTarget
 } from "@/features/drive/lib/saveDownload"
+import { previewCacheScope } from "@/features/preview/lib/accessMode"
+import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import { useTransfersStore, type TransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure, toastDownloadFailed, type DownloadOutcome } from "@/features/transfers/lib/settle"
 import { startZipDownload } from "@/features/drive/lib/downloadZip"
@@ -118,17 +123,44 @@ function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget, 
 	return pipeToPickedFile(save, transferred => sdkApi.downloadFileToWriter(file, transferId, transferred, Comlink.proxy(onProgress)))
 }
 
-// The real wiring behind RunDownloadDeps.download: branches on SaveTarget.kind, applying
-// Comlink.transfer/Comlink.proxy on the fsa branch (mirrors defaultUploadDeps' Comlink.proxy wrap). The
-// sw branch settles on the service worker's own report of the stream, progress included
-// (saveDownload.ts's triggerSwDownload).
+// Saves a file the preview overlay already holds whole instead of downloading it again: everything it
+// shows from a buffer (documents, text, PDFs, spreadsheets, HEIC). Streamed video, audio and images are
+// never held, so they always download. Read when the download starts, so a preview closed meanwhile
+// (which clears its cache) just means a normal download.
+async function saveHeldBytes(bytes: Uint8Array, save: SaveTarget, onProgress: (bytes: bigint) => void): Promise<void> {
+	if (save.kind === "fsa") {
+		try {
+			await writeBytesToPickedFile(save, bytes)
+		} catch (e) {
+			await discardPickedFile(save)
+
+			throw e
+		}
+	} else {
+		saveBlob(new Blob([bytes as Uint8Array<ArrayBuffer>]), save.name)
+	}
+
+	onProgress(BigInt(bytes.byteLength))
+}
+
+// The real wiring behind RunDownloadDeps.download: bytes the preview already holds first, else branches
+// on SaveTarget.kind, applying Comlink.transfer/Comlink.proxy on the fsa branch (mirrors
+// defaultUploadDeps' Comlink.proxy wrap). The sw branch settles on the service worker's own report of
+// the stream, progress included (saveDownload.ts's triggerSwDownload).
 export const defaultDownloadDeps: RunDownloadDeps = {
-	download: (file, transferId, save, onProgress) =>
-		save.kind === "fsa"
+	download: (file, transferId, save, onProgress) => {
+		const held = getPreviewBytes(previewCacheScope("authed", undefined), file.uuid)
+
+		if (held !== undefined) {
+			return saveHeldBytes(held, save, onProgress)
+		}
+
+		return save.kind === "fsa"
 			? downloadViaFsa(file, transferId, save, onProgress)
 			: triggerSwDownload(file, save, transferId, bytes => {
 					onProgress(BigInt(bytes))
-				}),
+				})
+	},
 	cancel: transferId => {
 		void sdkApi.cancelTransfer(transferId)
 	},

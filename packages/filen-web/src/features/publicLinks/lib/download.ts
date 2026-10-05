@@ -3,7 +3,15 @@ import type { AnyFile, AnyLinkedDirWithContext } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
-import { discardPickedFile, isFsaAvailable, isPickerCancelled, pickFsaTarget, type FsaSaveTarget } from "@/features/drive/lib/saveDownload"
+import {
+	discardPickedFile,
+	isFsaAvailable,
+	isPickerCancelled,
+	pickFsaTarget,
+	saveBlob,
+	writeBytesToPickedFile,
+	type FsaSaveTarget
+} from "@/features/drive/lib/saveDownload"
 import { chooseDownloadStrategy, createCollectingSink, type CollectingSink } from "@/features/publicLinks/lib/download.logic"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
 import { joinPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
@@ -22,24 +30,6 @@ export type AnonDownloadProgress = (loaded: number, total: number | null) => voi
 export type AnonDownloadOutcome =
 	{ status: "success" } | { status: "cancelled" } | { status: "too-large" } | { status: "error"; dto: ErrorDTO }
 
-// Saves a fully-buffered blob via a transient anchor. The object URL is revoked after a delay so the
-// browser has grabbed the download before it is released (an immediate revoke cancels the save in some
-// browsers).
-function saveBlob(blob: Blob, name: string): void {
-	const url = URL.createObjectURL(blob)
-	const anchor = document.createElement("a")
-
-	anchor.href = url
-	anchor.download = name
-	document.body.appendChild(anchor)
-	anchor.click()
-	anchor.remove()
-
-	setTimeout(() => {
-		URL.revokeObjectURL(url)
-	}, 10_000)
-}
-
 // Picks an FSA file off the calling user gesture. MUST be the first awaited call in a handler
 // (showSaveFilePicker has to run synchronously off the gesture) — callers invoke the start* functions
 // directly from the click handler, and this is their first step. Returns null when the user dismisses
@@ -55,12 +45,6 @@ async function pickFsaFile(suggestedName: string): Promise<FsaSaveTarget | null>
 
 		throw e
 	}
-}
-
-// Writes a buffer already in memory to the picked file.
-async function writeBytes(writable: FileSystemWritableFileStream, bytes: Uint8Array): Promise<void> {
-	await writable.write(bytes as Uint8Array<ArrayBuffer>)
-	await writable.close()
 }
 
 // Single linked file → disk. FSA path streams; the buffered fallback refuses a file over the in-memory
@@ -110,7 +94,7 @@ export async function startAnonFileDownload(args: {
 
 		if (previewed !== undefined) {
 			if (target !== null) {
-				await writeBytes(target.writable, previewed)
+				await writeBytesToPickedFile(target, previewed)
 			} else {
 				saveBlob(new Blob([previewed as BlobPart]), name)
 			}
