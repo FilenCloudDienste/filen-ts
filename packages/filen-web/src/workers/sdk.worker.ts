@@ -372,6 +372,14 @@ function extractJobOptions(
 // rather than borrowing that one.
 const previewAborts = new Map<string, AbortController>()
 
+interface PreviewProgress {
+	received: number
+	total: number
+}
+
+// The whole-buffer reads' progress under the same token, for cancelPreviewDownloadIfEarly.
+const previewProgress = new Map<string, PreviewProgress>()
+
 // A RAW's embedded preview, collected in this worker and handed back as one Blob — structured-cloning
 // a Blob hands over a handle, not a byte copy. Registered under the caller's preview token like the
 // whole-buffer reads, so cancelPreviewDownload aborts it through the SDK's own ManagedFuture.
@@ -416,13 +424,15 @@ function armThumbSweep(): void {
 	})
 }
 
-// One range of a file's decrypted bytes, written straight into a buffer of the known size.
+// One range of a file's decrypted bytes, written straight into a buffer of the known size. `progress`
+// tracks how much has landed, for a caller that decides on it whether a cancel is still worth it.
 async function readFileRange(
 	c: Pick<Client, "downloadFileToWriter">,
 	file: AnyFile,
 	start: number,
 	end: number,
-	signal: AbortSignal
+	signal: AbortSignal,
+	progress?: PreviewProgress
 ): Promise<Uint8Array> {
 	const out = new Uint8Array(end - start)
 	let offset = 0
@@ -434,6 +444,10 @@ async function readFileRange(
 
 			out.set(chunk, offset)
 			offset += chunk.length
+
+			if (progress !== undefined) {
+				progress.received = offset
+			}
 		}
 	})
 
@@ -1418,17 +1432,32 @@ const api = {
 	async downloadFileBytes(file: AnyFile, previewToken: string): Promise<Uint8Array> {
 		const c = requireClient()
 		const controller = new AbortController()
+		const progress: PreviewProgress = { received: 0, total: Number(file.size) }
 		previewAborts.set(previewToken, controller)
+		previewProgress.set(previewToken, progress)
 		try {
-			const bytes = await readFileRange(c, file, 0, Number(file.size), controller.signal)
+			const bytes = await readFileRange(c, file, 0, progress.total, controller.signal, progress)
 			return Comlink.transfer(bytes, [bytes.buffer])
 		} finally {
 			previewAborts.delete(previewToken)
+			previewProgress.delete(previewToken)
 		}
 	},
 	// Aborts an in-flight preview download by its token; a no-op once the download has settled (the
 	// controller is already evicted). Mirrors cancelTransfer.
 	cancelPreviewDownload(previewToken: string): void {
+		previewAborts.get(previewToken)?.abort()
+	},
+	// cancelPreviewDownload for a caller that would rather finish a download already past `maxFraction`
+	// of its bytes than throw them away (a thumbnail whose cell scrolled off: its result is cached for
+	// the next visit).
+	cancelPreviewDownloadIfEarly(previewToken: string, maxFraction: number): void {
+		const progress = previewProgress.get(previewToken)
+
+		if (progress !== undefined && progress.received >= progress.total * maxFraction) {
+			return
+		}
+
 		previewAborts.get(previewToken)?.abort()
 	},
 	// A camera RAW's preview: the JPEG embedded in the container, extracted by the SDK from the ranges

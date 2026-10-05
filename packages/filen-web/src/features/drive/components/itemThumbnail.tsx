@@ -8,17 +8,25 @@ import { cn, dirColorHex } from "@filen/shared"
 // The item's thumbnail when the service has one, else its icon. A leaf of its own so a late thumbnail
 // resolve re-renders only this, never the row/tile around it. useThumbnail already yields null for a
 // directory, so callers need no gating.
+//
+// While the service is still answering, the icon waits a beat before fading in: a thumbnail read back
+// from disk lands within a frame or two and then replaces an empty tile instead of flashing the icon,
+// while one that has to be generated still shows the icon in the meantime. A thumbnail that arrives
+// late fades in; one already cached paints on the first frame with no animation. Both are CSS only, so
+// neither costs a render.
 export function ItemThumbnail({ item, imgClassName, iconClassName }: { item: DriveItem; imgClassName: string; iconClassName: string }) {
 	const thumbUrl = useThumbnail(item)
+	// Whether this mount had to wait for its thumbnail.
+	const [waited] = useState(thumbUrl === undefined)
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount. Never reset
 	// back to false: this mount already gave up on this uuid.
 	const [thumbFailed, setThumbFailed] = useState(false)
 
-	if (thumbUrl === null || thumbFailed) {
+	if (typeof thumbUrl !== "string" || thumbFailed) {
 		return (
 			<ItemIcon
 				item={item}
-				className={iconClassName}
+				className={cn(iconClassName, thumbUrl === undefined && !thumbFailed && "animate-in delay-150 fill-mode-backwards fade-in")}
 			/>
 		)
 	}
@@ -29,7 +37,7 @@ export function ItemThumbnail({ item, imgClassName, iconClassName }: { item: Dri
 			alt=""
 			draggable={false}
 			decoding="async"
-			className={imgClassName}
+			className={cn(imgClassName, waited && "animate-in fade-in")}
 			onError={() => {
 				invalidateThumbnail(item.data.uuid)
 				setThumbFailed(true)
@@ -54,7 +62,9 @@ export function ItemHeroTile({ item, className, iconClassName }: { item: DriveIt
 			)}
 			style={isDirectory ? { backgroundColor: `color-mix(in srgb, ${dirHex} 16%, transparent)` } : undefined}
 		>
+			{/* Keyed: the dialog's item can rotate its uuid while open, and the per-mount state must not carry over. */}
 			<ItemThumbnail
+				key={item.data.uuid}
 				item={item}
 				imgClassName="size-full object-cover"
 				iconClassName={iconClassName}

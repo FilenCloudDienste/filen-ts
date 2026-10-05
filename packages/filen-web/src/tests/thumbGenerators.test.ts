@@ -11,6 +11,11 @@ import {
 } from "@/features/drive/lib/thumbnails.logic"
 import type { SdkThumbnailResult } from "@/workers/sdk.worker"
 
+// The signal of a generation some cell still wants.
+function live(): AbortSignal {
+	return new AbortController().signal
+}
+
 // Mock boundaries: registerThumbGenerator/seedThumbnail are replaced so this file's module-scope
 // registration (a side effect under test) never touches the real service's Map, and so the upload
 // warm can be observed without driving a real generation. The sdk client, download narrowing and the
@@ -31,8 +36,9 @@ vi.mock("@/features/drive/lib/thumbnails", () => ({
 	withGenerationSlot: withGenerationSlotMock
 }))
 
-const { downloadFileBytesMock, makeSdkThumbnailMock, makeSdkThumbnailFromFileMock } = vi.hoisted(() => ({
+const { downloadFileBytesMock, cancelPreviewDownloadIfEarlyMock, makeSdkThumbnailMock, makeSdkThumbnailFromFileMock } = vi.hoisted(() => ({
 	downloadFileBytesMock: vi.fn<(file: unknown, token: string) => Promise<Uint8Array>>(),
+	cancelPreviewDownloadIfEarlyMock: vi.fn<(token: string, maxFraction: number) => void>(),
 	makeSdkThumbnailMock:
 		vi.fn<(file: unknown, maxWidth: number, maxHeight: number, lossyQuality: number) => Promise<SdkThumbnailResult>>(),
 	makeSdkThumbnailFromFileMock:
@@ -42,6 +48,7 @@ const { downloadFileBytesMock, makeSdkThumbnailMock, makeSdkThumbnailFromFileMoc
 vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
 		downloadFileBytes: downloadFileBytesMock,
+		cancelPreviewDownloadIfEarly: cancelPreviewDownloadIfEarlyMock,
 		makeSdkThumbnail: makeSdkThumbnailMock,
 		makeSdkThumbnailFromFile: makeSdkThumbnailFromFileMock
 	}
@@ -64,6 +71,12 @@ vi.mock("@/features/preview/lib/previewStream", () => ({
 const { allowedMediaContentTypeMock } = vi.hoisted(() => ({ allowedMediaContentTypeMock: vi.fn<(item: DriveItem) => string | null>() }))
 
 vi.mock("@/features/preview/lib/mediaType", () => ({ allowedMediaContentType: allowedMediaContentTypeMock }))
+
+const { getPreviewBytesMock } = vi.hoisted(() => ({
+	getPreviewBytesMock: vi.fn<(scope: string | null, uuid: string) => Uint8Array | undefined>()
+}))
+
+vi.mock("@/features/preview/lib/previewCache", () => ({ getPreviewBytes: getPreviewBytesMock }))
 
 // A stand-in pdf.js whose documents fail to open, which is all the worker-sharing branch needs: the
 // worker handed to getDocument and each task's teardown are observable without a DOM.
@@ -168,6 +181,7 @@ function pdfItem(): BaseFileItem {
 beforeEach(() => {
 	vi.clearAllMocks()
 	narrowToAnyFileMock.mockImplementation((item: BaseFileItem) => item.data)
+	getPreviewBytesMock.mockReturnValue(undefined)
 })
 
 describe("registration", () => {
@@ -193,7 +207,7 @@ describe("generateSdkThumb", () => {
 			fromEmbeddedPreview: true
 		})
 
-		await generateSdkThumb(item)
+		await generateSdkThumb(item, live())
 
 		expect(makeSdkThumbnailMock).toHaveBeenCalledWith(item.data, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 		expect(downloadFileBytesMock).not.toHaveBeenCalled()
@@ -208,7 +222,7 @@ describe("generateSdkThumb", () => {
 			fromEmbeddedPreview: false
 		})
 
-		await expect(generateSdkThumb(imageItem())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([9, 9]) })
+		await expect(generateSdkThumb(imageItem(), live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([9, 9]) })
 	})
 
 	it("routes a camera RAW through the same call — there is no separate RAW path", async () => {
@@ -221,7 +235,7 @@ describe("generateSdkThumb", () => {
 			fromEmbeddedPreview: true
 		})
 
-		await expect(generateSdkThumb(item)).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([7]) })
+		await expect(generateSdkThumb(item, live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([7]) })
 		expect(makeSdkThumbnailMock).toHaveBeenCalledWith(item.data, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 	})
 
@@ -230,13 +244,13 @@ describe("generateSdkThumb", () => {
 	it.each(["unsupported", "overBudget"] as const)("maps a %s verdict to an 'unavailable' result", async type => {
 		makeSdkThumbnailMock.mockResolvedValue({ type })
 
-		await expect(generateSdkThumb(imageItem())).resolves.toEqual({ type: "unavailable", reason: type })
+		await expect(generateSdkThumb(imageItem(), live())).resolves.toEqual({ type: "unavailable", reason: type })
 	})
 
 	it("maps a corrupt verdict to an 'unavailable' result, dropping the message", async () => {
 		makeSdkThumbnailMock.mockResolvedValue({ type: "corrupt", message: "truncated JPEG scan" })
 
-		await expect(generateSdkThumb(imageItem())).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
+		await expect(generateSdkThumb(imageItem(), live())).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
 	})
 
 	// A zero-length buffer claiming to be a thumbnail is a bug somewhere, not a verdict about the file
@@ -250,13 +264,13 @@ describe("generateSdkThumb", () => {
 			fromEmbeddedPreview: false
 		})
 
-		await expect(generateSdkThumb(imageItem())).resolves.toEqual({ type: "failed" })
+		await expect(generateSdkThumb(imageItem(), live())).resolves.toEqual({ type: "failed" })
 	})
 
 	it("treats a rejected call (dead worker, no client, dropped read) as a transient failure", async () => {
 		makeSdkThumbnailMock.mockRejectedValue(new Error("no authenticated client"))
 
-		await expect(generateSdkThumb(imageItem())).resolves.toEqual({ type: "failed" })
+		await expect(generateSdkThumb(imageItem(), live())).resolves.toEqual({ type: "failed" })
 	})
 })
 
@@ -527,7 +541,7 @@ describe("generateSvgThumb", () => {
 	it("fails, counting toward the blacklist, when the download fails", async () => {
 		downloadFileBytesMock.mockRejectedValue(new Error("network"))
 
-		await expect(generateSvgThumb(itemAsBaseFile(narrowItem(namedFile("logo.svg", "image/svg+xml"))))).resolves.toEqual({
+		await expect(generateSvgThumb(itemAsBaseFile(narrowItem(namedFile("logo.svg", "image/svg+xml"))), live())).resolves.toEqual({
 			type: "failed"
 		})
 	})
@@ -537,7 +551,7 @@ describe("generateVideoThumb — early gates (no DOM element ever created)", () 
 	it("fails without calling previewStreamUrl when no worker will ever control the tab", async () => {
 		waitForMediaStreamMock.mockResolvedValue(false)
 
-		await expect(generateVideoThumb(videoItem())).resolves.toEqual({ type: "failed" })
+		await expect(generateVideoThumb(videoItem(), live())).resolves.toEqual({ type: "failed" })
 		expect(previewStreamUrlMock).not.toHaveBeenCalled()
 	})
 
@@ -545,7 +559,7 @@ describe("generateVideoThumb — early gates (no DOM element ever created)", () 
 		waitForMediaStreamMock.mockResolvedValue(true)
 		allowedMediaContentTypeMock.mockReturnValue(null)
 
-		await expect(generateVideoThumb(videoItem())).resolves.toEqual({ type: "failed" })
+		await expect(generateVideoThumb(videoItem(), live())).resolves.toEqual({ type: "failed" })
 		expect(previewStreamUrlMock).not.toHaveBeenCalled()
 	})
 
@@ -554,7 +568,7 @@ describe("generateVideoThumb — early gates (no DOM element ever created)", () 
 		allowedMediaContentTypeMock.mockReturnValue("video/mp4")
 		previewStreamUrlMock.mockRejectedValue(new Error("registration failed"))
 
-		await expect(generateVideoThumb(videoItem())).resolves.toEqual({ type: "failed" })
+		await expect(generateVideoThumb(videoItem(), live())).resolves.toEqual({ type: "failed" })
 	})
 })
 
@@ -562,7 +576,52 @@ describe("generatePdfThumb", () => {
 	it("fails and never imports pdf.js when the download fails", async () => {
 		downloadFileBytesMock.mockRejectedValue(new Error("network"))
 
-		await expect(generatePdfThumb(pdfItem())).resolves.toEqual({ type: "failed" })
+		await expect(generatePdfThumb(pdfItem(), live())).resolves.toEqual({ type: "failed" })
+	})
+})
+
+describe("whole-file generators — stopping and reuse", () => {
+	// Past half its bytes a download finishes anyway; the worker makes that call, against the token.
+	it("asks the worker to stop an early download once nobody wants the thumbnail", async () => {
+		const download = Promise.withResolvers<Uint8Array>()
+		const controller = new AbortController()
+
+		downloadFileBytesMock.mockReturnValue(download.promise)
+
+		const attempt = generatePdfThumb(pdfItem(), controller.signal)
+
+		controller.abort()
+
+		const token = downloadFileBytesMock.mock.calls[0]?.[1]
+
+		expect(cancelPreviewDownloadIfEarlyMock).toHaveBeenCalledWith(token, 0.5)
+		download.reject(new Error("aborted"))
+		await expect(attempt).resolves.toEqual({ type: "failed" })
+	})
+
+	it("never starts a download for a generation already unwanted", async () => {
+		const controller = new AbortController()
+
+		controller.abort()
+
+		await expect(generatePdfThumb(pdfItem(), controller.signal)).resolves.toEqual({ type: "failed" })
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+	})
+
+	it("uses the bytes a preview already holds instead of downloading", async () => {
+		const held = new Uint8Array([1, 2, 3])
+
+		getPreviewBytesMock.mockReturnValue(held)
+		getDocumentMock.mockImplementation(() => ({ promise: Promise.reject(new Error("broken pdf")), destroy: taskDestroyMock }))
+
+		await generatePdfThumb(pdfItem(), live())
+
+		const data = (getDocumentMock.mock.calls[0]?.[0] as { data: Uint8Array }).data
+
+		expect(downloadFileBytesMock).not.toHaveBeenCalled()
+		// pdf.js transfers what it is handed: the preview's buffer must stay intact.
+		expect(data).toEqual(held)
+		expect(data).not.toBe(held)
 	})
 })
 
@@ -573,8 +632,8 @@ describe("generatePdfThumb worker", () => {
 	})
 
 	it("hands every generation the same pdf.js worker, and each task tears down only its own document", async () => {
-		await expect(generatePdfThumb(pdfItem())).resolves.toEqual({ type: "failed" })
-		await expect(generatePdfThumb(pdfItem())).resolves.toEqual({ type: "failed" })
+		await expect(generatePdfThumb(pdfItem(), live())).resolves.toEqual({ type: "failed" })
+		await expect(generatePdfThumb(pdfItem(), live())).resolves.toEqual({ type: "failed" })
 
 		const workers = getDocumentMock.mock.calls.map(([params]) => (params as { worker: unknown }).worker)
 

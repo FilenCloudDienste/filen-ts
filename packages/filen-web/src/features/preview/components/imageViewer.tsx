@@ -259,23 +259,25 @@ function RawThumbnailFallback({ item, alt }: { item: DriveItem; alt: string }) {
 			return
 		}
 
-		let live = true
+		// Closing the preview withdraws this interest like an unmounted tile does, so a generation nothing
+		// shows any more is not kept alive by it.
+		const controller = new AbortController()
 
-		getThumbnailUrl(item).then(
+		getThumbnailUrl(item, undefined, controller.signal).then(
 			url => {
-				if (live) {
+				if (!controller.signal.aborted) {
 					setState({ status: "done", url })
 				}
 			},
 			() => {
-				if (live) {
+				if (!controller.signal.aborted) {
 					setState({ status: "done", url: null })
 				}
 			}
 		)
 
 		return () => {
-			live = false
+			controller.abort()
 		}
 	}, [item, accessMode])
 

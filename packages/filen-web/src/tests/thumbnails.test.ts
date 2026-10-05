@@ -147,7 +147,7 @@ function deferredCalls<TResult>(): {
 }
 
 async function flushMicrotasks(): Promise<void> {
-	for (let i = 0; i < 5; i++) {
+	for (let i = 0; i < 20; i++) {
 		await Promise.resolve()
 	}
 }
@@ -188,7 +188,8 @@ describe("getThumbnailUrl — objectURL cache", () => {
 
 		expect(first).not.toBeNull()
 		expect(second).toBe(first)
-		expect(deps.readThumbnailBlob).toHaveBeenCalledTimes(1)
+		// The cache miss, then the read-back of the stored file.
+		expect(deps.readThumbnailBlob).toHaveBeenCalledTimes(2)
 		expect(generator).toHaveBeenCalledTimes(1)
 	})
 })
@@ -241,7 +242,7 @@ describe("getThumbnailUrl — routing by category", () => {
 
 		expect(url).not.toBeNull()
 		expect(deps.getGenerator).toHaveBeenCalledWith("sdk")
-		expect(generator).toHaveBeenCalledWith(item)
+		expect(generator).toHaveBeenCalledWith(item, expect.any(AbortSignal))
 	})
 
 	// HEIC has no arm of its own any more — it is a still image, so it is the SDK's, like every other.
@@ -254,7 +255,7 @@ describe("getThumbnailUrl — routing by category", () => {
 
 		expect(url).not.toBeNull()
 		expect(deps.getGenerator).toHaveBeenCalledWith("sdk")
-		expect(generator).toHaveBeenCalledWith(item)
+		expect(generator).toHaveBeenCalledWith(item, expect.any(AbortSignal))
 	})
 
 	it("persists a generated result through storeThumbnail", async () => {
@@ -506,7 +507,8 @@ describe("seedThumbnail", () => {
 
 		expect(url).not.toBeNull()
 		expect(generator).not.toHaveBeenCalled()
-		expect(deps.readThumbnailBlob).not.toHaveBeenCalled()
+		// Only the read-back of the stored file, never generate()'s cache read.
+		expect(deps.readThumbnailBlob).toHaveBeenCalledTimes(1)
 	})
 
 	// "none" is the production's own answer about the file, so it resolves null for the joined caller —
@@ -542,7 +544,7 @@ describe("seedThumbnail", () => {
 		const url = await getThumbnailUrl(item, deps)
 
 		expect(url).not.toBeNull()
-		expect(generator).toHaveBeenCalledWith(item)
+		expect(generator).toHaveBeenCalledWith(item, expect.any(AbortSignal))
 		expect(deps.storeThumbnail).toHaveBeenCalledWith(item.data.uuid, new Uint8Array([7]))
 	})
 
@@ -559,7 +561,7 @@ describe("seedThumbnail", () => {
 		const url = await getThumbnailUrl(item, deps)
 
 		expect(url).not.toBeNull()
-		expect(generator).toHaveBeenCalledWith(item)
+		expect(generator).toHaveBeenCalledWith(item, expect.any(AbortSignal))
 		expect(deps.storeThumbnail).toHaveBeenCalledWith(item.data.uuid, new Uint8Array([8]))
 	})
 
@@ -938,6 +940,155 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 		deferred.resolve(item.data.uuid, bytes)
 
 		await expect(wanted).resolves.not.toBeNull()
+	})
+})
+
+describe("getThumbnailUrl — interest withdrawn from a running generation", () => {
+	const bytes: ThumbGenerationResult = { type: "bytes", bytes: new Uint8Array([1]) }
+
+	// A generator held open until the test answers, recording the signal it was handed.
+	function running() {
+		const answer = Promise.withResolvers<ThumbGenerationResult>()
+		const signals: AbortSignal[] = []
+		const generator = vi.fn((_item: unknown, signal: AbortSignal) => {
+			signals.push(signal)
+
+			return answer.promise
+		})
+
+		return { answer, signals, generator, deps: depsWithGenerator(generator) }
+	}
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("signals the generator once nobody has wanted it for the grace period", async () => {
+		const { answer, signals, deps } = running()
+		const controller = new AbortController()
+		const attempt = getThumbnailUrl(imageItem(), deps, controller.signal)
+
+		await flushMicrotasks()
+		controller.abort()
+
+		expect(signals[0]?.aborted).toBe(false)
+
+		vi.advanceTimersByTime(300)
+
+		expect(signals[0]?.aborted).toBe(true)
+		answer.resolve({ type: "failed" })
+		await expect(attempt).resolves.toBeNull()
+	})
+
+	it("a remount within the grace period keeps the generation running", async () => {
+		const { answer, signals, deps } = running()
+		const item = imageItem()
+		const gone = new AbortController()
+		const first = getThumbnailUrl(item, deps, gone.signal)
+
+		await flushMicrotasks()
+		gone.abort()
+		vi.advanceTimersByTime(100)
+
+		const again = getThumbnailUrl(item, deps, new AbortController().signal)
+
+		vi.advanceTimersByTime(1_000)
+
+		expect(signals).toHaveLength(1)
+		expect(signals[0]?.aborted).toBe(false)
+		answer.resolve(bytes)
+
+		const [firstUrl, againUrl] = await Promise.all([first, again])
+
+		expect(againUrl).not.toBeNull()
+		expect(firstUrl).toBe(againUrl)
+	})
+
+	// The generator chose to finish work it was well into: a cell asking again waits for that result
+	// instead of starting a second generation.
+	it("a caller asking after the signal joins a generation that finishes anyway", async () => {
+		const { answer, generator, deps } = running()
+		const item = imageItem()
+		const gone = new AbortController()
+
+		void getThumbnailUrl(item, deps, gone.signal)
+		await flushMicrotasks()
+		gone.abort()
+		vi.advanceTimersByTime(300)
+
+		const again = getThumbnailUrl(item, deps, new AbortController().signal)
+
+		answer.resolve(bytes)
+
+		await expect(again).resolves.not.toBeNull()
+		expect(generator).toHaveBeenCalledTimes(1)
+	})
+
+	it("a generator that stopped costs no strike, and a caller asking again generates afresh", async () => {
+		const item = imageItem()
+		const answers: PromiseWithResolvers<ThumbGenerationResult>[] = []
+		const generator = vi.fn(() => {
+			const answer = Promise.withResolvers<ThumbGenerationResult>()
+
+			answers.push(answer)
+
+			return answer.promise
+		})
+		const deps = depsWithGenerator(generator)
+
+		// Three stops in a row: a strike each would blacklist the uuid.
+		for (let i = 0; i < 3; i++) {
+			const gone = new AbortController()
+			const attempt = getThumbnailUrl(item, deps, gone.signal)
+
+			await flushMicrotasks()
+			gone.abort()
+			vi.advanceTimersByTime(300)
+			answers.at(-1)?.resolve({ type: "failed" })
+			await expect(attempt).resolves.toBeNull()
+		}
+
+		const wanted = getThumbnailUrl(item, deps, new AbortController().signal)
+
+		await flushMicrotasks()
+		answers.at(-1)?.resolve(bytes)
+
+		await expect(wanted).resolves.not.toBeNull()
+		expect(generator).toHaveBeenCalledTimes(4)
+	})
+})
+
+describe("getThumbnailUrl — persisted thumbnails are served from disk", () => {
+	it("serves the stored file once it holds exactly the generated bytes", async () => {
+		const stored = new Blob([new Uint8Array([1, 2, 3])])
+		const readThumbnailBlob = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(stored)
+		const deps = depsWithGenerator(vi.fn().mockResolvedValue({ type: "bytes", bytes: new Uint8Array([1, 2, 3]) }), {
+			readThumbnailBlob
+		})
+
+		await getThumbnailUrl(imageItem(), deps)
+
+		expect(deps.createObjectUrl).toHaveBeenCalledWith(stored)
+	})
+
+	it("keeps the in-memory copy when the stored file differs or the persist failed", async () => {
+		const partial = new Blob([new Uint8Array([1])])
+		const differs = depsWithGenerator(vi.fn().mockResolvedValue({ type: "bytes", bytes: new Uint8Array([1, 2, 3]) }), {
+			readThumbnailBlob: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(partial)
+		})
+		const failed = depsWithGenerator(vi.fn().mockResolvedValue({ type: "bytes", bytes: new Uint8Array([1, 2, 3]) }), {
+			storeThumbnail: vi.fn().mockRejectedValue(new Error("disk full"))
+		})
+
+		await getThumbnailUrl(imageItem(), differs)
+		await getThumbnailUrl(imageItem(), failed)
+
+		expect(differs.createObjectUrl).not.toHaveBeenCalledWith(partial)
+		expect(failed.readThumbnailBlob).toHaveBeenCalledTimes(1)
 	})
 })
 

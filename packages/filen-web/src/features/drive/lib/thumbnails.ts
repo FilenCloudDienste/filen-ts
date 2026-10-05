@@ -42,7 +42,11 @@ export type ThumbGeneratorCategory = Exclude<ThumbnailCategory, "none">
 export type ThumbGenerationResult =
 	{ type: "bytes"; bytes: Uint8Array } | { type: "unavailable"; reason: "unsupported" | "overBudget" | "corrupt" } | { type: "failed" }
 
-export type ThumbGenerator = (item: BaseFileItem) => Promise<ThumbGenerationResult>
+// `signal` aborts once no cell has wanted the generation for DROP_GRACE_MS. A generator stops only where
+// stopping still saves real work (before its expensive part starts, or a download not yet half done)
+// and otherwise finishes: the result is cached for the next time a cell asks. A stopped generator
+// resolves "failed" or throws, which the service then counts as neither a failure nor a verdict.
+export type ThumbGenerator = (item: BaseFileItem, signal: AbortSignal) => Promise<ThumbGenerationResult>
 
 // What a seeded production answers (see seedThumbnail). Three-way for the reason ThumbGenerationResult
 // is, but the line falls elsewhere: "none" is a verdict about the FILE — the production read the local
@@ -116,13 +120,23 @@ onlineManager.subscribe(online => {
 		unavailable.clear()
 	}
 })
+// How long a generation nobody wants keeps running before its generator is told to stop: long enough
+// for a cell scrolled straight back (or React's StrictMode remount) to claim it again.
+const DROP_GRACE_MS = 300
+
 // Who still wants a pending generation. A caller with an AbortSignal counts as interest until it aborts;
 // one without (and every seat) pins the entry. An unpinned generation nobody wants any more is dropped
-// when it reaches a generation slot instead of downloading and decoding for a cell that scrolled away.
+// when it reaches a generation slot instead of downloading and decoding for a cell that scrolled away;
+// one already running is signalled through `controller` (see ThumbGenerator).
 interface PendingClaim {
 	interest: number
 	pinned: boolean
 	abandoned: boolean
+	controller: AbortController
+	dropTimer: ReturnType<typeof setTimeout> | undefined
+	// Ended without an answer because nobody wanted it, as opposed to a failure or a verdict.
+	dropped: boolean
+	settled: boolean
 }
 
 interface PendingEntry {
@@ -167,9 +181,20 @@ const reusing = new Map<string, Promise<undefined>>()
 // Registers run's promise as THE pending entry for uuid, removed once settled only while it is still
 // that entry, so a superseded promise never evicts a newer one.
 function startPending(uuid: string, pinned: boolean, run: (claim: PendingClaim) => Promise<string | null>): PendingEntry {
-	const claim: PendingClaim = { interest: 0, pinned, abandoned: false }
+	const claim: PendingClaim = {
+		interest: 0,
+		pinned,
+		abandoned: false,
+		controller: new AbortController(),
+		dropTimer: undefined,
+		dropped: false,
+		settled: false
+	}
 	const entry: PendingEntry = { promise: run(claim), claim }
 	const settle = (): void => {
+		claim.settled = true
+		clearTimeout(claim.dropTimer)
+
 		if (pending.get(uuid) === entry) {
 			pending.delete(uuid)
 		}
@@ -195,14 +220,31 @@ function registerInterest(claim: PendingClaim, signal: AbortSignal | undefined):
 	}
 
 	claim.interest++
+	clearTimeout(claim.dropTimer)
 
 	signal.addEventListener(
 		"abort",
 		() => {
 			claim.interest--
+
+			if (claim.settled || claim.pinned || claim.interest > 0) {
+				return
+			}
+
+			clearTimeout(claim.dropTimer)
+
+			claim.dropTimer = setTimeout(() => {
+				if (!claim.pinned && claim.interest <= 0) {
+					claim.controller.abort()
+				}
+			}, DROP_GRACE_MS)
 		},
 		{ once: true }
 	)
+}
+
+function unwanted(claim: PendingClaim): boolean {
+	return claim.controller.signal.aborted || (!claim.pinned && claim.interest <= 0)
 }
 
 function finalize(deps: ThumbnailServiceDeps, uuid: string, blob: Blob): string {
@@ -220,15 +262,25 @@ function finalize(deps: ThumbnailServiceDeps, uuid: string, blob: Blob): string 
 // its own storage immediately, whereas storeThumbnail's Comlink.transfer detaches this SAME buffer
 // synchronously, at the call itself (postMessage's transfer-list handoff, not once the call resolves)
 // — persisting first would leave `bytes` a zero-length view, silently producing an empty Blob.
+//
+// A persisted thumbnail is then served from its stored file, whose Blob is backed by disk rather than by
+// a copy of the bytes in memory — what lets the url cache hold many entries for next to nothing. Only a
+// file of exactly this size counts: a persist another tab's writer skipped may still be mid-write.
 async function persistAndFinalize(deps: ThumbnailServiceDeps, uuid: string, bytes: Uint8Array, label: string): Promise<string> {
 	const attachedBytes = bytes as Uint8Array<ArrayBuffer>
 	const blob = new Blob([attachedBytes])
 
-	await deps.storeThumbnail(uuid, attachedBytes).catch((e: unknown) => {
-		log.warn("thumbnails", `${label}: persist failed`, uuid, e)
-	})
+	const persisted = await deps.storeThumbnail(uuid, attachedBytes).then(
+		() => true,
+		(e: unknown) => {
+			log.warn("thumbnails", `${label}: persist failed`, uuid, e)
 
-	return finalize(deps, uuid, blob)
+			return false
+		}
+	)
+	const stored = persisted ? await deps.readThumbnailBlob(uuid).catch(() => null) : null
+
+	return finalize(deps, uuid, stored !== null && stored.size === blob.size ? stored : blob)
 }
 
 // The one real generation attempt for a uuid: check the OPFS cache first (another tab, or an earlier
@@ -241,8 +293,8 @@ async function persistAndFinalize(deps: ThumbnailServiceDeps, uuid: string, byte
 // bytes — a thrown error, an empty buffer, or no generator — is LOGGED ONLY (never surfaced to a user:
 // thumbnail generation is silent by design) and counted against the blacklist; a SETTLED
 // "unavailable" verdict instead joins the session-only `unavailable` set above and costs no strike.
-// Work that lost every interested caller while queued is dropped on reaching its slot, as neither a
-// failure nor a verdict.
+// Work that lost every interested caller while queued is dropped on reaching its slot, and a generator
+// that stopped on the claim's signal ends the same way: neither a failure nor a verdict.
 async function generate(
 	deps: ThumbnailServiceDeps,
 	item: BaseFileItem,
@@ -282,8 +334,9 @@ async function generate(
 	await semaphore.acquire()
 
 	// Synchronous with the removal, so no caller can join the entry between the check and the null.
-	if (!claim.pinned && claim.interest <= 0) {
+	if (unwanted(claim)) {
 		claim.abandoned = true
+		claim.dropped = true
 
 		if (pending.get(uuid)?.claim === claim) {
 			pending.delete(uuid)
@@ -299,7 +352,8 @@ async function generate(
 
 		try {
 			const generator = deps.getGenerator(category)
-			const generated: ThumbGenerationResult = generator === undefined ? { type: "failed" } : await generator(item)
+			const generated: ThumbGenerationResult =
+				generator === undefined ? { type: "failed" } : await generator(item, claim.controller.signal)
 
 			if (generated.type === "bytes") {
 				bytes = generated.bytes
@@ -309,7 +363,15 @@ async function generate(
 				return null
 			}
 		} catch (e) {
-			log.warn("thumbnails", "generate: generation failed", uuid, e)
+			if (!claim.controller.signal.aborted) {
+				log.warn("thumbnails", "generate: generation failed", uuid, e)
+			}
+		}
+
+		if (bytes === undefined && claim.controller.signal.aborted) {
+			claim.dropped = true
+
+			return null
 		}
 
 		if (bytes === undefined || bytes.length === 0) {
@@ -365,6 +427,16 @@ export async function getThumbnailUrl(
 
 	if (entry === undefined || entry.claim.abandoned) {
 		entry = startPending(uuid, false, claim => generate(deps, base, category, uuid, claim))
+	} else if (entry.claim.controller.signal.aborted) {
+		// Told to stop, but its generator may be finishing work it was already well into: wait for that
+		// rather than start a second one, and generate afresh only if it really stopped.
+		const prior = entry
+
+		entry = startPending(uuid, false, async claim => {
+			const url = await prior.promise
+
+			return url === null && prior.claim.dropped ? await generate(deps, base, category, uuid, claim) : url
+		})
 	} else {
 		// Marked before the promise is handed over, so a seat that resolves nothing still knows it had
 		// an audience worth falling through for.

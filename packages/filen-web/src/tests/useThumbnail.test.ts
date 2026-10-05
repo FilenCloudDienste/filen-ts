@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, renderHook } from "@testing-library/react"
+import { cleanup, renderHook, waitFor } from "@testing-library/react"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { testUuid } from "@/tests/support/uuid"
@@ -67,13 +67,50 @@ describe("useThumbnail", () => {
 		expect(peekThumbnailUrlMock).toHaveBeenCalledWith(file.uuid)
 	})
 
-	it("starts at null when nothing is cached", () => {
+	it("is undefined while the service answers when nothing is cached", () => {
 		getThumbnailUrlMock.mockReturnValue(new Promise(() => undefined))
 		peekThumbnailUrlMock.mockReturnValue(null)
 
 		const { result } = renderHook(() => useThumbnail(narrowItem(imageFile())))
 
-		expect(result.current).toBeNull()
+		expect(result.current).toBeUndefined()
+	})
+
+	// Scrolling back to a cached thumbnail costs no round trip and no second render.
+	it("never asks the service for a url it already painted", () => {
+		peekThumbnailUrlMock.mockReturnValue("blob:cached")
+
+		renderHook(() => useThumbnail(narrowItem(imageFile())))
+
+		expect(getThumbnailUrlMock).not.toHaveBeenCalled()
+	})
+
+	it("resolves to the service's answer", async () => {
+		getThumbnailUrlMock.mockResolvedValue("blob:fresh")
+		peekThumbnailUrlMock.mockReturnValue(null)
+
+		const { result } = renderHook(() => useThumbnail(narrowItem(imageFile())))
+
+		await waitFor(() => {
+			expect(result.current).toBe("blob:fresh")
+		})
+	})
+
+	// A cell handed a different file must not keep showing the previous file's thumbnail.
+	it("resets when the uuid changes under the same cell", () => {
+		getThumbnailUrlMock.mockReturnValue(new Promise(() => undefined))
+		peekThumbnailUrlMock.mockImplementation(uuid => (uuid === testUuid("thumb") ? "blob:first" : null))
+
+		const { result, rerender } = renderHook(({ file }: { file: SdkFile }) => useThumbnail(narrowItem(file)), {
+			initialProps: { file: imageFile() }
+		})
+
+		expect(result.current).toBe("blob:first")
+
+		rerender({ file: { ...imageFile(), uuid: testUuid("other") } })
+
+		expect(result.current).toBeUndefined()
+		expect(getThumbnailUrlMock).toHaveBeenCalledTimes(1)
 	})
 
 	// A file whose category lost its thumbnail story keeps rendering its icon even while its url is cached.

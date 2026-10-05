@@ -2,15 +2,14 @@ import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { estimateVisibleSlots } from "@/features/drive/lib/gridLayout"
 
 // Slack above the strictly-visible slot count — covers a virtualizer's own overscan mounts, a resize
-// transient between two ResizeObserver frames, and view-mode toggles landing mid-flight. "Generous"
-// per the design call, not tuned to a byte budget: an objectURL is a cheap browser-side handle, not
-// the decoded bytes themselves.
+// transient between two ResizeObserver frames, and view-mode toggles landing mid-flight.
 const HEADROOM_MULTIPLIER = 3
 
-// Floor for a viewport that hasn't reported its real size yet (module load, before the first
-// ResizeObserver frame) or is genuinely tiny — never let capacity collapse low enough that ordinary
-// scrolling thrashes the cache.
-const MIN_CAPACITY = 24
+// Floor that keeps scrolling back and forth through a large listing on cached urls: a cell whose url
+// is still here paints its thumbnail on its first frame, where a miss shows the icon until the disk read
+// lands. Affordable because an entry is a handle onto a Blob backed by the stored file (see
+// persistAndFinalize in thumbnails.ts), not a copy of its bytes.
+const MIN_CAPACITY = 1024
 
 // How many live objectURLs the thumbnail service should keep at once for a surface showing this many
 // thumbnail slots. Every surface sizes through this one rule, so they cannot drift apart.

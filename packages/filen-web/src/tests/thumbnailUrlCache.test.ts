@@ -2,18 +2,19 @@ import { describe, expect, it, vi } from "vitest"
 import { capacityForVisibleSlots, createThumbnailUrlCache, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
 import { ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
 
+// Viewports past the floor, where the visible-slot rule is what decides.
 describe("computeThumbnailCapacity — list vs grid math", () => {
 	it("list mode scales purely with viewport height, ignoring width", () => {
-		const short = computeThumbnailCapacity(1_000, ROW_HEIGHT * 4, "list")
-		const tall = computeThumbnailCapacity(1_000, ROW_HEIGHT * 40, "list")
+		const short = computeThumbnailCapacity(1_000, ROW_HEIGHT * 400, "list")
+		const tall = computeThumbnailCapacity(1_000, ROW_HEIGHT * 4_000, "list")
 
 		expect(tall).toBeGreaterThan(short)
-		expect(computeThumbnailCapacity(200, ROW_HEIGHT * 40, "list")).toBe(computeThumbnailCapacity(2_000, ROW_HEIGHT * 40, "list"))
+		expect(computeThumbnailCapacity(200, ROW_HEIGHT * 4_000, "list")).toBe(computeThumbnailCapacity(2_000, ROW_HEIGHT * 4_000, "list"))
 	})
 
 	it("grid mode scales with both width (columns) and height (rows)", () => {
-		const oneColumn = computeThumbnailCapacity(TILE_WIDTH, TILE_ROW_HEIGHT * 10, "grid")
-		const fourColumns = computeThumbnailCapacity(TILE_WIDTH * 4, TILE_ROW_HEIGHT * 10, "grid")
+		const oneColumn = computeThumbnailCapacity(TILE_WIDTH, TILE_ROW_HEIGHT * 1_000, "grid")
+		const fourColumns = computeThumbnailCapacity(TILE_WIDTH * 4, TILE_ROW_HEIGHT * 1_000, "grid")
 
 		expect(fourColumns).toBeGreaterThan(oneColumn)
 	})
@@ -21,8 +22,8 @@ describe("computeThumbnailCapacity — list vs grid math", () => {
 	it("a large viewport in grid mode needs a materially larger capacity than the same viewport in list mode", () => {
 		// A wide, tall viewport packs many tile CELLS (columns * rows) but only as many list ROWS as fit
 		// vertically — grid's capacity should come out higher for identical dimensions.
-		const width = TILE_WIDTH * 6
-		const height = TILE_ROW_HEIGHT * 6
+		const width = TILE_WIDTH * 12
+		const height = TILE_ROW_HEIGHT * 600
 
 		expect(computeThumbnailCapacity(width, height, "grid")).toBeGreaterThan(computeThumbnailCapacity(width, height, "list"))
 	})
@@ -30,6 +31,11 @@ describe("computeThumbnailCapacity — list vs grid math", () => {
 	it("floors at a minimum capacity for a zero/tiny viewport (module load, before the first layout frame)", () => {
 		expect(computeThumbnailCapacity(0, 0, "list")).toBeGreaterThan(0)
 		expect(computeThumbnailCapacity(0, 0, "grid")).toBeGreaterThan(0)
+	})
+
+	// Scrolling back through a large listing should stay on cached urls whatever the viewport.
+	it("keeps many more urls than an ordinary viewport shows", () => {
+		expect(computeThumbnailCapacity(1_000, ROW_HEIGHT * 20, "list")).toBeGreaterThanOrEqual(1_000)
 	})
 })
 
@@ -42,7 +48,7 @@ describe("capacityForVisibleSlots", () => {
 
 	it("floors like the drive listing's capacity, and agrees with it for the same slot count", () => {
 		expect(capacityForVisibleSlots(0)).toBe(computeThumbnailCapacity(0, 0, "list"))
-		expect(capacityForVisibleSlots(4 * 11)).toBe(computeThumbnailCapacity(TILE_WIDTH * 4, TILE_ROW_HEIGHT * 10, "grid"))
+		expect(capacityForVisibleSlots(4 * 1_001)).toBe(computeThumbnailCapacity(TILE_WIDTH * 4, TILE_ROW_HEIGHT * 1_000, "grid"))
 	})
 })
 
