@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useEffectEvent, useState } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { previewStreamUrl } from "@/features/preview/lib/previewStream"
@@ -15,7 +15,7 @@ export type UsePreviewStreamUrlResult =
 	| { status: "error"; refetch: () => void }
 
 // Registers `item` against the SW's inline-preview route once per mount and returns its fetchable
-// same-origin URL — mirrors usePreviewBytes.ts's own shape/lifecycle (item-keyed effect, a `live`
+// same-origin URL — mirrors usePreviewBytes.ts's own shape/lifecycle (uuid-keyed effect, a `live`
 // flag guarding a late resolution after unmount/item-change) but produces a stable src URL instead of
 // a whole buffer. No cancellation message exists for a preview registration (unlike
 // cancelPreviewDownload) — the SW's own bounded, oldest-evicted registry is the only cleanup, so the
@@ -36,6 +36,11 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 	})
 	const [reloadToken, setReloadToken] = useState(0)
 	const cacheScope = usePreviewCacheScope()
+	const uuid = item.data.uuid
+	// Read at registration time rather than keyed on: a metadata-only update (favorite, reconcile) hands
+	// over a new item for the same uuid, whose registration would only be a redundant round trip to the
+	// service worker for the same URL.
+	const fileOf = useEffectEvent(() => narrowToAnyFile(item))
 
 	useEffect(() => {
 		let live = true
@@ -44,11 +49,10 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 		// A throw anywhere in here rejects: promise handlers below, not try/catch, which the React Compiler
 		// cannot lower around a logical expression and would skip the hook for.
 		async function register(): Promise<string> {
-			const file = narrowToAnyFile(item)
-			const id = getPreviewStreamId(cacheScope, item.data.uuid, contentType) ?? crypto.randomUUID()
-			const url = await previewStreamUrl(file, name, contentType, id)
+			const id = getPreviewStreamId(cacheScope, uuid, contentType) ?? crypto.randomUUID()
+			const url = await previewStreamUrl(fileOf(), name, contentType, id)
 
-			setPreviewStreamId(cacheScope, item.data.uuid, contentType, id, epoch)
+			setPreviewStreamId(cacheScope, uuid, contentType, id, epoch)
 
 			return url
 		}
@@ -69,7 +73,7 @@ export function usePreviewStreamUrl(item: DriveItem, name: string, contentType: 
 		return () => {
 			live = false
 		}
-	}, [item, name, contentType, reloadToken, cacheScope])
+	}, [uuid, name, contentType, reloadToken, cacheScope])
 
 	function refetch(): void {
 		forgetPreviewStreamId(cacheScope, item.data.uuid, contentType)

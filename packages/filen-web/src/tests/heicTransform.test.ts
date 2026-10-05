@@ -231,4 +231,30 @@ describe("heic worker lifetime", () => {
 
 		expect(terminateMock).toHaveBeenCalledTimes(1)
 	})
+
+	// A preview stepped past while its transform waited for the worker posts nothing at all.
+	it("never posts a transform whose caller went away while it waited", async () => {
+		const { transformHeicBytes } = await freshModule()
+		let finish: (blob: Blob) => void = () => undefined
+		transformMock.mockImplementationOnce(
+			() =>
+				new Promise<Blob>(resolve => {
+					finish = resolve
+				})
+		)
+
+		const first = transformHeicBytes(new Uint8Array([1]))
+		const gone = new AbortController()
+		const second = transformHeicBytes(new Uint8Array([2]), gone.signal)
+
+		await vi.waitFor(() => {
+			expect(transformMock).toHaveBeenCalledTimes(1)
+		})
+		gone.abort()
+		finish(new Blob())
+		await first
+
+		await expect(second).rejects.toThrow()
+		expect(transformMock).toHaveBeenCalledTimes(1)
+	})
 })

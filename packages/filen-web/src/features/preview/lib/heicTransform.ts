@@ -1,4 +1,5 @@
 import * as Comlink from "comlink"
+import { Semaphore } from "@filen/shared"
 import HeicWorker from "@/features/preview/workers/heic.worker.ts?worker"
 import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 import { idleResource } from "@/lib/idleResource"
@@ -29,8 +30,23 @@ const heicWorker = idleResource(
 	HEIC_WORKER_IDLE_MS
 )
 
-async function transferToWorker(bytes: Uint8Array): Promise<Blob> {
-	return await heicWorker.use(({ remote }) => remote.transform(Comlink.transfer(bytes, [bytes.buffer])))
+// One transform posted at a time. The worker decodes them one by one anyway, and every job queued there
+// holds its own copy of the file; waiting here instead lets a caller that went away (a preview stepped
+// past) drop out before anything is copied or posted.
+const postGate = new Semaphore(1)
+
+async function transferToWorker(take: () => Uint8Array, signal: AbortSignal | undefined): Promise<Blob> {
+	await postGate.acquire()
+
+	try {
+		signal?.throwIfAborted()
+
+		const bytes = take()
+
+		return await heicWorker.use(({ remote }) => remote.transform(Comlink.transfer(bytes, [bytes.buffer])))
+	} finally {
+		postGate.release()
+	}
 }
 
 // The one entry point for both HEIC callers — decode + JPEG re-encode run off the main thread in the
@@ -48,14 +64,14 @@ async function transferToWorker(bytes: Uint8Array): Promise<Blob> {
 // effect — StrictMode's double-invoked effect in dev, the Retry button, any later re-run — so
 // transferring the caller's own buffer would leave every run after the first posting a detached
 // buffer (DataCloneError).
-export async function transformHeicBytes(bytes: Uint8Array): Promise<Blob> {
-	return await transferToWorker(bytes.slice())
+export async function transformHeicBytes(bytes: Uint8Array, signal?: AbortSignal): Promise<Blob> {
+	return await transferToWorker(() => bytes.slice(), signal)
 }
 
 // For a caller whose buffer is freshly read and never used again: it is transferred as is (and
 // detached), sparing a second full copy of the file.
 export async function transformHeicBytesOwned(bytes: Uint8Array): Promise<Blob> {
-	return await transferToWorker(bytes)
+	return await transferToWorker(() => bytes, undefined)
 }
 
 // Logout: nothing of the previous session's photos should outlive it in the worker's heap.

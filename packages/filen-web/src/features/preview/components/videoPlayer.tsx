@@ -39,6 +39,7 @@ import { mediaControlsList } from "@/features/preview/lib/accessMode"
 import { getVideoPosition, setVideoPosition } from "@/features/preview/lib/videoContinuity"
 import { CODECS, type CodecId } from "@/features/preview/lib/containerTracks"
 import { usePlaybackGap } from "@/features/preview/hooks/usePlaybackGap"
+import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 import { MediaFailureState } from "@/features/preview/components/mediaFailureState"
 import { PreviewDownloadButton } from "@/features/preview/components/previewErrorState"
 
@@ -152,6 +153,8 @@ export function VideoPlayer({
 
 	useSyncedMediaVolume(video)
 	useVideoContinuity(video, positionKey)
+	// After useVideoContinuity, whose cleanup reads the position this empties.
+	useReleaseOnUnmount(video)
 
 	// Playback starting shows the controls for one idle period before they fade.
 	useEffect(() => {

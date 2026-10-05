@@ -7,6 +7,7 @@ import { mediaControlsList, usePreviewDownloadable } from "@/features/preview/li
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
 import { VideoPlayer } from "@/features/preview/components/videoPlayer"
 import { MediaFailureState } from "@/features/preview/components/mediaFailureState"
+import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 
 export interface MediaViewerProps {
 	item: DriveItem
@@ -86,6 +87,8 @@ function PreviewAudio({
 }) {
 	const [audio, setAudio] = useState<HTMLAudioElement | null>(null)
 	const [failure, setFailure] = useState<MediaFailureKind | null>(null)
+
+	useReleaseOnUnmount(audio)
 
 	return (
 		<div className="relative flex size-full items-center justify-center px-6">

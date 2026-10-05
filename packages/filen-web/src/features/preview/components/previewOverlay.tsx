@@ -52,6 +52,8 @@ import { RemoteFileCompare } from "@/features/preview/components/remoteCompare"
 import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
 import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
+import { PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
 	isTextEditingTarget,
 	previewNavigationUnmountsOverlay,
@@ -582,6 +584,7 @@ export function PreviewOverlay({
 	// neighbour that mounts no editor at all (an image, a PDF, a rendered markdown) would strand the flag
 	// on a buffer that no longer exists — a prompt about nothing, an armed route block and beforeunload.
 	const slotKey = driveItem === undefined ? null : bodyKey(driveItem, currentDocumentKey, pin)
+	const slotSettled = useSettledSlot(slotKey)
 
 	useEffect(() => {
 		dropPreviewBuffer(contentRef)
@@ -1041,33 +1044,38 @@ export function PreviewOverlay({
 					</header>
 					<div className="min-h-0 flex-1">
 						<ArchiveListingScope>
-							<PreviewErrorBoundary key={slotKey}>
-								<PreviewDownloadableProvider
-									downloadable={downloadable}
-									onDownload={download}
-								>
-									<PreviewBody
-										item={driveItem}
-										variant={variant}
-										category={pin?.category}
-										documentKey={currentDocumentKey}
-										editable={editable}
-										renamedReadOnly={renamedReadOnly}
-										neverEditable={variant !== "drive"}
-										asText={asText}
-										locked={saving}
-										onDirtyChange={setPreviewDirty}
-										contentRef={contentRef}
-										spreadsheetRef={spreadsheetRef}
-										canSaveCopy={canSaveCopyBeside(driveItem, variant)}
-										onOpenFile={opened => {
-											if (rawDriveItem !== undefined) {
-												commitSaved(rawDriveItem.data.uuid, opened)
-											}
-										}}
-									/>
-								</PreviewDownloadableProvider>
-							</PreviewErrorBoundary>
+							{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
+							{!slotSettled ? (
+								<PreviewLoading />
+							) : (
+								<PreviewErrorBoundary key={slotKey}>
+									<PreviewDownloadableProvider
+										downloadable={downloadable}
+										onDownload={download}
+									>
+										<PreviewBody
+											item={driveItem}
+											variant={variant}
+											category={pin?.category}
+											documentKey={currentDocumentKey}
+											editable={editable}
+											renamedReadOnly={renamedReadOnly}
+											neverEditable={variant !== "drive"}
+											asText={asText}
+											locked={saving}
+											onDirtyChange={setPreviewDirty}
+											contentRef={contentRef}
+											spreadsheetRef={spreadsheetRef}
+											canSaveCopy={canSaveCopyBeside(driveItem, variant)}
+											onOpenFile={opened => {
+												if (rawDriveItem !== undefined) {
+													commitSaved(rawDriveItem.data.uuid, opened)
+												}
+											}}
+										/>
+									</PreviewDownloadableProvider>
+								</PreviewErrorBoundary>
+							)}
 						</ArchiveListingScope>
 					</div>
 					{/* Nested confirmation dialog — Base UI supports nesting a dialog inside another normally

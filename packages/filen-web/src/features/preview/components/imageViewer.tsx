@@ -12,6 +12,7 @@ import "@/features/drive/lib/thumbGenerators"
 import { useObjectUrl } from "@/lib/useObjectUrl"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
+import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
 
 export interface ImageViewerProps {
@@ -36,6 +37,7 @@ function ZoomableImage({
 	const [transform, setTransform] = useState<ZoomTransform>({ scale: 1, x: 0, y: 0 })
 	const [natural, setNatural] = useState<Size | null>(null)
 	const containerRef = useRef<HTMLDivElement | null>(null)
+	const [image, setImage] = useState<HTMLImageElement | null>(null)
 	// Pointerdown-time snapshot: the transform's own x/y right then, plus the pointer's own screen
 	// position — every subsequent pointermove computes its delta against THIS, never the previous
 	// pointermove's position, so per-event float drift can never accumulate.
@@ -73,6 +75,9 @@ function ZoomableImage({
 			container.removeEventListener("wheel", handleWheel)
 		}
 	}, [natural])
+
+	// Stepping past a streamed image before it has loaded stops its download.
+	useReleaseOnUnmount(image)
 
 	function handlePointerDown(event: ReactPointerEvent<HTMLImageElement>): void {
 		if (transform.scale <= 1) {
@@ -114,6 +119,7 @@ function ZoomableImage({
 			className="flex size-full items-center justify-center overflow-hidden"
 		>
 			<img
+				ref={setImage}
 				src={url}
 				alt={alt}
 				draggable={false}
@@ -153,18 +159,19 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 	const [retryToken, setRetryToken] = useState(0)
 
 	useEffect(() => {
-		let live = true
+		// Aborted on unmount, so a transform still waiting for the worker is never posted.
+		const gone = new AbortController()
 		let objectUrl: string | null = null
 
 		// Promise handlers, not try/catch: the React Compiler skips a component whose try block holds a
 		// conditional or logical expression.
 		const cached = heicJpegs.get(bytes)
 
-		void (cached === undefined ? transformHeicBytes(bytes) : Promise.resolve(cached)).then(
+		void (cached === undefined ? transformHeicBytes(bytes, gone.signal) : Promise.resolve(cached)).then(
 			blob => {
 				heicJpegs.set(bytes, blob)
 
-				if (!live) {
+				if (gone.signal.aborted) {
 					return
 				}
 
@@ -172,14 +179,14 @@ function TransformedImageBytes({ bytes, alt }: { bytes: Uint8Array; alt: string 
 				setState({ status: "success", url: objectUrl })
 			},
 			() => {
-				if (live) {
+				if (!gone.signal.aborted) {
 					setState({ status: "error" })
 				}
 			}
 		)
 
 		return () => {
-			live = false
+			gone.abort()
 
 			if (objectUrl) {
 				URL.revokeObjectURL(objectUrl)

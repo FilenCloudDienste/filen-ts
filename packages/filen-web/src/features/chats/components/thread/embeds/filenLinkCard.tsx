@@ -14,6 +14,7 @@ import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { LoadingState } from "@/components/loadingState"
 import { BlockSource, urlReadRange } from "@/lib/media/blockSource"
 import { mediaFailureDTO, reportMediaFailure, type MediaFailureKind } from "@/lib/media/mediaFailure"
+import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { noop } from "@/lib/utils"
 import { formatShortDate } from "@/lib/formatDate"
@@ -162,6 +163,10 @@ function FilenStreamedInlineMedia({
 	const { t } = useTranslation("chats")
 	const [previewOpen, setPreviewOpen] = useState(false)
 	const result = usePreviewStreamUrl(item, name, contentType)
+	const [image, setImage] = useState<HTMLImageElement | null>(null)
+
+	// A message scrolled out of the thread stops loading its image.
+	useReleaseOnUnmount(image)
 
 	if (result.status === "pending") {
 		return (
@@ -203,6 +208,7 @@ function FilenStreamedInlineMedia({
 				className="block max-w-sm overflow-hidden rounded-2xl focus-ring outline-none"
 			>
 				<img
+					ref={setImage}
 					src={result.url}
 					alt={name}
 					loading="lazy"
@@ -241,6 +247,9 @@ function FilenInlinePlayer({
 }) {
 	const [source] = useState(() => new BlockSource(size, urlReadRange(url)))
 	const [failure, setFailure] = useState<MediaFailureKind | null>(null)
+	const [media, setMedia] = useState<HTMLMediaElement | null>(null)
+
+	useReleaseOnUnmount(media)
 
 	function handleError(event: SyntheticEvent<HTMLMediaElement>): void {
 		reportMediaFailure(event.currentTarget, source, setFailure)
@@ -262,6 +271,7 @@ function FilenInlinePlayer({
 	if (category === "video") {
 		return (
 			<video
+				ref={setMedia}
 				onError={handleError}
 				src={url}
 				controls
@@ -275,6 +285,7 @@ function FilenInlinePlayer({
 
 	return (
 		<audio
+			ref={setMedia}
 			onError={handleError}
 			src={url}
 			controls
