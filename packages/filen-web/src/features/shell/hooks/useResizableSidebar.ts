@@ -4,7 +4,7 @@ import { useSeparatorValue, type SeparatorValue } from "@/lib/useSeparatorValue"
 
 export type ResizableSidebarHandle = Omit<SeparatorValue, "value"> & { width: number }
 
-// Drive/Notes/Chats each call this with their own SidebarModule so the three widths persist
+// Drive/Notes/Chats/Playlists each call this with their own SidebarModule so the widths persist
 // independently under features/shell/lib/sidebarWidth.ts's per-module kv keys.
 export function useResizableSidebar(module: SidebarModule): ResizableSidebarHandle {
 	const widthQuery = useSidebarWidthQuery(module)

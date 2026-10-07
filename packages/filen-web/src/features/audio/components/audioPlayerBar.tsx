@@ -7,7 +7,7 @@ import { useAudioStore, useAudioNowPlaying, useAudioError } from "@/features/aud
 import { playbackErrorLabel } from "@/features/audio/lib/formatFailureNotice"
 import { MEDIA_FORMAT_UNSUPPORTED } from "@/lib/media/mediaFailure"
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
-import { ShuffleToggleButton, LoopToggleButton } from "@/features/audio/components/queueToggles"
+import { ShuffleToggleButton, LoopToggleButton, TOGGLE_ON_CLASS } from "@/features/audio/components/queueToggles"
 import { useAction } from "@/lib/keymap/useAction"
 import { Button } from "@/components/ui/button"
 import { MediaScrubber } from "@/components/media/mediaScrubber"
@@ -15,7 +15,7 @@ import { VolumeControl } from "@/components/media/volumeControl"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { toastObstructionRef } from "@/lib/toastClearance"
-import { cn, formatSecondsToMediaClock } from "@filen/shared"
+import { formatSecondsToMediaClock } from "@filen/shared"
 import { previewTitleSplitIndex } from "@/features/preview/lib/previewTitle"
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
@@ -156,7 +156,7 @@ export function AudioPlayerBar() {
 									size="icon-sm"
 									aria-label={t("showQueue")}
 									aria-pressed={queueOpen}
-									className={cn(queueOpen && "text-primary")}
+									className={TOGGLE_ON_CLASS}
 								>
 									<ListMusic />
 								</Button>

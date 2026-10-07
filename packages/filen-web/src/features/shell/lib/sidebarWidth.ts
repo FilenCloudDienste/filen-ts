@@ -2,10 +2,10 @@ import { type, type Type } from "arktype"
 import { kvPreference, type KvPreference } from "@/lib/storage/preference"
 import { splitterKeyValue, type SplitterKeyBounds } from "@/lib/useSeparatorValue.logic"
 
-// The three contextual sidebars big enough to want more room than the fixed-width settings/contacts
+// The contextual sidebars big enough to want more room than the fixed-width settings/contacts
 // panels — each persists its own width independently, same per-module split as old-web's own
 // separate "…ResizablePanelSizes" / "…ResizablePanelSizes:notes" localStorage keys.
-export type SidebarModule = "drive" | "notes" | "chats"
+export type SidebarModule = "drive" | "notes" | "chats" | "playlists"
 
 export const DEFAULT_SIDEBAR_WIDTH = 300
 export const SIDEBAR_WIDTH_MIN = 240
@@ -47,7 +47,8 @@ function sidebarWidthPreference(module: SidebarModule): KvPreference<number> {
 const sidebarWidthPreferences: Record<SidebarModule, KvPreference<number>> = {
 	drive: sidebarWidthPreference("drive"),
 	notes: sidebarWidthPreference("notes"),
-	chats: sidebarWidthPreference("chats")
+	chats: sidebarWidthPreference("chats"),
+	playlists: sidebarWidthPreference("playlists")
 }
 
 export function getSidebarWidth(module: SidebarModule): Promise<number> {

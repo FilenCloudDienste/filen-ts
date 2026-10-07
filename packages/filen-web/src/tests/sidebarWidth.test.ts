@@ -118,13 +118,15 @@ describe("sidebar width: get/set", () => {
 		await expect(getSidebarWidth("drive")).resolves.toBe(SIDEBAR_WIDTH_MAX)
 	})
 
-	it("persists notes/chats/drive under independent keys — one module's width never leaks into another", async () => {
+	it("persists each module under its own key — one module's width never leaks into another", async () => {
 		await setSidebarWidth("drive", 320)
 		await setSidebarWidth("notes", 360)
 		await setSidebarWidth("chats", 400)
+		await setSidebarWidth("playlists", 440)
 
 		await expect(getSidebarWidth("drive")).resolves.toBe(320)
 		await expect(getSidebarWidth("notes")).resolves.toBe(360)
 		await expect(getSidebarWidth("chats")).resolves.toBe(400)
+		await expect(getSidebarWidth("playlists")).resolves.toBe(440)
 	})
 })

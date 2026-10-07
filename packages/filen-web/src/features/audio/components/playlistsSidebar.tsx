@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { Link, useSearch } from "@tanstack/react-router"
-import { ListMusicIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
+import { ListMusicIcon, PlusIcon } from "lucide-react"
 import { cn, type Playlist } from "@filen/shared"
 import { usePlaylistsQuery, type PlaylistEntry } from "@/features/audio/queries/playlists"
 import { resolveSelectedPlaylist } from "@/features/audio/lib/playlistSelection"
@@ -15,23 +15,13 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
+import { DropdownMenu } from "@/components/ui/dropdown-menu"
+import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 
-// ContactsSidebar's nav-row idiom, grown to two lines for the thumbnail + meta. Keyed on aria-current
-// rather than TanStack's data-status: with no (or a stale) `playlist` param the view shows the last
-// opened or first playlist, which no Link's own search matches, so the row sets aria-current itself (Link
-// only ever adds the same value on an exact match).
-const ROW_CLASS = cn(
-	"flex w-full items-center gap-2.5 rounded-xl px-1.5 py-1.5 text-sm focus-ring transition-colors outline-none app-region-no-drag",
-	"text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
-	"aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground"
-)
-
-// The shell's playlists contextual sidebar: same w-52 rounded-xl panel as ContactsSidebar, one row per
-// playlist. Rows link to /playlists with an always-explicit `playlist` param (see
-// routes/_app/playlists.tsx); create/rename/delete open the shared PlaylistDialogsHost the route
-// screen mounts.
+// The shell's playlists contextual sidebar: a resizable panel like notes/chats, one row per playlist.
+// Rows link to /playlists with an always-explicit `playlist` param (see routes/_app/playlists.tsx);
+// create/rename/delete open the shared PlaylistDialogsHost the route screen mounts.
 export function PlaylistsSidebar() {
 	const { t } = useTranslation(["audio", "common"])
 	const isOnline = useIsOnline()
@@ -44,7 +34,10 @@ export function PlaylistsSidebar() {
 	const selectedUuid = selection.deciding ? undefined : resolveSelectedPlaylist(entries, selection.uuid)?.uuid
 
 	return (
-		<SidebarPanel>
+		<ResizableSidebarPanel
+			module="playlists"
+			resizeLabel={t("playlistsSidebarResize")}
+		>
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
 				<div className="flex items-center justify-between gap-2 pb-2.5 pl-2.5">
 					<h2 className="truncate pt-1 text-[15px] font-semibold">{t("common:modulePlaylists")}</h2>
@@ -81,7 +74,7 @@ export function PlaylistsSidebar() {
 					</ul>
 				)}
 			</div>
-		</SidebarPanel>
+		</ResizableSidebarPanel>
 	)
 }
 
@@ -121,13 +114,24 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 	const now = useNowMinute()
 	const coverUrl = useKnownCoverUrl(playlist.files[0])
 
+	// The wrapper is the hover group and the no-drag region, like the notes/chats/drive rows: the whole
+	// row, ⋯ included, must be outside the panel's Electron drag region for hover to reach it. Highlight
+	// keys on `selected` rather than TanStack's data-status: with no (or a stale) `playlist` param the view
+	// shows the last opened or first playlist, which no Link's own search matches.
 	return (
-		<li className="group/prow relative">
+		<li
+			className={cn(
+				"group flex items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag",
+				selected
+					? "bg-sidebar-accent text-sidebar-accent-foreground"
+					: "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground has-aria-expanded:bg-sidebar-accent/60"
+			)}
+		>
 			<Link
 				to="/playlists"
 				search={{ playlist: playlist.uuid }}
 				aria-current={selected ? "page" : undefined}
-				className={ROW_CLASS}
+				className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl py-1.5 pl-1.5 text-sm focus-ring outline-none"
 			>
 				<PlaylistArtwork
 					uuid={playlist.uuid}
@@ -135,8 +139,7 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 					className="size-8 rounded-lg"
 					iconClassName="size-4"
 				/>
-				{/* Room for the ⋯ trigger only while it shows, so a name isn't clipped short at rest. */}
-				<span className="min-w-0 flex-1 group-focus-within/prow:pr-7 group-hover/prow:pr-7">
+				<span className="min-w-0 flex-1">
 					<span
 						title={playlist.name}
 						className="block truncate font-medium"
@@ -151,17 +154,9 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 			{/* A sibling of the Link, never inside it: an interactive element nested in an anchor is
 			    invalid and swallows the navigation. */}
 			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("playlistItemMenuTrigger")}
-							className="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity app-region-no-drag group-focus-within/prow:opacity-100 group-hover/prow:opacity-100 aria-expanded:opacity-100"
-						>
-							<MoreHorizontalIcon />
-						</Button>
-					}
+				<RowMenuTrigger
+					label={t("playlistItemMenuTrigger")}
+					reveal="plain"
 				/>
 				<PlaylistMenuContent
 					playlist={playlist}

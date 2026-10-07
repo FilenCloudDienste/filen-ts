@@ -115,6 +115,7 @@ export const audio = {
 	playlistTrackCount_other: "{{count}} tracks",
 	/** Accessible label for a playlist row's ⋯ menu trigger */
 	playlistItemMenuTrigger: "Playlist options",
+	playlistsSidebarResize: "Resize sidebar",
 	/** Play the whole queue/playlist from the top */
 	shufflePlay: "Shuffle play",
 	/** Add-tracks button in a playlist's page header */

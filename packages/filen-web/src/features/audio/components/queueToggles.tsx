@@ -13,6 +13,10 @@ const LOOP_LABEL_KEYS = {
 	one: "loopOne"
 } as const satisfies Record<LoopMode, string>
 
+// Blue, as on mobile: --primary is a neutral a hair off --foreground, so an "on" tinted with it read as off.
+// Keyed on aria-pressed so it also outranks the ghost variant's hover/aria-expanded foreground.
+export const TOGGLE_ON_CLASS = "aria-pressed:text-blue-500"
+
 // Shared by the player bar and the now-playing panel. Each reads only its own store field, so a toggle
 // re-renders itself rather than its host surface.
 export function ShuffleToggleButton({ className }: { className?: string }) {
@@ -25,7 +29,7 @@ export function ShuffleToggleButton({ className }: { className?: string }) {
 			size="icon-sm"
 			aria-label={t("shuffle")}
 			aria-pressed={shuffleEnabled}
-			className={cn(className, shuffleEnabled && "text-primary")}
+			className={cn(TOGGLE_ON_CLASS, className)}
 			onClick={() => {
 				audioEngine.setShuffleEnabled(!shuffleEnabled)
 			}}
@@ -45,7 +49,7 @@ export function LoopToggleButton({ className }: { className?: string }) {
 			size="icon-sm"
 			aria-label={t(LOOP_LABEL_KEYS[loopMode])}
 			aria-pressed={loopMode !== "off"}
-			className={cn(className, loopMode !== "off" && "text-primary")}
+			className={cn(TOGGLE_ON_CLASS, className)}
 			onClick={() => {
 				audioEngine.setLoopMode(nextLoopMode(loopMode))
 			}}

@@ -59,6 +59,11 @@ const { lastOpened } = vi.hoisted(() => ({
 	lastOpened: { stored: null as string | null | undefined, remember: vi.fn<(module: string, uuid: string) => void>() }
 }))
 
+// The sidebar's resizable panel only reads `data` and calls `refetch()` after a drag.
+vi.mock("@/features/shell/queries/sidebarWidth", () => ({
+	useSidebarWidthQuery: () => ({ data: 300, refetch: () => Promise.resolve() })
+}))
+
 vi.mock("@/features/shell/lib/lastOpened", () => ({
 	useLastOpened: () => lastOpened.stored,
 	rememberLastOpened: lastOpened.remember
