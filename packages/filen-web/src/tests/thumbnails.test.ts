@@ -82,6 +82,19 @@ function heicItem(overrides: Partial<SdkFile> = {}): DriveItem {
 	)
 }
 
+// A browser-decoded category, so it queues on the three-slot browser gate rather than the SDK's one.
+function pdfItem(overrides: Partial<SdkFile> = {}): DriveItem {
+	return narrowItem(
+		mockFile({
+			meta: {
+				type: "decoded",
+				data: { name: "doc.pdf", mime: "application/pdf", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+			},
+			...overrides
+		})
+	)
+}
+
 function dirItem(): DriveItem {
 	return narrowItem({
 		uuid: testUuid("dir"),
@@ -686,13 +699,13 @@ describe("getThumbnailUrl — dedupe (pending-map join)", () => {
 	})
 })
 
-describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
+describe("getThumbnailUrl — browser gate (max 3 concurrent generations)", () => {
 	function generatorKeyedByUuid(deferred: ReturnType<typeof deferredCalls<ThumbGenerationResult>>): ThumbGenerator {
 		return item => deferred.fn(item.data.uuid)
 	}
 
 	it("a 4th concurrent call for a different uuid queues until a slot frees", async () => {
-		const items = [imageItem(), imageItem(), imageItem(), imageItem()]
+		const items = [pdfItem(), pdfItem(), pdfItem(), pdfItem()]
 		const deferred = deferredCalls<ThumbGenerationResult>()
 		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
 		const bytes: ThumbGenerationResult = { type: "bytes", bytes: new Uint8Array([1]) }
@@ -731,9 +744,9 @@ describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 	})
 
 	it("gives a freed slot to the visible cell before an earlier one above the view", async () => {
-		const held = [imageItem(), imageItem(), imageItem()]
-		const above = imageItem()
-		const visible = imageItem()
+		const held = [pdfItem(), pdfItem(), pdfItem()]
+		const above = pdfItem()
+		const visible = pdfItem()
 		const deferred = deferredCalls<ThumbGenerationResult>()
 		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
 		const bytes: ThumbGenerationResult = { type: "bytes", bytes: new Uint8Array([1]) }
@@ -771,8 +784,8 @@ describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 	})
 
 	it("an OPFS cache hit renders while every slot is held by a slow generation", async () => {
-		const slow = [imageItem(), imageItem(), imageItem()]
-		const cachedItem = imageItem()
+		const slow = [pdfItem(), pdfItem(), pdfItem()]
+		const cachedItem = pdfItem()
 		const deferred = deferredCalls<ThumbGenerationResult>()
 		const deps = depsWithGenerator(generatorKeyedByUuid(deferred), {
 			readThumbnailBlob: vi.fn((uuid: string) =>
@@ -796,6 +809,106 @@ describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 	})
 })
 
+// Image jobs end in the SDK's single thumbnail decoder; video/pdf/svg decode in the browser. Each kind
+// queues on its own gate, so one never waits on the other's slots.
+describe("getThumbnailUrl — image and browser gates", () => {
+	const bytes: ThumbGenerationResult = { type: "bytes", bytes: new Uint8Array([1]) }
+
+	function generatorKeyedByUuid(deferred: ReturnType<typeof deferredCalls<ThumbGenerationResult>>): ThumbGenerator {
+		return item => deferred.fn(item.data.uuid)
+	}
+
+	it("runs one image generation at a time, as the SDK decodes them", async () => {
+		const first = imageItem()
+		const second = imageItem()
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
+
+		const attempts = [getThumbnailUrl(first, deps), getThumbnailUrl(second, deps)]
+
+		await flushMicrotasks()
+
+		expect(deferred.keys).toEqual([first.data.uuid])
+
+		deferred.resolve(first.data.uuid, bytes)
+		await flushMicrotasks()
+
+		expect(deferred.keys).toEqual([first.data.uuid, second.data.uuid])
+
+		deferred.resolve(second.data.uuid, bytes)
+
+		expect((await Promise.all(attempts)).every(url => url !== null)).toBe(true)
+	})
+
+	it("starts a pdf and a video while image jobs wait on the decoder", async () => {
+		const images = [imageItem(), imageItem()]
+		const pdf = pdfItem()
+		const video = imageItem({
+			meta: {
+				type: "decoded",
+				data: { name: "clip.mp4", mime: "video/mp4", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+			}
+		})
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
+
+		const attempts = [...images, pdf, video].map(item => getThumbnailUrl(item, deps))
+
+		await flushMicrotasks()
+
+		const [held, queued] = images
+		if (held === undefined || queued === undefined) {
+			throw new Error("expected two fixtures")
+		}
+
+		expect(deferred.keys).toEqual([held.data.uuid, pdf.data.uuid, video.data.uuid])
+
+		for (const item of [held, pdf, video]) {
+			deferred.resolve(item.data.uuid, bytes)
+		}
+
+		await flushMicrotasks()
+		deferred.resolve(queued.data.uuid, bytes)
+
+		expect((await Promise.all(attempts)).every(url => url !== null)).toBe(true)
+	})
+
+	// The write and its read-back need no decoder: the next image starts while the first still persists.
+	it("frees the slot before the persist completes", async () => {
+		const first = imageItem()
+		const second = imageItem()
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const persist = Promise.withResolvers<undefined>()
+		const storeThumbnail = vi.fn((uuid: string) => (uuid === first.data.uuid ? persist.promise : Promise.resolve(undefined)))
+		const deps = depsWithGenerator(generatorKeyedByUuid(deferred), { storeThumbnail })
+
+		const firstUrl = getThumbnailUrl(first, deps)
+		const secondUrl = getThumbnailUrl(second, deps)
+
+		await flushMicrotasks()
+		deferred.resolve(first.data.uuid, bytes)
+		await flushMicrotasks()
+
+		expect(storeThumbnail).toHaveBeenCalledWith(first.data.uuid, expect.any(Uint8Array))
+		expect(deferred.keys).toEqual([first.data.uuid, second.data.uuid])
+
+		let firstSettled = false
+
+		void firstUrl.then(() => {
+			firstSettled = true
+		})
+		await flushMicrotasks()
+
+		expect(firstSettled).toBe(false)
+
+		persist.resolve(undefined)
+		deferred.resolve(second.data.uuid, bytes)
+
+		await expect(firstUrl).resolves.not.toBeNull()
+		await expect(secondUrl).resolves.not.toBeNull()
+	})
+})
+
 // Rows scrolled past during a fling queue a generation each; one whose cells all unmounted before it
 // reached a slot must not download and decode for nobody.
 describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
@@ -803,7 +916,7 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 
 	// Holds all three slots with pinned generations until the returned release runs.
 	async function holdSlots(deps: ThumbnailServiceDeps, deferred: ReturnType<typeof deferredCalls<ThumbGenerationResult>>) {
-		const holders = [imageItem(), imageItem(), imageItem()]
+		const holders = [pdfItem(), pdfItem(), pdfItem()]
 		const attempts = holders.map(item => getThumbnailUrl(item, deps))
 
 		await flushMicrotasks()
@@ -828,8 +941,8 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 	it("runs the generator only for uuids still wanted once a slot frees", async () => {
 		const { deferred, deps } = setup()
 		const release = await holdSlots(deps, deferred)
-		const scrolledPast = [imageItem(), imageItem(), imageItem(), imageItem()]
-		const kept = imageItem()
+		const scrolledPast = [pdfItem(), pdfItem(), pdfItem(), pdfItem()]
+		const kept = pdfItem()
 		const scrolledAttempts = scrolledPast.map(item => {
 			const controller = new AbortController()
 			const attempt = getThumbnailUrl(item, deps, controller.signal)
@@ -857,7 +970,7 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 	it("still generates while any one of several interested callers remains", async () => {
 		const { deferred, deps } = setup()
 		const release = await holdSlots(deps, deferred)
-		const item = imageItem()
+		const item = pdfItem()
 		const gone = new AbortController()
 		const stays = new AbortController()
 		const first = getThumbnailUrl(item, deps, gone.signal)
@@ -879,7 +992,7 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 	it("a remount before the slot frees rejoins the same generation", async () => {
 		const { deferred, generator, deps } = setup()
 		const release = await holdSlots(deps, deferred)
-		const item = imageItem()
+		const item = pdfItem()
 		const unmounted = new AbortController()
 
 		void getThumbnailUrl(item, deps, unmounted.signal)
@@ -898,7 +1011,7 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 	it("a caller asking again after abandonment gets a real url from a fresh generation", async () => {
 		const { deferred, deps } = setup()
 		const release = await holdSlots(deps, deferred)
-		const item = imageItem()
+		const item = pdfItem()
 		const controller = new AbortController()
 		const abandoned = getThumbnailUrl(item, deps, controller.signal)
 
@@ -919,7 +1032,7 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 	it("a caller without a signal is never abandoned", async () => {
 		const { deferred, deps } = setup()
 		const release = await holdSlots(deps, deferred)
-		const item = imageItem()
+		const item = pdfItem()
 		const controller = new AbortController()
 		const withSignal = getThumbnailUrl(item, deps, controller.signal)
 		const pinned = getThumbnailUrl(item, deps)
@@ -937,7 +1050,7 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 
 	it("a late abort from a settled generation never abandons a newer one for the same uuid", async () => {
 		const { deferred, deps } = setup()
-		const item = imageItem()
+		const item = pdfItem()
 		const stale = new AbortController()
 		const first = getThumbnailUrl(item, deps, stale.signal)
 
@@ -960,7 +1073,7 @@ describe("getThumbnailUrl — interest withdrawn before a slot frees", () => {
 
 	it("an abandoned generation records no failure strike and no verdict", async () => {
 		const { deferred, generator, deps } = setup()
-		const item = imageItem()
+		const item = pdfItem()
 
 		// Three abandonments in a row: a strike each would blacklist the uuid.
 		for (let i = 0; i < 3; i++) {

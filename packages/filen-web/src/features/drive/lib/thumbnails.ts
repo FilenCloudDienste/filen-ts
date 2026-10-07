@@ -20,7 +20,14 @@ import { RankedGate } from "@/features/drive/lib/rankedGate"
 // How many generator runs happen at once, app-wide — shapes DEMAND on the CPU/SDK-download layer,
 // never a limit the SDK itself needs (never reimplement SDK-side concurrency; this bounds how many
 // requests THIS app issues concurrently). The OPFS cache read stays outside it: see generate().
-const CONCURRENT_GENERATIONS = 3
+//
+// Two gates, because the two kinds of producer saturate different things. Every image ("sdk") job ends
+// in the SDK's thumbnail decoder, which runs one decode at a time (its own chunk reads included): a slot
+// past that only parks a job inside the SDK, and in a shared gate it held a slot a browser decode needed.
+// Rises to 3 together with `thumbnailDecodeConcurrency: 3` once the SDK decodes on a pool of workers.
+const SDK_THUMBNAIL_DECODES = 1
+// Video, pdf and svg decode in the browser, each on its own element, worker or canvas.
+const BROWSER_GENERATIONS = 3
 
 // How long a generation for a cell off screen waits on a free slot before taking it, so the visible cells
 // mounting in the same pass (whose cache reads come back moments later) claim the slots first.
@@ -159,12 +166,17 @@ const pending = new Map<string, PendingEntry>()
 // generation has no entry here — nothing but a seat ever needs to know it was joined.
 const seats = new Map<string, { joined: boolean }>()
 
-const gate = new RankedGate(CONCURRENT_GENERATIONS, OFFSCREEN_HOLD_MS)
+const sdkGate = new RankedGate(SDK_THUMBNAIL_DECODES, OFFSCREEN_HOLD_MS)
+const browserGate = new RankedGate(BROWSER_GENERATIONS, OFFSCREEN_HOLD_MS)
 
-// Runs a seeded production that decodes in the browser (video, pdf) in one of the generation slots: it
-// costs what the generation it replaces would have, less the download.
-export function withGenerationSlot<T>(produce: () => Promise<T>): Promise<T> {
-	return gate.withPermit(firstInLine, produce)
+function gateFor(category: ThumbGeneratorCategory): RankedGate {
+	return category === "sdk" ? sdkGate : browserGate
+}
+
+// Runs a seeded production in one of its category's generation slots: it costs what the generation it
+// replaces would have, less the download.
+export function withGenerationSlot<T>(category: ThumbGeneratorCategory, produce: () => Promise<T>): Promise<T> {
+	return gateFor(category).withPermit(firstInLine, produce)
 }
 
 function firstInLine(): number {
@@ -325,12 +337,12 @@ async function persistAndFinalize(deps: ThumbnailServiceDeps, uuid: string, byte
 // The one real generation attempt for a uuid: check the OPFS cache first (another tab, or an earlier
 // session, may have already produced this thumbnail), then route through the registered generator for
 // the category (an unregistered category resolves no bytes, same as any other failure below). Only the
-// generator runs under the app-wide generation gate: a cache hit is a local read, and gating it would park
-// every already-cached tile behind whichever slow video/PDF generations hold the slots; the mounted
-// tiles already bound how many reads run at once. A generated result is written back through
-// storeThumbnail — a persist failure there is logged and non-fatal. A transient failure to obtain
-// bytes — a thrown error, an empty buffer, or no generator — is LOGGED ONLY (never surfaced to a user:
-// thumbnail generation is silent by design) and counted against the blacklist; a SETTLED
+// generator runs under its category's generation gate: a cache hit is a local read, and gating it would
+// park every already-cached tile behind whichever slow generations hold the slots; the mounted tiles
+// already bound how many reads run at once. A generated result is written back through storeThumbnail
+// after the slot is given back — a persist failure there is logged and non-fatal. A transient failure
+// to obtain bytes — a thrown error, an empty buffer, or no generator — is LOGGED ONLY (never surfaced
+// to a user: thumbnail generation is silent by design) and counted against the blacklist; a SETTLED
 // "unavailable" verdict instead joins the session-only `unavailable` set above and costs no strike.
 // Work that lost every interested caller while queued is dropped on reaching its slot, and a generator
 // that stopped on the claim's signal ends the same way: neither a failure nor a verdict.
@@ -370,6 +382,8 @@ async function generate(
 		return null
 	}
 
+	const gate = gateFor(category)
+
 	await gate.acquire(() => claimRank(claim))
 
 	// Synchronous with the removal, so no caller can join the entry between the check and the null.
@@ -386,42 +400,41 @@ async function generate(
 		return null
 	}
 
+	// Only the generator holds the slot: the persist below is a write and a read-back, no decode.
+	let generated: ThumbGenerationResult = { type: "failed" }
+
 	try {
-		let bytes: Uint8Array | undefined
+		const generator = deps.getGenerator(category)
 
-		try {
-			const generator = deps.getGenerator(category)
-			const generated: ThumbGenerationResult =
-				generator === undefined ? { type: "failed" } : await generator(item, claim.controller.signal)
-
-			if (generated.type === "bytes") {
-				bytes = generated.bytes
-			} else if (generated.type === "unavailable") {
-				unavailable.add(uuid)
-
-				return null
-			}
-		} catch (e) {
-			if (!claim.controller.signal.aborted) {
-				log.warn("thumbnails", "generate: generation failed", uuid, e)
-			}
+		if (generator !== undefined) {
+			generated = await generator(item, claim.controller.signal)
 		}
-
-		if (bytes === undefined && claim.controller.signal.aborted) {
-			claim.dropped = true
-
-			return null
+	} catch (e) {
+		if (!claim.controller.signal.aborted) {
+			log.warn("thumbnails", "generate: generation failed", uuid, e)
 		}
-
-		if (bytes === undefined || bytes.length === 0) {
-			failures.set(uuid, (failures.get(uuid) ?? 0) + 1)
-			return null
-		}
-
-		return await persistAndFinalize(deps, uuid, bytes, "generate")
 	} finally {
 		gate.release()
 	}
+
+	if (generated.type === "unavailable") {
+		unavailable.add(uuid)
+
+		return null
+	}
+
+	if (generated.type === "failed" && claim.controller.signal.aborted) {
+		claim.dropped = true
+
+		return null
+	}
+
+	if (generated.type === "failed" || generated.bytes.length === 0) {
+		failures.set(uuid, (failures.get(uuid) ?? 0) + 1)
+		return null
+	}
+
+	return await persistAndFinalize(deps, uuid, generated.bytes, "generate")
 }
 
 // The cached objectURL for a uuid, synchronously, so a mounting cell can render it on its first frame.
@@ -500,10 +513,10 @@ export async function getThumbnailUrl(
 // next commit, and without a pending entry that tile would immediately start DOWNLOADING bytes the
 // client still has in hand — the exact re-download the upload-side thumbnail exists to avoid.
 //
-// The production runs outside the generation gate unless it takes a slot itself
-// (withGenerationSlot): the SDK serialises its own decodes internally, so an SDK production adds no
-// unbounded CPU demand, and a fifty-file upload batch must not be able to hold all three generation
-// slots against the listing the user is actually looking at. A browser decode has no such bound.
+// The production runs outside the generation gates unless it takes a slot itself (withGenerationSlot).
+// A decode does: an image one shares the SDK's decoder with the listing's image generations, so its
+// slot keeps that gate's count of the decoder true, and a browser decode has no other bound. An svg
+// render needs none, being bounded by its own render gate (thumbGenerators.ts).
 //
 // Its two byte-less outcomes are NOT the same thing (ThumbSeedResult names them). A production that
 // answers "none" has read the local bytes and settled "no thumbnail for this file" — null is the
@@ -515,10 +528,9 @@ export async function getThumbnailUrl(
 //
 // That fall-through runs ONLY where a caller actually joined. The upload path seats a production for
 // every file it uploads, including uploads into a directory nothing is rendering, whose rows never
-// mount and never ask; generating server-side for one of those would queue range-read work through
-// the three generation slots for a thumbnail nobody wants, which is exactly what running the
-// production outside the gate exists to prevent. A caller that arrives after an unjoined seat is
-// gone finds no pending entry, no strike and no verdict behind it, so it starts an ordinary
+// mount and never ask; generating server-side for one of those would download and decode, through the
+// generation slots the listing needs, a thumbnail nobody wants. A caller that arrives after an unjoined
+// seat is gone finds no pending entry, no strike and no verdict behind it, so it starts an ordinary
 // generation of its own.
 //
 // A uuid that already has a rendered url or an in-flight generation is left alone.
@@ -547,7 +559,7 @@ export function seedThumbnail(
 
 	// pending.has(uuid) was just checked false above, and this function is synchronous up to here
 	// (no await before this point) — nothing else can touch `pending` for this uuid in between, so this
-	// always registers a fresh entry. Pinned: the production runs outside the gate, and its
+	// always registers a fresh entry. Pinned: the production never consults the claim, and its
 	// fall-through serves a caller that joined.
 	void startPending(uuid, true, async claim => {
 		let result: ThumbSeedResult

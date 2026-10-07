@@ -140,7 +140,7 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 		const contentType = allowedMediaContentType(item)
 
 		if (contentType !== null) {
-			seedLocalThumb(item, () =>
+			seedLocalThumb(item, "video", () =>
 				videoThumb(uploaded.uuid, defer => {
 					const url = URL.createObjectURL(file.slice(0, file.size, contentType))
 
@@ -157,7 +157,7 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 	}
 
 	if (category === "pdf") {
-		seedLocalThumb(item, async () => {
+		seedLocalThumb(item, "pdf", async () => {
 			let bytes: Uint8Array
 
 			try {
@@ -189,30 +189,33 @@ export function warmUploadThumbnail(uploaded: SdkFile, file: File): void {
 		return
 	}
 
-	seedThumbnail(item, async () => {
-		const result = await sdkApi.makeSdkThumbnailFromFile(file, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
+	// In an image generation slot: it takes the SDK's decoder exactly as the drive-side arm would.
+	seedThumbnail(item, () =>
+		withGenerationSlot("sdk", async (): Promise<ThumbSeedResult> => {
+			const result = await sdkApi.makeSdkThumbnailFromFile(file, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 
-		if (result.type === "thumbnail") {
-			return { type: "bytes", bytes: result.bytes }
-		}
+			if (result.type === "thumbnail") {
+				return { type: "bytes", bytes: result.bytes }
+			}
 
-		log.info("thumb-generators", "warmUploadThumbnail: no thumbnail", uploaded.uuid, result.type)
+			log.info("thumb-generators", "warmUploadThumbnail: no thumbnail", uploaded.uuid, result.type)
 
-		// `unsupported` and `corrupt` are answers about the bytes themselves, which the drive-side arm
-		// sniffs the same way and would answer the same. `overBudget` is not: the budget this arm decodes
-		// under shrank by the whole source, so a decoder peak that does not fit HERE can still fit the
-		// drive arm's near-full budget — a verdict about this arm's own buffering, not about the file.
-		return result.type === "overBudget" ? { type: "unanswered" } : { type: "none" }
-	})
+			// `unsupported` and `corrupt` are answers about the bytes themselves, which the drive-side arm
+			// sniffs the same way and would answer the same. `overBudget` is not: the budget this arm decodes
+			// under shrank by the whole source, so a decoder peak that does not fit HERE can still fit the
+			// drive arm's near-full budget — a verdict about this arm's own buffering, not about the file.
+			return result.type === "overBudget" ? { type: "unanswered" } : { type: "none" }
+		})
+	)
 }
 
 // A local video or pdf production: a browser decode, so it takes a generation slot like the drive-side
 // one it replaces (see withGenerationSlot). Its failure is settled as "none": the drive-side arm would
 // run this same code over these same bytes, only after downloading them. Null is a local file that
 // could not be read, which says nothing about the file.
-function seedLocalThumb(item: DriveItem, produce: () => Promise<ThumbGenerationResult | null>): void {
+function seedLocalThumb(item: DriveItem, category: "video" | "pdf", produce: () => Promise<ThumbGenerationResult | null>): void {
 	seedThumbnail(item, () =>
-		withGenerationSlot(async (): Promise<ThumbSeedResult> => {
+		withGenerationSlot(category, async (): Promise<ThumbSeedResult> => {
 			const result = await produce()
 
 			if (result === null) {
@@ -366,9 +369,9 @@ export const generateVideoThumb: ThumbGenerator = async (item, signal) => {
 
 const SVG_RENDER_TIMEOUT_MS = 10_000
 
-// One render at a time: an svg's layout and paint run on the main thread, where nothing can interrupt
-// them, so a costly document never has another one stacked beside it.
-const svgRenderGate = new Semaphore(1)
+// Two renders at a time: an svg's layout and paint run on the main thread, where nothing can interrupt
+// them, so a costly document never has more than one other beside it.
+const svgRenderGate = new Semaphore(2)
 
 async function inSvgRenderSlot<T>(render: () => Promise<T>): Promise<T> {
 	await svgRenderGate.acquire()

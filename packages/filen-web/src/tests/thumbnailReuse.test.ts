@@ -20,7 +20,7 @@ import { testUuid } from "@/tests/support/uuid"
 
 let uuidCounter = 0
 
-function imageItem(): DriveItem {
+function imageItem(name = "photo.jpg", mime = "image/jpeg"): DriveItem {
 	uuidCounter += 1
 
 	const file: SdkFile = {
@@ -36,11 +36,15 @@ function imageItem(): DriveItem {
 		canMakeThumbnail: true,
 		meta: {
 			type: "decoded",
-			data: { name: "photo.jpg", mime: "image/jpeg", modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
+			data: { name, mime, modified: 1_700_000_000_000n, size: 1_024n, key: "key", version: 2 }
 		}
 	}
 
 	return narrowItem(file)
+}
+
+function pdfItem(): DriveItem {
+	return imageItem("doc.pdf", "application/pdf")
 }
 
 function makeDeps(overrides: Partial<ThumbnailServiceDeps> = {}): ThumbnailServiceDeps {
@@ -177,8 +181,8 @@ describe("reuseCopiedThumbnails", () => {
 })
 
 describe("withGenerationSlot", () => {
-	it("waits for one of the three generation slots", async () => {
-		const held = [imageItem(), imageItem(), imageItem()]
+	// Generations of `items` held open until each is released.
+	async function hold(items: DriveItem[]) {
 		const releases: (() => void)[] = []
 		const deps = makeDeps({
 			getGenerator: vi.fn().mockReturnValue(
@@ -190,25 +194,54 @@ describe("withGenerationSlot", () => {
 					})
 			)
 		})
-		const holding = held.map(item => getThumbnailUrl(item, deps))
+		const holding = items.map(item => getThumbnailUrl(item, deps))
 
 		await flushMicrotasks()
 
+		return {
+			releases,
+			done: async (): Promise<void> => {
+				for (const release of releases) {
+					release()
+				}
+
+				await Promise.all(holding)
+			}
+		}
+	}
+
+	it("waits for one of the three browser generation slots", async () => {
+		const held = await hold([pdfItem(), pdfItem(), pdfItem()])
 		const produce = vi.fn(() => Promise.resolve("done"))
-		const slotted = withGenerationSlot(produce)
+		const slotted = withGenerationSlot("video", produce)
 
 		await flushMicrotasks()
 
 		expect(produce).not.toHaveBeenCalled()
 
-		releases[0]?.()
+		held.releases[0]?.()
 
 		await expect(slotted).resolves.toBe("done")
+		await held.done()
+	})
 
-		for (const release of releases) {
-			release()
-		}
+	it("waits for the SDK's decoder, and only for it", async () => {
+		const browser = await hold([pdfItem(), pdfItem(), pdfItem()])
+		const image = await hold([imageItem()])
 
-		await Promise.all(holding)
+		expect(image.releases).toHaveLength(1)
+
+		const produce = vi.fn(() => Promise.resolve("done"))
+		const slotted = withGenerationSlot("sdk", produce)
+
+		await flushMicrotasks()
+
+		expect(produce).not.toHaveBeenCalled()
+
+		image.releases[0]?.()
+
+		await expect(slotted).resolves.toBe("done")
+		await image.done()
+		await browser.done()
 	})
 })

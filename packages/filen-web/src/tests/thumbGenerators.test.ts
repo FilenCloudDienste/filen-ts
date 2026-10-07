@@ -27,7 +27,7 @@ function live(): AbortSignal {
 const { registerThumbGeneratorMock, seedThumbnailMock, withGenerationSlotMock } = vi.hoisted(() => ({
 	registerThumbGeneratorMock: vi.fn<(category: ThumbGeneratorCategory, generator: ThumbGenerator) => void>(),
 	seedThumbnailMock: vi.fn<(item: DriveItem, produce: () => Promise<ThumbSeedResult>) => void>(),
-	withGenerationSlotMock: vi.fn(<T>(produce: () => Promise<T>) => produce())
+	withGenerationSlotMock: vi.fn(<T>(_category: ThumbGeneratorCategory, produce: () => Promise<T>) => produce())
 }))
 
 vi.mock("@/features/drive/lib/thumbnails", () => ({
@@ -356,6 +356,7 @@ describe("warmUploadThumbnail", () => {
 
 		await expect(seededProduction()()).resolves.toEqual({ type: "none" })
 		expect(withGenerationSlotMock).toHaveBeenCalledTimes(1)
+		expect(withGenerationSlotMock.mock.calls[0]?.[0]).toBe("video")
 		expect(previewStreamUrlMock).not.toHaveBeenCalled()
 		expect(downloadFileBytesMock).not.toHaveBeenCalled()
 	})
@@ -377,6 +378,7 @@ describe("warmUploadThumbnail", () => {
 
 		await expect(seededProduction()()).resolves.toEqual({ type: "none" })
 		expect(withGenerationSlotMock).toHaveBeenCalledTimes(1)
+		expect(withGenerationSlotMock.mock.calls[0]?.[0]).toBe("pdf")
 		expect((getDocumentMock.mock.calls[0]?.[0] as { data: Uint8Array }).data).toEqual(new Uint8Array([7, 8, 9]))
 		expect(downloadFileBytesMock).not.toHaveBeenCalled()
 	})
@@ -399,7 +401,7 @@ describe("warmUploadThumbnail", () => {
 		expect(seedThumbnailMock).not.toHaveBeenCalled()
 	})
 
-	it("the seeded production hands the browser File straight to the SDK and returns its bytes", async () => {
+	it("the seeded production hands the browser File straight to the SDK, in an image slot, and returns its bytes", async () => {
 		const uploaded = namedFile("shot.nef", "image/x-nikon-nef", { canMakeThumbnail: true })
 		const file = browserFile("shot.nef")
 		makeSdkThumbnailFromFileMock.mockResolvedValue({
@@ -419,6 +421,8 @@ describe("warmUploadThumbnail", () => {
 		}
 
 		await expect(produce()).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([5, 5]) })
+		expect(withGenerationSlotMock).toHaveBeenCalledTimes(1)
+		expect(withGenerationSlotMock.mock.calls[0]?.[0]).toBe("sdk")
 		expect(makeSdkThumbnailFromFileMock).toHaveBeenCalledWith(file, THUMB_MAX_DIM, THUMB_SDK_MAX_HEIGHT, THUMB_SDK_LOSSY_QUALITY)
 	})
 
@@ -491,8 +495,8 @@ describe("rasterizeSvgThumb — refusals (no DOM element ever created)", () => {
 	})
 })
 
-describe("rasterizeSvgThumb — one render at a time", () => {
-	it("starts a second document's render only once the first has settled", async () => {
+describe("rasterizeSvgThumb — two renders at a time", () => {
+	it("starts a third document's render only once one of the first two has settled", async () => {
 		const decodes: { reject: (reason: unknown) => void }[] = []
 
 		vi.stubGlobal(
@@ -513,23 +517,26 @@ describe("rasterizeSvgThumb — one render at a time", () => {
 			const svg = '<svg viewBox="0 0 10 10"></svg>'
 			const first = rasterizeSvgThumb(svg)
 			const second = rasterizeSvgThumb(svg)
+			const third = rasterizeSvgThumb(svg)
 
 			await vi.waitFor(() => {
-				expect(decodes).toHaveLength(1)
+				expect(decodes).toHaveLength(2)
 			})
 			await Promise.resolve()
-			expect(decodes).toHaveLength(1)
+			expect(decodes).toHaveLength(2)
 
 			decodes[0]?.reject(new Error("bad"))
 
 			await expect(first).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
 			await vi.waitFor(() => {
-				expect(decodes).toHaveLength(2)
+				expect(decodes).toHaveLength(3)
 			})
 
 			decodes[1]?.reject(new Error("bad"))
+			decodes[2]?.reject(new Error("bad"))
 
 			await expect(second).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
+			await expect(third).resolves.toEqual({ type: "unavailable", reason: "corrupt" })
 		} finally {
 			vi.unstubAllGlobals()
 			vi.restoreAllMocks()
