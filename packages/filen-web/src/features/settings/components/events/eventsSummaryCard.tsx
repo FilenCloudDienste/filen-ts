@@ -33,9 +33,10 @@ function SummaryItem({
 }) {
 	return (
 		<div className="flex min-w-0 flex-col gap-0.5">
-			{/* Labels and details wrap: two narrow columns on a phone would cut them off mid-word. */}
+			{/* Everything wraps: the columns are fixed fractions, so a one-line value would cut off copy like
+			    "Not changed in the last 30 days" while the row below has room for it. */}
 			<dt className="text-xs break-words text-muted-foreground">{label}</dt>
-			<dd className={cn("truncate font-medium", warning === true && "text-warning-foreground")}>{value}</dd>
+			<dd className={cn("font-medium text-pretty break-words", warning === true && "text-warning-foreground")}>{value}</dd>
 			{detail !== undefined ? <dd className="text-xs break-words text-muted-foreground">{detail}</dd> : null}
 		</div>
 	)
