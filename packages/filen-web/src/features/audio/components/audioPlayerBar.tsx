@@ -58,7 +58,7 @@ export function AudioPlayerBar() {
 		<section
 			ref={toastObstructionRef}
 			aria-label={t("playerLabel")}
-			className="flex flex-col gap-1 border-t border-border bg-card px-3 py-2 text-foreground"
+			className="flex flex-col gap-1 border-t border-shell-border bg-card px-3 py-2 text-foreground"
 		>
 			{lastError !== null ? (
 				<div

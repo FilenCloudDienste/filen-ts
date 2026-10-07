@@ -6,8 +6,8 @@ import { type SidebarModule } from "@/features/shell/lib/sidebarWidth"
 // Drag region (Electron plumbing): inert in a plain browser, opted back out by every interactive
 // descendant via app-region-no-drag. Visibility is the shell's call, never the panel's — see
 // appShell.tsx.
-const PANEL_CLASS = "flex max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
-const FIXED_PANEL_CLASS = "flex w-52 max-w-full shrink-0 flex-col rounded-xl bg-sidebar app-region-drag"
+const PANEL_CLASS = "flex max-w-full shrink-0 flex-col rounded-xl border border-shell-border bg-sidebar app-region-drag"
+const FIXED_PANEL_CLASS = "flex w-52 max-w-full shrink-0 flex-col rounded-xl border border-shell-border bg-sidebar app-region-drag"
 
 export function SidebarPanel({ children }: { children: ReactNode }) {
 	return <aside className={FIXED_PANEL_CLASS}>{children}</aside>

@@ -32,7 +32,7 @@ const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 
 // Padded canvas holding the three shell zones: a bare icon rail sitting directly on the canvas, then
 // two floating rounded panels — the contextual module sidebar and the content card. Nothing touches a
-// viewport edge; zones separate through the canvas gaps themselves, never a border line. The sidebar
+// viewport edge; zones separate through the canvas gaps, each panel outlined by --shell-border. The sidebar
 // is contextual per module (see resolveSidebarKind).
 //
 // Below the app's layout breakpoint the row cannot hold the sidebar at all, so the shell RELOCATES it
@@ -46,7 +46,7 @@ const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 export function AppShell() {
 	// The sidebar panel is contextual: /chats* gets the ChatsSidebar, /notes* the NotesSidebar,
 	// /settings* the SettingsSidebar, /contacts the ContactsSidebar, /playlists the PlaylistsSidebar,
-	// everything else the DriveSidebar. All six share the same panel styling (rounded-xl, borderless);
+	// everything else the DriveSidebar. All six share the same panel styling (rounded-xl, --shell-border outline);
 	// drive, notes and chats are user-resizable (useResizableSidebar) and render a trailing drag-handle
 	// sibling — settings/contacts/playlists stay fixed at w-52.
 	const { t } = useTranslation("common")
@@ -119,7 +119,7 @@ export function AppShell() {
 				    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
 				    gap and make the sidebar-to-main spacing wider than the row's padding. */}
 				{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
-				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-card shadow-sm">
+				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm">
 					<Outlet />
 				</main>
 			</div>
