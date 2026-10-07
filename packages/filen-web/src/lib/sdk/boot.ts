@@ -15,7 +15,13 @@ import { queryClient } from "@/queries/client"
 import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
 import { advanceBootSplash } from "@/lib/bootSplash"
-import { getTransferPreferences, buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES } from "@/features/settings/lib/transferConfig"
+import {
+	getTransferPreferences,
+	buildJsClientConfig,
+	DEFAULT_TRANSFER_PREFERENCES,
+	rememberAppliedTransferConfig
+} from "@/features/settings/lib/transferConfig"
+import { SDK_THUMBNAIL_DECODES } from "@/features/drive/lib/thumbnails.logic"
 import { getArchivePreferences, buildArchiveClientConfig, DEFAULT_ARCHIVE_PREFERENCES } from "@/features/settings/lib/archiveConfig"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
@@ -129,7 +135,8 @@ export async function bootSdk(): Promise<void> {
 				readClientConfig("archive", getArchivePreferences, buildArchiveClientConfig, DEFAULT_ARCHIVE_PREFERENCES)
 			])
 
-			await sdkApi.setClientConfig({ ...transfer, ...archive })
+			rememberAppliedTransferConfig(transfer)
+			await sdkApi.setClientConfig({ ...transfer, ...archive, thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES })
 		} catch (e) {
 			log.warn("boot", "failed to apply client config; using defaults", e)
 		}

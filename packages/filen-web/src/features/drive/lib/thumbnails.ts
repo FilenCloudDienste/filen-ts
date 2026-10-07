@@ -4,7 +4,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { defaultObjectUrlFns, type ObjectUrlFns } from "@/lib/objectUrl"
 import { readThumbnailBlob, deleteThumbnail as deleteThumbnailBlob } from "@/features/drive/lib/thumbCache"
-import { thumbnailCategory, type ThumbnailCategory, type ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
+import { thumbnailCategory, type ThumbnailCategory, type ThumbnailCopy, SDK_THUMBNAIL_DECODES } from "@/features/drive/lib/thumbnails.logic"
 import { asDirectoryOrFile, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { createThumbnailUrlCache, capacityForVisibleSlots, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
@@ -22,10 +22,8 @@ import { RankedGate } from "@/features/drive/lib/rankedGate"
 // requests THIS app issues concurrently). The OPFS cache read stays outside it: see generate().
 //
 // Two gates, because the two kinds of producer saturate different things. Every image ("sdk") job ends
-// in the SDK's thumbnail decoder, which runs one decode at a time (its own chunk reads included): a slot
+// in the SDK's thumbnail decoders, sized by the same SDK_THUMBNAIL_DECODES boot hands the client: a slot
 // past that only parks a job inside the SDK, and in a shared gate it held a slot a browser decode needed.
-// Rises to 3 together with `thumbnailDecodeConcurrency: 3` once the SDK decodes on a pool of workers.
-const SDK_THUMBNAIL_DECODES = 1
 // Video, pdf and svg decode in the browser, each on its own element, worker or canvas.
 const BROWSER_GENERATIONS = 3
 

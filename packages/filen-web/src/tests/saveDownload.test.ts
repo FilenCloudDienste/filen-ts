@@ -1,3 +1,4 @@
+import { buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES } from "@/features/settings/lib/transferConfig"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
 import { type SwSaveTarget } from "@/features/drive/lib/saveDownload"
@@ -232,6 +233,21 @@ describe("saveDownload — FSA branch", () => {
 })
 
 describe("saveDownload — sw branch (no FSA)", () => {
+	it("hands the service worker the transfer config this page's client was built with", async () => {
+		stubWindow()
+		const sw = fakeServiceWorker(() => ({ ok: true }))
+		stubServiceWorkerReady(sw)
+
+		const { saveDownload } = await freshModule()
+		const { rememberAppliedTransferConfig } = await import("@/features/settings/lib/transferConfig")
+		const applied = buildJsClientConfig({ preset: "maximum" })
+
+		rememberAppliedTransferConfig(applied)
+		await saveDownload("report.pdf")
+
+		expect(sw.calls[0]?.payload["config"]).toEqual(applied)
+	})
+
 	it("inits the sw client and returns a sw target addressed at SW_DOWNLOAD_PREFIX", async () => {
 		stubWindow()
 		const sw = fakeServiceWorker(() => ({ ok: true }))
@@ -241,7 +257,12 @@ describe("saveDownload — sw branch (no FSA)", () => {
 		const target = await saveDownload("report.pdf")
 
 		expect(toStringified).toHaveBeenCalledTimes(1)
-		expect(sw.calls).toEqual([{ type: SW_MSG_INIT_CLIENT, payload: { blob: { email: "user@filen.io" } } }])
+		expect(sw.calls).toEqual([
+			{
+				type: SW_MSG_INIT_CLIENT,
+				payload: { blob: { email: "user@filen.io" }, config: buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES) }
+			}
+		])
 
 		if (target.kind !== "sw") {
 			throw new Error("expected a sw target")
@@ -317,7 +338,10 @@ describe("triggerSwDownload", () => {
 		await triggerSwDownload(file, save, "transfer-1", () => undefined)
 
 		expect(sw.calls).toEqual([
-			{ type: SW_MSG_INIT_CLIENT, payload: { blob: { email: "user@filen.io" } } },
+			{
+				type: SW_MSG_INIT_CLIENT,
+				payload: { blob: { email: "user@filen.io" }, config: buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES) }
+			},
 			{ type: SW_MSG_REGISTER_DOWNLOAD, payload: { id: "abc-123", file, name: "report.pdf", size: 2_048 } }
 		])
 		expect(location.href).toBe(`${SW_DOWNLOAD_PREFIX}abc-123`)
@@ -740,7 +764,10 @@ describe("triggerSwZipDownload", () => {
 		await triggerSwZipDownload(items, save, "transfer-2", () => undefined)
 
 		expect(sw.calls).toEqual([
-			{ type: SW_MSG_INIT_CLIENT, payload: { blob: { email: "user@filen.io" } } },
+			{
+				type: SW_MSG_INIT_CLIENT,
+				payload: { blob: { email: "user@filen.io" }, config: buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES) }
+			},
 			{ type: SW_MSG_REGISTER_ZIP_DOWNLOAD, payload: { id: "abc-123", items, name: "Filen.zip" } }
 		])
 		expect(location.href).toBe(`${SW_DOWNLOAD_PREFIX}abc-123`)

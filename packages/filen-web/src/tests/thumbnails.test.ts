@@ -33,7 +33,7 @@ import {
 	type ThumbnailServiceDeps,
 	type ThumbSeedResult
 } from "@/features/drive/lib/thumbnails"
-import { rowRank } from "@/features/drive/lib/thumbnails.logic"
+import { rowRank, SDK_THUMBNAIL_DECODES } from "@/features/drive/lib/thumbnails.logic"
 import { testUuid } from "@/tests/support/uuid"
 
 let uuidCounter = 0
@@ -818,30 +818,32 @@ describe("getThumbnailUrl — image and browser gates", () => {
 		return item => deferred.fn(item.data.uuid)
 	}
 
-	it("runs one image generation at a time, as the SDK decodes them", async () => {
-		const first = imageItem()
-		const second = imageItem()
+	it("runs as many image generations at once as the SDK decodes", async () => {
+		const images = Array.from({ length: SDK_THUMBNAIL_DECODES + 1 }, () => imageItem())
+		const uuids = images.map(item => item.data.uuid)
 		const deferred = deferredCalls<ThumbGenerationResult>()
 		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
 
-		const attempts = [getThumbnailUrl(first, deps), getThumbnailUrl(second, deps)]
+		const attempts = images.map(item => getThumbnailUrl(item, deps))
 
 		await flushMicrotasks()
 
-		expect(deferred.keys).toEqual([first.data.uuid])
+		expect(deferred.keys).toEqual(uuids.slice(0, SDK_THUMBNAIL_DECODES))
 
-		deferred.resolve(first.data.uuid, bytes)
+		deferred.resolve(uuids[0] ?? "", bytes)
 		await flushMicrotasks()
 
-		expect(deferred.keys).toEqual([first.data.uuid, second.data.uuid])
+		expect(deferred.keys).toEqual(uuids)
 
-		deferred.resolve(second.data.uuid, bytes)
+		for (const uuid of uuids.slice(1)) {
+			deferred.resolve(uuid, bytes)
+		}
 
 		expect((await Promise.all(attempts)).every(url => url !== null)).toBe(true)
 	})
 
 	it("starts a pdf and a video while image jobs wait on the decoder", async () => {
-		const images = [imageItem(), imageItem()]
+		const images = Array.from({ length: SDK_THUMBNAIL_DECODES + 1 }, () => imageItem())
 		const pdf = pdfItem()
 		const video = imageItem({
 			meta: {
@@ -856,14 +858,15 @@ describe("getThumbnailUrl — image and browser gates", () => {
 
 		await flushMicrotasks()
 
-		const [held, queued] = images
-		if (held === undefined || queued === undefined) {
-			throw new Error("expected two fixtures")
+		const held = images.slice(0, SDK_THUMBNAIL_DECODES)
+		const queued = images.at(-1)
+		if (queued === undefined) {
+			throw new Error("expected fixtures")
 		}
 
-		expect(deferred.keys).toEqual([held.data.uuid, pdf.data.uuid, video.data.uuid])
+		expect(deferred.keys).toEqual([...held.map(item => item.data.uuid), pdf.data.uuid, video.data.uuid])
 
-		for (const item of [held, pdf, video]) {
+		for (const item of [...held, pdf, video]) {
 			deferred.resolve(item.data.uuid, bytes)
 		}
 
@@ -875,22 +878,25 @@ describe("getThumbnailUrl — image and browser gates", () => {
 
 	// The write and its read-back need no decoder: the next image starts while the first still persists.
 	it("frees the slot before the persist completes", async () => {
-		const first = imageItem()
-		const second = imageItem()
+		const [first, ...rest] = Array.from({ length: SDK_THUMBNAIL_DECODES + 1 }, () => imageItem())
+		if (first === undefined) {
+			throw new Error("expected fixtures")
+		}
 		const deferred = deferredCalls<ThumbGenerationResult>()
 		const persist = Promise.withResolvers<undefined>()
 		const storeThumbnail = vi.fn((uuid: string) => (uuid === first.data.uuid ? persist.promise : Promise.resolve(undefined)))
 		const deps = depsWithGenerator(generatorKeyedByUuid(deferred), { storeThumbnail })
 
 		const firstUrl = getThumbnailUrl(first, deps)
-		const secondUrl = getThumbnailUrl(second, deps)
+		const restUrls = rest.map(item => getThumbnailUrl(item, deps))
 
 		await flushMicrotasks()
 		deferred.resolve(first.data.uuid, bytes)
 		await flushMicrotasks()
 
+		// The gate was full; the last image starts while the first's persist is still pending.
 		expect(storeThumbnail).toHaveBeenCalledWith(first.data.uuid, expect.any(Uint8Array))
-		expect(deferred.keys).toEqual([first.data.uuid, second.data.uuid])
+		expect(deferred.keys).toEqual([first, ...rest].map(item => item.data.uuid))
 
 		let firstSettled = false
 
@@ -902,10 +908,12 @@ describe("getThumbnailUrl — image and browser gates", () => {
 		expect(firstSettled).toBe(false)
 
 		persist.resolve(undefined)
-		deferred.resolve(second.data.uuid, bytes)
+		for (const item of rest) {
+			deferred.resolve(item.data.uuid, bytes)
+		}
 
 		await expect(firstUrl).resolves.not.toBeNull()
-		await expect(secondUrl).resolves.not.toBeNull()
+		expect((await Promise.all(restUrls)).every(url => url !== null)).toBe(true)
 	})
 })
 

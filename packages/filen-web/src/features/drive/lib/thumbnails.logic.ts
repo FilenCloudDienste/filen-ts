@@ -178,3 +178,8 @@ export function rowRank(row: number, visible: VisibleRows | null): number {
 
 	return row > visible.endIndex ? row - visible.endIndex : ABOVE_VIEW_RANK + visible.startIndex - row
 }
+
+// How many image thumbnails the SDK decodes at once: its pool of decode workers on the web, each holding up
+// to THUMB_SDK_MEM_BUDGET while it runs and never handing its memory back to the tab. Boot passes it as the
+// client's thumbnailDecodeConcurrency, and the generation gate for image thumbnails is sized by it.
+export const SDK_THUMBNAIL_DECODES = 3

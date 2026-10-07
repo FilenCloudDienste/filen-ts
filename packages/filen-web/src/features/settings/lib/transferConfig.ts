@@ -71,3 +71,15 @@ export function buildJsClientConfig(prefs: TransferPreferences): JsClientConfig 
 		rateLimitPerSec
 	}
 }
+
+// The transfer config this page's client was built with, so the service worker's own client, which runs
+// the downloads FSA cannot, gets the same one rather than a preset changed since this page loaded.
+let appliedTransferConfig: JsClientConfig = buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES)
+
+export function rememberAppliedTransferConfig(config: JsClientConfig): void {
+	appliedTransferConfig = config
+}
+
+export function getAppliedTransferConfig(): JsClientConfig {
+	return appliedTransferConfig
+}

@@ -1,6 +1,7 @@
 import type { AnyFile, AnyItemWithContext } from "@filen/sdk-rs"
 import { isAbortError } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
+import { getAppliedTransferConfig } from "@/features/settings/lib/transferConfig"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { pipeWorkerToSink } from "@/lib/pipeWorkerToSink"
@@ -170,7 +171,8 @@ async function initSwClient(): Promise<void> {
 	const blob = await sdkApi.toStringified()
 	const target = await activeServiceWorker()
 
-	await sendToSw(target, SW_MSG_INIT_CLIENT, { blob })
+	// The SW's client runs every download FSA cannot, so it gets the transfer preset this page applied.
+	await sendToSw(target, SW_MSG_INIT_CLIENT, { blob, config: getAppliedTransferConfig() })
 }
 
 export function ensureSwClientReady(): Promise<void> {

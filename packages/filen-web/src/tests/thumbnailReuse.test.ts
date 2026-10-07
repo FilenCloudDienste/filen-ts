@@ -15,7 +15,7 @@ import {
 	type ThumbGenerationResult,
 	type ThumbnailServiceDeps
 } from "@/features/drive/lib/thumbnails"
-import type { ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
+import { SDK_THUMBNAIL_DECODES, type ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 import { testUuid } from "@/tests/support/uuid"
 
 let uuidCounter = 0
@@ -227,9 +227,9 @@ describe("withGenerationSlot", () => {
 
 	it("waits for the SDK's decoder, and only for it", async () => {
 		const browser = await hold([pdfItem(), pdfItem(), pdfItem()])
-		const image = await hold([imageItem()])
+		const image = await hold(Array.from({ length: SDK_THUMBNAIL_DECODES }, () => imageItem()))
 
-		expect(image.releases).toHaveLength(1)
+		expect(image.releases).toHaveLength(SDK_THUMBNAIL_DECODES)
 
 		const produce = vi.fn(() => Promise.resolve("done"))
 		const slotted = withGenerationSlot("sdk", produce)

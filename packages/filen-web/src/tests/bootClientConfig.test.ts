@@ -1,3 +1,4 @@
+import { SDK_THUMBNAIL_DECODES } from "@/features/drive/lib/thumbnails.logic"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
@@ -53,7 +54,8 @@ describe("bootSdk client config", () => {
 			concurrency: 160,
 			fileIoMemoryBudget: 128 * FULL_CHUNK_BYTES,
 			rateLimitPerSec: 640,
-			archiveCodecMemBudget: 512 * MIB
+			archiveCodecMemBudget: 512 * MIB,
+			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 		expect(useBootStore.getState().phase).toBe("ready")
 	})
@@ -65,7 +67,8 @@ describe("bootSdk client config", () => {
 
 		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
 			...buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES),
-			archiveCodecMemBudget: 128 * MIB
+			archiveCodecMemBudget: 128 * MIB,
+			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 	})
 
@@ -77,7 +80,8 @@ describe("bootSdk client config", () => {
 
 		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
 			...buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES),
-			archiveCodecMemBudget: 64 * MIB
+			archiveCodecMemBudget: 64 * MIB,
+			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 		expect(useBootStore.getState().phase).toBe("ready")
 	})
@@ -89,7 +93,8 @@ describe("bootSdk client config", () => {
 
 		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
 			...buildJsClientConfig({ preset: "batterySaver" }),
-			archiveCodecMemBudget: 128 * MIB
+			archiveCodecMemBudget: 128 * MIB,
+			thumbnailDecodeConcurrency: SDK_THUMBNAIL_DECODES
 		})
 	})
 

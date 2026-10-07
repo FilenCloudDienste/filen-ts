@@ -5,6 +5,7 @@ import initSdk, {
 	fromStringified,
 	type Client as SwClient,
 	type StringifiedClient as SwStringifiedClient,
+	type JsClientConfig as SwClientConfig,
 	type AnyFile as SwAnyFile,
 	type AnyItemWithContext as SwZipItem
 } from "@filen/sdk-rs/service-worker/sdk-rs.js"
@@ -137,7 +138,9 @@ function releaseClient(client: SwClient): void {
 	}
 }
 
-async function adoptSwClient(blob: SwStringifiedClient): Promise<void> {
+// `config` is the page's transfer preset (concurrency, memory budget, request rate); a page from before it
+// was sent leaves the SDK's defaults.
+async function adoptSwClient(blob: SwStringifiedClient, config: SwClientConfig | undefined): Promise<void> {
 	const epoch = logoutEpoch
 
 	await ensureSdkInit()
@@ -148,7 +151,7 @@ async function adoptSwClient(blob: SwStringifiedClient): Promise<void> {
 
 	const previous = swClient
 
-	swClient = fromStringified(blob)
+	swClient = fromStringified(blob, config ?? null)
 	retireClient(previous)
 }
 
@@ -534,8 +537,8 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 	}
 
 	if (type === SW_MSG_INIT_CLIENT) {
-		const blob = (event.data as { blob: SwStringifiedClient }).blob
-		void adoptSwClient(blob).then(
+		const { blob, config } = event.data as { blob: SwStringifiedClient; config?: SwClientConfig }
+		void adoptSwClient(blob, config).then(
 			() => port?.postMessage({ ok: true }),
 			(e: unknown) => port?.postMessage({ ok: false, error: e instanceof Error ? e.message : String(e) })
 		)
