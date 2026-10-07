@@ -23,7 +23,7 @@ import type { AudioMetadataResult } from "@/workers/audioMetadata"
 // The SDK owns network concurrency and retries; the queue here only bounds how many parses this page has
 // in flight, which is what bounds their memory.
 
-const CONCURRENT_READS = 2
+const CONCURRENT_READS = 4
 
 // A track whose bytes would not arrive this many times is left alone for the rest of the session, until
 // the connection comes back.

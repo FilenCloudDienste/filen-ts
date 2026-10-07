@@ -1,56 +1,92 @@
 import * as Comlink from "comlink"
-import { Semaphore } from "@filen/shared"
 import HeicWorker from "@/features/preview/workers/heic.worker.ts?worker"
 import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 import { idleResource } from "@/lib/idleResource"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
-// libheif's wasm memory grows to fit the largest image it has decoded and can never shrink, so the
+// libheif's wasm memory grows to fit the largest image it has decoded and can never shrink, so each
 // worker is torn down once it has sat idle; a later HEIC spins up a fresh one.
 const HEIC_WORKER_IDLE_MS = 30_000
 
-// Spun up on the first HEIC/HEIF transform, not at module load — most sessions never open one. Wrapped
-// with Comlink exactly like sdk.worker.ts/db.worker.ts's own workers (client.ts, storage/leader.ts);
-// unlike those, this one has no cross-tab role. A failed spin-up isn't cached, so the next attempt gets
-// a fresh worker instead of staying broken for the rest of the tab session.
-const heicWorker = idleResource(
-	() => {
-		const worker = new HeicWorker()
-		// A deploy that changed this worker removes its old file (appUpdate.ts).
-		worker.addEventListener("error", () => {
-			recoverIfNewerBuild()
-		})
+// Two decodes at once: a batch of uploads or a preview stepped through quickly keeps two cores busy,
+// while each worker's heap stays bounded by the one image it decodes at a time.
+const HEIC_WORKERS = 2
 
-		return { worker, remote: Comlink.wrap<HeicWorkerApi>(worker) }
-	},
-	({ worker, remote }) => {
-		remote[Comlink.releaseProxy]()
-		worker.terminate()
-	},
-	HEIC_WORKER_IDLE_MS
-)
+// Each spun up on demand, not at module load — most sessions never open a HEIC, and a lone transform only
+// ever wakes the first. Wrapped with Comlink exactly like sdk.worker.ts/db.worker.ts's own workers
+// (client.ts, storage/leader.ts); unlike those, these have no cross-tab role. A failed spin-up isn't
+// cached, so the next attempt gets a fresh worker instead of staying broken for the rest of the tab
+// session.
+function pooledWorker() {
+	return idleResource(
+		() => {
+			const worker = new HeicWorker()
+			// A deploy that changed this worker removes its old file (appUpdate.ts).
+			worker.addEventListener("error", () => {
+				recoverIfNewerBuild()
+			})
 
-// One transform posted at a time. The worker decodes them one by one anyway, and every job queued there
-// holds its own copy of the file; waiting here instead lets a caller that went away (a preview stepped
-// past) drop out before anything is copied or posted.
-const postGate = new Semaphore(1)
+			return { worker, remote: Comlink.wrap<HeicWorkerApi>(worker) }
+		},
+		({ worker, remote }) => {
+			remote[Comlink.releaseProxy]()
+			worker.terminate()
+		},
+		HEIC_WORKER_IDLE_MS
+	)
+}
+
+type PooledWorker = ReturnType<typeof pooledWorker>
+
+const heicWorkers = Array.from({ length: HEIC_WORKERS }, pooledWorker)
+// Workers with no transform posted, the first last so it is the one taken next: a lone transform keeps
+// reusing the same worker and the other idles out.
+const freeWorkers = heicWorkers.toReversed()
+const waiting: ((heic: PooledWorker) => void)[] = []
+
+// One transform posted per worker. A worker decodes its jobs one by one anyway, and every job queued
+// there holds its own copy of the file; waiting here instead lets a caller that went away (a preview
+// stepped past) drop out before anything is copied or posted.
+function takeWorker(): Promise<PooledWorker> {
+	const free = freeWorkers.pop()
+
+	if (free !== undefined) {
+		return Promise.resolve(free)
+	}
+
+	return new Promise(resolve => {
+		waiting.push(resolve)
+	})
+}
+
+function giveBack(heic: PooledWorker): void {
+	const next = waiting.shift()
+
+	if (next !== undefined) {
+		next(heic)
+
+		return
+	}
+
+	freeWorkers.push(heic)
+}
 
 async function transferToWorker(take: () => Uint8Array, signal: AbortSignal | undefined): Promise<Blob> {
-	await postGate.acquire()
+	const heic = await takeWorker()
 
 	try {
 		signal?.throwIfAborted()
 
 		const bytes = take()
 
-		return await heicWorker.use(({ remote }) => remote.transform(Comlink.transfer(bytes, [bytes.buffer])))
+		return await heic.use(({ remote }) => remote.transform(Comlink.transfer(bytes, [bytes.buffer])))
 	} finally {
-		postGate.release()
+		giveBack(heic)
 	}
 }
 
 // The one entry point for both HEIC callers — decode + JPEG re-encode run off the main thread in the
-// worker above, so a multi-megapixel photo (iPhone default) never blocks the tab. Any failure surfaces
+// workers above, so a multi-megapixel photo (iPhone default) never blocks the tab. Any failure surfaces
 // as a plain rejected Error, which each caller maps to its own outcome.
 //
 // Not preview-only: imageViewer.tsx (TransformedImageBytes) renders the Blob, and heicUpload.ts wires
@@ -74,7 +110,9 @@ export async function transformHeicBytesOwned(bytes: Uint8Array): Promise<Blob> 
 	return await transferToWorker(() => bytes, undefined)
 }
 
-// Logout: nothing of the previous session's photos should outlive it in the worker's heap.
+// Logout: nothing of the previous session's photos should outlive it in a worker's heap.
 export function releaseHeicWorker(): void {
-	heicWorker.disposeIfIdle()
+	for (const heic of heicWorkers) {
+		heic.disposeIfIdle()
+	}
 }

@@ -42,8 +42,8 @@ export interface HeicUploadConvertDeps {
 export const defaultHeicUploadConvertDeps: HeicUploadConvertDeps = { transform: transformHeicBytesOwned }
 
 // Both upload entry points start every file's conversion at once. Without a bound, a large HEIC batch
-// would read every source file into memory together while the single worker decodes them one by one.
-// Two keeps the worker fed (the next file is read while the current one decodes); SDK upload
+// would read every source file into memory together while the workers decode them two at a time. Two,
+// one per HEIC worker (heicTransform.ts), so no file sits in memory waiting for a decode; SDK upload
 // concurrency is untouched.
 const heicConvertLock = new Semaphore(2)
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-// heicTransform.ts's client-side contract: lazily spins up + memoizes a single shared worker (never
-// at module load), wraps it with Comlink, and forwards transform() calls through it. The worker
+// heicTransform.ts's client-side contract: lazily spins up + memoizes a pool of two workers (never
+// at module load), wraps each with Comlink, and forwards transform() calls through it. The worker
 // itself is heic.worker.ts, which heic.worker.test.ts already pins over a real MessageChannel — this
 // file only needs to prove heicTransform.ts's OWN seam (lazy spin-up, memoization, retry-after-failure,
 // transfer of a private copy, pass-through of the transform result/opts), so both the `?worker` constructor and
@@ -232,29 +232,113 @@ describe("heic worker lifetime", () => {
 		expect(terminateMock).toHaveBeenCalledTimes(1)
 	})
 
-	// A preview stepped past while its transform waited for the worker posts nothing at all.
+	// A preview stepped past while its transform waited for a worker posts nothing at all.
 	it("never posts a transform whose caller went away while it waited", async () => {
 		const { transformHeicBytes } = await freshModule()
-		let finish: (blob: Blob) => void = () => undefined
-		transformMock.mockImplementationOnce(
+		const finishers: ((blob: Blob) => void)[] = []
+		transformMock.mockImplementation(
 			() =>
 				new Promise<Blob>(resolve => {
-					finish = resolve
+					finishers.push(resolve)
 				})
 		)
 
-		const first = transformHeicBytes(new Uint8Array([1]))
+		const busy = [transformHeicBytes(new Uint8Array([1])), transformHeicBytes(new Uint8Array([2]))]
 		const gone = new AbortController()
-		const second = transformHeicBytes(new Uint8Array([2]), gone.signal)
+		const waiting = transformHeicBytes(new Uint8Array([3]), gone.signal)
 
 		await vi.waitFor(() => {
-			expect(transformMock).toHaveBeenCalledTimes(1)
+			expect(transformMock).toHaveBeenCalledTimes(2)
 		})
 		gone.abort()
-		finish(new Blob())
+
+		for (const finish of finishers) {
+			finish(new Blob())
+		}
+
+		await Promise.all(busy)
+
+		await expect(waiting).rejects.toThrow()
+		expect(transformMock).toHaveBeenCalledTimes(2)
+	})
+})
+
+// Two workers decode side by side; a third transform waits for one of them rather than queueing a copy
+// of its file inside a busy worker.
+describe("heic worker pool", () => {
+	function held() {
+		const finishers: ((blob: Blob) => void)[] = []
+
+		transformMock.mockImplementation(
+			() =>
+				new Promise<Blob>(resolve => {
+					finishers.push(resolve)
+				})
+		)
+
+		return finishers
+	}
+
+	it("runs two transforms at once, each on its own worker, and holds a third until one frees", async () => {
+		const { transformHeicBytes } = await freshModule()
+		const finishers = held()
+
+		const first = transformHeicBytes(new Uint8Array([1]))
+		const second = transformHeicBytes(new Uint8Array([2]))
+		const third = transformHeicBytes(new Uint8Array([3]))
+
+		await vi.waitFor(() => {
+			expect(transformMock).toHaveBeenCalledTimes(2)
+		})
+		await Promise.resolve()
+
+		expect(WorkerCtor).toHaveBeenCalledTimes(2)
+		expect(transformMock).toHaveBeenCalledTimes(2)
+
+		finishers[0]?.(new Blob())
 		await first
 
-		await expect(second).rejects.toThrow()
-		expect(transformMock).toHaveBeenCalledTimes(1)
+		await vi.waitFor(() => {
+			expect(transformMock).toHaveBeenCalledTimes(3)
+		})
+		expect(WorkerCtor).toHaveBeenCalledTimes(2)
+
+		finishers[1]?.(new Blob())
+		finishers[2]?.(new Blob())
+
+		await Promise.all([second, third])
+	})
+
+	it("keeps reusing one worker for transforms that never overlap", async () => {
+		const { transformHeicBytes } = await freshModule()
+		transformMock.mockResolvedValue(new Blob())
+
+		for (let i = 0; i < 4; i++) {
+			await transformHeicBytes(new Uint8Array([i]))
+		}
+
+		expect(WorkerCtor).toHaveBeenCalledTimes(1)
+	})
+
+	it("releases both workers on logout", async () => {
+		const { transformHeicBytes, releaseHeicWorker } = await freshModule()
+		vi.useFakeTimers()
+		const finishers = held()
+
+		const both = [transformHeicBytes(new Uint8Array([1])), transformHeicBytes(new Uint8Array([2]))]
+
+		await vi.waitFor(() => {
+			expect(transformMock).toHaveBeenCalledTimes(2)
+		})
+
+		for (const finish of finishers) {
+			finish(new Blob())
+		}
+
+		await Promise.all(both)
+		releaseHeicWorker()
+
+		expect(terminateMock).toHaveBeenCalledTimes(2)
+		expect(releaseMock).toHaveBeenCalledTimes(2)
 	})
 })

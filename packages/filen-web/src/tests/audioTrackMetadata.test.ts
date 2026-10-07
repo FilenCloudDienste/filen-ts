@@ -295,14 +295,18 @@ describe("TrackMetadataService", () => {
 
 	it("drops a queued read nobody wants any more, but keeps one another caller still wants", async () => {
 		const { service, deps } = makeService()
-		const gates = [Promise.withResolvers<AudioMetadataResult>(), Promise.withResolvers<AudioMetadataResult>()]
+		// One per concurrent read, so the two below wait in the queue.
+		const busy = ["a", "b", "e", "f"]
+		const gates = busy.map(() => Promise.withResolvers<AudioMetadataResult>())
 
-		deps.readRemote
-			.mockReturnValueOnce(gates[0]?.promise ?? Promise.resolve(parsed()))
-			.mockReturnValueOnce(gates[1]?.promise ?? Promise.resolve(parsed()))
+		for (const gate of gates) {
+			deps.readRemote.mockReturnValueOnce(gate.promise)
+		}
 
-		service.request(track("a"))
-		service.request(track("b"))
+		for (const uuid of busy) {
+			service.request(track(uuid))
+		}
+
 		await flush()
 
 		const unwanted = service.request(track("c"))
@@ -314,11 +318,13 @@ describe("TrackMetadataService", () => {
 
 		expect(await unwanted.promise).toEqual({ type: "unavailable" })
 
-		gates[0]?.resolve(parsed())
-		gates[1]?.resolve(parsed())
+		for (const gate of gates) {
+			gate.resolve(parsed())
+		}
+
 		await flush()
 
-		expect(deps.readRemote.mock.calls.map(([t]) => t.uuid)).toEqual(["a", "b", "d"])
+		expect(deps.readRemote.mock.calls.map(([t]) => t.uuid)).toEqual([...busy, "d"])
 	})
 
 	it("records an unparseable file as final, so it is never read again", async () => {
@@ -450,14 +456,17 @@ describe("TrackMetadataService", () => {
 
 		const running = service.request(track("a"))
 
-		service.request(track("b"))
-		service.request(track("c"))
+		// Four run at once; "e" waits.
+		for (const uuid of ["b", "c", "d", "e"]) {
+			service.request(track(uuid))
+		}
+
 		await flush()
 		putTrackTags("z", record())
 
 		service.reset()
 
-		expect(deps.cancelRead).toHaveBeenCalledTimes(2)
+		expect(deps.cancelRead).toHaveBeenCalledTimes(4)
 		expect(deps.revokeObjectUrl).toHaveBeenCalledWith("blob:1")
 		expect(await running.promise).toEqual({ type: "unavailable" })
 		expect(getTrackTags("z")).toBeUndefined()
@@ -466,6 +475,6 @@ describe("TrackMetadataService", () => {
 		await flush()
 
 		expect(getTrackTags("a")).toBeUndefined()
-		expect(deps.readRemote).toHaveBeenCalledTimes(2)
+		expect(deps.readRemote).toHaveBeenCalledTimes(4)
 	})
 })

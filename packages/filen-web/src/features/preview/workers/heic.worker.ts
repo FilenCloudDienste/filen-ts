@@ -4,7 +4,7 @@ import { Semaphore } from "@filen/shared"
 import { runHeicTransform, productionDeps } from "@/features/preview/lib/heicCodec"
 
 // Thin glue only — heicCodec.ts owns every real step (decode, orientation, freeing WASM handles, JPEG
-// encode, error normalization). One dedicated worker per tab, spun up lazily by heicTransform.ts;
+// encode, error normalization). One of heicTransform.ts's two pooled workers, each spun up lazily;
 // every call while it lives reuses this same instance, so heicCodec.ts's own decoder memoization
 // (getSharedDecoder) applies across calls.
 //

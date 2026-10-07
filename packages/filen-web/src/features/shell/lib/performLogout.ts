@@ -111,7 +111,7 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// audio from this account survives into the next session.
 	disposeAudioEngine()
 	// Decrypted preview buffers and archive listings (entry names, passwords) held for pager revisits,
-	// and an idle HEIC worker whose heap still holds this account's decoded photos.
+	// and any idle HEIC worker whose heap still holds this account's decoded photos.
 	clearPreviewCache()
 	clearArchiveListings()
 	releaseHeicWorker()
