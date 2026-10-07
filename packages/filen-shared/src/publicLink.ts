@@ -16,6 +16,14 @@ function nodeBuffer(): BufferLike {
 
 export const UUID_SUB = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
+const UUID_RE = new RegExp(`^${UUID_SUB}$`, "i")
+
+// For an id from outside the app (a URL, a pasted link) before it reaches the SDK, which rejects a
+// malformed one as a conversion failure rather than answering "not found".
+export function isUuid(value: string): boolean {
+	return UUID_RE.test(value)
+}
+
 const ORIGIN = "^https?://(?:app|drive)\\.filen\\.io/"
 
 // NEW path format (what the current web app builds): <origin>/f|d/<uuid>(#|%23)<hexkey>. Its letters

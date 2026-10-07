@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { parseFilenPublicLink } from "@filen/shared"
+import { isUuid, parseFilenPublicLink } from "@filen/shared"
 
 // Version 4 (third group starts "4"), variant 8 (fourth "8") — the 'uuid' package's validate() (which
 // parseFilenPublicLink uses) enforces both nibbles, unlike a plain 8-4-4-4-12 hex-shape regex.
@@ -138,5 +138,15 @@ describe("parseFilenPublicLink — rejections", () => {
 		const rawKey = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456"
 
 		expect(parseFilenPublicLink(`https://app.filen.io/#/d/${UUID}%23${rawKey}`)).toBeNull()
+	})
+})
+
+describe("isUuid", () => {
+	it("accepts a uuid in either case and nothing around it", () => {
+		expect(isUuid("0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d")).toBe(true)
+		expect(isUuid("0A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D")).toBe(true)
+		expect(isUuid("not-a-uuid")).toBe(false)
+		expect(isUuid(" 0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d")).toBe(false)
+		expect(isUuid("")).toBe(false)
 	})
 })
