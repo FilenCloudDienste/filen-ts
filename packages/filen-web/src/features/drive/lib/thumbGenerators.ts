@@ -226,7 +226,7 @@ function seedLocalThumb(item: DriveItem, produce: () => Promise<ThumbGenerationR
 
 // Resolves once `event` fires, or rejects if the element errors first — a corrupt/unplayable stream
 // must fail promptly rather than sit until the deadline — or once `signal` aborts.
-function waitForVideoEvent(video: HTMLVideoElement, event: "loadeddata" | "seeked", signal: AbortSignal): Promise<void> {
+function waitForVideoEvent(video: HTMLVideoElement, event: "loadedmetadata" | "loadeddata" | "seeked", signal: AbortSignal): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const cleanup = () => {
 			video.removeEventListener(event, onEvent)
@@ -263,10 +263,12 @@ const VIDEO_GENERATE_TIMEOUT_MS = 15_000
 // One frame of the video `openSource` resolves to, drawn into a thumbnail. Both arms share it: the
 // drive-side one plays the SW's Range stream, the upload warm the local file.
 //
-// The waits end at the deadline themselves, so a stream that never fires loadeddata/seeked/error
-// settles this callback and its deferred cleanup empties the element, ending the stream; runTimeout
-// alone could only stop waiting for it. `signal` stops the generation only until the first frame has
-// loaded: past that, all that is left is one seek and one draw.
+// Only the metadata is preloaded, and the seek then fetches just the data for the frame drawn: buffering
+// ahead ("auto") downloaded and decrypted megabytes that the teardown below then cancelled. The waits end
+// at the deadline themselves, so a stream that never fires its event or error settles this callback and
+// its deferred cleanup empties the element, ending the stream; runTimeout alone could only stop waiting
+// for it. `signal` stops the generation only until the frame has loaded: past that, all that is left is
+// one draw.
 async function videoThumb(
 	uuid: string,
 	openSource: (defer: DeferFn) => Promise<string> | string,
@@ -284,7 +286,7 @@ async function videoThumb(
 
 		video.muted = true
 		video.playsInline = true
-		video.preload = "auto"
+		video.preload = "metadata"
 		video.src = url
 
 		// Removing the attribute empties the element. `src = ""` instead resolves against the page, so
@@ -294,17 +296,22 @@ async function videoThumb(
 			video.load()
 		})
 
-		await waitForVideoEvent(video, "loadeddata", beforeFirstFrame)
+		await waitForVideoEvent(video, "loadedmetadata", beforeFirstFrame)
 
-		// An indeterminate duration (NaN — e.g. a stream with no known Content-Length) falls back to
-		// frame 0, which is already showing once loadeddata fires: seeking to the position the video is
-		// already at would never fire `seeked`, hanging until the outer timeout.
+		// `seeked` fires once the frame at the new position is decoded. An indeterminate duration (NaN —
+		// e.g. a stream with no known Content-Length) falls back to frame 0, where seeking to the position
+		// the video is already at would never fire `seeked`: that one loads the first frame instead, which
+		// a metadata-only preload need not do on its own.
 		const seekTo = Number.isFinite(video.duration) ? Math.min(1, video.duration / 2) : 0
 
 		if (seekTo > 0) {
 			video.currentTime = seekTo
 
-			await waitForVideoEvent(video, "seeked", deadline)
+			await waitForVideoEvent(video, "seeked", beforeFirstFrame)
+		} else if (video.readyState < video.HAVE_CURRENT_DATA) {
+			video.preload = "auto"
+
+			await waitForVideoEvent(video, "loadeddata", beforeFirstFrame)
 		}
 
 		const { width, height } = fitWithin(video.videoWidth, video.videoHeight, THUMB_MAX_DIM)
