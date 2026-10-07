@@ -4,7 +4,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 10
+export const SW_PROTOCOL_VERSION = 11
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
@@ -66,6 +66,13 @@ export type SwDownloadStatus =
 // mid-stream sends nothing at all.
 export const SW_DOWNLOAD_HEARTBEAT_MS = 5_000
 export const SW_DOWNLOAD_STALL_MS = 30_000
+
+// Sent by the page to the worker itself (never over a port) while any watched download streams. A whole
+// download is one fetch event, and Firefox terminates a worker about a minute after its last event even
+// with waitUntil pending; a client's message is an event that restarts its 30 s idle timeout. The worker
+// treats it as a no-op.
+export const SW_MSG_KEEPALIVE = "FILEN_SW_KEEPALIVE"
+export const SW_KEEPALIVE_MS = 10_000
 
 // How long the page waits for a message's ack before rejecting. Generous enough for the one slow
 // message: INIT_CLIENT compiles the 2 MB wasm on a cold worker before it can reply.

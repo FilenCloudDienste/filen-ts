@@ -21,6 +21,7 @@ import {
 	SW_MSG_LOGOUT,
 	SW_MSG_WATCH_DOWNLOAD,
 	SW_MSG_CANCEL_DOWNLOAD,
+	SW_MSG_KEEPALIVE,
 	isAllowedInlineContentType
 } from "@/lib/sw/protocol"
 import { PendingRegistry } from "@/lib/sw/pendingRegistry"
@@ -206,8 +207,9 @@ function failedOutcome(e: unknown, cancelled: boolean): { type: "failed"; error:
 // waitUntil is what keeps this worker alive for the pump: respondWith gets an already-resolved Response,
 // so the fetch event itself settles immediately and an idle worker is terminated (spec-permitted, ~30 s in
 // Firefox) straight through a running download — which the page cannot observe, having handed the save
-// off to the browser. Browsers cap that extension (Firefox at about a minute past the last event), so this
-// bounds the exposure rather than removing it; a media preview's pieces each bring a fresh event.
+// off to the browser. Browsers cap that extension (Firefox at about a minute past the last event): a
+// watched download's page sends SW_MSG_KEEPALIVE events for as long as it streams, and a media preview's
+// pieces each bring a fresh fetch event.
 function pumpToResponse(
 	event: FetchEvent,
 	id: string,
@@ -431,6 +433,11 @@ function hasClient(port: MessagePort | null): boolean {
 self.addEventListener("message", (event: ExtendableMessageEvent) => {
 	const data = event.data as { type?: string } | null
 	const type = data?.type
+
+	// Receiving it is the whole point (see SW_MSG_KEEPALIVE).
+	if (type === SW_MSG_KEEPALIVE) {
+		return
+	}
 
 	if (type === SW_SKIP_WAITING_MESSAGE) {
 		// Never truncate a running save — only honor the update switch when no stream is in flight.

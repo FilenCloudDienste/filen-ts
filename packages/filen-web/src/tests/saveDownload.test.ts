@@ -11,6 +11,8 @@ import {
 	SW_MSG_WATCH_DOWNLOAD,
 	SW_MSG_CANCEL_DOWNLOAD,
 	SW_DOWNLOAD_STALL_MS,
+	SW_KEEPALIVE_MS,
+	SW_MSG_KEEPALIVE,
 	type SwDownloadStatus
 } from "@/lib/sw/protocol"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
@@ -453,6 +455,45 @@ describe("a watched service-worker download", () => {
 		await running
 
 		expect(cancelSwDownload("transfer-1")).toBe(false)
+	})
+
+	it("keeps the worker alive with its own messages while the download streams, and stops after", async () => {
+		vi.useFakeTimers()
+
+		try {
+			let report: (status: SwDownloadStatus) => void = () => undefined
+			const sw = fakeServiceWorker(
+				() => ({ ok: true }),
+				send => {
+					report = send
+				}
+			)
+			stubWindow()
+			stubServiceWorkerReady(sw)
+			const keepAlives = () => sw.postMessage.mock.calls.filter(([msg]) => msg.type === SW_MSG_KEEPALIVE).length
+
+			const { triggerSwDownload } = await freshModule()
+			const running = triggerSwDownload(testFile(), save, "transfer-1", () => undefined)
+
+			await vi.waitFor(() => {
+				expect(sw.watches).toEqual(["abc-123"])
+			})
+			// The worker's own heartbeat between ticks, as it repeats its progress while streaming.
+			for (let tick = 0; tick < 3; tick++) {
+				report({ type: "progress", bytes: 1, total: 1_024 })
+				await vi.advanceTimersByTimeAsync(SW_KEEPALIVE_MS)
+			}
+
+			expect(keepAlives()).toBe(3)
+
+			report({ type: "done" })
+			await running
+			await vi.advanceTimersByTimeAsync(SW_KEEPALIVE_MS * 3)
+
+			expect(keepAlives()).toBe(3)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("fails a download whose worker goes silent", async () => {

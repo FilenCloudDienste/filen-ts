@@ -8,8 +8,10 @@ import {
 	SW_DOWNLOAD_PREFIX,
 	SW_DOWNLOAD_STALL_MS,
 	SW_ERROR_NO_CLIENT,
+	SW_KEEPALIVE_MS,
 	SW_MSG_CANCEL_DOWNLOAD,
 	SW_MSG_INIT_CLIENT,
+	SW_MSG_KEEPALIVE,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
@@ -263,11 +265,41 @@ export function cancelSwDownload(transferId: string): boolean {
 	return cancel !== undefined
 }
 
+// One timer for every streaming download, however many: each holds a reference until it settles.
+let keepAliveHolds = 0
+let keepAliveTimer: ReturnType<typeof setInterval> | undefined
+
+function holdWorkerAlive(worker: ServiceWorker): () => void {
+	keepAliveHolds++
+
+	if (keepAliveHolds === 1) {
+		keepAliveTimer = setInterval(() => {
+			worker.postMessage({ type: SW_MSG_KEEPALIVE })
+		}, SW_KEEPALIVE_MS)
+	}
+
+	let held = true
+
+	return () => {
+		if (!held) {
+			return
+		}
+
+		held = false
+		keepAliveHolds--
+
+		if (keepAliveHolds === 0) {
+			clearInterval(keepAliveTimer)
+		}
+	}
+}
+
 // Starts a registered download and settles when the service worker reports how it ended: the browser's
 // download manager owns the save from the navigation on, so without this a failed or cancelled download
 // would read as finished. Rejects with the reported ErrorDTO (kind "Cancelled" for a cancel from the row
 // or from the browser's own download UI), or once the worker has been silent for SW_DOWNLOAD_STALL_MS — it
-// repeats its progress while streaming, so silence means the browser terminated it.
+// repeats its progress while streaming, so silence means the browser terminated it. While it streams, the
+// page keeps the worker alive (SW_MSG_KEEPALIVE).
 async function startWatchedSwDownload(
 	save: SwSaveTarget,
 	transferId: string,
@@ -281,12 +313,14 @@ async function startWatchedSwDownload(
 
 	const target = await activeServiceWorker()
 	const channel = new MessageChannel()
+	const releaseWorker = holdWorkerAlive(target)
 
 	const outcome = new Promise<void>((resolve, reject) => {
 		let stall: ReturnType<typeof setTimeout> | undefined
 
 		function finish(): void {
 			clearTimeout(stall)
+			releaseWorker()
 			channel.port1.close()
 			swDownloadCancels.delete(transferId)
 		}
