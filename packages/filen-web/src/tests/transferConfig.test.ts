@@ -19,34 +19,59 @@ import {
 	getTransferPreferences,
 	setTransferPreferences,
 	DEFAULT_TRANSFER_PREFERENCES,
+	FULL_CHUNK_BYTES,
+	WEB_TRANSFER_PRESET_VALUES,
 	type TransferPreferences
 } from "@/features/settings/lib/transferConfig"
-import { TRANSFER_PRESET_VALUES } from "@filen/shared"
+import { TRANSFER_PERFORMANCE_PRESETS } from "@filen/shared"
 
 beforeEach(() => {
 	kvStore.clear()
 })
 
 describe("buildJsClientConfig", () => {
-	it("maps the default preset to its concurrency + memory budget", () => {
+	it("maps the default preset to its concurrency, chunk budget and request rate", () => {
 		expect(buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES)).toEqual({
-			concurrency: 8,
-			fileIoMemoryBudget: 8 * 1024 * 1024
+			concurrency: 48,
+			fileIoMemoryBudget: 32 * 1_048_604,
+			rateLimitPerSec: 160
 		})
 	})
 
-	it("maps every preset to its own concurrency + memory budget", () => {
-		for (const [preset, values] of Object.entries(TRANSFER_PRESET_VALUES)) {
-			const prefs: TransferPreferences = { preset: preset as TransferPreferences["preset"] }
-			const config = buildJsClientConfig(prefs)
+	it("pins the web ladder", () => {
+		expect(WEB_TRANSFER_PRESET_VALUES).toEqual({
+			batterySaver: { chunks: 8, concurrency: 12, rateLimitPerSec: 64 },
+			balanced: { chunks: 32, concurrency: 48, rateLimitPerSec: 160 },
+			performance: { chunks: 64, concurrency: 96, rateLimitPerSec: 320 },
+			maximum: { chunks: 128, concurrency: 160, rateLimitPerSec: 640 }
+		})
+	})
 
-			expect(config.concurrency).toBe(values.concurrency)
-			expect(config.fileIoMemoryBudget).toBe(values.memoryMib * 1024 * 1024)
+	// The SDK charges a full chunk 1 MiB plus its 28-byte encryption overhead; a budget in plain MiB
+	// would buy one chunk fewer than the preset names.
+	it("budgets whole chunks, overhead included", () => {
+		for (const preset of TRANSFER_PERFORMANCE_PRESETS) {
+			const { fileIoMemoryBudget } = buildJsClientConfig({ preset })
+
+			expect(fileIoMemoryBudget).toBe(WEB_TRANSFER_PRESET_VALUES[preset].chunks * FULL_CHUNK_BYTES)
+			expect(Math.floor((fileIoMemoryBudget ?? 0) / FULL_CHUNK_BYTES)).toBe(WEB_TRANSFER_PRESET_VALUES[preset].chunks)
+		}
+
+		expect(FULL_CHUNK_BYTES).toBe(1_048_604)
+	})
+
+	it("leaves every preset more requests than chunks, so listings still get through", () => {
+		for (const values of Object.values(WEB_TRANSFER_PRESET_VALUES)) {
+			expect(values.concurrency).toBeGreaterThan(values.chunks)
 		}
 	})
 
-	it("emits only the two knobs the wasm client actually honors", () => {
-		expect(Object.keys(buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES))).toEqual(["concurrency", "fileIoMemoryBudget"])
+	it("emits only the three knobs the wasm client actually honors", () => {
+		expect(Object.keys(buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES))).toEqual([
+			"concurrency",
+			"fileIoMemoryBudget",
+			"rateLimitPerSec"
+		])
 	})
 })
 

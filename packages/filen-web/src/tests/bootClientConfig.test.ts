@@ -3,7 +3,7 @@ import type { Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
 
 // bootSdk applies the stored transfer preset and archive memory in one config before any client
-// exists; an unreadable preference leaves only its own knobs on wasm's defaults.
+// exists; an unreadable preference falls back to its own default without dropping the other.
 const { kvGetJson, setClientConfig } = vi.hoisted(() => ({
 	kvGetJson: vi.fn<(key: string, schema: Type) => Promise<unknown>>(),
 	setClientConfig: vi.fn<(config: JsClientConfig) => Promise<void>>()
@@ -21,8 +21,7 @@ vi.mock("@/queries/persist", () => ({ restorePersistedQueries: vi.fn(), purgePer
 
 import { bootSdk } from "@/lib/sdk/boot"
 import { useBootStore } from "@/stores/boot"
-import { buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES } from "@/features/settings/lib/transferConfig"
-import { TRANSFER_PRESET_VALUES } from "@filen/shared"
+import { buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES, FULL_CHUNK_BYTES } from "@/features/settings/lib/transferConfig"
 
 const MIB = 1024 * 1024
 
@@ -51,8 +50,9 @@ describe("bootSdk client config", () => {
 
 		expect(setClientConfig).toHaveBeenCalledTimes(1)
 		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
-			concurrency: TRANSFER_PRESET_VALUES.maximum.concurrency,
-			fileIoMemoryBudget: TRANSFER_PRESET_VALUES.maximum.memoryMib * MIB,
+			concurrency: 160,
+			fileIoMemoryBudget: 128 * FULL_CHUNK_BYTES,
+			rateLimitPerSec: 640,
 			archiveCodecMemBudget: 512 * MIB
 		})
 		expect(useBootStore.getState().phase).toBe("ready")
@@ -69,13 +69,28 @@ describe("bootSdk client config", () => {
 		})
 	})
 
-	it("keeps wasm's defaults for a preference that fails to read, applying the other", async () => {
+	// wasm's own transfer defaults sit far below the default preset, so they are never the fallback.
+	it("applies the default preset for a transfer preference that fails to read, keeping the other", async () => {
 		stored({ "settings.transferConfig.v1": new Error("kv down"), "settings.archiveConfig.v1": { codecMemoryMib: 64 } })
 
 		await bootSdk()
 
-		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({ archiveCodecMemBudget: 64 * MIB })
+		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
+			...buildJsClientConfig(DEFAULT_TRANSFER_PREFERENCES),
+			archiveCodecMemBudget: 64 * MIB
+		})
 		expect(useBootStore.getState().phase).toBe("ready")
+	})
+
+	it("applies the default archive memory for an archive preference that fails to read, keeping the other", async () => {
+		stored({ "settings.transferConfig.v1": { preset: "batterySaver" }, "settings.archiveConfig.v1": new Error("kv down") })
+
+		await bootSdk()
+
+		expect(setClientConfig.mock.calls[0]?.[0]).toEqual({
+			...buildJsClientConfig({ preset: "batterySaver" }),
+			archiveCodecMemBudget: 128 * MIB
+		})
 	})
 
 	it("still boots when applying the config fails", async () => {

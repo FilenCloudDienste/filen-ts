@@ -2290,11 +2290,10 @@ const api = {
 			return false
 		}
 	},
-	// Called once by boot.ts (after storage() resolves, before resumeSession()) with the persisted
-	// Advanced-settings transfer config, and again whenever the settings page writes a new
-	// preference — the latter only affects the NEXT UnauthClient this worker constructs (see
-	// `clientConfig`'s own comment), so a value changed while signed in needs a reload to take
-	// effect. Synchronous and side-effect-free otherwise: never touches the live `client`.
+	// Called once, by boot.ts (after storage() resolves, before resumeSession()), with the persisted
+	// Advanced-settings transfer and archive config. The settings page only stores a new preference,
+	// which applies at the next page load (see `clientConfig`'s own comment). Synchronous and
+	// side-effect-free otherwise: never touches the live `client`.
 	setClientConfig(config: JsClientConfig): void {
 		clientConfig = config
 	}

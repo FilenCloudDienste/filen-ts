@@ -15,8 +15,8 @@ import { queryClient } from "@/queries/client"
 import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
 import { log } from "@/lib/log"
 import { advanceBootSplash } from "@/lib/bootSplash"
-import { getTransferPreferences, buildJsClientConfig } from "@/features/settings/lib/transferConfig"
-import { getArchivePreferences, buildArchiveClientConfig } from "@/features/settings/lib/archiveConfig"
+import { getTransferPreferences, buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES } from "@/features/settings/lib/transferConfig"
+import { getArchivePreferences, buildArchiveClientConfig, DEFAULT_ARCHIVE_PREFERENCES } from "@/features/settings/lib/archiveConfig"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -50,12 +50,18 @@ async function finishPendingSignOut(): Promise<void> {
 	writeSignOutPending(false)
 }
 
-// A preference that can't be read leaves its knobs on wasm's own defaults without dropping the other's.
-function readClientConfig<P>(name: string, read: () => Promise<P>, build: (prefs: P) => JsClientConfig): Promise<JsClientConfig> {
+// A preference that can't be read applies its own default without dropping the other's, never wasm's
+// built-in values: those match no preset (its transfer knobs sit far below the default one).
+function readClientConfig<P>(
+	name: string,
+	read: () => Promise<P>,
+	build: (prefs: P) => JsClientConfig,
+	fallback: P
+): Promise<JsClientConfig> {
 	return read().then(build, (e: unknown) => {
 		log.warn("boot", `failed to read ${name} config; using defaults`, e)
 
-		return {}
+		return build(fallback)
 	})
 }
 
@@ -113,14 +119,14 @@ export async function bootSdk(): Promise<void> {
 		}
 		// Apply the persisted Advanced-settings transfer preset and archive codec memory BEFORE the
 		// worker ever builds a client: the wasm surface only accepts concurrency/fileIoMemoryBudget/
-		// archiveCodecMemBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's
+		// rateLimitPerSec/archiveCodecMemBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's
 		// `clientConfig`), so this must land before resumeSession/login's first UnauthClient. Never
-		// blocks boot on failure — an unreadable preference just leaves the worker on wasm's own
-		// defaults.
+		// blocks boot on failure — an unreadable preference applies its default, and a failed apply leaves
+		// the worker on wasm's own defaults.
 		try {
 			const [transfer, archive] = await Promise.all([
-				readClientConfig("transfer", getTransferPreferences, buildJsClientConfig),
-				readClientConfig("archive", getArchivePreferences, buildArchiveClientConfig)
+				readClientConfig("transfer", getTransferPreferences, buildJsClientConfig, DEFAULT_TRANSFER_PREFERENCES),
+				readClientConfig("archive", getArchivePreferences, buildArchiveClientConfig, DEFAULT_ARCHIVE_PREFERENCES)
 			])
 
 			await sdkApi.setClientConfig({ ...transfer, ...archive })

@@ -1,12 +1,7 @@
 import { type, type Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
 import { kvPreference } from "@/lib/storage/preference"
-import {
-	TRANSFER_PERFORMANCE_PRESETS,
-	type TransferPerformancePreset,
-	DEFAULT_TRANSFER_PERFORMANCE_PRESET,
-	TRANSFER_PRESET_VALUES
-} from "@filen/shared"
+import { TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset, DEFAULT_TRANSFER_PERFORMANCE_PRESET } from "@filen/shared"
 
 // Advanced settings → transfer performance preset. Scoped to THIS web app's own uploads/downloads
 // (the worker-held wasm Client every drive/notes/chats transfer runs through) — worded that way
@@ -22,14 +17,30 @@ import {
 // info toast rather than pretending the change is immediate.
 //
 // No bandwidth cap here: the wasm build compiles the SDK's bandwidth limiter out entirely, while
-// concurrency and the file-IO memory budget below carry no such gate and are honored unconditionally.
+// concurrency, the file-IO memory budget and the request rate carry no such gate and are honored
+// unconditionally.
 //
-// The preset ladder itself (TRANSFER_PERFORMANCE_PRESETS / TRANSFER_PRESET_VALUES) lives in
-// @filen/shared and is the same one mobile's advanced settings use — there is no web-specific
-// constraint (no low iOS-style file-descriptor ceiling in a browser tab) that would argue for
-// different numbers, and keeping them identical means the four preset names mean the same thing on
-// every Filen client.
-const MIB = 1024 * 1024
+// The preset NAMES come from @filen/shared, so a stored choice and its label mean the same on every
+// client; the numbers behind them are the web's own. Mobile's ladder is held low by the iOS
+// file-descriptor ceiling, which a browser tab does not have.
+
+// One full chunk as the SDK's file-IO budget counts it (FULL_CHUNK_BYTES: 1 MiB of data plus the
+// 28-byte encryption overhead), so a budget of N of these buys exactly N chunks, not N - 1.
+export const FULL_CHUNK_BYTES = 1024 * 1024 + 28
+
+// chunks: the file-IO budget, in full chunks. concurrency: the global in-flight request cap, kept above
+// the chunks so listings and thumbnails still get requests while transfers fill the budget.
+// rateLimitPerSec: requests started per second across the whole client; the SDK's own 64 would cap
+// transfers near 64 MiB/s on every preset above battery saver.
+export const WEB_TRANSFER_PRESET_VALUES: Record<
+	TransferPerformancePreset,
+	{ chunks: number; concurrency: number; rateLimitPerSec: number }
+> = {
+	batterySaver: { chunks: 8, concurrency: 12, rateLimitPerSec: 64 },
+	balanced: { chunks: 32, concurrency: 48, rateLimitPerSec: 160 },
+	performance: { chunks: 64, concurrency: 96, rateLimitPerSec: 320 },
+	maximum: { chunks: 128, concurrency: 160, rateLimitPerSec: 640 }
+}
 
 export interface TransferPreferences {
 	preset: TransferPerformancePreset
@@ -52,10 +63,11 @@ export const { get: getTransferPreferences, set: setTransferPreferences } = kvPr
 // Pure preset -> JsClientConfig mapping, called from boot.ts (main thread, after the preference is
 // read from kv) and unit-tested without touching the worker or wasm at all.
 export function buildJsClientConfig(prefs: TransferPreferences): JsClientConfig {
-	const { concurrency, memoryMib } = TRANSFER_PRESET_VALUES[prefs.preset]
+	const { chunks, concurrency, rateLimitPerSec } = WEB_TRANSFER_PRESET_VALUES[prefs.preset]
 
 	return {
 		concurrency,
-		fileIoMemoryBudget: memoryMib * MIB
+		fileIoMemoryBudget: chunks * FULL_CHUNK_BYTES,
+		rateLimitPerSec
 	}
 }
