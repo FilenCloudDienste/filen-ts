@@ -213,10 +213,12 @@ describe("sdk worker copy", () => {
 
 		fakeClient.getDirOptional.mockReturnValue(lookup.promise)
 
-		const call = api.copyItems("looking-up", [], "dest", undefined, () => undefined)
+		// A real uuid: the worker answers a malformed one as not found without a lookup.
+		const dest = "0d0d0d0d-0000-4000-8000-000000000000"
+		const call = api.copyItems("looking-up", [], dest, undefined, () => undefined)
 
 		await api.cancelTransfer("looking-up")
-		lookup.resolve({ uuid: "dest", meta: { type: "decoded", data: { name: "dest" } } })
+		lookup.resolve({ uuid: dest, meta: { type: "decoded", data: { name: "dest" } } })
 		await call
 
 		expect(copyCalls()[2]?.managedFuture.abortSignal.aborted).toBe(true)

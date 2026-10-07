@@ -1,5 +1,5 @@
 import { Buffer } from "buffer"
-import { UUID_SUB, decodeHexKey } from "@filen/shared"
+import { UUID_SUB, decodeHexKey, isUuid } from "@filen/shared"
 
 // Single source of truth for what a Filen public link looks like — both BUILDING one (the drive
 // link dialog imports the prefixes + builder here) and resolving one (the legacy redirect and the
@@ -24,8 +24,6 @@ const FILE_PUBLIC_LINK_PATH = "/f/"
 const DIRECTORY_PUBLIC_LINK_PATH = "/d/"
 
 export type PublicLinkKind = "file" | "directory"
-
-const UUID_RE = new RegExp(`^${UUID_SUB}$`, "i")
 
 // The NEW-format link the drive dialog copies to the clipboard: `<origin>/<f|d>/<uuid>#<hexkey>`. The
 // origin is the one this app is served from (production, staging or a dev server): a link opens in this
@@ -89,7 +87,7 @@ export function resolveRouteLink(uuidParam: string, hash: string): ResolvedRoute
 
 	uuid = uuid.toLowerCase()
 
-	if (!UUID_RE.test(uuid)) {
+	if (!isUuid(uuid)) {
 		return null
 	}
 

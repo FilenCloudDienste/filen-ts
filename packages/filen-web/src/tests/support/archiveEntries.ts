@@ -32,7 +32,8 @@ export function archiveEntry(spec: EntrySpec | string, fallbackIndex = 0): Archi
 		encrypted: false,
 		method: undefined,
 		skip: skip === undefined ? undefined : { type: skip },
-		macMetadata: false
+		macMetadata: false,
+		access: undefined
 	}
 }
 

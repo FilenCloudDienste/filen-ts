@@ -463,8 +463,8 @@ export class Sync {
 
 	// Resolve a LIVE, sendable Chat by uuid for the push loop. The durable queue's persisted `chat` is a
 	// DISK-REVIVED plain object, NOT a live wasm-backed Chat handle: the web SDK surface (opaque wasm
-	// handles) diverges from mobile's plain uniffi records, so feeding that revived object to the wasm
-	// sendChatMessage never resolves — it wedges the loop after a replay-on-launch (mobile can send its
+	// handles) diverges from mobile's plain uniffi records, so the wasm sendChatMessage rejects that
+	// revived object as a conversion failure — every replay-on-launch send would fail (mobile can send its
 	// snapshot; web must not). So the send ALWAYS resolves a fresh chat here: the warm list cache first
 	// (restore + the sidebar both seed it), a targeted getChat on a cache miss. The stored `chat` snapshot
 	// survives in the queue only for the conversation-row preview, never to send.

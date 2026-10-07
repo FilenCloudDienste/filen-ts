@@ -62,6 +62,8 @@ export const errors = {
 	ArchivePasswordRequired: "This archive needs a password.",
 	/** Fires when the password given for an encrypted archive is wrong; the extract flow prompts again on this kind */
 	ArchiveWrongPassword: "Wrong password. Please try again.",
+	/** Fires when opening one file of a solid 7z archive would decode more of the archive before it than the app accepted */
+	ArchiveSolidSkipExceeded: "Opening this file means reading a large part of the archive first.",
 	/** Raised by the app (not the SDK) when the browser can't decode a video/audio file's format or codec; shown in the preview, a chat embed and the music player's error line */
 	MediaFormatUnsupported: "Your browser can't play this file's format.",
 	/** Raised by the app (not the SDK) when a video/audio file stopped playing for any other reason (the stream broke, the file couldn't be read); shown wherever the player reports */

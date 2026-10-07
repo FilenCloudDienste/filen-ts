@@ -23,6 +23,7 @@ function entry(index: number, path: string | undefined, overrides: EntryOverride
 		method: undefined,
 		skip: undefined,
 		macMetadata: false,
+		access: undefined,
 		...rest
 	}
 }

@@ -83,7 +83,7 @@ import init, {
 	type UserEventResult,
 	type JsClientConfig
 } from "@filen/sdk-rs"
-import { InFlight, run, runEffect, runTimeout } from "@filen/shared"
+import { InFlight, isUuid, run, runEffect, runTimeout } from "@filen/shared"
 import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import {
 	compressReportToDTO,
@@ -486,8 +486,6 @@ async function readFileRange(
 	await c.downloadFileToWriter({
 		file,
 		writer,
-		// Required at runtime despite `progress?:` in the .d.ts.
-		progress: () => undefined,
 		start: BigInt(start),
 		end: BigInt(end),
 		managedFuture: { abortSignal: signal }
@@ -712,8 +710,14 @@ function lookupsFor(c: Client): ClientLookups {
 }
 
 // Cache-first owned-dir resolve (listDirectory's uuid case, the breadcrumb's name lookup, every
-// create/move/upload parent): concurrent asks for the same cold uuid share one getDirOptional.
+// create/move/upload parent): concurrent asks for the same cold uuid share one getDirOptional. A
+// malformed uuid (a hand-edited URL) is simply not found: the SDK would reject it as a conversion
+// failure, which reads as a generic error instead of the not-found path.
 async function resolveOwnedDir(c: Client, uuid: string): Promise<Dir | undefined> {
+	if (!isUuid(uuid)) {
+		return undefined
+	}
+
 	const cached = getCachedDir(uuid)
 
 	if (cached !== undefined) {
@@ -1047,14 +1051,14 @@ const api = {
 		cacheDirs([created])
 		return created
 	},
-	// Thin getDirOptional pass-through.
-	getDirectory(uuid: string): Promise<Dir | undefined> {
-		return requireClient().getDirOptional(uuid)
+	// Thin getDirOptional pass-through; a malformed uuid is not found (see resolveOwnedDir).
+	async getDirectory(uuid: string): Promise<Dir | undefined> {
+		return isUuid(uuid) ? requireClient().getDirOptional(uuid) : undefined
 	},
 	// Thin getFileOptional pass-through — the audio module's dead-track existence check (a playlist
 	// entry's drive file may have been trashed/deleted from elsewhere; `undefined` means gone).
-	getFile(uuid: string): Promise<File | undefined> {
-		return requireClient().getFileOptional(uuid)
+	async getFile(uuid: string): Promise<File | undefined> {
+		return isUuid(uuid) ? requireClient().getFileOptional(uuid) : undefined
 	},
 	// A file's current head by its whole-life id, across renames and new versions; a trashed head
 	// resolves with a `trash` parent, a permanently deleted one to `undefined`.
@@ -1123,8 +1127,7 @@ const api = {
 	// The reverse of uploadFile: the WritableStream SINK arrives via Comlink.transfer (a transferable
 	// stream, moved once — the decrypted bytes stream through it and are pulled on the main side, never
 	// crossing Comlink as a buffer), and progress is a plain-fn-wrapped Comlink proxy (same as upload —
-	// wasm needs a plain preserved callable, not a proxy object). progress is passed unconditionally: the
-	// wasm layer requires it despite `progress?:` in the .d.ts. managedFuture.abortSignal IS accepted at
+	// wasm needs a plain preserved callable, not a proxy object). managedFuture.abortSignal IS accepted at
 	// runtime — same as uploadFile now — so cancelTransfer is a real cancel.
 	async downloadFileToWriter(
 		file: AnyFile,

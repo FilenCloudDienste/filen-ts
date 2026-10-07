@@ -365,11 +365,15 @@ function streamFileRange(
 			client.downloadFileToWriter({
 				file: pending.file,
 				writer: writable,
-				// progress is REQUIRED at runtime despite `progress?:` in the .d.ts (omitting it rejects the
-				// wasm call mid-stream — same gotcha as the streaming upload).
-				progress: bytes => {
-					stream?.progress(Number(bytes), total)
-				},
+				// Only a reported download has anyone to tell; a preview leaves it out rather than pay a call
+				// into JS per write.
+				...(stream !== null
+					? {
+							progress: (bytes: bigint) => {
+								stream.progress(Number(bytes), total)
+							}
+						}
+					: {}),
 				...(range !== null ? { start: BigInt(start), end: BigInt(end + 1) } : {})
 			}),
 		watched === null || stream === null ? null : { stream, cancelledByBrowser: watched.cancelledByBrowser }

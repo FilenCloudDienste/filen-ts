@@ -10,6 +10,7 @@ import type {
 	ExtractArchiveEntriesParams,
 	ExtractArchiveParams,
 	ExtractReport,
+	UuidStr,
 	ExtractUpdate,
 	ListArchiveParams,
 	ListReport,
@@ -133,7 +134,8 @@ await import("@/workers/sdk.worker")
 const api = exposed.get("api") as Remote<SdkWorkerApi>
 
 const ARCHIVE = { type: "file", uuid: testUuid("archive") } as unknown as AnyFile
-const DEST = testUuid("dest")
+// A real uuid: the worker answers a malformed one (testUuid's readable labels) as not found unasked.
+const DEST = "0d0d0d0d-0000-4000-8000-000000000000" as UuidStr
 const DEST_DIR = { uuid: DEST, meta: { type: "decoded", data: { name: "dest" } } }
 const ZIP: CompressFormat = { type: "zip", method: { type: "deflate", level: 6 } }
 
@@ -191,7 +193,8 @@ const ENTRY: ArchiveEntry = {
 	encrypted: false,
 	method: undefined,
 	skip: undefined,
-	macMetadata: false
+	macMetadata: false,
+	access: undefined
 }
 
 const LIST_REPORT: ListReport = {
@@ -257,6 +260,18 @@ function lastCall<P>(mock: { mock: { calls: P[] } }): P {
 
 	return call
 }
+
+describe("sdk worker lookups", () => {
+	it("answers a malformed uuid (a hand-edited URL) as not found without asking the SDK", async () => {
+		fakeClient.getDirOptional.mockClear()
+
+		await expect(api.getDirectory("not-a-uuid")).resolves.toBeUndefined()
+		expect(fakeClient.getDirOptional).not.toHaveBeenCalled()
+
+		await expect(api.getDirectory(DEST)).resolves.toEqual(DEST_DIR)
+		expect(fakeClient.getDirOptional).toHaveBeenCalledWith(DEST)
+	})
+})
 
 describe("sdk worker archives", () => {
 	it("leaves out the options a compress was not given, and passes an empty password as none", async () => {
