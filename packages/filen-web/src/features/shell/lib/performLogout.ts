@@ -24,6 +24,8 @@ import { confirmDiscardUnsavedPreview, usePreviewUnsavedGuardStore } from "@/fea
 import { queryClient } from "@/queries/client"
 import { toast } from "sonner"
 import { i18n } from "@/lib/i18n"
+import { writeSignOutPending } from "@/lib/signOutPending"
+import { showSignOutOverlay } from "@/features/shell/lib/signOutOverlay"
 
 // Resolves once no unsaved preview buffer is left — the overlay dropping its dirty bit (discard, close,
 // unmount). Immediate when nothing is dirty.
@@ -81,6 +83,12 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 		await awaitPreviewBufferReleased()
 	}
 
+	// Nothing below can be cancelled any more. The flag lets the next boot finish a wipe this tab does not
+	// live to complete (see signOutPending.ts); the overlay covers the wait, which the thumbnail wipe can
+	// stretch to seconds.
+	writeSignOutPending(true)
+	showSignOutOverlay()
+
 	// Notes + chats sync cancel BEFORE the wipe: abort each outbox loop and suppress any further disk
 	// write so a late flush can never resurrect this account's plaintext queue after kv-clear lands.
 	// Whatever is still queued dies here, so the confirm that leads to this warns about it
@@ -126,6 +134,9 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 		kvClear,
 		wipeThumbnails: wipeThumbnailStore,
 		wipeServiceWorker: wipeSwClient,
+		wipesLanded: () => {
+			writeSignOutPending(false)
+		},
 		broadcast: () => {
 			broadcastAuth("logout")
 		},

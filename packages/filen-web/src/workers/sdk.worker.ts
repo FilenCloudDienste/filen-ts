@@ -399,8 +399,42 @@ async function writeRawPreview(
 
 // Latched by armThumbSweep below, never reset.
 let thumbsSweptThisSession = false
+// Thumbnails written since the last cap sweep, and whether one is running.
+let thumbWritesSinceSweep = 0
+let thumbSweepRunning = false
 
-// Fires sweepThumbs and removeStaleThumbGenerations at most once per worker lifetime — a long-lived
+// A session that keeps scrolling new thumbnails in (Photos) would otherwise grow the cache past its cap
+// until the next session; sign-out then deletes every file one by one inside the browser, so the cap is
+// also what bounds how long signing out takes. About a thousand writes is ~1/10 of what the cap holds.
+const THUMB_WRITES_PER_SWEEP = 1024
+
+function sweepThumbCap(): void {
+	if (thumbSweepRunning) {
+		return
+	}
+
+	thumbSweepRunning = true
+	thumbWritesSinceSweep = 0
+
+	void sweepThumbs(THUMB_CACHE_CAP)
+		.catch((e: unknown) => {
+			log.warn("sdk.worker", "sweepThumbs failed", e)
+		})
+		.finally(() => {
+			thumbSweepRunning = false
+		})
+}
+
+function noteThumbWrites(count: number): void {
+	thumbWritesSinceSweep += count
+
+	if (thumbWritesSinceSweep >= THUMB_WRITES_PER_SWEEP) {
+		sweepThumbCap()
+	}
+}
+
+// Fires sweepThumbs and removeStaleThumbGenerations once per worker lifetime (the cap sweep again every
+// THUMB_WRITES_PER_SWEEP writes, see noteThumbWrites) — a long-lived
 // tab's OPFS thumbnail cache still gets cap-enforced and stale generations still get reclaimed without
 // every generation paying for a listing pass. Called from storeThumbnail (every persist) AND from both
 // SDK thumbnail ops, because those two can settle WITHOUT producing bytes: an "unsupported" /
@@ -419,9 +453,7 @@ function armThumbSweep(): void {
 		log.warn("sdk.worker", "removeStaleThumbGenerations failed", e)
 	})
 
-	void sweepThumbs(THUMB_CACHE_CAP).catch((e: unknown) => {
-		log.warn("sdk.worker", "sweepThumbs failed", e)
-	})
+	sweepThumbCap()
 }
 
 // One range of a file's decrypted bytes, written straight into a buffer of the known size. `progress`
@@ -490,6 +522,7 @@ async function runAudioMetadata(
 			},
 			storeThumbnail: bytes => {
 				armThumbSweep()
+				noteThumbWrites(1)
 				return writeThumb(uuid, bytes)
 			}
 		})
@@ -2037,11 +2070,13 @@ const api = {
 	// armThumbSweep).
 	async storeThumbnail(uuid: string, bytes: Uint8Array): Promise<void> {
 		armThumbSweep()
+		noteThumbWrites(1)
 		await writeThumb(uuid, bytes)
 	},
 	// A copied file's thumbnail from its source's cache entry (see copyThumbs).
 	copyThumbnails(copies: ThumbnailCopy[]): Promise<void> {
 		armThumbSweep()
+		noteThumbWrites(copies.length)
 
 		return copyThumbs(copies)
 	},

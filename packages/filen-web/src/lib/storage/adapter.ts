@@ -107,22 +107,42 @@ async function kvDeleteEach(api: StorageHandle["api"]): Promise<void> {
 	}
 }
 
+// The database reset (db.worker.ts wipe), or false from a leader on an older build without it.
+async function resetDatabase(api: StorageHandle["api"]): Promise<boolean> {
+	try {
+		await api.wipe()
+
+		return true
+	} catch (e) {
+		if (!isMissingStorageMethod(e)) {
+			throw e
+		}
+
+		return false
+	}
+}
+
 // Wipes every kv row — query-persist rows and keymap overrides included, the full local wipe
-// logout needs. One prefix delete per pass (an empty prefix covers every key): a single statement
-// and a single follower RPC, rather than an enumeration plus one autocommit delete per row.
+// logout needs. The first pass resets the database files, which leaves none of the deleted plaintext
+// on disk; the second is one prefix delete (an empty prefix covers every key): a single statement and a
+// single follower RPC, rather than an enumeration plus one autocommit delete per row.
 export async function kvClear(): Promise<void> {
 	const { api } = await storage()
 	let prefixDelete = true
 	let failure: { reason: unknown } | null = null
 
 	// Sweep TWICE. A write already in flight when the wipe starts — e.g. an outbox flush past its own
-	// abort gate, or any other persist racing logout — can land after the first delete and would survive
+	// abort gate, or any other persist racing logout — can land after the first pass and would survive
 	// the "full wipe" as a decrypted row that replays on the next boot. A second sweep after the first
 	// drained catches that straggler. Bounded at two passes: the outbox channel is closed before logout
 	// reaches here, so no NEW write can originate; only an already-in-flight one remains, and it completes
 	// within the first pass. A failed pass (e.g. a follower RPC timeout) still runs the other one.
 	for (let pass = 0; pass < 2; pass++) {
 		try {
+			if (pass === 0 && (await resetDatabase(api))) {
+				continue
+			}
+
 			if (prefixDelete) {
 				try {
 					await api.kvDeletePrefix("")

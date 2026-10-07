@@ -29,6 +29,11 @@ const { fakeStore, fakeApi } = vi.hoisted(() => {
 			}
 
 			return Promise.resolve()
+		},
+		wipe: () => {
+			fakeStore.clear()
+
+			return Promise.resolve()
 		}
 	}
 
@@ -86,36 +91,47 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 		expect(fakeStore.size).toBe(0)
 	})
 
-	it("kvClear is two prefix deletes over every key, never a per-row enumeration", async () => {
+	it("kvClear resets the database, then sweeps once with a prefix delete, never a per-row enumeration", async () => {
 		await kvSetJson("rq.v1.a", { n: 1n })
 		await kvSetJson("session", { n: 2n })
+		const wipe = vi.spyOn(fakeApi, "wipe")
 		const deletePrefix = vi.spyOn(fakeApi, "kvDeletePrefix")
 		const keys = vi.spyOn(fakeApi, "kvKeys")
 		const del = vi.spyOn(fakeApi, "kvDelete")
 
 		await kvClear()
 
-		expect(deletePrefix.mock.calls).toEqual([[""], [""]])
+		expect(wipe).toHaveBeenCalledTimes(1)
+		expect(deletePrefix.mock.calls).toEqual([[""]])
 		expect(keys).not.toHaveBeenCalled()
 		expect(del).not.toHaveBeenCalled()
+	})
+
+	it("kvClear sweeps with two prefix deletes through a leader whose database cannot reset", async () => {
+		await kvSetJson("session", { n: 1n })
+		const unknownMethod = new Error("Cannot read properties of undefined (reading 'apply')")
+
+		unknownMethod.name = "TypeError"
+		vi.spyOn(fakeApi, "wipe").mockRejectedValue(unknownMethod)
+		const deletePrefix = vi.spyOn(fakeApi, "kvDeletePrefix")
+
+		await kvClear()
+
+		expect(deletePrefix.mock.calls).toEqual([[""], [""]])
+		expect(fakeStore.size).toBe(0)
 	})
 
 	it("kvClear leaves no row behind when a straggler write lands mid-wipe (logout resurrection guard)", async () => {
 		await kvSetJson("session", { n: 1n })
 
 		// Model a write that races the wipe: an in-flight persist (e.g. an outbox flush already past its own
-		// abort gate) re-adds a decrypted row right after the first delete ran. A single sweep leaves that
+		// abort gate) re-adds a decrypted row right after the first pass ran. A single sweep leaves that
 		// row on disk to replay next boot; the second sweep must catch it.
-		const origDeletePrefix = fakeApi.kvDeletePrefix
-		let injected = false
+		const origWipe = fakeApi.wipe
 
-		vi.spyOn(fakeApi, "kvDeletePrefix").mockImplementation(async (prefix: string) => {
-			await origDeletePrefix(prefix)
-
-			if (!injected) {
-				injected = true
-				fakeStore.set("inflightChatMessages", "straggler")
-			}
+		vi.spyOn(fakeApi, "wipe").mockImplementation(async () => {
+			await origWipe()
+			fakeStore.set("inflightChatMessages", "straggler")
 		})
 
 		await kvClear()
@@ -126,15 +142,13 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 
 	it("kvClear still runs the second pass when the first rejects, then rejects itself", async () => {
 		await kvSetJson("session", { n: 1n })
-		const timeout = new Error("db rpc timeout: kvDeletePrefix")
-		const origDeletePrefix = fakeApi.kvDeletePrefix
-		const deletePrefix = vi
-			.spyOn(fakeApi, "kvDeletePrefix")
-			.mockRejectedValueOnce(timeout)
-			.mockImplementation(prefix => origDeletePrefix(prefix))
+		const timeout = new Error("db rpc timeout: wipe")
+
+		vi.spyOn(fakeApi, "wipe").mockRejectedValue(timeout)
+		const deletePrefix = vi.spyOn(fakeApi, "kvDeletePrefix")
 
 		await expect(kvClear()).rejects.toBe(timeout)
-		expect(deletePrefix).toHaveBeenCalledTimes(2)
+		expect(deletePrefix).toHaveBeenCalledTimes(1)
 		expect(fakeStore.size).toBe(0)
 	})
 
@@ -148,6 +162,7 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 
 		unknownMethod.name = "TypeError"
 
+		vi.spyOn(fakeApi, "wipe").mockRejectedValue(unknownMethod)
 		const deletePrefix = vi.spyOn(fakeApi, "kvDeletePrefix").mockRejectedValue(unknownMethod)
 		const keys = vi.spyOn(fakeApi, "kvKeys")
 
@@ -162,6 +177,7 @@ describe("storage adapter (Map-backed fake StorageApi)", () => {
 		await kvSetJson("session", { n: 1n })
 		const timeout = new Error("db rpc timeout: kvDeletePrefix")
 
+		vi.spyOn(fakeApi, "wipe").mockRejectedValue(timeout)
 		vi.spyOn(fakeApi, "kvDeletePrefix").mockRejectedValue(timeout)
 		const keys = vi.spyOn(fakeApi, "kvKeys")
 

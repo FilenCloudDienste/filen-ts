@@ -215,6 +215,8 @@ export const auth = {
 	/** Toast shown when a password change on another device forced a sign-out and the user postponed it at the unsaved-changes prompt */
 	logoutForcedPending:
 		"Your password was changed on another device, so this device is signing out. Copy anything you still need from the unsaved preview — the sign-out finishes as soon as you close it.",
+	/** Full-screen sign-out overlay — label and progress-bar name while this device's cached data is wiped */
+	signingOut: "Signing out…",
 
 	// ── Security settings page ──────────────────────────────────────────────────
 	/** Security settings — page title */

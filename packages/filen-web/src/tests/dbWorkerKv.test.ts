@@ -4,7 +4,11 @@ import type { StorageApi } from "@/workers/db.worker"
 // The kv ops against a real sqlite (the package's node build, in memory): only the OPFS pool install is
 // swapped out, so the SQL the worker runs is exactly what ships.
 
-const mocks = vi.hoisted(() => ({ expose: vi.fn(), db: null as { selectValue: (sql: string) => unknown } | null }))
+const mocks = vi.hoisted(() => ({
+	expose: vi.fn(),
+	db: null as { selectValue: (sql: string) => unknown; isOpen: () => boolean } | null,
+	wipeFiles: vi.fn<() => Promise<void>>()
+}))
 
 vi.mock("comlink", () => ({ expose: mocks.expose }))
 vi.mock("@sqlite.org/sqlite-wasm", async importOriginal => {
@@ -21,7 +25,8 @@ vi.mock("@sqlite.org/sqlite-wasm", async importOriginal => {
 				}
 			}
 
-			return { installOpfsSAHPoolVfs: () => Promise.resolve({ OpfsSAHPoolDb: MemoryDb }) }
+			// A fresh in-memory connection after a wipe is empty, as reopening the cut-back pool files is.
+			return { installOpfsSAHPoolVfs: () => Promise.resolve({ OpfsSAHPoolDb: MemoryDb, wipeFiles: mocks.wipeFiles }) }
 		}
 	}
 })
@@ -39,6 +44,28 @@ beforeAll(async () => {
 
 beforeEach(async () => {
 	await api.kvDeletePrefix("")
+})
+
+describe("db.worker wipe", () => {
+	it("cuts the pool files back with the connection closed, then serves an empty database", async () => {
+		await api.kvSet("session", "secret")
+		const before = mocks.db
+		let openDuringWipe: boolean | undefined
+
+		mocks.wipeFiles.mockImplementationOnce(() => {
+			openDuringWipe = before?.isOpen()
+
+			return Promise.resolve()
+		})
+
+		await api.wipe()
+
+		expect(openDuringWipe).toBe(false)
+		expect(mocks.db).not.toBe(before)
+		expect(await api.kvGet("session")).toBeNull()
+		await api.kvSet("after", "1")
+		expect(await api.kvGet("after")).toBe("1")
+	})
 })
 
 describe("db.worker open", () => {

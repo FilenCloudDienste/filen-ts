@@ -36,6 +36,9 @@ function makeHarness() {
 		calls.push("wipeServiceWorker")
 		return Promise.resolve()
 	})
+	const wipesLanded = vi.fn<() => void>().mockImplementation(() => {
+		calls.push("wipesLanded")
+	})
 	const broadcast = vi.fn<() => void>().mockImplementation(() => {
 		calls.push("broadcast")
 	})
@@ -51,6 +54,7 @@ function makeHarness() {
 		kvClear,
 		wipeThumbnails,
 		wipeServiceWorker,
+		wipesLanded,
 		broadcast,
 		reload
 	}
@@ -65,6 +69,7 @@ function makeHarness() {
 		kvClear,
 		wipeThumbnails,
 		wipeServiceWorker,
+		wipesLanded,
 		broadcast,
 		reload
 	}
@@ -75,22 +80,66 @@ beforeEach(() => {
 })
 
 describe("runLogout (injected deps, no worker)", () => {
-	it("runs every phase in order: cancel+clear cache, sdk logout, clear session, kv clear, thumbnail wipe, broadcast, reload", async () => {
+	it("stops consumers and the client first, runs the wipes, then broadcasts and reloads", async () => {
 		const h = makeHarness()
 
 		await runLogout(h.deps)
 
-		expect(h.calls).toEqual([
-			"cancelQueries",
-			"clearQueryCache",
-			"sdkLogout",
-			"clearSession",
-			"kvClear",
-			"wipeThumbnails",
-			"wipeServiceWorker",
-			"broadcast",
-			"reload"
-		])
+		expect(h.calls.slice(0, 3)).toEqual(["cancelQueries", "clearQueryCache", "sdkLogout"])
+		expect(h.calls.slice(3, 7).sort()).toEqual(["clearSession", "kvClear", "wipeServiceWorker", "wipeThumbnails"])
+		expect(h.calls.indexOf("clearSession")).toBeLessThan(h.calls.indexOf("kvClear"))
+		expect(h.calls.slice(7)).toEqual(["wipesLanded", "broadcast", "reload"])
+	})
+
+	it("reports the wipes landed only when every one succeeded", async () => {
+		vi.spyOn(log, "error").mockImplementation(() => undefined)
+		const h = makeHarness()
+		h.kvClear.mockRejectedValue(new Error("db rpc timeout"))
+
+		await runLogout(h.deps)
+
+		expect(h.clearSession).toHaveBeenCalledTimes(1)
+		expect(h.wipesLanded).not.toHaveBeenCalled()
+		expect(h.broadcast).toHaveBeenCalledTimes(1)
+		expect(h.reload).toHaveBeenCalledTimes(1)
+	})
+
+	it("still clears every kv row when the session row fails to clear", async () => {
+		vi.spyOn(log, "error").mockImplementation(() => undefined)
+		const h = makeHarness()
+		h.clearSession.mockRejectedValue(new Error("db rpc timeout"))
+
+		await runLogout(h.deps)
+
+		expect(h.kvClear).toHaveBeenCalledTimes(1)
+		expect(h.wipesLanded).not.toHaveBeenCalled()
+	})
+
+	it("runs the three wipes side by side and broadcasts only once the slowest has landed", async () => {
+		const h = makeHarness()
+		let finishThumbs: () => void = () => undefined
+
+		h.wipeThumbnails.mockImplementation(
+			() =>
+				new Promise<void>(resolve => {
+					finishThumbs = resolve
+				})
+		)
+
+		const running = runLogout(h.deps)
+
+		await vi.waitFor(() => {
+			expect(h.wipeServiceWorker).toHaveBeenCalledTimes(1)
+			expect(h.kvClear).toHaveBeenCalledTimes(1)
+		})
+		expect(h.wipeThumbnails).toHaveBeenCalledTimes(1)
+		expect(h.broadcast).not.toHaveBeenCalled()
+
+		finishThumbs()
+		await running
+
+		expect(h.broadcast).toHaveBeenCalledTimes(1)
+		expect(h.reload).toHaveBeenCalledTimes(1)
 	})
 
 	it("wipes the thumbnail cache after the client is dropped and before other tabs are told to reload", async () => {
@@ -117,14 +166,14 @@ describe("runLogout (injected deps, no worker)", () => {
 		expect(errorSpy).toHaveBeenCalledWith("logout", expect.stringContaining("wipe-thumbnails"), expect.anything())
 	})
 
-	it("wipes the service worker AFTER the local store wipe and BEFORE the broadcast+reload", async () => {
+	it("wipes the service worker after the client is dropped and BEFORE the broadcast+reload", async () => {
 		const h = makeHarness()
 
 		await runLogout(h.deps)
 
 		const wipeSw = h.calls.indexOf("wipeServiceWorker")
 
-		expect(wipeSw).toBeGreaterThan(h.calls.indexOf("kvClear"))
+		expect(wipeSw).toBeGreaterThan(h.calls.indexOf("sdkLogout"))
 		expect(wipeSw).toBeLessThan(h.calls.indexOf("broadcast"))
 		expect(wipeSw).toBeLessThan(h.calls.indexOf("reload"))
 	})

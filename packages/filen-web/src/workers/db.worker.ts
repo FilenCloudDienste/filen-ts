@@ -1,18 +1,20 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
-import sqlite3InitModule, { type SqlValue } from "@sqlite.org/sqlite-wasm"
+import sqlite3InitModule, { type SAHPoolUtil, type SqlValue } from "@sqlite.org/sqlite-wasm"
 import { opfsUnavailableError } from "@/lib/storage/errors"
 import { isLockConflictError, isNotFoundError } from "@/lib/storage/opfs"
 import { log } from "@/lib/log"
 
 // Narrow local interface — sqlite-wasm's own typings are inconsistent here (see the SAH pool / oo1
 // overload set in the installed `.d.mts`): an `OpfsSAHPoolDb` instance (which extends the base
-// `Database` class) structurally satisfies this — the only member `open()` below actually calls.
+// `Database` class) structurally satisfies this — the only members this worker calls.
 interface Db {
 	exec(opts: { sql: string; bind?: readonly SqlValue[]; callback?: (row: SqlValue[]) => void }): unknown
+	close(): void
 }
 
 let db: Db | null = null
+let pool: SAHPoolUtil | null = null
 
 function requireDb(): Db {
 	if (db === null) {
@@ -23,6 +25,7 @@ function requireDb(): Db {
 }
 
 const POOL_NAME = "filen-web"
+const DB_PATH = "/filen-web.sqlite3"
 // The library's own default for this name, spelled out because waitForPoolRelease reads the layout: the
 // pool keeps its files in a fixed ".opaque" subdirectory, which the library can never rename without
 // orphaning every existing database.
@@ -94,21 +97,48 @@ async function open(): Promise<void> {
 	const [sqlite3] = await Promise.all([sqlite3InitModule(), waitForPoolRelease()])
 
 	try {
-		const pool = await sqlite3.installOpfsSAHPoolVfs({ name: POOL_NAME, directory: POOL_DIRECTORY, initialCapacity: 4 })
-
-		db = new pool.OpfsSAHPoolDb("/filen-web.sqlite3")
+		pool = await sqlite3.installOpfsSAHPoolVfs({ name: POOL_NAME, directory: POOL_DIRECTORY, initialCapacity: 4 })
+		db = connect(pool)
 	} catch (e) {
 		throw opfsUnavailableError(e)
 	}
+}
 
-	requireDb().exec({
+function connect(from: SAHPoolUtil): Db {
+	const connection: Db = new from.OpfsSAHPoolDb(DB_PATH)
+
+	connection.exec({
 		sql: "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL) WITHOUT ROWID"
 	})
 	// Per connection. The pool VFS pays a header write, a flush and a truncate to create and delete a journal,
 	// so every autocommit write would pay them twice; PERSIST keeps the journal (same atomicity) and the size
 	// limit trims what a large delete leaves in it.
-	requireDb().exec({ sql: "PRAGMA journal_mode=PERSIST" })
-	requireDb().exec({ sql: "PRAGMA journal_size_limit=1048576" })
+	connection.exec({ sql: "PRAGMA journal_mode=PERSIST" })
+	connection.exec({ sql: "PRAGMA journal_size_limit=1048576" })
+
+	return connection
+}
+
+// Sign-out's wipe. Deleting rows leaves their bytes behind (secure_delete is off, so freed pages keep the
+// old content, and the PERSIST journal keeps pre-images), so the pool's files are cut back to their headers
+// instead: the database and its journal together, in a few truncates however many rows there were. The
+// files must not be open while that runs, so the connection is closed first and reopened, empty, after. A
+// kv call arriving meanwhile fails like one before open().
+async function wipe(): Promise<void> {
+	const from = pool
+
+	if (from === null) {
+		throw new Error("db.worker: open() must be called first")
+	}
+
+	requireDb().close()
+	db = null
+
+	try {
+		await from.wipeFiles()
+	} finally {
+		db = connect(from)
+	}
 }
 
 // A prefix scan as a range on the primary key: no LIKE, so "_" and "%" in a prefix match literally and the
@@ -133,6 +163,7 @@ function prefixRange(prefix: string): { where: string; bind: string[] } {
 
 const api = {
 	open,
+	wipe,
 	kvGet: (key: string): string | null => {
 		let out: string | null = null
 

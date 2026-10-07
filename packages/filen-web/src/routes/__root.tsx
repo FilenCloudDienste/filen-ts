@@ -23,6 +23,7 @@ import { JobReportDialog } from "@/features/transfers/components/jobReportDialog
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { guardStrayDrops } from "@/lib/dropGuard"
 import { titleMeta } from "@/lib/head/routeHead"
+import { SignOutOverlay } from "@/features/shell/components/signOutOverlay"
 
 export const Route = createRootRoute({
 	component: RootLayout,
@@ -141,6 +142,8 @@ function RootLayout() {
 					<JobReportDialog />
 					{/* Opened from an activity's result toast. */}
 					<ActivityDetailsDialog />
+					{/* Last, over everything: once a sign-out starts wiping, nothing behind it is usable. */}
+					<SignOutOverlay />
 				</TooltipProvider>
 			</ThemeProvider>
 		</QueryClientProvider>

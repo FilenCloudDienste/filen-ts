@@ -16,6 +16,8 @@ export interface LogoutDeps {
 	kvClear: () => Promise<void>
 	wipeThumbnails: () => Promise<void>
 	wipeServiceWorker: () => Promise<void>
+	// Only once every wipe succeeded: what tells the next boot there is nothing left to finish.
+	wipesLanded: () => void
 	broadcast: () => void
 	reload: () => void
 }
@@ -24,15 +26,19 @@ export interface LogoutDeps {
 // not a bare `fn()` — because a SYNCHRONOUS throw (e.g. a closed BroadcastChannel's postMessage)
 // must turn into a rejection here too, or Promise.allSettled below would never see it and the throw
 // would escape this function, aborting every later phase — exactly what this helper exists to
-// prevent. A rejection is logged and swallowed either way.
-async function phase(label: string, fn: () => void | Promise<void>): Promise<void> {
+// prevent. A rejection is logged and swallowed either way; the result says whether the phase succeeded.
+async function phase(label: string, fn: () => void | Promise<void>): Promise<boolean> {
 	const [outcome] = await Promise.allSettled([Promise.resolve().then(fn)])
 	if (outcome.status === "rejected") {
 		log.error("logout", `${label} failed`, asErrorDTO(outcome.reason))
+
+		return false
 	}
+
+	return true
 }
 
-// The phased local wipe. Order is load-bearing — wipe fully lands, THEN broadcast, THEN reload:
+// The phased local wipe. Order is load-bearing — wipes fully land, THEN broadcast, THEN reload:
 // broadcasting earlier loses two races — a fast follower tab reloads and reads the still-valid
 // session back in, and if this tab is itself a storage follower, the leader tab would reload itself
 // dead before the wipe RPC ever reaches it (no re-election exists), silently resurrecting the
@@ -44,19 +50,33 @@ export async function runLogout(deps: LogoutDeps): Promise<void> {
 	// having succeeded, so a cancelQueries failure must not skip it.
 	await phase("cancel-queries", deps.cancelQueries)
 	await phase("clear-query-cache", deps.clearQueryCache)
-	// Worker nulls the client immediately (new ops fail fast); the handle free is deferred.
+	// Worker nulls the client immediately (new ops fail fast); the handle free is deferred. Before the
+	// wipes, so no thumbnail write of this account starts after its cache is gone.
 	await phase("sdk-logout", deps.sdkLogout)
-	// Session row first, then every remaining kv row — query-persist rows and keymap overrides
-	// included: logout is a full local wipe by design, matching the confirm dialog's copy.
-	await phase("clear-session", deps.clearSession)
-	await phase("kv-clear", deps.kvClear)
-	// The OPFS thumbnail cache (drive thumbnails, audio cover thumbnails) holds decrypted derivatives of
-	// this account's files, which the kv wipe does not reach.
-	await phase("wipe-thumbnails", deps.wipeThumbnails)
-	// The service worker keeps its own reconstructed Client (decrypted key material) that no store wipe
-	// above reaches — signal it to drop that + any pending downloads before the reload, so no secret
-	// survives sign-out inside the worker.
-	await phase("wipe-service-worker", deps.wipeServiceWorker)
+	// The three wipes touch separate stores, so they run side by side and sign-out waits only as long as
+	// the slowest, the thumbnail cache, whose deletion grows with its file count.
+	const wiped = await Promise.all([
+		// Session row first, then every remaining kv row — query-persist rows and keymap overrides
+		// included: logout is a full local wipe by design, matching the confirm dialog's copy.
+		(async () => {
+			const session = await phase("clear-session", deps.clearSession)
+			const rows = await phase("kv-clear", deps.kvClear)
+
+			return session && rows
+		})(),
+		// The OPFS thumbnail cache (drive thumbnails, audio cover thumbnails) holds decrypted derivatives of
+		// this account's files, which the kv wipe does not reach.
+		phase("wipe-thumbnails", deps.wipeThumbnails),
+		// The service worker keeps its own reconstructed Client (decrypted key material) that no store
+		// wipe reaches — signal it to drop that + any pending downloads before the reload, so no secret
+		// survives sign-out inside the worker.
+		phase("wipe-service-worker", deps.wipeServiceWorker)
+	])
+	// Before the broadcast, so the tabs it reloads never redo a wipe that already landed: one of those boots
+	// running late could otherwise wipe a session signed in here meanwhile.
+	if (wiped.every(Boolean)) {
+		await phase("wipes-landed", deps.wipesLanded)
+	}
 	// Other tabs reload only once the wipe has landed, per the race above.
 	await phase("broadcast", deps.broadcast)
 	// Fresh boot lands on /login. No retry loop — a reload failure leaves a torn-but-unauthed state

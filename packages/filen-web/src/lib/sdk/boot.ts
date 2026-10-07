@@ -4,7 +4,10 @@ import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
 import { persistSession, resumeSession } from "@/lib/sdk/session"
 import { parseEnvelope } from "@/lib/serialize"
 import { takeSeededSession } from "@/e2e-hooks/sessionSeed"
-import { storage } from "@/lib/storage/adapter"
+import { kvClear, storage } from "@/lib/storage/adapter"
+import { readSignOutPending, writeSignOutPending } from "@/lib/signOutPending"
+import { wipeThumbnailStore } from "@/features/drive/lib/thumbCache"
+import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { isOpfsApiAvailable } from "@/lib/storage/capability"
 import { isOpfsUnavailableError } from "@/lib/storage/errors"
 import { useBootStore } from "@/stores/boot"
@@ -28,6 +31,23 @@ const bootReady = new Promise<void>(resolve => {
 
 export function whenBootReady(): Promise<void> {
 	return bootReady
+}
+
+// Finishes a sign-out the previous page did not live to complete (see signOutPending.ts): every wipe again,
+// before any session could be resumed from what it left. After a sign-out that did complete, each of these
+// finds next to nothing to do. The flag clears only once all three succeeded, so a failure retries on the
+// next boot rather than being forgotten.
+async function finishPendingSignOut(): Promise<void> {
+	const outcomes = await Promise.allSettled([kvClear(), wipeThumbnailStore(), wipeSwClient()])
+	const failed = outcomes.find(outcome => outcome.status === "rejected")
+
+	if (failed !== undefined) {
+		log.error("boot", "finishing a pending sign-out failed", asErrorDTO(failed.reason))
+
+		return
+	}
+
+	writeSignOutPending(false)
 }
 
 // A preference that can't be read leaves its knobs on wasm's own defaults without dropping the other's.
@@ -88,6 +108,9 @@ export async function bootSdk(): Promise<void> {
 			return
 		}
 		advanceBootSplash("storage")
+		if (readSignOutPending()) {
+			await finishPendingSignOut()
+		}
 		// Apply the persisted Advanced-settings transfer preset and archive codec memory BEFORE the
 		// worker ever builds a client: the wasm surface only accepts concurrency/fileIoMemoryBudget/
 		// archiveCodecMemBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's

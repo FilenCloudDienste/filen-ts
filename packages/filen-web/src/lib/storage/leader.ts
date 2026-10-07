@@ -67,7 +67,8 @@ const STORAGE_METHODS = [
 	"kvDelete",
 	"kvKeys",
 	"kvEntries",
-	"kvDeletePrefix"
+	"kvDeletePrefix",
+	"wipe"
 ] as const satisfies readonly (keyof StorageApi)[]
 
 // Spin up this tab's own db worker, open OPFS, and start serving the RPC channel — the work a tab does
