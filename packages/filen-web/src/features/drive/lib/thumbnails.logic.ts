@@ -159,3 +159,22 @@ export interface ThumbCacheEntry {
 	size: number
 	lastModified: number
 }
+
+// A virtualizer's visible rows, overscan excluded (TanStack Virtual's `range`); null before it has a size.
+export interface VisibleRows {
+	startIndex: number
+	endIndex: number
+}
+
+const ABOVE_VIEW_RANK = 1_000_000
+
+// Where a cell's thumbnail generation queues (see RankedGate): visible rows first, then the rows below,
+// nearest first, and the rows above last, since they are behind the direction a grid is read in. No
+// range yet ranks every row as visible, which leaves plain arrival order.
+export function rowRank(row: number, visible: VisibleRows | null): number {
+	if (visible === null || (row >= visible.startIndex && row <= visible.endIndex)) {
+		return 0
+	}
+
+	return row > visible.endIndex ? row - visible.endIndex : ABOVE_VIEW_RANK + visible.startIndex - row
+}

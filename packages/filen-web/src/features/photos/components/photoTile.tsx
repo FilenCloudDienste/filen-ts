@@ -88,6 +88,7 @@ export function PhotoTile({
 						<div className="relative flex aspect-square w-full items-center justify-center overflow-hidden bg-muted/40">
 							<ItemThumbnail
 								item={item}
+								index={index}
 								imgClassName="size-full object-cover"
 								iconClassName="size-14"
 							/>

@@ -33,6 +33,7 @@ import {
 	type ThumbnailServiceDeps,
 	type ThumbSeedResult
 } from "@/features/drive/lib/thumbnails"
+import { rowRank } from "@/features/drive/lib/thumbnails.logic"
 import { testUuid } from "@/tests/support/uuid"
 
 let uuidCounter = 0
@@ -727,6 +728,46 @@ describe("getThumbnailUrl — semaphore (max 3 concurrent generations)", () => {
 		const urls = await Promise.all(attempts)
 
 		expect(urls.every(url => url !== null)).toBe(true)
+	})
+
+	it("gives a freed slot to the visible cell before an earlier one above the view", async () => {
+		const held = [imageItem(), imageItem(), imageItem()]
+		const above = imageItem()
+		const visible = imageItem()
+		const deferred = deferredCalls<ThumbGenerationResult>()
+		const deps = depsWithGenerator(generatorKeyedByUuid(deferred))
+		const bytes: ThumbGenerationResult = { type: "bytes", bytes: new Uint8Array([1]) }
+		const controller = new AbortController()
+
+		const attempts = held.map(item => getThumbnailUrl(item, deps))
+
+		await flushMicrotasks()
+		attempts.push(getThumbnailUrl(above, deps, controller.signal, () => rowRank(2, { startIndex: 10, endIndex: 14 })))
+		await flushMicrotasks()
+		attempts.push(getThumbnailUrl(visible, deps, controller.signal, () => rowRank(12, { startIndex: 10, endIndex: 14 })))
+		await flushMicrotasks()
+
+		const [first, second, third] = held
+		if (first === undefined || second === undefined || third === undefined) {
+			throw new Error("expected three fixtures")
+		}
+
+		deferred.resolve(first.data.uuid, bytes)
+		await flushMicrotasks()
+
+		expect(deferred.keys).toContain(visible.data.uuid)
+		expect(deferred.keys).not.toContain(above.data.uuid)
+
+		deferred.resolve(second.data.uuid, bytes)
+		await flushMicrotasks()
+
+		expect(deferred.keys).toContain(above.data.uuid)
+
+		deferred.resolve(third.data.uuid, bytes)
+		deferred.resolve(visible.data.uuid, bytes)
+		deferred.resolve(above.data.uuid, bytes)
+
+		expect((await Promise.all(attempts)).every(url => url !== null)).toBe(true)
 	})
 
 	it("an OPFS cache hit renders while every slot is held by a slow generation", async () => {

@@ -103,6 +103,7 @@ export function DriveRow({
 					>
 						<ItemThumbnail
 							item={item}
+							index={index}
 							imgClassName="size-6 shrink-0 rounded-md object-cover"
 							iconClassName="size-6 shrink-0"
 						/>

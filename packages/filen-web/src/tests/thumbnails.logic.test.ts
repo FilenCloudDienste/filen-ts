@@ -3,6 +3,7 @@ import type { Dir, File, SharedDir, SharedFile, SharedRootDir } from "@filen/sdk
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { RAW_IMAGE_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import {
+	rowRank,
 	thumbnailCategory,
 	THUMB_MAX_DIM,
 	THUMB_SDK_MAX_HEIGHT,
@@ -264,5 +265,20 @@ describe("THUMB_SDK_MAX_HEIGHT", () => {
 	it("is twice THUMB_MAX_DIM, never equal to it", () => {
 		expect(THUMB_SDK_MAX_HEIGHT).toBe(THUMB_MAX_DIM * 2)
 		expect(THUMB_SDK_MAX_HEIGHT).toBe(768)
+	})
+})
+
+describe("rowRank", () => {
+	const visible = { startIndex: 10, endIndex: 14 }
+
+	it("ranks visible rows first, then rows below nearest first, then rows above last", () => {
+		const order = [16, 3, 12, 15, 9].sort((a, b) => rowRank(a, visible) - rowRank(b, visible))
+
+		expect(order).toEqual([12, 15, 16, 9, 3])
+	})
+
+	it("ranks every row as visible before the virtualizer has a range", () => {
+		expect(rowRank(0, null)).toBe(0)
+		expect(rowRank(500, null)).toBe(0)
 	})
 })

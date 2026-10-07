@@ -45,6 +45,8 @@ import { Button } from "@/components/ui/button"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { EmptyMessage } from "@/components/emptyMessage"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { ThumbnailRankContext } from "@/features/drive/lib/thumbnailRank"
+import { rowRank } from "@/features/drive/lib/thumbnails.logic"
 
 // Spacer between tiles only, never along the grid's outer edges: CSS grid gap separates columns and
 // the virtualizer's gap separates rows. 2px reads as a seam, not as padding.
@@ -122,6 +124,8 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 	// The virtualizer lives in PhotoGridRows, whose scroll-driven renders it keeps to itself; keyboard
 	// navigation reaches it through this ref, set in a layout effect before any key event can land.
 	const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null)
+	// For ThumbnailRankContext: changes only with the timeline, and reads the visible rows when a slot frees.
+	const rankThumbnail = (index: number) => rowRank(timeline.rowOfItem[index] ?? 0, virtualizerRef.current?.range ?? null)
 
 	const { safeActiveIndex, handleKeyDown, registerRef, setActive, setCursor, resetCursor } = usePhotosGridNav({
 		items,
@@ -362,23 +366,25 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 						onKeyDown={handleKeyDown}
 						onPointerDown={marquee.onPointerDown}
 					>
-						<PhotoGridRows
-							scrollElement={scrollElement}
-							timeline={timeline}
-							items={items}
-							rootUuid={rootUuid}
-							columns={columns}
-							cellSize={cellSize}
-							language={language}
-							selectedUuids={selectedUuids}
-							safeActiveIndex={safeActiveIndex}
-							registerRef={registerRef}
-							onTileClick={handleTileClick}
-							onTileToggle={handleTileToggle}
-							onItemAction={handleItemAction}
-							rectStore={marquee.rectStore}
-							virtualizerRef={virtualizerRef}
-						/>
+						<ThumbnailRankContext value={rankThumbnail}>
+							<PhotoGridRows
+								scrollElement={scrollElement}
+								timeline={timeline}
+								items={items}
+								rootUuid={rootUuid}
+								columns={columns}
+								cellSize={cellSize}
+								language={language}
+								selectedUuids={selectedUuids}
+								safeActiveIndex={safeActiveIndex}
+								registerRef={registerRef}
+								onTileClick={handleTileClick}
+								onTileToggle={handleTileToggle}
+								onItemAction={handleItemAction}
+								rectStore={marquee.rectStore}
+								virtualizerRef={virtualizerRef}
+							/>
+						</ThumbnailRankContext>
 					</div>
 					{scrollElement ? (
 						<TimelineScrubber

@@ -1,6 +1,5 @@
 import * as Comlink from "comlink"
 import { onlineManager } from "@tanstack/react-query"
-import { Semaphore } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { defaultObjectUrlFns, type ObjectUrlFns } from "@/lib/objectUrl"
@@ -9,6 +8,7 @@ import { thumbnailCategory, type ThumbnailCategory, type ThumbnailCopy } from "@
 import { asDirectoryOrFile, type BaseFileItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { createThumbnailUrlCache, capacityForVisibleSlots, computeThumbnailCapacity } from "@/features/drive/lib/thumbnailUrlCache"
+import { RankedGate } from "@/features/drive/lib/rankedGate"
 
 // No declared mime on rendered thumbnail blobs: the format genuinely varies by producer. The SDK arm
 // always encodes webp in wasm, while the video/pdf/svg canvas encodes are webp where the browser
@@ -21,6 +21,10 @@ import { createThumbnailUrlCache, capacityForVisibleSlots, computeThumbnailCapac
 // never a limit the SDK itself needs (never reimplement SDK-side concurrency; this bounds how many
 // requests THIS app issues concurrently). The OPFS cache read stays outside it: see generate().
 const CONCURRENT_GENERATIONS = 3
+
+// How long a generation for a cell off screen waits on a free slot before taking it, so the visible cells
+// mounting in the same pass (whose cache reads come back moments later) claim the slots first.
+const OFFSCREEN_HOLD_MS = 50
 
 // Permanent-failure threshold — the third failed generation for a uuid blacklists it for the rest of
 // the session, short-circuiting every later call instead of repeating pointless work (a download that
@@ -124,12 +128,14 @@ onlineManager.subscribe(online => {
 // for a cell scrolled straight back (or React's StrictMode remount) to claim it again.
 const DROP_GRACE_MS = 300
 
-// Who still wants a pending generation. A caller with an AbortSignal counts as interest until it aborts;
-// one without (and every seat) pins the entry. An unpinned generation nobody wants any more is dropped
+// Who still wants a pending generation, and how soon. A caller with an AbortSignal counts as interest until
+// it aborts; one without (and every seat) pins the entry. An unpinned generation nobody wants any more is dropped
 // when it reaches a generation slot instead of downloading and decoding for a cell that scrolled away;
 // one already running is signalled through `controller` (see ThumbGenerator).
 interface PendingClaim {
 	interest: number
+	// Each interested cell's current rank (see rowRank); a caller without one counts as first in line.
+	ranks: Set<() => number>
 	pinned: boolean
 	abandoned: boolean
 	controller: AbortController
@@ -153,12 +159,16 @@ const pending = new Map<string, PendingEntry>()
 // generation has no entry here — nothing but a seat ever needs to know it was joined.
 const seats = new Map<string, { joined: boolean }>()
 
-const semaphore = new Semaphore(CONCURRENT_GENERATIONS)
+const gate = new RankedGate(CONCURRENT_GENERATIONS, OFFSCREEN_HOLD_MS)
 
 // Runs a seeded production that decodes in the browser (video, pdf) in one of the generation slots: it
 // costs what the generation it replaces would have, less the download.
 export function withGenerationSlot<T>(produce: () => Promise<T>): Promise<T> {
-	return semaphore.withPermit(produce)
+	return gate.withPermit(firstInLine, produce)
+}
+
+function firstInLine(): number {
+	return 0
 }
 
 // A copy job's thumbnails go to the worker in batches of at most this many, one batch at a time, so a
@@ -183,6 +193,7 @@ const reusing = new Map<string, Promise<undefined>>()
 function startPending(uuid: string, pinned: boolean, run: (claim: PendingClaim) => Promise<string | null>): PendingEntry {
 	const claim: PendingClaim = {
 		interest: 0,
+		ranks: new Set(),
 		pinned,
 		abandoned: false,
 		controller: new AbortController(),
@@ -208,7 +219,7 @@ function startPending(uuid: string, pinned: boolean, run: (claim: PendingClaim) 
 
 // The abort listener closes over the claim itself, never a uuid lookup: a late abort must not touch a
 // newer generation for the same uuid.
-function registerInterest(claim: PendingClaim, signal: AbortSignal | undefined): void {
+function registerInterest(claim: PendingClaim, signal: AbortSignal | undefined, rank: (() => number) | undefined): void {
 	if (signal === undefined) {
 		claim.pinned = true
 
@@ -222,10 +233,18 @@ function registerInterest(claim: PendingClaim, signal: AbortSignal | undefined):
 	claim.interest++
 	clearTimeout(claim.dropTimer)
 
+	if (rank !== undefined) {
+		claim.ranks.add(rank)
+	}
+
 	signal.addEventListener(
 		"abort",
 		() => {
 			claim.interest--
+
+			if (rank !== undefined) {
+				claim.ranks.delete(rank)
+			}
 
 			if (claim.settled || claim.pinned || claim.interest > 0) {
 				return
@@ -245,6 +264,26 @@ function registerInterest(claim: PendingClaim, signal: AbortSignal | undefined):
 
 function unwanted(claim: PendingClaim): boolean {
 	return claim.controller.signal.aborted || (!claim.pinned && claim.interest <= 0)
+}
+
+// Work nobody wants goes first: it gives its slot straight back. A pinned claim, or a caller with no rank,
+// is first in line; otherwise the nearest of the cells still waiting on it.
+function claimRank(claim: PendingClaim): number {
+	if (unwanted(claim)) {
+		return -Infinity
+	}
+
+	if (claim.pinned || claim.ranks.size < claim.interest) {
+		return 0
+	}
+
+	let best = Infinity
+
+	for (const rank of claim.ranks) {
+		best = Math.min(best, rank())
+	}
+
+	return best
 }
 
 function finalize(deps: ThumbnailServiceDeps, uuid: string, blob: Blob): string {
@@ -286,7 +325,7 @@ async function persistAndFinalize(deps: ThumbnailServiceDeps, uuid: string, byte
 // The one real generation attempt for a uuid: check the OPFS cache first (another tab, or an earlier
 // session, may have already produced this thumbnail), then route through the registered generator for
 // the category (an unregistered category resolves no bytes, same as any other failure below). Only the
-// generator runs under the app-wide semaphore: a cache hit is a local read, and gating it would park
+// generator runs under the app-wide generation gate: a cache hit is a local read, and gating it would park
 // every already-cached tile behind whichever slow video/PDF generations hold the slots; the mounted
 // tiles already bound how many reads run at once. A generated result is written back through
 // storeThumbnail — a persist failure there is logged and non-fatal. A transient failure to obtain
@@ -331,7 +370,7 @@ async function generate(
 		return null
 	}
 
-	await semaphore.acquire()
+	await gate.acquire(() => claimRank(claim))
 
 	// Synchronous with the removal, so no caller can join the entry between the check and the null.
 	if (unwanted(claim)) {
@@ -342,7 +381,7 @@ async function generate(
 			pending.delete(uuid)
 		}
 
-		semaphore.release()
+		gate.release()
 
 		return null
 	}
@@ -381,7 +420,7 @@ async function generate(
 
 		return await persistAndFinalize(deps, uuid, bytes, "generate")
 	} finally {
-		semaphore.release()
+		gate.release()
 	}
 }
 
@@ -392,14 +431,16 @@ export function peekThumbnailUrl(uuid: string): string | null {
 }
 
 // The service's one read entry point. Routing order: no category -> null; a live objectURL -> reuse
-// it; blacklisted -> null without touching the cache/semaphore again; an in-flight generation for
+// it; blacklisted -> null without touching the cache/gate again; an in-flight generation for
 // this uuid -> join it; otherwise start a fresh generation. `deps` defaults to the
 // real worker/OPFS/Blob-URL wiring — pass a fake for tests. `signal` scopes this caller's interest in
 // a generation that has not started yet (see PendingClaim); without one the generation always runs.
+// `rank` says how soon this caller wants it while it waits for a slot (see rowRank).
 export async function getThumbnailUrl(
 	item: DriveItem,
 	deps: ThumbnailServiceDeps = defaultThumbnailDeps,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	rank?: () => number
 ): Promise<string | null> {
 	const category = thumbnailCategory(item)
 	// The base projection, so a shared file reaches the generators as the same file shape an owned one
@@ -447,7 +488,7 @@ export async function getThumbnailUrl(
 		}
 	}
 
-	registerInterest(entry.claim, signal)
+	registerInterest(entry.claim, signal, rank)
 
 	return entry.promise
 }
@@ -459,7 +500,7 @@ export async function getThumbnailUrl(
 // next commit, and without a pending entry that tile would immediately start DOWNLOADING bytes the
 // client still has in hand — the exact re-download the upload-side thumbnail exists to avoid.
 //
-// The production runs outside the generation semaphore unless it takes a slot itself
+// The production runs outside the generation gate unless it takes a slot itself
 // (withGenerationSlot): the SDK serialises its own decodes internally, so an SDK production adds no
 // unbounded CPU demand, and a fifty-file upload batch must not be able to hold all three generation
 // slots against the listing the user is actually looking at. A browser decode has no such bound.
@@ -476,7 +517,7 @@ export async function getThumbnailUrl(
 // every file it uploads, including uploads into a directory nothing is rendering, whose rows never
 // mount and never ask; generating server-side for one of those would queue range-read work through
 // the three generation slots for a thumbnail nobody wants, which is exactly what running the
-// production outside the semaphore exists to prevent. A caller that arrives after an unjoined seat is
+// production outside the gate exists to prevent. A caller that arrives after an unjoined seat is
 // gone finds no pending entry, no strike and no verdict behind it, so it starts an ordinary
 // generation of its own.
 //
@@ -506,7 +547,7 @@ export function seedThumbnail(
 
 	// pending.has(uuid) was just checked false above, and this function is synchronous up to here
 	// (no await before this point) — nothing else can touch `pending` for this uuid in between, so this
-	// always registers a fresh entry. Pinned: the production runs outside the semaphore, and its
+	// always registers a fresh entry. Pinned: the production runs outside the gate, and its
 	// fall-through serves a caller that joined.
 	void startPending(uuid, true, async claim => {
 		let result: ThumbSeedResult
@@ -520,7 +561,7 @@ export function seedThumbnail(
 		}
 
 		if (result.type === "unanswered") {
-			// The fallback the doc comment above describes. It runs INSIDE generate's semaphore — the
+			// The fallback the doc comment above describes. It runs INSIDE generate's gate — the
 			// download this seat displaced for the caller that joined it would have been gated too — and
 			// inherits that path's whole retry/blacklist accounting, so nothing here counts a failure of
 			// its own. Unjoined, there is no displaced download and no caller: the answer is nobody's.

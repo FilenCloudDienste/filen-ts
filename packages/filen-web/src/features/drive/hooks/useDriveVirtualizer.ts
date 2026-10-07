@@ -5,6 +5,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { GRID_INSET, ROW_HEIGHT, TILE_WIDTH, TILE_ROW_HEIGHT, columnsForWidth } from "@/features/drive/lib/gridLayout"
 import { setThumbnailViewport } from "@/features/drive/lib/thumbnails"
+import { rowRank } from "@/features/drive/lib/thumbnails.logic"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
@@ -87,6 +88,14 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode,
 
 	const activeVirtualizer = viewMode === "list" ? listVirtualizer : gridVirtualizer
 
+	// For ThumbnailRankContext. The instances are stable and `range` is read when a generation slot frees,
+	// so scrolling never changes this function's identity.
+	const rankThumbnail = useCallback(
+		(index: number) =>
+			viewMode === "list" ? rowRank(index, listVirtualizer.range) : rowRank(Math.floor(index / columns), gridVirtualizer.range),
+		[viewMode, columns, listVirtualizer, gridVirtualizer]
+	)
+
 	return {
 		setScrollElement,
 		scrollElement,
@@ -95,6 +104,7 @@ export function useDriveVirtualizer(items: DriveItem[], viewMode: DriveViewMode,
 		listVirtualizer,
 		gridVirtualizer,
 		activeVirtualizer,
+		rankThumbnail,
 		registerRef: itemRefs.registerRef,
 		itemRefs
 	}

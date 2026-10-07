@@ -1,7 +1,8 @@
-import { useEffect, useEffectEvent, useState } from "react"
+import { use, useEffect, useEffectEvent, useRef, useState } from "react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { getThumbnailUrl, peekThumbnailUrl } from "@/features/drive/lib/thumbnails"
 import { thumbnailCategory } from "@/features/drive/lib/thumbnails.logic"
+import { ThumbnailRankContext } from "@/features/drive/lib/thumbnailRank"
 
 // side-effect: registers the sdk/video/pdf generators against the thumbnail service — upload.ts is
 // the only other production importer (for its own warm path), and an unregistered category would
@@ -26,8 +27,9 @@ function initialThumbnail(item: DriveItem): string | null | undefined {
 // rotates the uuid (backend semantics), which resets the state during render.
 //
 // Unmount withdraws this cell's interest; the service decides from there whether its generation is
-// still worth running (see ThumbGenerator in thumbnails.ts).
-export function useThumbnail(item: DriveItem): string | null | undefined {
+// still worth running (see ThumbGenerator in thumbnails.ts). `index` is the cell's place in a
+// virtualized listing, which ranks its generation against the rest while it waits for a slot.
+export function useThumbnail(item: DriveItem, index?: number): string | null | undefined {
 	const uuid = item.data.uuid
 	const wanted = thumbnailCategory(item) !== "none"
 	const [state, setState] = useState(() => ({ uuid, wanted, url: initialThumbnail(item) }))
@@ -39,7 +41,21 @@ export function useThumbnail(item: DriveItem): string | null | undefined {
 	}
 
 	const settled = current.url !== undefined
-	const resolve = useEffectEvent((signal: AbortSignal) => getThumbnailUrl(item, undefined, signal))
+	// Read when a slot frees, possibly long after this render: a re-sort can move the cell meanwhile.
+	const rankOf = use(ThumbnailRankContext)
+	const placement = useRef({ rankOf, index })
+
+	useEffect(() => {
+		placement.current = { rankOf, index }
+	}, [rankOf, index])
+
+	const resolve = useEffectEvent((signal: AbortSignal) =>
+		getThumbnailUrl(item, undefined, signal, () => {
+			const { rankOf: rankAt, index: at } = placement.current
+
+			return rankAt === null || at === undefined ? 0 : rankAt(at)
+		})
+	)
 
 	useEffect(() => {
 		if (settled) {

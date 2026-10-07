@@ -14,8 +14,19 @@ import { cn, dirColorHex } from "@filen/shared"
 // while one that has to be generated still shows the icon in the meantime. A thumbnail that arrives
 // late fades in; one already cached paints on the first frame with no animation. Both are CSS only, so
 // neither costs a render.
-export function ItemThumbnail({ item, imgClassName, iconClassName }: { item: DriveItem; imgClassName: string; iconClassName: string }) {
-	const thumbUrl = useThumbnail(item)
+export function ItemThumbnail({
+	item,
+	index,
+	imgClassName,
+	iconClassName
+}: {
+	item: DriveItem
+	// The cell's place in a virtualized listing (see useThumbnail).
+	index?: number
+	imgClassName: string
+	iconClassName: string
+}) {
+	const thumbUrl = useThumbnail(item, index)
 	// Whether this mount had to wait for its thumbnail.
 	const [waited] = useState(thumbUrl === undefined)
 	// Downgrades a torn/corrupt cache entry back to the icon without waiting for a remount. Never reset

@@ -95,6 +95,7 @@ export function DriveTile({
 						<div className={cn(TILE_FACE_CLASS, "group-aria-selected/tile:ring-2 group-aria-selected/tile:ring-ring")}>
 							<ItemThumbnail
 								item={item}
+								index={index}
 								imgClassName="size-full object-cover"
 								iconClassName="size-14"
 							/>
