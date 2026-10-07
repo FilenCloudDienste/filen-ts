@@ -50,9 +50,15 @@ function DropdownMenuContent({
 				side={side}
 				sideOffset={sideOffset}
 			>
+				{/* Sized to its entries, never below the trigger or 8rem: a narrow trigger (Sort, an item's ⋯) would
+				    otherwise wrap its labels. */}
 				<MenuPrimitive.Popup
 					data-slot="dropdown-menu-content"
-					className={cn(MENU_POPUP_CLASS, "w-(--anchor-width) min-w-32 p-1 outline-none data-closed:overflow-hidden", className)}
+					className={cn(
+						MENU_POPUP_CLASS,
+						"w-max max-w-72 min-w-[max(--spacing(32),var(--anchor-width))] p-1 outline-none data-closed:overflow-hidden",
+						className
+					)}
 					// Portaled, yet its clicks still bubble through the React tree into the row that mounts the menu.
 					onClick={stopRowPropagation}
 					onDoubleClick={stopRowPropagation}

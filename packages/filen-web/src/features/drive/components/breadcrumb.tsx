@@ -23,8 +23,10 @@ const VARIANT_ROOT_LABEL_KEY = {
 	sharedOut: "common:driveSharedOut"
 } as const satisfies Record<DriveVariant, string>
 
-const CRUMB_LINK_CLASS = "text-muted-foreground hover:text-foreground hover:underline"
-const CRUMB_CURRENT_CLASS = "font-medium text-foreground"
+// Every segment carries the same px-1 (the link's drop-highlight inset), so navigating up doesn't shift
+// the right-aligned ancestors when the old parent turns into the plain current span.
+const CRUMB_LINK_CLASS = "rounded-sm px-1 text-muted-foreground hover:text-foreground hover:underline"
+const CRUMB_CURRENT_CLASS = "px-1 font-medium text-foreground"
 
 export interface BreadcrumbProps {
 	variant: DriveVariant
@@ -75,7 +77,7 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 			// it has started but this breadcrumb still shows the old path. Link always sets the attribute.
 			aria-current={undefined}
 			{...drop.handlers}
-			className={cn(CRUMB_LINK_CLASS, "rounded-sm px-1", drop.isOver && "text-foreground", dropHighlightClass(drop))}
+			className={cn(CRUMB_LINK_CLASS, drop.isOver && "text-foreground", dropHighlightClass(drop))}
 		>
 			{label}
 		</a>

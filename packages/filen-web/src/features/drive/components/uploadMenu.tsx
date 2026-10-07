@@ -78,11 +78,7 @@ export function UploadMenu({
 						</Button>
 					}
 				/>
-				{/* Sized to its entries rather than to the (narrow) trigger, so no label wraps. */}
-				<DropdownMenuContent
-					align="end"
-					className="w-max max-w-72 min-w-(--anchor-width)"
-				>
+				<DropdownMenuContent align="end">
 					{/* No New directory: the toolbar has its own button beside this one. */}
 					<DestinationEntries
 						family={DROPDOWN_TREE_MENU_FAMILY}

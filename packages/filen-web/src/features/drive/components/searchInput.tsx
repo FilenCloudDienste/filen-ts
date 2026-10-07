@@ -69,7 +69,8 @@ export function SearchInput({ action, label, value, onChange, onClear }: SearchI
 				// The engine's own cancel glyph would sit beside the clear button below.
 				className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
 			/>
-			<div className="absolute top-1/2 right-1.5 -translate-y-1/2">
+			{/* Flex, not a block: a block would seat the Kbd badge on a text line's baseline, off-center. */}
+			<div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center">
 				{value.length > 0 ? (
 					<Button
 						variant="ghost"
