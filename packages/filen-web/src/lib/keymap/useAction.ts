@@ -28,9 +28,18 @@ export function shouldIgnoreEvent(event: Pick<KeyboardEvent, "repeat">): boolean
 // directoryListing.tsx's moveActive/registerRef) — without this override every drive.* command
 // would silently never fire while a row actually has focus, which is the normal, expected state
 // during keyboard-driven listbox use, not an edge case.
+// A matched bare printable key (N for New directory, or any action a user rebinds to a letter) would
+// otherwise type itself: a handler that opens an autofocused field commits in React's sync lane, still
+// inside this keydown, so the browser's default text input lands in the new field. Only consulted for a
+// matched, non-ignored combo whose target is not a text field, so it never swallows real typing.
+export function producesTextInput(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey">): boolean {
+	return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey
+}
+
 const DEFAULT_OPTIONS: Options = {
 	ignoreEventWhen: shouldIgnoreEvent,
-	enableOnFormTags: ["option"]
+	enableOnFormTags: ["option"],
+	preventDefault: producesTextInput
 }
 
 // Thin wrapper around react-hotkeys-hook's `useHotkeys` (v5.3.3 — verified against the installed
