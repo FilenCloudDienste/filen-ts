@@ -2,15 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, s
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import {
-	test as base,
-	expect,
-	type BrowserContext,
-	type BrowserType,
-	type Page,
-	type Request,
-	type TestInfo
-} from "@playwright/test"
+import { test as base, expect, type BrowserContext, type BrowserType, type Page, type Request, type TestInfo } from "@playwright/test"
 import { SESSION_BINDING } from "@/e2e-hooks/sessionSeed"
 import { common } from "@/locales/en/common"
 
