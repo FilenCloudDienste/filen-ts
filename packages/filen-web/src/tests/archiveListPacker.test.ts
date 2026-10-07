@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest"
 import type { ArchiveEntry, ArchiveEntryKind, ListedSkipReason } from "@filen/sdk-rs"
 import { createListBatcher } from "@/workers/archiveListPacker"
-import { ENTRY_FLAG, ENTRY_KIND, SKIP_REASONS, skipCode, skipReasonOf, type PackedEntryBatch } from "@/lib/sdk/archiveListing"
+import {
+	accessOfFlags,
+	ENTRY_ACCESS,
+	ENTRY_FLAG,
+	ENTRY_KIND,
+	SKIP_REASONS,
+	skipCode,
+	skipReasonOf,
+	type PackedEntryBatch
+} from "@/lib/sdk/archiveListing"
 import { testUuid } from "@/tests/support/uuid"
 
 const ARCHIVE = testUuid("archive")
@@ -166,5 +175,54 @@ describe("createListBatcher", () => {
 
 	it("posts nothing when empty", () => {
 		expect(packed([])).toEqual([])
+	})
+
+	it("carries each entry's access in the flags' top bits, beside its own flags", () => {
+		const batch = only(
+			packed([
+				entry(0, "none", { kind: { type: "dir" }, size: undefined }),
+				entry(1, "direct", { access: { type: "direct", packedBytes: 5n }, encrypted: true }),
+				entry(2, "solid", { access: { type: "solidBlock", skippedBytes: 0n, estimatedPackedBytes: 4n, blockPackedBytes: 9n } }),
+				entry(3, "tar", { access: { type: "sequential" } })
+			])
+		)
+
+		expect([...batch.flags].map(accessOfFlags)).toEqual([
+			ENTRY_ACCESS.none,
+			ENTRY_ACCESS.direct,
+			ENTRY_ACCESS.solidBlock,
+			ENTRY_ACCESS.sequential
+		])
+		expect((batch.flags[1] ?? 0) & ENTRY_FLAG.encrypted).toBe(ENTRY_FLAG.encrypted)
+	})
+
+	it("posts solid costs only with a batch holding a solid entry, zero for the others", () => {
+		const solid = (skipped: bigint, estimated: bigint): EntryOverrides => ({
+			access: { type: "solidBlock", skippedBytes: skipped, estimatedPackedBytes: estimated, blockPackedBytes: 100n }
+		})
+		const batches = packed(
+			[
+				entry(0, "a", { access: { type: "direct", packedBytes: 1n } }),
+				entry(1, "b", solid(10n, 20n)),
+				entry(2, "c", solid(30n, 40n)),
+				entry(3, "d", { access: { type: "direct", packedBytes: 1n } }),
+				entry(4, "e", { access: { type: "direct", packedBytes: 1n } }),
+				entry(5, "f", { access: { type: "direct", packedBytes: 1n } })
+			],
+			2
+		)
+
+		expect(batches.map(batch => (batch.solid === null ? null : [...batch.solid.skipped]))).toEqual([[0, 10], [30, 0], null])
+		expect(batches.map(batch => (batch.solid === null ? null : [...batch.solid.estimated]))).toEqual([[0, 20], [40, 0], null])
+	})
+
+	it("starts a later batch's solid costs clean of an earlier one's", () => {
+		const solid: EntryOverrides = {
+			access: { type: "solidBlock", skippedBytes: 7n, estimatedPackedBytes: 8n, blockPackedBytes: 9n }
+		}
+		const batches = packed([entry(0, "a", solid), entry(1, "b", solid), entry(2, "c"), entry(3, "d", solid)], 2)
+
+		expect(batches[1]?.solid?.skipped).toEqual(new Float64Array([0, 7]))
+		expect(batches[1]?.solid?.estimated).toEqual(new Float64Array([0, 8]))
 	})
 })

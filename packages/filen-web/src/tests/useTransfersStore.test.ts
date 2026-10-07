@@ -110,6 +110,30 @@ describe("setPaused", () => {
 	})
 })
 
+describe("setWaitingForSlot", () => {
+	it("flags a row waiting for the archive slot and clears the flag off it again", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a" }))
+		useTransfersStore.getState().setWaitingForSlot("a", true)
+
+		expect(useTransfersStore.getState().transfers[0]?.waitingForSlot).toBe(true)
+
+		useTransfersStore.getState().setWaitingForSlot("a", false)
+
+		expect(useTransfersStore.getState().transfers[0]).not.toHaveProperty("waitingForSlot")
+	})
+
+	it("leaves the store untouched when nothing changes", () => {
+		useTransfersStore.getState().add(makeTransfer({ id: "a" }))
+
+		const before = useTransfersStore.getState()
+
+		useTransfersStore.getState().setWaitingForSlot("a", false)
+		useTransfersStore.getState().setWaitingForSlot("missing", true)
+
+		expect(useTransfersStore.getState()).toBe(before)
+	})
+})
+
 describe("setProgress", () => {
 	it("updates bytesTransferred for the matching id", () => {
 		useTransfersStore.getState().add(makeTransfer({ id: "a" }))

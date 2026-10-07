@@ -88,6 +88,8 @@ export interface ListingSession {
 	retry: () => void
 	// The password the listing accepted. In memory only: never logged, never stored.
 	password: () => string | undefined
+	// One an entry's own preview or download proved right: later extracts and entries take it unasked.
+	acceptPassword: (password: string) => void
 	// Where the browser is, "" the root: a cached listing reopens there.
 	rememberDirPath: (path: string) => void
 	restoredDirPath: () => string
@@ -518,6 +520,19 @@ export function openListingSession(
 			}
 		},
 		password: () => accepted,
+		acceptPassword: password => {
+			if (disposed || password === "") {
+				return
+			}
+
+			accepted = password
+
+			const summary = summaryOfPhase(snapshot.phase)
+
+			if (summary !== null && !summary.verifying && (summary.password === "required" || summary.password === "wrong")) {
+				setPhase(withSummary(snapshot.phase, { ...summary, password: "right", verifyError: null }))
+			}
+		},
 		rememberDirPath: path => {
 			dirPath = path
 		},

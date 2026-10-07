@@ -16,6 +16,7 @@ import {
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_REGISTER_DOWNLOAD,
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
+	SW_MSG_REGISTER_STREAM_DOWNLOAD,
 	SW_MSG_REGISTER_PREVIEW,
 	SW_ERROR_NO_CLIENT,
 	SW_MSG_LOGOUT,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/sw/protocol"
 import { PendingRegistry } from "@/lib/sw/pendingRegistry"
 import { DownloadReporter, type ReportedStream } from "@/lib/sw/downloadReporter"
+import { heldBackBody } from "@/lib/sw/heldBackBody"
 import { plainErrorDTO, toErrorDTO } from "@/lib/sdk/errors"
 import { contentDispositionAttachment } from "@/lib/filename"
 import { log } from "@/lib/log"
@@ -61,7 +63,15 @@ interface PendingPreviewDownload {
 	size: number
 	contentType: string
 }
-type PendingDownload = PendingFileDownload | PendingZipDownload | PendingPreviewDownload
+// Bytes the page streams in: one-shot, so `taken` once a GET has it.
+interface PendingStreamDownload {
+	kind: "stream"
+	stream: ReadableStream<Uint8Array>
+	name: string
+	size: number
+	taken: boolean
+}
+type PendingDownload = PendingFileDownload | PendingZipDownload | PendingPreviewDownload | PendingStreamDownload
 
 // A generous concurrent-download ceiling — bounded retention is the only guard against unbounded growth
 // of decrypted key material across the SW's lifetime (no page-side signal ever says a download
@@ -382,6 +392,52 @@ function streamFileRange(
 	return response
 }
 
+// The "stream" kind: the page's own stream, which only one response can read. Range is ignored and a whole
+// 200 answered, never Accept-Ranges, so nothing has reason to probe and come back for more; a later GET of
+// a taken stream finds it gone. Content-Length is the entry's size, and heldBackBody ends a failed stream
+// short of it, so the browser fails that download rather than keep a damaged file. No Client and no SDK
+// call: the page's SDK writes the bytes, and its stop or a failure reaches here as the stream's error.
+function handleStreamDownload(event: FetchEvent, id: string, pending: PendingStreamDownload): Response {
+	if (pending.taken) {
+		return event.request.mode === "navigate" ? new Response(null, { status: 204 }) : new Response("download not found", { status: 404 })
+	}
+
+	pending.taken = true
+
+	// No progress of its own: the page counts what its SDK writes, and the reporter's heartbeat tells it
+	// the worker still streams.
+	const stream = reporter.begin(id)
+	const held = heldBackBody(pending.stream)
+
+	// Built BEFORE the stream is counted (see pumpToResponse).
+	const response = new Response(held.body, {
+		status: 200,
+		headers: {
+			"Content-Type": "application/octet-stream",
+			"Content-Disposition": contentDispositionAttachment(pending.name),
+			"Content-Length": String(pending.size),
+			"X-Content-Type-Options": "nosniff"
+		}
+	})
+
+	stream.onCancelRequest(() => {
+		held.fail(new Error("download cancelled"))
+	})
+	downloads.beginStream(id)
+	// Keeps the worker alive while the browser reads, as pumpToResponse does.
+	event.waitUntil(
+		held.ended
+			.then(end => {
+				stream.end(end.type === "done" ? end : failedOutcome(end.error, stream.cancelRequested || end.cancelledByBrowser))
+			})
+			.finally(() => {
+				downloads.endStream(id)
+			})
+	)
+
+	return response
+}
+
 // A forced-attachment octet-stream response — the "file" kind's own contract, and the fallback a
 // "preview" kind takes when its contentType fails the SW's own re-validation.
 function attachmentHeaders(name: string): { contentType: string; disposition: string } {
@@ -391,6 +447,11 @@ function attachmentHeaders(name: string): { contentType: string; disposition: st
 function handleDownload(event: FetchEvent, url: URL): Response {
 	const id = decodeURIComponent(url.pathname.slice(SW_DOWNLOAD_PREFIX.length))
 	const pending = downloads.get(id)
+
+	if (pending?.kind === "stream") {
+		return handleStreamDownload(event, id, pending)
+	}
+
 	const client = swClient
 	if (pending === undefined || client === null) {
 		// The download trigger is a top-level NAVIGATION, so answering it with a body would commit that
@@ -497,6 +558,26 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 		}
 		const msg = event.data as { id: string; items: SwZipItem[]; name: string }
 		downloads.set(msg.id, { kind: "zip", items: msg.items, name: msg.name })
+		port?.postMessage({ ok: true })
+		return
+	}
+
+	// Needs no Client: the page streams the bytes.
+	if (type === SW_MSG_REGISTER_STREAM_DOWNLOAD) {
+		const msg = event.data as { id: string; name: string; size: number; stream: unknown }
+
+		if (!(msg.stream instanceof ReadableStream)) {
+			port?.postMessage({ ok: false, error: "no stream" })
+			return
+		}
+
+		downloads.set(msg.id, {
+			kind: "stream",
+			stream: msg.stream as ReadableStream<Uint8Array>,
+			name: msg.name,
+			size: msg.size,
+			taken: false
+		})
 		port?.postMessage({ ok: true })
 		return
 	}

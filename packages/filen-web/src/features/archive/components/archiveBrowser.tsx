@@ -54,6 +54,10 @@ import { ArchiveEntryList } from "@/features/archive/components/archiveEntryList
 import { ArchiveFooter } from "@/features/archive/components/archiveFooter"
 import { ArchivePasswordGate, ArchivePasswordPrompt } from "@/features/archive/components/archivePasswordPrompt"
 import { ArchiveLinkTargetsDialog } from "@/features/archive/components/archiveLinkTargetsDialog"
+import { ArchiveExtractPicker } from "@/features/archive/components/archiveExtractMenu"
+import { ArchiveEntryViewer } from "@/features/archive/components/archiveEntryViewer"
+import { useEntryActions, type EntryTarget } from "@/features/archive/components/useEntryActions"
+import { EntryMenuContext, type EntryMenuAction, type EntryMenuHost } from "@/features/archive/lib/entryMenu"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { LoadingState } from "@/components/loadingState"
 
@@ -126,7 +130,10 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 	const [anchor, setAnchor] = useState<RowPosition | null>(null)
 	const [passwordAsk, setPasswordAsk] = useState<PasswordAsk | null>(null)
 	const [linkAsk, setLinkAsk] = useState<LinkTargetsAsk | null>(null)
+	// A row's "Choose destination…", kept here: the row may unmount while the picker is open.
+	const [rowPick, setRowPick] = useState<EntryTarget | null>(null)
 	const [viewStore, setViewStore] = useState(store)
+	const entries = useEntryActions({ source, session: listing.session, downloadable, isOnline })
 	// Ends the wait for a password check that an extract is waiting on.
 	const pendingCheck = useRef<(() => void) | null>(null)
 
@@ -243,9 +250,12 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 		placeCursor(position, true)
 	}
 
+	// A directory opens; a file previews when it can, else it is saved.
 	function handleOpen(ref: RowRef): void {
 		if (isDirRef(ref)) {
 			navigate(dirOfRef(ref), null)
+		} else {
+			entries.activate({ store, slot: ref })
 		}
 	}
 
@@ -281,7 +291,7 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 
 				if (isDirRef(ref)) {
 					navigate(dirOfRef(ref), null)
-				} else {
+				} else if (!entries.activate({ store, slot: ref })) {
 					toggleAt(cursorIndex)
 				}
 
@@ -402,6 +412,33 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 		extractResolved(target, selection, dir)
 	}
 
+	// A row's own Extract: that entry alone, from the directory shown.
+	function extractEntry(target: ExtractTarget, entry: EntryTarget): void {
+		if (entry.store === store) {
+			extractResolved(target, toggle(store, EMPTY_SELECTION, entry.slot), dir)
+		}
+	}
+
+	function handleEntryMenu(slot: number, action: EntryMenuAction): void {
+		const entry = { store, slot }
+
+		switch (action.type) {
+			case "open":
+			case "download":
+				entries.request(entry, action.type)
+
+				break
+			case "extract":
+				extractEntry(action.target, entry)
+
+				break
+			case "chooseDestination":
+				setRowPick(entry)
+
+				break
+		}
+	}
+
 	// The listing holds the page's one archive slot, which the extract needs: it stops first.
 	function extractAll(target: ExtractTarget): void {
 		if (holdsSlot(phase)) {
@@ -472,6 +509,32 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 		listing.session()?.stop()
 	}
 
+	const viewing = entries.viewing
+
+	if (viewing !== null) {
+		return (
+			<>
+				<ArchiveEntryViewer
+					archiveUuid={source.uuid}
+					entry={viewing.entry}
+					password={viewing.password}
+					onPasswordAccepted={password => {
+						listing.session()?.acceptPassword(password)
+					}}
+					onDownload={
+						downloadable
+							? () => {
+									entries.request(viewing, "download")
+								}
+							: null
+					}
+					onBack={entries.closeViewer}
+				/>
+				{entries.dialogs}
+			</>
+		)
+	}
+
 	if (phase.type === "gate") {
 		return (
 			<ArchiveGate
@@ -532,6 +595,13 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 		)
 	}
 
+	const menuHost: EntryMenuHost = {
+		source,
+		newFolderName: single ? null : baseFolderName,
+		extractDisabled: extractOff || !canExtractSelection(phase, store.entryCount),
+		offers: slot => entries.offers({ store, slot }),
+		onAction: handleEntryMenu
+	}
 	const running = holdsSlot(phase) || phase.type === "resolving"
 	const empty =
 		searchRefs !== null ? (
@@ -593,26 +663,28 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 					{t("previewArchiveSearchTruncated", { count: SEARCH_CAP })}
 				</p>
 			) : null}
-			<ArchiveEntryList
-				listId={listId}
-				label={t("previewArchiveListLabel", { name: dirName })}
-				viewKey={`${String(dir)}:${searchMode ? "search" : "dir"}`}
-				snapshot={snapshot}
-				rows={rows}
-				selection={selection}
-				cursor={cursor}
-				searchMode={searchMode}
-				sort={sort}
-				headerCheck={headerCheck(snapshot, selection, dir, searchRefs)}
-				headerDisabled={searchRefs === null ? !dirSelectable(snapshot, dir) : searchRefs.length === 0}
-				empty={empty}
-				onSort={handleSort}
-				onHeaderCheck={handleHeaderCheck}
-				onKeyAction={handleKeyAction}
-				onPointer={handlePointer}
-				onOpen={handleOpen}
-				onCheck={toggleAt}
-			/>
+			<EntryMenuContext value={menuHost}>
+				<ArchiveEntryList
+					listId={listId}
+					label={t("previewArchiveListLabel", { name: dirName })}
+					viewKey={`${String(dir)}:${searchMode ? "search" : "dir"}`}
+					snapshot={snapshot}
+					rows={rows}
+					selection={selection}
+					cursor={cursor}
+					searchMode={searchMode}
+					sort={sort}
+					headerCheck={headerCheck(snapshot, selection, dir, searchRefs)}
+					headerDisabled={searchRefs === null ? !dirSelectable(snapshot, dir) : searchRefs.length === 0}
+					empty={empty}
+					onSort={handleSort}
+					onHeaderCheck={handleHeaderCheck}
+					onKeyAction={handleKeyAction}
+					onPointer={handlePointer}
+					onOpen={handleOpen}
+					onCheck={toggleAt}
+				/>
+			</EntryMenuContext>
 			<ArchiveFooter
 				source={source}
 				totals={totals}
@@ -636,6 +708,17 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 				}}
 				onSubmit={submitPassword}
 			/>
+			{entries.dialogs}
+			{rowPick === null ? null : (
+				<ArchiveExtractPicker
+					onPick={target => {
+						extractEntry(target, rowPick)
+					}}
+					onClose={() => {
+						setRowPick(null)
+					}}
+				/>
+			)}
 			{linkAsk === null ? null : (
 				<ArchiveLinkTargetsDialog
 					open

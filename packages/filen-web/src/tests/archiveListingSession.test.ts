@@ -454,6 +454,37 @@ describe("openListingSession", () => {
 		expect(deps.release).toHaveBeenCalledTimes(3)
 	})
 
+	it("takes a password an entry proved right, quieting the encrypted banner without a check", async () => {
+		const { calls, call, deps } = harness()
+		const session = openListingSession(source("a.zip", 10), deps)
+
+		session.start()
+		call(0).emit(entriesEvent(["secret"]))
+		call(0).resolve(report({ password: "required" }))
+		await settled()
+
+		const listener = vi.fn()
+
+		session.subscribe(listener)
+		session.acceptPassword("")
+
+		expect(session.password()).toBeUndefined()
+		expect(listener).not.toHaveBeenCalled()
+
+		session.acceptPassword("entry-pw")
+
+		const phase = session.getSnapshot().phase
+
+		expect(session.password()).toBe("entry-pw")
+		expect(phase.type === "done" ? phase.summary.password : null).toBe("right")
+		expect(calls).toHaveLength(1)
+
+		session.dispose()
+		session.acceptPassword("late")
+
+		expect(session.password()).toBeUndefined()
+	})
+
 	it("says while a check waits for the slot, and a stop ends the check alone", async () => {
 		const { call, deps } = harness()
 		const session = openListingSession(source("a.zip", 10), deps)

@@ -19,6 +19,7 @@ import { useLatestRef } from "@/lib/useLatestRef"
 import { LIST_MODIFIED_COLUMN_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
 import {
 	ARCHIVE_LIST_OVERSCAN,
+	ARCHIVE_MENU_COLUMN_CLASS,
 	ARCHIVE_ROW_HEIGHT,
 	browserKeyAction,
 	entryRowKind,
@@ -250,6 +251,7 @@ export function ArchiveEntryList({
 						</button>
 					)
 				})}
+				<span className={ARCHIVE_MENU_COLUMN_CLASS} />
 			</div>
 			<div
 				ref={setScrollElement}
@@ -276,6 +278,8 @@ export function ArchiveEntryList({
 							const flags = rowFlags(store, ref)
 							const parent = isDir ? store.dirParent(dir) : store.parent(ref)
 							const parentPath = searchMode ? store.dirPath(parent) : ""
+							const kind = entryRowKind(store, ref)
+							const selectable = isSelectable(store, ref)
 
 							return (
 								<ArchiveEntryRow
@@ -286,12 +290,12 @@ export function ArchiveEntryList({
 									total={rows.count}
 									start={virtualRow.start}
 									name={rowName(store, ref)}
-									kind={entryRowKind(store, ref)}
+									kind={kind}
 									size={isDir ? -1 : store.size(ref)}
 									modified={isDir ? store.dirModified(dir) : store.modified(ref)}
 									childCount={isDir ? store.childDirs(dir).length + store.childEntries(dir).length : 0}
 									check={rowCheck(store, selection, ref)}
-									selectable={isSelectable(store, ref)}
+									selectable={selectable}
 									cursor={virtualRow.index === cursorIndex}
 									skipLabel={skip === null ? null : t(SKIP_LABEL_KEYS[skip])}
 									encrypted={hasFlag(flags, ENTRY_FLAG.encrypted)}
@@ -299,6 +303,7 @@ export function ArchiveEntryList({
 									storedPath={isDir || !hasFlag(flags, ENTRY_FLAG.rewritten) ? null : (store.storedPath(ref) ?? null)}
 									linkTarget={isDir ? null : (store.link(ref)?.target ?? null)}
 									parentPath={parentPath === "" ? null : parentPath}
+									menu={kind === "file" && selectable}
 									onPointer={handlePointer}
 									onOpen={handleOpen}
 									onCheck={handleCheck}

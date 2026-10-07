@@ -41,6 +41,9 @@ export interface EntryStore {
 	link: (slot: number) => EntryLink | undefined
 	// Set only when the name is not the stored path.
 	storedPath: (slot: number) => string | undefined
+	// A solid 7z entry's skippedBytes and estimatedPackedBytes (accessOfFlags tells it is one); 0 otherwise.
+	solidSkipped: (slot: number) => number
+	solidEstimated: (slot: number) => number
 	// Per directory node.
 	dirParent: (id: number) => number
 	dirName: (id: number) => string
@@ -75,6 +78,9 @@ interface EntryChunk {
 	size: Float64Array
 	modified: Float64Array
 	parent: Int32Array
+	// Allocated by the chunk's first solid 7z entry.
+	solidSkipped: Float64Array | null
+	solidEstimated: Float64Array | null
 }
 
 const NO_CHILDREN: readonly number[] = []
@@ -87,7 +93,9 @@ function newChunk(): EntryChunk {
 		flags: new Uint8Array(ENTRY_CHUNK),
 		size: new Float64Array(ENTRY_CHUNK),
 		modified: new Float64Array(ENTRY_CHUNK),
-		parent: new Int32Array(ENTRY_CHUNK)
+		parent: new Int32Array(ENTRY_CHUNK),
+		solidSkipped: null,
+		solidEstimated: null
 	}
 }
 
@@ -233,6 +241,18 @@ export function createEntryStore(): EntryStore {
 			chunk.modified[offset] = batch.modified[i] ?? NaN
 			chunk.parent[offset] = parentId
 
+			if (batch.solid !== null) {
+				const skipped = batch.solid.skipped[i] ?? 0
+				const estimated = batch.solid.estimated[i] ?? 0
+
+				if (skipped > 0 || estimated > 0) {
+					chunk.solidSkipped ??= new Float64Array(ENTRY_CHUNK)
+					chunk.solidEstimated ??= new Float64Array(ENTRY_CHUNK)
+					chunk.solidSkipped[offset] = skipped
+					chunk.solidEstimated[offset] = estimated
+				}
+			}
+
 			names.push(name)
 
 			if (index > maxIndex) {
@@ -349,6 +369,8 @@ export function createEntryStore(): EntryStore {
 		name: slot => names[slot] ?? "",
 		link: slot => links.get(slot),
 		storedPath: slot => storedPaths.get(slot),
+		solidSkipped: slot => chunkOf(slot).solidSkipped?.[slot & CHUNK_MASK] ?? 0,
+		solidEstimated: slot => chunkOf(slot).solidEstimated?.[slot & CHUNK_MASK] ?? 0,
 		dirParent: id => dirParents[id] ?? -1,
 		dirName: id => dirNames[id] ?? "",
 		dirEntrySlot: id => dirEntrySlots[id] ?? -1,

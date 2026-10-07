@@ -475,5 +475,21 @@ export const preview = {
 	/** Hard-link dialog — extracts the selection without those links */
 	previewArchiveLinkTargetsLeaveOut: "Leave those links out",
 	/** Hard-link dialog — extracts with paths taken from a directory higher up that holds the link targets too; {{name}} is that directory */
-	previewArchiveLinkTargetsFromParent: "Extract from “{{name}}” instead"
+	previewArchiveLinkTargetsFromParent: "Extract from “{{name}}” instead",
+	/** Archive entry viewer — leaves the file shown for the archive's contents again (Escape does too) */
+	previewArchiveEntryBack: "Back to the archive",
+	/** Solid 7z cost dialog title — opening or saving one file means reading the files stored before it in the same block first */
+	previewArchiveEntryCostTitle: "Read part of the archive first?",
+	/** Solid 7z cost dialog body, opening; {{name}} is the file, {{download}} roughly how much of the archive is downloaded, {{skipped}} how much of the files stored before it is decoded and thrown away */
+	previewArchiveEntryCostOpenBody:
+		"This archive stores “{{name}}” together with other files. To open it, about {{download}} of the archive is downloaded, and {{skipped}} of the files stored before it is unpacked and discarded first.",
+	/** Solid 7z cost dialog body, saving; same placeholders as the opening one */
+	previewArchiveEntryCostDownloadBody:
+		"This archive stores “{{name}}” together with other files. To save it, about {{download}} of the archive is downloaded, and {{skipped}} of the files stored before it is unpacked and discarded first.",
+	/** Solid 7z cost dialog — opens the file anyway */
+	previewArchiveEntryCostOpen: "Open",
+	/** Solid 7z cost dialog — saves the file anyway */
+	previewArchiveEntryCostDownload: "Download",
+	/** Toast when a browser can't stream one file of an archive to disk (no File System Access and no transferable streams) */
+	previewArchiveEntryDownloadUnsupported: "This browser can't save a single file from an archive. Extract it to your drive instead."
 } as const

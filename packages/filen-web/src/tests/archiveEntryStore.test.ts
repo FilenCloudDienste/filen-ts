@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createEntryStore, ENTRY_CHUNK } from "@/features/archive/lib/entryStore"
-import { ENTRY_FLAG, ENTRY_KIND, skipCode, type PackedEntryBatch } from "@/lib/sdk/archiveListing"
+import { accessOfFlags, ENTRY_ACCESS, ENTRY_FLAG, ENTRY_KIND, skipCode, type PackedEntryBatch } from "@/lib/sdk/archiveListing"
 import { packEntries, storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
 
 describe("createEntryStore", () => {
@@ -179,6 +179,29 @@ describe("createEntryStore", () => {
 		expect(() => store.size(count + ENTRY_CHUNK)).toThrow()
 	})
 
+	it("keeps solid costs per slot, allocating them only in a chunk holding a solid entry", () => {
+		const count = ENTRY_CHUNK + 2
+		const store = storeOf(
+			Array.from({ length: count }, (_, i) =>
+				i === ENTRY_CHUNK + 1
+					? {
+							path: `s${String(i)}`,
+							access: { type: "solidBlock", skippedBytes: 3000n, estimatedPackedBytes: 1500n, blockPackedBytes: 9000n }
+						}
+					: { path: `f${String(i)}`, access: { type: "direct", packedBytes: 1n } }
+			),
+			1000
+		)
+
+		expect(accessOfFlags(store.flags(0))).toBe(ENTRY_ACCESS.direct)
+		expect(store.solidSkipped(0)).toBe(0)
+		expect(store.solidEstimated(ENTRY_CHUNK - 1)).toBe(0)
+		expect(accessOfFlags(store.flags(ENTRY_CHUNK + 1))).toBe(ENTRY_ACCESS.solidBlock)
+		expect(store.solidSkipped(ENTRY_CHUNK + 1)).toBe(3000)
+		expect(store.solidEstimated(ENTRY_CHUNK + 1)).toBe(1500)
+		expect(store.solidSkipped(ENTRY_CHUNK)).toBe(0)
+	})
+
 	it("finds a slot by entry index, in or out of order", () => {
 		const inOrder = storeOf(["a", "b", "c"])
 
@@ -255,7 +278,8 @@ describe("createEntryStore", () => {
 				parent,
 				parents,
 				links: [],
-				stored: []
+				stored: [],
+				solid: null
 			})
 		}
 

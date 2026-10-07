@@ -23,6 +23,12 @@ const PreviewDownloadableContext = createContext(true)
 // the host offers none of its own (a public link's page carries its own button beside the preview).
 const PreviewDownloadContext = createContext<(() => void) | null>(null)
 
+// Where a viewer's whole buffer comes from when it is no file of the drive or a link (an archive's entry):
+// usePreviewBytes loads through it, cancelled by the same token, and nothing streams. Null everywhere else.
+export type PreviewByteSource = (token: string) => Promise<Uint8Array>
+
+const PreviewByteSourceContext = createContext<PreviewByteSource | null>(null)
+
 // The preview cache's key scope (previewCache.ts). Authed items share one. A public link's is a
 // fingerprint of its key and password, so bytes read under one password are never served under
 // another; an anon provider given none caches nothing.
@@ -87,4 +93,12 @@ export function usePreviewDownload(): (() => void) | null {
 // Takes a native <video>/<audio> control bar's own download entry away when the file may not be saved.
 export function mediaControlsList(downloadable: boolean): "nodownload" | undefined {
 	return downloadable ? undefined : "nodownload"
+}
+
+export function PreviewByteSourceProvider({ source, children }: { source: PreviewByteSource; children: ReactNode }) {
+	return <PreviewByteSourceContext value={source}>{children}</PreviewByteSourceContext>
+}
+
+export function usePreviewByteSource(): PreviewByteSource | null {
+	return useContext(PreviewByteSourceContext)
 }

@@ -41,11 +41,7 @@ export function ArchiveExtractMenu({
 	disabledTitle,
 	onPick
 }: ArchiveExtractMenuProps) {
-	const { t } = useTranslation(["preview", "archive", "drive"])
-	const isOnline = useIsOnline()
 	const [picking, setPicking] = useState(false)
-	// Shared with the user, linked, a chat's or in the trash: it has no directory of the user's own.
-	const beside = source.ownParent !== undefined
 
 	return (
 		<>
@@ -69,70 +65,110 @@ export function ArchiveExtractMenu({
 					align="end"
 					className="w-auto max-w-80"
 				>
-					{beside && newFolderName !== null ? (
-						<DropdownMenuItem
-							onClick={() => {
-								onPick({ type: "besideNewFolder" })
-							}}
-						>
-							<FolderPlusIcon aria-hidden="true" />
-							<span className="min-w-0 flex-1 truncate">
-								{t("previewArchiveExtractBesideNewFolder", { name: newFolderName })}
-							</span>
-						</DropdownMenuItem>
-					) : null}
-					{beside ? (
-						<DropdownMenuItem
-							onClick={() => {
-								onPick({ type: "beside" })
-							}}
-						>
-							<PackageOpenIcon aria-hidden="true" />
-							{t("previewArchiveExtractBeside")}
-						</DropdownMenuItem>
-					) : null}
-					<DirectoryTreeSubmenu
-						family={DROPDOWN_TREE_MENU_FAMILY}
-						label={t("archive:archiveExtractTo")}
-						icon={ACTION_DEFS.extract.icon}
-						actionLabel={t("archive:archiveExtractHere")}
-						actionIcon={ACTION_DEFS.extract.icon}
-						isBrowseDisabled={() => !isOnline}
-						isTargetDisabled={() => !isOnline}
-						onSelect={target => {
-							onPick({
-								type: "directory",
-								destination: {
-									uuid: target.uuid,
-									name: target.uuid === null ? t("drive:driveMyDrive") : (cachedDirectoryName(target.uuid) ?? "")
-								}
-							})
-						}}
-					/>
-					<DropdownMenuItem
-						onClick={() => {
+					<ArchiveExtractItems
+						source={source}
+						newFolderName={newFolderName}
+						onPick={onPick}
+						onChooseDestination={() => {
 							setPicking(true)
 						}}
-					>
-						<FolderSearchIcon aria-hidden="true" />
-						{t("archive:archiveExtractChooseDestination")}
-					</DropdownMenuItem>
+					/>
 				</DropdownMenuContent>
 			</DropdownMenu>
 			{picking ? (
-				<MoveTargetDialog
-					mode="pick"
-					// An archive's contents may land anywhere.
-					items={[]}
-					pickLabels={{ title: t("archive:archiveExtractPickTitle"), confirm: t("archive:archiveExtractPickConfirm") }}
-					onPick={destination => {
-						onPick({ type: "directory", destination })
-					}}
+				<ArchiveExtractPicker
+					onPick={onPick}
 					onClose={() => {
 						setPicking(false)
 					}}
 				/>
 			) : null}
 		</>
+	)
+}
+
+export interface ArchiveExtractItemsProps {
+	source: ArchiveSource
+	newFolderName: string | null
+	onPick: (target: ExtractTarget) => void
+	// The destination picker is the host's: a row's menu may unmount with its row while it is open.
+	onChooseDestination: () => void
+}
+
+// The places an extract goes, as the entries of a menu (the footer's, or a row's Extract submenu).
+export function ArchiveExtractItems({ source, newFolderName, onPick, onChooseDestination }: ArchiveExtractItemsProps) {
+	const { t } = useTranslation(["preview", "archive", "drive"])
+	const isOnline = useIsOnline()
+	// Shared with the user, linked, a chat's or in the trash: it has no directory of the user's own.
+	const beside = source.ownParent !== undefined
+
+	return (
+		<>
+			{beside && newFolderName !== null ? (
+				<DropdownMenuItem
+					onClick={() => {
+						onPick({ type: "besideNewFolder" })
+					}}
+				>
+					<FolderPlusIcon aria-hidden="true" />
+					<span className="min-w-0 flex-1 truncate">{t("previewArchiveExtractBesideNewFolder", { name: newFolderName })}</span>
+				</DropdownMenuItem>
+			) : null}
+			{beside ? (
+				<DropdownMenuItem
+					onClick={() => {
+						onPick({ type: "beside" })
+					}}
+				>
+					<PackageOpenIcon aria-hidden="true" />
+					{t("previewArchiveExtractBeside")}
+				</DropdownMenuItem>
+			) : null}
+			<DirectoryTreeSubmenu
+				family={DROPDOWN_TREE_MENU_FAMILY}
+				label={t("archive:archiveExtractTo")}
+				icon={ACTION_DEFS.extract.icon}
+				actionLabel={t("archive:archiveExtractHere")}
+				actionIcon={ACTION_DEFS.extract.icon}
+				isBrowseDisabled={() => !isOnline}
+				isTargetDisabled={() => !isOnline}
+				onSelect={target => {
+					onPick({
+						type: "directory",
+						destination: {
+							uuid: target.uuid,
+							name: target.uuid === null ? t("drive:driveMyDrive") : (cachedDirectoryName(target.uuid) ?? "")
+						}
+					})
+				}}
+			/>
+			<DropdownMenuItem onClick={onChooseDestination}>
+				<FolderSearchIcon aria-hidden="true" />
+				{t("archive:archiveExtractChooseDestination")}
+			</DropdownMenuItem>
+		</>
+	)
+}
+
+export interface ArchiveExtractPickerProps {
+	onPick: (target: ExtractTarget) => void
+	onClose: () => void
+}
+
+// "Choose destination…": the drive's directory picker, any directory of the Cloud Drive.
+export function ArchiveExtractPicker({ onPick, onClose }: ArchiveExtractPickerProps) {
+	const { t } = useTranslation("archive")
+
+	return (
+		<MoveTargetDialog
+			mode="pick"
+			// An archive's contents may land anywhere.
+			items={[]}
+			pickLabels={{ title: t("archiveExtractPickTitle"), confirm: t("archiveExtractPickConfirm") }}
+			onPick={destination => {
+				onPick({ type: "directory", destination })
+			}}
+			onClose={onClose}
+		/>
 	)
 }

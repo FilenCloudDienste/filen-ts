@@ -96,7 +96,8 @@ describe("searchEntries", () => {
 			parent: new Uint32Array(total),
 			parents: [""],
 			links: [],
-			stored: []
+			stored: [],
+			solid: null
 		})
 
 		// Counts the reads rather than timing them, which a loaded machine would fail.

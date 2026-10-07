@@ -7,6 +7,10 @@ import type {
 	CompressFormat,
 	CompressItemsParams,
 	CompressReport,
+	DownloadArchiveEntryParams,
+	EntryDownloadPhase,
+	EntryDownloadReport,
+	EntryDownloadUpdate,
 	ExtractArchiveEntriesParams,
 	ExtractArchiveParams,
 	ExtractReport,
@@ -17,7 +21,7 @@ import type {
 	ListUpdate,
 	StringifiedClient
 } from "@filen/sdk-rs"
-import type { CompressJobEvent, ExtractJobEvent, ListJobEvent, SdkWorkerApi } from "@/workers/sdk.worker"
+import type { CompressJobEvent, EntryJobParams, EntryProgress, ExtractJobEvent, ListJobEvent, SdkWorkerApi } from "@/workers/sdk.worker"
 import { getCachedDir } from "@/features/drive/lib/cache"
 import { liveSdkError, sdkErrorDTO } from "@/tests/support/sdkError"
 import { testUuid } from "@/tests/support/uuid"
@@ -45,6 +49,7 @@ const { exposed, fakeClient, helpers } = vi.hoisted(() => ({
 		extractArchive: vi.fn<(params: ExtractArchiveParams & Signals, password?: Password) => Promise<ExtractReport>>(),
 		extractArchiveEntries: vi.fn<(params: ExtractArchiveEntriesParams & Signals, password?: Password) => Promise<ExtractReport>>(),
 		listArchive: vi.fn<(params: ListArchiveParams & Signals, password?: Password) => Promise<ListReport>>(),
+		downloadArchiveEntry: vi.fn<(params: DownloadArchiveEntryParams & Signals, password?: Password) => Promise<EntryDownloadReport>>(),
 		archiveCodecMemBudget: vi.fn(() => 128n * 1024n * 1024n),
 		free: vi.fn()
 	},
@@ -578,5 +583,209 @@ describe("sdk worker archives", () => {
 	it("tells why the SDK refuses each name, and rethrows anything but a name error", async () => {
 		await expect(api.itemNameErrors(["photos.zip", "a:b"])).resolves.toEqual([null, "ForbiddenChar"])
 		await expect(api.itemNameErrors(["boom"])).rejects.toThrow("wasm gone")
+	})
+})
+
+describe("sdk worker archive entries", () => {
+	const PARAMS: EntryJobParams = { archive: ARCHIVE, entry: { archive: testUuid("archive"), index: 3 }, maxSolidSkip: 4096 }
+	const DONE: EntryDownloadReport = { bytesWritten: 0n, bytesRead: 0n, checked: true, error: undefined }
+
+	function entryUpdate(phase: EntryDownloadPhase, bytesWritten = 0n): EntryDownloadUpdate {
+		return {
+			phase,
+			runState: "running",
+			bytesRead: 0n,
+			archiveBytes: 10n,
+			bytesWritten,
+			entryBytes: undefined,
+			bytesPerSecond: undefined,
+			etaMs: undefined,
+			activeTimeMs: 0n
+		}
+	}
+
+	// The SDK as the bridge sees it: updates, then the entry's chunks into the writer, a failed write
+	// ending it with an IO error as the SDK reports one.
+	function writing(chunks: number[][], phases: EntryDownloadPhase[] = ["waitingForWorker", "reading", "reading", "done"]): void {
+		fakeClient.downloadArchiveEntry.mockImplementation(async params => {
+			for (const phase of phases) {
+				params.onUpdate?.(entryUpdate(phase, 1n))
+			}
+
+			const writer = params.writer.getWriter()
+
+			try {
+				for (const chunk of chunks) {
+					await writer.write(new Uint8Array(chunk))
+				}
+
+				await writer.close()
+			} catch {
+				return { ...DONE, error: liveSdkError("IO", "write failed") }
+			}
+
+			return DONE
+		})
+	}
+
+	function sink(): { writer: WritableStream<Uint8Array>; received: number[] } {
+		const received: number[] = []
+
+		return {
+			writer: new WritableStream<Uint8Array>({
+				write(chunk) {
+					received.push(...chunk)
+				}
+			}),
+			received
+		}
+	}
+
+	it("passes exactly the accepted skip and an empty password as none, forwarding progress", async () => {
+		writing([[1, 2], [3]])
+
+		const { writer, received } = sink()
+		const onUpdate = vi.fn<(progress: EntryProgress) => void>()
+
+		await api.downloadArchiveEntry("entry-1", PARAMS, "", writer, onUpdate)
+
+		const [params, password] = lastCall(fakeClient.downloadArchiveEntry)
+
+		expect(params).toMatchObject({ archive: ARCHIVE, entry: PARAMS.entry, maxSolidSkip: 4096 })
+		expect(params.managedFuture.abortSignal).toBeInstanceOf(AbortSignal)
+		expect(password).toBeUndefined()
+		expect(received).toEqual([1, 2, 3])
+		expect(onUpdate).toHaveBeenNthCalledWith(1, { phase: "waitingForWorker", bytesWritten: 1 })
+		expect(onUpdate).toHaveBeenCalledTimes(4)
+
+		await api.downloadArchiveEntry("entry-2", { ...PARAMS, maxSolidSkip: 0 }, "pw", sink().writer, () => undefined)
+
+		expect(lastCall(fakeClient.downloadArchiveEntry)[0].maxSolidSkip).toBe(0)
+		expect(lastCall(fakeClient.downloadArchiveEntry)[1]).toBe("pw")
+	})
+
+	it("rejects with the report's error, freed, its kind intact", async () => {
+		const wrong = liveSdkError("ArchiveWrongPassword", "Error of kind ArchiveWrongPassword")
+
+		fakeClient.downloadArchiveEntry.mockResolvedValue({ ...DONE, checked: false, error: wrong })
+
+		await expect(api.downloadArchiveEntry("entry-3", PARAMS, "nope", sink().writer, () => undefined)).rejects.toEqual(
+			sdkErrorDTO("ArchiveWrongPassword", "Error of kind ArchiveWrongPassword")
+		)
+		expect(wrong.freed).toHaveBeenCalledTimes(1)
+	})
+
+	it("takes an unverified entry (a 7z without CRCs) as complete, saying it was not checked", async () => {
+		fakeClient.downloadArchiveEntry.mockResolvedValue({ ...DONE, checked: false })
+
+		await expect(api.downloadArchiveEntry("entry-4", PARAMS, "pw", sink().writer, () => undefined)).resolves.toBe(false)
+
+		fakeClient.downloadArchiveEntry.mockResolvedValue(DONE)
+
+		await expect(api.downloadArchiveEntry("entry-4b", PARAMS, "pw", sink().writer, () => undefined)).resolves.toBe(true)
+
+		fakeClient.downloadArchiveEntry.mockImplementationOnce(async params => {
+			const writer = params.writer.getWriter()
+
+			await writer.write(new Uint8Array([1]))
+			await writer.close()
+
+			return { ...DONE, checked: false }
+		})
+
+		await expect(api.downloadArchiveEntryBytes(PARAMS, 1, "pw", "token-0", () => undefined)).resolves.toEqual({
+			bytes: new Uint8Array([1]),
+			checked: false
+		})
+	})
+
+	it("cancels and pauses an entry download by its transfer id, freeing its pause after", async () => {
+		const running = Promise.withResolvers<EntryDownloadReport>()
+
+		fakeClient.downloadArchiveEntry.mockClear()
+		fakeClient.downloadArchiveEntry.mockReturnValue(running.promise)
+
+		const download = api.downloadArchiveEntry("entry-5", PARAMS, undefined, sink().writer, () => undefined)
+
+		await vi.waitFor(() => {
+			expect(fakeClient.downloadArchiveEntry).toHaveBeenCalled()
+		})
+
+		const { managedFuture } = lastCall(fakeClient.downloadArchiveEntry)[0]
+
+		await api.pauseTransfer("entry-5")
+		expect(managedFuture.pauseSignal.isPaused()).toBe(true)
+
+		await api.cancelTransfer("entry-5")
+		expect(managedFuture.abortSignal.aborted).toBe(true)
+
+		running.resolve({ ...DONE, error: liveSdkError("Cancelled", "Error of kind Cancelled") })
+
+		await expect(download).rejects.toMatchObject({ kind: "Cancelled" })
+		expect(managedFuture.pauseSignal.freed).toBe(1)
+	})
+
+	it("loads an entry's bytes into a buffer of its listed size, telling each phase once", async () => {
+		writing([
+			[1, 2],
+			[3, 4]
+		])
+
+		const onPhase = vi.fn<(phase: EntryDownloadPhase) => void>()
+		const { bytes, checked } = await api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-1", onPhase)
+
+		expect([...bytes]).toEqual([1, 2, 3, 4])
+		expect(bytes.buffer.byteLength).toBe(4)
+		expect(checked).toBe(true)
+		expect(onPhase.mock.calls.map(([phase]) => phase)).toEqual(["waitingForWorker", "reading", "done"])
+		expect(lastCall(fakeClient.downloadArchiveEntry)[0].maxSolidSkip).toBe(4096)
+	})
+
+	it("returns what arrived of an entry shorter than listed", async () => {
+		writing([[9]])
+
+		await expect(api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-2", () => undefined)).resolves.toEqual({
+			bytes: new Uint8Array([9]),
+			checked: true
+		})
+
+		writing([])
+
+		await expect(api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-2b", () => undefined)).resolves.toEqual({
+			bytes: new Uint8Array(0),
+			checked: true
+		})
+	})
+
+	it("fails an entry larger than listed rather than grow the buffer", async () => {
+		writing([
+			[1, 2],
+			[3, 4, 5]
+		])
+
+		await expect(api.downloadArchiveEntryBytes(PARAMS, 4, undefined, "token-3", () => undefined)).rejects.toMatchObject({ kind: "IO" })
+	})
+
+	it("aborts a preview's load by its token", async () => {
+		const running = Promise.withResolvers<EntryDownloadReport>()
+
+		fakeClient.downloadArchiveEntry.mockClear()
+		fakeClient.downloadArchiveEntry.mockReturnValue(running.promise)
+
+		const load = api.downloadArchiveEntryBytes(PARAMS, 4, "pw", "token-4", () => undefined)
+
+		await vi.waitFor(() => {
+			expect(fakeClient.downloadArchiveEntry).toHaveBeenCalled()
+		})
+
+		const [params, password] = lastCall(fakeClient.downloadArchiveEntry)
+
+		expect(password).toBe("pw")
+
+		await api.cancelPreviewDownload("token-4")
+		expect(params.managedFuture.abortSignal.aborted).toBe(true)
+
+		running.resolve({ ...DONE, error: liveSdkError("Cancelled", "Error of kind Cancelled") })
+		await expect(load).rejects.toMatchObject({ kind: "Cancelled" })
 	})
 })

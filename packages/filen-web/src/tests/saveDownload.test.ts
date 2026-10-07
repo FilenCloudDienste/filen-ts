@@ -7,6 +7,7 @@ import {
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
+	SW_MSG_REGISTER_STREAM_DOWNLOAD,
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
 	SW_MSG_WATCH_DOWNLOAD,
 	SW_MSG_CANCEL_DOWNLOAD,
@@ -755,5 +756,93 @@ describe("triggerSwZipDownload", () => {
 
 		await expect(triggerSwZipDownload([testFile()], save, "transfer-2", () => undefined)).rejects.toThrow("no room")
 		expect(location.href).toBe("")
+	})
+})
+
+describe("a download the page streams through the service worker", () => {
+	const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "entry.txt" }
+
+	it("needs no session handed over for its target", async () => {
+		vi.stubGlobal("window", { location: { href: "" } })
+		stubServiceWorkerReady(fakeServiceWorker(() => ({ ok: true })))
+
+		const { saveStreamDownload } = await freshModule()
+		const target = await saveStreamDownload("entry.txt")
+
+		expect(target).toMatchObject({ kind: "sw", name: "entry.txt" })
+		expect(toStringified).not.toHaveBeenCalled()
+	})
+
+	it("moves the stream to the worker with its size, then navigates", async () => {
+		const sw = fakeServiceWorker(() => ({ ok: true }))
+		const location = stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwStreamDownload } = await freshModule()
+		const stream = new ReadableStream<Uint8Array>()
+
+		await triggerSwStreamDownload(save, "transfer-1", stream, 2_048, () => undefined)
+
+		expect(sw.calls).toEqual([
+			{ type: SW_MSG_REGISTER_STREAM_DOWNLOAD, payload: { id: "abc-123", name: "entry.txt", size: 2_048, stream } }
+		])
+		expect(sw.postMessage.mock.calls[0]?.[1]).toContain(stream)
+		expect(toStringified).not.toHaveBeenCalled()
+		expect(location.href).toBe(`${SW_DOWNLOAD_PREFIX}abc-123`)
+	})
+
+	it("stops the producer too when the row cancels it", async () => {
+		let report: (status: SwDownloadStatus) => void = () => undefined
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			send => {
+				report = send
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+
+		const { triggerSwStreamDownload, cancelSwDownload } = await freshModule()
+		const onCancel = vi.fn()
+		const running = triggerSwStreamDownload(save, "transfer-1", new ReadableStream<Uint8Array>(), 1, onCancel)
+
+		await vi.waitFor(() => {
+			expect(sw.watches).toEqual(["abc-123"])
+		})
+		expect(cancelSwDownload("transfer-1")).toBe(true)
+		expect(sw.cancels).toEqual(["abc-123"])
+		expect(onCancel).toHaveBeenCalledOnce()
+
+		report({ type: "failed", error: plainErrorDTO("download cancelled", "Cancelled") })
+		await expect(running).rejects.toMatchObject({ dto: { kind: "Cancelled" } })
+	})
+
+	it("refuses an uncontrolled page before anything is registered", async () => {
+		vi.stubGlobal("navigator", { serviceWorker: { controller: null, ready: Promise.resolve({ active: null }) } })
+
+		const { assertSwControlled } = await freshModule()
+
+		expect(() => {
+			assertSwControlled()
+		}).toThrow("downloads need the page reloaded")
+	})
+
+	it("tells whether streams can be transferred, probing once", async () => {
+		const { canTransferStreams } = await freshModule()
+
+		expect(canTransferStreams()).toBe(true)
+
+		const refusing = vi.fn(() => {
+			throw new DOMException("not transferable", "DataCloneError")
+		})
+
+		vi.stubGlobal("structuredClone", refusing)
+
+		expect(canTransferStreams()).toBe(true)
+
+		const fresh = await freshModule()
+
+		expect(fresh.canTransferStreams()).toBe(false)
+		expect(refusing).toHaveBeenCalledOnce()
 	})
 })

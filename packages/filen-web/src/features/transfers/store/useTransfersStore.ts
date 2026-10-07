@@ -52,6 +52,8 @@ export interface Transfer {
 	// The browser's download manager streams this one (the service-worker path): it can be cancelled,
 	// never paused.
 	browserManaged?: true
+	// Waits for the page's one archive slot (an archive entry's download); a drive job's row reads its job.
+	waitingForSlot?: true
 	// The drive upload run this belongs to, which the target directory's listing shows while it runs.
 	batch?: UploadBatchRef
 }
@@ -212,6 +214,7 @@ export interface TransfersStore {
 	setPaused: (id: string, paused: boolean) => void
 	// setPaused for many rows in one update, so pause-all notifies subscribers once.
 	setPausedMany: (ids: ReadonlySet<string>, paused: boolean) => void
+	setWaitingForSlot: (id: string, waiting: boolean) => void
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
 	// `name` renames the row too, for a job whose item came out under another name than it asked for.
 	setItem: (id: string, item: DriveItem, name?: string) => void
@@ -360,6 +363,31 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 		set(state => ({
 			transfers: state.transfers.map(transfer => (ids.has(transfer.id) ? { ...transfer, paused } : transfer))
 		}))
+	},
+	setWaitingForSlot: (id, waiting) => {
+		set(state => {
+			const target = state.transfers.find(transfer => transfer.id === id)
+
+			if (target === undefined || (target.waitingForSlot === true) === waiting) {
+				return state
+			}
+
+			return {
+				transfers: state.transfers.map(transfer => {
+					if (transfer !== target) {
+						return transfer
+					}
+
+					const next: Transfer = { ...transfer, waitingForSlot: true }
+
+					if (!waiting) {
+						delete next.waitingForSlot
+					}
+
+					return next
+				})
+			}
+		})
 	},
 	setProgress: (id, bytesTransferred) => {
 		set(state => {

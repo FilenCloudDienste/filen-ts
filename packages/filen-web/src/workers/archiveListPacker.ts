@@ -1,5 +1,6 @@
 import type { ArchiveEntry } from "@filen/sdk-rs"
 import {
+	accessBits,
 	ENTRY_FLAG,
 	ENTRY_KIND,
 	skipCode,
@@ -16,7 +17,8 @@ export interface ListBatcher {
 }
 
 // Packs a listing's entries into PackedEntryBatches of up to `flushAt`. The builder columns are
-// allocated once; a flush posts trimmed copies, so the builder is reused and only the copies clone.
+// allocated once; a flush posts trimmed copies, so the builder is reused and only the copies clone. The
+// solid costs are allocated on the first solid 7z entry only, and posted only by a batch holding one.
 export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, flushAt = 4096): ListBatcher {
 	const index = new Uint32Array(flushAt)
 	const kind = new Uint8Array(flushAt)
@@ -26,6 +28,9 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 	const modified = new Float64Array(flushAt)
 	const parent = new Uint32Array(flushAt)
 	const parentOf = new Map<string, number>()
+	let solidSkipped: Float64Array | null = null
+	let solidEstimated: Float64Array | null = null
+	let solidInBatch = false
 	let archive = ""
 	let count = 0
 	let name: string[] = []
@@ -46,6 +51,13 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 		return found
 	}
 
+	function setSolid(i: number, skipped: number, estimated: number): void {
+		if (solidSkipped !== null && solidEstimated !== null) {
+			solidSkipped[i] = skipped
+			solidEstimated[i] = estimated
+		}
+	}
+
 	function add(entry: ArchiveEntry): void {
 		const i = count
 		let path = entry.path?.path ?? ""
@@ -64,6 +76,8 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 		if (entry.storedPathTruncated) {
 			bits |= ENTRY_FLAG.storedTruncated
 		}
+
+		bits |= accessBits(entry.access)
 
 		if (entry.path === undefined || path === "") {
 			bits |= ENTRY_FLAG.pathless
@@ -93,6 +107,21 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 		flags[i] = bits
 		size[i] = entry.size === undefined ? -1 : Number(entry.size)
 		modified[i] = entry.modified === undefined ? NaN : Number(entry.modified)
+
+		if (entry.access?.type === "solidBlock") {
+			if (!solidInBatch) {
+				solidSkipped ??= new Float64Array(flushAt)
+				solidEstimated ??= new Float64Array(flushAt)
+				// Positions before this one hold an earlier batch's values.
+				solidSkipped.fill(0, 0, i)
+				solidEstimated.fill(0, 0, i)
+				solidInBatch = true
+			}
+
+			setSolid(i, Number(entry.access.skippedBytes), Number(entry.access.estimatedPackedBytes))
+		} else if (solidInBatch) {
+			setSolid(i, 0, 0)
+		}
 
 		if (entry.kind.type === "symlink") {
 			links.push({ i, target: entry.kind.target, targetIndex: -1 })
@@ -125,10 +154,15 @@ export function createListBatcher(deliver: (batch: PackedEntryBatch) => void, fl
 			parent: parent.slice(0, count),
 			parents,
 			links,
-			stored
+			stored,
+			solid:
+				solidInBatch && solidSkipped !== null && solidEstimated !== null
+					? { skipped: solidSkipped.slice(0, count), estimated: solidEstimated.slice(0, count) }
+					: null
 		}
 
 		count = 0
+		solidInBatch = false
 		name = []
 		parents = []
 		links = []

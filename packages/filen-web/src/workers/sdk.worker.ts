@@ -19,6 +19,9 @@ import init, {
 	type ArchiveEntryId,
 	type ArchiveFormat,
 	type ArchiveLevels,
+	type DownloadArchiveEntryParams,
+	type EntryDownloadPhase,
+	type EntryDownloadReport,
 	type CompressFormat,
 	type EntryNameErrorKindJS,
 	type CopyEntry,
@@ -84,12 +87,13 @@ import init, {
 	type JsClientConfig
 } from "@filen/sdk-rs"
 import { InFlight, isUuid, run, runEffect, runTimeout } from "@filen/shared"
-import { toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
+import { asErrorDTO, ErrorWithDTO, toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
 import {
 	compressReportToDTO,
 	copyReportToDTO,
 	copyUpdateToDTO,
 	extractReportToDTO,
+	liftError,
 	listReportToDTO,
 	type CompressReportDTO,
 	type CopyReportDTO,
@@ -320,6 +324,76 @@ export interface ListJobParams {
 }
 
 export type ListJobEvent = { type: "update"; update: ListUpdate } | { type: "entries"; batch: PackedEntryBatch }
+
+// One file of a zip or 7z, from its listing.
+export interface EntryJobParams {
+	archive: AnyFile
+	entry: ArchiveEntryId
+	// The listed skippedBytes of a solid 7z entry the user accepted, 0 for any other: never null, which
+	// would let the SDK decode any amount.
+	maxSolidSkip: number
+}
+
+export interface EntryProgress {
+	phase: EntryDownloadPhase
+	bytesWritten: number
+}
+
+function entryDownloadParams(
+	params: EntryJobParams,
+	writer: WritableStream<Uint8Array>,
+	onUpdate: (progress: EntryProgress) => void
+): Omit<DownloadArchiveEntryParams, "managedFuture"> {
+	return {
+		archive: params.archive,
+		entry: params.entry,
+		writer,
+		maxSolidSkip: params.maxSolidSkip,
+		onUpdate: update => {
+			onUpdate({ phase: update.phase, bytesWritten: Number(update.bytesWritten) })
+		}
+	}
+}
+
+// A writer filling one buffer of the entry's listed size, made by the first byte (a load waiting for the
+// archive slot holds none); a larger entry fails rather than grow it. `take` is what arrived.
+function entryBuffer(size: number): { writer: WritableStream<Uint8Array>; take: () => Uint8Array } {
+	let out: Uint8Array | null = null
+	let offset = 0
+
+	return {
+		writer: new WritableStream<Uint8Array>({
+			write(chunk) {
+				out ??= new Uint8Array(size)
+
+				if (offset + chunk.length > out.length) {
+					throw new Error("archive entry overran its listed size")
+				}
+
+				out.set(chunk, offset)
+				offset += chunk.length
+			}
+		}),
+		take: () => (out === null ? new Uint8Array(0) : offset === out.length ? out : out.subarray(0, offset))
+	}
+}
+
+// The SDK resolves with its report however the download ended, the writer aborted on an early end: a
+// failed one rejects here, so neither a picked file nor a buffer is taken for the whole entry. An entry
+// without a CRC passes, answering `checked` false: whatever password it took is proven by nothing.
+function settleEntryReport(report: EntryDownloadReport): boolean {
+	if (report.error !== undefined) {
+		throw new ErrorWithDTO(liftError(report.error))
+	}
+
+	return report.checked
+}
+
+export interface EntryBytes {
+	bytes: Uint8Array
+	// Its checksum matched (see settleEntryReport).
+	checked: boolean
+}
 
 export interface ArchiveFormatInfo {
 	extension: string
@@ -1171,6 +1245,24 @@ const api = {
 			}
 		})
 	},
+	// One file of a zip or 7z into the transferred sink, a transfer of its own like downloadFileToWriter
+	// (cancel and pause by its id). It takes the page's archive slot; each call reads the archive's first
+	// chunk and index again. Resolves with whether its checksum matched.
+	downloadArchiveEntry(
+		transferId: string,
+		params: EntryJobParams,
+		password: string | undefined,
+		writer: WritableStream<Uint8Array>,
+		onUpdate: (progress: EntryProgress) => void
+	): Promise<boolean> {
+		const c = requireClient()
+
+		return withTransferControls(transferId, async managedFuture =>
+			settleEntryReport(
+				await c.downloadArchiveEntry({ ...entryDownloadParams(params, writer, onUpdate), managedFuture }, archivePassword(password))
+			)
+		)
+	},
 	// ── Transfer control ─────────────────────────────────────────────────────
 	// By upload/download transfer id or drive job id; each is a no-op once that transfer has settled or
 	// the job is released. Pause stops bytes/progress without erroring the call.
@@ -1495,6 +1587,44 @@ const api = {
 		}
 
 		previewAborts.get(previewToken)?.abort()
+	},
+	// An archive entry's whole buffer for the preview (entryBuffer), transferred back like downloadFileBytes.
+	// Cancelled by its token; only a change of phase crosses, for the waiting state.
+	async downloadArchiveEntryBytes(
+		params: EntryJobParams,
+		size: number,
+		password: string | undefined,
+		previewToken: string,
+		onPhase: (phase: EntryDownloadPhase) => void
+	): Promise<EntryBytes> {
+		const c = requireClient()
+		const controller = new AbortController()
+		const { writer, take } = entryBuffer(size)
+		let phase: EntryDownloadPhase | null = null
+
+		previewAborts.set(previewToken, controller)
+		try {
+			const checked = settleEntryReport(
+				await c.downloadArchiveEntry(
+					{
+						...entryDownloadParams(params, writer, update => {
+							if (update.phase !== phase) {
+								phase = update.phase
+								onPhase(update.phase)
+							}
+						}),
+						managedFuture: { abortSignal: controller.signal }
+					},
+					archivePassword(password)
+				)
+			)
+
+			const bytes = take()
+
+			return Comlink.transfer({ bytes, checked }, [bytes.buffer])
+		} finally {
+			previewAborts.delete(previewToken)
+		}
 	},
 	// A camera RAW's preview: the JPEG embedded in the container, extracted by the SDK from the ranges
 	// it needs (never a whole-file download into JS, never a RAW decode). Cancelled by the same token.
@@ -2171,7 +2301,8 @@ const api = {
 }
 export type SdkWorkerApi = typeof api
 
-// DTO-at-the-boundary: FilenSdkError clones hollow; Comlink re-throws plain thrown objects intact.
+// DTO-at-the-boundary: FilenSdkError clones hollow; Comlink re-throws plain thrown objects intact. An
+// ErrorWithDTO (a report's error) crosses as its own DTO.
 Comlink.expose(
 	new Proxy(api, {
 		get(t, p, r) {
@@ -2186,7 +2317,7 @@ Comlink.expose(
 					// The method, so a failure the caller swallows still says which call it was.
 					log.error("sdk.worker", String(p), e)
 					// eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberate: Comlink structured-clones a plain thrown object intact; an Error subclass would lose the DTO's custom fields to Comlink's lossy Error serializer.
-					throw toErrorDTO(e)
+					throw asErrorDTO(e)
 				}
 			}
 		}

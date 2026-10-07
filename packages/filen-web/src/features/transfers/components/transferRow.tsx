@@ -220,7 +220,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 		details = [t("transfersStatusMovingToTrash")]
 	} else if (active && transfer.paused) {
 		details = [t("transfersStatusPaused"), formatBytesFixed(transfer.bytesTransferred)]
-	} else if (active && waiting) {
+	} else if (active && (waiting || transfer.waitingForSlot === true)) {
 		details = [t("transfersStatusWaitingForSlot")]
 	} else if (active) {
 		details = [

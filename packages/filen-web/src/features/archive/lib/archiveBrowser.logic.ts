@@ -20,6 +20,8 @@ import { childRows, dirOfRef, dirRef, isDirRef, type ChildSort, type RowRef, typ
 // snapshot (a new object per notification) is what tells the React Compiler their answer changed.
 
 export const ARCHIVE_ROW_HEIGHT = 36
+// The rows' ⋯ column, kept by rows without a menu and the header, so the columns line up.
+export const ARCHIVE_MENU_COLUMN_CLASS = "size-6 shrink-0 pointer-coarse:size-8"
 export const ARCHIVE_LIST_OVERSCAN = 10
 // A quick name lookup or zip index read shows no spinner at all.
 export const ARCHIVE_SPINNER_DELAY_MS = 300

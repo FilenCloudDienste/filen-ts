@@ -3,6 +3,7 @@ import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { getPreviewBytes, loadPreviewBytes } from "@/features/preview/lib/previewCache"
+import { usePreviewByteSource } from "@/features/preview/lib/accessMode"
 import { type PreviewLoad, usePreviewFetch } from "@/features/preview/hooks/usePreviewFetch"
 
 export type UsePreviewBytesResult =
@@ -15,13 +16,15 @@ export type UsePreviewBytesResult =
 // so a failed or cancelled one is fetched again next time. A load of the same file already in flight
 // is joined rather than repeated; this hook's token only ever cancels a fetch it started itself.
 export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
+	const source = usePreviewByteSource()
 	const load = usePreviewFetch(item, {
 		seed: getPreviewBytes,
 		// ★ The single byte-source seam: an "anon" ambient mode (the public-link routes) routes the whole
 		// buffer through the UNAUTHENTICATED linked-file worker method instead of the authed one, so a
 		// logged-out visitor never reaches requireClient. The authed app leaves this at "authed" and its
 		// path is byte-for-byte unchanged. Both methods share the same previewAborts token registry, so the
-		// cancel-on-unmount reaches an anon read with no change of its own.
+		// cancel-on-unmount reaches an anon read with no change of its own. A byte source (an archive's
+		// entry) replaces both, under the same token.
 		run: async ({ token, signal, accessMode, cacheScope, uuid }) => {
 			const file = narrowToAnyFile(item)
 
@@ -30,7 +33,13 @@ export function usePreviewBytes(item: DriveItem): UsePreviewBytesResult {
 				uuid,
 				Number(file.size),
 				() =>
-					runOp(accessMode === "anon" ? sdkApi.downloadLinkedFileBytesAnon(file, token) : sdkApi.downloadFileBytes(file, token)),
+					runOp(
+						source !== null
+							? source(token)
+							: accessMode === "anon"
+								? sdkApi.downloadLinkedFileBytesAnon(file, token)
+								: sdkApi.downloadFileBytes(file, token)
+					),
 				{
 					signal
 				}

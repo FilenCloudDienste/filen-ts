@@ -7,7 +7,7 @@ import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { streamFailureAction } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
-import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewByteSource } from "@/features/preview/lib/accessMode"
 import { useObjectUrl } from "@/lib/useObjectUrl"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
@@ -127,9 +127,11 @@ function BufferedPreview({ item, render }: { item: DriveItem; render: RenderPrev
 export function StreamablePreview({ item, render }: { item: DriveItem; render: RenderPreviewUrl }) {
 	const contentType = allowedMediaContentType(item)
 	// An "anon" ambient mode (a public link) can never stream: the service worker's wasm bundle has no
-	// UnauthClient, so the buffered path is the only one that serves a logged-out visitor.
+	// UnauthClient, so the buffered path is the only one that serves a logged-out visitor. Nor can bytes of
+	// a byte source (an archive's entry), which is no file the worker could read.
 	const accessMode = usePreviewAccessMode()
-	const streamable = contentType !== null && isMediaStreamAvailable() && accessMode === "authed"
+	const byteSource = usePreviewByteSource()
+	const streamable = contentType !== null && isMediaStreamAvailable() && accessMode === "authed" && byteSource === null
 	const [useBuffered, setUseBuffered] = useState(!streamable)
 
 	if (!useBuffered && contentType !== null) {

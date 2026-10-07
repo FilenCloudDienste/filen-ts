@@ -14,6 +14,7 @@ import {
 	SW_MSG_KEEPALIVE,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
+	SW_MSG_REGISTER_STREAM_DOWNLOAD,
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
 	SW_MSG_WATCH_DOWNLOAD,
 	SW_REQUEST_TIMEOUT_MS,
@@ -115,8 +116,13 @@ export async function pipeToPickedFile(
 // channel's port2 transferred, resolve/reject on its single ack (`{ok: true}` / `{ok: false, error}`)
 // — the exact reply shape sw.ts's own message listener posts back for SW_MSG_INIT_CLIENT and
 // SW_MSG_REGISTER_DOWNLOAD. The port is closed on every outcome, timeout included, so a wedged worker
-// can't stall a download behind an unresolvable promise.
-export function sendToSw(target: ServiceWorker, type: string, payload: Record<string, unknown>): Promise<void> {
+// can't stall a download behind an unresolvable promise. `transfer` moves anything else the payload holds.
+export function sendToSw(
+	target: ServiceWorker,
+	type: string,
+	payload: Record<string, unknown>,
+	transfer: readonly Transferable[] = []
+): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const channel = new MessageChannel()
 		const timeout = setTimeout(() => {
@@ -139,7 +145,7 @@ export function sendToSw(target: ServiceWorker, type: string, payload: Record<st
 			}
 		}
 
-		target.postMessage({ type, ...payload }, [channel.port2])
+		target.postMessage({ type, ...payload }, [channel.port2, ...transfer])
 	})
 }
 
@@ -233,12 +239,16 @@ export async function wipeSwClient(): Promise<void> {
 	])
 }
 
-async function prepareSwTarget(suggestedName: string): Promise<SwSaveTarget> {
-	await ensureSwClientReady()
-
+function swTarget(suggestedName: string): SwSaveTarget {
 	const id = crypto.randomUUID()
 
 	return { kind: "sw", id, url: `${SW_DOWNLOAD_PREFIX}${id}`, name: suggestedName }
+}
+
+async function prepareSwTarget(suggestedName: string): Promise<SwSaveTarget> {
+	await ensureSwClientReady()
+
+	return swTarget(suggestedName)
 }
 
 // FSA branch MUST run synchronously off the calling user gesture (no await before
@@ -250,6 +260,35 @@ export async function saveDownload(suggestedName: string): Promise<SaveTarget> {
 	}
 
 	return prepareSwTarget(suggestedName)
+}
+
+// saveDownload for bytes the page streams itself (triggerSwStreamDownload): the service worker only pipes
+// them, so it is handed no session. Same synchronous-picker rule.
+export function saveStreamDownload(suggestedName: string): Promise<SaveTarget> {
+	if (isFsaAvailable()) {
+		return pickFsaTarget(suggestedName)
+	}
+
+	return Promise.resolve(swTarget(suggestedName))
+}
+
+let streamsTransferable: boolean | null = null
+
+// Whether a ReadableStream can be posted to the service worker (transferable streams), which the SW path
+// of triggerSwStreamDownload needs. Probed once.
+export function canTransferStreams(): boolean {
+	if (streamsTransferable === null) {
+		try {
+			const probe = new ReadableStream()
+
+			structuredClone(probe, { transfer: [probe] })
+			streamsTransferable = true
+		} catch {
+			streamsTransferable = false
+		}
+	}
+
+	return streamsTransferable
 }
 
 // The row's Cancel for a download the service worker streams: the page's own SDK isn't running it, so
@@ -294,6 +333,14 @@ function holdWorkerAlive(worker: ServiceWorker): () => void {
 	}
 }
 
+// An uncontrolled page (after a hard reload) would send a download's navigation to the network, which
+// answers it with the app itself in place of a file.
+export function assertSwControlled(): void {
+	if (navigator.serviceWorker.controller === null) {
+		throw new Error("downloads need the page reloaded")
+	}
+}
+
 // Starts a registered download and settles when the service worker reports how it ended: the browser's
 // download manager owns the save from the navigation on, so without this a failed or cancelled download
 // would read as finished. Rejects with the reported ErrorDTO (kind "Cancelled" for a cancel from the row
@@ -303,13 +350,11 @@ function holdWorkerAlive(worker: ServiceWorker): () => void {
 async function startWatchedSwDownload(
 	save: SwSaveTarget,
 	transferId: string,
-	onProgress: (bytes: number, total: number | null) => void
+	onProgress: (bytes: number, total: number | null) => void,
+	// Also stops what produces the bytes, when the page does.
+	onCancel?: () => void
 ): Promise<void> {
-	// An uncontrolled page (after a hard reload) would send the navigation to the network, which answers it
-	// with the app itself in place of a file.
-	if (navigator.serviceWorker.controller === null) {
-		throw new Error("downloads need the page reloaded")
-	}
+	assertSwControlled()
 
 	const target = await activeServiceWorker()
 	const channel = new MessageChannel()
@@ -354,6 +399,7 @@ async function startWatchedSwDownload(
 
 		swDownloadCancels.set(transferId, () => {
 			target.postMessage({ type: SW_MSG_CANCEL_DOWNLOAD, id: save.id })
+			onCancel?.()
 		})
 		armStall()
 	})
@@ -395,4 +441,20 @@ export async function triggerSwZipDownload(
 ): Promise<void> {
 	await registerWithSw(SW_MSG_REGISTER_ZIP_DOWNLOAD, { id: save.id, items, name: save.name })
 	await startWatchedSwDownload(save, transferId, onProgress)
+}
+
+// The page's own bytes (an archive entry the page's SDK reads) saved through the service worker: `readable`
+// moves to the worker, which only pipes it into the navigation's response, Content-Length `size`. Settles
+// as the worker reports the download; `onCancel` is the row's Cancel for the producer.
+export async function triggerSwStreamDownload(
+	save: SwSaveTarget,
+	transferId: string,
+	readable: ReadableStream<Uint8Array>,
+	size: number,
+	onCancel: () => void
+): Promise<void> {
+	await sendToSw(await activeServiceWorker(), SW_MSG_REGISTER_STREAM_DOWNLOAD, { id: save.id, name: save.name, size, stream: readable }, [
+		readable
+	])
+	await startWatchedSwDownload(save, transferId, () => undefined, onCancel)
 }

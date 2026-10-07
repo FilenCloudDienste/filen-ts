@@ -220,7 +220,8 @@ describe("childRows", () => {
 				parent: new Uint32Array(count),
 				parents: [""],
 				links: [],
-				stored: []
+				stored: [],
+				solid: null
 			})
 		}
 

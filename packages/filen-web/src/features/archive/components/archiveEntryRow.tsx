@@ -6,9 +6,12 @@ import { formatShortDate } from "@/lib/formatDate"
 import { fileIconKey } from "@/features/drive/lib/icon.logic"
 import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
 import { LIST_MODIFIED_COLUMN_CLASS, LIST_NAME_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
-import { ARCHIVE_ROW_HEIGHT, type EntryRowKind } from "@/features/archive/lib/archiveBrowser.logic"
+import { ARCHIVE_MENU_COLUMN_CLASS, ARCHIVE_ROW_HEIGHT, type EntryRowKind } from "@/features/archive/lib/archiveBrowser.logic"
 import type { RowCheck } from "@/features/archive/lib/selection"
 import type { RowRef } from "@/features/archive/lib/sortedChildren"
+import { ArchiveEntryMenuContent } from "@/features/archive/components/archiveEntryMenu"
+import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { DropdownMenu } from "@/components/ui/dropdown-menu"
 
 export interface ArchiveEntryRowProps {
 	id: string
@@ -37,6 +40,8 @@ export interface ArchiveEntryRowProps {
 	linkTarget: string | null
 	// A search match's directory, "/"-joined.
 	parentPath: string | null
+	// A file to extract, which the ⋯ menu offers to open, save or extract.
+	menu: boolean
 	onPointer: (index: number, ref: RowRef, event: MouseEvent<HTMLDivElement>) => void
 	onOpen: (ref: RowRef) => void
 	onCheck: (index: number, ref: RowRef) => void
@@ -65,11 +70,12 @@ export function ArchiveEntryRow({
 	storedPath,
 	linkTarget,
 	parentPath,
+	menu,
 	onPointer,
 	onOpen,
 	onCheck
 }: ArchiveEntryRowProps) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "drive"])
 	const skipped = skipLabel !== null
 	const sizeLabel = kind === "dir" ? t("previewArchiveDirItems", { count: childCount }) : size < 0 ? "" : formatBytes(size)
 	const dateLabel = Number.isNaN(modified) ? "" : formatShortDate(modified)
@@ -101,7 +107,7 @@ export function ArchiveEntryRow({
 				transform: `translateY(${String(start)}px)`
 			}}
 			className={cn(
-				"flex items-center gap-3 px-3 text-sm select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
+				"group/row flex items-center gap-3 px-3 text-sm select-none not-aria-selected:hover:bg-accent/50 aria-selected:bg-accent aria-selected:text-accent-foreground",
 				// The listbox holds focus; its cursor row shows it.
 				cursor && "group-focus:ring-2 group-focus:ring-ring/50 group-focus:ring-inset"
 			)}
@@ -178,6 +184,19 @@ export function ArchiveEntryRow({
 			) : null}
 			<span className={cn(LIST_SIZE_COLUMN_CLASS, "text-right text-xs text-muted-foreground tabular-nums")}>{sizeLabel}</span>
 			<span className={cn(LIST_MODIFIED_COLUMN_CLASS, "text-right text-xs text-muted-foreground")}>{dateLabel}</span>
+			{menu ? (
+				<DropdownMenu>
+					<RowMenuTrigger
+						label={t("drive:driveItemMenuTrigger")}
+						reveal="row"
+						// The listbox holds focus; Enter opens or saves the cursor's file.
+						tabIndex={-1}
+					/>
+					<ArchiveEntryMenuContent slot={rowRef} />
+				</DropdownMenu>
+			) : (
+				<span className={ARCHIVE_MENU_COLUMN_CLASS} />
+			)}
 		</div>
 	)
 }

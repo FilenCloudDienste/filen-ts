@@ -1,4 +1,4 @@
-import type { ArchiveEntryKind, ListedSkipReason } from "@filen/sdk-rs"
+import type { ArchiveEntryKind, EntryAccess, ListedSkipReason } from "@filen/sdk-rs"
 
 // A listing's entries as the worker posts them: one struct-of-arrays per batch instead of an object
 // graph per entry, so 250k entries clone and settle on the page as a few dozen typed arrays. Imported by
@@ -30,6 +30,25 @@ export const SKIP_REASONS = [
 export type SkipReason = (typeof SKIP_REASONS)[number]
 
 export const ENTRY_FLAG = { encrypted: 1, macMetadata: 2, rewritten: 4, misleading: 8, pathless: 16, storedTruncated: 32 } as const
+
+// What reading the entry alone costs (its EntryAccess type) rides in the flags' top two bits; 0 is none
+// (anything but a file). That fills the byte: another flag needs a wider column.
+export const ENTRY_ACCESS = { none: 0, direct: 1, solidBlock: 2, sequential: 3 } as const satisfies Record<
+	EntryAccess["type"] | "none",
+	number
+>
+
+export type EntryAccessCode = (typeof ENTRY_ACCESS)[keyof typeof ENTRY_ACCESS]
+
+const ACCESS_SHIFT = 6
+
+export function accessBits(access: EntryAccess | undefined): number {
+	return (access === undefined ? ENTRY_ACCESS.none : ENTRY_ACCESS[access.type]) << ACCESS_SHIFT
+}
+
+export function accessOfFlags(flags: number): EntryAccessCode {
+	return ((flags >>> ACCESS_SHIFT) & 3) as EntryAccessCode
+}
 
 // A character the SDK flags a path as misleading for (filen-sdk-rs fs/archive/entry_path.rs, is_suspicious):
 // a control (C0, DEL, C1) or a format character behind bidi overrides and invisible joins.
@@ -79,4 +98,13 @@ export interface PackedEntryBatch {
 	links: PackedEntryLink[]
 	// Only entries whose name is not their stored path: rewritten, pathless or truncated.
 	stored: PackedStoredPath[]
+	// A solid 7z entry's costs, per position (0 for any other entry); null when the batch holds none.
+	solid: PackedSolidCosts | null
+}
+
+export interface PackedSolidCosts {
+	// EntryAccess solidBlock's skippedBytes: decoded and thrown away before the entry.
+	skipped: Float64Array
+	// Its estimatedPackedBytes: archive bytes fetched to reach the entry's end.
+	estimated: Float64Array
 }

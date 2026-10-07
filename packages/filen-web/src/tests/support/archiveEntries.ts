@@ -1,4 +1,4 @@
-import type { ArchiveEntry, ArchiveEntryKind, ListedSkipReason } from "@filen/sdk-rs"
+import type { ArchiveEntry, ArchiveEntryKind, EntryAccess, ListedSkipReason } from "@filen/sdk-rs"
 import { createListBatcher } from "@/workers/archiveListPacker"
 import { createEntryStore, type EntryStore } from "@/features/archive/lib/entryStore"
 import type { PackedEntryBatch } from "@/lib/sdk/archiveListing"
@@ -14,11 +14,23 @@ export interface EntrySpec {
 	size?: number
 	modified?: number
 	skip?: ListedSkipReason["type"]
+	access?: EntryAccess
+	encrypted?: boolean
 }
 
 // An SDK entry as a listing reports it, from a path shorthand.
 export function archiveEntry(spec: EntrySpec | string, fallbackIndex = 0): ArchiveEntry {
-	const { path, index = fallbackIndex, stored, kind, size, modified, skip } = typeof spec === "string" ? { path: spec } : spec
+	const {
+		path,
+		index = fallbackIndex,
+		stored,
+		kind,
+		size,
+		modified,
+		skip,
+		access,
+		encrypted
+	} = typeof spec === "string" ? { path: spec } : spec
 	const isDir = kind?.type === "dir" || (kind === undefined && path?.endsWith("/") === true)
 
 	return {
@@ -29,11 +41,11 @@ export function archiveEntry(spec: EntrySpec | string, fallbackIndex = 0): Archi
 		kind: kind ?? (isDir ? { type: "dir" } : { type: "file" }),
 		size: isDir ? undefined : BigInt(size ?? 1),
 		...(modified !== undefined ? { modified: BigInt(modified) } : {}),
-		encrypted: false,
+		encrypted: encrypted ?? false,
 		method: undefined,
 		skip: skip === undefined ? undefined : { type: skip },
 		macMetadata: false,
-		access: undefined
+		access
 	}
 }
 

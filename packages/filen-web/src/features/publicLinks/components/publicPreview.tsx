@@ -1,15 +1,8 @@
-import { type ReactNode } from "react"
 import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { previewType } from "@/features/drive/lib/preview.logic"
 import { PreviewAccessModeProvider, PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
-import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
-import { MediaViewer } from "@/features/preview/components/mediaViewer"
-import { DocxViewer } from "@/features/preview/components/docxViewer"
-import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
-import { PdfViewer } from "@/features/preview/components/pdfViewer"
-import { TextViewer } from "@/features/preview/components/textViewer"
-import { SpreadsheetViewer } from "@/features/spreadsheet/components/spreadsheetViewer"
+import { ReadOnlyPreviewBody } from "@/features/preview/components/readOnlyPreviewBody"
 
 // Inline preview for a public-link file, reusing the SAME viewer components the authed app uses — fed
 // a fabricated DriveItem (linkedFileIntoDriveItem / a narrowed listing File) and wrapped in the anon
@@ -34,7 +27,7 @@ export function PublicPreview({ item, linkScope, downloadable }: { item: DriveIt
 		>
 			<PreviewDownloadableProvider downloadable={downloadable}>
 				<div className="size-full">
-					<PublicPreviewBody
+					<ReadOnlyPreviewBody
 						item={item}
 						category={category}
 						alt={alt}
@@ -43,87 +36,4 @@ export function PublicPreview({ item, linkScope, downloadable }: { item: DriveIt
 			</PreviewDownloadableProvider>
 		</PreviewAccessModeProvider>
 	)
-}
-
-// Guarded against a missing category arm by the `default` arm at the bottom, the same way
-// previewOverlay's own PreviewBody is.
-function PublicPreviewBody({ item, category, alt }: { item: DriveItem; category: ReturnType<typeof previewType>; alt: string }): ReactNode {
-	switch (category) {
-		case "image":
-			return (
-				<ImageViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		case "video":
-		case "audio":
-			return (
-				<MediaViewer
-					item={item}
-					category={category}
-					alt={alt}
-				/>
-			)
-		case "pdf":
-			return (
-				<PdfViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		case "docx":
-			return (
-				<DocxViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		case "spreadsheet":
-			return (
-				<SpreadsheetViewer
-					item={item}
-					documentKey={item.data.uuid}
-					neverEditable
-					alt={alt}
-				/>
-			)
-		case "text":
-		case "code":
-			return (
-				<TextViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		case "markdown":
-			return (
-				<MarkdownViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		// Reachable, unlike "other": anonPreviewability admits rawImage. The embedded preview is read
-		// through the anon worker method by the provider this component wraps its viewer in.
-		case "rawImage":
-			return (
-				<RawImageViewer
-					item={item}
-					alt={alt}
-				/>
-			)
-		// Unreachable: anonPreviewability (download.logic.ts) refuses an "other" item and keeps an archive for
-		// FileHero's own browser (publicArchive.tsx), never under this anon provider, before FileHero ever
-		// renders a preview pane for either.
-		case "archive":
-		case "other":
-			return null
-		// `category` narrows to `never` here only while every PreviewCategory has an arm above, so adding
-		// one without a viewer is a compile error on this assignment instead of a blank pane.
-		default: {
-			const unhandled: never = category
-
-			return unhandled
-		}
-	}
 }

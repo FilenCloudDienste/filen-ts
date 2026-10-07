@@ -4,7 +4,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 11
+export const SW_PROTOCOL_VERSION = 12
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
@@ -30,6 +30,10 @@ export const SW_MSG_REGISTER_DOWNLOAD = "FILEN_SW_REGISTER_DOWNLOAD"
 // own decrypted meta/key material) crosses ONLY through this structured-clone postMessage, never a
 // URL/query/log. No `size`: a freshly-generated zip's total byte count isn't known upfront.
 export const SW_MSG_REGISTER_ZIP_DOWNLOAD = "FILEN_SW_REGISTER_ZIP_DOWNLOAD"
+// A download whose bytes the page produces (an archive entry, which only the page's SDK can read): the
+// message transfers a ReadableStream the worker only pipes, so no session Client is needed or asked for.
+// One-shot: the first GET takes it, Range ignored, and any later GET finds it gone.
+export const SW_MSG_REGISTER_STREAM_DOWNLOAD = "FILEN_SW_REGISTER_STREAM_DOWNLOAD"
 // Same cross-only-via-structured-clone-postMessage rule, registering an INLINE (non-attachment)
 // stream instead — the `<video>`/`<audio>`/`<img>` preview route. `contentType` is the caller's own
 // allowlist-checked claim (features/preview/lib/mediaType.ts's allowedMediaContentType); the SW re-validates
