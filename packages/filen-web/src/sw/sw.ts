@@ -28,6 +28,7 @@ import { DownloadReporter, type ReportedStream } from "@/lib/sw/downloadReporter
 import { plainErrorDTO, toErrorDTO } from "@/lib/sdk/errors"
 import { contentDispositionAttachment } from "@/lib/filename"
 import { log } from "@/lib/log"
+import { parseRange, previewPieceEnd } from "@/sw/range"
 
 // ── SW-hosted trimmed SDK (single-threaded — no COI, no rayon pool) ─────────────────────────────
 // Lazy: only fetch+compile the 2 MB wasm and reconstruct the Client when a session is handed over, so
@@ -140,36 +141,6 @@ async function adoptSwClient(blob: SwStringifiedClient): Promise<void> {
 	retireClient(previous)
 }
 
-// Parse a single-range `bytes=` header against the known total; null = unsatisfiable/absent.
-function parseRange(header: string, total: number): { start: number; end: number } | null {
-	const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
-	if (match === null) {
-		return null
-	}
-	const startStr = match[1] ?? ""
-	const endStr = match[2] ?? ""
-	if (startStr === "" && endStr === "") {
-		return null
-	}
-	let start: number
-	let end: number
-	if (startStr === "") {
-		const suffix = Number(endStr)
-		if (suffix <= 0) {
-			return null
-		}
-		start = Math.max(0, total - suffix)
-		end = total - 1
-	} else {
-		start = Number(startStr)
-		end = endStr === "" ? total - 1 : Number(endStr)
-	}
-	if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || end >= total) {
-		return null
-	}
-	return { start, end }
-}
-
 // A watched download's Response body: the TransformStream's readable, passed through so the worker sees
 // the browser cancel it (the user aborting in the browser's download UI), and can fail it at once when
 // the page cancels instead of waiting for the SDK's next write to notice.
@@ -235,8 +206,8 @@ function failedOutcome(e: unknown, cancelled: boolean): { type: "failed"; error:
 // waitUntil is what keeps this worker alive for the pump: respondWith gets an already-resolved Response,
 // so the fetch event itself settles immediately and an idle worker is terminated (spec-permitted, ~30 s in
 // Firefox) straight through a running download — which the page cannot observe, having handed the save
-// off to the browser. Browsers cap that extension (~5 min), so this bounds the exposure rather than
-// removing it.
+// off to the browser. Browsers cap that extension (Firefox at about a minute past the last event), so this
+// bounds the exposure rather than removing it; a media preview's pieces each bring a fresh event.
 function pumpToResponse(
 	event: FetchEvent,
 	id: string,
@@ -319,14 +290,16 @@ function handleZipDownload(event: FetchEvent, id: string, pending: PendingZipDow
 // response loaded as its own browsing context/document, never a media/image fetch), but it closes off
 // a direct-navigation edge case: an allowlisted image/svg+xml response, if a URL is copied out of the
 // app and navigated to directly rather than embedded, could otherwise execute an embedded <script> as
-// a full document with no CSP of its own to stop it.
+// a full document with no CSP of its own to stop it. `pieced` answers an open-ended range with one
+// PREVIEW_PIECE_BYTES piece: for inline media only, since a saved file must stay one whole stream.
 function streamFileRange(
 	event: FetchEvent,
 	id: string,
 	pending: { file: SwAnyFile; size: number },
 	client: SwClient,
 	headers: { contentType: string; disposition: string | null; sandbox?: boolean },
-	reported: boolean
+	reported: boolean,
+	pieced = false
 ): Response {
 	const total = pending.size
 	const rangeHeader = event.request.headers.get("Range")
@@ -336,7 +309,7 @@ function streamFileRange(
 	}
 
 	const start = range?.start ?? 0
-	const end = range?.end ?? total - 1
+	const end = range === null ? total - 1 : pieced && range.openEnded ? previewPieceEnd(range.start, range.end) : range.end
 	const length = end - start + 1
 
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
@@ -436,7 +409,7 @@ function handleDownload(event: FetchEvent, url: URL): Response {
 		return streamFileRange(event, id, pending, client, attachmentHeaders(pending.name), false)
 	}
 
-	return streamFileRange(event, id, pending, client, { contentType: pending.contentType, disposition: null, sandbox: true }, false)
+	return streamFileRange(event, id, pending, client, { contentType: pending.contentType, disposition: null, sandbox: true }, false, true)
 }
 
 // A registration is only worth anything with a session Client to stream it: an idle-terminated worker
