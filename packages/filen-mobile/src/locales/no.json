@@ -495,6 +495,7 @@
 	"links": "Lenker",
 	"lock_app_after": "Lås appen etter",
 	"lock_app_after_description": "Velg når appen skal låses etter inaktivitet",
+	"lock_lost": "En annen enhet kan være i ferd med å endre dette akkurat nå. Prøv igjen.",
 	"log_level_all": "Alle",
 	"log_level_debug": "Feilsøking",
 	"log_level_errors": "Feil",

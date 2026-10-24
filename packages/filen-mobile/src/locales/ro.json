@@ -509,6 +509,7 @@
 	"links": "Linkuri",
 	"lock_app_after": "Blochează aplicația după",
 	"lock_app_after_description": "Alege când să se blocheze aplicația după inactivitate",
+	"lock_lost": "Este posibil ca un alt dispozitiv să modifice acest element chiar acum. Încearcă din nou.",
 	"log_level_all": "Toate",
 	"log_level_debug": "Depanare",
 	"log_level_errors": "Erori",

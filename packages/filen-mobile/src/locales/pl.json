@@ -523,6 +523,7 @@
 	"links": "Linki",
 	"lock_app_after": "Zablokuj aplikację po",
 	"lock_app_after_description": "Wybierz, kiedy zablokować aplikację po okresie nieaktywności",
+	"lock_lost": "Inne urządzenie może właśnie to zmieniać. Spróbuj ponownie.",
 	"log_level_all": "Wszystkie",
 	"log_level_debug": "Debugowanie",
 	"log_level_errors": "Błędy",

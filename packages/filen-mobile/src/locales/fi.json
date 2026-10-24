@@ -495,6 +495,7 @@
 	"links": "Linkit",
 	"lock_app_after": "Lukitse sovellus",
 	"lock_app_after_description": "Valitse, milloin sovellus lukitaan käyttämättömyyden jälkeen",
+	"lock_lost": "Toinen laite saattaa muokata tätä juuri nyt. Yritä uudelleen.",
 	"log_level_all": "Kaikki",
 	"log_level_debug": "Vianjäljitys",
 	"log_level_errors": "Virheet",

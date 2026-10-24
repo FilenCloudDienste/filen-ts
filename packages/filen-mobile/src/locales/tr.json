@@ -495,6 +495,7 @@
 	"links": "Bağlantılar",
 	"lock_app_after": "Uygulamayı şu süre sonra kilitle",
 	"lock_app_after_description": "Hareketsizlik sonrasında uygulamanın ne zaman kilitleneceğini seçin",
+	"lock_lost": "Başka bir cihaz şu anda bunu değiştiriyor olabilir. Lütfen tekrar deneyin.",
 	"log_level_all": "Tümü",
 	"log_level_debug": "Hata ayıklama",
 	"log_level_errors": "Hatalar",

@@ -495,6 +495,7 @@
 	"links": "Tautan",
 	"lock_app_after": "Kunci aplikasi setelah",
 	"lock_app_after_description": "Pilih kapan mengunci aplikasi setelah tidak aktif",
+	"lock_lost": "Perangkat lain mungkin sedang mengubah ini. Silakan coba lagi.",
 	"log_level_all": "Semua",
 	"log_level_debug": "Debug",
 	"log_level_errors": "Kesalahan",

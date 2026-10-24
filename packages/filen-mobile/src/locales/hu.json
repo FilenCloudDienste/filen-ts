@@ -495,6 +495,7 @@
 	"links": "Linkek",
 	"lock_app_after": "Alkalmazás zárolása",
 	"lock_app_after_description": "Válaszd ki, mikor záródjon az alkalmazás inaktivitás után",
+	"lock_lost": "Lehet, hogy egy másik eszköz éppen most módosítja ezt. Kérjük, próbáld újra.",
 	"log_level_all": "Összes",
 	"log_level_debug": "Hibakeresés",
 	"log_level_errors": "Hibák",

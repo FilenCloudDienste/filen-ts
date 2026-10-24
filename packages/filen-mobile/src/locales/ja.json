@@ -495,6 +495,7 @@
 	"links": "リンク",
 	"lock_app_after": "ロックまでの時間",
 	"lock_app_after_description": "操作がない場合にアプリをロックするタイミングを選択してください",
+	"lock_lost": "現在、別のデバイスがこの項目を変更している可能性があります。もう一度お試しください。",
 	"log_level_all": "すべて",
 	"log_level_debug": "デバッグ",
 	"log_level_errors": "エラー",
