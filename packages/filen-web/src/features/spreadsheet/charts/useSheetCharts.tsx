@@ -222,6 +222,13 @@ export function useSheetCharts({ grid, gridRef, handle, canEdit, text }: SheetCh
 	return {
 		extension: {
 			id: "charts",
+			...(selectedChart !== undefined && {
+				ribbon: {
+					editChart: () => {
+						openEditor(selectedChart)
+					}
+				}
+			}),
 			overlay:
 				shownChart === null ? undefined : (
 					<ChartSheetView

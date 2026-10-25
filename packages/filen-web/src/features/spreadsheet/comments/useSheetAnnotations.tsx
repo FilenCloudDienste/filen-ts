@@ -605,6 +605,33 @@ export function useSheetAnnotations({ grid, gridRef, handle, canEdit, text }: Sh
 	return {
 		id: "annotations",
 		grid: gridExtension,
+		ribbon: canEdit
+			? {
+					...(activeKind === "thread" || activeKind === "note"
+						? {}
+						: {
+								newComment: () => {
+									withAuthor(() => {
+										open("thread")
+									})
+								}
+							}),
+					...(activeKind === "thread"
+						? {}
+						: {
+								note: {
+									exists: activeKind === "note",
+									shown: activeShown,
+									toggle: () => {
+										void exec({ type: "note.show", sheet, row: active.row, col: active.col, shown: !activeShown })
+									},
+									remove: () => {
+										void exec({ type: "note.delete", sheet, ranges: selection.ranges })
+									}
+								}
+							})
+				}
+			: {},
 		overlay: (
 			<>
 				<ShownNotes

@@ -32,6 +32,7 @@ import { FormDialog } from "@/components/dialogs/formDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { TAB_COLORS, addedSheet, cssColor, moveTarget, nextShown } from "@/features/spreadsheet/tabs/sheetTabs.logic"
 import { useProtection } from "@/features/spreadsheet/tabs/useProtection"
+import { useSheetTabRequests } from "@/features/spreadsheet/tabs/tabRequests"
 
 // One menu's parts: the tab's context menu (right click, long press) and its ⋯ button share the items.
 interface MenuParts {
@@ -114,6 +115,30 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 		setMenuSheet(null)
 	})
 	const lockedTitle = locked ? t("previewSheetStructureProtected") : undefined
+
+	// The ribbon's sheet commands, for the sheet on show, as its tab's menu runs them.
+	useSheetTabRequests(model, request => {
+		const sheetProtected = (model.layout(grid.sheet)?.protection ?? null) !== null
+
+		switch (request) {
+			case "rename":
+				if (structure) setRenaming(grid.sheet)
+				break
+			case "delete":
+				if (structure && shown.length > 1) setDeleting(grid.sheet)
+				break
+			case "protectSheet":
+				if (!canEdit) break
+				if (sheetProtected) protection.unprotect({ sheet: grid.sheet })
+				else protection.protect({ sheet: grid.sheet })
+				break
+			case "protectWorkbook":
+				if (!canEdit) break
+				if (locked) protection.unprotect("workbook")
+				else protection.protect("workbook")
+				break
+		}
+	})
 
 	function select(sheet: SheetId): void {
 		if (sheet === grid.sheet) {

@@ -11,7 +11,7 @@ import type { DocxEditingHost } from "@filen/office/dom/docx/editing"
 import { registerAllActions } from "@/lib/keymap/actions"
 
 // Comments and tracked changes in the DOCX editor on a real document: margin balloons composed and edited in
-// place, the popover where the margin has no room, and the Review menu. Text is measured by a stand-in.
+// place, the popover where the margin has no room, and the ribbon's Review tab. Text is measured by a stand-in.
 
 interface OfficeView {
 	authorName: string | null
@@ -178,8 +178,9 @@ function balloons(): HTMLElement[] {
 	return [...document.querySelectorAll<HTMLElement>("article[data-balloon^='c:']")]
 }
 
+// The ribbon's Review tab.
 async function openReview(): Promise<void> {
-	fireEvent.click(await screen.findByRole("button", { name: /^Review/ }))
+	fireEvent.click(await screen.findByRole("tab", { name: "Review" }))
 }
 
 describe("comments in the margin", () => {
@@ -192,7 +193,7 @@ describe("comments in the margin", () => {
 		})
 		expect(balloons()[0]?.getAttribute("aria-label")).toBe("Comments by Alice")
 		await openReview()
-		fireEvent.click(await screen.findByRole("menuitem", { name: "New comment" }))
+		fireEvent.click(await screen.findByRole("button", { name: "New comment" }))
 
 		const field = await screen.findByRole("textbox", { name: "Add a comment" })
 
@@ -213,7 +214,7 @@ describe("comments in the margin", () => {
 		const editor = await openEditor()
 
 		await openReview()
-		fireEvent.click(await screen.findByRole("menuitem", { name: "New comment" }))
+		fireEvent.click(await screen.findByRole("button", { name: "New comment" }))
 		fireEvent.change(await screen.findByRole("textbox", { name: "Add a comment" }), { target: { value: "never" } })
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 		await waitFor(() => {
@@ -313,7 +314,7 @@ describe("comments in the margin", () => {
 		fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
 
 		await openReview()
-		fireEvent.click(await screen.findByRole("menuitem", { name: "New comment" }))
+		fireEvent.click(await screen.findByRole("button", { name: "New comment" }))
 		fireEvent.change(await screen.findByRole("textbox", { name: "Add a comment" }), { target: { value: "From the popover" } })
 		fireEvent.click(screen.getByRole("button", { name: "Comment" }))
 		await waitFor(() => {
@@ -478,7 +479,7 @@ describe("composing without a name", () => {
 		const editor = await openEditor()
 
 		await openReview()
-		fireEvent.click(await screen.findByRole("menuitem", { name: "New comment" }))
+		fireEvent.click(await screen.findByRole("button", { name: "New comment" }))
 		fireEvent.change(await screen.findByRole("textbox", { name: "Add a comment" }), { target: { value: "Kept draft" } })
 		fireEvent.click(screen.getByRole("button", { name: "Comment" }))
 
@@ -493,49 +494,49 @@ describe("composing without a name", () => {
 	})
 })
 
-describe("the Review menu", () => {
+describe("the Review tab", () => {
 	it("switches tracking, steps through and resolves changes, and switches the markup", async () => {
 		const editor = await openEditor()
 
-		// The document tracks changes (w:trackRevisions): the button says so.
+		await openReview()
+
+		// The document tracks changes (w:trackRevisions): the switch says so.
+		const track = await screen.findByRole("button", { name: "Track changes" })
+
 		expect(editor.snapshot().review.tracking).toBe(true)
-		fireEvent.click(await screen.findByRole("button", { name: "Review, track changes on" }))
-		fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Track changes" }))
+		expect(track.getAttribute("aria-pressed")).toBe("true")
+		fireEvent.click(track)
 		await waitFor(() => {
 			expect(editor.snapshot().review.tracking).toBe(false)
 		})
-		// The switch closes the menu, as every checkbox item does.
 		await waitFor(() => {
-			expect(screen.queryByRole("menuitemcheckbox", { name: "Track changes" })).toBeNull()
+			expect(screen.getByRole("button", { name: "Track changes" }).getAttribute("aria-pressed")).toBe("false")
 		})
-		fireEvent.click(await screen.findByRole("button", { name: "Review" }))
-		fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Track changes" }))
+		fireEvent.click(screen.getByRole("button", { name: "Track changes" }))
 		await waitFor(() => {
 			expect(editor.snapshot().review.tracking).toBe(true)
 		})
-		expect(await screen.findByRole("button", { name: "Review, track changes on" })).toBeTruthy()
 
-		await openReview()
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Next change" }))
+		fireEvent.click(screen.getByRole("button", { name: "Next change" }))
 		await waitFor(() => {
 			expect(editor.snapshot().review.current).not.toBeNull()
 		})
 
 		const before = editor.snapshot().review.revisionCount
 
-		await openReview()
+		fireEvent.click(within(screen.getByRole("toolbar", { name: "Commands" })).getByRole("button", { name: "Accept" }))
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Accept change" }))
 		await waitFor(() => {
 			expect(editor.snapshot().review.revisionCount).toBe(before - 1)
 		})
 
-		await openReview()
+		fireEvent.click(within(screen.getByRole("toolbar", { name: "Commands" })).getByRole("button", { name: "Reject" }))
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Reject all changes" }))
 		await waitFor(() => {
 			expect(editor.snapshot().review.revisionCount).toBe(0)
 		})
 
-		await openReview()
+		fireEvent.click(screen.getByRole("button", { name: "Markup" }))
 		fireEvent.click(await screen.findByRole("menuitemradio", { name: "All markup" }))
 		await waitFor(() => {
 			expect(editor.view).toBe(0)
@@ -546,7 +547,7 @@ describe("the Review menu", () => {
 		const editor = await openEditor()
 
 		await openReview()
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Next change" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Next change" }))
 
 		const card = await screen.findByRole("dialog", { name: /^Change by / })
 		const before = editor.snapshot().review.revisionCount

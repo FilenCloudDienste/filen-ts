@@ -3,6 +3,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
+import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // Sorting and autofilters on the office engine end to end: the toolbar's sort and
@@ -55,9 +56,10 @@ function menuItem(page: Page, name: string): Locator {
 	return page.getByRole("menuitem", { name, exact: true })
 }
 
-// The toolbar's sort and filter menu.
+// Home ▸ Editing ▸ Sort and filter, wherever the ribbon's width put it.
 async function sortFilterMenu(dialog: Locator): Promise<void> {
-	await dialog.getByRole("button", { name: preview.previewSheetSortFilter, exact: true }).click()
+	await ribbonTab(dialog, preview.previewOfficeRibbonTabHome)
+	await (await ribbonButton(dialog.page(), dialog, preview.previewOfficeRibbonEditing, preview.previewSheetSortFilter)).click()
 }
 
 // A header's filter button, drawn at the bottom right of its cell (header 20 px, rows 20 px, a 32 px row header and

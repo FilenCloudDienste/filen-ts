@@ -4,13 +4,16 @@ import { toast } from "sonner"
 import {
 	newSheetName,
 	type LayerKey,
+	type SheetAxis,
 	type SheetCommand,
 	type SheetFileKind,
 	type SheetFormatPatch,
 	type SheetId
 } from "@filen/office/core/sheet"
 import {
+	MAX_FIT_INDICES,
 	SheetGrid,
+	autofitSizes,
 	cellsEditable,
 	celllessSheet,
 	createSheetGrid,
@@ -30,13 +33,20 @@ import { PasswordBadge } from "@/features/preview/components/docxToolbar"
 import { useSizeLayer } from "@/features/spreadsheet/hooks/useSizeLayer"
 import type { SpreadsheetSaveSource, SpreadsheetSnapshot } from "@/features/spreadsheet/save/sheetSave.logic"
 import { assertSealedUpload } from "@/features/spreadsheet/lib/xlsxEncryption"
-import { useSheetClipboard } from "@/features/spreadsheet/clipboard/useSheetClipboard"
+import { sayClipboardRefusal, useSheetClipboard } from "@/features/spreadsheet/clipboard/useSheetClipboard"
 import { SheetFormulaBar } from "@/features/spreadsheet/components/sheetFormulaBar"
 import { openSheetFind, stepSheetFind } from "@/features/spreadsheet/find/findState"
 import { SheetAxisDialog, type SheetAxisDialogKind } from "@/features/spreadsheet/components/sheetAxisDialog"
 import { SheetFindBar } from "@/features/spreadsheet/find/sheetFindBar"
 import { SheetGridMenu } from "@/features/spreadsheet/components/sheetGridMenu"
-import { extensionShortcut, gridExtensions, menuGroups, type SheetBodyExtension } from "@/features/spreadsheet/components/sheetExtension"
+import {
+	extensionShortcut,
+	gridExtensions,
+	menuGroups,
+	ribbonCommands,
+	type SheetBodyExtension
+} from "@/features/spreadsheet/components/sheetExtension"
+import { selectionSpans } from "@/features/spreadsheet/menus/structure.logic"
 import { structureShortcut } from "@/features/spreadsheet/menus/structureShortcuts"
 import { useMergeCommands } from "@/features/spreadsheet/menus/useMergeCommands"
 import { SheetModifyPassword } from "@/features/spreadsheet/menus/modifyPassword"
@@ -46,7 +56,7 @@ import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 import { isLegacySheetKind } from "@/features/spreadsheet/lib/sheetKind"
 import { saveAsXlsxBodyKey } from "@/features/spreadsheet/save/sheetSaveAs"
 import { csvRefusalKey, readOnlyNoteKey, refusalKey } from "@/features/spreadsheet/lib/sheetMessages.logic"
-import { SheetToolbar } from "@/features/spreadsheet/toolbar/sheetToolbar"
+import { SheetToolbar, type SheetRibbonActions } from "@/features/spreadsheet/toolbar/sheetToolbar"
 import { borderShortcut, setFormatCellsOpen } from "@/features/spreadsheet/toolbar/formatCellsState"
 import { downloadSheetCsv } from "@/features/spreadsheet/save/sheetCsv"
 import { SheetFileMenu } from "@/features/spreadsheet/save/sheetFileMenu"
@@ -57,7 +67,6 @@ import { browserLanguage } from "@/features/spreadsheet/formulaBar/sheetLocale"
 import { usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { useSheetAutosave } from "@/features/spreadsheet/save/useSheetAutosave"
 import { useSheetFill } from "@/features/spreadsheet/fill/useSheetFill"
-import { useShortcutRequests } from "@/features/spreadsheet/objects/insertRequests"
 import { useSheetObjects } from "@/features/spreadsheet/objects/useSheetObjects"
 import { useSheetCharts } from "@/features/spreadsheet/charts/useSheetCharts"
 import { useSheetAnnotations } from "@/features/spreadsheet/comments/useSheetAnnotations"
@@ -498,8 +507,86 @@ export function SheetBody({
 		}
 	}
 
-	// The toolbar's Insert menu asks for a link or a note as Ctrl/Cmd+K and Shift+F2 do.
-	useShortcutRequests(model, handleShortcut)
+	// Home ▸ Cells ▸ Format ▸ AutoFit: the selection's rows or columns as the grid measures them, as a header's double
+	// click fits them.
+	function autofit(axis: SheetAxis): void {
+		const renderer = gridRef.current?.renderer
+		const measurer = renderer?.measurerFor() ?? null
+
+		if (renderer === undefined || measurer === null || !model.canResize()) {
+			return
+		}
+
+		const sheet = grid.sheet
+		const indices: number[] = []
+
+		for (const span of selectionSpans(grid.selection.ranges, axis)) {
+			for (let index = span.start; index <= span.end && indices.length < MAX_FIT_INDICES; index++) {
+				indices.push(index)
+			}
+		}
+
+		void autofitSizes(model, sheet, axis, indices, measurer, renderer.themeFont()).then(
+			fitted => {
+				if (fitted.indices.length > 0) {
+					model.resize(sheet, axis, fitted.indices, fitted.sizes).catch(() => undefined)
+				}
+			},
+			() => undefined
+		)
+	}
+
+	const ribbonActions: SheetRibbonActions = {
+		copy: cut => {
+			void clipboard.copy(cut).then(result => {
+				sayClipboardRefusal(result, cut ? "X" : "C", t)
+			})
+		},
+		paste: values => {
+			void clipboard.paste(values).then(result => {
+				sayClipboardRefusal(result, "V", t)
+			})
+		},
+		shortcut: shortcut => {
+			handleShortcut(shortcut)
+		},
+		insertCells: () => {
+			if (cellsWritable) {
+				setAxisAsked("insert")
+			}
+		},
+		deleteCells: () => {
+			if (cellsWritable) {
+				setAxisAsked("delete")
+			}
+		},
+		autofit,
+		commands: ribbonCommands(extensions)
+	}
+	const fileMenu = (
+		<SheetFileMenu
+			text={text}
+			onDownloadCsv={downloadCsv}
+			onDownloadPdf={downloadPdf}
+			liveConversion={liveConversion(handle, kind, alt, () => commitForExport(model, sayInvalidEntry))}
+			onPrint={print.open}
+			onSaveAsXlsx={
+				onSaveAsXlsx === undefined
+					? undefined
+					: () => {
+							setXlsxAsked(true)
+						}
+			}
+			autosave={canEdit && onAutosave !== undefined}
+		/>
+	)
+	// The File menu has something to offer (SheetFileMenu shows nothing else).
+	const fileOffered =
+		downloadCsv !== undefined ||
+		downloadPdf !== undefined ||
+		print.open !== undefined ||
+		onSaveAsXlsx !== undefined ||
+		(canEdit && onAutosave !== undefined)
 
 	return (
 		<div
@@ -520,7 +607,7 @@ export function SheetBody({
 				}
 			}}
 		>
-			{toolbarShown ? (
+			{toolbarShown || fileOffered ? (
 				<div
 					data-sheet-pane="toolbar"
 					className="contents"
@@ -530,6 +617,17 @@ export function SheetBody({
 						disabled={!canEdit}
 						formats={!text}
 						onFormat={format}
+						actions={ribbonActions}
+						viewOnly={!mayEdit}
+						file={fileMenu}
+						status={
+							handle.info.encrypted === undefined ? null : (
+								<PasswordBadge
+									integrity={handle.info.encrypted}
+									saving={canEdit}
+								/>
+							)
+						}
 					/>
 				</div>
 			) : null}
@@ -588,7 +686,8 @@ export function SheetBody({
 							onUnlock={modifyLocked}
 						/>
 					) : null}
-					{handle.info.encrypted === undefined ? null : (
+					{/* The ribbon shows it when there is one. */}
+					{handle.info.encrypted === undefined || toolbarShown || fileOffered ? null : (
 						<PasswordBadge
 							integrity={handle.info.encrypted}
 							saving={canEdit}
@@ -608,21 +707,6 @@ export function SheetBody({
 						</Button>
 					)}
 					{pdf.prompt}
-					<SheetFileMenu
-						text={text}
-						onDownloadCsv={downloadCsv}
-						onDownloadPdf={downloadPdf}
-						liveConversion={liveConversion(handle, kind, alt, () => commitForExport(model, sayInvalidEntry))}
-						onPrint={print.open}
-						onSaveAsXlsx={
-							onSaveAsXlsx === undefined
-								? undefined
-								: () => {
-										setXlsxAsked(true)
-									}
-						}
-						autosave={canEdit && onAutosave !== undefined}
-					/>
 				</SheetFormulaBar>
 			</div>
 			{/* The chart editor's side panel takes a column at the right; on a narrow screen it covers the grid's lower part. */}

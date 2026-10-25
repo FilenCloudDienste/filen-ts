@@ -129,7 +129,7 @@ async function openDocument(page: Page, listbox: Locator, name: string, marker: 
 
 async function closeDocument(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
-	await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toHaveCount(0)
+	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
 }
 
 async function save(page: Page): Promise<void> {

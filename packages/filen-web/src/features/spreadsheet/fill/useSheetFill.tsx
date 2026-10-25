@@ -30,6 +30,13 @@ export function useSheetFill({
 
 	return {
 		id: "fill",
+		...(canEdit && {
+			ribbon: {
+				fillSeries: () => {
+					setSeriesOpen(true)
+				}
+			}
+		}),
 		menuItems: canEdit ? (
 			<ContextMenuSub>
 				<ContextMenuSubTrigger>{t("previewSheetFill")}</ContextMenuSubTrigger>

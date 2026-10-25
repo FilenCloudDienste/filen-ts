@@ -3,13 +3,17 @@ import { test, expect, readFixtureManifest } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { DOCX_FIXTURE_TEXT, largePictureBytes, svgPictureBytes, webpPictureBytes } from "./helpers/docxFixtures"
+import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
-// The DOCX editor's Insert menu in a real browser: a picture from this device, the clipboard, a drop and the
+// The DOCX editor's Insert and References tabs in a real browser: a picture from this device, the clipboard, a drop and the
 // drive (the 25 MB one refused before it is read), a table of contents inserted and updated from its chip, a
 // link and a footnote. Nothing is saved: the documents are only changed in the page.
 
 type DocxEditFile = (typeof FIXTURE_FILES)["docx-edit"][number]
+
+const INSERT = preview.previewOfficeRibbonTabInsert
+const ILLUSTRATIONS = preview.previewOfficeRibbonIllustrations
 
 async function openDocument(page: Page, name: DocxEditFile): Promise<Locator> {
 	await bootTo(page)
@@ -23,7 +27,7 @@ async function openDocument(page: Page, name: DocxEditFile): Promise<Locator> {
 
 	await row.dblclick()
 
-	const toolbar = page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })
+	const toolbar = page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })
 
 	await expect(toolbar).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.locator(".fo-docx-page").getByText(DOCX_FIXTURE_TEXT[name]).first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
@@ -31,11 +35,13 @@ async function openDocument(page: Page, name: DocxEditFile): Promise<Locator> {
 	return toolbar
 }
 
-async function insertMenu(page: Page, toolbar: Locator, ...path: string[]): Promise<void> {
-	await toolbar.getByRole("button", { name: preview.previewDocxInsertMenu }).click()
+// A ribbon tab's button, then the item of its dropdown when it has one.
+async function insertFrom(page: Page, tab: string, group: string, button: string, item?: string): Promise<void> {
+	await ribbonTab(page, tab)
+	await (await ribbonButton(page, page, group, button)).click()
 
-	for (const name of path) {
-		await page.getByRole("menuitem", { name, exact: true }).click()
+	if (item !== undefined) {
+		await page.getByRole("menuitem", { name: item, exact: true }).click()
 	}
 }
 
@@ -84,7 +90,7 @@ async function dispatchFile(
 }
 
 test("inserts pictures from this device, the clipboard, a drop and the drive; refuses one over 25 MB", async ({ page, browserName }) => {
-	const toolbar = await openDocument(page, "w3-headers.docx")
+	await openDocument(page, "w3-headers.docx")
 	const pictures = page.locator(".fo-docx-page image")
 
 	await caretAtEnd(page)
@@ -94,14 +100,14 @@ test("inserts pictures from this device, the clipboard, a drop and the drive; re
 	// This device: the file chooser.
 	const chooser = page.waitForEvent("filechooser")
 
-	await insertMenu(page, toolbar, preview.previewDocxInsertPicture, preview.previewDocxPictureFromDevice)
+	await insertFrom(page, INSERT, ILLUSTRATIONS, preview.previewDocxInsertPicture, preview.previewDocxPictureFromDevice)
 	await (await chooser).setFiles({ name: "w3-picture.svg", mimeType: "image/svg+xml", buffer: svgPictureBytes() })
 	await expect(pictures).toHaveCount(before + 1, { timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	// Over 25 MB: refused from its size.
 	const large = page.waitForEvent("filechooser")
 
-	await insertMenu(page, toolbar, preview.previewDocxInsertPicture, preview.previewDocxPictureFromDevice)
+	await insertFrom(page, INSERT, ILLUSTRATIONS, preview.previewDocxInsertPicture, preview.previewDocxPictureFromDevice)
 	await (await large).setFiles({ name: "w3-picture-large.png", mimeType: "image/png", buffer: largePictureBytes() })
 	await expect(page.getByText(preview.previewDocxPictureTooLarge)).toBeVisible()
 	await expect(pictures).toHaveCount(before + 1)
@@ -127,7 +133,7 @@ test("inserts pictures from this device, the clipboard, a drop and the drive; re
 	await expect(pictures).toHaveCount(before + inserted, { timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	// The drive: its picker offers the pictures of the fixture tree.
-	await insertMenu(page, toolbar, preview.previewDocxInsertPicture, preview.previewDocxPictureFromDrive)
+	await insertFrom(page, INSERT, ILLUSTRATIONS, preview.previewDocxInsertPicture, preview.previewDocxPictureFromDrive)
 
 	const picker = page.getByRole("dialog", { name: preview.previewDocxPictureDriveTitle })
 
@@ -139,7 +145,7 @@ test("inserts pictures from this device, the clipboard, a drop and the drive; re
 })
 
 test("inserts a table of contents and updates the document's from its chip", async ({ page }) => {
-	const toolbar = await openDocument(page, "w3-toc.docx")
+	await openDocument(page, "w3-toc.docx")
 	const pages = page.locator(".fo-docx-page")
 
 	// The document's table, empty until updated.
@@ -153,7 +159,7 @@ test("inserts a table of contents and updates the document's from its chip", asy
 
 	// A new one at the end.
 	await caretAtEnd(page)
-	await insertMenu(page, toolbar, preview.previewDocxInsertToc)
+	await insertFrom(page, preview.previewDocxRibbonTabReferences, preview.previewDocxRibbonToc, preview.previewDocxInsertToc)
 	await page
 		.getByRole("dialog", { name: preview.previewDocxTocTitle })
 		.getByRole("button", { name: preview.previewDocxInsertAction })
@@ -162,11 +168,11 @@ test("inserts a table of contents and updates the document's from its chip", asy
 })
 
 test("inserts a link and a footnote", async ({ page }) => {
-	const toolbar = await openDocument(page, "w3-headers.docx")
+	await openDocument(page, "w3-headers.docx")
 	const pages = page.locator(".fo-docx-page")
 
 	await caretAtEnd(page)
-	await insertMenu(page, toolbar, preview.previewDocxInsertLink)
+	await insertFrom(page, INSERT, preview.previewOfficeRibbonLinks, preview.previewDocxInsertLink)
 
 	const link = page.getByRole("dialog", { name: preview.previewDocxLinkTitle })
 
@@ -180,7 +186,7 @@ test("inserts a link and a footnote", async ({ page }) => {
 	await link.getByRole("button", { name: preview.previewDocxInsertAction }).click()
 	await expect(pages.getByText("E2E link text")).toBeVisible()
 
-	await insertMenu(page, toolbar, preview.previewDocxInsertNotes, preview.previewDocxInsertFootnote)
+	await insertFrom(page, preview.previewDocxRibbonTabReferences, preview.previewDocxInsertNotes, preview.previewDocxInsertFootnote)
 	await page.keyboard.type("E2E footnote text")
 	await expect(pages.getByText("E2E footnote text")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 })

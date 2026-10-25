@@ -5,9 +5,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { DOCX_EDITOR_COMMANDS, NO_REVIEW, NO_VALUES, type DocxEditorSnapshot, type DocxTableContext } from "@filen/office/core/docx/edit"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxObjectPress } from "@filen/office/react/docx/editor"
-import { slotCommands, themeSwatches, type DocxSwatch } from "@/features/preview/components/docxEditor.logic"
+import { slotCommands } from "@/features/preview/components/docxEditor.logic"
 
-// The Table group's commands and dialogs, and dragging a column border (its direction turned in a
+// The Table tab's groups and dialogs, and dragging a column border (its direction turned in a
 // right-to-left table).
 
 const border = vi.hoisted(() => ({ value: undefined as import("@filen/office/core/docx/paged").DocxTableBorder | undefined }))
@@ -17,7 +17,7 @@ vi.mock("@filen/office/core/docx/paged", async () => ({
 	tableBorderOf: () => border.value
 }))
 
-const { DocxTableMenu, DocxTableSplitDialog } = await import("@/features/preview/components/docxTableMenu")
+const { DocxTableSplitDialog, TableAlignment, TableDesign, TableRowsColumns } = await import("@/features/preview/components/docxTableMenu")
 const { DocxTableBorderDrag } = await import("@/features/preview/components/docxTableBorderDrag")
 
 const TABLE: DocxTableContext = {
@@ -73,26 +73,31 @@ function snapshot(table: DocxTableContext | null, enabled: Partial<DocxEditorSna
 	}
 }
 
-function renderMenu(state: DocxEditorSnapshot, readOnly = false, theme: readonly (readonly DocxSwatch[])[] = []) {
+// The Table tab's groups, as the ribbon places them.
+function renderGroups(state: DocxEditorSnapshot, readOnly = false) {
 	const execute = vi.fn()
-	const requestInput = vi.fn()
+	const props = {
+		commands: slotCommands("table"),
+		snapshot: state,
+		readOnly,
+		apple: false,
+		execute,
+		surface: "pages" as const,
+		theme: [],
+		inputRequest: null,
+		requestInput: vi.fn(),
+		onInputDone: vi.fn()
+	}
 
 	render(
-		<DocxTableMenu
-			commands={slotCommands("table")}
-			snapshot={state}
-			readOnly={readOnly}
-			apple={false}
-			execute={execute}
-			surface="pages"
-			theme={theme}
-			inputRequest={null}
-			requestInput={requestInput}
-			onInputDone={vi.fn()}
-		/>
+		<>
+			<TableRowsColumns {...props} />
+			<TableDesign {...props} />
+			<TableAlignment {...props} />
+		</>
 	)
 
-	return { execute, requestInput }
+	return { execute }
 }
 
 afterEach(() => {
@@ -100,84 +105,37 @@ afterEach(() => {
 	border.value = undefined
 })
 
-describe("DocxTableMenu", () => {
-	it("closes the menu once the header row is switched, as a command does", async () => {
-		const { execute } = renderMenu(snapshot(TABLE))
+describe("the Table tab's groups", () => {
+	it("switch the header row and set the table's and the cells' alignment, as the table has them", async () => {
+		const { execute } = renderGroups(snapshot(TABLE))
 
-		fireEvent.click(screen.getByRole("button", { name: "Table" }))
-		fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Header row" }))
+		expect(screen.getByRole("button", { name: "Header row" }).getAttribute("aria-pressed")).toBe("true")
+		fireEvent.click(screen.getByRole("button", { name: "Header row" }))
 		expect(execute).toHaveBeenLastCalledWith({ type: "table.row.header" })
+		fireEvent.click(screen.getByRole("button", { name: "Table alignment" }))
+		expect((await screen.findByRole("menuitemradio", { name: "Center" })).getAttribute("aria-checked")).toBe("true")
+		fireEvent.click(screen.getByRole("menuitemradio", { name: "End" }))
+		expect(execute).toHaveBeenLastCalledWith({ type: "table.align", align: "end" })
 		await waitFor(() => {
-			expect(screen.queryByRole("menuitemcheckbox", { name: "Header row" })).toBeNull()
+			expect(screen.queryByRole("menu")).toBeNull()
 		})
+		fireEvent.click(screen.getByRole("button", { name: "Cell alignment" }))
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Bottom" }))
+		expect(execute).toHaveBeenLastCalledWith({ type: "table.cell.vAlign", align: "bottom" })
 	})
 
-	it("runs the table's commands, asks for the split's size, and shows the table's state", async () => {
-		const { execute, requestInput } = renderMenu(snapshot(TABLE, { "table.cells.merge": false }))
-
-		fireEvent.click(screen.getByRole("button", { name: "Table" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Insert row below" }))
-		expect(execute).toHaveBeenLastCalledWith({ type: "table.row.insertBelow" })
-
-		fireEvent.click(screen.getByRole("button", { name: "Table" }))
-		expect((await screen.findByRole("menuitem", { name: "Merge cells" })).getAttribute("aria-disabled")).toBe("true")
-		expect(screen.getByRole("menuitemcheckbox", { name: "Header row" }).getAttribute("aria-checked")).toBe("true")
-		fireEvent.click(screen.getByRole("menuitem", { name: "Split cells…" }))
-		expect(requestInput).toHaveBeenLastCalledWith("table.cell.split")
-		expect(execute).toHaveBeenCalledTimes(1)
-
-		fireEvent.click(screen.getByRole("button", { name: "Table" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Table style" }))
-		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Grid Table 4" }))
-		expect(execute).toHaveBeenLastCalledWith({ type: "table.style", styleId: "GridTable4" })
-
-		fireEvent.click(screen.getByRole("button", { name: "Table" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Shading" }))
-		expect((await screen.findByRole("button", { name: "Red" })).getAttribute("aria-pressed")).toBe("true")
-		fireEvent.click(screen.getByRole("button", { name: "No color" }))
-		expect(execute).toHaveBeenLastCalledWith({ type: "table.cell.shading", fill: null })
-	})
-
-	it("shades cells with a theme colour by its reference, and marks the cells' theme colour", async () => {
-		const theme = themeSwatches(name => (name === "dark1" || name === "text1" ? "000000" : "4472C4"))
-		const tinted = theme[1]?.find(swatch => swatch.key.startsWith("theme:accent1/tint:"))
-
-		if (tinted === undefined) throw new Error("no accent1 tint")
-
-		const { execute } = renderMenu(snapshot({ ...TABLE, shading: tinted.key }), false, theme)
-
-		fireEvent.click(screen.getByRole("button", { name: "Table" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Shading" }))
-
-		const pressed = (await screen.findAllByRole("button")).filter(button => button.getAttribute("aria-pressed") === "true")
-
-		const [chosen] = pressed
-
-		if (chosen === undefined || pressed.length !== 1) throw new Error("not one colour marked")
-
-		fireEvent.click(chosen)
-		expect(execute).toHaveBeenLastCalledWith({
-			type: "table.cell.shading",
-			fill: tinted.rgb,
-			theme: "accent1",
-			tint: tinted.color.kind === "theme" ? tinted.color.tint : undefined
-		})
-
-		// A standard colour goes as itself.
-		fireEvent.click(await screen.findByRole("button", { name: "Red" }))
-		expect(execute).toHaveBeenLastCalledWith({ type: "table.cell.shading", fill: "FF0000" })
-	})
-
-	it("is not shown outside a table, and offers nothing that writes while read-only", async () => {
-		renderMenu(snapshot(null))
-		expect(screen.queryByRole("button", { name: "Table" })).toBeNull()
+	it("show nothing outside a table, and nothing that writes while read-only", () => {
+		renderGroups(snapshot(null))
+		expect(screen.queryByRole("button", { name: "Header row" })).toBeNull()
 		cleanup()
 
-		renderMenu(snapshot(TABLE), true)
-		fireEvent.click(screen.getByRole("button", { name: "Table" }))
-		expect((await screen.findByRole("menuitem", { name: "Delete table" })).getAttribute("aria-disabled")).toBe("true")
+		renderGroups(snapshot(TABLE), true)
+		expect(screen.getByRole("button", { name: "Insert row above" }).hasAttribute("disabled")).toBe(true)
+		expect(screen.getByRole("button", { name: "Header row" }).hasAttribute("disabled")).toBe(true)
 	})
+})
 
+describe("DocxTableSplitDialog", () => {
 	it("splits the cell into the rows and columns typed", () => {
 		const execute = vi.fn(() => true)
 		const onInputDone = vi.fn()

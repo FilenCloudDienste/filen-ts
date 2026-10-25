@@ -3,6 +3,7 @@ import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, svgPictureBytes, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
+import { ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // The DOCX editor's editing UI in a real browser: the Table group and a column border dragged on the page, a
@@ -69,7 +70,7 @@ async function openDocument(page: Page, listbox: Locator, name: string, marker: 
 
 async function closeDocument(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
-	await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toHaveCount(0)
+	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
 }
 
 async function upload(page: Page, listbox: Locator, runId: string, fixtures: readonly DocxFixtureName[]): Promise<Record<string, string>> {
@@ -84,22 +85,22 @@ async function upload(page: Page, listbox: Locator, runId: string, fixtures: rea
 	return names
 }
 
-test("tables: the Table group's commands and a column border dragged on the page", async ({ page }) => {
+test("tables: the Table tab's commands and a column border dragged on the page", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
 
 	await withScratchDirectory(page, "docx-editing-tables", async ({ listbox, runId }) => {
 		const names = await upload(page, listbox, runId, ["w3-tables.docx", "w3-rtl-table.docx"])
-		const tableGroup = page.getByRole("button", { name: preview.previewDocxTableGroup, exact: true })
+		const tableTab = page.getByRole("tab", { name: preview.previewDocxTableGroup, exact: true })
 
 		await openDocument(page, listbox, names["w3-tables.docx"] ?? "", DOCX_FIXTURE_TEXT["w3-tables.docx"])
-		await expect(tableGroup).toHaveCount(0)
+		await expect(tableTab).toHaveCount(0)
 		await pageText(page, "A1").click()
-		await expect(tableGroup).toBeVisible()
+		await expect(tableTab).toBeVisible()
 
 		// A row below the caret's.
-		await tableGroup.click()
-		await page.getByRole("menuitem", { name: preview.previewDocxTableRowBelow }).click()
-		await expect(page.getByRole("button", { name: preview.previewDocxTableGroup, exact: true })).toBeVisible()
+		await tableTab.click()
+		await (await ribbonButton(page, page, preview.previewDocxRibbonRowsColumns, preview.previewDocxTableRowBelow)).click()
+		await expect(tableTab).toBeVisible()
 
 		// The border between the first two columns, dragged right: the second column's text moves with it.
 		const a1 = await pageText(page, "A1").boundingBox()
@@ -124,7 +125,7 @@ test("tables: the Table group's commands and a column border dragged on the page
 		await pageText(page, "A1").click({ button: "right" })
 		await page.getByRole("menuitem", { name: preview.previewDocxTableDelete }).click()
 		await expect(pageText(page, "A1")).toHaveCount(0)
-		await expect(tableGroup).toHaveCount(0)
+		await expect(tableTab).toHaveCount(0)
 		await closeDocumentDiscarding(page)
 
 		// Right to left: the border's column is the one on its right, a drag to the left widens it.
@@ -164,7 +165,7 @@ async function closeDocumentDiscarding(page: Page): Promise<void> {
 		.getByRole("alertdialog", { name: preview.previewUnsavedChangesTitle })
 		.getByRole("button", { name: preview.previewDiscardAction })
 		.click()
-	await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toHaveCount(0)
+	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
 }
 
 test("keyboard: Tab moves through a table's cells and adds a row from the last, and changes a list's level", async ({ page }) => {
@@ -199,7 +200,8 @@ test("keyboard: Tab moves through a table's cells and adds a row from the last, 
 
 		// A bulleted paragraph: Tab at its start takes it a level down, Shift+Tab back.
 		await pageText(page, "After the table.").click()
-		await page.getByRole("button", { name: preview.previewDocxBulletList, exact: true }).click()
+		await ribbonTab(page, preview.previewOfficeRibbonTabHome)
+		await (await ribbonButton(page, page, preview.previewDocxRibbonParagraph, preview.previewDocxBulletList)).click()
 		await page.keyboard.press("Home")
 
 		const level0 = await x("After the table.")
@@ -214,28 +216,37 @@ test("keyboard: Tab moves through a table's cells and adds a row from the last, 
 	})
 })
 
-// The toolbar at a phone's width in page view: its groups fit the row (what does not leaves for the menus), and
-// the ⋯ menu is in it and stays open once pressed.
-async function expectToolbarFits(page: Page): Promise<void> {
-	const toolbar = page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })
-	const more = page.getByRole("button", { name: preview.previewDocxMoreTools })
-
-	await expect
-		.poll(() => toolbar.evaluate(row => [...row.children].every(child => child.scrollWidth <= child.clientWidth + 1)))
-		.toBe(true)
-
-	const box = await more.boundingBox()
+// The ribbon at a phone's width in page view: its tab row scrolls, its command row fits (what does not goes into the
+// overflow menu, which is in it and opens).
+async function expectRibbonFits(page: Page): Promise<void> {
+	const row = ribbonCommands(page)
+	const more = row.getByRole("button", { name: preview.previewOfficeRibbonMore, exact: true })
 	const width = page.viewportSize()?.width ?? 0
 
+	await expect.poll(() => row.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+
+	const box = await row.boundingBox()
+
 	expect(box !== null && box.x >= 0 && box.x + box.width <= width).toBe(true)
-	await more.click()
-	await page.waitForTimeout(400)
-	await expect(page.getByRole("menuitemcheckbox", { name: preview.previewDocxMobileView })).toBeVisible()
-	await page.keyboard.press("Escape")
-	await expect(page.getByRole("menuitemcheckbox", { name: preview.previewDocxMobileView })).toHaveCount(0)
+
+	if ((await more.count()) > 0) {
+		const at = await more.boundingBox()
+
+		expect(at !== null && at.x >= 0 && at.x + at.width <= width).toBe(true)
+		await more.click()
+		await expect(page.locator("[data-ribbon-popup]")).toBeVisible()
+		await more.click()
+		await expect(page.locator("[data-ribbon-popup]")).toHaveCount(0)
+	}
 }
 
-test("toolbar: fits a phone's width in page view, the ⋯ menu in reach", async ({ page }) => {
+// Pages instead of Mobile view, from the View tab's switch.
+async function showPages(page: Page): Promise<void> {
+	await ribbonTab(page, preview.previewOfficeRibbonTabView)
+	await (await ribbonButton(page, page, preview.previewDocxRibbonViews, preview.previewDocxMobileView)).click()
+}
+
+test("ribbon: fits a phone's width in page view, the overflow menu in reach", async ({ page }) => {
 	await withScratchDirectory(page, "docx-editing-toolbar", async ({ listbox, runId }) => {
 		const names = await upload(page, listbox, runId, ["w3-tables.docx"])
 		const viewport = page.viewportSize() ?? { width: 1280, height: 800 }
@@ -243,61 +254,58 @@ test("toolbar: fits a phone's width in page view, the ⋯ menu in reach", async 
 		await openDocument(page, listbox, names["w3-tables.docx"] ?? "", DOCX_FIXTURE_TEXT["w3-tables.docx"])
 
 		try {
-			// A phone's width shows Mobile view: pages chosen from the ⋯ menu.
+			// A phone's width shows Mobile view: pages chosen from the View tab.
 			await page.setViewportSize({ width: 390, height: 800 })
 			await expect(page.locator(".fo-docx-reflow")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-			await page.getByRole("button", { name: preview.previewDocxMoreTools }).click()
-			await page.getByRole("menuitemcheckbox", { name: preview.previewDocxMobileView }).click()
+			await showPages(page)
 			await expect(pageText(page, "A1")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+			await ribbonTab(page, preview.previewOfficeRibbonTabHome)
 
 			for (const width of [390, 360, 320]) {
 				await page.setViewportSize({ width, height: 800 })
-				await expectToolbarFits(page)
+				await expectRibbonFits(page)
 			}
 
-			// With the Table group too.
+			// On the Table tab too.
 			await pageText(page, "A1").click()
-			await expect(page.getByRole("button", { name: preview.previewDocxTableGroup, exact: true })).toBeVisible()
+			await ribbonTab(page, preview.previewDocxTableGroup)
 
 			for (const width of [320, 360, 390]) {
 				await page.setViewportSize({ width, height: 800 })
-				await expectToolbarFits(page)
+				await expectRibbonFits(page)
 			}
 		} finally {
 			await page.setViewportSize(viewport)
 		}
 
-		// Back in the document (an Escape on the ⋯ button closes its tooltip first).
 		await pageText(page, "A1").click()
 		await closeDocument(page)
 	})
 })
 
-test("toolbar: a pressed picture's tools fit a phone's width, the rest in the ⋯ menu", async ({ page }) => {
+test("ribbon: a pressed picture's tab fits a phone's width", async ({ page }) => {
 	await withScratchDirectory(page, "docx-editing-toolbar-picture", async ({ listbox, runId }) => {
 		const names = await upload(page, listbox, runId, ["w3-tables.docx"])
 		const viewport = page.viewportSize() ?? { width: 1280, height: 800 }
 		const picture = page.locator(".fo-docx-page image").first()
-		const group = page.getByRole("group", { name: preview.previewDocxPictureGroup })
-		const more = page.getByRole("button", { name: preview.previewDocxMoreTools })
+		const pictureTab = page.getByRole("tab", { name: preview.previewDocxPictureGroup, exact: true })
 
 		await openDocument(page, listbox, names["w3-tables.docx"] ?? "", DOCX_FIXTURE_TEXT["w3-tables.docx"])
 		await clickEnd(lineWith(page, DOCX_FIXTURE_TEXT["w3-tables.docx"]))
 
 		const chooser = page.waitForEvent("filechooser")
 
-		await page.getByRole("button", { name: preview.previewDocxInsertMenu }).click()
-		await page.getByRole("menuitem", { name: preview.previewDocxInsertPicture, exact: true }).click()
+		await ribbonTab(page, preview.previewOfficeRibbonTabInsert)
+		await (await ribbonButton(page, page, preview.previewOfficeRibbonIllustrations, preview.previewDocxInsertPicture)).click()
 		await page.getByRole("menuitem", { name: preview.previewDocxPictureFromDevice, exact: true }).click()
 		await (await chooser).setFiles({ name: "w3-picture.svg", mimeType: "image/svg+xml", buffer: svgPictureBytes() })
 		await expect(picture).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 		try {
-			// Pages at a phone's width, chosen from the ⋯ menu.
+			// Pages at a phone's width, chosen from the View tab.
 			await page.setViewportSize({ width: 390, height: 800 })
 			await expect(page.locator(".fo-docx-reflow")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-			await more.click()
-			await page.getByRole("menuitemcheckbox", { name: preview.previewDocxMobileView }).click()
+			await showPages(page)
 			await expect(picture).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 			// The page's text layer is over it: a press where it is drawn.
 			const box = await picture.boundingBox()
@@ -307,26 +315,18 @@ test("toolbar: a pressed picture's tools fit a phone's width, the rest in the �
 			}
 
 			await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
-			await expect(group).toBeVisible()
+			await expect(pictureTab).toBeVisible()
+			await pictureTab.click()
 
 			for (const width of [390, 360, 320]) {
 				await page.setViewportSize({ width, height: 800 })
-				await expect(group).toBeVisible()
-				await expectToolbarFits(page)
-
-				// Delete picture: in the group, or in the ⋯ menu once the row has no room for it.
-				if ((await group.getByRole("button", { name: preview.previewDocxPictureDelete }).count()) === 0) {
-					await more.click()
-					await expect(page.getByRole("menuitem", { name: preview.previewDocxPictureDelete })).toBeVisible()
-					await page.keyboard.press("Escape")
-				}
+				await expectRibbonFits(page)
 			}
 
-			// At 320 px only the first tool stays; Delete picture from the ⋯ menu deletes it.
-			await expect(group.getByRole("button", { name: preview.previewDocxPictureWrap })).toBeVisible()
-			await more.click()
-			await page.getByRole("menuitem", { name: preview.previewDocxPictureDelete }).click()
+			// Delete picture deletes it, wherever the row put it.
+			await (await ribbonButton(page, page, preview.previewDocxPictureGroup, preview.previewDocxPictureDelete)).click()
 			await expect(page.locator(".fo-docx-page image")).toHaveCount(0)
+			await expect(pictureTab).toHaveCount(0)
 		} finally {
 			await page.setViewportSize(viewport)
 		}
@@ -381,7 +381,7 @@ test("forms: a checkbox ticked, a dropdown item and a date chosen where the cont
 		await expect(page.getByRole("textbox", { name: preview.previewDocxDropdownItem })).toBeFocused()
 		await page.keyboard.press("Escape")
 		await expect(page.locator("[data-docx-control-popover]")).toHaveCount(0)
-		await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toBeVisible()
+		await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toBeVisible()
 
 		await clickEnd(lineWith(page, "Date: 1/1/2026"))
 		// The popover itself is named "Pick a date" (or the control's title): the field by its exact label in it.
@@ -405,7 +405,7 @@ test("forms: a checkbox ticked, a dropdown item and a date chosen where the cont
 	})
 })
 
-test("format: character formatting from the toolbar, kept by a save", async ({ page }) => {
+test("format: character formatting from the ribbon, kept by a save", async ({ page }) => {
 	await withScratchDirectory(page, "docx-editing-format", async ({ listbox, runId }) => {
 		const names = await upload(page, listbox, runId, ["w3-tables.docx"])
 		const marker = DOCX_FIXTURE_TEXT["w3-tables.docx"]

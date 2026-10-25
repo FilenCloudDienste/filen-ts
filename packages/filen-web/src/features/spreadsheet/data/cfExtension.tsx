@@ -121,6 +121,7 @@ export function useSheetConditional({
 			/>
 		),
 		...(checking && {
+			ribbon: { dataValidation: openDialog },
 			menuItems: (
 				<ContextMenuItem
 					data-sheet-menu="validation"

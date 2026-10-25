@@ -2,11 +2,10 @@
 
 import { createRef } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react"
+import { act, cleanup, render, renderHook, screen } from "@testing-library/react"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxDocument } from "@filen/office/react/docx"
 import type { DocxEditorHandle, DocxReflowProps } from "@filen/office/react/docx/editor"
-import { DropdownMenu, DropdownMenuContent } from "@/components/ui/dropdown-menu"
 import { slotCommands } from "@/features/preview/components/docxEditor.logic"
 import { INITIAL_REFLOW, reflowChosen, reflowCommands, reflowForWidth, useReflowMode } from "@/features/preview/components/docxReflow.logic"
 import "@/lib/i18n"
@@ -25,7 +24,7 @@ vi.mock("@filen/office/react/docx/editor", async () => ({
 	}
 }))
 
-const { DocxReflowMenuItem, DocxReflowSurface } = await import("@/features/preview/components/docxReflowSurface")
+const { DocxReflowSurface } = await import("@/features/preview/components/docxReflowSurface")
 
 afterEach(() => {
 	cleanup()
@@ -94,85 +93,6 @@ describe("Mobile view commands", () => {
 		expect(types(true)).not.toContain("footer.edit")
 		expect(types(true)).toContain("insert.pageBreak")
 		expect(reflowCommands(sections, false)).toBe(sections)
-	})
-})
-
-describe("Mobile view switch", () => {
-	const props = (reflow: boolean, onReflowChange: (reflow: boolean) => void) => ({
-		commands: slotCommands("view"),
-		snapshot: undefined,
-		readOnly: false,
-		apple: false,
-		execute: vi.fn(),
-		surface: reflow ? ("reflow" as const) : ("pages" as const),
-		inputRequest: null,
-		requestInput: vi.fn(),
-		onInputDone: vi.fn(),
-		reflow,
-		onReflowChange
-	})
-
-	it("is a checked item of the ⋯ menu that switches the view", () => {
-		const onReflowChange = vi.fn()
-
-		render(
-			<DropdownMenu open>
-				<DropdownMenuContent>
-					<DocxReflowMenuItem {...props(false, onReflowChange)} />
-				</DropdownMenuContent>
-			</DropdownMenu>
-		)
-
-		const item = screen.getByRole("menuitemcheckbox", { name: "Mobile view" })
-
-		expect(item.getAttribute("aria-checked")).toBe("false")
-
-		fireEvent.click(item)
-
-		expect(onReflowChange).toHaveBeenCalledWith(true)
-	})
-
-	it("closes the ⋯ menu once the view is switched", () => {
-		const onOpenChange = vi.fn()
-
-		render(
-			<DropdownMenu
-				open
-				onOpenChange={onOpenChange}
-			>
-				<DropdownMenuContent>
-					<DocxReflowMenuItem {...props(false, vi.fn())} />
-				</DropdownMenuContent>
-			</DropdownMenu>
-		)
-
-		fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Mobile view" }))
-		expect(onOpenChange.mock.calls[0]?.[0]).toBe(false)
-	})
-
-	it("shows checked in Mobile view and nothing without its command", () => {
-		const { rerender } = render(
-			<DropdownMenu open>
-				<DropdownMenuContent>
-					<DocxReflowMenuItem {...props(true, vi.fn())} />
-				</DropdownMenuContent>
-			</DropdownMenu>
-		)
-
-		expect(screen.getByRole("menuitemcheckbox", { name: "Mobile view" }).getAttribute("aria-checked")).toBe("true")
-
-		rerender(
-			<DropdownMenu open>
-				<DropdownMenuContent>
-					<DocxReflowMenuItem
-						{...props(true, vi.fn())}
-						commands={[]}
-					/>
-				</DropdownMenuContent>
-			</DropdownMenu>
-		)
-
-		expect(screen.queryByRole("menuitemcheckbox")).toBeNull()
 	})
 })
 

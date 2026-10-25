@@ -12,10 +12,10 @@ import {
 } from "@filen/office/core/docx/edit"
 import type { PagedEditor, PagedEditorEvent } from "@filen/office/core/docx/paged"
 import type { DocxObjectPress } from "@filen/office/react/docx/editor"
-import { drawingItems, featureCommands } from "@/features/preview/components/docxEditor.logic"
+import { drawingItems, slotCommands } from "@/features/preview/components/docxEditor.logic"
 import { drawingCrop, setDrawingCrop } from "@/features/preview/components/docxDrawingCrop"
 import { DocxDrawingPress, DocxObjectHandles } from "@/features/preview/components/docxObjectHandles"
-import { DocxDrawingMenu } from "@/features/preview/components/docxDrawingMenu"
+import { DocxDrawingMenu, DocxPictureCrop } from "@/features/preview/components/docxDrawingMenu"
 import { DocxFieldChip } from "@/features/preview/components/docxFieldChip"
 import "@/lib/i18n"
 
@@ -291,15 +291,15 @@ describe("DocxObjectHandles", () => {
 	})
 })
 
-describe("DocxDrawingMenu", () => {
+describe("DocxDrawingMenu and DocxPictureCrop", () => {
 	function renderGroup(surface: "pages" | "reflow", readOnly = false) {
 		const execute = vi.fn()
 		const requestInput = vi.fn()
 
 		render(
 			<DocxDrawingMenu
-				commands={featureCommands("drawings")}
-				items={drawingItems(featureCommands("drawings"), surface)}
+				commands={slotCommands("picture")}
+				items={drawingItems(slotCommands("picture"), surface)}
 				snapshot={snapshot(drawingAt(5))}
 				readOnly={readOnly}
 				apple={false}
@@ -337,19 +337,27 @@ describe("DocxDrawingMenu", () => {
 	it("leaves crop mode on Enter or Escape in the document only: never on one for the find field, a button or a dialog", () => {
 		const execute = vi.fn()
 
+		const props = {
+			commands: slotCommands("picture"),
+			snapshot: snapshot(drawingAt(5)),
+			readOnly: false,
+			apple: false,
+			execute,
+			surface: "pages" as const,
+			inputRequest: null,
+			requestInput: vi.fn(),
+			onInputDone: vi.fn()
+		}
+
+		// The crop mode's keys are the ribbon's, whichever tab shows.
 		render(
-			<DocxDrawingMenu
-				commands={featureCommands("drawings")}
-				items={drawingItems(featureCommands("drawings"), "pages")}
-				snapshot={snapshot(drawingAt(5))}
-				readOnly={false}
-				apple={false}
-				execute={execute}
-				surface="pages"
-				inputRequest={null}
-				requestInput={vi.fn()}
-				onInputDone={vi.fn()}
-			/>
+			<>
+				<DocxPictureCrop {...props} />
+				<DocxDrawingMenu
+					{...props}
+					items={drawingItems(props.commands, "pages")}
+				/>
+			</>
 		)
 		fireEvent.click(screen.getByRole("button", { name: "Crop" }))
 		expect(drawingCrop(execute)).toBe(5)

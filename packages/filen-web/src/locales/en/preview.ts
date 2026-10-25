@@ -16,7 +16,9 @@ import { previewDocxPdf } from "@/locales/en/previewDocx/pdf"
 import { previewDocxSections } from "@/locales/en/previewDocx/sections"
 import { previewDocxMath } from "@/locales/en/previewDocx/math"
 import { previewDocxReflow } from "@/locales/en/previewDocx/reflow"
+import { previewDocxRibbon } from "@/locales/en/previewDocx/ribbon"
 import { previewOfficeShared } from "@/locales/en/previewOffice/shared"
+import { previewOfficeRibbon } from "@/locales/en/previewOffice/ribbon"
 import { previewSheetViewer } from "@/locales/en/previewSheet/viewer"
 import { previewSheetFormat } from "@/locales/en/previewSheet/format"
 import { previewSheetSave } from "@/locales/en/previewSheet/save"
@@ -33,6 +35,7 @@ import { previewSheetPrint } from "@/locales/en/previewSheet/print"
 import { previewSheetFormats } from "@/locales/en/previewSheet/formats"
 import { previewSheetObjects } from "@/locales/en/previewSheet/objects"
 import { previewSheetCharts } from "@/locales/en/previewSheet/charts"
+import { previewSheetRibbon } from "@/locales/en/previewSheet/ribbon"
 
 export const preview = {
 	// ── Header ───────────────────────────────────────────────────────────────
@@ -724,7 +727,9 @@ export const preview = {
 	...previewDocxSections,
 	...previewDocxMath,
 	...previewDocxReflow,
+	...previewDocxRibbon,
 	...previewOfficeShared,
+	...previewOfficeRibbon,
 	...previewSheetViewer,
 	...previewSheetSave,
 	...previewSheetFormat,
@@ -740,5 +745,6 @@ export const preview = {
 	...previewSheetPrint,
 	...previewSheetFormats,
 	...previewSheetObjects,
-	...previewSheetCharts
+	...previewSheetCharts,
+	...previewSheetRibbon
 } as const

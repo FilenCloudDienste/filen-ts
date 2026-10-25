@@ -29,7 +29,6 @@ import {
 	paperOf,
 	paragraphCommands,
 	paragraphForm,
-	slotsWidth,
 	drawingItems,
 	typeAhead,
 	TYPE_AHEAD_MS,
@@ -39,7 +38,6 @@ import {
 	commandActive,
 	commandFeature,
 	editorMarkupView,
-	featureCommands,
 	featureEditable,
 	rowCommands,
 	slotCommands,
@@ -56,8 +54,7 @@ import {
 	sameToolbarSnapshot,
 	shortcutKeys,
 	stepMatch,
-	styleLabel,
-	toolbarFit
+	styleLabel
 } from "@/features/preview/components/docxEditor.logic"
 import { viewOnlyReasonKey, viewOnlyReasons } from "@/features/preview/components/docxViewer.logic"
 import { preview as en } from "@/locales/en/preview"
@@ -160,65 +157,6 @@ describe("docx editor toolbar logic", () => {
 		expect(shortcutKeys("mod+space", false)).toEqual(["Ctrl", "Space"])
 	})
 
-	it("moves groups into the menu as the row narrows, in priority order", () => {
-		const all = {
-			picture: 0,
-			format: 2,
-			find: true,
-			painter: true,
-			style: true,
-			font: true,
-			color: true,
-			lists: true,
-			align: true,
-			clear: true,
-			zoom: true
-		}
-
-		expect(toolbarFit(2000, 0, true, 2)).toEqual(all)
-		expect(toolbarFit(2000, 0)).toEqual({ ...all, format: 0, painter: false, font: false, color: false })
-		expect(toolbarFit(200, 0, true, 2)).toEqual({
-			picture: 0,
-			format: 0,
-			find: false,
-			painter: false,
-			style: false,
-			font: false,
-			color: false,
-			lists: false,
-			align: false,
-			clear: false,
-			zoom: false
-		})
-		// The font pickers go before the lists and alignment, the colours after them.
-		const narrow = toolbarFit(860, 0, true, 2)
-
-		expect(narrow.font).toBe(true)
-		expect(narrow.color).toBe(false)
-
-		const middle = toolbarFit(640, 0, false, 2)
-
-		expect(middle.style).toBe(true)
-		expect(middle.clear).toBe(false)
-		// Badges take room too.
-		expect(toolbarFit(640, 300, false, 2).style).toBe(false)
-		// Not measured yet: the row as it always was.
-		expect(toolbarFit(0, 0, true, 2)).toMatchObject({ format: 2, find: true, painter: true, style: false })
-	})
-
-	it("fits a phone's row (360 and 390 px windows) with the menus as icons, the formatting tail first to stay", () => {
-		const menus = slotsWidth({ insert: true, review: true, table: false }, false)
-		const table = slotsWidth({ insert: true, review: true, table: true }, false)
-
-		expect(menus).toBeLessThan(slotsWidth({ insert: true, review: true, table: false }))
-		// Inside the row's 8 px padding on each side.
-		expect(toolbarFit(390 - 16, menus, true, 2)).toMatchObject({ format: 2, find: true, painter: false, style: false, zoom: false })
-		expect(toolbarFit(390 - 16, table, true, 2)).toMatchObject({ format: 2, find: false, painter: false })
-		expect(toolbarFit(360 - 16, menus, true, 2)).toMatchObject({ format: 2, find: false, painter: false })
-		expect(toolbarFit(360 - 16, table, true, 2)).toMatchObject({ format: 1, find: false, painter: false })
-		expect(toolbarFit(320 - 16, table, true, 2)).toMatchObject({ format: 0, find: false, painter: false })
-	})
-
 	it("explains read-only editing with keys that exist", () => {
 		expect(editorViewOnlyReasons(["host", "protected", "linkedTextbox"], true, false)).toEqual(["protected", "linkedTextbox"])
 		expect(editorViewOnlyReasons([], false, false)).toEqual(["notWritable"])
@@ -258,7 +196,7 @@ describe("docx command catalogue", () => {
 			"previewDocxAlignJustify"
 		])
 
-		for (const slot of ["insert", "review", "table", "format", "view"] as const) {
+		for (const slot of ["home", "insert", "layout", "references", "review", "view", "table", "picture"] as const) {
 			for (const command of slotCommands(slot)) {
 				expect(commandFeature(command.info.type)).not.toBe("base")
 				expect(COMMAND_LABELS[command.info.type]).toBe(command.label)
@@ -266,17 +204,31 @@ describe("docx command catalogue", () => {
 		}
 	})
 
-	it("offers a feature's labelled commands for its contextual group, in catalogue order", () => {
-		for (const feature of Object.keys(DOCX_COMMAND_CATALOGUE) as (keyof typeof DOCX_COMMAND_CATALOGUE)[]) {
-			const commands = featureCommands(feature)
+	it("offers every labelled command of a landed feature on a ribbon tab, but form controls (used in the document)", () => {
+		const tabs = ["home", "insert", "layout", "references", "review", "view", "table", "picture"] as const
+		const offered = new Set(tabs.flatMap(tab => slotCommands(tab).map(command => command.info.type)))
 
-			expect(commands.map(command => command.info.type)).toEqual(
-				DOCX_EDITOR_COMMANDS.filter(info => commandFeature(info.type) === feature && COMMAND_LABELS[info.type] !== undefined).map(
-					info => info.type
-				)
-			)
-			expect(commands.length > 0).toBe(featureLanded(feature))
+		for (const feature of Object.keys(DOCX_COMMAND_CATALOGUE) as (keyof typeof DOCX_COMMAND_CATALOGUE)[]) {
+			if (feature === "base" || feature === "forms" || !featureLanded(feature)) {
+				continue
+			}
+
+			expect(
+				DOCX_COMMAND_CATALOGUE[feature].some(type => offered.has(type)),
+				feature
+			).toBe(true)
 		}
+
+		// Each command on one tab only.
+		const all = tabs.flatMap(tab => slotCommands(tab).map(command => command.info.type))
+
+		expect(new Set(all).size).toBe(all.length)
+		expect(slotCommands("layout").map(command => command.info.type)).toEqual(
+			expect.arrayContaining(["insert.sectionBreak", "page.setup"])
+		)
+		expect(slotCommands("references").map(command => command.info.type)).toEqual(
+			expect.arrayContaining(["toc.insert", "note.insertFootnote", "field.updateAll"])
+		)
 	})
 })
 
@@ -474,7 +426,7 @@ describe("formatting, tables and page setup logic", () => {
 		}
 	})
 
-	it("offers inserting a table or a form control in the Insert menu, and the header toggles only on the chip", () => {
+	it("offers inserting a table or a form control on the Insert tab, and the header toggles only on the chip", () => {
 		const insert = slotCommands("insert").map(command => command.info.type)
 
 		expect(insert).toContain("table.insert")
@@ -717,24 +669,6 @@ describe("context menu and row room for pictures and links", () => {
 		expect(atChange["review.reject"]).toBe("run")
 	})
 
-	it("keeps room in the row for the Insert and Review menus and the contextual Table group", () => {
-		const none = slotsWidth({ insert: false, review: false, table: false })
-		const menus = slotsWidth({ insert: true, review: true, table: false })
-
-		expect(none).toBe(0)
-		expect(menus).toBeGreaterThan(0)
-		expect(slotsWidth({ insert: true, review: true, table: true })).toBeGreaterThan(menus)
-
-		// The narrowest row that keeps the lists with the menus loses them to a picture's tools.
-		let width = 300
-
-		while (!toolbarFit(width, menus, true, 2).lists) {
-			width += 10
-		}
-
-		expect(toolbarFit(width, menus, true, 2, 5).lists).toBe(false)
-	})
-
 	it("finds a list's type-ahead entry as the ARIA APG does", () => {
 		const texts = ["Red", "Green", "Grey", "Grey blue", "rose"]
 
@@ -752,23 +686,15 @@ describe("context menu and row room for pictures and links", () => {
 		expect(TYPE_AHEAD_MS).toBe(500)
 	})
 
-	it("fits the Picture group item by item at a phone's width, before the formatting tail", () => {
-		const menus = slotsWidth({ insert: true, review: true, table: false }, false)
-
-		expect(drawingItems(featureCommands("drawings"), "pages")).toEqual([
+	it("offers the Picture tab's items in Word's order, without cropping in Mobile view", () => {
+		expect(drawingItems(slotCommands("picture"), "pages")).toEqual([
 			"drawing.wrap",
 			"drawing.rotate",
 			"drawing.crop",
 			"drawing.altText",
 			"drawing.delete"
 		])
-		expect(drawingItems(featureCommands("drawings"), "reflow")).not.toContain("drawing.crop")
-		// Inside the row's padding: 390, 360 and 320 px windows.
-		expect(toolbarFit(390 - 16, menus, true, 2, 5)).toMatchObject({ picture: 3, format: 0, find: false })
-		expect(toolbarFit(360 - 16, menus, true, 2, 5)).toMatchObject({ picture: 2, format: 0 })
-		expect(toolbarFit(320 - 16, menus, true, 2, 5)).toMatchObject({ picture: 1, format: 0 })
-		expect(toolbarFit(1200, menus, true, 2, 5)).toMatchObject({ picture: 5, format: 2 })
-		expect(toolbarFit(0, menus, true, 2, 5).picture).toBe(5)
+		expect(drawingItems(slotCommands("picture"), "reflow")).not.toContain("drawing.crop")
 	})
 })
 

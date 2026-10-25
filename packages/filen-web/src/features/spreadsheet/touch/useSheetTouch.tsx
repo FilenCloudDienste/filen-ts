@@ -1,9 +1,12 @@
 import { useRef, useState, type ReactNode, type RefObject, type SyntheticEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "@filen/office/core/sheet"
-import { isMacPlatform, type GridSelection, type SheetGridHandle, type SheetGridState } from "@filen/office/react/sheet"
-import type { SheetClipboardCommands, SheetClipboardResult } from "@/features/spreadsheet/clipboard/useSheetClipboard"
+import type { GridSelection, SheetGridHandle, SheetGridState } from "@filen/office/react/sheet"
+import {
+	sayClipboardRefusal,
+	type SheetClipboardCommands,
+	type SheetClipboardResult
+} from "@/features/spreadsheet/clipboard/useSheetClipboard"
 import { SheetTouchMenu } from "@/features/spreadsheet/touch/sheetTouchMenu"
 import "@/features/spreadsheet/touch/sheetTouch.css"
 
@@ -52,11 +55,7 @@ export function useSheetTouch({
 	const shown = menuFor !== null && menuFor === grid.selection && grid.editing === null && range !== undefined
 
 	function done(result: SheetClipboardResult, key: string): void {
-		if (result === "blocked") {
-			toast.error(t("previewSheetClipboardBlocked", { shortcut: isMacPlatform() ? `⌘${key}` : `Ctrl+${key}` }))
-		} else if (result === "tooLarge") {
-			toast.error(t("previewSpreadsheetCopyTooLarge"))
-		}
+		sayClipboardRefusal(result, key, t)
 	}
 
 	function close(): void {
@@ -88,7 +87,7 @@ export function useSheetTouch({
 		paste: canEdit
 			? () => {
 					close()
-					void clipboard.paste().then(result => {
+					void clipboard.paste(false).then(result => {
 						done(result, "V")
 					})
 				}

@@ -1,8 +1,6 @@
 // "preview" namespace, Word document editor — the editor itself: its toolbar row, clipboard and spelling menu, locked
 // parts, saving and the author prompt. Spread into preview.ts; same catalog rules.
 export const previewDocxEditor = {
-	/** Docx editor — accessible name of the formatting toolbar row */
-	previewDocxEditToolbar: "Formatting",
 	/** Docx editor — toolbar button: undo the last change */
 	previewDocxUndo: "Undo",
 	/** Docx editor — toolbar button: redo the change last undone */
@@ -47,8 +45,6 @@ export const previewDocxEditor = {
 	previewDocxIndent: "Increase indent",
 	/** Docx editor — toolbar button: move list item one level out */
 	previewDocxOutdent: "Decrease indent",
-	/** Docx editor — overflow menu trigger holding tools that don't fit and editor options */
-	previewDocxMoreTools: "More tools",
 	/** Docx editor — overflow menu checkbox: save changes automatically after a pause in editing */
 	previewDocxAutosave: "Save automatically",
 	/** Docx editor — toolbar button opening find with the replace field */

@@ -1,51 +1,46 @@
-import { Fragment } from "react"
+import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { Table2Icon } from "lucide-react"
+import {
+	AlignCenterIcon,
+	AlignVerticalJustifyCenterIcon,
+	BetweenHorizontalEndIcon,
+	BetweenHorizontalStartIcon,
+	BetweenVerticalEndIcon,
+	BetweenVerticalStartIcon,
+	Columns3Icon,
+	HeadingIcon,
+	PaintBucketIcon,
+	PaletteIcon,
+	TableCellsMergeIcon,
+	TableCellsSplitIcon,
+	Trash2Icon
+} from "lucide-react"
 import type { DocxCellVAlign, DocxEditorCommand, DocxEditorCommandType, DocxTableAlign } from "@filen/office/core/docx/edit"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import {
 	STANDARD_SWATCHES,
-	keepFocus,
 	type DocxInputChannelProps,
 	type DocxSwatch,
-	type DocxToolbarCommand,
 	type DocxToolbarSlotProps
 } from "@/features/preview/components/docxEditor.logic"
-import { DocxColorGrid } from "@/features/preview/components/docxFormatControls"
+import { DocxColorButton, DocxColorGrid } from "@/features/preview/components/docxFormatControls"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
 import { DocxRowsColumnsDialog } from "@/features/preview/components/docxFields"
-import { Button } from "@/components/ui/button"
-import {
-	DropdownMenu,
-	DropdownMenuCheckboxItem,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuSeparator,
-	DropdownMenuSub,
-	DropdownMenuSubContent,
-	DropdownMenuSubTrigger,
-	DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu"
+import { DocxCommandMenu } from "@/features/preview/components/docxRibbonControls"
+import type { DocxMenuEntry } from "@/features/preview/components/docxRibbon.logic"
+import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu"
 import type { PreviewKey } from "@/lib/i18n"
 
-// The toolbar's contextual Table group, shown while the caret is in a table: rows and columns, merging and
-// splitting cells (a rows × columns dialog), the header row, distributing columns, the table's alignment and
-// style, and the selected cells' alignment and shading (the shared colour picker). Column widths are
-// dragged on the pages (docxTableBorderDrag.tsx).
+// The Word ribbon's contextual Table tab controls (docxRibbonGroups.tsx places them), shown while the caret is in a
+// table: rows and columns, merging and splitting cells (a rows × columns dialog), the header row, shading (the shared
+// colour picker) and the table's style, the table's and the cells' alignment. Column widths are dragged on the pages
+// (docxTableBorderDrag.tsx).
 
-export interface DocxTableMenuProps extends DocxToolbarSlotProps {
+export interface DocxTableTabProps extends DocxToolbarSlotProps {
 	// The theme part of the shading picker.
 	theme: readonly (readonly DocxSwatch[])[]
 }
-
-// Plain commands, by group (a separator between groups).
-const GROUPS: readonly (readonly DocxEditorCommandType[])[] = [
-	["table.row.insertAbove", "table.row.insertBelow", "table.column.insertLeft", "table.column.insertRight"],
-	["table.row.delete", "table.column.delete", "table.delete"],
-	["table.cells.merge", "table.cell.split", "table.distributeColumns"]
-]
 
 const ALIGNS: readonly { value: DocxTableAlign; label: PreviewKey }[] = [
 	{ value: "start", label: "previewDocxTableAlignStart" },
@@ -59,186 +54,277 @@ const V_ALIGNS: readonly { value: DocxCellVAlign; label: PreviewKey }[] = [
 	{ value: "bottom", label: "previewDocxTableCellBottom" }
 ]
 
-export function DocxTableMenu(props: DocxTableMenuProps) {
+function labelOf(props: DocxToolbarSlotProps, type: DocxEditorCommandType): PreviewKey | undefined {
+	return props.commands.find(command => command.info.type === type)?.label
+}
+
+function off(props: DocxToolbarSlotProps, type: DocxEditorCommandType): boolean {
+	return props.snapshot === undefined || props.readOnly || !props.snapshot.enabled[type]
+}
+
+function TableButton({
+	type,
+	icon,
+	pressed,
+	...props
+}: DocxToolbarSlotProps & { type: DocxEditorCommandType; icon: ReactNode; pressed?: boolean | undefined }) {
 	const { t } = useTranslation("preview")
-	const { snapshot, readOnly, commands, requestInput } = props
+	const label = labelOf(props, type)
+
+	return label === undefined ? null : (
+		<RibbonButton
+			label={t(label)}
+			icon={icon}
+			pressed={pressed}
+			disabled={off(props, type)}
+			onClick={() => {
+				if (type === "table.cell.split") {
+					props.requestInput(type)
+				} else {
+					props.execute({ type } as DocxEditorCommand)
+				}
+			}}
+		/>
+	)
+}
+
+// A choice of one (the table's alignment, the cells' alignment, the table's style).
+function ChoiceMenu<T extends string>({
+	label,
+	icon,
+	value,
+	disabled,
+	options,
+	onChoose
+}: {
+	label: string
+	icon: ReactNode
+	value: string
+	disabled: boolean
+	options: readonly { value: T; label: string }[]
+	onChoose: (value: T) => void
+}) {
 	const focus = useCommandMenuFocus()
-	const execute = (command: DocxEditorCommand): void => {
-		props.execute(command)
-		focus.ran()
-	}
-	const table = snapshot?.context.table ?? null
-	const has = (type: DocxEditorCommandType): DocxToolbarCommand | undefined => commands.find(command => command.info.type === type)
-	const off = (type: DocxEditorCommandType): boolean => snapshot === undefined || readOnly || !snapshot.enabled[type]
-	const item = (type: DocxEditorCommandType) => {
-		const command = has(type)
-
-		return command === undefined ? null : (
-			<DropdownMenuItem
-				key={type}
-				disabled={off(type)}
-				onClick={() => {
-					if (type === "table.cell.split") {
-						requestInput(type)
-						focus.kept()
-					} else {
-						execute({ type } as DocxEditorCommand)
-					}
-				}}
-			>
-				{t(command.label)}
-			</DropdownMenuItem>
-		)
-	}
-
-	if (table === null) {
-		return null
-	}
 
 	return (
 		<DropdownMenu onOpenChange={focus.opened}>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="sm"
-						className="shrink-0 gap-1 px-2"
-						onMouseDown={keepFocus}
-					>
-						<Table2Icon />
-						<span className="max-md:sr-only">{t("previewDocxTableGroup")}</span>
-					</Button>
-				}
+			<RibbonMenuTrigger
+				label={label}
+				icon={icon}
+				disabled={disabled}
 			/>
 			<DropdownMenuContent
 				finalFocus={focus.finalFocus}
 				data-preview-surface
+				className="max-h-80 overflow-y-auto"
 			>
-				{GROUPS.map((group, index) => (
-					<Fragment key={group[0]}>
-						{index > 0 ? <DropdownMenuSeparator /> : null}
-						{group.map(item)}
-					</Fragment>
-				))}
-				<DropdownMenuSeparator />
-				{has("table.row.header") === undefined ? null : (
-					<DropdownMenuCheckboxItem
-						checked={table.headerRow}
-						closeOnClick
-						disabled={off("table.row.header")}
-						onClick={() => {
-							execute({ type: "table.row.header" })
-						}}
-					>
-						{t("previewDocxTableHeaderRow")}
-					</DropdownMenuCheckboxItem>
-				)}
-				{has("table.align") === undefined ? null : (
-					<DropdownMenuSub>
-						<DropdownMenuSubTrigger disabled={off("table.align")}>{t("previewDocxTableAlign")}</DropdownMenuSubTrigger>
-						<DropdownMenuSubContent>
-							<DropdownMenuRadioGroup
-								value={table.align ?? ""}
-								onValueChange={(align: DocxTableAlign) => {
-									execute({ type: "table.align", align })
-								}}
-							>
-								{ALIGNS.map(align => (
-									<DropdownMenuRadioItem
-										key={align.value}
-										value={align.value}
-										closeOnClick
-									>
-										{t(align.label)}
-									</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-						</DropdownMenuSubContent>
-					</DropdownMenuSub>
-				)}
-				{has("table.cell.vAlign") === undefined ? null : (
-					<DropdownMenuSub>
-						<DropdownMenuSubTrigger disabled={off("table.cell.vAlign")}>
-							{t("previewDocxTableCellAlign")}
-						</DropdownMenuSubTrigger>
-						<DropdownMenuSubContent>
-							<DropdownMenuRadioGroup
-								value={table.vAlign === "mixed" ? "" : (table.vAlign ?? "top")}
-								onValueChange={(align: DocxCellVAlign) => {
-									execute({ type: "table.cell.vAlign", align })
-								}}
-							>
-								{V_ALIGNS.map(align => (
-									<DropdownMenuRadioItem
-										key={align.value}
-										value={align.value}
-										closeOnClick
-									>
-										{t(align.label)}
-									</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-						</DropdownMenuSubContent>
-					</DropdownMenuSub>
-				)}
-				{has("table.cell.shading") === undefined ? null : (
-					<DropdownMenuSub>
-						<DropdownMenuSubTrigger disabled={off("table.cell.shading")}>{t("previewDocxTableShading")}</DropdownMenuSubTrigger>
-						<DropdownMenuSubContent className="p-3">
-							<DocxColorGrid
-								theme={props.theme}
-								standard={STANDARD_SWATCHES}
-								chosen={table.shading === "mixed" ? undefined : (table.shading ?? "none")}
-								none={{ label: t("previewOfficeColorNone"), key: "none" }}
-								onPick={swatch => {
-									const color = swatch?.color
-
-									// A theme colour keeps its reference (Word writes w:themeFill with the fill).
-									execute(
-										swatch === null
-											? { type: "table.cell.shading", fill: null }
-											: {
-													type: "table.cell.shading",
-													fill: swatch.rgb,
-													...(color?.kind === "theme"
-														? {
-																theme: color.theme,
-																...(color.tint === undefined ? {} : { tint: color.tint }),
-																...(color.shade === undefined ? {} : { shade: color.shade })
-															}
-														: {})
-												}
-									)
-								}}
-							/>
-						</DropdownMenuSubContent>
-					</DropdownMenuSub>
-				)}
-				{has("table.style") === undefined || table.styles.length === 0 ? null : (
-					<DropdownMenuSub>
-						<DropdownMenuSubTrigger disabled={off("table.style")}>{t("previewDocxTableStyle")}</DropdownMenuSubTrigger>
-						<DropdownMenuSubContent className="max-h-80 overflow-y-auto">
-							<DropdownMenuRadioGroup
-								value={table.styleId ?? ""}
-								onValueChange={(styleId: string) => {
-									execute({ type: "table.style", styleId })
-								}}
-							>
-								{table.styles.map(style => (
-									<DropdownMenuRadioItem
-										key={style.id}
-										value={style.id}
-										closeOnClick
-									>
-										{style.name}
-									</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-						</DropdownMenuSubContent>
-					</DropdownMenuSub>
-				)}
+				<DropdownMenuRadioGroup
+					value={value}
+					onValueChange={(next: T) => {
+						onChoose(next)
+						focus.ran()
+					}}
+				>
+					{options.map(option => (
+						<DropdownMenuRadioItem
+							key={option.value}
+							value={option.value}
+							closeOnClick
+						>
+							{option.label}
+						</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
 			</DropdownMenuContent>
 		</DropdownMenu>
+	)
+}
+
+function DeleteMenu(props: DocxToolbarSlotProps) {
+	const { t } = useTranslation("preview")
+	const entries: DocxMenuEntry[] = (["table.row.delete", "table.column.delete", "table.delete"] as const).flatMap(type => {
+		const label = labelOf(props, type)
+
+		return label === undefined ? [] : [{ label: t(label), disabled: off(props, type), command: { type } }]
+	})
+
+	return entries.length === 0 ? null : (
+		<DocxCommandMenu
+			label={t("previewDocxRibbonTableDelete")}
+			icon={<Trash2Icon />}
+			entries={entries}
+			execute={props.execute}
+			requestInput={props.requestInput}
+		/>
+	)
+}
+
+function ShadingButton(props: DocxTableTabProps) {
+	const { t } = useTranslation("preview")
+	const table = props.snapshot?.context.table ?? null
+	const label = labelOf(props, "table.cell.shading")
+
+	if (table === null || label === undefined) {
+		return null
+	}
+
+	return (
+		<DocxColorButton
+			label={t(label)}
+			icon={<PaintBucketIcon />}
+			rgb={table.shading === null || table.shading === "mixed" || table.shading.startsWith("theme:") ? undefined : table.shading}
+			disabled={off(props, "table.cell.shading")}
+		>
+			{close => (
+				<DocxColorGrid
+					theme={props.theme}
+					standard={STANDARD_SWATCHES}
+					chosen={table.shading === "mixed" ? undefined : (table.shading ?? "none")}
+					none={{ label: t("previewOfficeColorNone"), key: "none" }}
+					onPick={swatch => {
+						const color = swatch?.color
+
+						close()
+						// A theme colour keeps its reference (Word writes w:themeFill with the fill).
+						props.execute(
+							swatch === null
+								? { type: "table.cell.shading", fill: null }
+								: {
+										type: "table.cell.shading",
+										fill: swatch.rgb,
+										...(color?.kind === "theme"
+											? {
+													theme: color.theme,
+													...(color.tint === undefined ? {} : { tint: color.tint }),
+													...(color.shade === undefined ? {} : { shade: color.shade })
+												}
+											: {})
+									}
+						)
+					}}
+				/>
+			)}
+		</DocxColorButton>
+	)
+}
+
+// Rows and columns: insert above, below, left and right; Delete ▾.
+export function TableRowsColumns(props: DocxToolbarSlotProps) {
+	return (
+		<>
+			<TableButton
+				{...props}
+				type="table.row.insertAbove"
+				icon={<BetweenHorizontalStartIcon />}
+			/>
+			<TableButton
+				{...props}
+				type="table.row.insertBelow"
+				icon={<BetweenHorizontalEndIcon />}
+			/>
+			<TableButton
+				{...props}
+				type="table.column.insertLeft"
+				icon={<BetweenVerticalStartIcon />}
+			/>
+			<TableButton
+				{...props}
+				type="table.column.insertRight"
+				icon={<BetweenVerticalEndIcon />}
+			/>
+			<DeleteMenu {...props} />
+		</>
+	)
+}
+
+// Merge: merge cells, split cells, distribute columns.
+export function TableMerge(props: DocxToolbarSlotProps) {
+	return (
+		<>
+			<TableButton
+				{...props}
+				type="table.cells.merge"
+				icon={<TableCellsMergeIcon />}
+			/>
+			<TableButton
+				{...props}
+				type="table.cell.split"
+				icon={<TableCellsSplitIcon />}
+			/>
+			<TableButton
+				{...props}
+				type="table.distributeColumns"
+				icon={<Columns3Icon />}
+			/>
+		</>
+	)
+}
+
+// Design: the header row, shading, the table's style.
+export function TableDesign(props: DocxTableTabProps) {
+	const { t } = useTranslation("preview")
+	const table = props.snapshot?.context.table ?? null
+	const style = labelOf(props, "table.style")
+
+	return table === null ? null : (
+		<>
+			<TableButton
+				{...props}
+				type="table.row.header"
+				icon={<HeadingIcon />}
+				pressed={table.headerRow}
+			/>
+			<ShadingButton {...props} />
+			{style === undefined || table.styles.length === 0 ? null : (
+				<ChoiceMenu
+					label={t(style)}
+					icon={<PaletteIcon />}
+					value={table.styleId ?? ""}
+					disabled={off(props, "table.style")}
+					options={table.styles.map(entry => ({ value: entry.id, label: entry.name }))}
+					onChoose={styleId => {
+						props.execute({ type: "table.style", styleId })
+					}}
+				/>
+			)}
+		</>
+	)
+}
+
+// Alignment: the table's, the selected cells'.
+export function TableAlignment(props: DocxToolbarSlotProps) {
+	const { t } = useTranslation("preview")
+	const table = props.snapshot?.context.table ?? null
+	const align = labelOf(props, "table.align")
+	const cellAlign = labelOf(props, "table.cell.vAlign")
+
+	return table === null ? null : (
+		<>
+			{align === undefined ? null : (
+				<ChoiceMenu
+					label={t(align)}
+					icon={<AlignCenterIcon />}
+					value={table.align ?? ""}
+					disabled={off(props, "table.align")}
+					options={ALIGNS.map(option => ({ value: option.value, label: t(option.label) }))}
+					onChoose={value => {
+						props.execute({ type: "table.align", align: value })
+					}}
+				/>
+			)}
+			{cellAlign === undefined ? null : (
+				<ChoiceMenu
+					label={t(cellAlign)}
+					icon={<AlignVerticalJustifyCenterIcon />}
+					value={table.vAlign === "mixed" ? "" : (table.vAlign ?? "top")}
+					disabled={off(props, "table.cell.vAlign")}
+					options={V_ALIGNS.map(option => ({ value: option.value, label: t(option.label) }))}
+					onChoose={value => {
+						props.execute({ type: "table.cell.vAlign", align: value })
+					}}
+				/>
+			)}
+		</>
 	)
 }
 

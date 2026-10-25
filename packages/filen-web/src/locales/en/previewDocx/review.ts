@@ -1,9 +1,5 @@
 // "preview" namespace, Word document editor — comments and tracked changes while editing: the review menu, balloons, the author prompt. Spread into preview.ts; same catalog rules.
 export const previewDocxReview = {
-	/** Docx editor — toolbar menu (and its tooltip) holding track changes, the markup modes, accept/reject and comment navigation, as Word's Review tab */
-	previewDocxReviewMenu: "Review",
-	/** Docx editor — accessible name of the Review menu button while edits are tracked (a dot shows on it) */
-	previewDocxReviewMenuTracking: "Review, track changes on",
 	/** Docx editor — Review menu switch recording every edit as a tracked change with the author's name (Word's "Track Changes") */
 	previewDocxTrackChanges: "Track changes",
 	/** Docx editor — Review menu item accepting the tracked change at the cursor */

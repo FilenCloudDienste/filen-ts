@@ -1,8 +1,6 @@
 // "preview" namespace, spreadsheet viewer — pictures, shapes and other drawing objects. Spread
 // into preview.ts; same catalog rules.
 export const previewSheetObjects = {
-	/** Spreadsheet toolbar — the Insert menu (pictures, a chart, a link, a note) */
-	previewSheetInsertMenu: "Insert",
 	/** Spreadsheet Insert menu — opens the link dialog for the selection, as Ctrl/Cmd+K does */
 	previewSheetInsertLink: "Link…",
 	/** Spreadsheet Insert menu — adds a note to the active cell (or opens its note), as Shift+F2 does */

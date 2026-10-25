@@ -22,7 +22,7 @@ function sampleText(sample: number | null, code: string, date1904: boolean): str
 	return sample === null ? "" : formatValue(sample, code, { date1904 }).text
 }
 
-export function NumberFormatItems({
+function NumberFormatItems({
 	numFmt,
 	sample,
 	date1904,

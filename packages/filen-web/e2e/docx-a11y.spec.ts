@@ -100,7 +100,7 @@ test.describe("editor", () => {
 		await expect(balloon.getByRole("button", { name: preview.previewDocxReplyPlaceholder })).toBeVisible()
 	})
 
-	test("picture handles: kept from the accessibility tree, the Picture group named", async ({ page }) => {
+	test("picture handles: kept from the accessibility tree, the Picture tab's group named", async ({ page }) => {
 		await openInEditor(page, "docx-notes-picture", "described-picture.docx")
 
 		const picture = page.locator(".fo-docx-page image").first()
@@ -116,8 +116,9 @@ test.describe("editor", () => {
 		// A layer around absolutely placed handles (it has no box of its own).
 		await expect(handles).toBeAttached()
 		await expect(handles.locator("[data-fo-handle]")).toHaveCount(8)
-		// Pointer handles only: nothing of them in the accessibility tree; the Picture group is the keyboard's way.
+		// Pointer handles only: nothing of them in the accessibility tree; the ribbon's Picture tab is the keyboard's way.
 		expect(await handles.ariaSnapshot()).toBe("")
+		await page.getByRole("tab", { name: preview.previewDocxPictureGroup, exact: true }).click()
 		await expect(page.getByRole("group", { name: preview.previewDocxPictureGroup })).toBeVisible()
 	})
 

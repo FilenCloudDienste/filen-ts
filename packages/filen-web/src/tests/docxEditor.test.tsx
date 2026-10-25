@@ -487,6 +487,7 @@ describe("DocxEditView", () => {
 
 		typeAtStart(editor, "zebra zebra ")
 		fireEvent.click(screen.getByRole("button", { name: "Find in document" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Find in document" }))
 
 		const field = await screen.findByRole("searchbox", { name: "Find" })
 
@@ -522,22 +523,40 @@ describe("DocxEditView", () => {
 		})
 	})
 
-	it("offers no Mobile view in the ⋯ menu until it is labelled", async () => {
+	it("offers find and replace in Home's Find menu, and Mobile view on the View tab", async () => {
 		await openEditor()
 
-		fireEvent.click(screen.getByRole("button", { name: "More tools" }))
+		fireEvent.click(screen.getByRole("button", { name: "Find in document" }))
 
 		const items = (await screen.findAllByRole("menuitem")).map(item => item.textContent)
 
-		expect(items).toContain("Find and replace")
-		expect(items.some(item => item.includes("Mobile"))).toBe(false)
+		expect(items).toEqual(["Find in document", "Find and replace"])
+		fireEvent.keyDown(screen.getByRole("menuitem", { name: "Find and replace" }), { key: "Escape" })
+		fireEvent.click(screen.getByRole("tab", { name: "View" }))
+		expect((await screen.findByRole("button", { name: "Mobile view" })).getAttribute("aria-pressed")).toBe("false")
 		expect(screen.getByRole("textbox", { name: "report.docx" })).toBeTruthy()
 	})
 
-	it("shows the Table group while the caret is in a table, and the context menu offers its rows and columns", async () => {
+	it("moves between the document and the ribbon with F6 and Shift+F6, landing on the File menu", async () => {
+		await openEditor()
+
+		const area = screen.getByRole("textbox", { name: "report.docx" })
+
+		act(() => {
+			area.focus()
+		})
+		fireEvent.keyDown(area, { key: "F6" })
+		expect(document.activeElement?.textContent).toBe("File")
+		fireEvent.keyDown(document.activeElement ?? area, { key: "F6", shiftKey: true })
+		await waitFor(() => {
+			expect(screen.getByRole("textbox", { name: "report.docx" }).contains(document.activeElement)).toBe(true)
+		})
+	})
+
+	it("shows the Table tab while the caret is in a table, and the context menu offers its rows and columns", async () => {
 		const { editor } = await openEditor()
 
-		expect(screen.queryByRole("button", { name: "Table" })).toBeNull()
+		expect(screen.queryByRole("tab", { name: "Table" })).toBeNull()
 		act(() => {
 			editor.selectParagraph(1)
 			void editor.execute({ type: "table.insert", rows: 2, cols: 3 })
@@ -555,8 +574,8 @@ describe("DocxEditView", () => {
 			editor.select({ pos: inside, affinity: 1, page: 0, line: 0, atom: false })
 		})
 
-		fireEvent.click(await screen.findByRole("button", { name: "Table" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Insert row below" }))
+		fireEvent.click(await screen.findByRole("tab", { name: "Table" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Insert row below" }))
 		await waitFor(() => {
 			expect(editor.snapshot().context.table?.rows).toBe(3)
 		})
@@ -567,7 +586,9 @@ describe("DocxEditView", () => {
 		await waitFor(() => {
 			expect(editor.snapshot().context.table).toBeNull()
 		})
-		expect(screen.queryByRole("button", { name: "Table" })).toBeNull()
+		expect(screen.queryByRole("tab", { name: "Table" })).toBeNull()
+		// Its tab gone, the ribbon shows Home again.
+		expect(screen.getByRole("tab", { name: "Home" }).getAttribute("aria-selected")).toBe("true")
 	})
 
 	it("edits a header with the chip's toggles, and Close goes back to the body", async () => {
@@ -593,12 +614,12 @@ describe("DocxEditView", () => {
 		expect(editor.snapshot().context.story.kind).toBe("body")
 	})
 
-	it("sets up the pages from the ⋯ menu's dialog, prefilled with the section's", async () => {
+	it("sets up the pages from the Layout tab's dialog, prefilled with the section's", async () => {
 		const { editor } = await openEditor()
 		const execute = vi.spyOn(editor, "execute")
 
-		fireEvent.click(screen.getByRole("button", { name: "More tools" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Page setup…" }))
+		fireEvent.click(screen.getByRole("tab", { name: "Layout" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Page setup…" }))
 
 		const top = await screen.findByRole("textbox", { name: "Top (in)" })
 
@@ -618,8 +639,8 @@ describe("DocxEditView", () => {
 	it("runs commands that change nothing while the file cannot be saved", async () => {
 		const { editor } = await openEditor({ writable: false })
 
-		fireEvent.click(screen.getByRole("button", { name: "More tools" }))
-		fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Show field codes" }))
+		fireEvent.click(screen.getByRole("tab", { name: "View" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Show field codes" }))
 		await waitFor(() => {
 			expect(editor.fieldCodes).toBe(true)
 		})
@@ -665,17 +686,16 @@ describe("DocxEditView", () => {
 
 		const { editor } = await openEditor()
 
-		fireEvent.click(await screen.findByRole("button", { name: /^Review/ }))
-		expect(await screen.findByRole("menuitemcheckbox", { name: "Track changes" })).toBeTruthy()
-		expect(screen.queryByRole("menuitemradio", { name: "All markup" })).toBeNull()
-		fireEvent.keyDown(screen.getByRole("menuitemcheckbox", { name: "Track changes" }), { key: "Escape" })
+		fireEvent.click(await screen.findByRole("tab", { name: "Review" }))
+		expect(await screen.findByRole("button", { name: "Track changes" })).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Markup" })).toBeNull()
 		act(() => {
 			void editor.execute({ type: "review.track", on: true })
 		})
 		await waitFor(() => {
 			expect(editor.snapshot().review.tracking).toBe(true)
 		})
-		fireEvent.click(await screen.findByRole("button", { name: /^Review/ }))
+		fireEvent.click(await screen.findByRole("button", { name: "Markup" }))
 		expect(await screen.findByRole("menuitemradio", { name: "All markup" })).toBeTruthy()
 	})
 

@@ -220,40 +220,45 @@ export function commandFeature(type: DocxEditorCommandType): DocxCommandFeature 
 	return FEATURES.get(type)
 }
 
-// Where the toolbar offers a feature's commands: the row's own groups (base), a slot component, or no
-// toolbar place (form controls are used where they are, in the document).
-export type DocxToolbarSlot = "insert" | "review" | "table" | "format" | "view"
+// The ribbon tab that offers a feature's commands: the Home tab's own groups take the base ones (null), the
+// formatting slot is Home's Font and Paragraph groups; form controls have no ribbon place (they are used where
+// they are, in the document).
+export type DocxToolbarSlot = "home" | "insert" | "layout" | "references" | "review" | "view" | "table" | "picture"
 
 const FEATURE_SLOTS: Readonly<Record<DocxCommandFeature, DocxToolbarSlot | null>> = {
 	base: null,
-	formatting: "format",
+	formatting: "home",
 	insert: "insert",
 	comments: "review",
 	review: "review",
 	tables: "table",
 	sections: "insert",
-	notes: "insert",
+	notes: "references",
 	fields: "insert",
 	forms: null,
-	drawings: "insert",
+	drawings: "picture",
 	math: "insert",
 	view: "view"
 }
 
-// Commands offered somewhere else than their feature's slot: inserting a table or a form control is the
-// Insert menu's, the header and footer toggles the header chip's, page setup and field codes the ⋯ menu's
-// and the context menu's.
+// Commands offered somewhere else than their feature's tab: inserting a table, a picture or a form control is
+// Insert's, section breaks and page setup Layout's, the table of contents and updating fields References'; the
+// header and footer toggles are the header chip's, a field's own code the context menu's.
 const COMMAND_SLOTS: Readonly<Partial<Record<DocxEditorCommandType, DocxToolbarSlot | null>>> = {
 	"table.insert": "insert",
+	"image.insert": "insert",
 	"control.insert": "insert",
+	"insert.sectionBreak": "layout",
+	"page.setup": "layout",
+	"toc.insert": "references",
+	"toc.update": "references",
+	"field.updateAll": "references",
 	"header.differentFirst": null,
 	"header.differentOddEven": null,
 	"header.linkToPrevious": null,
 	"header.remove": null,
 	"footer.remove": null,
 	"section.deleteBreak": null,
-	"page.setup": null,
-	"view.fieldCodes": null,
 	"view.fieldCode": null
 }
 
@@ -286,14 +291,9 @@ export function rowCommands(group: DocxEditorCommandGroup): DocxToolbarCommand[]
 	return toolbarCommands((info, feature) => feature === "base" && info.group === group && info.type !== "style.set")
 }
 
-// The labelled commands a toolbar slot offers, in catalogue order.
+// The labelled commands a ribbon tab offers, in catalogue order.
 export function slotCommands(slot: DocxToolbarSlot): DocxToolbarCommand[] {
 	return toolbarCommands((info, feature) => slotOf(info.type, feature) === slot)
-}
-
-// A feature's labelled commands, in catalogue order (a contextual group's: the Picture group's drawings).
-export function featureCommands(feature: DocxCommandFeature): DocxToolbarCommand[] {
-	return toolbarCommands((_info, owner) => owner === feature)
 }
 
 // One form of a command a menu offers as its own item (Insert ▸ Form control ▸ Checkbox): the command to run,
@@ -736,37 +736,6 @@ export function editorMarks(spelling: readonly SpellingMark[], matches: readonly
 	return out
 }
 
-// What the row's items take (px), each with the gap after it, as the browsers lay them out. History, bold,
-// italic and the ⋯ menu always stay (with the formatting menu once offered); the rest leave for the ⋯ menu (or
-// the formatting menu), last first, as the row narrows.
-const BUTTON_WIDTH = 30
-const DIVIDER_WIDTH = 11
-const STYLE_WIDTH = 146
-const FONT_WIDTH = 130 + 66
-const LIST_BUTTONS = 4
-const ALIGN_BUTTONS = 4
-const ZOOM_WIDTH = 50
-// Undo and redo, the divider after them, bold, italic and the ⋯ menu.
-const RESERVED_WIDTH = 5 * BUTTON_WIDTH + DIVIDER_WIDTH
-// Character formatting that always stays: the rest of it leaves for the ⋯ menu.
-export const KEPT_FORMAT_BUTTONS = 2
-
-// What the slots beside the row's groups take (px): the Insert and Review menus, and the contextual Table group
-// while the selection is in a table. `labels`: the menus show their names (a wide window); an icon each
-// otherwise. The Picture group's items are fitted one by one (toolbarFit).
-const INSERT_WIDTH = 80
-const REVIEW_WIDTH = 84
-const TABLE_GROUP_WIDTH = 84
-const ICON_MENU_WIDTH = 36
-
-export function slotsWidth(slots: { insert: boolean; review: boolean; table: boolean }, labels = true): number {
-	return (
-		(slots.insert ? (labels ? INSERT_WIDTH : ICON_MENU_WIDTH) : 0) +
-		(slots.review ? (labels ? REVIEW_WIDTH : ICON_MENU_WIDTH) : 0) +
-		(slots.table ? (labels ? TABLE_GROUP_WIDTH : ICON_MENU_WIDTH) : 0)
-	)
-}
-
 // How long after a typed character the next one adds to a list's type-ahead (ms), as the ARIA APG has it.
 export const TYPE_AHEAD_MS = 500
 
@@ -801,94 +770,11 @@ export type DocxDrawingItem = "drawing.wrap" | "drawing.rotate" | "drawing.crop"
 
 const DRAWING_ITEMS: readonly DocxDrawingItem[] = ["drawing.wrap", "drawing.rotate", "drawing.crop", "drawing.altText", "drawing.delete"]
 
-// The Picture group's items offered, in the order they stay in the row (the last leave for the ⋯ menu first);
-// cropping is the pages' only (its handles are on the page).
+// The Picture tab's items offered, in Word's order; cropping is the pages' only (its handles are on the page).
 export function drawingItems(commands: readonly DocxToolbarCommand[], surface: DocxSurface): DocxDrawingItem[] {
 	return DRAWING_ITEMS.filter(
 		item => (item !== "drawing.crop" || surface === "pages") && commands.some(command => command.info.type === item)
 	)
-}
-
-export interface ToolbarFit {
-	// How many of the Picture group's items stay in the row (drawingItems' order).
-	picture: number
-	// How many of the character formatting buttons after the kept ones stay in the row.
-	format: number
-	find: boolean
-	// The format painter (the formatting menu holds it otherwise).
-	painter: boolean
-	style: boolean
-	// The font and size pickers, and the colour buttons (the formatting menu holds them otherwise).
-	font: boolean
-	color: boolean
-	lists: boolean
-	align: boolean
-	clear: boolean
-	// The zoom percentage (the ⋯ menu's Zoom otherwise).
-	zoom: boolean
-}
-
-const UNMEASURED_FIT: ToolbarFit = {
-	picture: 0,
-	format: 0,
-	find: true,
-	painter: false,
-	style: false,
-	font: false,
-	color: false,
-	lists: false,
-	align: false,
-	clear: false,
-	zoom: true
-}
-
-// Which groups the row has room for at `width` (px, inside its padding), filled in priority order. `extra`:
-// what the badges and slots take; `format`: the formatting controls are offered; `formatButtons`: the
-// character formatting buttons past the kept ones; `pictureItems`: the Picture group's, while a picture is
-// selected (its tools come first, as Word's contextual tab does).
-export function toolbarFit(width: number, extra: number, format = false, formatButtons = 0, pictureItems = 0): ToolbarFit {
-	// Not measured yet: the groups that stayed before the narrow widths moved them.
-	if (width <= 0) {
-		return { ...UNMEASURED_FIT, picture: pictureItems, format: formatButtons, painter: format }
-	}
-
-	let room = width - RESERVED_WIDTH - extra - (format ? BUTTON_WIDTH : 0)
-	const take = (need: number): boolean => {
-		if (room < need) {
-			room = -1
-
-			return false
-		}
-
-		room -= need
-
-		return true
-	}
-
-	let picture = 0
-
-	// The group's divider with its first item.
-	while (picture < pictureItems && take(BUTTON_WIDTH + (picture === 0 ? DIVIDER_WIDTH : 0))) {
-		picture++
-	}
-
-	let shown = 0
-
-	while (shown < formatButtons && take(BUTTON_WIDTH)) {
-		shown++
-	}
-
-	const find = take(BUTTON_WIDTH)
-	const painter = format && take(BUTTON_WIDTH)
-	const zoom = take(ZOOM_WIDTH)
-	const style = take(DIVIDER_WIDTH + STYLE_WIDTH)
-	const font = format && take(FONT_WIDTH)
-	const lists = take(LIST_BUTTONS * BUTTON_WIDTH + DIVIDER_WIDTH)
-	const align = take(ALIGN_BUTTONS * BUTTON_WIDTH + DIVIDER_WIDTH)
-	const color = format && take(2 * BUTTON_WIDTH)
-	const clear = take(BUTTON_WIDTH)
-
-	return { picture, format: shown, find, painter, style, font, color, lists, align, clear, zoom }
 }
 
 type MarkupView = DocxMarkupInfo["view"]

@@ -65,10 +65,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { i18n } from "@/lib/i18n"
 
-// The toolbar's character formatting beyond the row's toggles: font and size pickers, text and highlight
-// colours, a formatting menu (sub/superscript, double strikethrough, caps, grow and shrink, character spacing,
-// clear all) and the format painter. What does not fit the row (the painter too) goes into the formatting menu. Every value
-// comes from the snapshot's `values` (the same object while nothing changes), so typing re-renders nothing.
+// The ribbon's Font group (font and size pickers, growing and shrinking the size, highlight and text colours, a
+// formatting menu: double strikethrough, caps, character spacing, clear all) and its Formatting group (the base toggles
+// with subscript and superscript); the format painter is the Clipboard group's. Every value comes from the snapshot's
+// `values` (the same object while nothing changes), so typing re-renders nothing.
 
 export interface DocxFormatControlsProps extends DocxToolbarSlotProps {
 	// The document's fonts (theme, its own, common), once read.
@@ -77,10 +77,10 @@ export interface DocxFormatControlsProps extends DocxToolbarSlotProps {
 	theme: readonly (readonly DocxSwatch[])[]
 	painter: DocxPainterState
 	onPainterCancel: () => void
-	// Room in the row for the font pickers, the colour buttons and the format painter.
-	showFont: boolean
-	showColor: boolean
-	showPainter: boolean
+	// Font: the pickers, the size steps, the colours and the formatting menu; style: the base toggles (`children`: bold
+	// to strikethrough, clear formatting) with subscript and superscript, a group of their own that a phone keeps.
+	part: "font" | "style"
+	children?: ReactNode
 }
 
 // The colour picker lives in a leaf the spreadsheet toolbar shares without reaching the editor.
@@ -127,7 +127,7 @@ function textColor(swatch: DocxSwatch | null): DocxTextColor {
 }
 
 // A toolbar button opening a colour picker: its icon over a bar of the colour in effect.
-function ColorButton({
+export function DocxColorButton({
 	label,
 	icon,
 	rgb,
@@ -389,12 +389,19 @@ export function DocxFormatControls(props: DocxFormatControlsProps) {
 	const has = (type: DocxEditorCommandType): DocxToolbarCommand | undefined => commands.find(command => command.info.type === type)
 	const off = (type: DocxEditorCommandType): boolean =>
 		snapshot === undefined || has(type) === undefined || (readOnly && has(type)?.info.write === true) || !snapshot.enabled[type]
+	// The formatting menu's toggles; subscript and superscript are buttons of the row.
 	const toggles: readonly { type: DocxEditorCommandType; on: boolean }[] = [
-		{ type: "format.superscript", on: values?.vertAlign === "superscript" },
-		{ type: "format.subscript", on: values?.vertAlign === "subscript" },
 		{ type: "format.doubleStrike", on: values?.doubleStrike === "on" },
 		{ type: "format.smallCaps", on: values?.smallCaps === "on" },
 		{ type: "format.allCaps", on: values?.allCaps === "on" }
+	]
+	const scripts: readonly { type: DocxEditorCommandType; on: boolean; icon: ReactNode }[] = [
+		{ type: "format.subscript", on: values?.vertAlign === "subscript", icon: <SubscriptIcon /> },
+		{ type: "format.superscript", on: values?.vertAlign === "superscript", icon: <SuperscriptIcon /> }
+	]
+	const steps: readonly { type: "font.grow" | "font.shrink"; icon: ReactNode }[] = [
+		{ type: "font.grow", icon: <AArrowUpIcon /> },
+		{ type: "font.shrink", icon: <AArrowDownIcon /> }
 	]
 	const chosenColor = values === undefined ? undefined : single(values.color)
 	const chosenHighlight = values === undefined ? undefined : single(values.highlight)
@@ -404,8 +411,6 @@ export function DocxFormatControls(props: DocxFormatControlsProps) {
 			? undefined
 			: HIGHLIGHT_SWATCHES.find(swatch => swatch.name === chosenHighlight)?.rgb
 	const spacing = values === undefined ? undefined : single(values.charSpacing)
-	const fontShown = props.showFont && has("font.family") !== undefined
-	const colorShown = props.showColor && has("color.text") !== undefined
 	const pickColor = (swatch: DocxSwatch | null): void => {
 		execute({ type: "color.text", color: textColor(swatch) })
 	}
@@ -414,293 +419,238 @@ export function DocxFormatControls(props: DocxFormatControlsProps) {
 
 		execute(command)
 	}
-	const colorGrid = (close: () => void): ReactNode => (
-		<DocxColorGrid
-			theme={props.theme}
-			standard={STANDARD_SWATCHES}
-			chosen={chosenColor}
-			none={{ label: t("previewOfficeColorAutomatic"), key: "auto" }}
-			onPick={swatch => {
-				close()
-				pickColor(swatch)
-			}}
-		/>
-	)
-	const highlightGrid = (close: () => void): ReactNode => (
-		<HighlightGrid
-			chosen={chosenHighlight}
-			onPick={name => {
-				close()
-				pickHighlight(name)
-			}}
-		/>
-	)
+	const hasMenu =
+		toggles.some(toggle => has(toggle.type) !== undefined) || has("font.spacing") !== undefined || has("format.clearAll") !== undefined
+
+	if (props.part === "style") {
+		return (
+			<>
+				{props.children}
+				{scripts.map(script => {
+					const command = has(script.type)
+
+					return command === undefined ? null : (
+						<TooltipIconButton
+							key={script.type}
+							label={t(command.label)}
+							disabled={off(script.type)}
+							pressed={script.on}
+							className={cn(script.on && "bg-accent text-foreground")}
+							onMouseDown={keepFocus}
+							onClick={() => {
+								props.execute({ type: script.type } as DocxEditorCommand)
+							}}
+						>
+							{script.icon}
+						</TooltipIconButton>
+					)
+				})}
+			</>
+		)
+	}
 
 	return (
 		<>
-			{fontShown ? (
-				<>
-					<FontPicker
-						fonts={props.fonts}
-						font={values?.font ?? null}
-						disabled={off("font.family")}
-						execute={execute}
-						focus={focus}
-					/>
-					{has("font.size") === undefined ? null : (
-						<SizePicker
-							size={values?.size ?? null}
-							disabled={off("font.size")}
-							execute={execute}
-							focus={focus}
+			{has("font.family") === undefined ? null : (
+				<FontPicker
+					fonts={props.fonts}
+					font={values?.font ?? null}
+					disabled={off("font.family")}
+					execute={execute}
+					focus={focus}
+				/>
+			)}
+			{has("font.size") === undefined ? null : (
+				<SizePicker
+					size={values?.size ?? null}
+					disabled={off("font.size")}
+					execute={execute}
+					focus={focus}
+				/>
+			)}
+			{steps.map(step => {
+				const command = has(step.type)
+
+				return command === undefined ? null : (
+					<TooltipIconButton
+						key={step.type}
+						label={t(command.label)}
+						disabled={off(step.type)}
+						onMouseDown={keepFocus}
+						onClick={() => {
+							props.execute({ type: step.type })
+						}}
+					>
+						{step.icon}
+					</TooltipIconButton>
+				)
+			})}
+			{has("color.highlight") === undefined ? null : (
+				<DocxColorButton
+					label={t("previewDocxHighlightColor")}
+					icon={<HighlighterIcon />}
+					rgb={highlightRgb}
+					disabled={off("color.highlight")}
+				>
+					{close => (
+						<HighlightGrid
+							chosen={chosenHighlight}
+							onPick={name => {
+								close()
+								pickHighlight(name)
+							}}
 						/>
 					)}
-				</>
-			) : null}
-			{colorShown ? (
-				<>
-					<ColorButton
-						label={t("previewDocxFontColor")}
-						icon={<BaselineIcon />}
-						rgb={colorRgb === "auto" ? undefined : colorRgb}
-						disabled={off("color.text")}
-					>
-						{colorGrid}
-					</ColorButton>
-					{has("color.highlight") === undefined ? null : (
-						<ColorButton
-							label={t("previewDocxHighlightColor")}
-							icon={<HighlighterIcon />}
-							rgb={highlightRgb}
-							disabled={off("color.highlight")}
-						>
-							{highlightGrid}
-						</ColorButton>
-					)}
-				</>
-			) : null}
-			<DropdownMenu onOpenChange={focus.opened}>
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										aria-label={t("previewDocxMoreFormatting")}
-										disabled={snapshot === undefined}
-										className="shrink-0"
-										onMouseDown={keepFocus}
-									>
-										<TypeIcon />
-									</Button>
-								}
-							/>
-						}
-					/>
-					<TooltipContent>{t("previewDocxMoreFormatting")}</TooltipContent>
-				</Tooltip>
-				<DropdownMenuContent
-					finalFocus={focus.finalFocus}
-					data-preview-surface
-				>
-					{!fontShown && has("font.family") !== undefined ? (
-						<DropdownMenuSub>
-							<DropdownMenuSubTrigger disabled={off("font.family")}>{t("previewDocxFont")}</DropdownMenuSubTrigger>
-							<DropdownMenuSubContent className="max-h-80 overflow-y-auto">
-								<DropdownMenuRadioGroup
-									value={values === undefined ? "" : (single(values.font) ?? "")}
-									onValueChange={(family: string) => {
-										execute({ type: "font.family", family })
-									}}
-								>
-									{props.fonts.map(font => (
-										<DropdownMenuRadioItem
-											key={font.family}
-											value={font.kind === "theme" ? font.family : font.name}
-											closeOnClick
-										>
-											{font.kind === "theme"
-												? t(font.role === "headings" ? "previewDocxFontHeadings" : "previewDocxFontBody", {
-														name: font.name
-													})
-												: font.name}
-										</DropdownMenuRadioItem>
-									))}
-								</DropdownMenuRadioGroup>
-							</DropdownMenuSubContent>
-						</DropdownMenuSub>
-					) : null}
-					{!fontShown && has("font.size") !== undefined ? (
-						<DropdownMenuSub>
-							<DropdownMenuSubTrigger disabled={off("font.size")}>{t("previewDocxFontSize")}</DropdownMenuSubTrigger>
-							<DropdownMenuSubContent className="max-h-80 overflow-y-auto">
-								<DropdownMenuRadioGroup
-									value={values === undefined ? "" : String(single(values.size) ?? "")}
-									onValueChange={(size: string) => {
-										execute({ type: "font.size", halfPoints: Number(size) })
-									}}
-								>
-									{DOCX_FONT_SIZES.map(half => (
-										<DropdownMenuRadioItem
-											key={half}
-											value={String(half)}
-											closeOnClick
-										>
-											{points(half)}
-										</DropdownMenuRadioItem>
-									))}
-								</DropdownMenuRadioGroup>
-							</DropdownMenuSubContent>
-						</DropdownMenuSub>
-					) : null}
-					{!colorShown && has("color.text") !== undefined ? (
-						<>
-							<DropdownMenuSub>
-								<DropdownMenuSubTrigger disabled={off("color.text")}>{t("previewDocxFontColor")}</DropdownMenuSubTrigger>
-								<DropdownMenuSubContent className="p-3">{colorGrid(() => undefined)}</DropdownMenuSubContent>
-							</DropdownMenuSub>
-							{has("color.highlight") === undefined ? null : (
-								<DropdownMenuSub>
-									<DropdownMenuSubTrigger disabled={off("color.highlight")}>
-										{t("previewDocxHighlightColor")}
-									</DropdownMenuSubTrigger>
-									<DropdownMenuSubContent className="p-3">{highlightGrid(() => undefined)}</DropdownMenuSubContent>
-								</DropdownMenuSub>
-							)}
-						</>
-					) : null}
-					{toggles.map(({ type, on }) => {
-						const command = has(type)
-
-						return command === undefined ? null : (
-							<DropdownMenuCheckboxItem
-								key={type}
-								checked={on}
-								disabled={off(type)}
-								// A format applied closes the menu (Base UI keeps a checkbox item's menu open; whether focus
-								// leaving it for the document closed it depended on the browser).
-								closeOnClick
-								onClick={() => {
-									execute({ type } as DocxEditorCommand)
-								}}
-							>
-								{type === "format.superscript" ? (
-									<SuperscriptIcon />
-								) : type === "format.subscript" ? (
-									<SubscriptIcon />
-								) : null}
-								{t(command.label)}
-							</DropdownMenuCheckboxItem>
-						)
-					})}
-					{has("font.grow") === undefined ? null : (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem
-								closeOnClick={false}
-								disabled={off("font.grow")}
-								onClick={() => {
-									execute({ type: "font.grow" })
-								}}
-							>
-								<AArrowUpIcon />
-								{t("previewDocxFontGrow")}
-							</DropdownMenuItem>
-						</>
-					)}
-					{has("font.shrink") === undefined ? null : (
-						<DropdownMenuItem
-							closeOnClick={false}
-							disabled={off("font.shrink")}
-							onClick={() => {
-								execute({ type: "font.shrink" })
-							}}
-						>
-							<AArrowDownIcon />
-							{t("previewDocxFontShrink")}
-						</DropdownMenuItem>
-					)}
-					{has("font.spacing") === undefined ? null : (
-						<DropdownMenuSub>
-							<DropdownMenuSubTrigger disabled={off("font.spacing")}>
-								{t("previewDocxCharacterSpacing")}
-							</DropdownMenuSubTrigger>
-							<DropdownMenuSubContent>
-								<DropdownMenuRadioGroup
-									value={spacing === undefined ? "" : String(spacing)}
-									onValueChange={(twips: string) => {
-										execute({ type: "font.spacing", twips: Number(twips) })
-									}}
-								>
-									{CHARACTER_SPACINGS.map(step => (
-										<DropdownMenuRadioItem
-											key={step.twips}
-											value={String(step.twips)}
-											closeOnClick
-										>
-											{t(step.label)}
-										</DropdownMenuRadioItem>
-									))}
-								</DropdownMenuRadioGroup>
-							</DropdownMenuSubContent>
-						</DropdownMenuSub>
-					)}
-					{props.showPainter || has("format.copy") === undefined ? null : (
-						<DropdownMenuCheckboxItem
-							checked={props.painter !== "off"}
-							disabled={readOnly || (props.painter === "off" && off("format.copy"))}
-							closeOnClick
-							onCheckedChange={() => {
-								if (props.painter === "off") {
-									execute({ type: "format.copy" })
-								} else {
-									props.onPainterCancel()
-									focus.kept()
-								}
-							}}
-						>
-							{t("previewDocxFormatPainter")}
-						</DropdownMenuCheckboxItem>
-					)}
-					{has("format.clearAll") === undefined ? null : (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem
-								disabled={off("format.clearAll")}
-								onClick={() => {
-									execute({ type: "format.clearAll" })
-								}}
-							>
-								{t("previewDocxClearAllFormatting")}
-							</DropdownMenuItem>
-						</>
-					)}
-				</DropdownMenuContent>
-			</DropdownMenu>
-			{!props.showPainter || has("format.copy") === undefined ? null : (
-				<TooltipIconButton
-					label={props.painter === "sticky" ? t("previewDocxFormatPainterSticky") : t("previewDocxFormatPainter")}
-					pressed={props.painter !== "off"}
-					// Its paste writes: off while the document cannot change.
-					disabled={readOnly || (props.painter === "off" && off("format.copy"))}
-					className={cn(props.painter !== "off" && "bg-accent text-foreground")}
-					onMouseDown={keepFocus}
-					onClick={event => {
-						const action = painterAction(event.detail, props.painter)
-
-						if (action === "cancel") {
-							props.onPainterCancel()
-						} else {
-							props.execute({ type: "format.copy", ...(action === "sticky" ? { sticky: true } : {}) })
-						}
-					}}
-				>
-					<PaintbrushVerticalIcon />
-				</TooltipIconButton>
+				</DocxColorButton>
 			)}
+			{has("color.text") === undefined ? null : (
+				<DocxColorButton
+					label={t("previewDocxFontColor")}
+					icon={<BaselineIcon />}
+					rgb={colorRgb === "auto" ? undefined : colorRgb}
+					disabled={off("color.text")}
+				>
+					{close => (
+						<DocxColorGrid
+							theme={props.theme}
+							standard={STANDARD_SWATCHES}
+							chosen={chosenColor}
+							none={{ label: t("previewOfficeColorAutomatic"), key: "auto" }}
+							onPick={swatch => {
+								close()
+								pickColor(swatch)
+							}}
+						/>
+					)}
+				</DocxColorButton>
+			)}
+			{hasMenu ? (
+				<DropdownMenu onOpenChange={focus.opened}>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											aria-label={t("previewDocxMoreFormatting")}
+											disabled={snapshot === undefined}
+											className="shrink-0"
+											onMouseDown={keepFocus}
+										>
+											<TypeIcon />
+										</Button>
+									}
+								/>
+							}
+						/>
+						<TooltipContent>{t("previewDocxMoreFormatting")}</TooltipContent>
+					</Tooltip>
+					<DropdownMenuContent
+						finalFocus={focus.finalFocus}
+						data-preview-surface
+					>
+						{toggles.map(({ type, on }) => {
+							const command = has(type)
+
+							return command === undefined ? null : (
+								<DropdownMenuCheckboxItem
+									key={type}
+									checked={on}
+									disabled={off(type)}
+									// A format applied closes the menu (Base UI keeps a checkbox item's menu open; whether focus
+									// leaving it for the document closed it depended on the browser).
+									closeOnClick
+									onClick={() => {
+										execute({ type } as DocxEditorCommand)
+									}}
+								>
+									{t(command.label)}
+								</DropdownMenuCheckboxItem>
+							)
+						})}
+						{has("font.spacing") === undefined ? null : (
+							<DropdownMenuSub>
+								<DropdownMenuSubTrigger disabled={off("font.spacing")}>
+									{t("previewDocxCharacterSpacing")}
+								</DropdownMenuSubTrigger>
+								<DropdownMenuSubContent>
+									<DropdownMenuRadioGroup
+										value={spacing === undefined ? "" : String(spacing)}
+										onValueChange={(twips: string) => {
+											execute({ type: "font.spacing", twips: Number(twips) })
+										}}
+									>
+										{CHARACTER_SPACINGS.map(step => (
+											<DropdownMenuRadioItem
+												key={step.twips}
+												value={String(step.twips)}
+												closeOnClick
+											>
+												{t(step.label)}
+											</DropdownMenuRadioItem>
+										))}
+									</DropdownMenuRadioGroup>
+								</DropdownMenuSubContent>
+							</DropdownMenuSub>
+						)}
+						{has("format.clearAll") === undefined ? null : (
+							<>
+								<DropdownMenuSeparator />
+								<DropdownMenuItem
+									disabled={off("format.clearAll")}
+									onClick={() => {
+										execute({ type: "format.clearAll" })
+									}}
+								>
+									{t("previewDocxClearAllFormatting")}
+								</DropdownMenuItem>
+							</>
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			) : null}
 		</>
+	)
+}
+
+// The Clipboard group's format painter: a click picks up the selection's formatting for one paste, a double click
+// keeps it until clicked again, a click while on puts it down.
+export function DocxFormatPainter({
+	commands,
+	snapshot,
+	readOnly,
+	execute,
+	painter,
+	onPainterCancel
+}: Pick<DocxFormatControlsProps, "commands" | "snapshot" | "readOnly" | "execute" | "painter" | "onPainterCancel">) {
+	const { t } = useTranslation("preview")
+
+	if (!commands.some(command => command.info.type === "format.copy")) {
+		return null
+	}
+
+	return (
+		<TooltipIconButton
+			label={painter === "sticky" ? t("previewDocxFormatPainterSticky") : t("previewDocxFormatPainter")}
+			pressed={painter !== "off"}
+			// Its paste writes: off while the document cannot change.
+			disabled={readOnly || (painter === "off" && snapshot?.enabled["format.copy"] !== true)}
+			className={cn(painter !== "off" && "bg-accent text-foreground")}
+			onMouseDown={keepFocus}
+			onClick={event => {
+				const action = painterAction(event.detail, painter)
+
+				if (action === "cancel") {
+					onPainterCancel()
+				} else {
+					execute({ type: "format.copy", ...(action === "sticky" ? { sticky: true } : {}) })
+				}
+			}}
+		>
+			<PaintbrushVerticalIcon />
+		</TooltipIconButton>
 	)
 }
 

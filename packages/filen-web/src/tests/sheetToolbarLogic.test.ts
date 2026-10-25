@@ -9,12 +9,16 @@ import {
 	numberLabel,
 	sampleOf,
 	themeSwatchRows,
-	toolbarFit,
-	valignPatch
+	valignPatch,
+	indentPatch,
+	rotationPatch,
+	zoomStep,
+	sheetShortcutKeys,
+	ORIENTATIONS
 } from "@/features/spreadsheet/toolbar/toolbar.logic"
 import { preview } from "@/locales/en/preview"
 
-// The spreadsheet toolbar's and Format Cells dialog's logic: what they read from the active cell and the workbook,
+// The spreadsheet ribbon's and Format Cells dialog's logic: what they read from the active cell and the workbook,
 // and the formats they send.
 
 describe("spreadsheet toolbar", () => {
@@ -74,18 +78,52 @@ describe("spreadsheet toolbar", () => {
 		expect(rows[1]?.[1]?.rgb).toBe("808080")
 	})
 
-	it("moves the last groups into the ⋯ menu first as the row narrows", () => {
-		expect(Object.values(toolbarFit(0)).every(Boolean)).toBe(true)
-		expect(Object.values(toolbarFit(2000)).every(Boolean)).toBe(true)
+	it("reads the cell's indent, angle (as the file writes it) and shrinking", () => {
+		expect(activeFormat({ indent: 2, rotation: -45, shrink: true }, {}, "General", "")).toMatchObject({
+			indent: 2,
+			rotation: 135,
+			shrink: true
+		})
+		expect(activeFormat({ rotation: 255 }, {}, "General", "").rotation).toBe(255)
+		expect(activeFormat({}, {}, "General", "")).toMatchObject({ indent: 0, rotation: 0, shrink: false })
+	})
 
-		const narrow = toolbarFit(700)
+	it("indents a level at a time up to Excel's 15, General and centred text turning left", () => {
+		expect(indentPatch({ indent: 0, align: "general" }, 1)).toEqual({ indent: 1, align: "left" })
+		expect(indentPatch({ indent: 0, align: "center" }, 1)).toEqual({ indent: 1, align: "left" })
+		expect(indentPatch({ indent: 1, align: "right" }, 1)).toEqual({ indent: 2 })
+		expect(indentPatch({ indent: 1, align: "left" }, -1)).toEqual({ indent: 0 })
+		expect(indentPatch({ indent: 0, align: "left" }, -1)).toBeNull()
+		expect(indentPatch({ indent: 15, align: "left" }, 1)).toBeNull()
+	})
 
-		expect(narrow.decimals).toBe(false)
-		expect(narrow.font).toBe(true)
+	it("turns the text to an angle, and back to horizontal when it is picked again", () => {
+		expect(ORIENTATIONS.map(orientation => orientation.rotation)).toEqual([45, 135, 255, 90, 180])
+		expect(rotationPatch(0, 45)).toEqual({ rotation: 45 })
+		expect(rotationPatch(45, 45)).toEqual({ rotation: 0 })
+		expect(rotationPatch(45, 180)).toEqual({ rotation: 180 })
 
-		const phone = toolbarFit(360)
+		for (const orientation of ORIENTATIONS) {
+			expect(preview).toHaveProperty(orientation.label)
+		}
+	})
 
-		expect(phone).toEqual({ font: false, toggles: false, borders: false, align: false, number: false, decimals: false })
+	it("zooms by Excel's steps, held at 25% and 400%", () => {
+		expect(zoomStep(100, 1)).toBe(125)
+		expect(zoomStep(100, -1)).toBe(75)
+		expect(zoomStep(110, -1)).toBe(100)
+		expect(zoomStep(400, 1)).toBe(400)
+		expect(zoomStep(25, -1)).toBe(25)
+	})
+
+	it("names a grid shortcut's keys as the platform shows them", () => {
+		expect(sheetShortcutKeys("bold", false)).toEqual(["Ctrl", "B"])
+		expect(sheetShortcutKeys("bold", true)).toEqual(["⌘", "B"])
+		expect(sheetShortcutKeys("filter", false)).toEqual(["Ctrl", "Shift", "L"])
+		expect(sheetShortcutKeys("insertCells", false)).toEqual(["Ctrl", "Shift", "="])
+		expect(sheetShortcutKeys("showFormulas", true)).toEqual(["⌃", "`"])
+		expect(sheetShortcutKeys("note", false)).toEqual(["Shift", "F2"])
+		expect(sheetShortcutKeys("formatCells", false)).toEqual(["Ctrl", "1"])
 	})
 
 	it("clears an alignment back to the default rather than writing it", () => {

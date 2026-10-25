@@ -3,6 +3,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
+import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // Sheet structure on the office engine end to end: rows and columns inserted,
@@ -125,8 +126,17 @@ test("rows and columns inserted, deleted, hidden and shown, the top row frozen, 
 
 	const dialog = page.getByRole("dialog").first()
 	const mod = await resolveModKey(page)
-	const freeze = dialog.getByRole("button", { name: preview.previewSheetFreeze, exact: true })
-	const merge = dialog.getByRole("button", { name: preview.previewSheetMerge, exact: true })
+	// View ▸ Window ▸ Freeze and Home ▸ Alignment ▸ Merge, wherever the ribbon's width put them.
+	const freeze = async (): Promise<Locator> => {
+		await ribbonTab(dialog, preview.previewOfficeRibbonTabView)
+
+		return ribbonButton(page, dialog, preview.previewSheetRibbonWindow, preview.previewSheetFreeze)
+	}
+	const merge = async (): Promise<Locator> => {
+		await ribbonTab(dialog, preview.previewOfficeRibbonTabHome)
+
+		return ribbonButton(page, dialog, preview.previewOfficeRibbonAlignment, preview.previewSheetMerge)
+	}
 
 	await withScratchDirectory(page, "sheet-structure-cells", async ({ listbox, runId }) => {
 		const rows = await upload(page, listbox, runId)
@@ -172,7 +182,7 @@ test("rows and columns inserted, deleted, hidden and shown, the top row frozen, 
 
 		// The top row frozen.
 		await open(dialog, rows.freeze)
-		await freeze.click()
+		await (await freeze()).click()
 		await expect(menuItem(page, preview.previewSheetUnfreeze)).toBeDisabled()
 		await menuItem(page, preview.previewSheetFreezeTopRow).click()
 		await saveAndClose(page, dialog, mod)
@@ -180,7 +190,7 @@ test("rows and columns inserted, deleted, hidden and shown, the top row frozen, 
 		// Merge and centre over two values: asked first.
 		await open(dialog, rows.merge)
 		await goTo(dialog, "A1:B1")
-		await merge.click()
+		await (await merge()).click()
 		await menuItem(page, preview.previewSheetMergeCenter).click()
 
 		const ask = page.getByRole("alertdialog")
@@ -221,7 +231,7 @@ test("rows and columns inserted, deleted, hidden and shown, the top row frozen, 
 		await close(page, dialog)
 
 		await open(dialog, rows.freeze)
-		await freeze.click()
+		await (await freeze()).click()
 		await expect(menuItem(page, preview.previewSheetUnfreeze)).toBeEnabled()
 		await closeMenu(page)
 		await close(page, dialog)
@@ -233,7 +243,7 @@ test("rows and columns inserted, deleted, hidden and shown, the top row frozen, 
 		// The merge is selected whole.
 		await expect(nameBox(dialog)).toHaveValue("A1:B1")
 		await expect(dialog.getByRole("grid").getByRole("gridcell")).toHaveText("Item")
-		await merge.click()
+		await (await merge()).click()
 		await expect(menuItem(page, preview.previewSheetUnmerge)).toBeEnabled()
 		await closeMenu(page)
 		await close(page, dialog)

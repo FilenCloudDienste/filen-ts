@@ -1,8 +1,10 @@
+import { vi } from "vitest"
 import { writeXlsx } from "hucre/xlsx"
 import { inThreadSheetHost } from "@filen/office/dom/sheet"
 import type { SheetEvent, SheetFileKind } from "@filen/office/core/sheet"
 import { createSheetGrid, type SheetGridModel } from "@filen/office/react/sheet"
 import { previewSheetStructure } from "@/locales/en/previewSheet/structure"
+import type { SheetRibbonActions } from "@/features/spreadsheet/toolbar/sheetToolbar"
 
 // Sessions on the in-thread host as the structure menus' tests use them: the grid's model, fed the session's events.
 
@@ -48,4 +50,17 @@ export function label(key: StructureKey | (string & {})): RegExp {
 	const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 	return new RegExp(`^(${value === undefined ? "" : `${escape(value)}|`}${escape(base)})$`)
+}
+
+// The ribbon's actions beyond formats and commands, each a spy (none of the features' commands offered).
+export function ribbonActions(): SheetRibbonActions {
+	return {
+		copy: vi.fn(),
+		paste: vi.fn(),
+		shortcut: vi.fn(),
+		insertCells: vi.fn(),
+		deleteCells: vi.fn(),
+		autofit: vi.fn(),
+		commands: {}
+	}
 }

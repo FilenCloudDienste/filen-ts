@@ -77,7 +77,7 @@ function Trigger({ label, icon: Icon, disabled }: { label: string; icon: LucideI
 	)
 }
 
-export function HorizontalAlignItems({ align, onAlign }: { align: Horizontal; onAlign: (align: Horizontal) => void }) {
+function HorizontalAlignItems({ align, onAlign }: { align: Horizontal; onAlign: (align: Horizontal) => void }) {
 	const { t } = useTranslation("preview")
 
 	return (
@@ -105,7 +105,7 @@ export function HorizontalAlignItems({ align, onAlign }: { align: Horizontal; on
 	)
 }
 
-export function VerticalAlignItems({ valign, onValign }: { valign: SheetVerticalAlign; onValign: (valign: SheetVerticalAlign) => void }) {
+function VerticalAlignItems({ valign, onValign }: { valign: SheetVerticalAlign; onValign: (valign: SheetVerticalAlign) => void }) {
 	const { t } = useTranslation("preview")
 
 	return (

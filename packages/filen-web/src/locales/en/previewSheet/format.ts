@@ -1,10 +1,6 @@
 // "preview" namespace, spreadsheet viewer — the formatting toolbar and the Format Cells
 // dialog. Spread into preview.ts; same catalog rules.
 export const previewSheetFormat = {
-	/** Spreadsheet viewer — accessible label of the formatting toolbar above the grid */
-	previewSheetFormatToolbar: "Formatting",
-	/** Spreadsheet viewer — the toolbar's ⋯ menu: formatting the row has no room for, and the Format Cells dialog */
-	previewSheetFormatMore: "More formatting",
 	/** Spreadsheet viewer — font picker (accessible label and tooltip) */
 	previewSheetFormatFont: "Font",
 	/** Spreadsheet viewer — font size picker (accessible label and tooltip) */

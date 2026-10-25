@@ -4,6 +4,7 @@ import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, toasts, uploadFiles, wit
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { common } from "@/locales/en/common"
+import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // The DOCX editor's Mobile view in a real browser at a phone's width: it shows by itself, the text is edited
@@ -63,14 +64,14 @@ async function openDocument(page: Page, listbox: Locator, name: string, marker: 
 	// The scratch directory makes the window tall for its listing: a phone's again before the editor opens.
 	await page.setViewportSize(PHONE)
 	await listbox.getByRole("option", { name }).dblclick()
-	await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(reflowText(page, marker)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(page.locator(".fo-docx-page")).toHaveCount(0)
 }
 
 async function closeDocument(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
-	await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toHaveCount(0)
+	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
 }
 
 test("Mobile view: shown by itself on a phone, typing, IME and spelling in place, kept by a save", async ({ page, browserName }) => {
@@ -131,7 +132,7 @@ test("Mobile view: shown by itself on a phone, typing, IME and spelling in place
 	expect(cspViolations).toEqual([])
 })
 
-test("Mobile view: tables fit the screen, the ⋯ switch goes to pages and back, the choice kept", async ({ page }) => {
+test("Mobile view: tables fit the screen, the View tab's switch goes to pages and back, the choice kept", async ({ page }) => {
 	await withScratchDirectory(
 		page,
 		"docx-mobile-switch",
@@ -139,8 +140,12 @@ test("Mobile view: tables fit the screen, the ⋯ switch goes to pages and back,
 			const fixture = "w3-tables.docx"
 			const marker = DOCX_FIXTURE_TEXT[fixture]
 			const name = await upload(page, listbox, runId, fixture)
-			const more = page.getByRole("button", { name: preview.previewDocxMoreTools })
-			const mobileView = page.getByRole("menuitemcheckbox", { name: preview.previewDocxMobileView })
+			// The View tab's switch.
+			const mobileView = async (): Promise<Locator> => {
+				await ribbonTab(page, preview.previewOfficeRibbonTabView)
+
+				return ribbonButton(page, page, preview.previewDocxRibbonViews, preview.previewDocxMobileView)
+			}
 
 			await openDocument(page, listbox, name, marker)
 
@@ -151,9 +156,10 @@ test("Mobile view: tables fit the screen, the ⋯ switch goes to pages and back,
 			expect(await table.evaluate(element => element.clientWidth <= window.innerWidth)).toBe(true)
 
 			await reflowText(page, "A1").click()
-			await more.click()
-			await expect(mobileView).toHaveAttribute("aria-checked", "true")
-			await mobileView.click()
+			const toPages = await mobileView()
+
+			await expect(toPages).toHaveAttribute("aria-pressed", "true")
+			await toPages.click()
 
 			// Pages, the same document.
 			await expect(page.locator(".fo-docx-page").getByText("A1", { exact: true }).first()).toBeVisible({
@@ -161,14 +167,15 @@ test("Mobile view: tables fit the screen, the ⋯ switch goes to pages and back,
 			})
 			await expect(page.locator(".fo-docx-reflow")).toHaveCount(0)
 
-			// The user's choice holds through width crossings: back to Mobile view only from the menu.
+			// The user's choice holds through width crossings: back to Mobile view only from the switch.
 			await page.setViewportSize({ width: 1200, height: 800 })
 			await page.setViewportSize({ width: 360, height: 800 })
 			await expect(page.locator(".fo-docx-page").first()).toBeVisible()
 			await expect(page.locator(".fo-docx-reflow")).toHaveCount(0)
-			await more.click()
-			await expect(mobileView).toHaveAttribute("aria-checked", "false")
-			await mobileView.click()
+			const toMobile = await mobileView()
+
+			await expect(toMobile).toHaveAttribute("aria-pressed", "false")
+			await toMobile.click()
 			await expect(page.locator(".fo-docx-reflow")).toBeVisible()
 			await expect(reflowText(page, "A1")).toBeVisible()
 

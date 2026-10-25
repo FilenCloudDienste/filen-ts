@@ -168,7 +168,14 @@ describe("AutoSum", () => {
 	it("opens the sum of the numbers above the active cell to finish", async () => {
 		await openViewer()
 		await goTo("A4")
-		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetAutoSum }))
+		// The formula bar's (the ribbon's Home tab has one too).
+		const autoSum = screen
+			.getAllByRole("button", { name: preview.previewSheetAutoSum })
+			.find(button => button.closest("[data-office-ribbon]") === null)
+
+		if (autoSum === undefined) throw new Error("no AutoSum in the formula bar")
+
+		fireEvent.click(autoSum)
 		await waitFor(() => {
 			expect(bar().value).toBe("=SUM(A2:A3)")
 		})

@@ -1,6 +1,8 @@
 import { useEffect, useRef, type RefObject } from "react"
 import { MAX_HTML_COPY_CELLS } from "@filen/office/core/sheet"
-import type { SheetGridModel } from "@filen/office/react/sheet"
+import { isMacPlatform, type SheetGridModel } from "@filen/office/react/sheet"
+import type { TFunction } from "i18next"
+import { toast } from "sonner"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { MAX_PASTE_HTML, sanitizeSheetClipboard } from "@/features/spreadsheet/clipboard/sheetClipboardSanitizer"
 
@@ -14,9 +16,21 @@ import { MAX_PASTE_HTML, sanitizeSheetClipboard } from "@/features/spreadsheet/c
 
 export type SheetClipboardResult = "done" | "tooLarge" | "blocked"
 
+// What a control's copy, cut or paste says when it did not go through: the browser blocked the clipboard (the shortcut
+// `key` still works) or the copy was too large.
+export function sayClipboardRefusal(result: SheetClipboardResult, key: string, t: TFunction<"preview">): void {
+	if (result === "blocked") {
+		toast.error(t("previewSheetClipboardBlocked", { shortcut: isMacPlatform() ? `⌘${key}` : `Ctrl+${key}` }))
+	} else if (result === "tooLarge") {
+		toast.error(t("previewSpreadsheetCopyTooLarge"))
+	}
+}
+
 export interface SheetClipboardCommands {
 	copy(cut: boolean): Promise<SheetClipboardResult>
-	paste(): Promise<SheetClipboardResult>
+	// Values only: the clipboard's text read as tab-separated values, never its formats or formulas (the ribbon's
+	// Paste values).
+	paste(values: boolean): Promise<SheetClipboardResult>
 }
 
 // HTML and text where the browser lets the page read both, else text alone; null when it refused.
@@ -110,7 +124,7 @@ export function useSheetClipboard({
 		)
 	}
 
-	function pasteData(text: string, html: string): void {
+	function pasteData(text: string, html: string, values: boolean): void {
 		const { model: grid } = latest.current
 		const { sheet, selection } = grid.getSnapshot()
 		const range = selection.ranges[selection.ranges.length - 1]
@@ -120,7 +134,7 @@ export function useSheetClipboard({
 		}
 
 		const at = { row: range.startRow, col: range.startCol }
-		const clip = lastClip.current === null ? {} : { clip: lastClip.current }
+		const clip = lastClip.current === null || values ? {} : { clip: lastClip.current }
 
 		void grid.intent()
 		void grid.command(
@@ -130,7 +144,7 @@ export function useSheetClipboard({
 		)
 	}
 
-	async function paste(): Promise<SheetClipboardResult> {
+	async function paste(values: boolean): Promise<SheetClipboardResult> {
 		if (!latest.current.canEdit) {
 			return "done"
 		}
@@ -141,8 +155,8 @@ export function useSheetClipboard({
 			return "blocked"
 		}
 
-		if (content.text !== "" || content.html !== "") {
-			pasteData(content.text, content.html)
+		if (values ? content.text !== "" : content.text !== "" || content.html !== "") {
+			pasteData(content.text, values ? "" : content.html, values)
 		}
 
 		return "done"
@@ -176,7 +190,8 @@ export function useSheetClipboard({
 				case "paste":
 					commands.current.pasteData(
 						event.clipboardData?.getData("text/plain") ?? "",
-						event.clipboardData?.getData("text/html") ?? ""
+						event.clipboardData?.getData("text/html") ?? "",
+						false
 					)
 					break
 			}

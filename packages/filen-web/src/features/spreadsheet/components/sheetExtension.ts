@@ -16,6 +16,37 @@ export interface SheetBodyExtension {
 	readonly dialogs?: ReactNode
 	// A keyboard shortcut (react/sheet/keys.ts) before SheetBody's own handling: true takes it.
 	readonly shortcut?: (shortcut: SheetShortcut) => boolean
+	// What the ribbon runs of the feature (absent: not offered now).
+	readonly ribbon?: SheetRibbonCommands
+}
+
+// The features' commands the ribbon offers, each present only while it can run: the active cell's comment and note,
+// the Series dialog, data validation, the selected object's tools.
+export interface SheetRibbonCommands {
+	readonly newComment?: () => void
+	readonly note?: {
+		// The active cell holds one: Edit note, Show or hide, Delete; else New note.
+		readonly exists: boolean
+		readonly shown: boolean
+		readonly toggle: () => void
+		readonly remove: () => void
+	}
+	readonly fillSeries?: () => void
+	readonly dataValidation?: () => void
+	readonly object?: {
+		readonly chart: boolean
+		readonly altText: (() => void) | undefined
+		readonly remove: (() => void) | undefined
+	}
+	readonly editChart?: () => void
+}
+
+// Every feature's ribbon commands, as one.
+export function ribbonCommands(extensions: readonly SheetBodyExtension[]): SheetRibbonCommands {
+	return extensions.reduce<SheetRibbonCommands>(
+		(all, extension) => (extension.ribbon === undefined ? all : { ...all, ...extension.ribbon }),
+		{}
+	)
 }
 
 export function gridExtensions(extensions: readonly SheetBodyExtension[]): SheetGridExtension[] {

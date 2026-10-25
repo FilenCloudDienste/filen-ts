@@ -7,10 +7,10 @@ import type { SheetKind } from "@filen/office/core/sheet"
 import type { SheetGridHandle, SheetGridState } from "@filen/office/react/sheet"
 import "@/lib/i18n"
 import { preview } from "@/locales/en/preview"
-import { openGrid, workbook } from "@/tests/sheetMenusFixtures"
+import { openGrid, ribbonActions, workbook } from "@/tests/sheetMenusFixtures"
 import { GridHarness } from "@/tests/sheetMenusHarness"
 
-// The toolbar and the formula bar on a sheet that is not a worksheet: its cells take no command (the session refuses
+// The ribbon and the formula bar on a sheet that is not a worksheet: its cells take no command (the session refuses
 // them), so the cells' controls are off. Undo and redo stay as they are; a chartsheet's name box names no cell.
 
 vi.mock("@/lib/useElementSize", () => ({ useElementSize: () => ({ width: 2000, height: 40 }) }))
@@ -44,6 +44,7 @@ async function renderControls(kind: SheetKind): Promise<void> {
 						disabled={false}
 						formats
 						onFormat={() => undefined}
+						actions={ribbonActions()}
 					/>
 					<SheetFormulaBar
 						grid={asKind(grid, kind)}
@@ -57,7 +58,7 @@ async function renderControls(kind: SheetKind): Promise<void> {
 		</GridHarness>
 	)
 	// The active cell's format arrives from the session.
-	await screen.findByRole("toolbar", { name: preview.previewSheetFormatToolbar })
+	await screen.findByRole("toolbar", { name: preview.previewOfficeRibbonCommands })
 }
 
 function control(name: string): HTMLElement {
@@ -68,7 +69,7 @@ describe("controls on a sheet without editable cells", () => {
 	it("offers the cells' controls on a worksheet", async () => {
 		await renderControls("worksheet")
 
-		expect(await screen.findByRole("button", { name: preview.previewSheetInsertMenu })).toHaveProperty("disabled", false)
+		expect(await screen.findByRole("button", { name: preview.previewSheetRibbonInsert })).toHaveProperty("disabled", false)
 		expect(screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox }).disabled).toBe(false)
 	})
 
@@ -76,7 +77,7 @@ describe("controls on a sheet without editable cells", () => {
 		it(`turns the cells' controls off on a ${kind}`, async () => {
 			await renderControls(kind)
 
-			for (const name of [preview.previewSheetInsertMenu, preview.previewSpreadsheetBold]) {
+			for (const name of [preview.previewSheetRibbonInsert, preview.previewSpreadsheetBold]) {
 				expect(control(name)).toHaveProperty("disabled", true)
 			}
 

@@ -92,7 +92,6 @@ vi.mock("@/features/preview/components/docxReflow.logic", async importOriginal =
 	useReflowMode: () => ({ reflow: hooks.reflow, setReflow: () => undefined })
 }))
 vi.mock("@/features/preview/components/docxReflowSurface", () => ({
-	DocxReflowMenuItem: () => null,
 	DocxReflowSurface: (props: { interactions?: DocxEditorInteractions; describedBy?: string }) => {
 		hooks.interactions = props.interactions
 

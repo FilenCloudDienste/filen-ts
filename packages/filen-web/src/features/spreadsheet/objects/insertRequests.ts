@@ -1,8 +1,7 @@
-import { useEffect, useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react"
 import type { SheetGridModel } from "@filen/office/react/sheet"
-import { useLatestRef } from "@/lib/useLatestRef"
 
-// A picture asked for from outside the objects feature (the toolbar's Insert menu): from this device's file chooser
+// A picture asked for from outside the objects feature (the ribbon's Insert tab): from this device's file chooser
 // or the drive's picker. The objects feature takes the request and clears it.
 
 export type ImageSource = "file" | "drive"
@@ -70,41 +69,4 @@ export function useImageRequest(model: SheetGridModel): ImageRequest | null {
 		() => store.request,
 		() => store.request
 	)
-}
-
-// A link or a note asked for from the toolbar's Insert menu: run as the keyboard's Ctrl/Cmd+K and Shift+F2 are, by the
-// view's own shortcut handling (useShortcutRequests), so the menu needs nothing of the annotations feature.
-
-export type InsertShortcut = "hyperlink" | "note"
-
-const shortcutListeners = new WeakMap<SheetGridModel, Set<(shortcut: InsertShortcut) => void>>()
-
-export function requestShortcut(model: SheetGridModel, shortcut: InsertShortcut): void {
-	for (const listener of shortcutListeners.get(model) ?? []) {
-		listener(shortcut)
-	}
-}
-
-// The view's shortcut handler takes what the Insert menu asks for.
-export function useShortcutRequests(model: SheetGridModel, run: (shortcut: InsertShortcut) => boolean): void {
-	const latest = useLatestRef(run)
-
-	useEffect(() => {
-		let listeners = shortcutListeners.get(model)
-
-		if (listeners === undefined) {
-			listeners = new Set()
-			shortcutListeners.set(model, listeners)
-		}
-
-		const listener = (shortcut: InsertShortcut): void => {
-			latest.current(shortcut)
-		}
-
-		listeners.add(listener)
-
-		return () => {
-			listeners.delete(listener)
-		}
-	}, [model, latest])
 }

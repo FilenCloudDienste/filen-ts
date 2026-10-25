@@ -14,7 +14,7 @@ test("opens every DOCX editing fixture in the editor, no CSP console errors", as
 	await bootTo(page)
 
 	const { rows } = await openFixtureRows(page, "docx-edit")
-	const toolbar = page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })
+	const toolbar = page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })
 
 	for (const [index, name] of FIXTURE_FILES["docx-edit"].entries()) {
 		const row = rows[index]

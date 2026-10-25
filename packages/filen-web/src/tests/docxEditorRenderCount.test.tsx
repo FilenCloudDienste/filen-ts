@@ -172,7 +172,8 @@ beforeAll(async () => {
 	DocxEditView = (
 		(await import(/* @vite-ignore */ compiledPath("docxEditor"))) as typeof import("@/features/preview/components/docxEditor")
 	).DocxEditView
-})
+	// Compiling the view and the ribbon and importing them takes long on a loaded runner.
+}, 60_000)
 
 afterAll(() => {
 	rmSync(dirname(compiledPath("x")), { recursive: true, force: true })

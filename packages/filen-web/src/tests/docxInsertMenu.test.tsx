@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import type { ComponentType } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import {
@@ -15,9 +16,11 @@ import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxObjectPress } from "@filen/office/react/docx/editor"
 import { slotCommands, type DocxInputRequest } from "@/features/preview/components/docxEditor.logic"
 import { fieldChipAction, linkTarget } from "@/features/preview/components/docxInsert.logic"
+import type { DocxCommandProps } from "@/features/preview/components/docxRibbon.logic"
 import "@/lib/i18n"
 
-// The Insert menu (its items run commands or ask for their input) and the dialogs it asks: a link (to an
+// The ribbon's Insert, Layout and References dropdowns (their items run commands or ask for their input) and the
+// dialogs they ask: a link (to an
 // address, a heading by its position, editing one preselecting it), a date previewed, bookmarks, a table's size.
 
 const paged = vi.hoisted(() => ({
@@ -37,7 +40,8 @@ vi.mock("@filen/office/core/docx/edit", async () => ({
 	sessionBookmarks: () => ({ byName: paged.hidden })
 }))
 
-const { DocxInsertMenu } = await import("@/features/preview/components/docxInsertMenu")
+const { ConvertNotesMenu, DocxBreaksMenu, FormControlMenu, PicturesMenu, TableMenu } =
+	await import("@/features/preview/components/docxInsertMenu")
 const { DocxInsertDialogs } = await import("@/features/preview/components/docxInsertDialogs")
 
 function snapshot(enabled: Partial<DocxEditorSnapshot["enabled"]> = {}, field: DocxFieldContext | null = null): DocxEditorSnapshot {
@@ -70,21 +74,17 @@ function snapshot(enabled: Partial<DocxEditorSnapshot["enabled"]> = {}, field: D
 	}
 }
 
-function renderMenu(readOnly = false) {
+function renderMenu(Menu: ComponentType<DocxCommandProps>, commands = slotCommands("insert"), readOnly = false) {
 	const execute = vi.fn()
 	const requestInput = vi.fn()
 
 	render(
-		<DocxInsertMenu
-			commands={slotCommands("insert")}
+		<Menu
+			commands={commands}
 			snapshot={snapshot()}
 			readOnly={readOnly}
-			apple={false}
 			execute={execute}
-			surface="pages"
-			inputRequest={null}
 			requestInput={requestInput}
-			onInputDone={vi.fn()}
 		/>
 	)
 
@@ -143,82 +143,59 @@ afterEach(() => {
 	paged.hidden.clear()
 })
 
-describe("DocxInsertMenu", () => {
-	it("runs commands and asks for the input of those that need it", async () => {
-		const { execute, requestInput } = renderMenu()
+describe("the Insert, Layout and References dropdowns", () => {
+	it("inserts a table of the size picked on its grid, or asks for its size", async () => {
+		const { execute, requestInput } = renderMenu(TableMenu)
 
-		fireEvent.click(screen.getByRole("button", { name: "Insert" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Horizontal line" }))
-		expect(execute).toHaveBeenLastCalledWith({ type: "insert.horizontalLine" })
+		fireEvent.click(screen.getByRole("button", { name: "Table" }))
+		fireEvent.click(await screen.findByRole("button", { name: "3 × 2 table" }))
+		expect(execute).toHaveBeenLastCalledWith({ type: "table.insert", cols: 3, rows: 2 })
 
-		fireEvent.click(screen.getByRole("button", { name: "Insert" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Link…" }))
-		expect(requestInput).toHaveBeenLastCalledWith("link.set")
-
-		fireEvent.click(screen.getByRole("button", { name: "Insert" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Picture" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "From Filen drive…" }))
-		expect(requestInput).toHaveBeenLastCalledWith("image.insert", "drive")
-
-		fireEvent.click(screen.getByRole("button", { name: "Insert" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Breaks" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Page break" }))
-		expect(execute).toHaveBeenLastCalledWith({ type: "insert.pageBreak" })
+		fireEvent.click(screen.getByRole("button", { name: "Table" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Insert table…" }))
+		expect(requestInput).toHaveBeenLastCalledWith("table.insert")
 	})
 
-	it("leaves the focus in the document after a command (the host gives it back), and is named below md", async () => {
-		const document_ = document.createElement("textarea")
+	it("breaks the page, the line or the section of the kind picked", async () => {
+		const { execute } = renderMenu(DocxBreaksMenu, [...slotCommands("insert"), ...slotCommands("layout")])
 
-		document.body.append(document_)
+		fireEvent.click(screen.getByRole("button", { name: "Breaks" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Page break" }))
+		expect(execute).toHaveBeenLastCalledWith({ type: "insert.pageBreak" })
 
-		const execute = vi.fn(() => {
-			document_.focus()
+		fireEvent.click(screen.getByRole("button", { name: "Breaks" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Next page" }))
+		expect(execute).toHaveBeenLastCalledWith({ type: "insert.sectionBreak", kind: "nextPage" })
+	})
+
+	it("leaves the focus in the document after a command (the host gives it back)", async () => {
+		const area = document.createElement("textarea")
+
+		document.body.append(area)
+		area.focus()
+
+		const { execute } = renderMenu(ConvertNotesMenu, slotCommands("references"))
+
+		execute.mockImplementation(() => {
+			area.focus()
 		})
-
-		render(
-			<DocxInsertMenu
-				commands={slotCommands("insert")}
-				snapshot={snapshot()}
-				readOnly={false}
-				apple={false}
-				execute={execute}
-				surface="pages"
-				inputRequest={null}
-				requestInput={vi.fn()}
-				onInputDone={vi.fn()}
-			/>
-		)
-
-		const trigger = screen.getByRole("button", { name: "Insert" })
-
-		// Its label is hidden on narrow screens: the button keeps its name.
-		expect(trigger.getAttribute("aria-label")).toBe("Insert")
-		fireEvent.click(trigger)
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Footnotes and endnotes" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Footnote" }))
-		expect(execute).toHaveBeenCalledWith({ type: "note.insertFootnote" })
+		fireEvent.click(screen.getByRole("button", { name: "Convert all notes" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Convert all to endnotes" }))
+		expect(execute).toHaveBeenCalledWith({ type: "note.convertAll", to: "endnote" })
 		await waitFor(() => {
 			expect(screen.queryByRole("menu")).toBeNull()
 		})
-		expect(document.activeElement).toBe(document_)
-		document_.remove()
+		expect(document.activeElement).toBe(area)
+		area.remove()
 	})
 
-	it("inserts a table of the size picked on its grid", async () => {
-		const { execute } = renderMenu()
+	it("offers nothing that writes while read-only", () => {
+		renderMenu(PicturesMenu, slotCommands("insert"), true)
 
-		fireEvent.click(screen.getByRole("button", { name: "Insert" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Table" }))
-		fireEvent.click(await screen.findByRole("button", { name: "3 × 2 table" }))
-		expect(execute).toHaveBeenLastCalledWith({ type: "table.insert", cols: 3, rows: 2 })
-	})
-
-	it("offers nothing that writes while read-only", async () => {
-		renderMenu(true)
-
-		fireEvent.click(screen.getByRole("button", { name: "Insert" }))
-		expect((await screen.findByRole("menuitem", { name: "Horizontal line" })).getAttribute("aria-disabled")).toBe("true")
-		expect(screen.getByRole("menuitem", { name: "Link…" }).getAttribute("aria-disabled")).toBe("true")
+		expect(screen.getByRole("button", { name: "Picture" }).hasAttribute("disabled")).toBe(true)
+		cleanup()
+		renderMenu(FormControlMenu, slotCommands("insert"), true)
+		expect(screen.getByRole("button", { name: "Form control" }).hasAttribute("disabled")).toBe(true)
 	})
 })
 

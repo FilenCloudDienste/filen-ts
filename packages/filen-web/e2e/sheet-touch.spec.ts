@@ -3,6 +3,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { common } from "@/locales/en/common"
+import { ribbonControl } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's grid under a finger, on a sheet's whole range and for a screen reader. A tap selects and a pan
@@ -351,7 +352,7 @@ test("a screen reader's grid: named, its active cell a gridcell in a row, the li
 		await page.mouse.click((centre?.x ?? 0) + 5, (centre?.y ?? 0) + 5, { button: "right" })
 		await expect(page.getByRole("menu", { name: preview.previewSheetGridMenu })).toBeVisible()
 		await page.keyboard.press("Escape")
-		await dialog.getByRole("combobox", { name: preview.previewSheetFormatFont }).click()
+		await (await ribbonControl(page, dialog, preview.previewOfficeRibbonFont, preview.previewSheetFormatFont, "combobox")).click()
 		await expect(page.getByRole("listbox", { name: preview.previewSheetFormatFont })).toBeVisible()
 		await page.keyboard.press("Escape")
 	})

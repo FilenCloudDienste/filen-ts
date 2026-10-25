@@ -3,8 +3,6 @@ import { useTranslation } from "react-i18next"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxDocument } from "@filen/office/react/docx"
 import { DocxReflow, type DocxEditorHandle, type DocxEditorInteractions, type DocxEditorMark } from "@filen/office/react/docx/editor"
-import { DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
-import type { DocxToolbarSlotProps } from "@/features/preview/components/docxEditor.logic"
 
 export interface DocxReflowSurfaceProps {
 	editor: PagedEditor
@@ -51,33 +49,5 @@ export function DocxReflowSurface({ handleRef, interactions, ...props }: DocxRef
 			storyLabel={(kind, mark) => (kind === "textbox" || mark === "" ? t(STORY_LABELS[kind]) : t(NUMBERED_LABELS[kind], { mark }))}
 			{...(interactions === undefined ? {} : { interactions })}
 		/>
-	)
-}
-
-export interface DocxReflowMenuItemProps extends DocxToolbarSlotProps {
-	reflow: boolean
-	onReflowChange: (reflow: boolean) => void
-}
-
-// The ⋯ menu's "Mobile view" switch between pages and the reflowed view (the user's choice holds for the open
-// document).
-export function DocxReflowMenuItem(props: DocxReflowMenuItemProps) {
-	const { t } = useTranslation("preview")
-	const command = props.commands.find(entry => entry.info.type === "view.reflow")
-
-	if (command === undefined) {
-		return null
-	}
-
-	return (
-		<DropdownMenuCheckboxItem
-			checked={props.reflow}
-			closeOnClick
-			onCheckedChange={checked => {
-				props.onReflowChange(checked)
-			}}
-		>
-			{t(command.label)}
-		</DropdownMenuCheckboxItem>
 	)
 }

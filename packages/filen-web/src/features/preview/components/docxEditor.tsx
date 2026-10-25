@@ -84,8 +84,9 @@ import { commandNeedsAuthor } from "@/features/preview/components/docxAuthorGate
 import { useDocxAuthorGate } from "@/features/preview/components/docxAuthorGate"
 import { DocxCommentPopover } from "@/features/preview/components/docxCommentPopover"
 import { DocxContextCommands } from "@/features/preview/components/docxContextMenu"
-import { DocxEditToolbar } from "@/features/preview/components/docxEditToolbar"
+import { DocxEditToolbar, type DocxRibbonClipboard } from "@/features/preview/components/docxEditToolbar"
 import { DocxFileMenu } from "@/features/preview/components/docxFileMenu"
+import { ribbonLanding } from "@/features/office/components/ribbon/ribbonFocus"
 import { useDocxPdfExport } from "@/features/preview/hooks/useDocxPdfExport"
 import { editedFile } from "@/features/preview/lib/docxLiveFile"
 import type { LiveFile } from "@/features/drive/lib/downloadAs"
@@ -1046,17 +1047,36 @@ export function DocxEditView({
 		focusEditor()
 	}
 
-	const paste = async (): Promise<void> => {
+	// Text only: the clipboard's text, without its formatting or pictures (the ribbon's Keep text only).
+	const paste = async (textOnly: boolean): Promise<void> => {
 		const content = await readEditorClipboard()
 
 		focusEditor()
 
 		if (content === null) {
 			blocked("V")
+		} else if (textOnly) {
+			if (content.text !== undefined && content.text !== "") {
+				handleRef.current?.paste({ text: content.text })
+			}
 		} else if (!image.paste(content)) {
 			handleRef.current?.paste(content)
 		}
 	}
+
+	// The ribbon's Clipboard group: one object for the editor's life, so a keystroke re-renders no part of the ribbon.
+	const clipboardRef = useLatestRef({ cut, copy, paste })
+	const [ribbonClipboard] = useState<DocxRibbonClipboard>(() => ({
+		cut: () => {
+			void clipboardRef.current.cut()
+		},
+		copy: () => {
+			void clipboardRef.current.copy()
+		},
+		paste: textOnly => {
+			void clipboardRef.current.paste(textOnly)
+		}
+	}))
 
 	const selectAll = (): void => {
 		handleRef.current?.selectAll()
@@ -1211,20 +1231,48 @@ export function DocxEditView({
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
+			// F6 and Shift+F6 move between the ribbon and the document, as Word's panes.
+			onKeyDown={event => {
+				if (event.key !== "F6" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
+					return
+				}
+
+				const ribbon = event.currentTarget.querySelector("[data-office-ribbon]")
+
+				if (ribbon === null) {
+					return
+				}
+
+				event.preventDefault()
+
+				if (event.target instanceof Node && ribbon.contains(event.target)) {
+					focusEditor()
+				} else {
+					ribbonLanding(ribbon)?.focus()
+				}
+			}}
 		>
 			<DocxEditToolbar
 				fileMenu={
-					pdf.onDownloadPdf === undefined ? undefined : (
-						<DocxFileMenu
-							onDownloadPdf={pdf.onDownloadPdf}
-							liveFile={liveFile}
-						/>
-					)
+					<DocxFileMenu
+						ribbon
+						onDownloadPdf={pdf.onDownloadPdf}
+						liveFile={liveFile}
+						autosave={{
+							checked: settings.autosave,
+							onChange: next => {
+								saveOfficeAutosave(next).catch((error: unknown) => {
+									log.warn("office", "autosave setting not saved", { error })
+								})
+							}
+						}}
+					/>
 				}
 				snapshot={toolbarSnapshot}
 				readOnly={readOnly}
 				apple={APPLE}
 				execute={execute}
+				clipboard={ribbonClipboard}
 				viewOnly={viewOnly}
 				encrypted={
 					encryption === undefined
@@ -1243,12 +1291,6 @@ export function DocxEditView({
 				zoom={zoom}
 				onZoom={change => {
 					setZoomMode(change === "fit" ? "fit" : stepZoom(zoom, change === "in" ? 1 : -1))
-				}}
-				autosave={settings.autosave}
-				onAutosaveChange={next => {
-					saveOfficeAutosave(next).catch((error: unknown) => {
-						log.warn("office", "autosave setting not saved", { error })
-					})
 				}}
 				reflow={reflow}
 				onReflowChange={setReflow}
@@ -1481,7 +1523,7 @@ export function DocxEditView({
 							},
 							paste: editable
 								? () => {
-										void paste()
+										void paste(false)
 									}
 								: null,
 							selectAll
@@ -1572,7 +1614,7 @@ export function DocxEditView({
 					<ContextMenuItem
 						disabled={!editable}
 						onClick={() => {
-							void paste()
+							void paste(false)
 						}}
 					>
 						{t("previewDocxPaste")}

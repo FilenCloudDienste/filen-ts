@@ -3,6 +3,7 @@ import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
+import { ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // Comments and tracked changes in the DOCX editor in a real browser: a comment composed, replied to and
@@ -49,7 +50,7 @@ async function closeDocumentDiscarding(page: Page): Promise<void> {
 		await discard.click()
 	}
 
-	await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toHaveCount(0)
+	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
 }
 
 // The account may have no author name yet: the first change that records one asks for it.
@@ -63,27 +64,28 @@ async function giveNameIfAsked(page: Page): Promise<void> {
 	}
 }
 
-// Track changes switched on from the Review menu. The switch keeps the menu open: it is closed from its button
-// (Escape there would reach the editor and close it once the name prompt took the menu down).
+// Track changes switched on from the Review tab (the first change it records may ask for the author's name).
 async function trackChanges(page: Page): Promise<void> {
-	const item = page.getByRole("menuitemcheckbox", { name: preview.previewDocxTrackChanges })
-	const tracking = page.getByRole("button", { name: preview.previewDocxReviewMenuTracking })
+	await ribbonTab(page, preview.previewOfficeRibbonTabReview)
 
-	await page.getByRole("button", { name: new RegExp(`^${preview.previewDocxReviewMenu}`) }).click()
-	await item.click()
+	const track = await ribbonButton(page, page, preview.previewDocxRibbonTracking, preview.previewDocxTrackChanges)
+
+	await track.click()
 	await giveNameIfAsked(page)
-	await expect(tracking).toBeVisible()
-
-	if (await item.isVisible().catch(() => false)) {
-		await tracking.click()
-	}
-
-	await expect(item).toHaveCount(0)
+	await expect(ribbonCommands(page).getByRole("button", { name: preview.previewDocxTrackChanges, exact: true })).toHaveAttribute(
+		"aria-pressed",
+		"true"
+	)
 }
 
-async function review(page: Page, item: string): Promise<void> {
-	await page.getByRole("button", { name: new RegExp(`^${preview.previewDocxReviewMenu}`) }).click()
-	await page.getByRole("menuitem", { name: item, exact: true }).click()
+// A Review tab command: a button of its group, or an entry of the Reject dropdown.
+async function review(page: Page, group: string, button: string, item?: string): Promise<void> {
+	await ribbonTab(page, preview.previewOfficeRibbonTabReview)
+	await (await ribbonButton(page, page, group, button)).click()
+
+	if (item !== undefined) {
+		await page.getByRole("menuitem", { name: item, exact: true }).click()
+	}
 }
 
 test("comments: composed, replied to and resolved in the margin", async ({ page }) => {
@@ -99,7 +101,7 @@ test("comments: composed, replied to and resolved in the margin", async ({ page 
 
 		// A new comment on a word of the second paragraph, composed in a balloon beside it.
 		await pageText(page, "second").dblclick()
-		await review(page, preview.previewDocxNewComment)
+		await review(page, preview.previewOfficeRibbonComments, preview.previewDocxNewComment)
 		await page.getByRole("textbox", { name: preview.previewDocxCommentPlaceholder }).fill("Composed in the margin")
 		await page.getByRole("button", { name: preview.previewDocxCommentPost, exact: true }).click()
 		await giveNameIfAsked(page)
@@ -141,7 +143,7 @@ test.describe("without room for balloons", () => {
 			await expect(page.getByText("A fixture comment.")).toHaveCount(0)
 
 			await pageText(page, "second").dblclick()
-			await review(page, preview.previewDocxNewComment)
+			await review(page, preview.previewOfficeRibbonComments, preview.previewDocxNewComment)
 			await page.getByRole("textbox", { name: preview.previewDocxCommentPlaceholder }).fill("From the popover")
 			await page.getByRole("button", { name: preview.previewDocxCommentPost, exact: true }).click()
 			await giveNameIfAsked(page)
@@ -175,7 +177,7 @@ test("track changes: switched on, typing recorded, changes accepted and rejected
 		// From the start of the first paragraph, the next change is the fixture's insertion: its card accepts it.
 		await pageText(page, DOCX_FIXTURE_TEXT["w3-tracked.docx"]).click()
 		await page.keyboard.press("Home")
-		await review(page, preview.previewDocxNextChange)
+		await review(page, preview.previewDocxRibbonChanges, preview.previewDocxNextChange)
 
 		const card = page.getByRole("dialog", { name: /^Change by / })
 
@@ -184,18 +186,14 @@ test("track changes: switched on, typing recorded, changes accepted and rejected
 		await expect(card).toHaveCount(0)
 
 		// The rest rejected: what was typed goes, the fixture's deletion comes back, no change is left to step to.
-		await review(page, preview.previewDocxRejectAll)
+		await review(page, preview.previewDocxRibbonChanges, preview.previewDocxRibbonReject, preview.previewDocxRejectAll)
 		await expect(pageText(page, "Typed while tracking")).toHaveCount(0)
 		await expect(pageText(page, "inserted")).toBeVisible()
 		await expect(pageText(page, "deleted")).toBeVisible()
 
-		const next = page.getByRole("menuitem", { name: preview.previewDocxNextChange, exact: true })
-
-		await page.getByRole("button", { name: new RegExp(`^${preview.previewDocxReviewMenu}`) }).click()
-		await expect(next).toBeDisabled()
-		// Closed by a press outside it (Escape would also reach the editor).
+		await ribbonTab(page, preview.previewOfficeRibbonTabReview)
+		await expect(await ribbonButton(page, page, preview.previewDocxRibbonChanges, preview.previewDocxNextChange)).toBeDisabled()
 		await pageText(page, "inserted").click()
-		await expect(next).toHaveCount(0)
 
 		await closeDocumentDiscarding(page)
 	})

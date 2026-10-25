@@ -4,6 +4,7 @@ import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { DOCX_FIXTURE_TEXT, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
+import { ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // IME composition in the DOCX editor with track changes on, through Chromium's input method protocol (CDP
@@ -58,7 +59,7 @@ async function closeDiscarding(page: Page): Promise<void> {
 		.getByRole("alertdialog", { name: preview.previewUnsavedChangesTitle })
 		.getByRole("button", { name: preview.previewDiscardAction })
 		.click()
-	await expect(page.getByRole("toolbar", { name: preview.previewDocxEditToolbar })).toHaveCount(0)
+	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
 }
 
 // The account may have no author name yet: the first change that records one asks for it.
@@ -72,21 +73,15 @@ async function giveNameIfAsked(page: Page): Promise<void> {
 	}
 }
 
-// Track changes on, from the Review menu (closed from its button: Escape would reach the editor).
+// Track changes on, from the Review tab.
 async function trackChanges(page: Page): Promise<void> {
-	const item = page.getByRole("menuitemcheckbox", { name: preview.previewDocxTrackChanges })
-	const tracking = page.getByRole("button", { name: preview.previewDocxReviewMenuTracking })
-
-	await page.getByRole("button", { name: new RegExp(`^${preview.previewDocxReviewMenu}`) }).click()
-	await item.click()
+	await ribbonTab(page, preview.previewOfficeRibbonTabReview)
+	await (await ribbonButton(page, page, preview.previewDocxRibbonTracking, preview.previewDocxTrackChanges)).click()
 	await giveNameIfAsked(page)
-	await expect(tracking).toBeVisible()
-
-	if (await item.isVisible().catch(() => false)) {
-		await tracking.click()
-	}
-
-	await expect(item).toHaveCount(0)
+	await expect(ribbonCommands(page).getByRole("button", { name: preview.previewDocxTrackChanges, exact: true })).toHaveAttribute(
+		"aria-pressed",
+		"true"
+	)
 }
 
 // Clicks just inside the end of `text` on the page.
@@ -209,8 +204,8 @@ test("in a comment's reply field: the reply's text, no change of the document", 
 	await expect(page.locator(".fo-docx-page").getByText("返信")).toHaveCount(0)
 
 	// Nothing in the document was changed while tracking.
-	await page.getByRole("button", { name: new RegExp(`^${preview.previewDocxReviewMenu}`) }).click()
-	await expect(page.getByRole("menuitem", { name: preview.previewDocxNextChange, exact: true })).toBeDisabled()
+	await ribbonTab(page, preview.previewOfficeRibbonTabReview)
+	await expect(await ribbonButton(page, page, preview.previewDocxRibbonChanges, preview.previewDocxNextChange)).toBeDisabled()
 	await pageText(page, DOCX_FIXTURE_TEXT["w3-comments.docx"]).click()
 	await closeDiscarding(page)
 })

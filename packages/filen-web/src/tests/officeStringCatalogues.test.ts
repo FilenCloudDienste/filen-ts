@@ -42,7 +42,12 @@ describe("the office editors' string catalogues", () => {
 	it("keep the editor's own strings in its catalogue, not in the viewer's preview.ts", () => {
 		const source = readFileSync(join(ROOT, "src/locales/en/preview.ts"), "utf8")
 
-		for (const key of ["previewDocxEditToolbar", "previewDocxSaveRefused", "previewDocxCommandFailed", "previewDocxClipboardBlocked"]) {
+		for (const key of [
+			"previewDocxRibbonTabLayout",
+			"previewDocxSaveRefused",
+			"previewDocxCommandFailed",
+			"previewDocxClipboardBlocked"
+		]) {
 			expect(source, key).not.toMatch(new RegExp(`^\\s+${key}:`, "m"))
 			expect(preview).toHaveProperty(key)
 		}

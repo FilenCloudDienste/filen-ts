@@ -271,6 +271,23 @@ export function useSheetObjects({
 		id: "objects",
 		grid: gridExtension,
 		shortcut,
+		...(selectedObject !== undefined && {
+			ribbon: {
+				object: {
+					chart: selectedObject.kind === "chart" || selectedObject.kind === "chartex",
+					altText: editable
+						? () => {
+								setAltFor(selectedObject)
+							}
+						: undefined,
+					remove: editable
+						? () => {
+								remove(selectedObject)
+							}
+						: undefined
+				}
+			}
+		}),
 		overlay:
 			drawings === undefined ? undefined : (
 				<SheetObjects

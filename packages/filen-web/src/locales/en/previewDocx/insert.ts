@@ -1,8 +1,6 @@
 // "preview" namespace, Word document editor — the editor's insert menu, its dialogs, pictures and notes. Spread into preview.ts; same catalog rules.
 export const previewDocxInsert = {
 	// ── Insert menu ──────────────────────────────────────────────────────────
-	/** Docx editor — the toolbar's Insert menu button (links, pictures, tables, breaks, notes, fields, symbols) */
-	previewDocxInsertMenu: "Insert",
 	/** Docx editor — Insert menu item and command: a link at the selection (opens the link dialog) */
 	previewDocxInsertLink: "Link…",
 	/** Docx editor — command removing the link at the selection, keeping its text */

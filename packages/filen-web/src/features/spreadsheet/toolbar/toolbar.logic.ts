@@ -18,12 +18,12 @@ import {
 	type SheetRgb,
 	type SheetVerticalAlign
 } from "@filen/office/core/sheet"
+import { SHEET_SHORTCUTS, type SheetShortcut } from "@filen/office/react/sheet"
 import { STANDARD_SWATCHES, type DocxSwatch } from "@/features/office/lib/officeControls"
 import type { PreviewKey } from "@/lib/i18n"
 
-// What the spreadsheet toolbar shows and sends: the active cell's format as the controls read it, the pickers'
-// choices (fonts, sizes, colours, border lines, alignments, number formats), the changes each control makes, and
-// which groups the row has room for.
+// What the spreadsheet ribbon shows and sends: the active cell's format as the controls read it, the pickers'
+// choices (fonts, sizes, colours, border lines, alignments, number formats) and the changes each control makes.
 
 // --- The active cell ---
 
@@ -40,6 +40,11 @@ export interface ActiveFormat {
 	readonly align: SheetHorizontalAlign | "general"
 	readonly valign: SheetVerticalAlign
 	readonly wrap: boolean
+	readonly shrink: boolean
+	// Indent levels.
+	readonly indent: number
+	// As the file writes it (§18.8.1 textRotation): 0 none, 1-90 counter-clockwise, 91-180 clockwise, 255 stacked.
+	readonly rotation: number
 	readonly numFmt: string
 	// The cell's text as shown (what Increase Decimal starts a General cell from).
 	readonly shown: string
@@ -63,6 +68,10 @@ export function activeFormat(style: SheetRenderStyle, base: SheetRenderStyle, nu
 		align: style.align ?? "general",
 		valign: style.valign ?? "bottom",
 		wrap: style.wrap === true,
+		shrink: style.shrink === true,
+		indent: style.indent ?? 0,
+		// The render style turns clockwise angles negative.
+		rotation: style.rotation === undefined ? 0 : style.rotation < 0 ? 90 - style.rotation : style.rotation,
 		numFmt,
 		shown
 	}
@@ -314,6 +323,37 @@ export function valignPatch(valign: SheetVerticalAlign): SheetFormatPatch {
 	return { valign: valign === "bottom" ? null : valign }
 }
 
+// Excel's most indent levels.
+const MAX_INDENT = 15
+
+// Increase or Decrease Indent: a level more or less; an indent needs an alignment that takes one, so General and
+// the centred ones become left as in Excel. Null when there is no level to take away.
+export function indentPatch(format: Pick<ActiveFormat, "indent" | "align">, delta: 1 | -1): SheetFormatPatch | null {
+	const indent = Math.min(MAX_INDENT, Math.max(0, format.indent + delta))
+
+	if (indent === format.indent) {
+		return null
+	}
+
+	const takes = format.align === "left" || format.align === "right" || format.align === "distributed"
+
+	return indent > 0 && !takes ? { indent, align: "left" } : { indent }
+}
+
+// The Orientation menu's angles (textRotation), in Excel's order.
+export const ORIENTATIONS: readonly { readonly rotation: number; readonly label: PreviewKey }[] = [
+	{ rotation: 45, label: "previewSheetRotationCounterclockwise" },
+	{ rotation: 135, label: "previewSheetRotationClockwise" },
+	{ rotation: 255, label: "previewSheetRotationVertical" },
+	{ rotation: 90, label: "previewSheetRotationUp" },
+	{ rotation: 180, label: "previewSheetRotationDown" }
+]
+
+// An angle picked again takes the text back to horizontal, as Excel's menu does.
+export function rotationPatch(current: number, picked: number): SheetFormatPatch {
+	return { rotation: current === picked ? 0 : picked }
+}
+
 // --- Number formats ---
 
 const CATEGORY_LABELS_BY_NAME: Readonly<Record<NumFmtCategory, PreviewKey>> = {
@@ -378,36 +418,54 @@ export function decimalsPatch(numFmt: string, shown: string, delta: 1 | -1, deci
 export const PERCENT_PATCH: SheetFormatPatch = { numFmt: PERCENT_STYLE }
 export const COMMA_PATCH: SheetFormatPatch = { numFmt: COMMA_STYLE }
 
-// --- Fitting the row ---
+// --- View ---
 
-// The groups the row may move into the ⋯ menu, right to left, and the room each takes (px; buttons are 32,
-// dropdown triggers 44, the dividers 9).
-const GROUP_WIDTHS = { decimals: 105, number: 129, align: 129, borders: 53, toggles: 137, font: 213 } as const
+// The View tab's zoom steps (%), within the grid's 10-400.
+const ZOOM_STEPS: readonly number[] = [25, 50, 75, 100, 125, 150, 200, 300, 400]
 
-export type ToolbarGroup = keyof typeof GROUP_WIDTHS
-
-// What always stays: undo and redo, the colour pickers, merge, freeze, find and the ⋯ button, with dividers.
-const KEPT_WIDTH = 64 + 9 + 64 + 9 + 53 + 53 + 32 + 32 + 16
-
-// Which groups the row shows at `width` (0: not measured yet, everything). The rest go into the ⋯ menu, the last
-// groups first.
-export function toolbarFit(width: number): Readonly<Record<ToolbarGroup, boolean>> {
-	const order: readonly ToolbarGroup[] = ["font", "toggles", "borders", "align", "number", "decimals"]
-	const shown: Record<ToolbarGroup, boolean> = { font: true, toggles: true, borders: true, align: true, number: true, decimals: true }
-
-	if (width <= 0) {
-		return shown
+// The next step above (1) or below (-1) `percent`, held at the ends.
+export function zoomStep(percent: number, direction: 1 | -1): number {
+	if (direction > 0) {
+		return ZOOM_STEPS.find(step => step > percent) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1] ?? percent
 	}
 
-	let room = width - KEPT_WIDTH
+	return ZOOM_STEPS.findLast(step => step < percent) ?? ZOOM_STEPS[0] ?? percent
+}
 
-	for (const group of order) {
-		room -= GROUP_WIDTHS[group]
+// --- Shortcuts ---
 
-		if (room < 0) {
-			shown[group] = false
-		}
+// Keys a chord names by position (KeyboardEvent.code), as printed on a US keyboard.
+const CODE_KEYS: Readonly<Record<string, string>> = {
+	Equal: "=",
+	Minus: "-",
+	Backquote: "`",
+	Semicolon: ";",
+	Quote: "'",
+	Period: ".",
+	NumpadAdd: "+",
+	NumpadSubtract: "-",
+	NumpadMultiply: "*"
+}
+
+// A grid shortcut's first chord (react/sheet/keys.ts) as the keys a tooltip shows; null for one without a chord.
+export function sheetShortcutKeys(action: SheetShortcut, mac: boolean): string[] | null {
+	const entry = SHEET_SHORTCUTS.find(candidate => candidate.action === action)
+	const chord = (mac ? entry?.mac : entry?.windows)?.[0]
+
+	if (chord === undefined) {
+		return null
 	}
 
-	return shown
+	const keys: string[] = []
+
+	if (chord.control === true) keys.push(mac ? "⌃" : "Ctrl")
+	if (chord.primary === true) keys.push(mac ? "⌘" : "Ctrl")
+	if (chord.alt === true) keys.push(mac ? "⌥" : "Alt")
+	if (chord.shift === true) keys.push(mac ? "⇧" : "Shift")
+
+	const key = chord.key ?? (chord.code === undefined ? "" : (CODE_KEYS[chord.code] ?? chord.code.replace(/^(Key|Digit)/u, "")))
+
+	keys.push(key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key)
+
+	return keys
 }

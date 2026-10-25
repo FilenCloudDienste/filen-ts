@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { FileSpreadsheetIcon } from "lucide-react"
+import { ChevronDownIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
 	DropdownMenu,
@@ -13,7 +13,6 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { saveOfficeAutosave, useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { EditorDownloadAsItems, type LiveConversion } from "@/features/drive/components/editorDownloadAs"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -36,7 +35,7 @@ export interface SheetFileMenuProps {
 	liveConversion?: LiveConversion | undefined
 }
 
-// The spreadsheet's file actions beside the cell contents: Save as .xlsx, Download as ▸ PDF, CSV or the formats the
+// The spreadsheet's file actions, first in its ribbon: Save as .xlsx, Download as ▸ PDF, CSV or the formats the
 // workbook converts to, Print, and the autosave setting (the same synced setting as Settings → Advanced → Documents). Nothing to offer: not shown.
 export function SheetFileMenu({ text, onDownloadCsv, onDownloadPdf, onSaveAsXlsx, autosave, onPrint, liveConversion }: SheetFileMenuProps) {
 	const { t } = useTranslation(["preview", "settings"])
@@ -51,27 +50,22 @@ export function SheetFileMenu({ text, onDownloadCsv, onDownloadPdf, onSaveAsXlsx
 
 	return (
 		<DropdownMenu>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<DropdownMenuTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-xs"
-									aria-label={t("previewSheetFileMenu")}
-									className="shrink-0"
-								>
-									<FileSpreadsheetIcon />
-								</Button>
-							}
-						/>
-					}
-				/>
-				<TooltipContent>{t("previewSheetFileMenu")}</TooltipContent>
-			</Tooltip>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="sm"
+						aria-label={t("previewSheetFileMenu")}
+						data-ribbon-file
+						className="shrink-0 gap-0.5 px-2.5"
+					>
+						{t("previewSheetFileMenu")}
+						<ChevronDownIcon className="size-3" />
+					</Button>
+				}
+			/>
 			<DropdownMenuContent
-				align="end"
+				align="start"
 				data-preview-surface
 			>
 				{onSaveAsXlsx === undefined ? null : (
