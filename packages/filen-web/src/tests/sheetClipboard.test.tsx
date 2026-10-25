@@ -36,6 +36,17 @@ describe("the sheet clipboard sanitizer", () => {
 		expect(clean).toContain('data-sheets-formula="=R[0]C[-1]"')
 		expect(clean).not.toMatch(/script|onclick|onerror|<img|<iframe|alert/)
 	})
+
+	it("keeps Excel's cell formats, which it writes inside an HTML comment in its style element", () => {
+		const clean = sanitizeSheetClipboard(
+			'<html><head><style><!--table\n\t{mso-displayed-decimal-separator:"\\.";}\n.xl65\n\t{font-weight:700;\n\tbackground:yellow;}\n--></style></head>' +
+				'<body><table><tr><td class="xl65">Bold</td></tr></table></body></html>'
+		)
+
+		expect(clean).toContain(".xl65")
+		expect(clean).toContain("font-weight:700")
+		expect(clean).toContain('<td class="xl65">Bold</td>')
+	})
 })
 
 interface Harness {

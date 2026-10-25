@@ -69,9 +69,21 @@ export interface SheetClipboardPurifier {
 	): string
 }
 
+// A style element's content as Excel writes it, inside an HTML comment (for browsers without CSS): DOMPurify drops an
+// element whose content holds a comment's end, so the markers go first. The rules are the same without them.
+const STYLE_ELEMENT = /(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/giu
+const COMMENT_MARKERS = /<!--|-->/gu
+
+function uncommentStyles(html: string): string {
+	return html.replace(
+		STYLE_ELEMENT,
+		(_whole, open: string, css: string, close: string) => open + css.replace(COMMENT_MARKERS, "") + close
+	)
+}
+
 export function createSheetClipboardSanitizer(purifier: SheetClipboardPurifier): (html: string) => string {
 	return html =>
-		purifier.sanitize(html, {
+		purifier.sanitize(uncommentStyles(html), {
 			ALLOWED_TAGS: [...SHEET_CLIPBOARD_ALLOWED_TAGS],
 			ALLOWED_ATTR: [...SHEET_CLIPBOARD_ALLOWED_ATTR],
 			ALLOW_DATA_ATTR: true,
