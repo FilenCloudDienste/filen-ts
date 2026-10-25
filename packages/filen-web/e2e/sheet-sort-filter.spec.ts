@@ -157,8 +157,13 @@ test("data sorted from the toolbar and the sort dialog, filtered from a header's
 		// The filtered rows stay hidden: the menu shows "pear" unchecked; Ctrl+Shift+L then turns the filter off.
 		await open(dialog, rows.filter)
 		await filterButton(dialog, 0)
-		await expect(page.locator("[data-sheet-filter-menu]").getByLabel("pear", { exact: true })).not.toBeChecked()
+		const filterMenu = page.locator("[data-sheet-filter-menu]")
+
+		await expect(filterMenu.getByLabel("pear", { exact: true })).not.toBeChecked()
+		// The Escape is the menu's once it holds focus; before, it would close the document (a slow runner's case).
+		await expect.poll(() => filterMenu.evaluate(element => element.contains(document.activeElement))).toBe(true)
 		await page.keyboard.press("Escape")
+		await expect(filterMenu).toHaveCount(0)
 		await goTo(dialog, "A1")
 		await page.keyboard.press(mod === "Meta" ? "Meta+Shift+F" : "Control+Shift+L")
 		await expect(dialog.getByRole("button", { name: "Save", exact: true })).toBeVisible()

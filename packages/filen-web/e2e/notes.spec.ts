@@ -487,7 +487,8 @@ test.describe("notes", () => {
 				runMenuAction(page, menuTrigger, "Export", "menuClosed")
 			])
 
-			expect(download.suggestedFilename()).toBe(`${title}.md`)
+			// Linux WebKit saves a download's spaces as underscores; the title has none of its own.
+			expect(download.suggestedFilename().replaceAll("_", " ")).toBe(`${title}.md`)
 			expect(readFileSync(await download.path(), "utf8")).toBe(expectedMarkdown)
 
 			// Export-all (the sidebar header's ⋯ bulk-ops menu, one entry today) — same bounded

@@ -78,15 +78,16 @@ async function rowMenu(dialog: Locator, row: number): Promise<void> {
 
 // The column header edges a pointer resizes at, left to right in page pixels: the middle of each stretch of the
 // header row where the grid shows the resize cursor (the cells are drawn, so the edges are found by hovering).
-async function columnEdges(page: Page, dialog: Locator, span = 400): Promise<number[]> {
+async function columnEdges(page: Page, dialog: Locator, span = 400, from?: number): Promise<number[]> {
 	const root = dialog.locator(".fo-sheet")
 	const box = await boxOf(root)
 	// Column headers 20 px at 100 %: the middle of the header row.
 	const y = box.y + 10
 	const edges: number[] = []
+	const first = from ?? box.x
 	let start: number | null = null
 
-	for (let x = box.x; x <= box.x + Math.min(span, box.width); x += 2) {
+	for (let x = first; x <= Math.min(first + span, box.x + box.width); x += 2) {
 		await page.mouse.move(x, y)
 
 		const resizing = (await root.getAttribute("data-cursor")) === "col-resize"
@@ -101,13 +102,20 @@ async function columnEdges(page: Page, dialog: Locator, span = 400): Promise<num
 	return edges
 }
 
-// The width between the first two header edges, and the second edge's position.
-async function measuredColumn(page: Page, dialog: Locator): Promise<{ width: number; edge: number }> {
-	const [first, second] = await columnEdges(page, dialog)
+// The first header edge past page x `from` (within 120 px), 0 when none: hovering the whole header row once per
+// poll is too slow for a CI runner's poll interval. Asserted near where a drag left it, as the next column's edge
+// lies in that range too.
+async function edgePast(page: Page, dialog: Locator, from: number): Promise<number> {
+	return (await columnEdges(page, dialog, 120, from))[0] ?? 0
+}
 
-	if (first === undefined || second === undefined) throw new Error("no column header edges found")
+// The second header edge's position: column A's right edge.
+async function columnAEdge(page: Page, dialog: Locator): Promise<number> {
+	const [, second] = await columnEdges(page, dialog)
 
-	return { width: second - first, edge: second }
+	if (second === undefined) throw new Error("no column header edges found")
+
+	return second
 }
 
 // Drags the header edge at page x `edge` by `dx` pixels.
@@ -260,10 +268,10 @@ test("a dragged column width: an xlsx keeps it in the file once saved, a csv bes
 		await expectCell(dialog, "A1", "Item", LAZY_VIEWER_TIMEOUT_MS)
 		await expect(bold).toBeEnabled()
 
-		const before = await measuredColumn(page, dialog)
+		const before = await columnAEdge(page, dialog)
 
-		await dragColumnEdge(page, dialog, before.edge, 80)
-		await expect.poll(async () => (await measuredColumn(page, dialog)).width).toBeGreaterThan(before.width + 70)
+		await dragColumnEdge(page, dialog, before, 80)
+		await expect.poll(async () => Math.abs((await edgePast(page, dialog, before + 40)) - (before + 80))).toBeLessThan(6)
 		await expect(saveButton).toBeEnabled()
 		await saveButton.click()
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
@@ -274,7 +282,7 @@ test("a dragged column width: an xlsx keeps it in the file once saved, a csv bes
 		await expect(xlsxRow).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await xlsxRow.dblclick()
 		await expectCell(dialog, "A1", "Item", LAZY_VIEWER_TIMEOUT_MS)
-		await expect.poll(async () => (await measuredColumn(page, dialog)).width).toBeGreaterThan(before.width + 70)
+		await expect.poll(async () => Math.abs((await edgePast(page, dialog, before + 40)) - (before + 80))).toBeLessThan(6)
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 
@@ -284,17 +292,17 @@ test("a dragged column width: an xlsx keeps it in the file once saved, a csv bes
 		await csvRow.dblclick()
 		await expectCell(dialog, "A2", "Apples", LAZY_VIEWER_TIMEOUT_MS)
 
-		const csvBefore = await measuredColumn(page, dialog)
+		const csvBefore = await columnAEdge(page, dialog)
 
-		await dragColumnEdge(page, dialog, csvBefore.edge, 60)
-		await expect.poll(async () => (await measuredColumn(page, dialog)).width).toBeGreaterThan(csvBefore.width + 50)
+		await dragColumnEdge(page, dialog, csvBefore, 60)
+		await expect.poll(async () => Math.abs((await edgePast(page, dialog, csvBefore + 30)) - (csvBefore + 60))).toBeLessThan(6)
 		await expect(saveButton).toHaveCount(0)
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 
 		await csvRow.dblclick()
 		await expectCell(dialog, "A2", "Apples", LAZY_VIEWER_TIMEOUT_MS)
-		await expect.poll(async () => (await measuredColumn(page, dialog)).width).toBeGreaterThan(csvBefore.width + 50)
+		await expect.poll(async () => Math.abs((await edgePast(page, dialog, csvBefore + 30)) - (csvBefore + 60))).toBeLessThan(6)
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 	})
