@@ -154,9 +154,11 @@ export function cardButton(card: Locator, name: CardButtonName): Locator {
 	return card.getByRole("button", { name, exact: true })
 }
 
-// Pauses a running job at once: a paused job is deterministic, and keeps the page's one archive slot.
-export async function pauseFirst(card: Locator): Promise<void> {
+// Pauses a running job at once: a paused job is deterministic, and keeps the page's one archive slot. A `hold` the
+// job's chunks wait on is released once the pause is asked for, so a short job cannot end before it.
+export async function pauseFirst(card: Locator, hold: ChunkHold | null = null): Promise<void> {
 	await cardButton(card, "Pause").click()
+	hold?.release()
 	await expect(card.getByText("Paused", { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 }
 

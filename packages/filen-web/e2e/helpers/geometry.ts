@@ -39,3 +39,11 @@ export async function hitCenterOf(locator: Locator, timeout = 10_000): Promise<{
 
 	return center
 }
+
+// The centre of `locator` once the next frame has drawn: for an element a renderer moves on its frame (the sheet's
+// active cell box), which a read straight after the state change finds where it was.
+export async function framedCenterOf(locator: Locator): Promise<{ x: number; y: number }> {
+	await locator.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+
+	return centerOf(locator)
+}

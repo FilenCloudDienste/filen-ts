@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
-import type { Locator, Page } from "@playwright/test"
+import type { Download, Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
+import JSZip from "jszip"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, toasts, uploadFiles, withScratchDirectory } from "./helpers/listing"
@@ -8,11 +9,13 @@ import { openRowMenu, openTrash, revealRow } from "./helpers/archive"
 import { buildZip } from "./helpers/archiveFixtures"
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes } from "./helpers/docxFixtures"
 import { ENCRYPTED_DOCX_PASSWORD, ENCRYPTED_DOCX_TEXT, encryptedDocxBytes } from "./helpers/docxEncryptedFixtures"
+import { holdChunks } from "./helpers/jobs"
 import { MOD_KEY } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
 import { drive } from "@/locales/en/drive"
 import { preview } from "@/locales/en/preview"
+import { transfers } from "@/locales/en/transfers"
 
 // Download as ▸ PDF from the drive's item menu, end to end against the backend: the saved file read, laid out in the
 // workers without opening its viewer, and downloaded as "<name>.pdf"; byte for byte the File menu's export of the
@@ -225,8 +228,11 @@ test("a password-protected document asks its password, refuses a wrong one and p
 	})
 })
 
-test("Cancel on the progress toast stops the export: no download, the toast goes", async ({ page }) => {
+test("Cancel on the progress toast stops the export: no download, the toast goes", async ({ page, browserName }) => {
 	test.slow()
+	// The export is held at its file's download so the Cancel lands mid-run, not after it; WebKit cannot hold the
+	// SDK worker's requests, and an unheld export of any size can finish before the click.
+	test.skip(browserName === "webkit", "WebKit cannot hold the SDK worker's requests")
 
 	await withScratchDirectory(page, "download-as-cancel", async ({ listbox, runId }) => {
 		const name = `e2e-${runId}-long.docx`
@@ -234,29 +240,38 @@ test("Cancel on the progress toast stops the export: no download, the toast goes
 
 		page.on("download", () => downloads++)
 		await uploadFiles(page, [{ name, mimeType: DOCX_MIME, buffer: longDocx(6000) }], listbox)
-		await openRowMenu(page, listbox, name)
-		await page.getByRole("menuitem", { name: drive.driveActionDownloadAs, exact: true }).click()
-		await page.getByRole("menuitem", { name: drive.driveDownloadAsPdf, exact: true }).click()
 
-		const progress = toasts(page).filter({ hasText: /page \d+ of \d+/ })
+		const hold = await holdChunks(page, browserName, { hosts: "egest" })
 
-		await expect(progress).toBeVisible({ timeout: EXPORT_TIMEOUT_MS })
-		await progress.getByRole("button", { name: preview.previewDocxPdfCancel, exact: true }).click()
-		await expect(progress).toHaveCount(0)
+		try {
+			await openRowMenu(page, listbox, name)
+			await page.getByRole("menuitem", { name: drive.driveActionDownloadAs, exact: true }).click()
+			await page.getByRole("menuitem", { name: drive.driveDownloadAsPdf, exact: true }).click()
+			await expect.poll(() => hold?.held() ?? 0, { timeout: EXPORT_TIMEOUT_MS }).toBeGreaterThan(0)
+
+			const progress = toasts(page).filter({ has: page.getByRole("button", { name: preview.previewDocxPdfCancel, exact: true }) })
+
+			await progress.getByRole("button", { name: preview.previewDocxPdfCancel, exact: true }).click()
+			await expect(progress).toHaveCount(0)
+		} finally {
+			hold?.release()
+			await hold?.dispose()
+		}
+
 		await page.waitForTimeout(3000)
 		expect(downloads).toBe(0)
 	})
 })
 
-test("the whole selection downloads as PDFs from the selection bar, one after another", async ({ page }) => {
+test("the whole selection downloads as one archive of PDFs from the selection bar", async ({ page }) => {
 	test.slow()
 
 	await withScratchDirectory(page, "download-as-bulk", async ({ listbox, runId }) => {
 		const document = `e2e-${runId}-a.docx`
 		const workbook = `e2e-${runId}-b.xlsx`
-		const names: string[] = []
+		const downloads: Download[] = []
 
-		page.on("download", download => names.push(download.suggestedFilename()))
+		page.on("download", download => downloads.push(download))
 		await uploadFiles(
 			page,
 			[
@@ -269,8 +284,21 @@ test("the whole selection downloads as PDFs from the selection bar, one after an
 		await listbox.getByRole("option", { name: workbook }).click({ modifiers: [MOD_KEY] })
 		await page.getByRole("button", { name: drive.driveActionDownloadAs, exact: true }).click()
 		await page.getByRole("menuitem", { name: drive.driveDownloadAsPdf, exact: true }).click()
-		await expect.poll(() => names.length, { timeout: EXPORT_TIMEOUT_MS }).toBe(2)
-		expect([...names].sort()).toEqual([document.replace(/\.docx$/, ".pdf"), workbook.replace(/\.xlsx$/, ".pdf")].sort())
+		// Several files arrive as one zip (no browser limit on downloads started without a click drops any).
+		await expect.poll(() => downloads.length, { timeout: EXPORT_TIMEOUT_MS }).toBe(1)
+
+		const [download] = downloads
+
+		expect(download?.suggestedFilename()).toBe(transfers.transfersZipDownloadDefaultName)
+
+		const zip = await JSZip.loadAsync(readFileSync((await download?.path()) ?? ""))
+		const entries = Object.keys(zip.files).sort()
+
+		expect(entries).toEqual([document.replace(/\.docx$/, ".pdf"), workbook.replace(/\.xlsx$/, ".pdf")].sort())
+
+		for (const entry of entries) {
+			expect((await zip.file(entry)?.async("string"))?.startsWith("%PDF-")).toBe(true)
+		}
 	})
 })
 

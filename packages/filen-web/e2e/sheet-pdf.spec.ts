@@ -4,6 +4,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
+import { pdfSyntax } from "./helpers/pdfBytes"
 import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookFixtures"
 import { preview } from "@/locales/en/preview"
 
@@ -48,7 +49,8 @@ async function open(page: Page, listbox: Locator, name: string): Promise<Locator
 	return dialog
 }
 
-async function downloadPdf(page: Page, dialog: Locator): Promise<{ name: string; text: string }> {
+// A protected workbook's PDF takes its password, asked for before the export.
+async function downloadPdf(page: Page, dialog: Locator, password?: string): Promise<{ name: string; text: string }> {
 	await dialog.getByRole("button", { name: preview.previewSheetFileMenu, exact: true }).click()
 	await page.getByRole("menuitem", { name: preview.previewSheetDownloadAs, exact: true }).click()
 
@@ -56,9 +58,16 @@ async function downloadPdf(page: Page, dialog: Locator): Promise<{ name: string;
 
 	await page.getByRole("menuitem", { name: preview.previewSheetDownloadPdf, exact: true }).click()
 
+	if (password !== undefined) {
+		const prompt = page.getByRole("dialog", { name: preview.previewOfficePdfPasswordTitle })
+
+		await prompt.getByLabel(preview.previewOfficePdfPasswordLabel).fill(password)
+		await prompt.getByRole("button", { name: preview.previewOfficePdfPasswordSubmit, exact: true }).click()
+	}
+
 	const download = await downloading
 
-	return { name: download.suggestedFilename(), text: readFileSync(await download.path()).toString("latin1") }
+	return { name: download.suggestedFilename(), text: pdfSyntax(readFileSync(await download.path())) }
 }
 
 test("a workbook's sheet downloads as a tagged PDF, from the File menu and from the print dialog", async ({ page }) => {
@@ -124,7 +133,7 @@ test("a password-protected workbook's PDF is encrypted with the same password", 
 
 		await expect(dialog.getByRole("grid")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
-		const pdf = await downloadPdf(page, dialog)
+		const pdf = await downloadPdf(page, dialog, WORKBOOK_PASSWORD)
 
 		expect(pdf.text).toMatch(/\/Encrypt/)
 		expect(pdf.text).toMatch(/\/AESV3/)

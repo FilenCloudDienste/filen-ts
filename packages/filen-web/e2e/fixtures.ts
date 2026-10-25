@@ -449,6 +449,14 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 		log(`tab${String(context.pages().indexOf(page))} app-update toast mounted`)
 	})
 	await context.addInitScript(stallProbe, common.updateReadyBody)
+	// Headless Chromium exposes the native save picker on a secure origin and Playwright cannot answer it, so a
+	// download would wait on a dialog nobody sees. Without it the app saves through the service worker, a real
+	// browser download. A spec's own stub (downloads.spec) is not native code and stays, whichever runs first.
+	await context.addInitScript(() => {
+		if (String(Reflect.get(window, "showSaveFilePicker")).includes("[native code]")) {
+			Reflect.deleteProperty(window, "showSaveFilePicker")
+		}
+	})
 
 	return {
 		report: () => {

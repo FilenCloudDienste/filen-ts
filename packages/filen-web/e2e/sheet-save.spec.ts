@@ -240,7 +240,8 @@ test("a CSV saves as an .xlsx copy holding its unsaved edits, and a sheet downlo
 
 		expect(download.suggestedFilename()).toBe(nameXlsx.replace(/\.xlsx$/, ".csv"))
 		expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
-		expect(bytes.subarray(3).toString("utf8")).toBe("Name,Qty\r\nApples,3\r\n007,=1+2\r\nPears,5")
+		// Every row ends with a line end, the last too, as Excel and LibreOffice write CSV.
+		expect(bytes.subarray(3).toString("utf8")).toBe("Name,Qty\r\nApples,3\r\n007,=1+2\r\nPears,5\r\n")
 		await close(page)
 
 		// The CSV stays as it was last saved.

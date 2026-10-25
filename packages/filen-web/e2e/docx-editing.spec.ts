@@ -68,6 +68,14 @@ async function openDocument(page: Page, listbox: Locator, name: string, marker: 
 	await expect(page.getByRole("button", { name: preview.previewDocxBold, exact: true })).toBeEnabled({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
+// Escape once the open menu holds focus, as it does by the time a person presses the key: an Escape while it is still
+// opening is the overlay's, which leaves it to the menu.
+async function closeMenu(page: Page): Promise<void> {
+	await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[role="menu"]') !== null)).toBe(true)
+	await page.keyboard.press("Escape")
+	await expect(page.getByRole("menu")).toHaveCount(0)
+}
+
 async function closeDocument(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
 	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
@@ -203,8 +211,19 @@ test("keyboard: Tab moves through a table's cells and adds a row from the last, 
 		await ribbonTab(page, preview.previewOfficeRibbonTabHome)
 		await (await ribbonButton(page, page, preview.previewDocxRibbonParagraph, preview.previewDocxBulletList)).click()
 		await page.keyboard.press("Home")
+		// Measured once the bulleted paragraph is laid out again: the pages replace its line while relaying it out,
+		// so a read in between finds no box.
+		let level0 = Number.NaN
 
-		const level0 = await x("After the table.")
+		await expect
+			.poll(async () => {
+				const previous = level0
+
+				level0 = await x("After the table.")
+
+				return Number.isFinite(level0) && level0 === previous
+			})
+			.toBe(true)
 
 		await page.keyboard.press("Tab")
 		await expect.poll(() => x("After the table.")).toBeGreaterThan(level0 + 10)
@@ -415,12 +434,15 @@ test("format: character formatting from the ribbon, kept by a save", async ({ pa
 		await pageText(page, marker).click({ clickCount: 3 })
 		await moreFormatting.click()
 		await page.getByRole("menuitemcheckbox", { name: preview.previewDocxDoubleStrikethrough }).click()
+		// Closed before it is opened again: a click on the trigger while the menu is still closing toggles it shut,
+		// and the Escape below then reaches the document instead.
+		await expect(page.getByRole("menu")).toHaveCount(0)
 		await moreFormatting.click()
 		await expect(page.getByRole("menuitemcheckbox", { name: preview.previewDocxDoubleStrikethrough })).toHaveAttribute(
 			"aria-checked",
 			"true"
 		)
-		await page.keyboard.press("Escape")
+		await closeMenu(page)
 
 		const save = page.getByRole("dialog").getByRole("button", { name: preview.previewSaveAction, exact: true })
 
@@ -435,7 +457,7 @@ test("format: character formatting from the ribbon, kept by a save", async ({ pa
 			"aria-checked",
 			"true"
 		)
-		await page.keyboard.press("Escape")
+		await closeMenu(page)
 		await closeDocument(page)
 	})
 })

@@ -483,7 +483,15 @@ const VIEWER_BUILDERS: Readonly<Record<DocxViewerFile, () => Buffer>> = {
 			],
 			defaults: [{ extension: "odttf", type: "application/vnd.openxmlformats-officedocument.obfuscatedFont" }]
 		}),
-	"viewer-legacy.docx": () => compoundFile([{ name: "WordDocument", data: Buffer.alloc(4096, 0xec) }]),
+	// A Word 95 header (FibBase wIdent 0xA5EC, nFib 0x68): readable as Word, a version before Word 97's format.
+	"viewer-legacy.docx": () => {
+		const word = Buffer.alloc(4096)
+
+		word.writeUInt16LE(0xa5ec, 0)
+		word.writeUInt16LE(0x68, 2)
+
+		return compoundFile([{ name: "WordDocument", data: word }])
+	},
 	"viewer-archive.zip": () =>
 		buildZip([
 			{ name: VIEWER_ENTRY_NAME, data: viewerEntry() },

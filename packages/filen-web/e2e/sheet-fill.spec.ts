@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
+import { framedCenterOf } from "./helpers/geometry"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's fill and clipboard end to end: the fill handle dragged with
@@ -58,11 +59,7 @@ async function goTo(dialog: Locator, ref: string): Promise<void> {
 async function cellCentre(dialog: Locator, ref: string): Promise<{ x: number; y: number }> {
 	await goTo(dialog, ref)
 
-	const box = await dialog.locator(".fo-sheet-a11y").boundingBox()
-
-	if (box === null) throw new Error(`no box for ${ref}`)
-
-	return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+	return framedCenterOf(dialog.locator(".fo-sheet-a11y"))
 }
 
 async function handleCentre(dialog: Locator): Promise<{ x: number; y: number }> {

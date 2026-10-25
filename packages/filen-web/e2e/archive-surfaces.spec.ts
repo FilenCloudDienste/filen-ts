@@ -280,7 +280,7 @@ test.describe("archives on links, chats and shares", () => {
 			// ---- the archive child: its hero offers Browse contents, which lists it ----
 			await visitLink(page, url)
 
-			const child = page.getByRole("listitem", { name: namePattern(archiveName) })
+			const child = page.getByRole("listitem").getByRole("button", { name: namePattern(archiveName) })
 
 			await expect(child).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 			await child.click()

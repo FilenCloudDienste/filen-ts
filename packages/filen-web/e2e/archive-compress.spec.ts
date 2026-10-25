@@ -450,6 +450,10 @@ test.describe("archive compress", () => {
 	})
 
 	test("a compress stops on request, paused or running, and leaves nothing behind", async ({ page, browserName }) => {
+		// Both legs need the job held before it ends, and WebKit cannot hold a worker's requests: a local run
+		// compresses the fixture before the Pause click lands. Chromium and Firefox hold it.
+		test.skip(browserName === "webkit", "WebKit cannot hold the SDK worker's requests")
+
 		await withArchiveScratch(page, "compress-cancel", async ({ listbox, scratchName, runId, holds }) => {
 			const waiting = `e2e-c-wait-${runId}.txt`
 			const paused = `e2e-c-cancel-${runId}.zip`
@@ -484,14 +488,19 @@ test.describe("archive compress", () => {
 			const keepGoing = prompt.getByRole("button", { name: "Continue compressing", exact: true })
 			const stop = prompt.getByRole("button", { name: "Stop compressing", exact: true })
 
-			// Paused at once: deterministic, and it keeps the page's one archive slot.
+			// Paused at once: deterministic, and it keeps the page's one archive slot. Its downloads wait until the
+			// pause is asked for, or the fixture can be compressed before the click lands.
+			const pauseHold = await holdChunks(page, browserName, { hosts: "egest" })
+
+			holds.push(pauseHold)
 			await startFromFixture(`e2e-c-cancel-${runId}`)
 
 			const pausedCard = jobCard(page, paused)
 
 			await expect(pausedCard).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 			await pausedCard.hover()
-			await pauseFirst(pausedCard)
+			await pauseFirst(pausedCard, pauseHold)
+			await pauseHold?.dispose()
 
 			// A second compress waits for the slot, and the paused one says it holds it.
 			await toScratch()
@@ -526,14 +535,13 @@ test.describe("archive compress", () => {
 			await expect(itemRow(listbox, paused)).toHaveCount(0)
 			await clearJobCards(page, ["compress", "extract"])
 
-			// Running, its downloads held: WebKit does not route the SDK worker's requests (the paused leg
-			// above is its stop coverage).
+			// Running, its downloads held.
 			const hold = await holdChunks(page, browserName, { hosts: "egest" })
 
 			holds.push(hold)
 
 			if (hold === null) {
-				return
+				throw new Error("no chunk hold on this browser")
 			}
 
 			const held = `e2e-c-held-${runId}.zip`

@@ -4,11 +4,12 @@ import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { common } from "@/locales/en/common"
 import { ribbonControl } from "./helpers/ribbon"
+import { framedCenterOf } from "./helpers/geometry"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's grid under a finger, on a sheet's whole range and for a screen reader. A tap selects and a pan
 // selects nothing, a double tap opens the entry with focus in it (the soft keyboard's target), a long press shows the
-// touch menu above the cell (Cut, Copy, Paste, Select all, Edit, with 44 px targets), the start handle drags a touch
+// touch menu above the cell (Cut, Copy, Paste, Select all, Edit, More, with 44 px targets), the start handle drags a touch
 // selection wider, and the menu's Edit and Select all work. The name box and Ctrl+arrows reach row 1,048,576 and
 // column XFD through a scroll range the browsers hold, the wheel moves the sheet by its own pixels there and the
 // scrollbar maps linearly onto it. The grid is a named ARIA grid whose live region says the active cell and the
@@ -57,11 +58,7 @@ async function goTo(dialog: Locator, ref: string): Promise<void> {
 async function cellCentre(dialog: Locator, ref: string): Promise<Point> {
 	await goTo(dialog, ref)
 
-	const box = await dialog.locator(".fo-sheet-a11y").boundingBox()
-
-	if (box === null) throw new Error(`no box for ${ref}`)
-
-	return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+	return framedCenterOf(dialog.locator(".fo-sheet-a11y"))
 }
 
 // One finger's press, hold, moves and release.
@@ -209,7 +206,10 @@ test.describe("touch", () => {
 			await page.keyboard.press("Escape")
 			await expect(editor).toHaveCount(0)
 
-			// A long press shows the menu above the cell, 44 px targets, the grid's own context menu shut.
+			// A long press shows the menu above the cell, 44 px targets, the grid's own context menu shut. Measured from
+			// the top: the pan above scrolled the sheet, and going to A1 for the press scrolls it back.
+			await goTo(dialog, "A1")
+
 			const c6 = await cellCentre(dialog, "C6")
 
 			await goTo(dialog, "A1")
@@ -221,8 +221,10 @@ test.describe("touch", () => {
 				preview.previewSheetTouchCopy,
 				preview.previewSheetTouchPaste,
 				preview.previewSheetTouchSelectAll,
-				preview.previewSheetTouchEdit
+				preview.previewSheetTouchEdit,
+				"⋯"
 			])
+			await expect(menu.getByRole("button").last()).toHaveAccessibleName(preview.previewSheetTouchMore)
 			await expect(page.getByRole("menu", { name: preview.previewSheetGridMenu })).toHaveCount(0)
 
 			const item = await menu.getByRole("button").first().boundingBox()
@@ -307,12 +309,12 @@ test("the whole sheet: the name box, Ctrl+arrows, the wheel and the scrollbar re
 		await page.waitForTimeout(300)
 		expect(Math.abs(before - (await row(30)) - 50)).toBeLessThanOrEqual(1)
 
-		// The scrollbar's middle is the sheet's middle.
+		// The scrollbar's middle is the sheet's middle: the pane's middle row, not its top one (half a pane above it).
 		await scroller.evaluate(element => {
 			element.scrollTop = (element.scrollHeight - element.clientHeight) / 2
 		})
 		await page.waitForTimeout(300)
-		expect(Math.abs((await row(30)) - 524_288)).toBeLessThan(50)
+		expect(Math.abs((await row((box?.height ?? 0) / 2)) - 524_288)).toBeLessThan(50)
 
 		await goTo(dialog, "XFD1")
 		await expect(grid.getByRole("gridcell")).toHaveAttribute("aria-colindex", "16384")

@@ -183,7 +183,10 @@ test("text preview renders, edits, and guards unsaved edits against navigation, 
 		await stepToSibling()
 		await expect(unsavedPrompt).toBeVisible()
 		await unsavedPrompt.getByRole("button", { name: "Discard", exact: true }).click()
-		await expect(page.getByText("Hello from a tiny docx fixture.")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		// The page as drawn: the editor's accessible text mirrors it.
+		await expect(page.locator(".fo-docx-page").getByText("Hello from a tiny docx fixture.")).toBeVisible({
+			timeout: LAZY_VIEWER_TIMEOUT_MS
+		})
 		await expect(saveButton).toHaveCount(0)
 
 		await stepToSibling()

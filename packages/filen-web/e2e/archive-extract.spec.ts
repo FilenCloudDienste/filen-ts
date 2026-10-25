@@ -592,6 +592,10 @@ test.describe("archive extract", () => {
 	})
 
 	test("an extract stopped from its card continues, keeps what it extracted, or trashes it", async ({ page, browserName }) => {
+		// Every leg needs the job held (paused or mid-upload) before it ends, and WebKit cannot hold a worker's
+		// requests: a local run finishes the extract before the Pause click lands. Chromium and Firefox hold it.
+		test.skip(browserName === "webkit", "WebKit cannot hold the SDK worker's requests")
+
 		await withArchiveScratch(page, "x-cancel", async ({ scratchName, runId, holds }) => {
 			const keepName = `keep-${runId}`
 			const trashName = `trash-${runId}`
@@ -620,12 +624,9 @@ test.describe("archive extract", () => {
 			await hideJobCards(page, ["extract"])
 
 			// With its uploads held, the job made its new directory before the pause, and the stop keeps it.
-			// WebKit cannot hold them, so its pause can land before even that directory is made.
-			if (browserName !== "webkit") {
-				const kept = await gotoDirectory(page, [scratchName, keepName])
+			const kept = await gotoDirectory(page, [scratchName, keepName])
 
-				await expect(itemRow(kept, gateDir)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			}
+			await expect(itemRow(kept, gateDir)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Paused again, then a stop that moves what was made to the trash.
 			card = await pausedGateExtract(page, browserName, [scratchName, trashName], holds)
@@ -637,25 +638,26 @@ test.describe("archive extract", () => {
 			await gotoDirectory(page, [scratchName, trashName])
 			await expect(page.getByTestId("listing-empty")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
-			// Running, not paused: held mid-upload, stopped into the trash. WebKit cannot hold a worker's
-			// requests, and a job it cannot hold may end before the stop lands.
+			// Running, not paused: held mid-upload, stopped into the trash.
 			const hold = await holdChunks(page, browserName, { hosts: "ingest", passFirst: 2 })
 
 			holds.push(hold)
 
-			if (hold !== null) {
-				card = await startGateExtract(page, [scratchName, runningName])
-				await expect.poll(() => hold.held(), { timeout: ARCHIVE_JOB_TIMEOUT_MS }).toBeGreaterThan(0)
-				await expect(card.getByText("Paused", { exact: true })).toHaveCount(0)
-				prompt = await openStopPrompt(page, card, "extract")
-				await prompt.getByRole("button", { name: "Stop and move extracted items to trash", exact: true }).click()
-				await expect(prompt).toHaveCount(0)
-				hold.release()
-				await expectJobCard(page, "Stopped. 1 extracted item was moved to the trash.", LIVE_WRITE_TIMEOUT_MS)
-				await hideJobCards(page, ["extract"])
-				await gotoDirectory(page, [scratchName, runningName])
-				await expect(page.getByTestId("listing-empty")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			if (hold === null) {
+				throw new Error("no chunk hold on this browser")
 			}
+
+			card = await startGateExtract(page, [scratchName, runningName])
+			await expect.poll(() => hold.held(), { timeout: ARCHIVE_JOB_TIMEOUT_MS }).toBeGreaterThan(0)
+			await expect(card.getByText("Paused", { exact: true })).toHaveCount(0)
+			prompt = await openStopPrompt(page, card, "extract")
+			await prompt.getByRole("button", { name: "Stop and move extracted items to trash", exact: true }).click()
+			await expect(prompt).toHaveCount(0)
+			hold.release()
+			await expectJobCard(page, "Stopped. 1 extracted item was moved to the trash.", LIVE_WRITE_TIMEOUT_MS)
+			await hideJobCards(page, ["extract"])
+			await gotoDirectory(page, [scratchName, runningName])
+			await expect(page.getByTestId("listing-empty")).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		})
 	})
 

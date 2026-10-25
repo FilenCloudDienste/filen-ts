@@ -128,6 +128,7 @@ test("an .ods saves itself after an idle pause and on Cmd/Ctrl+S, staying an Ope
 		await dialog.getByRole("grid").click({ button: "right", position: { x: 44, y: 20 + 20 + 10 } })
 		await page.getByRole("menuitem", { name: preview.previewSpreadsheetInsertRowsAbove_one, exact: true }).click()
 		await typeInto(page, dialog, "A2", "Inserted")
+		await expect(saveButton).toBeVisible()
 		await page.keyboard.press(`${mod}+S`)
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await goTo(dialog, "A1")
@@ -159,11 +160,13 @@ test("an .ots template saves as a template", async ({ page }) => {
 
 		const dialog = await open(page, listbox, name)
 
+		const saveButton = dialog.getByRole("button", { name: preview.previewSaveAction, exact: true })
+
 		await typeInto(page, dialog, "A5", "Template edit")
+		// The edit is unsaved once the worker says so: a save asked for before that has nothing to save.
+		await expect(saveButton).toBeVisible()
 		await page.keyboard.press(`${mod}+S`)
-		await expect(dialog.getByRole("button", { name: preview.previewSaveAction, exact: true })).toHaveCount(0, {
-			timeout: LIVE_WRITE_TIMEOUT_MS
-		})
+		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await goTo(dialog, "A1")
 		await close(page)
 
