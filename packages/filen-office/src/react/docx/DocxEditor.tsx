@@ -518,6 +518,8 @@ export function DocxEditor(props: DocxEditorProps) {
 		sink.view.dom.addEventListener("blur", onBlur)
 		sink.view.dom.addEventListener("compositionstart", onComposition)
 		sink.view.dom.addEventListener("compositionend", onComposition)
+		// A sink built in place of one that had focus takes it as it is built, before these listened.
+		setFocused(sink.focused && sink.view.dom.ownerDocument.hasFocus())
 
 		return () => {
 			sink.view.dom.removeEventListener("focus", onFocus)
@@ -633,8 +635,13 @@ export function DocxEditor(props: DocxEditorProps) {
 
 	useEffect(
 		() => () => {
-			if (frameRef.current.id !== 0) cancelAnimationFrame(frameRef.current.id)
+			const frame = frameRef.current
 
+			// Reset with the cancel: an id left behind would hold off every later frame (StrictMode's rehearsed
+			// unmount keeps the component).
+			if (frame.id !== 0) cancelAnimationFrame(frame.id)
+
+			frame.id = 0
 			surface.dispose()
 		},
 		[surface]

@@ -202,6 +202,9 @@ export function SheetObjects(props: SheetObjectsProps) {
 	useEffect(
 		() => () => {
 			if (placeSoon.current !== null) cancelAnimationFrame(placeSoon.current)
+
+			// Or no placing would be asked for again (StrictMode's rehearsed unmount keeps the component).
+			placeSoon.current = null
 		},
 		[]
 	)

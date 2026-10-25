@@ -44,7 +44,8 @@ export class HitTester {
 	}
 
 	// x of the caret before `offset` on `line` (`text` is the line's paragraph text). Offsets outside the
-	// line's fragments go to the line's end edge (start edge when before them).
+	// line's fragments go to the line's end edge (start edge when before them); in the spaces hanging past
+	// its last text, they move on through those spaces, as typing them shows.
 	xAtOffset(layout: TextLayout, line: number, text: string, offset: number): number {
 		const ints = line * LINE_INTS
 		const first = layout.lineInts[ints + LineInt.FIRST_FRAGMENT] ?? 0
@@ -53,6 +54,8 @@ export class HitTester {
 		const lineX = layout.lineFloats[line * LINE_FLOATS + 3] ?? 0
 		const lineEnd = lineX + (layout.lineFloats[line * LINE_FLOATS + 4] ?? 0)
 		let bestAfter = -1
+		let last = -1
+		let lastEnd = -1
 
 		for (let f = first; f < first + count; f++) {
 			const start = layout.fragmentInts[f * FRAGMENT_INTS] ?? 0
@@ -60,13 +63,28 @@ export class HitTester {
 
 			if (offset >= start && offset < end) return this.xInFragment(layout, f, text, offset)
 			if (offset === end) bestAfter = f
+
+			if (end > lastEnd) {
+				last = f
+				lastEnd = end
+			}
 		}
 
 		if (bestAfter >= 0) return this.xInFragment(layout, bestAfter, text, offset)
 
 		const textStart = layout.lineInts[ints + LineInt.TEXT_START] ?? 0
+		const textEnd = layout.lineInts[ints + LineInt.TEXT_END] ?? 0
 
 		if (offset <= textStart) return rtl ? lineEnd : lineX
+
+		if (
+			last >= 0 &&
+			offset > lastEnd &&
+			offset <= textEnd &&
+			((layout.fragmentInts[last * FRAGMENT_INTS + 3] ?? 0) & FRAGMENT_KIND_MASK) === FragmentKind.TEXT &&
+			/^[ \u00a0]+$/u.test(text.slice(lastEnd, offset))
+		)
+			return this.xInFragment(layout, last, text, offset, true)
 
 		return rtl ? lineX : lineEnd
 	}
@@ -115,7 +133,8 @@ export class HitTester {
 		return offset
 	}
 
-	private xInFragment(layout: TextLayout, f: number, text: string, offset: number): number {
+	// `beyond`: offset may lie past the fragment's end (the spaces hanging after it), measured on.
+	private xInFragment(layout: TextLayout, f: number, text: string, offset: number, beyond = false): number {
 		const fx = layout.fragmentFloats[f * FRAGMENT_FLOATS] ?? 0
 		const fw = layout.fragmentFloats[f * FRAGMENT_FLOATS + 1] ?? 0
 		const start = layout.fragmentInts[f * FRAGMENT_INTS] ?? 0
@@ -124,7 +143,7 @@ export class HitTester {
 
 		if ((info & FRAGMENT_KIND_MASK) !== FragmentKind.TEXT) return offset <= start ? (rtl ? fx + fw : fx) : rtl ? fx : fx + fw
 
-		const advance = this.advance(layout, f, text, offset)
+		const advance = this.advance(layout, f, text, offset, beyond)
 
 		return rtl ? fx + fw - advance : fx + advance
 	}
@@ -170,7 +189,7 @@ export class HitTester {
 	}
 
 	// Advance from a text fragment's start to `offset`, with the fragment's spacing.
-	private advance(layout: TextLayout, f: number, text: string, offset: number): number {
+	private advance(layout: TextLayout, f: number, text: string, offset: number, beyond = false): number {
 		const styles = this.styles
 		const start = layout.fragmentInts[f * FRAGMENT_INTS] ?? 0
 		const style = layout.fragmentInts[f * FRAGMENT_INTS + 2] ?? 0
@@ -221,6 +240,8 @@ export class HitTester {
 		const letterSpacing = styles.letterSpacing[style] ?? 0
 		const own = letterSpacing < 0 ? Math.max(0, raw + letterSpacing * clusters) : raw + letterSpacing * clusters
 		const advance = own * (styles.scaleX[style] ?? 1) + word * spaces + letter * clusters
+
+		if (beyond) return advance
 
 		// Justification's letter spacing after the line's last character is not part of the fragment.
 		return Math.min(advance, layout.fragmentFloats[f * FRAGMENT_FLOATS + 1] ?? advance)

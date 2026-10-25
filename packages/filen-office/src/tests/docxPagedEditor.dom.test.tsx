@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from "react"
+import { act, StrictMode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { closeHistory } from "prosemirror-history"
 import { TextSelection } from "prosemirror-state"
@@ -247,6 +247,69 @@ describe("DocxEditor", () => {
 		}
 
 		expect(container.querySelectorAll(".fo-docx-caret").length).toBe(0)
+	})
+
+	it("shows itself focused (the caret) when remounted holding focus", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const handle = { current: null as DocxEditorHandle | null }
+		const view = (key: string) => (
+			<DocxEditor
+				key={key}
+				ref={value => {
+					handle.current = value
+				}}
+				editor={editor}
+				document={documentOf(editor)}
+				zoom={1}
+				label="Document"
+				window={3}
+			/>
+		)
+
+		act(() => root.render(view("a")))
+		await act(async () => {
+			editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, paragraphPos(editor, 2) + 5)))
+			handle.current?.focus()
+			await frame()
+		})
+		expect(container.querySelector(".fo-docx-editor")?.hasAttribute("data-fo-focused")).toBe(true)
+
+		// The new input view takes the focus the old one handed on as it is built, before anything listens to it.
+		act(() => root.render(view("b")))
+		await act(frame)
+
+		expect(container.querySelector("[role=textbox]")).toBe(document.activeElement)
+		expect(container.querySelector(".fo-docx-editor")?.hasAttribute("data-fo-focused")).toBe(true)
+		expect(container.querySelectorAll(".fo-docx-caret").length).toBe(1)
+	})
+
+	it("draws the caret under StrictMode, whose rehearsed unmount cancels the first frame", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const handle = { current: null as DocxEditorHandle | null }
+
+		act(() =>
+			root.render(
+				<StrictMode>
+					<DocxEditor
+						ref={value => {
+							handle.current = value
+						}}
+						editor={editor}
+						document={documentOf(editor)}
+						zoom={1}
+						label="Document"
+						window={3}
+					/>
+				</StrictMode>
+			)
+		)
+		await act(async () => {
+			editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, paragraphPos(editor, 2) + 5)))
+			handle.current?.focus()
+			await frame()
+		})
+
+		expect(container.querySelectorAll(".fo-docx-caret").length).toBe(1)
 	})
 
 	it("types through the input view and patches the page", async () => {
