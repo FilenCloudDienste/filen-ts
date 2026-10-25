@@ -340,7 +340,9 @@ jobs:
   # concurrency group, so the three run at once. Unset, ONE job runs every browser on the shared account
   # in the one `filen-web-e2e` group, as before: three jobs in a single group would not serialise, GitHub
   # cancels all but the newest pending job of a group. A dispatched project runs only on its browser's
-  # job; one outside a browser (a setup project) on chromium's.
+  # job; one outside a browser (a setup project) on chromium's. Beside the per-browser (premium) accounts, an
+  # undispatched run checks the free tier's upgrade prompts on the shared account: only the specs that branch on
+  # E2E_PREMIUM, on chromium.
   e2e-matrix:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -351,15 +353,17 @@ jobs:
         env:
           PER_BROWSER: ${{ vars.E2E_ACCOUNT_PER_BROWSER }}
           E2E_PROJECT: ${{ inputs.project }}
+          E2E_SPEC: ${{ inputs.spec }}
         run: |
           entry() {
-            printf '{"browser":"%s","account":"%s","group":"filen-web-e2e-%s"}' "$1" "$2" "$1"
+            printf '{"name":"%s","browser":"%s","account":"%s","group":"filen-web-e2e-%s","specs":""}' "$1" "$1" "$2" "$1"
           }
+          free='{"name":"free-tier","browser":"chromium","account":"","group":"filen-web-e2e","specs":"e2e/menus.spec.ts e2e/settings.spec.ts e2e/public-links.spec.ts"}'
           if [ "$PER_BROWSER" != "true" ]; then
-            include='[{"browser":"all","account":"","group":"filen-web-e2e"}]'
+            include='[{"name":"all","browser":"all","account":"","group":"filen-web-e2e","specs":""}]'
           else
             case "$E2E_PROJECT" in
-              '') include="[$(entry chromium CHROMIUM),$(entry firefox FIREFOX),$(entry webkit WEBKIT)]" ;;
+              '') include="[$(entry chromium CHROMIUM),$(entry firefox FIREFOX),$(entry webkit WEBKIT)$([ -z "$E2E_SPEC" ] && printf ',%s' "$free")]" ;;
               firefox-*) include="[$(entry firefox FIREFOX)]" ;;
               webkit-*) include="[$(entry webkit WEBKIT)]" ;;
               *) include="[$(entry chromium CHROMIUM)]" ;;
@@ -370,7 +374,7 @@ jobs:
   test-web:
     # Nightly and on dispatch only (see `schedule` above); pushes and PRs get web-checks.
     needs: e2e-matrix
-    name: test-web (${{ matrix.browser }})
+    name: test-web (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
@@ -482,6 +486,11 @@ jobs:
             exit 1
           fi
           args=()
+          # The free-tier job's own specs (e2e-matrix), plain paths.
+          for spec in $MATRIX_SPECS; do
+            [[ "$spec" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid spec: $spec"; exit 1; }
+            args+=("$spec")
+          done
           if [ -n "$E2E_SPEC" ]; then
             [[ "$E2E_SPEC" =~ ^[A-Za-z0-9_./:-]+$ ]] || { echo "invalid spec: $E2E_SPEC"; exit 1; }
             args+=("$E2E_SPEC")
@@ -498,13 +507,16 @@ jobs:
           E2E_SPEC: ${{ inputs.spec }}
           E2E_PROJECT: ${{ inputs.project }}
           MATRIX_BROWSER: ${{ matrix.browser }}
+          MATRIX_SPECS: ${{ matrix.specs }}
           E2E_ACCOUNT: ${{ matrix.account }}
           FILEN_WEB_E2E_TEST_EMAIL: ${{ matrix.account == '' && secrets.FILEN_WEB_E2E_TEST_EMAIL || secrets[format('FILEN_WEB_E2E_TEST_EMAIL_{0}', matrix.account)] }}
           FILEN_WEB_E2E_TEST_PASSWORD: ${{ matrix.account == '' && secrets.FILEN_WEB_E2E_TEST_PASSWORD || secrets[format('FILEN_WEB_E2E_TEST_PASSWORD_{0}', matrix.account)] }}
+          # The per-browser accounts' tier (repository variable E2E_PREMIUM); the shared account is free.
+          E2E_PREMIUM: ${{ matrix.account != '' && vars.E2E_PREMIUM || '' }}
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-web-${{ matrix.browser }}
+          name: playwright-report-web-${{ matrix.name }}
           path: packages/filen-web/playwright-report
           retention-days: 14

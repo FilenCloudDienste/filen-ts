@@ -150,10 +150,9 @@ test.describe("context menus", () => {
 			await assertRowContextMenu(page, listbox, dirName, DIRECTORY_MENU_LABELS)
 			await assertRowContextMenu(page, listbox, fileName, FILE_MENU_LABELS)
 
-			// 1b. This e2e account is free-tier (public links are a paid feature) — a REAL, live proof
-			// that the link dialog's premium gate renders instead of the link form (link CREATION itself
-			// is not provable on this account; the gate state is). Opened from the item menu's own
-			// "Public link" entry, same reachable path a real user takes.
+			// 1b. The link dialog, opened from the item menu's own "Public link" entry: on a free account its
+			// premium gate renders instead of the link form (public links are a paid feature), on a premium one
+			// (E2E_PREMIUM) the form's no-link state. Nothing is created either way.
 			await fileRow.click({ button: "right" })
 			const linkMenu = page.getByRole("menu")
 			await expect(linkMenu).toBeVisible()
@@ -163,10 +162,16 @@ test.describe("context menus", () => {
 			// bare role lookup can resolve to the wrong surface — or to both at once.
 			const linkDialog = page.getByRole("dialog", { name: driveDict.driveLinkDialogTitle })
 			await expect(linkDialog).toBeVisible()
-			await expect(linkDialog.getByText(driveDict.driveLinkPremiumRequiredTitle, { exact: true })).toBeVisible()
-			// The Upgrade action is a router Link styled with buttonVariants (a real <a>, not a <button>) — its
-			// accessible role is "link", carrying the billing-settings href.
-			await expect(linkDialog.getByRole("link", { name: driveDict.driveLinkUpgradeAction, exact: true })).toBeVisible()
+			if (process.env["E2E_PREMIUM"]) {
+				await expect(linkDialog.getByText(driveDict.driveLinkNoLinkTitle, { exact: true })).toBeVisible()
+				await expect(linkDialog.getByRole("button", { name: driveDict.driveLinkEnableAction, exact: true })).toBeVisible()
+				await expect(linkDialog.getByText(driveDict.driveLinkPremiumRequiredTitle, { exact: true })).toHaveCount(0)
+			} else {
+				await expect(linkDialog.getByText(driveDict.driveLinkPremiumRequiredTitle, { exact: true })).toBeVisible()
+				// The Upgrade action is a router Link styled with buttonVariants (a real <a>, not a <button>) — its
+				// accessible role is "link", carrying the billing-settings href.
+				await expect(linkDialog.getByRole("link", { name: driveDict.driveLinkUpgradeAction, exact: true })).toBeVisible()
+			}
 			await page.keyboard.press("Escape")
 			await expect(linkDialog).toHaveCount(0)
 

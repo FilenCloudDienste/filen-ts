@@ -71,7 +71,7 @@ test.describe("settings", () => {
 		await expect(firstEventRow).toBeVisible()
 	})
 
-	test("the Billing section renders every table's empty state (the e2e account is FREE)", async ({ page }) => {
+	test("the Billing section names the plan, and a free account's tables their empty states", async ({ page }) => {
 		await gotoSettings(page)
 
 		await openSettingsSection(page, "Billing")
@@ -79,9 +79,15 @@ test.describe("settings", () => {
 		// Scoped to the plan row: "Free" also names the free storage elsewhere in settings.
 		const currentPlan = page.locator('[data-slot="settings-group"]').filter({ hasText: "Current plan" })
 
-		await expect(currentPlan.getByText("Free", { exact: true })).toBeVisible()
-		await expect(page.getByText("No subscriptions", { exact: true })).toBeVisible()
-		await expect(page.getByText("No invoices", { exact: true })).toBeVisible()
+		if (process.env["E2E_PREMIUM"]) {
+			// A premium account's subscriptions and invoices depend on how it became premium: only its tier is asserted.
+			await expect(currentPlan.getByText("Pro", { exact: true })).toBeVisible()
+		} else {
+			await expect(currentPlan.getByText("Free", { exact: true })).toBeVisible()
+			await expect(page.getByText("No subscriptions", { exact: true })).toBeVisible()
+			await expect(page.getByText("No invoices", { exact: true })).toBeVisible()
+		}
+
 		await expect(page.getByRole("button", { name: "Copy link", exact: true })).toBeVisible()
 	})
 

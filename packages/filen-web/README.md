@@ -24,7 +24,7 @@ Install once at the repo root (`pnpm install`); these run from this directory.
 | `pnpm run typecheck` | Type-check without emitting                              |
 | `pnpm run format`    | Format the source with Prettier                          |
 
-Unit tests are Vitest in `src/**/*.test.{ts,tsx}`, node by default (DOM tests opt in per file with `// @vitest-environment jsdom`). E2E is Playwright against a free-tier account (`FILEN_WEB_E2E_TEST_EMAIL` / `FILEN_WEB_E2E_TEST_PASSWORD` from `.env` or the environment), so premium-gated flows can only be checked for a graceful upgrade error; without credentials only the SDK-free specs run.
+Unit tests are Vitest in `src/**/*.test.{ts,tsx}`, node by default (DOM tests opt in per file with `// @vitest-environment jsdom`). E2E is Playwright against a live account (`FILEN_WEB_E2E_TEST_EMAIL` / `FILEN_WEB_E2E_TEST_PASSWORD` from `.env` or the environment); set `E2E_PREMIUM=1` for a premium account, which runs the premium-only flows (public links) and checks the paid state where a free account checks the upgrade prompt. Without credentials only the SDK-free specs run. CI uses one account per browser when the repository variable `E2E_ACCOUNT_PER_BROWSER` is `true` (secrets `FILEN_WEB_E2E_TEST_{EMAIL,PASSWORD}_{CHROMIUM,FIREFOX,WEBKIT}`, tier from the variable `E2E_PREMIUM`), else the shared free account.
 
 ## Deployment
 
