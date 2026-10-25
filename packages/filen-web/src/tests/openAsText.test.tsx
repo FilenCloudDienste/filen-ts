@@ -49,8 +49,8 @@ vi.mock("@/features/drive/components/extractDestinationDialog", () => ({
 vi.mock("@/features/preview/hooks/usePreviewBytes", () => ({
 	usePreviewBytes: () => ({ status: "success", bytes: previewBytes.current, refetch: vi.fn() })
 }))
-vi.mock("@/features/preview/components/codeMirrorSource", () => ({
-	CodeMirrorSource: ({ text }: { text: string }) => createElement("pre", { "data-testid": "source" }, text)
+vi.mock("@/features/preview/components/codeSurface", () => ({
+	CodeSurface: ({ file }: { file: { text: string } }) => createElement("pre", { "data-testid": "source" }, file.text)
 }))
 
 import "@/lib/i18n"

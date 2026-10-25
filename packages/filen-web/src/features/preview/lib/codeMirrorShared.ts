@@ -25,10 +25,20 @@ export function languageExtensionFor(tag: string): Extension | null {
 	return isCodeLanguageId(tag) ? codeLanguageSupport(tag) : null
 }
 
+// A host's own find (the text viewers' command bar): find, replace, the next and previous match and go to line, in
+// place of CodeMirror's panels. Stable for the editor's life (a new value rebuilds the keymap).
+export interface EditorKeymapCommands {
+	readonly find: Command
+	readonly replace: Command
+	readonly findNext: Command
+	readonly findPrevious: Command
+	readonly goToLine: Command
+}
+
 // The editor shortcuts (features/preview/lib/keymap.ts), bound inside CodeMirror so they act on the
 // focused editor only, and follow whatever the user rebound them to. The markdown ones only in a markdown
 // editor.
-export function useEditorKeymap(markdown: boolean): Extension {
+export function useEditorKeymap(markdown: boolean, commands?: EditorKeymapCommands): Extension {
 	const find = useComboFor("editor.find")
 	const replace = useComboFor("editor.replace")
 	const bold = useComboFor("editor.bold")
@@ -38,9 +48,18 @@ export function useEditorKeymap(markdown: boolean): Extension {
 	const link = useComboFor("editor.link")
 	const bindings: { keys: readonly string[]; run: Command; scope: string }[] = [
 		// Find and replace also answer with focus in the search panel's own fields.
-		{ keys: codeMirrorKeys(find), run: openSearchPanel, scope: CODE_SEARCH_SCOPE },
-		{ keys: codeMirrorKeys(replace), run: openReplacePanel, scope: CODE_SEARCH_SCOPE }
+		{ keys: codeMirrorKeys(find), run: commands?.find ?? openSearchPanel, scope: CODE_SEARCH_SCOPE },
+		{ keys: codeMirrorKeys(replace), run: commands?.replace ?? openReplacePanel, scope: CODE_SEARCH_SCOPE }
 	]
+
+	// Ahead of CodeMirror's own keys for these, which open its panels.
+	if (commands !== undefined) {
+		bindings.push(
+			{ keys: ["F3", "Mod-g"], run: commands.findNext, scope: CODE_EDITOR_SCOPE },
+			{ keys: ["Shift-F3", "Mod-Shift-g"], run: commands.findPrevious, scope: CODE_EDITOR_SCOPE },
+			{ keys: ["Mod-Alt-g"], run: commands.goToLine, scope: CODE_EDITOR_SCOPE }
+		)
+	}
 
 	if (markdown) {
 		bindings.push(

@@ -101,7 +101,7 @@ function bytes(text: string): Uint8Array {
 	return new TextEncoder().encode(text)
 }
 
-function toggle(name: "View source" | "View rendered"): void {
+function toggle(name: "Source" | "Rendered"): void {
 	fireEvent.click(screen.getByRole("button", { name }))
 }
 
@@ -133,13 +133,13 @@ describe("MarkdownViewer request count", () => {
 		})
 
 		await screen.findByRole("heading", { name: "Original heading" })
-		toggle("View source")
+		toggle("Source")
 		expect((await sourceEditor()).value).toBe(ORIGINAL)
 		expect((await sourceEditor()).readOnly).toBe(true)
 
-		toggle("View rendered")
+		toggle("Rendered")
 		await screen.findByRole("heading", { name: "Original heading" })
-		toggle("View source")
+		toggle("Source")
 		expect((await sourceEditor()).value).toBe(ORIGINAL)
 
 		expect(downloadFileBytes).toHaveBeenCalledTimes(1)
@@ -157,7 +157,7 @@ describe("MarkdownViewer request count", () => {
 		})
 
 		await screen.findByRole("heading", { name: "Original heading" })
-		toggle("View source")
+		toggle("Source")
 		const editor = await sourceEditor()
 		expect(editor.readOnly).toBe(false)
 		await waitFor(() => {
@@ -172,7 +172,7 @@ describe("MarkdownViewer request count", () => {
 		expect(contentRef.current?.()).toBe(SAVED)
 
 		// Locked while dirty: the unsaved buffer stays mounted.
-		toggle("View rendered")
+		toggle("Rendered")
 		expect((await sourceEditor()).value).toBe(SAVED)
 
 		// The overlay's save success: dirty reset, buffer released, body re-keyed onto the rotated uuid.
@@ -183,12 +183,12 @@ describe("MarkdownViewer request count", () => {
 		rerender(createElement(MarkdownViewer, { key: "after", item: mdFile("after"), ...props }))
 
 		await screen.findByRole("heading", { name: "Saved heading" })
-		toggle("View source")
+		toggle("Source")
 		expect((await sourceEditor()).value).toBe(SAVED)
 		expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(false)
-		toggle("View rendered")
+		toggle("Rendered")
 		await screen.findByRole("heading", { name: "Saved heading" })
-		toggle("View source")
+		toggle("Source")
 		expect((await sourceEditor()).value).toBe(SAVED)
 
 		// One download per uuid, none per toggle.

@@ -25,7 +25,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvDelete: () => Promise.resolve()
 }))
 
-const { OfficeRibbon } = await import("@/features/office/components/ribbon/officeRibbon")
+const { OfficeCommandBar, OfficeRibbon } = await import("@/features/office/components/ribbon/officeRibbon")
+const { onCommandBarF6 } = await import("@/features/office/components/ribbon/ribbonFocus")
 const { setRibbonCollapsed } = await import("@/features/office/lib/ribbonSettings")
 
 const TABS = [
@@ -243,5 +244,88 @@ describe("OfficeRibbon", () => {
 		expect(screen.getByRole("button", { name: "Show tabs only" }).getAttribute("aria-pressed")).toBe("false")
 		fireEvent.keyDown(window, { key: "F1", ctrlKey: true })
 		expect(screen.getByRole("button", { name: "Always show the ribbon" }).getAttribute("aria-pressed")).toBe("true")
+	})
+})
+
+describe("OfficeCommandBar", () => {
+	function bar(file: boolean) {
+		render(
+			<div
+				onKeyDown={event => {
+					onCommandBarF6(event, () => {
+						document.getElementById("content")?.focus()
+					})
+				}}
+			>
+				<OfficeCommandBar
+					label="Commands"
+					file={file ? <button data-ribbon-file>File</button> : undefined}
+					groups={[
+						{
+							id: "pages",
+							label: "Pages",
+							icon: ClipboardIcon,
+							width: 120,
+							priority: Infinity,
+							content: <Button aria-label="Next">Next</Button>
+						},
+						{
+							id: "zoom",
+							label: "Zoom",
+							icon: ClipboardIcon,
+							width: 300,
+							priority: 2,
+							content: <Button aria-label="Zoom in">+</Button>
+						}
+					]}
+					status={<span>Page 1 of 3</span>}
+				/>
+				<div
+					id="content"
+					tabIndex={-1}
+				/>
+			</div>
+		)
+	}
+
+	it("is one row: File, the groups, the status, with no tabs and no Show tabs only", () => {
+		bar(true)
+
+		const row = document.querySelector("[data-office-ribbon]")
+
+		expect(row?.firstElementChild?.textContent).toBe("File")
+		expect(row?.lastElementChild?.textContent).toBe("Page 1 of 3")
+		expect(screen.queryByRole("tablist")).toBeNull()
+		expect(screen.queryByRole("button", { name: "Show tabs only" })).toBeNull()
+		expect(
+			within(commands())
+				.getAllByRole("group")
+				.map(group => group.getAttribute("aria-label"))
+		).toEqual(["Pages", "Zoom"])
+
+		fireEvent.keyDown(window, { key: "F1", ctrlKey: true })
+		expect(screen.getByRole("toolbar", { name: "Commands" })).toBeTruthy()
+	})
+
+	it("fits its groups as the ribbon's row does", () => {
+		size.width = 250
+		bar(true)
+
+		expect(within(commands()).queryByRole("group", { name: "Zoom" })).toBeNull()
+		expect(within(commands()).getByRole("group", { name: "Pages" })).toBeTruthy()
+	})
+
+	it("takes F6 to its File menu and back, or to its row's stop without one", () => {
+		bar(true)
+		document.getElementById("content")?.focus()
+		fireEvent.keyDown(document.getElementById("content") ?? document.body, { key: "F6" })
+		expect(document.activeElement?.textContent).toBe("File")
+		fireEvent.keyDown(screen.getByText("File"), { key: "F6" })
+		expect(document.activeElement?.id).toBe("content")
+		cleanup()
+
+		bar(false)
+		fireEvent.keyDown(document.getElementById("content") ?? document.body, { key: "F6" })
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next" }))
 	})
 })

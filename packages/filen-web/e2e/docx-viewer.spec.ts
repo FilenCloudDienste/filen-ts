@@ -106,15 +106,16 @@ async function expectFind(scope: Locator, query: string, total: number): Promise
 	await expect(field).toHaveCount(0)
 }
 
-// Zoom in changes the zoom from fit-to-width; the fit button brings it back.
+// Zoom in changes the zoom from fit-to-width; the zoom menu's Fit to width brings it back.
 async function expectZoom(scope: Locator): Promise<void> {
-	const fit = scope.getByRole("button", { name: /, fit to width$/ })
-	const fitted = await fit.getAttribute("aria-label")
+	const menu = scope.getByRole("button", { name: /^Zoom level, \d+%$/ })
+	const fitted = await menu.getAttribute("aria-label")
 
 	await scope.getByRole("button", { name: preview.previewDocxZoomInAction, exact: true }).click()
-	await expect(fit).not.toHaveAttribute("aria-label", fitted ?? "")
-	await fit.click()
-	await expect(fit).toHaveAttribute("aria-label", fitted ?? "")
+	await expect(menu).not.toHaveAttribute("aria-label", fitted ?? "")
+	await menu.click()
+	await scope.page().getByRole("menuitemradio", { name: preview.previewDocxFitWidth, exact: true }).click()
+	await expect(menu).toHaveAttribute("aria-label", fitted ?? "")
 }
 
 // The engine's own pages, never docx-preview's.

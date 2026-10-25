@@ -1,22 +1,21 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
+	BookOpenIcon,
 	CaseSensitiveIcon,
 	ChevronDownIcon,
-	ChevronLeftIcon,
-	ChevronRightIcon,
 	ChevronUpIcon,
 	EyeIcon,
 	FileClockIcon,
 	LockIcon,
 	TriangleAlertIcon,
+	MaximizeIcon,
 	MessageSquareTextIcon,
 	ReplaceAllIcon,
 	ReplaceIcon,
 	SearchIcon,
 	XIcon,
-	ZoomInIcon,
-	ZoomOutIcon
+	ZoomInIcon
 } from "lucide-react"
 import {
 	DOCX_MARKUP_MODES,
@@ -50,16 +49,24 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Kbd } from "@/lib/keymap/kbd"
+import { fullscreenSupported } from "@/lib/media/fullscreen"
+import { OfficeCommandBar, type RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
+import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
+import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
+import { FullScreenButton, PageControls, ZoomControls } from "@/features/preview/components/commandBarControls"
+import { BAR_BUTTON, pageControlsWidth, ZOOM_CONTROLS_WIDTH, type ZoomFit } from "@/features/preview/components/commandBar.logic"
 import { useAction } from "@/lib/keymap/useAction"
 import { isImeKeydown } from "@/lib/ime"
 
-// The DOCX viewer's toolbar row, in the PDF viewer's style: page navigation and zoom in the centre (the
-// zoom percentage fits the page to the width again), swapped for an inline find field while finding; the
-// view-only badge on the left, the markup menu and find on the right. Everything it shows comes from the
-// viewer's command state; everything it does is a viewer command.
+// The DOCX viewer's command bar (OfficeCommandBar), as the PDF viewer's: File, then Pages (first, previous, the page
+// number field, next, last), Zoom (out, the zoom menu with its steps and fit to width, in), the markup menu (a
+// document with comments or tracked changes), Full screen and Find; the badges, the page and the zoom at the end. The
+// find field takes the groups' place while finding. Everything it shows comes from the viewer's command state;
+// everything it does is a viewer command.
 
 // Typing waits this long before the document is searched (each search runs over every page).
 const FIND_DEBOUNCE_MS = 150
+const FITS: readonly ZoomFit[] = ["fitWidth"]
 const FIELD_CLASS =
 	"h-7 w-40 min-w-0 rounded-xl bg-muted/60 pr-2 pl-7 text-xs leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50 max-sm:w-28 [&::-webkit-search-cancel-button]:appearance-none"
 
@@ -515,103 +522,10 @@ export function DocxFindField({
 	)
 }
 
-// Narrow rows (the toolbar is the docx-toolbar size container; widths are of its content, 16 px less than the row)
-// give up what is also reachable another way: the fit-width button below a 360 px row, and beside the markup menu,
-// which needs the room, below 400 px; there the page buttons too below 360 px (the pages scroll, and the page
-// indicator stays).
-const PAGE_BUTTON_FIT = { markup: "@max-[21.5rem]/docx-toolbar:hidden", plain: "" } as const
-const FIT_WIDTH_FIT = { markup: "@max-[24rem]/docx-toolbar:hidden", plain: "@max-[21.5rem]/docx-toolbar:hidden" } as const
-
-function Navigation({
-	state,
-	dispatch,
-	markup
-}: {
-	state: DocxViewerState
-	dispatch: (command: DocxViewerCommand) => void
-	// The markup menu is shown beside it.
-	markup: boolean
-}) {
-	const { t } = useTranslation("preview")
-	const percent = Math.round(state.zoom * 100)
-	const fit = markup ? "markup" : "plain"
-
-	return (
-		<div className="flex min-w-0 items-center gap-2 max-sm:gap-1">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				className={PAGE_BUTTON_FIT[fit]}
-				disabled={!isDocxCommandEnabled(state, "page.previous")}
-				aria-label={t("previewDocxPreviousPageAction")}
-				onClick={() => {
-					dispatch({ type: "page.previous" })
-				}}
-			>
-				<ChevronLeftIcon />
-			</Button>
-			<span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-				{t("previewDocxPageIndicator", { current: Math.min(state.page + 1, state.pageCount), total: state.pageCount })}
-			</span>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				className={PAGE_BUTTON_FIT[fit]}
-				disabled={!isDocxCommandEnabled(state, "page.next")}
-				aria-label={t("previewDocxNextPageAction")}
-				onClick={() => {
-					dispatch({ type: "page.next" })
-				}}
-			>
-				<ChevronRightIcon />
-			</Button>
-			<span
-				aria-hidden="true"
-				className="mx-1 h-4 w-px bg-border max-sm:mx-0"
-			/>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				disabled={!isDocxCommandEnabled(state, "zoom.out")}
-				aria-label={t("previewDocxZoomOutAction")}
-				onClick={() => {
-					dispatch({ type: "zoom.out" })
-				}}
-			>
-				<ZoomOutIcon />
-			</Button>
-			<Tooltip>
-				<TooltipTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="xs"
-							aria-label={t("previewDocxFitWidthAction", { percent })}
-							className={cn("w-12 px-0 text-muted-foreground tabular-nums", FIT_WIDTH_FIT[fit])}
-							onClick={() => {
-								dispatch({ type: "zoom.fitWidth" })
-							}}
-						>
-							{t("previewDocxZoomIndicator", { percent })}
-						</Button>
-					}
-				/>
-				<TooltipContent>{t("previewDocxFitWidth")}</TooltipContent>
-			</Tooltip>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				disabled={!isDocxCommandEnabled(state, "zoom.in")}
-				aria-label={t("previewDocxZoomInAction")}
-				onClick={() => {
-					dispatch({ type: "zoom.in" })
-				}}
-			>
-				<ZoomInIcon />
-			</Button>
-		</div>
-	)
-}
+// The zoom menu's steps, in percent.
+const ZOOM_PRESETS: readonly number[] = [50, 75, 100, 125, 150, 200, 300, 400]
+// The markup menu's button with its mode's name.
+const MARKUP_WIDTH = 120
 
 export function DocxToolbar({
 	state,
@@ -626,73 +540,168 @@ export function DocxToolbar({
 	fileMenu
 }: DocxToolbarProps) {
 	const { t } = useTranslation("preview")
+	const phone = usePhoneWidth()
+	const percent = Math.round(state.zoom * 100)
+	const page = Math.min(state.page + 1, state.pageCount)
+	const groups: RibbonGroup[] = [
+		{
+			id: "pages",
+			label: t("previewCommandBarPages"),
+			icon: BookOpenIcon,
+			width: pageControlsWidth(!phone),
+			priority: Infinity,
+			content: (
+				<PageControls
+					page={page}
+					total={state.pageCount}
+					ends={!phone}
+					canPrevious={isDocxCommandEnabled(state, "page.previous")}
+					canNext={isDocxCommandEnabled(state, "page.next")}
+					onGo={target => {
+						dispatch({ type: "page.goto", page: target - 1 })
+					}}
+					onPrevious={() => {
+						dispatch({ type: "page.previous" })
+					}}
+					onNext={() => {
+						dispatch({ type: "page.next" })
+					}}
+					onFirst={() => {
+						dispatch({ type: "page.goto", page: 0 })
+					}}
+					onLast={() => {
+						dispatch({ type: "page.goto", page: Math.max(0, state.pageCount - 1) })
+					}}
+				/>
+			)
+		},
+		{
+			id: "zoom",
+			label: t("previewOfficeRibbonZoom"),
+			icon: ZoomInIcon,
+			width: ZOOM_CONTROLS_WIDTH,
+			priority: 5,
+			content: (
+				<ZoomControls
+					percent={percent}
+					presets={ZOOM_PRESETS}
+					fits={FITS}
+					mode={state.zoomMode === "fitWidth" ? "fitWidth" : "custom"}
+					canIn={isDocxCommandEnabled(state, "zoom.in")}
+					canOut={isDocxCommandEnabled(state, "zoom.out")}
+					onIn={() => {
+						dispatch({ type: "zoom.in" })
+					}}
+					onOut={() => {
+						dispatch({ type: "zoom.out" })
+					}}
+					onPercent={next => {
+						dispatch({ type: "zoom.set", zoom: next / 100 })
+					}}
+					onFit={() => {
+						dispatch({ type: "zoom.fitWidth" })
+					}}
+				/>
+			)
+		}
+	]
+
+	if (markup !== null) {
+		groups.push({
+			id: "markup",
+			label: t("previewDocxMarkup"),
+			icon: MessageSquareTextIcon,
+			width: MARKUP_WIDTH,
+			priority: 4,
+			single: true,
+			content: (
+				<MarkupMenu
+					mode={markup}
+					onChange={onMarkupChange}
+				/>
+			)
+		})
+	}
+
+	if (fullscreenSupported()) {
+		groups.push({
+			id: "view",
+			label: t("previewOfficeRibbonTabView"),
+			icon: MaximizeIcon,
+			width: BAR_BUTTON,
+			priority: 1,
+			single: true,
+			content: <FullScreenButton />
+		})
+	}
+
+	groups.push({
+		id: "find",
+		label: t("previewEditorFind"),
+		icon: SearchIcon,
+		width: BAR_BUTTON,
+		priority: Infinity,
+		single: true,
+		content: (
+			<RibbonButton
+				label={t("previewDocxFindAction")}
+				icon={<SearchIcon />}
+				disabled={!isDocxCommandEnabled(state, "find.open")}
+				shortcut={<Kbd action="editor.find" />}
+				onClick={() => {
+					dispatch({ type: "find.open" })
+				}}
+			/>
+		)
+	})
 
 	return (
-		// The right cell keeps the width of its buttons (no min-w-0): where the row is short of room the page
-		// navigation moves left of centre instead of under them.
-		<div className="@container/docx-toolbar grid h-10 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 px-2">
-			<div className="@container flex min-w-0 items-center gap-1">
-				{fileMenu}
-				{viewOnly.length > 0 ? <ViewOnlyBadge reasons={viewOnly} /> : null}
-				{encrypted === undefined ? null : (
-					<PasswordBadge
-						integrity={encrypted}
-						saving={false}
+		<OfficeCommandBar
+			label={t("previewOfficeRibbonCommands")}
+			file={fileMenu}
+			groups={groups}
+			replacement={
+				state.find.open ? (
+					<DocxFindField
+						find={viewerFindControls(state, dispatch)}
+						focus={findFocus}
+						onClosed={onFindClosed}
 					/>
-				)}
-				{legacy === undefined ? null : (
-					<LegacyBadge
-						notConverted={legacy.notConverted}
-						onSaveAs={legacy.onSaveAs}
-					/>
-				)}
-				{/* A Word 97–2003 document is only ever edited as its .docx: the way there is in plain sight. Where this
-				    cell is too narrow for it beside the badge it would cover the page navigation, and the badge's popover
-				    offers it instead. */}
-				{legacy?.onSaveAs === undefined ? null : (
-					<Button
-						variant="outline"
-						size="xs"
-						className="shrink-0 @max-[15rem]:hidden"
-						onClick={legacy.onSaveAs}
-					>
-						{t("previewDocxSaveAsDocx")}
-					</Button>
-				)}
-			</div>
-			{state.find.open ? (
-				<DocxFindField
-					find={viewerFindControls(state, dispatch)}
-					focus={findFocus}
-					onClosed={onFindClosed}
-				/>
-			) : (
-				<Navigation
-					state={state}
-					dispatch={dispatch}
-					markup={markup !== null}
-				/>
-			)}
-			<div className="flex items-center justify-end gap-1">
-				{markup === null ? null : (
-					<MarkupMenu
-						mode={markup}
-						onChange={onMarkupChange}
-					/>
-				)}
-				{state.find.open ? null : (
-					<TooltipIconButton
-						label={t("previewDocxFindAction")}
-						disabled={!isDocxCommandEnabled(state, "find.open")}
-						shortcut={<Kbd action="editor.find" />}
-						onClick={() => {
-							dispatch({ type: "find.open" })
-						}}
-					>
-						<SearchIcon />
-					</TooltipIconButton>
-				)}
-			</div>
-		</div>
+				) : undefined
+			}
+			status={
+				<>
+					{viewOnly.length > 0 ? <ViewOnlyBadge reasons={viewOnly} /> : null}
+					{encrypted === undefined ? null : (
+						<PasswordBadge
+							integrity={encrypted}
+							saving={false}
+						/>
+					)}
+					{legacy === undefined ? null : (
+						<LegacyBadge
+							notConverted={legacy.notConverted}
+							onSaveAs={legacy.onSaveAs}
+						/>
+					)}
+					{/* A Word 97–2003 document is only ever edited as its .docx: the way there is in plain sight (on a phone
+					    the badge's popover offers it). */}
+					{legacy?.onSaveAs === undefined ? null : (
+						<Button
+							variant="outline"
+							size="xs"
+							className="shrink-0 max-sm:hidden"
+							onClick={legacy.onSaveAs}
+						>
+							{t("previewDocxSaveAsDocx")}
+						</Button>
+					)}
+					<span className="ml-2 flex items-center gap-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums max-sm:hidden">
+						<span>{t("previewDocxPageIndicator", { current: page, total: state.pageCount })}</span>
+						<span>{t("previewDocxZoomIndicator", { percent })}</span>
+					</span>
+				</>
+			}
+		/>
 	)
 }

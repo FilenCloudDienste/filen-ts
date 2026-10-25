@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 
-// The preview's PDF viewer on @filen/office's pages against a stand-in pdf.js: pages, the link gate and find.
+// The preview's PDF viewer on @filen/office's pages against a stand-in pdf.js: pages, the link gate, find and the
+// command bar (page field, rotate, outline, properties, zoom menu, F6).
 
 interface FakePage {
 	getViewport: ReturnType<typeof vi.fn>
@@ -17,9 +18,15 @@ interface FakePage {
 	getTextContent: () => Promise<{ items: unknown[] }>
 	getAnnotations: ReturnType<typeof vi.fn>
 	userUnit: number
+	rotate: number
 }
 
-const { pages } = vi.hoisted(() => ({ pages: new Map<number, FakePage>() }))
+const { pages, outline, info, scrolled } = vi.hoisted(() => {
+	const outline: { items: unknown[] | null } = { items: null }
+	const info: { value: Record<string, unknown> } = { value: {} }
+
+	return { pages: new Map<number, FakePage>(), outline, info, scrolled: [] as Element[] }
+})
 
 // The link gate reads the trusted link domains.
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
@@ -34,7 +41,8 @@ function fakePage(text: string[] = []): FakePage {
 		streamTextContent: () => items,
 		getTextContent: () => Promise.resolve({ items }),
 		getAnnotations: vi.fn(() => Promise.resolve([])),
-		userUnit: 1
+		userUnit: 1,
+		rotate: 0
 	}
 }
 
@@ -72,8 +80,10 @@ vi.mock("pdfjs-dist", () => ({
 		promise: Promise.resolve({
 			numPages: 3,
 			getPage: (n: number) => Promise.resolve(pages.get(n)),
-			getDestination: () => Promise.resolve(null),
-			getPageIndex: () => Promise.resolve(0)
+			getDestination: (id: string) => Promise.resolve(id === "third" ? [{ page: 3 }] : null),
+			getPageIndex: (ref: { page: number }) => Promise.resolve(ref.page - 1),
+			getOutline: () => Promise.resolve(outline.items),
+			getMetadata: () => Promise.resolve({ info: info.value })
 		}),
 		destroy: () => Promise.resolve()
 	})
@@ -143,6 +153,8 @@ function show(n: number, ratio = 1): void {
 beforeEach(() => {
 	observers.length = 0
 	pages.clear()
+	outline.items = null
+	info.value = {}
 
 	for (const n of [1, 2, 3]) {
 		pages.set(n, fakePage())
@@ -150,7 +162,13 @@ beforeEach(() => {
 
 	vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver)
 	// jsdom lays nothing out and has no scrollIntoView.
-	Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() })
+	scrolled.length = 0
+	Object.defineProperty(Element.prototype, "scrollIntoView", {
+		configurable: true,
+		value: function (this: Element) {
+			scrolled.push(this)
+		}
+	})
 })
 
 async function mount(): Promise<void> {
@@ -218,5 +236,98 @@ describe("PdfViewer", () => {
 			expect(document.querySelector(".highlight")).toBeNull()
 		})
 		expect(screen.getByText("Page 1 of 3")).toBeTruthy()
+	})
+
+	it("goes to a typed page, and to the first and last", async () => {
+		await mount()
+
+		const field = screen.getByRole("textbox", { name: "Page number" })
+
+		fireEvent.focus(field)
+		fireEvent.change(field, { target: { value: "3" } })
+		fireEvent.keyDown(field, { key: "Enter" })
+		expect(scrolled.at(-1)).toBe(pageElement(3))
+
+		// Out of range lands on the last page; Escape puts the page in view back.
+		fireEvent.change(field, { target: { value: "99" } })
+		fireEvent.blur(field)
+		expect(scrolled.at(-1)).toBe(pageElement(3))
+		fireEvent.change(field, { target: { value: "2" } })
+		fireEvent.keyDown(field, { key: "Escape" })
+		expect((field as HTMLInputElement).value).toBe("1")
+
+		show(2)
+		fireEvent.click(await screen.findByRole("button", { name: "Last page" }))
+		expect(scrolled.at(-1)).toBe(pageElement(3))
+		fireEvent.click(screen.getByRole("button", { name: "First page" }))
+		expect(scrolled.at(-1)).toBe(pageElement(1))
+	})
+
+	it("turns the pages from the Rotate group", async () => {
+		await mount()
+		fireEvent.click(screen.getByRole("button", { name: "Rotate clockwise" }))
+
+		await waitFor(() => {
+			expect(pages.get(1)?.getViewport).toHaveBeenLastCalledWith({ scale: 1.5, rotation: 90 })
+		})
+		fireEvent.click(screen.getByRole("button", { name: "Rotate counterclockwise" }))
+		await waitFor(() => {
+			expect(pages.get(1)?.getViewport).toHaveBeenLastCalledWith({ scale: 1.5, rotation: 0 })
+		})
+	})
+
+	it("offers no outline for a document without bookmarks", async () => {
+		await mount()
+		expect(screen.queryByRole("button", { name: "Outline" })).toBeNull()
+	})
+
+	it("follows a bookmark from the Outline menu", async () => {
+		outline.items = [{ title: "Chapter three", dest: "third", items: [] }]
+		await mount()
+
+		fireEvent.click(await screen.findByRole("button", { name: "Outline" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Chapter three" }))
+		await waitFor(() => {
+			expect(scrolled.at(-1)).toBe(pageElement(3))
+		})
+	})
+
+	it("shows the document's properties from the File menu", async () => {
+		info.value = { Title: "Annual report", Author: "Ada", PDFFormatVersion: "1.7" }
+		await mount()
+
+		fireEvent.click(screen.getByRole("button", { name: "File" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Document properties" }))
+
+		const dialog = await screen.findByRole("dialog", { name: "Document properties" })
+
+		expect(await within(dialog).findByText("Annual report")).toBeTruthy()
+		expect(within(dialog).getByText("Ada")).toBeTruthy()
+		expect(within(dialog).getByText("3")).toBeTruthy()
+	})
+
+	it("moves between the command bar and the pages with F6", async () => {
+		await mount()
+
+		const scroller = document.querySelector<HTMLElement>(".fo-pdf-page")?.closest<HTMLElement>("[tabindex]")
+
+		scroller?.focus()
+		fireEvent.keyDown(scroller ?? document.body, { key: "F6" })
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "File" }))
+		fireEvent.keyDown(screen.getByRole("button", { name: "File" }), { key: "F6" })
+		expect(document.activeElement).toBe(scroller)
+	})
+
+	it("keeps the command row one Tab stop with the zoom menu's steps and fits", async () => {
+		await mount()
+
+		const row = screen.getByRole("toolbar", { name: "Commands" })
+
+		expect(row.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
+		fireEvent.click(within(row).getByRole("button", { name: "Zoom level, 100%" }))
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: "200%" }))
+		expect(await within(row).findByRole("button", { name: "Zoom level, 200%" })).toBeTruthy()
+		fireEvent.click(within(row).getByRole("button", { name: "Zoom level, 200%" }))
+		expect(await screen.findByRole("menuitemradio", { name: "Fit page" })).toBeTruthy()
 	})
 })

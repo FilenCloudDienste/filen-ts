@@ -151,7 +151,16 @@ describe("React Compiler coverage", () => {
 			["src/features/preview/components/codeMirrorSource.tsx", "CodeMirrorSource"],
 			["src/features/preview/components/remoteCompare.tsx", "RemoteCompare"],
 			["src/features/preview/components/remoteCompare.tsx", "RemoteFileCompare"],
-			["src/features/preview/lib/codeMirrorShared.ts", "useEditorKeymap"]
+			["src/features/preview/lib/codeMirrorShared.ts", "useEditorKeymap"],
+			["src/features/preview/components/codeSurface.tsx", "CodeSurface"],
+			["src/features/preview/components/codeCommandBar.tsx", "CodeCommandBar"],
+			["src/features/preview/components/codeCommandBar.tsx", "HistoryButton"],
+			["src/features/preview/components/codeCommandBar.tsx", "CodePosition"],
+			["src/features/preview/components/codeCommandBar.tsx", "CodeFindField"],
+			["src/features/preview/components/codeCommandBar.tsx", "MarkdownModeSwitch"],
+			["src/features/preview/components/codeCommandBar.tsx", "MarkdownRenderedBar"],
+			["src/features/preview/components/textViewer.tsx", "TextViewer"],
+			["src/features/preview/components/markdownViewer.tsx", "MarkdownViewer"]
 		] as const) {
 			const events = compile(file)
 
@@ -647,8 +656,15 @@ describe("React Compiler coverage of the PDF viewer", () => {
 		["../filen-office/src/react/pdf/usePdfViewer.ts", "usePdfViewer"],
 		["../filen-office/src/react/pdf/usePdfDocument.ts", "usePdfDocument"],
 		["src/features/preview/components/pdfViewer.tsx", "PdfReader"],
-		["src/features/preview/components/pdfViewer.tsx", "PdfToolbar"],
-		["src/features/preview/components/pdfViewer.tsx", "PdfDocument"]
+		["src/features/preview/components/pdfViewer.tsx", "PdfDocument"],
+		["src/features/preview/components/pdfCommandBar.tsx", "PdfCommandBar"],
+		["src/features/preview/components/pdfCommandBar.tsx", "OutlineMenu"],
+		["src/features/preview/components/pdfCommandBar.tsx", "PdfPropertiesDialog"],
+		["src/features/preview/components/commandBarControls.tsx", "PageControls"],
+		["src/features/preview/components/commandBarControls.tsx", "ZoomControls"],
+		["src/features/preview/components/commandBarControls.tsx", "CommandFileMenu"],
+		["src/features/preview/components/commandBarControls.tsx", "FullScreenButton"],
+		["src/features/office/components/ribbon/officeRibbon.tsx", "OfficeCommandBar"]
 	])("compiles %s's %s", (file, fnName) => {
 		const events = compile(file)
 

@@ -1,9 +1,11 @@
 import type { RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { itemTypeExtension, codeMirrorLanguageFor, decodeUtf8, looksBinary } from "@/features/drive/lib/preview.logic"
+import { itemTypeExtension, codeMirrorLanguageFor, looksBinary } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
-import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
+import { CodeSurface } from "@/features/preview/components/codeSurface"
+import { readTextFile } from "@/features/preview/lib/textFile"
+import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
@@ -30,14 +32,16 @@ export interface TextViewerProps {
 }
 
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
-// category), then a non-fatal UTF-8 decode (decodeUtf8 — never throws) and a per-extension language
-// lookup. The actual CodeMirror surface (language + theme plumbing) lives in codeMirrorSource.tsx,
-// shared with the notes reader — this component stays the preview-specific shell around it (byte
-// loading, item-derived tag/alt).
+// category), then a non-fatal UTF-8 decode that keeps the file's byte order mark and line ending for its
+// saves (readTextFile — never throws) and a per-extension language lookup. The editor under its command bar
+// lives in codeSurface.tsx — this component stays the preview-specific shell around it (byte loading,
+// item-derived tag/alt).
 // No parameter defaults: the React Compiler skips a component that has them.
 export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, locked, rejectBinary }: TextViewerProps) {
 	const { t } = useTranslation("preview")
 	const result = usePreviewBytes(item)
+
+	useLeaveViewerFullScreen()
 
 	if (result.status === "pending") {
 		return <PreviewLoading />
@@ -60,20 +64,15 @@ export function TextViewer({ item, alt, editable, onDirtyChange, contentRef, loc
 		)
 	}
 
-	const tag = codeMirrorLanguageFor(itemTypeExtension(item))
-	const text = decodeUtf8(result.bytes)
-
 	return (
-		<CodeMirrorSource
-			text={text}
-			tag={tag}
+		<CodeSurface
+			file={readTextFile(result.bytes)}
+			tag={codeMirrorLanguageFor(itemTypeExtension(item))}
 			alt={alt}
 			editable={editable ?? false}
 			locked={locked ?? false}
-			// exactOptionalPropertyTypes: CodeMirrorSource's own optional props reject an explicit
-			// `undefined` value, so an unset prop here must omit the key entirely rather than forward it.
-			{...(onDirtyChange !== undefined ? { onDirtyChange } : {})}
-			{...(contentRef !== undefined ? { contentRef } : {})}
+			onDirtyChange={onDirtyChange}
+			contentRef={contentRef}
 		/>
 	)
 }

@@ -56,6 +56,8 @@ import { DocxPreviewFallback } from "@/features/preview/components/docxPreviewFa
 import { DocxPasswordGate, type PasswordVerdict } from "@/features/preview/components/docxPasswordPrompt"
 import { DocxEditView, DocxProtectedEditView, type DocxSaveSource } from "@/features/preview/components/docxEditor"
 import { DocxFileMenu } from "@/features/preview/components/docxFileMenu"
+import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
+import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
 import { useDocxPdfExport, type DocxPdfExportTarget } from "@/features/preview/hooks/useDocxPdfExport"
 import { DownloadAsItemProvider } from "@/features/drive/components/editorDownloadAs"
 import { DocxToolbar, type DocxLegacyInfo, type PasswordIntegrity } from "@/features/preview/components/docxToolbar"
@@ -121,6 +123,8 @@ function sourceFor(content: DocxContent, mode: DocxMarkupMode, format: "docx" | 
 
 // The document's File menus offer Download as for this file (editorDownloadAs.tsx).
 export function DocxViewer(props: DocxViewerProps) {
+	useLeaveViewerFullScreen()
+
 	return (
 		<DownloadAsItemProvider item={props.item}>
 			<DocxViewerBody {...props} />
@@ -939,6 +943,7 @@ function DocxPageList({
 	const restoreRef = useRef<{ from: unknown; page: number } | null>(null)
 	const session = document.session
 	const linkGate = useTrustedLinkGate()
+
 	// Links are judged when clicked (never when painted): http(s) and mailto open in a new tab with no opener
 	// or referrer, inside the click's user activation so no popup blocker interferes, once a web link's
 	// domain is trusted (asked once per domain); anything else is ignored.
@@ -1022,6 +1027,11 @@ function DocxPageList({
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
+			onKeyDown={event => {
+				onCommandBarF6(event, () => {
+					wrapper?.querySelector<HTMLElement>(".fo-docx-pages")?.focus()
+				})
+			}}
 		>
 			<DocxToolbar
 				state={state}

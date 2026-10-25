@@ -5,6 +5,7 @@ import {
 	pdfCanvasDims,
 	pdfLinks,
 	pdfPageAction,
+	pdfPageRotation,
 	pdfRenderRatio,
 	pdfRenderTransform,
 	resolveDestination,
@@ -45,6 +46,8 @@ export interface PdfPagesFind {
 export interface PdfPagesBinding {
 	readonly document: PdfDomDocument
 	readonly scale: number
+	// The view's turn, added to each page's own /Rotate (0, 90, 180 or 270).
+	readonly rotation: number
 	readonly find: PdfPagesFind
 	readonly scrollerRef: RefObject<HTMLDivElement | null>
 	readonly onVisible: (page: number, ratio: number) => void
@@ -133,6 +136,7 @@ export function PdfPages({
 	pdfjs,
 	document,
 	scale,
+	rotation,
 	find,
 	scrollerRef,
 	onVisible,
@@ -185,6 +189,7 @@ export function PdfPages({
 							page={page}
 							total={total}
 							scale={scale}
+							rotation={rotation}
 							watcher={watcher}
 							matches={from < to ? find.matches : null}
 							from={from}
@@ -230,6 +235,7 @@ interface PdfPageViewProps {
 	readonly page: number
 	readonly total: number
 	readonly scale: number
+	readonly rotation: number
 	readonly watcher: PageWatcher
 	readonly matches: Int32Array | null
 	readonly from: number
@@ -252,6 +258,7 @@ function PdfPageView({
 	page: pageNumber,
 	total,
 	scale,
+	rotation,
 	watcher,
 	matches,
 	from,
@@ -280,12 +287,12 @@ function PdfPageView({
 	const [nearView, setNearView] = useState(pageNumber === 1)
 	// Within the evict margin.
 	const [inView, setInView] = useState(false)
-	// The scale the canvas was painted at, or null; a zoom makes it stale in the same render.
-	const [paintedAt, setPaintedAt] = useState<number | null>(null)
+	// The scale and turn the canvas was painted at, or null; a zoom or a turn makes it stale in the same render.
+	const [paintedAt, setPaintedAt] = useState<{ readonly scale: number; readonly rotation: number } | null>(null)
 	// Bumped when a text layer has rendered, for the find highlights.
 	const [textEpoch, setTextEpoch] = useState(0)
 	const [links, setLinks] = useState<readonly PageLink[]>([])
-	const rendered = paintedAt === scale
+	const rendered = paintedAt !== null && paintedAt.scale === scale && paintedAt.rotation === rotation
 
 	useEffect(() => {
 		let live = true
@@ -354,7 +361,7 @@ function PdfPageView({
 		if (proxy === null || !nearView || canvas === null || pdfPageAction(inView, rendered) !== "render") return
 
 		let cancelled = false
-		const viewport = proxy.getViewport({ scale })
+		const viewport = proxy.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) })
 		const ratio = pdfRenderRatio(viewport.width, viewport.height, window.devicePixelRatio, maxCanvasBytes)
 		const dims = pdfCanvasDims(viewport.width, viewport.height, ratio)
 
@@ -367,7 +374,7 @@ function PdfPageView({
 
 		task.promise.then(
 			() => {
-				if (!cancelled) setPaintedAt(scale)
+				if (!cancelled) setPaintedAt({ scale, rotation })
 			},
 			() => {
 				// A cancelled render (scrolled away, zoomed) rejects too. A page that fails to render stays a
@@ -379,7 +386,7 @@ function PdfPageView({
 			cancelled = true
 			task.cancel()
 		}
-	}, [proxy, nearView, inView, rendered, scale, maxCanvasBytes])
+	}, [proxy, nearView, inView, rendered, scale, rotation, maxCanvasBytes])
 
 	// Its own effect, not the canvas's: that one re-runs as soon as its render resolves (`rendered` changes), and a
 	// text layer torn down there would be gone right after every paint. Leaving the evict margin tears it down.
@@ -391,7 +398,7 @@ function PdfPageView({
 		const layer = new pdfjs.TextLayer({
 			textContentSource: proxy.streamTextContent(),
 			container,
-			viewport: proxy.getViewport({ scale })
+			viewport: proxy.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) })
 		})
 
 		layerRef.current = layer
@@ -410,7 +417,7 @@ function PdfPageView({
 			// render() appends as it streams and the constructor never clears, so a rebuild would stack spans.
 			container.replaceChildren()
 		}
-	}, [pdfjs, proxy, nearView, inView, scale])
+	}, [pdfjs, proxy, nearView, inView, scale, rotation])
 
 	// Matches painted into the text layer; the active one is scrolled to when `reveal` asks.
 	useEffect(() => {
@@ -462,7 +469,8 @@ function PdfPageView({
 			})
 	}, [document, proxy, inView, allowLink])
 
-	const viewport = proxy?.getViewport({ scale })
+	// The text layer and links follow the canvas: pdf.js turns the layer by the viewport's rotation (pdf.css).
+	const viewport = proxy?.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) })
 
 	return (
 		<div

@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
-import { useTranslation } from "react-i18next"
-import { CodeIcon, EyeIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
-import { codeMirrorLanguageFor, decodeUtf8, itemTypeExtension } from "@/features/drive/lib/preview.logic"
+import { codeMirrorLanguageFor, itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
-import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
+import { CodeSurface } from "@/features/preview/components/codeSurface"
+import { MarkdownRenderedBar, type MarkdownBar, type MarkdownMode } from "@/features/preview/components/codeCommandBar"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
+import { usePreviewDownload } from "@/features/preview/lib/accessMode"
+import { readTextFile } from "@/features/preview/lib/textFile"
+import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
+import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
 export interface MarkdownViewerProps {
@@ -25,61 +26,6 @@ export interface MarkdownViewerProps {
 	locked?: boolean
 }
 
-function MarkdownToolbar({
-	mode,
-	disabled,
-	onToggle,
-	toggleRef
-}: {
-	mode: "rendered" | "source"
-	disabled: boolean
-	onToggle: () => void
-	toggleRef: RefObject<HTMLButtonElement | null>
-}) {
-	const { t } = useTranslation("preview")
-
-	return (
-		<div className="flex h-10 shrink-0 items-center justify-end px-2">
-			{/* The tooltip is the whole point of the disabled state: it is the only thing that explains why
-			    the toggle is locked. It only opens while locked — an enabled toggle already carries its own
-			    visible label. */}
-			<Tooltip disabled={!disabled}>
-				<TooltipTrigger
-					render={
-						<Button
-							ref={toggleRef}
-							variant="ghost"
-							size="sm"
-							disabled={disabled}
-							// aria-disabled (Base UI's focusableWhenDisabled) instead of the native disabled
-							// attribute: a natively disabled button gets pointer-events:none from the Button base
-							// class and drops out of the tab order, so neither hover nor focus could ever reach the
-							// hint below. Clicks and keys stay inert either way — Base UI's own button handlers
-							// swallow them while `disabled` is set — so the styling is all that has to be restated.
-							focusableWhenDisabled
-							className="aria-disabled:opacity-50"
-							onClick={onToggle}
-						>
-							{mode === "rendered" ? (
-								<>
-									<CodeIcon />
-									{t("previewMarkdownViewSourceAction")}
-								</>
-							) : (
-								<>
-									<EyeIcon />
-									{t("previewMarkdownViewRenderedAction")}
-								</>
-							)}
-						</Button>
-					}
-				/>
-				<TooltipContent>{t("previewMarkdownToggleDirtyHint")}</TooltipContent>
-			</Tooltip>
-		</div>
-	)
-}
-
 // Top-level gate on the whole-buffer download (usePreviewBytes, shared with every other buffered
 // category) — decodes ONCE here and feeds both views, so flipping modes never downloads again. The
 // editor seeds from `text` at mount, which is safe to repeat: the toggle is locked while dirty, and a
@@ -87,8 +33,11 @@ function MarkdownToolbar({
 // No parameter defaults: the React Compiler skips a component that has them.
 export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef, locked }: MarkdownViewerProps) {
 	const result = usePreviewBytes(item)
-	const [mode, setMode] = useState<"rendered" | "source">("rendered")
-	// Where focus goes after a keyboard toggle: into the source editor, or onto the toolbar toggle when
+	const download = usePreviewDownload()
+
+	useLeaveViewerFullScreen()
+	const [mode, setMode] = useState<MarkdownMode>("rendered")
+	// Where focus goes after a keyboard toggle: into the source editor, or onto the command bar's switch when
 	// the toggle unmounted the editor that had it.
 	const [focusAfterToggle, setFocusAfterToggle] = useState<"editor" | "toggle" | null>(null)
 	const containerRef = useRef<HTMLDivElement>(null)
@@ -99,7 +48,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 	// definition the overlay's own Save button reads too.
 	const dirty = usePreviewUnsavedGuardStore(state => state.dirty)
 
-	// Locked while dirty, like the toolbar's own toggle (see above). The key is swallowed even then:
+	// Locked while dirty, like the command bar's switch (see above). The key is swallowed even then:
 	// left to the browser, Ctrl+Shift+V pastes the clipboard over the selection, which is not what
 	// pressing the toggle asks for. Works with the cursor in the editor too.
 	useAction(
@@ -139,43 +88,55 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 		)
 	}
 
-	const text = decodeUtf8(result.bytes)
+	const file = readTextFile(result.bytes)
+	const bar: MarkdownBar = {
+		mode,
+		locked: dirty,
+		switchRef: toggleRef,
+		onMode: next => {
+			setFocusAfterToggle(null)
+			setMode(next)
+		}
+	}
 
 	return (
 		<div
 			ref={containerRef}
 			className="flex size-full flex-col"
+			// The source's F6 is the editor surface's own (it takes the key first).
+			onKeyDown={event => {
+				onCommandBarF6(event, () => {
+					containerRef.current?.querySelector<HTMLElement>('[role="document"]')?.focus()
+				})
+			}}
 		>
-			<MarkdownToolbar
-				mode={mode}
-				disabled={dirty}
-				toggleRef={toggleRef}
-				onToggle={() => {
-					setFocusAfterToggle(null)
-					setMode(prev => (prev === "rendered" ? "source" : "rendered"))
-				}}
-			/>
-			<div className="min-h-0 flex-1">
-				{mode === "source" ? (
-					<CodeMirrorSource
-						text={text}
-						tag={codeMirrorLanguageFor(itemTypeExtension(item))}
-						alt={alt}
-						editable={editable ?? false}
-						locked={locked ?? false}
-						autoFocus={focusAfterToggle === "editor"}
-						// exactOptionalPropertyTypes: an unset optional prop must omit the key entirely
-						// rather than forward an explicit `undefined`.
-						{...(onDirtyChange !== undefined ? { onDirtyChange } : {})}
-						{...(contentRef !== undefined ? { contentRef } : {})}
+			{mode === "source" ? (
+				<CodeSurface
+					file={file}
+					tag={codeMirrorLanguageFor(itemTypeExtension(item))}
+					alt={alt}
+					editable={editable ?? false}
+					locked={locked ?? false}
+					autoFocus={focusAfterToggle === "editor"}
+					markdown={bar}
+					onDirtyChange={onDirtyChange}
+					contentRef={contentRef}
+				/>
+			) : (
+				<>
+					<MarkdownRenderedBar
+						markdown={bar}
+						onDownload={download}
 					/>
-				) : (
-					<MarkdownRenderer
-						text={text}
-						alt={alt}
-					/>
-				)}
-			</div>
+					<div className="min-h-0 flex-1">
+						<MarkdownRenderer
+							text={file.text}
+							alt={alt}
+							tabIndex={-1}
+						/>
+					</div>
+				</>
+			)}
 		</div>
 	)
 }

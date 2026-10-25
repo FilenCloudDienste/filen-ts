@@ -21,6 +21,17 @@ export {
 } from "./find"
 export { pdfLinks, resolveDestination, type PdfLink, type PdfRect } from "./links"
 export {
+	loadPdfInfo,
+	loadPdfOutline,
+	parsePdfDate,
+	pdfDocumentInfo,
+	pdfOutline,
+	PDF_OUTLINE_LIMIT,
+	PDF_OUTLINE_MAX_DEPTH,
+	type PdfDocumentInfo,
+	type PdfOutlineItem
+} from "./outline"
+export {
 	openPdf,
 	pdfDocumentParams,
 	PdfReadError,
@@ -49,17 +60,23 @@ export {
 	mostVisiblePage,
 	pdfBox,
 	pdfCanvasDims,
+	pdfFitScale,
 	pdfPageAction,
+	pdfPageRotation,
+	pdfPercentScale,
 	pdfRenderRatio,
 	pdfRenderTransform,
+	pdfRotate,
 	pdfStepZoomScale,
 	pdfWheelZoomScale,
 	pdfZoomPercent,
 	PDF_BASE_SCALE,
+	PDF_FIT_MARGIN_PX,
 	PDF_MAX_SCALE,
 	PDF_MIN_SCALE,
 	PDF_PAGE_EVICT_MARGIN_PX,
 	PDF_PAGE_RENDER_MARGIN_PX,
+	PDF_ZOOM_PRESETS,
 	PDF_ZOOM_STEP,
 	PDF_ZOOM_WHEEL_SENSITIVITY,
 	type PdfBox,
@@ -67,5 +84,6 @@ export {
 	type PdfPageAction,
 	type PdfViewerCommand,
 	type PdfViewerCommandType,
-	type PdfViewerState
+	type PdfViewerState,
+	type PdfZoomMode
 } from "./viewer"

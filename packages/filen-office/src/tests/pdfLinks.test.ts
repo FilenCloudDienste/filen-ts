@@ -78,6 +78,8 @@ function document(fields: Partial<PdfDocument>): PdfDocument {
 		getPage: () => Promise.reject(new Error("unused")),
 		getDestination: () => Promise.resolve(null),
 		getPageIndex: () => Promise.resolve(0),
+		getOutline: () => Promise.resolve(null),
+		getMetadata: () => Promise.resolve({ info: {} }),
 		...fields
 	}
 }

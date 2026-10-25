@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import {
 	mostVisiblePage,
+	pdfFitScale,
+	pdfPageRotation,
+	pdfRotate,
 	pdfStepZoomScale,
 	pdfWheelZoomScale,
 	pdfZoomPercent,
@@ -16,7 +19,8 @@ import type { Slicing } from "../../core/slicing"
 import type { PdfPagesBinding } from "./PdfPages"
 import type { PdfDomDocument } from "./types"
 
-// The viewer over an open document: page tracking, navigation, zoom and find, driven by PdfViewerCommands.
+// The viewer over an open document: page tracking, navigation, zoom, rotation and find, driven by
+// PdfViewerCommands.
 // Render `<PdfPages {...viewer.pages} />` with it.
 
 export interface PdfViewer {
@@ -48,6 +52,12 @@ const FIND_SLICING: Slicing = {
 	now: () => performance.now()
 }
 
+interface Fit {
+	readonly mode: "fitWidth" | "fitPage"
+	// The page whose size is fitted (the one in view when asked).
+	readonly page: number
+}
+
 function reducedMotion(): boolean {
 	return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches
 }
@@ -58,6 +68,10 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 	const ratios = useRef(new Map<number, number>())
 	const [page, setPage] = useState(1)
 	const [scale, setScale] = useState(PDF_BASE_SCALE)
+	const [fit, setFit] = useState<Fit | null>(null)
+	const [rotation, setRotation] = useState(0)
+	// The page brought back into view once a fit, a preset or a turn has laid the pages out again.
+	const keepRef = useRef<number | null>(null)
 	const [find, setFind] = useState<FindState>(CLOSED)
 	const [finder, setFinder] = useState(() => ({ document, finder: new PdfFinder(document, FIND_SLICING) }))
 	const pageCount = document.numPages
@@ -77,6 +91,8 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 			if (!event.ctrlKey && !event.metaKey) return
 
 			event.preventDefault()
+			keepRef.current = null
+			setFit(null)
 			setScale(previous => pdfWheelZoomScale(previous, event.deltaY))
 		}
 
@@ -121,11 +137,64 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 		}
 	}, [finder, searching, caseSensitive])
 
+	// A fitted zoom follows the view's size and the turn: the fitted page's size is read once per fit, and a
+	// ResizeObserver refits from it.
+	useEffect(() => {
+		const scroller = scrollerRef.current
+
+		if (fit === null || scroller === null) return
+
+		let live = true
+		let size: { width: number; height: number } | null = null
+
+		const apply = (): void => {
+			const fitted = size
+
+			if (live && fitted !== null) {
+				setScale(previous =>
+					pdfFitScale(fit.mode, fitted.width, fitted.height, scroller.clientWidth, scroller.clientHeight, previous)
+				)
+			}
+		}
+
+		document.getPage(fit.page).then(
+			proxy => {
+				const viewport = proxy.getViewport({ scale: 1, rotation: pdfPageRotation(proxy.rotate, rotation) })
+
+				size = { width: viewport.width, height: viewport.height }
+				apply()
+			},
+			() => {
+				// An unreadable page leaves the zoom as it is.
+			}
+		)
+
+		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(apply) : null
+
+		observer?.observe(scroller)
+
+		return () => {
+			live = false
+			observer?.disconnect()
+		}
+	}, [document, fit, rotation])
+
 	const goToPage = (target: number, smooth: boolean): void => {
 		const clamped = Math.min(Math.max(1, Math.round(target)), pageCount)
 
 		elements.current.get(clamped)?.scrollIntoView({ behavior: smooth && !reducedMotion() ? "smooth" : "auto", block: "start" })
 	}
+
+	useEffect(() => {
+		const keep = keepRef.current
+
+		if (keep !== null) {
+			keepRef.current = null
+			elements.current.get(keep)?.scrollIntoView({ block: "start" })
+		}
+	}, [scale, rotation])
+
+	const shownPage = Math.min(page, pageCount)
 
 	const dispatch = (command: PdfViewerCommand): void => {
 		switch (command.type) {
@@ -135,20 +204,44 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 			case "page.next":
 				goToPage(page + 1, true)
 				break
+			case "page.first":
+				goToPage(1, false)
+				break
+			case "page.last":
+				goToPage(pageCount, false)
+				break
 			case "page.goto":
 				goToPage(command.page, true)
 				break
 			case "zoom.in":
+				keepRef.current = null
+				setFit(null)
 				setScale(previous => pdfStepZoomScale(previous, 1))
 				break
 			case "zoom.out":
+				keepRef.current = null
+				setFit(null)
 				setScale(previous => pdfStepZoomScale(previous, -1))
 				break
 			case "zoom.set":
+				keepRef.current = shownPage
+				setFit(null)
 				setScale(clampPdfScale(command.scale))
 				break
 			case "zoom.by":
+				keepRef.current = null
+				setFit(null)
 				setScale(previous => clampPdfScale(previous + command.delta))
+				break
+			case "zoom.fitWidth":
+			case "zoom.fitPage":
+				keepRef.current = shownPage
+				setFit({ mode: command.type === "zoom.fitWidth" ? "fitWidth" : "fitPage", page: shownPage })
+				break
+			case "rotate.clockwise":
+			case "rotate.counterClockwise":
+				keepRef.current = shownPage
+				setRotation(previous => pdfRotate(previous, command.type === "rotate.clockwise" ? 1 : -1))
 				break
 			case "find.open":
 				setFind(previous => (previous.open ? previous : { ...CLOSED, open: true, caseSensitive: previous.caseSensitive }))
@@ -207,10 +300,12 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 
 	const count = find.result === null ? 0 : find.result.matches.length / PDF_FIND_INTS
 	const state: PdfViewerState = {
-		page: Math.min(page, pageCount),
+		page: shownPage,
 		pageCount,
 		scale,
 		zoom: pdfZoomPercent(scale),
+		zoomMode: fit?.mode ?? "custom",
+		rotation,
 		find: {
 			open: find.open,
 			query: find.query,
@@ -228,6 +323,7 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 		pages: {
 			document,
 			scale,
+			rotation,
 			find: { matches: find.open ? (find.result?.matches ?? null) : null, active: find.active, reveal: find.reveal },
 			scrollerRef,
 			onVisible,

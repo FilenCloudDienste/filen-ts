@@ -19,6 +19,7 @@ import { previewDocxReflow } from "@/locales/en/previewDocx/reflow"
 import { previewDocxRibbon } from "@/locales/en/previewDocx/ribbon"
 import { previewOfficeShared } from "@/locales/en/previewOffice/shared"
 import { previewOfficeRibbon } from "@/locales/en/previewOffice/ribbon"
+import { previewCommandBar } from "@/locales/en/previewOffice/commandBar"
 import { previewSheetViewer } from "@/locales/en/previewSheet/viewer"
 import { previewSheetFormat } from "@/locales/en/previewSheet/format"
 import { previewSheetSave } from "@/locales/en/previewSheet/save"
@@ -272,17 +273,17 @@ export const preview = {
 	previewPdfPasswordReopen: "Enter password",
 	/** PDF viewer — shown in place of the document when it fails to load or render (corrupt file, decode error) */
 	previewPdfLoadFailed: "This PDF couldn't be rendered.",
-	/** PDF viewer — accessible label for the page-nav button stepping to the previous page; distinct from the overlay's own file-level previous/next */
+	/** Document viewers (PDF, Word) — accessible label for the command bar button stepping to the previous page; distinct from the overlay's own file-level previous/next */
 	previewPdfPreviousPageAction: "Previous page",
-	/** PDF viewer — accessible label for the page-nav button stepping to the next page */
+	/** Document viewers (PDF, Word) — accessible label for the command bar button stepping to the next page */
 	previewPdfNextPageAction: "Next page",
 	/** PDF viewer — page-nav indicator and per-page canvas label; {{current}} = the page in view, {{total}} = page count */
 	previewPdfPageIndicator: "Page {{current}} of {{total}}",
-	/** PDF viewer — accessible label for the toolbar button stepping the zoom level down */
+	/** Document viewers (PDF, Word) — accessible label for the command bar button stepping the zoom level down */
 	previewPdfZoomOutAction: "Zoom out",
-	/** PDF viewer — accessible label for the toolbar button stepping the zoom level up */
+	/** Document viewers (PDF, Word) — accessible label for the command bar button stepping the zoom level up */
 	previewPdfZoomInAction: "Zoom in",
-	/** PDF viewer — zoom-level indicator between the zoom out/in buttons; {{percent}} = current zoom relative to the document's own default render scale */
+	/** Document viewers — a zoom level ({{percent}}): the zoom menu button, its steps and the status */
 	previewPdfZoomIndicator: "{{percent}}%",
 
 	// ── Docx ─────────────────────────────────────────────────────────────────
@@ -322,10 +323,6 @@ export const preview = {
 	previewDocxLegacyFormat: "This document uses an older Word format that can't be opened here.",
 	/** Docx viewer — shown when the file is not a Word document at all (another Office file, or not a document) */
 	previewDocxNotDocument: "This file isn't a Word document.",
-	/** Docx viewer — accessible label for the page-nav button stepping to the previous page; distinct from the overlay's own file-level previous/next */
-	previewDocxPreviousPageAction: "Previous page",
-	/** Docx viewer — accessible label for the page-nav button stepping to the next page */
-	previewDocxNextPageAction: "Next page",
 	/** Docx viewer — page-nav indicator and each page's accessible label; {{current}} = the page in view, {{total}} = page count */
 	previewDocxPageIndicator: "Page {{current}} of {{total}}",
 	/** Docx viewer — accessible label for the toolbar button stepping the zoom level down */
@@ -730,6 +727,7 @@ export const preview = {
 	...previewDocxRibbon,
 	...previewOfficeShared,
 	...previewOfficeRibbon,
+	...previewCommandBar,
 	...previewSheetViewer,
 	...previewSheetSave,
 	...previewSheetFormat,

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from "react"
-import { Compartment, type Extension } from "@codemirror/state"
+import { Compartment, Text, type Extension } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
 import { codeEditorSetup, codeFillParent, codeReadOnly, codeTheme } from "@filen/office/dom/code"
 import { CodeEditor } from "@filen/office/react/code"
-import { languageExtensionFor, useEditorKeymap } from "@/features/preview/lib/codeMirrorShared"
+import { languageExtensionFor, useEditorKeymap, type EditorKeymapCommands } from "@/features/preview/lib/codeMirrorShared"
+import { writeTextFile, type TextFileFormat } from "@/features/preview/lib/textFile"
 
 // Shared CodeMirror read/write surface — extracted from textViewer.tsx so the notes reader (and the
 // notes editor) reuses the SAME language/theme plumbing (lib/codeMirrorShared.ts) as file preview
@@ -35,6 +36,18 @@ export interface CodeMirrorSourceProps {
 	// Read-only for now, keeping the buffer: the preview's save in flight, which remounts the editor on
 	// what it uploaded, so anything typed meanwhile would be lost.
 	locked?: boolean
+	// A host's command bar (CodeChrome): its extensions take the place of the editor's own wrapping, line numbers
+	// and language, its keymap that of the search panel. Stable for the editor's life.
+	chrome?: CodeMirrorChrome
+	// The file's byte order mark and line ending, put back in what contentRef reads (textFile.ts).
+	format?: TextFileFormat
+}
+
+export interface CodeMirrorChrome {
+	readonly extensions: Extension
+	readonly keymap: EditorKeymapCommands
+	// The view once created, null once gone.
+	attach(view: EditorView | null): void
 }
 
 const LOCKED: Extension = codeReadOnly(true)
@@ -49,6 +62,7 @@ function emptyCompartment(): { compartment: Compartment; initial: Extension } {
 
 // Extension values hold no state of their own, so every editor shares one setup.
 const SETUP: Extension = codeEditorSetup()
+const SETUP_WITHOUT_LINE_NUMBERS: Extension = codeEditorSetup({ lineNumbers: false })
 
 function noopDirtyChange(): void {
 	// Default for every read-only caller — CodeMirrorSource always calls onDirtyChange, so a real
@@ -72,13 +86,15 @@ export function CodeMirrorSource({
 	contentRef,
 	onValueChange,
 	autoFocus,
-	locked
+	locked,
+	chrome,
+	format
 }: CodeMirrorSourceProps) {
 	const editable = editableProp ?? false
 	const onDirtyChange = onDirtyChangeProp ?? noopDirtyChange
 	const languageExtension = languageExtensionFor(tag)
 	// Find, replace and (in markdown) formatting, on the user's own shortcuts.
-	const editorKeymap = useEditorKeymap(tag === "markdown")
+	const editorKeymap = useEditorKeymap(tag === "markdown", chrome?.keymap)
 	const [lock] = useState(emptyCompartment)
 	// Holds the change listener, installed once the view exists (handleCreateEditor).
 	const [changes] = useState(emptyCompartment)
@@ -87,26 +103,28 @@ export function CodeMirrorSource({
 	const [dirty, setDirty] = useState(false)
 	// Latest sinks for the change listener, which is installed once: a new callback identity must never
 	// reconfigure the editor.
-	const sinksRef = useRef({ editable, contentRef, onValueChange })
+	const sinksRef = useRef({ editable, contentRef, onValueChange, format })
 
 	useEffect(() => {
-		sinksRef.current = { editable, contentRef, onValueChange }
+		sinksRef.current = { editable, contentRef, onValueChange, format }
 	})
 
 	const readOnly = codeReadOnly(!editable)
-	const extensions = languageExtension
-		? [
-				codeFillParent,
-				SETUP,
-				codeTheme,
-				readOnly,
-				languageExtension,
-				EditorView.lineWrapping,
-				editorKeymap,
-				lock.initial,
-				changes.initial
-			]
-		: [codeFillParent, SETUP, codeTheme, readOnly, EditorView.lineWrapping, editorKeymap, lock.initial, changes.initial]
+	const extensions = chrome
+		? [codeFillParent, SETUP_WITHOUT_LINE_NUMBERS, codeTheme, readOnly, chrome.extensions, editorKeymap, lock.initial, changes.initial]
+		: languageExtension
+			? [
+					codeFillParent,
+					SETUP,
+					codeTheme,
+					readOnly,
+					languageExtension,
+					EditorView.lineWrapping,
+					editorKeymap,
+					lock.initial,
+					changes.initial
+				]
+			: [codeFillParent, SETUP, codeTheme, readOnly, EditorView.lineWrapping, editorKeymap, lock.initial, changes.initial]
 	const isLocked = locked === true
 
 	// A lock change on the live view; a view created while locked takes it in handleCreateEditor.
@@ -120,9 +138,12 @@ export function CodeMirrorSource({
 		const seedDoc = view.state.doc
 
 		viewRef.current = view
+		chrome?.attach(view)
 
 		function readBuffer(): string {
-			return view.state.doc.toString()
+			const fileFormat = sinksRef.current.format
+
+			return fileFormat === undefined ? view.state.doc.toString() : writeTextFile(view.state.doc, fileFormat)
 		}
 
 		const listener = EditorView.updateListener.of(update => {
@@ -155,12 +176,28 @@ export function CodeMirrorSource({
 		onDirtyChange(dirty)
 	}, [dirty, onDirtyChange])
 
+	useEffect(() => {
+		return () => {
+			chrome?.attach(null)
+		}
+	}, [chrome])
+
 	// Before the view exists the buffer is still the seed.
 	useEffect(() => {
 		if (contentRef) {
-			contentRef.current = editable ? () => viewRef.current?.state.doc.toString() ?? seed : null
+			contentRef.current = editable
+				? () => {
+						const doc = viewRef.current?.state.doc
+
+						if (format === undefined) {
+							return doc?.toString() ?? seed
+						}
+
+						return writeTextFile(doc ?? Text.of(seed.split(/\r\n?|\n/)), format)
+					}
+				: null
 		}
-	}, [contentRef, editable, seed])
+	}, [contentRef, editable, seed, format])
 
 	return (
 		<div className="size-full">

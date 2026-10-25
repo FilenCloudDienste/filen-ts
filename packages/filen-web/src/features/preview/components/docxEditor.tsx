@@ -1255,7 +1255,6 @@ export function DocxEditView({
 			<DocxEditToolbar
 				fileMenu={
 					<DocxFileMenu
-						ribbon
 						onDownloadPdf={pdf.onDownloadPdf}
 						liveFile={liveFile}
 						autosave={{

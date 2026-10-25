@@ -5,9 +5,13 @@ import {
 	mostVisiblePage,
 	pdfBox,
 	pdfCanvasDims,
+	pdfFitScale,
 	pdfPageAction,
+	pdfPageRotation,
+	pdfPercentScale,
 	pdfRenderRatio,
 	pdfRenderTransform,
+	pdfRotate,
 	pdfStepZoomScale,
 	pdfWheelZoomScale,
 	pdfZoomPercent,
@@ -138,6 +142,8 @@ describe("isPdfCommandEnabled", () => {
 		pageCount: 3,
 		scale: PDF_MIN_SCALE,
 		zoom: 33,
+		zoomMode: "custom",
+		rotation: 0,
 		find: { open: true, query: "a", caseSensitive: false, done: true, count: 0, capped: false, active: -1 }
 	}
 
@@ -150,5 +156,41 @@ describe("isPdfCommandEnabled", () => {
 		expect(isPdfCommandEnabled(state, "find.next")).toBe(false)
 		expect(isPdfCommandEnabled({ ...state, find: { ...state.find, count: 2 } }, "find.previous")).toBe(true)
 		expect(isPdfCommandEnabled(state, "find.open")).toBe(true)
+		expect(isPdfCommandEnabled(state, "page.first")).toBe(false)
+		expect(isPdfCommandEnabled(state, "page.last")).toBe(true)
+		expect(isPdfCommandEnabled({ ...state, page: 3 }, "page.last")).toBe(false)
+		expect(isPdfCommandEnabled({ ...state, page: 3 }, "page.first")).toBe(true)
+	})
+})
+
+describe("fit, presets and rotation", () => {
+	it("fits a page to the view's width, or whole, within the scale bounds", () => {
+		// (432 - 2 × 16) / 200
+		expect(pdfFitScale("fitWidth", 200, 400, 432, 300, 1.5)).toBe(2)
+		// min(2, (332 - 32) / 400)
+		expect(pdfFitScale("fitPage", 200, 400, 432, 332, 1.5)).toBe(0.75)
+		expect(pdfFitScale("fitWidth", 10, 10, 2000, 2000, 1.5)).toBe(PDF_MAX_SCALE)
+		expect(pdfFitScale("fitPage", 1000, 1000, 200, 200, 1.5)).toBe(PDF_MIN_SCALE)
+	})
+
+	it("keeps the scale while the view or the page has no size", () => {
+		expect(pdfFitScale("fitWidth", 200, 400, 0, 0, 1.25)).toBe(1.25)
+		expect(pdfFitScale("fitPage", 0, 400, 800, 600, 1.25)).toBe(1.25)
+		// A view laid out with no height yet fits the width.
+		expect(pdfFitScale("fitPage", 200, 400, 432, 0, 1.25)).toBe(2)
+	})
+
+	it("turns in 90° steps both ways and adds the page's own rotation", () => {
+		expect(pdfRotate(0, 1)).toBe(90)
+		expect(pdfRotate(270, 1)).toBe(0)
+		expect(pdfRotate(0, -1)).toBe(270)
+		expect(pdfPageRotation(90, 270)).toBe(0)
+		expect(pdfPageRotation(180, 90)).toBe(270)
+	})
+
+	it("reads a menu percent as a scale", () => {
+		expect(pdfPercentScale(100)).toBe(PDF_BASE_SCALE)
+		expect(pdfPercentScale(50)).toBe(0.75)
+		expect(pdfPercentScale(1000)).toBe(PDF_MAX_SCALE)
 	})
 })

@@ -283,10 +283,10 @@ test("markdown preview renders GFM content and its view-source toggle round-trip
 		await expect(link).toHaveAttribute("target", "_blank")
 		await expect(link).toHaveAttribute("rel", "noreferrer")
 
-		// View source — mounts the same CodeMirror surface the text/code legs use, this run's first use
+		// The Source view — mounts the same CodeMirror surface the text/code legs use, this run's first use
 		// of it since this file never opened via the text/code path.
-		const viewSource = page.getByRole("button", { name: "View source" })
-		const viewRendered = page.getByRole("button", { name: "View rendered" })
+		const viewSource = page.getByRole("button", { name: "Source", exact: true })
+		const viewRendered = page.getByRole("button", { name: "Rendered", exact: true })
 
 		await viewSource.click()
 		await expect(page.getByText("# Hello Markdown")).toBeVisible({ timeout: 30_000 })

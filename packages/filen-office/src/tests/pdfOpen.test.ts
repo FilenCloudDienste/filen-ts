@@ -71,7 +71,9 @@ const DOCUMENT: PdfDocument = {
 	numPages: 1,
 	getPage: () => Promise.reject(new Error("unused")),
 	getDestination: () => Promise.resolve(null),
-	getPageIndex: () => Promise.resolve(0)
+	getPageIndex: () => Promise.resolve(0),
+	getOutline: () => Promise.resolve(null),
+	getMetadata: () => Promise.resolve({ info: {} })
 }
 
 const SCRIPT = { kind: "script", src: "/pdf.worker.mjs" } as const

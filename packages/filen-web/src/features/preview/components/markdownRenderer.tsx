@@ -74,6 +74,8 @@ interface MarkdownRendererProps {
 	className?: string | undefined
 	overrides?: MarkdownComponents | undefined
 	urlTransform?: MarkdownUrlTransform | undefined
+	// -1: focusable from code (F6 from the preview's command bar).
+	tabIndex?: number | undefined
 }
 
 function MarkdownBody({
@@ -82,6 +84,7 @@ function MarkdownBody({
 	className,
 	overrides,
 	urlTransform,
+	tabIndex,
 	onClick,
 	onAuxClick
 }: MarkdownRendererProps & {
@@ -94,7 +97,8 @@ function MarkdownBody({
 		<div
 			role="document"
 			aria-label={alt}
-			className={cn("size-full overflow-auto px-6 py-4 select-text", className)}
+			className={cn("size-full overflow-auto px-6 py-4 outline-none select-text", className)}
+			tabIndex={tabIndex}
 			onClick={onClick}
 			onAuxClick={onAuxClick}
 		>

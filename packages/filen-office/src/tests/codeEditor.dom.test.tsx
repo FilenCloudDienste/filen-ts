@@ -2,7 +2,7 @@
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { EditorState, StateEffect, type Extension, type Transaction } from "@codemirror/state"
+import { Compartment, EditorState, StateEffect, type Extension, type Transaction } from "@codemirror/state"
 import { EditorView, runScopeHandlers } from "@codemirror/view"
 import { CodeEditor } from "../react/code/index"
 import { codeLanguageExtensions, codeLanguageForExtension, isCodeLanguageId, CODE_LANGUAGES } from "../core/code/index"
@@ -12,6 +12,7 @@ import {
 	codeFillParent,
 	codeKeymap,
 	codeLanguageSupport,
+	codeLineNumbers,
 	codeReadOnly,
 	codeTheme,
 	mountCodeCompare
@@ -196,6 +197,20 @@ describe("code editor extensions", () => {
 
 		expect(view.dom.querySelector(".cm-lineNumbers")).not.toBeNull()
 		expect(view.state.facet(EditorState.allowMultipleSelections)).toBe(true)
+		view.destroy()
+	})
+
+	it("leaves the line numbers to an app that switches them itself", () => {
+		const lines = new Compartment()
+		const view = new EditorView({
+			doc: "a\nb",
+			extensions: [codeEditorSetup({ lineNumbers: false }), lines.of([])],
+			parent: container
+		})
+
+		expect(view.dom.querySelector(".cm-lineNumbers")).toBeNull()
+		view.dispatch({ effects: lines.reconfigure(codeLineNumbers) })
+		expect(view.dom.querySelector(".cm-lineNumbers")).not.toBeNull()
 		view.destroy()
 	})
 

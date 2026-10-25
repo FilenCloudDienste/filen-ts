@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Tabs } from "@base-ui/react/tabs"
@@ -11,6 +11,7 @@ import { keepFocus } from "@/features/office/lib/officeControls"
 import { setRibbonCollapsed, useRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
 import { ribbonFit, type RibbonGroupState } from "@/features/office/components/ribbon/ribbonFit"
 import { RibbonToolbar } from "@/features/office/components/ribbon/ribbonToolbar"
+import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { KbdKeys } from "@/lib/keymap/kbd"
 import { useElementSize } from "@/lib/useElementSize"
 
@@ -19,6 +20,9 @@ import { useElementSize } from "@/lib/useElementSize"
 // end) over one row of the selected tab's command groups. Groups the row has no room for collapse into a dropdown
 // each, then move into its overflow menu (ribbonFit). "Show tabs only" (the chevron, Ctrl+F1) hides the command row
 // until a tab is clicked. Only the selected tab's groups are rendered.
+//
+// The document viewers' command bar (OfficeCommandBar) is that command row on its own, with no tab row: the File menu
+// first, then the groups, then the status.
 
 export interface RibbonTab {
 	readonly id: string
@@ -62,27 +66,6 @@ const DIVIDER_WIDTH = 11
 const COLLAPSED_WIDTH = 44
 // The command row's padding.
 const ROW_PADDING = 16
-// A phone's window: groups skip collapsing and go straight to the overflow menu, icon only.
-const PHONE_QUERY = "(max-width: 39.99rem)"
-
-// None where there is no matchMedia: reads as wide.
-function phoneMedia(): MediaQueryList | null {
-	return typeof window.matchMedia === "function" ? window.matchMedia(PHONE_QUERY) : null
-}
-
-function subscribePhone(change: () => void): () => void {
-	const query = phoneMedia()
-
-	query?.addEventListener("change", change)
-
-	return () => {
-		query?.removeEventListener("change", change)
-	}
-}
-
-function phoneWidth(): boolean {
-	return phoneMedia()?.matches === true
-}
 
 function Divider() {
 	return (
@@ -260,16 +243,19 @@ function Overflow({ groups }: { groups: readonly RibbonGroup[] }) {
 	)
 }
 
-function CommandRow({
+export function CommandRow({
 	commandsLabel,
 	groups,
 	replacement,
-	phone
+	phone,
+	className
 }: {
 	commandsLabel: string
 	groups: readonly RibbonGroup[]
 	replacement: ReactNode
+	// usePhoneWidth: groups skip collapsing.
 	phone: boolean
+	className?: string | undefined
 }) {
 	const [row, setRow] = useState<HTMLDivElement | null>(null)
 	const { width } = useElementSize(row)
@@ -290,7 +276,7 @@ function CommandRow({
 	return (
 		<div
 			ref={setRow}
-			className="flex h-10 min-w-0 items-center px-2"
+			className={cn("flex h-10 min-w-0 items-center px-2", className)}
 		>
 			{replacement ?? (
 				<RibbonToolbar
@@ -332,7 +318,7 @@ function CommandRow({
 export function OfficeRibbon(props: OfficeRibbonProps) {
 	const { t } = useTranslation("preview")
 	const collapsed = useRibbonCollapsed()
-	const phone = useSyncExternalStore(subscribePhone, phoneWidth)
+	const phone = usePhoneWidth()
 	const [tabRow, setTabRow] = useState<HTMLDivElement | null>(null)
 	// Show tabs only: the command row a clicked tab shows over the content until a command runs or focus leaves.
 	const peek = useRibbonPopup()
@@ -466,5 +452,39 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 				row
 			)}
 		</Tabs.Root>
+	)
+}
+
+export interface OfficeCommandBarProps {
+	// The command row's name.
+	label: string
+	// The File menu, first in the row.
+	file?: ReactNode
+	groups: readonly RibbonGroup[]
+	// At the row's end; what a phone has no room for carries max-sm:hidden.
+	status?: ReactNode
+	// Shown in place of the groups (the find field).
+	replacement?: ReactNode
+}
+
+// One row: the File menu, the groups (fitted as the ribbon's command row), the status. No tabs, so no Show tabs only.
+export function OfficeCommandBar({ label, file, groups, status, replacement }: OfficeCommandBarProps) {
+	const phone = usePhoneWidth()
+
+	return (
+		<div
+			data-office-ribbon
+			className="flex h-10 shrink-0 items-center border-b border-border"
+		>
+			{file === undefined || file === null ? null : <div className="flex shrink-0 items-center pl-2">{file}</div>}
+			<CommandRow
+				commandsLabel={label}
+				groups={groups}
+				replacement={replacement}
+				phone={phone}
+				className="flex-1"
+			/>
+			{status === undefined || status === null ? null : <div className="flex shrink-0 items-center gap-1 pr-2">{status}</div>}
+		</div>
 	)
 }

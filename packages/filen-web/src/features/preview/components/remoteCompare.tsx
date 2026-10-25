@@ -12,11 +12,30 @@ import { isNarrowViewport } from "@/features/shell/lib/breakpoints"
 // The newer version's text, as far as it has been had.
 export type RemoteTheirs = { status: "loading" } | { status: "failed" } | { status: "ready"; text: string }
 
+// The columns' names and the one-column legend, where the comparison is not with a newer version (View changes).
+export interface CompareLabels {
+	readonly theirs: string
+	readonly mine: string
+	readonly unified: string
+}
+
 // Read-only comparison of a newer version saved elsewhere (`theirs`) with the unsaved edits (`mine`), shown inside the remote-change
 // dialog before the user picks. `tag` is the CodeMirror language (codeMirrorLanguageFor).
-export function RemoteCompare({ theirs, mine, tag }: { theirs: RemoteTheirs; mine: string; tag: string }) {
+export function RemoteCompare({
+	theirs,
+	mine: mineText,
+	tag,
+	labels
+}: {
+	theirs: RemoteTheirs
+	mine: string
+	tag: string
+	labels?: CompareLabels | undefined
+}) {
 	const { t } = useTranslation("preview")
 	const theirsText = theirs.status === "ready" ? theirs.text : null
+	// The edits as a save writes them may begin with the file's byte order mark, which theirs (decoded) does not.
+	const mine = mineText.startsWith("\uFEFF") ? mineText.slice(1) : mineText
 	const language = languageExtensionFor(tag)
 	const hostRef = useRef<HTMLDivElement>(null)
 	// Side by side needs the width; a narrow window gets one column with both versions interleaved.
@@ -46,11 +65,11 @@ export function RemoteCompare({ theirs, mine, tag }: { theirs: RemoteTheirs; min
 		<div className="flex min-h-0 flex-col gap-2">
 			{sideBySide ? (
 				<div className="grid shrink-0 grid-cols-2 gap-px text-xs font-medium text-muted-foreground">
-					<span>{t("previewRemoteTheirs")}</span>
-					<span className="pl-3">{t("previewRemoteMine")}</span>
+					<span>{labels?.theirs ?? t("previewRemoteTheirs")}</span>
+					<span className="pl-3">{labels?.mine ?? t("previewRemoteMine")}</span>
 				</div>
 			) : (
-				<p className="shrink-0 text-xs text-muted-foreground">{t("previewRemoteUnifiedLegend")}</p>
+				<p className="shrink-0 text-xs text-muted-foreground">{labels?.unified ?? t("previewRemoteUnifiedLegend")}</p>
 			)}
 			<div
 				ref={hostRef}

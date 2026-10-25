@@ -16,11 +16,19 @@ import {
 	rectangularSelection
 } from "@codemirror/view"
 
+export interface CodeEditorSetupOptions {
+	// False leaves the line numbers to the app (one it can switch, in a Compartment of its own: codeLineNumbers).
+	readonly lineNumbers?: boolean
+}
+
+// The line-number gutter, one value so a Compartment holding it compares equal.
+export const codeLineNumbers: Extension = lineNumbers()
+
 // CodeMirror's basic setup, without the search keymap: its Mod-f would shadow a rebound find (an app binds
 // search through codeKeymap instead). Tab indents, as in every code editor here.
-export function codeEditorSetup(): Extension {
+export function codeEditorSetup(options?: CodeEditorSetupOptions): Extension {
 	return [
-		lineNumbers(),
+		options?.lineNumbers === false ? [] : codeLineNumbers,
 		highlightActiveLineGutter(),
 		highlightSpecialChars(),
 		history(),

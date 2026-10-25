@@ -117,7 +117,9 @@ function documentOf(pages: readonly (readonly object[] | Error)[]): { document: 
 				}
 			} as unknown as PdfPage),
 		getDestination: () => Promise.resolve(null),
-		getPageIndex: () => Promise.resolve(0)
+		getPageIndex: () => Promise.resolve(0),
+		getOutline: () => Promise.resolve(null),
+		getMetadata: () => Promise.resolve({ info: {} })
 	}
 
 	return { document, reads }

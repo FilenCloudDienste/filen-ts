@@ -2,10 +2,12 @@ import { test, expect } from "./fixtures"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, uploadFiles, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { focusEditorSurface } from "./helpers/editor"
 import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
+import { preview } from "@/locales/en/preview"
 
 // The file editor's shortcuts on a real CodeMirror: find and replace (bound inside the editor, so the
-// drive listing's own mod+f search stays out of it), Escape closing the search panel without closing the
-// file, the markdown formatting keys, the rendered/source toggle (locked while dirty) and mod+s. The
+// drive listing's own mod+f search stays out of it) opening the command bar's find field in place of
+// CodeMirror's panel, Escape closing it without closing the file, the markdown formatting keys, the
+// rendered/source switch (locked while dirty) and mod+s. The
 // editor keys go through CodeMirror, whose idea of "mod" can differ from the app's under Playwright's
 // device emulation (helpers/modkey.ts), hence the two resolvers.
 test.describe.configure({ mode: "default" })
@@ -39,23 +41,25 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 		await expect(content).toBeVisible({ timeout: 30_000 })
 		await focusEditorSurface(content)
 
-		// Find opens the editor's own search, not the listing's; Escape closes it and leaves the file open.
+		// Find opens the command bar's find field, not the listing's search nor CodeMirror's panel; Escape
+		// closes it and leaves the file open.
 		await page.keyboard.press(`${editorMod}+F`)
 
-		const search = dialog.locator(".cm-search")
+		const findField = dialog.getByRole("searchbox", { name: preview.previewDocxFindPlaceholder })
 
-		await expect(search).toBeVisible()
-		await expect(search.locator("input[name=search]")).toBeFocused()
+		await expect(findField).toBeFocused()
+		await expect(dialog.locator(".cm-search")).toHaveCount(0)
 		await page.keyboard.press("Escape")
-		await expect(search).toHaveCount(0)
+		await expect(findField).toHaveCount(0)
 		await expect(dialog).toBeVisible()
 
-		// Replace opens the same panel on its replace field.
+		// Replace opens the same field with its replace field beside it.
 		await focusEditorSurface(content)
 		await page.keyboard.press(`${editorMod}+Alt+F`)
-		await expect(search.locator("input[name=replace]")).toBeFocused()
+		await expect(dialog.getByRole("textbox", { name: preview.previewDocxReplacePlaceholder })).toBeVisible()
+		await expect(findField).toBeFocused()
 		await page.keyboard.press("Escape")
-		await expect(search).toHaveCount(0)
+		await expect(findField).toHaveCount(0)
 
 		// Bold around a double-clicked word; the buffer is dirty, which locks the preview toggle.
 		await content.getByText("plain words here").dblclick({ position: { x: 60, y: 8 } })

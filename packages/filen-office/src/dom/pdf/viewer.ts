@@ -18,6 +18,8 @@ export const PDF_PAGE_EVICT_MARGIN_PX = 1200
 export type PdfViewerCommand =
 	| { readonly type: "page.previous" }
 	| { readonly type: "page.next" }
+	| { readonly type: "page.first" }
+	| { readonly type: "page.last" }
 	// 1-based.
 	| { readonly type: "page.goto"; readonly page: number }
 	| { readonly type: "zoom.in" }
@@ -26,6 +28,12 @@ export type PdfViewerCommand =
 	| { readonly type: "zoom.set"; readonly scale: number }
 	// Adds `delta` to the scale on screen (wheel and pinch gestures, which arrive faster than renders).
 	| { readonly type: "zoom.by"; readonly delta: number }
+	// The page in view fits the view's width, or all of it the view; kept as the view resizes or turns.
+	| { readonly type: "zoom.fitWidth" }
+	| { readonly type: "zoom.fitPage" }
+	// Every page turns 90° (on top of its own /Rotate).
+	| { readonly type: "rotate.clockwise" }
+	| { readonly type: "rotate.counterClockwise" }
 	| { readonly type: "find.open" }
 	| { readonly type: "find.close" }
 	| { readonly type: "find.query"; readonly query: string; readonly caseSensitive?: boolean }
@@ -34,6 +42,14 @@ export type PdfViewerCommand =
 
 export type PdfViewerCommandType = PdfViewerCommand["type"]
 
+export type PdfZoomMode = "fitWidth" | "fitPage" | "custom"
+
+// The zoom menu's steps, in percent (those within PDF_MIN_SCALE..PDF_MAX_SCALE).
+export const PDF_ZOOM_PRESETS: readonly number[] = [50, 75, 100, 125, 150, 200, 250]
+
+// Room left around a fitted page: the page column's gap above and below, and a little at the sides.
+export const PDF_FIT_MARGIN_PX = 16
+
 export interface PdfViewerState {
 	// 1-based page most in view.
 	readonly page: number
@@ -41,6 +57,9 @@ export interface PdfViewerState {
 	readonly scale: number
 	// Percent of PDF_BASE_SCALE.
 	readonly zoom: number
+	readonly zoomMode: PdfZoomMode
+	// Added to every page's own /Rotate: 0, 90, 180 or 270.
+	readonly rotation: number
 	readonly find: {
 		readonly open: boolean
 		readonly query: string
@@ -58,8 +77,10 @@ export interface PdfViewerState {
 export function isPdfCommandEnabled(state: PdfViewerState, type: PdfViewerCommandType): boolean {
 	switch (type) {
 		case "page.previous":
+		case "page.first":
 			return state.page > 1
 		case "page.next":
+		case "page.last":
 			return state.page < state.pageCount
 		case "zoom.in":
 			return state.scale < PDF_MAX_SCALE
@@ -88,6 +109,44 @@ export function pdfStepZoomScale(current: number, direction: 1 | -1): number {
 
 export function pdfWheelZoomScale(current: number, deltaY: number): number {
 	return clampPdfScale(current - deltaY * PDF_ZOOM_WHEEL_SENSITIVITY)
+}
+
+// A zoom menu percent as a scale.
+export function pdfPercentScale(percent: number): number {
+	return clampPdfScale((percent / 100) * PDF_BASE_SCALE)
+}
+
+// The scale that fits a page (`width` × `height` at scale 1, already turned) into the view: its width, or all of
+// it. A view not laid out yet keeps the current scale.
+export function pdfFitScale(
+	mode: "fitWidth" | "fitPage",
+	width: number,
+	height: number,
+	viewWidth: number,
+	viewHeight: number,
+	current: number
+): number {
+	const room = viewWidth - 2 * PDF_FIT_MARGIN_PX
+
+	if (width <= 0 || height <= 0 || room <= 0) return current
+
+	const byWidth = room / width
+
+	if (mode === "fitWidth") return clampPdfScale(byWidth)
+
+	const roomY = viewHeight - 2 * PDF_FIT_MARGIN_PX
+
+	return roomY <= 0 ? clampPdfScale(byWidth) : clampPdfScale(Math.min(byWidth, roomY / height))
+}
+
+// The view's turn after a 90° step, in 0..270.
+export function pdfRotate(rotation: number, direction: 1 | -1): number {
+	return (((rotation + direction * 90) % 360) + 360) % 360
+}
+
+// A page's rotation on screen: its own /Rotate plus the view's turn.
+export function pdfPageRotation(own: number, rotation: number): number {
+	return (((own + rotation) % 360) + 360) % 360
 }
 
 export function pdfZoomPercent(scale: number): number {

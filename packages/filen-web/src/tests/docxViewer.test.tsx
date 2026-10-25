@@ -471,7 +471,7 @@ describe("DocxViewer", () => {
 		expect(screen.queryByRole("searchbox")).toBeNull()
 	})
 
-	it("fits the page to the width again from the zoom percentage", async () => {
+	it("fits the page to the width again from the zoom menu", async () => {
 		render(
 			<DocxViewer
 				item={item}
@@ -483,10 +483,9 @@ describe("DocxViewer", () => {
 		await emit(pages())
 
 		fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
-		expect(screen.getByRole("button", { name: "Zoom 110%, fit to width" })).toBeTruthy()
-
-		fireEvent.click(screen.getByRole("button", { name: "Zoom 110%, fit to width" }))
-		expect(screen.getByRole("button", { name: "Zoom 100%, fit to width" })).toBeTruthy()
+		fireEvent.click(screen.getByRole("button", { name: "Zoom level, 110%" }))
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: "Fit to width" }))
+		expect(await screen.findByRole("button", { name: "Zoom level, 100%" })).toBeTruthy()
 	})
 
 	it("offers the markup modes for a reviewed document, lays out the chosen view and marks its comments", async () => {

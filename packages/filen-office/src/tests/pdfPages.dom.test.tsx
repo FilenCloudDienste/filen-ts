@@ -25,7 +25,7 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
 interface FakePage extends PdfPage<ReadableStream> {
 	readonly render: ReturnType<typeof vi.fn<(params: PdfRenderParams) => { promise: Promise<void>; cancel: () => void }>>
 	readonly cleanup: ReturnType<typeof vi.fn<() => boolean>>
-	readonly getViewport: ReturnType<typeof vi.fn<(params: { scale: number }) => PdfViewport>>
+	readonly getViewport: ReturnType<typeof vi.fn<(params: { scale: number; rotation?: number }) => PdfViewport>>
 	readonly getAnnotations: ReturnType<typeof vi.fn<() => Promise<unknown[]>>>
 }
 
@@ -33,28 +33,32 @@ function textItems(text: readonly string[]): object[] {
 	return text.map(str => ({ str, hasEOL: false }))
 }
 
-function viewport(scale: number): PdfViewport {
+// A page 100 wide and `tall` high, turned by `rotation`.
+function viewport(scale: number, rotation = 0, tall = 100): PdfViewport {
+	const turned = rotation % 180 !== 0
+
 	return {
-		viewBox: [0, 0, 100, 100],
+		viewBox: [0, 0, 100, tall],
 		userUnit: 1,
 		scale,
-		rotation: 0,
+		rotation,
 		offsetX: 0,
 		offsetY: 0,
-		transform: [scale, 0, 0, -scale, 0, 100 * scale],
-		width: 100 * scale,
-		height: 100 * scale,
+		transform: [scale, 0, 0, -scale, 0, tall * scale],
+		width: (turned ? tall : 100) * scale,
+		height: (turned ? 100 : tall) * scale,
 		rawDims: {},
-		clone: () => viewport(scale),
+		clone: () => viewport(scale, rotation, tall),
 		convertToViewportPoint: (x: number, y: number) => [x, y],
 		convertToPdfPoint: (x: number, y: number) => [x, y]
 	}
 }
 
-function fakePage(text: readonly string[], annotations: unknown[] = []): FakePage {
+function fakePage(text: readonly string[], annotations: unknown[] = [], tall = 100, rotate = 0): FakePage {
 	return {
 		userUnit: 1,
-		getViewport: vi.fn(({ scale }: { scale: number }) => viewport(scale)),
+		rotate,
+		getViewport: vi.fn(({ scale, rotation }: { scale: number; rotation?: number }) => viewport(scale, rotation ?? rotate, tall)),
 		render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })),
 		cleanup: vi.fn(() => true),
 		// The stand-in text layer reads the items straight.
@@ -107,7 +111,9 @@ function fakePdfJs(
 		numPages: pages.length,
 		getPage: n => Promise.resolve(pages[n - 1] as FakePage),
 		getDestination: id => Promise.resolve(id in destinations ? [{ page: destinations[id] }] : null),
-		getPageIndex: ref => Promise.resolve((ref as { page: number }).page - 1)
+		getPageIndex: ref => Promise.resolve((ref as { page: number }).page - 1),
+		getOutline: () => Promise.resolve(null),
+		getMetadata: () => Promise.resolve({ info: {} })
 	}
 	const pdfjs: PdfJsDom = {
 		GlobalWorkerOptions: { workerSrc: "" },
@@ -405,6 +411,118 @@ describe("PdfPages", () => {
 		})
 		expect(zoom.defaultPrevented).toBe(true)
 		expect(latest.viewer?.state.zoom).toBe(110)
+	})
+
+	it("turns every page, its own /Rotate included, and paints the canvas and text layer again", async () => {
+		const pages = [fakePage(["a"], [], 200), fakePage(["b"], [], 200, 90)]
+		const { pdfjs, opened } = fakePdfJs(pages)
+
+		await mount(pdfjs, opened)
+		await show(1)
+		expect(pageElement(1).style.width).toBe("150px")
+		expect(pageElement(1).style.height).toBe("300px")
+
+		const renders = pages[0]?.render.mock.calls.length ?? 0
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "rotate.clockwise" })
+		})
+		await settle()
+		expect(latest.viewer?.state.rotation).toBe(90)
+		expect(pageElement(1).style.width).toBe("300px")
+		expect(pageElement(1).style.height).toBe("150px")
+		expect(pages[0]?.render.mock.calls.length).toBe(renders + 1)
+		expect(pages[0]?.render.mock.calls.at(-1)?.[0].viewport.rotation).toBe(90)
+		expect(pages[0]?.getViewport).toHaveBeenLastCalledWith({ scale: 1.5, rotation: 90 })
+		// The page that turns itself by 90° ends up at 180°.
+		expect(pages[1]?.getViewport).toHaveBeenLastCalledWith({ scale: 1.5, rotation: 180 })
+		// The page in view stays in view.
+		expect(scrolled.at(-1)).toBe(pageElement(1))
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "rotate.counterClockwise" })
+			latest.viewer?.dispatch({ type: "rotate.counterClockwise" })
+		})
+		await settle()
+		expect(latest.viewer?.state.rotation).toBe(270)
+	})
+
+	it("fits the page in view to the width or whole, keeps fitting as the view resizes, and leaves it on a zoom", async () => {
+		const resized: ResizeObserverCallback[] = []
+
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				constructor(callback: ResizeObserverCallback) {
+					resized.push(callback)
+				}
+
+				observe(): void {
+					// Resizes are fired by hand.
+				}
+
+				disconnect(): void {
+					resized.length = 0
+				}
+			}
+		)
+
+		const { pdfjs, opened } = fakePdfJs([fakePage([], [], 200)])
+
+		await mount(pdfjs, opened)
+
+		const scroller = host.firstElementChild as HTMLElement
+		const room = { width: 232, height: 432 }
+
+		Object.defineProperty(scroller, "clientWidth", { get: () => room.width })
+		Object.defineProperty(scroller, "clientHeight", { get: () => room.height })
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "zoom.fitWidth" })
+		})
+		await settle()
+		// (232 - 2 × 16) / 100
+		expect(latest.viewer?.state.scale).toBe(2)
+		expect(latest.viewer?.state.zoomMode).toBe("fitWidth")
+
+		room.width = 132
+		act(() => {
+			for (const callback of resized) callback([], {} as ResizeObserver)
+		})
+		expect(latest.viewer?.state.scale).toBe(1)
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "zoom.fitPage" })
+		})
+		await settle()
+		// min((132 - 32) / 100, (432 - 32) / 200)
+		expect(latest.viewer?.state.scale).toBe(1)
+		room.width = 1032
+		act(() => {
+			for (const callback of resized) callback([], {} as ResizeObserver)
+		})
+		expect(latest.viewer?.state.scale).toBe(2)
+		expect(latest.viewer?.state.zoomMode).toBe("fitPage")
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "zoom.in" })
+		})
+		expect(latest.viewer?.state.zoomMode).toBe("custom")
+		expect(resized).toHaveLength(0)
+	})
+
+	it("goes to the first and last page", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([]), fakePage([]), fakePage([])])
+
+		await mount(pdfjs, opened)
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.last" })
+		})
+		expect(scrolled.at(-1)).toBe(pageElement(3))
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.first" })
+		})
+		expect(scrolled.at(-1)).toBe(pageElement(1))
 	})
 })
 

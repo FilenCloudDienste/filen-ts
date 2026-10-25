@@ -47,7 +47,10 @@ export interface PdfTextContent {
 // `S` is what streamTextContent returns: a ReadableStream where the host has DOM types.
 export interface PdfPage<S = unknown> {
 	readonly userUnit: number
-	getViewport(params: { scale: number }): PdfViewport
+	// The page's own /Rotate (0, 90, 180 or 270).
+	readonly rotate: number
+	// `rotation` replaces the page's own /Rotate rather than adding to it.
+	getViewport(params: { scale: number; rotation?: number }): PdfViewport
 	render(params: PdfRenderParams): PdfRenderTask
 	// The text content as a stream, for the text layer.
 	streamTextContent(): S
@@ -61,6 +64,10 @@ export interface PdfDocument<S = unknown> {
 	getPage(pageNumber: number): Promise<PdfPage<S>>
 	getDestination(id: string): Promise<unknown[] | null>
 	getPageIndex(ref: unknown): Promise<number>
+	// The bookmarks tree (pdfOutline reads it); null without one.
+	getOutline(): Promise<readonly unknown[] | null>
+	// The Info dictionary as `info` (pdfDocumentInfo reads it).
+	getMetadata(): Promise<{ readonly info: unknown }>
 }
 
 export interface PdfLoadingTask<S = unknown> {
