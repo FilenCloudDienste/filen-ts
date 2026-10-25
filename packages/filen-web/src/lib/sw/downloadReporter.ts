@@ -19,10 +19,15 @@ interface Entry {
 	cancelRequested: boolean
 	aborts: Set<() => void>
 	heartbeat: ReturnType<typeof setInterval> | null
+	// The browser reads the body: said once, and again to a watcher attaching later. Not `last`, which the heartbeat
+	// repeats.
+	reading: boolean
 }
 
 export interface ReportedStream {
 	progress(bytes: number, total: number | null): void
+	// The browser reads the body.
+	reading(): void
 	// `abort` cuts this stream off; called when the page cancels the download.
 	onCancelRequest(abort: () => void): void
 	// Whether the page asked for the cancel, so a failure that follows reports as a cancel.
@@ -42,7 +47,16 @@ export class DownloadReporter {
 		let entry = this.entries.get(id)
 
 		if (entry === undefined) {
-			entry = { port: null, last: null, streams: 0, completed: false, cancelRequested: false, aborts: new Set(), heartbeat: null }
+			entry = {
+				port: null,
+				last: null,
+				streams: 0,
+				completed: false,
+				cancelRequested: false,
+				aborts: new Set(),
+				heartbeat: null,
+				reading: false
+			}
 			this.entries.set(id, entry)
 			this.evict()
 		}
@@ -105,6 +119,10 @@ export class DownloadReporter {
 		entry.port?.close()
 		entry.port = port
 
+		if (entry.reading) {
+			port.postMessage({ type: "reading" } satisfies SwDownloadStatus)
+		}
+
 		if (entry.last !== null) {
 			this.post(id, entry, entry.last)
 		}
@@ -148,6 +166,12 @@ export class DownloadReporter {
 
 		return {
 			progress,
+			reading: () => {
+				if (!entry.reading) {
+					entry.reading = true
+					entry.port?.postMessage({ type: "reading" } satisfies SwDownloadStatus)
+				}
+			},
 			onCancelRequest: fn => {
 				abort = fn
 				entry.aborts.add(fn)

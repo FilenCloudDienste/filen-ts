@@ -30,6 +30,9 @@ export interface ZipDelivery {
 	readonly sink: ByteSink
 	// Settles once the archive is saved (the browser's download finished, the picked file closed).
 	readonly saved: () => Promise<void>
+	// Settles once nothing the page reads next can be cut off by the delivery starting: the service worker's
+	// download is started here if not yet, and waited for until the browser reads it.
+	readonly ready: () => Promise<void>
 	readonly fail: (error: unknown) => Promise<void>
 }
 
@@ -86,13 +89,14 @@ function fsaDelivery(save: FsaSaveTarget): ZipDelivery {
 			close: () => save.writable.close()
 		},
 		saved: () => Promise.resolve(),
+		ready: () => Promise.resolve(),
 		// The picked file goes with an archive that was not finished.
 		fail: () => discardPickedFile(save)
 	}
 }
 
 // The service worker pipes the stream into the browser's download (no length: the archive is made as it streams).
-// The download starts with the archive's first bytes. A write waits for the browser to read; the run's Cancel
+// The download starts with the archive's first bytes, or once ready() asks. A write waits for the browser to read; the run's Cancel
 // (`signal`) or the download ending first (`onEnded`: failed, stalled, or the browser's own Cancel) stops the pipe,
 // and every write waiting then rejects, so the run always ends.
 function swDelivery(save: SwSaveTarget, signal: AbortSignal, onEnded: (error: unknown) => void): ZipDelivery {
@@ -117,8 +121,8 @@ function swDelivery(save: SwSaveTarget, signal: AbortSignal, onEnded: (error: un
 
 	signal.addEventListener("abort", onAbort, { once: true })
 
-	// The worker has taken the download's navigation. Until then the first write waits: WebKit stops the page's
-	// requests in flight when it navigates, and the next file's read would be one of them.
+	// The browser reads the download. WebKit stops the page's requests in flight while its navigation turns into
+	// the download, so the next file is read only after this (ready()).
 	let markStarted: () => void = () => undefined
 	const started = new Promise<void>(resolve => {
 		markStarted = resolve
@@ -153,11 +157,16 @@ function swDelivery(save: SwSaveTarget, signal: AbortSignal, onEnded: (error: un
 			write: chunk => {
 				start()
 
-				return Promise.race([Promise.all([writer.write(chunk), started]), stopped]).then(() => undefined)
+				return Promise.race([writer.write(chunk), stopped])
 			},
 			close: () => Promise.race([writer.close(), stopped])
 		},
 		saved: () => (delivered === null ? Promise.resolve() : Promise.race([delivered, stopped])),
+		ready: () => {
+			start()
+
+			return Promise.race([started, stopped])
+		},
 		// The aborted pipe errors the browser's download; how the worker reports that is not waited for.
 		fail: error => {
 			signal.removeEventListener("abort", onAbort)
@@ -200,6 +209,7 @@ function memoryDelivery(name: string, download: (name: string, blob: Blob) => vo
 			}
 		},
 		saved: () => Promise.resolve(),
+		ready: () => Promise.resolve(),
 		fail: () => {
 			parts.length = 0
 			pending = []

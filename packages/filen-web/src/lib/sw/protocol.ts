@@ -4,7 +4,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 18
+export const SW_PROTOCOL_VERSION = 19
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal.
@@ -19,6 +19,10 @@ export const SW_MSG_BUILD = "FILEN_SW_BUILD"
 // active worker after any reload (seen with this cross-origin isolated app), and a hard reload does everywhere;
 // every download and stream route needs one.
 export const SW_MSG_CLAIM = "FILEN_SW_CLAIM"
+
+// The protocol from which a stream download reports `reading` once the browser reads its body (the navigation has
+// become the download).
+export const SW_READING_PROTOCOL = 19
 
 // ── Download route (SW-hosted trimmed SDK stream) ───────────────────────────────────────────────
 // Virtual URL the SW answers with a streamed, attachment-forced file download. The `<id>` is an
@@ -105,7 +109,7 @@ export const SW_MSG_CANCEL_DOWNLOAD = "FILEN_SW_CANCEL_DOWNLOAD"
 // SDK walks its items). A cancel, from the page or the browser's own download UI, is a failure of kind
 // "Cancelled".
 export type SwDownloadStatus =
-	{ type: "progress"; bytes: number; total: number | null } | { type: "done" } | { type: "failed"; error: ErrorDTO }
+	{ type: "progress"; bytes: number; total: number | null } | { type: "reading" } | { type: "done" } | { type: "failed"; error: ErrorDTO }
 
 // A streaming download repeats its latest progress this often even when no byte moved, and the page
 // fails a watched download that stays silent for SW_DOWNLOAD_STALL_MS: a worker the browser terminated

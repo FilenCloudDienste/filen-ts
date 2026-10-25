@@ -18,8 +18,11 @@ export interface HeldBackBody {
 	fail: (reason: unknown) => void
 }
 
-export function heldBackBody(source: ReadableStream<Uint8Array>): HeldBackBody {
+// `onRead` runs at the browser's first read of the body: it is read only as the browser reads it (no high-water
+// mark), so the navigation has become the download by then.
+export function heldBackBody(source: ReadableStream<Uint8Array>, onRead?: () => void): HeldBackBody {
 	const reader = source.getReader()
+	let read = false
 	let held: Uint8Array | null = null
 	let control: ReadableStreamDefaultController<Uint8Array> | null = null
 	let settled = false
@@ -43,6 +46,11 @@ export function heldBackBody(source: ReadableStream<Uint8Array>): HeldBackBody {
 				control = controller
 			},
 			async pull(controller) {
+				if (!read) {
+					read = true
+					onRead?.()
+				}
+
 				try {
 					for (;;) {
 						const { done, value } = await reader.read()

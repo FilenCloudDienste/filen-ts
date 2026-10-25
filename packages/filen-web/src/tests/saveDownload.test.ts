@@ -9,6 +9,7 @@ import {
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
 	SW_MSG_REGISTER_STREAM_DOWNLOAD,
+	SW_READING_PROTOCOL,
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
 	SW_MSG_WATCH_DOWNLOAD,
 	SW_MSG_CANCEL_DOWNLOAD,
@@ -844,6 +845,64 @@ describe("a download the page streams through the service worker", () => {
 		expect(sw.postMessage.mock.calls[0]?.[1]).toContain(stream)
 		expect(toStringified).not.toHaveBeenCalled()
 		expect(location.href).toBe(`${SW_DOWNLOAD_PREFIX}abc-123`)
+	})
+
+	it("says the download started once the worker reports the browser reading it", async () => {
+		let report: (status: SwDownloadStatus) => void = () => undefined
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			send => {
+				report = send
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => Promise.resolve(new Response(JSON.stringify({ v: SW_READING_PROTOCOL }))))
+		)
+
+		const { triggerSwStreamDownload } = await freshModule()
+		const onStarted = vi.fn()
+		const running = triggerSwStreamDownload(save, "transfer-1", new ReadableStream<Uint8Array>(), null, () => undefined, onStarted)
+
+		await vi.waitFor(() => {
+			expect(sw.watches).toEqual(["abc-123"])
+		})
+		report({ type: "progress", bytes: 0, total: null })
+		expect(onStarted).not.toHaveBeenCalled()
+		report({ type: "reading" })
+		expect(onStarted).toHaveBeenCalledOnce()
+		report({ type: "done" })
+		await running
+	})
+
+	it("says the download started on an older worker's first report, which never says reading", async () => {
+		let report: (status: SwDownloadStatus) => void = () => undefined
+		const sw = fakeServiceWorker(
+			() => ({ ok: true }),
+			send => {
+				report = send
+			}
+		)
+		stubWindow()
+		stubServiceWorkerReady(sw)
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => Promise.resolve(new Response(JSON.stringify({ v: SW_READING_PROTOCOL - 1 }))))
+		)
+
+		const { triggerSwStreamDownload } = await freshModule()
+		const onStarted = vi.fn()
+		const running = triggerSwStreamDownload(save, "transfer-1", new ReadableStream<Uint8Array>(), null, () => undefined, onStarted)
+
+		await vi.waitFor(() => {
+			expect(sw.watches).toEqual(["abc-123"])
+		})
+		report({ type: "progress", bytes: 0, total: null })
+		expect(onStarted).toHaveBeenCalled()
+		report({ type: "done" })
+		await running
 	})
 
 	it("stops the producer too when the row cancels it", async () => {

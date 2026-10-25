@@ -86,6 +86,28 @@ describe("DownloadReporter", () => {
 		expect(watcher.received).toEqual([failure])
 	})
 
+	it("says once that the browser reads the body, to a watcher attaching later too, beside the repeated progress", () => {
+		const reporter = new DownloadReporter(8)
+		const early = fakePort()
+
+		reporter.attach("a", early.port, true)
+
+		const stream = reporter.begin("a")
+
+		stream.reading()
+		stream.reading()
+		expect(early.received).toEqual([{ type: "progress", bytes: 0, total: null }, { type: "reading" }])
+
+		// The heartbeat repeats the progress, never the reading.
+		vi.advanceTimersByTime(SW_DOWNLOAD_HEARTBEAT_MS)
+		expect(early.received.at(-1)).toEqual({ type: "progress", bytes: 0, total: null })
+
+		const late = fakePort()
+
+		reporter.attach("a", late.port, true)
+		expect(late.received).toEqual([{ type: "reading" }, { type: "progress", bytes: 0, total: null }])
+	})
+
 	it("fails a watch for a download the restarted worker no longer knows", () => {
 		const reporter = new DownloadReporter(8)
 		const watcher = fakePort()

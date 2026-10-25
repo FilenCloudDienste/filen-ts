@@ -1200,6 +1200,8 @@ export async function startDownloadAs(items: readonly DriveItem[], target: Downl
 
 				while (next.done !== true) {
 					yield { name: await name(next.value.name), blob: next.value.blob, modified: new Date() }
+					// Nothing is read while the archive's download starts (ZipDelivery.ready).
+					await zip.ready()
 					next = await pdfs.next()
 				}
 			}

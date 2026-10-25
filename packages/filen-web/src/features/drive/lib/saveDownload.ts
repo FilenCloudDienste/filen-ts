@@ -19,8 +19,10 @@ import {
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
 	SW_MSG_WATCH_DOWNLOAD,
 	SW_REQUEST_TIMEOUT_MS,
+	SW_READING_PROTOCOL,
 	type SwDownloadStatus
 } from "@/lib/sw/protocol"
+import { controllerProtocolVersion } from "@/lib/sw/register"
 
 // The disk mechanism a download writes to, picked once per saveDownload() call by capability —
 // callers (features/drive/lib/download.ts) branch on `kind`, never on the browser directly. FSA carries a
@@ -364,7 +366,9 @@ async function startWatchedSwDownload(
 	transferId: string,
 	onProgress: (bytes: number, total: number | null) => void,
 	// Also stops what produces the bytes, when the page does.
-	onCancel?: () => void
+	onCancel?: () => void,
+	// The browser reads the download (a stream download's, SW_READING_PROTOCOL).
+	onReading?: () => void
 ): Promise<void> {
 	assertSwControlled()
 
@@ -396,6 +400,13 @@ async function startWatchedSwDownload(
 			if (status.type === "progress") {
 				armStall()
 				onProgress(status.bytes, status.total)
+
+				return
+			}
+
+			if (status.type === "reading") {
+				armStall()
+				onReading?.()
 
 				return
 			}
@@ -458,8 +469,8 @@ export async function triggerSwZipDownload(
 // The page's own bytes (an archive entry the page's SDK reads, an archive the page writes) saved through the
 // service worker: `readable` moves to the worker, which only pipes it into the navigation's response,
 // Content-Length `size` (none when null: bytes made as they stream). Settles as the worker reports the download;
-// `onCancel` is the row's Cancel for the producer. `onStarted` runs once the worker has taken the navigation (its
-// first report).
+// `onCancel` is the row's Cancel for the producer. `onStarted` runs once the browser reads the download (an older
+// worker's first report instead: it took the navigation).
 export async function triggerSwStreamDownload(
 	save: SwSaveTarget,
 	transferId: string,
@@ -468,8 +479,18 @@ export async function triggerSwStreamDownload(
 	onCancel: () => void,
 	onStarted?: () => void
 ): Promise<void> {
+	const reports = ((await controllerProtocolVersion()) ?? 0) >= SW_READING_PROTOCOL
+
 	await sendToSw(await activeServiceWorker(), SW_MSG_REGISTER_STREAM_DOWNLOAD, { id: save.id, name: save.name, size, stream: readable }, [
 		readable
 	])
-	await startWatchedSwDownload(save, transferId, () => onStarted?.(), onCancel)
+	await startWatchedSwDownload(
+		save,
+		transferId,
+		() => {
+			if (!reports) onStarted?.()
+		},
+		onCancel,
+		reports ? onStarted : undefined
+	)
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { heldBackBody } from "@/lib/sw/heldBackBody"
 
 // The service worker's body for a stream the page produces: one chunk behind its source, so a source
@@ -67,6 +67,20 @@ describe("heldBackBody", () => {
 
 		expect(await readAll(held.body)).toEqual({ chunks: [[1, 2], [3], [4, 5]], error: null })
 		expect(await held.ended).toEqual({ type: "done" })
+	})
+
+	it("says when the browser first reads the body, and not before", async () => {
+		const { source, control } = controlled()
+		const onRead = vi.fn()
+		const held = heldBackBody(source, onRead)
+
+		control.enqueue(bytes(1))
+		await tick()
+		expect(onRead).not.toHaveBeenCalled()
+
+		control.close()
+		await readAll(held.body)
+		expect(onRead).toHaveBeenCalledOnce()
 	})
 
 	it("closes an empty source as an empty body", async () => {

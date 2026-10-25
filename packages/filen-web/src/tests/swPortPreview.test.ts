@@ -622,7 +622,7 @@ describe("sw.ts preview status", () => {
 
 describe("sw.ts version", () => {
 	it("reports its protocol version", async () => {
-		expect(SW_PROTOCOL_VERSION).toBe(18)
+		expect(SW_PROTOCOL_VERSION).toBe(19)
 
 		let response: Response | null = null
 
@@ -633,6 +633,6 @@ describe("sw.ts version", () => {
 			}
 		})
 
-		expect(await (response as Response | null)?.json()).toMatchObject({ v: 18 })
+		expect(await (response as Response | null)?.json()).toMatchObject({ v: 19 })
 	})
 })

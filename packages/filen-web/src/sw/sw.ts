@@ -783,9 +783,11 @@ function handleStreamDownload(event: FetchEvent, id: string, pending: PendingStr
 	pending.taken = true
 
 	// No progress of its own: the page counts what its SDK writes, and the reporter's heartbeat tells it
-	// the worker still streams.
+	// the worker still streams. The browser's first read is reported (SW_READING_PROTOCOL).
 	const stream = reporter.begin(id)
-	const held = heldBackBody(pending.stream)
+	const held = heldBackBody(pending.stream, () => {
+		stream.reading()
+	})
 
 	// Built BEFORE the stream is counted (see pumpToResponse).
 	const response = new Response(held.body, {
