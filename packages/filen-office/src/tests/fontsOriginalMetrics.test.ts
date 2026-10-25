@@ -4,6 +4,7 @@ import { buildDocx } from "./docxSynthetic"
 import { layOut, nodeFontAssets, nodeFontHost, pageLines } from "./layoutFixtures"
 import { odtBytes, odtLayout } from "./odtFixtures"
 import { openPdf, pdfOf, snapshotOf } from "./docxPdfFixtures"
+import { embeddedFontNames } from "./pdfWriteFixtures"
 
 // Layout units are CSS pixels.
 const PT = 0.75
@@ -75,13 +76,11 @@ describe("Georgia drawn with Gelasio", () => {
 
 		for (let i = 1; i < baselines.length; i++) expect((baselines[i - 1] ?? 0) - (baselines[i] ?? 0)).toBeCloseTo(GEORGIA_LINE_10PT, 2)
 
-		await page.getOperatorList()
-
 		const fonts = new Set(content.items.flatMap(item => ("str" in item && item.str.startsWith("Line ") ? [item.fontName] : [])))
 
-		expect([...fonts].map(id => (page.commonObjs.get(id) as { name: string }).name)).toEqual([
-			expect.stringMatching(/^[A-Z]{6}\+Gelasio/)
-		])
+		// One face draws every line, and the only one the PDF embeds is a Gelasio subset.
+		expect(fonts.size).toBe(1)
+		expect(embeddedFontNames(result.bytes)).toEqual([expect.stringMatching(/^[A-Z]{6}\+Gelasio/)])
 	})
 
 	it("sets 10 pt odt lines Georgia's 11.36 pt apart, as LibreOffice does", async () => {

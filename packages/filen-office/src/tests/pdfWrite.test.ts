@@ -1,12 +1,11 @@
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { inflateSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
 import { ByteWriter } from "../core/pdfwrite/bytes"
 import { preparePassword } from "../core/pdfwrite/crypto"
 import { ByteSource, readJpeg } from "../core/pdfwrite/images"
 import { serialize } from "../core/pdfwrite/objects"
 import { PdfWriteError, PdfWriter, pdfName, type PdfBlobLike, type PdfImageDecoder, type PdfTextRun } from "../core/pdfwrite"
-import { buildSyntheticPdf, encodePng, JPEG_32x24, naturalWidth, StubFont, TestDecoder } from "./pdfWriteFixtures"
+import { buildSyntheticPdf, encodePng, inflatedStreams, JPEG_32x24, latin1, naturalWidth, StubFont, TestDecoder } from "./pdfWriteFixtures"
 
 async function bytesOf(writer: PdfWriter): Promise<Uint8Array> {
 	const output = await writer.finish()
@@ -21,11 +20,6 @@ async function bytesOf(writer: PdfWriter): Promise<Uint8Array> {
 	return bytes
 }
 
-function latin1(bytes: Uint8Array): string {
-	return Buffer.from(bytes).toString("latin1")
-}
-
-// The decoded content of every FlateDecode stream (object streams included), for looking at what was written.
 // Glyph codes as a TJ literal string writes them: two bytes each, ( ) \\ CR and LF escaped (latin1, as decoded).
 function codes(...glyphs: number[]): string {
 	const escaped = (byte: number): string =>
@@ -38,27 +32,6 @@ function codes(...glyphs: number[]): string {
 					: String.fromCharCode(byte)
 
 	return `(${glyphs.map(glyph => escaped(glyph >>> 8) + escaped(glyph & 255)).join("")})`
-}
-
-function inflatedStreams(bytes: Uint8Array): string {
-	const text = latin1(bytes)
-	const out: string[] = []
-	const pattern = /stream\n/g
-	let match: RegExpExecArray | null
-
-	while ((match = pattern.exec(text)) !== null) {
-		const start = match.index + match[0].length
-		const end = text.indexOf("\nendstream", start)
-		const data = bytes.subarray(start, end)
-
-		try {
-			out.push(latin1(inflateSync(data)))
-		} catch {
-			out.push(latin1(data))
-		}
-	}
-
-	return out.join("\n")
 }
 
 async function open(bytes: Uint8Array, password?: string): Promise<pdfjs.PDFDocumentProxy> {

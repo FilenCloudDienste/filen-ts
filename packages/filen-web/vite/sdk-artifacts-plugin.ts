@@ -1,4 +1,4 @@
-import { cpSync, createReadStream, existsSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import { cpSync, createReadStream, existsSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs"
 import { dirname, extname, join, resolve, sep } from "node:path"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
@@ -41,10 +41,11 @@ function packageRoot(): string {
 // WHATEVER directory the request carries (match by basename / `/snippets/` suffix), and the build
 // copies them next to the emitted worker in `<assetsDir>`.
 // The rayon pool workers are NOT part of that copy: the snippet's own
-// `new Worker(new URL("./workerHelpers.js", import.meta.url))` is Vite's to emit, and vite 8.3.0 rewrites it
-// to a hashed `/assets/workerHelpers-*.js` it then never emits — the SPA fallback answers those worker loads
-// with index.html, so `initThreadPool` never gets `wasm_bindgen_worker_ready` and boot fails with reason
-// "pool". Hence the exact vite pin in package.json; drop it once a release emits that chunk again.
+// `new Worker(new URL("./workerHelpers.js", import.meta.url))` is Vite's to emit. Since 8.3.0 Vite drops a
+// worker entry whose referencing module was tree-shaken out of the PAGE bundle, without checking whether another
+// worker still references it, so a page-side value import of @filen/sdk-rs (or of the sdk worker) loses the
+// hashed `workerHelpers-*.js`; the SPA fallback then answers those worker loads with index.html and boot fails
+// with reason "pool" while every check stays green. closeBundle below fails the build instead.
 export const SDK_ARTIFACTS = ["filen-sdk-worker-thread.js", "sdk-rs.js", "sdk-rs_bg.wasm"]
 const MIME: Record<string, string> = { ".js": "text/javascript", ".wasm": "application/wasm" }
 export const COI_HEADERS = {
@@ -138,6 +139,31 @@ export function sdkArtifacts(): Plugin {
 					rmSync(join(out, f))
 				}
 			}
+
+			assertReferencedAssetsEmitted(out, `${config.base}${config.build.assetsDir}/`)
 		}
+	}
+}
+
+// Every script or wasm the emitted JS loads from the assets directory must have been emitted (see the rayon note
+// above): a missing worker chunk only surfaces as a boot hang. The hashed SDK wasm removed above is never loaded.
+function assertReferencedAssetsEmitted(out: string, prefix: string): void {
+	const reference = new RegExp(`["'\`]${prefix.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")}([\\w.-]+\\.(?:m?js|wasm))["'\`]`, "g")
+	const missing: string[] = []
+
+	for (const file of readdirSync(out)) {
+		if (!/\.m?js$/.test(file)) {
+			continue
+		}
+
+		for (const [, name] of readFileSync(join(out, file), "utf8").matchAll(reference)) {
+			if (name !== undefined && !/^sdk-rs_bg-.*\.wasm$/.test(name) && !existsSync(join(out, name))) {
+				missing.push(`${file} -> ${name}`)
+			}
+		}
+	}
+
+	if (missing.length > 0) {
+		throw new Error(`the build references assets it never emitted:\n${missing.join("\n")}`)
 	}
 }

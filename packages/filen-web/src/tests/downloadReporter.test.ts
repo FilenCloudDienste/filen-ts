@@ -52,6 +52,27 @@ describe("DownloadReporter", () => {
 		expect(watcher.isClosed()).toBe(true)
 	})
 
+	it("coalesces a burst of progress reports and still sends the last one before the outcome", () => {
+		const reporter = new DownloadReporter(8)
+		const watcher = fakePort()
+
+		reporter.attach("a", watcher.port, true)
+		const stream = reporter.begin("a")
+
+		for (let bytes = 65_536; bytes <= 65_536 * 32; bytes += 65_536) {
+			stream.progress(bytes, 65_536 * 32)
+		}
+
+		expect(watcher.received).toEqual([
+			{ type: "progress", bytes: 0, total: null },
+			{ type: "progress", bytes: 65_536, total: 65_536 * 32 }
+		])
+
+		stream.end({ type: "done" })
+
+		expect(watcher.received.slice(2)).toEqual([{ type: "progress", bytes: 65_536 * 32, total: 65_536 * 32 }, { type: "done" }])
+	})
+
 	it("replays the latest status to a watcher that attaches after the stream began", () => {
 		const reporter = new DownloadReporter(8)
 		const stream = reporter.begin("a")

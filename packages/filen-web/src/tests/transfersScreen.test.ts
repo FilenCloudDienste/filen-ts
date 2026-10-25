@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mockViewportHeight } from "@/tests/support/viewport"
 import { act, render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
@@ -35,23 +36,9 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	}
 }
 
-// The virtualizer sizes its viewport off offsetHeight, which jsdom leaves at 0: a 600px list.
+// The list is 600px tall.
 function mockListViewport(): void {
-	const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
-
-	Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-		configurable: true,
-		get(this: HTMLElement) {
-			return this.classList.contains("overflow-y-auto") ? 600 : 0
-		}
-	})
-	onTestFinished(() => {
-		if (original === undefined) {
-			Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight")
-		} else {
-			Object.defineProperty(HTMLElement.prototype, "offsetHeight", original)
-		}
-	})
+	mockViewportHeight(element => element.classList.contains("overflow-y-auto"), 600)
 }
 
 beforeEach(() => {

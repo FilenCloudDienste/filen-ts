@@ -1,5 +1,6 @@
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { SW_DOWNLOAD_HEARTBEAT_MS, type SwDownloadStatus } from "@/lib/sw/protocol"
+import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 
 // The service worker's side of a browser-streamed download's outcome. The browser's download manager
 // owns the save, so without this the page never learns whether the stream finished, failed or was
@@ -138,12 +139,15 @@ export class DownloadReporter {
 		}, SW_DOWNLOAD_HEARTBEAT_MS)
 		this.post(id, entry, { type: "progress", bytes: 0, total: null })
 
+		// The SDK reports every 64 KiB written; each report is a message the page handles on its main thread.
+		const progress = throttle((bytes: number, total: number | null) => {
+			if (!ended) {
+				this.post(id, entry, { type: "progress", bytes, total })
+			}
+		}, PROGRESS_THROTTLE_MS)
+
 		return {
-			progress: (bytes, total) => {
-				if (!ended) {
-					this.post(id, entry, { type: "progress", bytes, total })
-				}
-			},
+			progress,
 			onCancelRequest: fn => {
 				abort = fn
 				entry.aborts.add(fn)
@@ -160,6 +164,7 @@ export class DownloadReporter {
 					return
 				}
 
+				progress.flush()
 				ended = true
 				entry.streams--
 

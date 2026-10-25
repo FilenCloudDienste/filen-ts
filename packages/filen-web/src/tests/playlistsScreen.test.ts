@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mockViewportHeight } from "@/tests/support/viewport"
 import { render, screen, cleanup, within, waitFor, fireEvent } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import "@/lib/i18n"
@@ -160,22 +161,8 @@ function renderSplitView(selectedUuid?: string) {
 
 // jsdom lays nothing out and mints no object URLs.
 beforeEach(() => {
-	// The virtualizer sizes its viewport off offsetHeight, which jsdom leaves at 0: a 600px pane.
-	const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
-
-	onTestFinished(() => {
-		if (original === undefined) {
-			Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight")
-		} else {
-			Object.defineProperty(HTMLElement.prototype, "offsetHeight", original)
-		}
-	})
-	Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-		configurable: true,
-		get(this: HTMLElement) {
-			return this.classList.contains("overflow-y-auto") ? 600 : 0
-		}
-	})
+	// The pane is 600px tall.
+	mockViewportHeight(element => element.classList.contains("overflow-y-auto"), 600)
 	vi.spyOn(URL, "createObjectURL").mockImplementation(blob => `blob:${String((blob as Blob).size)}`)
 	vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
 })

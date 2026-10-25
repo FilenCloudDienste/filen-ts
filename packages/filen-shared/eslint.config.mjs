@@ -1,4 +1,5 @@
 import js from "@eslint/js"
+import { defineConfig } from "eslint/config"
 import tseslint from "typescript-eslint"
 
 // @filen/shared must compile on Hermes and in the browser, so nothing platform-bound may enter it.
@@ -22,7 +23,7 @@ const selfImportPattern = {
 	message: "Import the sibling module directly instead of the package barrel."
 }
 
-export default tseslint.config(
+export default defineConfig(
 	js.configs.recommended,
 	...tseslint.configs.recommended,
 	{
@@ -36,7 +37,6 @@ export default tseslint.config(
 			"no-mixed-spaces-and-tabs": 0,
 			"no-duplicate-imports": "error",
 			"no-extra-semi": 0,
-			"@typescript-eslint/ban-types": "off",
 			"@typescript-eslint/no-unused-vars": [
 				"error",
 				{

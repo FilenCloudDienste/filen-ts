@@ -6,6 +6,7 @@ import type { DocxPdfCell, DocxPdfRole } from "../core/docx/pdf/types"
 import { bookmarkIndex } from "../dom/docx/links"
 import { buildDocx } from "./docxSynthetic"
 import { layOut } from "./layoutFixtures"
+import { embeddedFontNames } from "./pdfWriteFixtures"
 
 interface StructNode {
 	readonly role?: string
@@ -379,14 +380,7 @@ describe("DOCX to PDF", () => {
 	})
 
 	it("embeds only subsets of the bundled faces", async () => {
-		const pdf = await openPdf((await pdfOf(await snapshotOf(structuredDocx()))).bytes)
-		const page = await pdf.getPage(1)
-
-		await page.getOperatorList()
-
-		const fonts = [...(page.commonObjs as unknown as { [Symbol.iterator](): Iterator<[string, { name?: string }]> })]
-			.map(([, value]) => value.name ?? "")
-			.filter(name => name.length > 0)
+		const fonts = embeddedFontNames((await pdfOf(await snapshotOf(structuredDocx()))).bytes)
 
 		expect(fonts.length).toBeGreaterThan(0)
 		expect(fonts.every(name => /^[A-Z]{6}\+/.test(name))).toBe(true)

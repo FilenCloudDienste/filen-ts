@@ -31,8 +31,11 @@ function scrollContainer(scrollTop: number): HTMLDivElement {
 	const element = document.createElement("div")
 	let top = scrollTop
 
+	// The virtualizer sizes the viewport off clientHeight/clientWidth and measures rows off offsetHeight.
 	Object.defineProperty(element, "offsetHeight", { configurable: true, value: 400 })
 	Object.defineProperty(element, "offsetWidth", { configurable: true, value: 800 })
+	Object.defineProperty(element, "clientHeight", { configurable: true, value: 400 })
+	Object.defineProperty(element, "clientWidth", { configurable: true, value: 800 })
 	Object.defineProperty(element, "scrollTop", {
 		configurable: true,
 		get: () => top,

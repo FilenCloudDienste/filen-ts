@@ -204,7 +204,7 @@ export function segmentsFromChapters(chapters: readonly ChapterInfo[], duration:
 		}
 
 		const skipType = chapter.skipType
-		let kind: SegmentKind | null = null
+		let kind: SegmentKind | null
 		let source: SegmentSource = "skipType"
 
 		if (skipType !== undefined && skipType !== null) {

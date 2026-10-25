@@ -301,9 +301,11 @@ describe("Move submenu", () => {
 			fireEvent.click(screen.getByRole("button", { name: "More actions" }))
 			await Promise.resolve()
 		})
-		const move = await openMove()
+		// A click on an open submenu's trigger closes it again, so the trigger takes its clicks before it opens.
+		const move = screen.getByRole("menuitem", { name: "Move" })
 		fireEvent.click(move)
 		fireEvent.doubleClick(move)
+		await openMove()
 		fireEvent.click(screen.getByText("Cloud Drive"))
 		fireEvent.doubleClick(screen.getByText("Cloud Drive"))
 

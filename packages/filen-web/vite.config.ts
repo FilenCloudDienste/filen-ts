@@ -270,5 +270,11 @@ export default defineConfig(({ mode }) => ({
 	},
 	// The preview headers are set by responseHeaders() (plugins above), not preview.headers.
 	// Each worker is one file too, for the same reason as the page's bundle.
-	worker: { format: "es", plugins: () => [officeFonts()], rolldownOptions: { output: { codeSplitting: false } } }
+	// Rolldown keeps `/* @__PURE__ */` annotations in minified output unless told otherwise, and Vite only says so
+	// for the page build: ~70 KB of comments across the workers.
+	worker: {
+		format: "es",
+		plugins: () => [officeFonts()],
+		rolldownOptions: { output: { codeSplitting: false, comments: { annotation: false } } }
+	}
 }))

@@ -1,5 +1,5 @@
 diff --git a/dist/_types.d.mts b/dist/_types.d.mts
-index 0106cd5a6d4550a57f4669754d72accd7c946bce..8aaf7ac86b621daf84d886fdfcf2db0950759f5f 100644
+index b388c30f7fea8739c9769e374645585f04dfb10d..1f6e004ce1ed33acd9143dfa5b137bd709093db0 100644
 --- a/dist/_types.d.mts
 +++ b/dist/_types.d.mts
 @@ -15,7 +15,8 @@ export interface FontStyle {
@@ -148,7 +148,7 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..8aaf7ac86b621daf84d886fdfcf2db09
  	/** Workbook-level protection */
  	workbookProtection?: {
  		lockStructure?: boolean;
-@@ -1366,6 +1423,14 @@ export interface WriteSheet {
+@@ -1380,6 +1437,14 @@ export interface WriteSheet {
  	* Excel picks its own from the default font.
  	*/
  	defaultColWidth?: number;
@@ -164,10 +164,10 @@ index 0106cd5a6d4550a57f4669754d72accd7c946bce..8aaf7ac86b621daf84d886fdfcf2db09
  	* Merged ranges, as coordinates or as A1 strings — `"A1:C1"` and
  	* `{ startRow: 0, startCol: 0, endRow: 0, endCol: 2 }` mean the same
 diff --git a/dist/xls/reader.mjs b/dist/xls/reader.mjs
-index 194ef02d40af50e589c22d921d14c5826e80fbbc..e254958da7695ff6b65020d2ccbaad9a3fad1906 100644
+index dd3042d5d097ef13fd3b602b213c874b6ae06914..ee1280e88d324b8fa858278b42714900ff4c4af4 100644
 --- a/dist/xls/reader.mjs
 +++ b/dist/xls/reader.mjs
-@@ -168,9 +168,27 @@ function parseSheet(records, startIdx, name, sst, isDate, date1904, cellLimit) {
+@@ -219,9 +219,27 @@ function parseSheet(records, startIdx, name, sst, strings, isDate, date1904, cel
  	const numeric = (row, col, ixfe, n) => {
  		setCell(row, col, isDate(ixfe) ? serialToDate(n, date1904) : n);
  	};
@@ -195,7 +195,7 @@ index 194ef02d40af50e589c22d921d14c5826e80fbbc..e254958da7695ff6b65020d2ccbaad9a
  		const r = new Reader(rec.data);
  		switch (rec.id) {
  			case SID.LABELSST: {
-@@ -222,7 +240,10 @@ function parseSheet(records, startIdx, name, sst, isDate, date1904, cellLimit) {
+@@ -278,7 +296,10 @@ function parseSheet(records, startIdx, name, sst, strings, isDate, date1904, cel
  					else if (kind === 2) setCell(row, col, ERROR_TEXT[b[2]] ?? "#ERR!");
  					else if (kind === 0) {
  						
@@ -204,7 +204,7 @@ index 194ef02d40af50e589c22d921d14c5826e80fbbc..e254958da7695ff6b65020d2ccbaad9a
 +						let k = i + 1;
 +						while (k < records.length && (records[k].id === 1212 || records[k].id === 545 || records[k].id === 566)) k++;
 +						const next = records[k];
- 						if (next && next.id === SID.STRING) setCell(row, col, readXLString(new Reader(next.data)));
+ 						if (next && next.id === SID.STRING) setCell(row, col, strings.long(new Reader(next.data)));
  					}
  				} else {
 diff --git a/dist/xlsx/comments-reader.mjs b/dist/xlsx/comments-reader.mjs
@@ -1198,7 +1198,7 @@ index 8852c8d7b0b94c0c1dfa0cf927a05c7df33d89c4..a1c88c84f40593aa350a972a741ddb7f
  	}));
  	
 diff --git a/dist/xlsx/worksheet-writer.mjs b/dist/xlsx/worksheet-writer.mjs
-index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa84c0485ca 100644
+index 7c2230a4084ee35f7efbad751bcae4426b08617a..7daa62a47663afeff5ee106684e249933ff252ee 100644
 --- a/dist/xlsx/worksheet-writer.mjs
 +++ b/dist/xlsx/worksheet-writer.mjs
 @@ -32,8 +32,12 @@ export function colToLetter(col) {
@@ -1307,7 +1307,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  			if (hasAnyCells) {
  				rowElements.push(xmlElement("row", rowAttrs, cellElements));
  			} else {
-@@ -434,6 +459,11 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -423,6 +448,11 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  		}, brkElements));
  	}
  	
@@ -1319,7 +1319,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  	let drawingRId = null;
  	let nextRId = hyperlinkRelationships.length + 1;
  	const hasImages = sheet.images && sheet.images.length > 0;
-@@ -489,9 +519,12 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
+@@ -478,9 +508,12 @@ export function writeWorksheetXml(sheet, styles, sharedStrings, dateSystem, glob
  			const tableRId = `rId${nextRId}`;
  			nextRId++;
  			const globalIdx = globalTableStartIndex + t;
@@ -1333,7 +1333,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  			});
  			tablePartElements.push(xmlSelfClose("tablePart", { "r:id": tableRId }));
  		}
-@@ -590,7 +623,7 @@ function resolveRows(sheet) {
+@@ -579,7 +612,7 @@ function resolveRows(sheet) {
  				
  				
  				const value = toCellValue(row[c]);
@@ -1342,7 +1342,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  				resolvedRow.push(style ? {
  					value,
  					style
-@@ -620,6 +653,7 @@ function resolveRows(sheet) {
+@@ -609,6 +642,7 @@ function resolveRows(sheet) {
  				checkbox: cellOverride.checkbox ?? existing?.checkbox,
  				formula: cellOverride.formula ?? existing?.formula,
  				formulaResult: cellOverride.formulaResult ?? existing?.formulaResult,
@@ -1350,7 +1350,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  				formulaType: cellOverride.formulaType ?? existing?.formulaType,
  				formulaSharedIndex: cellOverride.formulaSharedIndex ?? existing?.formulaSharedIndex,
  				formulaRef: cellOverride.formulaRef ?? existing?.formulaRef,
-@@ -641,7 +675,7 @@ function simpleCell(ref, styleIdx, type, content) {
+@@ -630,7 +664,7 @@ function simpleCell(ref, styleIdx, type, content) {
  	return type === "" ? `<c r="${ref}" s="${styleIdx}"><v>${content}</v></c>` : `<c r="${ref}" t="${type}" s="${styleIdx}"><v>${content}</v></c>`;
  }
  export function serializeCell(row, col, resolved, styles, sharedStrings, is1904, inlineStrings) {
@@ -1359,7 +1359,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  	
  	let styleIdx = 0;
  	let effectiveStyle = style;
-@@ -723,7 +757,8 @@ export function serializeCell(row, col, resolved, styles, sharedStrings, is1904,
+@@ -712,7 +746,8 @@ export function serializeCell(row, col, resolved, styles, sharedStrings, is1904,
  		
  		if (formulaResult !== undefined && formulaResult !== null) {
  			if (typeof formulaResult === "string") {
@@ -1369,7 +1369,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  				children.push(xmlElement("v", undefined, xmlEscape(formulaResult)));
  			} else if (typeof formulaResult === "boolean") {
  				cellAttrs["t"] = "b";
-@@ -851,6 +886,9 @@ function serializeDataValidations(validations) {
+@@ -840,6 +875,9 @@ function serializeDataValidations(validations) {
  		if (dv.operator) {
  			attrs["operator"] = dv.operator;
  		}
@@ -1379,7 +1379,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  		if (dv.allowBlank) {
  			attrs["allowBlank"] = 1;
  		}
-@@ -1052,13 +1090,11 @@ function serializePageSetup(ps) {
+@@ -1041,13 +1079,11 @@ function serializePageSetup(ps) {
  	if (ps.scale !== undefined) {
  		attrs["scale"] = ps.scale;
  	}
@@ -1398,7 +1398,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  	}
  	
  	
-@@ -1148,7 +1184,7 @@ function serializeColorAttrs(color) {
+@@ -1137,7 +1173,7 @@ function serializeColorAttrs(color) {
  }
  
  
@@ -1407,7 +1407,7 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  	const elements = [];
  	for (const run of runs) {
  		const runChildren = [];
-@@ -1246,6 +1282,13 @@ function serializeCfRule(rule, styles) {
+@@ -1250,6 +1286,13 @@ function serializeCfRule(rule, styles) {
  	if (rule.stopIfTrue) {
  		attrs["stopIfTrue"] = true;
  	}
@@ -1422,10 +1422,10 @@ index 2b9ee5c2b80b989625934e8d57272c7a268910c5..0769ed16fb219058c2c3d47d33e34aa8
  	if (rule.text !== undefined) {
  		attrs["text"] = rule.text;
 diff --git a/dist/xlsx/worksheet.mjs b/dist/xlsx/worksheet.mjs
-index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508f4427e39 100644
+index 34b535885e8a679c6fcdb80ca9963dca1b8b7f8e..81104d7602614295d6761cb6462888280b1172ab 100644
 --- a/dist/xlsx/worksheet.mjs
 +++ b/dist/xlsx/worksheet.mjs
-@@ -147,6 +147,11 @@ function worksheetParser(name, ctx) {
+@@ -161,6 +161,11 @@ function worksheetParser(name, ctx) {
  	
  	const columnDefs = [];
  	let defaultRowHeight;
@@ -1437,7 +1437,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  	let defaultColWidth;
  	let inCols = false;
  	
-@@ -267,14 +272,17 @@ function worksheetParser(name, ctx) {
+@@ -281,14 +286,17 @@ function worksheetParser(name, ctx) {
  				case "sheetFormatPr": {
  					const dh = attrs["defaultRowHeight"];
  					const dw = attrs["defaultColWidth"];
@@ -1456,7 +1456,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  						}
  					}
  					if (dw !== undefined) {
-@@ -332,6 +340,16 @@ function worksheetParser(name, ctx) {
+@@ -346,6 +354,16 @@ function worksheetParser(name, ctx) {
  								rowDefs.set(rowNum, existing);
  							}
  						}
@@ -1473,7 +1473,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  					}
  					break;
  				case "c":
-@@ -404,6 +422,8 @@ function worksheetParser(name, ctx) {
+@@ -418,6 +436,8 @@ function worksheetParser(name, ctx) {
  					break;
  				case "sheetPr":
  					inSheetPr = true;
@@ -1482,7 +1482,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  					break;
  				case "outlinePr":
  					
-@@ -666,6 +686,9 @@ function worksheetParser(name, ctx) {
+@@ -680,6 +700,9 @@ function worksheetParser(name, ctx) {
  				case "colBreaks":
  					inColBreaks = true;
  					break;
@@ -1492,7 +1492,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  				case "brk":
  					if (inRowBreaks || inColBreaks) {
  						const brkId = attrs["id"];
-@@ -1090,7 +1113,10 @@ function worksheetParser(name, ctx) {
+@@ -1089,7 +1112,10 @@ function worksheetParser(name, ctx) {
  			sheet.cells = cells;
  		}
  		
@@ -1504,7 +1504,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  		if (defaultColWidth !== undefined) sheet.defaultColWidth = defaultColWidth;
  		if (columnDefs.some((c) => Object.keys(c).length > 0)) {
  			sheet.columns = columnDefs;
-@@ -1154,6 +1180,10 @@ function worksheetParser(name, ctx) {
+@@ -1153,6 +1179,10 @@ function worksheetParser(name, ctx) {
  		if (outlineProperties) {
  			sheet.outlineProperties = outlineProperties;
  		}
@@ -1515,7 +1515,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  		return sheet;
  	}
  	return {
-@@ -1255,6 +1285,9 @@ function buildDataValidation(attrs, formula1Text, formula2Text) {
+@@ -1254,6 +1284,9 @@ function buildDataValidation(attrs, formula1Text, formula2Text) {
  		dv.operator = operatorStr;
  	}
  	
@@ -1525,7 +1525,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  	if (attrs["allowBlank"] === "1" || attrs["allowBlank"] === "true") {
  		dv.allowBlank = true;
  	}
-@@ -1312,8 +1345,12 @@ const VALID_CF_TYPES = new Set([
+@@ -1311,8 +1344,12 @@ const VALID_CF_TYPES = new Set([
  	"beginsWith",
  	"endsWith",
  	"containsBlanks",
@@ -1539,7 +1539,7 @@ index 2da07a93c6d60d1b9f2092a99edfd43446677dbb..aad9eb47776b80231bac425eced37508
  function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos, dbColor, isCfvos, isAttrsObj, dxfs, ctx) {
  	const typeStr = attrs["type"];
  	if (!typeStr || !VALID_CF_TYPES.has(typeStr)) return null;
-@@ -1325,9 +1362,17 @@ function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos
+@@ -1324,9 +1361,17 @@ function buildConditionalRule(attrs, sqref, formulas, csCfvos, csColors, dbCfvos
  	};
  	
  	const operatorStr = attrs["operator"];

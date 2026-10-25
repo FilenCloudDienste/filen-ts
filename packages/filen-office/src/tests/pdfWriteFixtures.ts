@@ -543,3 +543,35 @@ export async function buildSyntheticPdf(options: SyntheticOptions): Promise<{ re
 
 	return { bytes: Buffer.concat(chunks), refusedLink }
 }
+
+export function latin1(bytes: Uint8Array): string {
+	return Buffer.from(bytes).toString("latin1")
+}
+
+// The decoded content of every FlateDecode stream (object streams included), for looking at what was written.
+export function inflatedStreams(bytes: Uint8Array): string {
+	const text = latin1(bytes)
+	const out: string[] = []
+	const pattern = /stream\n/g
+	let match: RegExpExecArray | null
+
+	while ((match = pattern.exec(text)) !== null) {
+		const start = match.index + match[0].length
+		const end = text.indexOf("\nendstream", start)
+		const data = bytes.subarray(start, end)
+
+		try {
+			out.push(latin1(inflateSync(data)))
+		} catch {
+			out.push(latin1(data))
+		}
+	}
+
+	return out.join("\n")
+}
+
+// The names of the fonts a PDF embeds (the font dictionaries sit in compressed object streams, and pdf.js
+// stopped exposing font names on its font objects).
+export function embeddedFontNames(bytes: Uint8Array): string[] {
+	return [...new Set(Array.from(inflatedStreams(bytes).matchAll(/\/BaseFont\s*\/([^\s/<>[\]()]+)/g), match => match[1] ?? ""))]
+}

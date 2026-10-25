@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mockViewportHeight } from "@/tests/support/viewport"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { onlineManager, QueryClientProvider } from "@tanstack/react-query"
 import type { AnyFile } from "@filen/sdk-rs"
@@ -128,21 +129,7 @@ function fakeSession(phase: ListingPhase, store: EntryStore, password?: string):
 }
 
 function mockListViewport(): void {
-	const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
-
-	Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-		configurable: true,
-		get(this: HTMLElement) {
-			return this.getAttribute("role") === "listbox" ? 360 : 0
-		}
-	})
-	onTestFinished(() => {
-		if (original === undefined) {
-			Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight")
-		} else {
-			Object.defineProperty(HTMLElement.prototype, "offsetHeight", original)
-		}
-	})
+	mockViewportHeight(element => element.getAttribute("role") === "listbox", 360)
 }
 
 // `ownParent` undefined: the archive has no directory of the user's own (no default, which undefined

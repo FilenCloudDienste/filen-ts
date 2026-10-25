@@ -57,6 +57,8 @@ export const errors = {
 	ArchiveTooLarge: "This archive is too large to extract in the browser.",
 	/** Fires when a compress format's encoder needs more than the archive memory set in Advanced settings (also, rarely, when the browser can't hold a very large response) */
 	InsufficientMemory: "This needs more archive memory than Advanced settings allow. Raise it there, or choose another format.",
+	/** Fires when a write lost the account lock it held (e.g. the tab slept past the lock's lease, or another device took it); the write stopped part way and can simply be tried again */
+	LockLost: "Another device may be changing this right now. Please try again.",
 	/** Fires when the background worker running an archive job stopped mid-job (e.g. it ran out of memory) */
 	ArchiveWorkerDied: "The archive worker stopped unexpectedly. Please try again.",
 	/** Fires when an encrypted archive is opened, or a compress asks for encryption, without a password; the extract flow prompts for one on this kind */

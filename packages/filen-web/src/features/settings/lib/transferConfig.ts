@@ -28,8 +28,9 @@ import { TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset, DEFAULT_T
 // 28-byte encryption overhead), so a budget of N of these buys exactly N chunks, not N - 1.
 export const FULL_CHUNK_BYTES = 1024 * 1024 + 28
 
-// chunks: the file-IO budget, in full chunks. concurrency: the global in-flight request cap, kept above
-// the chunks so listings and thumbnails still get requests while transfers fill the budget.
+// chunks: the file-IO budget, in full chunks. concurrency: the cap on in-flight chunk transfers; the SDK
+// keeps four request slots beyond it (and a pool of its own for locks), so listings still get requests
+// while transfers fill the budget.
 // rateLimitPerSec: requests started per second across the whole client; the SDK's own 64 would cap
 // transfers near 64 MiB/s on every preset above battery saver.
 export const WEB_TRANSFER_PRESET_VALUES: Record<
