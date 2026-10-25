@@ -703,11 +703,14 @@ describe("Download as ▸ PDF of several files, saved as the drive's Download sa
 
 		let read: Promise<Uint8Array> | undefined
 
-		mocks.save.triggerSwStreamDownload.mockImplementation((_save: unknown, _id: string, readable: ReadableStream<Uint8Array>) => {
-			read = new Response(readable).arrayBuffer().then(buffer => new Uint8Array(buffer))
+		mocks.save.triggerSwStreamDownload.mockImplementation(
+			(_save: unknown, _id: string, readable: ReadableStream<Uint8Array>, _size: null, _cancel: unknown, started: () => void) => {
+				read = new Response(readable).arrayBuffer().then(buffer => new Uint8Array(buffer))
+				started()
 
-			return read.then(() => undefined)
-		})
+				return read.then(() => undefined)
+			}
+		)
 		await startDownloadAs([file("a.docx"), file("b.docx")], "pdf", CONTEXT)
 
 		expect(mocks.save.triggerSwStreamDownload).toHaveBeenCalledOnce()
@@ -717,6 +720,31 @@ describe("Download as ▸ PDF of several files, saved as the drive's Download sa
 
 		expect(archive.entries.map(entry => entry.name)).toEqual(["a.pdf", "b.pdf"])
 		expect(mocks.downloadBlob).not.toHaveBeenCalled()
+	})
+
+	it("reads the next file only once the service worker has taken the download (WebKit stops reads in flight as it navigates)", async () => {
+		swSave()
+
+		let started: () => void = () => undefined
+
+		mocks.save.triggerSwStreamDownload.mockImplementation(
+			(_save: unknown, _id: string, readable: ReadableStream<Uint8Array>, _size: null, _cancel: unknown, onStarted: () => void) => {
+				started = onStarted
+
+				return new Response(readable).arrayBuffer().then(() => undefined)
+			}
+		)
+
+		const run = startDownloadAs([file("a.docx"), file("b.docx")], "pdf", CONTEXT)
+
+		await until(() => mocks.save.triggerSwStreamDownload.mock.calls.length === 1)
+		await new Promise(resolve => setTimeout(resolve, 100))
+		expect(mocks.sdk.downloadFileBytes).toHaveBeenCalledOnce()
+
+		started()
+
+		expect(await settled(run)).toBe("settled")
+		expect(mocks.sdk.downloadFileBytes).toHaveBeenCalledTimes(2)
 	})
 })
 

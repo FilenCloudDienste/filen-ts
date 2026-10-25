@@ -199,6 +199,29 @@ describe("OfficeRibbon", () => {
 		})
 	})
 
+	it("puts focus back in the document as soon as a dropdown's command runs, before the dropdown has closed", async () => {
+		size.width = 600
+
+		const page = document.createElement("div")
+
+		page.tabIndex = -1
+		document.body.append(page)
+		page.focus()
+
+		renderRibbon()
+		fireEvent.click(within(commands()).getByRole("button", { name: "Clipboard" }))
+
+		const flyout = await screen.findByRole("toolbar", { name: "Clipboard" })
+		const cut = within(flyout).getByRole("button", { name: "Cut" })
+
+		cut.focus()
+		fireEvent.click(cut)
+
+		// Keys typed straight after the command reach the document, not the closing dropdown.
+		expect(document.activeElement).toBe(page)
+		page.remove()
+	})
+
 	it("moves groups into the overflow menu on a phone, under their names", async () => {
 		vi.spyOn(window, "matchMedia").mockImplementation(
 			query =>

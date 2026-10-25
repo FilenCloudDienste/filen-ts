@@ -100,13 +100,15 @@ export function CodeMirrorSource({
 	const [changes] = useState(emptyCompartment)
 	const viewRef = useRef<EditorView | null>(null)
 	const [seed] = useState(text)
-	const [dirty, setDirty] = useState(false)
+	// Reported from the change listener itself, in the same task as the edit: a state round trip would leave the
+	// overlay clean for a moment, in which a key that drops the editor (the markdown view toggle) drops the edit too.
+	const dirtyRef = useRef(false)
 	// Latest sinks for the change listener, which is installed once: a new callback identity must never
 	// reconfigure the editor.
-	const sinksRef = useRef({ editable, contentRef, onValueChange, format })
+	const sinksRef = useRef({ editable, contentRef, onValueChange, format, onDirtyChange })
 
 	useEffect(() => {
-		sinksRef.current = { editable, contentRef, onValueChange, format }
+		sinksRef.current = { editable, contentRef, onValueChange, format, onDirtyChange }
 	})
 
 	const readOnly = codeReadOnly(!editable)
@@ -153,7 +155,12 @@ export function CodeMirrorSource({
 				return
 			}
 
-			setDirty(!update.state.doc.eq(seedDoc))
+			const dirty = !update.state.doc.eq(seedDoc)
+
+			if (dirty !== dirtyRef.current) {
+				dirtyRef.current = dirty
+				sinks.onDirtyChange(dirty)
+			}
 
 			// Re-armed on every edit: the overlay nulls it on a slot change, which can land after this
 			// editor's own mount effect when its bytes were already cached.
@@ -173,8 +180,8 @@ export function CodeMirrorSource({
 	}
 
 	useEffect(() => {
-		onDirtyChange(dirty)
-	}, [dirty, onDirtyChange])
+		onDirtyChange(dirtyRef.current)
+	}, [onDirtyChange])
 
 	useEffect(() => {
 		return () => {

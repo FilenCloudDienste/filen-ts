@@ -369,28 +369,30 @@ function BrowseList({
 function BrowseRow({ entry, onOpen }: { entry: BrowseEntry; onOpen: (entry: BrowseEntry) => void }) {
 	const name = entryName(entry)
 
+	// The item holds the button: a button given the listitem role is announced as neither, and has no name.
 	return (
-		<button
-			type="button"
-			role="listitem"
-			onClick={() => {
-				onOpen(entry)
-			}}
-			className={cn(
-				"flex h-11 items-center gap-3 rounded-xl px-3 text-left text-sm focus-ring-row transition-colors outline-none hover:bg-accent/50"
-			)}
-		>
-			<ItemIcon
-				item={entry.item}
-				className="size-5 shrink-0"
-			/>
-			<span className="min-w-0 flex-1 truncate">{name}</span>
-			{entry.kind === "file" && (
-				<span className="hidden w-24 shrink-0 text-right text-muted-foreground tabular-nums sm:block">
-					{formatItemSize(entry.item)}
-				</span>
-			)}
-			<span className="hidden w-28 shrink-0 text-right text-muted-foreground md:block">{formatModifiedDate(entry.item)}</span>
-		</button>
+		<div role="listitem">
+			<button
+				type="button"
+				onClick={() => {
+					onOpen(entry)
+				}}
+				className={cn(
+					"flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm focus-ring-row transition-colors outline-none hover:bg-accent/50"
+				)}
+			>
+				<ItemIcon
+					item={entry.item}
+					className="size-5 shrink-0"
+				/>
+				<span className="min-w-0 flex-1 truncate">{name}</span>
+				{entry.kind === "file" && (
+					<span className="hidden w-24 shrink-0 text-right text-muted-foreground tabular-nums sm:block">
+						{formatItemSize(entry.item)}
+					</span>
+				)}
+				<span className="hidden w-28 shrink-0 text-right text-muted-foreground md:block">{formatModifiedDate(entry.item)}</span>
+			</button>
+		</div>
 	)
 }

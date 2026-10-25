@@ -15,6 +15,11 @@ export const SW_SKIP_WAITING_MESSAGE = "SKIP_WAITING"
 // reach: the page's own fetches go to its controller.
 export const SW_MSG_BUILD = "FILEN_SW_BUILD"
 
+// page → SW: claim the clients in scope that no worker controls. In Firefox a page loads uncontrolled beside an
+// active worker after any reload (seen with this cross-origin isolated app), and a hard reload does everywhere;
+// every download and stream route needs one.
+export const SW_MSG_CLAIM = "FILEN_SW_CLAIM"
+
 // ── Download route (SW-hosted trimmed SDK stream) ───────────────────────────────────────────────
 // Virtual URL the SW answers with a streamed, attachment-forced file download. The `<id>` is an
 // opaque per-download token (crypto.randomUUID) — NEVER key material (secrets cross only via

@@ -76,7 +76,8 @@ import {
 	resolveUnsavedConfirm,
 	slotPinSource,
 	unsavedPromptOpen,
-	type PreviewDismissIntent
+	type PreviewDismissIntent,
+	menuOpening
 } from "@/features/preview/components/previewOverlay.logic"
 import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
@@ -896,6 +897,14 @@ export function PreviewOverlay({
 		// An Escape something inside took already, the editor's find panel closing say, is not a close:
 		// Base UI hears it at the document, after the editor.
 		if (!next && details.reason === "escape-key" && details.event.defaultPrevented) {
+			details.cancel()
+
+			return
+		}
+
+		// Nor is one meant for a menu still opening: closing the document (or asking about its unsaved edits)
+		// instead would surprise.
+		if (!next && details.reason === "escape-key" && menuOpening(document)) {
 			details.cancel()
 
 			return

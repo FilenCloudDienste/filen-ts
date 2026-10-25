@@ -97,6 +97,8 @@ export function ArchiveBrowser({ item, variant }: ArchiveBrowserProps) {
 		<ArchiveSourceBrowser
 			key={source.uuid}
 			source={source}
+			// A trashed file's bytes go to no device (previewDownloadable), but an extract lands in the user's own drive.
+			extractable={variant === "trash"}
 		/>
 	)
 }
@@ -105,12 +107,14 @@ export interface ArchiveSourceBrowserProps {
 	source: ArchiveSource
 	// Another listing transport (a public link's).
 	deps?: ListingDeps | undefined
+	// Extracts offered even where the archive's bytes are not downloadable.
+	extractable?: boolean
 }
 
 // The archive's directories, browsed and searched, with an extract of the selection or of everything.
 // The selection's base is the directory shown (owner decision), so navigating clears it; extracts land in
 // the user's own drive whatever the archive's source.
-export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps) {
+export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourceBrowserProps) {
 	const { t } = useTranslation(["preview", "drive", "common"])
 	const isOnline = useIsOnline()
 	// A public link that allows no downloads can still be browsed, but nothing leaves it.
@@ -162,8 +166,9 @@ export function ArchiveSourceBrowser({ source, deps }: ArchiveSourceBrowserProps
 	const dirName = dir === 0 ? source.name : store.dirName(dir)
 	const baseFolderName = dir === 0 ? (info?.defaultName ?? source.name) : store.dirName(dir)
 	const totals = selectionTotalsOf(snapshot, selection)
-	const extractOff = info === null || !isOnline || !downloadable
-	const notAllowed = downloadable ? undefined : t("previewArchiveExtractNotAllowed")
+	const extractAllowed = downloadable || extractable === true
+	const extractOff = info === null || !isOnline || !extractAllowed
+	const notAllowed = extractAllowed ? undefined : t("previewArchiveExtractNotAllowed")
 	const extractOffTitle = notAllowed ?? (isOnline ? undefined : t("common:offlineActionDisabled"))
 	const { hidden, shown } = splitCrumbs(crumbTrail(store, dir), ARCHIVE_VISIBLE_CRUMBS)
 

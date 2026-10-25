@@ -129,7 +129,7 @@ function mockListViewport(): void {
 
 const parentKeyDown = vi.fn()
 
-function show(fake: FakeSession, downloadable = true, source: ArchiveSource = SOURCE) {
+function show(fake: FakeSession, downloadable = true, source: ArchiveSource = SOURCE, extractable = false) {
 	openListingSession.mockReturnValue(fake.session)
 
 	return render(
@@ -137,7 +137,10 @@ function show(fake: FakeSession, downloadable = true, source: ArchiveSource = SO
 			<PreviewDownloadableProvider downloadable={downloadable}>
 				{/* Stands in for the overlay's own handler, which pages on Left/Right. */}
 				<div onKeyDown={parentKeyDown}>
-					<ArchiveSourceBrowser source={source} />
+					<ArchiveSourceBrowser
+						source={source}
+						extractable={extractable}
+					/>
 				</div>
 			</PreviewDownloadableProvider>
 		</QueryClientProvider>
@@ -421,6 +424,14 @@ describe("ArchiveSourceBrowser states", () => {
 			expect(button.hasAttribute("disabled")).toBe(true)
 			expect(button.getAttribute("title")).toBe(reason)
 		}
+	})
+
+	it("extracts what is not downloadable when told it may (a trashed archive, into the user's drive)", () => {
+		mockListViewport()
+		show(fakeSession(done(), storeOf(TREE)), false, SOURCE, true)
+
+		expect(screen.getByRole("button", { name: "Extract all" }).hasAttribute("disabled")).toBe(false)
+		expect(screen.queryByText("The link's owner doesn't allow downloads, so nothing can be extracted from it.")).toBeNull()
 	})
 
 	it("offers no extract next to an archive below a directory shared with the user", () => {

@@ -113,6 +113,18 @@ function useRibbonPopup(): {
 		onClick: event => {
 			if (ranCommand(event)) {
 				ranRef.current = true
+
+				const focused = activeElement()
+
+				// Back to the document in the same click, not after the popup's close transition: keys typed straight
+				// after the command would land in the closing popup. A command that moved focus on keeps it there.
+				if (
+					(focused === null || focused === document.body || focused.closest("[data-ribbon-popup]") !== null) &&
+					beforeRef.current?.isConnected === true
+				) {
+					beforeRef.current.focus({ preventScroll: true })
+				}
+
 				setOpenState(false)
 			}
 		},

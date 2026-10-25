@@ -117,12 +117,25 @@ function swDelivery(save: SwSaveTarget, signal: AbortSignal, onEnded: (error: un
 
 	signal.addEventListener("abort", onAbort, { once: true })
 
+	// The worker has taken the download's navigation. Until then the first write waits: WebKit stops the page's
+	// requests in flight when it navigates, and the next file's read would be one of them.
+	let markStarted: () => void = () => undefined
+	const started = new Promise<void>(resolve => {
+		markStarted = resolve
+	})
 	const start = (): void => {
 		if (delivered !== null) return
 
-		delivered = triggerSwStreamDownload(save, crypto.randomUUID(), pipe.readable, null, () => {
-			onEnded(new DOMException("Cancelled", "AbortError"))
-		})
+		delivered = triggerSwStreamDownload(
+			save,
+			crypto.randomUUID(),
+			pipe.readable,
+			null,
+			() => {
+				onEnded(new DOMException("Cancelled", "AbortError"))
+			},
+			markStarted
+		)
 		delivered.then(
 			() => {
 				signal.removeEventListener("abort", onAbort)
@@ -140,7 +153,7 @@ function swDelivery(save: SwSaveTarget, signal: AbortSignal, onEnded: (error: un
 			write: chunk => {
 				start()
 
-				return Promise.race([writer.write(chunk), stopped])
+				return Promise.race([Promise.all([writer.write(chunk), started]), stopped]).then(() => undefined)
 			},
 			close: () => Promise.race([writer.close(), stopped])
 		},

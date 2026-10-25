@@ -15,6 +15,7 @@ import {
 	SW_STREAM_GONE_INTERVAL_MS,
 	SW_SKIP_WAITING_MESSAGE,
 	SW_MSG_BUILD,
+	SW_MSG_CLAIM,
 	SW_DOWNLOAD_PREFIX,
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_REGISTER_DOWNLOAD,
@@ -903,6 +904,11 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 
 	// Receiving it is the whole point (see SW_MSG_KEEPALIVE).
 	if (type === SW_MSG_KEEPALIVE) {
+		return
+	}
+
+	if (type === SW_MSG_CLAIM) {
+		event.waitUntil(self.clients.claim())
 		return
 	}
 

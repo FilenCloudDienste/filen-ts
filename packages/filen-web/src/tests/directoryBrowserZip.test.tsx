@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import type { DirPublicInfo, DirPublicLink } from "@filen/sdk-rs"
 import type { AnonDownloadOutcome } from "@/features/publicLinks/lib/download"
 import "@/lib/i18n"
@@ -101,7 +101,7 @@ describe("DirectoryBrowser — Download all", () => {
 		)
 		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
 		fireEvent.click(screen.getByRole("button", { name: "Download all" }))
-		fireEvent.click(screen.getByRole("listitem"))
+		fireEvent.click(within(screen.getByRole("listitem")).getByRole("button"))
 
 		await act(async () => {
 			finish(outcome)

@@ -458,16 +458,18 @@ export async function triggerSwZipDownload(
 // The page's own bytes (an archive entry the page's SDK reads, an archive the page writes) saved through the
 // service worker: `readable` moves to the worker, which only pipes it into the navigation's response,
 // Content-Length `size` (none when null: bytes made as they stream). Settles as the worker reports the download;
-// `onCancel` is the row's Cancel for the producer.
+// `onCancel` is the row's Cancel for the producer. `onStarted` runs once the worker has taken the navigation (its
+// first report).
 export async function triggerSwStreamDownload(
 	save: SwSaveTarget,
 	transferId: string,
 	readable: ReadableStream<Uint8Array>,
 	size: number | null,
-	onCancel: () => void
+	onCancel: () => void,
+	onStarted?: () => void
 ): Promise<void> {
 	await sendToSw(await activeServiceWorker(), SW_MSG_REGISTER_STREAM_DOWNLOAD, { id: save.id, name: save.name, size, stream: readable }, [
 		readable
 	])
-	await startWatchedSwDownload(save, transferId, () => undefined, onCancel)
+	await startWatchedSwDownload(save, transferId, () => onStarted?.(), onCancel)
 }

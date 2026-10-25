@@ -1,4 +1,4 @@
-import { SW_MSG_BUILD, SW_PROTOCOL_VERSION, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
+import { SW_MSG_BUILD, SW_MSG_CLAIM, SW_PROTOCOL_VERSION, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
 import { log } from "@/lib/log"
 
 let started = false
@@ -111,6 +111,11 @@ export function registerSW(onUpdateReady: () => void): void {
 		.register(SW_URL, { type: "module", scope: "/" })
 		.then(reg => {
 			registration = reg
+
+			// Loaded beside an active worker without being controlled by it (SW_MSG_CLAIM): asked to take the page.
+			if (navigator.serviceWorker.controller === null && reg.active !== null) {
+				reg.active.postMessage({ type: SW_MSG_CLAIM })
+			}
 
 			// The browser's own update check runs independently of this page's JS and can finish before
 			// this SDK-boot-gated call ever reaches here — a worker can already be waiting or mid-install

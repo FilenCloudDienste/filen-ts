@@ -66,6 +66,31 @@ describe("CodeMirrorSource buffer", () => {
 		expect(contentRef.current?.()).toBe("saved")
 	})
 
+	// Outside act: the report must not wait for React to render, or a key handled right after the edit (the
+	// markdown view toggle) still sees a clean overlay and drops the editor with the edit in it.
+	it("reports the dirty edge in the same task as the edit, before React renders", () => {
+		const onDirtyChange = vi.fn<(dirty: boolean) => void>()
+		const { container } = render(
+			<CodeMirrorSource
+				text="saved"
+				tag="text"
+				alt="notes.txt"
+				editable
+				onDirtyChange={onDirtyChange}
+			/>
+		)
+		const view = editorView(container)
+
+		onDirtyChange.mockClear()
+		view.dispatch({ changes: { from: view.state.doc.length, insert: "!" } })
+
+		expect(onDirtyChange).toHaveBeenCalledExactlyOnceWith(true)
+
+		view.dispatch({ changes: { from: view.state.doc.length, insert: "?" } })
+
+		expect(onDirtyChange).toHaveBeenCalledTimes(1)
+	})
+
 	it("builds the buffer string only when contentRef is read, never per keystroke", () => {
 		const contentRef = createRef<(() => string) | null>()
 		const { container } = render(

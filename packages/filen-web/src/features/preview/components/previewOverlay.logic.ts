@@ -107,3 +107,8 @@ export function slotPinSource<T>(
 export function previewDownloadable(downloadable: boolean, variant: DriveVariant): boolean {
 	return downloadable && variant !== "trash"
 }
+
+// An Escape pressed while a menu is still opening, before it takes focus and the key, was meant for that menu.
+export function menuOpening(root: ParentNode): boolean {
+	return root.querySelector('[aria-haspopup="menu"][aria-expanded="true"]') !== null
+}

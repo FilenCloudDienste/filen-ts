@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SW_MSG_BUILD, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
+import { SW_MSG_BUILD, SW_MSG_CLAIM, SW_SKIP_WAITING_MESSAGE } from "@/lib/sw/protocol"
 
 // register.ts keeps its whole state machine (started/registration/updateRequested/reloaded) in
 // module-level `let`s, so every test needs its own module instance -- `vi.resetModules()` + a
@@ -390,6 +390,38 @@ describe("registerSW / applyUpdate (fake navigator.serviceWorker + window.locati
 		fireControllerChange()
 
 		expect(reload).not.toHaveBeenCalled()
+	})
+
+	it("a page loaded uncontrolled beside an active worker asks it to claim the page, without a prompt or a reload", async () => {
+		// Firefox after a reload, or any hard reload.
+		const active = fakeWorker("activated")
+		const { reload, fireControllerChange } = setupBrowser(fakeRegistration(null, null, active))
+		const onUpdateReady = vi.fn()
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(onUpdateReady)
+		await flush()
+
+		expect(postedTypes(active)).toEqual([SW_MSG_CLAIM])
+
+		fireControllerChange()
+
+		expect(onUpdateReady).not.toHaveBeenCalled()
+		expect(reload).not.toHaveBeenCalled()
+	})
+
+	it("a page its active worker controls asks for no claim", async () => {
+		const active = fakeWorker("activated")
+		const { setController } = setupBrowser(fakeRegistration(null, null, active))
+
+		setController(active)
+
+		const { registerSW } = await freshRegisterModule()
+
+		registerSW(vi.fn())
+		await flush()
+
+		expect(postedTypes(active)).toEqual([])
 	})
 
 	it("a waiting worker that never answers the build query neither prompts nor takes over", async () => {
