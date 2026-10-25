@@ -1,7 +1,7 @@
 import type { Mark, Node } from "prosemirror-model"
 import type { Transaction } from "prosemirror-state"
 import { AttrStep, StepMap } from "prosemirror-transform"
-import { isMarkStep, markStepTypes } from "../edit/marks"
+import { markStepTypes, markStepsOf } from "../edit/marks"
 import { SetAttrsStep } from "../edit/attrs"
 import { docxSchema } from "../edit/schema"
 import type { DocxEditorSession } from "../edit/session"
@@ -153,8 +153,10 @@ function changedRanges(tr: Transaction): number[] {
 			out[k + 1] = map.map(out[k + 1] ?? 0, 1)
 		}
 
-		if (isMarkStep(step)) {
-			if (markStepTypes(step).includes(marks.content_control)) out.push(step.from, step.to)
+		const parts = markStepsOf(step)
+
+		if (parts !== undefined) {
+			for (const part of parts) if (markStepTypes(part).includes(marks.content_control)) out.push(part.from, part.to)
 		} else if (step instanceof AttrStep) {
 			out.push(step.pos, step.pos)
 		} else if (step instanceof SetAttrsStep) {

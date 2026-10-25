@@ -12,7 +12,7 @@ import {
 	dropPoint,
 	type Step
 } from "prosemirror-transform"
-import { isAddMarkLike, isMarkStep } from "../marks"
+import { isAddMarkLike, markStepsOf } from "../marks"
 import { isHistoryTransaction } from "prosemirror-history"
 import { MAX_LEVEL } from "../../numbering/index"
 import { SetAttrsStep } from "../attrs"
@@ -940,10 +940,13 @@ export function changedRanges(tr: Transaction, marks = true, attrs?: ReadonlySet
 		} else if (step instanceof AttrStep) {
 			if (attrs === undefined || attrs.has(step.attr)) out.push(step.pos, step.pos + 1)
 		} else if (step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep) out.push(step.pos, step.pos + 1)
-		else if (isMarkStep(step)) {
-			if (marks) out.push(step.from, step.to)
-		} else if (step instanceof RebuildStep) out.push(...replacedAfter(step))
-		else map.forEach((_oldStart, _oldEnd, newStart, newEnd) => out.push(newStart, newEnd))
+		else if (step instanceof RebuildStep) out.push(...replacedAfter(step))
+		else {
+			const parts = markStepsOf(step)
+
+			if (parts === undefined) map.forEach((_oldStart, _oldEnd, newStart, newEnd) => out.push(newStart, newEnd))
+			else if (marks) for (const part of parts) out.push(part.from, part.to)
+		}
 	})
 
 	return out
@@ -1153,7 +1156,12 @@ export function invariantViolation(tr: Transaction): string | undefined {
 		if (step === undefined || doc === undefined) continue
 		if (command) continue
 		if (protectedChange(step, doc)) return "protectedAttribute"
-		if ((step instanceof AddNodeMarkStep || isAddMarkLike(step)) && identityMark(step.mark)) return "identityMark"
+		if (
+			step instanceof AddNodeMarkStep
+				? identityMark(step.mark)
+				: markStepsOf(step)?.some(part => isAddMarkLike(part) && identityMark(part.mark))
+		)
+			return "identityMark"
 	}
 
 	// A copy of another part's properties that cannot be written in this one (a prefix its source does not bind)

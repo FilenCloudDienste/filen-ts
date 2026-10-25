@@ -1,7 +1,7 @@
 import { Fragment, Slice, type Mark, type MarkType, type Node } from "prosemirror-model"
 import { isHistoryTransaction } from "prosemirror-history"
 import { Selection, TextSelection, type EditorState, type Transaction } from "prosemirror-state"
-import { AddMarkStep, AttrStep, Mapping, RemoveMarkStep, ReplaceAroundStep, ReplaceStep, StepMap, type Step } from "prosemirror-transform"
+import { AddMarkStep, AttrStep, Mapping, ReplaceAroundStep, ReplaceStep, StepMap, type Step } from "prosemirror-transform"
 import { decodeUtf8, encodeUtf8, parseXml } from "../../xml/index"
 import type { DocxEditContext, DocxIdentity } from "../edit/context"
 import type { RunBase } from "../edit/formatting"
@@ -17,7 +17,7 @@ import {
 } from "../edit/invariants/core"
 import { FORMATTING_MARKS, NO_SOURCE, docxSchema, inlineLevel, type IndentAttrs, type SpacingAttrs } from "../edit/schema"
 import { SetAttrsStep } from "../edit/attrs"
-import { MarkChanges, SetMarkSetsStep, SetMarksStep, isMarkStep, type PieceStep } from "../edit/marks"
+import { MarkChanges, SetMarkSetsStep, SetMarksStep, markStepsOf, type MarkStep } from "../edit/marks"
 import { rowOverrides, type RowOverrides, type TrackStamp } from "../edit/tables/map"
 import type { DocxEditorSession } from "../edit/session"
 import { Item, Revision, RevisionFlag, type StoryPart } from "../model/index"
@@ -887,7 +887,7 @@ export function trackTransaction(tr: Transaction, session: DocxEditorSession): T
 
 	// Formatting and paragraph properties alone (a toolbar command over a selection): applied as they are, only
 	// recorded (a selection over a long document makes thousands of steps; nothing is copied for them).
-	if (tr.steps.every(step => isMarkStep(step) || step instanceof AttrStep || step instanceof SetAttrsStep)) {
+	if (tr.steps.every(step => markStepsOf(step) !== undefined || step instanceof AttrStep || step instanceof SetAttrsStep)) {
 		const plan: TrackPlan = {
 			stamp,
 			session,
@@ -905,8 +905,9 @@ export function trackTransaction(tr: Transaction, session: DocxEditorSession): T
 
 		tr.steps.forEach((step, index) => {
 			const doc = tr.docs[index] as Node
+			const parts = markStepsOf(step)
 
-			if (isMarkStep(step)) recordMarkStep(doc, step, plan, index)
+			if (parts !== undefined) for (const part of parts) recordMarkStep(doc, part, plan, index)
 			else if (step instanceof AttrStep && (PARAGRAPH_ATTRS as readonly string[]).includes(step.attr)) {
 				const node = doc.nodeAt(step.pos)
 
@@ -1156,8 +1157,11 @@ function rewriteStep(
 		return backward ? after.map(from, -1) : after.map(to, 1)
 	}
 
-	if (isMarkStep(step)) {
-		recordMarkStep(out.doc, step, plan, out.steps.length)
+	const parts = markStepsOf(step)
+
+	if (parts !== undefined) {
+		// A MarkSetStep's parts all read the document before it: the formatting before the step is recorded.
+		for (const part of parts) recordMarkStep(out.doc, part, plan, out.steps.length)
 
 		return out.maybeStep(step).failed === null ? undefined : false
 	}
@@ -1412,7 +1416,7 @@ interface FormatRange {
 
 // A formatting mark step about to apply: what it changes is recorded (content it leaves as it is, inside a
 // SetMarksStep's range or under a mark it already has, is no change).
-function recordMarkStep(doc: Node, step: AddMarkStep | RemoveMarkStep | PieceStep, plan: TrackPlan, at: number): void {
+function recordMarkStep(doc: Node, step: MarkStep, plan: TrackPlan, at: number): void {
 	const mark = step.mark
 	const type = mark.type
 

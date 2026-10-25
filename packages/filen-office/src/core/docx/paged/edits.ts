@@ -1,7 +1,7 @@
 import { Fragment, type Node } from "prosemirror-model"
 import type { Transaction } from "prosemirror-state"
 import { AddNodeMarkStep, AttrStep, RemoveNodeMarkStep, ReplaceAroundStep, ReplaceStep, StepMap } from "prosemirror-transform"
-import { isMarkStep } from "../edit/marks"
+import { markStepsOf } from "../edit/marks"
 import { Relationships } from "../../opc/index"
 import { decodeUtf8, encodeUtf8, parseXml, XmlError, type XmlDocument } from "../../xml/index"
 import { parseNumbering, type Numbering } from "../numbering/index"
@@ -3894,15 +3894,22 @@ function changedSpan(tr: Transaction): { from: number; to: number; whole: boolea
 			to = map.map(to, 1)
 		}
 
+		const parts = markStepsOf(step)
+
 		if (step instanceof ReplaceStep) {
 			a = step.from
 			b = step.from + step.slice.size
 		} else if (step instanceof ReplaceAroundStep) {
 			a = step.from
 			b = step.getMap().map(step.to, 1)
-		} else if (isMarkStep(step)) {
-			a = step.from
-			b = step.to
+		} else if (parts !== undefined) {
+			a = Infinity
+			b = -Infinity
+
+			for (const part of parts) {
+				a = Math.min(a, part.from)
+				b = Math.max(b, part.to)
+			}
 		} else if (step instanceof SetAttrsStep) {
 			a = step.from
 			b = step.to

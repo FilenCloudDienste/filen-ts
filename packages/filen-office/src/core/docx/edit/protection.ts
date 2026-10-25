@@ -9,7 +9,7 @@ import {
 	ReplaceStep,
 	type Step
 } from "prosemirror-transform"
-import { isMarkStep, markStepTypes } from "./marks"
+import { markStepTypes, markStepsOf } from "./marks"
 import { Ns } from "../model/namespaces"
 import type { DocxModel, StoryPart } from "../model/index"
 import { Item } from "../model/kinds"
@@ -506,8 +506,10 @@ function stepRanges(step: Step, doc: Node): number[] | undefined {
 	if (step instanceof RebuildStep) return [...step.replaces.flatMap(replace => [replace.from, replace.to]), ...step.touched]
 	if (step instanceof ReplaceStep) return [step.from, step.to]
 	if (step instanceof ReplaceAroundStep) return [step.from, step.to]
-	if (isMarkStep(step)) return [step.from, step.to]
 
+	const parts = markStepsOf(step)
+
+	if (parts !== undefined) return parts.flatMap(part => [part.from, part.to])
 	if (step instanceof AttrStep || step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep) {
 		const node = doc.nodeAt(step.pos)
 
@@ -661,9 +663,11 @@ function anchorsComment(step: Step, doc: Node): boolean {
 // Formatting set on content (not a revision a recording adds, nor a control): what Word's forms protection lets
 // no one change, inside a control too (format commands are refused there).
 function directFormatting(step: Step): boolean {
-	if (!isMarkStep(step)) return false
-
-	return markStepTypes(step).some(type => type.name !== "content_control" && !REVISION_MARKS.has(type.name))
+	return (
+		markStepsOf(step)?.some(part =>
+			markStepTypes(part).some(type => type.name !== "content_control" && !REVISION_MARKS.has(type.name))
+		) ?? false
+	)
 }
 
 const REVISION_MARKS = new Set(["insertion", "deletion", "move_from", "move_to", "format_change"])

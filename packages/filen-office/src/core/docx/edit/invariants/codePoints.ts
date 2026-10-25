@@ -1,6 +1,7 @@
 import type { Node } from "prosemirror-model"
 import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from "prosemirror-state"
-import { AddMarkStep, RemoveMarkStep, ReplaceAroundStep, ReplaceStep } from "prosemirror-transform"
+import { ReplaceAroundStep, ReplaceStep, type Step } from "prosemirror-transform"
+import { markStepPieces, markStepsOf } from "../marks"
 import { isInternal, replacesOf } from "./core"
 
 // Positions inside a UTF-16 surrogate pair (a character outside the BMP is two of the document's positions) are
@@ -25,15 +26,11 @@ export function insidePair(doc: Node, pos: number): boolean {
 }
 
 // The positions a step edits, in the document before it.
-function stepPositions(step: unknown): number[] {
+function stepPositions(step: Step): number[] {
 	if (step instanceof ReplaceAroundStep) return [step.from, step.to, step.gapFrom, step.gapTo]
 	if (step instanceof ReplaceStep) return replacesOf(step).flatMap(replace => [replace.from, replace.to])
-	if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) return [step.from, step.to]
 
-	// The editor's own mark steps (marks.ts) set marks over pieces.
-	const pieces = (step as { pieces?: readonly { from: number; to: number }[] }).pieces
-
-	return pieces === undefined ? [] : pieces.flatMap(piece => [piece.from, piece.to])
+	return markStepsOf(step)?.flatMap(part => markStepPieces(part).flatMap(piece => [piece.from, piece.to])) ?? []
 }
 
 // Positions a transaction may have looked up: an edit has a few; a command over a whole document (a step per

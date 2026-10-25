@@ -2,6 +2,7 @@ import { Fragment, type Mark, type MarkType, type Node, type Schema } from "pros
 import type { Transaction } from "prosemirror-state"
 import { AddMarkStep, RemoveMarkStep, Step, StepResult, type Mappable } from "prosemirror-transform"
 import { asBuilt, builtBlock } from "./origin"
+import { docxSchema } from "./schema"
 
 // Run-level content of [from, to) and the mark of the step's type it gets (null: none of that type).
 export interface MarkPiece {
@@ -29,7 +30,7 @@ interface Range {
 // (identity included).
 //
 // It covers [first piece's from, last piece's to) with `mark` standing for what it sets, for whatever reads mark
-// steps by kind (isMarkStep: changed ranges, layout, review index, tracked formatting); its inverse is a step of
+// steps by kind (markStepsOf: changed ranges, layout, review index, tracked formatting); its inverse is a step of
 // the same kind holding what each piece had, so an undo restores exactly. It is no AddMarkStep: AddMarkStep.merge
 // would take it for one (prosemirror-history merges an event's inverted steps) and set one mark over the whole
 // range; a Step merges with nothing.
@@ -178,8 +179,6 @@ abstract class PieceMarksStep<P extends Range> extends Step {
 	// Each piece maps as AddMarkStep's range does: its start to the right, its end to the left, so content
 	// inserted at a piece's edge stays outside it (typing next to bolded text is not bolded by a rebase), and a
 	// piece whose content was deleted (or that shrank to nothing) is dropped; the step is null without pieces.
-	// (AddMarkStep also drops its range when both ends were deleted though content is left between them; a
-	// piece keeps what is left.)
 	override map(mapping: Mappable): Step | null {
 		const pieces: P[] = []
 
@@ -323,12 +322,47 @@ export function isAddMarkLike(step: Step): step is AddMarkStep | PieceStep {
 }
 
 // A step changing inline marks over [from, to): an AddMarkStep, a RemoveMarkStep or a piece step.
-export function isMarkStep(step: Step): step is AddMarkStep | RemoveMarkStep | PieceStep {
+export type MarkStep = AddMarkStep | RemoveMarkStep | PieceStep
+
+// Private: a MarkSetStep changes marks too; callers read steps through markStepsOf.
+function isMarkStep(step: Step): step is MarkStep {
 	return step instanceof AddMarkStep || step instanceof RemoveMarkStep || step instanceof PieceMarksStep
 }
 
+// prosemirror-transform's MarkSetStep (not exported): what an AddMarkStep displacing other marks of its type or a
+// RemoveMarkStep over gaps inverts to, so an undo of a plain addMark/removeMark may hold one. Its `steps` (mark
+// steps, or such sets) apply in order. The class comes from the step registry: an O(1) check, nothing serialized.
+const MARK_SET = Step.fromJSON(docxSchema, { stepType: "markSet", steps: [] }).constructor
+
+// The mark steps `step` stands for, in the order they apply: itself, or a MarkSetStep's; undefined for any other
+// step. Mark steps change no positions, so each part's range holds in the document the step applies to.
+export function markStepsOf(step: Step): readonly MarkStep[] | undefined {
+	if (isMarkStep(step)) return [step]
+	if (step.constructor !== MARK_SET) return undefined
+
+	const out: MarkStep[] = []
+
+	collectMarkSet(step, out)
+
+	return out
+}
+
+function collectMarkSet(step: Step, out: MarkStep[]): void {
+	if (!("steps" in step) || !Array.isArray(step.steps)) return
+
+	for (const part of step.steps as readonly Step[]) {
+		if (isMarkStep(part)) out.push(part)
+		else collectMarkSet(part, out)
+	}
+}
+
+// The ranges a mark step changes: a piece step's pieces, else its range.
+export function markStepPieces(step: MarkStep): readonly { readonly from: number; readonly to: number }[] {
+	return step instanceof PieceMarksStep ? step.pieces : [step]
+}
+
 // The mark types a mark step changes.
-export function markStepTypes(step: AddMarkStep | RemoveMarkStep | PieceStep): readonly MarkType[] {
+export function markStepTypes(step: MarkStep): readonly MarkType[] {
 	return step instanceof SetMarkSetsStep ? step.types : [step.mark.type]
 }
 

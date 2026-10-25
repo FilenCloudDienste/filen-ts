@@ -37,11 +37,11 @@ import {
 	SetMarkSetsStep,
 	SetMarksStep,
 	isAddMarkLike,
-	isMarkStep,
 	markStepTypes,
+	markStepsOf,
 	type MarkPiece,
-	type MarksPiece,
-	type PieceStep
+	type MarkStep,
+	type MarksPiece
 } from "../marks"
 import { builtInStyleId } from "../formats"
 import { lockedStyleViolation, protectionOf, protectionViolation } from "../protection"
@@ -313,26 +313,27 @@ function plainTextLink(tr: Transaction, session: DocxEditorSession): string | un
 	const part = session.story.part
 
 	for (let k = 0; k < tr.steps.length; k++) {
-		const step = tr.steps[k]
-
-		if (!(step instanceof AddMarkStep) || step.mark.type !== marks.link) continue
-
 		const doc = tr.docs[k] as Node
-		let found = false
 
-		doc.nodesBetween(step.from, step.to, (node, pos) => {
-			if (found) return false
-			if (!node.isText) return true
+		for (const step of markStepsOf(tr.steps[k] as Step) ?? []) {
+			if (!(step instanceof AddMarkStep) || step.mark.type !== marks.link) continue
 
-			const from = Math.max(pos, step.from)
-			const to = Math.min(pos + node.nodeSize, step.to)
+			let found = false
 
-			found = from < to && plainTextAt(part, doc, from, to) !== undefined
+			doc.nodesBetween(step.from, step.to, (node, pos) => {
+				if (found) return false
+				if (!node.isText) return true
 
-			return false
-		})
+				const from = Math.max(pos, step.from)
+				const to = Math.min(pos + node.nodeSize, step.to)
 
-		if (found) return REASONS.notText
+				found = from < to && plainTextAt(part, doc, from, to) !== undefined
+
+				return false
+			})
+
+			if (found) return REASONS.notText
+		}
 	}
 
 	return undefined
@@ -433,9 +434,18 @@ function outside(from: number, to: number, locked: readonly number[]): number[] 
 function unlockedFormatting(tr: Transaction, session: DocxEditorSession): Transaction | undefined {
 	const steps = tr.steps
 
-	if (tr.before !== session.state.doc || !steps.every(isMarkStep)) return undefined
+	if (tr.before !== session.state.doc) return undefined
 
-	const markSteps = steps as readonly (AddMarkStep | RemoveMarkStep | PieceStep)[]
+	const markSteps: MarkStep[] = []
+
+	for (const step of steps) {
+		const parts = markStepsOf(step)
+
+		if (parts === undefined) return undefined
+
+		markSteps.push(...parts)
+	}
+
 	const from = Math.min(...markSteps.map(step => step.from))
 	const to = Math.max(...markSteps.map(step => step.to))
 	const sorted = lockedContent(session.story.part, tr.before, from, to)
@@ -716,9 +726,7 @@ function userLike(step: Step): boolean {
 
 		return !source && step.slice.openStart === 0 && step.slice.openEnd === 0 && step.slice.content.firstChild?.isInline !== false
 	}
-	if (isMarkStep(step)) return step.mark.type === marks.char_style
-
-	return false
+	return markStepsOf(step)?.every(part => part.mark.type === marks.char_style) ?? false
 }
 
 // Text typed into a combo box or a date control: the entry whose display text it is becomes the choice (none:
@@ -868,7 +876,9 @@ export function touchedPoints(tr: Transaction): number[] {
 
 		for (let k = 0; k < out.length; k++) out[k] = map.map(out[k] ?? 0, -1)
 
-		if (isMarkStep(step)) out.push(step.from, step.to)
+		const parts = markStepsOf(step)
+
+		if (parts !== undefined) for (const part of parts) out.push(part.from, part.to)
 		else map.forEach((_oldStart, _oldEnd, newStart, newEnd) => out.push(newStart, newEnd))
 	})
 
@@ -1326,17 +1336,19 @@ function lockViolation(tr: Transaction, part: StoryPart): string | undefined {
 						? undefined
 						: rangeViolation(part, doc, replace.from, replace.to, "replace", replace.slice.size > 0 ? replace.slice : null)
 				}
-		} else if (step !== undefined && isMarkStep(step)) {
-			const control = step.mark.type === marks.content_control
+		} else if (step !== undefined) {
+			for (const one of markStepsOf(step) ?? []) {
+				const control = one.mark.type === marks.content_control
 
-			// A control mark added by a user is the core's to refuse (an identity).
-			if (control && isAddMarkLike(step)) continue
+				// A control mark added by a user is the core's to refuse (an identity).
+				if (control && isAddMarkLike(one)) continue
 
-			// A step setting marks piece by piece formats its pieces only.
-			violation =
-				!control && (step instanceof SetMarksStep || step instanceof SetMarkSetsStep)
-					? piecesViolation(part, doc, step.pieces)
-					: rangeViolation(part, doc, step.from, step.to, control ? "unwrap" : "format")
+				// A step setting marks piece by piece formats its pieces only.
+				violation ??=
+					!control && (one instanceof SetMarksStep || one instanceof SetMarkSetsStep)
+						? piecesViolation(part, doc, one.pieces)
+						: rangeViolation(part, doc, one.from, one.to, control ? "unwrap" : "format")
+			}
 		}
 
 		if (violation !== undefined) return violation
@@ -1959,13 +1971,10 @@ function placeholderEdits(
 				if (commentsOnly) commented(doc, replace.from, replace.slice, index)
 				else note(doc, replace.from, replace.to, index)
 			}
-		} else if (
-			!commentsOnly &&
-			isMarkStep(step) &&
-			!(step instanceof RemoveMarkStep) &&
-			markStepTypes(step).some(type => DELETIONS.has(type.name))
-		) {
-			note(doc, step.from, step.to, index)
+		} else if (!commentsOnly) {
+			for (const part of markStepsOf(step) ?? [])
+				if (!(part instanceof RemoveMarkStep) && markStepTypes(part).some(type => DELETIONS.has(type.name)))
+					note(doc, part.from, part.to, index)
 		}
 	}
 

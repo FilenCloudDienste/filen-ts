@@ -2,7 +2,6 @@ import type { Fragment, Mark, MarkType, Node, Slice } from "prosemirror-model"
 import { isHistoryTransaction } from "prosemirror-history"
 import type { EditorState, Transaction } from "prosemirror-state"
 import {
-	AddMarkStep,
 	AddNodeMarkStep,
 	AttrStep,
 	RemoveMarkStep,
@@ -14,7 +13,7 @@ import {
 import { SetAttrsStep } from "../attrs"
 import { fieldUpdateOf } from "../../fields/evaluate"
 import { fieldFormatState, holdsFormatting, unformattableFields, resultDropsFormatting, setFieldFormatState } from "../../fields/format"
-import { SetMarkSetsStep, SetMarksStep, isAddMarkLike, isMarkStep } from "../marks"
+import { SetMarkSetsStep, SetMarksStep, isAddMarkLike, markStepPieces, markStepTypes, markStepsOf } from "../marks"
 import { RevisionFlag } from "../../model/index"
 import { isDeleted, markable, paragraphChange, planOf, setParagraphChange, type RevisionStamp } from "../../review/track"
 import { FORMATTING_MARKS, NO_SOURCE, docxSchema, survivorsOf, type MarkerAttrs, type MarkerList } from "../schema"
@@ -314,21 +313,26 @@ function wholeDeletions(transactions: readonly Transaction[], tr: Transaction): 
 	transactions.forEach((step, index) => {
 		const later = transactions.slice(index + 1)
 
-		step.steps.forEach((one, k) => {
-			if (
-				!isAddMarkLike(one) ||
-				!(DELETING.includes(one.mark.type) || (one instanceof SetMarkSetsStep && one.types.some(type => DELETING.includes(type))))
-			)
-				return
-
-			// From after the step to the end of the transactions, then through `tr`.
-			const map = (pos: number, assoc: number): number =>
-				tr.mapping.map(
-					later.reduce((at, next) => next.mapping.map(at, assoc), step.mapping.slice(k + 1).map(pos, assoc)),
-					assoc
+		step.steps.forEach((each, k) => {
+			for (const one of markStepsOf(each) ?? []) {
+				if (
+					!isAddMarkLike(one) ||
+					!(
+						DELETING.includes(one.mark.type) ||
+						(one instanceof SetMarkSetsStep && one.types.some(type => DELETING.includes(type)))
+					)
 				)
+					continue
 
-			ranges.push(map(one.from, -1), map(one.to, 1))
+				// From after the step to the end of the transactions, then through `tr`.
+				const map = (pos: number, assoc: number): number =>
+					tr.mapping.map(
+						later.reduce((at, next) => next.mapping.map(at, assoc), step.mapping.slice(k + 1).map(pos, assoc)),
+						assoc
+					)
+
+				ranges.push(map(one.from, -1), map(one.to, 1))
+			}
 		})
 	})
 
@@ -521,10 +525,12 @@ function unformatResults(transactions: readonly Transaction[], tr: Transaction):
 }
 
 // Where a step changed its document, in the document after it.
-function stepRanges(step: Step): { from: number; to: number }[] {
+function stepRanges(step: Step): readonly { readonly from: number; readonly to: number }[] {
 	if (step instanceof SetAttrsStep) return step.entries.map(entry => ({ from: entry.pos, to: entry.pos + 1 }))
-	if (step instanceof SetMarksStep || step instanceof SetMarkSetsStep)
-		return step.pieces.map(piece => ({ from: piece.from, to: piece.to }))
+
+	const parts = markStepsOf(step)
+
+	if (parts !== undefined) return parts.flatMap(markStepPieces)
 	if (step instanceof AttrStep || step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep)
 		return [{ from: step.pos, to: step.pos + 1 }]
 
@@ -569,15 +575,10 @@ function fieldsBetween(node: Node, start: number, from: number, to: number, f: (
 function changesFormatState(step: Step, tracked: boolean): boolean {
 	const changes = (type: MarkType): boolean => type === FORMAT_CHANGE || (tracked && FORMATTED.has(type))
 
-	if (step instanceof SetMarksStep) return changes(step.type)
-	if (step instanceof SetMarkSetsStep) return step.types.some(changes)
-	if (
-		step instanceof AddMarkStep ||
-		step instanceof RemoveMarkStep ||
-		step instanceof AddNodeMarkStep ||
-		step instanceof RemoveNodeMarkStep
-	)
-		return changes(step.mark.type)
+	const parts = markStepsOf(step)
+
+	if (parts !== undefined) return parts.some(part => markStepTypes(part).some(changes))
+	if (step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep) return changes(step.mark.type)
 
 	return !(step instanceof ReplaceStep || step instanceof ReplaceAroundStep || step instanceof AttrStep || step instanceof SetAttrsStep)
 }
@@ -857,7 +858,7 @@ function bringsUnformattable(step: Step): boolean | undefined {
 	if (step instanceof AttrStep) return FIELD_KINDS.includes(step.attr) ? undefined : false
 	if (step instanceof SetAttrsStep) return step.entries.some(entry => FIELD_KINDS.some(name => name in entry.attrs)) ? undefined : false
 
-	return isMarkStep(step) || step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep ? false : undefined
+	return markStepsOf(step) !== undefined || step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep ? false : undefined
 }
 
 function carryUnformattable(tr: Transaction): void {
@@ -893,11 +894,9 @@ function formats(type: MarkType): boolean {
 
 // Whether a step may give a field formatting: a formatting mark step.
 function formatsFields(step: Step): boolean {
-	if (step instanceof SetMarksStep) return formats(step.type)
-	if (step instanceof SetMarkSetsStep) return step.types.some(formats)
-	if (step instanceof AddMarkStep || step instanceof AddNodeMarkStep) return formats(step.mark.type)
+	if (step instanceof AddNodeMarkStep) return formats(step.mark.type)
 
-	return false
+	return markStepsOf(step)?.some(part => !(part instanceof RemoveMarkStep) && markStepTypes(part).some(formats)) ?? false
 }
 
 // Whether `content` holds such a field with formatting (pasted or moved).
@@ -938,10 +937,7 @@ function unformattable(transactions: readonly Transaction[], tr: Transaction): v
 
 				if (!marking) return
 
-				ranges =
-					step instanceof SetMarksStep || step instanceof SetMarkSetsStep
-						? step.pieces
-						: [step as AddMarkStep | AddNodeMarkStep as { from: number; to: number }]
+				ranges = stepRanges(step)
 			} else if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) {
 				if (isRemarking(step) || !someFormattedUnformattable(step.slice.content)) return
 
