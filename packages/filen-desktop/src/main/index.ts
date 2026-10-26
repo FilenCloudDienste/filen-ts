@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, session, shell } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, nativeTheme, protocol, safeStorage, session, shell } from "electron"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import type { DesktopPlatform } from "@filen/shared/desktop"
@@ -7,6 +7,7 @@ import { parseHeaders } from "./headers.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { registerAppProtocol } from "./serve.ts"
+import { createSessionVault, isSessionBlob, vaultFile, vaultMode, type VaultCipher } from "./sessionVault.ts"
 import { initialColors, windowOptions } from "./window.ts"
 
 const SCHEME = "filen"
@@ -37,6 +38,26 @@ protocol.registerSchemesAsPrivileged([
 const webDist = app.isPackaged
 	? path.join(process.resourcesPath, "web")
 	: path.resolve(process.env["FILEN_DESKTOP_WEB_DIST"] ?? path.join(app.getAppPath(), "../filen-web/dist"))
+
+// Probed on first use, after app ready: safeStorage reports nothing useful before it.
+async function sessionCipher(): Promise<VaultCipher | null> {
+	const backend = PLATFORM === "linux" ? safeStorage.getSelectedStorageBackend() : ""
+
+	if (vaultMode(PLATFORM, backend, await safeStorage.isAsyncEncryptionAvailable()) === "memory") {
+		console.warn(`session vault: no secure storage (${backend || "unavailable"}); keeping the session in memory only`)
+
+		return null
+	}
+
+	return {
+		encrypt: plain => safeStorage.encryptStringAsync(plain),
+		decrypt: encrypted => safeStorage.decryptStringAsync(encrypted)
+	}
+}
+
+const sessionVault = createSessionVault(sessionCipher, vaultFile(path.join(app.getPath("userData"), "session.vault")), message => {
+	console.warn(message)
+})
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false
@@ -148,6 +169,27 @@ if (!app.requestSingleInstanceLock()) {
 			BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor })
 		}
 	})
+
+	// Every invoke handler answers the app's own top-level document only.
+	function handle(channel: string, listener: (...args: unknown[]) => Promise<unknown>): void {
+		ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
+			if (!isTrustedSender(event.senderFrame?.url, APP_ORIGIN)) {
+				throw new Error("untrusted sender")
+			}
+
+			return listener(...args)
+		})
+	}
+
+	handle(CHANNELS.sessionGet, () => sessionVault.get())
+	handle(CHANNELS.sessionSet, blob => {
+		if (!isSessionBlob(blob)) {
+			throw new Error("invalid session")
+		}
+
+		return sessionVault.set(blob)
+	})
+	handle(CHANNELS.sessionClear, () => sessionVault.clear())
 
 	app.whenReady()
 		.then(() => {
