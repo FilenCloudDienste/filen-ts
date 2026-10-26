@@ -24,6 +24,7 @@ import { Route as AppPhotosRouteImport } from './routes/_app/photos'
 import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
 import { Route as AppRecentsRouteImport } from './routes/_app/recents'
 import { Route as AppSettingsRouteRouteImport } from './routes/_app/settings/route'
+import { Route as AppSyncRouteImport } from './routes/_app/sync'
 import { Route as AppTransfersRouteImport } from './routes/_app/transfers'
 import { Route as AppTrashRouteImport } from './routes/_app/trash'
 import { Route as AppVideosRouteImport } from './routes/_app/videos'
@@ -46,6 +47,8 @@ import { Route as AppSettingsKeyboardRouteImport } from './routes/_app/settings/
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
 import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
 import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
+import { Route as AppSyncIndexRouteImport } from './routes/_app/sync.index'
+import { Route as AppSyncPairIdRouteImport } from './routes/_app/sync.$pairId'
 import { Route as AppVideosIndexRouteImport } from './routes/_app/videos.index'
 import { Route as AppVideosMoviesRouteImport } from './routes/_app/videos.movies'
 import { Route as AppVideosOtherRouteImport } from './routes/_app/videos.other'
@@ -127,6 +130,11 @@ const AppRecentsRoute = AppRecentsRouteImport.update({
 const AppSettingsRouteRoute = AppSettingsRouteRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppSyncRoute = AppSyncRouteImport.update({
+  id: '/sync',
+  path: '/sync',
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppTransfersRoute = AppTransfersRouteImport.update({
@@ -239,6 +247,16 @@ const AppSharedOutSplatRoute = AppSharedOutSplatRouteImport.update({
   path: '/shared-out/$',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppSyncIndexRoute = AppSyncIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSyncRoute,
+} as any)
+const AppSyncPairIdRoute = AppSyncPairIdRouteImport.update({
+  id: '/$pairId',
+  path: '/$pairId',
+  getParentRoute: () => AppSyncRoute,
+} as any)
 const AppVideosIndexRoute = AppVideosIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -295,6 +313,7 @@ export interface FileRoutesByFullPath {
   '/photos': typeof AppPhotosRoute
   '/playlists': typeof AppPlaylistsRoute
   '/recents': typeof AppRecentsRoute
+  '/sync': typeof AppSyncRouteWithChildren
   '/transfers': typeof AppTransfersRoute
   '/trash': typeof AppTrashRoute
   '/videos': typeof AppVideosRouteWithChildren
@@ -314,6 +333,7 @@ export interface FileRoutesByFullPath {
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
+  '/sync/$pairId': typeof AppSyncPairIdRoute
   '/videos/movies': typeof AppVideosMoviesRoute
   '/videos/other': typeof AppVideosOtherRoute
   '/videos/search': typeof AppVideosSearchRoute
@@ -321,6 +341,7 @@ export interface FileRoutesByFullPath {
   '/chats/': typeof AppChatsIndexRoute
   '/notes/': typeof AppNotesIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
+  '/sync/': typeof AppSyncIndexRoute
   '/videos/': typeof AppVideosIndexRoute
   '/videos/library/$uuid': typeof AppVideosLibraryUuidRoute
   '/videos/title/$uuid': typeof AppVideosTitleUuidRoute
@@ -356,6 +377,7 @@ export interface FileRoutesByTo {
   '/settings/security': typeof AppSettingsSecurityRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
+  '/sync/$pairId': typeof AppSyncPairIdRoute
   '/videos/movies': typeof AppVideosMoviesRoute
   '/videos/other': typeof AppVideosOtherRoute
   '/videos/search': typeof AppVideosSearchRoute
@@ -363,6 +385,7 @@ export interface FileRoutesByTo {
   '/chats': typeof AppChatsIndexRoute
   '/notes': typeof AppNotesIndexRoute
   '/settings': typeof AppSettingsIndexRoute
+  '/sync': typeof AppSyncIndexRoute
   '/videos': typeof AppVideosIndexRoute
   '/videos/library/$uuid': typeof AppVideosLibraryUuidRoute
   '/videos/title/$uuid': typeof AppVideosTitleUuidRoute
@@ -385,6 +408,7 @@ export interface FileRoutesById {
   '/_app/photos': typeof AppPhotosRoute
   '/_app/playlists': typeof AppPlaylistsRoute
   '/_app/recents': typeof AppRecentsRoute
+  '/_app/sync': typeof AppSyncRouteWithChildren
   '/_app/transfers': typeof AppTransfersRoute
   '/_app/trash': typeof AppTrashRoute
   '/_app/videos': typeof AppVideosRouteWithChildren
@@ -404,6 +428,7 @@ export interface FileRoutesById {
   '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/shared-in/$': typeof AppSharedInSplatRoute
   '/_app/shared-out/$': typeof AppSharedOutSplatRoute
+  '/_app/sync/$pairId': typeof AppSyncPairIdRoute
   '/_app/videos/movies': typeof AppVideosMoviesRoute
   '/_app/videos/other': typeof AppVideosOtherRoute
   '/_app/videos/search': typeof AppVideosSearchRoute
@@ -411,6 +436,7 @@ export interface FileRoutesById {
   '/_app/chats/': typeof AppChatsIndexRoute
   '/_app/notes/': typeof AppNotesIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
+  '/_app/sync/': typeof AppSyncIndexRoute
   '/_app/videos/': typeof AppVideosIndexRoute
   '/_app/videos/library/$uuid': typeof AppVideosLibraryUuidRoute
   '/_app/videos/title/$uuid': typeof AppVideosTitleUuidRoute
@@ -433,6 +459,7 @@ export interface FileRouteTypes {
     | '/photos'
     | '/playlists'
     | '/recents'
+    | '/sync'
     | '/transfers'
     | '/trash'
     | '/videos'
@@ -452,6 +479,7 @@ export interface FileRouteTypes {
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
+    | '/sync/$pairId'
     | '/videos/movies'
     | '/videos/other'
     | '/videos/search'
@@ -459,6 +487,7 @@ export interface FileRouteTypes {
     | '/chats/'
     | '/notes/'
     | '/settings/'
+    | '/sync/'
     | '/videos/'
     | '/videos/library/$uuid'
     | '/videos/title/$uuid'
@@ -494,6 +523,7 @@ export interface FileRouteTypes {
     | '/settings/security'
     | '/shared-in/$'
     | '/shared-out/$'
+    | '/sync/$pairId'
     | '/videos/movies'
     | '/videos/other'
     | '/videos/search'
@@ -501,6 +531,7 @@ export interface FileRouteTypes {
     | '/chats'
     | '/notes'
     | '/settings'
+    | '/sync'
     | '/videos'
     | '/videos/library/$uuid'
     | '/videos/title/$uuid'
@@ -522,6 +553,7 @@ export interface FileRouteTypes {
     | '/_app/photos'
     | '/_app/playlists'
     | '/_app/recents'
+    | '/_app/sync'
     | '/_app/transfers'
     | '/_app/trash'
     | '/_app/videos'
@@ -541,6 +573,7 @@ export interface FileRouteTypes {
     | '/_app/settings/security'
     | '/_app/shared-in/$'
     | '/_app/shared-out/$'
+    | '/_app/sync/$pairId'
     | '/_app/videos/movies'
     | '/_app/videos/other'
     | '/_app/videos/search'
@@ -548,6 +581,7 @@ export interface FileRouteTypes {
     | '/_app/chats/'
     | '/_app/notes/'
     | '/_app/settings/'
+    | '/_app/sync/'
     | '/_app/videos/'
     | '/_app/videos/library/$uuid'
     | '/_app/videos/title/$uuid'
@@ -671,6 +705,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AppSettingsRouteRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/sync': {
+      id: '/_app/sync'
+      path: '/sync'
+      fullPath: '/sync'
+      preLoaderRoute: typeof AppSyncRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/transfers': {
@@ -827,6 +868,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSharedOutSplatRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/sync/': {
+      id: '/_app/sync/'
+      path: '/'
+      fullPath: '/sync/'
+      preLoaderRoute: typeof AppSyncIndexRouteImport
+      parentRoute: typeof AppSyncRoute
+    }
+    '/_app/sync/$pairId': {
+      id: '/_app/sync/$pairId'
+      path: '/$pairId'
+      fullPath: '/sync/$pairId'
+      preLoaderRoute: typeof AppSyncPairIdRouteImport
+      parentRoute: typeof AppSyncRoute
+    }
     '/_app/videos/': {
       id: '/_app/videos/'
       path: '/'
@@ -941,6 +996,19 @@ const AppNotesRouteWithChildren = AppNotesRoute._addFileChildren(
   AppNotesRouteChildren,
 )
 
+interface AppSyncRouteChildren {
+  AppSyncPairIdRoute: typeof AppSyncPairIdRoute
+  AppSyncIndexRoute: typeof AppSyncIndexRoute
+}
+
+const AppSyncRouteChildren: AppSyncRouteChildren = {
+  AppSyncPairIdRoute: AppSyncPairIdRoute,
+  AppSyncIndexRoute: AppSyncIndexRoute,
+}
+
+const AppSyncRouteWithChildren =
+  AppSyncRoute._addFileChildren(AppSyncRouteChildren)
+
 interface AppVideosRouteChildren {
   AppVideosMoviesRoute: typeof AppVideosMoviesRoute
   AppVideosOtherRoute: typeof AppVideosOtherRoute
@@ -977,6 +1045,7 @@ interface AppRouteRouteChildren {
   AppPhotosRoute: typeof AppPhotosRoute
   AppPlaylistsRoute: typeof AppPlaylistsRoute
   AppRecentsRoute: typeof AppRecentsRoute
+  AppSyncRoute: typeof AppSyncRouteWithChildren
   AppTransfersRoute: typeof AppTransfersRoute
   AppTrashRoute: typeof AppTrashRoute
   AppVideosRoute: typeof AppVideosRouteWithChildren
@@ -995,6 +1064,7 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppPhotosRoute: AppPhotosRoute,
   AppPlaylistsRoute: AppPlaylistsRoute,
   AppRecentsRoute: AppRecentsRoute,
+  AppSyncRoute: AppSyncRouteWithChildren,
   AppTransfersRoute: AppTransfersRoute,
   AppTrashRoute: AppTrashRoute,
   AppVideosRoute: AppVideosRouteWithChildren,

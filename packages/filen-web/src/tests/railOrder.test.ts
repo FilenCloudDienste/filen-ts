@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
 	DEFAULT_RAIL_ORDER,
+	mergeRailOrder,
 	moveRailEntry,
 	normalizeRailOrder,
 	railDropIndex,
 	railEntryActive,
-	railShift
+	railShift,
+	visibleRailOrder
 } from "@/features/shell/lib/railOrder.logic"
 
 describe("normalizeRailOrder", () => {
@@ -15,6 +17,7 @@ describe("normalizeRailOrder", () => {
 			"photos",
 			"videos",
 			"transfers",
+			"sync",
 			"notes",
 			"chats",
 			"playlists",
@@ -24,7 +27,7 @@ describe("normalizeRailOrder", () => {
 	})
 
 	it("keeps a stored order", () => {
-		const stored = ["settings", "chats", "drive", "photos", "videos", "transfers", "notes", "playlists", "contacts"]
+		const stored = ["settings", "chats", "drive", "photos", "videos", "transfers", "sync", "notes", "playlists", "contacts"]
 
 		expect(normalizeRailOrder(stored)).toEqual(stored)
 	})
@@ -39,6 +42,7 @@ describe("normalizeRailOrder", () => {
 			"photos",
 			"videos",
 			"transfers",
+			"sync",
 			"notes"
 		])
 	})
@@ -49,6 +53,7 @@ describe("normalizeRailOrder", () => {
 			"photos",
 			"videos",
 			"transfers",
+			"sync",
 			"notes",
 			"chats",
 			"playlists",
@@ -61,6 +66,7 @@ describe("normalizeRailOrder", () => {
 			"videos",
 			"drive",
 			"transfers",
+			"sync",
 			"notes",
 			"chats",
 			"playlists",
@@ -72,6 +78,30 @@ describe("normalizeRailOrder", () => {
 		expect(normalizeRailOrder(["photos", "videos", "transfers", "notes", "chats", "playlists", "contacts", "settings"])).toEqual(
 			normalizeRailOrder(null)
 		)
+	})
+})
+
+describe("visibleRailOrder", () => {
+	it("sync hidden in browser", () => {
+		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: false })).not.toContain("sync")
+		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: true })).toEqual(DEFAULT_RAIL_ORDER)
+	})
+})
+
+describe("mergeRailOrder", () => {
+	it("reorder keeps hidden sync", () => {
+		const full = normalizeRailOrder(null)
+		const visible = visibleRailOrder(full, { desktop: false })
+		const merged = mergeRailOrder(full, moveRailEntry(visible, 0, visible.length - 1))
+
+		expect(merged).toEqual(["photos", "videos", "transfers", "notes", "sync", "chats", "playlists", "contacts", "settings", "drive"])
+		expect(visibleRailOrder(merged, { desktop: false })).toEqual(moveRailEntry(visible, 0, visible.length - 1))
+	})
+
+	it("is the reordered list itself when nothing is hidden", () => {
+		const next = moveRailEntry(DEFAULT_RAIL_ORDER, 4, 0)
+
+		expect(mergeRailOrder(DEFAULT_RAIL_ORDER, next)).toEqual(next)
 	})
 })
 
@@ -123,6 +153,8 @@ describe("railEntryActive", () => {
 		expect(railEntryActive("videos", "/videos")).toBe(true)
 		expect(railEntryActive("videos", "/videos/library/abc")).toBe(true)
 		expect(railEntryActive("videos", "/videosx")).toBe(false)
+		expect(railEntryActive("sync", "/sync/1")).toBe(true)
+		expect(railEntryActive("sync", "/syncx")).toBe(false)
 	})
 
 	it("matches the single-page sections exactly", () => {

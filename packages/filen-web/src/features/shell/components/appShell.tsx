@@ -14,6 +14,7 @@ import { SettingsSidebar } from "@/features/settings/components/settingsSidebar"
 import { ContactsSidebar } from "@/features/contacts/components/contactsSidebar"
 import { PlaylistsSidebar } from "@/features/audio/components/playlistsSidebar"
 import { VideosSidebar } from "@/features/videos/components/videosSidebar"
+import { SyncSidebar } from "@/features/sync/components/syncSidebar"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
@@ -33,6 +34,7 @@ const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 	contacts: ContactsSidebar,
 	playlists: PlaylistsSidebar,
 	videos: VideosSidebar,
+	sync: SyncSidebar,
 	drive: DriveSidebar
 }
 
@@ -55,9 +57,10 @@ const IS_DESKTOP = desktopBridge() !== undefined
 export function AppShell() {
 	// The sidebar panel is contextual: /chats* gets the ChatsSidebar, /notes* the NotesSidebar,
 	// /settings* the SettingsSidebar, /contacts the ContactsSidebar, /playlists the PlaylistsSidebar,
-	// /videos* the VideosSidebar, everything else the DriveSidebar. All seven share the same panel styling
-	// (rounded-xl, --shell-border outline); drive, notes, chats, playlists and videos are user-resizable
-	// (useResizableSidebar) and render a trailing drag-handle sibling — settings/contacts stay fixed at w-52.
+	// /videos* the VideosSidebar, /sync* the SyncSidebar, everything else the DriveSidebar. All eight share
+	// the same panel styling (rounded-xl, --shell-border outline); drive, notes, chats, playlists and videos
+	// are user-resizable (useResizableSidebar) and render a trailing drag-handle sibling — settings,
+	// contacts and sync stay fixed at w-52.
 	const { t } = useTranslation("common")
 	const router = useRouter()
 	const pathname = useRouterState({ select: state => state.location.pathname })

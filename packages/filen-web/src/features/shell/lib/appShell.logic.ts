@@ -5,7 +5,7 @@ export function pathIsUnder(pathname: string, root: string): boolean {
 	return pathname === root || pathname.startsWith(`${root}/`)
 }
 
-export type SidebarKind = "chats" | "notes" | "settings" | "contacts" | "playlists" | "videos" | "drive"
+export type SidebarKind = "chats" | "notes" | "settings" | "contacts" | "playlists" | "videos" | "sync" | "drive"
 
 // The drive panel is the app's PERSISTENT navigation, not a drive-only accessory: every route without
 // a contextual sidebar of its own (/transfers, /photos, and every drive variant — /recents,
@@ -36,6 +36,10 @@ export function resolveSidebarKind(pathname: string): SidebarKind {
 		return "videos"
 	}
 
+	if (pathIsUnder(pathname, "/sync")) {
+		return "sync"
+	}
+
 	return "drive"
 }
 
@@ -48,5 +52,6 @@ export const SIDEBAR_LABEL_KEY: Record<SidebarKind, CommonKey> = {
 	contacts: "moduleContacts",
 	playlists: "modulePlaylists",
 	videos: "moduleVideos",
+	sync: "moduleSync",
 	drive: "moduleDrive"
 }

@@ -17,6 +17,7 @@ import {
 	LogOutIcon,
 	UserIcon,
 	CircleHelpIcon,
+	FolderSyncIcon,
 	type LucideIcon
 } from "lucide-react"
 import { formatBytesPerSecond } from "@filen/shared"
@@ -32,7 +33,13 @@ import { useHasActiveTransfers, useSpeedSampleAging, useTransfersAggregate } fro
 import { shouldShowTransfersAggregate } from "@/features/transfers/screens/transfers.logic"
 import { Logo } from "@/features/shell/components/logo"
 import { useRailReorder } from "@/features/shell/hooks/useRailReorder"
-import { DEFAULT_RAIL_ORDER, railEntryActive, type RailEntryId } from "@/features/shell/lib/railOrder.logic"
+import {
+	DEFAULT_RAIL_ORDER,
+	mergeRailOrder,
+	railEntryActive,
+	visibleRailOrder,
+	type RailEntryId
+} from "@/features/shell/lib/railOrder.logic"
 import { saveRailOrder, useRailOrderQuery } from "@/features/shell/queries/railOrder"
 import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
@@ -63,6 +70,9 @@ import { Kbd } from "@/lib/keymap/kbd"
 // state entirely. Reused by every real section entry (Drive, Contacts, Transfers) so they stay
 // visually identical.
 const RAIL_HOLDS_TRAFFIC_LIGHTS = desktopPlatform() === "darwin"
+
+// The bridge never appears or disappears mid-session.
+const IS_DESKTOP = desktopBridge() !== undefined
 
 function railItemClass(active: boolean): string {
 	return cn(
@@ -328,6 +338,21 @@ function TransfersEntry({ active, reordering }: RailEntryProps) {
 	)
 }
 
+// Desktop app only: visibleRailOrder leaves it out of a browser's rail.
+function SyncEntry({ active, reordering }: RailEntryProps) {
+	const { t } = useTranslation("common")
+
+	return (
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("moduleSync")}
+			icon={FolderSyncIcon}
+			linkOptions={{ to: "/sync" }}
+		/>
+	)
+}
+
 // Previously playlists only lived inside the now-playing popover's Playlists tab, unreachable without a
 // playing queue — this entry (plus nowPlayingPanel.tsx dropping that tab) fixes that reachability gap.
 function PlaylistsEntry({ active, reordering }: RailEntryProps) {
@@ -474,6 +499,7 @@ const RAIL_ENTRIES: Record<RailEntryId, (props: RailEntryProps) => ReactElement>
 	photos: PhotosEntry,
 	videos: VideosEntry,
 	transfers: TransfersEntry,
+	sync: SyncEntry,
 	notes: NotesEntry,
 	chats: ChatsEntry,
 	playlists: PlaylistsEntry,
@@ -506,8 +532,11 @@ function useNavigateAction(id: string, to: "/settings/account" | "/transfers" | 
 export function IconRail() {
 	const { t } = useTranslation()
 	const pathname = useRouterState({ select: state => state.location.pathname })
-	const order = useRailOrderQuery().data ?? DEFAULT_RAIL_ORDER
-	const { slotProps } = useRailReorder(order, saveRailOrder)
+	const fullOrder = useRailOrderQuery().data ?? DEFAULT_RAIL_ORDER
+	const order = visibleRailOrder(fullOrder, { desktop: IS_DESKTOP })
+	const { slotProps } = useRailReorder(order, next => {
+		saveRailOrder(mergeRailOrder(fullOrder, next))
+	})
 
 	useNavigateAction("app.openSettings", "/settings/account")
 	useNavigateAction("app.openTransfers", "/transfers")

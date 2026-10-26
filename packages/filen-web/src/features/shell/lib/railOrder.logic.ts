@@ -1,11 +1,26 @@
 import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
 
 // The icon rail's reorderable links. The logo above them and the help/account footer below stay put.
-export const RAIL_ENTRY_IDS = ["drive", "photos", "videos", "transfers", "notes", "chats", "playlists", "contacts", "settings"] as const
+export const RAIL_ENTRY_IDS = [
+	"drive",
+	"photos",
+	"videos",
+	"transfers",
+	"sync",
+	"notes",
+	"chats",
+	"playlists",
+	"contacts",
+	"settings"
+] as const
 
 export type RailEntryId = (typeof RAIL_ENTRY_IDS)[number]
 
 export const DEFAULT_RAIL_ORDER: readonly RailEntryId[] = RAIL_ENTRY_IDS
+
+// Entries only the desktop app can serve. The stored order still holds them in a browser, so a reorder
+// there never loses their slot for a later desktop session on the same origin.
+const DESKTOP_ONLY = new Set<RailEntryId>(["sync"])
 
 const KNOWN = new Set<string>(RAIL_ENTRY_IDS)
 
@@ -54,6 +69,32 @@ export function normalizeRailOrder(stored: readonly string[] | null): RailEntryI
 	return order
 }
 
+// The entries this runtime renders, in the stored order.
+export function visibleRailOrder(order: readonly RailEntryId[], runtime: { desktop: boolean }): RailEntryId[] {
+	return runtime.desktop ? [...order] : order.filter(id => !DESKTOP_ONLY.has(id))
+}
+
+// The full stored order after the visible entries were reordered to `visibleNext`: every hidden entry
+// keeps its slot and the visible ones fill the others in their new order.
+export function mergeRailOrder(full: readonly RailEntryId[], visibleNext: readonly RailEntryId[]): RailEntryId[] {
+	const visible = new Set(visibleNext)
+	const merged: RailEntryId[] = []
+	let next = 0
+
+	for (const id of full) {
+		if (!visible.has(id)) {
+			merged.push(id)
+
+			continue
+		}
+
+		merged.push(visibleNext[next] ?? id)
+		next += 1
+	}
+
+	return merged
+}
+
 // `order` with the entry at `from` moved to `to`, the others keeping their relative order.
 export function moveRailEntry(order: readonly RailEntryId[], from: number, to: number): RailEntryId[] {
 	const next = [...order]
@@ -92,7 +133,7 @@ export function railShift(index: number, from: number, to: number, pitch: number
 	return 0
 }
 
-// Whether `pathname` is inside the section an entry links to. Drive, Videos, Notes, Chats and Settings nest
+// Whether `pathname` is inside the section an entry links to. Drive, Videos, Sync, Notes, Chats and Settings nest
 // deeper routes under their root; the others are single pages.
 export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 	switch (id) {
@@ -110,6 +151,8 @@ export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 			return pathIsUnder(pathname, "/videos")
 		case "transfers":
 			return pathname === "/transfers"
+		case "sync":
+			return pathIsUnder(pathname, "/sync")
 		case "playlists":
 			return pathname === "/playlists"
 		case "contacts":

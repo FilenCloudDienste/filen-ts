@@ -92,6 +92,8 @@ export const common = {
 	modulePhotos: "Photos",
 	/** Videos module — icon rail tooltip/accessible label, the Videos sidebar title and its screens' heading */
 	moduleVideos: "Videos",
+	/** Sync module (desktop app only) — icon rail tooltip/accessible label and the Sync sidebar title */
+	moduleSync: "Sync",
 	// Account menu
 	/** Account menu — trigger's accessible label and the dropdown's heading */
 	account: "Account",
