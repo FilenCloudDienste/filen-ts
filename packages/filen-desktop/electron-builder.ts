@@ -79,6 +79,8 @@ const config: Configuration = {
 			{ target: "zip", arch: archs }
 		],
 		category: "public.app-category.productivity",
+		// An Icon Composer bundle; building it needs Xcode 26's actool.
+		icon: "build/icons/mac/icon.icon",
 		darkModeSupport: true,
 		minimumSystemVersion: macMinimum.macos,
 		hardenedRuntime: true,
@@ -98,6 +100,7 @@ const config: Configuration = {
 			{ target: "nsis", arch: archs },
 			{ target: "zip", arch: archs }
 		],
+		icon: "build/icons/win/icon.ico",
 		azureSignOptions
 	},
 	nsis: {
@@ -121,6 +124,7 @@ const config: Configuration = {
 			{ target: "zip", arch: archs }
 		],
 		executableName: "Filen",
+		icon: "build/icons/png",
 		// The .desktop file follows package.json desktopName so it matches Electron's app_id / WM_CLASS.
 		syncDesktopName: true,
 		maintainer: publisher,
