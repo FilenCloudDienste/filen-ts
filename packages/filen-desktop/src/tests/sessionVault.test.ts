@@ -2,15 +2,8 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-	createSessionVault,
-	isSessionBlob,
-	SESSION_BLOB_MAX_LENGTH,
-	vaultFile,
-	vaultMode,
-	type VaultCipher,
-	type VaultFile
-} from "../main/sessionVault.ts"
+import { createSessionVault, isSessionBlob, SESSION_BLOB_MAX_LENGTH, vaultMode, type VaultCipher } from "../main/sessionVault.ts"
+import { atomicFile, type AtomicFile } from "../main/atomicFile.ts"
 
 const BLOB = JSON.stringify({
 	email: "user@example.com",
@@ -42,7 +35,7 @@ function fakeCipher(): VaultCipher & { shouldReEncrypt: boolean; failDecrypt: bo
 	return cipher
 }
 
-function memoryFile(initial: Buffer | null = null): VaultFile & { data: Buffer | null; writes: number } {
+function memoryFile(initial: Buffer | null = null): AtomicFile & { data: Buffer | null; writes: number } {
 	const file = {
 		data: initial,
 		writes: 0,
@@ -221,7 +214,7 @@ describe("createSessionVault", () => {
 	})
 })
 
-describe("vaultFile", () => {
+describe("atomicFile", () => {
 	let directory: string
 
 	beforeEach(async () => {
@@ -234,7 +227,7 @@ describe("vaultFile", () => {
 
 	it("reads null when missing, writes atomically with owner-only permissions, and removes idempotently", async () => {
 		const target = path.join(directory, "session.vault")
-		const file = vaultFile(target)
+		const file = atomicFile(target)
 
 		await expect(file.read()).resolves.toBeNull()
 

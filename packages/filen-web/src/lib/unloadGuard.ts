@@ -1,3 +1,5 @@
+import { desktopBridge } from "@/lib/desktop"
+
 // Navigations the app starts on purpose — a service-worker download (a plain navigation the SW turns
 // into a file save without leaving the page) and the reloads that end a session — must not trip the
 // leave-page prompt that guards running transfers. Consumed by the first prompt it covers and bounded
@@ -30,13 +32,19 @@ export function blockUnloadUnlessAllowed(event: Pick<BeforeUnloadEvent, "prevent
 
 let holds = 0
 
+// The desktop shell keeps a hidden window's page alive and confirms quitting while anything holds (D14).
+function setHolds(count: number): void {
+	holds = count
+	desktopBridge()?.app.setUnloadHolds(count)
+}
+
 // Arms the leave-page prompt until the returned release is called. Every reason to keep the tab (running
 // transfers, a dirty editor) takes a hold on this ONE listener, never its own: an allowance is consumed by
 // the first listener that asks, so a second listener would still prompt on an allowed download.
 export function holdUnload(): () => void {
 	let released = false
 
-	holds += 1
+	setHolds(holds + 1)
 
 	if (holds === 1) {
 		window.addEventListener("beforeunload", blockUnloadUnlessAllowed)
@@ -48,7 +56,7 @@ export function holdUnload(): () => void {
 		}
 
 		released = true
-		holds -= 1
+		setHolds(holds - 1)
 
 		if (holds === 0) {
 			window.removeEventListener("beforeunload", blockUnloadUnlessAllowed)

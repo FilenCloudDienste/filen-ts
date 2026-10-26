@@ -51,6 +51,8 @@ export const contacts = {
 	// ── Section groups ───────────────────────────────────────────────────────
 	/** Contacts page — header of the highlighted incoming-requests panel atop the "All" view, singular */
 	contactsRequestsCalloutTitle_one: "{{count}} contact request",
+	/** Desktop app — title of the OS notification for a new incoming contact request; the body is the sender's name */
+	contactsRequestNotificationTitle: "New contact request",
 	/** Contacts page — header of the highlighted incoming-requests panel atop the "All" view, plural */
 	contactsRequestsCalloutTitle_other: "{{count}} contact requests",
 	/** Contacts page — group heading in the "All" view; {{section}} = the section's own header label (contactsSectionPending/Contacts/Blocked), {{count}} = rows in it */

@@ -40,6 +40,7 @@ import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/a
 import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced'
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
 import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
+import { Route as AppSettingsDesktopRouteImport } from './routes/_app/settings/desktop'
 import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
 import { Route as AppSettingsKeyboardRouteImport } from './routes/_app/settings/keyboard'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
@@ -208,6 +209,11 @@ const AppSettingsBillingRoute = AppSettingsBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
+const AppSettingsDesktopRoute = AppSettingsDesktopRouteImport.update({
+  id: '/desktop',
+  path: '/desktop',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppSettingsEventsRoute = AppSettingsEventsRouteImport.update({
   id: '/events',
   path: '/events',
@@ -302,6 +308,7 @@ export interface FileRoutesByFullPath {
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/billing': typeof AppSettingsBillingRoute
+  '/settings/desktop': typeof AppSettingsDesktopRoute
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/security': typeof AppSettingsSecurityRoute
@@ -343,6 +350,7 @@ export interface FileRoutesByTo {
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
   '/settings/billing': typeof AppSettingsBillingRoute
+  '/settings/desktop': typeof AppSettingsDesktopRoute
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/security': typeof AppSettingsSecurityRoute
@@ -390,6 +398,7 @@ export interface FileRoutesById {
   '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
   '/_app/settings/billing': typeof AppSettingsBillingRoute
+  '/_app/settings/desktop': typeof AppSettingsDesktopRoute
   '/_app/settings/events': typeof AppSettingsEventsRoute
   '/_app/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
@@ -437,6 +446,7 @@ export interface FileRouteTypes {
     | '/settings/advanced'
     | '/settings/appearance'
     | '/settings/billing'
+    | '/settings/desktop'
     | '/settings/events'
     | '/settings/keyboard'
     | '/settings/security'
@@ -478,6 +488,7 @@ export interface FileRouteTypes {
     | '/settings/advanced'
     | '/settings/appearance'
     | '/settings/billing'
+    | '/settings/desktop'
     | '/settings/events'
     | '/settings/keyboard'
     | '/settings/security'
@@ -524,6 +535,7 @@ export interface FileRouteTypes {
     | '/_app/settings/advanced'
     | '/_app/settings/appearance'
     | '/_app/settings/billing'
+    | '/_app/settings/desktop'
     | '/_app/settings/events'
     | '/_app/settings/keyboard'
     | '/_app/settings/security'
@@ -773,6 +785,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsBillingRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
+    '/_app/settings/desktop': {
+      id: '/_app/settings/desktop'
+      path: '/desktop'
+      fullPath: '/settings/desktop'
+      preLoaderRoute: typeof AppSettingsDesktopRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/settings/events': {
       id: '/_app/settings/events'
       path: '/events'
@@ -872,6 +891,7 @@ interface AppSettingsRouteRouteChildren {
   AppSettingsAdvancedRoute: typeof AppSettingsAdvancedRoute
   AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
   AppSettingsBillingRoute: typeof AppSettingsBillingRoute
+  AppSettingsDesktopRoute: typeof AppSettingsDesktopRoute
   AppSettingsEventsRoute: typeof AppSettingsEventsRoute
   AppSettingsKeyboardRoute: typeof AppSettingsKeyboardRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
@@ -883,6 +903,7 @@ const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsAdvancedRoute: AppSettingsAdvancedRoute,
   AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
   AppSettingsBillingRoute: AppSettingsBillingRoute,
+  AppSettingsDesktopRoute: AppSettingsDesktopRoute,
   AppSettingsEventsRoute: AppSettingsEventsRoute,
   AppSettingsKeyboardRoute: AppSettingsKeyboardRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,

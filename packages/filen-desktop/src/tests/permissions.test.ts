@@ -7,13 +7,15 @@ describe("isPermissionAllowed", () => {
 	it("allows what the web app uses, from the app", () => {
 		expect(isPermissionAllowed("clipboard-sanitized-write", "filen://app/drive", APP)).toBe(true)
 		expect(isPermissionAllowed("fileSystem", "filen://app/", APP)).toBe(true)
+		expect(isPermissionAllowed("notifications", "filen://app/", APP)).toBe(true)
 	})
 
-	it.each(["media", "display-capture", "geolocation", "midi", "openExternal", "notifications"])("denies %s", permission => {
+	it.each(["media", "display-capture", "geolocation", "midi", "openExternal"])("denies %s", permission => {
 		expect(isPermissionAllowed(permission, "filen://app/", APP)).toBe(false)
 	})
 
 	it("denies any other origin", () => {
 		expect(isPermissionAllowed("fullscreen", "https://example.com/", APP)).toBe(false)
+		expect(isPermissionAllowed("notifications", "https://example.com/", APP)).toBe(false)
 	})
 })

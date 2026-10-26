@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron"
-import type { DesktopBridge, DesktopPlatform, WindowState } from "@filen/shared/desktop"
-import { CHANNELS, type SessionRead } from "../shared/channels.ts"
+import type { DesktopBridge, DesktopMenuAction, DesktopPlatform, WindowState } from "@filen/shared/desktop"
+import { CHANNELS, type SessionRead, VERSION_ARG_PREFIX } from "../shared/channels.ts"
 
-// The sandboxed preload's process object carries the platform but no Node typings.
-declare const process: { readonly platform: DesktopPlatform }
+// The sandboxed preload's process object carries the platform and argv but no Node typings.
+declare const process: { readonly platform: DesktopPlatform; readonly argv: readonly string[] }
+
+const version = process.argv.find(arg => arg.startsWith(VERSION_ARG_PREFIX))?.slice(VERSION_ARG_PREFIX.length) ?? ""
 
 // Main sends the state once the page loads, possibly before the page subscribes, so the latest one is kept.
 let windowState: WindowState | null = null
@@ -14,6 +16,14 @@ ipcRenderer.on(CHANNELS.windowState, (_event, state: WindowState) => {
 
 	for (const listener of windowStateListeners) {
 		listener(state)
+	}
+})
+
+const menuActionListeners = new Set<(action: DesktopMenuAction) => void>()
+
+ipcRenderer.on(CHANNELS.menuAction, (_event, action: DesktopMenuAction) => {
+	for (const listener of menuActionListeners) {
+		listener(action)
 	}
 })
 
@@ -36,6 +46,36 @@ const bridge: DesktopBridge = {
 			await ipcRenderer.invoke(CHANNELS.sessionClear)
 		}
 	},
+	prefs: {
+		get: () => ipcRenderer.invoke(CHANNELS.prefsGet),
+		set: patch => ipcRenderer.invoke(CHANNELS.prefsSet, patch)
+	},
+	app: {
+		version,
+		setBadge: count => {
+			ipcRenderer.send(CHANNELS.setBadge, count)
+		},
+		setUnloadHolds: count => {
+			ipcRenderer.send(CHANNELS.setUnloadHolds, count)
+		},
+		setAudioPlaying: playing => {
+			ipcRenderer.send(CHANNELS.setAudioPlaying, playing)
+		},
+		setMenuShortcuts: combos => {
+			ipcRenderer.send(CHANNELS.setMenuShortcuts, combos)
+		},
+		onMenuAction: callback => {
+			menuActionListeners.add(callback)
+
+			if (menuActionListeners.size === 1) {
+				ipcRenderer.send(CHANNELS.menuReady)
+			}
+
+			return () => {
+				menuActionListeners.delete(callback)
+			}
+		}
+	},
 	setTitleBarColors: colors => {
 		ipcRenderer.send(CHANNELS.setTitleBarColors, colors)
 	},
@@ -49,6 +89,9 @@ const bridge: DesktopBridge = {
 		return () => {
 			windowStateListeners.delete(callback)
 		}
+	},
+	showWindow: () => {
+		ipcRenderer.send(CHANNELS.showWindow)
 	}
 }
 

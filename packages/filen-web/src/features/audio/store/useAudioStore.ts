@@ -6,6 +6,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 import { LOOP_MODES, type AudioPlaybackStatus, type LoopMode, type QueueTrack } from "@/features/audio/store/audioQueue"
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
+import { desktopBridge } from "@/lib/desktop"
 
 // The reactive surface the audio module drives its UI through — the zustand mirror of the engine
 // singleton, following useTransfersStore's conventions exactly: an in-memory-only store (the queue is
@@ -157,6 +158,19 @@ function persistPrefs(): Promise<void> {
 	const { shuffleEnabled, loopMode } = useAudioStore.getState()
 
 	return kvSetJsonQuiet(PREFS_KV_KEY, { shuffleEnabled, loopMode }, "audio", "audio prefs")
+}
+
+// The desktop shell keeps a hidden window's page alive while audio plays or is about to (D14).
+const desktop = desktopBridge()
+
+if (desktop !== undefined) {
+	const audible = (status: AudioPlaybackStatus) => status === "playing" || status === "loading"
+
+	useAudioStore.subscribe((state, previous) => {
+		if (audible(state.status) !== audible(previous.status)) {
+			desktop.app.setAudioPlaying(audible(state.status))
+		}
+	})
 }
 
 // Now-playing selector for the mini-player / now-playing bar — a stable-identity slice of the transport

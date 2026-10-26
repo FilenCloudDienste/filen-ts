@@ -63,7 +63,7 @@ type ChatEventInner =
 	| { type: "conversationParticipantNew"; chat: UuidStr; participant: ChatParticipant }
 	| { type: "conversationParticipantLeft"; uuid: UuidStr; userId: bigint }
 
-interface TypedChatSocketEvent {
+export interface TypedChatSocketEvent {
 	inner: ChatEventInner
 	chatMessageId: bigint
 }

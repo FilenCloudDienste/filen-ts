@@ -23,6 +23,8 @@ import { useDismissBootSplash } from "@/lib/bootSplash"
 import { AssistantDrawer, AssistantSidePanel } from "@/features/assistant/components/assistantPanel"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import { AssistantNavigationBridge } from "@/features/assistant/tools/navigationBridge"
+import { DesktopHost } from "@/features/desktop/components/desktopHost"
+import { desktopBridge } from "@/lib/desktop"
 
 const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 	chats: ChatsSidebar,
@@ -33,6 +35,9 @@ const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 	videos: VideosSidebar,
 	drive: DriveSidebar
 }
+
+// The bridge never appears or disappears mid-session.
+const IS_DESKTOP = desktopBridge() !== undefined
 
 // Padded canvas holding the shell zones: a bare icon rail sitting directly on the canvas, then floating
 // rounded panels — the contextual module sidebar, the content card and, when open, the assistant panel on
@@ -116,6 +121,7 @@ export function AppShell() {
 			{/* The assistant's navigation tools act through the router from here, whether or not the panel is
 			    open. Renders nothing. */}
 			<AssistantNavigationBridge />
+			{IS_DESKTOP ? <DesktopHost /> : null}
 			<div className="h-[env(titlebar-area-height,0px)] shrink-0 app-region-drag" />
 			{/* A sibling of the row, never its wrapper (see sidebarDrawer.tsx); the panel goes to exactly one
 			    of the two slots. */}

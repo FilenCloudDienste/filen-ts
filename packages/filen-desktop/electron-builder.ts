@@ -52,7 +52,10 @@ const config: Configuration = {
 	},
 	// Runtime dependencies are empty: esbuild bundles main and preload into dist.
 	files: ["dist/**/*", "!dist/**/*.map", "package.json"],
-	extraResources: [{ from: webDist, to: "web" }],
+	extraResources: [
+		{ from: webDist, to: "web" },
+		{ from: "build/tray", to: "tray" }
+	],
 	asar: true,
 	npmRebuild: false,
 	nodeGypRebuild: false,

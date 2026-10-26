@@ -1,6 +1,7 @@
 import type { DependencyList, RefCallback } from "react"
 import { useHotkeys, type HotkeyCallback, type Options } from "react-hotkeys-hook"
 import { isRecordingCombo, useComboFor } from "@/lib/keymap/registry"
+import { useMenuAction } from "@/lib/keymap/desktopMenu"
 
 // The single predicate every registered action's key handling is gated on. Exported so it can be
 // unit-tested directly; the narrow parameter type is all `event.repeat` needs and keeps it
@@ -82,6 +83,9 @@ export function useAction(
 	deps: DependencyList = []
 ): RefCallback<HTMLElement | null> {
 	const combo = useComboFor(id)
+
+	// The macOS desktop menu runs the same handler.
+	useMenuAction(id, handler)
 
 	return useHotkeys<HTMLElement>(combo, handler, { ...DEFAULT_OPTIONS, ...options }, [combo, ...deps])
 }

@@ -30,10 +30,47 @@ export interface DesktopSessionVault {
 	clear(): Promise<void>
 }
 
+// Shell preferences, kept by main in userData. `launchAtLogin` starts the app hidden; `notifications` also keeps the
+// hidden window's page alive, since it owns the chat socket the notifications come from.
+export interface DesktopPrefs {
+	minimizeToTray: boolean
+	startMinimized: boolean
+	launchAtLogin: boolean
+	notifications: boolean
+}
+
+export interface DesktopPrefsStore {
+	get(): Promise<DesktopPrefs>
+	// Resolves with the prefs now in effect.
+	set(patch: Partial<DesktopPrefs>): Promise<DesktopPrefs>
+}
+
+// The web keymap actions the macOS menu offers. Main shows each with the combo the web reports and sends the id back
+// when the item is clicked; the web stays the only key dispatcher.
+export type DesktopMenuAction = "app.openSettings" | "app.openShortcuts" | "app.toggleTheme" | "app.toggleAssistant" | "app.openTransfers"
+
+export interface DesktopApp {
+	readonly version: string
+	// Unread chat messages, shown on the dock / taskbar.
+	setBadge(count: number): void
+	// What must not be dropped (lib/unloadGuard.ts holds) and audio playback: either keeps a hidden window's page alive,
+	// and holds make quitting ask first.
+	setUnloadHolds(count: number): void
+	setAudioPlaying(playing: boolean): void
+	// The combo in effect per action ("" when unassigned), in the web keymap's notation.
+	setMenuShortcuts(combos: Partial<Record<DesktopMenuAction, string>>): void
+	// Subscribing tells main the page can take menu actions, so it delivers the ones clicked while the page loaded.
+	onMenuAction(callback: (action: DesktopMenuAction) => void): () => void
+}
+
 export interface DesktopBridge {
 	readonly platform: DesktopPlatform
 	readonly session: DesktopSessionVault
+	readonly prefs: DesktopPrefsStore
+	readonly app: DesktopApp
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
 	onWindowState(callback: (state: WindowState) => void): () => void
+	// Shows and focuses the window (a clicked notification).
+	showWindow(): void
 }

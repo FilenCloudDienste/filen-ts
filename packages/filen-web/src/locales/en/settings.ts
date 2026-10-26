@@ -21,6 +21,8 @@ export const settings = {
 	settingsSectionBilling: "Billing",
 	/** Settings sidebar — Advanced section nav label and that section's page heading */
 	settingsSectionAdvanced: "Advanced",
+	/** Settings sidebar — Desktop section nav label and that section's page heading (desktop app only) */
+	settingsSectionDesktop: "Desktop",
 	/** Account, Billing and Security pages — error-state title when the account query (getUserInfo) fails to load; paired with common:tryAgain */
 	settingsAccountLoadError: "Couldn't load your account",
 
@@ -280,6 +282,31 @@ export const settings = {
 	settingsLogsRefresh: "Refresh",
 	settingsLogsExport: "Export logs",
 	settingsLogsExportSuccess: "Your logs have started downloading.",
+
+	// ── Desktop (desktop app only) ─────────────────────────────────────────────
+	/** Desktop settings — group title over the startup rows */
+	settingsDesktopStartupTitle: "Startup",
+	/** Desktop settings — toggle: start the app when the user signs in to the computer */
+	settingsDesktopLaunchAtLogin: "Open at login",
+	settingsDesktopLaunchAtLoginDescription: "Start Filen in the background when you sign in to your computer.",
+	/** Desktop settings — toggle: start without opening a window */
+	settingsDesktopStartMinimized: "Start minimized",
+	settingsDesktopStartMinimizedDescription: "Start Filen without opening its window. Open it from the tray icon.",
+	/** Desktop settings — group title over the window rows (Windows and Linux only) */
+	settingsDesktopWindowTitle: "Window",
+	/** Desktop settings — toggle: closing the window keeps the app running in the system tray (Windows and Linux) */
+	settingsDesktopMinimizeToTray: "Keep running in the tray",
+	settingsDesktopMinimizeToTrayDescription: "Closing the window keeps Filen running in the tray instead of quitting.",
+	/** Desktop settings — group title over the notification row */
+	settingsDesktopNotificationsTitle: "Notifications",
+	/** Desktop settings — toggle: OS notifications for new chat messages and contact requests */
+	settingsDesktopNotifications: "Chat notifications",
+	settingsDesktopNotificationsDescription:
+		"Notify you of new messages and contact requests while Filen is in the background. Filen stays loaded in the background to receive them.",
+	/** Desktop settings — toast when a desktop setting could not be saved */
+	settingsDesktopSaveFailed: "Couldn't save this setting",
+	/** Desktop settings — About group row label next to the installed app version */
+	settingsDesktopVersion: "Version",
 
 	// ── Advanced: about / legal ────────────────────────────────────────────────
 	settingsAboutTitle: "About",

@@ -2,10 +2,22 @@
 export const CHANNELS = {
 	setTitleBarColors: "window:set-title-bar-colors",
 	windowState: "window:state",
+	showWindow: "window:show",
 	sessionGet: "session:get",
 	sessionSet: "session:set",
-	sessionClear: "session:clear"
+	sessionClear: "session:clear",
+	prefsGet: "prefs:get",
+	prefsSet: "prefs:set",
+	setBadge: "app:set-badge",
+	setUnloadHolds: "app:set-unload-holds",
+	setAudioPlaying: "app:set-audio-playing",
+	setMenuShortcuts: "app:set-menu-shortcuts",
+	menuReady: "app:menu-ready",
+	menuAction: "app:menu-action"
 } as const
+
+// The preload reads the app version from this argument, so the page gets it without a round trip.
+export const VERSION_ARG_PREFIX = "--filen-app-version="
 
 // What `session:get` answers. An error thrown by an IPC handler reaches the preload only as a wrapped message, so
 // the unreadable case travels as data and the preload turns it into the rejection the bridge documents.

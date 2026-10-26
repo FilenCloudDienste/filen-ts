@@ -1,7 +1,7 @@
-import { open, readFile, rename, rm } from "node:fs/promises"
 import { type } from "arktype"
 import { sessionEnvelopeSchema } from "@filen/shared/session"
 import type { SessionRead } from "../shared/channels.ts"
+import { errorCode, type AtomicFile } from "./atomicFile.ts"
 
 // A real session is a few KB (an RSA private key plus the master-key chain, ~65 bytes a key); this leaves room
 // for thousands of keys and only stops an unbounded payload.
@@ -32,52 +32,10 @@ export interface VaultCipher {
 	decrypt(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
-export interface VaultFile {
-	// null when the file does not exist; any other read error throws.
-	read(): Promise<Buffer | null>
-	write(data: Buffer): Promise<void>
-	remove(): Promise<void>
-}
-
 export interface SessionVault {
 	get(): Promise<SessionRead>
 	set(blob: string): Promise<void>
 	clear(): Promise<void>
-}
-
-function errorCode(error: unknown): string {
-	return error instanceof Error ? ((error as NodeJS.ErrnoException).code ?? error.name) : "unknown"
-}
-
-// The file is written to a sibling and renamed over the old one, so a crash mid-write never leaves half a vault.
-export function vaultFile(file: string): VaultFile {
-	return {
-		read: async () => {
-			try {
-				return await readFile(file)
-			} catch (error) {
-				if (errorCode(error) === "ENOENT") {
-					return null
-				}
-
-				throw error
-			}
-		},
-		write: async data => {
-			const temp = `${file}.tmp`
-			const handle = await open(temp, "w", 0o600)
-
-			try {
-				await handle.writeFile(data)
-				await handle.sync()
-			} finally {
-				await handle.close()
-			}
-
-			await rename(temp, file)
-		},
-		remove: () => rm(file, { force: true })
-	}
 }
 
 // `cipher` resolves once, lazily (safeStorage only works after app ready); null keeps the session in memory only.
@@ -85,7 +43,7 @@ export function vaultFile(file: string): VaultFile {
 // cached: it is read once per launch and changes only through this vault. Errors never carry the session.
 export function createSessionVault(
 	cipher: () => Promise<VaultCipher | null>,
-	file: VaultFile,
+	file: AtomicFile,
 	warn: (message: string) => void
 ): SessionVault {
 	let resolvedCipher: Promise<VaultCipher | null> | null = null

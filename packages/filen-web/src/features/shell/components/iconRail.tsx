@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type ReactNode } from "react"
+import { useEffect, useState, type ReactElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useNavigate, useRouterState, type RegisteredRouter, type ValidateLinkOptions } from "@tanstack/react-router"
 import {
@@ -38,7 +38,7 @@ import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
 import { RailProgressBar, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
 import { useTheme } from "@/providers/themeProvider"
-import { desktopPlatform } from "@/lib/desktop"
+import { desktopBridge, desktopPlatform } from "@/lib/desktop"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -429,6 +429,18 @@ function ChatsEntry({ active, reordering }: RailEntryProps) {
 	const { t } = useTranslation()
 	const currentUserId = useAccountQuery().data?.id
 	const unreadChatsCount = useChatsUnreadCount(currentUserId)
+
+	// The desktop shell shows the same count on the dock / taskbar; leaving the authed shell clears it.
+	useEffect(() => {
+		desktopBridge()?.app.setBadge(unreadChatsCount)
+	}, [unreadChatsCount])
+
+	useEffect(
+		() => () => {
+			desktopBridge()?.app.setBadge(0)
+		},
+		[]
+	)
 
 	return (
 		<RailLink

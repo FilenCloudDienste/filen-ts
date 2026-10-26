@@ -118,6 +118,16 @@ export function useOverrides(): Record<string, string> {
 	return useKeymapStore(state => state.overrides)
 }
 
+// Plain change feed of the override layer, for a non-React consumer (the desktop menu's combos,
+// lib/keymap/desktopMenu.ts).
+export function subscribeOverrides(listener: () => void): () => void {
+	return useKeymapStore.subscribe((state, previous) => {
+		if (state.overrides !== previous.overrides) {
+			listener()
+		}
+	})
+}
+
 // The kv read fires at most once per module lifetime, kicked off by the first `registerAction` call
 // (import order between this module and its first feature consumer is otherwise unspecified). A
 // storage-layer failure must never take keyboard shortcuts down with it, so defaults keep working

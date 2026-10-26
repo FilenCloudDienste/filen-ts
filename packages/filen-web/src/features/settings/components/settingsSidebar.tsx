@@ -1,9 +1,19 @@
 import type { ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { UserIcon, ShieldIcon, SunMoonIcon, KeyboardIcon, HistoryIcon, CreditCardIcon, SlidersHorizontalIcon } from "lucide-react"
+import {
+	UserIcon,
+	ShieldIcon,
+	SunMoonIcon,
+	KeyboardIcon,
+	HistoryIcon,
+	CreditCardIcon,
+	SlidersHorizontalIcon,
+	MonitorIcon
+} from "lucide-react"
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
+import { desktopBridge } from "@/lib/desktop"
 
 type IconType = ComponentType<{ className?: string }>
 
@@ -15,6 +25,7 @@ type SettingsRoute =
 	| "/settings/events"
 	| "/settings/billing"
 	| "/settings/advanced"
+	| "/settings/desktop"
 
 interface SettingsSidebarItem {
 	id: string
@@ -26,13 +37,14 @@ interface SettingsSidebarItem {
 		| "settingsSectionEvents"
 		| "settingsSectionBilling"
 		| "settingsSectionAdvanced"
+		| "settingsSectionDesktop"
 	icon: IconType
 	to: SettingsRoute
 }
 
 // Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
 // Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Events/Billing/
-// Advanced.
+// Advanced, and Desktop in the desktop app only.
 const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
 	{ id: "security", labelKey: "settingsSectionSecurity", icon: ShieldIcon, to: "/settings/security" },
@@ -40,7 +52,10 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "keyboard", labelKey: "settingsSectionKeyboard", icon: KeyboardIcon, to: "/settings/keyboard" },
 	{ id: "events", labelKey: "settingsSectionEvents", icon: HistoryIcon, to: "/settings/events" },
 	{ id: "billing", labelKey: "settingsSectionBilling", icon: CreditCardIcon, to: "/settings/billing" },
-	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" }
+	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" },
+	...(desktopBridge() === undefined
+		? []
+		: [{ id: "desktop", labelKey: "settingsSectionDesktop", icon: MonitorIcon, to: "/settings/desktop" } as const])
 ]
 
 // The shell's settings contextual sidebar: a flat list of section nav links, same w-52

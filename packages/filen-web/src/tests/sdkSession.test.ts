@@ -197,7 +197,22 @@ describe("desktop vault", () => {
 			})
 		}
 
-		desktop.bridge = { platform: "darwin", session: vault, setTitleBarColors: () => undefined, onWindowState: () => () => undefined }
+		desktop.bridge = {
+			platform: "darwin",
+			session: vault,
+			prefs: { get: () => Promise.reject(new Error("unused")), set: () => Promise.reject(new Error("unused")) },
+			app: {
+				version: "4.0.0",
+				setBadge: () => undefined,
+				setUnloadHolds: () => undefined,
+				setAudioPlaying: () => undefined,
+				setMenuShortcuts: () => undefined,
+				onMenuAction: () => () => undefined
+			},
+			setTitleBarColors: () => undefined,
+			onWindowState: () => () => undefined,
+			showWindow: () => undefined
+		}
 
 		return vault
 	}

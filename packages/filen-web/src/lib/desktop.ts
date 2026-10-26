@@ -1,8 +1,9 @@
 import type { DesktopBridge, DesktopPlatform } from "@filen/shared/desktop"
 
 // The one reader of window.desktop. The preload defines it before any page script runs, so it never
-// appears or disappears mid-session and is read once.
-const bridge = window.desktop
+// appears or disappears mid-session and is read once. Modules reporting to the shell (unloadGuard, the
+// audio store, the keymap) also load in DOM-less tests, where there is no window.
+const bridge = typeof window === "undefined" ? undefined : window.desktop
 
 // CSS keys the desktop window chrome off these attributes (index.css), so layouts need no JS for them:
 // data-desktop is the platform, data-window-fullscreen marks native fullscreen (no traffic lights), and
