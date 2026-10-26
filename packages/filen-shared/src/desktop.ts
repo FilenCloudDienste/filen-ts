@@ -3,10 +3,21 @@
 
 export type DesktopPlatform = "darwin" | "win32" | "linux"
 
-// Colours for the window-controls overlay that Windows and Linux draw top-right (CSS colour strings).
+// Window chrome colours (CSS colour strings): the controls overlay Windows and Linux draw top-right, and the border
+// Windows 11 draws around the window.
 export interface TitleBarColors {
 	color: string
 	symbolColor: string
+	border: string
+}
+
+// `drawsBorder`: the OS draws no window border (Windows 10), so the page draws one while the window is neither
+// maximized, fullscreen nor snapped.
+export interface WindowState {
+	maximized: boolean
+	fullScreen: boolean
+	snapped: boolean
+	drawsBorder: boolean
 }
 
 // The SDK session kept by the shell in the OS keychain-backed vault instead of web storage. `blob` is the session as
@@ -23,4 +34,6 @@ export interface DesktopBridge {
 	readonly platform: DesktopPlatform
 	readonly session: DesktopSessionVault
 	setTitleBarColors(colors: TitleBarColors): void
+	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
+	onWindowState(callback: (state: WindowState) => void): () => void
 }

@@ -47,9 +47,21 @@
     --window-inset-corner: var(--window-inset-top);
 }
 
-:root[data-desktop="darwin"]:not(:has(:fullscreen)) {
+:root[data-desktop="darwin"]:not([data-window-fullscreen], :has(:fullscreen)) {
     --window-inset-left: 5rem;
     --window-inset-corner: 2rem;
+}
+
+/* Windows 10 draws no border around a frameless window (Windows 11 and Linux do); lib/desktop.ts sets the
+   attribute only while the window is neither maximized, fullscreen nor snapped. Above every layer, never
+   hit-tested. */
+:root[data-window-border]::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    border: 1px solid var(--shell-border);
+    pointer-events: none;
 }
 
 /* The app's two focus-ring recipes, named once so a call site can never invent a third. `focus-ring`

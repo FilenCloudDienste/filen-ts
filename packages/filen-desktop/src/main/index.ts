@@ -1,14 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, nativeTheme, protocol, safeStorage, session, shell } from "electron"
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import type { DesktopPlatform } from "@filen/shared/desktop"
+import type { DesktopPlatform, WindowState } from "@filen/shared/desktop"
 import { CHANNELS } from "../shared/channels.ts"
 import { parseHeaders } from "./headers.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { registerAppProtocol } from "./serve.ts"
 import { createSessionVault, isSessionBlob, vaultFile, vaultMode, type VaultCipher } from "./sessionVault.ts"
-import { initialColors, windowOptions } from "./window.ts"
+import { drawsOwnBorder, initialColors, windowOptions } from "./window.ts"
 
 const SCHEME = "filen"
 const APP_ORIGIN = `${SCHEME}://app`
@@ -89,6 +89,38 @@ function openExternally(url: string): void {
 	}
 }
 
+const DRAWS_OWN_BORDER = drawsOwnBorder(PLATFORM, process.getSystemVersion())
+
+// The page keys its chrome off this state (the Windows 10 border, the macOS traffic-light inset in fullscreen).
+// Windows has no snap event, so resize re-reads it; unchanged states are not resent.
+function trackWindowState(window: BrowserWindow): void {
+	let sent = ""
+
+	const send = () => {
+		const state: WindowState = {
+			maximized: window.isMaximized(),
+			fullScreen: window.isFullScreen(),
+			snapped: PLATFORM === "win32" && window.snapped,
+			drawsBorder: DRAWS_OWN_BORDER
+		}
+		const serialized = JSON.stringify(state)
+
+		if (serialized !== sent) {
+			sent = serialized
+			window.webContents.send(CHANNELS.windowState, state)
+		}
+	}
+
+	window.webContents.on("dom-ready", () => {
+		sent = ""
+		send()
+	})
+
+	for (const event of ["maximize", "unmaximize", "enter-full-screen", "leave-full-screen", "resize"] as const) {
+		window.on(event as "maximize", send)
+	}
+}
+
 function createWindow(): void {
 	const window = new BrowserWindow(
 		windowOptions(
@@ -98,6 +130,8 @@ function createWindow(): void {
 			!app.isPackaged
 		)
 	)
+
+	trackWindowState(window)
 
 	window.webContents.setWindowOpenHandler(({ url }) => {
 		openExternally(url)
@@ -163,10 +197,19 @@ if (!app.requestSingleInstanceLock()) {
 			colors !== null &&
 			"color" in colors &&
 			"symbolColor" in colors &&
+			"border" in colors &&
 			typeof colors.color === "string" &&
-			typeof colors.symbolColor === "string"
+			typeof colors.symbolColor === "string" &&
+			typeof colors.border === "string"
 		) {
-			BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor })
+			const window = BrowserWindow.fromWebContents(event.sender)
+
+			window?.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor })
+
+			// Windows 11 draws the border in this colour (a no-op on Windows 10, which gets the page's border).
+			if (PLATFORM === "win32") {
+				window?.setAccentColor(colors.border)
+			}
 		}
 	})
 

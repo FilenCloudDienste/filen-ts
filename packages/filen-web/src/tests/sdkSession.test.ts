@@ -197,7 +197,7 @@ describe("desktop vault", () => {
 			})
 		}
 
-		desktop.bridge = { platform: "darwin", session: vault, setTitleBarColors: () => undefined }
+		desktop.bridge = { platform: "darwin", session: vault, setTitleBarColors: () => undefined, onWindowState: () => () => undefined }
 
 		return vault
 	}

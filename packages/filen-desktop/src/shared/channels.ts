@@ -1,6 +1,7 @@
 // IPC channel names shared by main and the preload; the renderer never sees them.
 export const CHANNELS = {
 	setTitleBarColors: "window:set-title-bar-colors",
+	windowState: "window:state",
 	sessionGet: "session:get",
 	sessionSet: "session:set",
 	sessionClear: "session:clear"

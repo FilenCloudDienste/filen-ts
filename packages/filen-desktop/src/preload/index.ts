@@ -1,9 +1,21 @@
 import { contextBridge, ipcRenderer } from "electron"
-import type { DesktopBridge, DesktopPlatform } from "@filen/shared/desktop"
+import type { DesktopBridge, DesktopPlatform, WindowState } from "@filen/shared/desktop"
 import { CHANNELS, type SessionRead } from "../shared/channels.ts"
 
 // The sandboxed preload's process object carries the platform but no Node typings.
 declare const process: { readonly platform: DesktopPlatform }
+
+// Main sends the state once the page loads, possibly before the page subscribes, so the latest one is kept.
+let windowState: WindowState | null = null
+const windowStateListeners = new Set<(state: WindowState) => void>()
+
+ipcRenderer.on(CHANNELS.windowState, (_event, state: WindowState) => {
+	windowState = state
+
+	for (const listener of windowStateListeners) {
+		listener(state)
+	}
+})
 
 const bridge: DesktopBridge = {
 	platform: process.platform,
@@ -26,6 +38,17 @@ const bridge: DesktopBridge = {
 	},
 	setTitleBarColors: colors => {
 		ipcRenderer.send(CHANNELS.setTitleBarColors, colors)
+	},
+	onWindowState: callback => {
+		windowStateListeners.add(callback)
+
+		if (windowState !== null) {
+			callback(windowState)
+		}
+
+		return () => {
+			windowStateListeners.delete(callback)
+		}
 	}
 }
 

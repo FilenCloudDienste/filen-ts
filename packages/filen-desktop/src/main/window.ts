@@ -1,12 +1,18 @@
 import type { BrowserWindowConstructorOptions } from "electron"
 import type { DesktopPlatform, TitleBarColors } from "@filen/shared/desktop"
 
-// filen-web's --canvas and --muted-foreground in rgb, so the window paints the right colour before the page
-// does; the page then keeps the overlay in sync with its theme (syncTitleBarColors).
+// filen-web's --canvas, --muted-foreground and --shell-border (blended over the canvas) in rgb, so the window paints
+// the right colours before the page does; the page then keeps them in sync with its theme (syncTitleBarColors).
 export function initialColors(dark: boolean): TitleBarColors {
 	return dark
-		? { color: "rgb(7, 7, 7)", symbolColor: "rgb(161, 161, 161)" }
-		: { color: "rgb(230, 230, 230)", symbolColor: "rgb(99, 99, 99)" }
+		? { color: "rgb(7, 7, 7)", symbolColor: "rgb(161, 161, 161)", border: "rgb(24, 24, 24)" }
+		: { color: "rgb(230, 230, 230)", symbolColor: "rgb(99, 99, 99)", border: "rgb(202, 202, 202)" }
+}
+
+// Windows 11 (build 22000) rounds and borders frameless windows itself; Windows 10 draws neither, and rounding there
+// would need a transparent window, which loses edge resizing and maximize. So Windows 10 gets a page-drawn border.
+export function drawsOwnBorder(platform: DesktopPlatform, systemVersion: string): boolean {
+	return platform === "win32" && Number(systemVersion.split(".")[2] ?? 0) < 22000
 }
 
 // The web reserves this band through env(titlebar-area-height) on Windows and Linux.
@@ -32,7 +38,8 @@ export function windowOptions(
 		titleBarStyle: "hidden",
 		...(platform === "darwin"
 			? { trafficLightPosition: TRAFFIC_LIGHT_POSITION }
-			: { titleBarOverlay: { ...colors, height: TITLE_BAR_OVERLAY_HEIGHT } }),
+			: { titleBarOverlay: { color: colors.color, symbolColor: colors.symbolColor, height: TITLE_BAR_OVERLAY_HEIGHT } }),
+		...(platform === "win32" ? { accentColor: colors.border } : {}),
 		webPreferences: {
 			preload,
 			sandbox: true,
