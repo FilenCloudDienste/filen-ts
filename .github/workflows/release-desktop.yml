@@ -2,9 +2,9 @@
 # as `filen-desktop@4.0.0`. The tag must match package.json's version.
 #
 # Order: preflight (tag, version, secrets) -> one web build -> signed per-platform builds, each checked against the
-# feed contract -> a draft GitHub release -> the CDN feed, artifacts before manifests -> the published feed read back
-# -> the GitHub release made public. A failure at any step leaves the feed untouched or, after the upload, still
-# serving byte-identical copies of what was checked.
+# feed contract -> real-install and update tests (install-test-desktop.yml) -> a draft GitHub release -> the CDN
+# feed, artifacts before manifests -> the published feed read back -> the GitHub release made public. A failure at
+# any step leaves the feed untouched or, after the upload, still serving byte-identical copies of what was checked.
 #
 # Secrets (names only; values live in the repository settings):
 #   CSC_LINK, CSC_KEY_PASSWORD      Developer ID Application certificate (.p12, base64) of Team 7YTW5D2K7P and its
@@ -360,8 +360,18 @@ jobs:
           retention-days: 7
           compression-level: 0
 
-  publish:
+  # Installs N-1 and 3.0.53 on every platform and architecture and updates them to these exact artifacts through the
+  # apps' own updaters, before any of it is published.
+  install-test:
     needs: [mac, windows, linux]
+    uses: ./.github/workflows/install-test-desktop.yml
+    with:
+      candidate-from-run: true
+      signed: true
+    secrets: inherit
+
+  publish:
+    needs: [mac, windows, linux, install-test]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
