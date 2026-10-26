@@ -217,6 +217,16 @@ describe("performLogout", () => {
 		expect(runLogout).toHaveBeenCalledTimes(1)
 	})
 
+	// Behind the desktop lock nobody can answer the prompt.
+	it("a sign-out that discards unsaved work never asks", async () => {
+		usePreviewUnsavedGuardStore.setState({ dirty: true })
+
+		await expect(performLogout({ forced: true, discardUnsaved: true })).resolves.toBe(true)
+		expect(usePreviewUnsavedGuardStore.getState().logoutRequest).toBeNull()
+		expect(toastWarning).not.toHaveBeenCalled()
+		expect(runLogout).toHaveBeenCalledTimes(1)
+	})
+
 	it("drops every decrypted preview buffer held for pager revisits", async () => {
 		await loadPreviewBytes("authed", "file-uuid", 3, () => Promise.resolve(new Uint8Array([1, 2, 3])))
 		expect(getPreviewBytes("authed", "file-uuid")).toBeDefined()

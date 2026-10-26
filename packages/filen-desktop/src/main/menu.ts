@@ -91,12 +91,14 @@ export interface MenuOptions {
 	shortcuts: MenuShortcuts
 	devTools: boolean
 	onAction: (action: DesktopMenuAction) => void
+	// Offered only while a PIN is set and the app is unlocked.
+	onLock: (() => void) | null
 	onWebsite: () => void
 }
 
 // The macOS application menu. Edit and window management use roles; web actions show the web's combo without
 // registering it, so the page's own key handling stays the only dispatcher.
-export function menuTemplate({ shortcuts, devTools, onAction, onWebsite }: MenuOptions): MenuItemConstructorOptions[] {
+export function menuTemplate({ shortcuts, devTools, onAction, onLock, onWebsite }: MenuOptions): MenuItemConstructorOptions[] {
 	const action = (id: DesktopMenuAction): MenuItemConstructorOptions => {
 		const accelerator = toAccelerator(shortcuts[id] ?? "")
 
@@ -116,6 +118,7 @@ export function menuTemplate({ shortcuts, devTools, onAction, onWebsite }: MenuO
 				{ role: "about" },
 				{ type: "separator" },
 				action("app.openSettings"),
+				...(onLock === null ? [] : ([{ label: "Lock Filen", click: onLock }] as const)),
 				{ type: "separator" },
 				{ role: "services" },
 				{ type: "separator" },

@@ -104,7 +104,10 @@ const config: Configuration = {
 			{ target: "zip", arch: archs }
 		],
 		icon: "build/icons/win/icon.ico",
-		azureSignOptions
+		azureSignOptions,
+		// The default, kept explicit: app-update.yml then names azureSignOptions.publisherName, and electron-updater
+		// installs only an update signed by that publisher.
+		verifyUpdateCodeSignature: true
 	},
 	nsis: {
 		oneClick: false,

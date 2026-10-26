@@ -16,21 +16,28 @@ import {
 	type WebFrameMain
 } from "electron"
 import { readFileSync } from "node:fs"
+import { writeFile } from "node:fs/promises"
+import os from "node:os"
 import { type } from "arktype"
 import path from "node:path"
-import type { DesktopMenuAction, DesktopPlatform, WindowState } from "@filen/shared/desktop"
+import type { DesktopLogsExport, DesktopMenuAction, DesktopPlatform, WindowState } from "@filen/shared/desktop"
+import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
+import { type AppLock, LOCK_AFTER_HIDDEN_MS, loadAppLock } from "./appLock.ts"
 import { atomicFile } from "./atomicFile.ts"
 import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
 import { parseHeaders } from "./headers.ts"
+import { createFileLog } from "./fileLog.ts"
 import { closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
 import { registerAppProtocol } from "./serve.ts"
-import { createSessionVault, isSessionBlob, vaultMode, type VaultCipher } from "./sessionVault.ts"
+import { redact } from "./redact.ts"
+import { createSessionVault, isSessionBlob, lazyCipher, vaultMode, type VaultCipher } from "./sessionVault.ts"
+import { startUpdater, type Updater } from "./updater.ts"
 import { drawsOwnBorder, initialColors, windowOptions } from "./window.ts"
 
 // Payloads from the renderer are untrusted input.
@@ -38,6 +45,9 @@ const titleBarColorsSchema = type({ color: "string", symbolColor: "string", bord
 const countSchema = type("0 <= number.integer < 1000000")
 const audioPlayingSchema = type("boolean")
 const menuShortcutsSchema = type({ "[string]": "string <= 64" })
+const pinChangeSchema = type([desktopPinSchema, desktopPinSchema.or("null")])
+// The page's own log ring holds a few hundred lines; this only stops an unbounded payload.
+const webLogSchema = type("string <= 16777216")
 
 const SCHEME = "filen"
 const APP_ORIGIN = `${SCHEME}://app`
@@ -67,6 +77,21 @@ protocol.registerSchemesAsPrivileged([
 	}
 ])
 
+// The shell's log, kept beside the other userData files (development has its own userData, so its own log).
+const fileLog = createFileLog(path.join(app.getPath("userData"), "logs"))
+
+function info(message: string): void {
+	console.info(message)
+	fileLog.write("info", message)
+}
+
+function warn(message: string): void {
+	console.warn(message)
+	fileLog.write("warn", message)
+}
+
+info(`Filen ${app.getVersion()} starting (Electron ${process.versions.electron}, ${PLATFORM} ${process.arch} ${os.release()})`)
+
 // Packaged builds carry the web build as a resource; development serves filen-web's own dist or FILEN_DESKTOP_WEB_DIST.
 const webDist = app.isPackaged
 	? path.join(process.resourcesPath, "web")
@@ -77,7 +102,7 @@ async function sessionCipher(): Promise<VaultCipher | null> {
 	const backend = PLATFORM === "linux" ? safeStorage.getSelectedStorageBackend() : ""
 
 	if (vaultMode(PLATFORM, backend, await safeStorage.isAsyncEncryptionAvailable()) === "memory") {
-		console.warn(`session vault: no secure storage (${backend || "unavailable"}); keeping the session in memory only`)
+		warn(`session vault: no secure storage (${backend || "unavailable"}); keeping the session in memory only`)
 
 		return null
 	}
@@ -88,15 +113,28 @@ async function sessionCipher(): Promise<VaultCipher | null> {
 	}
 }
 
-function warn(message: string): void {
-	console.warn(message)
-}
+// Shared by the session vault and the app lock's PIN record. safeStorage works only after ready.
+const vaultCipher = lazyCipher(async () => {
+	await app.whenReady()
 
-const sessionVault = createSessionVault(sessionCipher, atomicFile(path.join(app.getPath("userData"), "session.vault")), warn)
+	return sessionCipher()
+})
+const sessionVault = createSessionVault(vaultCipher, atomicFile(path.join(app.getPath("userData"), "session.vault")), warn)
 
 // Read before ready; the window and every pref-dependent decision come after ready, once this has settled.
 const prefsLoading = loadPrefs(atomicFile(path.join(app.getPath("userData"), "prefs.json")), warn)
 let prefs: PrefsStore | null = null
+
+// Read from before ready like the prefs (decrypting waits for ready); no window is created before it has settled.
+const appLockLoading = loadAppLock(atomicFile(path.join(app.getPath("userData"), "lock.vault")), vaultCipher, warn)
+let appLock: AppLock | null = null
+
+function isLocked(): boolean {
+	return appLock?.status().locked ?? true
+}
+
+// Only a packaged app has a feed (electron-builder's app-update.yml) and an install to replace.
+let updater: Updater | null = null
 
 function currentPrefs() {
 	return prefs?.get() ?? DEFAULT_PREFS
@@ -202,6 +240,37 @@ function scheduleIdleDestroy(): void {
 	}, IDLE_DESTROY_DELAY_MS)
 }
 
+// Every lock change the page did not just ask for reaches it here; the menu and tray offer "Lock" only while unlocked.
+function lockChanged(): void {
+	if (appLock !== null) {
+		mainWindow?.webContents.send(CHANNELS.lockChanged, appLock.status())
+	}
+
+	applyMenu()
+	applyTrayMenu()
+}
+
+function lockNow(): void {
+	if (appLock?.lock() === true) {
+		info("app lock: locked")
+		lockChanged()
+	}
+}
+
+let lockTimer: NodeJS.Timeout | undefined
+
+// A window hidden (or minimized) for a while locks, whether or not its page is still alive by then, so it is locked
+// before anything shows it again.
+function armHiddenLock(): void {
+	clearTimeout(lockTimer)
+	lockTimer = setTimeout(lockNow, LOCK_AFTER_HIDDEN_MS)
+}
+
+function disarmHiddenLock(): void {
+	clearTimeout(lockTimer)
+	lockTimer = undefined
+}
+
 function hideWindow(window: BrowserWindow): void {
 	// Hiding a fullscreen window leaves an empty fullscreen Space behind on macOS.
 	if (window.isFullScreen()) {
@@ -261,6 +330,14 @@ function createWindow(): void {
 
 	trackWindowState(window)
 
+	window.webContents.on("dom-ready", () => {
+		const version = updater?.ready() ?? null
+
+		if (version !== null) {
+			window.webContents.send(CHANNELS.updateReady, version)
+		}
+	})
+
 	window.webContents.setWindowOpenHandler(({ url }) => {
 		openExternally(url)
 
@@ -310,8 +387,16 @@ function createWindow(): void {
 		}
 	})
 
-	window.on("hide", scheduleIdleDestroy)
-	window.on("show", scheduleIdleDestroy)
+	window.on("hide", () => {
+		scheduleIdleDestroy()
+		armHiddenLock()
+	})
+	window.on("show", () => {
+		scheduleIdleDestroy()
+		disarmHiddenLock()
+	})
+	window.on("minimize", armHiddenLock)
+	window.on("restore", disarmHiddenLock)
 
 	window.on("closed", () => {
 		if (mainWindow === window) {
@@ -326,6 +411,13 @@ function createWindow(): void {
 
 // A menu click reaches the page once it listens; with no window one is created and the action waits for it.
 function runMenuAction(action: DesktopMenuAction): void {
+	// The lock screen takes no web actions; the click only brings the window up.
+	if (isLocked()) {
+		showWindow()
+
+		return
+	}
+
 	if (mainWindow !== null && menuReady) {
 		mainWindow.webContents.send(CHANNELS.menuAction, action)
 	} else if (!pendingMenuActions.includes(action)) {
@@ -346,6 +438,7 @@ function applyMenu(): void {
 						shortcuts: menuShortcuts,
 						devTools: !app.isPackaged,
 						onAction: runMenuAction,
+						onLock: canLock() ? lockNow : null,
 						onWebsite: () => {
 							void shell.openExternal("https://filen.io")
 						}
@@ -359,19 +452,30 @@ function applyMenu(): void {
 // comes back on Windows and Linux.
 let tray: Tray | null = null
 
+function canLock(): boolean {
+	const status = appLock?.status()
+
+	return status !== undefined && status.enabled && !status.locked
+}
+
+function applyTrayMenu(): void {
+	tray?.setContextMenu(
+		Menu.buildFromTemplate([
+			{ label: "Open Filen", click: showWindow },
+			...(canLock() ? [{ label: "Lock Filen", click: lockNow }] : []),
+			{ type: "separator" },
+			{ label: "Quit Filen", click: () => app.quit() }
+		])
+	)
+}
+
 function createTray(): void {
 	const directory = app.isPackaged ? path.join(process.resourcesPath, "tray") : path.join(app.getAppPath(), "build", "tray")
 	const file = PLATFORM === "darwin" ? "trayTemplate.png" : PLATFORM === "win32" ? "tray.ico" : "tray.png"
 
 	tray = new Tray(nativeImage.createFromPath(path.join(directory, file)))
 	tray.setToolTip("Filen")
-	tray.setContextMenu(
-		Menu.buildFromTemplate([
-			{ label: "Open Filen", click: showWindow },
-			{ type: "separator" },
-			{ label: "Quit Filen", click: () => app.quit() }
-		])
-	)
+	applyTrayMenu()
 	tray.on("click", showWindow)
 }
 
@@ -395,6 +499,33 @@ async function applyLaunchAtLogin(enabled: boolean): Promise<void> {
 
 	// macOS reports a login launch through wasOpenedAtLogin; Windows passes the argument.
 	app.setLoginItemSettings(PLATFORM === "win32" ? { openAtLogin: enabled, args: [HIDDEN_ARG] } : { openAtLogin: enabled })
+}
+
+// One redacted text file: the shell's log and the page's. The destination comes from the save dialog only.
+async function exportLogs(webLog: string): Promise<DesktopLogsExport> {
+	const stamp = new Date()
+		.toISOString()
+		.replaceAll(":", "-")
+		.replace(/\.\d+Z$/, "Z")
+	const options = {
+		title: "Export logs",
+		defaultPath: path.join(app.getPath("downloads"), `filen-desktop-logs-${stamp}.txt`),
+		filters: [{ name: "Text", extensions: ["txt"] }]
+	}
+	const choice = await (mainWindow === null ? dialog.showSaveDialog(options) : dialog.showSaveDialog(mainWindow, options))
+
+	if (choice.canceled || choice.filePath === undefined || choice.filePath.length === 0) {
+		return "canceled"
+	}
+
+	const header = `Filen ${app.getVersion()} (Electron ${process.versions.electron}, ${PLATFORM} ${process.arch} ${os.release()})\nExported ${new Date().toISOString()}\n`
+
+	await writeFile(choice.filePath, `${header}\n== Shell ==\n${redact(await fileLog.read())}\n== Web ==\n${redact(webLog)}\n`, {
+		mode: 0o600
+	})
+	info("logs exported")
+
+	return "saved"
 }
 
 function isTrusted(senderFrame: WebFrameMain | null): boolean {
@@ -544,9 +675,110 @@ if (!app.requestSingleInstanceLock()) {
 		pendingMenuActions = []
 	})
 
+	ipcMain.on(CHANNELS.installUpdate, event => {
+		if (!isTrusted(event.senderFrame) || updater === null || updater.ready() === null) {
+			return
+		}
+
+		// The window's close handler would otherwise only hide it, and the install waits for every window to close.
+		quitting = true
+		updater.install()
+	})
+
+	handle(CHANNELS.lockStatus, async () => {
+		const lock = await appLockLoading
+
+		await lock.reload()
+
+		return lock.status()
+	})
+	handle(CHANNELS.lockUnlock, async pin => {
+		const valid = desktopPinSchema(pin)
+
+		if (valid instanceof type.errors) {
+			throw new Error("invalid pin")
+		}
+
+		const lock = await appLockLoading
+		const result = await lock.unlock(valid)
+
+		if (result.ok) {
+			info("app lock: unlocked")
+		}
+
+		lockChanged()
+
+		return result
+	})
+	handle(CHANNELS.lockSet, async (...args) => {
+		const valid = pinChangeSchema(args)
+
+		if (valid instanceof type.errors) {
+			throw new Error("invalid pin")
+		}
+
+		const result = await (await appLockLoading).set(valid[0], valid[1])
+
+		lockChanged()
+
+		return result
+	})
+	handle(CHANNELS.lockClear, async pin => {
+		const valid = desktopPinSchema(pin)
+
+		if (valid instanceof type.errors) {
+			throw new Error("invalid pin")
+		}
+
+		const result = await (await appLockLoading).clear(valid)
+
+		lockChanged()
+
+		return result
+	})
+	// A forgotten PIN signs out: the session it guarded goes first, so a failure leaves the app locked.
+	handle(CHANNELS.lockReset, async () => {
+		const lock = await appLockLoading
+
+		await sessionVault.clear()
+		await lock.reset()
+		info("app lock: reset by signing out")
+		lockChanged()
+	})
+	ipcMain.on(CHANNELS.lockNow, event => {
+		if (isTrusted(event.senderFrame)) {
+			lockNow()
+		}
+	})
+
+	handle(CHANNELS.logsExport, async payload => {
+		const webLog = webLogSchema(payload)
+
+		if (webLog instanceof type.errors) {
+			throw new Error("invalid log")
+		}
+
+		return exportLogs(webLog)
+	})
+
+	// First and on its own, so neither startup nor a renderer can hold it back.
+	app.whenReady()
+		.then(() => {
+			if (app.isPackaged) {
+				updater = startUpdater({ info, warn }, version => {
+					info(`updater: ${version} is ready to install`)
+					mainWindow?.webContents.send(CHANNELS.updateReady, version)
+				})
+			}
+		})
+		.catch((error: unknown) => {
+			warn(`updater did not start: ${error instanceof Error ? error.message : String(error)}`)
+		})
+
 	app.whenReady()
 		.then(async () => {
 			prefs = await prefsLoading
+			appLock = await appLockLoading
 			applyMenu()
 			createTray()
 

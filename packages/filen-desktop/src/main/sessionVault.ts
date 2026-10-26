@@ -32,6 +32,27 @@ export interface VaultCipher {
 	decrypt(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
+// Resolves the cipher once and shares it; a failed probe is retried by the next call instead of being replayed for the
+// rest of the run.
+export function lazyCipher(probe: () => Promise<VaultCipher | null>): () => Promise<VaultCipher | null> {
+	let resolved: Promise<VaultCipher | null> | null = null
+
+	return () => {
+		if (resolved === null) {
+			const attempt = probe()
+
+			resolved = attempt
+			void attempt.catch(() => {
+				if (resolved === attempt) {
+					resolved = null
+				}
+			})
+		}
+
+		return resolved
+	}
+}
+
 export interface SessionVault {
 	get(): Promise<SessionRead>
 	set(blob: string): Promise<void>
@@ -46,7 +67,7 @@ export function createSessionVault(
 	file: AtomicFile,
 	warn: (message: string) => void
 ): SessionVault {
-	let resolvedCipher: Promise<VaultCipher | null> | null = null
+	const currentCipher = lazyCipher(cipher)
 	// undefined: not read yet.
 	let cached: string | null | undefined
 	let tail: Promise<unknown> = Promise.resolve()
@@ -57,22 +78,6 @@ export function createSessionVault(
 		tail = run.catch(() => undefined)
 
 		return run
-	}
-
-	function currentCipher(): Promise<VaultCipher | null> {
-		if (resolvedCipher === null) {
-			const attempt = cipher()
-
-			resolvedCipher = attempt
-			// A failed probe is retried by the next call instead of being replayed for the rest of the run.
-			void attempt.catch(() => {
-				if (resolvedCipher === attempt) {
-					resolvedCipher = null
-				}
-			})
-		}
-
-		return resolvedCipher
 	}
 
 	async function load(active: VaultCipher): Promise<SessionRead> {

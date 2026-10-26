@@ -33,6 +33,7 @@
 		"arktype": "^2.2.9",
 		"electron": "45.0.0",
 		"electron-builder": "26.18.0",
+		"electron-updater": "6.8.11",
 		"esbuild": "^0.28.2",
 		"eslint": "^10.13.0",
 		"eslint-config-prettier": "^10.1.8",

@@ -39,6 +39,7 @@ describe("menuTemplate", () => {
 		shortcuts: { "app.openSettings": "mod+comma", "app.toggleTheme": "" },
 		devTools: false,
 		onAction,
+		onLock: null,
 		onWebsite: vi.fn()
 	})
 
@@ -67,9 +68,22 @@ describe("menuTemplate", () => {
 	it("offers the dev tools only when asked", () => {
 		expect(items(template).some(item => item.role === "toggleDevTools")).toBe(false)
 		expect(
-			items(menuTemplate({ shortcuts: {}, devTools: true, onAction, onWebsite: vi.fn() })).some(
+			items(menuTemplate({ shortcuts: {}, devTools: true, onAction, onLock: null, onWebsite: vi.fn() })).some(
 				item => item.role === "toggleDevTools"
 			)
 		).toBe(true)
+	})
+
+	it("offers Lock only when given a handler", () => {
+		const onLock = vi.fn()
+
+		expect(items(template).some(item => item.label === "Lock Filen")).toBe(false)
+
+		const lock = items(menuTemplate({ shortcuts: {}, devTools: false, onAction, onLock, onWebsite: vi.fn() })).find(
+			item => item.label === "Lock Filen"
+		)
+
+		;(lock?.click as () => void)()
+		expect(onLock).toHaveBeenCalled()
 	})
 })

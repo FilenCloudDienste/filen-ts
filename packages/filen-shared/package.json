@@ -23,6 +23,7 @@
 		"./svgProlog": "./src/svgProlog.ts",
 		"./linkPolicy": "./src/linkPolicy.ts",
 		"./desktop": "./src/desktop.ts",
+		"./desktopLock": "./src/desktopLock.ts",
 		"./session": "./src/session.ts"
 	},
 	"scripts": {

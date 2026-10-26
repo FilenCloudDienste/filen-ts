@@ -207,8 +207,20 @@ describe("desktop vault", () => {
 				setUnloadHolds: () => undefined,
 				setAudioPlaying: () => undefined,
 				setMenuShortcuts: () => undefined,
-				onMenuAction: () => () => undefined
+				onMenuAction: () => () => undefined,
+				onUpdateReady: () => () => undefined,
+				installUpdate: () => undefined
 			},
+			lock: {
+				status: () => Promise.reject(new Error("unused")),
+				onChanged: () => () => undefined,
+				unlock: () => Promise.reject(new Error("unused")),
+				set: () => Promise.reject(new Error("unused")),
+				clear: () => Promise.reject(new Error("unused")),
+				lock: () => undefined,
+				reset: () => Promise.reject(new Error("unused"))
+			},
+			logs: { export: () => Promise.reject(new Error("unused")) },
 			setTitleBarColors: () => undefined,
 			onWindowState: () => () => undefined,
 			showWindow: () => undefined

@@ -61,6 +61,54 @@ export interface DesktopApp {
 	setMenuShortcuts(combos: Partial<Record<DesktopMenuAction, string>>): void
 	// Subscribing tells main the page can take menu actions, so it delivers the ones clicked while the page loaded.
 	onMenuAction(callback: (action: DesktopMenuAction) => void): () => void
+	// A downloaded update waiting to be installed: calls back with its version right away when one is ready, and when
+	// one becomes ready. Returns the unsubscribe.
+	onUpdateReady(callback: (version: string) => void): () => void
+	// Quits and installs the downloaded update, then relaunches. Without one, nothing happens. A quit the page's unload
+	// guard cancels installs on the next quit instead.
+	installUpdate(): void
+}
+
+// The app lock. Main keeps the PIN (a salted slow hash in userData, encrypted like the session; never the PIN itself), the locked state and the
+// failed-attempt backoff; the page only shows the lock screen and forwards what the user typed. PINs follow
+// `desktopPinSchema` in `@filen/shared/desktopLock`.
+export interface DesktopLockStatus {
+	// A PIN is set.
+	enabled: boolean
+	// The page must show the lock screen and nothing else.
+	locked: boolean
+	// A PIN is set but cannot be read (the keychain is locked, the file is damaged), so it cannot be checked: the lock
+	// screen offers trying again (`status()` reads it again) or signing out.
+	unreadable: boolean
+	// While wrong attempts are being backed off: when the next attempt is accepted (epoch ms).
+	retryAt: number | null
+}
+
+// A PIN check. A rejected one carries the backoff in effect; an attempt during it is rejected without being checked.
+export type DesktopLockAttempt = { ok: true } | { ok: false; retryAt: number | null }
+
+export interface DesktopLock {
+	status(): Promise<DesktopLockStatus>
+	// Calls back with every status main changes on its own (a lock while the window was hidden, a manual lock).
+	onChanged(callback: (status: DesktopLockStatus) => void): () => void
+	unlock(pin: string): Promise<DesktopLockAttempt>
+	// Sets or changes the PIN; changing one needs the current PIN. Only while unlocked.
+	set(pin: string, currentPin: string | null): Promise<DesktopLockAttempt>
+	// Removes the PIN. Only while unlocked.
+	clear(currentPin: string): Promise<DesktopLockAttempt>
+	// Locks now; nothing without a PIN.
+	lock(): void
+	// A forgotten PIN: main removes the stored session and then the PIN. The page must sign out (wiping this device's
+	// data) before it shows anything again.
+	reset(): Promise<void>
+}
+
+// What `logs.export` did. The destination is picked in a save dialog main shows; the page never names a path.
+export type DesktopLogsExport = "saved" | "canceled"
+
+export interface DesktopLogs {
+	// Bundles the shell's log with `webLog` (this page's own log, as text) into one redacted file.
+	export(webLog: string): Promise<DesktopLogsExport>
 }
 
 export interface DesktopBridge {
@@ -68,6 +116,8 @@ export interface DesktopBridge {
 	readonly session: DesktopSessionVault
 	readonly prefs: DesktopPrefsStore
 	readonly app: DesktopApp
+	readonly lock: DesktopLock
+	readonly logs: DesktopLogs
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
 	onWindowState(callback: (state: WindowState) => void): () => void

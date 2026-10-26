@@ -13,7 +13,17 @@ export const CHANNELS = {
 	setAudioPlaying: "app:set-audio-playing",
 	setMenuShortcuts: "app:set-menu-shortcuts",
 	menuReady: "app:menu-ready",
-	menuAction: "app:menu-action"
+	menuAction: "app:menu-action",
+	updateReady: "app:update-ready",
+	installUpdate: "app:install-update",
+	lockStatus: "lock:status",
+	lockChanged: "lock:changed",
+	lockUnlock: "lock:unlock",
+	lockSet: "lock:set",
+	lockClear: "lock:clear",
+	lockNow: "lock:now",
+	lockReset: "lock:reset",
+	logsExport: "logs:export"
 } as const
 
 // The preload reads the app version from this argument, so the page gets it without a round trip.

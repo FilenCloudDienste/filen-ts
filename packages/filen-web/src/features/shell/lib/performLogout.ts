@@ -68,6 +68,9 @@ export interface PerformLogoutOptions {
 	// it: declining defers the teardown until the buffer is released instead of cancelling it, so a
 	// server-dead session can't keep decrypted local state alive indefinitely.
 	forced?: boolean
+	// Nobody can answer the unsaved-preview prompt (the desktop app is locked and its PIN forgotten): a dirty buffer
+	// is dropped with everything else.
+	discardUnsaved?: boolean
 }
 
 // The single unified sign-out both surfaces drive through: the account menu (user-initiated) and the
@@ -80,7 +83,7 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// A dirty preview buffer lives only in memory: the wipe + reload below destroys it with no recovery,
 	// so the user answers BEFORE anything is torn down. Cancel leaves a user-initiated sign-out's session
 	// completely intact — nothing has run at this point.
-	if (!(await confirmDiscardUnsavedPreview())) {
+	if (options?.discardUnsaved !== true && !(await confirmDiscardUnsavedPreview())) {
 		if (options?.forced !== true) {
 			return false
 		}

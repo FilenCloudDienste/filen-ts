@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from "electron"
-import type { DesktopBridge, DesktopMenuAction, DesktopPlatform, WindowState } from "@filen/shared/desktop"
+import type {
+	DesktopBridge,
+	DesktopLockAttempt,
+	DesktopLockStatus,
+	DesktopLogsExport,
+	DesktopMenuAction,
+	DesktopPlatform,
+	WindowState
+} from "@filen/shared/desktop"
 import { CHANNELS, type SessionRead, VERSION_ARG_PREFIX } from "../shared/channels.ts"
 
 // The sandboxed preload's process object carries the platform and argv but no Node typings.
@@ -24,6 +32,26 @@ const menuActionListeners = new Set<(action: DesktopMenuAction) => void>()
 ipcRenderer.on(CHANNELS.menuAction, (_event, action: DesktopMenuAction) => {
 	for (const listener of menuActionListeners) {
 		listener(action)
+	}
+})
+
+// Main sends a ready update when the page loads, possibly before the page subscribes, so it is kept like the state.
+let updateReady: string | null = null
+const updateReadyListeners = new Set<(version: string) => void>()
+
+ipcRenderer.on(CHANNELS.updateReady, (_event, version: string) => {
+	updateReady = version
+
+	for (const listener of updateReadyListeners) {
+		listener(version)
+	}
+})
+
+const lockListeners = new Set<(status: DesktopLockStatus) => void>()
+
+ipcRenderer.on(CHANNELS.lockChanged, (_event, status: DesktopLockStatus) => {
+	for (const listener of lockListeners) {
+		listener(status)
 	}
 })
 
@@ -74,7 +102,43 @@ const bridge: DesktopBridge = {
 			return () => {
 				menuActionListeners.delete(callback)
 			}
+		},
+		onUpdateReady: callback => {
+			updateReadyListeners.add(callback)
+
+			if (updateReady !== null) {
+				callback(updateReady)
+			}
+
+			return () => {
+				updateReadyListeners.delete(callback)
+			}
+		},
+		installUpdate: () => {
+			ipcRenderer.send(CHANNELS.installUpdate)
 		}
+	},
+	lock: {
+		status: () => ipcRenderer.invoke(CHANNELS.lockStatus) as Promise<DesktopLockStatus>,
+		onChanged: callback => {
+			lockListeners.add(callback)
+
+			return () => {
+				lockListeners.delete(callback)
+			}
+		},
+		unlock: pin => ipcRenderer.invoke(CHANNELS.lockUnlock, pin) as Promise<DesktopLockAttempt>,
+		set: (pin, currentPin) => ipcRenderer.invoke(CHANNELS.lockSet, pin, currentPin) as Promise<DesktopLockAttempt>,
+		clear: currentPin => ipcRenderer.invoke(CHANNELS.lockClear, currentPin) as Promise<DesktopLockAttempt>,
+		lock: () => {
+			ipcRenderer.send(CHANNELS.lockNow)
+		},
+		reset: async () => {
+			await ipcRenderer.invoke(CHANNELS.lockReset)
+		}
+	},
+	logs: {
+		export: webLog => ipcRenderer.invoke(CHANNELS.logsExport, webLog) as Promise<DesktopLogsExport>
 	},
 	setTitleBarColors: colors => {
 		ipcRenderer.send(CHANNELS.setTitleBarColors, colors)

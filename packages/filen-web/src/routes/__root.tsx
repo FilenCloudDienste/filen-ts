@@ -25,6 +25,7 @@ import { allowNextUnload } from "@/lib/unloadGuard"
 import { guardStrayDrops } from "@/lib/dropGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 import { SignOutOverlay } from "@/features/shell/components/signOutOverlay"
+import { DesktopLockGate } from "@/features/desktop/components/desktopLock"
 
 export const Route = createRootRoute({
 	component: RootLayout,
@@ -126,27 +127,30 @@ function RootLayout() {
 					    <title> ahead of index.html's static one, which stays as the pre-hydration fallback.
 					    Outside BootGate so the title is also correct during boot and on the capability screens. */}
 					<HeadContent />
-					<BootGate />
-					{/* Mounted once here (not inside AppShell/the auth pages separately) — a fixed overlay
-					    with its own top-center position, so this single instance covers the authed shell
-					    AND the unauthenticated sign-in/register/reset pages without a second subscription. */}
-					<OfflineIndicator />
-					<TransfersUnloadGuard />
-					{/* Bottom-right. A toast over a selection bar's buttons swallows their clicks, so the Toaster
-					    lifts itself while a registered surface occupies that corner (lib/toastClearance.ts).
-					    Top positions are no alternative — they intercepted the header buttons and the
-					    listing's first rows. */}
-					<Toaster />
-					{/* Asked from a drive job's progress toast or its transfers row, so they live beside the toasts. */}
-					<DriveJobCancelDialog />
-					<ExtractPasswordDialog />
-					{/* Asked by a protected file's Download as, started from an item menu that has closed since. */}
-					<DownloadAsPasswordDialog />
-					<JobReportDialog />
-					{/* Opened from an activity's result toast. */}
-					<ActivityDetailsDialog />
-					{/* Last, over everything: once a sign-out starts wiping, nothing behind it is usable. */}
-					<SignOutOverlay />
+					{/* The desktop app lock: nothing below mounts before the first unlock, and a later lock covers it. */}
+					<DesktopLockGate>
+						<BootGate />
+						{/* Mounted once here (not inside AppShell/the auth pages separately) — a fixed overlay
+						    with its own top-center position, so this single instance covers the authed shell
+						    AND the unauthenticated sign-in/register/reset pages without a second subscription. */}
+						<OfflineIndicator />
+						<TransfersUnloadGuard />
+						{/* Bottom-right. A toast over a selection bar's buttons swallows their clicks, so the Toaster
+						    lifts itself while a registered surface occupies that corner (lib/toastClearance.ts).
+						    Top positions are no alternative — they intercepted the header buttons and the
+						    listing's first rows. */}
+						<Toaster />
+						{/* Asked from a drive job's progress toast or its transfers row, so they live beside the toasts. */}
+						<DriveJobCancelDialog />
+						<ExtractPasswordDialog />
+						{/* Asked by a protected file's Download as, started from an item menu that has closed since. */}
+						<DownloadAsPasswordDialog />
+						<JobReportDialog />
+						{/* Opened from an activity's result toast. */}
+						<ActivityDetailsDialog />
+						{/* Last, over everything: once a sign-out starts wiping, nothing behind it is usable. */}
+						<SignOutOverlay />
+					</DesktopLockGate>
 				</TooltipProvider>
 			</ThemeProvider>
 		</QueryClientProvider>
