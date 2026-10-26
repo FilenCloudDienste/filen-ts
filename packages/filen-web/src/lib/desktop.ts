@@ -4,10 +4,6 @@ import type { DesktopPlatform } from "@filen/shared/desktop"
 // appears or disappears mid-session and is read once.
 const bridge = window.desktop
 
-export function isDesktop(): boolean {
-	return bridge !== undefined
-}
-
 export function desktopPlatform(): DesktopPlatform | undefined {
 	return bridge?.platform
 }
