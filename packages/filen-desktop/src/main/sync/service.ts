@@ -25,11 +25,15 @@ import { CHANNELS } from "../../shared/channels.ts"
 import type { NativeOp, NativeOpArgs, NativePairRuntime } from "../../shared/nativeProtocol.ts"
 import type { NativeResult } from "../native/rpc.ts"
 import type { NativeEvent, NativeSupervisor } from "../native/supervisor.ts"
+import { errorCode } from "../atomicFile.ts"
+import { serialQueue } from "../serial.ts"
 import { createActivityLog } from "./activity.ts"
+import { attachUnheld, type FirstRunDeps, holdReviewed } from "./firstRun.ts"
+import { applyLegacySync } from "./legacyPairs.ts"
 import { chooseLocalDirectory, inspectLocalRoot, type LocalRootContext, type RootTokens } from "./localRoot.ts"
 import { reconcileMirror, shellPairId } from "./mirror.ts"
 import { mergeOverview } from "./overview.ts"
-import type { ShellPair, SyncStore } from "./store.ts"
+import { isRefusedNotice, type ShellPair, type SyncStore } from "./store.ts"
 
 // Overview pushes to a page at most this often.
 export const OVERVIEW_PUSH_INTERVAL_MS = 250
@@ -54,7 +58,10 @@ export interface SyncServiceDeps {
 		rootContext(): Omit<LocalRootContext, "pairRoots" | "mountPoints">
 	}
 	shell: { openPath(target: string): Promise<string> }
+	// The old client's sync config the migration stashed for a user.
+	legacySync: { pending(userId: string): Promise<unknown>; consume(userId: string): Promise<void> }
 	now(): number
+	log: { info(message: string): void; warn(message: string): void }
 }
 
 type Result<T> = DesktopSyncResult<T>
@@ -117,6 +124,8 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 	let hostUser: string | null = null
 	let pushTimer: NodeJS.Timeout | undefined
 	let lastPush = Number.NEGATIVE_INFINITY
+	// What each `ready` does to the pairs runs one at a time.
+	const readyWork = serialQueue()
 
 	async function overview(): Promise<DesktopSyncOverview> {
 		const user = await supervisor.user()
@@ -231,6 +240,54 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		return DONE
 	}
 
+	// After the engine's pairs replaced the mirror's: pairs in review stay paused, the old client's pairs are imported
+	// once, and every pair the engine does not hold is added through the first-run guard. Each step is retried on the
+	// next `ready` when it fails.
+	async function afterReady(userId: string, store: SyncStore): Promise<void> {
+		const user = await supervisor.user()
+
+		if (user?.userId !== userId) {
+			return
+		}
+
+		const run: FirstRunDeps = {
+			call: (op, args) => supervisor.call(op, args, userId),
+			store: {
+				...store,
+				update: async change => {
+					const next = await store.update(change)
+
+					schedulePush()
+
+					return next
+				}
+			},
+			now: deps.now,
+			log: deps.log
+		}
+		const steps: [string, () => Promise<void>][] = [
+			["holding pairs in review", () => holdReviewed(run)],
+			[
+				"importing the previous app's pairs",
+				() =>
+					applyLegacySync({
+						...run,
+						rootUuid: user.rootUuid,
+						stash: { pending: () => deps.legacySync.pending(userId), consume: () => deps.legacySync.consume(userId) }
+					})
+			],
+			["adding pairs", () => attachUnheld(run)]
+		]
+
+		for (const [what, step] of steps) {
+			try {
+				await step()
+			} catch (error) {
+				deps.log.warn(`sync: ${what} failed: ${errorCode(error)}`)
+			}
+		}
+	}
+
 	function release(planId: string): void {
 		plans.delete(planId)
 
@@ -249,18 +306,26 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			}
 
 			switch (message.t) {
-				case "ready": {
-					const store = await deps.storeFor(userId)
+				case "ready":
+					return readyWork(async () => {
+						const store = await deps.storeFor(userId)
+						let lost = 0
 
-					await store.update(state => {
-						const { pairs } = reconcileMirror(state.pairs, message.pairs, { reset: message.reset, now: deps.now() })
+						await store.update(state => {
+							const { pairs, readd } = reconcileMirror(state.pairs, message.pairs, { reset: message.reset, now: deps.now() })
 
-						return JSON.stringify(pairs) === JSON.stringify(state.pairs) ? state : { ...state, pairs }
+							lost = readd.length
+
+							return JSON.stringify(pairs) === JSON.stringify(state.pairs) ? state : { ...state, pairs }
+						})
+						schedulePush()
+
+						if (lost > 0) {
+							deps.log.info(`sync: re-adding ${String(lost)} pairs the engine lost`)
+						}
+
+						await afterReady(userId, store)
 					})
-					schedulePush()
-
-					return
-				}
 				case "overview":
 					runtime = message.pairs
 					schedulePush()
@@ -384,6 +449,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 					state: "active",
 					review: null,
 					legacyUuid: null,
+					legacyDotFiles: null,
 					notices: [],
 					createdAt: deps.now()
 				}
@@ -516,7 +582,16 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		dismissNotice: async (pairId, notice) => {
 			const found = await find(pairId)
 
-			if (found !== null && found.pair.notices.includes(notice)) {
+			if (found === null || !found.pair.notices.includes(notice)) {
+				return
+			}
+
+			// A pair kept only to tell the user the engine refused it goes with its notice.
+			if (isRefusedNotice(notice)) {
+				await updatePairs(found.store, pairs => pairs.filter(pair => shellPairId(pair) !== pairId))
+				activityLog.drop(pairId)
+				supervisor.ensure("pair removed")
+			} else {
 				await patchPair(found.store, pairId, { notices: found.pair.notices.filter(entry => entry !== notice) })
 			}
 		},

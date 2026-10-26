@@ -250,13 +250,19 @@ const pairArgs = type({ pairId: pairIdSchema, "+": "reject" })
 const pageArgs = type({ pairId: pairIdSchema, offset: countSchema, limit: pageLimitSchema, "+": "reject" })
 const done = type("null")
 
-// What evaluatePlan found. `legacyHits` (only with a `check`): paths the plan would sync that the old client's rules
-// hid, with a few of them as a sample.
+// What evaluatePlan found. `check` (only when asked for): the first-run guard's scan of the plan's actions. The summary's
+// action count includes the adoptions that transfer nothing, so the scan counts the uploads and downloads; with `legacy`
+// it also finds the paths the plan would sync that the old client's rules hid, with a few of them as a sample.
 const evaluationSchema = type({ status: "'unconverged'", "+": "reject" }).or({
 	status: "'ok'",
 	planId: planIdSchema,
 	summary: nativePlanSummarySchema,
-	legacyHits: type({ count: countSchema, sample: relPathSchema.array().atMostLength(20), "+": "reject" }).or("null"),
+	check: type({
+		uploads: countSchema,
+		downloads: countSchema,
+		legacyHits: type({ count: countSchema, sample: relPathSchema.array().atMostLength(20), "+": "reject" }).or("null"),
+		"+": "reject"
+	}).or("null"),
 	"+": "reject"
 })
 
@@ -277,7 +283,11 @@ export const NATIVE_OPS = {
 	},
 	requestPass: { args: pairArgs, result: done },
 	evaluatePlan: {
-		args: type({ pairId: pairIdSchema, "check?": type({ excludeDotFiles: "boolean", "+": "reject" }), "+": "reject" }),
+		args: type({
+			pairId: pairIdSchema,
+			"check?": type({ legacy: type({ excludeDotFiles: "boolean", "+": "reject" }).or("null"), "+": "reject" }),
+			"+": "reject"
+		}),
 		result: evaluationSchema
 	},
 	planPage: {

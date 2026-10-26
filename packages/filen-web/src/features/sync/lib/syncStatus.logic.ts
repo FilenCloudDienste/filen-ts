@@ -117,7 +117,22 @@ export function hostBanner(host: DesktopSyncHostState): { key: SyncKey; retry: b
 
 export const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
 	localTrashDropped: "noticeLocalTrashDropped",
-	accountRootUnsupported: "noticeAccountRootUnsupported"
+	accountRootUnsupported: "noticeAccountRootUnsupported",
+	refusedLocalRoot: "noticeRefusedLocalRoot",
+	refusedRemoteMissing: "noticeRefusedRemoteMissing",
+	refusedLocalOverlap: "noticeRefusedLocalOverlap",
+	refusedRemoteOverlap: "noticeRefusedRemoteOverlap"
+}
+
+// What a notice is about: "unsupported" and "refused" say why the pair is not synced (the generic line is then left
+// out); dismissing a "refused" one removes the pair the engine would not take.
+export const NOTICE_ROLE: Record<DesktopSyncNotice, "info" | "unsupported" | "refused"> = {
+	localTrashDropped: "info",
+	accountRootUnsupported: "unsupported",
+	refusedLocalRoot: "refused",
+	refusedRemoteMissing: "refused",
+	refusedLocalOverlap: "refused",
+	refusedRemoteOverlap: "refused"
 }
 
 export const FINDING_KEY: Record<DesktopSyncReviewFinding, SyncKey> = {

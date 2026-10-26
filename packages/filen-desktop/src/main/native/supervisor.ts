@@ -58,8 +58,9 @@ export interface NativeSupervisor {
 	sessionChanged(blob: string): void
 	// Stops the host; the user's engine data stays.
 	signedOut(): void
-	// Starts the host when needed and waits for it to be ready.
-	call<K extends NativeOp>(op: K, args: NativeOpArgs<K>): Promise<NativeResult<K>>
+	// Starts the host when needed and waits for it to be ready. With `userId`, only that user's host answers (work
+	// begun for one user never reaches the next one's engine).
+	call<K extends NativeOp>(op: K, args: NativeOpArgs<K>, userId?: string): Promise<NativeResult<K>>
 	// A page shows the overview: the host streams it and stays up.
 	subscribe(on: boolean): void
 	// After a failure: start again from a clean slate.
@@ -518,7 +519,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 				setState({ state: "off" })
 			})
 		},
-		call: async (op, args) => {
+		call: async (op, args, userId) => {
 			inFlight++
 
 			try {
@@ -534,7 +535,9 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 
 				const child = current
 
-				return child?.ready === true ? await child.rpc.call(op, args) : UNAVAILABLE
+				return child?.ready === true && (userId === undefined || child.userId === userId)
+					? await child.rpc.call(op, args)
+					: UNAVAILABLE
 			} finally {
 				inFlight--
 

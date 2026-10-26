@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { runSyncAction } from "@/features/sync/lib/syncActions"
-import { issueTotal, PHASE_KEY } from "@/features/sync/lib/syncStatus.logic"
+import { issueTotal, NOTICE_ROLE, PHASE_KEY } from "@/features/sync/lib/syncStatus.logic"
 import type { SyncTab } from "@/features/sync/lib/syncTabs"
 import { useRemoteDirectoryName } from "@/features/sync/hooks/useRemoteDirectoryName"
 import { SyncPhaseIcon } from "@/features/sync/components/syncPhaseIcon"
@@ -273,7 +273,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 						/>
 					)}
 					{pair.phase === "waitingForRoot" ? <SyncCallout tone="warning">{t("detailWaitingForRoot")}</SyncCallout> : null}
-					{pair.phase === "unsupported" && !pair.notices.includes("accountRootUnsupported") ? (
+					{pair.phase === "unsupported" && pair.notices.every(notice => NOTICE_ROLE[notice] === "info") ? (
 						<SyncCallout tone="info">{t("detailUnsupported")}</SyncCallout>
 					) : null}
 					{pair.degraded.local ? <SyncCallout tone="info">{t("detailDegradedLocal")}</SyncCallout> : null}

@@ -342,6 +342,18 @@ describe("createNativeSupervisor", () => {
 		expect(supervisor.state()).toEqual({ state: "off" })
 	})
 
+	it("a call for one user never reaches another user's host", async () => {
+		const { supervisor, last } = harness()
+
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+		await settle()
+
+		expect(await supervisor.call("listPairs", {}, "2")).toEqual({ ok: false, error: { code: "hostUnavailable" } })
+		expect(last().calls()).toEqual([])
+	})
+
 	it("a fatal addon load fails without restarting", async () => {
 		const { supervisor, forks, last } = harness()
 

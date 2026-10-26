@@ -3,10 +3,11 @@ import type { DesktopSyncNotice } from "@filen/shared/desktop"
 import { Button } from "@/components/ui/button"
 import { log } from "@/lib/log"
 import { syncApi } from "@/features/sync/lib/syncStore"
-import { NOTICE_KEY } from "@/features/sync/lib/syncStatus.logic"
+import { NOTICE_KEY, NOTICE_ROLE } from "@/features/sync/lib/syncStatus.logic"
 import { SyncCallout } from "@/features/sync/components/syncCallout"
 
-// What the shell tells once per pair until dismissed. Dismissing drops it from the next overview.
+// What the shell tells once per pair until dismissed. Dismissing drops it from the next overview; dismissing a refusal
+// removes the pair it is about.
 export function NoticeBanner({ pairId, notices }: { pairId: string; notices: readonly DesktopSyncNotice[] }) {
 	const { t } = useTranslation("sync")
 
@@ -32,7 +33,7 @@ export function NoticeBanner({ pairId, notices }: { pairId: string; notices: rea
 									})
 							}}
 						>
-							{t("noticeDismiss")}
+							{t(NOTICE_ROLE[notice] === "refused" ? "noticeRemove" : "noticeDismiss")}
 						</Button>
 					}
 				>

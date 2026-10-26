@@ -1,5 +1,11 @@
 import { type } from "arktype"
-import type { DesktopSyncMode, DesktopSyncNotice, DesktopSyncReview, DesktopSyncReviewFinding } from "@filen/shared/desktop"
+import type {
+	DesktopSyncMode,
+	DesktopSyncNotice,
+	DesktopSyncRefusedNotice,
+	DesktopSyncReview,
+	DesktopSyncReviewFinding
+} from "@filen/shared/desktop"
 import { localPathSchema, pairIdSchema, pinned, planSummarySchema, syncModeSchema } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, errorCode } from "../atomicFile.ts"
 import { serialQueue } from "../serial.ts"
@@ -9,6 +15,8 @@ import { serialQueue } from "../serial.ts"
 // the baseline DB and go with it when a schema change forces a reset. The engine is the source of truth whenever it
 // is open (see reconcileMirror).
 export type ShellPairState = "active" | "review" | "waitingForRoot" | "unsupported"
+
+export type LegacyDotFiles = "device" | "pair"
 
 export interface ShellPair {
 	// null while the engine does not hold the pair.
@@ -21,6 +29,8 @@ export interface ShellPair {
 	state: ShellPairState
 	review: DesktopSyncReview | null
 	legacyUuid: string | null
+	// The old client hid this pair's dot files, now through the device-wide ignore or the pair's own root .filenignore.
+	legacyDotFiles: LegacyDotFiles | null
 	notices: DesktopSyncNotice[]
 	// Epoch ms.
 	createdAt: number
@@ -39,6 +49,22 @@ const findingSchema = pinned<DesktopSyncReviewFinding>()(
 	type.enumerated("uploads", "downloads", "conflicts", "heldDeletions", "refused", "newlySynced", "unconverged", "dotFilesPerPair")
 )
 
+// The notices that stand for an engine refusal; such a pair is never added, and dismissing one removes it.
+const REFUSED_NOTICES = {
+	refusedLocalRoot: true,
+	refusedRemoteMissing: true,
+	refusedLocalOverlap: true,
+	refusedRemoteOverlap: true
+} as const satisfies Record<DesktopSyncRefusedNotice, true>
+
+export function isRefusedNotice(notice: DesktopSyncNotice): notice is DesktopSyncRefusedNotice {
+	return Object.hasOwn(REFUSED_NOTICES, notice)
+}
+
+export const noticeSchema = pinned<DesktopSyncNotice>()(
+	type.enumerated("localTrashDropped", "accountRootUnsupported", ...(Object.keys(REFUSED_NOTICES) as DesktopSyncRefusedNotice[]))
+)
+
 const shellPairSchema = pinned<ShellPair>()(
 	type({
 		pairId: pairIdSchema.or("null"),
@@ -55,7 +81,8 @@ const shellPairSchema = pinned<ShellPair>()(
 			"+": "delete"
 		}).or("null"),
 		legacyUuid: type("string.uuid").or("null"),
-		notices: type("'localTrashDropped' | 'accountRootUnsupported'").array(),
+		legacyDotFiles: type("'device' | 'pair' | null"),
+		notices: noticeSchema.array(),
 		createdAt: "number.integer >= 0",
 		"+": "delete"
 	})

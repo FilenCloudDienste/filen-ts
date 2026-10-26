@@ -147,9 +147,14 @@ export type DesktopSyncHostState =
 
 export type DesktopSyncPhase = "idle" | "syncing" | "paused" | "review" | "waitingForRoot" | "unsupported" | "error"
 
+// Why the engine refused for good a pair it had to add (a migrated one, or one a baseline reset lost): the local directory cannot be a root, the cloud directory is gone,
+// or the pair overlaps another one on this device or in the cloud.
+export type DesktopSyncRefusedNotice = "refusedLocalRoot" | "refusedRemoteMissing" | "refusedLocalOverlap" | "refusedRemoteOverlap"
+
 // Told once per pair until dismissed: the old client's local trash is no longer used; the engine cannot sync an
-// account's root directory yet.
-export type DesktopSyncNotice = "localTrashDropped" | "accountRootUnsupported"
+// account's root directory yet; the engine refused the pair, which is kept (not synced) until this is dismissed, and
+// dismissing it removes the pair.
+export type DesktopSyncNotice = "localTrashDropped" | "accountRootUnsupported" | DesktopSyncRefusedNotice
 
 // Why deletions were held back for approval.
 export type DesktopSyncHeldReason =

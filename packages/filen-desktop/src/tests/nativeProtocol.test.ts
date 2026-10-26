@@ -32,7 +32,7 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	resume: { pairId: "1" },
 	setMode: { pairId: "1", mode: "twoWay", backlog: "adoptDestination" },
 	requestPass: { pairId: "1" },
-	evaluatePlan: { pairId: "1", check: { excludeDotFiles: true } },
+	evaluatePlan: { pairId: "1", check: { legacy: { excludeDotFiles: true } } },
 	planPage: { planId: "p1", list: "held", offset: 0, limit: 1000 },
 	releasePlan: { planId: "p1" },
 	conflicts: { pairId: "1", offset: 0, limit: 200 },
@@ -73,7 +73,9 @@ describe("toNativeSchema", () => {
 		expect(accepts(toNativeSchema, call("deleteEverything", {}))).toBe(false)
 		expect(accepts(toNativeSchema, { ...call("pause", { pairId: "1" }), extra: 1 })).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: "1", extra: 1 }))).toBe(false)
-		expect(accepts(toNativeSchema, call("evaluatePlan", { pairId: "1", check: { excludeDotFiles: true, more: 1 } }))).toBe(false)
+		expect(accepts(toNativeSchema, call("evaluatePlan", { pairId: "1", check: { legacy: { excludeDotFiles: true }, more: 1 } }))).toBe(
+			false
+		)
 		expect(accepts(toNativeSchema, { t: "shutdown", now: true })).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: 1 }))).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: "1n" }))).toBe(false)
@@ -165,7 +167,7 @@ describe("opResult", () => {
 					refused: null,
 					passToken: "token"
 				},
-				legacyHits: { count: 1, sample: [".hidden"] }
+				check: { uploads: 1, downloads: 0, legacyHits: { count: 1, sample: [".hidden"] } }
 			})
 		).toBe(true)
 		expect(

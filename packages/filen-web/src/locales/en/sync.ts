@@ -121,8 +121,21 @@ export const sync = {
 		"Filen no longer keeps deleted local files in .filen.trash.local. Files the sync replaces or deletes on this device now go to .filen-sync-trash in this pair's directory.",
 	/** Notice — the account's whole drive cannot be a pair yet */
 	noticeAccountRootUnsupported: "Syncing your whole Cloud Drive isn't supported yet. This pair starts once it is.",
+	/** Notice — the local directory of a pair the previous app synced can't be a sync root */
+	noticeRefusedLocalRoot:
+		"Filen can't sync this pair from the previous app: its directory on this device can't be synced. Add it again with another directory.",
+	/** Notice — the cloud directory of a pair the previous app synced is gone */
+	noticeRefusedRemoteMissing:
+		"Filen can't sync this pair from the previous app: its cloud directory no longer exists. Add it again with another cloud directory.",
+	/** Notice — the local directory overlaps another pair's */
+	noticeRefusedLocalOverlap:
+		"Filen can't sync this pair: its directory on this device is, contains or is inside another pair's directory.",
+	/** Notice — the cloud directory overlaps another pair's */
+	noticeRefusedRemoteOverlap: "Filen can't sync this pair: its cloud directory is, contains or is inside another pair's cloud directory.",
 	/** Notice — dismiss button */
 	noticeDismiss: "Dismiss",
+	/** Notice — remove the pair a refusal notice is about */
+	noticeRemove: "Remove pair",
 
 	// ── Activity ────────────────────────────────────────────────────────
 	/** Activity — a file was uploaded */

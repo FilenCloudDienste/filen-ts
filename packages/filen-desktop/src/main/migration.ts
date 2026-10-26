@@ -2,6 +2,9 @@ import { type } from "arktype"
 import type { SessionRead } from "../shared/channels.ts"
 import { type AtomicFile, codedError, errorCode } from "./atomicFile.ts"
 import {
+	effectiveConfig,
+	LEGACY_FEATURES,
+	type LegacyFeature,
 	legacyPin,
 	legacyPrefs,
 	type LegacyPrefs,
@@ -9,10 +12,12 @@ import {
 	type LegacySession,
 	type LegacySnapshot,
 	legacyStash,
-	parseReadResult
+	type LegacyStash,
+	parseReadResult,
+	parseStash
 } from "./legacyData.ts"
 import { serialQueue } from "./serial.ts"
-import { sessionUserId } from "./sessionVault.ts"
+import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 
 // The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where
 // it got to:
@@ -441,5 +446,108 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 			wipeInBackground()
 		}
+	}
+}
+
+// The stash without the user's part of a feature (their own entry, and the fallback when it was theirs); null once
+// nothing is left in it.
+export function withoutFeature(stash: LegacyStash, userId: string, feature: LegacyFeature): LegacyStash | null {
+	const { [userId]: _taken, ...others } = stash.users[feature]
+	const users = { ...stash.users, [feature]: others }
+	const fallback = { ...stash.fallback }
+
+	if (stash.userId !== null && String(stash.userId) === userId) {
+		delete fallback[feature]
+	}
+
+	const empty = LEGACY_FEATURES.every(entry => Object.keys(users[entry]).length === 0) && Object.keys(fallback).length === 0
+
+	return empty ? null : { ...stash, users, fallback }
+}
+
+export interface StashStore {
+	// Stores what the migration stashed; with no cipher it is kept for this run only.
+	write(text: string): Promise<void>
+	// The feature's old config for the user (PLAN §6 step 5), undefined when none is waiting.
+	pending(userId: string, feature: LegacyFeature): Promise<unknown>
+	// The user's part of the feature was applied: rewritten without it, deleted once empty.
+	consume(userId: string, feature: LegacyFeature): Promise<void>
+}
+
+// The encrypted stash, decrypted once and served from memory. A stash that cannot be decrypted now (a locked keychain)
+// is read again next time and never removed.
+export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCipher | null>, warn: (message: string) => void): StashStore {
+	// undefined: not read yet.
+	let cached: LegacyStash | null | undefined
+	const serial = serialQueue()
+
+	async function load(): Promise<LegacyStash | null> {
+		if (cached !== undefined) {
+			return cached
+		}
+
+		const data = await file.read()
+		const active = data === null ? null : await cipher()
+
+		if (data === null || active === null) {
+			cached = null
+
+			return null
+		}
+
+		const stash = parseStash((await active.decrypt(data)).result)
+
+		if (stash === null) {
+			warn("migration: the stash is invalid; ignoring it")
+		}
+
+		cached = stash
+
+		return stash
+	}
+
+	async function store(stash: LegacyStash | null): Promise<void> {
+		const active = await cipher()
+
+		if (stash === null) {
+			await file.remove()
+		} else if (active === null) {
+			warn("migration: no secure storage; the stash is kept for this run only")
+		} else {
+			await file.write(await active.encrypt(JSON.stringify(stash)))
+		}
+
+		cached = stash
+	}
+
+	return {
+		write: text =>
+			serial(async () => {
+				const stash = parseStash(text)
+
+				if (stash !== null) {
+					await store(stash)
+				}
+			}),
+		pending: (userId, feature) =>
+			serial(async () => {
+				try {
+					const stash = await load()
+
+					return stash === null ? undefined : effectiveConfig(stash, userId, feature)
+				} catch (error) {
+					warn(`migration: the stash is unreadable: ${errorCode(error)}`)
+
+					return undefined
+				}
+			}),
+		consume: (userId, feature) =>
+			serial(async () => {
+				const stash = await load()
+
+				if (stash !== null) {
+					await store(withoutFeature(stash, userId, feature))
+				}
+			})
 	}
 }

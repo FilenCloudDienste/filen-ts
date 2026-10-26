@@ -10,6 +10,7 @@ import {
 	syncModeSchema
 } from "../../shared/nativeProtocol.ts"
 import type { SyncPage, SyncService } from "./service.ts"
+import { noticeSchema } from "./store.ts"
 
 // The part of an Electron IPC event the sync handlers read.
 export interface SyncIpcEvent {
@@ -36,7 +37,6 @@ const newPairSchema = type({
 	name: nameSchema,
 	"+": "reject"
 })
-const noticeSchema = type("'localTrashDropped' | 'accountRootUnsupported'")
 
 type Run = (service: SyncService, page: SyncPage, args: unknown[]) => unknown
 

@@ -132,7 +132,14 @@ describe("sync copy", () => {
 		expectAllKeysExist(PHASE_KEY, ["idle", "syncing", "paused", "review", "waitingForRoot", "unsupported", "error"])
 		expectAllKeysExist(MODE_KEY, [...MODES])
 		expectAllKeysExist(MODE_DESCRIPTION_KEY, [...MODES])
-		expectAllKeysExist(NOTICE_KEY, ["localTrashDropped", "accountRootUnsupported"])
+		expectAllKeysExist(NOTICE_KEY, [
+			"localTrashDropped",
+			"accountRootUnsupported",
+			"refusedLocalRoot",
+			"refusedRemoteMissing",
+			"refusedLocalOverlap",
+			"refusedRemoteOverlap"
+		])
 		expectAllKeysExist(FINDING_KEY, [
 			"uploads",
 			"downloads",

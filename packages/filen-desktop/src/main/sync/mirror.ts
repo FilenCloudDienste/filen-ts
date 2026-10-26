@@ -13,7 +13,7 @@ function rootKey(localRoot: string, remoteRoot: string): string {
 	return `${stripVerbatim(localRoot).toLowerCase()}\0${remoteRoot.toLowerCase()}`
 }
 
-function basename(localRoot: string): string {
+export function basename(localRoot: string): string {
 	const segments = localRoot.split(/[\\/]/).filter(segment => segment.length > 0)
 
 	return segments.at(-1) ?? localRoot
@@ -21,15 +21,15 @@ function basename(localRoot: string): string {
 
 export interface Reconciled {
 	pairs: ShellPair[]
-	// Pairs a baseline reset lost: to be added again, paused, through the first-run guard. Their `paused` is what the
-	// user had.
+	// Pairs a baseline reset lost, or a re-add left unfinished: to be added again, paused, through the first-run guard.
+	// Their `paused` is what the user had.
 	readd: ShellPair[]
 }
 
 // Run on every `ready`: the engine's pairs win. Matched by roots (a reset engine numbers its pairs afresh); the
 // engine's id, local root, mode and paused flag replace the mirror's, the shell's own fields stay. An engine pair the
 // mirror lacks gets its directory's name. A mirror pair the engine lacks is gone (removed elsewhere, or a crash
-// between the two writes) unless the engine never held it; after a reset it is re-added instead.
+// between the two writes) unless the engine never held it (no engine id); after a reset it is re-added instead.
 export function reconcileMirror(
 	pairs: readonly ShellPair[],
 	enginePairs: readonly NativePair[],
@@ -55,7 +55,7 @@ export function reconcileMirror(
 			})
 		} else if (pair.state === "waitingForRoot" || pair.state === "unsupported") {
 			next.push(pair)
-		} else if (options.reset) {
+		} else if (options.reset || pair.pairId === null) {
 			const lost = { ...pair, pairId: null }
 
 			next.push(lost)
@@ -74,6 +74,7 @@ export function reconcileMirror(
 			state: "active",
 			review: null,
 			legacyUuid: null,
+			legacyDotFiles: null,
 			notices: [],
 			createdAt: options.now
 		})

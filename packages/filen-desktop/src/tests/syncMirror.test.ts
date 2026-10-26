@@ -25,6 +25,7 @@ function shellPair(overrides: Partial<ShellPair> = {}): ShellPair {
 		state: "active",
 		review: null,
 		legacyUuid: null,
+		legacyDotFiles: null,
 		notices: [],
 		createdAt: 1,
 		...overrides

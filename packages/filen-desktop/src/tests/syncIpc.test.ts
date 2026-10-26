@@ -9,7 +9,8 @@ import { createActivityLog } from "../main/sync/activity.ts"
 import { registerSyncIpc, type SyncIpcEvent, type SyncIpcMain } from "../main/sync/ipc.ts"
 import { createRootTokens, ROOT_TOKEN_TTL_MS } from "../main/sync/localRoot.ts"
 import { createSyncService, OVERVIEW_PUSH_INTERVAL_MS, type SyncServiceDeps } from "../main/sync/service.ts"
-import type { ShellPair, ShellSyncState, SyncStore } from "../main/sync/store.ts"
+import type { ShellPair } from "../main/sync/store.ts"
+import { memoryStore } from "./syncFakes.ts"
 
 const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
 const REMOTE = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
@@ -27,20 +28,6 @@ const SUMMARY: DesktopSyncPlanSummary = {
 	refused: null
 }
 
-function memoryStore(pairs: ShellPair[] = []): SyncStore {
-	let state: ShellSyncState = { version: 1, pairs, legacyApplied: false }
-
-	return {
-		get: () => state,
-		update: change => {
-			state = change(state)
-
-			return Promise.resolve(state)
-		},
-		hasPairs: () => state.pairs.length > 0
-	}
-}
-
 function shellPair(overrides: Partial<ShellPair> = {}): ShellPair {
 	return {
 		pairId: "7",
@@ -52,6 +39,7 @@ function shellPair(overrides: Partial<ShellPair> = {}): ShellPair {
 		state: "active",
 		review: null,
 		legacyUuid: null,
+		legacyDotFiles: null,
 		notices: [],
 		createdAt: 1,
 		...overrides
@@ -76,7 +64,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 			status: "ok",
 			planId: "plan-1",
 			summary: { ...SUMMARY, passToken: null } satisfies NativePlanSummary,
-			legacyHits: null
+			check: null
 		}),
 		...options.answers
 	}
@@ -103,7 +91,9 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 			rootContext: () => ({ platform: process.platform, home: "/nonexistent-home", appData: [], temporary: [], oneDrive: [] })
 		},
 		shell: { openPath: vi.fn(() => Promise.resolve("")) },
-		now: () => clock
+		legacySync: { pending: () => Promise.resolve(undefined), consume: () => Promise.resolve() },
+		now: () => clock,
+		log: { info: vi.fn(), warn: vi.fn() }
 	})
 	const handlers = new Map<string, (event: SyncIpcEvent, ...args: unknown[]) => unknown>()
 	const listeners = new Map<string, (event: SyncIpcEvent, ...args: unknown[]) => void>()
@@ -301,6 +291,30 @@ describe("registerSyncIpc", () => {
 		expect(store.get().pairs).toEqual([])
 		expect(ops()).toEqual([])
 		expect(supervisor.ensure).toHaveBeenCalled()
+	})
+
+	it("a ready after a baseline reset re-adds the lost pairs paused through the guard", async () => {
+		const { service, store, ops } = setup({ pairs: [shellPair({ localRoot: directory, name: "Mine" })] })
+
+		await service.nativeEvent({ t: "ready", pairs: [], reset: true }, "1")
+
+		expect(ops()).toEqual(["addPair", "pause", "evaluatePlan", "releasePlan", "resume"])
+		expect(store.get().pairs).toEqual([shellPair({ localRoot: directory, name: "Mine" })])
+	})
+
+	it("dismissing a refusal removes the pair; other notices only go away", async () => {
+		const legacy = "11111111-2222-4333-8444-555555555555"
+		const { invoke, store } = setup({
+			pairs: [
+				shellPair({ notices: ["localTrashDropped"] }),
+				shellPair({ pairId: null, legacyUuid: legacy, state: "unsupported", notices: ["refusedRemoteMissing"] })
+			]
+		})
+
+		await invoke("dismissNotice", "7", "localTrashDropped")
+		await invoke("dismissNotice", `legacy:${legacy}`, "refusedRemoteMissing")
+
+		expect(store.get().pairs).toEqual([shellPair()])
 	})
 
 	it("reveals the root or the quarantine only", async () => {

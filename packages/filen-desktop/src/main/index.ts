@@ -37,7 +37,7 @@ import { closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, sta
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
-import { createMigration } from "./migration.ts"
+import { createMigration, createStashStore } from "./migration.ts"
 import { addonPath } from "./native/addonPath.ts"
 import { createNativeSupervisor } from "./native/supervisor.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
@@ -145,7 +145,8 @@ const appLockLoading = loadAppLock(atomicFile(path.join(app.getPath("userData"),
 let appLock: AppLock | null = null
 
 const userDataPath = app.getPath("userData")
-const migrationStash = atomicFile(path.join(userDataPath, "migration.stash"))
+// What the migration kept for the later phases (sync pairs, mounts), encrypted like the vault.
+const migrationStash = createStashStore(atomicFile(path.join(userDataPath, "migration.stash")), vaultCipher, warn)
 
 // The one-time import from the old client. Runs after ready and before the first window; see migration.ts.
 const migration = createMigration({
@@ -182,18 +183,7 @@ const migration = createMigration({
 	launchesAtLogin: () =>
 		PLATFORM !== "linux" && app.getLoginItemSettings(PLATFORM === "win32" ? { args: [HIDDEN_ARG] } : undefined).openAtLogin,
 	applyLaunchAtLogin: enabled => applyLaunchAtLogin(enabled),
-	writeStash: async text => {
-		const cipher = await vaultCipher()
-
-		// Like the session: no secure storage, nothing on disk.
-		if (cipher === null) {
-			warn("migration: no secure storage; the stash is not kept")
-
-			return
-		}
-
-		await migrationStash.write(await cipher.encrypt(text))
-	},
+	writeStash: text => migrationStash.write(text),
 	now: Date.now,
 	info,
 	warn
@@ -248,7 +238,7 @@ const nativeSupervisor = createNativeSupervisor({
 			exists: existsSync
 		}),
 	dirFor: engineDir,
-	demand: async userId => (await syncStoreFor(userId)).hasPairs(),
+	demand: async userId => (await syncStoreFor(userId)).hasPairs() || (await migrationStash.pending(userId, "sync")) !== undefined,
 	log: { info, warn },
 	onMessage: (message, userId) => {
 		if (message.t === "aggregate") {
@@ -299,7 +289,12 @@ const syncService = createSyncService({
 		})
 	},
 	shell: { openPath: target => shell.openPath(target) },
-	now: Date.now
+	legacySync: {
+		pending: userId => migrationStash.pending(userId, "sync"),
+		consume: userId => migrationStash.consume(userId, "sync")
+	},
+	now: Date.now,
+	log: { info, warn }
 })
 
 // The engine's own work keeps going; only its data and its process go with the session.

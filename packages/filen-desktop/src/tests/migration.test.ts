@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 import type { AtomicFile } from "../main/atomicFile.ts"
-import { LEGACY_KEYS } from "../main/legacyData.ts"
+import { LEGACY_KEYS, type LegacyStash } from "../main/legacyData.ts"
 import {
 	createMigration,
+	createStashStore,
 	MAX_FAILED_STARTS,
 	type MigrationDeps,
 	type MigrationMarker,
@@ -11,9 +12,13 @@ import {
 	startupDecision,
 	verifiedBy,
 	waitExpired,
-	WIPE_AFTER_MS
+	WIPE_AFTER_MS,
+	withoutFeature
 } from "../main/migration.ts"
+import type { VaultCipher } from "../main/sessionVault.ts"
+import { applyLegacySync, type LegacySyncDeps } from "../main/sync/legacyPairs.ts"
 import type { SessionRead } from "../shared/channels.ts"
+import { fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -517,5 +522,156 @@ describe("purging the old stores", () => {
 		expect(run.deps.warn).toHaveBeenCalledTimes(1)
 		expect(run.deps.warn).toHaveBeenCalledWith("migration: deleting the old stores failed, tried again next launch: EBUSY")
 		expect(run.stored()).toMatchObject({ purged: false })
+	})
+})
+
+const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
+
+function oldPair(uuid: string, localPath: string) {
+	return {
+		name: localPath,
+		uuid,
+		localPath,
+		remoteParentUUID: uuid,
+		mode: "twoWay",
+		excludeDotFiles: false,
+		paused: false,
+		localTrashDisabled: true
+	}
+}
+
+const OLD_SYNC = {
+	enabled: true,
+	syncPairs: [
+		oldPair("11111111-2222-4333-8444-555555555555", "/nonexistent/a"),
+		oldPair("22222222-3333-4444-8555-666666666666", "/nonexistent/b")
+	]
+}
+
+function legacySetup(options: { pairs?: Parameters<typeof memoryStore>[0]; legacyApplied?: boolean } = {}) {
+	const store = memoryStore(options.pairs, options.legacyApplied)
+	const native = fakeNative(store)
+	const stash = {
+		left: true as boolean,
+		pending: vi.fn(() => Promise.resolve(stash.left ? OLD_SYNC : undefined)),
+		consume: vi.fn(() => {
+			stash.left = false
+
+			return Promise.resolve()
+		})
+	}
+	const deps: LegacySyncDeps = { ...native.deps, rootUuid: ACCOUNT_ROOT, stash }
+
+	return { store, native, stash, deps }
+}
+
+describe("applyLegacySync", () => {
+	it("stash consumed only after every pair is recorded", async () => {
+		const { store, stash, deps, native } = legacySetup()
+
+		stash.consume.mockImplementation(() => {
+			expect(store.get()).toMatchObject({
+				legacyApplied: true,
+				pairs: [{ localRoot: "/nonexistent/a" }, { localRoot: "/nonexistent/b" }]
+			})
+			stash.left = false
+
+			return Promise.resolve()
+		})
+
+		await applyLegacySync(deps)
+
+		expect(stash.consume).toHaveBeenCalledOnce()
+		expect(native.ops()).toEqual(["userIgnore", "setUserIgnore"])
+		expect(native.argsOf("setUserIgnore")).toEqual([{ text: ".filen.trash.local/\n" }])
+	})
+
+	it("keeps the stash and records nothing while the device-wide ignore cannot be set", async () => {
+		const { store, stash, deps } = legacySetup()
+		const failing = fakeNative(store, { setUserIgnore: () => new Refusal("hostUnavailable") })
+
+		await expect(applyLegacySync({ ...deps, call: failing.deps.call })).rejects.toThrow()
+		expect(store.get()).toMatchObject({ legacyApplied: false, pairs: [] })
+		expect(stash.consume).not.toHaveBeenCalled()
+	})
+
+	it("rerun after a crash adds no duplicates", async () => {
+		// A crash before the stash was consumed: the run starts over.
+		const crashed = legacySetup()
+
+		crashed.stash.consume.mockRejectedValueOnce(new Error("crash"))
+		await applyLegacySync(crashed.deps)
+		expect(crashed.stash.left).toBe(true)
+
+		await applyLegacySync(crashed.deps)
+		expect(crashed.store.get().pairs).toHaveLength(2)
+		expect(crashed.stash.left).toBe(false)
+		// The ignore was written once; a rerun past it only consumes.
+		expect(crashed.native.argsOf("setUserIgnore")).toHaveLength(1)
+
+		// A crash between recording some pairs and the flag: only the missing one is recorded.
+		const partial = legacySetup({ pairs: crashed.store.get().pairs.slice(0, 1) })
+
+		await applyLegacySync(partial.deps)
+		expect(partial.store.get().pairs.map(pair => pair.localRoot)).toEqual(["/nonexistent/a", "/nonexistent/b"])
+	})
+
+	it("does nothing without a waiting stash", async () => {
+		const { stash, deps, native } = legacySetup()
+
+		stash.left = false
+		await applyLegacySync(deps)
+		expect(native.ops()).toEqual([])
+	})
+})
+
+function fakeCipher(): VaultCipher {
+	return {
+		encrypt: plain => Promise.resolve(Buffer.from(`enc:${plain}`)),
+		decrypt: data => Promise.resolve({ result: data.toString().slice(4), shouldReEncrypt: false })
+	}
+}
+
+const STASH: LegacyStash = {
+	version: 1,
+	userId: 1001,
+	users: { sync: { "1002": { enabled: true, syncPairs: [] } }, networkDrive: { "1001": { enabled: false } }, webdav: {}, s3: {} },
+	fallback: { sync: OLD_SYNC }
+}
+
+describe("stash store", () => {
+	it("consumes one user's part of a feature and deletes the stash once empty", async () => {
+		const file = memoryFile(`enc:${JSON.stringify(STASH)}`)
+		const store = createStashStore(file, () => Promise.resolve(fakeCipher()), vi.fn())
+
+		expect(await store.pending("1001", "sync")).toEqual(OLD_SYNC)
+		expect(await store.pending("1003", "sync")).toBeUndefined()
+
+		await store.consume("1001", "sync")
+		expect(await store.pending("1001", "sync")).toBeUndefined()
+		expect(file.text()?.startsWith("enc:")).toBe(true)
+		expect(JSON.parse(file.text()?.slice(4) ?? "")).toEqual({ ...STASH, fallback: {} })
+
+		await store.consume("1002", "sync")
+		await store.consume("1001", "networkDrive")
+		expect(file.text()).toBeNull()
+	})
+
+	it("reads a stash it cannot decrypt again later, never removing it", async () => {
+		const file = memoryFile(`enc:${JSON.stringify(STASH)}`)
+		let locked = true
+		const cipher: VaultCipher = {
+			...fakeCipher(),
+			decrypt: data => (locked ? Promise.reject(new Error("locked")) : fakeCipher().decrypt(data))
+		}
+		const store = createStashStore(file, () => Promise.resolve(cipher), vi.fn())
+
+		expect(await store.pending("1001", "sync")).toBeUndefined()
+		locked = false
+		expect(await store.pending("1001", "sync")).toEqual(OLD_SYNC)
+	})
+
+	it("withoutFeature keeps other users' and other features' parts", () => {
+		expect(withoutFeature(STASH, "1002", "sync")).toEqual({ ...STASH, users: { ...STASH.users, sync: {} } })
 	})
 })
