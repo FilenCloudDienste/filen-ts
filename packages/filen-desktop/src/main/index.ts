@@ -47,11 +47,12 @@ import { closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, sta
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
-import { createMigration, createStashStore } from "./migration.ts"
+import { createMigration, createStashStore, legacyOwner, parseMarker } from "./migration.ts"
 import { addonPath } from "./native/addonPath.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
 import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
 import { registerMountsIpc } from "./mounts/ipc.ts"
+import { createLegacyMounts } from "./mounts/legacyApply.ts"
 import { configuredMountPoints } from "./mounts/mountPoint.ts"
 import { bakedRcloneSha256, rclonePaths } from "./mounts/rclonePath.ts"
 import { createMountsService } from "./mounts/service.ts"
@@ -175,9 +176,11 @@ const userDataPath = app.getPath("userData")
 // What the migration kept for the later phases (sync pairs, mounts), encrypted like the vault.
 const migrationStash = createStashStore(atomicFile(path.join(userDataPath, "migration.stash")), vaultCipher, warn)
 
+const migrationMarker = atomicFile(path.join(userDataPath, "migration.json"))
+
 // The one-time import from the old client. Runs after ready and before the first window; see migration.ts.
 const migration = createMigration({
-	marker: atomicFile(path.join(userDataPath, "migration.json")),
+	marker: migrationMarker,
 	legacyProfile: async () => {
 		try {
 			return (await stat(path.join(userDataPath, "Local Storage", "leveldb"))).isDirectory()
@@ -349,7 +352,8 @@ const nativeSupervisor = createNativeSupervisor({
 		anyDemand([
 			async () => (await syncStoreFor(userId)).hasPairs(),
 			async () => (await migrationStash.pending(userId, "sync")) !== undefined,
-			async () => (await mountsStoreFor(userId)).anyEnabled()
+			async () => (await mountsStoreFor(userId)).anyEnabled(),
+			() => legacyMounts.wanted(userId)
 		]),
 	log: { info, warn },
 	onMessage: (message, userId) => {
@@ -446,6 +450,26 @@ async function confirmMountsSignOut(pending: number): Promise<boolean> {
 	return response === 1
 }
 
+// Where the network drive may not be, with the user's sync pairs.
+async function mountPointContext(userId: string) {
+	return { ...reservedDirectories(), pairRoots: (await syncStoreFor(userId)).get().pairs.map(pair => pair.localRoot) }
+}
+
+// The old client's rclone, caches and mount settings (PLAN §6.7).
+const legacyMounts = createLegacyMounts({
+	userData: userDataPath,
+	mountsDir: userId => path.join(mountsRoot, userId),
+	owner: async () => legacyOwner(parseMarker((await migrationMarker.read())?.toString("utf8") ?? null)),
+	binary: rclone?.binary ?? null,
+	platform: process.platform,
+	call: (op, args, userId, timeoutMs) => nativeSupervisor.callMounts(op, args, userId, timeoutMs),
+	stash: migrationStash,
+	storeFor: mountsStoreFor,
+	credentialsFor: credentialStoreFor,
+	mountPointContext,
+	log: { info, warn }
+})
+
 const mountsService = createMountsService({
 	supervisor: nativeSupervisor,
 	platform: process.platform,
@@ -464,14 +488,12 @@ const mountsService = createMountsService({
 	tokens: createRootTokens(Date.now),
 	dialogs: {
 		showOpenDialog,
-		mountPointContext: async userId => ({
-			...reservedDirectories(),
-			pairRoots: (await syncStoreFor(userId)).get().pairs.map(pair => pair.localRoot)
-		}),
+		mountPointContext,
 		confirmSignOut: confirmMountsSignOut
 	},
 	shell: { openPath: target => shell.openPath(target) },
 	clipboard: { writeText: text => clipboard.writeText(text) },
+	legacy: legacyMounts,
 	statusChanged: failed => {
 		applyTray()
 		notifyMountsFailed(failed)

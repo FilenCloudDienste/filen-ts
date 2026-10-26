@@ -51,6 +51,7 @@ async function setup(
 		binary?: boolean
 		confirm?: boolean
 		install?: MountsServiceDeps["fuse"]["install"]
+		legacy?: MountsServiceDeps["legacy"]
 	} = {}
 ) {
 	let clock = 1_000
@@ -120,6 +121,7 @@ async function setup(
 		},
 		shell: { openPath: vi.fn(() => Promise.resolve("")) },
 		clipboard,
+		legacy: options.legacy ?? { prepare: () => Promise.resolve(), drain: () => Promise.resolve() },
 		statusChanged: vi.fn(),
 		now: () => clock,
 		log: { info: vi.fn(), warn: vi.fn() }
@@ -530,6 +532,46 @@ describe("signing out", () => {
 
 		expect(ops.slice(-3)).toEqual(["mountsStatus", "mountsApply", "clearCache"])
 		expect(context.argsOf("clearCache")).toEqual([{ dir: path.join(context.mountsDir, "cache") }])
+	})
+
+	it("roles start only after quiesce", async () => {
+		const order: string[] = []
+		let release = () => undefined as void
+		const context = await setup({
+			config: {
+				...DEFAULT_MOUNTS,
+				drive: { enabled: true, mountPoint: path.join(directory, "Filen"), driveLetter: null, readOnly: false }
+			},
+			answers: {
+				mountsApply: () => {
+					order.push("mountsApply")
+
+					return DRIVE_RUNNING
+				}
+			},
+			legacy: {
+				prepare: () =>
+					new Promise(resolve => {
+						order.push("prepare")
+						release = () => {
+							order.push("prepared")
+							resolve()
+						}
+					}),
+				drain: () => {
+					order.push("drain")
+
+					return Promise.resolve()
+				}
+			}
+		})
+
+		await context.settled()
+		expect(order).toEqual(["prepare"])
+		release()
+		await vi.waitFor(() => {
+			expect(order).toEqual(["prepare", "prepared", "mountsApply", "drain"])
+		})
 	})
 
 	it("a user without a cache has nothing to delete", async () => {

@@ -1,7 +1,7 @@
 import path from "node:path"
 import { type } from "arktype"
 import type { DesktopMountsNotice } from "@filen/shared/desktop"
-import { isLoopbackHost, listenHostSchema, portSchema } from "../../shared/nativeProtocol.ts"
+import { isLoopbackHost, listenHostSchema, localPathSchema, portSchema } from "../../shared/nativeProtocol.ts"
 import { type CredentialProtocol, credentialsProblem, type ServeCredentials } from "./credentials.ts"
 import { type MountPointContext, mountPointProblem } from "./mountPoint.ts"
 import { DEFAULT_MOUNTS, defaultServe, type MountsConfig, type MountsDrive, type MountsServe } from "./store.ts"
@@ -87,6 +87,18 @@ function importDrive(raw: unknown, ctx: MountPointContext, notices: Set<DesktopM
 	}
 
 	return { enabled: enabled && valid, mountPoint: valid ? path.posix.normalize(mountPoint) : null, driveLetter: null, readOnly }
+}
+
+// Where the old client mounted the drive, as it stored it (an invalid point included: a stale mount there still needs
+// unmounting); null when it had none.
+export function legacyDriveMountPoint(raw: unknown): string | null {
+	const old = driveSchema(raw)
+
+	if (old instanceof type.errors || old.mountPoint === undefined) {
+		return null
+	}
+
+	return localPathSchema(old.mountPoint) instanceof type.errors ? null : old.mountPoint
 }
 
 interface OldServe {

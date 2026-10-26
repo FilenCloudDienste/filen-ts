@@ -4,6 +4,7 @@ import { LEGACY_KEYS, type LegacyStash } from "../main/legacyData.ts"
 import {
 	createMigration,
 	createStashStore,
+	legacyOwner,
 	MAX_FAILED_STARTS,
 	type MigrationDeps,
 	type MigrationMarker,
@@ -72,6 +73,18 @@ describe("parseMarker", () => {
 		const { startedAt: _startedAt, stashOnly: _stashOnly, ...older } = marker({ stage: "started" })
 
 		expect(parseMarker(JSON.stringify({ version: 1, ...older }))).toMatchObject({ startedAt: null, stashOnly: false })
+	})
+})
+
+describe("legacyOwner", () => {
+	it("is known once the import got that far", () => {
+		expect(legacyOwner(null)).toBeUndefined()
+		expect(legacyOwner(marker({ stage: "started" }))).toBeUndefined()
+		expect(legacyOwner(marker({ stage: "imported", userId: 42 }))).toBe("42")
+		expect(legacyOwner(marker({ stage: "verified", userId: 42 }))).toBe("42")
+		expect(legacyOwner(marker({ stage: "imported", userId: null }))).toBeNull()
+		expect(legacyOwner(marker({ stage: "abandoned" }))).toBeNull()
+		expect(legacyOwner(marker({ stage: "skipped" }))).toBeNull()
 	})
 })
 

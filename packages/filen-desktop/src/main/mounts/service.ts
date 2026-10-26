@@ -38,6 +38,7 @@ import { serialQueue } from "../serial.ts"
 import type { RootTokens } from "../sync/localRoot.ts"
 import { mountsAggregate, newlyFailedRoles } from "../tray.ts"
 import { listenAddresses } from "./addresses.ts"
+import type { LegacyMounts } from "./legacyApply.ts"
 import { type CredentialStore, credentialsProblem } from "./credentials.ts"
 import { mountsDesired, wantsRoles } from "./desired.ts"
 import { chooseMountPoint, defaultMountPoint, inspectMountPoint, type MountPointContext, validDriveLetter } from "./mountPoint.ts"
@@ -85,6 +86,8 @@ export interface MountsServiceDeps {
 	}
 	shell: { openPath(target: string): Promise<string> }
 	clipboard: { writeText(text: string): void }
+	// The old client's mounts (legacyApply.ts): prepared before a host's first apply, its caches drained after it.
+	legacy: Pick<LegacyMounts, "prepare" | "drain">
 	// The status changed; `failed` are the roles that just went into error.
 	statusChanged(failed: DesktopMountsRole[]): void
 	now(): number
@@ -409,7 +412,11 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 			switch (message.t) {
 				case "ready":
 					run = freshRun()
+					// The old client's rclone is stopped and its cache adopted before any role starts here.
+					void queue(() => deps.legacy.prepare(userId)).then(schedulePush)
 					void queueApply(userId)
+						.then(() => deps.legacy.drain(userId))
+						.then(schedulePush)
 
 					if (overviewPages.size > 0) {
 						askCacheUsage(userId)

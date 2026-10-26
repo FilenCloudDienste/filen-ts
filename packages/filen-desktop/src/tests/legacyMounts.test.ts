@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { effectiveConfig, type LegacyStash } from "../main/legacyData.ts"
-import { legacyMountsImport } from "../main/mounts/legacyMounts.ts"
+import { legacyDriveMountPoint, legacyMountsImport } from "../main/mounts/legacyMounts.ts"
 import type { MountPointContext } from "../main/mounts/mountPoint.ts"
 import { DEFAULT_MOUNTS, DEFAULT_TUNING, defaultServe } from "../main/mounts/store.ts"
 
@@ -154,5 +154,17 @@ describe("legacyMountsImport", () => {
 			...DEFAULT_MOUNTS,
 			legacyApplied: true
 		})
+	})
+})
+
+describe("legacyDriveMountPoint", () => {
+	it("is the stored point, an invalid one included", () => {
+		expect(legacyDriveMountPoint(OLD_DRIVE)).toBe("/Users/u/Filen")
+		expect(legacyDriveMountPoint({ mountPoint: "/tmp/filen" })).toBe("/tmp/filen")
+		expect(legacyDriveMountPoint({ mountPoint: "X:" })).toBe("X:")
+		expect(legacyDriveMountPoint({ mountPoint: "" })).toBeNull()
+		expect(legacyDriveMountPoint({ enabled: true })).toBeNull()
+		expect(legacyDriveMountPoint(["/x"])).toBeNull()
+		expect(legacyDriveMountPoint(undefined)).toBeNull()
 	})
 })

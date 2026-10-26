@@ -103,6 +103,21 @@ export function serializeMarker(marker: MigrationMarker): string {
 	return JSON.stringify({ version: 1, ...marker })
 }
 
+// The old client's signed-in account, whose uploads its rclone caches hold: null when it had none (or nothing was
+// imported), undefined while the import has not got that far.
+export function legacyOwner(marker: MigrationMarker | null): string | null | undefined {
+	switch (marker?.stage) {
+		case "imported":
+		case "verified":
+			return marker.userId === null ? null : String(marker.userId)
+		case "abandoned":
+		case "skipped":
+			return null
+		default:
+			return undefined
+	}
+}
+
 export type StartupDecision =
 	| "run"
 	// Imports the stash only: the user is signed in to this app already.
