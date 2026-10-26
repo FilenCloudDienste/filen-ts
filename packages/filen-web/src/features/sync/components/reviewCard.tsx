@@ -27,8 +27,9 @@ import {
 	planListTotal,
 	REFUSAL_KEY
 } from "@/features/sync/lib/syncStatus.logic"
-import { SyncCallout } from "@/features/sync/components/syncCallout"
-import { ActionEntry, EntryRow, IgnoredEntry, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
+import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
+import { EntryRow } from "@/features/desktop/components/entryRow"
+import { ActionEntry, IgnoredEntry, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
 
 type PlanRow =
 	| { list: "actions" | "held"; entry: DesktopSyncPlanAction }
@@ -203,18 +204,18 @@ export function ReviewSummary({ summary, findings, planId }: ReviewSummaryProps)
 				</ul>
 			) : null}
 			{summary === null ? (
-				<SyncCallout tone="info">{t("reviewUnconverged")}</SyncCallout>
+				<DesktopCallout tone="info">{t("reviewUnconverged")}</DesktopCallout>
 			) : (
 				<>
 					<p className="text-sm text-muted-foreground">{summaryLines(summary, t).join(" · ")}</p>
 					{summary.heldReason !== null && summary.heldDeletions > 0 ? (
-						<SyncCallout tone="warning">{t(HELD_REASON_KEY[summary.heldReason])}</SyncCallout>
+						<DesktopCallout tone="warning">{t(HELD_REASON_KEY[summary.heldReason])}</DesktopCallout>
 					) : null}
-					{summary.refused !== null ? <SyncCallout tone="error">{t(REFUSAL_KEY[summary.refused])}</SyncCallout> : null}
+					{summary.refused !== null ? <DesktopCallout tone="error">{t(REFUSAL_KEY[summary.refused])}</DesktopCallout> : null}
 					{isLargePlan(summary) ? (
-						<SyncCallout tone="warning">
+						<DesktopCallout tone="warning">
 							{t("reviewLarge", { formatted: new Intl.NumberFormat(i18n.language).format(summary.actions) })}
-						</SyncCallout>
+						</DesktopCallout>
 					) : null}
 					{planId !== null && planListsWithEntries(summary).length > 0 ? (
 						showLists ? (

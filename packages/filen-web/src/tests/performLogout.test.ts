@@ -28,7 +28,8 @@ const {
 	wipeArtStore,
 	wipeVideoIndexStore,
 	resetVideoSession,
-	officeSettingsReset
+	officeSettingsReset,
+	confirmMountsSignOut
 } = vi.hoisted(() => {
 	const calls: string[] = []
 	const record =
@@ -64,7 +65,8 @@ const {
 		wipeArtStore: vi.fn(() => Promise.resolve()),
 		wipeVideoIndexStore: vi.fn(() => Promise.resolve()),
 		resetVideoSession: vi.fn(record("resetVideoSession", () => undefined)),
-		officeSettingsReset: vi.fn()
+		officeSettingsReset: vi.fn(),
+		confirmMountsSignOut: vi.fn(() => Promise.resolve(true))
 	}
 })
 
@@ -118,6 +120,7 @@ vi.mock("@/features/preview/lib/heicTransform", () => ({ releaseHeicWorker, tran
 vi.mock("@/queries/client", () => ({ queryClient: { cancelQueries: vi.fn(), clear: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
 vi.mock("@/features/office/lib/officeSettings", () => ({ officeSettings: { reset: officeSettingsReset } }))
+vi.mock("@/features/mounts/lib/mountsStore", () => ({ confirmMountsSignOut }))
 
 import { kvClear } from "@/lib/storage/adapter"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
@@ -288,6 +291,21 @@ describe("performLogout", () => {
 		await expect(performLogout()).resolves.toBe(true)
 
 		expect(useDirectoryTreeStore.getState().open).toEqual({})
+	})
+
+	// Desktop: the shell asks to wait for the network drive's pending uploads; waiting cancels the sign-out.
+	it("a sign-out the user waits on at the drive's pending-uploads prompt tears nothing down", async () => {
+		confirmMountsSignOut.mockResolvedValueOnce(false)
+
+		await expect(performLogout()).resolves.toBe(false)
+		expect(calls).toEqual([])
+		expect(runLogout).not.toHaveBeenCalled()
+	})
+
+	it("a forced sign-out never asks about the drive's pending uploads", async () => {
+		await expect(performLogout({ forced: true })).resolves.toBe(true)
+		await expect(performLogout({ forced: true, discardUnsaved: true })).resolves.toBe(true)
+		expect(confirmMountsSignOut).not.toHaveBeenCalled()
 	})
 
 	it("a forced sign-out with a clean buffer never shows the pending notice", async () => {

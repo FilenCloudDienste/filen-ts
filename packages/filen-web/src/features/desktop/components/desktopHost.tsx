@@ -14,6 +14,7 @@ import { loadDesktopPrefs, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { isDesktopLocked } from "@/features/desktop/lib/lock"
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { loadSync } from "@/features/sync/lib/syncStore"
+import { loadMounts } from "@/features/mounts/lib/mountsStore"
 import { i18n } from "@/lib/i18n"
 
 // One prompt however often main reports the same download (each page load hears it again).
@@ -58,8 +59,8 @@ export function DesktopHost(): null {
 	}, [])
 
 	// The shell removed a session the server rejected while syncing with it: a forced sign-out, like the
-	// socket's after a password change (an unsaved preview may delay it, never veto it). Sync follows the shell's overview for this page's whole life
-	// (the rail's dot reads it); a clicked sync notification opens that pair's issues.
+	// socket's after a password change (an unsaved preview may delay it, never veto it). Sync and mounts follow the
+	// shell's overviews for this page's whole life (the rail's dots read them); a clicked sync notification opens that pair's issues.
 	useEffect(() => {
 		const bridge = desktopBridge()
 
@@ -68,6 +69,7 @@ export function DesktopHost(): null {
 		}
 
 		loadSync()
+		loadMounts()
 
 		const unsubscribeRevoked = bridge.session.onRevoked(() => {
 			void performLogout({ forced: true })

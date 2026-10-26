@@ -10,6 +10,7 @@ import type {
 	DesktopSyncHostState
 } from "@filen/shared/desktop"
 import { HTTPS_PROTOCOLS, type NativeMountsStatus, SERVE_PROTOCOLS } from "../../shared/nativeProtocol.ts"
+import { listenAddressKind } from "./addresses.ts"
 import { defaultServe, type MountsConfig } from "./store.ts"
 
 // nfs has no server on Windows.
@@ -102,14 +103,17 @@ export function mountsOverview(input: MountsOverviewInput): DesktopMountsOvervie
 	const protocols = offeredProtocols(platform)
 	const serves = protocols.map((protocol): DesktopServe => {
 		const serve = config.serves[protocol] ?? defaultServe(protocol)
-		const https = serve.https && HTTPS_PROTOCOLS.has(protocol)
+		const httpsCapable = HTTPS_PROTOCOLS.has(protocol)
+		const https = serve.https && httpsCapable
 
 		return {
 			protocol,
 			enabled: serve.enabled,
 			...roleView(input, protocol, serve.enabled),
 			address: serve.host,
+			addressKind: listenAddressKind(serve.host),
 			port: serve.port,
+			httpsCapable,
 			https,
 			readOnly: serve.readOnly,
 			authenticated: protocol !== "nfs",

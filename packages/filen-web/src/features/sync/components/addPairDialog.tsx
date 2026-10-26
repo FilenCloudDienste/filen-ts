@@ -35,7 +35,7 @@ import {
 } from "@/features/sync/components/addPairDialog.logic"
 import { RemoteDirectoryChooser } from "@/features/sync/components/remoteDirectoryChooser"
 import { ReviewSummary } from "@/features/sync/components/reviewCard"
-import { SyncCallout } from "@/features/sync/components/syncCallout"
+import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 
 type Busy = "choosing" | "adding" | "starting" | "removing" | null
 
@@ -251,19 +251,19 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 							{fields.local === null ? t("addChooseLocal") : t("addChooseOtherLocal")}
 						</Button>
 						{refusal === null ? null : (
-							<SyncCallout tone="error">
+							<DesktopCallout tone="error">
 								<span className="block truncate font-medium">{refusal.path}</span>
 								{refusal.message}
-							</SyncCallout>
+							</DesktopCallout>
 						)}
-						{addError === null ? null : <SyncCallout tone="error">{addError}</SyncCallout>}
+						{addError === null ? null : <DesktopCallout tone="error">{addError}</DesktopCallout>}
 						{warnings.map(warning => (
-							<SyncCallout
+							<DesktopCallout
 								key={warning}
 								tone="warning"
 							>
 								{t(ROOT_WARNING_KEY[warning])}
-							</SyncCallout>
+							</DesktopCallout>
 						))}
 					</div>
 				)

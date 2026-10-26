@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { log } from "@/lib/log"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { NOTICE_KEY, NOTICE_ROLE } from "@/features/sync/lib/syncStatus.logic"
-import { SyncCallout } from "@/features/sync/components/syncCallout"
+import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 
 // What the shell tells once per pair until dismissed. Dismissing drops it from the next overview; dismissing a refusal
 // removes the pair it is about.
@@ -18,7 +18,7 @@ export function NoticeBanner({ pairId, notices }: { pairId: string; notices: rea
 	return (
 		<div className="flex flex-col gap-2">
 			{notices.map(notice => (
-				<SyncCallout
+				<DesktopCallout
 					key={notice}
 					tone="info"
 					action={
@@ -38,7 +38,7 @@ export function NoticeBanner({ pairId, notices }: { pairId: string; notices: rea
 					}
 				>
 					{t(NOTICE_KEY[notice])}
-				</SyncCallout>
+				</DesktopCallout>
 			))}
 		</div>
 	)

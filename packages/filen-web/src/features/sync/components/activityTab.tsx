@@ -12,7 +12,7 @@ import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { SettingsGroup, SettingsPanel } from "@/features/settings/components/settingsLayout"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { ACTIVITY_KIND_KEY, ACTIVITY_KIND_TONE, ACTIVITY_LIMIT, mergeActivity, type ActivityTone } from "@/features/sync/lib/activity.logic"
-import { EntryRow } from "@/features/sync/components/syncEntryRows"
+import { EntryRow } from "@/features/desktop/components/entryRow"
 
 const TONE_ICON: Record<ActivityTone, { icon: typeof HistoryIcon; className: string }> = {
 	normal: { icon: CircleCheckIcon, className: "text-muted-foreground" },

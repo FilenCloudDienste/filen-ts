@@ -2,29 +2,29 @@ import type { ReactNode } from "react"
 import { CircleAlertIcon, InfoIcon, TriangleAlertIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 
-export type SyncCalloutTone = "info" | "warning" | "error"
+export type DesktopCalloutTone = "info" | "warning" | "error"
 
-const TONE_CLASS: Record<SyncCalloutTone, string> = {
+const TONE_CLASS: Record<DesktopCalloutTone, string> = {
 	info: "bg-muted text-foreground",
 	warning: "bg-warning/15 text-warning-foreground",
 	error: "bg-destructive/10 text-destructive"
 }
 
-const TONE_ICON: Record<SyncCalloutTone, typeof InfoIcon> = {
+const TONE_ICON: Record<DesktopCalloutTone, typeof InfoIcon> = {
 	info: InfoIcon,
 	warning: TriangleAlertIcon,
 	error: CircleAlertIcon
 }
 
-// A tinted one-paragraph message inside the Sync section (host state, notices, root warnings, refusals), the
+// A tinted one-paragraph message inside the desktop app's sections (host state, notices, warnings, refusals), the
 // same shape as the Videos chooser's warning. `action` sits under the text; only warnings and errors announce.
-export function SyncCallout({
+export function DesktopCallout({
 	tone,
 	children,
 	action,
 	className
 }: {
-	tone: SyncCalloutTone
+	tone: DesktopCalloutTone
 	children: ReactNode
 	action?: ReactNode
 	className?: string

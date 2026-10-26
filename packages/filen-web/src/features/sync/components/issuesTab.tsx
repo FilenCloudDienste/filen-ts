@@ -15,7 +15,8 @@ import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { runSyncAction, syncErrorLabel } from "@/features/sync/lib/syncActions"
 import { conflictDetailKey, HELD_REASON_KEY } from "@/features/sync/lib/syncStatus.logic"
-import { ActionEntry, EntryRow, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
+import { EntryRow } from "@/features/desktop/components/entryRow"
+import { ActionEntry, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
 
 const RESOLUTIONS: readonly { value: DesktopSyncResolution; key: "conflictKeepLocal" | "conflictKeepRemote" | "conflictKeepBoth" }[] = [
 	{ value: "keepLocal", key: "conflictKeepLocal" },

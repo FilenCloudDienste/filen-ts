@@ -34,6 +34,7 @@ import { toast } from "sonner"
 import { i18n } from "@/lib/i18n"
 import { writeSignOutPending } from "@/lib/signOutPending"
 import { showSignOutOverlay } from "@/features/shell/lib/signOutOverlay"
+import { confirmMountsSignOut } from "@/features/mounts/lib/mountsStore"
 
 // Resolves once no unsaved preview buffer is left — the overlay dropping its dirty bit (discard, close,
 // unmount). Immediate when nothing is dirty.
@@ -78,8 +79,15 @@ export interface PerformLogoutOptions {
 // auth.logout(). @/lib/logout stays free of any worker-constructing import so its own node test can
 // import it (see runLogout's own note); the real collaborators are wired here instead, at the component
 // layer, and injected into runLogout's phased wipe. Resolves `false` — with nothing torn down — only
-// when a NON-forced sign-out was declined at the unsaved-preview prompt below.
+// when a NON-forced sign-out was declined at the network drive's pending-uploads prompt or the unsaved-preview prompt
+// below.
 export async function performLogout(options?: PerformLogoutOptions): Promise<boolean> {
+	// Desktop: with uploads still in the network drive's cache, the shell asks to wait or to sign out anyway (they then
+	// finish at this user's next sign-in). Only a user-initiated sign-out asks; a revoked session cannot upload anyway.
+	if (options?.forced !== true && options?.discardUnsaved !== true && !(await confirmMountsSignOut())) {
+		return false
+	}
+
 	// A dirty preview buffer lives only in memory: the wipe + reload below destroys it with no recovery,
 	// so the user answers BEFORE anything is torn down. Cancel leaves a user-initiated sign-out's session
 	// completely intact — nothing has run at this point.

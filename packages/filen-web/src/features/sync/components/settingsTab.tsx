@@ -5,6 +5,7 @@ import type { DesktopSyncBacklog, DesktopSyncMode } from "@filen/shared/desktop"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { ActionRow } from "@/features/desktop/components/actionRow"
 import { SettingsGroup, SettingsRow } from "@/features/settings/components/settingsLayout"
 import { SettingsSelectRow } from "@/features/settings/components/settingRows"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
@@ -63,47 +64,6 @@ function NameRow({ pairId, name }: { pairId: string; name: string }) {
 					{t("settingsNameSave")}
 				</Button>
 			</form>
-		</SettingsRow>
-	)
-}
-
-// A row whose one button runs a sync call, spinning while it does.
-function ActionRow({
-	label,
-	description,
-	action,
-	disabled,
-	variant,
-	run
-}: {
-	label: string
-	description?: string
-	action: string
-	disabled?: boolean
-	variant?: "outline" | "destructive"
-	run: () => Promise<unknown>
-}) {
-	const [running, setRunning] = useState(false)
-
-	return (
-		<SettingsRow
-			label={label}
-			description={description}
-		>
-			<Button
-				variant={variant ?? "outline"}
-				aria-label={label}
-				disabled={running || disabled === true}
-				onClick={() => {
-					setRunning(true)
-					void run().finally(() => {
-						setRunning(false)
-					})
-				}}
-			>
-				{running ? <Spinner data-icon="inline-start" /> : null}
-				{action}
-			</Button>
 		</SettingsRow>
 	)
 }

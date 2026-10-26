@@ -1,6 +1,5 @@
 import type {
 	DesktopSyncHeldReason,
-	DesktopSyncHostState,
 	DesktopSyncIssueCounts,
 	DesktopSyncMode,
 	DesktopSyncNotice,
@@ -89,30 +88,6 @@ export function isBackupMode(mode: DesktopSyncMode): boolean {
 // Leaving a backup mode must say what happens to what it held back from the destination (setMode's `backlog`).
 export function modeChangeNeedsBacklog(from: DesktopSyncMode, to: DesktopSyncMode): boolean {
 	return from !== to && isBackupMode(from)
-}
-
-// What the host banner says, and whether it offers retryHost. null: nothing worth a banner.
-export function hostBanner(host: DesktopSyncHostState): { key: SyncKey; retry: boolean; tone: "info" | "warning" } | null {
-	switch (host.state) {
-		case "off":
-		case "running":
-			return null
-		case "starting":
-			return { key: "hostStarting", retry: false, tone: "info" }
-		case "restarting":
-			return { key: "hostRestarting", retry: false, tone: "warning" }
-		case "failed":
-			switch (host.reason) {
-				case "crashLoop":
-					return { key: "hostCrashLoop", retry: true, tone: "warning" }
-				case "addonMissing":
-					return { key: "hostAddonMissing", retry: true, tone: "warning" }
-				case "baselineInUse":
-					return { key: "hostBaselineInUse", retry: true, tone: "warning" }
-				case "keychainLocked":
-					return { key: "hostKeychainLocked", retry: true, tone: "warning" }
-			}
-	}
 }
 
 export const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {

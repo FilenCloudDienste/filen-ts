@@ -367,11 +367,16 @@ describe("registerMountsIpc", () => {
 				readOnly: false
 			}
 		])
-		expect((await service.overview()).serves.find(serve => serve.protocol === "webdav")).toMatchObject({
+		const { serves } = await service.overview()
+
+		expect(serves.find(serve => serve.protocol === "webdav")).toMatchObject({
 			url: `https://${LAN}:1900`,
+			addressKind: "lan",
+			httpsCapable: true,
 			tlsFingerprint: "AA:BB",
 			authenticated: true
 		})
+		expect(serves.find(serve => serve.protocol === "ftp")).toMatchObject({ addressKind: "loopback", httpsCapable: false, https: false })
 	})
 
 	it("clearCache refuses with pending uploads", async () => {

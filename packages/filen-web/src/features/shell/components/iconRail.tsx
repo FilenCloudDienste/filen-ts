@@ -46,6 +46,7 @@ import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
 import { RailProgressBar, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
 import { useSyncAggregate } from "@/features/sync/lib/syncStore"
+import { useMountsAggregate } from "@/features/mounts/lib/mountsStore"
 import { useTheme } from "@/providers/themeProvider"
 import { desktopBridge, desktopPlatform } from "@/lib/desktop"
 import { Button } from "@/components/ui/button"
@@ -369,16 +370,28 @@ function SyncEntry({ active, reordering }: RailEntryProps) {
 
 // Desktop app only: visibleRailOrder leaves it out of a browser's rail.
 function MountsEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation("common")
+	const { t } = useTranslation(["common", "mounts"])
+	const aggregate = useMountsAggregate()
+	const dot = aggregate === "attention" ? "bg-destructive" : aggregate === "uploading" ? "bg-primary" : null
 
 	return (
 		<RailLink
 			active={active}
 			reordering={reordering}
-			label={t("moduleMounts")}
+			label={t("common:moduleMounts")}
+			ariaLabel={
+				aggregate === "attention" ? t("mounts:railAttention") : aggregate === "uploading" ? t("mounts:railUploading") : undefined
+			}
 			icon={HardDriveIcon}
 			linkOptions={{ to: "/mounts" }}
-		/>
+		>
+			{dot === null ? null : (
+				<span
+					aria-hidden="true"
+					className={cn("absolute top-1 right-1 size-2 rounded-full ring-2 ring-canvas", dot)}
+				/>
+			)}
+		</RailLink>
 	)
 }
 

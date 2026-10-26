@@ -16,7 +16,7 @@ import { issueTotal, NOTICE_ROLE, PHASE_KEY } from "@/features/sync/lib/syncStat
 import type { SyncTab } from "@/features/sync/lib/syncTabs"
 import { useRemoteDirectoryName } from "@/features/sync/hooks/useRemoteDirectoryName"
 import { SyncPhaseIcon } from "@/features/sync/components/syncPhaseIcon"
-import { SyncCallout } from "@/features/sync/components/syncCallout"
+import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 import { NoticeBanner } from "@/features/sync/components/noticeBanner"
 import { ReviewCard } from "@/features/sync/components/reviewCard"
 import { RemovePairDialog } from "@/features/sync/components/removePairDialog"
@@ -272,12 +272,12 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 							review={pair.review}
 						/>
 					)}
-					{pair.phase === "waitingForRoot" ? <SyncCallout tone="warning">{t("detailWaitingForRoot")}</SyncCallout> : null}
+					{pair.phase === "waitingForRoot" ? <DesktopCallout tone="warning">{t("detailWaitingForRoot")}</DesktopCallout> : null}
 					{pair.phase === "unsupported" && pair.notices.every(notice => NOTICE_ROLE[notice] === "info") ? (
-						<SyncCallout tone="info">{t("detailUnsupported")}</SyncCallout>
+						<DesktopCallout tone="info">{t("detailUnsupported")}</DesktopCallout>
 					) : null}
-					{pair.degraded.local ? <SyncCallout tone="info">{t("detailDegradedLocal")}</SyncCallout> : null}
-					{pair.degraded.remote ? <SyncCallout tone="info">{t("detailDegradedRemote")}</SyncCallout> : null}
+					{pair.degraded.local ? <DesktopCallout tone="info">{t("detailDegradedLocal")}</DesktopCallout> : null}
+					{pair.degraded.remote ? <DesktopCallout tone="info">{t("detailDegradedRemote")}</DesktopCallout> : null}
 					<NoticeBanner
 						pairId={pair.id}
 						notices={pair.notices}

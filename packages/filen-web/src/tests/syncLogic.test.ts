@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { DesktopSyncActivity, DesktopSyncOverview, DesktopSyncPair, DesktopSyncPlanSummary } from "@filen/shared/desktop"
 import { sync } from "@/locales/en/sync"
+import { hostBanner } from "@/features/desktop/lib/hostBanner.logic"
 import { ACTIVITY_KIND_KEY, ACTIVITY_KIND_TONE, ACTIVITY_LIMIT, mergeActivity } from "@/features/sync/lib/activity.logic"
 import { ROOT_PROBLEM_KEY, ROOT_WARNING_KEY, SYNC_ERROR_KEY, UNSYNCABLE_REASON_KEY } from "@/features/sync/lib/syncErrors.logic"
 import {
@@ -9,7 +10,6 @@ import {
 	conflictDetailKey,
 	FINDING_KEY,
 	HELD_REASON_KEY,
-	hostBanner,
 	isLargePlan,
 	MODE_DESCRIPTION_KEY,
 	MODE_KEY,

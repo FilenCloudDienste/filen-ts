@@ -6,9 +6,9 @@ import { LoadingState } from "@/components/loadingState"
 import { SidebarNotice } from "@/components/sidebarNotice"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { openAddPair, syncApi, useSyncHost, useSyncPairIds } from "@/features/sync/lib/syncStore"
-import { hostBanner } from "@/features/sync/lib/syncStatus.logic"
+import { hostBanner } from "@/features/desktop/lib/hostBanner.logic"
 import { SyncPairRow } from "@/features/sync/components/syncPairRow"
-import { SyncCallout } from "@/features/sync/components/syncCallout"
+import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 
 const PAIR_PATH = /^\/sync\/([^/]+)/
 
@@ -23,7 +23,7 @@ function HostBanner() {
 	}
 
 	return (
-		<SyncCallout
+		<DesktopCallout
 			tone={banner.tone}
 			className="app-region-no-drag"
 			action={
@@ -41,7 +41,7 @@ function HostBanner() {
 			}
 		>
 			{t(banner.key)}
-		</SyncCallout>
+		</DesktopCallout>
 	)
 }
 

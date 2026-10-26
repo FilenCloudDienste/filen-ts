@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { listenAddresses } from "../main/mounts/addresses.ts"
+import { listenAddresses, listenAddressKind } from "../main/mounts/addresses.ts"
 import { createCredentialStore } from "../main/mounts/credentials.ts"
 import { mountsDesired, wantsRoles } from "../main/mounts/desired.ts"
 import { DEFAULT_MOUNTS, defaultServe, type MountsConfig } from "../main/mounts/store.ts"
@@ -91,5 +91,16 @@ describe("listenAddresses", () => {
 			{ address: "192.168.1.20", kind: "lan", interface: "en0" },
 			{ address: "0.0.0.0", kind: "all", interface: null }
 		])
+	})
+})
+
+describe("listenAddressKind", () => {
+	it("tells a host's reach by its form", () => {
+		expect(listenAddressKind("127.0.0.1")).toBe("loopback")
+		expect(listenAddressKind("127.4.0.9")).toBe("loopback")
+		expect(listenAddressKind("localhost")).toBe("loopback")
+		expect(listenAddressKind("::1")).toBe("loopback")
+		expect(listenAddressKind("0.0.0.0")).toBe("all")
+		expect(listenAddressKind("192.168.1.5")).toBe("lan")
 	})
 })

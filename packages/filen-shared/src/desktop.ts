@@ -510,13 +510,16 @@ export interface DesktopDrive {
 	error: DesktopMountsError | null
 }
 
-// `address` is the IP the server listens on; `authenticated` is false for nfs only.
+// `address` is the IP the server listens on and `addressKind` how far it reaches; `httpsCapable` says whether the
+// protocol can be served over https at all; `authenticated` is false for nfs only.
 export interface DesktopServe {
 	protocol: DesktopServeProtocol
 	enabled: boolean
 	state: DesktopMountsRoleState
 	address: string
+	addressKind: DesktopListenAddress["kind"]
 	port: number
+	httpsCapable: boolean
 	https: boolean
 	readOnly: boolean
 	authenticated: boolean
