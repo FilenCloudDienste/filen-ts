@@ -38,6 +38,7 @@ import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
 import { RailProgressBar, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
 import { useTheme } from "@/providers/themeProvider"
+import { desktopPlatform } from "@/lib/desktop"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -61,6 +62,8 @@ import { Kbd } from "@/lib/keymap/kbd"
 // muted marks on the canvas that tint on hover. No borders — the chip and hover fills carry the
 // state entirely. Reused by every real section entry (Drive, Contacts, Transfers) so they stay
 // visually identical.
+const RAIL_HOLDS_TRAFFIC_LIGHTS = desktopPlatform() === "darwin"
+
 function railItemClass(active: boolean): string {
 	return cn(
 		// app-region-no-drag: every rail item is a real click target inside the rail's own drag region
@@ -508,7 +511,12 @@ export function IconRail() {
 			// with app-region-no-drag so it stays clickable. overflow-y-auto: the entry list is fixed-height
 			// and can outgrow a short viewport (landscape phone); tooltips portal out, so a scroll container
 			// here cannot clip them.
-			className="flex w-12 shrink-0 flex-col items-center gap-1.5 overflow-y-auto py-1.5 app-region-drag"
+			// macOS desktop: the native traffic lights sit at the top of the rail (see the shell's window
+			// options), so the rail widens to hold them and the brand moves below them.
+			className={cn(
+				"flex shrink-0 flex-col items-center gap-1.5 overflow-y-auto app-region-drag",
+				RAIL_HOLDS_TRAFFIC_LIGHTS ? "w-16 pt-8 pb-1.5" : "w-12 py-1.5"
+			)}
 		>
 			<Link
 				to="/drive/$"

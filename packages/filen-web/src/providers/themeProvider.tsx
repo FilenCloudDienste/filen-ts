@@ -3,6 +3,7 @@ import * as React from "react"
 import { DEFAULT_THEME_SETTING, isThemeSetting, type ThemeSetting } from "@filen/shared"
 import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { syncTitleBarColors } from "@/lib/desktop"
 
 export type Theme = ThemeSetting
 type ResolvedTheme = "dark" | "light"
@@ -52,6 +53,7 @@ function applyTheme(nextTheme: Theme) {
 
 	root.classList.remove("light", "dark")
 	root.classList.add(resolvedTheme)
+	syncTitleBarColors()
 	restoreTransitions()
 }
 

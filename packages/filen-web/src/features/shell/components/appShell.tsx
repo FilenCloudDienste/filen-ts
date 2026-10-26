@@ -14,7 +14,6 @@ import { SettingsSidebar } from "@/features/settings/components/settingsSidebar"
 import { ContactsSidebar } from "@/features/contacts/components/contactsSidebar"
 import { PlaylistsSidebar } from "@/features/audio/components/playlistsSidebar"
 import { VideosSidebar } from "@/features/videos/components/videosSidebar"
-import { SystemStrip } from "@/features/shell/components/systemStrip"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
@@ -45,9 +44,9 @@ const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 // The panel has exactly one mount either way: inline in the row at desktop widths, inside the drawer
 // portal below them.
 //
-// SystemStrip sits ABOVE the padded row: in a plain browser it renders null and the column collapses
-// to exactly the row below. Under Electron it adds its own height on top instead of eating into the
-// page padding — the row gets `min-h-0 flex-1` so it never has to know the strip exists.
+// The title-bar band sits ABOVE the padded row. It has a height only where the desktop shell's
+// window-controls overlay (Windows, Linux) defines titlebar-area-height, and is 0 in a browser and on macOS,
+// so the row gets `min-h-0 flex-1` and never has to know the band exists.
 export function AppShell() {
 	// The sidebar panel is contextual: /chats* gets the ChatsSidebar, /notes* the NotesSidebar,
 	// /settings* the SettingsSidebar, /contacts the ContactsSidebar, /playlists the PlaylistsSidebar,
@@ -117,7 +116,7 @@ export function AppShell() {
 			{/* The assistant's navigation tools act through the router from here, whether or not the panel is
 			    open. Renders nothing. */}
 			<AssistantNavigationBridge />
-			<SystemStrip />
+			<div className="h-[env(titlebar-area-height,0px)] shrink-0 app-region-drag" />
 			{/* A sibling of the row, never its wrapper (see sidebarDrawer.tsx); the panel goes to exactly one
 			    of the two slots. */}
 			<SidebarDrawer

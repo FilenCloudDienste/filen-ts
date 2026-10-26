@@ -3,10 +3,8 @@ import { FILEN_PRIVACY_URL, FILEN_TERMS_URL } from "@/lib/externalUrls"
 import { SettingsLinkRow } from "@/features/settings/components/settingsLayout"
 
 // External links only — same target="_blank" + rel="noopener noreferrer" convention as the Billing
-// page's "Manage on filen.io" link. Electron: window.desktop carries no "open external URL" bridge
-// method, and a plain `<a target="_blank">` inside an Electron BrowserWindow already opens the OS
-// default browser (Electron's default `window.open` handler for a target the app hasn't otherwise
-// intercepted), so no bridge call is needed here either.
+// page's "Manage on filen.io" link. In the desktop app the shell's window-open handler sends them to the
+// OS browser, so no bridge call is needed.
 function AboutRows() {
 	const { t } = useTranslation("common")
 

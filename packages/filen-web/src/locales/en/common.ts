@@ -123,18 +123,6 @@ export const common = {
 	backOnline: "Back online",
 	/** Disabled-control tooltip/title suffix — appended wherever a mutating action is disabled purely because the app is offline */
 	offlineActionDisabled: "Unavailable while offline",
-	// Desktop system strip — win32/linux custom window controls (darwin uses native traffic lights,
-	// no custom buttons); only rendered when window.desktop is present (see src/types/desktop.d.ts)
-	/** System strip — minimize-window button accessible label */
-	windowMinimize: "Minimize",
-	/** System strip — maximize-window button accessible label, shown while the window is not maximized */
-	windowMaximize: "Maximize",
-	/** System strip — restore-window button accessible label, shown while the window is maximized */
-	windowRestore: "Restore",
-	/** System strip — hide-window button accessible label */
-	windowHide: "Hide",
-	/** System strip — close-window button accessible label */
-	windowClose: "Close window",
 	// Undecryptable-item explainer — shown in place of the normal content wherever an item whose
 	// metadata never decrypted can still be reached (note editor pane, drive info dialog)
 	/** Cannot-decrypt explainer — heading */

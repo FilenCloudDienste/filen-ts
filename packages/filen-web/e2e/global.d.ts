@@ -1,3 +1,5 @@
+import type { DesktopBridge } from "@filen/shared/desktop"
+
 // Types the VITE_E2E test hooks the app installs on `window` (src/e2e-hooks/index.ts) for use inside
 // Playwright page.evaluate callbacks. Kept as a standalone, minimal mirror because the e2e project
 // cannot import the browser module directly — it pulls in Vite-only `?worker` imports that tsc can't
@@ -78,19 +80,6 @@ export interface ArchiveCatalogueRow {
 	maxLevel: number | null
 	probeMemory: number | null
 	levelMemory: (number | null)[]
-}
-
-// Mirrors src/types/desktop.d.ts's DesktopBridge for the same reason as E2eHooks above: this project
-// can't import the app source tree. No spec here ever exercises a populated bridge (Electron isn't
-// part of this suite) — boot.spec.ts only asserts window.desktop stays undefined in a plain browser,
-// so the shape only needs to exist for that read to typecheck.
-interface DesktopBridge {
-	readonly platform: "darwin" | "win32" | "linux"
-	minimize(): void
-	toggleMaximize(): void
-	hide(): void
-	close(): void
-	onMaximizedChange(cb: (maximized: boolean) => void): () => void
 }
 
 declare global {

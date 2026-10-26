@@ -39,11 +39,8 @@ test.describe("boot", () => {
 			timeout: BOOT_SETTLE_TIMEOUT_MS
 		})
 
-		// The desktop system strip (Electron plumbing) is runtime-detected off window.desktop, which a
-		// plain browser never defines - proves the strip has zero footprint here, not merely that it
-		// wasn't asserted for.
+		// Desktop chrome is runtime-detected off window.desktop, which a plain browser never defines.
 		expect(await page.evaluate(() => window.desktop)).toBeUndefined()
-		await expect(page.getByRole("button", { name: "Close window" })).toHaveCount(0)
 
 		// Chats and Notes are both real, enabled rail Links now — the chats module promoted the last
 		// remaining "coming soon" module out of the inert loop (same precedent as the notes promotion).
