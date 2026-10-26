@@ -1,7 +1,7 @@
 import type { JsClientConfig, StringifiedClient } from "@filen/sdk-rs"
 import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
-import { persistSession, resumeSession } from "@/lib/sdk/session"
+import { clearSessionOutsideKv, persistSession, resumeSession } from "@/lib/sdk/session"
 import { parseEnvelope } from "@/lib/serialize"
 import { takeSeededSession } from "@/e2e-hooks/sessionSeed"
 import { kvClear, storage } from "@/lib/storage/adapter"
@@ -42,12 +42,12 @@ export function whenBootReady(): Promise<void> {
 
 // Finishes a sign-out the previous page did not live to complete (see signOutPending.ts): every wipe again,
 // before any session could be resumed from what it left. After a sign-out that did complete, each of these
-// finds next to nothing to do. The flag clears only once all three succeeded, so a failure retries on the
+// finds next to nothing to do. The flag clears only once all of them succeeded, so a failure retries on the
 // next boot rather than being forgotten.
 async function finishPendingSignOut(): Promise<void> {
 	wipePendingWatch(() => localStorage)
 
-	const outcomes = await Promise.allSettled([kvClear(), wipeImageCaches(), wipeSwClient()])
+	const outcomes = await Promise.allSettled([kvClear(), clearSessionOutsideKv(), wipeImageCaches(), wipeSwClient()])
 	const failed = outcomes.find(outcome => outcome.status === "rejected")
 
 	if (failed !== undefined) {

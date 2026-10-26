@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 // Same kv boundary as sidebarWidth.test.ts: the adapter itself, backed by a Map reset per test.
 const { kvStore } = vi.hoisted(() => ({ kvStore: new Map<string, unknown>() }))
 
+// The real accessor reads `window` at import, which the node environment has none of; the session store imports it.
+vi.mock("@/lib/desktop", () => ({ desktopBridge: () => undefined }))
+
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: (key: string) => Promise.resolve(kvStore.get(key) ?? null),
 	kvSetJson: (key: string, value: unknown) => {

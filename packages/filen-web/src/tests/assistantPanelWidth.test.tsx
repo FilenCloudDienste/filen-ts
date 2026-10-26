@@ -17,7 +17,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 	},
 	kvEntriesJson: (prefix: string) => Promise.resolve([...kvStore].filter(([key]) => key.startsWith(prefix))),
 	kvKeys: (prefix: string) => Promise.resolve([...kvStore.keys()].filter(key => key.startsWith(prefix))),
-	kvHas: (key: string) => Promise.resolve(key === "sdk.session.v1" || kvStore.has(key)),
+	kvHas: (key: string) => Promise.resolve(kvStore.has(key)),
 	kvDelete: (key: string) => {
 		kvStore.delete(key)
 
@@ -32,7 +32,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 	}
 }))
 
-vi.mock("@/lib/sdk/session", () => ({ SESSION_KV_KEY: "sdk.session.v1", onAuthBroadcast: () => () => undefined }))
+vi.mock("@/lib/sdk/session", () => ({ hasPersistedSession: () => Promise.resolve(true), onAuthBroadcast: () => () => undefined }))
 
 // Saved at the maximum on a wide window.
 vi.mock("@/features/shell/queries/sidebarWidth", () => ({

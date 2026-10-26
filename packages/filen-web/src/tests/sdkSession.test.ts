@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
+import type { DesktopBridge, DesktopSessionVault } from "@filen/shared/desktop"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
 // to the one method the session store calls. `injectClient` is a spy so the resume path is observable.
@@ -8,7 +9,7 @@ const { injectClient } = vi.hoisted(() => ({ injectClient: vi.fn<(blob: Stringif
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { injectClient } }))
 
 // Map-backed fake StorageApi (mirrors adapter.test.ts) so persist/resume/clear exercise the REAL
-// adapter + envelope + arktype validation — only the leader-election machinery is faked.
+// adapter + envelope + schema validation — only the leader-election machinery is faked.
 const { fakeStore } = vi.hoisted(() => ({ fakeStore: new Map<string, string>() }))
 
 vi.mock("@/lib/storage/leader", () => ({
@@ -36,8 +37,16 @@ const { writeSignedInHint } = vi.hoisted(() => ({ writeSignedInHint: vi.fn<(sign
 
 vi.mock("@/lib/signedInHint", () => ({ writeSignedInHint }))
 
-import { persistSession, resumeSession, clearSession, SESSION_KV_KEY } from "@/lib/sdk/session"
+// The desktop shell's bridge, swapped in per test; undefined is a plain browser.
+const desktop = vi.hoisted(() => ({ bridge: undefined as DesktopBridge | undefined }))
+
+vi.mock("@/lib/desktop", () => ({ desktopBridge: () => desktop.bridge }))
+
+import { persistSession, resumeSession, clearSession, clearSessionOutsideKv, hasPersistedSession } from "@/lib/sdk/session"
 import { log } from "@/lib/log"
+import { stringifyEnvelope } from "@/lib/serialize"
+
+const SESSION_KV_KEY = "sdk.session.v1"
 
 function sampleBlob(): StringifiedClient {
 	return {
@@ -57,6 +66,7 @@ beforeEach(() => {
 	injectClient.mockReset()
 	injectClient.mockResolvedValue(undefined)
 	writeSignedInHint.mockReset()
+	desktop.bridge = undefined
 })
 
 describe("session store (Map-backed fake kv, mocked worker inject)", () => {
@@ -141,5 +151,102 @@ describe("signed-in hint", () => {
 		injectClient.mockRejectedValueOnce(new Error("stale session"))
 		await resumeSession()
 		expect(writeSignedInHint.mock.calls).toEqual([[false]])
+	})
+})
+
+describe("browser kv", () => {
+	it("reads an unparseable or invalid row as no session, without clearing or injecting", async () => {
+		const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => undefined)
+
+		fakeStore.set(SESSION_KV_KEY, "{")
+		await expect(resumeSession()).resolves.toBe(false)
+
+		fakeStore.set(SESSION_KV_KEY, stringifyEnvelope({ ...sampleBlob(), userId: 1 }))
+		await expect(resumeSession()).resolves.toBe(false)
+
+		expect(injectClient).not.toHaveBeenCalled()
+		expect(warnSpy).toHaveBeenCalledTimes(2)
+		expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("private-key")
+	})
+
+	it("hasPersistedSession follows the kv row; the vault-only clear is a no-op", async () => {
+		await expect(hasPersistedSession()).resolves.toBe(false)
+		await persistSession(sampleBlob())
+		await expect(hasPersistedSession()).resolves.toBe(true)
+
+		await clearSessionOutsideKv()
+		expect(fakeStore.has(SESSION_KV_KEY)).toBe(true)
+	})
+})
+
+describe("desktop vault", () => {
+	function installVault(stored: string | null = null) {
+		const state = { stored }
+		const vault = {
+			state,
+			get: vi.fn<DesktopSessionVault["get"]>(() => Promise.resolve(state.stored)),
+			set: vi.fn<DesktopSessionVault["set"]>(blob => {
+				state.stored = blob
+
+				return Promise.resolve()
+			}),
+			clear: vi.fn<DesktopSessionVault["clear"]>(() => {
+				state.stored = null
+
+				return Promise.resolve()
+			})
+		}
+
+		desktop.bridge = { platform: "darwin", session: vault, setTitleBarColors: () => undefined }
+
+		return vault
+	}
+
+	it("persists the envelope to the vault only and resumes from it", async () => {
+		const vault = installVault()
+		const blob = sampleBlob()
+
+		await persistSession(blob)
+
+		expect(vault.state.stored).toBe(stringifyEnvelope(blob))
+		expect(fakeStore.size).toBe(0)
+		await expect(hasPersistedSession()).resolves.toBe(true)
+		await expect(resumeSession()).resolves.toBe(true)
+		expect(injectClient).toHaveBeenCalledWith(blob)
+		expect(writeSignedInHint.mock.calls).toEqual([[true], [true]])
+	})
+
+	it("an unreadable vault rejects the resume and clears nothing", async () => {
+		const vault = installVault(stringifyEnvelope(sampleBlob()))
+
+		vault.get.mockRejectedValueOnce(new Error("locked"))
+
+		await expect(resumeSession()).rejects.toThrow("locked")
+		expect(vault.clear).not.toHaveBeenCalled()
+		expect(vault.state.stored).not.toBeNull()
+		expect(injectClient).not.toHaveBeenCalled()
+	})
+
+	it("a session the SDK rejects is cleared from the vault", async () => {
+		vi.spyOn(log, "warn").mockImplementation(() => undefined)
+
+		const vault = installVault(stringifyEnvelope(sampleBlob()))
+
+		injectClient.mockRejectedValueOnce(new Error("stale session"))
+
+		await expect(resumeSession()).resolves.toBe(false)
+		expect(vault.clear).toHaveBeenCalledTimes(1)
+		expect(vault.state.stored).toBeNull()
+	})
+
+	it("clears through the vault, also for a pending sign-out", async () => {
+		const vault = installVault(stringifyEnvelope(sampleBlob()))
+
+		await clearSession()
+		expect(vault.clear).toHaveBeenCalledTimes(1)
+		await expect(hasPersistedSession()).resolves.toBe(false)
+
+		await clearSessionOutsideKv()
+		expect(vault.clear).toHaveBeenCalledTimes(2)
 	})
 })

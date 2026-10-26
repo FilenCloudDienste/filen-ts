@@ -138,6 +138,12 @@ export async function kvDelete(key: string): Promise<void> {
 	await api.kvDelete(key)
 }
 
+// The stored string as is, for a reader that decodes it itself.
+export async function kvGet(key: string): Promise<string | null> {
+	const { api } = await storage()
+	return api.kvGet(key)
+}
+
 // Raw existence check, independent of any schema: kvGetJson collapses "absent" and "present but
 // schema-mismatched" to the same `null`, which is the right call for a normal typed read but makes
 // it useless for proving a key is genuinely gone (e.g. after a wipe) when the caller does not also

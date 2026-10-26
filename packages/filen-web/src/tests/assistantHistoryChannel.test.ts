@@ -12,7 +12,6 @@ vi.mock("@/lib/storage/adapter", () => ({
 		return Promise.resolve([])
 	},
 	kvKeys: () => Promise.resolve([]),
-	kvHas: () => Promise.resolve(true),
 	kvDelete: () => Promise.resolve(),
 	kvDeletePrefix: () => Promise.resolve()
 }))
@@ -20,7 +19,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 vi.mock("@/lib/signOutPending", () => ({ readSignOutPending: () => false }))
 
 vi.mock("@/lib/sdk/session", () => ({
-	SESSION_KV_KEY: "sdk.session.v1",
+	hasPersistedSession: () => Promise.resolve(true),
 	onAuthBroadcast: () => () => undefined
 }))
 

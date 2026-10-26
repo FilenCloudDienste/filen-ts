@@ -1,6 +1,6 @@
 import { create } from "zustand"
-import { kvDelete, kvDeletePrefix, kvEntriesJson, kvGetJson, kvHas, kvKeys, kvSetJson } from "@/lib/storage/adapter"
-import { onAuthBroadcast, SESSION_KV_KEY } from "@/lib/sdk/session"
+import { kvDelete, kvDeletePrefix, kvEntriesJson, kvGetJson, kvKeys, kvSetJson } from "@/lib/storage/adapter"
+import { hasPersistedSession, onAuthBroadcast } from "@/lib/sdk/session"
 import { readSignOutPending } from "@/lib/signOutPending"
 import { log } from "@/lib/log"
 import {
@@ -196,7 +196,7 @@ async function write(target: Slot, content: ConversationContent, json: string): 
 	// Signing out in this or another tab: a row landing after the wipe would outlive the account. The
 	// session row goes before the kv wipe, and the wipe waits for this lock (withHistoryWritesHeld), so a
 	// write either lands before the wipe or finds no session.
-	if (closed || readSignOutPending() || !(await kvHas(SESSION_KV_KEY))) {
+	if (closed || readSignOutPending() || !(await hasPersistedSession())) {
 		if (target.savedJson === json) {
 			target.savedJson = null
 		}

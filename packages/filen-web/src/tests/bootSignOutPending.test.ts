@@ -42,6 +42,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/lib/storage/adapter", () => ({ storage: () => Promise.resolve({}), kvGetJson: () => Promise.resolve(null), kvClear }))
 vi.mock("@/lib/storage/capability", () => ({ isOpfsApiAvailable: () => true }))
 vi.mock("@/lib/sdk/session", () => ({
+	clearSessionOutsideKv: () => Promise.resolve(),
 	persistSession: vi.fn(),
 	resumeSession: () => {
 		calls.push("resumeSession")

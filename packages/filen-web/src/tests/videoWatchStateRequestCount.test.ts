@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WATCH_STATE_FILE_NAME, emptyWatchState, itemKey, markWatched, parseWatchStateText, type WatchStateDoc } from "@filen/shared/videos"
 import type { File as SdkFile, FileVersion, SocketEvent } from "@filen/sdk-rs"
 
+// The real accessor reads `window` at import, which the node environment has none of; the session store imports it.
+vi.mock("@/lib/desktop", () => ({ desktopBridge: () => undefined }))
+
 vi.mock("@/lib/storage/adapter", () => ({
 	kvGetJson: vi.fn(),
 	kvSetJson: vi.fn(),

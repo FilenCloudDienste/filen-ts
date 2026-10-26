@@ -23,7 +23,6 @@ vi.mock("@/lib/storage/adapter", () => ({
 			[...kvStore].filter(([key, value]) => key.startsWith(prefix) && typeof value === "object" && value !== null && "rev" in value)
 		),
 	kvKeys: (prefix: string) => Promise.resolve([...kvStore.keys()].filter(key => key.startsWith(prefix))),
-	kvHas: (key: string) => Promise.resolve(key === "sdk.session.v1" ? signOut.session : kvStore.has(key)),
 	kvDelete: (key: string) => {
 		kvStore.delete(key)
 
@@ -41,7 +40,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 vi.mock("@/lib/signOutPending", () => ({ readSignOutPending: () => signOut.pending }))
 
 vi.mock("@/lib/sdk/session", () => ({
-	SESSION_KV_KEY: "sdk.session.v1",
+	hasPersistedSession: () => Promise.resolve(signOut.session),
 	onAuthBroadcast: (handler: (message: { kind: "login" | "logout" }) => void) => {
 		authHandlers.add(handler)
 
