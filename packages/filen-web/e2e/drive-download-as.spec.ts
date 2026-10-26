@@ -263,8 +263,18 @@ test("Cancel on the progress toast stops the export: no download, the toast goes
 	})
 })
 
-test("the whole selection downloads as one archive of PDFs from the selection bar", async ({ page }) => {
+// A Linux WebKit browser's user agent: the in-memory archive it gets (downloadAsZip's streamsSafely), which Playwright's
+// Linux WebKit, reporting Safari's macOS one, would otherwise never take.
+const LINUX_WEBKIT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+
+test("the whole selection downloads as one archive of PDFs from the selection bar", async ({ page, browserName }) => {
 	test.slow()
+
+	if (browserName === "webkit" && process.platform === "linux") {
+		await page.context().addInitScript(userAgent => {
+			Object.defineProperty(navigator, "userAgent", { get: () => userAgent })
+		}, LINUX_WEBKIT_USER_AGENT)
+	}
 
 	await withScratchDirectory(page, "download-as-bulk", async ({ listbox, runId }) => {
 		const document = `e2e-${runId}-a.docx`

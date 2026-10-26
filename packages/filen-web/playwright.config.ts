@@ -87,13 +87,8 @@ const BROWSER_USE = {
 	firefox: { ...devices["Desktop Firefox"], launchOptions: { firefoxUserPrefs: { "media.volume_scale": "0.0" } } },
 	// At 1x like the other two: the helpers stretch the page to 1280x8000 (virtualization), and Linux WebKit
 	// paints in software, so Desktop Safari's 2x (a 2560x16000 surface) runs at a few frames a second, too
-	// slow for actions that wait on a stable element. Linux WebKit keeps its own user agent: the app treats it
-	// apart from Safari (downloadAsZip's streamsSafely), which Desktop Safari's would hide.
-	webkit: {
-		...devices["Desktop Safari"],
-		deviceScaleFactor: 1,
-		...(process.platform === "linux" ? { userAgent: undefined } : {})
-	}
+	// slow for actions that wait on a stable element.
+	webkit: { ...devices["Desktop Safari"], deviceScaleFactor: 1 }
 } satisfies Record<Browser, Project["use"]>
 
 function lanes(browser: Browser): Project[] {
