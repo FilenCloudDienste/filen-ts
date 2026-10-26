@@ -1,13 +1,26 @@
-import * as z from "zod"
+import { type } from "arktype"
 import { ASSISTANT_PERIOD_FILTERS } from "./dates"
-import { defineTool, type AssistantRoute, type AssistantTool, type AssistantToolGroup } from "./tool"
+import { defineTool, oneOf, type AssistantRoute, type AssistantTool, type AssistantToolArg, type AssistantToolGroup } from "./tool"
 
 // Items are addressed by short handles ("f3", "d1", "n2", "c4", "p1") that read tools hand out.
 // A model reliably copies a handle it has seen and reliably mangles a UUID, so UUIDs never reach it. No example
 // handle: one it lacks, it would copy from the example, whatever the item's kind.
-const handle = (what: string) => z.string().describe(`Handle of ${what}, as returned by an earlier tool result`)
+const handle = (what: string) => ({
+	type: type.string,
+	description: `Handle of ${what}, as returned by an earlier tool result`
+})
 
-const handles = (what: string) => z.array(z.string()).min(1).describe(`Handles of ${what}, as returned by earlier tool results`)
+const handles = (what: string) => ({
+	type: type.string.array().atLeastLength(1),
+	description: `Handles of ${what}, as returned by earlier tool results`
+})
+
+const optional = <const Arg extends AssistantToolArg>(arg: Arg) => ({
+	...arg,
+	optional: true
+})
+
+const integer = type("number.integer")
 
 const DRIVE_KINDS = ["file", "directory", "image", "video", "audio", "document"] as const
 
@@ -32,17 +45,26 @@ export const ASSISTANT_OFFICE_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set
 ])
 
 // Small models fill every optional argument they are offered, so a new filter's first value changes nothing.
-const anyKind = z
-	.enum(["any", ...DRIVE_KINDS])
-	.optional()
-	.describe("Only this kind; any for all")
+const anyKind = optional({
+	...oneOf(["any", ...DRIVE_KINDS]),
+	description: "Only this kind; any for all"
+})
 
 // Dates go in as a named period or as plain days and are resolved in code (dates.ts): small models count
 // days wrong. Kept short: these fields repeat in every filtering tool's schema.
 const periodFilter = () => ({
-	period: z.enum(ASSISTANT_PERIOD_FILTERS).optional().describe("Only items dated in this period; custom uses from/to"),
-	from: z.string().optional().describe("First day, YYYY-MM-DD"),
-	to: z.string().optional().describe("Last day, YYYY-MM-DD")
+	period: optional({
+		...oneOf(ASSISTANT_PERIOD_FILTERS),
+		description: "Only items dated in this period; custom uses from/to"
+	}),
+	from: optional({
+		type: type.string,
+		description: "First day, YYYY-MM-DD"
+	}),
+	to: optional({
+		type: type.string,
+		description: "Last day, YYYY-MM-DD"
+	})
 })
 
 // The dates a drive item carries; "created" is the file's own creation date where the uploader recorded one.
@@ -51,7 +73,10 @@ const DRIVE_DATES = ["modified", "uploaded", "created"] as const
 function dateFilter<const Fields extends readonly [string, ...string[]]>(fields: Fields) {
 	return {
 		...periodFilter(),
-		date: z.enum(fields).optional().describe(`Date to filter by, default ${fields[0]}`)
+		date: optional({
+			...oneOf(fields),
+			description: `Date to filter by, default ${fields[0]}`
+		})
 	}
 }
 
@@ -64,7 +89,7 @@ export const getContext = defineTool({
 	untrustedOutput: "names",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({})
+	input: {}
 })
 
 export const searchItems = defineTool({
@@ -78,11 +103,17 @@ export const searchItems = defineTool({
 	grounded: {
 		text: ["query"]
 	},
-	input: z.strictObject({
-		query: z.string().describe("Words from the item name, e.g. \"invoice 2024\""),
-		kind: z.enum(DRIVE_KINDS).optional().describe("Only return this kind of item"),
+	input: {
+		query: {
+			type: type.string,
+			description: "Words from the item name, e.g. \"invoice 2024\""
+		},
+		kind: optional({
+			...oneOf(DRIVE_KINDS),
+			description: "Only return this kind of item"
+		}),
 		...dateFilter(DRIVE_DATES)
-	})
+	}
 })
 
 // Small models fill every optional argument they are offered, and a filter nobody asked for hides what the
@@ -93,10 +124,10 @@ const searchItemsByName = defineTool({
 	...searchItems,
 	description: "Search files and directories in the user's drive by name. Returns handles, names and paths.",
 	group: "files",
-	input: searchItems.input.pick({
-		query: true,
-		kind: true
-	})
+	input: {
+		query: searchItems.input.query,
+		kind: searchItems.input.kind
+	}
 })
 
 export const listDirectory = defineTool({
@@ -112,17 +143,23 @@ export const listDirectory = defineTool({
 		handles: ["handle"],
 		text: ["path"]
 	},
-	input: z.strictObject({
-		handle: handle("a directory").optional(),
-		path: z.string().optional().describe("Absolute path, e.g. \"/Documents/Invoices\""),
-		sort: z
-			.enum(["name", "largest", "smallest", "newest", "oldest"])
-			.optional()
-			.describe("Order, default name"),
+	input: {
+		handle: optional(handle("a directory")),
+		path: optional({
+			type: type.string,
+			description: "Absolute path, e.g. \"/Documents/Invoices\""
+		}),
+		sort: optional({
+			...oneOf(["name", "largest", "smallest", "newest", "oldest"]),
+			description: "Order, default name"
+		}),
 		kind: anyKind,
 		...dateFilter(DRIVE_DATES),
-		offset: z.int().optional().describe("Where to start: the result's next, to list the rest of a long directory")
-	})
+		offset: optional({
+			type: integer,
+			description: "Where to start: the result's next, to list the rest of a long directory"
+		})
+	}
 })
 
 // Carried by a size-sorted listing that holds directories: no tool ranks the whole drive's files, and without
@@ -134,12 +171,12 @@ const listDirectoryPlain = defineTool({
 	...listDirectory,
 	description: "List the contents of a directory, given its handle or its path (\"/\" is the drive root). Can sort by size or date.",
 	group: "files",
-	input: listDirectory.input.pick({
-		handle: true,
-		path: true,
-		sort: true,
-		offset: true
-	})
+	input: {
+		handle: listDirectory.input.handle,
+		path: listDirectory.input.path,
+		sort: listDirectory.input.sort,
+		offset: listDirectory.input.offset
+	}
 })
 
 export const getItemInfo = defineTool({
@@ -154,9 +191,9 @@ export const getItemInfo = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a file or directory")
-	})
+	}
 })
 
 export const recentItems = defineTool({
@@ -169,11 +206,14 @@ export const recentItems = defineTool({
 	untrustedOutput: "names",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({
+	input: {
 		kind: anyKind,
-		sort: z.enum(["newest", "oldest", "largest", "smallest"]).optional().describe("Order, default newest"),
+		sort: optional({
+			...oneOf(["newest", "oldest", "largest", "smallest"]),
+			description: "Order, default newest"
+		}),
 		...dateFilter(["uploaded", "modified"])
-	})
+	}
 })
 
 export const listPhotos = defineTool({
@@ -185,11 +225,17 @@ export const listPhotos = defineTool({
 	untrustedOutput: "names",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({
-		kind: z.enum(["any", "image", "video"]).optional().describe("Only photos or only videos; any for both"),
-		sort: z.enum(["newest", "oldest"]).optional().describe("Order, default newest"),
+	input: {
+		kind: optional({
+			...oneOf(["any", "image", "video"]),
+			description: "Only photos or only videos; any for both"
+		}),
+		sort: optional({
+			...oneOf(["newest", "oldest"]),
+			description: "Order, default newest"
+		}),
 		...periodFilter()
-	})
+	}
 })
 
 export const getStorage = defineTool({
@@ -202,7 +248,7 @@ export const getStorage = defineTool({
 	untrustedOutput: "none",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({})
+	input: {}
 })
 
 // The drive's own lists, by the names open_route gives their screens. Read-only: nothing here restores from
@@ -220,10 +266,13 @@ export const listSection = defineTool({
 	untrustedOutput: "names",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({
-		section: z.enum(ASSISTANT_DRIVE_SECTIONS),
-		query: z.string().optional().describe("Only items with these words in the name or in whom they are shared with or by")
-	})
+	input: {
+		section: oneOf(ASSISTANT_DRIVE_SECTIONS),
+		query: optional({
+			type: type.string,
+			description: "Only items with these words in the name or in whom they are shared with or by"
+		})
+	}
 })
 
 export const getSharing = defineTool({
@@ -238,9 +287,9 @@ export const getSharing = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a file or directory")
-	})
+	}
 })
 
 export const readTextFile = defineTool({
@@ -254,9 +303,9 @@ export const readTextFile = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a text file")
-	})
+	}
 })
 
 export const revealItem = defineTool({
@@ -270,9 +319,9 @@ export const revealItem = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a file or directory")
-	})
+	}
 })
 
 export const setFavorite = defineTool({
@@ -286,10 +335,13 @@ export const setFavorite = defineTool({
 	grounded: {
 		handles: ["handles"]
 	},
-	input: z.strictObject({
+	input: {
 		handles: handles("files or directories"),
-		favorite: z.boolean().describe("true to add to favorites, false to remove")
-	})
+		favorite: {
+			type: type.boolean,
+			description: "true to add to favorites, false to remove"
+		}
+	}
 })
 
 export const createDirectory = defineTool({
@@ -304,10 +356,13 @@ export const createDirectory = defineTool({
 		handles: ["parent"],
 		text: ["name"]
 	},
-	input: z.strictObject({
+	input: {
 		parent: handle("the parent directory"),
-		name: z.string().describe("Name of the new directory")
-	})
+		name: {
+			type: type.string,
+			description: "Name of the new directory"
+		}
+	}
 })
 
 export const renameItem = defineTool({
@@ -322,10 +377,13 @@ export const renameItem = defineTool({
 		handles: ["handle"],
 		text: ["new_name"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("the file or directory"),
-		new_name: z.string().describe("The complete new name, including the extension")
-	})
+		new_name: {
+			type: type.string,
+			description: "The complete new name, including the extension"
+		}
+	}
 })
 
 export const moveItems = defineTool({
@@ -339,10 +397,10 @@ export const moveItems = defineTool({
 	grounded: {
 		handles: ["handles", "destination"]
 	},
-	input: z.strictObject({
+	input: {
 		handles: handles("the files or directories to move"),
 		destination: handle("the destination directory")
-	})
+	}
 })
 
 export const copyItems = defineTool({
@@ -356,10 +414,10 @@ export const copyItems = defineTool({
 	grounded: {
 		handles: ["handles", "destination"]
 	},
-	input: z.strictObject({
+	input: {
 		handles: handles("the files or directories to copy"),
 		destination: handle("the destination directory")
-	})
+	}
 })
 
 export const trashItems = defineTool({
@@ -374,9 +432,9 @@ export const trashItems = defineTool({
 	grounded: {
 		handles: ["handles"]
 	},
-	input: z.strictObject({
+	input: {
 		handles: handles("the files, directories or notes")
-	})
+	}
 })
 
 export const listNotes = defineTool({
@@ -391,11 +449,17 @@ export const listNotes = defineTool({
 	grounded: {
 		text: ["query"]
 	},
-	input: z.strictObject({
-		query: z.string().optional().describe("Words from the note title or tags"),
-		only: z.enum(["any", "pinned", "favorite", "archived"]).optional().describe("Only pinned, favorite or archived notes; any for all"),
+	input: {
+		query: optional({
+			type: type.string,
+			description: "Words from the note title or tags"
+		}),
+		only: optional({
+			...oneOf(["any", "pinned", "favorite", "archived"]),
+			description: "Only pinned, favorite or archived notes; any for all"
+		}),
 		...periodFilter()
-	})
+	}
 })
 
 export const readNote = defineTool({
@@ -409,9 +473,9 @@ export const readNote = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a note")
-	})
+	}
 })
 
 export const openNote = defineTool({
@@ -425,9 +489,9 @@ export const openNote = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a note")
-	})
+	}
 })
 
 export const createNote = defineTool({
@@ -441,11 +505,20 @@ export const createNote = defineTool({
 	grounded: {
 		text: ["title"]
 	},
-	input: z.strictObject({
-		title: z.string().describe("Title of the note"),
-		content: z.string().optional().describe("Initial text; for a checklist, one item per line"),
-		type: z.enum(["text", "markdown", "rich", "checklist", "code"]).optional().describe("Note type, default text")
-	})
+	input: {
+		title: {
+			type: type.string,
+			description: "Title of the note"
+		},
+		content: optional({
+			type: type.string,
+			description: "Initial text; for a checklist, one item per line"
+		}),
+		type: optional({
+			...oneOf(["text", "markdown", "rich", "checklist", "code"]),
+			description: "Note type, default text"
+		})
+	}
 })
 
 export const setNoteFlags = defineTool({
@@ -459,12 +532,21 @@ export const setNoteFlags = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a note"),
-		pinned: z.boolean().optional().describe("Pin or unpin"),
-		favorite: z.boolean().optional().describe("Favorite or unfavorite"),
-		archived: z.boolean().optional().describe("Archive or unarchive")
-	})
+		pinned: optional({
+			type: type.boolean,
+			description: "Pin or unpin"
+		}),
+		favorite: optional({
+			type: type.boolean,
+			description: "Favorite or unfavorite"
+		}),
+		archived: optional({
+			type: type.boolean,
+			description: "Archive or unarchive"
+		})
+	}
 })
 
 export const listChats = defineTool({
@@ -479,9 +561,12 @@ export const listChats = defineTool({
 	grounded: {
 		text: ["query"]
 	},
-	input: z.strictObject({
-		query: z.string().optional().describe("Words from the chat or participant name")
-	})
+	input: {
+		query: optional({
+			type: type.string,
+			description: "Words from the chat or participant name"
+		})
+	}
 })
 
 export const readChat = defineTool({
@@ -495,10 +580,13 @@ export const readChat = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a chat"),
-		limit: z.int().optional().describe("How many recent messages, default 20")
-	})
+		limit: optional({
+			type: integer,
+			description: "How many recent messages, default 20"
+		})
+	}
 })
 
 export const openChat = defineTool({
@@ -512,9 +600,9 @@ export const openChat = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a chat")
-	})
+	}
 })
 
 export const draftChatMessage = defineTool({
@@ -529,10 +617,13 @@ export const draftChatMessage = defineTool({
 		handles: ["chat"],
 		links: ["text"]
 	},
-	input: z.strictObject({
+	input: {
 		chat: handle("the chat"),
-		text: z.string().describe("The message text, in the language the user wants to write in")
-	})
+		text: {
+			type: type.string,
+			description: "The message text, in the language the user wants to write in"
+		}
+	}
 })
 
 export const findContacts = defineTool({
@@ -548,9 +639,12 @@ export const findContacts = defineTool({
 	grounded: {
 		text: ["query"]
 	},
-	input: z.strictObject({
-		query: z.string().describe("Words from the contact's name or email address")
-	})
+	input: {
+		query: {
+			type: type.string,
+			description: "Words from the contact's name or email address"
+		}
+	}
 })
 
 export const listPlaylists = defineTool({
@@ -562,7 +656,7 @@ export const listPlaylists = defineTool({
 	untrustedOutput: "names",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({})
+	input: {}
 })
 
 export const openPlaylist = defineTool({
@@ -576,9 +670,9 @@ export const openPlaylist = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("a playlist")
-	})
+	}
 })
 
 export const play = defineTool({
@@ -592,9 +686,9 @@ export const play = defineTool({
 	grounded: {
 		handles: ["handle"]
 	},
-	input: z.strictObject({
+	input: {
 		handle: handle("an audio file, a directory of audio files or a playlist")
-	})
+	}
 })
 
 export const audioControl = defineTool({
@@ -607,9 +701,9 @@ export const audioControl = defineTool({
 	untrustedOutput: "names",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({
-		action: z.enum(["pause", "resume", "next", "previous", "stop", "shuffle_on", "shuffle_off", "repeat_on", "repeat_off"])
-	})
+	input: {
+		action: oneOf(["pause", "resume", "next", "previous", "stop", "shuffle_on", "shuffle_off", "repeat_on", "repeat_off"])
+	}
 })
 
 export const addTracksToPlaylist = defineTool({
@@ -623,10 +717,10 @@ export const addTracksToPlaylist = defineTool({
 	grounded: {
 		handles: ["playlist", "handles"]
 	},
-	input: z.strictObject({
+	input: {
 		playlist: handle("the playlist"),
 		handles: handles("the audio files")
-	})
+	}
 })
 
 export const getTransfers = defineTool({
@@ -640,7 +734,7 @@ export const getTransfers = defineTool({
 	untrustedOutput: "names",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({})
+	input: {}
 })
 
 export const openRoute = defineTool({
@@ -652,8 +746,8 @@ export const openRoute = defineTool({
 	untrustedOutput: "none",
 	exfiltrates: false,
 	grounded: {},
-	input: z.strictObject({
-		route: z.enum([
+	input: {
+		route: oneOf([
 			"drive",
 			"recents",
 			"favorites",
@@ -677,7 +771,7 @@ export const openRoute = defineTool({
 			"settings_advanced",
 			"settings_camera_upload"
 		])
-	})
+	}
 })
 
 export const ASSISTANT_TOOLS = [

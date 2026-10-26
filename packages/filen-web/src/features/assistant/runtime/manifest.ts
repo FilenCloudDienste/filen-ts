@@ -1,8 +1,4 @@
-import * as z from "zod"
-
-// zod probes `new Function` when it builds its first object schema; the app's CSP blocks that and reports a
-// violation on every page load. Under that CSP the interpreted parser runs anyway. Must run before any schema exists.
-z.config({ jitless: true })
+import { type } from "arktype"
 
 // Import-free of the app (no "@/" imports): scripts/assistant-model-manifest.ts and the dev server plugin
 // read it under Node too.
@@ -15,32 +11,36 @@ const SHA256 = /^[0-9a-f]{64}$/
 
 const SPLIT_NAME = /-(\d{5})-of-(\d{5})\.gguf$/
 
-const fileSchema = z.strictObject({
-	file: z.string().regex(/^[\w.-]+\.gguf$/),
-	size: z.int().positive(),
-	sha256: z.string().regex(SHA256)
+const fileSchema = type({
+	"+": "reject",
+	file: /^[\w.-]+\.gguf$/,
+	size: "number.integer > 0",
+	sha256: SHA256
 })
 
-const manifestSchema = z.strictObject({
-	id: z.string().regex(/^[\w.-]+$/),
-	label: z.string(),
-	license: z.strictObject({
-		name: z.string(),
-		url: z.string()
-	}),
-	source: z.strictObject({
-		repo: z.string(),
-		revision: z.string()
-	}),
+const manifestSchema = type({
+	"+": "reject",
+	id: /^[\w.-]+$/,
+	label: "string",
+	license: {
+		"+": "reject",
+		name: "string",
+		url: "string"
+	},
+	source: {
+		"+": "reject",
+		repo: "string",
+		revision: "string"
+	},
 	// The unsplit GGUF, for runtimes without wllama's 2 GB per-file limit (mobile).
-	whole: fileSchema.optional(),
+	"whole?": fileSchema,
 	// llama-gguf-split pieces in order; the web runtime downloads and loads these.
-	shards: z.array(fileSchema).min(1)
+	shards: fileSchema.array().atLeastLength(1)
 })
 
-export type AssistantModelFile = z.infer<typeof fileSchema>
+export type AssistantModelFile = typeof fileSchema.infer
 
-export type AssistantModelManifest = z.infer<typeof manifestSchema>
+export type AssistantModelManifest = typeof manifestSchema.infer
 
 // wllama copies a file into one ArrayBuffer when it cannot stream it (no JSPI), which caps a file at 2 GB.
 export const MAX_SHARD_BYTES = 2 * 1024 * 1024 * 1024 - 1
@@ -48,7 +48,7 @@ export const MAX_SHARD_BYTES = 2 * 1024 * 1024 * 1024 - 1
 // Throws on anything malformed: a split model's pieces must be named and listed in llama-gguf-split order,
 // since llama.cpp finds the next piece by that name.
 export function parseManifest(value: unknown): AssistantModelManifest {
-	const manifest = manifestSchema.parse(value)
+	const manifest = manifestSchema.assert(value)
 	const { shards } = manifest
 
 	if (new Set(shards.map(shard => shard.file)).size !== shards.length) {

@@ -29,7 +29,6 @@
 // Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
 
 import Anthropic from "@anthropic-ai/sdk"
-import { z } from "zod"
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
@@ -39,6 +38,7 @@ import {
 	computePluralBases,
 	cldrCategories,
 	parseCliArgs,
+	parseTranslatedBatch,
 	PLURAL_SUFFIXES,
 	sortRecord,
 	splitPluralKey,
@@ -449,10 +449,7 @@ async function translateBatch(args: {
 		throw new Error(`No text content returned for ${lang}`)
 	}
 
-	const parsed: unknown = JSON.parse(block.text)
-	const validated = z.record(z.string(), z.string()).parse(parsed)
-
-	return validated
+	return parseTranslatedBatch(block.text)
 }
 
 // ---------------------------------------------------------------------------

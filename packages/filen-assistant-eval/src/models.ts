@@ -4,51 +4,48 @@ import { mkdir, readFile, rename, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
-import * as z from "zod"
+import { type } from "arktype"
 
-const modelSchema = z.object({
-	id: z.string(),
-	label: z.string(),
-	enabled: z.boolean(),
-	file: z.string(),
-	url: z.url(),
-	sha256: z.string().regex(/^[0-9a-f]{64}$/),
-	sizeBytes: z.int(),
-	source: z.object({
-		repo: z.string(),
-		revision: z.string()
-	}),
-	baseModel: z.object({
-		repo: z.string(),
-		revision: z.string()
-	}),
-	license: z.object({
-		name: z.string(),
-		url: z.url(),
+const repoPin = {
+	repo: "string",
+	revision: "string"
+} as const
+
+const modelSchema = type({
+	id: "string",
+	label: "string",
+	enabled: "boolean",
+	file: "string",
+	url: "string.url",
+	sha256: /^[0-9a-f]{64}$/,
+	sizeBytes: "number.integer",
+	source: repoPin,
+	baseModel: repoPin,
+	license: {
+		name: "string",
+		url: "string.url",
 		// Commercial use and redistribution in the apps without revenue caps or usage restrictions.
-		shippable: z.boolean()
-	}),
-	chatWrapper: z.enum(["qwen3.5", "lfm2", "auto"]),
-	contextOptions: z
-		.object({
-			batchSize: z.int()
-		})
-		.optional(),
-	note: z.string().optional()
+		shippable: "boolean"
+	},
+	chatWrapper: "'qwen3.5' | 'lfm2' | 'auto'",
+	"contextOptions?": {
+		batchSize: "number.integer"
+	},
+	"note?": "string"
 })
 
-export type ModelEntry = z.infer<typeof modelSchema>
+const manifestSchema = type({
+	models: modelSchema.array()
+})
+
+export type ModelEntry = typeof modelSchema.infer
 
 export const PACKAGE_ROOT = new URL("..", import.meta.url).pathname
 
 export async function loadManifest(): Promise<ModelEntry[]> {
 	const raw: unknown = JSON.parse(await readFile(join(PACKAGE_ROOT, "models.json"), "utf8"))
 
-	return z
-		.object({
-			models: z.array(modelSchema)
-		})
-		.parse(raw).models
+	return manifestSchema.assert(raw).models
 }
 
 async function sha256Of(path: string): Promise<string> {

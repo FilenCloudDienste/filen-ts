@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest"
-import * as z from "zod"
+import { type } from "arktype"
 import {
 	ASSISTANT_ROUTES,
 	ASSISTANT_TOOL_GROUPS,
 	ASSISTANT_TOOLS,
 	assistantRouteDescription,
+	createDirectory,
 	defineTool,
+	openRoute,
+	parseToolInput,
 	portableSchemaViolations,
 	readChat,
 	isConsequentialTool,
@@ -26,68 +29,33 @@ describe("assistant tool schemas", () => {
 		}
 	})
 
-	it("drops the implicit safe-integer bounds of z.int()", () => {
+	it("emits an integer without bounds", () => {
 		expect(toolInputJsonSchema(readChat).properties["limit"]).toEqual({
 			type: "integer",
 			description: "How many recent messages, default 20"
 		})
 	})
 
+	it("keeps the declared order of arguments and enum values", () => {
+		const schema = toolInputJsonSchema(createDirectory)
+
+		expect(Object.keys(schema.properties)).toEqual(["parent", "name"])
+		expect(schema.required).toEqual(["parent", "name"])
+
+		const route = toolInputJsonSchema(openRoute).properties["route"]
+
+		expect(route !== undefined && "enum" in route ? route.enum.slice(0, 3) : null).toEqual(["drive", "recents", "favorites"])
+	})
+
 	it.each([
-		[
-			"a nested object",
-			z.strictObject({
-				nested: z.strictObject({
-					a: z.string()
-				})
-			})
-		],
-		[
-			"a union",
-			z.strictObject({
-				a: z.union([z.string(), z.boolean()]).describe("a")
-			})
-		],
-		[
-			"a number bound",
-			z.strictObject({
-				a: z.int().min(1).describe("a")
-			})
-		],
-		[
-			"a string format",
-			z.strictObject({
-				a: z.email().describe("a")
-			})
-		],
-		[
-			"a pattern",
-			z.strictObject({
-				a: z
-					.string()
-					.regex(/^f\d+$/)
-					.describe("a")
-			})
-		],
-		[
-			"a default",
-			z.strictObject({
-				a: z.string().default("x").describe("a")
-			})
-		],
-		[
-			"open additional properties",
-			z.object({
-				a: z.string().describe("a")
-			})
-		],
-		[
-			"a float",
-			z.strictObject({
-				a: z.number().describe("a")
-			})
-		]
-	])("rejects %s", (_label, input) => {
+		["a nested object", type({ a: "string" })],
+		["a union", type("string | boolean")],
+		["a number bound", type("number.integer >= 1")],
+		["a string format", type("string.email")],
+		["a pattern", type(/^f\d+$/)],
+		["a float", type.number],
+		["a single literal", type.unit("x")]
+	])("rejects %s", (_label, argType) => {
 		expect(() =>
 			toolInputJsonSchema(
 				defineTool({
@@ -99,10 +67,52 @@ describe("assistant tool schemas", () => {
 					untrustedOutput: "none",
 					exfiltrates: false,
 					grounded: {},
-					input
+					input: {
+						a: {
+							type: argType,
+							description: "a"
+						}
+					}
 				})
 			)
 		).toThrow(/not portable/)
+	})
+})
+
+describe("assistant tool input parsing", () => {
+	it("accepts declared arguments and leaves out the optional ones", () => {
+		expect(parseToolInput(createDirectory, { parent: "d1", name: "Invoices" })).toEqual({
+			ok: true,
+			args: { parent: "d1", name: "Invoices" }
+		})
+		expect(parseToolInput(readChat, { handle: "c1" })).toEqual({
+			ok: true,
+			args: { handle: "c1" }
+		})
+	})
+
+	it("names every problem for the model to correct", () => {
+		expect(parseToolInput(readChat, { handle: 1, limit: 1.5, extra: true })).toEqual({
+			ok: false,
+			error: "handle must be a string (was a number); limit must be an integer (was 1.5); extra must be removed"
+		})
+		expect(parseToolInput(createDirectory, { parent: "d1" })).toEqual({
+			ok: false,
+			error: "name must be a string (was missing)"
+		})
+		expect(parseToolInput(openRoute, { route: "nowhere" })).toMatchObject({
+			ok: false,
+			error: expect.stringMatching(/^route must be .*"drive".* \(was "nowhere"\)$/) as unknown
+		})
+	})
+
+	it("refuses anything but a plain object", () => {
+		for (const input of [null, [], "x", 1]) {
+			expect(parseToolInput(createDirectory, input)).toEqual({
+				ok: false,
+				error: "input must be an object"
+			})
+		}
 	})
 })
 

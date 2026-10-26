@@ -6,6 +6,7 @@ import {
 	isConsequentialTool,
 	mapUntrustedStrings,
 	extractionSource,
+	parseToolInput,
 	quarantinedExtractionPrompt,
 	sanitizeUntrustedText,
 	screenAssistantReply,
@@ -533,11 +534,11 @@ export async function runTurn({
 
 				transcript.calls.push(record)
 
-				const parsed = tool?.input.safeParse(args)
+				const parsed = tool === undefined ? undefined : parseToolInput(tool, args)
 
-				if (tool === undefined || parsed === undefined || !parsed.success) {
+				if (tool === undefined || parsed === undefined || !parsed.ok) {
 					record.status = "invalid"
-					record.error = parsed?.success === false ? parsed.error.issues.map(issue => issue.message).join("; ") : "unknown tool"
+					record.error = parsed?.ok === false ? parsed.error : "unknown tool"
 					result = {
 						error: `Invalid call: ${record.error}`
 					}

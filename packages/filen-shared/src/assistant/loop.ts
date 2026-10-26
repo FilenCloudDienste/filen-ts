@@ -16,6 +16,7 @@ import {
 } from "./prompts"
 import {
 	isConsequentialTool,
+	parseToolInput,
 	toolInputJsonSchema,
 	type AssistantRoute,
 	type AssistantTool,
@@ -1372,17 +1373,17 @@ export async function runAssistantTurn({
 				call: record
 			})
 
-			const parsed = tool === undefined || raw === null ? null : tool.input.safeParse(raw)
+			const parsed = tool === undefined || raw === null ? null : parseToolInput(tool, raw)
 
-			if (tool === undefined || parsed === null || !parsed.success) {
+			if (tool === undefined || parsed === null || !parsed.ok) {
 				const error =
 					tool === undefined
 						? `Tool "${call.name}" is not available for this request`
-						: parsed === null || parsed.success
+						: parsed === null || parsed.ok
 							? generated.truncated === true
 								? CUT_CALL
 								: "Arguments are not a JSON object"
-							: parsed.error.issues.map(issue => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ")
+							: parsed.error
 
 				record = update(record, {
 					status: "invalid",
@@ -1395,7 +1396,7 @@ export async function runAssistantTurn({
 				const checked = await executor.check({
 					callId: call.id,
 					tool,
-					args: parsed.data as Record<string, unknown>
+					args: parsed.args
 				})
 
 				if (!checked.ok) {

@@ -11,6 +11,7 @@ import {
 	listRest,
 	MAX_ARRAY_ITEMS,
 	OUTSIDE_DATES_ITEMS,
+	parseToolInput,
 	resolveDateFilter,
 	screenOpened,
 	type AssistantPeriodFilter
@@ -279,20 +280,20 @@ export class FakeApp {
 			}
 		}
 
-		const parsed = tool.input.safeParse(args ?? {})
+		const parsed = parseToolInput(tool, args ?? {})
 
-		if (!parsed.success) {
+		if (!parsed.ok) {
 			return {
 				ok: false,
 				invalid: true,
-				error: parsed.error.issues.map(issue => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; ")
+				error: parsed.error
 			}
 		}
 
 		try {
 			const result = this.run({
 				name,
-				input: parsed.data as Record<string, unknown>
+				input: parsed.args
 			})
 			const returned = this.takeReturned()
 

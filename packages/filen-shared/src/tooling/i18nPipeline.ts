@@ -1,9 +1,11 @@
 /**
- * The dependency-free core of the apps' translate-i18n scripts: CLI parsing, CLDR plural expansion,
- * the translator system prompt, the structured-output schema and batching. Each script keeps its own
+ * The core of the apps' translate-i18n scripts: CLI parsing, CLDR plural expansion, the translator
+ * system prompt, the structured-output schema, batching and reading a batch's reply. Each script keeps its own
  * catalog shape, model, target languages and Anthropic call. Node-only build tooling, reachable solely
  * through the "@filen/shared/tooling/i18n" subpath so it never enters an app bundle.
  */
+
+import { type } from "arktype"
 
 export type CliArgs<L extends string> = {
 	full: boolean
@@ -312,4 +314,20 @@ export function sortRecord(record: Record<string, string>): Record<string, strin
 	}
 
 	return sorted
+}
+
+const translatedBatch = type({
+	"[string]": "string"
+})
+
+/** A batch's reply text: a JSON map of keys to translated strings. Throws on anything else. */
+export function parseTranslatedBatch(text: string): Record<string, string> {
+	const parsed: unknown = JSON.parse(text)
+
+	// arktype counts an array as an object.
+	if (Array.isArray(parsed)) {
+		throw new Error("Translation reply is an array, not a JSON map")
+	}
+
+	return translatedBatch.assert(parsed)
 }

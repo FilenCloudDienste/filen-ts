@@ -4,7 +4,13 @@ import { QueryClient } from "@tanstack/react-query"
 import type { RegisteredRouter } from "@tanstack/react-router"
 import type { Chat, ChatMessage, Contact, Dir, File, FilePublicLink, Note, SharedRootDir, UserInfo } from "@filen/sdk-rs"
 import { driveItemName, type Playlist } from "@filen/shared"
-import { assistantToolByName, DIRECTORIES_BY_SIZE_NOTE, LISTING_PAGE_ITEMS, type AssistantToolFailure } from "@filen/shared/assistant"
+import {
+	assistantToolByName,
+	DIRECTORIES_BY_SIZE_NOTE,
+	LISTING_PAGE_ITEMS,
+	parseToolInput,
+	type AssistantToolFailure
+} from "@filen/shared/assistant"
 import { testUuid } from "@/tests/support/uuid"
 
 const sdk = vi.hoisted(() => ({
@@ -268,7 +274,7 @@ async function call(
 ): Promise<CallOutcome> {
 	const tool = assistantToolByName(name)
 
-	if (!tool?.input.safeParse(args).success) {
+	if (tool === undefined || !parseToolInput(tool, args).ok) {
 		throw new Error(`bad test call ${name}`)
 	}
 

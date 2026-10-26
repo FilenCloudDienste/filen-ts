@@ -5,6 +5,7 @@ import {
 	cldrCategories,
 	computePluralBases,
 	parseCliArgs,
+	parseTranslatedBatch,
 	sortRecord,
 	splitPluralKey,
 	translateSubset
@@ -102,5 +103,18 @@ describe("translateSubset", () => {
 		await expect(
 			translateSubset({ label: "de/common", subset: { a: "1", b: "2" }, translateBatch: async () => ({ a: "x" }) })
 		).rejects.toThrow("de/common: model did not return a translation for key \"b\"")
+	})
+})
+
+describe("parseTranslatedBatch", () => {
+	it("returns a map of strings", () => {
+		expect(parseTranslatedBatch("{\"a\":\"x\",\"b\":\"y\"}")).toEqual({ a: "x", b: "y" })
+	})
+
+	it("throws on a non-string value, an array or malformed JSON", () => {
+		expect(() => parseTranslatedBatch("{\"a\":1}")).toThrow(/a must be a string/)
+		expect(() => parseTranslatedBatch("[\"x\"]")).toThrow(/array/)
+		expect(() => parseTranslatedBatch("null")).toThrow()
+		expect(() => parseTranslatedBatch("{")).toThrow()
 	})
 })

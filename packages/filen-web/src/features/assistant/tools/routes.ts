@@ -4,7 +4,7 @@ import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/
 import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
 import { navigateChecked } from "@/features/assistant/tools/navigation"
 
-export type AssistantRouteName = (typeof openRoute.input.shape.route.options)[number]
+export type AssistantRouteName = (typeof openRoute.input.route.type)["infer"]
 
 // Where each open_route section lives, most specific first so a settings page beats "settings". The
 // web app has no camera upload, so that section has no path and opens nothing.
