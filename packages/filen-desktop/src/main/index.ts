@@ -16,7 +16,7 @@ import {
 	type WebFrameMain
 } from "electron"
 import { readFileSync } from "node:fs"
-import { rm, stat, writeFile } from "node:fs/promises"
+import { readdir, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import { type } from "arktype"
 import path from "node:path"
@@ -156,6 +156,13 @@ const migration = createMigration({
 
 		// The old client's generated rclone remote: the account's keys, merely obscured.
 		await rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true })
+	},
+	purgeLegacyStores: async () => {
+		const indexedDb = path.join(userDataPath, "IndexedDB")
+		const oldOrigin = (await readdir(indexedDb).catch(() => [])).filter(name => name.startsWith("filendesktop_bundle_0."))
+
+		await Promise.all(oldOrigin.map(name => rm(path.join(indexedDb, name), { recursive: true, force: true })))
+		await rm(path.join(userDataPath, "Local Storage"), { recursive: true, force: true })
 	},
 	vault: sessionVault,
 	lock: {

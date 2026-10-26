@@ -18,7 +18,7 @@ import type { SessionRead } from "../shared/channels.ts"
 const DAY = 24 * 60 * 60 * 1000
 
 function marker(overrides: Partial<MigrationMarker> = {}): MigrationMarker {
-	return { stage: "imported", failedStarts: 1, userId: 123456, importedAt: 0, wiped: false, ...overrides }
+	return { stage: "imported", failedStarts: 1, userId: 123456, importedAt: 0, wiped: false, purged: false, ...overrides }
 }
 
 const SESSION_OF = (userId: string) => JSON.stringify({ userId: `$bigint:${userId}n` })
@@ -36,6 +36,12 @@ describe("parseMarker", () => {
 		expect(parseMarker(JSON.stringify({ version: 2, ...marker() }))).toBeNull()
 		expect(parseMarker(JSON.stringify({ version: 1, ...marker({ stage: "done" as "imported" }) }))).toBeNull()
 		expect(parseMarker(JSON.stringify({ version: 1, ...marker({ userId: 1 }) }))).toBeNull()
+	})
+
+	it("reads a marker written before purging existed as not purged", () => {
+		const { purged: _purged, ...older } = marker({ stage: "verified", wiped: true })
+
+		expect(parseMarker(JSON.stringify({ version: 1, ...older }))?.purged).toBe(false)
 	})
 })
 
@@ -138,6 +144,7 @@ function setup(
 		readLegacy: vi.fn(() => Promise.resolve(options.read ?? legacyRead(SIGNED_IN))),
 		readOptions: vi.fn(() => Promise.resolve<string | null>(JSON.stringify({ startMinimized: true }))),
 		wipeLegacy: vi.fn(() => Promise.resolve()),
+		purgeLegacyStores: vi.fn(() => Promise.resolve()),
 		vault: {
 			get: vi.fn(() => Promise.resolve(state.vault)),
 			set: vi.fn((blob: string) => {
@@ -182,7 +189,7 @@ describe("createMigration", () => {
 		expect(deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true })
 		expect(JSON.parse(deps.writeStash.mock.calls[0]?.[0] ?? "")).toMatchObject({ userId: 123456 })
 		expect(deps.wipeLegacy).not.toHaveBeenCalled()
-		expect(stored()).toEqual({ stage: "imported", failedStarts: 1, userId: 123456, importedAt: 1000, wiped: false })
+		expect(stored()).toEqual({ stage: "imported", failedStarts: 1, userId: 123456, importedAt: 1000, wiped: false, purged: false })
 	})
 
 	it("logs counts and reasons, never a value", async () => {
@@ -361,5 +368,39 @@ describe("failure logging", () => {
 		await migration.start()
 
 		expect(deps.warn).toHaveBeenCalledWith("migration: failed: no keys")
+	})
+})
+
+describe("purging the old stores", () => {
+	it("deletes them on the launch after the wipe, once", async () => {
+		const first = setup({ marker: marker({ stage: "verified", wiped: true }) })
+
+		await first.migration.start()
+
+		expect(first.deps.purgeLegacyStores).toHaveBeenCalledTimes(1)
+		expect(first.stored()).toMatchObject({ wiped: true, purged: true })
+
+		const second = setup({ marker: first.stored() ?? undefined })
+
+		await second.migration.start()
+
+		expect(second.deps.purgeLegacyStores).not.toHaveBeenCalled()
+	})
+
+	it("never deletes them before the secrets were wiped", async () => {
+		const run = setup({ marker: marker({ stage: "verified", wiped: false }) })
+
+		await run.migration.start()
+
+		expect(run.deps.purgeLegacyStores).not.toHaveBeenCalled()
+	})
+
+	it("tries again next launch when deleting fails", async () => {
+		const run = setup({ marker: marker({ stage: "verified", wiped: true }) })
+
+		run.deps.purgeLegacyStores.mockRejectedValueOnce(new Error("EBUSY"))
+		await run.migration.start()
+
+		expect(run.stored()).toMatchObject({ purged: false })
 	})
 })

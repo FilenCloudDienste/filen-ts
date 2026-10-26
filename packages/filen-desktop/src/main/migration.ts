@@ -8,7 +8,9 @@ import { legacyPin, legacyPrefs, type LegacyPrefs, legacySession, legacyStash, p
 //   started   a read began; `failedStarts` counts the attempts that never reached `imported`
 //   imported  session, PIN, prefs and the stash are stored; the old origin still holds its plaintext secrets
 //   verified  the migrated account proved itself (an authed request, a sign-in as the same user) or the wait ran out;
-//             the old secrets are wiped, `wiped` says whether that finished
+//             the old secrets are wiped, `wiped` says whether that finished; LevelDB keeps deleted values on disk
+//             until a compaction that may never come, so the launch after the wipe deletes the old origin's stores
+//             before anything opens them, and `purged` records that
 //   skipped   nothing to import (a fresh install, a session already in the vault) or too many failed attempts
 export type MigrationStage = "started" | "imported" | "verified" | "skipped"
 
@@ -19,6 +21,7 @@ export interface MigrationMarker {
 	userId: number | null
 	importedAt: number | null
 	wiped: boolean
+	purged: boolean
 }
 
 // A read that crashed or came back empty this many times is not tried again.
@@ -34,7 +37,8 @@ const markerSchema = type({
 	failedStarts: "0 <= number.integer < 1000",
 	userId: type("1 < number.integer <= 9007199254740991").or("null"),
 	importedAt: type("number.integer >= 0").or("null"),
-	wiped: "boolean"
+	wiped: "boolean",
+	"purged?": "boolean"
 })
 
 // null: no marker, or one that cannot be used (it is then decided afresh, which never overwrites a stored session).
@@ -62,7 +66,8 @@ export function parseMarker(data: string | null): MigrationMarker | null {
 		failedStarts: marker.failedStarts,
 		userId: marker.userId,
 		importedAt: marker.importedAt,
-		wiped: marker.wiped
+		wiped: marker.wiped,
+		purged: marker.purged ?? false
 	}
 }
 
@@ -132,6 +137,9 @@ export interface MigrationDeps {
 	readOptions(): Promise<string | null>
 	// Runs WIPE_SCRIPT in the old origin (and removes the old rclone config); rejects unless all of it worked.
 	wipeLegacy(): Promise<void>
+	// Deletes the old origin's IndexedDB and the Local Storage store on disk. Only called before any window or storage
+	// use in this launch; the new page loses its few localStorage values (theme choice, splash hint) once.
+	purgeLegacyStores(): Promise<void>
 	vault: { get(): Promise<SessionRead>; set(blob: string): Promise<void> }
 	lock: { enabled(): boolean; set(pin: string): Promise<boolean> }
 	prefs: { set(patch: LegacyPrefs & { launchAtLogin?: boolean }): Promise<unknown> }
@@ -175,7 +183,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 	}
 
 	function fresh(stage: MigrationStage): MigrationMarker {
-		return { stage, failedStarts: 0, userId: null, importedAt: null, wiped: false }
+		return { stage, failedStarts: 0, userId: null, importedAt: null, wiped: false, purged: false }
 	}
 
 	// Errors are logged by their code only: none of this may ever log a value.
@@ -281,8 +289,18 @@ export function createMigration(deps: MigrationDeps): Migration {
 			try {
 				marker = parseMarker((await deps.marker.read())?.toString("utf8") ?? null)
 
+				if (marker?.wiped === true) {
+					if (!marker.purged) {
+						await deps.purgeLegacyStores()
+						await save({ ...marker, purged: true })
+						deps.info("migration: the old client's stores were deleted from disk")
+					}
+
+					return result
+				}
+
 				// Every launch after it finished: one small file read.
-				if (marker?.stage === "skipped" || marker?.wiped === true) {
+				if (marker?.stage === "skipped") {
 					return result
 				}
 
