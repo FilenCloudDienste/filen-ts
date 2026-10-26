@@ -49,11 +49,13 @@ export const FAMILIES = {
 	pptx: ["pptx", "pptm", "ppsx", "ppsm", "potx", "potm"],
 	odt: ["odt"],
 	ods: ["ods"],
-	odp: ["odp"],
+	odp: ["odp", "otp"],
 	rtf: ["rtf"],
 	doc: ["doc", "dot"],
 	xls: ["xls", "xlt"],
-	ppt: ["ppt", "pps", "pot"]
+	ppt: ["ppt", "pps", "pot"],
+	// Embedded font data (a presentation's embedded fonts, saved as Embedded OpenType).
+	fntdata: ["fntdata"]
 } as const satisfies Record<string, readonly string[]>
 
 export type CorpusFamily = keyof typeof FAMILIES
@@ -70,7 +72,8 @@ export const CONTAINERS: Record<CorpusFamily, string> = {
 	rtf: "rtf",
 	doc: "cfb",
 	xls: "cfb",
-	ppt: "cfb"
+	ppt: "cfb",
+	fntdata: "eot"
 }
 
 const EXTENSION_FAMILY = new Map<string, CorpusFamily>(

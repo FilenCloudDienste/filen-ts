@@ -12,6 +12,23 @@ export const VALIDATOR = process.env["FILEN_OFFICE_OOXML_VALIDATOR"] ?? ""
 const DOTNET = process.env["FILEN_OFFICE_DOTNET"] || "dotnet"
 const ALLOW = fileURLToPath(new URL("../../../tools/openxml-validate/allow.json", import.meta.url))
 
+// The extensions the validator opens as each package kind (tools/openxml-validate/Program.cs); it opens any other
+// path as a word-processing document, so a caller validates only these and decrypts encrypted packages first.
+export const SDK_EXTENSIONS = {
+	wordprocessing: ["docx", "docm", "dotx", "dotm"],
+	spreadsheet: ["xlsx", "xlsm", "xltx", "xltm"],
+	presentation: ["pptx", "pptm", "potx", "potm", "ppsx", "ppsm"]
+} as const
+
+export type SdkPackageKind = keyof typeof SDK_EXTENSIONS
+
+// The package kind the validator opens `path` as, or undefined for an extension it does not validate.
+export function sdkPackageKind(path: string): SdkPackageKind | undefined {
+	const extension = path.slice(path.lastIndexOf(".") + 1).toLowerCase()
+
+	return (Object.keys(SDK_EXTENSIONS) as SdkPackageKind[]).find(kind => (SDK_EXTENSIONS[kind] as readonly string[]).includes(extension))
+}
+
 export interface SdkError {
 	readonly id: string
 	readonly description: string

@@ -1,9 +1,15 @@
 import type { DocxGateReason, DocxOpenFailure, DocxVariant } from "../../core/docx/index"
 import type { DecorationValue } from "../../core/docx/layout/index"
-import type { DrawingClip, DrawingImage, DrawingText, Paint, Shadow, Stroke } from "../../core/drawingml/index"
 import type { FontFaceDescriptor } from "../../core/fonts/index"
 import type { MathElement } from "../../core/math/index"
 import type { DocxAnnotations } from "./annotations"
+import type { DocxPageData, DocxTextStyle, DocxLinkTarget } from "../../core/docx/layout/pageData"
+import type { DrawingData } from "../../core/drawingml/data"
+
+// The page and drawing data are core's (the engine builds them); re-exported here for the renderers.
+export type { DocxLinkTarget, DocxPageData, DocxTextStyle } from "../../core/docx/layout/pageData"
+export { LINK_INTS } from "../../core/docx/layout/pageData"
+export type { DrawingData } from "../../core/drawingml/data"
 
 // What the DOCX engine sends to a renderer. Everything here is plain data (numbers, enums, strings and
 // typed arrays) so it crosses a worker boundary by structured clone, with the typed arrays transferred. A
@@ -37,97 +43,6 @@ export interface DocxOpenInfo {
 	readonly revisions?: number
 	// Of the tracked changes, those to formatting (run, paragraph, numbering, table properties).
 	readonly formatting?: number
-}
-
-// One text style of the layout (the fragment STYLE ints index these).
-export interface DocxTextStyle {
-	// CSS font shorthand naming an internal alias (never a document's family name).
-	readonly font: string
-	// The font for the lower-case letters of a small-caps fragment.
-	readonly smallCapsFont: string
-	// Six hex digits, or "" for the document's automatic colour.
-	readonly color: string
-	readonly kerning: boolean
-	// px added after every character.
-	readonly letterSpacing: number
-	// Horizontal glyph scale.
-	readonly scaleX: number
-	// Baseline raised (positive) or lowered.
-	readonly shift: number
-	// The drawn font's ascent and descent as the browser lays it out (px), to put the baseline exactly.
-	readonly ascent: number
-	readonly descent: number
-	// TrackedLook of the run (0 none).
-	readonly revision: number
-	// The colour slot (1..8) of the tracked change's author, 0 without one: inserted and deleted text is drawn
-	// in --fo-revision-<slot>.
-	readonly author?: number
-}
-
-export type DocxLinkTarget =
-	| { readonly kind: "external"; readonly href: string; readonly tooltip: string | undefined }
-	| { readonly kind: "internal"; readonly anchor: string; readonly tooltip: string | undefined }
-
-// linkInts per range: source, text start, text end, link (index into the session's link table).
-export const LINK_INTS = 4
-
-export interface DocxPageData {
-	readonly index: number
-	readonly number: number
-	readonly numberText: string
-	readonly section: number
-	readonly width: number
-	readonly height: number
-	readonly lineCount: number
-	readonly fragmentCount: number
-	readonly decorationCount: number
-	readonly lineFloats: Float32Array
-	readonly lineInts: Int32Array
-	readonly fragmentFloats: Float32Array
-	readonly fragmentInts: Int32Array
-	readonly decorationFloats: Float32Array
-	readonly decorationInts: Int32Array
-	readonly graphicCount: number
-	readonly graphicFloats: Float32Array
-	readonly graphicInts: Int32Array
-	readonly objectCount: number
-	readonly objectFloats: Float32Array
-	readonly objectInts: Int32Array
-	// ObjectKind of each object entry.
-	readonly objectKinds: Uint8Array
-	readonly sourceCount: number
-	readonly sourceInts: Int32Array
-	readonly sourceTexts: readonly string[]
-	// Per source, the object (by id) whose text box its paragraph is laid out in, -1 for none; absent when the page
-	// has no text box text. The text is drawn with its box.
-	readonly sourceOwners?: Int32Array
-	readonly linkCount: number
-	readonly linkInts: Int32Array
-}
-
-// A drawing's display list as data (DrawingList.compact() without its interning maps).
-export interface DrawingData {
-	// The frame the drawing was built for (px); the renderer scales it onto the object's box.
-	readonly width: number
-	readonly height: number
-	readonly commands: Uint8Array
-	readonly coords: Float32Array
-	readonly itemCount: number
-	readonly itemFloats: Float32Array
-	readonly itemInts: Int32Array
-	readonly paints: readonly Paint[]
-	readonly strokes: readonly Stroke[]
-	readonly images: readonly DrawingImage[]
-	readonly texts: readonly DrawingText[]
-	readonly shadows: readonly Shadow[]
-	readonly clips?: readonly DrawingClip[]
-	// Per item: its clip, or -1; absent when no item is clipped.
-	readonly itemClips?: Int32Array
-	// Per text: the font family list the engine resolved for it (an internal alias and a generic family),
-	// or "" for none.
-	readonly textFonts?: readonly string[]
-	// The surface the drawing starts on (0xRRGGBBAA), absent for a transparent one.
-	readonly background?: number
 }
 
 export type DocxObjectData =

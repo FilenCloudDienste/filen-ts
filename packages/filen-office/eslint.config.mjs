@@ -11,6 +11,10 @@ const coreImportPatterns = [
 	{
 		group: ["**/react/**"],
 		message: "The core may not import the React layer."
+	},
+	{
+		group: ["**/dom/**"],
+		message: "The core may not import the realm layer."
 	}
 ]
 

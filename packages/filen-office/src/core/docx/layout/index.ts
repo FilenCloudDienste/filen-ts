@@ -44,3 +44,4 @@ export {
 	type FontSource,
 	type RunStyleInfo
 } from "./styles"
+export { LINK_INTS, type DocxLinkTarget, type DocxPageData, type DocxTextStyle } from "./pageData"

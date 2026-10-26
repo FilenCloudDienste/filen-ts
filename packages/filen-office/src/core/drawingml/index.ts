@@ -75,3 +75,4 @@ export { averageShade, rampColor, shadeBounds, shadeRaster, type ShadedRaster } 
 export { addArrowhead, convertGraphic, convertShapeTree, pathEnds, shapeGeometry, type ShapeContext, type ShapeConversion } from "./shape"
 export { convertSmartArt } from "./smartart"
 export { DEFAULT_TEXT, plainParagraph, readBodyProps, readTextBody, resolveTypeface, type TextDefaults } from "./text"
+export type { DrawingData } from "./data"
