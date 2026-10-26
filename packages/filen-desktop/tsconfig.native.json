@@ -1,0 +1,8 @@
+{
+  // The utility process that owns the sync engine: Node plus Electron's `process.parentPort`.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "electron"]
+  },
+  "include": ["src/native", "src/shared"]
+}

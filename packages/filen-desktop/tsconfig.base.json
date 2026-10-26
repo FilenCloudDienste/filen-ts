@@ -4,6 +4,8 @@
     "lib": ["ES2024"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // Resolves @filen/sdk-rs to its napi typings (node/index.d.ts) instead of the wasm build's.
+    "customConditions": ["filen-desktop"],
     "allowImportingTsExtensions": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,

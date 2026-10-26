@@ -28,6 +28,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
+		"@filen/sdk-rs": "0.5.7",
 		"@filen/shared": "workspace:*",
 		"@types/node": "^24.19.2",
 		"arktype": "^2.2.9",
