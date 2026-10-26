@@ -21,7 +21,8 @@
 		"./videos": "./src/videos/index.ts",
 		"./videos/transportStreamHead": "./src/videos/transportStreamHead.ts",
 		"./svgProlog": "./src/svgProlog.ts",
-		"./linkPolicy": "./src/linkPolicy.ts"
+		"./linkPolicy": "./src/linkPolicy.ts",
+		"./desktop": "./src/desktop.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && tsc -p tsconfig.dom.json && tsc -p tsconfig.tooling.json",
