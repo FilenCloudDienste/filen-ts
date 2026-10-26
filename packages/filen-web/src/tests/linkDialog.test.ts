@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Dir, DirPublicLinkRW, File, FilePublicLink, SharedDir, SharedFile, SharingRole } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
@@ -11,6 +11,14 @@ import {
 } from "@/features/drive/components/linkDialog.logic"
 import { testUuid } from "@/tests/support/uuid"
 import { sharerRole } from "@/tests/fixtures/sdk"
+
+const desktop = vi.hoisted(() => ({ platform: undefined as "darwin" | undefined }))
+
+vi.mock("@/lib/desktop", () => ({ desktopPlatform: () => desktop.platform }))
+
+beforeEach(() => {
+	desktop.platform = undefined
+})
 
 function mockDirLink(overrides: Partial<DirPublicLinkRW> = {}): DirPublicLinkRW {
 	return {
@@ -300,6 +308,30 @@ describe("buildPublicLinkUrl", () => {
 
 		expect(item.type).toBe("sharedDirectory")
 		expect(buildPublicLinkUrl(item, dirStatus({ linkUuid: testUuid("link"), linkKey: "abc" }))).toBe(
+			`https://app.filen.io/d/${testUuid("link")}#616263`
+		)
+	})
+
+	it("builds against the origin this app is served from in a browser", () => {
+		vi.stubGlobal("location", { origin: "https://staging.example.com" })
+
+		expect(buildPublicLinkUrl(dirItem(), dirStatus({ linkUuid: testUuid("link"), linkKey: "abc" }))).toBe(
+			`https://staging.example.com/d/${testUuid("link")}#616263`
+		)
+	})
+
+	it("builds against the web app in the desktop app, whose own origin no recipient can open", () => {
+		desktop.platform = "darwin"
+		vi.stubGlobal("location", { origin: "filen://app" })
+
+		const item = fileItem({
+			meta: { type: "decoded", data: { name: "f", mime: "x", modified: 1n, size: 1n, key: "abc", version: 2 } }
+		})
+
+		expect(buildPublicLinkUrl(item, fileStatus({ linkUuid: testUuid("link") }))).toBe(
+			`https://app.filen.io/f/${testUuid("link")}#616263`
+		)
+		expect(buildPublicLinkUrl(dirItem(), dirStatus({ linkUuid: testUuid("link"), linkKey: "abc" }))).toBe(
 			`https://app.filen.io/d/${testUuid("link")}#616263`
 		)
 	})

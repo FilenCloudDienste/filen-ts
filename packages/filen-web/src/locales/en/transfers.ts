@@ -139,7 +139,7 @@ export const transfers = {
 	/** Download summary toast — at least one file in the batch failed; {{count}} = files that succeeded, {{failed}} = files that failed; plural */
 	transfersDownloadSummaryCompleteWithFailures_other: "{{count}} files downloaded, {{failed}} failed",
 	/** Under a failed or cancelled download the browser itself was saving: browsers keep the part already downloaded (for their own retry), and only the browser's downloads list can delete it */
-	transfersBrowserKeptPartialHint: "Your browser may have kept the part already downloaded. Delete it from the browser's downloads list.",
+	transfersBrowserKeptPartialHint: "The part already downloaded may remain where the file was being saved. Delete it there.",
 
 	// ── Transfer start toast (features/transfers/lib/transferStartToast.tsx) ───
 	/** Toast shown once a download of a single file or directory has started; {{name}} = the file's name, or the zip's for a directory */
@@ -233,8 +233,8 @@ export const transfers = {
 	transfersCopyDetails: "Details",
 	/** Job card (copy, compress, extract) details — shown when there is nothing to list yet (no file in flight, no failure, no note) */
 	transfersCopyNoDetails: "Nothing to report yet.",
-	/** Copy card — one-line note while the copy runs: the copy runs in this tab */
-	transfersCopyTabNote: "Closing this tab stops the copy.",
+	/** Copy card — one-line note while the copy runs: the copy runs in this page, so closing Filen ends it */
+	transfersCopyTabNote: "Closing Filen stops the copy.",
 	/** Copy card details — heading above the files being copied right now */
 	transfersCopyCurrentFiles: "Copying now",
 	/** Copy card details — heading above the files and directories that could not be copied */
@@ -316,8 +316,8 @@ export const transfers = {
 	transfersCompressCardDismiss: "Hide compress progress",
 	/** Compress card — accessible label on the progress bar */
 	transfersCompressProgressLabel: "Compress progress",
-	/** Compress card — one-line note while the compress runs: it runs in this tab */
-	transfersCompressTabNote: "Closing this tab stops compressing.",
+	/** Compress card — one-line note while the compress runs: it runs in this page, so closing Filen ends it */
+	transfersCompressTabNote: "Closing Filen stops compressing.",
 	/** Compress card details — heading above the file being read into the archive right now */
 	transfersCompressCurrentFiles: "Compressing now",
 	/** Compress card — status while the selected items are listed; {{done}} = items listed so far, {{count}} = items selected; singular */
@@ -362,8 +362,8 @@ export const transfers = {
 	transfersExtractCardDismiss: "Hide extract progress",
 	/** Extract card — accessible label on the progress bar */
 	transfersExtractProgressLabel: "Extract progress",
-	/** Extract card — one-line note while the extract runs: it runs in this tab */
-	transfersExtractTabNote: "Closing this tab stops extracting.",
+	/** Extract card — one-line note while the extract runs: it runs in this page, so closing Filen ends it */
+	transfersExtractTabNote: "Closing Filen stops extracting.",
 	/** Extract card details — heading above the files being extracted right now */
 	transfersExtractCurrentFiles: "Extracting now",
 	/** Extract card details — heading above the entries that could not be extracted */

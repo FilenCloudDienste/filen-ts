@@ -241,7 +241,7 @@ describe("DocxEditView, a password-protected document", () => {
 		cleanup()
 
 		await openEditor({ seal: () => Promise.resolve(CFB), released: false }, false)
-		expect(await badgeText()).toBe("Opened with its password, in this browser only.")
+		expect(await badgeText()).toBe("Opened with its password, on this device only.")
 	})
 
 	it("opens on its own copy taken from where the document is held, and releases the key once it closes", async () => {

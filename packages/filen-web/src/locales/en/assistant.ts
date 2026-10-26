@@ -70,8 +70,8 @@ export const assistant = {
 	// ── Status chip in the header ────────────────────────────────────────────
 	/** Status chip — the device can't run the model */
 	assistantStatusUnavailable: "Unavailable",
-	/** Status chip — another Filen tab has the model loaded */
-	assistantStatusInUseElsewhere: "In another tab",
+	/** Status chip — another Filen tab or window has the model loaded */
+	assistantStatusInUseElsewhere: "In use elsewhere",
 	/** Status chip — the model hasn't been downloaded yet */
 	assistantStatusNotDownloaded: "Not set up",
 	/** Status chip — download progress, a whole percentage */
@@ -106,17 +106,18 @@ export const assistant = {
 	/** Setup screen — the device check failed; the download button stays disabled below this */
 	assistantUnavailableTitle: "The assistant can't run here",
 	/** Unavailable reason — the browser lacks what the model needs */
-	assistantUnavailableUnsupportedBrowser:
-		"This browser can't run the assistant's model. Try a recent version of Chrome, Edge or Firefox on a computer.",
+	assistantUnavailableUnsupportedBrowser: "The assistant's model needs graphics features that aren't available here.",
+	/** Follows assistantUnavailableUnsupportedBrowser in a browser only (the desktop app cannot switch browsers) */
+	assistantUnavailableUnsupportedBrowserAdvice: "Try a recent version of Chrome, Edge or Firefox on a computer.",
 	/** Unavailable reason — not enough memory */
 	assistantUnavailableInsufficientMemory: "This device doesn't have enough memory to run the assistant's model.",
 	/** Unavailable reason — not enough free storage for the download */
 	assistantUnavailableInsufficientStorage: "There isn't enough free storage on this device for the assistant's model.",
-	/** Another Filen tab holds the model; it becomes available here once that tab closes it — title */
-	assistantInUseElsewhereTitle: "Open in another Filen tab",
-	/** Another Filen tab holds the model — explanation; no action is offered */
+	/** Another Filen tab or window holds the model; it becomes available here once that one closes it — title */
+	assistantInUseElsewhereTitle: "Already open elsewhere",
+	/** Another Filen tab or window holds the model — explanation; no action is offered */
 	assistantInUseElsewhereBody:
-		"The assistant runs in one tab at a time. Close it in the other tab, or use it there; it becomes available here on its own.",
+		"The assistant runs in one place at a time. Close it where it is open, or use it there; it becomes available here on its own.",
 
 	// ── Download and start ───────────────────────────────────────────────────
 	/** Download in progress — title */
@@ -166,7 +167,7 @@ export const assistant = {
 	/** Failure reason — the model couldn't be loaded */
 	assistantErrorLoadFailed: "The model couldn't be started.",
 	/** Failure reason — out of memory while loading */
-	assistantErrorOutOfMemory: "This device ran out of memory while starting the model. Close other tabs and try again.",
+	assistantErrorOutOfMemory: "This device ran out of memory while starting the model. Close other apps and try again.",
 	/** Failure reason — storage filled up during the download */
 	assistantErrorStorageFull: "This device ran out of storage while downloading the model.",
 	/** Failure — retries the download or start */

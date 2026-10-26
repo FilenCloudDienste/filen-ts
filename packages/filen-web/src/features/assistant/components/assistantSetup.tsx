@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import type { AssistantKey } from "@/lib/i18n"
+import { desktopPlatform } from "@/lib/desktop"
 import { cancelAssistantDownload, downloadAssistantModel } from "@/features/assistant/store/assistantSession"
 import { downloadByteFigures, downloadPercent } from "@/features/assistant/components/assistant.logic"
 import { ASSISTANT_PANEL_ID, assistantInitialFocusTarget } from "@/features/assistant/components/assistantFocus"
@@ -61,6 +62,10 @@ function FirstRun({ model, unavailable }: { model: AssistantModelInfo | null; un
 						className="text-sm text-muted-foreground"
 					>
 						{t(UNAVAILABLE_KEYS[unavailable])}
+						{/* Switching browsers is advice for a browser only. */}
+						{unavailable === "unsupported-browser" && desktopPlatform() === undefined
+							? ` ${t("assistantUnavailableUnsupportedBrowserAdvice")}`
+							: null}
 					</p>
 					{/* Free space can change: every click checks the storage again, so only the device's own limits disable it. */}
 					<Button

@@ -1153,7 +1153,7 @@ describe("Download as ▸ another editable format", () => {
 		expect(mocks.textToXlsx).not.toHaveBeenCalled()
 		expect(mocks.downloadBlob).not.toHaveBeenCalled()
 		expect(text.close).toHaveBeenCalledOnce()
-		expect(mocks.toast.error).toHaveBeenCalledWith("This file is too large to convert in the browser", { description: "data.csv" })
+		expect(mocks.toast.error).toHaveBeenCalledWith("This file is too large to convert here", { description: "data.csv" })
 	})
 
 	it("converts an editor's open workbook from its session, reading nothing", async () => {

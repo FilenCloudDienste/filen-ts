@@ -129,7 +129,7 @@ export const settings = {
 	// ── Appearance: icon rail order ──────────────────────────────────────────
 	settingsRailTitle: "Navigation",
 	settingsRailDescription:
-		"Drag the icons in the bar on the far left to reorder them, or press Alt+Up/Down on a focused icon. The order is saved in this browser.",
+		"Drag the icons in the bar on the far left to reorder them, or press Alt+Up/Down on a focused icon. The order is saved on this device.",
 	settingsRailReset: "Reset order",
 	settingsRailResetDescription: "Put the navigation icons back in their default order",
 	settingsRailResetSuccess: "Navigation order reset",
@@ -217,29 +217,29 @@ export const settings = {
 	/** Advanced group — scoped explicitly to THIS browser tab's own uploads/downloads, since the same
 	 *  app also serves as the Electron desktop frontend, whose future file-sync/network-drive engine
 	 *  will carry its own separate bandwidth/concurrency settings */
-	settingsAdvancedTransferTitle: "Web transfer performance",
+	settingsAdvancedTransferTitle: "Transfer performance",
 	settingsAdvancedTransferDescription:
-		"Tune how many transfers this browser tab runs in parallel and how much memory they may use. The Electron desktop app's file sync and network drive have their own separate settings.",
+		"Tune how many transfers Filen runs in parallel and how much memory they may use. Desktop sync and network drives have their own settings.",
 	settingsAdvancedTransferPreset: "Transfer performance",
 	settingsAdvancedPresetBatterySaver: "Battery saver",
 	settingsAdvancedPresetBalanced: "Balanced",
 	settingsAdvancedPresetPerformance: "Performance",
 	settingsAdvancedPresetMaximum: "Maximum",
 	/** Shown after a preset change — the wasm client only reads these at startup, there is no live setter */
-	settingsAdvancedRestartRequired: "This takes effect the next time Filen loads in this browser tab.",
+	settingsAdvancedRestartRequired: "This takes effect the next time Filen starts.",
 
 	// ── Advanced: archives ───────────────────────────────────────────────────
 	/** Advanced group — compressing and extracting archives in this browser tab */
 	settingsAdvancedArchiveTitle: "Archives",
-	settingsAdvancedArchiveDescription: "How this browser tab compresses and extracts archives",
+	settingsAdvancedArchiveDescription: "How Filen compresses and extracts archives",
 	/** Select row — the memory one archive job's codecs may use */
 	settingsAdvancedArchiveMemory: "Archive memory",
 	/** Row description; followed by settingsAdvancedRestartRequired. The tab keeps memory it grew into (wasm memory never shrinks) */
 	settingsAdvancedArchiveMemoryDescription:
-		"Memory one archive job may use. More allows higher compression levels and opening archives made with bigger dictionaries. Once used, this tab keeps the memory until it is closed.",
+		"Memory one archive job may use. More allows higher compression levels and opening archives made with bigger dictionaries. Once used, the memory stays reserved until Filen is reloaded or closed.",
 	/** Row description, after settingsAdvancedArchiveMemoryDescription; {{size}} is the largest option in mebibytes. Filen's memory in one tab is capped at 1 GiB, shared with transfers and thumbnails */
 	settingsAdvancedArchiveMemoryHighHint:
-		"Filen can use at most 1 GiB of memory per tab, so {{size}} MiB next to heavy transfers or thumbnails can run out. Choose it only for archives that need it.",
+		"Filen can use at most 1 GiB of memory, so {{size}} MiB next to heavy transfers or thumbnails can run out. Choose it only for archives that need it.",
 	/** Select option; {{size}} is a whole number of mebibytes */
 	settingsAdvancedArchiveMemoryOption: "{{size}} MiB",
 	/** Select option for the default value; {{size}} is a whole number of mebibytes */
@@ -277,7 +277,7 @@ export const settings = {
 	// ── Advanced: diagnostic logs ─────────────────────────────────────────────
 	settingsLogsTitle: "Diagnostic logs",
 	/** {{count}} is the ring buffer's max size (500) */
-	settingsLogsDescription: "The last {{count}} log entries from this browser tab, kept in memory for troubleshooting",
+	settingsLogsDescription: "The last {{count}} log entries from this session, kept in memory for troubleshooting",
 	settingsLogsEmpty: "No log entries yet.",
 	settingsLogsRefresh: "Refresh",
 	settingsLogsExport: "Export logs",

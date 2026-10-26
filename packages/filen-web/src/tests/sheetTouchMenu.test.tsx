@@ -185,7 +185,7 @@ describe("the touch menu", () => {
 		})
 
 		expect(clipboard.paste).toHaveBeenCalledOnce()
-		expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/blocked access to the clipboard\. Use (Ctrl\+|⌘)V instead/))
+		expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/clipboard was blocked\. Use (Ctrl\+|⌘)V instead/))
 
 		ask(true)
 		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetTouchSelectAll }))

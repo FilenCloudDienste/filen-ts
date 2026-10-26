@@ -54,7 +54,7 @@ export const errors = {
 	/** Fires when an archive uses a format or feature (e.g. a compression method) the extractor can't read; shown wherever the archive job reports */
 	ArchiveUnsupported: "This archive format isn't supported.",
 	/** Fires when extracting would pass a safety limit: more items than allowed, more data than the decompression-bomb guard lets through, or a decoder needing more memory than the browser budget */
-	ArchiveTooLarge: "This archive is too large to extract in the browser.",
+	ArchiveTooLarge: "This archive is too large to extract here.",
 	/** Fires when a compress format's encoder needs more than the archive memory set in Advanced settings (also, rarely, when the browser can't hold a very large response) */
 	InsufficientMemory: "This needs more archive memory than Advanced settings allow. Raise it there, or choose another format.",
 	/** Fires when a write lost the account lock it held (e.g. the tab slept past the lock's lease, or another device took it); the write stopped part way and can simply be tried again */
@@ -68,9 +68,9 @@ export const errors = {
 	/** Fires when opening one file of a solid 7z archive would decode more of the archive before it than the app accepted */
 	ArchiveSolidSkipExceeded: "Opening this file means reading a large part of the archive first.",
 	/** Raised by the app (not the SDK) when the browser can't decode a video/audio file's format or codec; shown in the preview, a chat embed and the music player's error line */
-	MediaFormatUnsupported: "Your browser can't play this file's format.",
+	MediaFormatUnsupported: "This file's format can't be played here.",
 	/** Raised by the app (not the SDK) when a video/audio file stopped playing for any other reason (the stream broke, the file couldn't be read); shown wherever the player reports */
 	MediaPlaybackFailed: "This file couldn't be played.",
 	/** Raised by the app (not the SDK) when a download starts on a page the service worker does not control (after a hard reload), which cannot save a streamed file; shown wherever the download reports (a drive download, Download as, an archive entry) */
-	DownloadNeedsReload: "Reload the page to download files."
+	DownloadNeedsReload: "Reload Filen to download files."
 } as const satisfies Partial<Record<SdkErrorKind | MediaErrorKind | typeof DOWNLOAD_NEEDS_RELOAD, string>>

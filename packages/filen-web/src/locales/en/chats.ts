@@ -253,8 +253,8 @@ export const chats = {
 	chatEmbedFilenFile: "Filen file",
 	/** Filen-link previewable card — accessible label on the click-to-open-preview control */
 	chatEmbedOpenPreview: "Open preview of {{name}}",
-	/** Filen-link card — accessible label for a non-previewable file / directory link's new-tab open control */
-	chatEmbedOpenNewTab: "Open {{name}} in a new tab",
+	/** Filen-link card — accessible label for a non-previewable file / directory link's open control */
+	chatEmbedOpenLink: "Open {{name}}",
 	/** Composer attach menu — trigger button accessible label */
 	chatComposerAttach: "Attach",
 	/** Composer attach menu — trigger tooltip when disabled for a non-Pro account (pre-gated) */

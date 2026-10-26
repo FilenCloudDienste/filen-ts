@@ -221,7 +221,7 @@ describe("DocxViewer, password-protected documents", () => {
 
 		expect(note?.textContent).toBe(warning)
 		fireEvent.click(badge)
-		expect(await screen.findByText("Opened with its password, in this browser only.")).toBeTruthy()
+		expect(await screen.findByText("Opened with its password, on this device only.")).toBeTruthy()
 		expect(screen.getAllByText(warning).length).toBe(2)
 	})
 

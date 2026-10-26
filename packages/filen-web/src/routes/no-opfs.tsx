@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { DatabaseXIcon } from "lucide-react"
 import { FullScreenNotice, ReloadButton } from "@/components/fullScreenNotice"
 import { routeHead } from "@/lib/head/routeHead"
+import { desktopPlatform } from "@/lib/desktop"
 import { i18n } from "@/lib/i18n"
 
 // Terminal page for a browser that could not open the persistent OPFS storage the app requires (SAH
@@ -23,7 +24,8 @@ function NoOpfsPage() {
 			icon={<DatabaseXIcon />}
 			destructive={true}
 			title={t("noOpfsTitle")}
-			description={t("noOpfsBody")}
+			// No private window or other browser to switch to in the desktop app.
+			description={t(desktopPlatform() === undefined ? "noOpfsBody" : "desktopNoOpfsBody")}
 		>
 			<ReloadButton />
 		</FullScreenNotice>

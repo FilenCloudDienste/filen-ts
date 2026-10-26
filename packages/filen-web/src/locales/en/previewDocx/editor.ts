@@ -66,7 +66,7 @@ export const previewDocxEditor = {
 	/** Docx editor — context and touch menu: select the whole document */
 	previewDocxSelectAll: "Select all",
 	/** Docx editor — toast when the browser refuses access to the clipboard; names the keyboard shortcut that still works */
-	previewDocxClipboardBlocked: "Your browser blocked access to the clipboard. Use {{shortcut}} instead.",
+	previewDocxClipboardBlocked: "Access to the clipboard was blocked. Use {{shortcut}} instead.",
 	/** Docx editor — context menu while spelling suggestions load */
 	previewDocxSpellingLoading: "Looking for suggestions…",
 	/** Docx editor — context menu when a misspelled word has no suggestions */

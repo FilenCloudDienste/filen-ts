@@ -79,7 +79,7 @@ describe("FilenLinkCard for an archive", () => {
 	it("keeps the new-tab link shell for a file nothing previews", () => {
 		renderCard("setup.exe")
 
-		const card = screen.getByRole("link", { name: "Open setup.exe in a new tab" })
+		const card = screen.getByRole("link", { name: "Open setup.exe" })
 
 		expect(card.getAttribute("href")).toBe(URL)
 		expect(card.getAttribute("target")).toBe("_blank")

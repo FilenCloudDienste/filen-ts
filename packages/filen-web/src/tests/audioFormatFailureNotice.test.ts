@@ -22,10 +22,10 @@ afterEach(() => {
 
 describe("formatFailureMessage", () => {
 	it("names one track and counts several, in the skipped and stopped wordings", () => {
-		expect(formatFailureMessage("a.wma", 1, false)).toBe("Skipped a.wma — its format isn't supported by your browser")
-		expect(formatFailureMessage("a.wma", 1, true)).toBe("Couldn't play a.wma — its format isn't supported by your browser")
-		expect(formatFailureMessage("a.wma", 3, false)).toBe("Skipped 3 tracks — their format isn't supported by your browser")
-		expect(formatFailureMessage("a.wma", 3, true)).toBe("Couldn't play 3 tracks — their format isn't supported by your browser")
+		expect(formatFailureMessage("a.wma", 1, false)).toBe("Skipped a.wma — its format can't be played here")
+		expect(formatFailureMessage("a.wma", 1, true)).toBe("Couldn't play a.wma — its format can't be played here")
+		expect(formatFailureMessage("a.wma", 3, false)).toBe("Skipped 3 tracks — their format can't be played here")
+		expect(formatFailureMessage("a.wma", 3, true)).toBe("Couldn't play 3 tracks — their format can't be played here")
 	})
 })
 
@@ -33,10 +33,8 @@ describe("playbackErrorLabel", () => {
 	it("words a format failure as its notice does: skipped once the player moved on, stopped while still on it", () => {
 		const a = track("a")
 
-		expect(playbackErrorLabel(mediaFailureDTO("format"), a, track("b"))).toBe(
-			"Skipped a.wma — its format isn't supported by your browser"
-		)
-		expect(playbackErrorLabel(mediaFailureDTO("format"), a, a)).toBe("Couldn't play a.wma — its format isn't supported by your browser")
+		expect(playbackErrorLabel(mediaFailureDTO("format"), a, track("b"))).toBe("Skipped a.wma — its format can't be played here")
+		expect(playbackErrorLabel(mediaFailureDTO("format"), a, a)).toBe("Couldn't play a.wma — its format can't be played here")
 	})
 
 	it("labels any other failure through the errors catalog instead of the element's raw message", () => {
@@ -51,9 +49,9 @@ describe("notifyFormatFailure", () => {
 		notifyFormatFailure(track("c"), true)
 
 		expect(warning.mock.calls.map(([message]) => message)).toEqual([
-			"Skipped a.wma — its format isn't supported by your browser",
-			"Skipped 2 tracks — their format isn't supported by your browser",
-			"Couldn't play 3 tracks — their format isn't supported by your browser"
+			"Skipped a.wma — its format can't be played here",
+			"Skipped 2 tracks — their format can't be played here",
+			"Couldn't play 3 tracks — their format can't be played here"
 		])
 		expect(new Set(warning.mock.calls.map(([, options]) => options.id)).size).toBe(1)
 	})
@@ -62,7 +60,7 @@ describe("notifyFormatFailure", () => {
 		notifyFormatFailure(track("a"), false)
 		notifyFormatFailure(track("a"), false)
 
-		expect(warning.mock.lastCall?.[0]).toBe("Skipped a.wma — its format isn't supported by your browser")
+		expect(warning.mock.lastCall?.[0]).toBe("Skipped a.wma — its format can't be played here")
 	})
 
 	it("starts over once the notice has closed", () => {
@@ -70,6 +68,6 @@ describe("notifyFormatFailure", () => {
 		warning.mock.lastCall?.[1].onAutoClose()
 		notifyFormatFailure(track("b"), true)
 
-		expect(warning.mock.lastCall?.[0]).toBe("Couldn't play b.wma — its format isn't supported by your browser")
+		expect(warning.mock.lastCall?.[0]).toBe("Couldn't play b.wma — its format can't be played here")
 	})
 })

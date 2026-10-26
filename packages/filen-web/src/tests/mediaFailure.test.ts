@@ -50,7 +50,7 @@ describe("classifyMediaError", () => {
 
 describe("mediaFailureDTO", () => {
 	it("labels each kind through the errors catalog", () => {
-		expect(errorLabel(mediaFailureDTO("format"))).toBe("Your browser can't play this file's format.")
+		expect(errorLabel(mediaFailureDTO("format"))).toBe("This file's format can't be played here.")
 		expect(errorLabel(mediaFailureDTO("other"))).toBe("This file couldn't be played.")
 	})
 })

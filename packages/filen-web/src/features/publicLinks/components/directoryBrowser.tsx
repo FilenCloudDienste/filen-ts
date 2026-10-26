@@ -33,7 +33,7 @@ import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
+import { DownloadTooLargeNote, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 import { cn } from "@filen/shared"
 
 type ZipUiState =
@@ -191,7 +191,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				<Progress value={zip.total !== null && zip.total > 0 ? Math.round((zip.loaded / zip.total) * 100) : null} />
 			)}
 			{zip.status === "too-large" && zip.forUuid === current.uuid && (
-				<p className="text-sm text-destructive">{t("downloadDirectoryTooLarge")}</p>
+				<DownloadTooLargeNote message={t("downloadDirectoryTooLarge")} />
 			)}
 			{zip.status === "error" && zip.forUuid === current.uuid && (
 				<p className="text-sm text-destructive">{`${t("downloadFailed")} ${errorLabel(zip.dto)}`}</p>

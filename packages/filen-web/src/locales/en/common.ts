@@ -8,8 +8,8 @@ export const common = {
 	appName: "Filen",
 	/** Boot failure screen — title shown when the app could not start */
 	bootErrorTitle: "Filen could not start",
-	/** Shared reload-page action label: boot failure screen button, /no-coi and /no-opfs page buttons, and the update toast's action */
-	reload: "Reload page",
+	/** Shared reload action label: boot failure screen button, /no-coi and /no-opfs page buttons, and the update toast's action */
+	reload: "Reload",
 	/** Dialog primitive (ui/dialog.tsx) — screen-reader label on the icon-only close button, and the text label on the optional footer close button */
 	close: "Close",
 	/** Generic dialog cancel button — shared by every ConfirmDialog/TypedConfirmDialog consumer (e.g. the reset page's skip-master-keys ceremony) */
@@ -49,11 +49,16 @@ export const common = {
 	/** /no-coi error page — body explaining the missing isolation and suggesting a reload */
 	noCoiBody:
 		"Your browser did not load this page with the isolation features Filen requires. Try reloading the page, or contact support if the problem continues.",
+	/** /no-coi error page in the desktop app, in place of noCoiBody: the app itself served the page without isolation */
+	desktopNoCoiBody: "Filen could not load with the isolation features it requires. Reload, or reinstall Filen if the problem continues.",
 	/** /no-opfs error page — title shown when the browser could not provide the persistent storage Filen requires */
 	noOpfsTitle: "Persistent storage is unavailable",
 	/** /no-opfs error page — body explaining OPFS is required and suggesting how to fix it (enable it, use a supported browser) */
 	noOpfsBody:
 		"Filen needs your browser's private, persistent file storage (OPFS) to keep your data on this device. It may be disabled or blocked in a private/incognito window. Enable it, or switch to a recent version of Chrome, Edge, or Safari, then reload the page.",
+	/** /no-opfs error page in the desktop app, in place of noOpfsBody: its local storage could not be opened */
+	desktopNoOpfsBody:
+		"Filen could not open its storage on this device. Reload, or quit and restart Filen; contact support if the problem continues.",
 	/** Theme toggle — icon rail button tooltip/accessible label and the keymap action description shown in shortcut UI */
 	toggleTheme: "Toggle theme",
 	/** Icon rail — tooltip suffix on modules and items that are not available yet */

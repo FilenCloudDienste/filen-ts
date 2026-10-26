@@ -9,9 +9,12 @@ import "@/lib/i18n"
 
 // A failed or oversized "Download all" says so instead of quietly resetting the button.
 
-const { startAnonDirZipDownload } = vi.hoisted(() => ({
-	startAnonDirZipDownload: vi.fn<() => Promise<AnonDownloadOutcome>>()
+const { startAnonDirZipDownload, desktop } = vi.hoisted(() => ({
+	startAnonDirZipDownload: vi.fn<() => Promise<AnonDownloadOutcome>>(),
+	desktop: { platform: undefined as "darwin" | undefined }
 }))
+
+vi.mock("@/lib/desktop", () => ({ desktopBridge: () => undefined, desktopPlatform: () => desktop.platform }))
 
 vi.mock("@/features/publicLinks/lib/download", () => ({ startAnonDirZipDownload }))
 vi.mock("@/features/publicLinks/queries/publicLink", () => ({
@@ -43,7 +46,7 @@ const LISTING = {
 }
 const INFO = { root: { inner: { uuid: ROOT_UUID, meta: { type: "decoded", data: { name: "Photos" } } } } } as unknown as DirPublicInfo
 const LINK = { enableDownload: true, linkKey: "key", password: undefined } as unknown as DirPublicLink
-const TOO_LARGE = "This directory is too large to download in this browser. Use a Chromium-based browser or the Filen desktop app."
+const TOO_LARGE = "This directory is too large to download here. Use a Chromium-based browser or the Filen desktop app."
 
 async function downloadAll(outcome: AnonDownloadOutcome): Promise<void> {
 	startAnonDirZipDownload.mockResolvedValueOnce(outcome)
@@ -57,6 +60,7 @@ async function downloadAll(outcome: AnonDownloadOutcome): Promise<void> {
 
 beforeEach(() => {
 	startAnonDirZipDownload.mockReset()
+	desktop.platform = undefined
 })
 
 afterEach(() => {
@@ -69,6 +73,13 @@ describe("DirectoryBrowser — Download all", () => {
 
 		expect(screen.getByText(TOO_LARGE)).toBeDefined()
 		expect(screen.getByRole("button", { name: "Download all" })).toBeDefined()
+	})
+
+	it("gives no advice to switch to another browser or the desktop app inside the desktop app", async () => {
+		desktop.platform = "darwin"
+		await downloadAll({ status: "too-large" })
+
+		expect(screen.getByText("This directory is too large to download here.")).toBeDefined()
 	})
 
 	it("shows a failed zip with the error's own label", async () => {

@@ -40,7 +40,7 @@ export const driveDownloadAs = {
 	/** Download as error — a password-protected file is not converted to an OpenDocument format: the OpenDocument copy could not keep its password protection */
 	driveDownloadAsConvertProtected: "Password-protected files can't be converted to OpenDocument, because the copy would not be protected",
 	/** Download as error — the file is too large for the browser to convert */
-	driveDownloadAsConvertTooLarge: "This file is too large to convert in the browser",
+	driveDownloadAsConvertTooLarge: "This file is too large to convert here",
 	/** Download as error — a Word 6.0/95 or older document, which cannot be converted */
 	driveDownloadAsConvertLegacyVersion: "Documents from Word 95 and earlier can't be converted",
 	/** Download as warning — the converted copy lacks something the file has (pictures, charts, macros, formatting the other format cannot hold…) */

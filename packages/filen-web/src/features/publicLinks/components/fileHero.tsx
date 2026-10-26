@@ -18,6 +18,7 @@ import { linkedArchiveSource } from "@/features/archive/lib/archiveSource"
 import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
 import { PublicArchiveActions, PublicArchiveBrowser } from "@/features/publicLinks/components/publicArchive"
+import { DownloadTooLargeNote } from "@/features/publicLinks/components/publicLinkStates"
 
 type DownloadUiState =
 	| { status: "idle" }
@@ -255,7 +256,7 @@ export function FileHero({
 					</div>
 				)}
 				{!downloadEnabled && <p className="text-sm text-muted-foreground">{t("downloadDisabled")}</p>}
-				{download.status === "too-large" && <p className="text-sm text-destructive">{t("downloadTooLarge")}</p>}
+				{download.status === "too-large" && <DownloadTooLargeNote message={t("downloadTooLarge")} />}
 				{download.status === "error" && <p className="text-sm text-destructive">{downloadError(download.dto)}</p>}
 
 				{download.status === "running" && download.total !== null && download.total > 0 && (

@@ -233,7 +233,7 @@ export const videos = {
 	/** Card accessible name — the title was watched */
 	videosCardWatched: "watched",
 	/** Card accessible name — the format can't be played here */
-	videosCardNotPlayableLabel: "not playable in the browser",
+	videosCardNotPlayableLabel: "not playable here",
 	/** Card hover button — accessible name; {{title}} = the card's title */
 	videosCardPlayLabel: "Play {{title}}",
 	/** Card menu trigger — accessible name */
@@ -422,7 +422,7 @@ export const videos = {
 	playerCast: "Cast to a TV",
 	/** Cast panel — body */
 	playerCastUnavailable:
-		"Casting isn't available for your private library. Files are decrypted only in this browser. Use screen mirroring, HDMI or a browser on the TV.",
+		"Casting isn't available for your private library. Files are decrypted only on this device. Use screen mirroring, HDMI or a browser on the TV.",
 	/** Player — keyboard shortcuts button and sheet */
 	playerShortcuts: "Keyboard shortcuts",
 	/** Shortcuts sheet — title */
@@ -464,7 +464,7 @@ export const videos = {
 	/** Player — the file's headers couldn't be read, body */
 	playerProbeFailedBody: "Its file couldn't be read. Check your connection and try again.",
 	/** Player — no way to play this file in this browser */
-	playerUnsupportedTitle: "This video can't be played in this browser",
+	playerUnsupportedTitle: "This video can't be played here",
 	/** Player — no way to play this file in this browser, body */
 	playerUnsupportedBody: "Its format isn't supported here. You can download it from Cloud Drive and play it in another app.",
 	/** Player — playback failed */
@@ -490,7 +490,7 @@ export const videos = {
 	/** Tracks popover — a commentary track */
 	playerAudioCommentary: "Commentary",
 	/** Tracks popover — tooltip on an audio track this browser can't play as it is */
-	playerAudioTranscoded: "Converted to stereo for this browser",
+	playerAudioTranscoded: "Converted to stereo for playback",
 	/** Tracks popover — the file has no audio */
 	playerAudioNone: "No audio",
 

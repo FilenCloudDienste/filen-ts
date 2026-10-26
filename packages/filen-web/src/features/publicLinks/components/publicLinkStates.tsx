@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { FileWarningIcon, RotateCwIcon } from "lucide-react"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
+import { desktopPlatform } from "@/lib/desktop"
 
 // The shell's `main` is a flex column; every terminal state (loading / invalid / error) centers itself
 // in that space. Kept as a plain wrapper so each state reads as a small centered card in the app's
@@ -75,5 +76,17 @@ export function PublicLinkError({ onRetry }: { onRetry: () => void }) {
 				</Button>
 			}
 		/>
+	)
+}
+
+// The file or directory zip cannot be held in memory. The way out (another browser or the desktop app) is
+// advice for a browser only.
+export function DownloadTooLargeNote({ message }: { message: string }) {
+	const { t } = useTranslation("publicLinks")
+
+	return (
+		<p className="text-sm text-destructive">
+			{desktopPlatform() === undefined ? `${message} ${t("downloadTooLargeAdvice")}` : message}
+		</p>
 	)
 }

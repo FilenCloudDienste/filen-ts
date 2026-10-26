@@ -2,14 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 // The deployment probe every caller shares: one bounded request to index.html, and what the tab does on
 // a newer build. The toast, the service worker and the unload guard are faked.
-const { toast, busy } = vi.hoisted(() => ({ toast: vi.fn(), busy: { held: false } }))
+const { toast, busy, desktop } = vi.hoisted(() => ({
+	toast: vi.fn(),
+	busy: { held: false },
+	desktop: { platform: undefined as "darwin" | undefined }
+}))
 
 vi.mock("sonner", () => ({ toast }))
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 vi.mock("@/lib/sw/register", () => ({ applyUpdate: vi.fn() }))
 vi.mock("@/lib/unloadGuard", () => ({ hasUnloadHold: () => busy.held }))
+vi.mock("@/lib/desktop", () => ({ desktopPlatform: () => desktop.platform }))
 
-const { buildDeployment, recoverIfNewerBuild, updateToNewerBuild } = await import("@/lib/appUpdate")
+const { buildDeployment, recoverIfNewerBuild, showUpdateReadyToast, updateToNewerBuild } = await import("@/lib/appUpdate")
 
 // The bundle this build runs from, as the deployed index.html names it: the module under test.
 const RUNNING_BUNDLE = new URL("../lib/appUpdate.ts", import.meta.url).pathname
@@ -25,6 +30,7 @@ function serve(response: () => Promise<Response>): ReturnType<typeof vi.fn> {
 beforeEach(() => {
 	vi.stubEnv("PROD", true)
 	busy.held = false
+	desktop.platform = undefined
 	toast.mockClear()
 })
 
@@ -82,6 +88,21 @@ describe("buildDeployment", () => {
 		expect(await verdict).toBe("unknown")
 		expect(timeout).toHaveBeenCalledTimes(1)
 		expect(timeout.mock.calls[0]?.[0]).toBeLessThanOrEqual(10_000)
+	})
+})
+
+describe("showUpdateReadyToast", () => {
+	it("prompts in a browser", () => {
+		showUpdateReadyToast()
+
+		expect(toast).toHaveBeenCalledTimes(1)
+	})
+
+	it("never prompts in the desktop app, which updates natively", () => {
+		desktop.platform = "darwin"
+		showUpdateReadyToast()
+
+		expect(toast).not.toHaveBeenCalled()
 	})
 })
 

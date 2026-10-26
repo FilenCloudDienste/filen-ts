@@ -91,9 +91,9 @@ describe("ArchiveMemoryRow", () => {
 		])
 		expect(screen.getByText("Archive memory")).toBeDefined()
 		expect(description()).toContain("higher compression levels")
-		expect(description()).toContain("keeps the memory until it is closed")
-		expect(description()).toContain("at most 1 GiB of memory per tab, so 512 MiB")
-		expect(description()).toContain("next time Filen loads")
+		expect(description()).toContain("the memory stays reserved until Filen is reloaded or closed")
+		expect(description()).toContain("at most 1 GiB of memory, so 512 MiB")
+		expect(description()).toContain("next time Filen starts")
 		expect(description()).not.toContain("In effect now")
 	})
 
@@ -107,7 +107,7 @@ describe("ArchiveMemoryRow", () => {
 		})
 
 		expect(kvStore.get(KEY)).toEqual({ codecMemoryMib: 512 })
-		expect(toastInfo).toHaveBeenCalledWith("This takes effect the next time Filen loads in this browser tab.")
+		expect(toastInfo).toHaveBeenCalledWith("This takes effect the next time Filen starts.")
 		await screen.findByText("512")
 		await vi.waitFor(() => {
 			expect(description()).toContain("In effect now: 128 MiB.")

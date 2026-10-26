@@ -509,7 +509,7 @@ describe("AssistantSidePanel", () => {
 			[{ kind: "loading", model: MOCK_ASSISTANT_MODEL, verifying: false }, "Loading"],
 			[{ kind: "ready", model: MOCK_ASSISTANT_MODEL }, "On this device"],
 			[{ kind: "error", error: "load-failed", model: MOCK_ASSISTANT_MODEL }, "Error"],
-			[{ kind: "unavailable", reason: "in-use-elsewhere", model: MOCK_ASSISTANT_MODEL }, "In another tab"],
+			[{ kind: "unavailable", reason: "in-use-elsewhere", model: MOCK_ASSISTANT_MODEL }, "In use elsewhere"],
 			[{ kind: "unavailable", reason: "insufficient-memory", model: MOCK_ASSISTANT_MODEL }, "Unavailable"]
 		]
 
@@ -586,7 +586,7 @@ describe("AssistantSidePanel", () => {
 		withSession({ kind: "unavailable", reason: "in-use-elsewhere", model: MOCK_ASSISTANT_MODEL })
 		render(<AssistantSidePanel />)
 
-		expect(screen.getByText("Open in another Filen tab")).toBeDefined()
+		expect(screen.getByText("Already open elsewhere")).toBeDefined()
 		expect(screen.queryByRole("button", { name: "Download model" })).toBeNull()
 	})
 

@@ -234,7 +234,7 @@ describe("card state", () => {
 		expect(cardLabel({ ...heat, progress: 0.45 }, t)).toBe("Heat, 1995, 45% watched")
 		expect(cardLabel({ ...heat, progress: 0.456 }, t)).toBe("Heat, 1995, 46% watched")
 		expect(cardLabel({ ...heat, badge: { kind: "unwatched", count: 3 } }, t)).toBe("Heat, 1995, 3 unwatched episodes")
-		expect(cardLabel(old, t)).toBe("old.avi, AVI · Download to watch, not playable in the browser")
+		expect(cardLabel(old, t)).toBe("old.avi, AVI · Download to watch, not playable here")
 	})
 
 	it("marks every version of a movie and every episode of a series", () => {

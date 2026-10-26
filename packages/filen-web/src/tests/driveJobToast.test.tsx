@@ -144,7 +144,7 @@ describe("DriveJobToast for a copy", () => {
 		expect(screen.getByText("12 of 40 files")).toBeTruthy()
 		expect(screen.getByText("25%")).toBeTruthy()
 		expect(screen.getByText(/^\S+ \S+ of \S+ \S+ · \S+ \S+\/s · 0:06 left$/)).toBeTruthy()
-		expect(screen.getByText("Closing this tab stops the copy.")).toBeTruthy()
+		expect(screen.getByText("Closing Filen stops the copy.")).toBeTruthy()
 		expect(screen.getByRole("progressbar", { name: "Copy progress" })).toBeTruthy()
 	})
 
@@ -245,7 +245,7 @@ describe("DriveJobToast for a copy", () => {
 		expect(screen.getByText("Copy to Photos")).toBeTruthy()
 		expect(screen.getByText("2 items couldn't be copied")).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
-		expect(screen.queryByText("Closing this tab stops the copy.")).toBeNull()
+		expect(screen.queryByText("Closing Filen stops the copy.")).toBeNull()
 
 		fireEvent.click(screen.getByRole("button", { name: "Details" }))
 
@@ -431,7 +431,7 @@ describe("DriveJobToast for an archive job", () => {
 		expect(screen.getByText("Compressing 3 items into photos.zip")).toBeTruthy()
 		expect(screen.getByText("12 of 40 files")).toBeTruthy()
 		expect(screen.getByText("25%")).toBeTruthy()
-		expect(screen.getByText("Closing this tab stops compressing.")).toBeTruthy()
+		expect(screen.getByText("Closing Filen stops compressing.")).toBeTruthy()
 		expect(screen.getByRole("progressbar", { name: "Compress progress" })).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Hide compress progress" })).toBeTruthy()
 

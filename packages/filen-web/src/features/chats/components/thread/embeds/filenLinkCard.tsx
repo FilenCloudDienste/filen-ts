@@ -376,7 +376,7 @@ export function FilenLinkCard({
 				}
 				name={link.uuid}
 				subtitle={t(link.type === "directory" ? "chatEmbedFilenDirectory" : "chatEmbedFilenFile")}
-				ariaLabel={t("chatEmbedOpenNewTab", { name: link.uuid })}
+				ariaLabel={t("chatEmbedOpenLink", { name: link.uuid })}
 				href={url}
 			/>
 		)
@@ -397,7 +397,7 @@ export function FilenLinkCard({
 				}
 				name={name}
 				subtitle={formatShortDate(data.timestamp)}
-				ariaLabel={t("chatEmbedOpenNewTab", { name })}
+				ariaLabel={t("chatEmbedOpenLink", { name })}
 				href={url}
 			/>
 		)
@@ -443,7 +443,7 @@ export function FilenLinkCard({
 				icon={icon}
 				name={name}
 				subtitle={sizeLabel}
-				ariaLabel={t("chatEmbedOpenNewTab", { name })}
+				ariaLabel={t("chatEmbedOpenLink", { name })}
 				href={url}
 			/>
 		)

@@ -51,17 +51,17 @@ export const audio = {
 
 	// ── Unplayable formats (toast + the bar's error line) ──────────────────
 	/** The player skipped a track because the browser can't decode its format; {{name}} is the file name */
-	formatSkipped: "Skipped {{name}} — its format isn't supported by your browser",
+	formatSkipped: "Skipped {{name}} — its format can't be played here",
 	/** Playback stopped on a track because the browser can't decode its format (nothing left to skip to, or paused); {{name}} is the file name */
-	formatStopped: "Couldn't play {{name}} — its format isn't supported by your browser",
+	formatStopped: "Couldn't play {{name}} — its format can't be played here",
 	/** One notice covering several skipped tracks whose format the browser can't decode, singular */
-	formatSkippedCount_one: "Skipped {{count}} track — its format isn't supported by your browser",
+	formatSkippedCount_one: "Skipped {{count}} track — its format can't be played here",
 	/** One notice covering several skipped tracks whose format the browser can't decode, plural */
-	formatSkippedCount_other: "Skipped {{count}} tracks — their format isn't supported by your browser",
+	formatSkippedCount_other: "Skipped {{count}} tracks — their format can't be played here",
 	/** One notice covering several tracks whose format the browser can't decode, after which playback stopped, singular */
-	formatStoppedCount_one: "Couldn't play {{count}} track — its format isn't supported by your browser",
+	formatStoppedCount_one: "Couldn't play {{count}} track — its format can't be played here",
 	/** One notice covering several tracks whose format the browser can't decode, after which playback stopped, plural */
-	formatStoppedCount_other: "Couldn't play {{count}} tracks — their format isn't supported by your browser",
+	formatStoppedCount_other: "Couldn't play {{count}} tracks — their format can't be played here",
 
 	// ── Keyboard-shortcut descriptions (keymap registry) ───────────────────
 	/** Toggle play/pause via keyboard */

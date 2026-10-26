@@ -6,6 +6,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicLink"
 import { useDismissBootSplash } from "@/lib/bootSplash"
 import { ThirdPartyNoticesLink } from "@/features/settings/components/advanced/thirdPartyNoticesLink"
+import { desktopPlatform } from "@/lib/desktop"
 
 const FILEN_HOME_URL = "https://filen.io"
 const REPORT_ABUSE_MAILTO = "mailto:abuse@filen.io"
@@ -56,14 +57,17 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 							>
 								{t("signIn")}
 							</Link>
-							<a
-								href={FILEN_HOME_URL}
-								target="_blank"
-								rel="noopener noreferrer"
-								className={buttonVariants({ size: "sm" })}
-							>
-								{t("getFilen")}
-							</a>
+							{/* Inside the desktop app the visitor already has Filen. */}
+							{desktopPlatform() === undefined ? (
+								<a
+									href={FILEN_HOME_URL}
+									target="_blank"
+									rel="noopener noreferrer"
+									className={buttonVariants({ size: "sm" })}
+								>
+									{t("getFilen")}
+								</a>
+							) : null}
 						</>
 					) : null}
 				</div>

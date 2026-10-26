@@ -26,10 +26,11 @@ const DIRECTORY_PUBLIC_LINK_PATH = "/d/"
 export type PublicLinkKind = "file" | "directory"
 
 // The NEW-format link the drive dialog copies to the clipboard: `<origin>/<f|d>/<uuid>#<hexkey>`. The
-// origin is the one this app is served from (production, staging or a dev server): a link opens in this
-// same app, and the key in the fragment never reaches any server, whichever it is. `keyPlain` is the
-// SDK's plaintext key; it is hex-encoded here purely for URL-safety, decoded back on open. A literal '#'
-// (not encodeURIComponent) so the key is a genuine fragment.
+// origin is the one this app is served from (production, staging or a dev server; the desktop app
+// passes the web app's, linkDialog.logic.ts): a link opens in this same app, and the key in the
+// fragment never reaches any server, whichever it is. `keyPlain` is the SDK's plaintext key; it is
+// hex-encoded here purely for URL-safety, decoded back on open. A literal '#' (not
+// encodeURIComponent) so the key is a genuine fragment.
 export function buildPublicLinkUrl(kind: PublicLinkKind, uuid: string, keyPlain: string, origin: string = location.origin): string {
 	const path = kind === "file" ? FILE_PUBLIC_LINK_PATH : DIRECTORY_PUBLIC_LINK_PATH
 

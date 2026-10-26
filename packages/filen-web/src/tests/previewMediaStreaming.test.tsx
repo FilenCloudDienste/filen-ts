@@ -246,7 +246,7 @@ describe("audio preview with a service worker", () => {
 		vi.stubGlobal("MediaSource", undefined)
 		render(createElement(MediaViewer, { item: linkedFileItem("track.mp3"), category: "audio", alt: "a" }), { wrapper: anon })
 
-		expect(await screen.findByText("This browser can't stream this file.")).toBeTruthy()
+		expect(await screen.findByText("This file can't be streamed here.")).toBeTruthy()
 		expect(mocks.openRemuxSession).not.toHaveBeenCalled()
 		expectNoWholeFileRead()
 	})

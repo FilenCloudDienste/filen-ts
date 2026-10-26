@@ -5,6 +5,7 @@ import { asDirectoryOrFile, isDirectoryItem, type DriveItem } from "@/features/d
 import { formatItemSize } from "@/features/drive/lib/format"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import type { DriveKey } from "@/lib/i18n"
+import { desktopPlatform } from "@/lib/desktop"
 
 // Normalized shape the dialog's form reads from — collapses the dir/file field-name asymmetry
 // (`enableDownload` vs `downloadable`) into one internal name.
@@ -90,6 +91,10 @@ export function buildLinkUpdate(current: DriveItemLinkStatus, edits: LinkFormEdi
 	}
 }
 
+// The desktop app is served from its own filen://app origin, which no recipient can open, so its links
+// point at the web app instead. Every copied, shared or chat-attached link is built below.
+const DESKTOP_PUBLIC_LINK_ORIGIN = "https://app.filen.io"
+
 // A file link's key is the ITEM's own decrypted metadata key (FilePublicLink itself carries no key
 // field); a directory link's key is the LINK's own linkKey (absent until the link finishes
 // provisioning). Returns null rather than throwing when the needed key isn't available — the caller
@@ -101,8 +106,10 @@ export function buildLinkUpdate(current: DriveItemLinkStatus, edits: LinkFormEdi
 // itself (NEW path-based format, key hex-encoded in the fragment) is owned by
 // features/publicLinks/lib/format.logic.ts — the same module the /f/ /d/ route and the chat recognizer
 // parse with, so a built link always round-trips.
+
 export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus): string | null {
 	const base = asDirectoryOrFile(item)
+	const origin = desktopPlatform() === undefined ? location.origin : DESKTOP_PUBLIC_LINK_ORIGIN
 
 	if (base.type === "file" && status.type === "file") {
 		const key = base.data.decryptedMeta?.key
@@ -111,7 +118,7 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 			return null
 		}
 
-		return buildPublicLinkUrlString("file", status.status.linkUuid, key)
+		return buildPublicLinkUrlString("file", status.status.linkUuid, key, origin)
 	}
 
 	if (base.type === "directory" && status.type === "directory") {
@@ -121,7 +128,7 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 			return null
 		}
 
-		return buildPublicLinkUrlString("directory", status.status.linkUuid, linkKey)
+		return buildPublicLinkUrlString("directory", status.status.linkUuid, linkKey, origin)
 	}
 
 	return null

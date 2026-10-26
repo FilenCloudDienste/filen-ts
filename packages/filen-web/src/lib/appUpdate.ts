@@ -2,6 +2,7 @@ import { toast } from "sonner"
 import { i18n } from "@/lib/i18n"
 import { applyUpdate } from "@/lib/sw/register"
 import { hasUnloadHold } from "@/lib/unloadGuard"
+import { desktopPlatform } from "@/lib/desktop"
 import { isBuildStillDeployed, staleBuildAction } from "@/lib/appUpdate.logic"
 
 // One id, so a service-worker update and a failed worker start in the same tab raise a single prompt.
@@ -15,7 +16,12 @@ const RUNNING_BUNDLE = new URL(import.meta.url).pathname
 
 let lastCheckAt = 0
 
+// The desktop app ships its page inside the app and updates natively, so it never offers a page reload as an update.
 export function showUpdateReadyToast(): void {
+	if (desktopPlatform() !== undefined) {
+		return
+	}
+
 	toast(i18n.t("updateReadyTitle"), {
 		id: UPDATE_TOAST_ID,
 		description: i18n.t("updateReadyBody"),

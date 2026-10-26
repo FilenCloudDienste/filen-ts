@@ -556,7 +556,7 @@ describe("startDownloads (real runDownload + defaultDownloadDeps)", () => {
 		await startDownloads([fileItem()])
 
 		expect(toastError).toHaveBeenCalledWith("0 files downloaded, 1 failed", {
-			description: "Your browser may have kept the part already downloaded. Delete it from the browser's downloads list."
+			description: "The part already downloaded may remain where the file was being saved. Delete it there."
 		})
 	})
 

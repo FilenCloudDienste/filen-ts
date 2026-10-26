@@ -254,7 +254,7 @@ export const preview = {
 	/** Spreadsheet viewer — note beside the cell contents when an Excel file stays read-only because saving it here would lose some of its content */
 	previewSpreadsheetReadOnlyLossy: "Read-only here: this file has content this app can't save without losing it.",
 	/** Spreadsheet viewer — note beside the cell contents when an Excel file opens read-only because it is too large to check that saving it keeps everything in it */
-	previewSpreadsheetReadOnlyTooLarge: "Read-only here: this file is too large to edit in the browser.",
+	previewSpreadsheetReadOnlyTooLarge: "Read-only here: this file is too large to edit.",
 	/** Spreadsheet viewer — shown beside the formula bar (and as a toast for a paste) when an entry starts with "=" but isn't a formula Excel can read, e.g. a parenthesis left open or ";" between arguments */
 	previewSpreadsheetFormulaInvalid: "This formula can't be read. Check its parentheses and quotes, and separate arguments with commas.",
 
@@ -314,7 +314,7 @@ export const preview = {
 	/** Docx viewer and editor — toolbar badge (and its popover's title) for a document opened with its password */
 	previewDocxPasswordProtected: "Password-protected",
 	/** Docx viewer — the Password-protected badge's popover: the document was decrypted with its password in this browser, in memory only */
-	previewDocxPasswordOpened: "Opened with its password, in this browser only.",
+	previewDocxPasswordOpened: "Opened with its password, on this device only.",
 	/** Docx editor and spreadsheet editor — the Password-protected badge's popover: every save (explicit or autosave) is encrypted again with the password the file was opened with. In preview.ts, not previewDocx/*: the spreadsheet editor shows it too */
 	previewDocxPasswordSaved: "Saved with the same password.",
 	/** Docx viewer and editor, spreadsheet — the Password-protected badge's warning (popover and screen-reader description) for a file whose encryption carries no integrity check (Standard encryption, or an Agile file without one): its content may have been changed after it was encrypted */
@@ -486,11 +486,11 @@ export const preview = {
 
 	// ── Video player ─────────────────────────────────────────────────────────
 	/** Video/audio preview — the browser can't decode the file; {{codecs}} lists the formats it reported it can't play, e.g. "HEVC, AC-3" (format names, not translated). Shown with a Download button */
-	previewMediaFormatUnsupportedCodecs: "Your browser can't play this file's format ({{codecs}}).",
+	previewMediaFormatUnsupportedCodecs: "This file's format can't be played here ({{codecs}}).",
 	/** Video player — notice over a video that plays without sound because the browser can't decode its audio; {{codec}} is the audio format's name, e.g. AC-3 */
-	previewMediaNoSound: "No sound: your browser can't play this video's {{codec}} audio.",
+	previewMediaNoSound: "No sound: this video's {{codec}} audio can't be played here.",
 	/** Video player — notice over a video that plays its sound without a picture because the browser can't decode its video; {{codec}} is the video format's name, e.g. HEVC */
-	previewMediaNoPicture: "No picture: your browser can't play this video's {{codec}} video.",
+	previewMediaNoPicture: "No picture: this video's {{codec}} video can't be played here.",
 	/** Video player — accessible label of the button closing the no-sound/no-picture notice */
 	previewMediaNoticeDismiss: "Dismiss",
 	/** Video player — accessible label of the floating control bar */
@@ -514,7 +514,7 @@ export const preview = {
 	/** Preview overlay body — a `.ts` file that turned out to be TypeScript, too large to load as text */
 	previewTextTooLarge: "This file is too large to show as text.",
 	/** Preview overlay body — the browser has no way to stream this video or audio file (no service worker, no MediaSource); the Download button sits below */
-	previewMediaCannotStream: "This browser can't stream this file.",
+	previewMediaCannotStream: "This file can't be streamed here.",
 	/** Video player — subtitles menu button and its heading */
 	previewMediaSubtitles: "Subtitles",
 	/** Video player — subtitles menu: no subtitles */
@@ -602,7 +602,7 @@ export const preview = {
 	/** Archive browser — the listing failed: the archive is damaged */
 	previewArchiveFailedCorrupt: "This archive is damaged.",
 	/** Archive browser — the listing failed: too many entries to list in the browser, or it unpacks to an implausible size */
-	previewArchiveFailedTooLarge: "This archive is too large to list in the browser.",
+	previewArchiveFailedTooLarge: "This archive is too large to list here.",
 	/** Archive browser — a damaged archive whose first entries could be read */
 	previewArchivePartial_one: "Showing the {{count}} entry read before the damage.",
 	/** Archive browser — a damaged archive whose first entries could be read */
@@ -708,7 +708,7 @@ export const preview = {
 	/** Solid 7z cost dialog — saves the file anyway */
 	previewArchiveEntryCostDownload: "Download",
 	/** Toast when a browser can't stream one file of an archive to disk (no File System Access and no transferable streams) */
-	previewArchiveEntryDownloadUnsupported: "This browser can't save a single file from an archive. Extract it to your drive instead.",
+	previewArchiveEntryDownloadUnsupported: "A single file can't be saved from this archive here. Extract it to your drive instead.",
 
 	// ── Word document editor features (locales/en/previewDocx/*) ─────────────
 	...previewDocxEditor,

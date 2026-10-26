@@ -59,10 +59,11 @@ export const publicLinks = {
 	/** Download — note when downloads are disabled for the link */
 	downloadDisabled: "The owner has disabled downloads for this link.",
 	/** Download — note when a file exceeds the in-memory download cap on a non-streaming browser */
-	downloadTooLarge: "This file is too large to download in this browser. Use a Chromium-based browser or the Filen desktop app.",
+	downloadTooLarge: "This file is too large to download here.",
 	/** Download — note when a directory's zip outgrows the in-memory download cap on a non-streaming browser */
-	downloadDirectoryTooLarge:
-		"This directory is too large to download in this browser. Use a Chromium-based browser or the Filen desktop app.",
+	downloadDirectoryTooLarge: "This directory is too large to download here.",
+	/** Download — follows downloadTooLarge / downloadDirectoryTooLarge in a browser only (never inside the desktop app) */
+	downloadTooLargeAdvice: "Use a Chromium-based browser or the Filen desktop app.",
 	/** Download — note when a file or directory download failed, followed by the error's own label */
 	downloadFailed: "The download failed.",
 	/** Download — in-progress label */

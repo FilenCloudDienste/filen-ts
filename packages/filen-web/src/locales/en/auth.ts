@@ -50,7 +50,7 @@ export const auth = {
 	loginSubmit: "Sign in",
 	/** Login screen — warning toast when sign-in succeeded but the session could not be saved on this device; the tab stays signed in, only resume after closing it is lost */
 	sessionPersistFailed:
-		"Signed in, but your session could not be saved on this device. You may need to sign in again after closing the tab.",
+		"Signed in, but your session could not be saved on this device. You may need to sign in again after closing Filen.",
 	/** Login screen — split-sentence link to the register screen; <a> wraps "Sign up" */
 	dontHaveAccount: "Don't have an account? <a>Sign up</a>",
 

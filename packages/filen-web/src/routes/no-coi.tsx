@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { ShieldAlertIcon } from "lucide-react"
 import { FullScreenNotice, ReloadButton } from "@/components/fullScreenNotice"
 import { routeHead } from "@/lib/head/routeHead"
+import { desktopPlatform } from "@/lib/desktop"
 import { i18n } from "@/lib/i18n"
 
 // Terminal page for a browser that did not load the app cross-origin-isolated (COOP/COEP missing).
@@ -21,7 +22,8 @@ function NoCoiPage() {
 			icon={<ShieldAlertIcon />}
 			destructive={true}
 			title={t("noCoiTitle")}
-			description={t("noCoiBody")}
+			// The desktop app serves its own headers, so a browser's advice does not apply there.
+			description={t(desktopPlatform() === undefined ? "noCoiBody" : "desktopNoCoiBody")}
 		>
 			<ReloadButton />
 		</FullScreenNotice>

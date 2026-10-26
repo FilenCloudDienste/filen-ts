@@ -375,7 +375,7 @@ describe("ArchiveSourceBrowser states", () => {
 
 		show(fake)
 
-		expect(screen.getByText("This archive is too large to list in the browser.")).toBeTruthy()
+		expect(screen.getByText("This archive is too large to list here.")).toBeTruthy()
 
 		fireEvent.click(screen.getByRole("button", { name: "Try again" }))
 
