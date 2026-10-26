@@ -2,7 +2,11 @@ import { classifyLink } from "@filen/shared/linkPolicy"
 
 export type NavigationVerdict = "inApp" | "external" | "deny"
 
-// Our own origin stays in the window; anything the shared link policy allows goes to the OS; the rest is refused.
+// The OS opens web and mail links only: links here can come from content other people wrote (chats, notes,
+// documents), and the remaining schemes the shared link policy allows would hand them to arbitrary local apps.
+const EXTERNAL_SCHEMES = new Set(["https:", "http:", "mailto:"])
+
+// Our own origin stays in the window; web and mail links go to the OS; the rest is refused.
 export function classifyNavigation(url: string, appOrigin: string): NavigationVerdict {
 	let origin: string
 
@@ -19,7 +23,9 @@ export function classifyNavigation(url: string, appOrigin: string): NavigationVe
 		return "inApp"
 	}
 
-	return classifyLink(url).kind === "external" ? "external" : "deny"
+	const verdict = classifyLink(url)
+
+	return verdict.kind === "external" && EXTERNAL_SCHEMES.has(verdict.scheme) ? "external" : "deny"
 }
 
 // IPC is answered only for the app's own top-level document, never for another origin a frame was navigated to.

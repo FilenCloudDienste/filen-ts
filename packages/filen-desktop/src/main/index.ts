@@ -1,10 +1,11 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, protocol, shell } from "electron"
-import { readFile } from "node:fs/promises"
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, protocol, session, shell } from "electron"
+import { readFileSync } from "node:fs"
 import path from "node:path"
 import type { DesktopPlatform } from "@filen/shared/desktop"
 import { CHANNELS } from "../shared/channels.ts"
 import { parseHeaders } from "./headers.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
+import { isPermissionAllowed } from "./permissions.ts"
 import { registerAppProtocol } from "./serve.ts"
 import { initialColors, windowOptions } from "./window.ts"
 
@@ -39,8 +40,14 @@ const webDist = app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false
+// activate and second-instance can fire before the app protocol exists; the window waits for it.
+let started = false
 
 function showWindow(): void {
+	if (!started) {
+		return
+	}
+
 	if (mainWindow === null) {
 		createWindow()
 
@@ -90,12 +97,21 @@ function createWindow(): void {
 	window.on("close", event => {
 		if (PLATFORM === "darwin" && !quitting) {
 			event.preventDefault()
-			window.hide()
+
+			// Hiding a fullscreen window leaves an empty fullscreen Space behind.
+			if (window.isFullScreen()) {
+				window.once("leave-full-screen", () => window.hide())
+				window.setFullScreen(false)
+			} else {
+				window.hide()
+			}
 		}
 	})
 
 	window.on("closed", () => {
-		mainWindow = null
+		if (mainWindow === window) {
+			mainWindow = null
+		}
 	})
 
 	mainWindow = window
@@ -133,8 +149,24 @@ if (!app.requestSingleInstanceLock()) {
 		}
 	})
 
-	void app.whenReady().then(async () => {
-		registerAppProtocol(SCHEME, webDist, parseHeaders(await readFile(path.join(webDist, "_headers"), "utf8")))
-		createWindow()
-	})
+	app.whenReady()
+		.then(() => {
+			const { defaultSession } = session
+
+			defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+				callback(isPermissionAllowed(permission, details.requestingUrl, APP_ORIGIN))
+			})
+			defaultSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) =>
+				isPermissionAllowed(permission, requestingOrigin, APP_ORIGIN)
+			)
+
+			// Without its headers the web app cannot run (no cross-origin isolation, no CSP), so a missing file is fatal.
+			registerAppProtocol(SCHEME, webDist, parseHeaders(readFileSync(path.join(webDist, "_headers"), "utf8")))
+			started = true
+			showWindow()
+		})
+		.catch((error: unknown) => {
+			dialog.showErrorBox("Filen", `Filen could not start.\n\n${error instanceof Error ? error.message : String(error)}`)
+			app.exit(1)
+		})
 }
