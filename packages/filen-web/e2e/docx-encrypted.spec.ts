@@ -134,8 +134,10 @@ test("password-protected documents: refused when rights-managed, asked, unlocked
 		// Reopened, the password is asked again (none is remembered).
 		await openLocked(page, listbox, encrypted)
 		await page.keyboard.press("Escape")
+		await expect(passwordPrompt(page)).toHaveCount(0)
+		// A locked document draws no page: its message going is what shows the preview closed.
 		await page.keyboard.press("Escape")
-		await expect(page.locator(".fo-docx-page")).toHaveCount(0)
+		await expect(page.getByText(preview.previewDocxNeedsPassword, { exact: true })).toHaveCount(0)
 
 		expect(await storedPassword(page, ENCRYPTED_DOCX_PASSWORD)).toEqual([])
 	})

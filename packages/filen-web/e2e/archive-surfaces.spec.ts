@@ -1,4 +1,5 @@
 import type { Browser, Locator, Page } from "@playwright/test"
+import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect, settleLeases } from "./fixtures"
 import { escapeRegExp, leadingNamePattern, namePattern, openRowMenu, pickDestination, waitForCompressDialog } from "./helpers/archive"
 import { plainTreeZip } from "./helpers/archiveFixtures"
@@ -103,7 +104,7 @@ function linkArchiveBrowser(page: Page): { list: Locator; extractAll: Locator; n
 // The tree zip's root, as plainTreeZip writes it.
 async function expectTreeRoot(list: Locator): Promise<void> {
 	for (const name of ["docs", "empty-dir", "photos", "readme.txt"]) {
-		await expect(list.getByRole("option", { name: leadingNamePattern(name) })).toBeVisible({ timeout: 60_000 })
+		await expect(list.getByRole("option", { name: leadingNamePattern(name) })).toBeVisible({ timeout: budget(60_000) })
 	}
 }
 

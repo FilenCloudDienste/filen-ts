@@ -62,7 +62,31 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 		await expect(findField).toHaveCount(0)
 
 		// Bold around a double-clicked word; the buffer is dirty, which locks the preview toggle.
-		await content.getByText("plain words here").dblclick({ position: { x: 60, y: 8 } })
+		const line = content.getByText("plain words here")
+		// Where "words" is drawn, by the fonts this browser has.
+		const words = await line.evaluate(element => {
+			const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+
+			for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+				const start = node.textContent?.indexOf("words") ?? -1
+
+				if (start >= 0) {
+					const range = document.createRange()
+
+					range.setStart(node, start)
+					range.setEnd(node, start + "words".length)
+
+					const rect = range.getBoundingClientRect()
+					const box = element.getBoundingClientRect()
+
+					return { x: rect.left - box.left + rect.width / 2, y: rect.top - box.top + rect.height / 2 }
+				}
+			}
+
+			throw new Error('no "words" in the line')
+		})
+
+		await line.dblclick({ position: words })
 		await page.keyboard.press(`${editorMod}+B`)
 		await expect(content).toContainText("plain **words** here")
 		await page.keyboard.press(`${appMod}+Shift+V`)

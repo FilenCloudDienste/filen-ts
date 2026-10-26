@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test"
 import { formatBytes } from "@filen/shared"
+import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect, readFixtureManifest } from "./fixtures"
 import {
 	archivePasswordPrompt,
@@ -58,7 +59,7 @@ import {
 const [DOWNLOAD_CANCEL] = FIXTURE_FILES["download-cancel"]
 
 // A tarball or single compressed file is downloaded whole to be listed; a zip's or 7z's index is one read.
-const LISTING_TIMEOUT_MS = 60_000
+const LISTING_TIMEOUT_MS = budget(60_000)
 
 const EXTRACT_PASSWORD_DIALOG = /^(Password required|Wrong password)$/
 
@@ -303,7 +304,8 @@ test.describe("archive compress", () => {
 
 			await expect(archivePasswordPrompt(page)).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
 			await expect(page.getByText("This archive's contents are encrypted.", { exact: true })).toBeVisible()
-			await expect(browser.list.getByRole("option")).toHaveCount(0)
+			// CSS, not role: the hidden list would match no option by role whatever it held.
+			await expect(page.locator('[role="listbox"][aria-label^="Contents of "] [role="option"]')).toHaveCount(0)
 			await browser.unlock(password)
 			await expect(browser.row(first)).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
 			await expectRows(browser.list, sources)
@@ -389,7 +391,7 @@ test.describe("archive compress", () => {
 			await expect(itemRow(listbox, archive)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			for (const name of sources) {
-				await expect(itemRow(listbox, name)).toHaveCount(0)
+				await expect(itemRow(listbox, name)).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			}
 
 			// "e2e-" names: the run's debris sweep takes them out of the trash later.
@@ -432,7 +434,7 @@ test.describe("archive compress", () => {
 			await clearJobCards(page, ["compress", "extract"])
 
 			await expect(itemRow(listbox, archive)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			await expect(itemRow(listbox, source)).toHaveCount(0)
+			await expect(itemRow(listbox, source)).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// The archive is good: it extracts with the password into a new directory beside it.
 			const extract = await openExtractDialog(page, listbox, archive)

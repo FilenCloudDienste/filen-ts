@@ -672,7 +672,12 @@ export async function selectAndTrashRow(page: Page, listbox: Locator, name: stri
 		}
 
 		await expect(row).toBeVisible()
-		await row.click()
+
+		// A click on the sole selected row deselects it, which would hide the bulk Trash on a retry.
+		if ((await row.getAttribute("aria-selected")) !== "true") {
+			await row.click()
+		}
+
 		await waitForToastsClear(page)
 		await page.getByRole("button", { name: "Trash", exact: true }).click()
 		await expect(confirm).toBeVisible()

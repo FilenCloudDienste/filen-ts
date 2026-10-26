@@ -232,7 +232,7 @@ test("a long press selects the word: handles at its ends, the touch menu, a hand
 	const startBefore = await centerOf(handles.nth(0))
 
 	await touch(page, browserName, [await centerOf(menu.getByRole("menuitem", { name: preview.previewDocxSelectAll, exact: true }))], 0)
-	await expect.poll(async () => (await centerOf(handles.nth(0))).x).toBeLessThanOrEqual(startBefore.x)
+	await expect.poll(async () => (await centerOf(handles.nth(0))).x).toBeLessThan(startBefore.x)
 	await expect(menu).toBeVisible()
 
 	// A tap elsewhere collapses the selection: no handles, no menu.

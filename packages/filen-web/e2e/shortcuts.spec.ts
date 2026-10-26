@@ -25,11 +25,18 @@ test.describe("keyboard shortcuts", () => {
 
 	test("the overlay opens on its combo and lists groups from route chunks that were never loaded", async ({ page }) => {
 		await gotoSettings(page)
-		await page.keyboard.press("Shift+Slash")
 
 		const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" })
 
-		await expect(dialog).toBeVisible()
+		// Re-pressed until it opens: a press before the binding is installed is swallowed (helpers/theme.ts),
+		// and one that did land is never pressed again, which could close it.
+		await expect(async () => {
+			if (!(await dialog.isVisible())) {
+				await page.keyboard.press("Shift+Slash")
+			}
+
+			await expect(dialog).toBeVisible({ timeout: 2_000 })
+		}).toPass({ timeout: 30_000 })
 
 		// Photos has never been visited in this session, so its actions only exist because the defs are
 		// static data rather than side effects of the route chunk — the direct regression test.

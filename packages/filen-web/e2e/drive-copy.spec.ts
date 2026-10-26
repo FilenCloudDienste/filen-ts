@@ -290,9 +290,14 @@ test.describe("drive copy", () => {
 			}
 
 			// ---- paused: the card offers Resume, the transfers row mirrors it ----
+			// Its uploads wait until the pause is asked for, or the copy can finish before the click lands.
+			hold = await holdChunks(page, browserName, { hosts: "ingest" })
+
 			const keepCard = await copyInto(keepDir)
 
-			await pauseFirst(keepCard)
+			await pauseFirst(keepCard, hold)
+			await hold?.dispose()
+			hold = null
 			await expect(cardButton(keepCard, "Resume")).toBeVisible()
 
 			await openTransfers(page)
@@ -325,9 +330,13 @@ test.describe("drive copy", () => {
 			await waitForListingSettled(page)
 
 			// ---- a second copy, stopped with its copied items moved to the trash ----
+			hold = await holdChunks(page, browserName, { hosts: "ingest" })
+
 			const trashCard = await copyInto(trashDir)
 
-			await pauseFirst(trashCard)
+			await pauseFirst(trashCard, hold)
+			await hold?.dispose()
+			hold = null
 			await stopJob(page, trashCard, "copy", "Move copied items to trash")
 			await trashCard.hover()
 			await expect(trashCard.getByText(/^Stopped\./)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })

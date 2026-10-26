@@ -62,11 +62,14 @@ async function closeDiscarding(page: Page): Promise<void> {
 	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
 }
 
-// The account may have no author name yet: the first change that records one asks for it.
-async function giveNameIfAsked(page: Page): Promise<void> {
+// The account may have no author name yet: the first change that records one asks for it, and waits for it.
+// `made`: the change went through (with a name already given, nothing is asked).
+async function giveNameIfAsked(page: Page, made: () => Promise<boolean>): Promise<void> {
 	const dialog = page.getByRole("dialog", { name: preview.previewOfficeAuthorNameTitle })
 
-	if (await dialog.isVisible({ timeout: 2000 }).catch(() => false)) {
+	await expect.poll(async () => (await dialog.isVisible()) || (await made())).toBe(true)
+
+	if (await dialog.isVisible()) {
 		await dialog.getByRole("textbox", { name: preview.previewOfficeAuthorNameLabel }).fill(AUTHOR)
 		await dialog.getByRole("button", { name: preview.previewOfficeAuthorNameSave }).click()
 		await expect(dialog).toHaveCount(0)
@@ -76,12 +79,11 @@ async function giveNameIfAsked(page: Page): Promise<void> {
 // Track changes on, from the Review tab.
 async function trackChanges(page: Page): Promise<void> {
 	await ribbonTab(page, preview.previewOfficeRibbonTabReview)
+	const pressed = ribbonCommands(page).getByRole("button", { name: preview.previewDocxTrackChanges, exact: true, pressed: true })
+
 	await (await ribbonButton(page, page, preview.previewDocxRibbonTracking, preview.previewDocxTrackChanges)).click()
-	await giveNameIfAsked(page)
-	await expect(ribbonCommands(page).getByRole("button", { name: preview.previewDocxTrackChanges, exact: true })).toHaveAttribute(
-		"aria-pressed",
-		"true"
-	)
+	await giveNameIfAsked(page, () => pressed.isVisible())
+	await expect(pressed).toBeVisible()
 }
 
 // Clicks just inside the end of `text` on the page.
@@ -116,6 +118,9 @@ async function caretInNote(page: Page, reference: string, text: string): Promise
 		.getByRole("toolbar", { name: preview.previewDocxFieldChip })
 		.getByRole("button", { name: preview.previewDocxNoteGoTo })
 		.click()
+	// In the note's story, the caret with it, before End moves along the note's line.
+	await expect(page.locator(".fo-docx-editor")).toHaveAttribute("data-fo-story", /^(footnote|endnote)$/)
+	await expect(page.locator(".fo-docx-sink [role='textbox']:focus")).toHaveCount(1)
 	await page.keyboard.press("End")
 	await expect(pageText(page, text)).toBeVisible()
 }

@@ -67,11 +67,8 @@ async function handleCentre(dialog: Locator): Promise<{ x: number; y: number }> 
 
 	await expect(handle).toBeVisible()
 
-	const box = await handle.boundingBox()
-
-	if (box === null) throw new Error("no fill handle")
-
-	return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+	// Placed on the renderer's frame: visible already from the previous selection, at its old corner.
+	return framedCenterOf(handle)
 }
 
 async function dragHandle(page: Page, dialog: Locator, to: { x: number; y: number }, ctrl = false): Promise<void> {

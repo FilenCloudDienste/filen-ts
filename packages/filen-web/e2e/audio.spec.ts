@@ -114,7 +114,7 @@ test("drive audio double-click hands off to the persistent player and transport 
 		await expect(bar.getByRole("button", { name: "Play" })).toBeVisible()
 		await expect(async () => {
 			await seek.press("Home")
-			expect(Number(await seek.inputValue())).toBeLessThan(1_000)
+			expect(Number(await seek.inputValue())).toBeLessThan(1)
 		}).toPass({ timeout: 10_000 })
 
 		await bar.getByRole("button", { name: "Previous track" }).click()

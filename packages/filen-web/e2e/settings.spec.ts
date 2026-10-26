@@ -73,6 +73,8 @@ test.describe("settings", () => {
 
 	test("the Billing section names the plan, and a free account's tables their empty states", async ({ page }) => {
 		await gotoSettings(page)
+		// Billing gates on the same account read, so it renders from the settled cache.
+		await waitForAccountLoaded(page)
 
 		await openSettingsSection(page, "Billing")
 

@@ -80,6 +80,19 @@ async function closeOverlay(page: Page): Promise<void> {
 	await expect(previewOverlay(page)).toHaveCount(0)
 }
 
+// The view-only badge's popover, showing `reason`, closed with Escape once focus is in it (pressed before, the
+// Escape goes to the viewer).
+async function closeViewOnlyPopover(page: Page, reason: string): Promise<void> {
+	const shown = page.getByText(reason, { exact: true })
+
+	await expect(shown).toBeVisible()
+	await expect
+		.poll(() => shown.evaluate(element => element.closest('[data-slot="popover-content"]')?.contains(document.activeElement) === true))
+		.toBe(true)
+	await page.keyboard.press("Escape")
+	await expect(shown).toHaveCount(0)
+}
+
 async function viewerRows(page: Page): Promise<Readonly<Record<ViewerFile, Locator>>> {
 	await bootTo(page)
 
@@ -253,8 +266,7 @@ test("archive entries: a docx in a zip and in a 7z opens in the viewer, view-onl
 
 		// Why it is view-only.
 		await browser.overlay.getByRole("button", { name: preview.previewDocxViewOnly, exact: true }).click()
-		await expect(page.getByText(preview.previewDocxViewOnlyArchive, { exact: true })).toBeVisible()
-		await page.keyboard.press("Escape")
+		await closeViewOnlyPopover(page, preview.previewDocxViewOnlyArchive)
 
 		await expectFind(browser.overlay, "entry", 1)
 		await expectZoom(browser.overlay)
@@ -408,8 +420,7 @@ test.describe("public link and chat card", () => {
 				try {
 					await expectEngine(main, DOCX_VIEWER_TEXT[name])
 					await main.getByRole("button", { name: preview.previewDocxViewOnly, exact: true }).click()
-					await expect(visitor.getByText(preview.previewDocxViewOnlyPublicLink, { exact: true })).toBeVisible()
-					await visitor.keyboard.press("Escape")
+					await closeViewOnlyPopover(visitor, preview.previewDocxViewOnlyPublicLink)
 					await expectFind(main, "fixture", 1)
 					await expectZoom(main)
 					await expect(visitor.getByRole("button", { name: "Download", exact: true })).toHaveCount(downloads ? 1 : 0)

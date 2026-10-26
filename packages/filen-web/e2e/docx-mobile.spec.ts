@@ -50,12 +50,15 @@ async function dismissToasts(page: Page): Promise<void> {
 	// Not those already on their way out.
 	const shown = toasts(page).and(page.locator(':not([data-removed="true"])'))
 
-	while ((await shown.count()) > 0) {
-		await shown.first().hover()
-		await shown.first().getByRole("button", { name: common.toastDismiss }).click()
-	}
+	// Short action timeouts: one dismissing itself mid-step is retried, not waited on.
+	await expect(async () => {
+		while ((await shown.count()) > 0) {
+			await shown.first().hover({ timeout: 1000 })
+			await shown.first().getByRole("button", { name: common.toastDismiss }).click({ timeout: 1000 })
+		}
 
-	await expect(toasts(page)).toHaveCount(0)
+		await expect(toasts(page)).toHaveCount(0, { timeout: 1000 })
+	}).toPass()
 }
 
 // Opens `name` from the listing: at this width the editor shows it in Mobile view.

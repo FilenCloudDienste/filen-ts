@@ -4,6 +4,7 @@ import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { DOCX_FIXTURE_TEXT, largePictureBytes, svgPictureBytes, webpPictureBytes } from "./helpers/docxFixtures"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
+import { resolveModKey } from "./helpers/modkey"
 import { preview } from "@/locales/en/preview"
 
 // The DOCX editor's Insert and References tabs in a real browser: a picture from this device, the clipboard, a drop and the
@@ -45,13 +46,15 @@ async function insertFrom(page: Page, tab: string, group: string, button: string
 	}
 }
 
-// Puts the caret at the end of the document's text.
+// Puts the caret at the end of the document's text (by the keymap the page's own UA picks).
 async function caretAtEnd(page: Page): Promise<void> {
+	const apple = (await resolveModKey(page)) === "Meta"
+
 	await page
 		.locator(".fo-docx-page")
 		.first()
 		.click({ position: { x: 200, y: 140 } })
-	await page.keyboard.press(process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End")
+	await page.keyboard.press(apple ? "Meta+ArrowDown" : "Control+End")
 }
 
 // Hands `bytes` to the page as one File in a DataTransfer and dispatches `events` with it on `selector`.
@@ -187,6 +190,9 @@ test("inserts a link and a footnote", async ({ page }) => {
 	await expect(pages.getByText("E2E link text")).toBeVisible()
 
 	await insertFrom(page, preview.previewDocxRibbonTabReferences, preview.previewDocxInsertNotes, preview.previewDocxInsertFootnote)
+	// Typed once the caret is in the new footnote's story.
+	await expect(page.locator(".fo-docx-editor")).toHaveAttribute("data-fo-story", "footnote")
+	await expect(page.locator(".fo-docx-sink [role='textbox']:focus")).toHaveCount(1)
 	await page.keyboard.type("E2E footnote text")
 	await expect(pages.getByText("E2E footnote text")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 })

@@ -708,11 +708,11 @@ export async function openTrash(page: Page): Promise<Locator> {
 	return listbox
 }
 
-// Scrolls the listing's own scroller a screen at a time from the top until `row` renders: the listing
-// virtualizes its rows, so one far down is not in the DOM until scrolled to.
+// Scrolls the listing's own scroller most of a screen at a time from the top until `row` renders: the
+// listing virtualizes its rows, so one far down is not in the DOM until scrolled to.
 export async function revealRow(listbox: Locator, row: Locator, timeout = 30_000): Promise<void> {
 	const scroll = (top: boolean): Promise<boolean> =>
-		listbox.evaluate((element, toTop) => {
+		listbox.evaluate(async (element, toTop) => {
 			let scroller: HTMLElement | null = element as HTMLElement
 
 			while (
@@ -728,7 +728,9 @@ export async function revealRow(listbox: Locator, row: Locator, timeout = 30_000
 
 			const before = scroller.scrollTop
 
-			scroller.scrollTop = toTop ? 0 : before + scroller.clientHeight
+			scroller.scrollTop = toTop ? 0 : before + Math.max(1, Math.floor(scroller.clientHeight * 0.8))
+			// Two frames for the virtualizer to mount what the scroll brought near.
+			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
 
 			return scroller.scrollTop !== before
 		}, top)

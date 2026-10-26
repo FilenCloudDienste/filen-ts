@@ -61,8 +61,9 @@ async function cellCentre(dialog: Locator, ref: string): Promise<Point> {
 	return framedCenterOf(dialog.locator(".fo-sheet-a11y"))
 }
 
-// One finger's press, hold, moves and release.
-async function touch(page: Page, browserName: string, path: readonly Point[], holdMs = 40): Promise<void> {
+// One finger's press, hold, moves and release, `taps` times back to back (in one session, so a double tap's gap
+// stays well inside DOUBLE_TAP_MS however loaded the runner).
+async function touch(page: Page, browserName: string, path: readonly Point[], holdMs = 40, taps = 1): Promise<void> {
 	const [first] = path
 
 	if (first === undefined) return
@@ -70,24 +71,27 @@ async function touch(page: Page, browserName: string, path: readonly Point[], ho
 	if (browserName === "chromium") {
 		const cdp = await page.context().newCDPSession(page)
 
-		await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...first, id: 1 }] })
-		await page.waitForTimeout(holdMs)
+		for (let tap = 0; tap < taps; tap++) {
+			await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...first, id: 1 }] })
+			await page.waitForTimeout(holdMs)
 
-		for (const point of path.slice(1)) {
-			await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...point, id: 1 }] })
-			await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
+			for (const point of path.slice(1)) {
+				await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...point, id: 1 }] })
+				await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)))
+			}
+
+			if (path.length > 1) await page.waitForTimeout(100)
+
+			await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
 		}
 
-		if (path.length > 1) await page.waitForTimeout(100)
-
-		await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
 		await cdp.detach()
 
 		return
 	}
 
 	await page.evaluate(
-		async ({ path, holdMs }) => {
+		async ({ path, holdMs, taps }) => {
 			const init = (point: { x: number; y: number }): PointerEventInit => ({
 				pointerId: 7,
 				pointerType: "touch",
@@ -128,21 +132,25 @@ async function touch(page: Page, browserName: string, path: readonly Point[], ho
 
 				if (start === undefined) return
 
-				// A touch is captured by what it pressed, as the platforms do.
-				const pressed = target(start)
+				for (let tap = 0; tap < taps; tap++) {
+					captured = null
 
-				pressed.dispatchEvent(new PointerEvent("pointerdown", init(start)))
-				captured ??= pressed
-				await new Promise(resolve => setTimeout(resolve, holdMs))
+					// A touch is captured by what it pressed, as the platforms do.
+					const pressed = target(start)
 
-				for (const point of path.slice(1)) {
-					target(point).dispatchEvent(new PointerEvent("pointermove", init(point)))
-					await new Promise(resolve => requestAnimationFrame(resolve))
+					pressed.dispatchEvent(new PointerEvent("pointerdown", init(start)))
+					captured ??= pressed
+					await new Promise(resolve => setTimeout(resolve, holdMs))
+
+					for (const point of path.slice(1)) {
+						target(point).dispatchEvent(new PointerEvent("pointermove", init(point)))
+						await new Promise(resolve => requestAnimationFrame(resolve))
+					}
+
+					const end = path[path.length - 1] ?? start
+
+					target(end).dispatchEvent(new PointerEvent("pointerup", { ...init(end), buttons: 0 }))
 				}
-
-				const end = path[path.length - 1] ?? start
-
-				target(end).dispatchEvent(new PointerEvent("pointerup", { ...init(end), buttons: 0 }))
 			} finally {
 				names.forEach((name, k) => {
 					const descriptor = saved[k]
@@ -151,7 +159,7 @@ async function touch(page: Page, browserName: string, path: readonly Point[], ho
 				})
 			}
 		},
-		{ path, holdMs }
+		{ path, holdMs, taps }
 	)
 }
 
@@ -199,9 +207,7 @@ test.describe("touch", () => {
 			// A double tap opens the entry with focus in it.
 			const c4 = await cellCentre(dialog, "C4")
 
-			await touch(page, browserName, [c4])
-			await page.waitForTimeout(60)
-			await touch(page, browserName, [c4])
+			await touch(page, browserName, [c4], undefined, 2)
 			await expect(editor).toBeFocused()
 			await page.keyboard.press("Escape")
 			await expect(editor).toHaveCount(0)
@@ -227,6 +233,8 @@ test.describe("touch", () => {
 			await expect(menu.getByRole("button").last()).toHaveAccessibleName(preview.previewSheetTouchMore)
 			await expect(page.getByRole("menu", { name: preview.previewSheetGridMenu })).toHaveCount(0)
 
+			// The handle and the active cell's box move on the renderer's frame after the selection: read once it drew.
+			const from = await framedCenterOf(handle)
 			const item = await menu.getByRole("button").first().boundingBox()
 			const menuBox = await menu.boundingBox()
 			const cellBox = await dialog.locator(".fo-sheet-a11y").boundingBox()
@@ -235,12 +243,7 @@ test.describe("touch", () => {
 			expect((menuBox?.y ?? 0) + (menuBox?.height ?? 0)).toBeLessThanOrEqual(cellBox?.y ?? 0)
 
 			// The start handle dragged up and left: the selection runs from C6 to A3.
-			const start = await handle.boundingBox()
-
-			if (start === null) throw new Error("no start handle")
-
 			const a3 = { x: b3.x - (c4.x - b3.x), y: b3.y }
-			const from = { x: start.x + start.width / 2, y: start.y + start.height / 2 }
 
 			await touch(page, browserName, [from, { x: (from.x + a3.x) / 2, y: (from.y + a3.y) / 2 }, a3])
 			await expect(nameBox(dialog)).toHaveValue("A3:C6")
@@ -306,15 +309,14 @@ test("the whole sheet: the name box, Ctrl+arrows, the wheel and the scrollbar re
 
 		for (let step = 0; step < 10; step++) await page.mouse.wheel(0, -100)
 
-		await page.waitForTimeout(300)
-		expect(Math.abs(before - (await row(30)) - 50)).toBeLessThanOrEqual(1)
+		// A wheel call does not wait for its scroll; the probe's click selects without scrolling, so it may repeat.
+		await expect.poll(async () => Math.abs(before - (await row(30)) - 50)).toBeLessThanOrEqual(1)
 
 		// The scrollbar's middle is the sheet's middle: the pane's middle row, not its top one (half a pane above it).
 		await scroller.evaluate(element => {
 			element.scrollTop = (element.scrollHeight - element.clientHeight) / 2
 		})
-		await page.waitForTimeout(300)
-		expect(Math.abs((await row((box?.height ?? 0) / 2)) - 524_288)).toBeLessThan(50)
+		await expect.poll(async () => Math.abs((await row((box?.height ?? 0) / 2)) - 524_288)).toBeLessThan(50)
 
 		await goTo(dialog, "XFD1")
 		await expect(grid.getByRole("gridcell")).toHaveAttribute("aria-colindex", "16384")

@@ -205,6 +205,9 @@ test.describe("archive browser", () => {
 		await expect(symlink).toHaveAttribute("aria-disabled", "true")
 		// A skipped row cannot be selected, not even through its checkbox.
 		await browser.check(symlink)
+		await browser.check(browser.row("ok.txt"))
+		// The footer counts ok.txt alone: both clicks were handled, and the symlink selected nothing.
+		await expect(browser.footerSummary()).toHaveText(`1 file selected · ${formatBytes(Buffer.byteLength("ok\n"))}`)
 		await expect(symlink).toHaveAttribute("aria-selected", "false")
 
 		await expect(list.getByRole("option", { name: /escape\.txt.*Unsafe path · not extracted/ })).toBeVisible()
@@ -440,6 +443,8 @@ test.describe("archive browser", () => {
 
 		const nextBrowser = await openArchive(page, listbox, GATE_NEXT)
 
+		// Lists only once the closed listing's held chunk has come back and freed the slot.
+		await expect(nextBrowser.row("next.txt")).toBeVisible({ timeout: LISTING_TIMEOUT_MS })
 		await expectRows(nextBrowser.list, ["next.txt"])
 		await expect(nextBrowser.status("Waiting for another archive job")).toHaveCount(0)
 
@@ -448,9 +453,6 @@ test.describe("archive browser", () => {
 	})
 
 	test("a 100 000-entry zip lists, selects and scrolls without stalling", async ({ page, browserName }) => {
-		// Its listing alone may take LISTING_TIMEOUT_MS.
-		test.slow()
-
 		const cspViolations = trackCspViolations(page)
 		const heapBytes = (): Promise<number> =>
 			page.evaluate(() => (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0)

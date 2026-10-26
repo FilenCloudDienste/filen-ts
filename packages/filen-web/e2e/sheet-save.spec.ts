@@ -127,6 +127,8 @@ test("a workbook saves itself after an idle pause, and on Cmd/Ctrl+S from the gr
 		// Cmd/Ctrl+S with the entry still open: it is committed and saved.
 		await goTo(dialog, "B3")
 		await page.keyboard.type("333")
+		// The open entry's change shows Save; a Mod+S before that finds nothing to save.
+		await expect(saveButton).toBeVisible()
 		await page.keyboard.press(`${mod}+S`)
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		// Back on the grid: an Escape there closes the preview (in the cell editor it would only end the entry).
@@ -288,6 +290,8 @@ test("a password-protected workbook's saves store only its sealed package, and i
 		await dialog.getByRole("button", { name: preview.previewSheetFileMenu, exact: true }).click()
 		await expect(page.getByRole("menuitemcheckbox", { name: preview.previewSheetAutosave })).toBeVisible()
 		await page.getByRole("menuitem", { name: preview.previewSheetDownloadAs, exact: true }).click()
+		// The submenu is open (its PDF is offered) before the CSV's absence means anything.
+		await expect(page.getByRole("menuitem", { name: preview.previewSheetDownloadPdf, exact: true })).toBeVisible()
 		await expect(page.getByRole("menuitem", { name: preview.previewSheetDownloadSheetCsvFormat })).toHaveCount(0)
 		await page.keyboard.press("Escape")
 
@@ -342,10 +346,14 @@ test("each save is what the file opens on after a reload, never announced as mad
 			// Opened at once from the listing restored from disk: the version saved last, no notice of it.
 			await expectCell(dialog, "A1", previous, LIVE_WRITE_TIMEOUT_MS)
 			await expect(page.getByText("Updated with changes saved elsewhere.")).toHaveCount(0)
+			const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
+
 			await typeInto(page, dialog, "A1", value)
 			await goTo(dialog, "A1")
+			// The edit is dirty once the worker says so; a Mod+S before that saves nothing.
+			await expect(saveButton).toBeVisible()
 			await page.keyboard.press(`${mod}+S`)
-			await expect(dialog.getByRole("button", { name: "Save", exact: true })).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			await close(page)
 			await page.reload()
 			previous = value

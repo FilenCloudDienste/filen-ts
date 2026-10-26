@@ -13,6 +13,6 @@ test.describe("no OPFS storage", () => {
 
 		await expect(page.getByText("Persistent storage is unavailable")).toBeVisible()
 		await expect(page.getByText("private, persistent file storage (OPFS)")).toBeVisible()
-		await expect(page.getByRole("button", { name: "Reload page" })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Reload" })).toBeVisible()
 	})
 })

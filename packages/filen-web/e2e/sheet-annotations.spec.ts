@@ -72,11 +72,14 @@ async function hover(page: Page, dialog: Locator, row: number, col: number): Pro
 	await page.mouse.move(box.x + point.x, box.y + point.y)
 }
 
-// The account may have no author name yet: the first note or comment asks for it.
-async function giveNameIfAsked(page: Page): Promise<void> {
+// The account may have no author name yet: the first note or comment asks for it. Settled once either the question
+// or `next` (what opens without it) shows.
+async function giveNameIfAsked(page: Page, next: Locator): Promise<void> {
 	const ask = page.getByRole("dialog", { name: preview.previewOfficeAuthorNameTitle })
 
-	if (await ask.isVisible({ timeout: 2000 }).catch(() => false)) {
+	await expect(ask.or(next).first()).toBeVisible()
+
+	if (await ask.isVisible()) {
 		await ask.getByRole("textbox", { name: preview.previewOfficeAuthorNameLabel }).fill(AUTHOR)
 		await ask.getByRole("button", { name: preview.previewOfficeAuthorNameSave }).click()
 		await expect(ask).toHaveCount(0)
@@ -88,7 +91,13 @@ async function giveNameIfAsked(page: Page): Promise<void> {
 async function closeStrayMenu(page: Page): Promise<void> {
 	const menu = page.getByRole("menu")
 
-	if (await menu.isVisible({ timeout: 1000 }).catch(() => false)) {
+	// isVisible never waits: a menu that opens a moment later would be missed.
+	const opened = await menu.waitFor({ state: "visible", timeout: 1000 }).then(
+		() => true,
+		() => false
+	)
+
+	if (opened) {
 		await menu.press("Escape")
 		await expect(menu).toHaveCount(0)
 	}
@@ -137,9 +146,10 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 		await goTo(dialog, "B2")
 		await gridMenu(dialog, 1, 1)
 		await page.getByRole("menuitem", { name: preview.previewSheetNoteInsert, exact: true }).click()
-		await giveNameIfAsked(page)
 
 		const noteField = dialog.getByRole("textbox", { name: preview.previewSheetNoteText })
+
+		await giveNameIfAsked(page, noteField)
 
 		await expect(noteField).toBeFocused()
 		await page.keyboard.type("Check the rent")
@@ -150,8 +160,11 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 		await goTo(dialog, "A3")
 		await gridMenu(dialog, 2, 0)
 		await page.getByRole("menuitem", { name: preview.previewSheetCommentNew, exact: true }).click()
-		await giveNameIfAsked(page)
-		await expect(dialog.getByRole("textbox", { name: preview.previewSheetCommentPlaceholder })).toBeFocused()
+
+		const commentField = dialog.getByRole("textbox", { name: preview.previewSheetCommentPlaceholder })
+
+		await giveNameIfAsked(page, commentField)
+		await expect(commentField).toBeFocused()
 		await page.keyboard.type("Food went up")
 		await dialog.getByRole("button", { name: preview.previewSheetCommentPost, exact: true }).click()
 		await dialog.getByRole("button", { name: preview.previewSheetCommentReplyPlaceholder, exact: true }).click()

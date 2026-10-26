@@ -120,10 +120,15 @@ test("data sorted from the toolbar and the sort dialog, filtered from a header's
 		await goTo(dialog, "A2")
 		await sortFilterMenu(dialog)
 		await page.getByRole("menuitemcheckbox", { name: new RegExp(preview.previewSheetFilter) }).click()
-		await filterButton(dialog, 0)
 
 		const menu = page.locator("[data-sheet-filter-menu]")
 
+		// The filter lands from the worker and its button is drawn on the canvas, with no DOM to wait on: a press
+		// before it lands only selects the header cell, so press until the menu opens.
+		await expect(async () => {
+			await filterButton(dialog, 0)
+			await expect(menu).toBeVisible({ timeout: 1_000 })
+		}).toPass({ timeout: 10_000 })
 		await expect(menu.getByLabel("pear", { exact: true })).toBeChecked()
 		await menu.getByLabel("pear", { exact: true }).uncheck()
 		await menu.getByRole("button", { name: preview.previewSheetFilterApply, exact: true }).click()

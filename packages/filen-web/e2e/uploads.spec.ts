@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test, expect } from "./fixtures"
-import type { Route } from "@playwright/test"
+import { boxOf } from "./helpers/geometry"
+import { holdChunks } from "./helpers/jobs"
 import {
 	withScratchDirectory,
 	bootTo,
@@ -22,9 +23,6 @@ import {
 // OS-level drag does), so uploadDropzone.tsx's own drop handler never fires from automation. It's
 // manual-QA-only. Both tests below drive the picker inputs instead (setInputFiles), a real,
 // automatable path through the exact same upload orchestration.
-
-// Held back long enough that a running upload is still on screen when the test looks for it.
-const SLOW_CHUNK_DELAY_MS = 2_000
 
 test.describe("uploads", () => {
 	test("picking a file uploads it through the worker and lands a row in the listing", async ({ page }) => {
@@ -99,20 +97,14 @@ test.describe("uploads", () => {
 
 		await withScratchDirectory(page, "upload-pending", async ({ listbox, runId }) => {
 			const fileName = `e2e-upload-pending-${runId}.bin`
-			let heldChunks = 0
-			const isChunk = (url: URL) => url.hostname.startsWith("ingest.filen")
-			const holdChunk = async (route: Route) => {
-				heldChunks++
-				await new Promise<void>(resolve => {
-					setTimeout(resolve, SLOW_CHUNK_DELAY_MS)
-				})
-				await route.continue().catch(() => undefined)
+			// Held until the pending row is checked, so the upload is still running however slow the runner.
+			const hold = await holdChunks(page, browserName, { hosts: "ingest" })
+
+			if (hold === null) {
+				throw new Error("no chunk hold on this browser")
 			}
 
-			await page.context().route(isChunk, holdChunk)
-
 			try {
-				// Two chunks' worth, so the upload is still running through at least one held chunk.
 				await fileInput(page).setInputFiles([
 					{ name: fileName, mimeType: "application/octet-stream", buffer: Buffer.alloc(2 * 1024 * 1024, 7) }
 				])
@@ -124,20 +116,19 @@ test.describe("uploads", () => {
 				await expect(pendingRow.getByRole("progressbar", { name: fileName })).toBeVisible()
 				// A pending row is no item: never an option of the listbox, and the listing's first row.
 				await expect(listbox.getByRole("option", { name: fileName })).toHaveCount(0)
+				await expect(async () => {
+					const [pendingBox, listboxBox] = await Promise.all([boxOf(pendingRow), boxOf(listbox)])
 
-				const pendingBox = await pendingRow.boundingBox()
-				const listboxBox = await listbox.boundingBox()
-
-				expect(pendingBox).not.toBeNull()
-				expect(listboxBox).not.toBeNull()
-				expect(Math.abs((pendingBox?.y ?? 0) - (listboxBox?.y ?? 0))).toBeLessThan(2)
+					expect(Math.abs(pendingBox.y - listboxBox.y)).toBeLessThan(2)
+				}).toPass({ timeout: 5_000 })
+				await expect.poll(() => hold.held(), { timeout: LIVE_WRITE_TIMEOUT_MS }).toBeGreaterThan(0)
+				hold.release()
 
 				// Finished, the real row takes its place and the pending row goes.
 				await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 				await expect(pendingRow).toHaveCount(0)
-				expect(heldChunks).toBeGreaterThan(0)
 			} finally {
-				await page.context().unroute(isChunk, holdChunk)
+				await hold.dispose()
 			}
 		})
 	})

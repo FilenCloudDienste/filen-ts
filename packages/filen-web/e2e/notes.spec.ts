@@ -1135,13 +1135,17 @@ test.describe("notes: realtime", () => {
 			await expect(page.getByText("Updated with changes saved elsewhere.", { exact: true })).toBeVisible()
 			await expect(prompt).toHaveCount(0)
 
-			// Editing: the other client's content asks what to do with the edits in progress.
+			// Editing: the other client's content asks what to do with the edits in progress. Gated while
+			// typing so the 3s debounce cannot push them first and leave this page clean; the open dialog
+			// holds the note's pushes from then on.
+			await dispatchAppConnectivity(page, true)
 			await typeIntoTextEditor(page, mine)
 			await pageB.evaluate(args => window.__filenE2E.setTestNoteContentByUuid(args.uuid, args.content), {
 				uuid,
 				content: secondRemoteContent
 			})
 			await expect(prompt).toBeVisible({ timeout: 30_000 })
+			await dispatchAppConnectivity(page, false)
 
 			await prompt.getByRole("button", { name: "Compare", exact: true }).click()
 			await expect(prompt.locator(".cm-mergeView")).toContainText(secondRemoteContent)

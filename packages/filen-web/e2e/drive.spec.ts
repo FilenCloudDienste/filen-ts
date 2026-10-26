@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures"
+import { test, expect, readFixtureManifest } from "./fixtures"
 import { trackConsoleErrors } from "./helpers/csp"
 import { bootTo, breadcrumb, clickSidebarLink, waitForListingSettled } from "./helpers/listing"
 import { FIXTURE_SCENARIOS, enterFixtureRoot } from "./helpers/fixtures"
@@ -79,6 +79,8 @@ test.describe("drive", () => {
 		await waitForListingSettled(page)
 		await page.goBack()
 		await page.waitForURL(fixtureRootUrl)
+		// The URL flips before the pop commits; until then the nested listing is still the one rendered.
+		await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(readFixtureManifest().fixtureRoot)
 		const root = await waitForListingSettled(page)
 
 		// Info is a pure read dialog — nothing is created or destroyed by opening it.

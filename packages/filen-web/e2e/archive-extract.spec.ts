@@ -104,16 +104,22 @@ async function expectTreeDirectory(page: Page, listbox: Locator, directory: stri
 // Into a directory whose name its parent shares, where descendInto's breadcrumb check would see two.
 async function openNestedDirectory(page: Page, listbox: Locator, name: string): Promise<void> {
 	const before = page.url()
+	// Both levels hold a row of this name: the URL flips before the new listing commits, so wait for the
+	// outgoing row to unmount, or the next lookup can land on it.
+	const row = itemRow(listbox, name)
+	const outgoing = await row.elementHandle()
 
-	await itemRow(listbox, name).dblclick()
+	await row.dblclick()
 	await page.waitForURL(url => url.toString() !== before)
+	await expect.poll(() => outgoing.evaluate(element => element.isConnected)).toBe(false)
+	await outgoing.dispose()
 	await waitForListingSettled(page)
 }
 
 // Starts "Extract all" of the fixture gate tarball (8.5 MiB) from its gate into `path`, and pauses it.
-// Off WebKit the pause waits for the first held upload chunk: a file uploads only into its directory, so the
-// job has made that directory by then, and it cannot finish before Pause lands. On WebKit (no routing of
-// worker requests) it pauses at once, and the tarball's size alone keeps it running that long.
+// The pause waits for the first held upload chunk: a file uploads only into its directory, so the job has
+// made that directory by then, and it cannot finish before Pause lands. WebKit cannot hold the worker's
+// requests (holdChunks is null), so its callers skip.
 async function pausedGateExtract(page: Page, browserName: string, path: readonly string[], holds: (ChunkHold | null)[]): Promise<Locator> {
 	const hold = await holdChunks(page, browserName, { hosts: "ingest" })
 
@@ -517,7 +523,7 @@ test.describe("archive extract", () => {
 			await expect(
 				card.getByText("1 directory created before the password turned out wrong was moved to the trash.", { exact: true })
 			).toBeVisible()
-			await expect(itemRow(listbox, stem)).toHaveCount(0)
+			await expect(itemRow(listbox, stem)).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await cardButton(card, "Enter password").click()
 			await answerExtractPassword(page, LATE_PASSWORD, { expectTitle: "Wrong password" })
@@ -662,6 +668,8 @@ test.describe("archive extract", () => {
 	})
 
 	test("a paused extract holds the page's archive slot until it resumes", async ({ page, browserName }) => {
+		test.skip(browserName === "webkit", "WebKit cannot hold the SDK worker's requests")
+
 		await withArchiveScratch(page, "x-slot", async ({ listbox, scratchName, runId, holds }) => {
 			const destName = `dest-${runId}`
 			const slotZip = `e2e-x-slot-${runId}.zip`

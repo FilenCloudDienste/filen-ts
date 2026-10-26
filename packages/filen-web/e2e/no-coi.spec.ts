@@ -4,6 +4,7 @@ import { extname, join, normalize } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { AddressInfo } from "node:net"
 import { test, expect } from "./fixtures"
+import { BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url))
 
@@ -102,7 +103,8 @@ test.describe("no cross-origin isolation", () => {
 	test("serving without COI headers routes to the no-COI page", async ({ page }) => {
 		await page.goto(`${plainServer().baseUrl}/`)
 
-		await expect(page.getByText("Unable to start Filen securely")).toBeVisible()
+		// The verdict waits on the worker's uncompressed wasm init, then a cold boot.
+		await expect(page.getByText("Unable to start Filen securely")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 	})
 })
 
@@ -115,7 +117,7 @@ test.describe("blocked SDK artifacts", () => {
 
 		await page.goto("/")
 
-		await expect(page.getByText("Filen could not start")).toBeVisible()
+		await expect(page.getByText("Filen could not start")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 		await expect(page.getByText("artifacts", { exact: true })).toBeVisible()
 	})
 })

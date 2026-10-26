@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test"
+import { budget } from "@filen/shared/tooling/testBudget"
 import { test, expect, readFixtureManifest, settleLeases } from "./fixtures"
 import { namePattern, openSubmenu, selectionBar, waitForCompressDialog } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
@@ -51,7 +52,7 @@ async function choosePhotosRoot(page: Page, path: readonly string[], expectTiles
 	const grid = page.getByRole("listbox", { name: "Photos grid" })
 
 	// The photos listing walks the root first, a network read.
-	await expect(grid.getByRole("option")).toHaveCount(expectTiles, { timeout: 45_000 })
+	await expect(grid.getByRole("option")).toHaveCount(expectTiles, { timeout: budget(45_000) })
 
 	return grid
 }

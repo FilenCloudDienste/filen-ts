@@ -46,6 +46,11 @@ async function clickEnd(locator: Locator): Promise<void> {
 	await locator.page().mouse.click(box.x + box.width - 4, box.y + box.height / 2)
 }
 
+// Focus moved into `popover`: an Escape before that goes to the editor, not to it.
+async function focusInside(popover: Locator): Promise<void> {
+	await expect.poll(() => popover.evaluate(element => element.contains(document.activeElement))).toBe(true)
+}
+
 async function openRow(page: Page, scenario: FixtureScenario, name: string): Promise<void> {
 	await bootTo(page)
 
@@ -148,6 +153,7 @@ test.describe("editor", () => {
 		await expect(list).toBeVisible()
 		await expect(list.getByRole("option", { name: "Red" })).toHaveAttribute("aria-selected", "true")
 		await expect(list.getByRole("option", { name: "Green" })).toHaveAttribute("aria-selected", "false")
+		await focusInside(popover)
 		await page.keyboard.press("Escape")
 		await expect(popover).toHaveCount(0)
 
@@ -155,6 +161,7 @@ test.describe("editor", () => {
 		await expect(popover).toBeVisible()
 		await expect(page.getByRole("dialog", { name: preview.previewDocxControlDate, exact: true })).toBeVisible()
 		await expect(popover.getByLabel(preview.previewDocxControlDateLabel, { exact: true })).toBeVisible()
+		await focusInside(popover)
 		await page.keyboard.press("Escape")
 		await expect(popover).toHaveCount(0)
 	})

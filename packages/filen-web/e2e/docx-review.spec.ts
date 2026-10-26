@@ -45,19 +45,26 @@ async function closeDocumentDiscarding(page: Page): Promise<void> {
 	const discard = page
 		.getByRole("alertdialog", { name: preview.previewUnsavedChangesTitle })
 		.getByRole("button", { name: preview.previewDiscardAction })
+	const toolbar = page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })
 
-	if (await discard.isVisible().catch(() => false)) {
+	// The prompt can commit a moment after the Escape: waited for, or the editor closed without one.
+	await expect.poll(async () => (await discard.isVisible()) || (await toolbar.count()) === 0).toBe(true)
+
+	if (await discard.isVisible()) {
 		await discard.click()
 	}
 
-	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
+	await expect(toolbar).toHaveCount(0)
 }
 
-// The account may have no author name yet: the first change that records one asks for it.
-async function giveNameIfAsked(page: Page): Promise<void> {
+// The account may have no author name yet: the first change that records one asks for it, and waits for it.
+// `made`: the change went through (with a name already given, nothing is asked).
+async function giveNameIfAsked(page: Page, made: () => Promise<boolean>): Promise<void> {
 	const dialog = page.getByRole("dialog", { name: preview.previewOfficeAuthorNameTitle })
 
-	if (await dialog.isVisible({ timeout: 2000 }).catch(() => false)) {
+	await expect.poll(async () => (await dialog.isVisible()) || (await made())).toBe(true)
+
+	if (await dialog.isVisible()) {
 		await dialog.getByRole("textbox", { name: preview.previewOfficeAuthorNameLabel }).fill(AUTHOR)
 		await dialog.getByRole("button", { name: preview.previewOfficeAuthorNameSave }).click()
 		await expect(dialog).toHaveCount(0)
@@ -69,13 +76,11 @@ async function trackChanges(page: Page): Promise<void> {
 	await ribbonTab(page, preview.previewOfficeRibbonTabReview)
 
 	const track = await ribbonButton(page, page, preview.previewDocxRibbonTracking, preview.previewDocxTrackChanges)
+	const pressed = ribbonCommands(page).getByRole("button", { name: preview.previewDocxTrackChanges, exact: true, pressed: true })
 
 	await track.click()
-	await giveNameIfAsked(page)
-	await expect(ribbonCommands(page).getByRole("button", { name: preview.previewDocxTrackChanges, exact: true })).toHaveAttribute(
-		"aria-pressed",
-		"true"
-	)
+	await giveNameIfAsked(page, () => pressed.isVisible())
+	await expect(pressed).toBeVisible()
 }
 
 // A Review tab command: a button of its group, or an entry of the Reject dropdown.
@@ -102,9 +107,12 @@ test("comments: composed, replied to and resolved in the margin", async ({ page 
 		// A new comment on a word of the second paragraph, composed in a balloon beside it.
 		await pageText(page, "second").dblclick()
 		await review(page, preview.previewOfficeRibbonComments, preview.previewDocxNewComment)
-		await page.getByRole("textbox", { name: preview.previewDocxCommentPlaceholder }).fill("Composed in the margin")
+
+		const composer = page.getByRole("textbox", { name: preview.previewDocxCommentPlaceholder })
+
+		await composer.fill("Composed in the margin")
 		await page.getByRole("button", { name: preview.previewDocxCommentPost, exact: true }).click()
-		await giveNameIfAsked(page)
+		await giveNameIfAsked(page, async () => (await composer.count()) === 0)
 		await expect(balloons).toHaveCount(2)
 
 		const added = balloons.filter({ hasText: "Composed in the margin" })
@@ -144,15 +152,18 @@ test.describe("without room for balloons", () => {
 
 			await pageText(page, "second").dblclick()
 			await review(page, preview.previewOfficeRibbonComments, preview.previewDocxNewComment)
-			await page.getByRole("textbox", { name: preview.previewDocxCommentPlaceholder }).fill("From the popover")
+			const composer = page.getByRole("textbox", { name: preview.previewDocxCommentPlaceholder })
+
+			await composer.fill("From the popover")
 			await page.getByRole("button", { name: preview.previewDocxCommentPost, exact: true }).click()
-			await giveNameIfAsked(page)
-			await expect(page.getByRole("textbox", { name: preview.previewDocxCommentPlaceholder })).toHaveCount(0)
+			await giveNameIfAsked(page, async () => (await composer.count()) === 0)
+			await expect(composer).toHaveCount(0)
 
 			// Next to the fixture's, the new comment shares its marker (markers this close are one).
 			await marker.click()
 			await expect(page.getByText("From the popover")).toBeVisible()
 			await marker.click()
+			await expect(page.getByText("From the popover")).toHaveCount(0)
 
 			await closeDocumentDiscarding(page)
 			// The scratch directory is left from the wide layout (the sidebar folds away this narrow).
