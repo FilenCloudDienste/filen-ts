@@ -27,8 +27,17 @@ import { symbolTable, symbolToUnicode } from "../../fonts/index"
 import { GRAPHIC_FLOATS, GRAPHIC_INTS, Layer, OBJECT_FLOATS, OBJECT_INTS, PageGraphic } from "../layout/output"
 import type { DecorationValue } from "../layout/styles"
 import { paintDrawingPdf } from "../../drawingml/pdf"
-import type { DrawingImage } from "../../drawingml/index"
-import { PdfWriteError, type PdfImage, type PdfPage, type PdfStructOptions, type PdfTextRun, type PdfWriter } from "../../pdfwrite/index"
+import type { DrawingImage, Paint } from "../../drawingml/index"
+import {
+	PdfWriteError,
+	type PdfGradient,
+	type PdfImage,
+	type PdfPage,
+	type PdfStructOptions,
+	type PdfTextOptions,
+	type PdfTextRun,
+	type PdfWriter
+} from "../../pdfwrite/index"
 import { mathText } from "./math"
 import { mathLayout } from "../layout/math"
 import type { MathElement } from "../../math/index"
@@ -51,6 +60,9 @@ import {
 // of a list item, inside the table cells it sits in); fills, rules, borders, headers, footers and repeated
 // header rows are artifacts. Elements end with the page: a paragraph continuing on the next page continues in
 // a new element there.
+
+// The middle of the ideographic em box (0.88 em above the baseline to 0.12 em below), em above the baseline.
+const IDEOGRAPHIC_MIDDLE = 0.38
 
 const BLACK = 0x000000ff
 // Synthetic oblique for an upright face drawn as italic (about 12 degrees).
@@ -1106,6 +1118,7 @@ export class DocxPagePainter {
 		const spread = style.fit === "scale" || placed.length < 2 ? 0 : (target - natural) / (placed.length - 1)
 		const x0 = data.fragmentFloats[ff] ?? 0
 		const y = baseline - style.shift
+		const upright = (info & FragmentFlag.UPRIGHT) !== 0
 		// Link ranges over this fragment's text.
 		const links = this.linkPieces(source, start, end)
 		const linkOf = (cluster: number): number => {
@@ -1152,18 +1165,38 @@ export class DocxPagePainter {
 
 			pen += (segmentNatural + (next - at) * spread) * fit
 
+			const look = drawingLook(style, context.doc)
+			const base = [scaleX, 0, fauxItalic ? FAUX_SHEAR * scaleX : 0, 1] as const
+			// An upright cluster of sideways text: turned 90° counter-clockwise about the centre of its cell (x + width / 2,
+			// 0.38 em above the baseline: the ideographic em box's middle, as the style carries no font extents), so its
+			// origin moves to where the turned cell puts it.
+			const middle = head.size * IDEOGRAPHIC_MIDDLE
+			const turned = upright
+				? {
+						x: x + (segmentWidth * scaleX) / 2 + middle,
+						y: y - middle + (segmentWidth * scaleX) / 2,
+						transform: [base[1], -base[0], base[3], -base[2]] as const
+					}
+				: undefined
 			const options = {
-				x,
-				y,
+				x: turned?.x ?? x,
+				y: turned?.y ?? y,
 				size: head.size,
-				color: style.color,
+				color: look.color,
 				text: fragmentText,
 				wordSpacing,
 				letterSpacing,
 				width: segmentWidth,
 				fit: style.fit,
-				...(scaleX !== 1 || fauxItalic ? { transform: [scaleX, 0, fauxItalic ? FAUX_SHEAR * scaleX : 0, 1] as const } : {}),
-				...(fauxBold ? { render: "fillStroke" as const, strokeWidth: head.size / 30 } : {})
+				...(turned !== undefined ? { transform: turned.transform } : scaleX !== 1 || fauxItalic ? { transform: base } : {}),
+				...(fauxBold ? { render: "fillStroke" as const, strokeWidth: head.size / 30 } : {}),
+				...(look.stroke === undefined
+					? {}
+					: {
+							render: look.filled ? ("fillStroke" as const) : ("stroke" as const),
+							strokeWidth: look.stroke.width,
+							strokeColor: look.stroke.color
+						})
 			}
 			const target = link >= 0 ? context.doc.links[link] : undefined
 			const allowed = target !== undefined && linkAllowed(target)
@@ -1171,26 +1204,57 @@ export class DocxPagePainter {
 			if (target !== undefined && !allowed) refuse(context, "link")
 
 			if (node === undefined || !this.tagged) {
-				page.text(runs, options)
+				await this.showText(runs, options, look, [x, lineTop, segmentWidth * scaleX, lineHeight])
 			} else if (allowed) {
 				this.endOpenContent()
 
 				const linkNode = context.writer.open("Link")
 
 				page.beginContent(linkNode)
-				page.text(runs, options)
+				await this.showText(runs, options, look, [x, lineTop, segmentWidth * scaleX, lineHeight])
 				page.endContent()
 				context.writer.close(linkNode)
 				this.addLink(target, x, lineTop, segmentWidth * scaleX, lineHeight, fragmentText, placed, at, next, linkNode)
 			} else {
 				this.useContent(node)
-				page.text(runs, options)
+				await this.showText(runs, options, look, [x, lineTop, segmentWidth * scaleX, lineHeight])
 			}
 
 			if (!this.tagged && allowed)
 				this.addLink(target, x, lineTop, segmentWidth * scaleX, lineHeight, fragmentText, placed, at, next, undefined)
 
 			at = next
+		}
+	}
+
+	// Shows a fragment's runs; with a gradient fill (ISO 32000-1 §9.3.6 mode 7) the glyphs clip the shading painted
+	// through them, and an outline is stroked over in a second pass whose text reads as nothing (ActualText ""), so
+	// the fragment's text is extracted once.
+	private async showText(
+		runs: readonly PdfTextRun[],
+		options: PdfTextOptions,
+		look: DrawingLook,
+		box: readonly [number, number, number, number]
+	): Promise<void> {
+		const page = this.page
+		const gradient = look.gradient
+
+		if (gradient === undefined) {
+			page.text(runs, options)
+
+			return
+		}
+
+		page.saveState()
+		page.text(runs, { ...options, render: "clip" })
+		await page.gradient(textGradient(gradient, box))
+		page.restoreState()
+
+		if (look.stroke !== undefined) {
+			page.text(
+				runs.map(run => ({ ...run, actualText: "" })),
+				{ ...options, render: "stroke", strokeWidth: look.stroke.width, strokeColor: look.stroke.color }
+			)
 		}
 	}
 
@@ -1442,6 +1506,115 @@ export class DocxPagePainter {
 
 // A symbol font's codes as the Unicode characters they show, where one UTF-16 unit stays one (offsets keep
 // meaning the source's); a code whose character is outside the BMP is left (and reported missing).
+interface DrawingLook {
+	readonly color: number
+	readonly filled: boolean
+	readonly stroke: { readonly width: number; readonly color: number } | undefined
+	// A gradient fill, painted through the glyphs as a clip.
+	readonly gradient: Extract<Paint, { kind: "linear" | "path" | "gradient" }> | undefined
+}
+
+// A gradient fill of text over its fragment's box (x, y, width, height px) as a PDF shading: a:lin along its angle
+// through the box's centre, reaching the box's corners; a:path from the focus rectangle's centre to the farthest
+// corner.
+function textGradient(paint: NonNullable<DrawingLook["gradient"]>, box: readonly [number, number, number, number]): PdfGradient {
+	const [x, y, width, height] = box
+	const bounds: [number, number, number, number] = [x, y, x + width, y + height]
+	const stops = { offsets: paint.stops.offsets, colors: paint.stops.colors }
+
+	if (paint.kind === "path") {
+		const cx = x + (width * (paint.focus.left + (1 - paint.focus.right))) / 2
+		const cy = y + (height * (paint.focus.top + (1 - paint.focus.bottom))) / 2
+		const radius = Math.max(
+			Math.hypot(cx - x, cy - y),
+			Math.hypot(x + width - cx, cy - y),
+			Math.hypot(cx - x, y + height - cy),
+			Math.hypot(x + width - cx, y + height - cy)
+		)
+
+		return { type: "radial", coords: [cx, cy, 0, cx, cy, Math.max(radius, 0.01)], ...stops, spread: "pad", bounds }
+	}
+
+	const angle = ((paint.kind === "linear" ? paint.angle : 0) * Math.PI) / 180
+	const dx = Math.cos(angle)
+	const dy = Math.sin(angle)
+	const half = Math.max((Math.abs(width * dx) + Math.abs(height * dy)) / 2, 0.01)
+	const cx = x + width / 2
+	const cy = y + height / 2
+
+	return { type: "axial", coords: [cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half], ...stops, spread: "pad", bounds }
+}
+
+// How a DrawingML style's optional fields draw (DocxPdfStyle.paint, alpha, outline): the fill colour with the glyphs'
+// opacity (a solid fill's; a paint's is its own), a gradient or pattern fill in its mean colour, and the outline's width and colour (text rendering mode 2,
+// or 1 for text without a fill, ISO 32000-1 §9.3.6). A document's styles have none of the fields: their colour as is.
+function drawingLook(style: DocxPdfStyle, doc: DocxPdfDocument): DrawingLook {
+	if (style.paint === undefined && style.alpha === undefined && style.outline === undefined) {
+		return { color: style.color, filled: true, stroke: undefined, gradient: undefined }
+	}
+
+	const paint = style.paint === undefined ? undefined : doc.paints?.[style.paint]
+	const base = paint === undefined ? style.color : meanColor(paint, style.color)
+	// A paint carries its own opacity (its stops'); alpha is the solid fill's, as the DOM and canvas painters read it.
+	const alpha = style.alpha === undefined || paint !== undefined ? 1 : Math.min(1, Math.max(0, style.alpha))
+	const color = ((base & 0xffffff00) | Math.round((base & 255) * alpha)) >>> 0
+	const outline = style.outline === undefined ? undefined : doc.strokes?.[style.outline]
+	const strokePaint = outline === undefined ? undefined : doc.paints?.[outline.paint]
+
+	return {
+		color,
+		filled: alpha > 0,
+		gradient:
+			paint !== undefined && alpha > 0 && (paint.kind === "linear" || paint.kind === "path" || paint.kind === "gradient")
+				? paint
+				: undefined,
+		stroke:
+			outline === undefined || !(outline.width > 0)
+				? undefined
+				: { width: outline.width, color: strokePaint === undefined ? style.color : meanColor(strokePaint, style.color) }
+	}
+}
+
+// One colour for a paint: a solid's, a gradient's mean, a pattern's blend of foreground and background.
+function meanColor(paint: Paint, fallback: number): number {
+	switch (paint.kind) {
+		case "solid":
+			return paint.color
+		case "pattern":
+			return blendColors(paint.foreground, paint.background, patternShare(paint.pattern))
+		case "linear":
+		case "path":
+		case "gradient": {
+			const colors = paint.stops.colors
+
+			if (colors.length === 0) return fallback
+
+			let mean = colors[0] ?? fallback
+
+			for (let k = 1; k < colors.length; k++) mean = blendColors(colors[k] ?? fallback, mean, 1 / (k + 1))
+
+			return mean
+		}
+		default:
+			return fallback
+	}
+}
+
+function patternShare(pattern: string): number {
+	const percent = /^pct(\d+)$/.exec(pattern)
+
+	return percent === null ? 0.5 : Number.parseInt(percent[1] ?? "50", 10) / 100
+}
+
+function blendColors(top: number, bottom: number, share: number): number {
+	let out = 0
+
+	for (const shift of [24, 16, 8, 0])
+		out = out * 256 + Math.round(((top >>> shift) & 255) * share + ((bottom >>> shift) & 255) * (1 - share))
+
+	return out >>> 0
+}
+
 function symbolMapped(text: string, family: string | undefined): string {
 	const table = family === undefined ? undefined : symbolTable(family)
 

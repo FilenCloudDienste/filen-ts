@@ -134,3 +134,76 @@ export {
 	type PartChanges,
 	type Touch
 } from "./edit/apply"
+export {
+	RenderReport,
+	placeholderChain,
+	renderSlide,
+	renderTable,
+	type PlaceholderLevel,
+	type RenderRelationship,
+	type RenderServices,
+	type SmartArtRenderer,
+	type TableTextStyle,
+	type TextLayoutRequest,
+	type TextLayoutResult
+} from "./render/index"
+export { classifyAction, classifyHref, type ActionContext, type ActionInput } from "./actions"
+export { resolveBackground, themeFillStyle, type ResolvedBackground } from "./background"
+export { DEFAULT_PRESENTATION_BUDGETS, DeckTally, type PresentationBudgets } from "./budget"
+export { addGate, gateReasons, type GateFacts } from "./gate"
+export {
+	MAX_MASTER_LAYOUT_ID,
+	MAX_SLIDE_ID,
+	MIN_MASTER_LAYOUT_ID,
+	MIN_SLIDE_ID,
+	SlideRefs,
+	creationId,
+	newGuid,
+	nextMasterLayoutId,
+	nextShapeId,
+	nextSlideId,
+	uniqueShapeIds,
+	type RandomWords
+} from "./ids"
+export {
+	DEFAULT_BODY_PR,
+	inheritLevels,
+	inheritedShapes,
+	layoutPlaceholder,
+	masterOf,
+	masterPlaceholder,
+	mergeParaProps,
+	mergeRunProps,
+	placeholderClass,
+	resolveBodyPr,
+	resolveParagraph,
+	resolveRun,
+	resolveShape,
+	styleFont,
+	textClassOf,
+	type GroupSource,
+	type InheritLevel,
+	type PlaceholderClass,
+	type PlaceholderMatch,
+	type ResolvedParagraph,
+	type ResolvedShape,
+	type SourceDocuments,
+	type TextClass
+} from "./inherit"
+export { encryptionRefusal, guarded, isRefused, tooDeep, tooLarge } from "./refusal"
+export {
+	CLR_MAP_KEYS,
+	DEFAULT_CLR_MAP,
+	applyMods,
+	effectiveClrMap,
+	presetColor,
+	readTheme,
+	resolveColor,
+	themeOf,
+	themeSlot,
+	themeTypeface,
+	toRgba,
+	type ColorContext,
+	type PresentationTheme,
+	type ResolvedColor
+} from "./theme"

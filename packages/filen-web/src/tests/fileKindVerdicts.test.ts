@@ -142,6 +142,22 @@ describe("file-kind verdict cache", () => {
 		expect(kv.kvSetJson.mock.calls[0]?.[0]).toBe(`${VERDICT_KV_PREFIX}visited`)
 	})
 
+	it.each(["wordBinary", "notWordBinary", "presentationBinary", "notPresentationBinary"] as const)(
+		"holds the document verdict %s in memory only",
+		async verdict => {
+			kv.kvEntriesJson.mockResolvedValue([])
+			kv.kvSetJson.mockResolvedValue(undefined)
+			connectFileKindVerdictStorage()
+			await settle()
+
+			recordFileKindVerdict(`read-${verdict}`, verdict)
+			await settle()
+
+			expect(fileKindVerdict(`read-${verdict}`)).toBe(verdict)
+			expect(kv.kvSetJson).not.toHaveBeenCalled()
+		}
+	)
+
 	it("gives a .ts the video glyph only once a probe read it as a transport stream", async () => {
 		kv.kvEntriesJson.mockResolvedValue([])
 		kv.kvSetJson.mockResolvedValue(undefined)

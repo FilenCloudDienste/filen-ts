@@ -366,9 +366,9 @@ describe("unsupported and hostile charts", () => {
 	})
 
 	it("draws the supported plots of a combination chart", () => {
-		const plotArea = `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>${series(0, "One", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:barChart><c:stockChart>${series(1, "Two", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:stockChart>${AXES}`
+		const plotArea = `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>${series(0, "One", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:barChart><c:surfaceChart>${series(1, "Two", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:surfaceChart>${AXES}`
 
-		expect(convert(plotArea)).toMatchObject({ supported: true, plots: ["barChart", "stockChart"], unsupported: ["stockChart"] })
+		expect(convert(plotArea)).toMatchObject({ supported: true, plots: ["barChart", "surfaceChart"], unsupported: ["surfaceChart"] })
 	})
 
 	it("caps point counts and survives junk values", () => {
@@ -379,5 +379,149 @@ describe("unsupported and hostile charts", () => {
 		expect(list.coordCount).toBeLessThan(1 << 22)
 
 		expect(list.coords.subarray(0, list.coordCount).every(Number.isFinite)).toBe(true)
+	})
+})
+
+describe("stock charts and crowded category axes", () => {
+	const RED = rgba("98002E")
+	const stock = (extra: string = "") =>
+		`<c:stockChart>${series(0, "High", [5, 7, 6], CATS, '<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:marker><c:symbol val="dash"/><c:size val="5"/></c:marker>')}` +
+		`${series(1, "Low", [1, 2, 3], CATS, '<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:marker><c:symbol val="dash"/><c:size val="5"/></c:marker>')}` +
+		`${series(2, "Close", [3, 4, 5], CATS)}` +
+		`<c:hiLowLines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="98002E"/></a:solidFill></a:ln></c:spPr></c:hiLowLines>${extra}<c:axId val="1"/><c:axId val="2"/></c:stockChart>${AXES}`
+
+	it("draws a high-low-close chart's high-low lines and its series' own markers, with no default line", () => {
+		const result = convert(stock())
+		const list = result.list
+		const highLow = items(list, ItemKind.PATH).filter(item => {
+			const stroke = list.strokes[list.itemInt(item, ItemInt.STROKE)]
+			const paint = stroke === undefined ? undefined : list.paints[stroke.paint]
+
+			return paint?.kind === "solid" && paint.color === RED
+		})
+
+		expect(result).toMatchObject({ supported: true, unsupported: [] })
+		// One path: a segment per category.
+		expect(highLow).toHaveLength(1)
+		expect(list.itemInt(highLow[0] ?? -1, ItemInt.COMMAND_COUNT)).toBe(6)
+		// The close series has neither a written line nor a marker, so it draws nothing.
+		const lines = items(list, ItemKind.PATH).filter(
+			item => list.itemInt(item, ItemInt.SOURCE) >= 0 && list.itemInt(item, ItemInt.STROKE) >= 0
+		)
+
+		expect(lines.length).toBeGreaterThan(0)
+	})
+
+	it("counts up-down bars as not drawn", () => {
+		expect(convert(stock('<c:upDownBars><c:gapWidth val="150"/></c:upDownBars>')).unsupported).toEqual(["upDownBars"])
+	})
+
+	it("shows the automatic title only for a chart of one series, counting plots it does not draw", () => {
+		const one = `<c:barChart><c:barDir val="col"/>${series(0, "Cases", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:barChart>${AXES}`
+		const withSurface = one.replace(
+			AXES,
+			`<c:surfaceChart>${series(1, "Rate", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:surfaceChart>${AXES}`
+		)
+		const auto = '<c:autoTitleDeleted val="0"/>'
+
+		expect(texts(convert(one, auto).list)).toContain("Cases")
+		expect(texts(convert(withSurface, auto).list)).not.toContain("Cases")
+	})
+
+	it("turns crowded category labels 45° instead of dropping them, unless the file sets their rotation", () => {
+		const names = Array.from({ length: 12 }, (_, k) => `Region number ${String(k + 1)}`)
+		const plot = (txPr: string) =>
+			`<c:barChart><c:barDir val="col"/>${series(
+				0,
+				"S",
+				names.map((_, k) => k + 1),
+				names
+			)}<c:axId val="1"/><c:axId val="2"/></c:barChart>` + AXES.replace('<c:crossAx val="2"/>', `${txPr}<c:crossAx val="2"/>`)
+		const labelsOf = (list: DrawingList) =>
+			items(list, ItemKind.TEXT).flatMap(item => {
+				const text = list.texts[list.itemInt(item, ItemInt.REF)] as DrawingText
+
+				return text.kind === "body" && /^Region/.test(text.paragraphs[0]?.runs[0]?.text ?? "") ? [text.body.rotation] : []
+			})
+
+		expect(labelsOf(convert(plot("")).list)).toEqual(Array.from({ length: 12 }, () => -45))
+		// Written level: kept level, so thinned.
+		const level = labelsOf(convert(plot('<c:txPr><a:bodyPr rot="0"/><a:lstStyle/><a:p><a:endParaRPr/></a:p></c:txPr>')).list)
+
+		expect(level.every(rotation => rotation === 0)).toBe(true)
+		expect(level.length).toBeLessThan(12)
+	})
+
+	it("breaks crowded category labels into lines at spaces when every word fits its band", () => {
+		const names = ["Hypertensive", "and GP diagnosed with it", "and on BP medication", "and with controlled BP"]
+		const plot = `<c:barChart><c:barDir val="col"/>${series(0, "S", [4, 3, 2, 1], names)}<c:axId val="1"/><c:axId val="2"/></c:barChart>${AXES}`
+		const list = convert(plot, "", 480, 320).list
+		const labels = items(list, ItemKind.TEXT).flatMap(item => {
+			const text = list.texts[list.itemInt(item, ItemInt.REF)] as DrawingText
+
+			return text.kind === "body" && /^(Hyper|and)/.test(text.paragraphs[0]?.runs[0]?.text ?? "")
+				? [{ rotation: text.body.rotation, lines: text.paragraphs.map(p => p.runs.map(r => r.text).join("")) }]
+				: []
+		})
+
+		expect(labels).toHaveLength(4)
+		expect(labels.every(label => label.rotation === 0)).toBe(true)
+		expect(labels[2]?.lines.length).toBeGreaterThan(1)
+		expect(labels[2]?.lines.join(" ")).toBe("and on BP medication")
+	})
+
+	it('treats Excel\'s rot="-60000000" on category labels as automatic rotation', () => {
+		const names = Array.from({ length: 12 }, (_, k) => `Region number ${String(k + 1)}`)
+		const plot =
+			`<c:barChart><c:barDir val="col"/>${series(
+				0,
+				"S",
+				names.map((_, k) => k + 1),
+				names
+			)}<c:axId val="1"/><c:axId val="2"/></c:barChart>` +
+			AXES.replace(
+				'<c:crossAx val="2"/>',
+				'<c:txPr><a:bodyPr rot="-60000000" vert="horz"/><a:lstStyle/><a:p><a:endParaRPr/></a:p></c:txPr><c:crossAx val="2"/>'
+			)
+		const list = convert(plot).list
+		const rotations = items(list, ItemKind.TEXT).flatMap(item => {
+			const text = list.texts[list.itemInt(item, ItemInt.REF)] as DrawingText
+
+			return text.kind === "body" && /^Region/.test(text.paragraphs[0]?.runs[0]?.text ?? "") ? [text.body.rotation] : []
+		})
+
+		expect(rotations).toEqual(Array.from({ length: 12 }, () => -45))
+	})
+
+	it("centres an axis title with no alignment written along its axis", () => {
+		const title =
+			'<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:t>Year</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>'
+		const left =
+			'<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="l"><a:defRPr/></a:pPr><a:r><a:t>Year</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>'
+		const alignOf = (axisTitle: string) => {
+			const plot = `<c:barChart><c:barDir val="col"/>${series(0, "S", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:barChart>${AXES.replace('<c:axPos val="b"/>', `<c:axPos val="b"/>${axisTitle}`)}`
+			const list = convert(plot).list
+
+			return items(list, ItemKind.TEXT).flatMap(item => {
+				const text = list.texts[list.itemInt(item, ItemInt.REF)] as DrawingText
+
+				return text.kind === "body" && text.paragraphs[0]?.runs[0]?.text === "Year" ? [text.paragraphs[0].align] : []
+			})
+		}
+
+		expect(alignOf(title)).toEqual(["ctr"])
+		expect(alignOf(left)).toEqual(["l"])
+	})
+
+	it("keeps category labels level when they fit", () => {
+		const plot = `<c:barChart><c:barDir val="col"/>${series(0, "S", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:barChart>${AXES}`
+		const list = convert(plot).list
+		const rotations = items(list, ItemKind.TEXT).flatMap(item => {
+			const text = list.texts[list.itemInt(item, ItemInt.REF)] as DrawingText
+
+			return text.kind === "body" && CATS.includes(text.paragraphs[0]?.runs[0]?.text ?? "") ? [text.body.rotation] : []
+		})
+
+		expect(rotations).toEqual([0, 0, 0])
 	})
 })

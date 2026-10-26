@@ -58,12 +58,15 @@ export {
 	NO_PAINT,
 	readFillElement,
 	shapeFill,
+	shapeEffects,
 	shapeLine,
 	shapeShadow,
 	styleRef,
 	type LineEnd,
 	type LineStyle,
 	type PaintContext,
+	type ShapeEffect,
+	type ShapeEffects,
 	type StyleRef
 } from "./fill"
 export { compileCustomGeometry } from "./geometry/custom"

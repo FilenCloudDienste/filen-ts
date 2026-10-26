@@ -82,6 +82,11 @@ export interface ParagraphGeometry {
 	// proportional height's extra or shortfall goes under the text, an exact height's baseline sits at four fifths of
 	// it. Default false: Word's, the mark on the last line and the difference above the text.
 	readonly libreOfficeSpacing?: boolean
+	// Lines as LibreOffice's EditEngine (Impress, Draw) sizes them (ImpEditEngine::CreateLines): the paragraph mark's
+	// font sizes only an empty line; a proportional height above single puts its extra above the text, one below
+	// single keeps the baseline at most four fifths of the reduced height. Default false. Ignored with
+	// libreOfficeSpacing.
+	readonly editEngineSpacing?: boolean
 }
 
 // Marks hyphenation opportunities: sets breaks[i] = BREAK_HYPHEN for positions i inside words of
@@ -1350,7 +1355,9 @@ export class ParagraphLayouter {
 
 		this.rowLast = last
 
-		if (!any || (last && g.libreOfficeSpacing !== true && !(objectsOnly && g.markSizesObjectLines === false))) {
+		const markOnLastLine = g.libreOfficeSpacing !== true && g.editEngineSpacing !== true
+
+		if (!any || (last && markOnLastLine && !(objectsOnly && g.markSizesObjectLines === false))) {
 			ascent = Math.max(ascent, styles.ascent[p.markStyle] ?? 0)
 			descent = Math.max(descent, styles.descent[p.markStyle] ?? 0)
 		}
@@ -1359,7 +1366,9 @@ export class ParagraphLayouter {
 		// Extra line spacing goes above the text (and a smaller exact height clips its top), or where LibreOffice puts it.
 		this.rowBaseline =
 			g.libreOfficeSpacing !== true || g.lineRule === LineRule.AT_LEAST
-				? this.rowHeight - descent
+				? g.editEngineSpacing === true && g.lineRule === LineRule.AUTO && g.lineSpacing < 1
+					? Math.min(ascent, (this.rowHeight * 4) / 5)
+					: this.rowHeight - descent
 				: g.lineRule === LineRule.EXACT
 					? (this.rowHeight * 4) / 5
 					: ascent

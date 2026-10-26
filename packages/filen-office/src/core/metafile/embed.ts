@@ -273,12 +273,18 @@ export function hasMetafileImages(list: DrawingList): boolean {
 
 // The list with each metafile image item replaced by its conversion (an image whose conversion fails stays
 // as it is, drawn as a placeholder; an empty picture leaves nothing). The input list is returned unchanged
-// when nothing converts.
+// when nothing converts. `starts`, when given (itemCount + 1 long), receives each input item's first item in the
+// output (its end: the next one's), so positions recorded against the input carry over.
 export async function expandMetafiles(
 	list: DrawingList,
-	convert: (image: DrawingImage) => Promise<MetafileConversion | undefined>
+	convert: (image: DrawingImage) => Promise<MetafileConversion | undefined>,
+	starts?: Int32Array
 ): Promise<DrawingList> {
-	if (!hasMetafileImages(list)) return list
+	if (!hasMetafileImages(list)) {
+		if (starts !== undefined) for (let item = 0; item <= list.itemCount && item < starts.length; item++) starts[item] = item
+
+		return list
+	}
 
 	const conversions = new Map<number, MetafileConversion | undefined>()
 
@@ -297,7 +303,11 @@ export async function expandMetafiles(
 
 	for (const conversion of conversions.values()) if (conversion?.ok === true) any = true
 
-	if (!any) return list
+	if (!any) {
+		if (starts !== undefined) for (let item = 0; item <= list.itemCount && item < starts.length; item++) starts[item] = item
+
+		return list
+	}
 
 	const out = new DrawingList()
 
@@ -317,6 +327,8 @@ export async function expandMetafiles(
 	}
 
 	for (let item = 0; item < list.itemCount; item++) {
+		if (starts !== undefined && item < starts.length) starts[item] = out.itemCount
+
 		const ref = list.kind(item) === ItemKind.IMAGE ? list.itemInt(item, ItemInt.REF) : -1
 		const conversion = ref >= 0 && (list.itemInt(item, ItemInt.FLAGS) & ItemFlag.HIDDEN) === 0 ? conversions.get(ref) : undefined
 		const image = ref >= 0 ? list.images[ref] : undefined
@@ -329,6 +341,8 @@ export async function expandMetafiles(
 		// An empty picture (an empty equation) draws nothing.
 		if (conversion.list.itemCount > 0) embed(out, list, item, image, conversion, host, budget)
 	}
+
+	if (starts !== undefined && list.itemCount < starts.length) starts[list.itemCount] = out.itemCount
 
 	return out
 }

@@ -59,7 +59,11 @@ export const FragmentFlag = {
 	// Upper-cased at SMALL_CAPS_SCALE of the size.
 	SMALL_CAPS: 0x20,
 	// Append a hyphen (the line breaks at a soft hyphen or hyphenation point).
-	HYPHEN: 0x40
+	HYPHEN: 0x40,
+	// One cluster drawn upright in text that runs sideways (East Asian characters of vertical text): turned 90°
+	// counter-clockwise about the centre of its cell, x + width / 2 along the line and (ascent − descent) / 2 of the
+	// drawn font above the baseline (0.38 em, the ideographic em box's, where a painter has no font extents).
+	UPRIGHT: 0x80
 } as const
 
 export const FRAGMENT_LEVEL_SHIFT = 8

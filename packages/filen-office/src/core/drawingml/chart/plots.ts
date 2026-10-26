@@ -317,6 +317,9 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 	const base = crossingValue(value, category.axis)
 	const baseY = axisClamp(value, valuePosition(value, base))
 	const xs = new Float64Array(count)
+	// Per category, the series' highest and lowest y (for the high-low lines).
+	const tops = plot.hiLowLines >= 0 ? new Float64Array(count).fill(Number.NaN) : null
+	const bottoms = plot.hiLowLines >= 0 ? new Float64Array(count).fill(Number.NaN) : null
 
 	for (let k = 0; k < count; k++) xs[k] = categoryPosition(category, k)
 
@@ -376,7 +379,44 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 		builder.end(-1, style.stroke, inner, 0, series.node)
 		drawMarkers(builder, style, xs, ys, inner, series.node)
 		pointLabels(frame, series, order, xs, ys, null, "r")
+
+		if (tops === null || bottoms === null) return
+
+		for (let k = 0; k < count; k++) {
+			const y = ys[k] ?? Number.NaN
+
+			if (!Number.isFinite(y)) continue
+
+			const top = tops[k] ?? Number.NaN
+			const bottom = bottoms[k] ?? Number.NaN
+
+			tops[k] = Number.isFinite(top) ? Math.min(top, y) : y
+			bottoms[k] = Number.isFinite(bottom) ? Math.max(bottom, y) : y
+		}
 	})
+
+	// High-low lines: from each category's highest value to its lowest.
+	if (tops !== null && bottoms !== null) {
+		const reader = builder.reader
+		const stroke = builder.line(reader.child(plot.hiLowLines, D.C, "spPr"), {
+			color: mutedText(builder.theme, 0.75),
+			width: 1,
+			round: false
+		})
+
+		if (stroke >= 0) {
+			builder.begin()
+
+			for (let k = 0; k < count; k++) {
+				const top = tops[k] ?? Number.NaN
+				const bottom = bottoms[k] ?? Number.NaN
+
+				if (Number.isFinite(top) && Number.isFinite(bottom) && top !== bottom) builder.segment(xs[k] ?? 0, top, xs[k] ?? 0, bottom)
+			}
+
+			builder.end(-1, stroke, inner, 0, plot.hiLowLines)
+		}
+	}
 }
 
 export function drawScatter(frame: PlotFrame): void {

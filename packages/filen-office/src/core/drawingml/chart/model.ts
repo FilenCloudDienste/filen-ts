@@ -18,10 +18,13 @@ const PLOT_KINDS: Readonly<Record<string, PlotKind>> = {
 	ofPieChart: "pie",
 	doughnutChart: "doughnut",
 	scatterChart: "scatter",
-	radarChart: "radar"
+	radarChart: "radar",
+	// High-low-close (§21.2.2.198): its series as lines over the categories, drawn only as their own spPr and markers
+	// say (no default line or marker), with the high-low lines between them. Up-down bars are not drawn.
+	stockChart: "line"
 }
 
-export const UNSUPPORTED_PLOTS: ReadonlySet<string> = new Set(["surfaceChart", "surface3DChart", "stockChart", "bubbleChart"])
+export const UNSUPPORTED_PLOTS: ReadonlySet<string> = new Set(["surfaceChart", "surface3DChart", "bubbleChart"])
 
 export type Grouping = "standard" | "clustered" | "stacked" | "percentStacked"
 
@@ -47,6 +50,8 @@ export interface Plot {
 	readonly filled: boolean
 	readonly smooth: boolean
 	readonly dataLabels: number
+	// c:hiLowLines (§21.2.2.80, line and stock charts): a line per category from its highest to its lowest value; -1.
+	readonly hiLowLines: number
 }
 
 export type AxisKind = "cat" | "val" | "date" | "ser"
@@ -115,6 +120,10 @@ function readPlot(reader: DrawingReader, node: number, kind: PlotKind, budget: P
 	let smooth = false
 
 	if (kind === "line") markers = flag(reader, node, "marker", element === "lineChart")
+	if (element === "stockChart") {
+		markers = false
+		lines = false
+	}
 	if (kind === "scatter") {
 		lines = scatterStyle !== "marker" && scatterStyle !== "none"
 		markers = scatterStyle !== "line" && scatterStyle !== "smooth" && scatterStyle !== "none"
@@ -142,7 +151,8 @@ function readPlot(reader: DrawingReader, node: number, kind: PlotKind, budget: P
 		lines,
 		filled,
 		smooth,
-		dataLabels: reader.child(node, D.C, "dLbls")
+		dataLabels: reader.child(node, D.C, "dLbls"),
+		hiLowLines: kind === "line" ? reader.child(node, D.C, "hiLowLines") : -1
 	}
 }
 
@@ -191,6 +201,8 @@ export interface PlotArea {
 	// Plot kinds found (element names) and the ones not drawn.
 	readonly found: string[]
 	readonly unsupported: string[]
+	// Series in every plot, drawn or not (an automatic title shows only for a chart of one series).
+	readonly seriesTotal: number
 }
 
 export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea {
@@ -201,6 +213,7 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 	const document = reader.document
 	const budget = pointBudget()
 	const seriesCount = { count: 0 }
+	let undrawnSeries = 0
 
 	for (let child = plotArea < 0 ? -1 : document.firstChildElement(plotArea); child >= 0; child = document.nextSiblingElement(child)) {
 		if (reader.group(child) !== D.C) continue
@@ -212,6 +225,8 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 		if (kind !== undefined) {
 			found.push(local)
 			plots.push(readPlot(reader, child, kind, budget, seriesCount))
+
+			if (reader.child(child, D.C, "upDownBars") >= 0) unsupported.push("upDownBars")
 		} else if (axisKind !== undefined) {
 			const axis = readAxis(reader, child, axisKind)
 
@@ -219,8 +234,16 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 		} else if (UNSUPPORTED_PLOTS.has(local)) {
 			found.push(local)
 			unsupported.push(local)
+			undrawnSeries += reader.children(child, D.C, "ser").length
 		}
 	}
 
-	return { node: plotArea, plots, axes, found, unsupported }
+	return {
+		node: plotArea,
+		plots,
+		axes,
+		found,
+		unsupported,
+		seriesTotal: plots.reduce((sum, plot) => sum + plot.series.length, undrawnSeries)
+	}
 }

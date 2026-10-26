@@ -188,7 +188,7 @@ export function readFillElement(context: PaintContext, reader: DrawingReader, fi
 			})
 		}
 		case "blipFill": {
-			const image = readBlip(context, reader, fill)
+			const image = readBlip(context, reader, fill, placeholder)
 
 			if (image < 0) return undefined
 
@@ -387,4 +387,193 @@ export function shapeShadow(context: PaintContext, reader: DrawingReader, spPr: 
 	}
 
 	return context.list.shadow(value)
+}
+
+// An effect of an a:effectLst as drawn around a shape (§20.1.8): colours resolved, sizes in px, directions in
+// degrees clockwise. A prstShdw is its offset at the preset's colour (the preset's shape is not drawn).
+export type ShapeEffect =
+	| {
+			readonly kind: "outerShadow" | "innerShadow"
+			readonly color: Rgba
+			readonly blur: number
+			readonly dx: number
+			readonly dy: number
+			readonly sx: number
+			readonly sy: number
+	  }
+	| { readonly kind: "glow"; readonly color: Rgba; readonly radius: number }
+	| { readonly kind: "softEdge"; readonly radius: number }
+	| { readonly kind: "blur"; readonly radius: number }
+	| {
+			readonly kind: "reflection"
+			readonly blur: number
+			readonly startAlpha: number
+			readonly endAlpha: number
+			readonly endPos: number
+			readonly distance: number
+			readonly direction: number
+	  }
+
+export interface ShapeEffects {
+	readonly effects: readonly ShapeEffect[]
+	// Per effect, the element it was read from (outerShdw, prstShdw…).
+	readonly sources: readonly string[]
+	// Effect elements read but not drawn as written (a preset shadow's shape, a shadow's skew or alignment, an
+	// effect DAG, 3D), by local name.
+	readonly approximated: readonly string[]
+	// Effect elements after the first of their kind: CT_EffectList (§20.1.8.26) holds each kind at most once, so
+	// only the first is read and the rest are counted, not drawn.
+	readonly repeated: number
+}
+
+const NO_EFFECTS: ShapeEffects = { effects: [], sources: [], approximated: [], repeated: 0 }
+
+// The effects of a shape's properties: its own a:effectLst (or a:effectDag, counted as approximated), else the
+// one its style's effect reference names in the theme. Read whether or not `context.effects` is on.
+export function shapeEffects(context: PaintContext, reader: DrawingReader, spPr: number, effectRef: StyleRef | undefined): ShapeEffects {
+	let source: DrawingReader = reader
+	let list = reader.child(spPr, D.A, "effectLst")
+	let placeholder: Rgba | undefined
+	const approximated: string[] = []
+
+	if (list < 0 && reader.child(spPr, D.A, "effectDag") >= 0) return { effects: [], sources: [], approximated: ["effectDag"], repeated: 0 }
+
+	if (list < 0 && effectRef !== undefined && effectRef.node >= 0) {
+		source = effectRef.reader
+		list = source.child(effectRef.node, D.A, "effectLst")
+		placeholder = effectRef.color
+
+		if (list < 0 && source.child(effectRef.node, D.A, "effectDag") >= 0) approximated.push("effectDag")
+	}
+
+	if (list < 0) return approximated.length === 0 ? NO_EFFECTS : { effects: [], sources: [], approximated, repeated: 0 }
+
+	const document = source.document
+	const effects: ShapeEffect[] = []
+	const sources: string[] = []
+	const color = (node: number): Rgba | undefined => readColorIn(source, node, context.theme, placeholder)
+	const offset = (node: number): { dx: number; dy: number } => {
+		const distance = source.emu(node, "dist", 0) / EMU_PER_PX
+		const direction = (source.angle(node, "dir", 0) * Math.PI) / 180
+
+		return { dx: distance * Math.cos(direction), dy: distance * Math.sin(direction) }
+	}
+
+	const seen = new Set<string>()
+	let repeated = 0
+
+	for (let effect = document.firstChildElement(list); effect >= 0; effect = document.nextSiblingElement(effect)) {
+		if (source.group(effect) !== D.A) continue
+
+		const local = document.localName(effect)
+
+		if (seen.has(local)) {
+			repeated++
+
+			continue
+		}
+
+		seen.add(local)
+
+		switch (local) {
+			case "outerShdw":
+			case "innerShdw": {
+				const shadowColor = color(effect)
+
+				if (shadowColor === undefined) break
+
+				if (
+					local === "outerShdw" &&
+					(source.attr(effect, "kx") !== undefined ||
+						source.attr(effect, "ky") !== undefined ||
+						source.attr(effect, "algn") !== undefined)
+				)
+					approximated.push(local)
+
+				effects.push({
+					kind: local === "outerShdw" ? "outerShadow" : "innerShadow",
+					color: shadowColor,
+					blur: source.emu(effect, "blurRad", 0) / EMU_PER_PX,
+					...offset(effect),
+					sx: source.fraction(effect, "sx", 1),
+					sy: source.fraction(effect, "sy", 1)
+				})
+				sources.push(local)
+
+				break
+			}
+			case "prstShdw": {
+				const shadowColor = color(effect)
+
+				if (shadowColor === undefined) break
+
+				approximated.push(local)
+				effects.push({ kind: "outerShadow", color: shadowColor, blur: 0, ...offset(effect), sx: 1, sy: 1 })
+				sources.push(local)
+
+				break
+			}
+			case "glow": {
+				const glowColor = color(effect)
+				const radius = source.emu(effect, "rad", 0) / EMU_PER_PX
+
+				if (glowColor !== undefined && radius > 0) {
+					effects.push({ kind: "glow", color: glowColor, radius })
+					sources.push(local)
+				}
+
+				break
+			}
+			case "softEdge": {
+				const radius = source.emu(effect, "rad", 0) / EMU_PER_PX
+
+				if (radius > 0) {
+					effects.push({ kind: "softEdge", radius })
+					sources.push(local)
+				}
+
+				break
+			}
+			case "blur": {
+				const radius = source.emu(effect, "rad", 0) / EMU_PER_PX
+
+				if (radius > 0) {
+					effects.push({ kind: "blur", radius })
+					sources.push(local)
+				}
+				if (source.bool(effect, "grow", true) === false) approximated.push("blur")
+
+				break
+			}
+			case "reflection": {
+				// §20.1.8.50 defaults: stA 100%, endA 0%, endPos 100%; skew, scale other than a mirror and the fade
+				// direction are not drawn.
+				if (
+					source.attr(effect, "kx") !== undefined ||
+					source.attr(effect, "ky") !== undefined ||
+					source.fraction(effect, "sy", -1) !== -1 ||
+					source.attr(effect, "fadeDir") !== undefined
+				)
+					approximated.push(local)
+
+				effects.push({
+					kind: "reflection",
+					blur: source.emu(effect, "blurRad", 0) / EMU_PER_PX,
+					startAlpha: source.fraction(effect, "stA", 1),
+					endAlpha: source.fraction(effect, "endA", 0),
+					endPos: source.fraction(effect, "endPos", 1),
+					distance: source.emu(effect, "dist", 0) / EMU_PER_PX,
+					direction: source.angle(effect, "dir", 0)
+				})
+				sources.push(local)
+
+				break
+			}
+			default:
+				// fillOverlay and the effect-container forms are not drawn.
+				approximated.push(local)
+		}
+	}
+
+	return { effects, sources, approximated, repeated }
 }

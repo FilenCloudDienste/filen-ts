@@ -93,3 +93,29 @@ export {
 	type RasterJobRequest,
 	type ToPresentationJobsWorker
 } from "./jobs/registry"
+export {
+	closeBitmapsOf,
+	inThreadPresentationWorker,
+	PresentationCallError,
+	presentationWorkerPool,
+	servePresentationWorker,
+	type PresentationClient,
+	type PresentationListener,
+	type PresentationWorkerLike,
+	type PresentationWorkerOptions,
+	type PresentationWorkerPool,
+	type PresentationWorkerScope
+} from "./host"
+export { presentationScheduler, realmScheduler, SLICE_MS, type PresentationWorkerScheduler } from "./scheduler"
+export {
+	installPresentationRealm,
+	MAX_DECODED_PIXELS,
+	offscreenCanvas,
+	presentationRealm,
+	workerRealm,
+	type PresentationRealm,
+	type RasterCanvas,
+	type RasterImage,
+	type RealmCanvas
+} from "./services"
+export { paintSlideCanvas, rasterizeSlide, ThumbnailCache, type RasterizedSlide } from "./thumbs"

@@ -189,7 +189,7 @@ describe("presentation dispatch seams", () => {
 		}
 	})
 
-	it("refuses the fonts and SmartArt services and every opener as notImplemented", async () => {
+	it("refuses the fonts and SmartArt services and the openers not built yet as notImplemented", async () => {
 		const session = { s: 1 } as unknown as EngineSession
 
 		await expect(SERVICES.fonts.faces(session)).rejects.toMatchObject({ reason: "notImplemented" })
@@ -202,7 +202,7 @@ describe("presentation dispatch seams", () => {
 			reason: "notImplemented"
 		})
 
-		for (const format of ["pptx", "odp", "ppt"] as const) {
+		for (const format of ["odp", "ppt"] as const) {
 			const outcome = await OPENERS[format].open({
 				source: bytesSource(new Uint8Array(0)),
 				sourceKind: "bytes",
@@ -211,6 +211,15 @@ describe("presentation dispatch seams", () => {
 
 			expect(outcome, format).toEqual({ kind: "refused", reason: "notImplemented", detail: `open ${format}` })
 		}
+
+		// The pptx reader is built: bytes that are no package are refused as malformed.
+		expect(
+			await OPENERS.pptx.open({
+				source: bytesSource(new Uint8Array(0)),
+				sourceKind: "bytes",
+				options: { format: "pptx", fileName: "x.pptx" }
+			})
+		).toMatchObject({ kind: "refused", reason: "malformed" })
 	})
 
 	it("registers the pdf, raster and convert jobs, each refusing as notImplemented", async () => {

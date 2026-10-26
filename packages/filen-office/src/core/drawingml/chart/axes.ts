@@ -1,6 +1,6 @@
 import { D } from "../reader"
 import { plainParagraph, readTextBody, type TextDefaults } from "../text"
-import { ChartBuilder, estimateHeight, estimateWidth, labelBody, type Rect } from "./builder"
+import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type Rect } from "./builder"
 import { formatNumber } from "./format"
 import type { Axis } from "./model"
 import { mutedText } from "./palette"
@@ -19,6 +19,10 @@ export interface AxisState {
 	categories: string[]
 	text: TextDefaults
 	rotation: number
+	// The labels' rotation is not written (c:txPr a:bodyPr@rot): crowded category labels may wrap or turn.
+	autoRotate: boolean
+	// Crowded category labels broken into lines this wide (px) at word boundaries; 0 when they are not.
+	wrap: number
 	// Pixel span along the axis direction (from = minimum, after orientation).
 	from: number
 	to: number
@@ -27,7 +31,7 @@ export interface AxisState {
 	used: boolean
 }
 
-export function axisState(axis: Axis, text: TextDefaults, rotation: number): AxisState {
+export function axisState(axis: Axis, text: TextDefaults, rotation: number, autoRotate: boolean = false): AxisState {
 	return {
 		axis,
 		horizontal: axis.side === "b" || axis.side === "t",
@@ -38,6 +42,8 @@ export function axisState(axis: Axis, text: TextDefaults, rotation: number): Axi
 		categories: [],
 		text,
 		rotation,
+		autoRotate,
+		wrap: 0,
 		from: 0,
 		to: 0,
 		line: 0,
@@ -118,6 +124,97 @@ export function tickLabels(state: AxisState): string[] {
 	return scaleTicks(state.scale).map(value => formatNumber(value, state.format))
 }
 
+const NARROW = new Set("ilIjtfr.,:;!|'`\"()[]{}/\\- 1")
+const WIDE = new Set("mwMW@%")
+
+// A label's width (px) at `size` pt in a proportional sans face like Office's default Calibri, by character class
+// (narrow, wide, capital, other), closer than estimateWidth's monospaced guess: whether labels fit decides whether
+// they turn.
+function proportionalWidth(text: string, size: number): number {
+	let em = 0
+	let longest = 0
+
+	for (const char of text) {
+		if (char === "\n") {
+			longest = Math.max(longest, em)
+			em = 0
+		} else if (NARROW.has(char)) em += 0.25
+		else if (WIDE.has(char)) em += 0.8
+		else if ((char.codePointAt(0) ?? 0) >= 0x2e80) em += 1
+		else if (char >= "A" && char <= "Z") em += 0.6
+		else em += 0.5
+	}
+
+	return Math.max(longest, em) * size * PX_PER_PT
+}
+
+// Lines a wrapped label takes beyond this are not worth it: the labels turn instead.
+const MAX_WRAPPED_LINES = 3
+
+// `label` broken at spaces into lines no wider than `width` (px) where its words allow.
+function wrapLabel(label: string, size: number, width: number): string[] {
+	const lines: string[] = []
+	let line = ""
+
+	for (const word of label.split(" ")) {
+		const candidate = line === "" ? word : `${line} ${word}`
+
+		if (line !== "" && proportionalWidth(candidate, size) > width) {
+			lines.push(line)
+			line = word
+		} else line = candidate
+	}
+
+	lines.push(line)
+
+	return lines
+}
+
+// Category labels across the bottom or top that do not fit their bands side by side, when the file leaves their
+// rotation automatic, are drawn as LibreOffice draws them (PowerPoint documents no rule): broken into lines at spaces
+// when every word fits its band, else turned 45° (counterclockwise, ending at their ticks); thinning follows only when
+// even turned they overlap. `length` is the axis length (px), estimated.
+export function autoRotateLabels(state: AxisState, length: number): void {
+	if (!state.autoRotate || !state.horizontal || state.scale !== undefined || state.axis.labelSkip > 0 || state.count <= 0) return
+
+	const band = (length / Math.max(1, state.between ? state.count : state.count - 1)) * 0.95
+	const size = state.text.size
+	let widest = 0
+	let widestWord = 0
+	let lines = 1
+
+	for (const label of state.categories) widest = Math.max(widest, proportionalWidth(label, size))
+
+	state.rotation = 0
+	state.wrap = 0
+
+	if (widest <= band) return
+
+	for (const label of state.categories) {
+		for (const word of label.split(" ")) widestWord = Math.max(widestWord, proportionalWidth(word, size))
+
+		if (widestWord > band) break
+
+		lines = Math.max(lines, wrapLabel(label, size, band).length)
+	}
+
+	if (widestWord <= band && lines <= MAX_WRAPPED_LINES) state.wrap = band
+	else state.rotation = -45
+}
+
+// A label's width as the axis lays it out: a proportional estimate where the axis fits crowded category labels
+// itself (horizontal, rotation automatic), the plain estimate elsewhere.
+function labelWidth(state: AxisState, label: string): number {
+	return state.autoRotate && state.horizontal && state.scale === undefined
+		? proportionalWidth(label, state.text.size)
+		: estimateWidth(label, state.text.size)
+}
+
+// The lines of a horizontal axis label: its wrapped lines, else itself.
+function labelLines(state: AxisState, label: string): string[] {
+	return state.wrap > 0 && state.horizontal && state.rotation === 0 ? wrapLabel(label, state.text.size, state.wrap) : [label]
+}
+
 // Space the axis's labels and title take beside the plot (px), estimated.
 export function axisExtent(builder: ChartBuilder, state: AxisState): number {
 	const axis = state.axis
@@ -129,10 +226,14 @@ export function axisExtent(builder: ChartBuilder, state: AxisState): number {
 	if (axis.labelPosition !== "none") {
 		const labels = tickLabels(state)
 		let widest = 0
+		let lines = 1
 
-		for (const label of labels) widest = Math.max(widest, estimateWidth(label, state.text.size))
+		for (const label of labels) {
+			widest = Math.max(widest, labelWidth(state, label))
+			lines = Math.max(lines, labelLines(state, label).length)
+		}
 
-		const tall = estimateHeight(state.text.size)
+		const tall = estimateHeight(state.text.size, lines)
 		const radians = (Math.abs(state.rotation) * Math.PI) / 180
 		const rotatedHeight = Math.abs(Math.sin(radians)) * widest + Math.abs(Math.cos(radians)) * tall
 		const rotatedWidth = Math.abs(Math.cos(radians)) * widest + Math.abs(Math.sin(radians)) * tall
@@ -259,20 +360,29 @@ export function drawAxisLabels(builder: ChartBuilder, state: AxisState, inner: R
 			state.scale === undefined ? categoryBand(state) : positions.length > 1 ? (positions[1] ?? 0) - (positions[0] ?? 0) : 100
 		)
 		let widest = 0
+		let lineCount = 1
 
-		for (const label of labels) widest = Math.max(widest, estimateWidth(label, size))
+		for (const label of labels) {
+			widest = Math.max(widest, state.wrap > 0 ? Math.min(state.wrap, labelWidth(state, label)) : labelWidth(state, label))
+			lineCount = Math.max(lineCount, labelLines(state, label).length)
+		}
 
 		// Category labels that would overlap are thinned, as Office does when it cannot rotate them.
 		// Never more than MAX_TICK_LABELS, whatever the skip says.
+		const radians = (Math.abs(state.rotation) * Math.PI) / 180
+		const cos = Math.abs(Math.cos(radians))
+		const sin = Math.abs(Math.sin(radians))
+		// Along a horizontal category axis, a label takes its width when level, and its line height over the sine
+		// when turned.
+		const across = state.rotation === 0 ? widest : sin > 1e-6 ? tall / sin : widest
 		const skip = Math.max(
 			Math.ceil(labels.length / MAX_TICK_LABELS),
 			axis.labelSkip > 0
 				? axis.labelSkip
-				: state.scale === undefined && state.horizontal && state.rotation === 0
-					? Math.max(1, Math.ceil(widest / Math.max(1, band * 0.95)))
+				: state.scale === undefined && state.horizontal
+					? Math.max(1, Math.ceil(across / Math.max(1, band * 0.95)))
 					: 1
 		)
-		const vertical = state.rotation !== 0 && state.horizontal
 
 		labels.forEach((label, index) => {
 			if (label === "" || index % skip !== 0) return
@@ -281,14 +391,30 @@ export function drawAxisLabels(builder: ChartBuilder, state: AxisState, inner: R
 			const width = Math.max(band, estimateWidth(label, size) + 4)
 			const paragraph = plainParagraph(label, state.text, state.horizontal ? "ctr" : before ? "r" : "l")
 
-			if (state.horizontal) {
-				const height = vertical ? Math.max(tall, estimateWidth(label, size)) : tall
+			if (state.horizontal && state.rotation === 0) {
+				const rows = labelLines(state, label)
+				const height = estimateHeight(size, rows.length)
 				const y = before ? line - gap - height : line + gap
 
 				builder.label(
-					[paragraph],
+					rows.map(row => plainParagraph(row, state.text, "ctr")),
 					{ x: position - width / 2, y, w: width, h: height },
-					labelBody(before ? "b" : "t", state.rotation),
+					labelBody(before ? "b" : "t", 0),
+					axis.node
+				)
+			} else if (state.horizontal) {
+				// A turned label laid out level in its own box, turned about the box's centre: its end (counterclockwise) or
+				// start (clockwise) at the tick, away from the axis.
+				const length = labelWidth(state, label) + 4
+				const toward = state.rotation < 0 ? -1 : 1
+				const cx = position + (toward * length * cos) / 2
+				const reach = (length * sin) / 2 + (tall * cos) / 2
+				const cy = before ? line - gap - reach : line + gap + reach
+
+				builder.label(
+					[paragraph],
+					{ x: cx - length / 2, y: cy - tall / 2, w: length, h: tall },
+					labelBody("ctr", state.rotation),
 					axis.node
 				)
 			} else {
@@ -304,9 +430,7 @@ export function drawAxisLabels(builder: ChartBuilder, state: AxisState, inner: R
 			}
 		})
 
-		const radians = (Math.abs(state.rotation) * Math.PI) / 180
-
-		extent = state.horizontal ? Math.abs(Math.sin(radians)) * widest + Math.abs(Math.cos(radians)) * tall : widest + 4
+		extent = state.horizontal ? sin * widest + cos * estimateHeight(size, lineCount) : widest + 4
 	}
 
 	if (axis.title >= 0) drawAxisTitle(builder, state, line, before, gap + extent + 4)
@@ -324,8 +448,13 @@ function drawAxisTitle(builder: ChartBuilder, state: AxisState, line: number, be
 
 	if (rich >= 0) {
 		const body = readTextBody(reader, builder.theme, rich, defaults)
+		const listAlign = reader.attr(reader.child(reader.child(rich, D.A, "lstStyle"), D.A, "lvl1pPr"), "algn")
+		const written = reader
+			.children(rich, D.A, "p")
+			.map(p => listAlign !== undefined || reader.attr(reader.child(p, D.A, "pPr"), "algn") !== undefined)
 
-		paragraphs = body.paragraphs
+		// A title paragraph with no alignment written is centred along the axis, as Office draws it.
+		paragraphs = body.paragraphs.map((paragraph, k) => (written[k] === true ? paragraph : { ...paragraph, align: "ctr" as const }))
 		rotation = builder.textRotation(rich) ?? rotation
 	} else {
 		const text = reader.text(reader.child(reader.child(reader.child(ref, D.C, "strRef"), D.C, "strCache"), D.C, "pt"))

@@ -105,6 +105,9 @@ export interface Deck {
 	// taking a Deck (apply, inherit, render, emit) is synchronous and needs each node it touches present, with its
 	// layout and master chain; the engine parses them first (asynchronously, through the reader's part map).
 	nodes: Map<SlideRef, SlideNode>
+	// Slides hidden in the show (p:sld show="0"), known at open before the slides are parsed. A parsed node's own
+	// `hidden` wins.
+	hiddenSlides?: ReadonlySet<SlideRef>
 	sections: Section[]
 	customShows: CustomShow[]
 	show: ShowSettings
@@ -186,6 +189,9 @@ export type ShapeKind = "sp" | "pic" | "grpSp" | "cxnSp" | "frame" | "ink" | "op
 export interface Placeholder {
 	type: PlaceholderType
 	idx: number
+	// The source wrote idx (§19.3.1.36 defaults it to 0). A written idx matches the layout placeholder by idx alone
+	// (MS-OI29500 §2.1.1127(b)); an implied one falls back by type.
+	idxWritten?: true
 	orient?: "horz" | "vert"
 	sz?: "full" | "half" | "quarter"
 	hasCustomPrompt?: boolean
@@ -201,6 +207,8 @@ export interface ShapeNode {
 	hidden: boolean
 	kind: ShapeKind
 	ph?: Placeholder
+	// p:cNvSpPr/@txBox: its text defaults come from the theme's txDef, not spDef (§20.1.4.1.27–28).
+	txBox?: true
 	xfrm?: Xfrm
 	// Typed overrides written by edits; undefined = the source as read.
 	props?: ShapePropsEdit
@@ -572,6 +580,8 @@ export type Action =
 	| { readonly kind: "internal"; readonly jump: "next" | "previous" | "first" | "last" | "end" | "lastViewed" }
 	| { readonly kind: "slide"; readonly slide: SlideRef }
 	| { readonly kind: "customShow"; readonly id: number; readonly returnAfter: boolean }
+	// ppaction://media: play the shape's own media (never a linked one).
+	| { readonly kind: "media" }
 	// http, https and mailto only.
 	| { readonly kind: "url"; readonly href: string }
 	// Inert, kept in the file byte for byte, shown with its reason.
@@ -647,6 +657,21 @@ export interface ThemeRef {
 	readonly part: string
 	// Bumps when the theme is edited or replaced (an inherit memo key).
 	revision: number
+	// a:objectDefaults (§20.1.6.7): what a non-placeholder shape's text inherits before the master
+	// (MS-OI29500 §2.1.1379(b), §2.1.1388(a)).
+	objectDefaults?: ObjectDefaults
+}
+
+// The text half of a:spDef / a:txDef: bodyPr as written (unwritten insets NaN) and the list style.
+export interface ObjectDefault {
+	readonly bodyPr: Partial<TextBodyProps>
+	readonly lstStyle?: ListStyle
+}
+
+// a:spDef for shapes, a:txDef for text boxes. a:lnDef is not kept: a connector has no text body (CT_Connector).
+export interface ObjectDefaults {
+	readonly sp?: ObjectDefault
+	readonly tx?: ObjectDefault
 }
 
 export type Background =

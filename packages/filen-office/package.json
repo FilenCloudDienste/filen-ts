@@ -53,6 +53,7 @@
 		"./react/presentation": "./src/react/presentation/index.ts",
 		"./react/docx": "./src/react/docx/index.ts",
 		"./css/docx.css": "./src/css/docx.css",
+		"./css/presentation.css": "./src/css/presentation.css",
 		"./css/docx-review.css": "./src/css/docx-review.css",
 		"./css/docx-objects.css": "./src/css/docx-objects.css",
 		"./css/sheet.css": "./src/css/sheet.css",

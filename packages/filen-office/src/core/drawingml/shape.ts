@@ -22,12 +22,17 @@ import { D, EMU_PER_PX, drawingReader, type DrawingReader } from "./reader"
 import { DEFAULT_TEXT, readBodyProps, readTextBody, resolveTypeface, type TextDefaults } from "./text"
 
 // DrawingML shape trees (§20.1.2.2, §20.5 wps/wpg, §20.4 pictures, the dsp: SmartArt drawing) to the display
-// list. Shapes, pictures, connectors and groups (nested, with child coordinate systems) are converted;
-// graphic frames inside groups (charts in a group) are counted as unsupported.
+// list. Shapes, pictures, connectors and groups (nested, with child coordinate systems) are converted; graphic
+// frames (at the top of a shape tree, or inside groups) are drawn by the host's frame hook, else counted as
+// unsupported.
 
 export interface ShapeContext extends PaintContext {
 	// Maps a w:txbxContent node to the host's story reference (WordprocessingML text boxes).
 	readonly story?: (txbxContent: number) => number
+	// Maps an a:txBody node to the host's story reference when the host lays the text out itself (presentation
+	// text): the body then becomes a story item over the same text rectangle, never laid out here. Undefined
+	// keeps the body as DrawingML text.
+	readonly body?: (txBody: number) => number | undefined
 	// Run properties DrawingML text falls back to before the shape's font reference applies.
 	readonly text?: TextDefaults
 	// Draws a graphic frame inside a group (a chart) into `list`, placed by `matrix` (the frame's px to the list's), at
@@ -56,7 +61,8 @@ export const MAX_DEPTH = 128
 const SHAPES: ReadonlySet<string> = new Set(["wsp", "sp", "cxnSp"])
 const GROUPS: ReadonlySet<string> = new Set(["wgp", "grpSp", "lockedCanvas", "wpc"])
 // xdr: a sheet's drawing part (§20.5), whose pictures, shapes and groups are its own elements.
-const SHAPE_GROUPS: ReadonlySet<D> = new Set([D.Wps, D.Wpg, D.Wpc, D.Pic, D.Dsp, D.A, D.Lc, D.Xdr])
+// p: a slide's shape tree (§19.3.1), the same elements in PresentationML.
+const SHAPE_GROUPS: ReadonlySet<D> = new Set([D.Wps, D.Wpg, D.Wpc, D.Pic, D.Dsp, D.A, D.Lc, D.Xdr, D.P])
 
 // Placement of child coordinates: a child at EMU (x, y) lands at (offsetX + x * scaleX, ...) EMU in the
 // parent's local frame; `matrix` maps that frame (in px) into the drawing.
@@ -648,12 +654,13 @@ class ShapeWalker {
 
 		const width = Math.max(0, rect[2] - rect[0])
 		const height = Math.max(0, rect[3] - rect[1])
+		const hosted = content < 0 && context.body !== undefined ? context.body(txBody) : undefined
 
-		if (content >= 0) {
-			const body: TextBodyProps = readBodyProps(reader, bodyPr)
-			const text = list.text({ kind: "story", body, story: context.story?.(content) ?? content })
+		if (content >= 0 || hosted !== undefined) {
+			const body: TextBodyProps = readBodyProps(reader, bodyPr >= 0 ? bodyPr : reader.child(txBody, D.A, "bodyPr"))
+			const text = list.text({ kind: "story", body, story: hosted ?? context.story?.(content) ?? content })
 
-			this.textboxes.push(content)
+			if (content >= 0) this.textboxes.push(content)
 			list.addItem(
 				ItemKind.TEXT,
 				textMatrix,

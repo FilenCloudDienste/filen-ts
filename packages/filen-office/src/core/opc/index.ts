@@ -45,3 +45,20 @@ export {
 	type ZipPlanItem
 } from "./zipWriter"
 export { SliceClock, sliceClock, type Slicing } from "../slicing"
+export {
+	MEDIA_LIMITS,
+	PRESENTATION_ZIP_LIMITS,
+	checkPackage,
+	confirmMedia,
+	imageDimensions,
+	imageWithinBudget,
+	isMediaCandidate,
+	isMediaRelationship,
+	mediaTargets,
+	sniffMedia,
+	type EntryClass,
+	type MediaContainer,
+	type MediaLimits,
+	type MediaNotice,
+	type PackagePolicy
+} from "./mediaPolicy"

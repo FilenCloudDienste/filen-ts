@@ -1,0 +1,308 @@
+/* Structure of @filen/office's presentation viewer: the slide view, the slide rail, the notes panel and the static
+   show. Every visual value is a --fo-* variable with a neutral default; apps map them to their tokens (light and
+   dark). Slides are white paper in both themes; their own formatting is set inline by the compositor. */
+
+/* Slide view */
+
+.fo-slide-view {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--fo-canvas, #e6e6e6);
+	contain: strict;
+}
+
+.fo-slide-frame {
+	position: relative;
+	flex: none;
+	overflow: hidden;
+	background: var(--fo-page-bg, #fff);
+	box-shadow: var(--fo-page-shadow, 0 1px 3px rgb(0 0 0 / 0.2));
+	outline: 1px solid var(--fo-page-edge, transparent);
+}
+
+.fo-slide-frame[data-fo-pending] {
+	background: var(--fo-page-pending, #f4f4f5);
+}
+
+.fo-slide-paper {
+	position: absolute;
+	inset: 0 auto auto 0;
+	transform-origin: 0 0;
+	isolation: isolate;
+	color: var(--fo-auto-text, #000);
+}
+
+.fo-slide-content,
+.fo-slide-hotspots {
+	position: absolute;
+	inset: 0;
+}
+
+.fo-slide-content ::selection {
+	background: var(--fo-selection, rgb(37 99 235 / 0.3));
+}
+
+.fo-slide-hotspots {
+	pointer-events: none;
+}
+
+.fo-slide-hotspot {
+	position: absolute;
+	inset: 0 auto auto 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	transform-origin: 0 0;
+	cursor: pointer;
+	pointer-events: auto;
+}
+
+.fo-slide-view[data-fo-mode="edit"] .fo-slide-hotspot {
+	cursor: default;
+}
+
+.fo-slide-hotspot:focus-visible {
+	outline: 2px solid var(--fo-focus-ring, #2563eb);
+	outline-offset: 2px;
+}
+
+/* Slide rail */
+
+.fo-slide-rail {
+	position: relative;
+	overflow: auto;
+	overscroll-behavior: contain;
+	background: var(--fo-rail-bg, #f4f4f5);
+	contain: strict;
+	outline: none;
+}
+
+.fo-slide-rail[data-fo-orientation="vertical"] {
+	overflow-x: hidden;
+}
+
+.fo-slide-rail[data-fo-orientation="horizontal"] {
+	overflow-y: hidden;
+}
+
+.fo-slide-rail:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--fo-focus-ring, #2563eb);
+}
+
+.fo-slide-rail-content {
+	position: relative;
+}
+
+.fo-slide-rail-item {
+	position: absolute;
+	box-sizing: border-box;
+	display: flex;
+	gap: 6px;
+	cursor: pointer;
+	user-select: none;
+	contain: layout paint;
+}
+
+.fo-slide-rail[data-fo-orientation="vertical"] .fo-slide-rail-item {
+	left: 0;
+	right: 0;
+	align-items: flex-start;
+	padding: 6px 8px 6px 4px;
+}
+
+.fo-slide-rail[data-fo-orientation="horizontal"] .fo-slide-rail-item {
+	top: 0;
+	bottom: 0;
+	flex-direction: column;
+	align-items: flex-start;
+	padding: 4px 6px;
+}
+
+.fo-slide-rail-number {
+	flex: none;
+	min-width: 1.75em;
+	font: var(--fo-rail-number-font, 12px / 1.2 system-ui, sans-serif);
+	font-variant-numeric: tabular-nums;
+	text-align: end;
+	color: var(--fo-rail-number, #52525b);
+}
+
+.fo-slide-rail[data-fo-orientation="horizontal"] .fo-slide-rail-number {
+	position: absolute;
+	z-index: 1;
+	top: 6px;
+	left: 8px;
+	min-width: 0;
+	padding: 0 4px;
+	border-radius: 3px;
+	text-align: start;
+	background: var(--fo-rail-number-bg, rgb(255 255 255 / 0.85));
+	color: var(--fo-rail-number-on-thumb, #18181b);
+}
+
+.fo-slide-rail-thumb {
+	position: relative;
+	flex: none;
+	display: block;
+	overflow: hidden;
+	border-radius: var(--fo-rail-radius, 2px);
+	background: var(--fo-page-bg, #fff);
+	box-shadow: 0 0 0 1px var(--fo-rail-edge, rgb(0 0 0 / 0.15));
+}
+
+.fo-slide-rail-thumb[data-fo-pending] {
+	background: var(--fo-page-pending, #fafafa);
+}
+
+.fo-slide-rail-canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+.fo-slide-rail-item:hover .fo-slide-rail-thumb {
+	box-shadow: 0 0 0 2px var(--fo-rail-hover, rgb(0 0 0 / 0.3));
+}
+
+.fo-slide-rail-item[aria-selected="true"] .fo-slide-rail-thumb {
+	box-shadow: 0 0 0 2px var(--fo-rail-selected, #2563eb);
+}
+
+.fo-slide-rail:focus-visible .fo-slide-rail-item[aria-selected="true"] .fo-slide-rail-thumb {
+	box-shadow:
+		0 0 0 2px var(--fo-rail-selected, #2563eb),
+		0 0 0 4px var(--fo-focus-ring, #2563eb);
+}
+
+/* Hidden slides: dimmed, their number struck through. */
+.fo-slide-rail-item[data-fo-hidden] .fo-slide-rail-thumb {
+	opacity: var(--fo-rail-hidden-opacity, 0.45);
+}
+
+.fo-slide-rail-item[data-fo-hidden] .fo-slide-rail-number {
+	text-decoration: line-through;
+}
+
+/* Notes panel */
+
+.fo-notes {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	background: var(--fo-notes-bg, #fff);
+	color: var(--fo-notes-text, #18181b);
+	border-top: 1px solid var(--fo-notes-edge, #e4e4e7);
+}
+
+.fo-notes-splitter {
+	position: absolute;
+	z-index: 1;
+	top: -4px;
+	left: 0;
+	right: 0;
+	height: 8px;
+	cursor: ns-resize;
+	touch-action: none;
+	outline: none;
+}
+
+.fo-notes-splitter:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--fo-focus-ring, #2563eb);
+}
+
+.fo-notes-header {
+	display: flex;
+	align-items: center;
+	min-height: 32px;
+	padding: 0 8px;
+}
+
+.fo-notes-toggle {
+	min-height: 28px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	font: var(--fo-notes-header-font, 500 12px / 1.2 system-ui, sans-serif);
+	cursor: pointer;
+}
+
+.fo-notes-toggle:hover {
+	background: var(--fo-notes-hover, rgb(0 0 0 / 0.06));
+}
+
+.fo-notes-toggle:focus-visible {
+	outline: 2px solid var(--fo-focus-ring, #2563eb);
+	outline-offset: 1px;
+}
+
+.fo-notes-body {
+	box-sizing: border-box;
+	overflow: auto;
+	padding: 0 16px 12px;
+	font: var(--fo-notes-font, 14px / 1.5 system-ui, sans-serif);
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+	outline: none;
+}
+
+.fo-notes-body:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--fo-focus-ring, #2563eb);
+}
+
+.fo-notes-paragraph {
+	min-height: 1lh;
+	margin: 0;
+}
+
+.fo-notes-empty {
+	margin: 0;
+	color: var(--fo-notes-placeholder, #52525b);
+}
+
+/* Static show */
+
+.fo-show-stage {
+	position: fixed;
+	z-index: var(--fo-show-z, 2147483000);
+	inset: 0;
+	display: flex;
+	background: #000;
+	outline: none;
+	cursor: none;
+}
+
+.fo-show-stage:hover {
+	cursor: default;
+}
+
+.fo-show-stage[data-fo-screen="white"] {
+	background: #fff;
+}
+
+.fo-show-slide {
+	flex: 1;
+	background: #000;
+}
+
+.fo-show-slide .fo-slide-frame {
+	box-shadow: none;
+	outline: 0;
+}
+
+.fo-show-live {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}

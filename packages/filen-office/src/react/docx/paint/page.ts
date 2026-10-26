@@ -15,6 +15,8 @@ import {
 	TabLeader
 } from "../../../core/text/index"
 import { LINK_INTS, type DocxPageData, type DocxTextStyle } from "../../../dom/docx/protocol"
+import type { Paint, Stroke } from "../../../core/drawingml/index"
+import type { RenderEffects } from "../../../core/presentation/output"
 import type { DocxTables } from "../store"
 
 // Paints one page's display list as DOM: real text in absolutely positioned spans (so selection, copy,
@@ -205,6 +207,170 @@ function borderStyle(style: string): string {
 export interface PagePaintContext {
 	readonly document: Document
 	readonly tables: DocxTables
+	// The tables DrawingML text styles index (DocxTextStyle.paint, .outline, .effects; a presentation TextPage's);
+	// absent for documents, whose styles never set those fields.
+	readonly paints?: TextPaintTables
+}
+
+export interface TextPaintTables {
+	readonly paints: readonly Paint[]
+	readonly strokes: readonly Stroke[]
+	readonly textEffects: readonly RenderEffects[]
+}
+
+// 0xRRGGBBAA as a CSS colour.
+function rgbaCss(color: number): string {
+	const value = color >>> 0
+	const alpha = Math.round(((value & 255) / 255) * 1000) / 1000
+
+	return `rgba(${(value >>> 24) & 255},${(value >>> 16) & 255},${(value >>> 8) & 255},${alpha})`
+}
+
+function stopsCss(offsets: Float32Array, colors: Uint32Array): string {
+	const out: string[] = []
+
+	for (let k = 0; k < Math.min(offsets.length, colors.length); k++) {
+		out.push(`${rgbaCss(colors[k] ?? 0)} ${round(Math.min(1, Math.max(0, offsets[k] ?? 0)) * 100)}%`)
+	}
+
+	return out.join(",")
+}
+
+// Share of the foreground in an 8×8 preset pattern tile: the pctN presets their N, the line and shape presets
+// about half. Pattern-filled text is drawn in the blend, as the PDF painter draws patterns.
+function patternShare(pattern: string): number {
+	const percent = /^pct(\d+)$/.exec(pattern)
+
+	return percent === null ? 0.5 : Number.parseInt(percent[1] ?? "50", 10) / 100
+}
+
+function blend(foreground: number, background: number, share: number): number {
+	let out = 0
+
+	for (const shift of [24, 16, 8, 0]) {
+		const value = Math.round(((foreground >>> shift) & 255) * share + ((background >>> shift) & 255) * (1 - share))
+
+		out = out * 256 + value
+	}
+
+	return out >>> 0
+}
+
+// The fill of glyphs as CSS: a gradient clipped to the text (background-clip: text), a pattern's blend, or a solid.
+function paintCss(paint: Paint | undefined): string {
+	if (paint === undefined) return ""
+
+	switch (paint.kind) {
+		case "solid":
+			return `color:${rgbaCss(paint.color)};`
+		case "linear": {
+			// DrawingML angles run clockwise from +x; CSS gradient angles clockwise from "to top".
+			const angle = round(paint.angle + 90)
+
+			return `background-image:linear-gradient(${angle}deg,${stopsCss(paint.stops.offsets, paint.stops.colors)});${CLIP_TEXT}`
+		}
+		case "path": {
+			const focusX = round(((paint.focus.left + (1 - paint.focus.right)) / 2) * 100)
+			const focusY = round(((paint.focus.top + (1 - paint.focus.bottom)) / 2) * 100)
+			const shape = paint.shape === "circle" ? "circle farthest-corner" : "ellipse farthest-side"
+
+			return `background-image:radial-gradient(${shape} at ${focusX}% ${focusY}%,${stopsCss(paint.stops.offsets, paint.stops.colors)});${CLIP_TEXT}`
+		}
+		case "gradient":
+			return `background-image:linear-gradient(90deg,${stopsCss(paint.stops.offsets, paint.stops.colors)});${CLIP_TEXT}`
+		case "pattern":
+			return `color:${rgbaCss(blend(paint.foreground, paint.background, patternShare(paint.pattern)))};`
+		default:
+			return ""
+	}
+}
+
+const CLIP_TEXT = "-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;"
+
+function strokeColor(stroke: Stroke, paints: readonly Paint[]): string {
+	const paint = paints[stroke.paint]
+
+	if (paint === undefined) return "currentColor"
+	if (paint.kind === "solid") return rgbaCss(paint.color)
+	if (paint.kind === "pattern") return rgbaCss(blend(paint.foreground, paint.background, patternShare(paint.pattern)))
+	if (paint.kind === "linear" || paint.kind === "path" || paint.kind === "gradient") return rgbaCss(paint.stops.colors[0] ?? 0x000000ff)
+
+	return "currentColor"
+}
+
+// Effects on glyphs as CSS: shadows and glow as text-shadow, blur as a filter, reflection where the engine has
+// one (-webkit-box-reflect; Firefox draws none). Inner shadows and soft edges have no CSS for text: not drawn.
+function effectsCss(effects: RenderEffects | undefined): string {
+	if (effects === undefined || effects.length === 0) return ""
+
+	const shadows: string[] = []
+	let out = ""
+
+	for (const effect of effects) {
+		switch (effect.kind) {
+			case "outerShadow":
+				shadows.push(`${px(effect.dx)}px ${px(effect.dy)}px ${px(Math.max(0, effect.blur))}px ${rgbaCss(effect.color)}`)
+				break
+			case "glow":
+				// A glow spreads its colour around the glyphs: two blurred copies at the radius.
+				shadows.push(
+					`0 0 ${px(Math.max(0, effect.radius))}px ${rgbaCss(effect.color)}`,
+					`0 0 ${px(Math.max(0, effect.radius / 2))}px ${rgbaCss(effect.color)}`
+				)
+				break
+			case "blur":
+				out += `filter:blur(${px(Math.max(0, effect.radius) / 2)}px);`
+				break
+			case "reflection":
+				out += `-webkit-box-reflect:below ${px(effect.distance)}px linear-gradient(transparent ${round((1 - effect.endPos) * 100)}%,rgba(0,0,0,${round(effect.startAlpha)}));`
+				break
+			default:
+				break
+		}
+	}
+
+	return shadows.length === 0 ? out : `text-shadow:${shadows.join(",")};${out}`
+}
+
+const drawingCssCache = new WeakMap<DocxTextStyle, string>()
+
+// The declarations a DrawingML style adds to its spans (paint, outline, effects, alpha); "" for a document's styles.
+export function drawingTextCss(style: DocxTextStyle | undefined, tables: TextPaintTables | undefined): string {
+	if (style === undefined || tables === undefined) return ""
+	if (style.paint === undefined && style.outline === undefined && style.effects === undefined && style.alpha === undefined) return ""
+
+	let css = drawingCssCache.get(style)
+
+	if (css !== undefined) return css
+
+	css = paintCss(style.paint === undefined ? undefined : tables.paints[style.paint])
+
+	const stroke = style.outline === undefined ? undefined : tables.strokes[style.outline]
+
+	if (stroke !== undefined && stroke.width > 0) {
+		// Centred on the glyph outline and over the fill, as DrawingML a:ln draws text outlines.
+		css += `-webkit-text-stroke:${px(stroke.width)}px ${strokeColor(stroke, tables.paints)};`
+	}
+
+	// Alpha of the glyph fill (a run with no fill is fully transparent, its outline still drawn).
+	if (style.alpha !== undefined && style.paint === undefined) {
+		const alpha = Math.min(1, Math.max(0, style.alpha))
+
+		css += alpha === 0 ? "-webkit-text-fill-color:transparent;" : `color:${hexAlpha(style.color, alpha)};`
+	}
+
+	css += effectsCss(style.effects === undefined ? undefined : tables.textEffects[style.effects])
+	drawingCssCache.set(style, css)
+
+	return css
+}
+
+function hexAlpha(color: string, alpha: number): string {
+	if (!HEX.test(color)) return "var(--fo-auto-text, #000)"
+
+	const value = Number.parseInt(color, 16)
+
+	return `rgba(${(value >> 16) & 255},${(value >> 8) & 255},${value & 255},${round(alpha)})`
 }
 
 function box(document: Document, className: string, x: number, y: number, width: number, height: number, extra: string): HTMLElement {
@@ -749,7 +915,8 @@ function paintLine(
 	tables: DocxTables,
 	line: number,
 	links: Map<number, number[]>,
-	look: LineLook
+	look: LineLook,
+	paints?: TextPaintTables
 ): PaintedLine {
 	const lf = line * LINE_FLOATS
 	const li = line * LINE_INTS
@@ -806,12 +973,20 @@ function paintLine(
 
 			if (wordSpacing !== 0) extra += `word-spacing:${px(wordSpacing)}px;`
 			if (letterSpacing !== 0) extra += `letter-spacing:${px(letterSpacing)}px;`
-			if (scaleX !== 1 && Number.isFinite(scaleX) && scaleX > 0) extra += `transform:scaleX(${Math.min(scaleX, 10)});`
+			const scaled = scaleX !== 1 && Number.isFinite(scaleX) && scaleX > 0 ? `scaleX(${Math.min(scaleX, 10)})` : ""
+
+			// An upright cluster of sideways text: turned back about the centre of its box (the span's top is the
+			// ascent above the baseline).
+			if ((info & FragmentFlag.UPRIGHT) !== 0) {
+				extra += `transform:rotate(-90deg) ${scaled};transform-origin:${px(width / 2)}px ${px((css.ascent + Math.max(0, px(style?.descent))) / 2)}px;`
+			} else if (scaled.length > 0) {
+				extra += `transform:${scaled};`
+			}
 			if ((info >> FRAGMENT_LEVEL_SHIFT) % 2 === 1) extra += "direction:rtl;unicode-bidi:bidi-override;"
 			if ((info & FragmentFlag.CAPS) !== 0) extra += "text-transform:uppercase;"
 
 			span.className = "fo-docx-run"
-			span.style.cssText = css.base + extra
+			span.style.cssText = css.base + extra + drawingTextCss(style, paints)
 
 			const pieces = linkPieces(page, sourceLinks, start, end)
 			const smallCaps = (info & FragmentFlag.SMALL_CAPS) !== 0
@@ -1009,7 +1184,7 @@ export function paintPage(page: DocxPageData, context: PagePaintContext): Painte
 		const count = lineLook(page, line, links)
 		const source = page.lineInts[line * LINE_INTS + 5] ?? -1
 		const text = page.sourceTexts[source] ?? ""
-		const painted = paintLine(document, page, tables, line, links, keptLook(lookHash(count, text), count, text))
+		const painted = paintLine(document, page, tables, line, links, keptLook(lookHash(count, text), count, text), context.paints)
 
 		stackLine(painted, stack.sources[source] ?? "")
 		lines.push(painted)
@@ -1113,7 +1288,7 @@ export function patchPage(
 		let next: PaintedLine
 
 		if (kept === undefined) {
-			next = paintLine(document, page, tables, line, links, keptLook(hash, count, text))
+			next = paintLine(document, page, tables, line, links, keptLook(hash, count, text), context.paints)
 		} else {
 			const start = page.lineInts[line * LINE_INTS + 2] ?? 0
 			const shift = start - (kept.texts[0]?.start ?? start)

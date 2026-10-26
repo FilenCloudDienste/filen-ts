@@ -45,6 +45,11 @@ describe("fileIconKey", () => {
 		expect(fileIconKey(ext, stubSets)).toBe("xls")
 	})
 
+	// Every format a presentation opens as: decks, templates, shows, macro-enabled ones, OpenDocument and 97–2003.
+	it.each("ppt pptx pptm potx potm ppsx ppsm pps pot odp otp".split(" "))("routes .%s to the presentation glyph", ext => {
+		expect(fileIconKey(ext, stubSets)).toBe("ppt")
+	})
+
 	it("routes archives, code, binaries and platform packages", () => {
 		expect(fileIconKey("zip", stubSets)).toBe("archive")
 		expect(fileIconKey("rs", stubSets)).toBe("code")

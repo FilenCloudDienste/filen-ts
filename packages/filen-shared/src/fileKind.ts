@@ -11,9 +11,9 @@ export { MIN_TRANSPORT_STREAM_BYTES }
 //
 // 1. A known extension that means one thing wins.
 // 2. An extension that means two (`.ts` TypeScript or an MPEG transport stream; `.webm`, `.ogg`, `.mp4`,
-//    `.mkv` and their audio siblings; `.dot` a Word 97–2003 template or a Graphviz/text file) is settled by a
-//    content verdict for the file when one exists, else by a MIME type that says audio or video (text, for a
-//    `.dot`), else by its usual meaning. A MIME type never makes a `.ts` a
+//    `.mkv` and their audio siblings; `.dot` a Word 97–2003 template or a Graphviz/text file; `.pot` a PowerPoint
+//    97–2003 template or a gettext template) is settled by a content verdict for the file when one exists, else by
+//    a MIME type that says audio or video (text, for a `.dot` or `.pot`), else by its usual meaning. A MIME type never makes a `.ts` a
 //    video: browsers upload TypeScript as video/mp2t too.
 // 3. No or an unknown extension: a well-known name (a Makefile is code whatever its type says), else its MIME
 //    type, else unknown.
@@ -25,9 +25,9 @@ export { MIN_TRANSPORT_STREAM_BYTES }
 // What a read of the file's content found.
 export type ContentVerdict = "transportStream" | "notTransportStream" | "video" | "audio"
 
-// What a read of a `.dot` found: a Word binary compound file ([MS-CFB] signature) or not. Kept apart from the
-// media verdicts the apps persist.
-export type DocumentVerdict = "wordBinary" | "notWordBinary"
+// What a read of a `.dot` (or a `.pot`) found: a Word (PowerPoint) binary compound file ([MS-CFB] signature) or not.
+// Kept apart from the media verdicts the apps persist.
+export type DocumentVerdict = "wordBinary" | "notWordBinary" | "presentationBinary" | "notPresentationBinary"
 
 export type FileVerdict = ContentVerdict | DocumentVerdict
 
@@ -61,6 +61,8 @@ interface Ambiguity {
 	transportStream?: string
 	wordBinary?: string
 	notWordBinary?: string
+	presentationBinary?: string
+	notPresentationBinary?: string
 	// What a text/* MIME type makes it.
 	text?: string
 	// Whether a MIME type may settle it.
@@ -81,7 +83,8 @@ const AMBIGUOUS: ReadonlyMap<string, Ambiguity> = new Map([
 	["m4a", { fallback: "m4a", audio: "m4a", video: "mp4", mimeHint: true }],
 	["mkv", { fallback: "mkv", audio: "mka", video: "mkv", mimeHint: true }],
 	["mka", { fallback: "mka", audio: "mka", video: "mkv", mimeHint: true }],
-	["dot", { fallback: "dot", wordBinary: "dot", notWordBinary: "txt", text: "txt", mimeHint: false }]
+	["dot", { fallback: "dot", wordBinary: "dot", notWordBinary: "txt", text: "txt", mimeHint: false }],
+	["pot", { fallback: "pot", presentationBinary: "pot", notPresentationBinary: "txt", text: "txt", mimeHint: false }]
 ])
 
 function lowerName(name: string): string {
@@ -100,6 +103,10 @@ function verdictExtension(ambiguity: Ambiguity, verdict: FileVerdict): string | 
 			return ambiguity.wordBinary
 		case "notWordBinary":
 			return ambiguity.notWordBinary
+		case "presentationBinary":
+			return ambiguity.presentationBinary
+		case "notPresentationBinary":
+			return ambiguity.notPresentationBinary
 		case "transportStream":
 			return ambiguity.transportStream
 		case "notTransportStream":

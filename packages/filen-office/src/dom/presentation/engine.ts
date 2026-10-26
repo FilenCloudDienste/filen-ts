@@ -36,9 +36,10 @@ import { openPptxCapability } from "./engine/open/pptx"
 import { saveCapability } from "./engine/save"
 import { showCapability } from "./engine/show"
 import { smartartCapability } from "./engine/smartart"
-import { textCapability } from "./engine/text"
+import { textCapability, type TextServices } from "./engine/text"
 import { thumbsCapability } from "./engine/thumbs"
 import { viewCapability } from "./engine/view"
+import { streamOpenWindow } from "./window"
 
 // The presentation worker's engine: a registry of capabilities, each in its own file under engine/ with one owner,
 // and the dispatcher that serves the protocol over them. A session is one open deck; every call on it goes to the
@@ -60,6 +61,8 @@ export interface OpenedPackage {
 	readonly opc?: OpcPackage
 	// Shapes locked at open.
 	readonly locks: number
+	// Called once when the session closes (drops what the opener kept: a decrypted package's key).
+	readonly release?: () => void
 }
 
 // Which lane a call runs in: the priority lane is served before the next background slice (§ scheduler).
@@ -103,6 +106,8 @@ export interface PresentationScheduler {
 export interface EngineServices {
 	readonly fonts: FontsCapability
 	readonly smartart: SmartArtCapability
+	// A shape's text chain, box and measuring environment (layoutText); absent: layoutText is refused notImplemented.
+	readonly text?: TextServices
 }
 
 export interface EngineSession {
@@ -228,7 +233,7 @@ export function openInfo(deck: Deck, opened: OpenedPackage): OpenInfo {
 	return {
 		format: deck.format,
 		variant: deck.variant,
-		slides: deck.slides.map(ref => ({ ref, hidden: deck.nodes.get(ref)?.hidden ?? false })),
+		slides: deck.slides.map(ref => ({ ref, hidden: deck.nodes.get(ref)?.hidden ?? deck.hiddenSlides?.has(ref) ?? false })),
 		size: { ...deck.size },
 		notesSize: { ...deck.notesSize },
 		sections: deck.sections,
@@ -349,7 +354,11 @@ export function servePresentation(endpoint: PresentationEndpoint, options: Serve
 			return
 		}
 
-		if (entry.aborted || pending.get(s) !== entry) return
+		if (entry.aborted || pending.get(s) !== entry) {
+			if (outcome.kind === "opened") outcome.package.release?.()
+
+			return
+		}
 
 		if (outcome.kind === "needsPassword") {
 			post({
@@ -370,6 +379,8 @@ export function servePresentation(endpoint: PresentationEndpoint, options: Serve
 		}
 
 		const closers: (() => void)[] = []
+
+		if (outcome.package.release !== undefined) closers.push(outcome.package.release)
 		const closed = { aborted: false, listeners: [] as (() => void)[] }
 		const sessionSignal: CallSignal = {
 			get aborted() {
@@ -406,6 +417,9 @@ export function servePresentation(endpoint: PresentationEndpoint, options: Serve
 
 		sessions.set(s, { session, calls: new Map(), closers })
 		post({ t: "event", s, event: { type: "opened", info: openInfo(outcome.deck, outcome.package) } })
+
+		if (request.options.window !== undefined)
+			streamOpenWindow(session, request.options.window, handlers.render, scheduler, sessionSignal)
 	}
 
 	const call = async (message: Extract<ToPresentationWorker, { t: "call" }>): Promise<void> => {

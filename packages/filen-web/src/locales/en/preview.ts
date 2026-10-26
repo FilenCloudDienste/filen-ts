@@ -21,6 +21,7 @@ import { previewOfficeShared } from "@/locales/en/previewOffice/shared"
 import { previewOfficeRibbon } from "@/locales/en/previewOffice/ribbon"
 import { previewCommandBar } from "@/locales/en/previewOffice/commandBar"
 import { previewSheetViewer } from "@/locales/en/previewSheet/viewer"
+import { previewPptxViewer } from "@/locales/en/previewPptx/viewer"
 import { previewSheetFormat } from "@/locales/en/previewSheet/format"
 import { previewSheetSave } from "@/locales/en/previewSheet/save"
 import { previewSheetStructure } from "@/locales/en/previewSheet/structure"
@@ -729,6 +730,7 @@ export const preview = {
 	...previewOfficeRibbon,
 	...previewCommandBar,
 	...previewSheetViewer,
+	...previewPptxViewer,
 	...previewSheetSave,
 	...previewSheetFormat,
 	...previewSheetKeys,

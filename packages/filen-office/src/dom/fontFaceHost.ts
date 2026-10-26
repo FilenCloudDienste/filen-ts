@@ -49,17 +49,61 @@ export function localSource(name: string): string {
 	return `local("${escaped}")`
 }
 
+// How long a local() lookup may take before the font counts as not installed: a lookup that never settles must not
+// hold up the text waiting on it.
+export const LOCAL_FONT_TIMEOUT_MS = 3000
+
+// Faces whose load has not settled. Firefox's workers collect a FontFace that only its own pending load refers to,
+// and that load then never settles; holding each one here until it does keeps it alive.
+const loading = new Set<FontFaceLike>()
+
+// Timers through globalThis: the module type-checks without DOM or Node typings.
+function setTimer(run: () => void, ms: number): unknown {
+	const set: unknown = Reflect.get(globalThis, "setTimeout")
+
+	return typeof set === "function" ? Reflect.apply(set, globalThis, [run, ms]) : undefined
+}
+
+function clearTimer(handle: unknown): void {
+	const clear: unknown = Reflect.get(globalThis, "clearTimeout")
+
+	if (typeof clear === "function") Reflect.apply(clear, globalThis, [handle])
+}
+
+async function load(fontFace: FontFaceLike, timeoutMs: number | undefined): Promise<void> {
+	loading.add(fontFace)
+
+	let timer: unknown
+
+	try {
+		await (timeoutMs === undefined
+			? fontFace.load()
+			: Promise.race([
+					fontFace.load(),
+					new Promise((_, reject) => {
+						timer = setTimer(() => {
+							reject(new Error("local font lookup timed out"))
+						}, timeoutMs)
+					})
+				]))
+	} finally {
+		if (timer !== undefined) clearTimer(timer)
+
+		loading.delete(fontFace)
+	}
+}
+
 export function fontFaceHost(scope: FontFaceScope): FontHost {
 	const faces = new Map<string, FontFaceLike[]>()
 	// Families removed while one of their faces was still loading: that face must not be added after.
 	const removed = new Set<string>()
 
-	const add = async (face: FontFaceDescriptor, source: string | ArrayBuffer): Promise<boolean> => {
+	const add = async (face: FontFaceDescriptor, source: string | ArrayBuffer, timeoutMs?: number): Promise<boolean> => {
 		let fontFace: FontFaceLike
 
 		try {
 			fontFace = new scope.FontFace(face.family, source, descriptors(face))
-			await fontFace.load()
+			await load(fontFace, timeoutMs)
 		} catch {
 			return false
 		}
@@ -78,7 +122,7 @@ export function fontFaceHost(scope: FontFaceScope): FontHost {
 
 	return {
 		addBytes: (face, data) => add(face, arrayBufferOf(data)),
-		addLocal: (face, name) => add(face, localSource(name)),
+		addLocal: (face, name) => add(face, localSource(name), LOCAL_FONT_TIMEOUT_MS),
 		remove(family) {
 			for (const face of faces.get(family) ?? []) scope.fonts.delete(face)
 

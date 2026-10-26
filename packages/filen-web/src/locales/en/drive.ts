@@ -607,6 +607,8 @@ export const drive = {
 	drivePreviewKindDocx: "Word document",
 	/** Info panel — Kind row value for a CSV, TSV or Excel file */
 	drivePreviewKindSpreadsheet: "Spreadsheet",
+	/** Info panel — Kind row value for a PowerPoint or OpenDocument presentation */
+	drivePreviewKindPresentation: "Presentation",
 	/** Info panel — Kind row value: a plain-text file */
 	drivePreviewKindText: "Text",
 	/** Info panel — Kind row value: a source-code file */

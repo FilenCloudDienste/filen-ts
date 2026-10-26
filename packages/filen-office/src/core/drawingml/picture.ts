@@ -102,8 +102,9 @@ export const MISSING_IMAGE: DrawingImage = {
 }
 
 // Reads the a:blip of a blip fill (pic:blipFill, a:blipFill, dsp/c blip fills) with its crop and the
-// supported effects into the list's image table; the image index, or -1 without a blip.
-export function readBlip(context: PaintContext, reader: DrawingReader, blipFill: number): number {
+// supported effects into the list's image table; the image index, or -1 without a blip. `placeholder` is the colour a
+// style reference gives phClr (a theme fill style's duotone and colour change are written in it).
+export function readBlip(context: PaintContext, reader: DrawingReader, blipFill: number, placeholder?: Rgba): number {
 	const blip = reader.child(blipFill, D.A, "blip")
 
 	if (blip < 0) return -1
@@ -163,7 +164,7 @@ export function readBlip(context: PaintContext, reader: DrawingReader, blipFill:
 				for (let child = document.firstChildElement(effect); child >= 0; child = document.nextSiblingElement(child)) {
 					const color =
 						reader.group(child) === D.A && COLOR_ELEMENTS.has(document.localName(child))
-							? readColor(reader, child, context.theme)
+							? readColor(reader, child, context.theme, placeholder)
 							: undefined
 
 					if (color !== undefined) colors.push(color)
@@ -178,8 +179,8 @@ export function readBlip(context: PaintContext, reader: DrawingReader, blipFill:
 				contrast = reader.fraction(effect, "contrast", 0)
 				break
 			case "clrChange": {
-				const from = readColorIn(reader, reader.child(effect, D.A, "clrFrom"), context.theme)
-				const to = readColorIn(reader, reader.child(effect, D.A, "clrTo"), context.theme)
+				const from = readColorIn(reader, reader.child(effect, D.A, "clrFrom"), context.theme, placeholder)
+				const to = readColorIn(reader, reader.child(effect, D.A, "clrTo"), context.theme, placeholder)
 
 				if (from !== undefined && to !== undefined) colorChange = [from, to]
 

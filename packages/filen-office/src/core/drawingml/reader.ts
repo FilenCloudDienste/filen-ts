@@ -25,7 +25,12 @@ export const D = {
 	Cdr: 19,
 	Lc: 20,
 	Wp: 21,
-	Xdr: 22
+	Xdr: 22,
+	// PresentationML and the PowerPoint 2010, 2013 and 2015 extensions.
+	P: 23,
+	P14: 24,
+	P15: 25,
+	P159: 26
 } as const
 
 export type D = (typeof D)[keyof typeof D]
@@ -64,7 +69,11 @@ const GROUP_URIS: readonly (readonly [D, readonly string[]])[] = [
 	[
 		D.Xdr,
 		["http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing", "http://purl.oclc.org/ooxml/drawingml/spreadsheetDrawing"]
-	]
+	],
+	[D.P, ["http://schemas.openxmlformats.org/presentationml/2006/main", "http://purl.oclc.org/ooxml/presentationml/main"]],
+	[D.P14, ["http://schemas.microsoft.com/office/powerpoint/2010/main"]],
+	[D.P15, ["http://schemas.microsoft.com/office/powerpoint/2012/main"]],
+	[D.P159, ["http://schemas.microsoft.com/office/powerpoint/2015/09/main"]]
 ]
 
 const GROUP_BY_URI = new Map<string, D>()

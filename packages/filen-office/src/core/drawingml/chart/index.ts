@@ -4,6 +4,7 @@ import type { PaintContext } from "../fill"
 import { D, EMU_PER_PX, drawingReader, type DrawingReader } from "../reader"
 import { plainParagraph, readTextBody, type TextDefaults } from "../text"
 import {
+	autoRotateLabels,
 	axisExtent,
 	axisState,
 	crossingPosition,
@@ -322,7 +323,13 @@ export function convertChart(
 
 			const rotation = builder.textRotation(axis.txPr)
 
-			existing = axisState(axis, builder.textProps(axis.txPr), rotation === undefined || Math.abs(rotation) > 360 ? 0 : rotation)
+			existing = axisState(
+				axis,
+				builder.textProps(axis.txPr),
+				rotation === undefined || Math.abs(rotation) > 360 ? 0 : rotation,
+				// No rotation, or one beyond a turn: Excel 2013 and later write rot="-60000000" for "automatic".
+				rotation === undefined || Math.abs(rotation) > 360
+			)
 			states.set(id, existing)
 		}
 
@@ -473,7 +480,7 @@ export function convertChart(
 	const allSeries = drawable.flatMap(plot => plot.series)
 	let title: { paragraphs: TextParagraph[]; rotation: number; box: Rect } | undefined
 
-	if (titleNode >= 0 || (autoDeleted >= 0 && !reader.bool(autoDeleted, "val", true) && allSeries.length === 1)) {
+	if (titleNode >= 0 || (autoDeleted >= 0 && !reader.bool(autoDeleted, "val", true) && area.seriesTotal === 1)) {
 		const defaults = builder.textProps(reader.child(titleNode, D.C, "txPr"), { ...builder.text, size: 18, bold: true })
 		const fallback = allSeries.length === 1 ? seriesName(allSeries[0] as (typeof allSeries)[number], 0) : "Chart Title"
 		const text = titleParagraphs(builder, titleNode, defaults, fallback)
@@ -613,9 +620,13 @@ export function convertChart(
 
 	if (!innerTarget) {
 		const reserve = { t: 0, b: 0, l: 0, r: 0 }
+		// Vertical axes first: the room they leave is the length horizontal category labels are fitted to.
+		const cartesianStates = [...states.entries()]
+			.filter(([id]) => !radial.has(id))
+			.sort(([, a], [, b]) => Number(a.horizontal) - Number(b.horizontal))
 
-		for (const [id, axisStateValue] of states) {
-			if (radial.has(id)) continue
+		for (const [, axisStateValue] of cartesianStates) {
+			if (axisStateValue.horizontal) autoRotateLabels(axisStateValue, Math.max(1, outer.w - reserve.l - reserve.r))
 
 			const extent = axisExtent(builder, axisStateValue)
 			const side = axisStateValue.horizontal
@@ -637,6 +648,10 @@ export function convertChart(
 			h: Math.max(1, outer.h - reserve.t - reserve.b)
 		}
 	}
+
+	if (innerTarget)
+		for (const [id, axisStateValue] of states)
+			if (!radial.has(id) && axisStateValue.horizontal) autoRotateLabels(axisStateValue, inner.w)
 
 	for (const axisStateValue of states.values()) setSpan(axisStateValue, inner)
 

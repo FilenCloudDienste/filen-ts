@@ -2,6 +2,7 @@ import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
 import { clampListboxIndex } from "@/features/drive/lib/listbox"
 import { ARCHIVE_NAME_EXTENSIONS } from "@/features/drive/lib/archiveFormats"
 import { SPREADSHEET_EXTENSIONS } from "@/features/spreadsheet/lib/fileKind"
+import { PRESENTATION_EXTENSIONS } from "@/features/presentation/lib/fileKind"
 import { CODE_FILE_EXTENSIONS, extensionStart, resolveFileKind, type FileVerdict, type FileKind } from "@filen/shared"
 import { codeLanguageExtensions, codeLanguageForExtension, type CodeLanguageId } from "@filen/office/core/code"
 import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
@@ -9,7 +10,19 @@ import { fileKindVerdict } from "@/features/drive/lib/fileKindVerdicts"
 // Every previewable file resolves to one of these; "other" is the download-only fallback (no viewer,
 // ever — canPreview excludes it unconditionally).
 export type PreviewCategory =
-	"image" | "rawImage" | "video" | "audio" | "pdf" | "docx" | "spreadsheet" | "text" | "code" | "markdown" | "archive" | "other"
+	| "image"
+	| "rawImage"
+	| "video"
+	| "audio"
+	| "pdf"
+	| "docx"
+	| "spreadsheet"
+	| "presentation"
+	| "text"
+	| "code"
+	| "markdown"
+	| "archive"
+	| "other"
 
 // Whole-buffer preview memory ceiling (old-web's MAX_PREVIEW_SIZE_WEB precedent): pdf/docx (and text,
 // under its own lower cap below) download fully into RAM before rendering, so an oversize file is excluded from canPreview
@@ -104,6 +117,9 @@ const EXTENSION_CATEGORIES: ReadonlyMap<string, PreviewCategory> = buildExtensio
 	// and templates open from their conversion, view-only; OpenDocument text (and its templates) translated, editable.
 	[["docx", "docm", "dotx", "dotm", "doc", "dot", "odt", "ott", "rtf"], "docx"],
 	[SPREADSHEET_EXTENSIONS, "spreadsheet"],
+	// Decks, templates and shows, macro-enabled or not (macros never run), OpenDocument presentations, and PowerPoint
+	// 97–2003 files (viewed). A `.pot` is a 97–2003 template until a read of its signature says it is text (gettext).
+	[PRESENTATION_EXTENSIONS, "presentation"],
 	[["md", "markdown"], "markdown"],
 	[["txt", "log"], "text"],
 	[ARCHIVE_NAME_EXTENSIONS, "archive"],
@@ -176,12 +192,13 @@ export function unprobedTransportStream(item: DriveItem): boolean {
 	return kind !== null && kind.sniffable && (kind.extension === "ts" || kind.extension === "mts")
 }
 
-// A `.dot` no read has told apart yet: the docx viewer's own read decides whether it is a Word 97–2003 template
-// or a text file (a Graphviz graph), and records the verdict that settles it.
+// A `.dot` or `.pot` no read has told apart yet: the docx (presentation) viewer's own read decides whether it is a
+// Word (PowerPoint) 97–2003 template or a text file (a Graphviz graph, a gettext template), and records the verdict
+// that settles it.
 export function unsniffedTemplate(item: DriveItem): boolean {
 	const kind = itemFileKind(item)
 
-	return kind !== null && kind.sniffable && kind.extension === "dot"
+	return kind !== null && kind.sniffable && (kind.extension === "dot" || kind.extension === "pot")
 }
 
 // A directory (or a shared-directory arm, which asDirectoryOrFile normalizes to one) always resolves
@@ -239,6 +256,11 @@ export function canPreview(item: DriveItem): boolean {
 	}
 
 	if (isStreamedCategory(category) && !needsImageTransform(item)) {
+		return true
+	}
+
+	// A drive deck is read in ranges by the presentation worker (bounded block cache), never whole: any size opens.
+	if (category === "presentation") {
 		return true
 	}
 

@@ -62,6 +62,7 @@ import { PdfViewer } from "@/features/preview/components/pdfViewer"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
 import { SheetViewer } from "@/features/spreadsheet/sheetViewer"
+import { PresentationViewer } from "@/features/presentation/components/presentationViewer"
 import { RemoteFileCompare } from "@/features/preview/components/remoteCompare"
 import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
 import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
@@ -1486,6 +1487,17 @@ function PreviewBody({
 									onAutosave
 								}
 							})}
+				/>
+			)
+		// View-only for now: no edit side, so it follows the version shown like every other viewer (bodyKey).
+		case "presentation":
+			return (
+				<PresentationViewer
+					item={item}
+					alt={alt}
+					variant={variant}
+					canSaveCopy={canSaveCopy}
+					onOpenFile={onOpenFile}
 				/>
 			)
 		case "text":

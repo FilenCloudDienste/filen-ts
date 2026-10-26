@@ -17,15 +17,23 @@ export interface FileKindVerdictStorage {
 	remove: (uuid: string) => Promise<void>
 }
 
-// A verdict as memory holds it: a document verdict (a `.dot` read as a Word template or not) as well as the media
-// ones kv keeps.
+// A verdict as memory holds it: a document verdict (a `.dot` read as a Word template or not, a `.pot` as a
+// PowerPoint one or not) as well as the media ones kv keeps.
 interface HeldVerdict {
 	v: FileVerdict
 	at: number
 }
 
 function isContentVerdict(verdict: FileVerdict): verdict is ContentVerdict {
-	return verdict !== "wordBinary" && verdict !== "notWordBinary"
+	switch (verdict) {
+		case "wordBinary":
+		case "notWordBinary":
+		case "presentationBinary":
+		case "notPresentationBinary":
+			return false
+		default:
+			return true
+	}
 }
 
 // Most recently written last.

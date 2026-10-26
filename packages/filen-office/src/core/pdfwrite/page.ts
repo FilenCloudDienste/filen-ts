@@ -58,9 +58,12 @@ export interface PdfTextOptions {
 	readonly fit?: "spread" | "scale"
 	// A linear transform of the text about its origin (rotation, synthetic italic shear): a b c d.
 	readonly transform?: readonly [number, number, number, number]
-	// Text rendering mode (§9.3.6); "fillStroke" with strokeWidth emboldens.
-	readonly render?: "fill" | "stroke" | "fillStroke" | "invisible"
+	// Text rendering mode (§9.3.6); "fillStroke" with strokeWidth emboldens; "clip" (mode 7) adds the glyphs to the
+	// clipping path, which applies after ET (wrap the call in saveState/restoreState).
+	readonly render?: "fill" | "stroke" | "fillStroke" | "invisible" | "clip"
 	readonly strokeWidth?: number
+	// The stroke colour of "stroke" and "fillStroke" (0xRRGGBBAA); default `color`.
+	readonly strokeColor?: number
 }
 
 export type PdfLinkTarget =
@@ -298,7 +301,7 @@ export class PdfPage extends ContentBuilder {
 		this.fillColor(options.color ?? 0x000000ff)
 
 		if (options.render === "stroke" || options.render === "fillStroke") {
-			this.strokeColor(options.color ?? 0x000000ff)
+			this.strokeColor(options.strokeColor ?? options.color ?? 0x000000ff)
 			this.lineWidth(options.strokeWidth ?? size / 30)
 		}
 
@@ -308,7 +311,7 @@ export class PdfPage extends ContentBuilder {
 		this.op("BT")
 
 		if (options.render !== undefined && options.render !== "fill") {
-			this.op(`${options.render === "stroke" ? 1 : options.render === "fillStroke" ? 2 : 3} Tr`)
+			this.op(`${options.render === "stroke" ? 1 : options.render === "fillStroke" ? 2 : options.render === "clip" ? 7 : 3} Tr`)
 		}
 
 		// Text space: y up, so the matrix flips the page's y-down space back (d negated).

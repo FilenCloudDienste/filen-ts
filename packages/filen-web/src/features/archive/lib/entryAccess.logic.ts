@@ -14,6 +14,7 @@ const ENTRY_PREVIEW_CATEGORIES: ReadonlySet<PreviewCategory> = new Set<PreviewCa
 	"pdf",
 	"docx",
 	"spreadsheet",
+	"presentation",
 	"image"
 ])
 

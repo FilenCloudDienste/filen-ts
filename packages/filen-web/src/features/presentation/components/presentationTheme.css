@@ -1,0 +1,19 @@
+/* The presentation viewer's slide list and notes in the app's tokens, light and dark alike (the variables are listed
+   in @filen/office/css/presentation.css). Slides and thumbnails stay the deck's own white paper; only their
+   surroundings follow the app. */
+.fo-slide-rail,
+.fo-notes {
+	--fo-rail-bg: var(--canvas);
+	--fo-rail-number: var(--muted-foreground);
+	--fo-rail-edge: var(--border);
+	--fo-rail-hover: color-mix(in oklab, var(--foreground) 35%, transparent);
+	--fo-rail-selected: var(--primary);
+	--fo-rail-number-font: 12px / 1.2 var(--font-sans);
+	--fo-notes-bg: var(--background);
+	--fo-notes-text: var(--foreground);
+	--fo-notes-edge: var(--border);
+	--fo-notes-hover: color-mix(in oklab, var(--foreground) 6%, transparent);
+	--fo-notes-placeholder: var(--muted-foreground);
+	--fo-notes-header-font: 500 12px / 1.2 var(--font-sans);
+	--fo-notes-font: 14px / 1.5 var(--font-sans);
+}

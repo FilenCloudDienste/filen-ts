@@ -23,7 +23,8 @@ const KINDS: Readonly<Record<string, string>> = {
 	gz: "archive",
 	jpg: "image",
 	docx: "docx",
-	dot: "docx"
+	dot: "docx",
+	pot: "presentation"
 }
 
 function kindOf(extension: string): string | null {
@@ -92,7 +93,12 @@ const ROWS: Row[] = [
 	["letter.dot", "application/msword", 30_000, null, "docx", "dot", "default", true, true],
 	["letter.dot", null, 30_000, "wordBinary", "docx", "dot", "sniff", true, false],
 	["graph.dot", "application/msword", 300, "notWordBinary", "text", "txt", "sniff", true, false],
-	["graph.dot", "text/vnd.graphviz", 300, null, "text", "txt", "mime", true, true]
+	["graph.dot", "text/vnd.graphviz", 300, null, "text", "txt", "mime", true, true],
+	// A .pot is a PowerPoint 97–2003 template or a gettext template (text): the same rule.
+	["deck.pot", "application/vnd.ms-powerpoint", 30_000, null, "presentation", "pot", "default", true, true],
+	["deck.pot", null, 30_000, "presentationBinary", "presentation", "pot", "sniff", true, false],
+	["messages.pot", null, 300, "notPresentationBinary", "text", "txt", "sniff", true, false],
+	["messages.pot", "text/x-gettext-translation-template", 300, null, "text", "txt", "mime", true, true]
 ]
 
 describe("resolveFileKind", () => {
@@ -108,6 +114,14 @@ describe("resolveFileKind", () => {
 
 		expect(verdictChangesKind(graph, "notWordBinary", kindOf)).toBe(true)
 		expect(verdictChangesKind(graph, "wordBinary", kindOf)).toBe(false)
+	})
+
+	it("keeps a .pot's verdict only where it changes the kind, and never takes a Word verdict for it", () => {
+		const messages = { name: "messages.pot", size: 300 }
+
+		expect(verdictChangesKind(messages, "notPresentationBinary", kindOf)).toBe(true)
+		expect(verdictChangesKind(messages, "presentationBinary", kindOf)).toBe(false)
+		expect(resolveFileKind({ ...messages, verdict: "notWordBinary" }, kindOf).extension).toBe("pot")
 	})
 
 	it("says nothing is sniffable for a .ts of unknown size", () => {

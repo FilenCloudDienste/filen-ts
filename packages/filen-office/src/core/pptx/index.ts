@@ -16,3 +16,4 @@ export {
 	type SpliceWriter
 } from "./write/types"
 export { emitFamilyOf, emitPptx, PPTX_EMIT_FAMILIES } from "./write/emit"
+export { openPptx, openPptxPackage, PptxParts, type PptxOpen, type PptxOpenOptions } from "./package"

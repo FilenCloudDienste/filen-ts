@@ -567,8 +567,8 @@ describe("the presentation protocol", () => {
 		const channel = loopback()
 		const stop = servePresentation(channel.worker)
 
+		// pptx is built (presentationOpenPptxCorpus.test.ts opens the corpus through the session).
 		for (const [s, format] of [
-			[1, "pptx"],
 			[2, "odp"],
 			[3, "ppt"]
 		] as const) {
