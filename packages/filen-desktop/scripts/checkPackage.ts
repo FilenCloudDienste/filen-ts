@@ -1,11 +1,14 @@
+import { spawnSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 import { isFeedPlatform } from "./feed.ts"
+import { nativeArchOf } from "./nativeArch.ts"
 
-// Checks the unpacked apps electron-builder leaves in release/: the web build and tray assets made it in, and the
-// app-update.yml baked into each app polls the frozen feed with no channel. With --signed, the Windows one must also
-// pin the publisher, which is what makes the updater verify an update's signature.
+// Checks the unpacked apps electron-builder leaves in release/: the web build, tray assets and the sync addon (built
+// for the app's arch) made it in, and the app-update.yml baked into each app polls the frozen feed with no channel.
+// With --signed, the Windows one must also pin the publisher, which is what makes the updater verify an update's
+// signature, and on macOS the addon must carry the team's valid signature (the hardened runtime loads nothing else).
 // DESKTOP_FEED_URL, when set, must equal the builder config's feed, so a workflow cannot upload somewhere else.
 //
 //   node scripts/checkPackage.ts <mac|win|linux> <x64|arm64>... [--signed]
@@ -28,6 +31,9 @@ const failures: string[] = []
 if (typeof feedUrl !== "string") {
 	throw new Error("electron-builder.ts has no generic publish url")
 }
+
+// The Developer ID team the installed apps' designated requirement pins.
+const MAC_TEAM = "7YTW5D2K7P"
 
 const normalise = (url: string) => url.replace(/\/+$/, "")
 const workflowFeed = process.env["DESKTOP_FEED_URL"]
@@ -76,6 +82,31 @@ for (const arch of archs) {
 		if (!existsSync(file)) {
 			failures.push(`${app}: ${file} is missing`)
 		}
+	}
+
+	const addon = path.join(resources, "native", "sdk-rs.node")
+
+	if (existsSync(addon)) {
+		const found = nativeArchOf(addon)
+
+		if (found !== arch) {
+			failures.push(`${addon}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
+		}
+
+		if (values.signed && platform === "mac") {
+			const verify = spawnSync("codesign", ["--verify", "--strict", addon], { encoding: "utf8" })
+			const details = spawnSync("codesign", ["-dv", addon], { encoding: "utf8" })
+
+			if (verify.status !== 0) {
+				failures.push(`${addon}: signature does not verify: ${verify.stderr.trim()}`)
+			}
+
+			if (!new RegExp(`^TeamIdentifier=${MAC_TEAM}$`, "m").test(details.stderr)) {
+				failures.push(`${addon}: not signed by team ${MAC_TEAM}`)
+			}
+		}
+	} else {
+		failures.push(`${app}: ${addon} is missing`)
 	}
 
 	const tray = path.join(resources, "tray")

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import type { Configuration, WindowsConfiguration } from "electron-builder"
+import { Arch, type Configuration, type WindowsConfiguration } from "electron-builder"
 
 // Everything here that installed 3.x clients can observe (appId, productName, artifact names, feed URL, install
 // locations, Linux package name) is frozen: changing any of it stops the fleet from upgrading in place.
@@ -52,10 +52,27 @@ const config: Configuration = {
 	},
 	// Runtime dependencies are empty: esbuild bundles main and preload into dist.
 	files: ["dist/**/*", "!dist/**/*.map", "package.json"],
+	// The sync addon sits beside the asar, not unpacked from it: the native host loads it by path. scripts/stageNapi.ts
+	// stages it per arch.
 	extraResources: [
 		{ from: webDist, to: "web" },
-		{ from: "build/tray", to: "tray" }
+		{ from: "build/tray", to: "tray" },
+		{ from: "build/native/${os}-${arch}", to: "native" }
 	],
+	// A missing extraResources source is skipped silently; an app without its addon cannot sync.
+	beforePack: context => {
+		const addon = path.join(
+			packageDir,
+			"build",
+			"native",
+			`${context.packager.platform.buildConfigurationKey}-${Arch[context.arch]}`,
+			"sdk-rs.node"
+		)
+
+		if (!existsSync(addon)) {
+			throw new Error(`No sync addon at ${addon}; run scripts/stageNapi.ts`)
+		}
+	},
 	asar: true,
 	npmRebuild: false,
 	nodeGypRebuild: false,
@@ -107,6 +124,8 @@ const config: Configuration = {
 		],
 		icon: "build/icons/win/icon.ico",
 		azureSignOptions,
+		// The sync addon is code the app loads, so it is signed like the executables.
+		signExts: [".node"],
 		// The default, kept explicit: app-update.yml then names azureSignOptions.publisherName, and electron-updater
 		// installs only an update signed by that publisher.
 		verifyUpdateCodeSignature: true

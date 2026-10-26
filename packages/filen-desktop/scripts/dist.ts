@@ -3,13 +3,14 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import path from "node:path"
 
-// Production bundle, then electron-builder for the host (extra CLI args such as `--mac dir` are passed through).
+// The sync addon staged per arch, the production bundle, then electron-builder for the host (extra CLI args such as `--mac dir` are passed through).
 // Uploading is the release workflow's job, so nothing is published from here.
 process.env["NODE_ENV"] = "production"
 
 // Loaded first so a missing web build fails before bundling.
 const { macMinimum } = await import("../electron-builder.ts")
 
+await import("./stageNapi.ts")
 await import("./build.ts")
 
 const cli = createRequire(import.meta.url).resolve("electron-builder/cli.js")

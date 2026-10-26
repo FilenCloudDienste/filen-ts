@@ -1,6 +1,7 @@
 import { build, type BuildOptions } from "esbuild"
 
-// Main is ESM; the sandboxed preload cannot load ESM, so it is a CJS bundle that only requires "electron".
+// Main and the native host (the sync engine's utility process) are ESM; the sandboxed preload cannot load ESM, so it is a
+// CJS bundle that only requires "electron".
 const common = {
 	bundle: true,
 	platform: "node",
@@ -11,17 +12,22 @@ const common = {
 	minify: process.env["NODE_ENV"] === "production"
 } satisfies BuildOptions
 
+// Bundled CommonJS packages (electron-updater and its dependencies) require Node built-ins, which an ESM bundle only
+// reaches through a require of its own.
+const esmRequire = {
+	js: 'import { createRequire as __filenCreateRequire } from "node:module"; const require = __filenCreateRequire(import.meta.url);'
+}
+
 await Promise.all([
+	build({ ...common, entryPoints: ["src/main/index.ts"], outfile: "dist/main.js", format: "esm", banner: esmRequire }),
+	// @filen/sdk-rs is imported for its types only; the addon is loaded at runtime by path.
 	build({
 		...common,
-		entryPoints: ["src/main/index.ts"],
-		outfile: "dist/main.js",
+		entryPoints: ["src/native/index.ts"],
+		outfile: "dist/native.js",
 		format: "esm",
-		// Bundled CommonJS packages (electron-updater and its dependencies) require Node built-ins, which an ESM bundle
-		// only reaches through a require of its own.
-		banner: {
-			js: 'import { createRequire as __filenCreateRequire } from "node:module"; const require = __filenCreateRequire(import.meta.url);'
-		}
+		conditions: ["filen-desktop"],
+		banner: esmRequire
 	}),
 	build({ ...common, entryPoints: ["src/preload/index.ts"], outfile: "dist/preload.cjs", format: "cjs" })
 ])
