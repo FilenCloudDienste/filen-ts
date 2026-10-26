@@ -8,6 +8,7 @@ on:
       - 'packages/filen-web/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-shared/**'
+      - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
       - 'pnpm-lock.yaml'
@@ -20,6 +21,7 @@ on:
       - 'packages/filen-web/**'
       - 'packages/filen-mobile/**'
       - 'packages/filen-shared/**'
+      - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
       - 'pnpm-lock.yaml'
@@ -40,6 +42,7 @@ jobs:
       filen-shared: ${{ steps.filter.outputs.filen-shared }}
       filen-office: ${{ steps.filter.outputs.filen-office }}
       filen-spellcheck: ${{ steps.filter.outputs.filen-spellcheck }}
+      filen-desktop: ${{ steps.filter.outputs.filen-desktop }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4
@@ -62,6 +65,13 @@ jobs:
               - 'patches/**'
               - 'package.json'
             filen-shared:
+              - 'packages/filen-shared/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
+            filen-desktop:
+              - 'packages/filen-desktop/**'
               - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
@@ -139,6 +149,29 @@ jobs:
         run: pnpm install --frozen-lockfile --filter @filen/shared...
       - name: Lint
         working-directory: packages/filen-shared
+        run: pnpm run lint
+  lint-desktop:
+    needs: changes
+    if: needs.changes.outputs.filen-desktop == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Electron never runs here, so its ~100 MB binary is not downloaded.
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-desktop
+        run: pnpm install --frozen-lockfile --filter @filen/desktop...
+      - name: Lint
+        working-directory: packages/filen-desktop
         run: pnpm run lint
   lint-office:
     needs: changes

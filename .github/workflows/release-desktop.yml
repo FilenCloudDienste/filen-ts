@@ -1,0 +1,409 @@
+# Signed release of filen-desktop to the update feed every installed client polls, triggered by a version tag such
+# as `filen-desktop@4.0.0`. The tag must match package.json's version.
+#
+# Order: preflight (tag, version, secrets) -> one web build -> signed per-platform builds, each checked against the
+# feed contract -> a draft GitHub release -> the CDN feed, artifacts before manifests -> the published feed read back
+# -> the GitHub release made public. A failure at any step leaves the feed untouched or, after the upload, still
+# serving byte-identical copies of what was checked.
+#
+# Secrets (names only; values live in the repository settings):
+#   CSC_LINK, CSC_KEY_PASSWORD      Developer ID Application certificate (.p12, base64) of Team 7YTW5D2K7P and its
+#                                   password; the installed Macs only accept an update signed by that team.
+#   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD
+#                                   Apple ID and app-specific password used to notarize the apps and disk images.
+#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+#                                   Service principal allowed to sign with the Azure Trusted Signing account below.
+#   DESKTOP_FEED_UPLOAD_URL, DESKTOP_FEED_UPLOAD_TOKEN
+#                                   Upload endpoint and bearer token for the CDN feed (see the "Upload to the feed" step).
+name: Release desktop
+
+on:
+  push:
+    tags:
+      - 'filen-desktop@*'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Queue, never cancel: an upload is not interrupted halfway.
+  group: release-desktop
+  cancel-in-progress: false
+
+env:
+  # Must equal the publish url in packages/filen-desktop/electron-builder.ts; scripts/checkPackage.ts enforces it.
+  DESKTOP_FEED_URL: https://cdn.filen.io/@filen/desktop/release/latest/
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/filen-desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Verify tag matches package version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#filen-desktop@}"
+          PKG_VERSION="$(node -p 'require("./package.json").version')"
+          echo "Tag: ${GITHUB_REF_NAME} (version ${TAG_VERSION}) | package.json version: ${PKG_VERSION}"
+          if [ "${TAG_VERSION}" != "${PKG_VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version (${PKG_VERSION}). Bump the version to ${TAG_VERSION} (or retag) before releasing."
+            exit 1
+          fi
+      # The feed has no channel, so every installed client is offered whatever is published there, prereleases
+      # included. Only a plain X.Y.Z above every 3.x release may ship.
+      - name: Verify version is a stable 4.x or later
+        run: |
+          PKG_VERSION="$(node -p 'require("./package.json").version')"
+          if ! [[ "${PKG_VERSION}" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]] || [ "${BASH_REMATCH[1]}" -lt 4 ]; then
+            echo "::error::${PKG_VERSION} cannot be published to the feed: it must be a stable version of 4.0.0 or later."
+            exit 1
+          fi
+      - name: Verify signing and upload secrets are set
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          DESKTOP_FEED_UPLOAD_URL: ${{ secrets.DESKTOP_FEED_UPLOAD_URL }}
+          DESKTOP_FEED_UPLOAD_TOKEN: ${{ secrets.DESKTOP_FEED_UPLOAD_TOKEN }}
+        # electron-builder skips notarization and signing silently without them, which would ship builds the
+        # installed clients refuse.
+        run: |
+          missing=0
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET DESKTOP_FEED_UPLOAD_URL DESKTOP_FEED_UPLOAD_TOKEN; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Secret ${name} is not set."
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+  # Built once and handed to every platform job: the bundle is platform-independent.
+  web:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: packages/filen-web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      # The spellchecker's wasm engine is built from source (packages/filen-spellcheck): rustup installs the
+      # toolchain and wasm target that rust-toolchain.toml pins.
+      - name: Set up Rust
+        working-directory: packages/filen-spellcheck
+        run: rustup toolchain install
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-spellcheck/crate/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache spellcheck dictionaries
+        uses: actions/cache@v4
+        with:
+          path: packages/filen-spellcheck/.dictionaries
+          key: spellcheck-dictionaries-${{ hashFiles('packages/filen-spellcheck/dictionaries/manifest.json') }}
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @filen/web...
+      - name: Build
+        env:
+          VITE_BUILD_ID: ${{ github.sha }}
+        run: pnpm run build
+      - name: Upload web build
+        uses: actions/upload-artifact@v6
+        with:
+          name: web-dist
+          path: packages/filen-web/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  mac:
+    needs: web
+    runs-on: macos-26
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: packages/filen-desktop
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      # Public identity, not a secret: the installed apps' designated requirement pins this team.
+      APPLE_TEAM_ID: 7YTW5D2K7P
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      # The app icon is an Icon Composer bundle, which only Xcode 26's actool compiles.
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.5'
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @filen/desktop...
+      - name: Download web build
+        uses: actions/download-artifact@v7
+        with:
+          name: web-dist
+          path: packages/filen-web/dist
+      - name: Build, sign and notarize
+        run: pnpm run dist -- --mac --x64 --arm64
+      # electron-builder notarizes the apps (and so the update zips) but not the disk images around them.
+      - name: Notarize and staple the disk images
+        run: |
+          set -euo pipefail
+          for dmg in release/*.dmg; do
+            xcrun notarytool submit "${dmg}" --apple-id "${APPLE_ID}" --password "${APPLE_APP_SPECIFIC_PASSWORD}" --team-id "${APPLE_TEAM_ID}" --wait
+            xcrun stapler staple "${dmg}"
+            xcrun stapler validate "${dmg}"
+          done
+      # Stapling changed the disk images after electron-builder hashed them.
+      - name: Re-hash the feed manifest
+        run: node scripts/feedHashes.ts
+      # Checked on the zips, because a zip is exactly what Squirrel.Mac stages on an installed client. The
+      # designated requirement is the one the installed apps hold an update to.
+      - name: Verify signatures, notarization and designated requirement
+        run: |
+          set -euo pipefail
+          DR='identifier "io.filen.desktop" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "7YTW5D2K7P"'
+          VERSION="$(node -p 'require("./package.json").version')"
+          WORK="$(mktemp -d)"
+          for arch in x64 arm64; do
+            lipo_arch="$([ "${arch}" = x64 ] && echo x86_64 || echo arm64)"
+            ditto -x -k "release/Filen_mac_${arch}.zip" "${WORK}/${arch}"
+            app="${WORK}/${arch}/Filen.app"
+            codesign --verify --deep --strict "${app}" || { echo "::error::Filen_mac_${arch}.zip: codesign verification failed"; exit 1; }
+            codesign --verify -R="${DR}" "${app}" || { echo "::error::Filen_mac_${arch}.zip: fails the installed apps' designated requirement"; exit 1; }
+            spctl --assess --type execute "${app}" || { echo "::error::Filen_mac_${arch}.zip: Gatekeeper rejects the app"; exit 1; }
+            xcrun stapler validate "${app}" || { echo "::error::Filen_mac_${arch}.zip: no stapled notarization ticket"; exit 1; }
+            actual_arch="$(lipo -archs "${app}/Contents/MacOS/Filen")"
+            [ "${actual_arch}" = "${lipo_arch}" ] || { echo "::error::Filen_mac_${arch}.zip: binary is ${actual_arch}, expected ${lipo_arch}"; exit 1; }
+            bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app}/Contents/Info.plist")"
+            [ "${bundle_version}" = "${VERSION}" ] || { echo "::error::Filen_mac_${arch}.zip: bundle version ${bundle_version}, expected ${VERSION}"; exit 1; }
+          done
+      - name: Check feed contract
+        run: node scripts/checkFeed.ts mac
+      - name: Check packaged apps
+        run: node scripts/checkPackage.ts mac x64 arm64
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-mac
+          path: |
+            packages/filen-desktop/release/*.dmg
+            packages/filen-desktop/release/*.zip
+            packages/filen-desktop/release/*.blockmap
+            packages/filen-desktop/release/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  windows:
+    needs: web
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/filen-desktop
+    env:
+      # The signer reads the credentials; the builder config enables signing only with all three account values.
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SIGNING_ENDPOINT: https://weu.codesigning.azure.net
+      AZURE_SIGNING_ACCOUNT: filen-signing
+      AZURE_SIGNING_PROFILE: filen-signing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @filen/desktop...
+      - name: Download web build
+        uses: actions/download-artifact@v7
+        with:
+          name: web-dist
+          path: packages/filen-web/dist
+      - name: Build and sign
+        run: pnpm run dist -- --win --x64 --arm64
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          $files = @('release/Filen_win.exe', 'release/win-unpacked/Filen.exe', 'release/win-arm64-unpacked/Filen.exe')
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -FilePath $file
+            if ($signature.Status -ne 'Valid') {
+              Write-Output "::error::${file}: Authenticode status is $($signature.Status)"
+              exit 1
+            }
+            if ($signature.SignerCertificate.Subject -notlike '*Filen Cloud Dienste UG*') {
+              Write-Output "::error::${file}: signed by $($signature.SignerCertificate.Subject)"
+              exit 1
+            }
+            Write-Output "${file}: signed by $($signature.SignerCertificate.Subject)"
+          }
+      - name: Check feed contract
+        run: node scripts/checkFeed.ts win
+      - name: Check packaged apps
+        run: node scripts/checkPackage.ts win x64 arm64 --signed
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-windows
+          path: |
+            packages/filen-desktop/release/*.exe
+            packages/filen-desktop/release/*.zip
+            packages/filen-desktop/release/*.blockmap
+            packages/filen-desktop/release/latest.yml
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  linux:
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/filen-desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      # electron-builder's rpm target shells out to rpmbuild.
+      - name: Install rpm
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends rpm
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @filen/desktop...
+      - name: Download web build
+        uses: actions/download-artifact@v7
+        with:
+          name: web-dist
+          path: packages/filen-web/dist
+      - name: Build
+        run: pnpm run dist -- --linux --x64 --arm64
+      - name: Check feed contract
+        run: node scripts/checkFeed.ts linux
+      - name: Check packaged apps
+        run: node scripts/checkPackage.ts linux x64 arm64
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-linux
+          path: |
+            packages/filen-desktop/release/*.deb
+            packages/filen-desktop/release/*.rpm
+            packages/filen-desktop/release/*.AppImage
+            packages/filen-desktop/release/*.zip
+            packages/filen-desktop/release/latest-linux*.yml
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    needs: [mac, windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: packages/filen-desktop/scripts
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Download artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: desktop-*
+          path: release
+          merge-multiple: true
+      - name: Check every manifest against the artifacts
+        run: node packages/filen-desktop/scripts/feedHashes.ts --check release
+      - name: Attach artifacts to a draft GitHub release
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" --draft --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" release/* --clobber
+      # Expected inputs:
+      #   DESKTOP_FEED_UPLOAD_URL    HTTPS endpoint where `PUT <url>/<file name>` stores (and overwrites) the request
+      #                              body so the feed URL above serves it under the same name.
+      #   DESKTOP_FEED_UPLOAD_TOKEN  Bearer token that endpoint accepts.
+      # Every artifact is uploaded before any manifest, so a client never reads a manifest naming a file that is not
+      # there yet. Another transport only changes the upload function; the order and the read-back after it stay.
+      - name: Upload to the feed
+        env:
+          DESKTOP_FEED_UPLOAD_URL: ${{ secrets.DESKTOP_FEED_UPLOAD_URL }}
+          DESKTOP_FEED_UPLOAD_TOKEN: ${{ secrets.DESKTOP_FEED_UPLOAD_TOKEN }}
+        working-directory: release
+        run: |
+          set -euo pipefail
+          if [ -z "${DESKTOP_FEED_UPLOAD_URL:-}" ] || [ -z "${DESKTOP_FEED_UPLOAD_TOKEN:-}" ]; then
+            echo "::error::DESKTOP_FEED_UPLOAD_URL and DESKTOP_FEED_UPLOAD_TOKEN must be set to publish to the feed."
+            exit 1
+          fi
+          upload() {
+            echo "Uploading $1"
+            curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+              --header "Authorization: Bearer ${DESKTOP_FEED_UPLOAD_TOKEN}" \
+              --header "Content-Type: application/octet-stream" \
+              --upload-file "$1" "${DESKTOP_FEED_UPLOAD_URL%/}/$1"
+          }
+          for file in *; do
+            case "${file}" in
+              latest*.yml) ;;
+              *) upload "${file}" ;;
+            esac
+          done
+          for file in latest*.yml; do
+            upload "${file}"
+          done
+      - name: Verify the published feed
+        run: node packages/filen-desktop/scripts/verifyFeed.ts release "${DESKTOP_FEED_URL}"
+      - name: Publish the GitHub release
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false

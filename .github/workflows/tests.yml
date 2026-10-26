@@ -20,6 +20,7 @@ on:
   push:
     paths:
       - 'packages/filen-shared/**'
+      - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
       - 'packages/filen-mobile/**'
@@ -33,6 +34,7 @@ on:
   pull_request:
     paths:
       - 'packages/filen-shared/**'
+      - 'packages/filen-desktop/**'
       - 'packages/filen-office/**'
       - 'packages/filen-spellcheck/**'
       - 'packages/filen-mobile/**'
@@ -52,6 +54,7 @@ jobs:
       filen-shared: ${{ steps.filter.outputs.filen-shared }}
       filen-office: ${{ steps.filter.outputs.filen-office }}
       filen-spellcheck: ${{ steps.filter.outputs.filen-spellcheck }}
+      filen-desktop: ${{ steps.filter.outputs.filen-desktop }}
       filen-mobile: ${{ steps.filter.outputs.filen-mobile }}
       filen-web: ${{ steps.filter.outputs.filen-web }}
       filen-assistant-eval: ${{ steps.filter.outputs.filen-assistant-eval }}
@@ -75,6 +78,13 @@ jobs:
               - 'package.json'
             filen-spellcheck:
               - 'packages/filen-spellcheck/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'package.json'
+            filen-desktop:
+              - 'packages/filen-desktop/**'
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
@@ -212,6 +222,29 @@ jobs:
         run: pnpm run test:rust
       - name: Test
         working-directory: packages/filen-spellcheck
+        run: pnpm test
+  test-desktop:
+    needs: changes
+    if: needs.changes.outputs.filen-desktop == 'true' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: filen-desktop-tests-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-desktop
+        run: pnpm install --frozen-lockfile --filter @filen/desktop...
+      - name: Test
+        working-directory: packages/filen-desktop
         run: pnpm test
   test-mobile:
     needs: changes

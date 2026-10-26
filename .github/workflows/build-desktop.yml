@@ -1,0 +1,88 @@
+# Packaging smoke test for filen-desktop: builds the web app it serves, bundles the shell and packs an unsigned
+# Linux app directory with electron-builder (no installers, nothing signed or published), then checks what landed
+# in it. Signed installers are release-desktop.yml's job.
+name: Build desktop
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/filen-desktop/**'
+      - 'packages/filen-web/**'
+      - 'packages/filen-shared/**'
+      - 'packages/filen-spellcheck/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'package.json'
+      - '.github/workflows/build-desktop.yml'
+
+  pull_request:
+    paths:
+      - 'packages/filen-desktop/**'
+      - 'packages/filen-web/**'
+      - 'packages/filen-shared/**'
+      - 'packages/filen-spellcheck/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'package.json'
+      - '.github/workflows/build-desktop.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      # The spellchecker's wasm engine is built from source (packages/filen-spellcheck): rustup installs the
+      # toolchain and wasm target that rust-toolchain.toml pins. Same caches as the web workflows.
+      - name: Set up Rust
+        working-directory: packages/filen-spellcheck
+        run: rustup toolchain install
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-spellcheck/crate/target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache spellcheck dictionaries
+        uses: actions/cache@v4
+        with:
+          path: packages/filen-spellcheck/.dictionaries
+          key: spellcheck-dictionaries-${{ hashFiles('packages/filen-spellcheck/dictionaries/manifest.json') }}
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @filen/web... --filter @filen/desktop...
+      - name: Build web
+        working-directory: packages/filen-web
+        env:
+          VITE_BUILD_ID: ${{ github.sha }}
+        run: pnpm run build
+      - name: Package unsigned Linux app directory
+        working-directory: packages/filen-desktop
+        run: pnpm run dist -- --linux dir --x64
+      - name: Check packaged app
+        working-directory: packages/filen-desktop
+        run: node scripts/checkPackage.ts linux x64
