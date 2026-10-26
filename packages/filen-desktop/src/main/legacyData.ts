@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { sessionEnvelopeSchema } from "@filen/shared/session"
-import { SESSION_BLOB_MAX_LENGTH } from "./sessionVault.ts"
+import { SESSION_BLOB_MAX_LENGTH } from "../shared/channels.ts"
 
 // What the old client (3.0.53) kept in its renderer's localStorage on filendesktop://bundle. Its web app wrote every
 // value with JSON.stringify (usehooks' useLocalStorage), so each raw string is JSON, `authed` included ("true").
@@ -162,14 +162,6 @@ export function legacySession(snapshot: LegacySnapshot): LegacySession {
 	}
 
 	return { ok: true, blob, userId: config.userId }
-}
-
-// The userId digits of a session envelope (the vault's blob), or null.
-export function sessionUserId(blob: string): string | null {
-	const userId = (parseJson(blob) as { userId?: unknown } | undefined)?.userId
-	const match = typeof userId === "string" ? /^\$bigint:(\d+)n$/.exec(userId) : null
-
-	return match?.[1] ?? null
 }
 
 // The old lock was active only with both a PIN and an inactivity timeout; a PIN alone never locked anything, so it

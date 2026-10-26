@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
-import { stringifyEnvelope } from "@/lib/serialize"
+import { stringifyEnvelope } from "@filen/shared/session"
 import { log } from "@/lib/log"
 import { persister, restorePersistedQueries, purgePersistedQueries, removeQueriesAndPersisted, PERSIST_PREFIX } from "@/queries/persist"
 

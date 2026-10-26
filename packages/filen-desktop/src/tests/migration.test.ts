@@ -31,7 +31,16 @@ function marker(overrides: Partial<MigrationMarker> = {}): MigrationMarker {
 	}
 }
 
-const SESSION_OF = (userId: string) => JSON.stringify({ userId: `$bigint:${userId}n` })
+const SESSION_OF = (userId: string) =>
+	JSON.stringify({
+		email: "user@example.com",
+		userId: `$bigint:${userId}n`,
+		rootUuid: "root-uuid",
+		authInfo: "auth-info",
+		privateKey: "private-key",
+		apiKey: "api-key",
+		authVersion: 2
+	})
 
 describe("parseMarker", () => {
 	it("round-trips a marker", () => {

@@ -2,7 +2,7 @@ import { type } from "arktype"
 import { experimental_createQueryPersister, type AsyncStorage, type PersistedQuery } from "@tanstack/react-query-persist-client"
 import { hashKey, type QueryClient, type QueryFunction, type QueryFunctionContext, type QueryKey } from "@tanstack/react-query"
 import { storage } from "@/lib/storage/adapter"
-import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
+import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
 import { log } from "@/lib/log"
 import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 

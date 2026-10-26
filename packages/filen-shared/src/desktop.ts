@@ -127,3 +127,235 @@ export interface DesktopBridge {
 	// Shows and focuses the window (a clicked notification).
 	showWindow(): void
 }
+
+// Directory sync. Pair ids are the engine's ids as decimal strings; a pair the engine does not hold yet (its local
+// directory is missing, or the engine cannot sync its remote directory) has no engine id.
+
+export type DesktopSyncMode = "twoWay" | "localToRemote" | "remoteToLocal" | "localBackup" | "remoteBackup"
+
+// The native host that runs the sync engine. `retryAt` is epoch ms.
+export type DesktopSyncHostState =
+	| { state: "off" }
+	| { state: "starting" }
+	| { state: "running" }
+	| { state: "restarting"; retryAt: number }
+	| { state: "failed"; reason: "crashLoop" | "addonMissing" | "baselineInUse" | "keychainLocked" }
+
+export type DesktopSyncPhase = "idle" | "syncing" | "paused" | "review" | "waitingForRoot" | "unsupported" | "error"
+
+// Told once per pair until dismissed: the old client's local trash is no longer used; the engine cannot sync an
+// account's root directory yet.
+export type DesktopSyncNotice = "localTrashDropped" | "accountRootUnsupported"
+
+// Why deletions were held back for approval.
+export type DesktopSyncHeldReason =
+	"scanIncomplete" | "firstSyncWithDeletions" | "remoteUnconverged" | "remoteEmptied" | "exceededThreshold"
+
+// Why a pass applies nothing: two items on one side resolve to the same path.
+export type DesktopSyncRefusal = "remoteCollision" | "localCollision"
+
+// What a dry run would do.
+export interface DesktopSyncPlanSummary {
+	actions: number
+	uploadBytes: number
+	downloadBytes: number
+	heldDeletions: number
+	heldReason: DesktopSyncHeldReason | null
+	conflicts: number
+	unsyncable: number
+	ignored: number
+	refused: DesktopSyncRefusal | null
+}
+
+export type DesktopSyncReviewFinding =
+	"uploads" | "downloads" | "conflicts" | "heldDeletions" | "refused" | "newlySynced" | "unconverged" | "dotFilesPerPair"
+
+// A pair kept paused until the user looked at what its first run would do. `summary` is null when the remote side
+// never converged.
+export interface DesktopSyncReview {
+	reason: "migrated" | "baselineReset"
+	findings: DesktopSyncReviewFinding[]
+	summary: DesktopSyncPlanSummary | null
+}
+
+export interface DesktopSyncTransfer {
+	relPath: string
+	direction: "upload" | "download"
+	bytes: number
+	total: number
+}
+
+export interface DesktopSyncIssueCounts {
+	conflicts: number
+	heldDeletions: number
+	unsyncable: number
+	failed: number
+}
+
+export interface DesktopSyncPair {
+	id: string
+	name: string
+	localRoot: string
+	// The remote directory's uuid.
+	remoteRoot: string
+	mode: DesktopSyncMode
+	paused: boolean
+	phase: DesktopSyncPhase
+	progress: { done: number; total: number } | null
+	transfers: DesktopSyncTransfer[]
+	// Epoch ms of the last completed pass this run saw.
+	lastSyncedAt: number | null
+	lastError: string | null
+	issues: DesktopSyncIssueCounts
+	// A watcher fell back to periodic full passes.
+	degraded: { local: boolean; remote: boolean }
+	review: DesktopSyncReview | null
+	notices: DesktopSyncNotice[]
+}
+
+export interface DesktopSyncOverview {
+	host: DesktopSyncHostState
+	pairs: DesktopSyncPair[]
+}
+
+export type DesktopSyncActivityKind =
+	| "uploaded"
+	| "downloaded"
+	| "createdRemoteDirectory"
+	| "createdLocalDirectory"
+	| "trashedRemote"
+	| "deletedLocal"
+	| "movedRemote"
+	| "movedLocal"
+	| "quarantined"
+	| "failed"
+	| "conflict"
+	| "deletionsHeld"
+	| "passFailed"
+	| "passCompleted"
+
+export interface DesktopSyncActivity {
+	seq: number
+	pairId: string
+	// Epoch ms.
+	at: number
+	kind: DesktopSyncActivityKind
+	relPath?: string
+	to?: string
+	detail?: string
+}
+
+export type DesktopSyncPlanList = "actions" | "held" | "conflicts" | "unsyncable" | "ignored"
+
+export type DesktopSyncNodeKind = "file" | "directory"
+
+export type DesktopSyncActionKind =
+	| "upload"
+	| "download"
+	| "createRemoteDirectory"
+	| "createLocalDirectory"
+	| "moveRemote"
+	| "moveLocal"
+	| "trashRemote"
+	| "deleteLocal"
+	| "adoptBaseline"
+
+// `to` is a move's destination; `size` is null for directories and sizes neither side reported.
+export interface DesktopSyncPlanAction {
+	relPath: string
+	kind: DesktopSyncActionKind
+	to: string | null
+	node: DesktopSyncNodeKind
+	size: number | null
+}
+
+// A side is null where that side deleted the path.
+export interface DesktopSyncConflict {
+	relPath: string
+	local: DesktopSyncNodeKind | null
+	remote: DesktopSyncNodeKind | null
+}
+
+export type DesktopSyncUnsyncableReason =
+	"invalidName" | "repeatedFailure" | "remoteUndecodable" | "remoteInvalidName" | "remoteBrokenParent" | "localAlias"
+
+export interface DesktopSyncUnsyncable {
+	relPath: string
+	reason: DesktopSyncUnsyncableReason
+	detail: string | null
+}
+
+// `dir` is the directory of the `.filenignore` holding `pattern` ("" is the pair's root), for level "file" only.
+// `tracked`: the path was synced before and is no longer.
+export interface DesktopSyncIgnored {
+	relPath: string
+	level: "default" | "user" | "file"
+	dir: string | null
+	pattern: string
+	tracked: boolean
+}
+
+export type DesktopSyncPlanPage =
+	| { list: "actions" | "held"; total: number; entries: DesktopSyncPlanAction[] }
+	| { list: "conflicts"; total: number; entries: DesktopSyncConflict[] }
+	| { list: "unsyncable"; total: number; entries: DesktopSyncUnsyncable[] }
+	| { list: "ignored"; total: number; entries: DesktopSyncIgnored[] }
+
+// The deletions the last pass held back, and the token that approves exactly them.
+export interface DesktopSyncHeldDeletions {
+	passToken: string | null
+	reason: DesktopSyncHeldReason | null
+	total: number
+	entries: DesktopSyncPlanAction[]
+}
+
+export type DesktopSyncErrorCode =
+	| "hostUnavailable"
+	| "timeout"
+	| "unauthenticated"
+	| "pairNotFound"
+	| "planExpired"
+	| "rootExpired"
+	| "rootRefused"
+	| "accountRoot"
+	| "localRootMissing"
+	| "remoteRootMissing"
+	| "localRootInUse"
+	| "localRootNested"
+	| "localRootContains"
+	| "remoteRootInUse"
+	| "remoteRootNested"
+	| "remoteRootContains"
+	| "modeConflict"
+	| "invalidIgnore"
+	| "unknown"
+
+// `pairId`: the other pair an overlap refusal names. `line`: the first ignore line that does not parse (1-based).
+export interface DesktopSyncError {
+	code: DesktopSyncErrorCode
+	pairId?: string
+	line?: number
+	message?: string
+}
+
+// Why a chosen local directory cannot be a pair's root.
+export type DesktopSyncRootProblem =
+	| "notDirectory"
+	| "notWritable"
+	| "filesystemRoot"
+	| "homeDirectory"
+	| "appData"
+	| "temporary"
+	| "insidePair"
+	| "containsPair"
+	| "insideMount"
+	| "containsMount"
+
+// A root inside a directory another app syncs: allowed, but both apps then write the same files.
+export type DesktopSyncRootWarning = "iCloud" | "cloudStorage" | "oneDrive"
+
+// `id` stands for the chosen directory in a later addPair; the page never sends a path back.
+export type DesktopSyncLocalRootChoice =
+	| { status: "canceled" }
+	| { status: "refused"; path: string; problem: DesktopSyncRootProblem }
+	| { status: "ok"; id: string; path: string; name: string; warnings: DesktopSyncRootWarning[] }

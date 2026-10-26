@@ -44,7 +44,7 @@ vi.mock("@/lib/desktop", () => ({ desktopBridge: () => desktop.bridge }))
 
 import { persistSession, resumeSession, clearSession, clearSessionOutsideKv, hasPersistedSession } from "@/lib/sdk/session"
 import { log } from "@/lib/log"
-import { stringifyEnvelope } from "@/lib/serialize"
+import { stringifyEnvelope } from "@filen/shared/session"
 
 const SESSION_KV_KEY = "sdk.session.v1"
 

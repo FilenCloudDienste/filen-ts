@@ -31,7 +31,7 @@ const { JobQueue } = await import("@/features/audio/lib/trackMetadata.logic")
 const { planTrackTagEvictions, trackTagsKey, trackDisplayTitle } = await import("@/features/audio/lib/trackTags.logic")
 const { backfillTrackDuration, getTrackTags, hydrateTrackTags, putTrackTags, resetTrackTags, useTrackTagsStore } =
 	await import("@/features/audio/store/useTrackTagsStore")
-const { stringifyEnvelope } = await import("@/lib/serialize")
+const { stringifyEnvelope } = await import("@filen/shared/session")
 
 import type { AudioMetadataResult } from "@/workers/audioMetadata"
 import type { TrackMetadataDeps } from "@/features/audio/lib/trackMetadata"

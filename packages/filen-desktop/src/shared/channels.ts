@@ -33,3 +33,7 @@ export const VERSION_ARG_PREFIX = "--filen-app-version="
 // What `session:get` answers. An error thrown by an IPC handler reaches the preload only as a wrapped message, so
 // the unreadable case travels as data and the preload turns it into the rejection the bridge documents.
 export type SessionRead = { status: "absent" } | { status: "present"; blob: string } | { status: "unreadable" }
+
+// A real session is a few KB (an RSA private key plus the master-key chain, ~65 bytes a key); this leaves room
+// for thousands of keys and only stops an unbounded payload.
+export const SESSION_BLOB_MAX_LENGTH = 1024 * 1024

@@ -3,7 +3,7 @@ import * as Comlink from "comlink"
 import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { accountQueryGet } from "@/queries/account"
-import { stringifyEnvelope } from "@/lib/serialize"
+import { stringifyEnvelope } from "@filen/shared/session"
 import { kvGetJson, kvHas, kvSetJson } from "@/lib/storage/adapter"
 import { comboFor, setUserCombo } from "@/lib/keymap/registry"
 import { whenBootReady } from "@/lib/sdk/boot"
@@ -33,7 +33,7 @@ import {
 // The e2e harness logs in once through the real form, harvests the session via `dumpSession`
 // (`mint` is kept only as a fallback), stores the blob to a file, and re-seeds it on later loads via
 // sessionStorage, which bootSdk drains into kv before its own resumeSession (@/lib/sdk/boot). The blob carries
-// a bigint (`StringifiedClient.userId`), so it always travels as an envelope STRING (@/lib/serialize),
+// a bigint (`StringifiedClient.userId`), so it always travels as an envelope STRING (@filen/shared/session),
 // never raw JSON.
 
 // Test kv probes go through the normal adapter, which requires an arktype schema on read.

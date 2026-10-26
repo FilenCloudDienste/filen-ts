@@ -1,12 +1,8 @@
 import { type } from "arktype"
-import { sessionEnvelopeSchema } from "@filen/shared/session"
-import type { SessionRead } from "../shared/channels.ts"
+import { parseSessionBlob, sessionEnvelopeSchema } from "@filen/shared/session"
+import { SESSION_BLOB_MAX_LENGTH, type SessionRead } from "../shared/channels.ts"
 import { errorCode, type AtomicFile } from "./atomicFile.ts"
 import { serialQueue } from "./serial.ts"
-
-// A real session is a few KB (an RSA private key plus the master-key chain, ~65 bytes a key); this leaves room
-// for thousands of keys and only stops an unbounded payload.
-export const SESSION_BLOB_MAX_LENGTH = 1024 * 1024
 
 // The shape check main does before storing what the renderer sent. Main never uses the keys; the web's resume is
 // the real check.
@@ -20,6 +16,11 @@ export function isSessionBlob(value: unknown): value is string {
 	} catch {
 		return false
 	}
+}
+
+// The userId digits of a stored session blob, or null when it is not a session.
+export function sessionUserId(blob: string): string | null {
+	return parseSessionBlob(blob)?.userId.toString() ?? null
 }
 
 // Linux falls back to a hardcoded key when no keyring is recognised ("basic_text"), which protects nothing, so the

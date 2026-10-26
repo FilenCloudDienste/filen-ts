@@ -2,8 +2,9 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createSessionVault, isSessionBlob, SESSION_BLOB_MAX_LENGTH, vaultMode, type VaultCipher } from "../main/sessionVault.ts"
+import { createSessionVault, isSessionBlob, sessionUserId, vaultMode, type VaultCipher } from "../main/sessionVault.ts"
 import { atomicFile, type AtomicFile } from "../main/atomicFile.ts"
+import { SESSION_BLOB_MAX_LENGTH } from "../shared/channels.ts"
 
 const BLOB = JSON.stringify({
 	email: "user@example.com",
@@ -68,6 +69,15 @@ describe("isSessionBlob", () => {
 		expect(isSessionBlob(JSON.stringify({ email: "a" }))).toBe(false)
 		expect(isSessionBlob(BLOB.replace("$bigint:123456789012345678n", "123"))).toBe(false)
 		expect(isSessionBlob(BLOB.slice(0, -1) + `,"pad":"${"x".repeat(SESSION_BLOB_MAX_LENGTH)}"}`)).toBe(false)
+	})
+})
+
+describe("sessionUserId", () => {
+	it("reads the user id of a stored session only", () => {
+		expect(sessionUserId(BLOB)).toBe("123456789012345678")
+		expect(sessionUserId(JSON.stringify({ userId: "$bigint:42n" }))).toBeNull()
+		expect(sessionUserId(JSON.stringify({ ...JSON.parse(BLOB), userId: 42 }))).toBeNull()
+		expect(sessionUserId("{")).toBeNull()
 	})
 })
 

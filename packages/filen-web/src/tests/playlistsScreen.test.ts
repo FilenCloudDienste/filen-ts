@@ -116,7 +116,7 @@ const { PlaylistsScreen } = await import("@/features/audio/screens/playlists")
 const { PlaylistsSidebar } = await import("@/features/audio/components/playlistsSidebar")
 const { useAudioStore } = await import("@/features/audio/store/useAudioStore")
 const { resetTrackTags } = await import("@/features/audio/store/useTrackTagsStore")
-const { stringifyEnvelope } = await import("@/lib/serialize")
+const { stringifyEnvelope } = await import("@filen/shared/session")
 const { trackTagsKey } = await import("@/features/audio/lib/trackTags.logic")
 const { reorderPlaylistFileAction } = await import("@/features/audio/lib/playlists")
 

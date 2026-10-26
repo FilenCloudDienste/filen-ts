@@ -1,6 +1,6 @@
 import type { Type } from "arktype"
 import { acquireStorage, type StorageHandle } from "@/lib/storage/leader"
-import { parseEnvelope, stringifyEnvelope } from "@/lib/serialize"
+import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
 import { log } from "@/lib/log"
 import { decodeValue } from "@/lib/storage/decode"
 import { nextTask } from "@/lib/nextTask"

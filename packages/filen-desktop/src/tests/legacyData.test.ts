@@ -12,7 +12,6 @@ import {
 	parseReadResult,
 	parseStash,
 	READ_SCRIPT,
-	sessionUserId,
 	WIPE_SCRIPT
 } from "../main/legacyData.ts"
 import { isSessionBlob } from "../main/sessionVault.ts"
@@ -207,14 +206,6 @@ describe("legacySession", () => {
 			ok: false,
 			reason: "invalid-account"
 		})
-	})
-})
-
-describe("sessionUserId", () => {
-	it("reads the envelope's user id", () => {
-		expect(sessionUserId(JSON.stringify({ userId: "$bigint:42n" }))).toBe("42")
-		expect(sessionUserId(JSON.stringify({ userId: 42 }))).toBeNull()
-		expect(sessionUserId("{")).toBeNull()
 	})
 })
 

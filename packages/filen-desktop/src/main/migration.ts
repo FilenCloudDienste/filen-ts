@@ -9,10 +9,10 @@ import {
 	type LegacySession,
 	type LegacySnapshot,
 	legacyStash,
-	parseReadResult,
-	sessionUserId
+	parseReadResult
 } from "./legacyData.ts"
 import { serialQueue } from "./serial.ts"
+import { sessionUserId } from "./sessionVault.ts"
 
 // The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where
 // it got to:
