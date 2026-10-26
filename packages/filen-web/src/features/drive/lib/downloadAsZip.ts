@@ -1,6 +1,7 @@
 import { writeZip, type ByteChunks, type ByteSink } from "@filen/office/core/opc"
 import { macrotaskYield } from "@filen/office/dom/docx"
 import { convertedCopyName } from "@/features/drive/lib/copyName"
+import { browserEngine } from "@/lib/media/mseController.logic"
 import {
 	activeServiceWorker,
 	assertSwControlled,
@@ -219,6 +220,12 @@ function memoryDelivery(name: string, download: (name: string, blob: Blob) => vo
 	}
 }
 
+// Linux WebKit stops the page's requests at a point the page cannot see while a navigation turns into a download
+// (Safari's are safe once the browser reads it, ready()), so there, and only there, the archive is gathered in memory.
+export function streamsSafely(userAgent: string): boolean {
+	return !(browserEngine(userAgent) === "webkit" && /\bLinux\b/u.test(userAgent))
+}
+
 // Where a bulk run's archive goes. Call it synchronously off the click: the save picker needs the gesture. Rejects
 // when the user dismisses the picker (isPickerCancelled).
 export async function zipDelivery(
@@ -233,7 +240,7 @@ export async function zipDelivery(
 		if (save.kind === "fsa") return fsaDelivery(save)
 	}
 
-	if (!canTransferStreams()) {
+	if (!canTransferStreams() || !streamsSafely(navigator.userAgent)) {
 		return memoryDelivery(name, download)
 	}
 
