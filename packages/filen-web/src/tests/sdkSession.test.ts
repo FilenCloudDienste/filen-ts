@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
-import type { DesktopBridge, DesktopSessionVault, DesktopSync } from "@filen/shared/desktop"
+import type { DesktopBridge, DesktopMounts, DesktopSessionVault, DesktopSync } from "@filen/shared/desktop"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
 // to the one method the session store calls. `injectClient` is a spy so the resume path is observable.
@@ -212,6 +212,29 @@ const unusedSync: DesktopSync = {
 	onOpenPair: () => () => undefined
 }
 
+const unusedMounts: DesktopMounts = {
+	overview: unused,
+	onOverview: () => () => undefined,
+	stats: unused,
+	onStats: () => () => undefined,
+	chooseMountPoint: unused,
+	driveLetters: unused,
+	setDrive: unused,
+	listenAddresses: unused,
+	setServe: unused,
+	credentials: unused,
+	copyCredential: unused,
+	setCredentials: unused,
+	regenerateCredentials: unused,
+	setTuning: unused,
+	clearCache: unused,
+	installFuse: unused,
+	revealDrive: unused,
+	confirmSignOut: unused,
+	dismissNotice: unused,
+	retryHost: () => undefined
+}
+
 describe("desktop vault", () => {
 	function installVault(stored: string | null = null) {
 		const state = { stored }
@@ -257,6 +280,7 @@ describe("desktop vault", () => {
 			},
 			logs: { export: () => Promise.reject(new Error("unused")) },
 			sync: unusedSync,
+			mounts: unusedMounts,
 			setTitleBarColors: () => undefined,
 			onWindowState: () => () => undefined,
 			showWindow: () => undefined

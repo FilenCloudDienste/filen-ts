@@ -6,7 +6,8 @@ import type { DesktopSyncHostState, DesktopSyncPlanSummary } from "@filen/shared
 import { CHANNELS, syncChannel, type SyncCall } from "../shared/channels.ts"
 import type { NativeOp, NativeOpArgs, NativePlanSummary } from "../shared/nativeProtocol.ts"
 import { createActivityLog } from "../main/sync/activity.ts"
-import { registerSyncIpc, type SyncIpcEvent, type SyncIpcMain } from "../main/sync/ipc.ts"
+import type { IpcEvent, IpcMain } from "../main/pages.ts"
+import { registerSyncIpc } from "../main/sync/ipc.ts"
 import { createRootTokens, ROOT_TOKEN_TTL_MS } from "../main/sync/localRoot.ts"
 import { createSyncService, OVERVIEW_PUSH_INTERVAL_MS, type SyncServiceDeps } from "../main/sync/service.ts"
 import type { ShellPair } from "../main/sync/store.ts"
@@ -96,9 +97,9 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		now: () => clock,
 		log: { info: vi.fn(), warn: vi.fn() }
 	})
-	const handlers = new Map<string, (event: SyncIpcEvent, ...args: unknown[]) => unknown>()
-	const listeners = new Map<string, (event: SyncIpcEvent, ...args: unknown[]) => void>()
-	const ipc: SyncIpcMain = {
+	const handlers = new Map<string, (event: IpcEvent, ...args: unknown[]) => unknown>()
+	const listeners = new Map<string, (event: IpcEvent, ...args: unknown[]) => void>()
+	const ipc: IpcMain = {
 		handle: (channel, listener) => {
 			handlers.set(channel, listener)
 		},
@@ -107,7 +108,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		}
 	}
 	const sent: [string, unknown][] = []
-	const event: SyncIpcEvent = {
+	const event: IpcEvent = {
 		senderFrame: { url: options.senderUrl ?? APP },
 		sender: {
 			id: 3,

@@ -280,6 +280,9 @@ importers:
       eslint-config-prettier:
         specifier: ^10.1.8
         version: 10.1.8(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       prettier:
         specifier: ^3.9.10
         version: 3.9.10

@@ -330,7 +330,7 @@ export const SYNC_OPS = {
 
 export const SERVE_PROTOCOLS = ["webdav", "s3", "ftp", "sftp", "http", "restic", "nfs"] as const satisfies readonly DesktopServeProtocol[]
 
-const serveProtocolSchema = pinned<DesktopServeProtocol>()(type.enumerated(...SERVE_PROTOCOLS))
+export const serveProtocolSchema = pinned<DesktopServeProtocol>()(type.enumerated(...SERVE_PROTOCOLS))
 
 const roleSchema = pinned<DesktopMountsRole>()(type.enumerated("drive", ...SERVE_PROTOCOLS))
 
@@ -355,6 +355,10 @@ const mountsErrorCodeSchema = pinned<DesktopMountsErrorCode>()(
 		"binaryInvalid",
 		"unauthenticated",
 		"timeout",
+		"mountPointExpired",
+		"credentialsInvalid",
+		"credentialsWeak",
+		"acknowledgementRequired",
 		"unknown"
 	)
 )

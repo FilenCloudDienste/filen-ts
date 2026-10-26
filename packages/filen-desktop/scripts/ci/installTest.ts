@@ -2,14 +2,17 @@ import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
 import { hashFile, parseFeed } from "../feed.ts"
+import { nativeArchOf } from "../nativeArch.ts"
 import { LEGACY_E2E_BANNER, LEGACY_RELEASE_URL, LEGACY_SHA512, LEGACY_VERSION } from "./legacy.ts"
 import {
 	downloadPinned,
 	errorMessage,
 	fail,
 	holds,
+	run,
 	section,
 	serveFeed,
 	startXvfb,
@@ -34,6 +37,9 @@ import { targetFor, type AppProcess, type Arch, type Format, type Platform, type
 // 127.0.0.1, replaces the feed and installs a downloaded update at once, through the same path as the page's restart
 // prompt; it logs TEST_FEED_LOG when it takes effect. Every launch logs "Filen <version> starting" to
 // <userData>/logs/main.log, which is how the relaunched version is read without touching the app.
+//
+// The updated app must also ship the pinned rclone (build/rclone/versions.json) for its CPU, runnable from the install,
+// and on Windows have WinFsp installed (Target.verifyInstall).
 
 const TEST_FEED_ENV = "FILEN_DESKTOP_TEST_UPDATE_FEED"
 const TEST_FEED_LOG = "updater: test feed"
@@ -151,6 +157,34 @@ async function feedFor(target: Target): Promise<{ server: FeedServer; size: numb
 	console.log(`feed ${server.url} serving ${names.join(", ")}`)
 
 	return { server, size: entry.size, sha512: entry.sha512 }
+}
+
+// The installed app's rclone: built for the runner's CPU and the pinned release.
+function verifyRclone(target: Target): void {
+	const versions: unknown = JSON.parse(readFileSync(fileURLToPath(new URL("../../build/rclone/versions.json", import.meta.url)), "utf8"))
+	const pinned = typeof versions === "object" && versions !== null && "rclone" in versions ? versions.rclone : undefined
+
+	if (typeof pinned !== "string") {
+		fail("build/rclone/versions.json names no rclone version")
+	}
+
+	target.resource(path.join("rclone", platform === "win" ? "rclone.exe" : "rclone"), file => {
+		if (!existsSync(file)) {
+			fail(`${file} is missing`)
+		}
+
+		const found = nativeArchOf(file)
+
+		if (found !== arch) {
+			fail(`${file} is built for ${found ?? "an unknown architecture"}, not ${arch}`)
+		}
+
+		const version = /^rclone v(\S+)$/m.exec(run(file, ["version"]).stdout)?.[1]
+
+		if (version !== pinned) {
+			fail(`${file} is rclone ${version ?? "of no version"}, expected ${pinned}`)
+		}
+	})
 }
 
 function writeMarker(target: Target): string {
@@ -314,6 +348,7 @@ async function main(): Promise<void> {
 
 		section("verify")
 		target.verifyInstall(signed)
+		verifyRclone(target)
 
 		const installed = target.installedVersion()
 

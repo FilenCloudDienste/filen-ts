@@ -39,6 +39,7 @@
 		"esbuild": "^0.28.2",
 		"eslint": "^10.13.0",
 		"eslint-config-prettier": "^10.1.8",
+		"fflate": "^0.8.3",
 		"prettier": "^3.9.10",
 		"reflect-metadata": "^0.2.2",
 		"typescript": "6.0.3",

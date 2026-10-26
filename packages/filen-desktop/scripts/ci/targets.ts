@@ -38,8 +38,11 @@ export interface Target {
 	installedVersion(): string
 	// The version the OS's package database or uninstall entry records, null where there is none.
 	registeredVersion(): string | null
-	// Checks run after every install: location, registration and the payload's signature when signed.
+	// Checks run after every install: location, registration and the payload's signature when signed; on Windows also
+	// WinFsp, which every installer (3.0.53's and the new one) installs.
 	verifyInstall(signed: boolean): void
+	// Hands `use` a file of the installed app's resources directory (an AppImage's is extracted for the call).
+	resource<T>(relative: string, use: (file: string) => T): T
 }
 
 const home = os.homedir()
@@ -113,6 +116,16 @@ function windows(): Target {
 				`foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath; ` +
 				`if ($p.DisplayName -eq 'Filen' -or $p.DisplayName -like 'Filen [0-9]*') { "$($p.DisplayVersion)|$($p.InstallLocation)" } } }`
 		)
+	// WinFsp registers under the 32-bit view only; its DLL for this CPU must be there too.
+	const winFspDll = (): string | null => {
+		const installDir = powershell(
+			"(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\WOW6432Node\\WinFsp' -Name InstallDir -ErrorAction SilentlyContinue).InstallDir"
+		)
+		const dll =
+			installDir === "" ? null : path.win32.join(installDir, "bin", process.arch === "arm64" ? "winfsp-a64.dll" : "winfsp-x64.dll")
+
+		return dll !== null && existsSync(dll) ? dll : null
+	}
 	const mainProcesses = (): AppProcess[] =>
 		powershell(
 			'Get-CimInstance Win32_Process -Filter "Name=\'Filen.exe\'" | ForEach-Object { "$($_.ProcessId)`t$($_.ExecutablePath)`t$($_.CommandLine)" }'
@@ -145,6 +158,17 @@ function windows(): Target {
 			if (existsSync(uninstaller)) {
 				// _?= runs the uninstaller in place (synchronously) and must reach NSIS unquoted to the end of the line.
 				run("cmd.exe", ["/d", "/s", "/c", `""${uninstaller}" /S _?=${installDir}"`], { verbatim: true, allowFailure: true })
+			}
+
+			// WinFsp outlives the app's uninstaller; removed so that every install has to bring it.
+			const winFsp = powershell(
+				"$roots = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'); " +
+					"foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath; " +
+					"if ($p.DisplayName -like 'WinFsp*' -and $_.PSChildName -match '^\\{[0-9A-Fa-f-]+\\}$') { $_.PSChildName } } }"
+			)
+
+			for (const product of new Set(winFsp.split(/\r?\n/).filter(line => line !== ""))) {
+				run("msiexec.exe", ["/x", product, "/qn", "/norestart"], { allowFailure: true })
 			}
 
 			remove(
@@ -186,6 +210,10 @@ function windows(): Target {
 				fail("a per-user (HKCU) uninstall entry for Filen exists: the install was not per-machine")
 			}
 
+			if (winFspDll() === null) {
+				fail("WinFsp is not installed (no InstallDir under HKLM\\SOFTWARE\\WinFsp, or no DLL for this CPU)")
+			}
+
 			if (signed) {
 				const status = powershell(`(Get-AuthenticodeSignature -FilePath '${executable}').Status`)
 
@@ -193,7 +221,8 @@ function windows(): Target {
 					fail(`${executable}: Authenticode status ${status}`)
 				}
 			}
-		}
+		},
+		resource: (relative, use) => use(path.join(installDir, "resources", relative))
 	}
 }
 
@@ -264,7 +293,8 @@ function mac(arch: Arch): Target {
 			if (signed) {
 				run("codesign", ["--verify", "--deep", "--strict", app])
 			}
-		}
+		},
+		resource: (relative, use) => use(path.join(app, "Contents", "Resources", relative))
 	}
 }
 
@@ -339,6 +369,17 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 			verifyInstall() {
 				if (!existsSync(executable)) {
 					fail(`${executable} is missing`)
+				}
+			},
+			resource(relative, use) {
+				const work = mkdtempSync(path.join(os.tmpdir(), "filen-appimage-"))
+
+				try {
+					run(executable, ["--appimage-extract", `resources/${relative}`], { cwd: work })
+
+					return use(path.join(work, "squashfs-root", "resources", relative))
+				} finally {
+					remove(work)
 				}
 			}
 		}
@@ -416,7 +457,8 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 			if (deb && existsSync("/sys/kernel/security/apparmor") && !existsSync("/etc/apparmor.d/Filen")) {
 				fail("/etc/apparmor.d/Filen is missing: the app cannot start its sandbox on Ubuntu 24.04")
 			}
-		}
+		},
+		resource: (relative, use) => use(path.join("/opt/Filen/resources", relative))
 	}
 }
 

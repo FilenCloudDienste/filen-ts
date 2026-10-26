@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { Arch, type Configuration, type WindowsConfiguration } from "electron-builder"
+import { signRclone } from "./scripts/signRclone.ts"
 
 // Everything here that installed 3.x clients can observe (appId, productName, artifact names, feed URL, install
 // locations, Linux package name) is frozen: changing any of it stops the fleet from upgrading in place.
@@ -52,27 +53,38 @@ const config: Configuration = {
 	},
 	// Runtime dependencies are empty: esbuild bundles main and preload into dist.
 	files: ["dist/**/*", "!dist/**/*.map", "package.json"],
-	// The sync addon sits beside the asar, not unpacked from it: the native host loads it by path. scripts/stageNapi.ts
-	// stages it per arch.
+	// The sync addon and rclone sit beside the asar, not unpacked from it: the native host loads the addon and runs
+	// rclone by path. scripts/stageNapi.ts and scripts/stageRclone.ts stage them per arch.
 	extraResources: [
 		{ from: webDist, to: "web" },
 		{ from: "build/tray", to: "tray" },
-		{ from: "build/native/${os}-${arch}", to: "native" }
+		{ from: "build/native/${os}-${arch}", to: "native" },
+		{ from: "build/rclone/${os}-${arch}", to: "rclone" }
 	],
-	// A missing extraResources source is skipped silently; an app without its addon cannot sync.
+	// A missing extraResources source is skipped silently; an app without its addon cannot sync, one without rclone
+	// cannot mount or serve, and a Windows one without WinFsp's installer cannot mount.
 	beforePack: context => {
-		const addon = path.join(
-			packageDir,
-			"build",
-			"native",
-			`${context.packager.platform.buildConfigurationKey}-${Arch[context.arch]}`,
-			"sdk-rs.node"
-		)
+		const os = context.packager.platform.buildConfigurationKey
+		const staged = `${os}-${Arch[context.arch]}`
+		const required = [
+			{ file: path.join(packageDir, "build", "native", staged, "sdk-rs.node"), stage: "scripts/stageNapi.ts" },
+			{
+				file: path.join(packageDir, "build", "rclone", staged, os === "win" ? "rclone.exe" : "rclone"),
+				stage: "scripts/stageRclone.ts"
+			}
+		]
 
-		if (!existsSync(addon)) {
-			throw new Error(`No sync addon at ${addon}; run scripts/stageNapi.ts`)
+		if (os === "win") {
+			required.push({ file: path.join(packageDir, "build", "deps", "win", "winfsp.msi"), stage: "scripts/stageRclone.ts" })
+		}
+
+		for (const { file, stage } of required) {
+			if (!existsSync(file)) {
+				throw new Error(`No ${file}; run ${stage}`)
+			}
 		}
 	},
+	afterPack: signRclone,
 	asar: true,
 	npmRebuild: false,
 	nodeGypRebuild: false,
@@ -109,6 +121,8 @@ const config: Configuration = {
 		gatekeeperAssess: false,
 		entitlements: "build/entitlements.mac.plist",
 		entitlementsInherit: "build/entitlements.mac.plist",
+		// scripts/signRclone.ts signs rclone with its own entitlements before this signing runs.
+		signIgnore: ["/Contents/Resources/rclone/rclone$"],
 		// Signing identity comes from CSC_LINK / CSC_KEY_PASSWORD (Developer ID, Team 7YTW5D2K7P, which the
 		// installed apps' designated requirement pins); notarization from APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
 		// APPLE_TEAM_ID or an App Store Connect API key, and is skipped without them.
@@ -124,7 +138,10 @@ const config: Configuration = {
 		],
 		icon: "build/icons/win/icon.ico",
 		azureSignOptions,
-		// The sync addon is code the app loads, so it is signed like the executables.
+		// WinFsp's installer for the network drive; the NSIS installer and the app run it. It keeps its own publisher's
+		// signature (only .exe and signExts files are signed).
+		extraResources: [{ from: "build/deps/win", to: "deps" }],
+		// The sync addon is code the app loads, so it is signed like the executables (rclone.exe among them).
 		signExts: [".node"],
 		// The default, kept explicit: app-update.yml then names azureSignOptions.publisherName, and electron-updater
 		// installs only an update signed by that publisher.
@@ -161,8 +178,10 @@ const config: Configuration = {
 		description: "Filen Desktop Client"
 	},
 	// electron-builder derives the package name from package.json name only when it is unscoped.
-	deb: { packageName: "Filen" },
-	rpm: { packageName: "Filen" },
+	// fuse3 mounts the network drive; recommended rather than required, so the app installs without it. The deb keeps
+	// electron-builder's default recommendation.
+	deb: { packageName: "Filen", recommends: ["libappindicator3-1", "fuse3"] },
+	rpm: { packageName: "Filen", fpm: ["--rpm-tag", "Recommends: fuse3"] },
 	toolsets: {
 		appimage: "1.0.3"
 	}

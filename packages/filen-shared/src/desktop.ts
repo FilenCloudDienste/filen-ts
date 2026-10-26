@@ -125,6 +125,7 @@ export interface DesktopBridge {
 	readonly lock: DesktopLock
 	readonly logs: DesktopLogs
 	readonly sync: DesktopSync
+	readonly mounts: DesktopMounts
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
 	onWindowState(callback: (state: WindowState) => void): () => void
@@ -475,6 +476,10 @@ export type DesktopMountsErrorCode =
 	| "binaryInvalid"
 	| "unauthenticated"
 	| "timeout"
+	| "mountPointExpired"
+	| "credentialsInvalid"
+	| "credentialsWeak"
+	| "acknowledgementRequired"
 	| "unknown"
 
 export interface DesktopMountsError {
@@ -530,8 +535,14 @@ export interface DesktopVfsTuning {
 
 export interface DesktopMountsOverview {
 	host: DesktopSyncHostState
-	// null until the host reported it.
+	// false: this build has no usable rclone, so nothing can be mounted or served (enabled roles report
+	// `binaryInvalid`).
+	available: boolean
+	// null until it was looked up.
 	fuse: DesktopFuseStatus | null
+	// What Linux lacks to mount: the fuse3 package, or the FUSE device itself (a container or sandbox, which no
+	// package fixes); null elsewhere and when nothing is missing.
+	fuseGap: "fuse3" | "device" | null
 	drive: DesktopDrive
 	serves: DesktopServe[]
 	// The protocols this platform offers.
@@ -565,3 +576,77 @@ export type DesktopMountPointChoice =
 	| { status: "canceled" }
 	| { status: "refused"; path: string; problem: DesktopMountPointProblem }
 	| { status: "ok"; id: string; path: string }
+
+// The credentials a server takes: a user and password, or (s3) an access key pair. nfs takes none.
+export type DesktopCredentialProtocol = Exclude<DesktopServeProtocol, "nfs">
+
+export type DesktopServeCredentials =
+	| { kind: "basic"; user: string; password: string }
+	| { kind: "s3"; accessKeyId: string; secretAccessKey: string }
+
+// An address a server can listen on: loopback, one LAN interface's IPv4 address, or every interface ("0.0.0.0").
+export interface DesktopListenAddress {
+	address: string
+	kind: "loopback" | "lan" | "all"
+	interface: string | null
+}
+
+// `mountPointId` is the id chooseMountPoint issued (macOS, Linux); `driveLetter` one of driveLetters() (Windows).
+// Enabling without either takes the default: `~/Filen`, or the first free letter from X down.
+export interface DesktopDrivePatch {
+	enabled?: boolean
+	mountPointId?: string
+	driveLetter?: string
+	readOnly?: boolean
+}
+
+// `address` is one of listenAddresses(). Moving a server off loopback turns https on unless the patch says otherwise.
+// nfs runs only on loopback and only with `acknowledgeUnauthenticated`.
+export interface DesktopServePatch {
+	enabled?: boolean
+	address?: string
+	port?: number
+	https?: boolean
+	readOnly?: boolean
+	acknowledgeUnauthenticated?: boolean
+}
+
+export type DesktopFuseInstall = "installed" | "rebootRequired" | "canceled" | "failed"
+
+// The overview reaches a page only while it listens; the stats only while it listens to them, at most once a second
+// and only while a role runs.
+export interface DesktopMounts {
+	overview(): Promise<DesktopMountsOverview>
+	// Calls back with the latest overview right away when one is known, then on every change.
+	onOverview(callback: (overview: DesktopMountsOverview) => void): () => void
+	stats(): Promise<DesktopMountsStats>
+	onStats(callback: (stats: DesktopMountsStats) => void): () => void
+	chooseMountPoint(): Promise<DesktopMountPointChoice>
+	// The letters free now; empty off Windows.
+	driveLetters(): Promise<DesktopMountsResult<string[]>>
+	setDrive(patch: DesktopDrivePatch): Promise<DesktopMountsResult<null>>
+	listenAddresses(): Promise<DesktopListenAddress[]>
+	setServe(protocol: DesktopServeProtocol, patch: DesktopServePatch): Promise<DesktopMountsResult<null>>
+	// Made at random the first time they are asked for.
+	credentials(protocol: DesktopCredentialProtocol): Promise<DesktopMountsResult<DesktopServeCredentials>>
+	// Copies one part to the clipboard without the page holding it.
+	copyCredential(protocol: DesktopCredentialProtocol, part: "user" | "secret"): Promise<DesktopMountsResult<null>>
+	// Refused as `credentialsInvalid` or `credentialsWeak`.
+	setCredentials(protocol: DesktopCredentialProtocol, credentials: DesktopServeCredentials): Promise<DesktopMountsResult<null>>
+	regenerateCredentials(protocol: DesktopCredentialProtocol): Promise<DesktopMountsResult<null>>
+	// Applies to every mount and server; running ones restart.
+	setTuning(tuning: DesktopVfsTuning): Promise<DesktopMountsResult<null>>
+	// Refused as `uploadsPending` while uploads are not finished; running roles stop for it and start again.
+	clearCache(): Promise<DesktopMountsResult<null>>
+	// Windows: installs the bundled WinFsp (asks for administrator rights); refused as `fuseMissing` where the app
+	// ships no installer.
+	installFuse(): Promise<DesktopMountsResult<DesktopFuseInstall>>
+	// Opens the mounted drive.
+	revealDrive(): Promise<DesktopMountsResult<null>>
+	// Before signing out: true to go on. With uploads from the drive pending, the shell asks the user to wait or to
+	// sign out anyway (the uploads then finish when this user signs in again).
+	confirmSignOut(): Promise<boolean>
+	dismissNotice(notice: DesktopMountsNotice): Promise<void>
+	// Starts the native host again after it failed.
+	retryHost(): void
+}

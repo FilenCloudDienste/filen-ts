@@ -1,12 +1,15 @@
 import {
 	app,
 	BrowserWindow,
+	clipboard,
 	dialog,
 	ipcMain,
 	type IpcMainInvokeEvent,
 	Menu,
 	type NativeImage,
 	nativeImage,
+	type OpenDialogOptions,
+	type OpenDialogReturnValue,
 	nativeTheme,
 	Notification,
 	powerMonitor,
@@ -23,7 +26,14 @@ import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import { type } from "arktype"
 import path from "node:path"
-import type { DesktopLogsExport, DesktopMenuAction, DesktopPlatform, DesktopSyncHostState, WindowState } from "@filen/shared/desktop"
+import type {
+	DesktopLogsExport,
+	DesktopMenuAction,
+	DesktopMountsRole,
+	DesktopPlatform,
+	DesktopSyncHostState,
+	WindowState
+} from "@filen/shared/desktop"
 import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
 import type { NativeAggregate } from "../shared/nativeProtocol.ts"
@@ -39,10 +49,12 @@ import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
 import { createMigration, createStashStore } from "./migration.ts"
 import { addonPath } from "./native/addonPath.ts"
-import { listenAddresses } from "./mounts/addresses.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
-import { mountsDesired, wantsRoles } from "./mounts/desired.ts"
+import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
+import { registerMountsIpc } from "./mounts/ipc.ts"
 import { configuredMountPoints } from "./mounts/mountPoint.ts"
+import { bakedRcloneSha256, rclonePaths } from "./mounts/rclonePath.ts"
+import { createMountsService } from "./mounts/service.ts"
 import { loadMountsStore, type MountsStore } from "./mounts/store.ts"
 import { ensureCertificate } from "./mounts/tls.ts"
 import { anyDemand, createNativeSupervisor } from "./native/supervisor.ts"
@@ -56,7 +68,16 @@ import { registerSyncIpc } from "./sync/ipc.ts"
 import { createRootTokens } from "./sync/localRoot.ts"
 import { createSyncService } from "./sync/service.ts"
 import { loadSyncStore, type SyncStore } from "./sync/store.ts"
-import { attentionPair, attentionTransitions, trayIconFile, trayState, type TrayState, traySyncStatus, trayTooltip } from "./sync/tray.ts"
+import {
+	attentionPair,
+	attentionTransitions,
+	roleFailureMessage,
+	trayIconFile,
+	trayState,
+	type TrayState,
+	trayStatusLines,
+	trayTooltip
+} from "./tray.ts"
 import { startUpdater, testUpdateFeed, type Updater } from "./updater.ts"
 import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } from "./window.ts"
 
@@ -289,55 +310,26 @@ function credentialStoreFor(userId: string): CredentialStore {
 	return store
 }
 
-// The bundled rclone and, on Linux, its checksum; no rclone ships in this build yet.
-function rcloneBinary(): { path: string; sha256: string | null } | null {
-	return null
+// The bundled rclone (on Linux with the digest the build baked in) and the FUSE installer shipped beside it.
+const rclone = rclonePaths({
+	packaged: app.isPackaged,
+	resourcesPath: process.resourcesPath,
+	env: process.env,
+	appPath: app.getAppPath(),
+	platform: process.platform,
+	arch: process.arch,
+	sha256: bakedRcloneSha256,
+	exists: existsSync
+})
+const fuseContext: FuseContext = {
+	platform: process.platform,
+	arch: process.arch,
+	env: process.env,
+	exists: existsSync,
+	run: runProgram,
+	fuseInstaller: rclone?.fuseInstaller ?? null
 }
-
-// Every host start: the roles the user enabled. A fresh host runs none, so nothing is sent while none is wanted.
-async function applyMounts(userId: string): Promise<void> {
-	const config = (await mountsStoreFor(userId)).get()
-
-	if (!wantsRoles(config, process.platform)) {
-		return
-	}
-
-	const binary = rcloneBinary()
-
-	if (binary === null) {
-		warn("mounts: no rclone in this build")
-
-		return
-	}
-
-	const dir = await mountsDir(userId)
-	const stateDir = path.join(dir, "state")
-	const cacheDir = path.join(dir, "cache")
-
-	await Promise.all([mkdir(stateDir, { recursive: true, mode: 0o700 }), mkdir(cacheDir, { recursive: true, mode: 0o700 })])
-
-	const desired = await mountsDesired(config, {
-		platform: process.platform,
-		binary,
-		stateDir,
-		cacheDir,
-		logFile: path.join(userDataPath, "logs", "rclone.log"),
-		credentials: credentialStoreFor(userId),
-		certificate: (protocol, host) =>
-			ensureCertificate(
-				path.join(dir, "tls"),
-				protocol,
-				host === "0.0.0.0" ? listenAddresses(os.networkInterfaces()).map(entry => entry.address) : [host],
-				Date.now()
-			),
-		warn
-	})
-	const applied = await nativeSupervisor.callMounts("mountsApply", { desired }, userId)
-
-	if (!applied.ok) {
-		warn(`mounts: not applied: ${applied.error.code}`)
-	}
-}
+const { fuseInstaller } = fuseContext
 
 const nativeSupervisor = createNativeSupervisor({
 	fork: () => utilityProcess.fork(path.join(import.meta.dirname, "native.js"), [], { serviceName: "Filen Helper", stdio: "pipe" }),
@@ -361,19 +353,17 @@ const nativeSupervisor = createNativeSupervisor({
 		]),
 	log: { info, warn },
 	onMessage: (message, userId) => {
+		if (message.t === "ready" || message.t === "mounts" || message.t === "mountsStats") {
+			mountsService.nativeEvent(message, userId)
+		}
+
 		if (message.t === "mounts" || message.t === "mountsStats") {
 			return
 		}
 
-		if (message.t === "ready") {
-			applyMounts(userId).catch((error: unknown) => {
-				warn(`mounts: not applied: ${errorCode(error)}`)
-			})
-		}
-
 		if (message.t === "aggregate") {
 			syncAggregate = message.state
-			applySyncTray()
+			applyTray()
 		} else if (message.t === "activity") {
 			syncAttentionPair = attentionPair(message.entries, syncAttentionPair)
 		}
@@ -388,26 +378,39 @@ const nativeSupervisor = createNativeSupervisor({
 		}
 
 		syncService.hostChanged(state)
-		applySyncTray()
+		mountsService.hostChanged(state)
+		applyTray()
 	},
 	onRevoked: () => {
 		info("session revoked by the server; signed out")
 		syncService.signedOut()
+		mountsService.signedOut()
 		mainWindow?.webContents.send(CHANNELS.sessionRevoked)
 	}
 })
+
+function showOpenDialog(options: OpenDialogOptions): Promise<OpenDialogReturnValue> {
+	return mainWindow === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(mainWindow, options)
+}
+
+// Where neither a sync pair nor the network drive may be.
+function reservedDirectories() {
+	return {
+		platform: process.platform,
+		home: app.getPath("home"),
+		appData: [userDataPath, app.getPath("appData")],
+		temporary: [app.getPath("temp"), os.tmpdir()]
+	}
+}
 
 const syncService = createSyncService({
 	supervisor: nativeSupervisor,
 	storeFor: syncStoreFor,
 	tokens: createRootTokens(Date.now),
 	dialogs: {
-		showOpenDialog: options => (mainWindow === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(mainWindow, options)),
+		showOpenDialog,
 		rootContext: () => ({
-			platform: process.platform,
-			home: app.getPath("home"),
-			appData: [userDataPath, app.getPath("appData")],
-			temporary: [app.getPath("temp"), os.tmpdir()],
+			...reservedDirectories(),
 			oneDrive:
 				PLATFORM === "win32"
 					? ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"].flatMap(name => {
@@ -428,10 +431,70 @@ const syncService = createSyncService({
 	log: { info, warn }
 })
 
+// Uploads the drive still holds ask before a sign-out; with none, the user's cache goes with the session.
+async function confirmMountsSignOut(pending: number): Promise<boolean> {
+	const options = {
+		type: "warning" as const,
+		buttons: ["Wait", "Sign out"],
+		defaultId: 0,
+		cancelId: 0,
+		message: "The network drive is still uploading",
+		detail: `${pending === 1 ? "1 file is" : `${String(pending)} files are`} not uploaded yet. If you sign out now, they finish uploading when you sign in again.`
+	}
+	const { response } = await (mainWindow === null ? dialog.showMessageBox(options) : dialog.showMessageBox(mainWindow, options))
+
+	return response === 1
+}
+
+const mountsService = createMountsService({
+	supervisor: nativeSupervisor,
+	platform: process.platform,
+	storeFor: mountsStoreFor,
+	credentialsFor: credentialStoreFor,
+	mountsDir: userId => path.join(mountsRoot, userId),
+	logFile: path.join(userDataPath, "logs", "rclone.log"),
+	binary: rclone?.binary ?? null,
+	fuse: {
+		status: () => fuseStatus(fuseContext),
+		gap: () => (PLATFORM === "linux" ? linuxFuseGap(fuseContext) : null),
+		install: PLATFORM === "win32" && fuseInstaller !== null ? () => installWinFsp(fuseContext, fuseInstaller) : null
+	},
+	certificate: ensureCertificate,
+	interfaces: () => os.networkInterfaces(),
+	tokens: createRootTokens(Date.now),
+	dialogs: {
+		showOpenDialog,
+		mountPointContext: async userId => ({
+			...reservedDirectories(),
+			pairRoots: (await syncStoreFor(userId)).get().pairs.map(pair => pair.localRoot)
+		}),
+		confirmSignOut: confirmMountsSignOut
+	},
+	shell: { openPath: target => shell.openPath(target) },
+	clipboard: { writeText: text => clipboard.writeText(text) },
+	statusChanged: failed => {
+		applyTray()
+		notifyMountsFailed(failed)
+	},
+	now: Date.now,
+	log: { info, warn }
+})
+
 // The engine's own work keeps going; only its data and its process go with the session.
 function syncSignedOut(): void {
 	nativeSupervisor.signedOut()
 	syncService.signedOut()
+	mountsService.signedOut()
+}
+
+// A sign-out the user asked for: before the host goes, rclone stops and the user's drive cache is deleted when no
+// upload is left in it.
+async function signOut(userId: string | null): Promise<void> {
+	if (userId !== null) {
+		await mountsService.signOut(userId)
+	}
+
+	syncSignedOut()
 }
 
 function isLocked(): boolean {
@@ -687,9 +750,11 @@ function createWindow(): void {
 	// A new document or none: the old page's sync subscription and plans go.
 	window.webContents.on("did-navigate", () => {
 		syncService.pageGone(contentsId)
+		mountsService.pageGone(contentsId)
 	})
 	window.webContents.on("destroyed", () => {
 		syncService.pageGone(contentsId)
+		mountsService.pageGone(contentsId)
 	})
 
 	window.webContents.on("dom-ready", () => {
@@ -840,13 +905,16 @@ function applyMenu(): void {
 let tray: Tray | null = null
 const trayDirectory = app.isPackaged ? path.join(process.resourcesPath, "tray") : path.join(app.getAppPath(), "build", "tray")
 
-// What the tray shows of sync: the host's last aggregate while it runs.
+// What the tray shows: sync's last aggregate while the host runs, and what the mounts report.
 let syncAggregate: NativeAggregate = "idle"
+// Sync's own state, for its notification; the icon shows the more urgent of sync and mounts.
 let syncTray: TrayState = "idle"
-let syncStatus: string | null = null
+let trayIcon: TrayState = "idle"
+let trayLines: string[] = []
+let trayDrive: string | null = null
 let syncAttentionPair: string | null = null
 // Held so it is not collected before it is clicked.
-let syncNotification: Notification | null = null
+let notification: Notification | null = null
 // A pair to open once the page has loaded.
 let pendingOpenPair: string | null = null
 
@@ -864,53 +932,67 @@ function openSyncPair(pairId: string): void {
 	}
 }
 
-// Only while the user is elsewhere and wants notifications; the click opens the pair that asked last.
-function notifySyncAttention(host: DesktopSyncHostState): void {
+// Only while the user is elsewhere and wants notifications.
+function notify(body: string, onClick: () => void): void {
 	if (!currentPrefs().notifications || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) {
 		return
 	}
 
+	notification = new Notification({ title: "Filen", body })
+	notification.on("click", () => {
+		notification = null
+		showWindow()
+		onClick()
+	})
+	notification.show()
+}
+
+// The click opens the pair that asked last.
+function notifySyncAttention(host: DesktopSyncHostState): void {
 	const pairId = host.state === "failed" ? null : syncAttentionPair
 
-	syncNotification = new Notification({
-		title: "Filen",
-		body: host.state === "failed" ? "Sync stopped. Open Filen to see why." : "A sync pair needs your attention."
-	})
-	syncNotification.on("click", () => {
-		syncNotification = null
-		showWindow()
-
+	notify(host.state === "failed" ? "Sync stopped. Open Filen to see why." : "A sync pair needs your attention.", () => {
 		if (pairId !== null) {
 			openSyncPair(pairId)
 		}
 	})
-	syncNotification.show()
 }
 
-function applySyncTray(): void {
-	const host = nativeSupervisor.state()
-	const next = trayState(syncAggregate, host)
-	const status = traySyncStatus(next, host)
-	const previous = syncTray
+function notifyMountsFailed(roles: readonly DesktopMountsRole[]): void {
+	if (roles.length > 0) {
+		notify(roleFailureMessage(roles), () => undefined)
+	}
+}
 
-	syncTray = next
+function applyTray(): void {
+	const host = nativeSupervisor.state()
+	const mounts = mountsService.trayView()
+	const nextSync = trayState(syncAggregate, "idle", host)
+	const nextIcon = trayState(syncAggregate, mounts.aggregate, host)
+	const lines = trayStatusLines(syncAggregate, mounts.aggregate, host, mounts.mountPoint)
+	const previousSync = syncTray
+
+	syncTray = nextSync
 
 	// Activity names the pair before the aggregate turns; it is forgotten once the attention is over.
-	if (previous === "attention" && next !== "attention") {
+	if (previousSync === "attention" && nextSync !== "attention") {
 		syncAttentionPair = null
 	}
 
-	if (tray !== null && next !== previous) {
-		tray.setImage(trayImage(next))
+	if (tray !== null && nextIcon !== trayIcon) {
+		tray.setImage(trayImage(nextIcon))
 	}
 
-	if (status !== syncStatus) {
-		syncStatus = status
-		tray?.setToolTip(trayTooltip(next, host))
+	trayIcon = nextIcon
+
+	if (lines.join("\n") !== trayLines.join("\n") || mounts.mountPoint !== trayDrive) {
+		trayLines = lines
+		trayDrive = mounts.mountPoint
+		tray?.setToolTip(trayTooltip(lines))
 		applyTrayMenu()
 	}
 
-	if (attentionTransitions(previous, next)) {
+	if (attentionTransitions(previousSync, nextSync)) {
 		notifySyncAttention(host)
 	}
 }
@@ -924,7 +1006,18 @@ function canLock(): boolean {
 function applyTrayMenu(): void {
 	tray?.setContextMenu(
 		Menu.buildFromTemplate([
-			...(syncStatus === null ? [] : [{ label: syncStatus, enabled: false }, { type: "separator" as const }]),
+			...trayLines.map(label => ({ label, enabled: false })),
+			...(trayDrive === null
+				? []
+				: [
+						{
+							label: "Open network drive",
+							click: () => {
+								void mountsService.revealDrive()
+							}
+						}
+					]),
+			...(trayLines.length === 0 ? [] : [{ type: "separator" as const }]),
 			{ label: "Open Filen", click: showWindow },
 			...(canLock() ? [{ label: "Lock Filen", click: lockNow }] : []),
 			{ type: "separator" },
@@ -934,8 +1027,8 @@ function applyTrayMenu(): void {
 }
 
 function createTray(): void {
-	tray = new Tray(trayImage(syncTray))
-	tray.setToolTip(trayTooltip(syncTray, nativeSupervisor.state()))
+	tray = new Tray(trayImage(trayIcon))
+	tray.setToolTip(trayTooltip(trayLines))
 	applyTrayMenu()
 	tray.on("click", showWindow)
 }
@@ -1074,10 +1167,12 @@ if (!app.requestSingleInstanceLock()) {
 		void migration.sessionConfirmed(blob)
 	})
 	handle(CHANNELS.sessionClear, async () => {
+		const user = await nativeSupervisor.user()
+
 		try {
 			await sessionVault.clear()
 		} finally {
-			syncSignedOut()
+			await signOut(user?.userId ?? null)
 		}
 	})
 	ipcMain.on(CHANNELS.sessionVerified, event => {
@@ -1253,9 +1348,10 @@ if (!app.requestSingleInstanceLock()) {
 	// A forgotten PIN signs out: the session it guarded goes first, so a failure leaves the app locked.
 	handle(CHANNELS.lockReset, async () => {
 		const lock = await appLockLoading
+		const user = await nativeSupervisor.user()
 
 		await sessionVault.clear()
-		syncSignedOut()
+		await signOut(user?.userId ?? null)
 		await lock.reset()
 		info("app lock: reset by signing out")
 		lockChanged()
@@ -1267,6 +1363,7 @@ if (!app.requestSingleInstanceLock()) {
 	})
 
 	registerSyncIpc(ipcMain, syncService, url => isTrustedSender(url, APP_ORIGIN))
+	registerMountsIpc(ipcMain, mountsService, url => isTrustedSender(url, APP_ORIGIN))
 
 	handle(CHANNELS.logsExport, async payload => {
 		const webLog = webLogSchema(payload)

@@ -2,7 +2,9 @@
 # that ships, each install format is installed the way a user installs it, launched, and updated by the app's own
 # updater from a feed on the loopback interface that serves the candidate build N. The test then requires the app to
 # relaunch at N from the same install location, with the same userData and a marker file in it intact
-# (packages/filen-desktop/scripts/ci/installTest.ts).
+# (packages/filen-desktop/scripts/ci/installTest.ts). N must ship the pinned rclone for the runner's CPU, runnable from
+# the install, and on Windows every install (and the update) must leave WinFsp installed; the test removes WinFsp
+# between installs so that each installer has to bring it.
 #
 #   N-1 -> N      N-1 is the same commit built with a lower version, so the new updater, installer and uninstaller
 #                 run against each other.

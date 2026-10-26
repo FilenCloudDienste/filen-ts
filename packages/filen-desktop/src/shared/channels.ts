@@ -1,4 +1,4 @@
-import type { DesktopSync } from "@filen/shared/desktop"
+import type { DesktopMounts, DesktopSync } from "@filen/shared/desktop"
 
 // IPC channel names shared by main and the preload; the renderer never sees them.
 export const CHANNELS = {
@@ -31,7 +31,10 @@ export const CHANNELS = {
 	syncSubscribe: "sync:subscribe",
 	syncOverview: "sync:overview",
 	syncActivity: "sync:activity",
-	syncOpenPair: "sync:open-pair"
+	syncOpenPair: "sync:open-pair",
+	mountsSubscribe: "mounts:subscribe",
+	mountsOverview: "mounts:overview",
+	mountsStats: "mounts:stats"
 } as const
 
 // The sync bridge's requests, each answered on its own channel (syncChannel).
@@ -67,6 +70,40 @@ export type SyncCall = (typeof SYNC_CALLS)[number]
 
 export function syncChannel(call: SyncCall): string {
 	return `sync:call:${call}`
+}
+
+// The mounts bridge's requests, each answered on its own channel (mountsChannel).
+export const MOUNTS_CALLS = [
+	"overview",
+	"stats",
+	"chooseMountPoint",
+	"driveLetters",
+	"setDrive",
+	"listenAddresses",
+	"setServe",
+	"credentials",
+	"copyCredential",
+	"setCredentials",
+	"regenerateCredentials",
+	"setTuning",
+	"clearCache",
+	"installFuse",
+	"revealDrive",
+	"confirmSignOut",
+	"dismissNotice",
+	"retryHost"
+] as const satisfies readonly (keyof DesktopMounts)[]
+
+export type MountsCall = (typeof MOUNTS_CALLS)[number]
+
+export function mountsChannel(call: MountsCall): string {
+	return `mounts:call:${call}`
+}
+
+// What a page listens to: the overview, the stats, or both.
+export interface MountsSubscription {
+	overview: boolean
+	stats: boolean
 }
 
 // The preload reads the app version from this argument, so the page gets it without a round trip.

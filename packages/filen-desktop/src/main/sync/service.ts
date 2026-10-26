@@ -26,6 +26,7 @@ import type { NativeOpArgs, NativePairRuntime, SyncOp } from "../../shared/nativ
 import type { NativeResult } from "../native/rpc.ts"
 import type { NativeEvent, NativeSupervisor } from "../native/supervisor.ts"
 import { errorCode } from "../atomicFile.ts"
+import { type Page, pushThrottle } from "../pages.ts"
 import { serialQueue } from "../serial.ts"
 import { createActivityLog } from "./activity.ts"
 import { attachUnheld, type FirstRunDeps, holdReviewed } from "./firstRun.ts"
@@ -40,12 +41,6 @@ export const OVERVIEW_PUSH_INTERVAL_MS = 250
 
 // Where the engine moves local files it replaced or deleted, inside the pair's root.
 const QUARANTINE_DIR = ".filen-sync-trash"
-
-// A page (one web contents) as main reaches it.
-export interface SyncPage {
-	id: number
-	send(channel: string, payload: unknown): void
-}
 
 export interface SyncServiceDeps {
 	supervisor: Pick<NativeSupervisor, "call" | "subscribe" | "ensure" | "retry" | "user" | "state">
@@ -72,13 +67,13 @@ export interface SyncService {
 	nativeEvent(message: NativeEvent, userId: string): Promise<void>
 	hostChanged(state: DesktopSyncHostState): void
 	signedOut(): void
-	subscribe(page: SyncPage, on: boolean): void
+	subscribe(page: Page, on: boolean): void
 	// The page navigated or closed: it stops listening and its plans are released.
 	pageGone(pageId: number): void
 	overview(): Promise<DesktopSyncOverview>
 	activity(pairId: string, limit: number): DesktopSyncActivity[]
 	chooseLocalDirectory(): Promise<DesktopSyncLocalRootChoice>
-	addPair(page: SyncPage, pair: DesktopSyncNewPair): Promise<Result<{ pairId: string; plan: DesktopSyncPlan | null }>>
+	addPair(page: Page, pair: DesktopSyncNewPair): Promise<Result<{ pairId: string; plan: DesktopSyncPlan | null }>>
 	startPair(pairId: string): Promise<Result<null>>
 	removePair(pairId: string): Promise<Result<null>>
 	pausePair(pairId: string): Promise<Result<null>>
@@ -86,7 +81,7 @@ export interface SyncService {
 	setMode(pairId: string, mode: DesktopSyncMode, backlog: DesktopSyncBacklog | null): Promise<Result<null>>
 	renamePair(pairId: string, name: string): Promise<Result<null>>
 	syncNow(pairId: string): Promise<Result<null>>
-	plan(page: SyncPage, pairId: string): Promise<Result<DesktopSyncPlan | null>>
+	plan(page: Page, pairId: string): Promise<Result<DesktopSyncPlan | null>>
 	planPage(planId: string, list: DesktopSyncPlanList, offset: number, limit: number): Promise<Result<DesktopSyncPlanPage>>
 	releasePlan(planId: string): Promise<void>
 	conflicts(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncConflict>>>
@@ -117,15 +112,13 @@ function isBackup(mode: DesktopSyncMode): boolean {
 export function createSyncService(deps: SyncServiceDeps): SyncService {
 	const { supervisor } = deps
 	const activityLog = createActivityLog()
-	const pages = new Map<number, SyncPage>()
+	const pages = new Map<number, Page>()
 	// The page each plan was made for.
 	const plans = new Map<string, number>()
 	let host = supervisor.state()
 	let runtime: readonly NativePairRuntime[] = []
 	// The user the runtime and activity belong to.
 	let hostUser: string | null = null
-	let pushTimer: NodeJS.Timeout | undefined
-	let lastPush = Number.NEGATIVE_INFINITY
 	// What each `ready` does to the pairs runs one at a time.
 	const readyWork = serialQueue()
 
@@ -141,24 +134,18 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		return mergeOverview(host, user.userId === hostUser ? runtime : [], store.get().pairs)
 	}
 
-	function schedulePush(): void {
-		if (pages.size === 0 || pushTimer !== undefined) {
-			return
-		}
-
-		pushTimer = setTimeout(
-			() => {
-				pushTimer = undefined
-				lastPush = deps.now()
-				void overview().then(current => {
-					for (const page of pages.values()) {
-						page.send(CHANNELS.syncOverview, current)
-					}
-				})
-			},
-			Math.max(0, lastPush + OVERVIEW_PUSH_INTERVAL_MS - deps.now())
-		)
-	}
+	const schedulePush = pushThrottle(
+		() => {
+			void overview().then(current => {
+				for (const page of pages.values()) {
+					page.send(CHANNELS.syncOverview, current)
+				}
+			})
+		},
+		OVERVIEW_PUSH_INTERVAL_MS,
+		deps.now,
+		() => pages.size > 0
+	)
 
 	async function currentStore(): Promise<SyncStore | null> {
 		const user = await supervisor.user()
@@ -209,7 +196,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		}
 	}
 
-	async function evaluate(page: SyncPage, pairId: string): Promise<Result<DesktopSyncPlan | null>> {
+	async function evaluate(page: Page, pairId: string): Promise<Result<DesktopSyncPlan | null>> {
 		const evaluated = await supervisor.call("evaluatePlan", { pairId })
 
 		if (!evaluated.ok) {

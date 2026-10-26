@@ -5,12 +5,23 @@ import type {
 	DesktopLockStatus,
 	DesktopLogsExport,
 	DesktopMenuAction,
+	DesktopMountsOverview,
+	DesktopMountsStats,
 	DesktopPlatform,
 	DesktopSyncActivity,
 	DesktopSyncOverview,
 	WindowState
 } from "@filen/shared/desktop"
-import { CHANNELS, type SessionRead, type SyncCall, syncChannel, VERSION_ARG_PREFIX } from "../shared/channels.ts"
+import {
+	CHANNELS,
+	type MountsCall,
+	mountsChannel,
+	type MountsSubscription,
+	type SessionRead,
+	type SyncCall,
+	syncChannel,
+	VERSION_ARG_PREFIX
+} from "../shared/channels.ts"
 
 // The sandboxed preload's process object carries the platform and argv but no Node typings.
 declare const process: { readonly platform: DesktopPlatform; readonly argv: readonly string[] }
@@ -123,6 +134,45 @@ ipcRenderer.on(CHANNELS.syncOpenPair, (_event, pairId: string) => {
 // Main answers each call with the type the bridge declares for it.
 function syncInvoke(call: SyncCall, ...args: unknown[]): Promise<never> {
 	return ipcRenderer.invoke(syncChannel(call), ...args) as Promise<never>
+}
+
+// Main pushes the mounts overview while the page listens to it, and the stats while it listens to those; the latest
+// overview is kept for late subscribers and dropped with the stream.
+let mountsOverview: DesktopMountsOverview | null = null
+let mountsSubscribed: MountsSubscription = { overview: false, stats: false }
+const mountsOverviewListeners = new Set<(overview: DesktopMountsOverview) => void>()
+const mountsStatsListeners = new Set<(stats: DesktopMountsStats) => void>()
+
+function mountsSubscription(): void {
+	const next = { overview: mountsOverviewListeners.size > 0, stats: mountsStatsListeners.size > 0 }
+
+	if (next.overview !== mountsSubscribed.overview || next.stats !== mountsSubscribed.stats) {
+		mountsSubscribed = next
+
+		if (!next.overview) {
+			mountsOverview = null
+		}
+
+		ipcRenderer.send(CHANNELS.mountsSubscribe, next)
+	}
+}
+
+ipcRenderer.on(CHANNELS.mountsOverview, (_event, overview: DesktopMountsOverview) => {
+	mountsOverview = overview
+
+	for (const listener of mountsOverviewListeners) {
+		listener(overview)
+	}
+})
+
+ipcRenderer.on(CHANNELS.mountsStats, (_event, stats: DesktopMountsStats) => {
+	for (const listener of mountsStatsListeners) {
+		listener(stats)
+	}
+})
+
+function mountsInvoke(call: MountsCall, ...args: unknown[]): Promise<never> {
+	return ipcRenderer.invoke(mountsChannel(call), ...args) as Promise<never>
 }
 
 const bridge: DesktopBridge = {
@@ -289,6 +339,51 @@ const bridge: DesktopBridge = {
 			return () => {
 				openPairListeners.delete(callback)
 			}
+		}
+	},
+	mounts: {
+		overview: () => mountsInvoke("overview"),
+		onOverview: callback => {
+			mountsOverviewListeners.add(callback)
+
+			if (mountsOverview !== null) {
+				callback(mountsOverview)
+			}
+
+			mountsSubscription()
+
+			return () => {
+				mountsOverviewListeners.delete(callback)
+				mountsSubscription()
+			}
+		},
+		stats: () => mountsInvoke("stats"),
+		onStats: callback => {
+			mountsStatsListeners.add(callback)
+			mountsSubscription()
+
+			return () => {
+				mountsStatsListeners.delete(callback)
+				mountsSubscription()
+			}
+		},
+		chooseMountPoint: () => mountsInvoke("chooseMountPoint"),
+		driveLetters: () => mountsInvoke("driveLetters"),
+		setDrive: patch => mountsInvoke("setDrive", patch),
+		listenAddresses: () => mountsInvoke("listenAddresses"),
+		setServe: (protocol, patch) => mountsInvoke("setServe", protocol, patch),
+		credentials: protocol => mountsInvoke("credentials", protocol),
+		copyCredential: (protocol, part) => mountsInvoke("copyCredential", protocol, part),
+		setCredentials: (protocol, credentials) => mountsInvoke("setCredentials", protocol, credentials),
+		regenerateCredentials: protocol => mountsInvoke("regenerateCredentials", protocol),
+		setTuning: tuning => mountsInvoke("setTuning", tuning),
+		clearCache: () => mountsInvoke("clearCache"),
+		installFuse: () => mountsInvoke("installFuse"),
+		revealDrive: () => mountsInvoke("revealDrive"),
+		confirmSignOut: () => mountsInvoke("confirmSignOut"),
+		dismissNotice: notice => mountsInvoke("dismissNotice", notice),
+		retryHost: () => {
+			void mountsInvoke("retryHost")
 		}
 	},
 	setTitleBarColors: colors => {
