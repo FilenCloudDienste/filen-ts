@@ -1,0 +1,9 @@
+{
+  // The sandboxed preload runs in the renderer: DOM globals, no Node.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM"],
+    "types": []
+  },
+  "include": ["src/preload", "src/shared"]
+}

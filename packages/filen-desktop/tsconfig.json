@@ -1,24 +1,4 @@
 {
-	"include": ["src/**/*.ts", "src/**/*.tsx"],
-	"compilerOptions": {
-		"target": "esnext",
-		"module": "commonjs",
-		"lib": ["esnext"],
-		"rootDir": "src",
-		"outDir": "dist",
-		"esModuleInterop": true,
-		"forceConsistentCasingInFileNames": true,
-		"moduleResolution": "node",
-		"skipLibCheck": true,
-		"strict": true,
-		"noUnusedLocals": true,
-		"noUnusedParameters": true,
-		"noFallthroughCasesInSwitch": true,
-		"noUncheckedSideEffectImports": true,
-		"noUncheckedIndexedAccess": true,
-		"baseUrl": ".",
-		"paths": {
-			"@/*": ["./src/*"]
-		}
-	}
+  "files": [],
+  "references": [{ "path": "./tsconfig.main.json" }, { "path": "./tsconfig.preload.json" }]
 }

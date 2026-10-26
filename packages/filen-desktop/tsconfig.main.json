@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/main", "src/shared", "src/tests", "scripts", "eslint.config.js", "vitest.config.ts"]
+}

@@ -1,6 +1,6 @@
 {
 	"name": "@filen/desktop",
-	"version": "3.0.0",
+	"version": "4.0.0-alpha.0",
 	"description": "Filen Desktop Client",
 	"homepage": "https://filen.io",
 	"repository": {
@@ -9,37 +9,32 @@
 	},
 	"license": "AGPLv3",
 	"author": "Filen Cloud Dienste UG (haftungsbeschränkt) <support@filen.io>",
-	"type": "commonjs",
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
 	"private": true,
+	"type": "module",
+	"main": "dist/main.js",
 	"scripts": {
-		"tsc": "tsc",
-		"clear": "rimraf ./dist",
-		"build": "pnpm run clear && pnpm run lint && pnpm run tsc",
-		"dev": "pnpm run build && cross-env NODE_ENV=development electron ./src/index.dev.js --no-sandbox",
-		"ncu": "npm-check-updates --interactive --format group",
-		"lint": "eslint --report-unused-disable-directives --max-warnings 0 --no-warn-ignored"
+		"build": "node scripts/build.ts",
+		"dev": "node scripts/build.ts && electron .",
+		"lint": "eslint . && prettier --check \"**/*.ts\"",
+		"format": "prettier --write \"**/*.ts\"",
+		"typecheck": "tsc -b --noEmit",
+		"test": "vitest run",
+		"verify": "pnpm run lint && pnpm run typecheck && pnpm run test"
 	},
 	"engines": {
 		"node": ">=24"
 	},
-	"dependencies": {
-		"@filen/shared": "workspace:*"
-	},
 	"devDependencies": {
-		"@eslint/eslintrc": "^3.3.5",
-		"@eslint/js": "^9.34.0",
-		"@types/node": "^24.3.0",
-		"@typescript-eslint/eslint-plugin": "^8.41.0",
-		"@typescript-eslint/parser": "^8.41.0",
-		"cross-env": "^10.0.0",
-		"electron": "^37.4.0",
-		"electron-builder": "^26.0.12",
-		"eslint": "^9.34.0",
-		"npm-check-updates": "^18.0.3",
-		"rimraf": "^6.1.0",
-		"tsx": "^4.20.5",
-		"typescript": "^5.9.2"
+		"@eslint/js": "^10.0.1",
+		"@filen/shared": "workspace:*",
+		"@types/node": "^24.19.2",
+		"electron": "45.0.0",
+		"esbuild": "^0.28.2",
+		"eslint": "^10.13.0",
+		"eslint-config-prettier": "^10.1.8",
+		"prettier": "^3.9.10",
+		"typescript": "6.0.3",
+		"typescript-eslint": "^8.72.0",
+		"vitest": "^5.0.5"
 	}
 }

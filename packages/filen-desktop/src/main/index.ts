@@ -1,0 +1,140 @@
+import { app, BrowserWindow, ipcMain, nativeTheme, protocol, shell } from "electron"
+import { readFile } from "node:fs/promises"
+import path from "node:path"
+import type { DesktopPlatform } from "@filen/shared/desktop"
+import { CHANNELS } from "../shared/channels.ts"
+import { parseHeaders } from "./headers.ts"
+import { classifyNavigation, isTrustedSender } from "./navigation.ts"
+import { registerAppProtocol } from "./serve.ts"
+import { initialColors, windowOptions } from "./window.ts"
+
+const SCHEME = "filen"
+const APP_ORIGIN = `${SCHEME}://app`
+const PLATFORM = process.platform as DesktopPlatform
+
+// The old client's userData lives under the package name; pinning it keeps it for the migration and the keychain.
+// Unpackaged runs get their own directory so development never touches a real installation.
+app.setPath("userData", path.join(app.getPath("appData"), app.isPackaged ? "@filen/desktop" : "@filen/desktop-dev"))
+app.setName("Filen")
+
+protocol.registerSchemesAsPrivileged([
+	{
+		scheme: SCHEME,
+		privileges: {
+			standard: true,
+			secure: true,
+			supportFetchAPI: true,
+			corsEnabled: true,
+			stream: true,
+			codeCache: true,
+			allowServiceWorkers: true
+		}
+	}
+])
+
+// Packaged builds carry the web build as a resource; development serves filen-web's own dist or FILEN_DESKTOP_WEB_DIST.
+const webDist = app.isPackaged
+	? path.join(process.resourcesPath, "web")
+	: path.resolve(process.env["FILEN_DESKTOP_WEB_DIST"] ?? path.join(app.getAppPath(), "../filen-web/dist"))
+
+let mainWindow: BrowserWindow | null = null
+let quitting = false
+
+function showWindow(): void {
+	if (mainWindow === null) {
+		createWindow()
+
+		return
+	}
+
+	if (mainWindow.isMinimized()) {
+		mainWindow.restore()
+	}
+
+	mainWindow.show()
+	mainWindow.focus()
+}
+
+function openExternally(url: string): void {
+	if (classifyNavigation(url, APP_ORIGIN) === "external") {
+		void shell.openExternal(url)
+	}
+}
+
+function createWindow(): void {
+	const window = new BrowserWindow(
+		windowOptions(
+			PLATFORM,
+			initialColors(nativeTheme.shouldUseDarkColors),
+			path.join(import.meta.dirname, "preload.cjs"),
+			!app.isPackaged
+		)
+	)
+
+	window.webContents.setWindowOpenHandler(({ url }) => {
+		openExternally(url)
+
+		return { action: "deny" }
+	})
+
+	window.webContents.on("will-navigate", (event, url) => {
+		if (classifyNavigation(url, APP_ORIGIN) !== "inApp") {
+			event.preventDefault()
+			openExternally(url)
+		}
+	})
+
+	window.once("ready-to-show", () => window.show())
+
+	// macOS keeps the app running when the window closes; the dock icon brings it back.
+	window.on("close", event => {
+		if (PLATFORM === "darwin" && !quitting) {
+			event.preventDefault()
+			window.hide()
+		}
+	})
+
+	window.on("closed", () => {
+		mainWindow = null
+	})
+
+	mainWindow = window
+	void window.loadURL(`${APP_ORIGIN}/`)
+}
+
+if (!app.requestSingleInstanceLock()) {
+	app.quit()
+} else {
+	app.on("second-instance", showWindow)
+	app.on("before-quit", () => {
+		quitting = true
+	})
+	app.on("activate", showWindow)
+	app.on("window-all-closed", () => {
+		if (PLATFORM !== "darwin") {
+			app.quit()
+		}
+	})
+
+	ipcMain.on(CHANNELS.setTitleBarColors, (event, colors: unknown) => {
+		if (!isTrustedSender(event.senderFrame?.url, APP_ORIGIN) || PLATFORM === "darwin") {
+			return
+		}
+
+		if (
+			typeof colors === "object" &&
+			colors !== null &&
+			"color" in colors &&
+			"symbolColor" in colors &&
+			typeof colors.color === "string" &&
+			typeof colors.symbolColor === "string"
+		) {
+			BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor })
+		}
+	})
+
+	void app.whenReady().then(async () => {
+		registerAppProtocol(SCHEME, webDist, parseHeaders(await readFile(path.join(webDist, "_headers"), "utf8")))
+		createWindow()
+	})
+}
