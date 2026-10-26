@@ -1048,7 +1048,8 @@ export function PreviewOverlay({
 					onKeyDown={handleKeyDown}
 					className="fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 				>
-					<header className="flex h-14 shrink-0 items-center gap-1 px-4">
+					{/* Window chrome on desktop: below the Windows/Linux controls band, clear of the macOS lights. */}
+					<header className="flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center gap-1 px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] app-region-chrome">
 						<PreviewName name={name} />
 						{editable && dirty ? (
 							<TooltipIconButton

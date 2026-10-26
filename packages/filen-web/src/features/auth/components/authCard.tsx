@@ -29,8 +29,9 @@ function AuthCard({
 	useDismissBootSplash()
 
 	return (
-		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 text-foreground">
-			<Card className="w-full max-w-sm">
+		// Desktop: the bare canvas moves the window and keeps clear of the Windows/Linux controls band.
+		<div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-canvas p-6 pt-[max(1.5rem,var(--window-inset-top))] text-foreground app-region-chrome">
+			<Card className="w-full max-w-sm app-region-no-drag">
 				<CardHeader className="justify-items-center gap-3 text-center">
 					<Logo className="size-10 text-primary" />
 					<div className="flex flex-col gap-1">

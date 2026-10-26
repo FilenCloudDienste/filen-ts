@@ -24,8 +24,9 @@ export function FullScreenNotice({
 	useDismissBootSplash()
 
 	return (
-		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 text-foreground">
-			<Empty className="max-w-md">
+		// Desktop: the bare canvas moves the window and keeps clear of the Windows/Linux controls band.
+		<div className="flex min-h-svh items-center justify-center bg-canvas p-6 pt-[max(1.5rem,var(--window-inset-top))] text-foreground app-region-chrome">
+			<Empty className="max-w-md app-region-no-drag">
 				<EmptyHeader>
 					<EmptyMedia className={cn(destructive && "bg-destructive/10 text-destructive")}>{icon}</EmptyMedia>
 					<EmptyTitle>{title}</EmptyTitle>

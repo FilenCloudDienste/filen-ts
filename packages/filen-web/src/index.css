@@ -7,7 +7,7 @@
 
 /* Electron drag regions (spec: "Electron plumbing") — inert in every browser, `-webkit-app-region`
    is a Chromium/Electron-only property browsers elsewhere ignore. `app-region-drag` marks a whole
-   background (the system strip, rail, sidebar) draggable; `app-region-no-drag` opts individual
+   background (the title band, rail, sidebar) draggable; `app-region-no-drag` opts individual
    interactive descendants back out so they stay clickable. */
 @utility app-region-drag {
     -webkit-app-region: drag;
@@ -15,6 +15,41 @@
 
 @utility app-region-no-drag {
     -webkit-app-region: no-drag;
+}
+
+/* Window chrome — a full-window layer's top bar, a page's bare background: drags the window while every
+   control inside stays clickable. */
+@utility app-region-chrome {
+    -webkit-app-region: drag;
+
+    & :is(a, button, input, label, select, textarea, [role="button"], [tabindex]) {
+        -webkit-app-region: no-drag;
+    }
+}
+
+/* Chromium builds drag regions regardless of stacking, so a popup over the rail, a sidebar or the title
+   band would drag the window instead of taking clicks. Base layer, zero specificity: a drag bar inside
+   still wins. */
+@layer base {
+    :where([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]) {
+        -webkit-app-region: no-drag;
+    }
+}
+
+/* Desktop window chrome (lib/desktop.ts sets data-desktop; every inset is 0 in a browser). Windows and
+   Linux: the window-controls overlay, a band across the top whose controls sit at the right. macOS: the
+   traffic lights at x 14-68, y 14-28, gone in fullscreen. A full-window layer's top bar leaves
+   --window-inset-top above itself and --window-inset-left before its first control; a panel in the
+   top-left corner starts --window-inset-corner down. */
+:root {
+    --window-inset-top: env(titlebar-area-height, 0px);
+    --window-inset-left: 0px;
+    --window-inset-corner: var(--window-inset-top);
+}
+
+:root[data-desktop="darwin"]:not(:has(:fullscreen)) {
+    --window-inset-left: 5rem;
+    --window-inset-corner: 2rem;
 }
 
 /* The app's two focus-ring recipes, named once so a call site can never invent a third. `focus-ring`

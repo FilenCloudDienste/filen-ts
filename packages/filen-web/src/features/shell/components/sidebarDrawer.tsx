@@ -51,7 +51,8 @@ export function SidebarDrawer({
 		>
 			<DrawerPrimitive.Portal keepMounted={true}>
 				<DrawerPrimitive.Backdrop className={SCRIM_CLASS} />
-				<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex">
+				{/* Desktop: the panel starts below the macOS traffic lights or the Windows/Linux controls band. */}
+				<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex pt-(--window-inset-corner)">
 					{/* aria-label rather than a Drawer.Title: each panel already renders its own <h2>, and the
 					    popup merges consumer props last so this wins as the accessible name. */}
 					<DrawerPrimitive.Popup

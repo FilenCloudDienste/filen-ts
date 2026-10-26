@@ -645,8 +645,10 @@ export function VideoStage(props: VideoStageProps) {
 						/>
 						<div
 							className={cn(
-								"absolute inset-x-0 top-0 flex items-center gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))]",
-								controlsClass
+								"absolute inset-x-0 top-0 flex items-center gap-2 px-3 pt-[calc(max(0.75rem,env(safe-area-inset-top))+var(--window-inset-top))] pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left),var(--window-inset-left))]",
+								controlsClass,
+								// Desktop window chrome only while shown: hidden, the picture's top edge takes the click.
+								visible && "app-region-chrome"
 							)}
 						>
 							<StageIconButton

@@ -32,7 +32,7 @@ function SignOutScreen() {
 		<div
 			role="progressbar"
 			aria-label={t("signingOut")}
-			className="fixed inset-0 z-2147483647 flex flex-col items-center justify-center gap-8 bg-canvas text-primary"
+			className="fixed inset-0 z-2147483647 flex flex-col items-center justify-center gap-8 bg-canvas text-primary app-region-drag"
 		>
 			<Logo className="size-12" />
 			<div className="h-0.75 w-32 overflow-hidden rounded-[3px] bg-muted-foreground/20">

@@ -174,7 +174,8 @@ export function AssistantDrawer({ open, narrow }: { open: boolean; narrow: boole
 		>
 			<DrawerPrimitive.Portal>
 				<DrawerPrimitive.Backdrop className={SCRIM_CLASS} />
-				<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex justify-end">
+				{/* Desktop: the right-docked panel starts below the Windows/Linux window-controls band. */}
+				<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex justify-end pt-(--window-inset-top)">
 					<DrawerPrimitive.Popup
 						aria-label={t("assistantTitle")}
 						initialFocus={drawerInitialFocus}

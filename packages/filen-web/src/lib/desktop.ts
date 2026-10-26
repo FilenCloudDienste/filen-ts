@@ -1,8 +1,17 @@
-import type { DesktopPlatform } from "@filen/shared/desktop"
+import type { DesktopBridge, DesktopPlatform } from "@filen/shared/desktop"
 
 // The one reader of window.desktop. The preload defines it before any page script runs, so it never
 // appears or disappears mid-session and is read once.
 const bridge = window.desktop
+
+// CSS keys the desktop window-chrome insets off this attribute (index.css), so layouts need no JS for them.
+if (bridge !== undefined) {
+	document.documentElement.dataset["desktop"] = bridge.platform
+}
+
+export function desktopBridge(): DesktopBridge | undefined {
+	return bridge
+}
 
 export function desktopPlatform(): DesktopPlatform | undefined {
 	return bridge?.platform

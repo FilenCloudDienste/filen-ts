@@ -60,6 +60,8 @@
         background: var(--boot-canvas);
         color: var(--boot-mark);
         transition: opacity 200ms ease-out;
+        /* Moves the desktop app's window; browsers ignore it. */
+        -webkit-app-region: drag;
       }
       #boot-splash > svg {
         width: 48px;
@@ -82,6 +84,7 @@
       #boot-splash.boot-splash-out {
         opacity: 0;
         pointer-events: none;
+        -webkit-app-region: initial;
       }
       @media (prefers-reduced-motion: reduce) {
         #boot-splash,

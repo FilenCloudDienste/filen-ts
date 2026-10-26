@@ -25,7 +25,8 @@ export function PublicLinkShell({ children }: { children: ReactNode }) {
 
 	return (
 		<div className="flex min-h-svh flex-col bg-canvas text-foreground">
-			<header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-canvas/80 px-4 backdrop-blur-sm sm:px-6">
+			{/* Window chrome on desktop: below the Windows/Linux controls band, clear of the macOS lights. */}
+			<header className="sticky top-0 z-10 flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center justify-between gap-3 border-b border-border bg-canvas/80 px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] backdrop-blur-sm app-region-chrome sm:px-6 sm:pl-[max(1.5rem,var(--window-inset-left))]">
 				<a
 					href={FILEN_HOME_URL}
 					target="_blank"
