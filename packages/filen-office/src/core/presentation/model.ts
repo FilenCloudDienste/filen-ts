@@ -202,6 +202,10 @@ export interface ShapeNode {
 	// `sourceId`, which emit writes back and a rebase rebinds by.
 	id: number
 	sourceId?: number
+	// A shape the source has no element for on this level: an ODP master's header, footer, date-time or page-number
+	// frame shown on a slide by the drawing page's presentation:display-* flags, its field text resolved for that slide.
+	// Rendered and converted like any shape, never written back to ODP.
+	synthetic?: true
 	name: string
 	alt?: { descr?: string; title?: string; decorative?: boolean }
 	hidden: boolean
@@ -238,12 +242,13 @@ export interface Xfrm {
 }
 
 // Per DrawingML property group; each present group replaces the source group whole when emitted.
+// In a setProps op, an explicit undefined for a group restores the source group.
 export interface ShapePropsEdit {
-	geometry?: Geometry
-	fill?: FillProps | "none"
-	ln?: LineProps | "none"
-	effects?: EffectList
-	bodyPr?: Partial<TextBodyProps>
+	geometry?: Geometry | undefined
+	fill?: FillProps | "none" | undefined
+	ln?: LineProps | "none" | undefined
+	effects?: EffectList | undefined
+	bodyPr?: Partial<TextBodyProps> | undefined
 }
 
 export type Geometry =
@@ -500,6 +505,9 @@ export interface ParaProps {
 	readonly eaLnBrk?: boolean
 	readonly latinLnBrk?: boolean
 	readonly hangingPunct?: boolean
+	// ODF style:font-independent-line-spacing. false: the paragraph's lines take their faces' ascent and descent, not
+	// the font-independent single line; absent or true: the font-independent line. DrawingML has no such property.
+	readonly fontIndependentLineSpacing?: boolean
 	readonly defRPr?: RunProps
 }
 

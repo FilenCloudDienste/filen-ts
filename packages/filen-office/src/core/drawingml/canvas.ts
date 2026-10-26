@@ -23,6 +23,7 @@ import {
 	ItemFloat,
 	ItemInt,
 	ItemKind,
+	pathGradientCircle,
 	PATH_COMMAND_COORDS,
 	PathCommand,
 	type DrawingClip,
@@ -1089,16 +1090,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 		switch (paint.kind) {
 			case "path": {
-				const [left, top, right, bottom] = insetOf(paint.focus, 0, 1)
-				const halfWidth = Math.max(0, 1 - left - right) / 2
-				const halfHeight = Math.max(0, 1 - top - bottom) / 2
-				const cx = clamp(left + halfWidth, 0, 1, 0.5)
-				const cy = clamp(top + halfHeight, 0, 1, 0.5)
-				const reachX = Math.max(cx, 1 - cx)
-				const reachY = Math.max(cy, 1 - cy)
-				const rect = paint.shape === "rect"
-				const radius = Math.max(rect ? Math.max(reachX, reachY) : Math.hypot(reachX, reachY), 0.001)
-				const inner = clamp((rect ? Math.max(halfWidth, halfHeight) : Math.hypot(halfWidth, halfHeight)) / radius, 0, 0.99, 0)
+				const { cx, cy, radius, inner } = pathGradientCircle(paint)
 
 				// The SVG painter's objectBoundingBox radial: a circle in the unit box, stretched with the box.
 				this.place(times(this.local, [width, 0, 0, height, x, y]))
@@ -1877,8 +1869,11 @@ export type CanvasTextEffects = readonly (
 	  }
 	| { readonly kind: "glow"; readonly color: Rgba; readonly radius: number }
 	| { readonly kind: "softEdge" | "blur"; readonly radius: number }
-	| { readonly kind: "reflection" }
+	| { readonly kind: "reflection"; readonly distance?: number; readonly startAlpha?: number; readonly endPos?: number }
 )[]
+
+// Bands a text reflection's fade is drawn in (each a clipped copy at its own opacity).
+const REFLECTION_BANDS = 8
 
 const LEADER_DASH: Readonly<Record<number, readonly number[]>> = {
 	[TabLeader.DOT]: [1, 2],
@@ -2172,6 +2167,7 @@ class CanvasTextPainter<I> {
 			}
 
 			if (outline !== undefined && outline !== null) this.outline(outline, piece, at, y)
+			if (effects !== undefined) this.reflection(effects, style, piece, at, y, fill)
 		}
 
 		let pen = x
@@ -2260,6 +2256,58 @@ class CanvasTextPainter<I> {
 				cast(rgbaOf(effect.color), radius, 0, 0)
 				cast(rgbaOf(effect.color), radius / 2, 0, 0)
 			}
+		}
+	}
+
+	// A reflection as the DOM painter's -webkit-box-reflect draws it: the span's box (its line-height, the glyphs centred
+	// in it by the half-leading) mirrored `distance` below its bottom, opaque by startAlpha at the edge and fading out over
+	// endPos of the box's height.
+	private reflection(
+		effects: CanvasTextEffects,
+		style: DocxTextStyle | undefined,
+		text: string,
+		x: number,
+		y: number,
+		fill: unknown
+	): void {
+		const effect = effects.find(candidate => candidate?.kind === "reflection")
+
+		if (effect === undefined || effect.kind !== "reflection" || fill === null) return
+
+		const startAlpha = clamp(effect.startAlpha, 0, 1, 0)
+		const endPos = clamp(effect.endPos, 0, 1, 0)
+
+		if (startAlpha === 0 || endPos === 0) return
+
+		const ascent = Math.max(0, finite(style?.ascent, 0))
+		const descent = Math.max(0, finite(style?.descent, 0))
+		const lineHeight = Number(/\/\s*([\d.]+)px/.exec(style?.font ?? "")?.[1] ?? Number.NaN)
+		const height = Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : ascent + descent
+		const bottom = y + descent + (height - ascent - descent) / 2
+		const axis = bottom + clamp(effect.distance, 0, MAX_COORD, 0) / 2
+		const fade = endPos * height
+		const { ctx } = this
+		const m = times(this.base, [1, 0, 0, -1, 0, 2 * axis])
+		const reach = Math.max(
+			clamp(this.text.page.width, 0, MAX_COORD, 0),
+			Math.abs(x) + Math.abs(finite(this.ctx.measureText(text).width, 0)),
+			1
+		)
+
+		for (let band = 0; band < REFLECTION_BANDS; band++) {
+			// Bands from the box's bottom edge upwards in its own space, which the mirror puts nearest the glyphs.
+			const from = bottom - (fade * band) / REFLECTION_BANDS
+			const to = bottom - (fade * (band + 1)) / REFLECTION_BANDS
+
+			ctx.save()
+			ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5])
+			ctx.beginPath()
+			ctx.rect(-reach, to, 3 * reach, from - to)
+			ctx.clip()
+			ctx.globalAlpha *= startAlpha * (1 - (band + 0.5) / REFLECTION_BANDS)
+			ctx.fillStyle = fill
+			ctx.fillText(text, x, y)
+			ctx.restore()
 		}
 	}
 

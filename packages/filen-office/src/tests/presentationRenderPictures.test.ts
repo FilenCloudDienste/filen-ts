@@ -188,6 +188,33 @@ describe("metafile pictures", () => {
 		expect(second.every(bytes => bytes.byteLength > 0)).toBe(true)
 	})
 
+	it("names a metafile's embedded bitmap the same in every render, so the page shares one URL for its copies", async () => {
+		const { info, bits } = dib24(2, 2, 0x00ff00)
+		const blit = new ByteWriter()
+			.u32(0x00cc0020)
+			.i16(2)
+			.i16(2)
+			.i16(0)
+			.i16(0)
+			.i16(360)
+			.i16(720)
+			.i16(0)
+			.i16(0)
+			.raw(new ByteWriter().raw(info).raw(bits).done())
+			.done()
+		const bitmap = wmf().record(0x12d, [0]).recordBytes(0xb41, blit).build([0, 0, 1440, 720])
+		const { services, deck } = setup(true)
+		const withBitmap = { ...services, bytes: () => Promise.resolve(bitmap) }
+		const names = (render: Awaited<ReturnType<typeof renderSlide>>) =>
+			render.layers.flatMap(layer => layer.drawing.images.flatMap(image => (image.bytes === undefined ? [] : [image.bytesKey])))
+		const first = names(await renderSlide(deck, SLIDE, withBitmap, SLICING))
+		const second = names(await renderSlide(deck, SLIDE, withBitmap, SLICING))
+
+		expect(first.length).toBeGreaterThan(0)
+		expect(first.every(name => typeof name === "string" && name.length > 0)).toBe(true)
+		expect(second).toEqual(first)
+	})
+
 	it("keeps the placeholder and counts it without a byte reader", async () => {
 		const { services, deck } = setup(false)
 		const report = new RenderReport()

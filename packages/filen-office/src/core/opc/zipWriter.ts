@@ -149,10 +149,17 @@ class BatchingSink {
 	async flush(): Promise<void> {
 		if (this.filled === 0) return
 
-		// The sink may keep what it is handed, so the batch buffer is handed over and replaced.
-		const chunk = this.buffer.subarray(0, this.filled)
+		// The sink may keep what it is handed: a full batch buffer is handed over and replaced, a partial one copied out
+		// (a view would pin the whole buffer for a few bytes, before every large entry of a kept zip) and reused.
+		let chunk: Uint8Array
 
-		this.buffer = new Uint8Array(BATCH)
+		if (this.filled === BATCH) {
+			chunk = this.buffer
+			this.buffer = new Uint8Array(BATCH)
+		} else {
+			chunk = this.buffer.slice(0, this.filled)
+		}
+
 		this.filled = 0
 
 		await this.sink.write(chunk)
@@ -652,6 +659,10 @@ async function dataOf(item: Extract<ZipPlanItem, { kind: "data" }>, options: Wri
 	return { crc, size: data.length, data: () => once(data), fed: () => crc }
 }
 
+function shortCopy(name: string, got: number, wanted: number): ZipError {
+	return new ZipError("corrupt", `A copy of ${name} read ${String(got)} of ${String(wanted)} bytes`)
+}
+
 // Executes a zip plan: copied entries stream from the original unchanged (in copyChunkSize reads), new
 // content is deflated here, and a fresh central directory follows. Only DataView, the CRC table and fflate's
 // deflate are used, so the same code runs in a worker, a WebView or Hermes next to the file on disk. Given
@@ -698,13 +709,20 @@ export async function writeZip(
 			for (let offset = entry.localHeaderOffset; offset < end; offset += copyChunkSize) {
 				const length = Math.min(copyChunkSize, end - offset)
 
+				// A short read would shift every later byte: the package must fail, never be written.
 				if (source.readChecked !== undefined) {
 					const read = await source.readChecked(offset, length, raw)
+
+					if (read.bytes.length !== length) throw shortCopy(entry.name, read.bytes.length, length)
 
 					raw = read.crc
 					await out.write(read.bytes)
 				} else {
-					await out.write(await source.read(offset, length))
+					const bytes = await source.read(offset, length)
+
+					if (bytes.length !== length) throw shortCopy(entry.name, bytes.length, length)
+
+					await out.write(bytes)
 				}
 			}
 

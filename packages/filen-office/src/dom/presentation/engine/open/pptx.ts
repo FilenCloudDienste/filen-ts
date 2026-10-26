@@ -18,6 +18,12 @@ export function pptxParts(deck: Deck): PptxParts | undefined {
 	return parts.get(deck)
 }
 
+// Registers the parts of a deck opened from a package another opener built (a PowerPoint 97–2003 deck through the
+// in-memory pptx it converts to), so every capability reads it as it reads a pptx.
+export function registerPptxParts(deck: Deck, opened: PptxParts): void {
+	parts.set(deck, opened)
+}
+
 // The decrypted package of an encrypted deck (its key seals the next save), or undefined.
 export function pptxDecrypted(deck: Deck): DecryptedPackage | undefined {
 	return decrypted.get(deck)

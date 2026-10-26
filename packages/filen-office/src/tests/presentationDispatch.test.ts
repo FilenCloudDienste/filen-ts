@@ -16,7 +16,7 @@ import {
 import { smartArtColorsDef, smartArtLayoutDef, smartArtStyleDef } from "../core/smartart/gallery/defs"
 import { CAPABILITIES, METHOD_HANDLERS, OPENERS, PRESENTATION_LANES, SERVICES, type EngineSession } from "../dom/presentation/engine"
 import { PRESENTATION_JOBS, runPresentationJob, type JobContext } from "../dom/presentation/jobs/registry"
-import { PRESENTATION_METHODS } from "../dom/presentation/protocol"
+import { PRESENTATION_METHODS, type PresentationMethod } from "../dom/presentation/protocol"
 import { bytesSource, memorySink } from "../core/opc/index"
 import { unavailablePresenterPortal, unavailableShowController } from "../react/presentation/show/controller"
 import { fixtureBody, fixtureDeck } from "./fixtures/presentation/deck"
@@ -54,6 +54,11 @@ const SAMPLE_OPS: { readonly [F in DeckOpFamily]: OpOf<F> } = {
 	mediaTiming: { family: "mediaTiming", kind: "setTrim", target, startMs: 0, endMs: 1000 }
 }
 
+// What the slices have built so far: the loops below cover only what still refuses as notImplemented.
+const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set(["slide", "shape"])
+const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set(["shape", "slide", "text"])
+const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved"])
+
 const context: ApplyContext = {
 	sourceBytes: () => new Uint8Array(0),
 	newShapeId: () => 100,
@@ -78,8 +83,8 @@ describe("presentation dispatch seams", () => {
 		expect(Object.keys(ODP_EMIT_FAMILIES).sort()).toEqual([...DECK_OP_FAMILIES].sort())
 	})
 
-	it("refuses every op family's apply as notImplemented, touching nothing and leaving the deck as it was", () => {
-		for (const family of DECK_OP_FAMILIES) {
+	it("refuses every op family's apply not built yet as notImplemented, touching nothing and leaving the deck as it was", () => {
+		for (const family of DECK_OP_FAMILIES.filter(family => !BUILT_APPLY.has(family))) {
 			const deck = fixtureDeck()
 			const before = structuredClone(deck)
 			const op = SAMPLE_OPS[family]
@@ -90,7 +95,7 @@ describe("presentation dispatch seams", () => {
 		}
 	})
 
-	it("refuses every family's pptx and ODP emit as notImplemented", () => {
+	it("refuses every family's pptx and ODP emit not built yet as notImplemented", () => {
 		const deck = fixtureDeck()
 		const node = deck.nodes.get(slide)
 
@@ -106,11 +111,14 @@ describe("presentation dispatch seams", () => {
 		}
 
 		for (const family of DECK_OP_FAMILIES) {
-			expect(emitPptx(family, request, pptx), family).toEqual({
-				kind: "refused",
-				reason: "notImplemented",
-				detail: `pptx emit ${family}`
-			})
+			if (!BUILT_PPTX_EMIT.has(family)) {
+				expect(emitPptx(family, request, pptx), family).toEqual({
+					kind: "refused",
+					reason: "notImplemented",
+					detail: `pptx emit ${family}`
+				})
+			}
+
 			expect(emitOdp(family, request, odp), family).toEqual({
 				kind: "refused",
 				reason: "notImplemented",
@@ -167,7 +175,7 @@ describe("presentation dispatch seams", () => {
 		expect(emitFamilyOf({ slide: node, touch: { kind: "slide", slide, dirt: { kind: "node" } } })).toBe("slide")
 	})
 
-	it("routes every protocol method to a capability, each refusing as notImplemented", async () => {
+	it("routes every protocol method to a capability, each not built yet refusing as notImplemented", async () => {
 		const owned = [...Object.values(CAPABILITIES).flatMap(capability => Object.keys(capability)), "smartArtPreview"]
 
 		expect(owned.sort()).toEqual([...PRESENTATION_METHODS].sort())
@@ -177,7 +185,7 @@ describe("presentation dispatch seams", () => {
 		const signal = { aborted: false, onAbort: () => undefined }
 		const slicing = { pause: () => Promise.resolve(), sliceMs: 8, now: () => 0 }
 
-		for (const method of PRESENTATION_METHODS) {
+		for (const method of PRESENTATION_METHODS.filter(method => !BUILT_METHODS.has(method))) {
 			const handler = METHOD_HANDLERS[method] as (context: unknown, ...args: unknown[]) => Promise<unknown>
 			const error: unknown = await handler({ session, signal, lane: PRESENTATION_LANES[method], slicing }).then(
 				() => undefined,
@@ -189,7 +197,7 @@ describe("presentation dispatch seams", () => {
 		}
 	})
 
-	it("refuses the fonts and SmartArt services and the openers not built yet as notImplemented", async () => {
+	it("refuses the fonts and SmartArt services as notImplemented, and empty bytes in every reader typed", async () => {
 		const session = { s: 1 } as unknown as EngineSession
 
 		await expect(SERVICES.fonts.faces(session)).rejects.toMatchObject({ reason: "notImplemented" })
@@ -202,24 +210,17 @@ describe("presentation dispatch seams", () => {
 			reason: "notImplemented"
 		})
 
-		for (const format of ["odp", "ppt"] as const) {
+		// Every reader is built: bytes that are no presentation are refused typed, never as notImplemented.
+		for (const format of ["pptx", "odp", "ppt"] as const) {
 			const outcome = await OPENERS[format].open({
 				source: bytesSource(new Uint8Array(0)),
 				sourceKind: "bytes",
 				options: { format, fileName: `x.${format}` }
 			})
 
-			expect(outcome, format).toEqual({ kind: "refused", reason: "notImplemented", detail: `open ${format}` })
+			expect(outcome, format).toMatchObject({ kind: "refused" })
+			expect(outcome, format).not.toMatchObject({ reason: "notImplemented" })
 		}
-
-		// The pptx reader is built: bytes that are no package are refused as malformed.
-		expect(
-			await OPENERS.pptx.open({
-				source: bytesSource(new Uint8Array(0)),
-				sourceKind: "bytes",
-				options: { format: "pptx", fileName: "x.pptx" }
-			})
-		).toMatchObject({ kind: "refused", reason: "malformed" })
 	})
 
 	it("registers the pdf, raster and convert jobs, each refusing as notImplemented", async () => {

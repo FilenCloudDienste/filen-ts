@@ -174,6 +174,25 @@ describe("presentation viewer session", () => {
 		expect(await screen.findByText("That password isn't right. Try again.")).toBeTruthy()
 	})
 
+	it("says a deck with no slides has none: a zero counter, a message on the stage, no notes or show", async () => {
+		render(
+			<PresentationViewer
+				item={deckItem()}
+				alt="deck.pptx"
+			/>
+		)
+
+		await waitFor(() => {
+			expect(engine.opens).toHaveLength(1)
+		})
+		await emit({ ...opened, info: { ...opened.info, slides: [] } })
+
+		expect(screen.getByText("This presentation has no slides.")).toBeDefined()
+		expect(screen.getByLabelText<HTMLInputElement>("Page number").value).toBe("0")
+		expect(screen.queryByRole("img", { name: /Slide/u })).toBeNull()
+		expect(screen.getByRole("button", { name: "Present" }).hasAttribute("disabled")).toBe(true)
+	})
+
 	it("leaves arrow keys to an open menu", async () => {
 		render(
 			<PresentationViewer

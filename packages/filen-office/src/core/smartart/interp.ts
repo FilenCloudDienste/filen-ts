@@ -1,17 +1,23 @@
 import { compositeLayout } from "./algorithms/composite"
 import { linLayout } from "./algorithms/lin"
 import { snakeLayout } from "./algorithms/snake"
+import { customScale } from "./algorithms/shared"
 import { spLayout } from "./algorithms/sp"
 import { txLayout } from "./algorithms/tx"
+import { matchesType, resolveChildren, type Cap } from "./constraints"
 import { DEFAULT_SMARTART_BUDGETS, SmartArtError, type DataModel, type DataPoint, type SmartArtBudgets } from "./data"
 import type { Algorithm, Atom, Body, Constraint, IfDef, IteratorStep, LayoutDefinition, LayoutNodeDef, Rule, ShapeDef } from "./layoutDef"
+import type { TextMeasurer } from "./measure"
+import { equalizeFonts, relax, resetCaps } from "./rules"
+import type { XmlDocument } from "../xml/index"
 
-// The layout interpreter: expands a layout definition against a data model into layout nodes
-// (ECMA-376 §21.4.2.14 forEach, §21.4.2.6 choose, §21.4.7.33 functions, MS-OI29500 §2.1.1618), then
-// lays them out top-down. Per layout node, constraints are a deterministic ordered pass in constrLst
-// order (references to values not yet known are retried, bounded by the pass budget); the node's
-// algorithm then places its children, and its rules relax constraints within bounded steps
-// (L.4.15.6.3.22) when the children do not fit.
+export type { TextMeasurer } from "./measure"
+
+// The layout interpreter: expands a layout definition against a data model into layout nodes (ECMA-376 §21.4.2.14
+// forEach, §21.4.2.6 choose, §21.4.7.33 functions, MS-OI29500 §2.1.1618), then lays them out top-down. Per layout
+// node the constraints are resolved (constraints.ts), the node's algorithm places its children, the user's custom
+// sizes apply, and the node's rules relax constraints within bounded steps when the content does not fit
+// (rules.ts). The user's custom offsets apply last, over the whole tree (applyOffsets).
 
 export interface Box {
 	x: number
@@ -20,18 +26,12 @@ export interface Box {
 	h: number
 }
 
-// Measures text for the tx algorithm: the height in EMU of `text` set at `fontPt` and wrapped at
-// `width` EMU, and the widest line.
-export interface TextMeasurer {
-	measure(text: string, fontPt: number, width: number): { readonly width: number; readonly height: number }
-}
-
 export interface LayoutNode {
 	readonly def: LayoutNodeDef
 	readonly name: string
 	readonly point: DataPoint
-	// The presentation point the file holds for this layout node, if any: it carries the user's custom
-	// sizes and offsets and variable overrides.
+	// The presentation point the file holds for this layout node, if any: it carries the user's custom sizes and
+	// offsets and variable overrides.
 	readonly pres: DataPoint | undefined
 	readonly parent: LayoutNode | undefined
 	readonly children: LayoutNode[]
@@ -49,8 +49,13 @@ export interface LayoutNode {
 	fontPt: number | undefined
 	// Whether the node's text overflows its box at fontPt (set by the tx algorithm).
 	overflow: boolean
-	// Font size caps this node's rules currently impose on their targets, while the rules relax.
-	readonly caps: Map<Rule, number>
+	// The values this node's rules currently impose while they relax (rules.ts).
+	readonly caps: Map<Rule, Cap>
+	// The size before the user's custom scale (custScaleX/Y), once applied: offsets count in it.
+	base: { w: number; h: number } | undefined
+	// Whether the parent's algorithm laid the custom scale out itself (a snake flows the scaled sizes), rather than
+	// scaling about the centre afterwards.
+	scaledInPlace: boolean
 }
 
 export interface LaidShape {
@@ -64,11 +69,18 @@ export interface LaidShape {
 	readonly styleLbl: string | undefined
 	readonly text: readonly DataPoint[]
 	readonly fontPt: number | undefined
+	readonly node: LayoutNode
 }
 
 export interface DiagramLayout {
 	readonly root: LayoutNode
+	// In drawing order (back to front): document order, chOrder and zOrderOff applied.
 	readonly shapes: readonly LaidShape[]
+	// The style and colour definitions the diagram was laid out with, for its shapes' styling.
+	readonly styleDef: XmlDocument | undefined
+	readonly colorsDef: XmlDocument | undefined
+	// Rule relaxation steps taken (bounded by SmartArtBudgets.maxRuleSteps).
+	readonly ruleSteps: number
 }
 
 export interface LayoutContext {
@@ -76,44 +88,19 @@ export interface LayoutContext {
 	readonly budgets: SmartArtBudgets
 	// Resolves the constraints of `node`'s children as if `node` were w × h EMU.
 	constrain(node: LayoutNode, w: number, h: number): void
+	// The box `node`'s children take when `node` is w × h EMU at the origin (their custom scale applied), for an
+	// algorithm that sizes a child by its content.
+	content(node: LayoutNode, w: number, h: number): Box
 	ruleSteps: number
+	// Algorithm runs so far, bounded by LAYOUT_WORK_PER_NODE × the layout node budget.
+	placements: number
+	// Whether a content measurement is running.
+	measuring: boolean
 }
 
-const EMU_PER_MM = 36000
-const EMU_PER_PT = 12700
-
-const FONT_TYPES: ReadonlySet<string> = new Set(["primFontSz", "secFontSz"])
-const MARGIN_TYPES: ReadonlySet<string> = new Set(["lMarg", "rMarg", "tMarg", "bMarg", "begMarg", "endMarg"])
-const SIZE_TYPES: ReadonlySet<string> = new Set(["w", "h"])
-const RAW_TYPES: ReadonlySet<string> = new Set(["pyraAcctRatio", "unknown", "none"])
-
-type UnitClass = "emu" | "pt" | "raw"
-
-function unitOf(type: string): UnitClass {
-	if (FONT_TYPES.has(type)) return "pt"
-	if (RAW_TYPES.has(type) || type.startsWith("user")) return "raw"
-
-	return "emu"
-}
-
-// A literal constraint value in its type's unit: geometry in millimetres, margins and fonts in points.
-function literal(type: string, val: number): number {
-	if (FONT_TYPES.has(type)) return val
-	if (MARGIN_TYPES.has(type)) return val * EMU_PER_PT
-	if (unitOf(type) === "raw") return val
-
-	return val * EMU_PER_MM
-}
-
-// A referenced value in the unit of the constraint it sets. A font size read by a margin is points of
-// inset (the cached bodyPr insets are fact × size in points); read by any other geometry it counts as
-// millimetres (the cached heights of hList1-style text boxes are fact × size in millimetres).
-function convert(value: number, from: UnitClass, to: UnitClass, type: string): number {
-	if (from === to || from === "raw" || to === "raw") return value
-	if (from === "pt") return value * (MARGIN_TYPES.has(type) ? EMU_PER_PT : EMU_PER_MM)
-
-	return value / EMU_PER_MM
-}
+// How many times over, at most, each layout node may be placed: rule relaxation, lin fitting and content
+// measurement lay subtrees out again, and a hostile definition must not multiply that without bound.
+const LAYOUT_WORK_PER_NODE = 8
 
 // ---------------------------------------------------------------------------------------------------
 // Data navigation (ST_AxisType §21.4.7.6, ST_ElementType §21.4.7.27).
@@ -159,39 +146,44 @@ function axisPoints(model: DataModel, point: DataPoint, axis: string): DataPoint
 
 			return out
 		}
-		case "followSib":
-		case "follow": {
+		case "followSib": {
 			const list = siblings(point)
 
 			return list.slice(list.indexOf(point) + 1)
 		}
-		case "precedSib":
-		case "preced": {
+		case "follow": {
+			// The peers after the point, each followed by its descendants.
+			const out: DataPoint[] = []
+			const list = siblings(point)
+
+			for (const peer of list.slice(list.indexOf(point) + 1)) {
+				out.push(peer)
+				descendants(peer, out)
+			}
+
+			return out
+		}
+		case "precedSib": {
 			const list = siblings(point)
 
 			return list.slice(0, Math.max(0, list.indexOf(point))).reverse()
+		}
+		case "preced": {
+			// The peers before the point, nearest first, each followed by its descendants.
+			const out: DataPoint[] = []
+			const list = siblings(point)
+
+			for (const peer of list.slice(0, Math.max(0, list.indexOf(point))).reverse()) {
+				out.push(peer)
+				descendants(peer, out)
+			}
+
+			return out
 		}
 		case "root":
 			return [model.root]
 		default:
 			return []
-	}
-}
-
-function matchesType(point: DataPoint, ptType: string): boolean {
-	switch (ptType) {
-		case "all":
-			return true
-		case "node":
-			return point.type === "node" || point.type === "asst"
-		case "norm":
-			return point.type === "node"
-		case "nonNorm":
-			return point.type !== "node"
-		case "nonAsst":
-			return point.type !== "asst"
-		default:
-			return point.type === ptType
 	}
 }
 
@@ -340,7 +332,9 @@ class Expander {
 			box: { x: 0, y: 0, w: 0, h: 0 },
 			fontPt: undefined,
 			overflow: false,
-			caps: new Map()
+			caps: new Map(),
+			base: undefined,
+			scaledInPlace: false
 		}
 
 		if (def.vars !== undefined) for (const [k, v] of def.vars) node.vars.set(k, v)
@@ -391,7 +385,13 @@ class Expander {
 	private test(node: LayoutNode, branch: IfDef, point: DataPoint, iteration: Iteration): boolean {
 		switch (branch.func) {
 			case "var": {
-				const value = node.vars.get(branch.arg) ?? VAR_DEFAULTS[branch.arg] ?? ""
+				// A variable a layout node does not set is its ancestors' (the root's dir reaches every branch).
+				let value: string | undefined
+
+				for (let at: LayoutNode | undefined = node; at !== undefined && value === undefined; at = at.parent)
+					value = at.vars.get(branch.arg)
+
+				value ??= VAR_DEFAULTS[branch.arg] ?? ""
 				const normalized = value === "" ? (VAR_DEFAULTS[branch.arg] ?? "") : value
 
 				return compare(branch.op, Number.isNaN(Number(normalized)) ? normalized : Number(normalized), branch.val)
@@ -423,281 +423,12 @@ class Expander {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Constraints.
-
-function matchName(node: LayoutNode, name: string, ptType: string): boolean {
-	return (name === "" || node.name === name) && matchesType(node.point, ptType)
-}
-
-function targets(owner: LayoutNode, rel: "self" | "ch" | "des", name: string, ptType: string): LayoutNode[] {
-	if (rel === "self") return name === "" || owner.name === name ? [owner] : []
-
-	if (rel === "ch") return owner.children.filter(c => matchName(c, name, ptType))
-
-	const out: LayoutNode[] = []
-	const stack = [...owner.children].reverse()
-
-	while (stack.length > 0) {
-		const node = stack.pop() as LayoutNode
-
-		if (matchName(node, name, ptType)) out.push(node)
-
-		for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i] as LayoutNode)
-	}
-
-	return out
-}
-
-// A value of `node` for a reference: set values first, then what follows from the others.
-function valueOf(node: LayoutNode, type: string, selfBox: { w: number; h: number } | undefined): number | undefined {
-	const values = node.values
-	const direct = values.get(type)
-
-	if (direct !== undefined) return direct
-
-	if (selfBox !== undefined) {
-		switch (type) {
-			case "w":
-				return selfBox.w
-			case "h":
-				return selfBox.h
-			case "l":
-			case "t":
-				return 0
-			case "r":
-				return selfBox.w
-			case "b":
-				return selfBox.h
-			case "ctrX":
-				return selfBox.w / 2
-			case "ctrY":
-				return selfBox.h / 2
-		}
-	}
-
-	return inferred(
-		values,
-		type,
-		type === "l" || type === "r" || type === "w" || type === "ctrX" ? ["l", "ctrX", "r", "w"] : ["t", "ctrY", "b", "h"]
-	)
-}
-
-// One axis value from the two others that fix it: near edge, centre, far edge, extent.
-function inferred(values: ReadonlyMap<string, number>, type: string, keys: readonly [string, string, string, string]): number | undefined {
-	const [near, center, far, size] = keys
-	const n = values.get(near)
-	const c = values.get(center)
-	const f = values.get(far)
-	const s = values.get(size)
-
-	switch (type) {
-		case near:
-			return s !== undefined
-				? c !== undefined
-					? c - s / 2
-					: f !== undefined
-						? f - s
-						: undefined
-				: c !== undefined && f !== undefined
-					? 2 * c - f
-					: undefined
-		case far:
-			return s !== undefined
-				? n !== undefined
-					? n + s
-					: c !== undefined
-						? c + s / 2
-						: undefined
-				: n !== undefined && c !== undefined
-					? 2 * c - n
-					: undefined
-		case center:
-			return s !== undefined
-				? n !== undefined
-					? n + s / 2
-					: f !== undefined
-						? f - s / 2
-						: undefined
-				: n !== undefined && f !== undefined
-					? (n + f) / 2
-					: undefined
-		case size:
-			return n !== undefined && f !== undefined
-				? f - n
-				: n !== undefined && c !== undefined
-					? 2 * (c - n)
-					: c !== undefined && f !== undefined
-						? 2 * (f - c)
-						: undefined
-		default:
-			return undefined
-	}
-}
-
-// The lowest cap a relaxing font rule of an ancestor puts on `node`'s `type`.
-function capOf(node: LayoutNode, type: string): number {
-	let cap = Number.POSITIVE_INFINITY
-
-	for (let owner = node.parent; owner !== undefined; owner = owner.parent) {
-		for (const [rule, value] of owner.caps) {
-			if (rule.type === type && value < cap && targets(owner, rule.for, rule.forName, rule.ptType).includes(node)) cap = value
-		}
-	}
-
-	return cap
-}
-
-function set(node: LayoutNode, constraint: Constraint, value: number): void {
-	// An unbounded or undefined value (val="INF", a NaN factor) bounds nothing and sets nothing.
-	if (!Number.isFinite(value)) return
-
-	const capped = FONT_TYPES.has(constraint.type) ? Math.min(value, capOf(node, constraint.type)) : value
-
-	if (constraint.op === "gte") node.lower.set(constraint.type, capped)
-	else if (constraint.op === "lte") node.upper.set(constraint.type, capped)
-	else node.values.set(constraint.type, capped)
-}
-
-// One constraint of `owner` (whose own size is `box`); false when its reference is not known yet.
-function applyConstraint(owner: LayoutNode, constraint: Constraint, box: { w: number; h: number }, only?: LayoutNode): boolean {
-	const hits = targets(owner, constraint.for, constraint.forName, constraint.ptType).filter(n => only === undefined || n === only)
-
-	if (hits.length === 0) return true
-
-	let value: number
-
-	if (constraint.refType === "none" || constraint.refType === "unknown") {
-		// A size of 0 without a reference only groups the targets (op equ) or leaves the size to the
-		// algorithm and the rules; it is not a size.
-		if (constraint.val === 0 && SIZE_TYPES.has(constraint.type)) return true
-
-		value = literal(constraint.type, constraint.val)
-	} else {
-		const refs = targets(owner, constraint.refFor, constraint.refForName, constraint.refPtType)
-		const ref = refs[0]
-
-		if (ref === undefined) return true
-
-		const raw = valueOf(ref, constraint.refType, ref === owner ? box : undefined)
-
-		if (raw === undefined) return false
-
-		value = convert(raw, unitOf(constraint.refType), unitOf(constraint.type), constraint.type) * constraint.fact
-	}
-
-	for (const hit of hits) {
-		// A target's own constraints are evaluated against its own values, so a self reference of the
-		// target (h = 0.4 w) needs w set first; the owner's are never overridden by a child default.
-		set(hit, constraint, value)
-	}
-
-	return true
-}
-
-function resolveChildren(node: LayoutNode, w: number, h: number, budgets: SmartArtBudgets): void {
-	for (const child of node.children) {
-		child.values.clear()
-		child.lower.clear()
-		child.upper.clear()
-	}
-
-	// Constraints `des` of ancestors reach this node's children before its own.
-	const inherited: { owner: LayoutNode; constraint: Constraint }[] = []
-
-	for (let a = node.parent; a !== undefined; a = a.parent) {
-		for (const constraint of a.constraints) if (constraint.for === "des") inherited.unshift({ owner: a, constraint })
-	}
-
-	let pending: { owner: LayoutNode; constraint: Constraint; only?: LayoutNode }[] = []
-
-	for (const { owner, constraint } of inherited) {
-		for (const child of node.children) pending.push({ owner, constraint, only: child })
-	}
-
-	for (const constraint of node.constraints) {
-		if (constraint.for !== "self") pending.push({ owner: node, constraint })
-	}
-
-	// The node's constraints on itself that read its children (a snake's row gap from a spacer's width).
-	for (const constraint of node.constraints) {
-		if (constraint.for === "self" && constraint.refFor !== "self") pending.push({ owner: node, constraint })
-	}
-
-	// The children's own constraints come last and only fill what the parent left open.
-	const own: { owner: LayoutNode; constraint: Constraint }[] = []
-
-	for (const child of node.children) {
-		for (const constraint of child.constraints) {
-			if (constraint.for === "self" && constraint.forName === "") own.push({ owner: child, constraint })
-		}
-	}
-
-	for (let pass = 0; pending.length > 0; pass++) {
-		if (pass >= budgets.maxConstraintPasses) break
-
-		const deferred: typeof pending = []
-
-		for (const item of pending) {
-			const box = item.owner === node ? { w, h } : item.owner.box
-
-			if (!applyConstraint(item.owner, item.constraint, box, item.only)) deferred.push(item)
-		}
-
-		if (deferred.length === pending.length) break
-
-		pending = deferred
-	}
-
-	let open = own
-
-	for (let pass = 0; open.length > 0 && pass < budgets.maxConstraintPasses; pass++) {
-		const deferred: typeof open = []
-
-		for (const item of open) {
-			const { owner, constraint } = item
-			const isGeometryDefault = constraint.refType === "none" && constraint.val === 0 && constraint.op === "none"
-
-			if (owner.values.has(constraint.type) || isGeometryDefault) continue
-
-			if (constraint.refType !== "none" && constraint.refType !== "unknown") {
-				const raw = valueOf(owner, constraint.refType, undefined)
-
-				if (raw === undefined) {
-					deferred.push(item)
-
-					continue
-				}
-
-				set(owner, constraint, convert(raw, unitOf(constraint.refType), unitOf(constraint.type), constraint.type) * constraint.fact)
-			} else {
-				set(owner, constraint, literal(constraint.type, constraint.val))
-			}
-		}
-
-		if (deferred.length === open.length) break
-
-		open = deferred
-	}
-
-	for (const child of node.children) {
-		for (const [type, max] of child.upper) {
-			const value = child.values.get(type)
-
-			if (value !== undefined && value > max) child.values.set(type, max)
-		}
-
-		for (const [type, min] of child.lower) {
-			const value = child.values.get(type)
-
-			if (value !== undefined && value < min) child.values.set(type, min)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------------------------------
 // Layout.
 
 function place(node: LayoutNode, context: LayoutContext): void {
+	if (++context.placements > context.budgets.maxLayoutNodes * LAYOUT_WORK_PER_NODE)
+		throw new SmartArtError("tooLarge", "too much layout work")
+
 	switch (node.alg.type) {
 		case "composite":
 			compositeLayout(node, context)
@@ -712,49 +443,90 @@ function place(node: LayoutNode, context: LayoutContext): void {
 			txLayout(node, context)
 			break
 		default:
-			// Algorithms without a draft yet give every child the whole box, like sp.
+			// Algorithms without an implementation yet give every child its constraint size at the node's origin.
 			spLayout(node, context)
 	}
 }
 
-// The user's own size and offset edits on the presentation point (§21.4.3.4 custScaleX/Y,
-// custLinFactNeighborX/Y): a scale about the box centre, then a shift in units of the unscaled size,
-// kept inside the diagram when the shape fits.
-function applyCustom(node: LayoutNode, frame: Box): void {
-	const props = node.pres?.props
+// Scales a child's box about its centre by the user's custom scale, unless its parent's algorithm laid the scaled
+// size out itself.
+function scaleAboutCentre(node: LayoutNode): void {
+	if (node.scaledInPlace) return
 
-	if (props === undefined) return
+	const { x, y } = customScale(node)
+
+	if (x === 1 && y === 1) return
 
 	const box = node.box
-	const baseW = box.w
-	const baseH = box.h
-	const sx = props.custScaleX === undefined ? 1 : props.custScaleX / 100000
-	const sy = props.custScaleY === undefined ? 1 : props.custScaleY / 100000
-	const cx = box.x + box.w / 2
-	const cy = box.y + box.h / 2
-	const moved = props.custLinFactNeighborX !== undefined || props.custLinFactNeighborY !== undefined
 
-	box.w = baseW * sx
-	box.h = baseH * sy
-	box.x = cx - box.w / 2 + ((props.custLinFactNeighborX ?? 0) / 100000) * baseW
-	box.y = cy - box.h / 2 + ((props.custLinFactNeighborY ?? 0) / 100000) * baseH
-
-	if (moved) {
-		if (box.w <= frame.w) box.x = Math.min(Math.max(box.x, frame.x), frame.x + frame.w - box.w)
-		if (box.h <= frame.h) box.y = Math.min(Math.max(box.y, frame.y), frame.y + frame.h - box.h)
-	}
+	node.base = { w: box.w, h: box.h }
+	node.box = { x: box.x + (box.w - box.w * x) / 2, y: box.y + (box.h - box.h * y) / 2, w: box.w * x, h: box.h * y }
 }
 
-function layoutOnce(node: LayoutNode, context: LayoutContext, frame: Box): boolean {
+function contentOf(node: LayoutNode, w: number, h: number, context: LayoutContext): Box {
+	// One level only: the content's own children take their constraint sizes, so nested lines cost linear work.
+	if (context.measuring) return { x: 0, y: 0, w, h }
+
+	const saved = node.box
+
+	context.measuring = true
+
+	node.box = { x: 0, y: 0, w, h }
+	context.constrain(node, w, h)
+
+	for (const child of node.children) {
+		child.base = undefined
+		child.scaledInPlace = false
+	}
+
+	place(node, context)
+
+	let x0 = Number.POSITIVE_INFINITY
+	let y0 = Number.POSITIVE_INFINITY
+	let x1 = Number.NEGATIVE_INFINITY
+	let y1 = Number.NEGATIVE_INFINITY
+
+	for (const child of node.children) {
+		scaleAboutCentre(child)
+
+		const box = child.box
+		const shape = child.shape
+		// What draws: a spacer (no geometry, text or children) holds a place but no content.
+		const draws =
+			(shape !== undefined && shape.type !== "none" && !shape.hideGeom) ||
+			(child.text.length > 0 && child.alg.type === "tx") ||
+			child.children.length > 0
+
+		if (!draws || !(box.w > 0 && box.h > 0)) continue
+
+		x0 = Math.min(x0, box.x)
+		y0 = Math.min(y0, box.y)
+		x1 = Math.max(x1, box.x + box.w)
+		y1 = Math.max(y1, box.y + box.h)
+	}
+
+	node.box = saved
+	context.measuring = false
+
+	return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w, h }
+}
+
+function layoutOnce(node: LayoutNode, context: LayoutContext): boolean {
 	context.constrain(node, node.box.w, node.box.h)
+
+	for (const child of node.children) {
+		child.base = undefined
+		child.scaledInPlace = false
+	}
+
 	place(node, context)
 
 	let overflow = node.overflow
 
 	for (const child of node.children) {
-		applyCustom(child, frame)
+		scaleAboutCentre(child)
 
-		if (layoutNode(child, context, frame)) overflow = true
+		if (layoutNode(child, context)) overflow = true
 	}
 
 	equalizeFonts(node)
@@ -762,59 +534,78 @@ function layoutOnce(node: LayoutNode, context: LayoutContext, frame: Box): boole
 	return overflow
 }
 
-// Lays out `node`'s subtree; true when text still overflows in it. A font rule of the node on its
-// descendants (primFontSz/secFontSz for ch/des, L.4.15.6.3.22) relaxes when the subtree overflows: the
-// targets' size is capped and bisected in half points between the rule's value and the constraint's,
-// relaying the subtree each step, within the rule step budget.
-function layoutNode(node: LayoutNode, context: LayoutContext, frame: Box): boolean {
-	let overflow = layoutOnce(node, context, frame)
+// Lays out `node`'s subtree; true when text still overflows in it.
+function layoutNode(node: LayoutNode, context: LayoutContext): boolean {
+	resetCaps(node)
 
-	for (const rule of node.rules) {
-		if (!overflow) break
-		if (!FONT_TYPES.has(rule.type) || rule.for === "self" || !Number.isFinite(rule.val)) continue
-
-		let high = 0
-
-		for (const target of targets(node, rule.for, rule.forName, rule.ptType)) high = Math.max(high, target.values.get(rule.type) ?? 0)
-
-		let low = rule.val
-
-		if (high <= low) continue
-
-		node.caps.set(rule, low)
-
-		if (layoutOnce(node, context, frame)) continue
-
-		for (let step = 0; step < context.budgets.maxRuleSteps && high - low > 0.5; step++) {
-			context.ruleSteps++
-
-			const mid = Math.round(low + high) / 2
-
-			node.caps.set(rule, mid)
-
-			if (layoutOnce(node, context, frame)) high = mid
-			else low = mid
-		}
-
-		node.caps.set(rule, low)
-		overflow = layoutOnce(node, context, frame)
-	}
-
-	return overflow
+	return relax(node, context, layoutOnce(node, context), () => layoutOnce(node, context))
 }
 
-// primFontSz/secFontSz constraints with op equ share one size: the smallest any target came to.
-function equalizeFonts(node: LayoutNode): void {
-	for (const constraint of node.constraints) {
-		if (constraint.op !== "equ" || constraint.type !== "primFontSz" || constraint.for === "self") continue
+function translate(node: LayoutNode, dx: number, dy: number): void {
+	const stack = [node]
 
-		const group = targets(node, constraint.for, constraint.forName, constraint.ptType).filter(t => t.fontPt !== undefined)
-		let min = Number.POSITIVE_INFINITY
+	while (stack.length > 0) {
+		const at = stack.pop() as LayoutNode
 
-		for (const target of group) min = Math.min(min, target.fontPt as number)
+		at.box = { ...at.box, x: at.box.x + dx, y: at.box.y + dy }
 
-		for (const target of group) target.fontPt = min
+		for (const child of at.children) stack.push(child)
 	}
+}
+
+// The user's custom offsets (§21.4.3.4 custLinFactNeighborX/Y, in 1/1000 % of the node's size before its custom
+// scale) and the extent they live in. Measured on PowerPoint's caches: a child of the root scaled about its centre
+// past the frame grows the diagram's extent to hold it, and that extent stays centred on the frame, so the whole
+// diagram shifts by half the difference between the growth on either side (a bottom node whose height grows by 2Δ
+// about its centre reaches Δ past the edge and moves the diagram up by Δ/2); an offset node is then kept inside that
+// extent when it fits. Deeper nodes grow
+// only their own parent's box, which the root's extent does not see (hList1's scaled headers stay clamped to the
+// frame).
+function applyOffsets(root: LayoutNode, frame: Box): void {
+	let x0 = frame.x
+	let y0 = frame.y
+	let x1 = frame.x + frame.w
+	let y1 = frame.y + frame.h
+	const all: LayoutNode[] = []
+	const stack = [root]
+
+	while (stack.length > 0) {
+		const node = stack.pop() as LayoutNode
+
+		all.push(node)
+
+		for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i] as LayoutNode)
+	}
+
+	for (const node of root.children) {
+		if (node.base === undefined || node.scaledInPlace) continue
+
+		x0 = Math.min(x0, node.box.x)
+		y0 = Math.min(y0, node.box.y)
+		x1 = Math.max(x1, node.box.x + node.box.w)
+		y1 = Math.max(y1, node.box.y + node.box.h)
+	}
+
+	for (const node of all) {
+		const props = node.pres?.props
+
+		if (props === undefined || (props.custLinFactNeighborX === undefined && props.custLinFactNeighborY === undefined)) continue
+
+		const box = node.box
+		const base = node.base ?? box
+		let x = box.x + ((props.custLinFactNeighborX ?? 0) / 100000) * base.w
+		let y = box.y + ((props.custLinFactNeighborY ?? 0) / 100000) * base.h
+
+		if (box.w <= x1 - x0) x = Math.min(Math.max(x, x0), x1 - box.w)
+		if (box.h <= y1 - y0) y = Math.min(Math.max(y, y0), y1 - box.h)
+
+		translate(node, x - box.x, y - box.y)
+	}
+
+	const dx = frame.x + frame.w / 2 - (x0 + x1) / 2
+	const dy = frame.y + frame.h / 2 - (y0 + y1) / 2
+
+	if (dx !== 0 || dy !== 0) translate(root, dx, dy)
 }
 
 function collect(node: LayoutNode, out: LaidShape[]): void {
@@ -825,8 +616,8 @@ function collect(node: LayoutNode, out: LaidShape[]): void {
 		const rot = shape?.rot ?? 0
 		const quarter = Math.abs(Math.round(rot / 90)) % 2 === 1 && Math.abs(rot % 90) < 1e-9
 		const box = node.box
-		// A shape turned a quarter turn fills its layout box with its rotated footprint: the unrotated
-		// box (what xfrm holds) has the sides swapped about the same centre.
+		// A shape turned a quarter turn fills its layout box with its rotated footprint: the unrotated box (what xfrm
+		// holds) has the sides swapped about the same centre.
 		const drawn = quarter ? { x: box.x + (box.w - box.h) / 2, y: box.y + (box.h - box.w) / 2, w: box.h, h: box.w } : { ...box }
 
 		out.push({
@@ -839,32 +630,54 @@ function collect(node: LayoutNode, out: LaidShape[]): void {
 			hideGeom: shape?.hideGeom ?? false,
 			styleLbl: node.def.styleLbl ?? node.pres?.props.presStyleLbl,
 			text: node.text,
-			fontPt: node.fontPt
+			fontPt: node.fontPt,
+			node
 		})
 	}
 
+	// chOrder="t" (§21.4.2.15): the children are stacked top-first, so the first child draws last.
 	const children = node.def.chOrder === "t" ? [...node.children].reverse() : node.children
 
 	for (const child of children) collect(child, out)
 }
 
+// zOrderOff (§21.4.2.27) moves a shape that many places back (negative) or forward in the drawing order, ahead of
+// the shape already at that place.
+function zOrdered(shapes: LaidShape[]): LaidShape[] {
+	if (!shapes.some(s => (s.node.shape?.zOrderOff ?? 0) !== 0)) return shapes
+
+	const keyed = shapes.map((shape, index) => {
+		const off = shape.node.shape?.zOrderOff ?? 0
+
+		return { shape, index, key: index + off + (off < 0 ? -0.5 : off > 0 ? 0.5 : 0) }
+	})
+
+	keyed.sort((a, b) => a.key - b.key || a.index - b.index)
+
+	return keyed.map(k => k.shape)
+}
+
 export interface LayoutOptions {
-	readonly measurer: TextMeasurer
 	readonly budgets?: SmartArtBudgets | undefined
 }
 
-// Expands `def` over `model` and lays it out in a `width` × `height` EMU frame.
+// Expands `layoutDef` over `data` and lays it out in `box` (EMU; a dsp:drawing's shapes are relative to the
+// graphic frame, so its box is at 0, 0). `styleDef` and `colorsDef` style the shapes and are carried to them; the
+// geometry depends only on the data, the layout definition, the box and the text measurer. Refuses
+// (SmartArtError) past the budgets.
 export function layoutDiagram(
-	model: DataModel,
-	def: LayoutDefinition,
-	width: number,
-	height: number,
-	options: LayoutOptions
+	data: DataModel,
+	layoutDef: LayoutDefinition,
+	styleDef: XmlDocument | undefined,
+	colorsDef: XmlDocument | undefined,
+	box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+	text: TextMeasurer,
+	options: LayoutOptions = {}
 ): DiagramLayout {
 	const budgets = options.budgets ?? DEFAULT_SMARTART_BUDGETS
 	const presByKey = new Map<string, DataPoint>()
 
-	for (const pres of model.pres) {
+	for (const pres of data.pres) {
 		const { presName, presAssocID } = pres.props
 
 		if (presName === undefined || presAssocID === undefined) continue
@@ -874,22 +687,26 @@ export function layoutDiagram(
 		if (!presByKey.has(key)) presByKey.set(key, pres)
 	}
 
-	const expander = new Expander(model, def, budgets, presByKey)
-	const root = expander.node(def.root, model.root, undefined, { pos: 1, count: 1 })
-	const frame: Box = { x: 0, y: 0, w: width, h: height }
+	const expander = new Expander(data, layoutDef, budgets, presByKey)
+	const root = expander.node(layoutDef.root, data.root, undefined, { pos: 1, count: 1 })
+	const frame: Box = { x: box.x, y: box.y, w: Math.max(0, box.w), h: Math.max(0, box.h) }
 	const context: LayoutContext = {
-		measurer: options.measurer,
+		measurer: text,
 		budgets,
 		constrain: (node, w, h) => resolveChildren(node, w, h, budgets),
-		ruleSteps: 0
+		content: (node, w, h) => contentOf(node, w, h, context),
+		ruleSteps: 0,
+		placements: 0,
+		measuring: false
 	}
 
 	root.box = { ...frame }
-	layoutNode(root, context, frame)
+	layoutNode(root, context)
+	applyOffsets(root, frame)
 
 	const shapes: LaidShape[] = []
 
 	collect(root, shapes)
 
-	return { root, shapes }
+	return { root, shapes: zOrdered(shapes), styleDef, colorsDef, ruleSteps: context.ruleSteps }
 }

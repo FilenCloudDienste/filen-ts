@@ -35,6 +35,42 @@ import { budget, cpuMs } from "./timing"
 
 // The fake font at 20 px: "a" 10, space 5, "i"/"l"/"." 5, "m"/"w" 15, ideographs 20; lines 20 px high.
 
+describe("ranges that start a new line", () => {
+	it("moves a range that fits a line but not the rest of this one to the next line", () => {
+		const h = harness()
+
+		expect(texts(layOut(h, b => b.append("aaa aaaa aa aa", h.base), {}, { breakBefore: [9, 14] }))).toEqual(["aaa aaaa ", "aa aa"])
+	})
+
+	it("leaves a range that fits the rest of the line where it is", () => {
+		const h = harness()
+
+		expect(texts(layOut(h, b => b.append("aa aa aa", h.base), {}, { breakBefore: [3, 8] }))).toEqual(["aa aa aa"])
+	})
+
+	it("starts a range longer than a line on a new line, then wraps it at its spaces", () => {
+		const h = harness()
+
+		expect(texts(layOut(h, b => b.append("aa aaaa aaaa aaaa", h.base), {}, { breakBefore: [3, 17] }))).toEqual([
+			"aa ",
+			"aaaa aaaa ",
+			"aaaa"
+		])
+	})
+
+	it("adds no empty line for a range that already starts a line", () => {
+		const h = harness()
+
+		expect(texts(layOut(h, b => b.append("aaaa aaaa aaaa", h.base), {}, { breakBefore: [0, 14] }))).toEqual(["aaaa aaaa ", "aaaa"])
+	})
+
+	it("ignores a range where no break is allowed before it", () => {
+		const h = harness()
+
+		expect(texts(layOut(h, b => b.append("aaaaaaaa aa", h.base), {}, { breakBefore: [4, 11] }))).toEqual(["aaaaaaaa ", "aa"])
+	})
+})
+
 describe("greedy line breaking", () => {
 	it("fills lines greedily and lets line-end spaces hang", () => {
 		const h = harness()

@@ -1,7 +1,7 @@
 import type { ByteSink, OpcPackage, PartBytes, Slicing, WriteZipReport, ZipArchive, ZipChanges } from "../../opc/index"
 import type { XmlDocument, XmlEditor } from "../../xml/index"
 import type { DeckChanges, Touch } from "../../presentation/edit/apply"
-import type { Deck, Refused, ShapeNode, SlideNode } from "../../presentation/model"
+import type { Deck, Refused, ShapeNode, SlideNode, SlideRef } from "../../presentation/model"
 
 // The interfaces of the pptx writers: the splice writer (same-format source, write/splice.ts), the parts it adds
 // and removes (write/parts.ts), the fresh writer (write/fresh.ts) and the save (write/save.ts). Every touched part
@@ -73,9 +73,20 @@ export interface PptxEmitFamily {
 }
 
 // The source a save copies from: the archive over the base ByteSource and its package.
+// What the writer needs of the open deck's part map (PptxParts has it): a node's part ("/ppt/slides/slide3.xml"),
+// a slide's p:sldId, the node a part is, and the base source's generation.
+export interface PptxPartIndex {
+	partOf(ref: SlideRef): string | undefined
+	slideId(ref: SlideRef): number | undefined
+	refOf(part: string): SlideRef | undefined
+	readonly epoch: number
+}
+
 export interface PptxSource {
 	readonly archive: ZipArchive
 	readonly package: OpcPackage
+	// The open deck's part map (engine: session.parts); without it only parsed slides are known.
+	readonly index?: PptxPartIndex
 }
 
 // A save at revision R: the changes against the saved state, and the deck they apply to.

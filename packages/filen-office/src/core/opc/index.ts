@@ -8,7 +8,7 @@ export {
 } from "./contentTypes"
 export { crc32 } from "./crc32"
 export { OpcError, ZipError, type OpcErrorCode, type ZipErrorCode } from "./errors"
-export { bytesSource, memorySink, type ByteSink, type ByteSource, type MemorySink } from "./io"
+export { bytesSource, chunksSource, memorySink, type ByteSink, type ByteSource, type MemorySink } from "./io"
 export { BytePieces, isByteChunks, joinBytes, type ByteChunks, type PartBytes } from "./pieces"
 export { OpcPackage } from "./package"
 export { isValidPartName, partKey, partNameUri, relationshipsPartName, relativeTarget, resolvePartName } from "./partNames"

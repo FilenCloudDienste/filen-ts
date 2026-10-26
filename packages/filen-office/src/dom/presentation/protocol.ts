@@ -93,6 +93,8 @@ export type PresentationNotice =
 	| { readonly kind: "fontScale"; readonly shape: ShapeRef }
 	| { readonly kind: "saveReverted"; readonly ops: number }
 	| { readonly kind: "budget"; readonly what: string }
+	// Jumps to deleted slides now go to the next slide; `count` of them, in `shapes`.
+	| { readonly kind: "jumpsRewritten"; readonly count: number; readonly shapes: readonly ShapeRef[] }
 
 export type PresentationEvent =
 	| { readonly type: "opened"; readonly info: OpenInfo }
@@ -110,6 +112,8 @@ export type PresentationEvent =
 			readonly type: "changed"
 			readonly revision: number
 			readonly dirty: boolean
+			// Net bytes dirty against the saved state as the history estimates them (the autosave tiers' 1 KiB rule).
+			readonly dirtyBytes?: number
 			readonly slides: readonly SlideRef[]
 			readonly info?: Partial<OpenInfo>
 	  }
@@ -172,7 +176,14 @@ export interface ShowLayer {
 
 export type SaveResult =
 	| { readonly kind: "unchanged" }
-	| { readonly kind: "written"; readonly bytes: number; readonly revision: number; readonly notices: readonly PresentationNotice[] }
+	| {
+			readonly kind: "written"
+			readonly bytes: number
+			readonly revision: number
+			readonly notices: readonly PresentationNotice[]
+			// Network bytes of the save: the package uploaded, and the copies a range-backed deck downloaded for it.
+			readonly transfer?: { readonly uploaded: number; readonly downloaded: number }
+	  }
 	| { readonly kind: "refused"; readonly reason: PresentationRefusal }
 
 // The drive file a save produced (the upload rotates the uuid).

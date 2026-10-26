@@ -22,6 +22,7 @@ import {
 	type TextParagraph,
 	type TextRun
 } from "../../../core/drawingml/index"
+import { pathGradientCircle } from "../../../core/drawingml/displayList"
 import { layoutBlock } from "../../../core/drawingml/textBlock"
 import type { DrawingData } from "../../../dom/docx/protocol"
 
@@ -1221,16 +1222,7 @@ class Painter {
 
 		if (cached !== undefined) return `url(#${cached})`
 
-		const [left, top, right, bottom] = insetOf(paint.focus, 0, 1)
-		const halfWidth = Math.max(0, 1 - left - right) / 2
-		const halfHeight = Math.max(0, 1 - top - bottom) / 2
-		const cx = clamp(left + halfWidth, 0, 1, 0.5)
-		const cy = clamp(top + halfHeight, 0, 1, 0.5)
-		const reachX = Math.max(cx, 1 - cx)
-		const reachY = Math.max(cy, 1 - cy)
-		const rect = paint.shape === "rect"
-		const radius = Math.max(rect ? Math.max(reachX, reachY) : Math.hypot(reachX, reachY), 0.001)
-		const inner = clamp((rect ? Math.max(halfWidth, halfHeight) : Math.hypot(halfWidth, halfHeight)) / radius, 0, 0.99, 0)
+		const { cx, cy, radius, inner } = pathGradientCircle(paint)
 		const id = this.id("r")
 		const gradient = this.el("radialGradient")
 

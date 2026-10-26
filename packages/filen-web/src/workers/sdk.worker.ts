@@ -153,6 +153,8 @@ import { probeSource, probeVideo, type ProbeTier, type VideoProbe } from "@filen
 import { asByteStream, imageSniffStream } from "@/lib/media/imageSniff"
 import { EarlyCancels } from "@/workers/earlyCancels"
 import { exposeRangePort } from "@/lib/media/rangePort"
+import { crc32, savePortReader } from "@filen/office/dom/presentation/savePort"
+import { savePortStream } from "@/lib/media/savePortStream"
 import { WalkCoordinator } from "@/workers/walkCoordinator"
 import { noteFoundDir, resolveParentDir as resolveParentDirFrom } from "@/workers/parentDir"
 import { VideoIndexEngine, type IndexRootConfig } from "@/workers/videoIndex/engine"
@@ -724,7 +726,9 @@ function serveRangePort(
 				releaseIfDone()
 			}
 		},
-		controller
+		controller,
+		// readChecked: the CRC of what is sent, so a presentation save can check the copies it uploads.
+		crc32
 	)
 }
 
@@ -1508,6 +1512,55 @@ const api = {
 			return await c.uploadFile(data, { ...params, managedFuture: { abortSignal: AbortSignal.any(signals) } })
 		} finally {
 			if (token !== undefined) {
+				previewAborts.delete(token)
+			}
+		}
+	},
+	// A save streamed from the presentation worker over `port` (@filen/office's save port): the upload pulls 1 MiB
+	// chunks into a byte stream of its own (savePortStream), at most four asked ahead while the writer waits for
+	// requests, so no transferable stream crosses (an engine this app supports has none) and memory stays a few chunks
+	// on each side. Only the writer's end makes the file: its abort, a stalled port or a failed upload rejects with no
+	// new version, and the writer is told whether the file was made (it holds the deck's reads of the old file until
+	// then). `size` when the writer knows it up front. `control` as uploadFileBytes's.
+	async uploadFileFromPort(
+		parentUuid: string | null,
+		name: string,
+		mime: string,
+		port: MessagePort,
+		size?: number,
+		control?: { deadlineMs?: number; abortToken?: string }
+	): Promise<File> {
+		const reader = savePortReader(port)
+		const controller = new AbortController()
+		const token = control?.abortToken
+		const signals =
+			control?.deadlineMs === undefined ? [controller.signal] : [controller.signal, AbortSignal.timeout(control.deadlineMs)]
+
+		if (token !== undefined) {
+			registerPreviewAbort(token, controller)
+		}
+
+		try {
+			const c = requireClient()
+			const parent = await resolveNormalDirParent(c, parentUuid)
+			const file = await c.uploadFileFromReader({
+				parent,
+				name,
+				reader: savePortStream(reader),
+				knownSize: size !== undefined && size > 0 ? size : undefined,
+				...(mime ? { mime } : {}),
+				managedFuture: { abortSignal: AbortSignal.any(signals) }
+			})
+
+			reader.settled(true)
+
+			return file
+		} catch (e) {
+			reader.abort(controller.signal.aborted ? "cancelled" : "upload")
+
+			throw e
+		} finally {
+			if (token !== undefined && previewAborts.get(token) === controller) {
 				previewAborts.delete(token)
 			}
 		}

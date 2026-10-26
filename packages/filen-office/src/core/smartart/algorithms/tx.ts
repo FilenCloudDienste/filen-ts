@@ -55,8 +55,6 @@ export function txLayout(node: LayoutNode, context: LayoutContext): void {
 
 	// Office steps font sizes in half points; a bounded bisection lands on the largest that fits.
 	for (let step = 0; step < Math.min(FIT_STEPS, context.budgets.maxRuleSteps) && high - low > 0.5; step++) {
-		context.ruleSteps++
-
 		const mid = Math.round(low + high) / 2
 
 		if (fits(mid)) low = mid

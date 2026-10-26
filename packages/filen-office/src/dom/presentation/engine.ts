@@ -39,6 +39,7 @@ import { smartartCapability } from "./engine/smartart"
 import { textCapability, type TextServices } from "./engine/text"
 import { thumbsCapability } from "./engine/thumbs"
 import { viewCapability } from "./engine/view"
+import { rebasableSource } from "./save"
 import { streamOpenWindow } from "./window"
 
 // The presentation worker's engine: a registry of capabilities, each in its own file under engine/ with one owner,
@@ -63,6 +64,8 @@ export interface OpenedPackage {
 	readonly locks: number
 	// Called once when the session closes (drops what the opener kept: a decrypted package's key).
 	readonly release?: () => void
+	// A format the session only shows (ppt): edits and saves are refused viewOnly, as for the viewOnly open option.
+	readonly viewOnly?: boolean
 }
 
 // Which lane a call runs in: the priority lane is served before the next background slice (§ scheduler).
@@ -229,7 +232,20 @@ export const METHOD_HANDLERS: Handlers = {
 	smartArtPreview: (context, ...args) => context.session.services.smartart.smartArtPreview(context, ...args)
 }
 
-export function openInfo(deck: Deck, opened: OpenedPackage): OpenInfo {
+// What the methods that edit or save the deck in place answer in a view-only session (Save as a copy still works):
+// their own typed refusal, as for a gated deck.
+const VIEW_ONLY_ANSWERS: { readonly [M in PresentationMethod]?: PresentationValue<M> } = {
+	command: { ok: false, refusal: "viewOnly" },
+	undo: { ok: false, refusal: "viewOnly" },
+	redo: { ok: false, refusal: "viewOnly" },
+	save: { kind: "refused", reason: "viewOnly" }
+}
+
+function isViewOnly(opened: OpenedPackage, options: PresentationOpenOptions): boolean {
+	return opened.viewOnly === true || options.viewOnly === true
+}
+
+export function openInfo(deck: Deck, opened: OpenedPackage, viewOnly = opened.viewOnly === true): OpenInfo {
 	return {
 		format: deck.format,
 		variant: deck.variant,
@@ -240,7 +256,7 @@ export function openInfo(deck: Deck, opened: OpenedPackage): OpenInfo {
 		customShows: deck.customShows,
 		protection: { writeProtected: deck.protection.modifyVerifier !== undefined, encrypted: deck.protection.encrypted !== undefined },
 		gate: deck.gate,
-		editable: deck.gate.length === 0,
+		editable: deck.gate.length === 0 && !viewOnly,
 		locks: opened.locks,
 		packageBytes: opened.bytes,
 		source: opened.sourceKind
@@ -289,6 +305,7 @@ interface LiveSession {
 	readonly session: EngineSession
 	readonly calls: Map<number, { aborted: boolean; readonly listeners: (() => void)[] }>
 	readonly closers: (() => void)[]
+	readonly viewOnly: boolean
 }
 
 function isMessage(data: unknown): data is ToPresentationWorker {
@@ -415,8 +432,10 @@ export function servePresentation(endpoint: PresentationEndpoint, options: Serve
 			}
 		}
 
-		sessions.set(s, { session, calls: new Map(), closers })
-		post({ t: "event", s, event: { type: "opened", info: openInfo(outcome.deck, outcome.package) } })
+		const viewOnly = isViewOnly(outcome.package, request.options)
+
+		sessions.set(s, { session, calls: new Map(), closers, viewOnly })
+		post({ t: "event", s, event: { type: "opened", info: openInfo(outcome.deck, outcome.package, viewOnly) } })
 
 		if (request.options.window !== undefined)
 			streamOpenWindow(session, request.options.window, handlers.render, scheduler, sessionSignal)
@@ -428,6 +447,14 @@ export function servePresentation(endpoint: PresentationEndpoint, options: Serve
 
 		if (live === undefined) {
 			post({ t: "refused", s, id, reason: "closed", message: method })
+
+			return
+		}
+
+		const viewOnlyAnswer = live.viewOnly ? VIEW_ONLY_ANSWERS[method] : undefined
+
+		if (viewOnlyAnswer !== undefined) {
+			post({ t: "result", s, id, method, value: viewOnlyAnswer } as FromPresentationWorker)
 
 			return
 		}
@@ -484,7 +511,7 @@ export function servePresentation(endpoint: PresentationEndpoint, options: Serve
 				let source: ByteSource
 
 				try {
-					source = sourceOf(message.source)
+					source = rebasableSource(sourceOf(message.source))
 				} catch (error) {
 					fail(message.s, error)
 

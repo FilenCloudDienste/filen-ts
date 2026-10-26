@@ -24,6 +24,13 @@ export interface DocKey {
 	wipe(): void
 }
 
+// A CryptoAPI RC4 key that also decrypts a range as one key stream from a block key ([MS-PPT] §2.3.7: a persist object
+// with its persist id as the block number, each Pictures-stream field with block 0).
+export interface DocBlockKey extends DocKey {
+	// `input` decrypted into a new array with the key of `block`, never rekeyed.
+	decryptBlock(input: Uint8Array, block: number): Promise<Uint8Array>
+}
+
 // [MS-DOC] §2.2.6.1–§2.2.6.3: FibBase (68 bytes) stays clear; RC4 rekeys every 512 bytes from the stream's start.
 export const CLEAR_WORD_BYTES = 68
 const BLOCK = 512
@@ -84,6 +91,14 @@ export async function docKey(
 		case "cryptoApiRc4":
 			return cryptoApiKey(lKey, table, decryption, options.block ?? BLOCK)
 	}
+}
+
+// The RC4 CryptoAPI key of an EncryptionHeader that stands alone ([MS-OFFCRYPTO] §2.3.5.1; a PowerPoint
+// CryptSession10Container's data), checked against its verifier. The same DocErrors as docKey.
+export async function cryptoApiBlockKey(header: Uint8Array, decryption: DocDecryption): Promise<DocBlockKey> {
+	if (decryption.password.length > MAX_PASSWORD) throw wrong()
+
+	return cryptoApiKey(header.length, header, decryption, BLOCK)
 }
 
 // --- XOR obfuscation ---
@@ -296,7 +311,7 @@ export function cryptoApiHeaderProblem(table: Uint8Array, lKey: number): string 
 	return undefined
 }
 
-async function cryptoApiKey(lKey: number, table: Uint8Array, decryption: DocDecryption, blockSize: number): Promise<DocKey> {
+async function cryptoApiKey(lKey: number, table: Uint8Array, decryption: DocDecryption, blockSize: number): Promise<DocBlockKey> {
 	const end = lKey
 	const problem = cryptoApiHeaderProblem(table, lKey)
 
@@ -321,7 +336,11 @@ async function cryptoApiKey(lKey: number, table: Uint8Array, decryption: DocDecr
 
 	input.fill(0)
 
+	let wiped = false
 	const blockKey = async (block: number): Promise<Uint8Array> => {
+		// A wiped key's h0 is zeros: decrypting with it would give garbage, not an error.
+		if (wiped) throw new Error("the CryptoAPI key was wiped")
+
 		const seed = new Uint8Array(h0.length + 4)
 
 		seed.set(h0)
@@ -359,12 +378,30 @@ async function cryptoApiKey(lKey: number, table: Uint8Array, decryption: DocDecr
 		throw wrong()
 	}
 
-	return rc4Stream(
+	const stream = rc4Stream(
 		"cryptoApiRc4",
 		blockSize,
 		(first, count) => Promise.all(Array.from({ length: count }, (_, k) => blockKey(first + k))),
-		() => h0.fill(0)
+		() => {
+			wiped = true
+			h0.fill(0)
+		}
 	)
+
+	return {
+		...stream,
+		async decryptBlock(input, block) {
+			const out = new Uint8Array(input.length)
+			const key = await blockKey(block)
+			const cipher = new Rc4(key)
+
+			key.fill(0)
+			cipher.apply(input, out, 0, 0, input.length)
+			cipher.wipe()
+
+			return out
+		}
+	}
 }
 
 // The EncryptionHeader's version says which RC4 the file uses (§2.2.6.2–§2.2.6.3); XOR when fObfuscated.

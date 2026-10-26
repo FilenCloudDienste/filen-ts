@@ -17,6 +17,8 @@ import {
 	type PresentationJump,
 	type PresentationStore
 } from "@filen/office/react/presentation"
+// The slide text's paragraph classes (hanging indents, link underlines) are the docx engine's.
+import "@filen/office/css/docx.css"
 import "@filen/office/css/presentation.css"
 import "@/features/presentation/components/presentationTheme.css"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
@@ -37,6 +39,7 @@ import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode, usePreviewByteSource, usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
 import { PresentationSlideRail } from "@/features/presentation/components/slideRail"
+import { LegacyPresentationBar } from "@/features/presentation/components/legacyView"
 import {
 	PRESENTATION_SNIFF_BYTES,
 	presentationFileKind,
@@ -243,7 +246,7 @@ function DriveDeck({ item, alt }: { item: DriveItem; alt: string }) {
 				}
 
 				handed = port
-				setPrepared({ status: "ready", source: { kind: "range", port, size: Number(file.size), checked: false }, format, attempt })
+				setPrepared({ status: "ready", source: { kind: "range", port, size: Number(file.size), checked: true }, format, attempt })
 			} catch (error) {
 				log.warn("presentation", "range port not opened", { error })
 
@@ -649,7 +652,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 			priority: Infinity,
 			content: (
 				<PageControls
-					page={index + 1}
+					page={count === 0 ? 0 : index + 1}
 					total={count}
 					ends={!phone}
 					canPrevious={index > 0}
@@ -699,6 +702,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 					<RibbonButton
 						label={t("previewPptxRailToggle")}
 						icon={<PanelLeftIcon />}
+						disabled={count === 0}
 						pressed={railOpen}
 						onClick={() => {
 							setRailOpen(open => !open)
@@ -707,6 +711,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 					<RibbonButton
 						label={t(notesOpen ? "previewPptxNotesHide" : "previewPptxNotesShow")}
 						icon={<StickyNoteIcon />}
+						disabled={count === 0}
 						pressed={notesOpen}
 						onClick={() => {
 							setNotesOpen(open => !open)
@@ -762,6 +767,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 				}
 				groups={groups}
 			/>
+			<LegacyPresentationBar format={deck.info?.format} />
 			{notes.length > 0 && !dismissed ? (
 				<div
 					role="status"
@@ -800,7 +806,11 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 						className="relative min-h-0 flex-1 bg-muted/40 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
 					>
 						{/* Nothing of it is seen under the show: it is painted again once, when the show ends. */}
-						{showing ? null : (
+						{count === 0 ? (
+							<p className="flex size-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+								{t("previewPptxEmptyDeck")}
+							</p>
+						) : showing ? null : (
 							<SlideView
 								render={render}
 								size={size}
@@ -815,7 +825,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 						)}
 						{showing ? null : refusedNote("canvas")}
 					</div>
-					{notesOpen ? (
+					{notesOpen && count > 0 ? (
 						<PresentationNotesPane
 							text={render?.notesText ?? ""}
 							phone={phone}

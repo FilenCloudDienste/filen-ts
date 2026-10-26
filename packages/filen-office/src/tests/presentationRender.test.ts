@@ -774,12 +774,13 @@ describe("tables", () => {
 			}))
 			.filter(entry => entry.fill !== undefined)
 
-		// Rows with text grow to 60 px of text plus the 0.05in margins; the empty last row keeps its 20 px.
+		// Rows grow to 60 px of text plus the 0.05in margins; the empty last row too, to its paragraph marks' line (the
+		// fixture lays every body out 60 px high).
 		const grown = 60 + 9.6
 
 		expect(fills.map(entry => entry.fill)).toEqual(["4472C4", "4472C4", "AAAAAA", "AAAAAA", "00FF00", "DDDDDD", "DDDDDD", "DDDDDD"])
 		expect(fills[0]?.box).toEqual([0, 0, 200, expect.closeTo(grown, 4)])
-		expect(fills[7]?.box[3]).toBeCloseTo(20, 4)
+		expect(fills[7]?.box[3]).toBeCloseTo(grown, 4)
 
 		const strokes = itemsOf(table, ItemKind.PATH).filter(item => (table.itemInts[item * 10 + ItemInt.STROKE] ?? -1) >= 0)
 

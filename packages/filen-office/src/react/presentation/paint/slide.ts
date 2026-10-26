@@ -8,8 +8,9 @@ import type { SlidePainter } from "../SlideView"
 // The slide compositor: a SlideRender as DOM. The background, then per layer its drawing (one SVG from paintDrawing,
 // placed by the layer's matrix) and its text (paintPage of the layer's TextPage, placed by its text matrix), so text
 // stays selectable, findable and visible to screen readers. Pictures load through the session (`image`) as blob URLs
-// and repaint the layers that show them. The URLs are shared by every paint of the session (the next slide, the show,
-// a slide painted again) and kept, least recently used out, up to a byte budget once no paint shows them;
+// and repaint the layers that show them; the bitmaps a drawing carries (a metafile's embedded images) take theirs at
+// once, under the names the worker gives them. The URLs are shared by every paint of the session (the next slide, the show, a slide
+// painted again) and kept, least recently used out, up to a byte budget once no paint shows them;
 // releaseSlidePictures revokes a closed session's. Effects beyond the drawing's own shadow are CSS
 // filters (glow, blur, further outer shadows) and a masked mirror copy (reflection); soft edges and inner shadows are
 // not drawn.
@@ -108,6 +109,20 @@ class PictureCache {
 		return entry.url
 	}
 
+	// A bitmap a drawing carries, under its content key: one blob URL however many paints show it.
+	hold(key: string, bytes: Uint8Array, type: string, window: PageWindow): string {
+		const taken = this.take(key)
+
+		if (taken !== undefined) return taken
+
+		const url = this.urlApi.createObjectURL(new window.Blob([bytes as Uint8Array<ArrayBuffer>], { type }))
+
+		this.entries.delete(key)
+		this.entries.set(key, { url, loaded: Promise.resolve(url), bytes: bytes.byteLength, users: 1 })
+
+		return url
+	}
+
 	release(key: string): void {
 		const entry = this.entries.get(key)
 
@@ -181,6 +196,15 @@ function cssColor(color: Rgba): string {
 	return `rgba(${String((value >>> 24) & 255)},${String((value >>> 16) & 255)},${String((value >>> 8) & 255)},${String(Math.round(((value & 255) / 255) * 1000) / 1000)})`
 }
 
+// MIME types of the encodings a drawing may carry inline (a metafile's embedded bitmap) that the page shows.
+const INLINE_TYPES: Readonly<Partial<Record<DrawingImage["format"], string>>> = {
+	png: "image/png",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	bmp: "image/bmp",
+	webp: "image/webp"
+}
+
 function imageKey(image: DrawingImage): string | undefined {
 	const key = image.svgPartName ?? image.partName
 
@@ -249,10 +273,38 @@ export const paintSlide: SlidePainter = (render, context) => {
 	root.dataset["foSlide"] = String(render.index)
 	root.style.cssText = `position:relative;width:${String(width)}px;height:${String(height)}px;overflow:hidden;background:#fff`
 
+	// Pictures the drawings carry as bytes (no part to load): held in the session's cache under the name the worker
+	// gives each bitmap (bytesKey), so every paint of the session shares one blob URL per bitmap; unnamed, or without a
+	// session, one URL each for this paint, revoked on release. A cache key that starts with a space is no part name.
+	const inline = new Map<DrawingImage, string>()
+	const ownInline: string[] = []
 	const imageUrl = (image: DrawingImage): string | undefined => {
 		const key = imageKey(image)
 
-		return key === undefined ? undefined : urls.get(key)
+		return key === undefined ? inline.get(image) : urls.get(key)
+	}
+	const carried = (data: DrawingData): void => {
+		if (window === null) return
+
+		for (const image of data.images) {
+			const type = image?.bytes === undefined || imageKey(image) !== undefined ? undefined : INLINE_TYPES[image.format]
+
+			if (type === undefined || inline.has(image) || image.bytes === undefined) continue
+
+			if (session === undefined || image.bytesKey === undefined) {
+				const url = window.URL.createObjectURL(new window.Blob([image.bytes as Uint8Array<ArrayBuffer>], { type }))
+
+				ownInline.push(url)
+				inline.set(image, url)
+
+				continue
+			}
+
+			const key = ` ${image.bytesKey}`
+
+			held.push(key)
+			inline.set(image, picturesOf(session, window).hold(key, image.bytes, type, window))
+		}
 	}
 
 	// Paints `data` into `holder` now, and again whenever one of its pictures arrives.
@@ -276,6 +328,7 @@ export const paintSlide: SlidePainter = (render, context) => {
 
 		holder.style.width = `${String(frameWidth)}px`
 		holder.style.height = `${String(frameHeight)}px`
+		carried(data)
 
 		const images = session === undefined || window === null ? [] : drawingImages(data)
 		const cache = session === undefined || window === null ? undefined : picturesOf(session, window)
@@ -417,6 +470,11 @@ export const paintSlide: SlidePainter = (render, context) => {
 			released = true
 			pending.clear()
 			urls.clear()
+
+			for (const url of ownInline) window?.URL.revokeObjectURL(url)
+
+			ownInline.length = 0
+			inline.clear()
 
 			const cache = session === undefined ? undefined : pictureCaches.get(session)
 

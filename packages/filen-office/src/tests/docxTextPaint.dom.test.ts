@@ -22,16 +22,18 @@ describe("page painter: DrawingML text paint", () => {
 		const decorated = drawingTextCss(text.styles[1], { paints: text.paints, strokes: text.strokes, textEffects: text.textEffects })
 
 		// What the decorated style adds: the gradient clipped to the glyphs (DrawingML 90° = top to bottom = CSS
-		// 180deg), the outline in its paint, a two-step glow; alpha does not apply to a paint fill.
+		// 180deg), the outline in its paint, a two-step glow; alpha does not apply to a paint fill. The glyphs' own fill
+		// is transparent (the gradient shows through it), so the glow is a filter of the painted glyphs: a text-shadow
+		// would show through them.
 		expect(decorated).toBe(
 			"background-image:linear-gradient(180deg,rgba(68,114,196,1) 0%,rgba(237,125,49,1) 100%);" +
 				"-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;" +
 				"-webkit-text-stroke:1px rgba(31,41,55,1);" +
-				"text-shadow:0 0 4px rgba(255,192,0,0.6),0 0 2px rgba(255,192,0,0.6);"
+				"filter:drop-shadow(0 0 4px rgba(255,192,0,0.6)) drop-shadow(0 0 2px rgba(255,192,0,0.6));"
 		)
 		// The span carries it (the DOM under test keeps the standard properties of it).
 		expect(title).toContain("linear-gradient(180deg")
-		expect(title).toContain("text-shadow")
+		expect(title).toContain("drop-shadow")
 		expect(plain).not.toMatch(/gradient|text-shadow/)
 		expect(drawingTextCss(text.styles[0], { paints: text.paints, strokes: text.strokes, textEffects: text.textEffects })).toBe("")
 	})

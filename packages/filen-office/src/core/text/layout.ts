@@ -109,6 +109,14 @@ export interface PrepareOptions {
 	readonly hangingPunctuation?: boolean
 	// The caller's id for the paragraph, stored on every line.
 	readonly source?: number
+	// Ranges [start, end) as pairs of paragraph offsets that break only where nothing else fits: no opportunity
+	// inside them, so a range that does not fit the rest of a line moves to the next whole and one longer than a
+	// line breaks at the character that overflows.
+	readonly keepTogether?: ArrayLike<number>
+	// Ranges [start, end) as pairs of paragraph offsets, in text order, that start the next line when they do not fit
+	// the rest of this one (a range at a line's start, or with no break allowed before it, stays): one longer than a
+	// line then wraps inside as usual.
+	readonly breakBefore?: ArrayLike<number>
 }
 
 const ItemKind = { TEXT: 0, TAB: 1, OBJECT: 2, BREAK: 3 } as const
@@ -117,6 +125,8 @@ const ItemKind = { TEXT: 0, TAB: 1, OBJECT: 2, BREAK: 3 } as const
 const ITEM_SMALL = 1
 // An item with East Asian (wide, fullwidth or halfwidth) characters: justified across characters.
 const ITEM_EAST_ASIAN = 2
+// A text item starting a breakBefore range; its aux holds the range's end.
+const ITEM_BREAK_BEFORE = 4
 
 const EPSILON = 1e-6
 
@@ -387,6 +397,16 @@ export class ParagraphLayouter {
 
 		options.hyphenator?.hyphenate(text, 0, n, breaks)
 
+		const keep = options.keepTogether
+
+		if (keep !== undefined) {
+			for (let k = 0; k + 1 < keep.length; k += 2) {
+				const end = Math.min(n, keep[k + 1] ?? 0)
+
+				for (let i = Math.max(1, (keep[k] ?? 0) + 1); i < end; i++) if (breaks[i] !== BREAK_MANDATORY) breaks[i] = BREAK_NONE
+			}
+		}
+
 		const levels = this.resolveLevels(text, n, p)
 		const hanging = options.hangingPunctuation === true
 		let run = 0
@@ -522,6 +542,10 @@ export class ParagraphLayouter {
 
 			p.hang[item] = (p.hang[item] ?? 0) * scale
 		}
+
+		const before = options.breakBefore
+
+		if (before !== undefined) markBreakBefore(p, before)
 
 		return p
 	}
@@ -935,6 +959,22 @@ export class ParagraphLayouter {
 			const kind = p.kind[item] ?? ItemKind.TEXT
 			const style = p.style[item] ?? 0
 
+			if (
+				offset < 0 &&
+				((p.flags[item] ?? 0) & ITEM_BREAK_BEFORE) !== 0 &&
+				placed &&
+				candidatePieces === this.pieceCount &&
+				candidateItem === item &&
+				!this.fitsRange(p, item, segEnd)
+			) {
+				this.nextItem = item
+				this.nextOffset = -1
+
+				if (candidateHyphen) this.pFlags[candidatePieces - 1] = (this.pFlags[candidatePieces - 1] ?? 0) | FragmentFlag.HYPHEN
+
+				return Fill.WRAP
+			}
+
 			if (kind === ItemKind.TEXT || kind === ItemKind.OBJECT) {
 				const itemStart = p.start[item] ?? 0
 				const start = offset >= 0 ? offset : itemStart
@@ -1142,6 +1182,26 @@ export class ParagraphLayouter {
 		this.nextOffset = -1
 
 		return Fill.END
+	}
+
+	// Whether the breakBefore range starting at `item` fits the rest of the line from the pen (its last item's trailing
+	// spaces hang). Adds only until it overflows, so a long range costs about a line.
+	private fitsRange(p: PreparedParagraph, item: number, segEnd: number): boolean {
+		const end = p.aux[item] ?? 0
+		const room = segEnd + EPSILON - (this.tabPending ? this.extent(this.pen[PEN_X] ?? 0) : (this.pen[PEN_X] ?? 0))
+		let width = 0
+
+		for (let k = item; k < p.count && (p.start[k] ?? 0) < end; k++) {
+			if (k >= p.ready) p.refresh?.(k)
+
+			width += p.width[k] ?? 0
+
+			if (width - (p.hang[k] ?? 0) > room) return false
+
+			width += p.space[k] ?? 0
+		}
+
+		return true
 	}
 
 	// Where content ending at `x` (laid out as if left-aligned) ends once a pending tab aligns it.
@@ -2072,4 +2132,22 @@ function resizeF64(a: Float64Array, size: number): Float64Array<ArrayBuffer> {
 	out.set(a.subarray(0, Math.min(a.length, size)))
 
 	return out
+}
+
+// Flags the text item each breakBefore range starts at (none where no item starts there: no break is allowed before
+// it), with the range's end in its aux. Ranges and items both run in text order: one pass over each.
+function markBreakBefore(p: PreparedParagraph, ranges: ArrayLike<number>): void {
+	let item = 0
+
+	for (let k = 0; k + 1 < ranges.length; k += 2) {
+		const start = ranges[k] ?? 0
+
+		while (item < p.count && (p.start[item] ?? 0) < start) item++
+
+		if (item >= p.count) return
+		if (p.start[item] !== start || p.kind[item] !== ItemKind.TEXT) continue
+
+		p.flags[item] = (p.flags[item] ?? 0) | ITEM_BREAK_BEFORE
+		p.aux[item] = Math.max(p.aux[item] ?? 0, ranges[k + 1] ?? 0)
+	}
 }

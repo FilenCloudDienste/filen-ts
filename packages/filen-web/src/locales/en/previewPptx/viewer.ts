@@ -5,6 +5,8 @@ export const previewPptxViewer = {
 	previewPptxCommandBar: "Presentation",
 	/** Presentation viewer — accessible name of the slide in view, e.g. "Slide 3 of 12" */
 	previewPptxSlideLabel: "Slide {{current}} of {{total}}",
+	/** Presentation viewer — shown on the stage when the presentation has no slides at all */
+	previewPptxEmptyDeck: "This presentation has no slides.",
 	/** Presentation viewer — accessible name of a slide in the slide list that is hidden in the slide show, e.g. "Slide 3 of 12, hidden" */
 	previewPptxSlideHiddenLabel: "Slide {{current}} of {{total}}, hidden",
 	/** Presentation viewer — accessible name of the list of slide thumbnails */

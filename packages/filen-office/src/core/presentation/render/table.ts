@@ -6,6 +6,7 @@ import { parseXml, type XmlDocument } from "../../xml/index"
 import type { TableCell, TableModel } from "../model"
 import { fillXml, lineXml, ScratchWriter } from "./markup"
 import type { RenderServices, TableTextStyle } from "./services"
+import { builtinTableStyle } from "./tableStyles"
 
 // A table frame (a:tbl, §21.1.3) drawn from the model: the grid, rows grown to their text, merged cells, fills and
 // borders from each cell's own properties (typed edits first, then its a:tcPr), else from the table style
@@ -72,18 +73,20 @@ export interface TableRenderInput {
 	readonly textHeight: (cell: TableCell, row: number, column: number, width: number, style: TableTextStyle | undefined) => number
 }
 
+// The style a table names (else the part's default): the tableStyles part's, else PowerPoint's built-in one.
 function styleNode(document: XmlDocument | undefined, id: string | undefined): { reader: DrawingReader; node: number } | undefined {
-	if (document === undefined) return undefined
-
-	const reader = drawingReader(document)
-	const root = document.documentElement()
-	const wanted = id ?? reader.attr(root, "def")
+	const reader = document === undefined ? undefined : drawingReader(document)
+	const root = document === undefined ? -1 : document.documentElement()
+	const wanted = id ?? (reader === undefined ? undefined : reader.attr(root, "def"))
 
 	if (wanted === undefined) return undefined
 
-	for (const style of reader.children(root, D.A, "tblStyle")) if (reader.attr(style, "styleId") === wanted) return { reader, node: style }
+	if (reader !== undefined) {
+		for (const style of reader.children(root, D.A, "tblStyle"))
+			if (reader.attr(style, "styleId") === wanted) return { reader, node: style }
+	}
 
-	return undefined
+	return builtinTableStyle(wanted)
 }
 
 // A table style's regions in drawing order (whole table, banded columns, banded rows, first and last column, first

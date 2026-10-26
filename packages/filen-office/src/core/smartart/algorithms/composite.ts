@@ -7,7 +7,8 @@ function axis(values: ReadonlyMap<string, number>, keys: readonly [string, strin
 	const nearValue = values.get(near)
 	const farValue = values.get(far)
 	const centerValue = values.get(center)
-	let extent = values.get(size)
+	const own = values.get(size)
+	let extent = own !== undefined && Number.isFinite(own) ? own : undefined
 
 	if (extent === undefined) {
 		if (nearValue !== undefined && farValue !== undefined) extent = farValue - nearValue
@@ -21,7 +22,7 @@ function axis(values: ReadonlyMap<string, number>, keys: readonly [string, strin
 	if (nearValue !== undefined) {
 		start = nearValue + (values.get(`${near}Off`) ?? 0)
 
-		if (farValue !== undefined && !values.has(size)) extent = farValue + (values.get(`${far}Off`) ?? 0) - start
+		if (farValue !== undefined && own === undefined) extent = farValue + (values.get(`${far}Off`) ?? 0) - start
 	} else if (centerValue !== undefined) {
 		start = centerValue + (values.get(`${center}Off`) ?? 0) - extent / 2
 	} else if (farValue !== undefined) {

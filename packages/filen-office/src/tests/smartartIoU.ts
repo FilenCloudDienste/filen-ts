@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { OpcPackage, bytesSource } from "@filen/office/core/opc"
 import { D, drawingReader } from "../core/drawingml/reader"
-import { parseDataModel, type DataModel } from "../core/smartart/data"
+import { parseDataModel, pointText, type DataModel } from "../core/smartart/data"
 import { layoutDiagram, type Box, type DiagramLayout, type TextMeasurer } from "../core/smartart/interp"
 import { parseLayoutDef } from "../core/smartart/layoutDef"
 import { parseXml } from "../core/xml/index"
@@ -98,10 +98,14 @@ function cachedShapes(bytes: Uint8Array, model: DataModel): { key: string; name:
 	return out
 }
 
+// Supplies the measurer a slide's diagrams lay out with (the crude one when absent), given every text they hold.
+export type MeasurerFor = (slide: string, texts: readonly string[]) => Promise<TextMeasurer>
+
 export async function scoreFile(
 	path: string,
 	label: string,
-	inspect?: (score: DiagramScore, layout: DiagramLayout) => void
+	inspect?: (score: DiagramScore, layout: DiagramLayout) => void,
+	measurerFor?: MeasurerFor
 ): Promise<DiagramScore[]> {
 	const pkg = await OpcPackage.open(bytesSource(readFileSync(path)))
 	const out: DiagramScore[] = []
@@ -148,7 +152,10 @@ export async function scoreFile(
 
 				if (cached.length === 0) continue
 
-				const ours = layoutDiagram(model, def, reader.emu(ext, "cx", 0), reader.emu(ext, "cy", 0), { measurer })
+				const texts = [...model.points.values()].map(pointText).filter(text => text !== "")
+				const text = measurerFor === undefined ? measurer : await measurerFor(slide, texts)
+				const box = { x: 0, y: 0, w: reader.emu(ext, "cx", 0), h: reader.emu(ext, "cy", 0) }
+				const ours = layoutDiagram(model, def, undefined, undefined, box, text)
 				const byKey = new Map<string, Box[]>()
 
 				for (const shape of ours.shapes) {

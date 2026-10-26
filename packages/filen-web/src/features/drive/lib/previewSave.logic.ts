@@ -1,10 +1,12 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
+import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/presentation"
 import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { isEditableSpreadsheetExtension } from "@/features/spreadsheet/lib/fileKind"
+import { isEditablePresentationExtension } from "@/features/presentation/lib/fileKind"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
 import { asErrorDTO, plainErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
@@ -72,6 +74,11 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 		return DOCX_EDITABLE_EXTENSIONS.has(extensionOf(driveItemName(base)))
 	}
 
+	// A deck, template or show (OOXML or OpenDocument) saves as itself; a 97–2003 deck only opens to be looked at.
+	if (category === "presentation") {
+		return isEditablePresentationExtension(extensionOf(driveItemName(base)))
+	}
+
 	return isTextCategory(category)
 }
 
@@ -88,6 +95,8 @@ export function isTextCategory(category: PreviewCategory): boolean {
 // unrelated, already-cached listing (see upsertDriveItem's own unconditional-append behavior).
 export interface PreviewSaveDeps {
 	uploadFileBytes: (parentUuid: string | null, data: Uint8Array, name: string, mime: string) => Promise<SdkFile>
+	// A save streamed over a port (a presentation's: the worker writes, the SDK worker uploads as it reads).
+	uploadFileFromPort?: (parentUuid: string | null, port: MessagePort, name: string, mime: string, size?: number) => Promise<SdkFile>
 	patchListing: (parentUuid: string | null, updater: (items: DriveItem[]) => DriveItem[]) => void
 	// The account's own root uuid — a real Dir.parent is never null (see sdk.worker.ts's own
 	// ListDirectoryTarget comment), so a root-level item's parent must collapse back to the `null`
@@ -113,9 +122,12 @@ function dropUuid(items: DriveItem[], uuid: string): DriveItem[] {
 // `asNewFile` writes the buffer beside the file under that name instead (a copy of unsaved edits the
 // file itself moved on from, or of a file deleted meanwhile), leaving the file's own row alone. The name
 // must be free: the same upload onto a taken name would make a new version of that file.
+// What a save uploads: text, bytes, or a port a worker writes the file to (never held whole on the page).
+export type PreviewSaveContent = string | Uint8Array | { readonly port: MessagePort; readonly size?: number }
+
 export async function runPreviewSave(
 	deps: PreviewSaveDeps,
-	args: { item: DriveItem; content: string | Uint8Array; asNewFile?: string }
+	args: { item: DriveItem; content: PreviewSaveContent; asNewFile?: string }
 ): Promise<ActionOutcome<DriveItem>> {
 	const { item, content, asNewFile } = args
 	const base = asDirectoryOrFile(item)
@@ -128,7 +140,6 @@ export async function runPreviewSave(
 
 	const name = asNewFile ?? driveItemName(base)
 	const mime = base.data.decryptedMeta?.mime ?? ""
-	const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content
 	// Root-sentinel collapse inlined rather than importing normalizeParentUuid (queries/drive.ts): the
 	// .logic.ts split keeps this file framework-free (no queryClient import anywhere in it, direct or
 	// transitive) — the one-line uuid compare isn't worth crossing that boundary for.
@@ -136,7 +147,7 @@ export async function runPreviewSave(
 
 	let uploaded: SdkFile
 	try {
-		uploaded = await runOp(deps.uploadFileBytes(targetParent, Comlink.transfer(bytes, [bytes.buffer]), name, mime))
+		uploaded = await runOp(upload(deps, targetParent, content, name, mime))
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
@@ -149,6 +160,84 @@ export async function runPreviewSave(
 	)
 
 	return { status: "success", item: newItem }
+}
+
+function upload(deps: PreviewSaveDeps, parent: string | null, content: PreviewSaveContent, name: string, mime: string): Promise<SdkFile> {
+	if (typeof content === "string" || content instanceof Uint8Array) {
+		const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content
+
+		return deps.uploadFileBytes(parent, Comlink.transfer(bytes, [bytes.buffer]), name, mime)
+	}
+
+	if (deps.uploadFileFromPort === undefined) {
+		content.port.close()
+
+		return Promise.reject(new Error("runPreviewSave: no port upload"))
+	}
+
+	return deps.uploadFileFromPort(parent, Comlink.transfer(content.port, [content.port]), name, mime, content.size)
+}
+
+// A presentation save as the overlay drives it (the editor's presentationRef makes one per save): the session writes
+// to one end of a channel while the SDK worker uploads from the other. `result` is the session's answer (it waits for
+// the upload to say whether it made the file); once the upload made `file`, commit() moves the session onto it,
+// answering whether edits made meanwhile leave it dirty. A written save must be committed: the session holds its
+// reads of the old file (which a drive without versioning deletes) until then.
+export interface PresentationSaveEdits {
+	readonly kind: "port"
+	// The upload's end of the channel.
+	readonly port: MessagePort
+	readonly result: Promise<SaveResult>
+	commit(file: DriveItem): Promise<{ readonly dirty: boolean }>
+}
+
+export type PresentationSaveSource = (options: { auto: boolean }) => Promise<PresentationSaveEdits | null>
+
+// The session calls a save needs (the editor's PresentationClient).
+export interface PresentationSaveSession {
+	save(options: { readonly reason: "user" | "auto"; readonly port: PortLike }): Promise<SaveResult>
+	commitSaved(options: {
+		readonly file: DriveFileRef
+		readonly port: PortLike
+		readonly size: number
+		readonly revision: number
+	}): Promise<{ readonly dirty: boolean }>
+}
+
+// Starts one save of `session` (what an editor's presentationRef returns). `openRangePort` serves the saved file's
+// ranges on a port (sdkApi.openRangePort), which the session reads from once it is committed.
+export function presentationSaveEdits(
+	session: PresentationSaveSession,
+	openRangePort: (port: MessagePort, file: DriveItem) => void,
+	auto: boolean
+): PresentationSaveEdits {
+	const channel = new MessageChannel()
+	const result = session.save({ reason: auto ? "auto" : "user", port: channel.port1 })
+
+	return {
+		kind: "port",
+		port: channel.port2,
+		result,
+		async commit(file) {
+			const answer = await result
+
+			if (answer.kind !== "written") {
+				throw new Error(`commit of a save that was not written (${answer.kind})`)
+			}
+
+			const range = new MessageChannel()
+			const saved = asDirectoryOrFile(file)
+
+			openRangePort(range.port2, file)
+
+			return session.commitSaved({
+				file: { uuid: saved.data.uuid, name: driveItemName(saved) },
+				port: range.port1,
+				size: Number(saved.data.size),
+				revision: answer.revision
+			})
+		}
+	}
 }
 
 // True for the one save-failure class where retrying is pointless — resolveNormalDirParent's own

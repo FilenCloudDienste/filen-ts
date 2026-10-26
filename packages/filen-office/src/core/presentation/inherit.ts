@@ -254,7 +254,7 @@ export interface ResolvedShape {
 	// The list styles of the text chain, nearest first (shape, layout ph, master ph, master txStyles, defaults).
 	readonly listStyles: readonly ListStyle[]
 	// How many of listStyles are the shape's own lstStyle (0 or 1, first) and the master's (txStyles and
-	// defaultTextStyle, last).
+	// defaultTextStyle, last; text of the title and body classes stops at txStyles).
 	readonly ownListStyles: number
 	readonly masterListStyles: number
 	// The nearest p:style (a non-placeholder's own; a placeholder inherits its parent's).
@@ -426,11 +426,15 @@ export function resolveShape(deck: Deck, slide: SlideRef, shape: ShapeNode, docs
 	const ownListStyles = shape.text?.lstStyle === undefined ? 0 : 1
 
 	const masterStyle = masterTextStyle(deck, node, textClass)
-	const masterListStyles = masterStyle === undefined ? 1 : 2
+	// Text of the title and body classes stops at the master's titleStyle or bodyStyle, then the attribute defaults;
+	// text boxes and date, footer, slide-number and header placeholders (the "other" class) go on to
+	// defaultTextStyle. Measured in LibreOffice 7.5 with a defaultTextStyle the txStyles leave unset; ECMA-376 and
+	// MS-OI29500 §2.1.1388(a) do not name defaultTextStyle in the placeholder chain.
+	const withDefaults = masterStyle === undefined || textClass === "other"
+	const masterListStyles = (masterStyle === undefined ? 0 : 1) + (withDefaults ? 1 : 0)
 
 	if (masterStyle !== undefined) listStyles.push(masterStyle)
-
-	listStyles.push(deck.defaultTextStyle)
+	if (withDefaults) listStyles.push(deck.defaultTextStyle)
 
 	const bodyLevels: Partial<TextBodyProps>[] = []
 

@@ -1,16 +1,19 @@
 import type { ChartEditType, SheetChartEdit } from "../../xlsx/charts/edit"
 import type { ChartGrouping } from "../../xlsx/charts/model"
 import type { Behavior, TimeNode, TimingTree, Transition } from "../../anim/model"
+import type { JumpRewrite } from "./integrity"
 import type {
 	Action,
 	Background,
 	ColorModel,
+	CustomShow,
 	EdgeFractions,
 	ShapeNode,
 	ShapePropsEdit,
 	ShapeRef,
 	ShapeStyleRefs,
 	Section,
+	SlideNode,
 	SlideRef,
 	TableCellProps,
 	TextBody,
@@ -73,6 +76,9 @@ export interface RawPart {
 	readonly bytes: Uint8Array
 	// Its relationships part, when it has one.
 	readonly rels?: Uint8Array
+	// Internal targets of its relationships the package did not have when the part was held (a damaged source): written
+	// back as they were, never refused as this save's damage. Model part names.
+	readonly absent?: readonly string[]
 }
 
 export type SlideOp =
@@ -84,7 +90,17 @@ export type SlideOp =
 	| {
 			readonly family: "slide"
 			readonly kind: "restore"
-			readonly slides: readonly { readonly ref: SlideRef; readonly at: number; readonly parts: readonly RawPart[] }[]
+			readonly slides: readonly {
+				readonly ref: SlideRef
+				readonly at: number
+				readonly parts: readonly RawPart[]
+				// The nodes' typed state when deleted (the slide, then its notes): the edits on them, and the whole of a slide
+				// an op made (it has no parts).
+				readonly nodes?: readonly SlideNode[]
+				// On the first entry: the custom shows as they were, and the jumps the delete rewrote (edit/integrity.ts).
+				readonly customShows?: readonly CustomShow[]
+				readonly jumps?: readonly JumpRewrite[]
+			}[]
 	  }
 	| { readonly family: "slide"; readonly kind: "move"; readonly slides: readonly SlideRef[]; readonly to: number }
 	| { readonly family: "slide"; readonly kind: "hide"; readonly slides: readonly SlideRef[]; readonly hidden: boolean }

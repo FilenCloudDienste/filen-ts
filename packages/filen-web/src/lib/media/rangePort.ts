@@ -6,6 +6,9 @@ import type { AbortableReadRange } from "@/lib/media/blockCache"
 // the reader can cancel; the bytes come back transferred, never copied.
 export interface RangePortApi {
 	read(start: number, end: number, id: number): Promise<Uint8Array>
+	// read() with the CRC-32 of the bytes continued from `crc`, computed here where the bytes live, so the reader can
+	// check what arrived (a save copying them must not upload damaged bytes). Rejects when the port serves no checksum.
+	readChecked(start: number, end: number, crc: number, id: number): Promise<{ bytes: Uint8Array; crc: number }>
 	cancel(id: number): void
 	// The reader is done with the file: in-flight reads are aborted and the port closed.
 	close(): void
@@ -26,8 +29,12 @@ const CLOSED_NOTICE = "filen.rangePort.closed"
 // reader that holds no lock of its own (holdLife's readerLock), whose death cannot be seen otherwise.
 export const RANGE_PORT_IDLE_MS = 30 * 60_000
 
-// Serves `read` on `port` until `lifetime` aborts, which the reader's close() and the idle timeout do too.
-export function exposeRangePort(port: MessagePort, read: AbortableReadRange, lifetime: AbortController): void {
+// Continues a CRC-32 over more bytes (the zip CRC: crc(b, crc(a)) === crc(a + b)).
+export type RangeChecksum = (bytes: Uint8Array, crc: number) => number
+
+// Serves `read` on `port` until `lifetime` aborts, which the reader's close() and the idle timeout do too. With
+// `checksum`, readChecked is served too.
+export function exposeRangePort(port: MessagePort, read: AbortableReadRange, lifetime: AbortController, checksum?: RangeChecksum): void {
 	const closed = lifetime.signal
 	const reads = new Map<number, AbortController>()
 	let idle: ReturnType<typeof setTimeout> | undefined
@@ -76,21 +83,33 @@ export function exposeRangePort(port: MessagePort, read: AbortableReadRange, lif
 		)
 	})
 
+	const tracked = async (start: number, end: number, id: number): Promise<Uint8Array> => {
+		const controller = new AbortController()
+
+		reads.set(id, controller)
+		clearTimeout(idle)
+
+		try {
+			return await read(start, end, AbortSignal.any([controller.signal, closed]))
+		} finally {
+			reads.delete(id)
+			armIdle()
+		}
+	}
 	const api: RangePortApi = {
 		async read(start, end, id) {
-			const controller = new AbortController()
+			const bytes = await tracked(start, end, id)
 
-			reads.set(id, controller)
-			clearTimeout(idle)
-
-			try {
-				const bytes = await read(start, end, AbortSignal.any([controller.signal, closed]))
-
-				return Comlink.transfer(bytes, [bytes.buffer])
-			} finally {
-				reads.delete(id)
-				armIdle()
+			return Comlink.transfer(bytes, [bytes.buffer])
+		},
+		async readChecked(start, end, crc, id) {
+			if (checksum === undefined) {
+				throw new Error("this range port serves no checksum")
 			}
+
+			const bytes = await tracked(start, end, id)
+
+			return Comlink.transfer({ bytes, crc: checksum(bytes, crc) }, [bytes.buffer])
 		},
 		cancel(id) {
 			reads.get(id)?.abort()
@@ -158,8 +177,23 @@ const CLOSE_REPLY_TIMEOUT_MS = 1000
 // within it.
 export const RANGE_READ_TIMEOUT_MS = 60_000
 
+// Shuts down the serving side of a port its reader never read through (rangePortReader's close() without making a
+// reader, whose life locks a port nobody reads would only set up to let go of). The port is closed here either way.
+export function closeRangePort(port: MessagePort): void {
+	const remote = Comlink.wrap<RangePortApi>(port)
+
+	void Promise.race([remote.close(), new Promise(resolve => setTimeout(resolve, CLOSE_REPLY_TIMEOUT_MS))])
+		.catch(() => undefined)
+		.finally(() => {
+			remote[Comlink.releaseProxy]()
+			port.close()
+		})
+}
+
 export interface RangePortReader {
 	readRange: AbortableReadRange
+	// The bytes with the CRC-32 the server computed over them, continued from `crc` (a port served with a checksum).
+	readChecked(start: number, end: number, crc: number, signal: AbortSignal): Promise<{ bytes: Uint8Array; crc: number }>
 	// Called once if the serving side goes away (not after this side's own close()).
 	onLost(callback: () => void): void
 	close(): void
@@ -269,60 +303,64 @@ export function rangePortReader(port: MessagePort): RangePortReader {
 			.catch(() => undefined)
 	}
 
-	return {
-		readRange: (start, end, signal) => {
-			if (gone) {
-				return Promise.reject(new RangePortClosedError())
+	// One read through `call`, settled by its answer, its signal, the server going away or the stall timeout.
+	const pendingRead = <T>(signal: AbortSignal, call: (id: number) => Promise<T>): Promise<T> => {
+		if (gone) {
+			return Promise.reject(new RangePortClosedError())
+		}
+
+		signal.throwIfAborted()
+
+		const id = nextId++
+
+		return new Promise<T>((resolve, reject) => {
+			const onAbort = () => {
+				void remote.cancel(id).catch(() => undefined)
+				settle(signal.reason instanceof Error ? signal.reason : new DOMException("aborted", "AbortError"))
+			}
+			const settle = (error: Error | null, value?: T) => {
+				if (!pending.delete(id)) {
+					return
+				}
+
+				signal.removeEventListener("abort", onAbort)
+
+				if (error === null && value !== undefined) {
+					armStall()
+					resolve(value)
+				} else {
+					if (pending.size === 0) {
+						armStall()
+					}
+
+					reject(error ?? new Error("range read failed"))
+				}
+			}
+			const fail = (error: Error) => {
+				settle(error)
 			}
 
-			signal.throwIfAborted()
+			pending.set(id, fail)
 
-			const id = nextId++
+			if (stall === undefined) {
+				armStall()
+			}
 
-			return new Promise<Uint8Array>((resolve, reject) => {
-				const onAbort = () => {
-					void remote.cancel(id).catch(() => undefined)
-					settle(signal.reason instanceof Error ? signal.reason : new DOMException("aborted", "AbortError"))
+			signal.addEventListener("abort", onAbort, { once: true })
+			call(id).then(
+				value => {
+					settle(null, value)
+				},
+				(error: unknown) => {
+					settle(error instanceof Error ? error : new Error(String(error)))
 				}
-				const settle = (error: Error | null, bytes?: Uint8Array) => {
-					if (!pending.delete(id)) {
-						return
-					}
+			)
+		})
+	}
 
-					signal.removeEventListener("abort", onAbort)
-
-					if (error === null && bytes !== undefined) {
-						armStall()
-						resolve(bytes)
-					} else {
-						if (pending.size === 0) {
-							armStall()
-						}
-
-						reject(error ?? new Error("range read failed"))
-					}
-				}
-				const fail = (error: Error) => {
-					settle(error)
-				}
-
-				pending.set(id, fail)
-
-				if (stall === undefined) {
-					armStall()
-				}
-
-				signal.addEventListener("abort", onAbort, { once: true })
-				remote.read(start, end, id).then(
-					bytes => {
-						settle(null, bytes)
-					},
-					(error: unknown) => {
-						settle(error instanceof Error ? error : new Error(String(error)))
-					}
-				)
-			})
-		},
+	return {
+		readRange: (start, end, signal) => pendingRead(signal, id => remote.read(start, end, id)),
+		readChecked: (start, end, crc, signal) => pendingRead(signal, id => remote.readChecked(start, end, crc, id)),
 		onLost: callback => {
 			lostCallbacks.push(callback)
 		},

@@ -14,6 +14,9 @@ import type { RenderServices } from "./services"
 
 const caches = new WeakMap<RenderServices, MetafileCache>()
 const sizes = new WeakMap<RenderServices, Map<string, Promise<{ readonly width: number; readonly height: number } | undefined>>>()
+// The names of cached conversions' embedded bitmaps (weak: a conversion the cache drops takes its names along).
+const bitmapNames = new WeakMap<Uint8Array, string>()
+let bitmapCount = 0
 // Tiled pictures whose sizes are kept per host.
 const MAX_SIZES = 256
 const PX_PER_INCH = 96
@@ -73,6 +76,21 @@ async function expandMetafilePictures(list: DrawingList, services: RenderService
 
 	if (hasMetafileImages(expanded)) report.refuse("metafile")
 	if (expanded === list) return { list, starts: undefined }
+
+	// Each embedded bitmap is named by the cached conversion's array it comes from, so the page keys every copy of it
+	// alike (one blob URL per bitmap across slide views) without reading its bytes.
+	expanded.images.forEach((image, index) => {
+		if (image.bytes === undefined || image.partName !== undefined) return
+
+		let name = bitmapNames.get(image.bytes)
+
+		if (name === undefined) {
+			name = String(++bitmapCount)
+			bitmapNames.set(image.bytes, name)
+		}
+
+		expanded.images[index] = { ...image, bytesKey: name }
+	})
 
 	// The arrays a conversion's tables hold (embedded bitmaps, gradient stops, meshes, dashes, glyph positions) belong to
 	// the cached conversion, and a render's buffers are transferred to the page: each render sends its own copies.

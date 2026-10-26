@@ -87,7 +87,8 @@ describe("placeholder inheritance", () => {
 		const resolved = resolveShape(deck, notes.ref, shape(notes, "Notes Placeholder 2"))
 
 		expect(resolved.xfrm).toMatchObject({ x: 10, y: 20, cx: 300, cy: 400 })
-		expect(resolved.listStyles[resolved.listStyles.length - 2]?.levels[0]).toEqual({ defRPr: { sz: 1200 } })
+		// A placeholder stops at the master's notesStyle (MS-OI29500 §2.1.1388(a)), so it is last.
+		expect(resolved.listStyles[resolved.listStyles.length - 1]?.levels[0]).toEqual({ defRPr: { sz: 1200 } })
 	})
 
 	it("resolves bodyPr attribute by attribute, insets per side", async () => {
@@ -145,9 +146,10 @@ describe("placeholder inheritance", () => {
 
 		expect(content.textClass).toBe("body")
 		// algn from the slide's lstStyle, sz from the layout's (2600 over the master body style's 2800), marL and the
-		// bullet from the master's bodyStyle, kern from the defaults.
-		expect(p1.pPr).toMatchObject({ algn: "r", marL: 228600, bullet: { kind: "char", char: "•" }, defRPr: { sz: 2600, kern: 1200 } })
-		expect(resolveRun(p1, run?.kind === "r" ? run.rPr : undefined)).toMatchObject({ b: true, sz: 2600, kern: 1200, lang: "en-GB" })
+		// bullet from the master's bodyStyle; a placeholder never reaches defaultTextStyle (MS-OI29500 §2.1.1388(a)).
+		expect(p1.pPr).toMatchObject({ algn: "r", marL: 228600, bullet: { kind: "char", char: "•" }, defRPr: { sz: 2600 } })
+		expect(p1.pPr.defRPr?.kern).toBeUndefined()
+		expect(resolveRun(p1, run?.kind === "r" ? run.rPr : undefined)).toMatchObject({ b: true, sz: 2600, lang: "en-GB" })
 		expect(p2.level).toBe(1)
 		expect(p2.pPr).toMatchObject({ marL: 685800, defRPr: { sz: 2400 } })
 

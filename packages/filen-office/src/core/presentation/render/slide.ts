@@ -27,6 +27,7 @@ import { ScratchWriter, colorXml, fillXml } from "./markup"
 import {
 	TEXT_MARK,
 	hasText,
+	levelSource,
 	placeholderChain,
 	resolveLevels,
 	resolvedBodyPr,
@@ -41,6 +42,7 @@ import {
 import type { PlaceholderLevel, RenderServices, TableTextStyle } from "./services"
 import { finishPictures } from "./pictures"
 import { renderTableSteps, type TableRenderInput } from "./table"
+import { fitTextWarp, readTextWarp } from "./warp"
 import { ThemeCache, levels as chainOf } from "./theme"
 
 // A slide to its SlideRender: the background, then one layer per shape that paints (the master's and the layout's
@@ -924,12 +926,13 @@ async function layersOf(input: {
 				target.bodyPr
 			)
 			const page = layoutText(deck, slide, services, theme, target, box, report)
+			const warp = page === undefined ? undefined : warpOf(services, target, box, page, report)
 
 			push({
 				...segment(cut.at, target.shape.id),
 				...(page === undefined ? {} : { text: page }),
 				matrix,
-				textMatrix: multiply(matrix, box.matrix)
+				textMatrix: warp === undefined ? multiply(matrix, box.matrix) : multiply(multiply(matrix, box.matrix), warp)
 			})
 
 			continue
@@ -945,6 +948,38 @@ async function layersOf(input: {
 	}
 
 	if (start < list.itemCount || first) push({ ...segment(list.itemCount, entry.shape.id), matrix })
+}
+
+// The affine fit of the WordArt warp the shape or its nearest placeholder writes (warp.ts), in text page px; undefined
+// for none. Sideways text keeps its turn and is not warped.
+function warpOf(
+	services: RenderServices,
+	target: TextTarget,
+	box: { readonly width: number; readonly height: number },
+	page: TextPage,
+	report: RenderReport
+): readonly number[] | undefined {
+	for (const shape of [target.shape, ...target.chain.map(level => level.shape)]) {
+		const source = levelSource(services, shape)
+		const txBody = source === undefined ? -1 : source.reader.child(source.element, D.P, "txBody")
+		const warp = txBody < 0 || source === undefined ? undefined : readTextWarp(source.reader, txBody)
+
+		if (warp === undefined) continue
+		if (turnOf(target.bodyPr.vertical) !== 0) {
+			report.approximate("prstTxWarp:vertical")
+
+			return undefined
+		}
+
+		const fit = fitTextWarp(warp, page.page, page.styles, box.width, box.height)
+
+		if (fit === undefined) report.approximate(`prstTxWarp:${warp.preset}`)
+		else if (fit.approximate) report.approximate(`prstTxWarp:${warp.preset}`)
+
+		return fit?.matrix
+	}
+
+	return undefined
 }
 
 function smartArtTarget(texts: SmartArtTexts, story: number): TextTarget | undefined {
@@ -1101,9 +1136,9 @@ async function renderTableLayer(
 		services,
 		part,
 		tableStyles: stylesDocument === undefined || stylesPart === undefined ? undefined : { document: stylesDocument, part: stylesPart },
+		// An empty cell still holds its paragraph mark's line: a row never shrinks below it (as PowerPoint and LibreOffice
+		// lay a table out).
 		textHeight: (cell, row, column, width, style) => {
-			if (!cellHasText(cell.text)) return 0
-
 			const result = request(cell.text, width, 0, { row, column, style })
 			const height = result?.height ?? 0
 

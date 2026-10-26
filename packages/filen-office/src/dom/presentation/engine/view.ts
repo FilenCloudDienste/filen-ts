@@ -1,21 +1,22 @@
 import { scriptForLanguage } from "../../../core/docx/theme/index"
 import { FontManager, type FontRequest } from "../../../core/fonts/index"
-import { partKey, type Relationships } from "../../../core/opc/index"
+import { partKey, type Relationships, type Slicing, type ZipEntry } from "../../../core/opc/index"
 import { imageWithinBudget } from "../../../core/opc/mediaPolicy"
-import type { PptxParts } from "../../../core/pptx/package"
+import type { PresentationBudgets } from "../../../core/presentation/budget"
 import { PresentationError, refused, type ShapeRef, type SlideNode, type SlideRef } from "../../../core/presentation/model"
 import type { SlideRender } from "../../../core/presentation/output"
 import type { RenderServices, TextLayoutRequest, TextLayoutResult } from "../../../core/presentation/render/services"
 import { renderSlide } from "../../../core/presentation/render/slide"
 import { fontRequests, layoutBody, type TextEnvironment } from "../../../core/presentation/text/body"
 import { resolveBody, shapeBodyContext, type BodyContext, type TextFonts } from "../../../core/presentation/text/resolve"
-import { effectiveClrMap, resolveColor, themeOf, themeTypeface, toRgba } from "../../../core/presentation/theme"
+import { effectiveClrMap, resolveColor, themeOf, themeTypeface, toRgba, type PresentationTheme } from "../../../core/presentation/theme"
 import { MeasureCache } from "../../../core/text/index"
 import type { XmlDocument } from "../../../core/xml/index"
 import type { DocxFontFace } from "../../docx/protocol"
 import type { CallContext, EngineSession, ViewCapability } from "../engine"
 import { presentationRealm, type PresentationRealm } from "../services"
 import type { ShapeTextContext, TextServices } from "./text"
+import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
 
 // Slide renders for the page's SVG canvas, the raster path and the jobs worker: each slide parsed with its layout,
@@ -35,6 +36,28 @@ const AHEAD_DEPTH = 2
 // The largest picture image() hands out.
 const MAX_IMAGE_BYTES = 64 * 1024 * 1024
 
+// What this capability reads of a deck's package, whichever reader opened it (core/pptx PptxParts, core/odp OdpParts):
+// parsed documents, the lazy node parse, themes, content types and the package's streams.
+export interface ViewParts {
+	readonly budgets: PresentationBudgets
+	readonly contentTypes: { typeOf(name: string): string | undefined }
+	readonly opc: {
+		entry(name: string): ZipEntry | undefined
+		has(name: string): boolean
+		read(name: string, slicing?: Slicing): Promise<Uint8Array>
+		xml(name: string, slicing?: Slicing): Promise<XmlDocument>
+		relationships(name: string): Promise<Relationships>
+	}
+	document(part: string): XmlDocument | undefined
+	theme(part: string): PresentationTheme | undefined
+	refOf(part: string): SlideRef | undefined
+	slide(ref: SlideRef, slicing?: Slicing): Promise<SlideNode>
+}
+
+export function viewParts(deck: Parameters<typeof pptxParts>[0]): ViewParts | undefined {
+	return pptxParts(deck) ?? odpParts(deck)
+}
+
 interface ViewText {
 	readonly realm: PresentationRealm
 	readonly fonts: FontManager
@@ -50,7 +73,7 @@ interface ViewText {
 }
 
 interface ViewState {
-	readonly parts: PptxParts
+	readonly parts: ViewParts
 	readonly text: ViewText | undefined
 	// XML of parts outside the deck's own nodes (charts, diagram parts, chart styles), by part key.
 	readonly documents: Map<string, XmlDocument | null>
@@ -64,7 +87,7 @@ const states = new WeakMap<EngineSession, ViewState>()
 
 function stateOf(session: EngineSession): ViewState {
 	const held = states.get(session)
-	const parts = pptxParts(session.deck)
+	const parts = viewParts(session.deck)
 
 	if (held !== undefined && held.parts === parts) return held
 	if (parts === undefined) throw new PresentationError("notImplemented", "render")
@@ -240,7 +263,7 @@ function requestKey(request: FontRequest): string {
 
 // What a body inherits: the one resolver's chain (core/presentation/text/resolve.ts shapeBodyContext) with the
 // slide's theme fonts and colours.
-export function bodyContextOf(parts: PptxParts, request: TextLayoutRequest): BodyContext {
+export function bodyContextOf(parts: ViewParts, request: TextLayoutRequest): BodyContext {
 	const { deck } = request
 	const themeRef = themeOf(deck.nodes, request.owner)
 	const theme = themeRef === undefined ? undefined : parts.theme(themeRef.part)
@@ -257,7 +280,7 @@ export function bodyContextOf(parts: PptxParts, request: TextLayoutRequest): Bod
 	return shapeBodyContext(deck, request.owner, request.shape, fonts, request.bodyPr, request.cell)
 }
 
-function layoutRequest(parts: PptxParts, text: ViewText, request: TextLayoutRequest): TextLayoutResult | undefined {
+function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequest): TextLayoutResult | undefined {
 	const capture = text.capture
 
 	if (capture !== undefined && capture.shape.slide === request.slide.ref && capture.shape.id === request.shape.id)
@@ -397,7 +420,7 @@ export async function readImage(
 	session: EngineSession,
 	part: string
 ): Promise<{ readonly bytes: Uint8Array; readonly type: string } | null> {
-	const parts = pptxParts(session.deck)
+	const parts = viewParts(session.deck)
 
 	if (parts === undefined) throw new PresentationError("notImplemented", "image")
 

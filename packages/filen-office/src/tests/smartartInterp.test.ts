@@ -1,72 +1,11 @@
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SMARTART_BUDGETS, parseDataModel, SmartArtError } from "../core/smartart/data"
-import { layoutDiagram, type Box, type TextMeasurer } from "../core/smartart/interp"
+import { layoutDiagram, type Box } from "../core/smartart/interp"
 import { parseLayoutDef } from "../core/smartart/layoutDef"
 import { encodeUtf8, parseXml } from "../core/xml/index"
+import { boxes, data, DGM, layout, measurer, MM, round, run } from "./smartartFixtures"
 
 // The layout interpreter over small layout definitions written for these tests (ECMA-376 §21.4).
-
-const DGM = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
-const A = "http://schemas.openxmlformats.org/drawingml/2006/main"
-const MM = 36000
-
-const measurer: TextMeasurer = {
-	// Every character is half an em wide, lines are 1.2 em; no wrapping.
-	measure(text, fontPt) {
-		const lines = text.split("\n")
-
-		return { width: Math.max(...lines.map(l => l.length)) * fontPt * 6350, height: lines.length * fontPt * 12700 * 1.2 }
-	}
-}
-
-interface PointSpec {
-	readonly id: string
-	readonly text?: string
-	readonly type?: string
-	readonly prSet?: string
-	readonly vars?: string
-}
-
-// A data model: `nodes` under the doc point in order, each with its parent and sibling transitions.
-function data(nodes: readonly PointSpec[], extra: readonly PointSpec[] = [], prSetDoc = ""): string {
-	let pts = `<dgm:pt modelId="doc" type="doc"><dgm:prSet ${prSetDoc}/></dgm:pt>`
-	let cxns = ""
-
-	nodes.forEach((node, index) => {
-		const t = node.text === undefined ? "" : `<dgm:t><a:bodyPr/><a:p><a:r><a:t>${node.text}</a:t></a:r></a:p></dgm:t>`
-
-		pts += `<dgm:pt modelId="${node.id}"><dgm:prSet ${node.prSet ?? ""}/>${t}</dgm:pt>`
-		pts += `<dgm:pt modelId="${node.id}p" type="parTrans" cxnId="c${node.id}"/><dgm:pt modelId="${node.id}s" type="sibTrans" cxnId="c${node.id}"/>`
-		cxns += `<dgm:cxn modelId="c${node.id}" srcId="doc" destId="${node.id}" srcOrd="${index}" destOrd="0" parTransId="${node.id}p" sibTransId="${node.id}s"/>`
-	})
-
-	for (const point of extra) {
-		const vars = point.vars === undefined ? "" : `<dgm:presLayoutVars>${point.vars}</dgm:presLayoutVars>`
-
-		pts += `<dgm:pt modelId="${point.id}" type="${point.type ?? "pres"}"><dgm:prSet ${point.prSet ?? ""}>${vars}</dgm:prSet></dgm:pt>`
-	}
-
-	return `<dgm:dataModel xmlns:dgm="${DGM}" xmlns:a="${A}"><dgm:ptLst>${pts}</dgm:ptLst><dgm:cxnLst>${cxns}</dgm:cxnLst></dgm:dataModel>`
-}
-
-function layout(body: string): string {
-	return `<dgm:layoutDef xmlns:dgm="${DGM}" uniqueId="test"><dgm:layoutNode name="root">${body}</dgm:layoutNode></dgm:layoutDef>`
-}
-
-function run(dataXml: string, layoutXml: string, w: number, h: number) {
-	const model = parseDataModel(parseXml(encodeUtf8(dataXml)))
-	const def = parseLayoutDef(parseXml(encodeUtf8(layoutXml)))
-
-	return layoutDiagram(model, def, w, h, { measurer })
-}
-
-function boxes(result: ReturnType<typeof run>, name: string): Box[] {
-	return result.shapes.filter(s => s.name === name).map(s => s.box)
-}
-
-function round(box: Box): Box {
-	return { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h) }
-}
 
 const NODES = [
 	{ id: "n1", text: "One" },
@@ -159,7 +98,9 @@ describe("SmartArt iteration and conditions", () => {
 		const def = parseLayoutDef(parseXml(encodeUtf8(ROW_OF_NODES("", '<dgm:alg type="lin"/>'))))
 		const budgets = { ...DEFAULT_SMARTART_BUDGETS, maxLayoutNodes: 4 }
 
-		expect(() => layoutDiagram(model, def, MM, MM, { measurer, budgets })).toThrow(expect.objectContaining({ reason: "tooLarge" }))
+		expect(() => layoutDiagram(model, def, undefined, undefined, { x: 0, y: 0, w: MM, h: MM }, measurer, { budgets })).toThrow(
+			expect.objectContaining({ reason: "tooLarge" })
+		)
 	})
 
 	it("ignores constraints whose value is unbounded or undefined", () => {
@@ -253,5 +194,194 @@ describe("SmartArt constraints and algorithms", () => {
 		const box = round(boxes(run(data(NODES, pres), xml, 200 * MM, 100 * MM), "a")[0] as Box)
 
 		expect(box).toEqual({ x: 40 * MM, y: 20 * MM, w: 120 * MM, h: 50 * MM })
+	})
+
+	it("flows custom-scaled sizes in a snake: each row as deep as its deepest node, the block fitted and centred", () => {
+		const constraints = `<dgm:constr type="w" for="ch" forName="node" refType="w"/>
+			<dgm:constr type="h" for="ch" forName="node" refType="w" refFor="ch" refForName="node" fact="0.5"/>
+			<dgm:constr type="w" for="ch" forName="gap" refType="w" refFor="ch" refForName="node" fact="0.2"/>
+			<dgm:constr type="sp" refType="w" refFor="ch" refForName="gap"/>`
+		const alg = '<dgm:alg type="snake"><dgm:param type="bkpt" val="fixed"/><dgm:param type="bkPtFixedVal" val="2"/></dgm:alg>'
+		const pres = [
+			{ id: "p1", prSet: 'presName="node" presAssocID="n1" custScaleY="200000"' },
+			{ id: "p2", prSet: 'presName="node" presAssocID="n2" custScaleX="150000"' }
+		]
+		const nodes = boxes(run(data(NODES, pres), ROW_OF_NODES(constraints, alg), 270 * MM, 200 * MM), "node").map(round)
+		// Unit w: row 1 is w + 0.2 w + 1.5 w = 2.7 w wide and max(1 w, 0.5 w) deep; row 2 is 0.5 w deep; with the
+		// 0.2 w row gap the block is 2.7 w × 1.7 w, so w = 100 mm fits 270 × 200 mm; the block is centred vertically.
+		const top = (200 - 170) / 2
+
+		expect(nodes).toEqual([
+			{ x: 0, y: top * MM, w: 100 * MM, h: 100 * MM },
+			{ x: 120 * MM, y: (top + 25) * MM, w: 150 * MM, h: 50 * MM },
+			{ x: 0, y: (top + 120) * MM, w: 100 * MM, h: 50 * MM }
+		])
+	})
+
+	it("flows custom-scaled sizes along a lin row and sizes a row by its scaled content", () => {
+		const xml = layout(`<dgm:alg type="lin"><dgm:param type="linDir" val="fromT"/></dgm:alg><dgm:constrLst>
+			<dgm:constr type="h" for="ch" forName="row" refType="h" fact="0.5"/></dgm:constrLst>
+			<dgm:forEach name="f" axis="ch" ptType="node" cnt="2"><dgm:layoutNode name="row"><dgm:alg type="lin"/>
+			<dgm:constrLst><dgm:constr type="w" for="ch" forName="cell" refType="w" fact="0.5"/></dgm:constrLst>
+			<dgm:layoutNode name="cell"><dgm:shape type="rect"/><dgm:presOf axis="self"/></dgm:layoutNode></dgm:layoutNode></dgm:forEach>`)
+		const pres = [{ id: "p1", prSet: 'presName="cell" presAssocID="n1" custScaleX="50000" custScaleY="40000"' }]
+		const cells = boxes(run(data(NODES, pres), xml, 200 * MM, 100 * MM), "cell").map(round)
+
+		// Row 1's cell is scaled to 50 × 20 mm, so row 1 takes 20 mm; row 2 takes its full 50 mm; the column of
+		// 70 mm is centred in 100 mm.
+		expect(cells).toEqual([
+			{ x: 75 * MM, y: 15 * MM, w: 50 * MM, h: 20 * MM },
+			{ x: 50 * MM, y: 35 * MM, w: 100 * MM, h: 50 * MM }
+		])
+	})
+
+	it("shifts the whole diagram by half the difference of a root child's growth past either edge", () => {
+		const xml = layout(`<dgm:alg type="composite"/><dgm:constrLst>
+			<dgm:constr type="w" for="ch" forName="a" refType="w"/><dgm:constr type="h" for="ch" forName="a" val="20"/>
+			<dgm:constr type="b" for="ch" forName="a" refType="h"/>
+			<dgm:constr type="w" for="ch" forName="b" val="10"/><dgm:constr type="h" for="ch" forName="b" val="10"/>
+			</dgm:constrLst><dgm:layoutNode name="a"><dgm:shape type="rect"/></dgm:layoutNode><dgm:layoutNode name="b"><dgm:shape type="rect"/></dgm:layoutNode>`)
+		const pres = [{ id: "pa", prSet: 'presName="a" presAssocID="doc" custScaleY="200000"' }]
+		const result = run(data(NODES, pres), xml, 100 * MM, 100 * MM)
+
+		// a grows from 20 to 40 mm about its centre, 10 mm past the bottom; the extent is centred on the frame, so
+		// everything moves up 5 mm.
+		expect(round(boxes(result, "a")[0] as Box)).toEqual({ x: 0, y: 65 * MM, w: 100 * MM, h: 40 * MM })
+		expect(round(boxes(result, "b")[0] as Box)).toEqual({ x: 0, y: -5 * MM, w: 10 * MM, h: 10 * MM })
+	})
+
+	it("keeps an offset node inside the frame when it fits", () => {
+		const xml = layout(`<dgm:alg type="composite"/><dgm:constrLst><dgm:constr type="w" for="ch" forName="a" val="50"/>
+			<dgm:constr type="h" for="ch" forName="a" val="50"/></dgm:constrLst><dgm:layoutNode name="a"><dgm:shape type="rect"/></dgm:layoutNode>`)
+		const pres = [{ id: "pa", prSet: 'presName="a" presAssocID="doc" custLinFactNeighborX="-50000" custLinFactNeighborY="300000"' }]
+
+		expect(round(boxes(run(data(NODES, pres), xml, 100 * MM, 100 * MM), "a")[0] as Box)).toEqual({
+			x: 0,
+			y: 50 * MM,
+			w: 50 * MM,
+			h: 50 * MM
+		})
+	})
+})
+
+describe("SmartArt constraint resolution", () => {
+	const composite = (constraints: string, children = "ab") =>
+		layout(
+			`<dgm:alg type="composite"/><dgm:constrLst>${constraints}</dgm:constrLst>` +
+				[...children].map(n => `<dgm:layoutNode name="${n}"><dgm:shape type="rect"/></dgm:layoutNode>`).join("")
+		)
+
+	it("defers a reference to a value set later in constrLst order and retries it", () => {
+		const xml = composite(`<dgm:constr type="w" for="ch" forName="b" refType="w" refFor="ch" refForName="a" fact="0.5"/>
+			<dgm:constr type="w" for="ch" forName="a" val="40"/>`)
+
+		expect(round(boxes(run(data(NODES), xml, 100 * MM, 100 * MM), "b")[0] as Box).w).toBe(20 * MM)
+	})
+
+	it("infers an edge from the two other values on its axis", () => {
+		const xml = composite(`<dgm:constr type="l" for="ch" forName="a" val="10"/><dgm:constr type="w" for="ch" forName="a" val="30"/>
+			<dgm:constr type="l" for="ch" forName="b" refType="r" refFor="ch" refForName="a"/>
+			<dgm:constr type="t" for="ch" forName="b" refType="ctrX" refFor="ch" refForName="a"/>`)
+		const b = round(boxes(run(data(NODES), xml, 100 * MM, 100 * MM), "b")[0] as Box)
+
+		expect([b.x, b.y]).toEqual([40 * MM, 25 * MM])
+	})
+
+	it("applies an ancestor's des constraints to grandchildren before the parent's own fill the rest", () => {
+		const xml =
+			layout(`<dgm:alg type="composite"/><dgm:constrLst><dgm:constr type="w" for="des" forName="leaf" val="30"/></dgm:constrLst>
+			<dgm:layoutNode name="mid"><dgm:alg type="composite"/><dgm:constrLst><dgm:constr type="w" for="ch" forName="leaf" val="70"/>
+			<dgm:constr type="h" for="ch" forName="leaf" val="20"/></dgm:constrLst>
+			<dgm:layoutNode name="leaf"><dgm:shape type="rect"/><dgm:constrLst><dgm:constr type="h" val="5"/></dgm:constrLst></dgm:layoutNode></dgm:layoutNode>`)
+		const leaf = round(boxes(run(data(NODES), xml, 100 * MM, 100 * MM), "leaf")[0] as Box)
+
+		// The parent's own ch constraint comes after the ancestor's des one and wins; the leaf's own h only fills
+		// what the parent left open, which it did not.
+		expect([leaf.w, leaf.h]).toEqual([70 * MM, 20 * MM])
+	})
+
+	it("treats lte and gte as bounds on rules, not as clamps on the values constraints set", () => {
+		const xml = composite(
+			'<dgm:constr type="w" for="ch" forName="a" val="80"/><dgm:constr type="w" for="ch" forName="a" op="lte" val="50"/>',
+			"a"
+		)
+
+		expect(round(boxes(run(data(NODES), xml, 100 * MM, 100 * MM), "a")[0] as Box).w).toBe(80 * MM)
+	})
+
+	it("keeps an unbounded size (INF) as the content's: a lin child takes the extent of what it holds", () => {
+		const xml = layout(`<dgm:alg type="lin"><dgm:param type="linDir" val="fromT"/><dgm:param type="vertAlign" val="t"/></dgm:alg>
+			<dgm:constrLst><dgm:constr type="h" for="ch" forName="group" val="INF"/><dgm:constr type="h" for="des" forName="item" val="15"/></dgm:constrLst>
+			<dgm:forEach name="f" axis="ch" ptType="node" cnt="2"><dgm:layoutNode name="group"><dgm:alg type="lin"/>
+			<dgm:layoutNode name="item"><dgm:shape type="rect"/></dgm:layoutNode></dgm:layoutNode></dgm:forEach>`)
+		const items = boxes(run(data(NODES), xml, 100 * MM, 100 * MM), "item").map(b => Math.round(b.y))
+
+		expect(items).toEqual([0, 15 * MM])
+	})
+})
+
+describe("SmartArt rules", () => {
+	// A tx child "t" of a composite, 60 × 20 mm, its text at 20 pt: "Three" is 5 × 10 pt = 50 pt wide, 24 pt tall.
+	const rules = (ruleLst: string, size = 'val="60"') =>
+		layout(`<dgm:alg type="composite"/><dgm:constrLst><dgm:constr type="w" for="ch" forName="t" ${size}/>
+			<dgm:constr type="h" for="ch" forName="t" val="20"/><dgm:constr type="primFontSz" for="ch" forName="t" val="20"/></dgm:constrLst>
+			<dgm:ruleLst>${ruleLst}</dgm:ruleLst>
+			<dgm:layoutNode name="t"><dgm:alg type="tx"/><dgm:shape type="rect"/><dgm:presOf axis="ch" ptType="node" st="3" cnt="1"/></dgm:layoutNode>`)
+
+	it("shrinks a font size by a des rule in half points until the text fits", () => {
+		// 10 mm wide holds 5 chars × 0.5 em up to 11.34 pt: the rule takes 20 pt down to 11 pt.
+		const shape = run(data(NODES), rules('<dgm:rule type="primFontSz" for="ch" forName="t" val="5"/>', 'val="10"'), 100 * MM, 100 * MM)
+			.shapes[0]
+
+		expect(shape?.fontPt).toBe(11)
+	})
+
+	it("stops a font rule at its floor when the text still does not fit", () => {
+		const shape = run(data(NODES), rules('<dgm:rule type="primFontSz" for="ch" forName="t" val="10"/>', 'val="1"'), 100 * MM, 100 * MM)
+			.shapes[0]
+
+		expect(shape?.fontPt).toBe(10)
+	})
+
+	it("grows a size by a rule only as far as the text needs, within the room left", () => {
+		// 20 pt text 50 pt wide (17.64 mm) needs the 10 mm box to grow.
+		const xml = rules('<dgm:rule type="w" for="ch" forName="t" val="INF"/>', 'val="10"')
+		const w = (boxes(run(data(NODES), xml, 100 * MM, 100 * MM), "t")[0] as Box).w
+
+		expect(w).toBeGreaterThanOrEqual(50 * 12700)
+		expect(w).toBeLessThan(50 * 12700 + 0.2 * MM)
+	})
+
+	it("undoes a geometry rule that cannot make the text fit", () => {
+		const xml = rules('<dgm:rule type="w" for="ch" forName="t" val="0"/>', 'val="1"')
+
+		expect((boxes(run(data(NODES), xml, 100 * MM, 100 * MM), "t")[0] as Box).w).toBe(1 * MM)
+	})
+
+	it("relaxes no further than the rule step budget", () => {
+		const xml = rules('<dgm:rule type="primFontSz" for="ch" forName="t" val="1"/>', 'val="3"')
+		const result = run(data(NODES), xml, 100 * MM, 100 * MM, { budgets: { ...DEFAULT_SMARTART_BUDGETS, maxRuleSteps: 2 } })
+
+		expect(result.ruleSteps).toBeLessThanOrEqual(2)
+	})
+})
+
+describe("SmartArt drawing order", () => {
+	it("draws a chOrder=t node's children top first and moves a shape back by zOrderOff", () => {
+		const shapes = (attributes: string, zOrderOff = 0) =>
+			run(
+				data(NODES),
+				layout(
+					`<dgm:layoutNode name="p" ${attributes}><dgm:layoutNode name="a"><dgm:shape type="rect"/></dgm:layoutNode>
+					<dgm:layoutNode name="b"><dgm:shape type="rect"/></dgm:layoutNode>
+					<dgm:layoutNode name="c"><dgm:shape type="rect" zOrderOff="${zOrderOff}"/></dgm:layoutNode></dgm:layoutNode>`
+				),
+				MM,
+				MM
+			).shapes.map(s => s.name)
+
+		expect(shapes("")).toEqual(["a", "b", "c"])
+		expect(shapes('chOrder="t"')).toEqual(["c", "b", "a"])
+		expect(shapes("", -2)).toEqual(["c", "a", "b"])
 	})
 })

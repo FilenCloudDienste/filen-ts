@@ -31,6 +31,7 @@ import {
 	type SlideKind,
 	type SlideNode,
 	type SlideRef,
+	type SourceRef,
 	type ThemeRef
 } from "../presentation/model"
 import { tooDeep, tooLarge } from "../presentation/refusal"
@@ -43,6 +44,7 @@ import { readCustomShows, readSections } from "./read/sections"
 import { legacyOlePreviews } from "./read/legacyOle"
 import { readSlidePart, SlidePartError } from "./read/slide"
 import { readObjectDefaults } from "./read/objectDefaults"
+import { resolvePath, structuralPath, visitSources } from "./sourcePath"
 import { G, partReader, STRICT_P, type PartReader } from "./read/xml"
 
 // Opening a PresentationML package (pptx, pptm, potx, potm, ppsx, ppsm; ECMA-376 Part 1 §19, Part 2 OPC): the
@@ -294,6 +296,20 @@ function relsSource(name: string): string | undefined {
 	return `${match[1] ?? ""}${match[2] ?? ""}`
 }
 
+// A slide or notes part a save added, bound to its node (prepareRebase).
+export interface RebasedPart {
+	readonly ref: SlideRef
+	readonly kind: "slide" | "notes"
+	readonly part: string
+	readonly document: XmlDocument | undefined
+}
+
+export interface RebasePlan {
+	// p:sldId/@id by slide part key, as the saved presentation lists them.
+	readonly slideIds: ReadonlyMap<string, number>
+	readonly added: readonly RebasedPart[]
+}
+
 interface Listed {
 	readonly ref: SlideRef
 	readonly kind: SlideKind
@@ -305,11 +321,23 @@ interface Listed {
 // A deck's parts: the parsed documents, the themes, and the lazy parse of slides and their notes. Core functions
 // on the deck are synchronous and need the nodes they touch present: callers `await parts.slide(ref)` first.
 export class PptxParts {
-	readonly opc: OpcPackage
-	readonly contentTypes: ContentTypes
+	get opc(): OpcPackage {
+		return this.package
+	}
+
+	get contentTypes(): ContentTypes {
+		return this.types
+	}
+
+	get epoch(): number {
+		return this.generation
+	}
+
 	readonly budgets: PresentationBudgets
 	readonly tally: DeckTally
-	readonly epoch: number
+	private package: OpcPackage
+	private types: ContentTypes
+	private generation: number
 	// Part keys of the entries classed media (core/opc/mediaPolicy.ts).
 	readonly media: ReadonlySet<string>
 	readonly notices: MediaNotice[]
@@ -326,6 +354,8 @@ export class PptxParts {
 	// a:objectDefaults of each theme read (shared by every ThemeRef to it).
 	private readonly objectDefaults = new Map<string, ObjectDefaults | undefined>()
 	private readonly pending = new Map<SlideRef, Promise<SlideNode>>()
+	// The main part ("/ppt/presentation.xml").
+	private mainPart = ""
 
 	constructor(
 		opc: OpcPackage,
@@ -335,14 +365,177 @@ export class PptxParts {
 		media: ReadonlySet<string>,
 		notices: MediaNotice[]
 	) {
-		this.opc = opc
-		this.contentTypes = contentTypes
+		this.package = opc
+		this.types = contentTypes
 		this.budgets = budgets
 		this.tally = new DeckTally(budgets)
-		this.epoch = options.epoch ?? 0
+		this.generation = options.epoch ?? 0
 		this.options = options
 		this.media = media
 		this.notices = notices
+	}
+
+	// A document the session holds under a name of its own ("raw:N": source markup an inverse held, read back after a
+	// rebase made the old refs stale), so document(name) resolves such a src like a part's. rebase() keeps it.
+	adopt(name: string, document: XmlDocument): void {
+		this.documents.set(partKey(name), document)
+	}
+
+	forget(name: string): void {
+		this.documents.delete(partKey(name))
+	}
+
+	// What a rebase needs of the saved package, read before anything moves (so the rebase itself is one synchronous
+	// step): its slide list (part → p:sldId/@id) and the slide and notes parts the save added, each bound to the node
+	// the model named it for and parsed.
+	async prepareRebase(opc: OpcPackage): Promise<RebasePlan> {
+		const slideIds = new Map<string, number>()
+		const added: RebasedPart[] = []
+		const document = await opc.xml(this.mainPart)
+		const reader = partReader(document)
+		const relationships = await opc.relationships(this.mainPart.slice(1))
+
+		for (const entry of reader.children(reader.child(document.documentElement(), G.P, "sldIdLst"), G.P, "sldId")) {
+			const rId = reader.rel(entry, "id")
+			const target = rId === undefined ? undefined : relationships.byId(rId)
+			const id = reader.int(entry, "id")
+
+			if (target?.partName !== undefined && !target.external && id !== undefined) slideIds.set(partKey(`/${target.partName}`), id)
+		}
+
+		const listed = new Set(this.deck.slides)
+		// One node per part: a part two nodes name goes to the one the deck lists (a slide in deck.slides, its notes).
+		const chosen = new Map<string, SlideNode>()
+
+		for (const node of this.unindexed(opc)) {
+			const key = partKey(node.part)
+			const held = chosen.get(key)
+
+			if (node.kind === "slide" && !slideIds.has(key)) continue
+			if (held === undefined || (!this.inDeck(held.ref, listed) && this.inDeck(node.ref, listed))) chosen.set(key, node)
+		}
+
+		for (const node of chosen.values()) {
+			if ((opc.entry(node.part)?.uncompressedSize ?? 0) > this.budgets.xmlPartBytes)
+				tooLarge(`XML part ${node.part}`, this.budgets.xmlPartBytes)
+
+			const parsed = await opc.xml(node.part)
+
+			checkDepth(parsed, this.budgets.elementDepth)
+			added.push({ ref: node.ref, kind: node.kind as "slide" | "notes", part: node.part, document: parsed })
+		}
+
+		return { slideIds, added }
+	}
+
+	// Slide and notes nodes whose part the index does not know and `opc` has (new in a save).
+	private unindexed(opc: OpcPackage): SlideNode[] {
+		const out: SlideNode[] = []
+
+		for (const node of this.deck.nodes.values()) {
+			if ((node.kind === "slide" || node.kind === "notes") && !this.byPart.has(partKey(node.part)) && opc.has(node.part))
+				out.push(node)
+		}
+
+		return out
+	}
+
+	private inDeck(ref: SlideRef, listed: ReadonlySet<SlideRef>): boolean {
+		if (listed.has(ref)) return true
+
+		for (const slide of listed) if (this.deck.nodes.get(slide)?.notes === ref) return true
+
+		return false
+	}
+
+	// A save's rebase (dom/presentation/save.ts): the package reads from the saved file from now on, `epoch` the new
+	// base generation. `documents` replaces the parsed documents of the parts the save rewrote or removed (undefined:
+	// dropped, read again on demand); every other parsed document holds the same bytes, so the model's node indices
+	// into it stand. Slides parsed from now on carry the new epoch. The part index follows the saved package: the slide
+	// and notes parts the save removed are dropped, the ones it added are bound to their nodes (whose refs into the
+	// markup they were written from move into the saved part), and slide ids are the saved list's (`plan`, from
+	// prepareRebase; without one the added parts are found by name and keep no id).
+	rebase(
+		opc: OpcPackage,
+		contentTypes: ContentTypes,
+		epoch: number,
+		documents: ReadonlyMap<string, XmlDocument | undefined>,
+		plan?: RebasePlan
+	): void {
+		const fresh = new Map<string, XmlDocument | undefined>()
+
+		for (const [part, document] of documents) fresh.set(partKey(part), document)
+
+		const added: readonly RebasedPart[] =
+			plan?.added ??
+			this.unindexed(opc).map(node => ({ ref: node.ref, kind: node.kind as "slide" | "notes", part: node.part, document: undefined }))
+
+		// Refs into the markup an added part was written from (its source slide's, or held markup) move into the part,
+		// while the documents they index are still held.
+		for (const part of added) {
+			const node = this.deck.nodes.get(part.ref)
+			const own = node?.src?.format === "pptx" ? node.src.part : undefined
+
+			if (node === undefined || own === undefined || part.document === undefined) continue
+
+			const to = part.document
+			const from = (src: SourceRef): XmlDocument | undefined =>
+				(src.epoch === epoch ? fresh.get(partKey(src.part)) : undefined) ?? this.documents.get(partKey(src.part))
+			const memo = new Map<number, number | undefined>()
+
+			visitSources(node, src => {
+				if (src.format !== "pptx" || partKey(src.part) !== partKey(own)) return src
+
+				if (!memo.has(src.node)) {
+					const document = from(src)
+
+					memo.set(src.node, document === undefined ? undefined : resolvePath(to, structuralPath(document, src.node)))
+				}
+
+				const mapped = memo.get(src.node)
+
+				return mapped === undefined ? src : { format: "pptx", part: part.part, node: mapped, epoch }
+			})
+		}
+
+		this.package = opc
+		this.types = contentTypes
+		this.generation = epoch
+
+		for (const [key, document] of fresh) {
+			if (document === undefined) this.documents.delete(key)
+			else this.documents.set(key, document)
+		}
+
+		for (const [key, listed] of this.byPart) {
+			if ((listed.kind !== "slide" && listed.kind !== "notes") || opc.has(listed.part)) continue
+
+			this.byPart.delete(key)
+			this.slideParts.delete(listed.ref)
+			this.slideIds.delete(listed.ref)
+		}
+
+		for (const part of added) {
+			const key = partKey(part.part)
+
+			if (this.byPart.has(key)) continue
+
+			const id = part.kind === "slide" ? plan?.slideIds.get(key) : undefined
+
+			this.byPart.set(key, { ref: part.ref, kind: part.kind, part: part.part, ...(id === undefined ? {} : { id }) })
+			this.slideParts.set(part.ref, part.part)
+			if (id !== undefined) this.slideIds.set(part.ref, id)
+			if (part.document !== undefined) this.documents.set(key, part.document)
+		}
+
+		for (const [key, id] of plan?.slideIds ?? []) {
+			const listed = this.byPart.get(key)
+
+			if (listed?.kind !== "slide" || listed.id === id) continue
+
+			this.byPart.set(key, { ...listed, id })
+			this.slideIds.set(listed.ref, id)
+		}
 	}
 
 	// The parsed document of a part read so far (presentation, masters, layouts, themes, parsed slides), or undefined.
@@ -434,7 +627,7 @@ export class PptxParts {
 		}
 	}
 
-	private action(reader: PartReader, relationships: Relationships, node: number): Action | undefined {
+	action(reader: PartReader, relationships: Relationships, node: number): Action | undefined {
 		const id = reader.rel(node, "id")
 		const target = id === undefined || id === "" ? undefined : relationships.byId(id)
 		const action = reader.attr(node, "action")
@@ -722,6 +915,8 @@ export class PptxParts {
 	}
 
 	async open(mainPart: string, variant: DeckVariant, strict: boolean, signatures: number): Promise<PptxOpen> {
+		this.mainPart = mainPart
+
 		const document = await this.xml(mainPart)
 		const reader = partReader(document)
 		const root = document.documentElement()

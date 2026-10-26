@@ -186,6 +186,7 @@ describe("range port", () => {
 		let lockName: string | null = null
 		const server: RangePortApi = {
 			read: () => new Promise<Uint8Array>(() => undefined),
+			readChecked: () => new Promise<{ bytes: Uint8Array; crc: number }>(() => undefined),
 			cancel: () => undefined,
 			close: () => undefined,
 			holdLife: name => {

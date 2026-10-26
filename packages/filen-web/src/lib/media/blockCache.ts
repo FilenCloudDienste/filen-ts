@@ -16,7 +16,7 @@ const SEQUENTIAL_STEPS_FOR_READ_AHEAD = 2
 // Blocks per range request. The SDK downloads the chunks of one request in parallel, so a run of a few
 // blocks is faster than block-sized requests, while a cap keeps one cluster-sized read from holding
 // tens of megabytes in a single response.
-const MAX_RUN_BLOCKS = 4
+export const MAX_RUN_BLOCKS = 4
 
 // Below any block index by more than one, so a first read never counts as a forward step.
 const NO_BLOCK = -2

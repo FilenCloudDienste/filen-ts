@@ -5,24 +5,16 @@ import { openOdtSource, type OdtSource } from "../core/odt/write/source"
 import { writeOdt, type OdtEdits } from "../core/odt/write/writer"
 import { CORPUS_DIR } from "./corpusDir"
 import { decodeUtf8, encodeUtf8 } from "@filen/office/core/xml"
+import { liveHeap, liveHeapNow } from "./liveHeap"
 import { cpuMs } from "./timing"
 
 // What a save of the largest corpus ODT (2.4 MB content.xml, 14 MB with its pictures) holds at its peak, over what
 // the open document holds: heap and array buffers live at every turn the sliced save gives (collected first), for
-// an edit the whole file's proof proves and one the span proof does. Opt-in: needs the corpus and a runtime with
-// --expose-gc (vitest --execArgv=--expose-gc).
+// an edit the whole file's proof proves and one the span proof does (liveHeap.ts: this process's live heap, whatever
+// runs alongside). Needs the corpus.
 
 const FILE = join(CORPUS_DIR, "odt", "govuk__8_Energy_20_5_2026v2.odt")
-const gc = (globalThis as { gc?: () => void }).gc
 const MB = 1024 * 1024
-
-function live(): number {
-	gc?.()
-
-	const usage = process.memoryUsage()
-
-	return usage.heapUsed + usage.arrayBuffers
-}
 
 function slicing(pause: () => void): {
 	signal: { aborted: boolean }
@@ -44,9 +36,9 @@ function slicing(pause: () => void): {
 
 // The save's peak over what was live before it, and its CPU time (measured apart: collecting at every turn costs).
 async function measured(source: OdtSource, edits: OdtEdits): Promise<{ peak: number; ms: number; proof: string; size: number }> {
-	const base = live()
+	const base = await liveHeap()
 	let peak = base
-	const written = await writeOdt(source, edits, { turns: slicing(() => (peak = Math.max(peak, live()))) })
+	const written = await writeOdt(source, edits, { turns: slicing(() => (peak = Math.max(peak, liveHeapNow()))) })
 	let ms = Infinity
 
 	for (let run = 0; run < 3; run++) {
@@ -56,7 +48,7 @@ async function measured(source: OdtSource, edits: OdtEdits): Promise<{ peak: num
 		ms = Math.min(ms, cpuMs() - started)
 	}
 
-	return { peak: Math.max(peak, live()) - base, ms, proof: written.proof ?? "none", size: written.bytes.length }
+	return { peak: Math.max(peak, await liveHeap()) - base, ms, proof: written.proof ?? "none", size: written.bytes.length }
 }
 
 // The translation's body with "Filen " typed at the first text of the first paragraph `which` takes.
@@ -69,7 +61,7 @@ function typed(source: OdtSource, which: (paragraph: string) => boolean): OdtEdi
 	return { parts: new Map([["word/document.xml", encodeUtf8(`${body.slice(0, at)}Filen ${body.slice(at)}`)]]) }
 }
 
-describe.skipIf(!existsSync(FILE) || gc === undefined)("ODT writer memory on a 14 MB document", () => {
+describe.skipIf(!existsSync(FILE))("ODT writer memory on a 14 MB document", () => {
 	it("saves an edit within a few times its content's size", { timeout: 600_000 }, async () => {
 		const opened = await openOdtSource(new Uint8Array(readFileSync(FILE)))
 

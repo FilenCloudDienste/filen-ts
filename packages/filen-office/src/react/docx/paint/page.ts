@@ -300,10 +300,13 @@ function strokeColor(stroke: Stroke, paints: readonly Paint[]): string {
 
 // Effects on glyphs as CSS: shadows and glow as text-shadow, blur as a filter, reflection where the engine has
 // one (-webkit-box-reflect; Firefox draws none). Inner shadows and soft edges have no CSS for text: not drawn.
-function effectsCss(effects: RenderEffects | undefined): string {
+// Glyphs filled by a clipped background (`clipped`) have a transparent text fill, which a text-shadow would show
+// through: their shadows are drop-shadow filters of the painted glyphs instead.
+function effectsCss(effects: RenderEffects | undefined, clipped: boolean): string {
 	if (effects === undefined || effects.length === 0) return ""
 
 	const shadows: string[] = []
+	let blur = ""
 	let out = ""
 
 	for (const effect of effects) {
@@ -319,7 +322,7 @@ function effectsCss(effects: RenderEffects | undefined): string {
 				)
 				break
 			case "blur":
-				out += `filter:blur(${px(Math.max(0, effect.radius) / 2)}px);`
+				blur = `blur(${px(Math.max(0, effect.radius) / 2)}px)`
 				break
 			case "reflection":
 				out += `-webkit-box-reflect:below ${px(effect.distance)}px linear-gradient(transparent ${round((1 - effect.endPos) * 100)}%,rgba(0,0,0,${round(effect.startAlpha)}));`
@@ -329,7 +332,74 @@ function effectsCss(effects: RenderEffects | undefined): string {
 		}
 	}
 
+	if (clipped) {
+		const filters = shadows.map(shadow => `drop-shadow(${shadow})`)
+
+		if (blur !== "") filters.push(blur)
+
+		return filters.length === 0 ? out : `filter:${filters.join(" ")};${out}`
+	}
+
+	if (blur !== "") out = `filter:${blur};${out}`
+
 	return shadows.length === 0 ? out : `text-shadow:${shadows.join(",")};${out}`
+}
+
+// Engines without -webkit-box-reflect (Firefox) get a text reflection as a mirrored, masked copy of the span: the
+// same box flipped about distance / 2 below its bottom, faded by the mask the reflection would have. Decorative only.
+let boxReflect: boolean | undefined
+
+function engineReflects(document: Document): boolean {
+	const css: unknown = document.defaultView === null ? undefined : Reflect.get(document.defaultView, "CSS")
+	const supports: unknown = typeof css === "object" && css !== null ? Reflect.get(css, "supports") : undefined
+
+	// Without CSS.supports there is no telling: the engine's own reflection (or none) stands.
+	return typeof supports === "function" ? Reflect.apply(supports, css, ["-webkit-box-reflect", "below 0px"]) === true : true
+}
+
+function reflectionMirror(
+	document: Document,
+	span: HTMLElement,
+	style: DocxTextStyle | undefined,
+	tables: TextPaintTables | undefined
+): HTMLElement | undefined {
+	const effects = style?.effects === undefined ? undefined : tables?.textEffects[style.effects]
+	const reflection = effects?.find(effect => effect.kind === "reflection")
+
+	if (reflection === undefined || reflection.kind !== "reflection") return undefined
+
+	boxReflect ??= engineReflects(document)
+
+	if (boxReflect) return undefined
+
+	const mirror = span.cloneNode(true) as HTMLElement
+	const mask = `linear-gradient(transparent ${round((1 - reflection.endPos) * 100)}%,rgba(0,0,0,${round(reflection.startAlpha)}))`
+
+	// Never focused, clicked or read: a link the span carries stays the span's.
+	mirror.setAttribute("aria-hidden", "true")
+	mirror.setAttribute("inert", "")
+	// The flip is about y = 100% + distance / 2 of the span's own box. An upright cluster turns about its own origin:
+	// the flip goes inside that turn, as -webkit-box-reflect draws it, written about the origin it keeps
+	// (y -> 2 * (100% + distance / 2 - origin) - y).
+	const origin = mirror.style.getPropertyValue("transform-origin")
+
+	if (origin === "") {
+		mirror.style.setProperty("transform-origin", `0 calc(100% + ${px(reflection.distance / 2)}px)`)
+		mirror.style.setProperty("transform", `scaleY(-1) ${mirror.style.transform}`)
+	} else {
+		const originY = origin.split(" ")[1] ?? "0px"
+
+		mirror.style.setProperty(
+			"transform",
+			`${mirror.style.transform} translateY(calc(200% + ${px(reflection.distance)}px - 2 * ${originY})) scaleY(-1)`
+		)
+	}
+
+	mirror.style.setProperty("mask-image", mask)
+	mirror.style.setProperty("pointer-events", "none")
+	mirror.style.setProperty("user-select", "none")
+
+	return mirror
 }
 
 const drawingCssCache = new WeakMap<DocxTextStyle, string>()
@@ -359,7 +429,7 @@ export function drawingTextCss(style: DocxTextStyle | undefined, tables: TextPai
 		css += alpha === 0 ? "-webkit-text-fill-color:transparent;" : `color:${hexAlpha(style.color, alpha)};`
 	}
 
-	css += effectsCss(style.effects === undefined ? undefined : tables.textEffects[style.effects])
+	css += effectsCss(style.effects === undefined ? undefined : tables.textEffects[style.effects], css.includes(CLIP_TEXT))
 	drawingCssCache.set(style, css)
 
 	return css
@@ -932,6 +1002,8 @@ function paintLine(
 	// The line's spans in logical (text) order: right-to-left runs are laid out visually, but copying and
 	// screen readers follow the DOM.
 	const lineTexts: PaintedText[] = []
+	// Reflections drawn as copies (reflectionMirror), after the line's own spans.
+	const mirrors: HTMLElement[] = []
 
 	for (let k = firstFragment; k < firstFragment + fragmentCount; k++) {
 		const ff = k * FRAGMENT_FLOATS
@@ -1005,6 +1077,10 @@ function paintLine(
 			}
 
 			if ((info & FragmentFlag.HYPHEN) !== 0) span.dataset["foHyphen"] = ""
+
+			const mirror = reflectionMirror(document, span, style, paints)
+
+			if (mirror !== undefined) mirrors.push(mirror)
 		}
 
 		lineTexts.push({ element: span, source, start, end })
@@ -1013,6 +1089,7 @@ function paintLine(
 	lineTexts.sort((a, b) => a.start - b.start)
 
 	for (const painted of lineTexts) textGroup.appendChild(painted.element)
+	for (const mirror of mirrors) textGroup.appendChild(mirror)
 
 	if (lineTexts.length > 0) {
 		const separator = lineSeparator(page, line, flags, text, lineTexts[lineTexts.length - 1]?.end ?? 0)

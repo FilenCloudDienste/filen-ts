@@ -532,6 +532,18 @@ async function* steps(chunks: AsyncIterable<Uint8Array>, size: () => number): As
 	}
 }
 
+// Errors of the source's own reads (a network failure, a read refused as stale): they reach the caller as they are,
+// never as damage of the deflate data they interrupted.
+const sourceFailures = new WeakSet<Error>()
+
+function sourceFailure(error: unknown): Error {
+	const failure = error instanceof Error ? error : new Error(String(error))
+
+	sourceFailures.add(failure)
+
+	return failure
+}
+
 // A zip read through its central directory, without touching entry data until asked: opening reads the
 // tail and the directory, an entry costs its local header and its own bytes. Every limit is checked
 // before anything inflates, and inflating stops as soon as an entry outgrows its declared size.
@@ -724,7 +736,7 @@ export class ZipArchive {
 				if (entry.compressedSize === 0) inflater.push(new Uint8Array(0), true)
 			}
 		} catch (error) {
-			if (error instanceof ZipError || yielding) throw error
+			if (error instanceof ZipError || yielding || (error instanceof Error && sourceFailures.has(error))) throw error
 
 			throw new ZipError("corrupt", `Damaged deflate data in ${entry.name}`)
 		}
@@ -760,7 +772,15 @@ export class ZipArchive {
 		for (let read = 0; read < entry.compressedSize;) {
 			const length = Math.min(READ_STEP, entry.compressedSize - read)
 
-			yield await this.source.read(dataOffset + read, length)
+			let bytes: Uint8Array
+
+			try {
+				bytes = await this.source.read(dataOffset + read, length)
+			} catch (error) {
+				throw sourceFailure(error)
+			}
+
+			yield bytes
 			read += length
 		}
 	}
@@ -827,7 +847,7 @@ export class ZipArchive {
 				if (entry.compressedSize === 0) inflater.push(new Uint8Array(0), true)
 			}
 		} catch (error) {
-			if (error instanceof ZipError || pausing) throw error
+			if (error instanceof ZipError || pausing || (error instanceof Error && sourceFailures.has(error))) throw error
 
 			throw new ZipError("corrupt", `Damaged deflate data in ${entry.name}`)
 		}

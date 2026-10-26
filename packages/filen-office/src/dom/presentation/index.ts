@@ -106,6 +106,7 @@ export {
 	type PresentationWorkerPool,
 	type PresentationWorkerScope
 } from "./host"
+export { type CopyPass, type RemoteByteSource } from "./save"
 export { presentationScheduler, realmScheduler, SLICE_MS, type PresentationWorkerScheduler } from "./scheduler"
 export {
 	installPresentationRealm,

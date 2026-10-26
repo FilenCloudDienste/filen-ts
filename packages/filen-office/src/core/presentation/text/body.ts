@@ -222,12 +222,20 @@ class Session {
 	readonly scale: number
 	readonly options: LayoutOptions
 
+	// The paragraph being built lays its lines out at its faces' own ascent and descent (fontIndependentOff).
+	faceLines = false
+
 	constructor(env: TextEnvironment, body: ResolvedBody, scale: number, options: LayoutOptions) {
 		this.env = env
 		this.body = body
 		this.scale = scale
 		this.options = options
-		this.styles = new StyleTable(env.cache, options.lineMetrics === "face" ? "hhea" : "gdi")
+		// Face metrics measure ascent plus descent without the line gap ("hhea"); the font-independent single line
+		// measures the same under either rule.
+		this.styles = new StyleTable(
+			env.cache,
+			options.lineMetrics === "face" || body.paragraphs.some(paragraph => fontIndependentOff(paragraph.pPr)) ? "hhea" : "gdi"
+		)
 	}
 
 	paint(paint: Paint): number {
@@ -289,7 +297,7 @@ class Session {
 	// The style id of a run's look in `slot`.
 	// `marker`: the paragraph's bullet or number, whose size does not set the line's height.
 	look(props: RunProps, slot: DrawingSlot, sizeFactor = 1, colorOverride?: Rgba, fontOverride?: string, marker = false): number {
-		const key = lookKey(props, slot, sizeFactor, colorOverride, fontOverride, marker)
+		const key = lookKey(props, slot, sizeFactor, colorOverride, fontOverride, marker, this.faceLines)
 		const known = this.looks.get(key)
 
 		if (known !== undefined) return known
@@ -319,7 +327,11 @@ class Session {
 		const size = escaped ? baseSize * ESCAPEMENT_SIZE : baseSize
 		const shift = ((props.baseline ?? 0) / 100000) * baseSize
 		const drawn = this.env.fonts.resolve(fontRequest(props, slot, fonts, fontOverride))
-		const font = withSingleLine(drawn, marker && sizeFactor > 0 ? 1 / sizeFactor : 1, this.options.lineMetrics === "face")
+		const font = withSingleLine(
+			drawn,
+			marker && sizeFactor > 0 ? 1 / sizeFactor : 1,
+			this.options.lineMetrics === "face" || this.faceLines
+		)
 		const sizePt = (props.sz ?? DEFAULT_SIZE) / 100
 		const kerning = props.kern === undefined || props.kern === 0 || sizePt * 100 >= props.kern
 		const letterSpacing = ((props.spc ?? 0) / 100) * PT_PX
@@ -330,7 +342,9 @@ class Session {
 				? { kind: "color" as const, color: colorOverride }
 				: resolveTextFill(props.fill ?? solidText, colorOf, BLACK)
 		const color = hlink ?? (fill.kind === "color" ? fill.color : fill.kind === "paint" ? averagePaint(fill.paint) : BLACK)
-		const underline = props.u ?? (linked ? "sng" : "none")
+		// Hyperlinked text is underlined whatever its style says (an inherited or written u="none" included):
+		// PowerPoint draws every hyperlink underlined, as LibreOffice 7.5 does (measured; ECMA is silent).
+		const underline = linked && (props.u === undefined || props.u === "none") ? "sng" : (props.u ?? "none")
 		const underlineColor =
 			props.uFill !== undefined && props.uFill !== "text"
 				? (() => {
@@ -426,10 +440,12 @@ function lookKey(
 	sizeFactor: number,
 	colorOverride: Rgba | undefined,
 	fontOverride: string | undefined,
-	marker: boolean
+	marker: boolean,
+	faceLines: boolean
 ): string {
-	return JSON.stringify([props, slot, sizeFactor, colorOverride ?? null, fontOverride ?? null, marker], (_key, value: unknown) =>
-		value instanceof Float64Array ? Array.from(value) : value
+	return JSON.stringify(
+		[props, slot, sizeFactor, colorOverride ?? null, fontOverride ?? null, marker, faceLines],
+		(_key, value: unknown) => (value instanceof Float64Array ? Array.from(value) : value)
 	)
 }
 
@@ -534,7 +550,8 @@ function appendBullet(session: Session, builder: ParagraphBuilder, paragraph: Re
 		return 0
 	}
 
-	const first = firstRunProps(paragraph)
+	// The marker is no part of a hyperlink its first run carries: drawn without the link's colour and underline.
+	const { hlinkClick: _link, ...first } = firstRunProps(paragraph)
 	let text: string
 	let font: string | undefined
 
@@ -579,7 +596,7 @@ function appendBullet(session: Session, builder: ParagraphBuilder, paragraph: Re
 	// The marker sits at marL + indent and a hanging tab takes the text to marL. When the marker reaches marL or
 	// beyond, the text follows it directly rather than going to the next default tab stop (LibreOffice 7.5, measured;
 	// ECMA and MS-OI29500 are silent).
-	const room = -(pPr.indent ?? 0) / EMU_PX
+	const room = -firstLineIndent(pPr) / EMU_PX
 	const width = session.env.cache.width(session.styles.fontKey[style] ?? 0, text, 0, text.length)
 
 	if (width < room) builder.tab(style)
@@ -647,7 +664,7 @@ function geometryOf(
 		width: wrap ? width : UNWRAPPED,
 		startIndent: (pPr.marL ?? 0) / EMU_PX,
 		endIndent: wrap ? (pPr.marR ?? 0) / EMU_PX : 0,
-		firstLineIndent: (pPr.indent ?? 0) / EMU_PX,
+		firstLineIndent: firstLineIndent(pPr) / EMU_PX,
 		rtl,
 		alignment: (wrap ? alignment : Alignment.START) as ParagraphGeometry["alignment"],
 		tabs: stops.length === 0 ? null : new TabStops(stops),
@@ -656,6 +673,20 @@ function geometryOf(
 		lineSpacing: spacing.value,
 		editEngineSpacing: true
 	}
+}
+
+// a:pPr@indent (EMU), the first line's offset from marL, kept from reaching before the text box's start edge: a
+// hanging indent wider than marL starts the first line at the edge, as LibreOffice 7.5 lays it out (measured;
+// ECMA-376 §21.1.2.2.7 and MS-OI29500 are silent on an indent past the edge).
+function firstLineIndent(pPr: ParaProps): number {
+	return Math.max(pPr.indent ?? 0, -Math.max(0, pPr.marL ?? 0))
+}
+
+// ODF style:font-independent-line-spacing="false" (ODF 1.3 Part 3 §20.297): the paragraph's lines take the height of
+// its faces' ascent and descent, as LibreOffice 7.5 lays them out without external leading (measured), instead of
+// the font-independent single line.
+function fontIndependentOff(pPr: ParaProps): boolean {
+	return pPr.fontIndependentLineSpacing === false
 }
 
 // The width an unwrapped paragraph (wrap="none") is laid out in: one line per paragraph and line break.
@@ -676,6 +707,28 @@ export function layoutBody(
 	if (runCount > MAX_BODY_RUNS) throw new PresentationError("tooLarge", `${runCount} text runs in one body`)
 
 	const bodyPr = resolved.bodyPr
+	const normal = bodyPr.autofit === "normal"
+
+	return layoutAt(
+		resolved,
+		box,
+		env,
+		options,
+		normal ? Math.max(0.01, bodyPr.fontScale) : 1,
+		normal ? Math.max(0, bodyPr.lineSpacingReduction) : 0
+	)
+}
+
+// One layout at `scale` (sizes and point spacing) with `reduction` off proportional line spacing.
+function layoutAt(
+	resolved: ResolvedBody,
+	box: { readonly width: number; readonly height: number },
+	env: TextEnvironment,
+	options: LayoutOptions,
+	scale: number,
+	reduction: number
+): BodyLayout {
+	const bodyPr = resolved.bodyPr
 	const vertical = bodyPr.vertical
 	const turn = turnOf(vertical)
 	const stacked = vertical === "wordArtVert" || vertical === "wordArtVertRtl"
@@ -683,9 +736,6 @@ export function layoutBody(
 	// Stacked columns are laid out horizontally across the column's length (the box's height) first.
 	const frameWidth = Math.max(0, stacked ? box.height : box.width)
 	const frameHeight = Math.max(0, stacked ? box.width : box.height)
-	const normal = bodyPr.autofit === "normal"
-	const scale = normal ? Math.max(0.01, bodyPr.fontScale) : 1
-	const reduction = normal ? Math.max(0, bodyPr.lineSpacingReduction) : 0
 	const session = new Session(env, resolved, scale, options)
 	const layouter = new ParagraphLayouter(session.styles)
 	const builder = new ParagraphBuilder()
@@ -695,6 +745,8 @@ export function layoutBody(
 	const fields = options.fields ?? {}
 	const texts: string[] = []
 	const prefixes = new Int32Array(resolved.paragraphs.length)
+	const kept: number[] = []
+	const groups: number[] = []
 	const columns = Math.max(1, Math.min(16, Math.trunc(bodyPr.columns)))
 	const gap = Math.max(0, bodyPr.columnSpacing)
 	const columnWidth = columns > 1 ? Math.max(1, (frameWidth - (columns - 1) * gap) / columns) : frameWidth
@@ -717,10 +769,15 @@ export function layoutBody(
 			index === 0 && !hasText(paragraph) && (lnSpc === undefined || "pct" in lnSpc)
 				? lineSpacing(undefined, 0, scale)
 				: lineSpacing(lnSpc, reduction, scale)
+		session.faceLines = fontIndependentOff(paragraph.pPr)
+
 		const markStyle = session.look(paragraph.endRPr, "latin")
 
 		builder.reset(markStyle)
 		prefixes[index] = appendBullet(session, builder, paragraph, counters)
+
+		const linksFrom = session.linkInts.length
+
 		appendRuns(session, builder, paragraph, index, fields)
 
 		const text = builder.finish()
@@ -728,12 +785,16 @@ export function layoutBody(
 		texts.push(text.text)
 
 		const lang = first.lang
+		const keepTogether = keptRanges(kept, text.text, session.linkInts, linksFrom, prefixes[index] ?? 0)
+		const breakBefore = linkGroups(groups, session.linkInts, linksFrom)
 		const prepared = layouter.prepare(text, {
 			rtl: paragraph.pPr.rtl === true,
 			source: index,
 			kinsoku: kinsokuFor(lang),
 			wordWrap: paragraph.pPr.eaLnBrk !== false,
-			hangingPunctuation: paragraph.pPr.hangingPunct === true
+			hangingPunctuation: paragraph.pPr.hangingPunct === true,
+			...(keepTogether === undefined ? {} : { keepTogether }),
+			...(breakBefore === undefined ? {} : { breakBefore })
 		})
 
 		const startLine = out.lineCount
@@ -808,6 +869,65 @@ export function layoutBody(
 }
 
 export type { Session as BodySession }
+
+// What a paragraph keeps on one line, as [start, end) pairs into `out` (reused): its marker (`prefix` long) with the
+// text after it, as LibreOffice 7.5 draws a marker outside the text's lines; and each space-free stretch of its
+// hyperlinked text, adjacent runs of links joined. LibreOffice imports a hyperlinked run as a URL text field, which its
+// EditEngine breaks only where the field alone overflows a line, so a URL moves to a line of its own instead of
+// breaking at its slashes and hyphens (measured; ECMA, MS-OI29500 and PowerPoint's documentation are silent on breaking
+// inside hyperlinks). Linked prose still wraps at its spaces, never inside a word: see linkGroups.
+function keptRanges(out: number[], text: string, linkInts: readonly number[], from: number, prefix: number): number[] | undefined {
+	out.length = 0
+
+	if (prefix > 0) out.push(0, prefix + 1)
+
+	for (let at = from; at < linkInts.length; at += 4) {
+		const end = linkInts[at + 2] ?? 0
+		let stretch = -1
+
+		for (let i = linkInts[at + 1] ?? 0; i <= end; i++) {
+			if (i < end && !breakingSpace(text.charCodeAt(i))) {
+				if (stretch < 0) stretch = i
+
+				continue
+			}
+
+			if (stretch >= 0) join(out, stretch, i)
+
+			stretch = -1
+		}
+	}
+
+	return out.length === 0 ? undefined : out
+}
+
+// A paragraph's hyperlinks as [start, end) pairs into `out` (reused), adjacent runs of a link joined: each starts the
+// next line when it does not fit the rest of this one, as LibreOffice moves a URL field (measured), and one longer
+// than a line then wraps at its spaces.
+function linkGroups(out: number[], linkInts: readonly number[], from: number): number[] | undefined {
+	out.length = 0
+
+	for (let at = from; at < linkInts.length; at += 4) join(out, linkInts[at + 1] ?? 0, linkInts[at + 2] ?? 0)
+
+	return out.length === 0 ? undefined : out
+}
+
+function join(out: number[], start: number, end: number): void {
+	if (out.length > 0 && out[out.length - 1] === start) out[out.length - 1] = end
+	else out.push(start, end)
+}
+
+// A space after which a line may break (UAX #14 classes SP and BA spaces, ZW): a kept stretch of a link ends there.
+function breakingSpace(code: number): boolean {
+	return (
+		code === 0x20 ||
+		code === 0x09 ||
+		code === 0x1680 ||
+		(code >= 0x2000 && code <= 0x200b && code !== 0x2007) ||
+		code === 0x205f ||
+		code === 0x3000
+	)
+}
 
 // The largest font size of the text on one line (the paragraph's marker excluded), px; `fallback` for a line
 // without text (ECMA-376 §21.1.2.2.11: percentage spacing is taken from the largest text on the line).

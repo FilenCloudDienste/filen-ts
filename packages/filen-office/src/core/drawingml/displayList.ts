@@ -193,6 +193,37 @@ export type Paint =
 			readonly focus?: readonly [number, number]
 	  }
 
+// An a:path gradient as the circle the painters draw in the unit box (stretched with the item's box). It is centred
+// on the fillToRect's centre clamped into the box, so an inverted rectangle (l + r > 1, as theme backgrounds write)
+// centres between its edges. Its first stop fills the focus rectangle (`inner`, a fraction of `radius`); its last
+// reaches the corners ("circle", "shape") or the farthest side ("rect").
+export function pathGradientCircle(paint: Extract<Paint, { kind: "path" }>): {
+	readonly cx: number
+	readonly cy: number
+	readonly radius: number
+	readonly inner: number
+} {
+	const finite = (value: number | undefined): number => (value !== undefined && Number.isFinite(value) ? value : 0)
+	const unit = (value: number): number => Math.min(1, Math.max(0, value))
+	const left = finite(paint.focus?.left)
+	const top = finite(paint.focus?.top)
+	const right = finite(paint.focus?.right)
+	const bottom = finite(paint.focus?.bottom)
+	const halfWidth = Math.max(0, 1 - unit(left) - unit(right)) / 2
+	const halfHeight = Math.max(0, 1 - unit(top) - unit(bottom)) / 2
+	const cx = unit((1 + left - right) / 2)
+	const cy = unit((1 + top - bottom) / 2)
+	const reachX = Math.max(cx, 1 - cx)
+	const reachY = Math.max(cy, 1 - cy)
+	const rect = paint.shape === "rect"
+	const radius = Math.max(rect ? Math.max(reachX, reachY) : Math.hypot(reachX, reachY), 0.001)
+	// A rectangle with no area (inverted on one axis) has no solid focus.
+	const focusSize = rect ? Math.max(halfWidth, halfHeight) : halfWidth > 0 && halfHeight > 0 ? Math.hypot(halfWidth, halfHeight) : 0
+	const inner = Math.min(0.99, Math.max(0, focusSize / radius))
+
+	return { cx, cy, radius, inner }
+}
+
 // How a shaded triangle's colour runs from its edge (position 0) to its centre vertex (1): preset colours
 // (`offsets`, `colors`), else blend factors (the share of `center` at each of `positions`), else linear.
 // Inside the `focus` scale (0..1) the centre colour is solid.
@@ -266,6 +297,9 @@ export interface DrawingImage {
 	// The encoded image itself (`format` names its encoding) for a bitmap the drawing carries, such as one
 	// embedded in a metafile; `partName` is then undefined.
 	readonly bytes?: Uint8Array
+	// The same for every copy of `bytes` a session's renders send (a cached metafile conversion's bitmap), so a page
+	// can share one blob URL across them; absent where no producer tracks it.
+	readonly bytesKey?: string
 }
 
 export type TextAnchor = "t" | "ctr" | "b" | "just" | "dist"

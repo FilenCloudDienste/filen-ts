@@ -387,7 +387,10 @@ describe("the presentation protocol", () => {
 			freshParts: () => session.call("freshParts", "pptx", ports()).answer
 		}
 
-		for (const method of PRESENTATION_METHODS) {
+		// Built by their slices: edits (command, undo, redo) and saving (save, commitSaved).
+		const built: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved"])
+
+		for (const method of PRESENTATION_METHODS.filter(method => !built.has(method))) {
 			const error: unknown = await calls[method]().then(
 				() => undefined,
 				(reason: unknown) => reason
@@ -563,21 +566,19 @@ describe("the presentation protocol", () => {
 		stop()
 	})
 
-	it("refuses to open a format whose reader is not built yet", async () => {
+	it("refuses bytes that are no presentation in every reader, typed (never notImplemented)", async () => {
 		const channel = loopback()
 		const stop = servePresentation(channel.worker)
 
-		// pptx is built (presentationOpenPptxCorpus.test.ts opens the corpus through the session).
 		for (const [s, format] of [
 			[2, "odp"],
 			[3, "ppt"]
 		] as const) {
 			const session = new LoopbackSession(channel.page, s)
+			const event = await opened(session, channel, { options: { format, fileName: `Deck.${format}` } })
 
-			expect(await opened(session, channel, { options: { format, fileName: `Deck.${format}` } })).toMatchObject({
-				type: "error",
-				reason: "notImplemented"
-			})
+			expect(event).toMatchObject({ type: "error" })
+			expect(event).not.toMatchObject({ reason: "notImplemented" })
 		}
 
 		stop()

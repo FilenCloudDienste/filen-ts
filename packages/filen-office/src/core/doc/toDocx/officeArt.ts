@@ -275,7 +275,76 @@ const BLIP_KINDS: ReadonlyMap<number, readonly [Blip["extension"], string, numbe
 	[0xf029, ["tiff", "image/tiff", 0x6e5]]
 ])
 
+// The file kind of a BLIP record type; undefined for a type that holds no picture file.
+export function blipKind(type: number): Omit<Blip, "bytes"> | undefined {
+	const kind = BLIP_KINDS.get(type)
+
+	return kind === undefined ? undefined : { extension: kind[0], contentType: kind[1] }
+}
+
 const MAX_INFLATED = 64 * 1024 * 1024
+// Deflate's longest match (258 bytes) costs at least two bits, so a zlib stream inflates to at most 1032 times its
+// length: what a metafile can really hold, whatever cbSize declares.
+const DEFLATE_RATIO = 1032
+// [MS-WMF] §2.3.2.3 META_PLACEABLE, put back in front of a WMF stored without it.
+const PLACEABLE_HEADER = 22
+
+interface Metafile {
+	readonly header: number
+	readonly cbSize: number
+	readonly bodyStart: number
+	readonly bodyEnd: number
+	readonly compressed: boolean
+}
+
+// OfficeArtMetafileHeader (§2.2.31): cbSize, rcBounds, ptSize, cbSave, compression (0 deflate, 0xFE none). Only the
+// header's bytes are read: `record.end` bounds the body.
+function metafileOf(data: Uint8Array, record: ArtRecord, uids: number): Metafile | undefined {
+	const header = record.start + uids
+
+	if (header + 34 > record.end) return undefined
+
+	const cbSave = u32(data, header + 28)
+
+	return {
+		header,
+		cbSize: u32(data, header),
+		bodyStart: header + 34,
+		bodyEnd: Math.min(record.end, header + 34 + cbSave),
+		compressed: (data[header + 32] ?? 0) === 0
+	}
+}
+
+// The bytes a compressed metafile inflates to at most (cbSize, bounded by what its deflate stream can hold).
+function inflatedLimit(metafile: Metafile): number {
+	return Math.min(metafile.cbSize, (metafile.bodyEnd - metafile.bodyStart) * DEFLATE_RATIO + 258)
+}
+
+// The size of the picture file a BLIP holds, from its headers alone (only the bytes up to and including the metafile
+// header or tag byte are read): exact for bitmaps and uncompressed metafiles, an upper bound for compressed ones.
+// Undefined where blipFile gives none.
+export function blipSize(data: Uint8Array, record: ArtRecord): number | undefined {
+	const kind = BLIP_KINDS.get(record.type)
+
+	if (kind === undefined) return undefined
+
+	const [extension, , twoUids] = kind
+	const uids = record.instance === twoUids ? 32 : 16
+
+	if (extension === "emf" || extension === "wmf" || extension === "pict") {
+		const metafile = metafileOf(data, record, uids)
+
+		if (metafile === undefined || (metafile.compressed && metafile.cbSize > MAX_INFLATED)) return undefined
+
+		const size = metafile.compressed ? inflatedLimit(metafile) : metafile.bodyEnd - metafile.bodyStart
+
+		return extension === "wmf" ? size + PLACEABLE_HEADER : size
+	}
+
+	const length = record.end - (record.start + uids + 1)
+
+	return length <= 0 ? undefined : length + (extension === "bmp" ? 14 : 0)
+}
 
 // The picture file a BLIP holds, or undefined for a record that is not one or is damaged.
 export function blipFile(data: Uint8Array, record: ArtRecord): Blip | undefined {
@@ -287,30 +356,32 @@ export function blipFile(data: Uint8Array, record: ArtRecord): Blip | undefined 
 	const uids = record.instance === twoUids ? 32 : 16
 
 	if (extension === "emf" || extension === "wmf" || extension === "pict") {
-		// OfficeArtMetafileHeader (§2.2.31): cbSize, rcBounds, ptSize, cbSave, compression (0 deflate, 0xFE none).
-		const header = record.start + uids
+		const metafile = metafileOf(data, record, uids)
 
-		if (header + 34 > record.end) return undefined
+		if (metafile === undefined) return undefined
 
-		const cbSize = u32(data, header)
-		const cbSave = u32(data, header + 28)
-		const compressed = (data[header + 32] ?? 0) === 0
-		const body = data.subarray(header + 34, Math.min(record.end, header + 34 + cbSave))
+		const body = data.subarray(metafile.bodyStart, metafile.bodyEnd)
 		let bytes: Uint8Array
 
-		if (compressed) {
-			if (cbSize > MAX_INFLATED) return undefined
+		if (metafile.compressed) {
+			if (metafile.cbSize > MAX_INFLATED) return undefined
+
+			// The output never outgrows the array it is given, so the array is no larger than the stream can fill,
+			// and a shorter result is copied out: a subarray would keep the whole allocation alive.
+			const out = new Uint8Array(inflatedLimit(metafile))
 
 			try {
-				bytes = unzlibSync(body, { out: new Uint8Array(cbSize) })
+				bytes = unzlibSync(body, { out })
 			} catch {
 				return undefined
 			}
+
+			if (bytes.length < out.length) bytes = bytes.slice()
 		} else {
 			bytes = body.slice()
 		}
 
-		if (extension === "wmf") bytes = withPlaceableHeader(bytes, data, header)
+		if (extension === "wmf") bytes = withPlaceableHeader(bytes, data, metafile.header)
 
 		return { bytes, extension, contentType }
 	}
@@ -346,7 +417,7 @@ function withPlaceableHeader(wmf: Uint8Array, data: Uint8Array, header: number):
 		return wmf
 
 	const inch = Math.max(1, Math.min(0xffff, Math.round((width * 914400) / widthEmu)))
-	const out = new Uint8Array(22 + wmf.length)
+	const out = new Uint8Array(PLACEABLE_HEADER + wmf.length)
 	const view = new DataView(out.buffer)
 
 	view.setUint32(0, 0x9ac6cdd7, true)
@@ -361,7 +432,7 @@ function withPlaceableHeader(wmf: Uint8Array, data: Uint8Array, header: number):
 	for (let k = 0; k < 20; k += 2) checksum ^= view.getUint16(k, true)
 
 	view.setUint16(20, checksum, true)
-	out.set(wmf, 22)
+	out.set(wmf, PLACEABLE_HEADER)
 
 	return out
 }
