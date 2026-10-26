@@ -1,3 +1,5 @@
+import type { DesktopSync } from "@filen/shared/desktop"
+
 // IPC channel names shared by main and the preload; the renderer never sees them.
 export const CHANNELS = {
 	setTitleBarColors: "window:set-title-bar-colors",
@@ -7,6 +9,7 @@ export const CHANNELS = {
 	sessionSet: "session:set",
 	sessionClear: "session:clear",
 	sessionVerified: "session:verified",
+	sessionRevoked: "session:revoked",
 	prefsGet: "prefs:get",
 	prefsSet: "prefs:set",
 	setBadge: "app:set-badge",
@@ -24,8 +27,47 @@ export const CHANNELS = {
 	lockClear: "lock:clear",
 	lockNow: "lock:now",
 	lockReset: "lock:reset",
-	logsExport: "logs:export"
+	logsExport: "logs:export",
+	syncSubscribe: "sync:subscribe",
+	syncOverview: "sync:overview",
+	syncActivity: "sync:activity",
+	syncOpenPair: "sync:open-pair"
 } as const
+
+// The sync bridge's requests, each answered on its own channel (syncChannel).
+export const SYNC_CALLS = [
+	"overview",
+	"activity",
+	"chooseLocalDirectory",
+	"addPair",
+	"startPair",
+	"removePair",
+	"pausePair",
+	"resumePair",
+	"setMode",
+	"renamePair",
+	"syncNow",
+	"plan",
+	"planPage",
+	"releasePlan",
+	"conflicts",
+	"resolveConflict",
+	"heldDeletions",
+	"approveDeletions",
+	"retryPath",
+	"ignoredPaths",
+	"userIgnore",
+	"setUserIgnore",
+	"reveal",
+	"dismissNotice",
+	"retryHost"
+] as const satisfies readonly (keyof DesktopSync)[]
+
+export type SyncCall = (typeof SYNC_CALLS)[number]
+
+export function syncChannel(call: SyncCall): string {
+	return `sync:call:${call}`
+}
 
 // The preload reads the app version from this argument, so the page gets it without a round trip.
 export const VERSION_ARG_PREFIX = "--filen-app-version="

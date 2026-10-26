@@ -35,7 +35,7 @@ const noNul = (value: string): boolean => !value.includes("\0")
 // The engine's u64 pair id.
 export const pairIdSchema = type(/^(?:0|[1-9]\d{0,19})$/)
 
-const countSchema = type("0 <= number.integer <= 9007199254740991")
+export const countSchema = type("0 <= number.integer <= 9007199254740991")
 
 // A path inside a pair, relative to its root ("" is the root).
 const relPathSchema = type("string <= 4096").narrow(noNul)
@@ -177,7 +177,7 @@ export interface NativePlanSummary extends DesktopSyncPlanSummary {
 	passToken: string | null
 }
 
-const passTokenSchema = type("0 < string <= 256")
+export const passTokenSchema = type("0 < string <= 256")
 
 export const planSummarySchema = pinned<DesktopSyncPlanSummary>()(type({ ...planSummaryFields, "+": "reject" }))
 
@@ -237,13 +237,13 @@ const heldDeletionsSchema = pinned<DesktopSyncHeldDeletions>()(
 	})
 )
 
-const planIdSchema = type("0 < string <= 64")
+export const planIdSchema = type("0 < string <= 64")
 
 // The engine pages at most 1000 entries at a time.
 const pageLimitSchema = type("1 <= number.integer <= 1000")
 
 // An ignore text: the engine allows 1 MiB per rule file.
-const ignoreTextSchema = type("string <= 1048576")
+export const ignoreTextSchema = type("string <= 1048576")
 
 const noArgs = type({ "+": "reject" })
 const pairArgs = type({ pairId: pairIdSchema, "+": "reject" })

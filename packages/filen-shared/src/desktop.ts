@@ -31,6 +31,9 @@ export interface DesktopSessionVault {
 	// The stored session just passed its first authed request of this page. The shell uses it once, to retire what
 	// the old desktop client left behind after its account was migrated.
 	markVerified(): void
+	// The server rejected the stored session (a revoked API key) while the shell used it for sync: the shell already
+	// removed it, so the page must sign out. Calls back right away when that happened before subscribing.
+	onRevoked(callback: () => void): () => void
 }
 
 // Shell preferences, kept by main in userData. `launchAtLogin` starts the app hidden; `notifications` also keeps the
@@ -121,6 +124,7 @@ export interface DesktopBridge {
 	readonly app: DesktopApp
 	readonly lock: DesktopLock
 	readonly logs: DesktopLogs
+	readonly sync: DesktopSync
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
 	onWindowState(callback: (state: WindowState) => void): () => void
@@ -359,3 +363,80 @@ export type DesktopSyncLocalRootChoice =
 	| { status: "canceled" }
 	| { status: "refused"; path: string; problem: DesktopSyncRootProblem }
 	| { status: "ok"; id: string; path: string; name: string; warnings: DesktopSyncRootWarning[] }
+
+// A sync call that can fail for a reason the page shows.
+export type DesktopSyncResult<T> = { ok: true; value: T } | { ok: false; error: DesktopSyncError }
+
+// A dry run held in the shell for paging; released by the page, on navigation, or after five minutes.
+export interface DesktopSyncPlan {
+	planId: string
+	summary: DesktopSyncPlanSummary
+}
+
+// What happens to the changes a backup mode kept from the destination when the pair leaves that mode.
+export type DesktopSyncBacklog = "propagate" | "adoptDestination"
+
+export type DesktopSyncResolution = "keepLocal" | "keepRemote" | "keepBoth"
+
+// `localRootId` is the id chooseLocalDirectory issued.
+export interface DesktopSyncNewPair {
+	localRootId: string
+	remoteRoot: string
+	mode: DesktopSyncMode
+	name: string
+}
+
+export interface DesktopSyncEntries<T> {
+	total: number
+	entries: T[]
+}
+
+// The device-wide ignore rules the user wrote, and the engine's built-in ones (read-only).
+export interface DesktopSyncUserIgnore {
+	text: string
+	defaults: string[]
+}
+
+// Pair ids are DesktopSyncPair.id. Overview and activity reach a page only while it listens; listening is what
+// keeps the live updates flowing. A plan is null when the remote side has not caught up yet (try again later).
+export interface DesktopSync {
+	overview(): Promise<DesktopSyncOverview>
+	// Calls back with the latest overview right away when one is known, then on every change.
+	onOverview(callback: (overview: DesktopSyncOverview) => void): () => void
+	// The pair's latest entries this run, newest first; at most 200.
+	activity(pairId: string, limit: number): Promise<DesktopSyncActivity[]>
+	onActivity(callback: (entries: DesktopSyncActivity[]) => void): () => void
+	chooseLocalDirectory(): Promise<DesktopSyncLocalRootChoice>
+	// Adds the pair paused and dry-runs it; startPair starts it, removePair cancels.
+	addPair(pair: DesktopSyncNewPair): Promise<DesktopSyncResult<{ pairId: string; plan: DesktopSyncPlan | null }>>
+	startPair(pairId: string): Promise<DesktopSyncResult<null>>
+	// The files stay on both sides.
+	removePair(pairId: string): Promise<DesktopSyncResult<null>>
+	pausePair(pairId: string): Promise<DesktopSyncResult<null>>
+	resumePair(pairId: string): Promise<DesktopSyncResult<null>>
+	// `backlog` is required when leaving a backup mode and ignored otherwise.
+	setMode(pairId: string, mode: DesktopSyncMode, backlog: DesktopSyncBacklog | null): Promise<DesktopSyncResult<null>>
+	renamePair(pairId: string, name: string): Promise<DesktopSyncResult<null>>
+	syncNow(pairId: string): Promise<DesktopSyncResult<null>>
+	plan(pairId: string): Promise<DesktopSyncResult<DesktopSyncPlan | null>>
+	// `limit` at most 200.
+	planPage(planId: string, list: DesktopSyncPlanList, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncPlanPage>>
+	releasePlan(planId: string): Promise<void>
+	conflicts(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncConflict>>>
+	// Resolves with where keepBoth put the local copy.
+	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<DesktopSyncResult<string | null>>
+	heldDeletions(pairId: string): Promise<DesktopSyncResult<DesktopSyncHeldDeletions>>
+	approveDeletions(pairId: string, passToken: string): Promise<DesktopSyncResult<null>>
+	retryPath(pairId: string, relPath: string): Promise<DesktopSyncResult<null>>
+	ignoredPaths(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncIgnored>>>
+	userIgnore(): Promise<DesktopSyncResult<DesktopSyncUserIgnore>>
+	// Rejected as `invalidIgnore` with the first bad line.
+	setUserIgnore(text: string): Promise<DesktopSyncResult<null>>
+	// Opens the pair's directory, or the directory the engine moves replaced and deleted local files to.
+	reveal(pairId: string, target: "root" | "quarantine"): Promise<DesktopSyncResult<null>>
+	dismissNotice(pairId: string, notice: DesktopSyncNotice): Promise<void>
+	// Starts the native host again after it failed.
+	retryHost(): void
+	// A pair to show, from a clicked notification. Calls back with what was asked before subscribing.
+	onOpenPair(callback: (pairId: string) => void): () => void
+}

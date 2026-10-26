@@ -8,24 +8,27 @@ import {
 	type NativeImage,
 	nativeImage,
 	nativeTheme,
+	Notification,
 	powerMonitor,
 	protocol,
 	safeStorage,
 	session,
 	shell,
 	Tray,
+	utilityProcess,
 	type WebFrameMain
 } from "electron"
-import { readFileSync } from "node:fs"
-import { readdir, rm, stat, writeFile } from "node:fs/promises"
+import { existsSync, readFileSync } from "node:fs"
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import { type } from "arktype"
 import path from "node:path"
-import type { DesktopLogsExport, DesktopMenuAction, DesktopPlatform, WindowState } from "@filen/shared/desktop"
+import type { DesktopLogsExport, DesktopMenuAction, DesktopPlatform, DesktopSyncHostState, WindowState } from "@filen/shared/desktop"
 import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
+import type { NativeAggregate } from "../shared/nativeProtocol.ts"
 import { type AppLock, hiddenLockDue, LOCK_AFTER_HIDDEN_MS, loadAppLock } from "./appLock.ts"
-import { atomicFile, codedError } from "./atomicFile.ts"
+import { atomicFile, codedError, errorCode } from "./atomicFile.ts"
 import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
 import { parseHeaders } from "./headers.ts"
@@ -35,12 +38,19 @@ import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
 import { createMigration } from "./migration.ts"
+import { addonPath } from "./native/addonPath.ts"
+import { createNativeSupervisor } from "./native/supervisor.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
 import { registerAppProtocol } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { createSessionVault, isSessionBlob, lazyCipher, vaultMode, type VaultCipher } from "./sessionVault.ts"
+import { registerSyncIpc } from "./sync/ipc.ts"
+import { createRootTokens } from "./sync/localRoot.ts"
+import { createSyncService } from "./sync/service.ts"
+import { loadSyncStore, type SyncStore } from "./sync/store.ts"
+import { attentionPair, attentionTransitions, trayIconFile, trayState, type TrayState, traySyncStatus, trayTooltip } from "./sync/tray.ts"
 import { startUpdater, testUpdateFeed, type Updater } from "./updater.ts"
 import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } from "./window.ts"
 
@@ -188,6 +198,115 @@ const migration = createMigration({
 	info,
 	warn
 })
+
+// Sync: one engine directory per user, never under the old client's userData/sync.
+const syncEngineRoot = path.join(userDataPath, "sync-engine")
+const syncStores = new Map<string, Promise<SyncStore>>()
+
+async function engineDir(userId: string): Promise<string> {
+	const dir = path.join(syncEngineRoot, userId)
+
+	await mkdir(dir, { recursive: true, mode: 0o700 })
+
+	return dir
+}
+
+// Read once per user; the directory is created by the first write, so a user without sync gets none.
+function syncStoreFor(userId: string): Promise<SyncStore> {
+	let store = syncStores.get(userId)
+
+	if (store === undefined) {
+		const file = atomicFile(path.join(syncEngineRoot, userId, "shell.json"))
+
+		store = loadSyncStore(
+			{
+				...file,
+				write: async data => {
+					await engineDir(userId)
+					await file.write(data)
+				}
+			},
+			warn
+		)
+		syncStores.set(userId, store)
+	}
+
+	return store
+}
+
+const nativeSupervisor = createNativeSupervisor({
+	fork: () => utilityProcess.fork(path.join(import.meta.dirname, "native.js"), [], { serviceName: "Filen Sync", stdio: "pipe" }),
+	vault: sessionVault,
+	addonPath: () =>
+		addonPath({
+			packaged: app.isPackaged,
+			resourcesPath: process.resourcesPath,
+			env: process.env,
+			appPath: app.getAppPath(),
+			platform: process.platform,
+			arch: process.arch,
+			exists: existsSync
+		}),
+	dirFor: engineDir,
+	demand: async userId => (await syncStoreFor(userId)).hasPairs(),
+	log: { info, warn },
+	onMessage: (message, userId) => {
+		if (message.t === "aggregate") {
+			syncAggregate = message.state
+			applySyncTray()
+		} else if (message.t === "activity") {
+			syncAttentionPair = attentionPair(message.entries, syncAttentionPair)
+		}
+
+		syncService.nativeEvent(message, userId).catch((error: unknown) => {
+			warn(`sync: ${message.t} not applied: ${errorCode(error)}`)
+		})
+	},
+	onState: state => {
+		if (state.state !== "running") {
+			syncAggregate = "idle"
+		}
+
+		syncService.hostChanged(state)
+		applySyncTray()
+	},
+	onRevoked: () => {
+		info("session revoked by the server; signed out")
+		syncService.signedOut()
+		mainWindow?.webContents.send(CHANNELS.sessionRevoked)
+	}
+})
+
+const syncService = createSyncService({
+	supervisor: nativeSupervisor,
+	storeFor: syncStoreFor,
+	tokens: createRootTokens(Date.now),
+	dialogs: {
+		showOpenDialog: options => (mainWindow === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(mainWindow, options)),
+		rootContext: () => ({
+			platform: process.platform,
+			home: app.getPath("home"),
+			appData: [userDataPath, app.getPath("appData")],
+			temporary: [app.getPath("temp"), os.tmpdir()],
+			oneDrive:
+				PLATFORM === "win32"
+					? ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"].flatMap(name => {
+							const dir = process.env[name]
+
+							return dir === undefined || dir.length === 0 ? [] : [dir]
+						})
+					: []
+		})
+	},
+	shell: { openPath: target => shell.openPath(target) },
+	now: Date.now
+})
+
+// The engine's own work keeps going; only its data and its process go with the session.
+function syncSignedOut(): void {
+	nativeSupervisor.signedOut()
+	syncService.signedOut()
+}
 
 function isLocked(): boolean {
 	return appLock?.status().locked ?? true
@@ -429,6 +548,24 @@ function createWindow(): void {
 
 	trackWindowState(window)
 
+	// Kept: the contents are gone by the time "destroyed" fires.
+	const contentsId = window.webContents.id
+
+	window.webContents.on("did-finish-load", () => {
+		if (pendingOpenPair !== null) {
+			window.webContents.send(CHANNELS.syncOpenPair, pendingOpenPair)
+			pendingOpenPair = null
+		}
+	})
+
+	// A new document or none: the old page's sync subscription and plans go.
+	window.webContents.on("did-navigate", () => {
+		syncService.pageGone(contentsId)
+	})
+	window.webContents.on("destroyed", () => {
+		syncService.pageGone(contentsId)
+	})
+
 	window.webContents.on("dom-ready", () => {
 		const version = updater?.ready() ?? null
 
@@ -575,6 +712,82 @@ function applyMenu(): void {
 // Kept for the app's lifetime: the tray is how a window-less app (start minimized, minimize to tray, idle destroy)
 // comes back on Windows and Linux.
 let tray: Tray | null = null
+const trayDirectory = app.isPackaged ? path.join(process.resourcesPath, "tray") : path.join(app.getAppPath(), "build", "tray")
+
+// What the tray shows of sync: the host's last aggregate while it runs.
+let syncAggregate: NativeAggregate = "idle"
+let syncTray: TrayState = "idle"
+let syncStatus: string | null = null
+let syncAttentionPair: string | null = null
+// Held so it is not collected before it is clicked.
+let syncNotification: Notification | null = null
+// A pair to open once the page has loaded.
+let pendingOpenPair: string | null = null
+
+function trayImage(state: TrayState): NativeImage {
+	return nativeImage.createFromPath(path.join(trayDirectory, trayIconFile(PLATFORM, state)))
+}
+
+function openSyncPair(pairId: string): void {
+	const contents = mainWindow?.webContents
+
+	if (contents !== undefined && !contents.isLoading()) {
+		contents.send(CHANNELS.syncOpenPair, pairId)
+	} else {
+		pendingOpenPair = pairId
+	}
+}
+
+// Only while the user is elsewhere and wants notifications; the click opens the pair that asked last.
+function notifySyncAttention(host: DesktopSyncHostState): void {
+	if (!currentPrefs().notifications || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) {
+		return
+	}
+
+	const pairId = host.state === "failed" ? null : syncAttentionPair
+
+	syncNotification = new Notification({
+		title: "Filen",
+		body: host.state === "failed" ? "Sync stopped. Open Filen to see why." : "A sync pair needs your attention."
+	})
+	syncNotification.on("click", () => {
+		syncNotification = null
+		showWindow()
+
+		if (pairId !== null) {
+			openSyncPair(pairId)
+		}
+	})
+	syncNotification.show()
+}
+
+function applySyncTray(): void {
+	const host = nativeSupervisor.state()
+	const next = trayState(syncAggregate, host)
+	const status = traySyncStatus(next, host)
+	const previous = syncTray
+
+	syncTray = next
+
+	// Activity names the pair before the aggregate turns; it is forgotten once the attention is over.
+	if (previous === "attention" && next !== "attention") {
+		syncAttentionPair = null
+	}
+
+	if (tray !== null && next !== previous) {
+		tray.setImage(trayImage(next))
+	}
+
+	if (status !== syncStatus) {
+		syncStatus = status
+		tray?.setToolTip(trayTooltip(next, host))
+		applyTrayMenu()
+	}
+
+	if (attentionTransitions(previous, next)) {
+		notifySyncAttention(host)
+	}
+}
 
 function canLock(): boolean {
 	const status = appLock?.status()
@@ -585,6 +798,7 @@ function canLock(): boolean {
 function applyTrayMenu(): void {
 	tray?.setContextMenu(
 		Menu.buildFromTemplate([
+			...(syncStatus === null ? [] : [{ label: syncStatus, enabled: false }, { type: "separator" as const }]),
 			{ label: "Open Filen", click: showWindow },
 			...(canLock() ? [{ label: "Lock Filen", click: lockNow }] : []),
 			{ type: "separator" },
@@ -594,11 +808,8 @@ function applyTrayMenu(): void {
 }
 
 function createTray(): void {
-	const directory = app.isPackaged ? path.join(process.resourcesPath, "tray") : path.join(app.getAppPath(), "build", "tray")
-	const file = PLATFORM === "darwin" ? "trayTemplate.png" : PLATFORM === "win32" ? "tray.ico" : "tray.png"
-
-	tray = new Tray(nativeImage.createFromPath(path.join(directory, file)))
-	tray.setToolTip("Filen")
+	tray = new Tray(trayImage(syncTray))
+	tray.setToolTip(trayTooltip(syncTray, nativeSupervisor.state()))
 	applyTrayMenu()
 	tray.on("click", showWindow)
 }
@@ -663,6 +874,18 @@ if (!app.requestSingleInstanceLock()) {
 	app.on("before-quit", () => {
 		quitting = true
 	})
+	// After the windows closed (and the page's unload guard agreed): the native host closes its engine first.
+	app.on("will-quit", event => {
+		if (nativeSupervisor.active()) {
+			event.preventDefault()
+			void nativeSupervisor.stop().finally(() => {
+				app.quit()
+			})
+		}
+	})
+	app.on("browser-window-focus", () => {
+		nativeSupervisor.ensure("focus")
+	})
 	app.on("activate", showWindow)
 	// Every web contents, including any created later: no <webview>, no new windows and no navigation off the app
 	// origin. A window's own handlers come on top (its window-open handler replaces this default); the legacy-origin
@@ -721,13 +944,22 @@ if (!app.requestSingleInstanceLock()) {
 		}
 
 		await sessionVault.set(blob)
+		nativeSupervisor.sessionChanged(blob)
 		void migration.sessionConfirmed(blob)
 	})
-	handle(CHANNELS.sessionClear, () => sessionVault.clear())
+	handle(CHANNELS.sessionClear, async () => {
+		try {
+			await sessionVault.clear()
+		} finally {
+			syncSignedOut()
+		}
+	})
 	ipcMain.on(CHANNELS.sessionVerified, event => {
 		if (!isTrusted(event.senderFrame)) {
 			return
 		}
+
+		nativeSupervisor.ensure("session verified")
 
 		// The vault logs its own failures; nothing is confirmed without a readable session.
 		void sessionVault
@@ -897,6 +1129,7 @@ if (!app.requestSingleInstanceLock()) {
 		const lock = await appLockLoading
 
 		await sessionVault.clear()
+		syncSignedOut()
 		await lock.reset()
 		info("app lock: reset by signing out")
 		lockChanged()
@@ -906,6 +1139,8 @@ if (!app.requestSingleInstanceLock()) {
 			lockNow()
 		}
 	})
+
+	registerSyncIpc(ipcMain, syncService, url => isTrustedSender(url, APP_ORIGIN))
 
 	handle(CHANNELS.logsExport, async payload => {
 		const webLog = webLogSchema(payload)
@@ -972,6 +1207,7 @@ if (!app.requestSingleInstanceLock()) {
 			}
 
 			started = true
+			nativeSupervisor.ensure("launch")
 
 			const openedAtLogin = PLATFORM === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin
 

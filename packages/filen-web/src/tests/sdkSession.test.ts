@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
-import type { DesktopBridge, DesktopSessionVault } from "@filen/shared/desktop"
+import type { DesktopBridge, DesktopSessionVault, DesktopSync } from "@filen/shared/desktop"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
 // to the one method the session store calls. `injectClient` is a spy so the resume path is observable.
@@ -179,6 +179,39 @@ describe("browser kv", () => {
 	})
 })
 
+const unused = () => Promise.reject(new Error("unused"))
+
+const unusedSync: DesktopSync = {
+	overview: unused,
+	onOverview: () => () => undefined,
+	activity: unused,
+	onActivity: () => () => undefined,
+	chooseLocalDirectory: unused,
+	addPair: unused,
+	startPair: unused,
+	removePair: unused,
+	pausePair: unused,
+	resumePair: unused,
+	setMode: unused,
+	renamePair: unused,
+	syncNow: unused,
+	plan: unused,
+	planPage: unused,
+	releasePlan: unused,
+	conflicts: unused,
+	resolveConflict: unused,
+	heldDeletions: unused,
+	approveDeletions: unused,
+	retryPath: unused,
+	ignoredPaths: unused,
+	userIgnore: unused,
+	setUserIgnore: unused,
+	reveal: unused,
+	dismissNotice: unused,
+	retryHost: () => undefined,
+	onOpenPair: () => () => undefined
+}
+
 describe("desktop vault", () => {
 	function installVault(stored: string | null = null) {
 		const state = { stored }
@@ -195,7 +228,8 @@ describe("desktop vault", () => {
 
 				return Promise.resolve()
 			}),
-			markVerified: vi.fn<DesktopSessionVault["markVerified"]>()
+			markVerified: vi.fn<DesktopSessionVault["markVerified"]>(),
+			onRevoked: () => () => undefined
 		}
 
 		desktop.bridge = {
@@ -222,6 +256,7 @@ describe("desktop vault", () => {
 				reset: () => Promise.reject(new Error("unused"))
 			},
 			logs: { export: () => Promise.reject(new Error("unused")) },
+			sync: unusedSync,
 			setTitleBarColors: () => undefined,
 			onWindowState: () => () => undefined,
 			showWindow: () => undefined
