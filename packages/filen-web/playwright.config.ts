@@ -260,7 +260,11 @@ export default defineConfig({
 	// before and after any spec at all. WebKit's lanes run one test at a time (its storage lock), which is
 	// most of a full run: this is sized for all three browsers (CI runs it nightly, not per push).
 	globalTimeout: 300 * 60_000,
-	reporter: process.env["CI"] ? [["github"], ["html", { open: "never" }], ["list"]] : [["html", { open: "never" }], ["list"]],
+	// CI also writes the JSON report its job summary lists retried tests from (scripts/e2e-flaky-summary.ts): beside the
+	// HTML report, whose folder that reporter clears.
+	reporter: process.env["CI"]
+		? [["github"], ["html", { open: "never" }], ["json", { outputFile: "e2e-results.json" }], ["list"]]
+		: [["html", { open: "never" }], ["list"]],
 	// Covers auth-setup only — every real lane below sets its own. Kept tight all the
 	// same: a write that hangs holds its test open for the whole budget, and the kill at the end of it
 	// orphans a `drive-write` lease that blocks every later test (see the READ_SPECS note), so a generous

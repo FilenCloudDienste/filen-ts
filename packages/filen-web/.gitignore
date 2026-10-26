@@ -35,6 +35,7 @@ e2e/.fixtures/
 e2e/.locks/
 test-results
 playwright-report
+e2e-results.json
 blob-report
 playwright/.cache
 

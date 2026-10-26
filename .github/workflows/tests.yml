@@ -513,6 +513,11 @@ jobs:
           FILEN_WEB_E2E_TEST_PASSWORD: ${{ matrix.account == '' && secrets.FILEN_WEB_E2E_TEST_PASSWORD || secrets[format('FILEN_WEB_E2E_TEST_PASSWORD_{0}', matrix.account)] }}
           # The per-browser accounts' tier (repository variable E2E_PREMIUM); the shared account is free.
           E2E_PREMIUM: ${{ matrix.account != '' && vars.E2E_PREMIUM || '' }}
+      # Tests that passed only on a retry, on the run's page even when it is green.
+      - name: List flaky tests
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-web
+        run: node scripts/e2e-flaky-summary.ts e2e-results.json
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
