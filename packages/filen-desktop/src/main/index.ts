@@ -41,7 +41,7 @@ import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./p
 import { registerAppProtocol } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { createSessionVault, isSessionBlob, lazyCipher, vaultMode, type VaultCipher } from "./sessionVault.ts"
-import { startUpdater, type Updater } from "./updater.ts"
+import { startUpdater, testUpdateFeed, type Updater } from "./updater.ts"
 import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } from "./window.ts"
 
 // Payloads from the renderer are untrusted input.
@@ -205,6 +205,23 @@ let quitting = false
 // Set once the update installer is launched: the page's unload confirm was answered for it (or there was nothing to
 // confirm), and a cancel could not stop the installer anyway.
 let installingUpdate = false
+
+// Restart into the downloaded update: the page's prompt, or right away under the install tests' feed.
+function installUpdateNow(): void {
+	if (updater === null || installingUpdate) {
+		return
+	}
+
+	// The window's close handler would otherwise only hide it, and the install waits for every window to close.
+	quitting = true
+	installingUpdate = true
+
+	if (!updater.install()) {
+		warn("updater: the update could not be installed")
+		quitting = false
+		installingUpdate = false
+	}
+}
 // The window needs the app protocol and the migration; a show asked for before (activate, second-instance, the
 // tray) is remembered and honoured once startup finished.
 let started = false
@@ -821,15 +838,7 @@ if (!app.requestSingleInstanceLock()) {
 			return
 		}
 
-		// The window's close handler would otherwise only hide it, and the install waits for every window to close.
-		quitting = true
-		installingUpdate = true
-
-		if (!updater.install()) {
-			warn("updater: the update could not be installed")
-			quitting = false
-			installingUpdate = false
-		}
+		installUpdateNow()
 	})
 
 	handle(CHANNELS.lockStatus, async () => {
@@ -912,10 +921,21 @@ if (!app.requestSingleInstanceLock()) {
 	app.whenReady()
 		.then(() => {
 			if (app.isPackaged) {
-				updater = startUpdater({ info, warn }, version => {
-					info(`updater: ${version} is ready to install`)
-					mainWindow?.webContents.send(CHANNELS.updateReady, version)
-				})
+				const testFeed = testUpdateFeed(process.env["FILEN_DESKTOP_TEST_UPDATE_FEED"])
+
+				updater = startUpdater(
+					{ info, warn },
+					version => {
+						info(`updater: ${version} is ready to install`)
+
+						if (testFeed !== null) {
+							installUpdateNow()
+						} else {
+							mainWindow?.webContents.send(CHANNELS.updateReady, version)
+						}
+					},
+					testFeed
+				)
 			}
 		})
 		.catch((error: unknown) => {

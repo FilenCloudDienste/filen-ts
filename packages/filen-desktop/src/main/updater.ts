@@ -29,6 +29,37 @@ export interface Updater {
 	install(): boolean
 }
 
+// The install tests (scripts/ci) serve a feed on loopback and point a packaged build at it through
+// FILEN_DESKTOP_TEST_UPDATE_FEED. Only an explicit-port http URL on 127.0.0.1 with nothing else in it is taken, so the
+// override can never reach a remote feed; signature checks apply to what it serves as to the real feed.
+export function testUpdateFeed(value: string | undefined): string | null {
+	if (value === undefined) {
+		return null
+	}
+
+	let url: URL
+
+	try {
+		url = new URL(value)
+	} catch {
+		return null
+	}
+
+	if (
+		url.protocol !== "http:" ||
+		url.hostname !== "127.0.0.1" ||
+		url.port === "" ||
+		url.username !== "" ||
+		url.password !== "" ||
+		url.search !== "" ||
+		url.hash !== ""
+	) {
+		return null
+	}
+
+	return url.href.endsWith("/") ? url.href : `${url.href}/`
+}
+
 function messageOf(value: unknown): string {
 	return value instanceof Error ? value.message : String(value)
 }
@@ -36,7 +67,7 @@ function messageOf(value: unknown): string {
 // electron-updater's generic provider on the feed electron-builder wrote into app-update.yml; Windows checks the
 // installer's signature against the publisher named there. Downloads run in the background and install when the
 // user restarts from the page's prompt or on the next quit. Loaded on first use, so startup never evaluates it.
-export function startUpdater(log: UpdaterLog, onReady: (version: string) => void): Updater {
+export function startUpdater(log: UpdaterLog, onReady: (version: string) => void, testFeed: string | null): Updater {
 	const state: UpdateCheckState = { checking: false, ready: null }
 	// Set with `ready`: a download implies the module loaded.
 	let loaded: AppUpdater | null = null
@@ -55,6 +86,12 @@ export function startUpdater(log: UpdaterLog, onReady: (version: string) => void
 		autoUpdater.logger = updaterLog
 		autoUpdater.autoDownload = true
 		autoUpdater.autoInstallOnAppQuit = true
+
+		if (testFeed !== null) {
+			autoUpdater.setFeedURL({ provider: "generic", url: testFeed })
+			log.info(`updater: test feed ${testFeed}`)
+		}
+
 		autoUpdater.on("update-downloaded", info => {
 			loaded = autoUpdater
 			state.ready = info.version
