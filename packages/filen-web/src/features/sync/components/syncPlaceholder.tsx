@@ -1,33 +1,18 @@
 import { useTranslation } from "react-i18next"
-import { FolderSyncIcon, PlusIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { FolderSyncIcon } from "lucide-react"
 import { EmptyMessage } from "@/components/emptyMessage"
 import { LoadingState } from "@/components/loadingState"
-import { openAddPair, useSyncPairIds } from "@/features/sync/lib/syncStore"
+import { useSyncPairIds } from "@/features/sync/lib/syncStore"
 
-// The content card when no pair is shown: loading until the first overview, the add prompt without pairs, the
-// select prompt otherwise, or (`missing`) a pair id that no longer exists.
+// The content card when no pair is shown: loading until the first overview, then the select prompt, or
+// (`missing`) a pair id that no longer exists. With no pairs the sidebar alone carries the empty state and
+// its add entry point, as in Notes and Chats.
 export function SyncPlaceholder({ missing }: { missing?: boolean }) {
 	const { t } = useTranslation("sync")
 	const pairIds = useSyncPairIds()
 
 	if (pairIds === null) {
 		return <LoadingState size="lg" />
-	}
-
-	if (pairIds.length === 0) {
-		return (
-			<EmptyMessage
-				icon={FolderSyncIcon}
-				title={t("syncEmptyTitle")}
-				description={t("syncEmptyDescription")}
-			>
-				<Button onClick={openAddPair}>
-					<PlusIcon />
-					{t("syncAddPair")}
-				</Button>
-			</EmptyMessage>
-		)
 	}
 
 	return (
