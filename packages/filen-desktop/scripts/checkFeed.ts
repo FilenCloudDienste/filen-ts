@@ -30,7 +30,15 @@ interface ManifestContract {
 // Published beside the manifests without being listed in them.
 const extras: Record<FeedPlatform, string[]> = {
 	mac: [],
-	win: ["Filen_win.exe.blockmap", "Filen_win_x64.zip", "Filen_win_arm64.zip"],
+	win: [
+		"Filen_win.exe.blockmap",
+		"Filen_win_x64.exe",
+		"Filen_win_x64.exe.blockmap",
+		"Filen_win_arm64.exe",
+		"Filen_win_arm64.exe.blockmap",
+		"Filen_win_x64.zip",
+		"Filen_win_arm64.zip"
+	],
 	linux: ["Filen_linux_x64.zip", "Filen_linux_arm64.zip"]
 }
 
