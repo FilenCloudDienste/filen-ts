@@ -16,7 +16,7 @@ import {
 	type WebFrameMain
 } from "electron"
 import { readFileSync } from "node:fs"
-import { writeFile } from "node:fs/promises"
+import { rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import { type } from "arktype"
 import path from "node:path"
@@ -24,13 +24,16 @@ import type { DesktopLogsExport, DesktopMenuAction, DesktopPlatform, WindowState
 import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
 import { type AppLock, LOCK_AFTER_HIDDEN_MS, loadAppLock } from "./appLock.ts"
-import { atomicFile } from "./atomicFile.ts"
+import { atomicFile, codedError } from "./atomicFile.ts"
 import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
 import { parseHeaders } from "./headers.ts"
 import { createFileLog } from "./fileLog.ts"
 import { closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
+import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
+import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
+import { createMigration } from "./migration.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
@@ -62,19 +65,21 @@ if (process.platform === "win32") {
 	app.setAppUserModelId("io.filen.desktop")
 }
 
+const SCHEME_PRIVILEGES = {
+	standard: true,
+	secure: true,
+	supportFetchAPI: true,
+	corsEnabled: true,
+	stream: true,
+	codeCache: true,
+	allowServiceWorkers: true
+}
+
+// One call (Electron takes only one). The old client's scheme is the migration's way into its localStorage, with the
+// privileges it had (its src/lib/serve.ts), so the origin and its storage are the same.
 protocol.registerSchemesAsPrivileged([
-	{
-		scheme: SCHEME,
-		privileges: {
-			standard: true,
-			secure: true,
-			supportFetchAPI: true,
-			corsEnabled: true,
-			stream: true,
-			codeCache: true,
-			allowServiceWorkers: true
-		}
-	}
+	{ scheme: SCHEME, privileges: SCHEME_PRIVILEGES },
+	{ scheme: LEGACY_SCHEME, privileges: SCHEME_PRIVILEGES }
 ])
 
 // The shell's log, kept beside the other userData files (development has its own userData, so its own log).
@@ -128,6 +133,55 @@ let prefs: PrefsStore | null = null
 // Read from before ready like the prefs (decrypting waits for ready); no window is created before it has settled.
 const appLockLoading = loadAppLock(atomicFile(path.join(app.getPath("userData"), "lock.vault")), vaultCipher, warn)
 let appLock: AppLock | null = null
+
+const userDataPath = app.getPath("userData")
+const migrationStash = atomicFile(path.join(userDataPath, "migration.stash"))
+
+// The one-time import from the old client. Runs after ready and before the first window; see migration.ts.
+const migration = createMigration({
+	marker: atomicFile(path.join(userDataPath, "migration.json")),
+	legacyProfile: async () => {
+		try {
+			return (await stat(path.join(userDataPath, "Local Storage", "leveldb"))).isDirectory()
+		} catch {
+			return false
+		}
+	},
+	readLegacy: () => runInLegacyOrigin(READ_SCRIPT),
+	readOptions: async () => (await atomicFile(path.join(userDataPath, "options.v1.json")).read())?.toString("utf8") ?? null,
+	wipeLegacy: async () => {
+		if ((await runInLegacyOrigin(WIPE_SCRIPT)) !== true) {
+			throw codedError("indexeddb not deleted")
+		}
+
+		// The old client's generated rclone remote: the account's keys, merely obscured.
+		await rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true })
+	},
+	vault: sessionVault,
+	lock: {
+		enabled: () => appLock?.status().enabled ?? true,
+		set: async pin => (await (await appLockLoading).set(pin, null)).ok
+	},
+	prefs: { set: async patch => (await prefsLoading).set(patch) },
+	launchesAtLogin: () =>
+		PLATFORM !== "linux" && app.getLoginItemSettings(PLATFORM === "win32" ? { args: [HIDDEN_ARG] } : undefined).openAtLogin,
+	applyLaunchAtLogin: enabled => applyLaunchAtLogin(enabled),
+	writeStash: async text => {
+		const cipher = await vaultCipher()
+
+		// Like the session: no secure storage, nothing on disk.
+		if (cipher === null) {
+			warn("migration: no secure storage; the stash is not kept")
+
+			return
+		}
+
+		await migrationStash.write(await cipher.encrypt(text))
+	},
+	now: Date.now,
+	info,
+	warn
+})
 
 function isLocked(): boolean {
 	return appLock?.status().locked ?? true
@@ -577,14 +631,26 @@ if (!app.requestSingleInstanceLock()) {
 	}
 
 	handle(CHANNELS.sessionGet, () => sessionVault.get())
-	handle(CHANNELS.sessionSet, blob => {
+	handle(CHANNELS.sessionSet, async blob => {
 		if (!isSessionBlob(blob)) {
 			throw new Error("invalid session")
 		}
 
-		return sessionVault.set(blob)
+		await sessionVault.set(blob)
+		void migration.sessionConfirmed(blob)
 	})
 	handle(CHANNELS.sessionClear, () => sessionVault.clear())
+	ipcMain.on(CHANNELS.sessionVerified, event => {
+		if (!isTrusted(event.senderFrame)) {
+			return
+		}
+
+		// The vault logs its own failures; nothing is confirmed without a readable session.
+		void sessionVault
+			.get()
+			.then(read => migration.sessionConfirmed(read.status === "present" ? read.blob : null))
+			.catch(() => undefined)
+	})
 
 	handle(CHANNELS.prefsGet, async () => (await prefsLoading).get())
 	handle(CHANNELS.prefsSet, async payload => {
@@ -793,6 +859,12 @@ if (!app.requestSingleInstanceLock()) {
 
 			// Without its headers the web app cannot run (no cross-origin isolation, no CSP), so a missing file is fatal.
 			registerAppProtocol(SCHEME, webDist, parseHeaders(readFileSync(path.join(webDist, "_headers"), "utf8")))
+
+			// Before the first window, so the page boots with the imported session, PIN and prefs.
+			if ((await migration.start()).pinImported) {
+				lockNow()
+			}
+
 			started = true
 
 			const openedAtLogin = PLATFORM === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin

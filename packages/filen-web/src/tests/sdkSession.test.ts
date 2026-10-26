@@ -194,7 +194,8 @@ describe("desktop vault", () => {
 				state.stored = null
 
 				return Promise.resolve()
-			})
+			}),
+			markVerified: vi.fn<DesktopSessionVault["markVerified"]>()
 		}
 
 		desktop.bridge = {

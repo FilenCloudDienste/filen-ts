@@ -6,6 +6,7 @@ export const CHANNELS = {
 	sessionGet: "session:get",
 	sessionSet: "session:set",
 	sessionClear: "session:clear",
+	sessionVerified: "session:verified",
 	prefsGet: "prefs:get",
 	prefsSet: "prefs:set",
 	setBadge: "app:set-badge",

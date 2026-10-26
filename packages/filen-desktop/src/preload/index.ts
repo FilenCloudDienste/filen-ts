@@ -72,6 +72,9 @@ const bridge: DesktopBridge = {
 		},
 		clear: async () => {
 			await ipcRenderer.invoke(CHANNELS.sessionClear)
+		},
+		markVerified: () => {
+			ipcRenderer.send(CHANNELS.sessionVerified)
 		}
 	},
 	prefs: {

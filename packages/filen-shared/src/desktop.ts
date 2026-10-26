@@ -28,6 +28,9 @@ export interface DesktopSessionVault {
 	get(): Promise<string | null>
 	set(blob: string): Promise<void>
 	clear(): Promise<void>
+	// The stored session just passed its first authed request of this page. The shell uses it once, to retire what
+	// the old desktop client left behind after its account was migrated.
+	markVerified(): void
 }
 
 // Shell preferences, kept by main in userData. `launchAtLogin` starts the app hidden; `notifications` also keeps the

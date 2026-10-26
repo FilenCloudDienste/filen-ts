@@ -11,6 +11,11 @@ export function errorCode(error: unknown): string {
 	return error instanceof Error ? ((error as NodeJS.ErrnoException).code ?? error.name) : "unknown"
 }
 
+// An error that logs as `code` through errorCode: for failures main raises itself, whose reason is the message.
+export function codedError(code: string): Error {
+	return Object.assign(new Error(code), { code })
+}
+
 // Owner-only. The file is written to a sibling and renamed over the old one, so a crash mid-write never leaves half a
 // file. Writers must not overlap: they share the sibling.
 export function atomicFile(file: string): AtomicFile {
