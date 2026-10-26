@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { drawsOwnBorder, initialColors, TITLE_BAR_OVERLAY_HEIGHT, windowOptions } from "../main/window.ts"
+import { type } from "arktype"
+import { drawsOwnBorder, initialColors, TITLE_BAR_OVERLAY_HEIGHT, titleBarColorsSchema, windowOptions } from "../main/window.ts"
 
 const colors = initialColors(true)
 
@@ -53,4 +54,23 @@ describe("windowOptions accent colour", () => {
 		expect(windowOptions("win32", colors, "/p.cjs", false, "4.0.0").accentColor).toBe(colors.border)
 		expect(windowOptions("linux", colors, "/p.cjs", false, "4.0.0").accentColor).toBeUndefined()
 	})
+})
+
+describe("titleBarColorsSchema", () => {
+	it("takes the colours the window and the page use", () => {
+		for (const dark of [true, false]) {
+			expect(titleBarColorsSchema(initialColors(dark))).toEqual(initialColors(dark))
+		}
+
+		expect(
+			titleBarColorsSchema({ color: "rgb(0, 0, 0)", symbolColor: "rgb(255, 255, 255)", border: "rgb(9, 99, 199)" })
+		).not.toBeInstanceOf(type.errors)
+	})
+
+	it.each(["rgb(256, 0, 0)", "rgb(0,0,0)", "rgb(01, 0, 0)", "rgba(0, 0, 0, 0.5)", "#000000", "red", "rgb(0, 0, 0) ", ""])(
+		"refuses %j",
+		color => {
+			expect(titleBarColorsSchema({ ...initialColors(true), border: color })).toBeInstanceOf(type.errors)
+		}
+	)
 })

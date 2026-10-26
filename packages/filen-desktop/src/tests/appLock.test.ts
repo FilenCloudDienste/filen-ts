@@ -7,7 +7,9 @@ import {
 	failedAttempt,
 	FREE_ATTEMPTS,
 	hashPin,
+	hiddenLockDue,
 	loadAppLock,
+	LOCK_AFTER_HIDDEN_MS,
 	normalizeAttempts,
 	parseLockRecord,
 	PIN_HASH_PARAMS,
@@ -53,6 +55,20 @@ function fakeCipher(): VaultCipher & { failDecrypt: boolean } {
 
 	return cipher
 }
+
+describe("hiddenLockDue", () => {
+	it("locks a window out of sight long enough, by the clock", () => {
+		expect(hiddenLockDue(null, LOCK_AFTER_HIDDEN_MS * 10)).toBe(false)
+		expect(hiddenLockDue(1000, 1000 + LOCK_AFTER_HIDDEN_MS - 1)).toBe(false)
+		expect(hiddenLockDue(1000, 1000 + LOCK_AFTER_HIDDEN_MS)).toBe(true)
+		// A night asleep: the timer never fired, the clock moved on.
+		expect(hiddenLockDue(1000, 1000 + 8 * 60 * 60 * 1000)).toBe(true)
+	})
+
+	it("waits after a clock set back", () => {
+		expect(hiddenLockDue(LOCK_AFTER_HIDDEN_MS, 0)).toBe(false)
+	})
+})
 
 describe("backoff", () => {
 	it("lets the first attempts through, then doubles the wait up to the cap", () => {

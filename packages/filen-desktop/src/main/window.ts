@@ -1,4 +1,5 @@
 import type { BrowserWindowConstructorOptions } from "electron"
+import { type } from "arktype"
 import type { DesktopPlatform, TitleBarColors } from "@filen/shared/desktop"
 import { VERSION_ARG_PREFIX } from "../shared/channels.ts"
 
@@ -9,6 +10,12 @@ export function initialColors(dark: boolean): TitleBarColors {
 		? { color: "rgb(7, 7, 7)", symbolColor: "rgb(161, 161, 161)", border: "rgb(24, 24, 24)" }
 		: { color: "rgb(230, 230, 230)", symbolColor: "rgb(99, 99, 99)", border: "rgb(202, 202, 202)" }
 }
+
+// What the page may send: the opaque rgb() form syncTitleBarColors writes (and initialColors uses), channels 0-255,
+// so setTitleBarOverlay and setAccentColor never get a value they throw on.
+const rgbColor = /^rgb\((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d), (25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d), (25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\)$/
+
+export const titleBarColorsSchema = type({ color: rgbColor, symbolColor: rgbColor, border: rgbColor })
 
 // Windows 11 (build 22000) rounds and borders frameless windows itself; Windows 10 draws neither, and rounding there
 // would need a transparent window, which loses edge resizing and maximize. So Windows 10 gets a page-drawn border.

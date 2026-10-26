@@ -72,6 +72,8 @@ const config: Configuration = {
 		// Enforced on macOS and Windows only; Electron has no Linux implementation.
 		enableEmbeddedAsarIntegrityValidation: true,
 		onlyLoadAppFromAsar: true,
+		// Nothing is loaded from file:// (the app has its own scheme), so it gets no more than a browser gives it.
+		grantFileProtocolExtraPrivileges: false,
 		// Flipping fuses breaks the bundle's ad-hoc signature; re-sign so unsigned local builds still launch on Apple
 		// silicon. Real signing runs afterwards and replaces it.
 		resetAdHocDarwinSignature: true

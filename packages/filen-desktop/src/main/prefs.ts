@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import type { DesktopPrefs } from "@filen/shared/desktop"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
+import { serialQueue } from "./serial.ts"
 
 export const DEFAULT_PREFS: DesktopPrefs = {
 	minimizeToTray: false,
@@ -52,7 +53,7 @@ export interface PrefsStore {
 // write rejects the set and keeps the in-memory prefs as they were.
 export async function loadPrefs(file: AtomicFile, warn: (message: string) => void): Promise<PrefsStore> {
 	let current = DEFAULT_PREFS
-	let tail: Promise<unknown> = Promise.resolve()
+	const serial = serialQueue()
 
 	try {
 		current = parsePrefs((await file.read())?.toString("utf8") ?? null)
@@ -62,8 +63,8 @@ export async function loadPrefs(file: AtomicFile, warn: (message: string) => voi
 
 	return {
 		get: () => current,
-		set: patch => {
-			const run = tail.then(async () => {
+		set: patch =>
+			serial(async () => {
 				const next = { ...current, ...patch }
 
 				await file.write(Buffer.from(JSON.stringify(next)))
@@ -71,10 +72,5 @@ export async function loadPrefs(file: AtomicFile, warn: (message: string) => voi
 
 				return next
 			})
-
-			tail = run.catch(() => undefined)
-
-			return run
-		}
 	}
 }

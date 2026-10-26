@@ -2,6 +2,7 @@ import { type } from "arktype"
 import { sessionEnvelopeSchema } from "@filen/shared/session"
 import type { SessionRead } from "../shared/channels.ts"
 import { errorCode, type AtomicFile } from "./atomicFile.ts"
+import { serialQueue } from "./serial.ts"
 
 // A real session is a few KB (an RSA private key plus the master-key chain, ~65 bytes a key); this leaves room
 // for thousands of keys and only stops an unbounded payload.
@@ -70,15 +71,7 @@ export function createSessionVault(
 	const currentCipher = lazyCipher(cipher)
 	// undefined: not read yet.
 	let cached: string | null | undefined
-	let tail: Promise<unknown> = Promise.resolve()
-
-	function serial<T>(operation: () => Promise<T>): Promise<T> {
-		const run = tail.then(operation, operation)
-
-		tail = run.catch(() => undefined)
-
-		return run
-	}
+	const serial = serialQueue()
 
 	async function load(active: VaultCipher): Promise<SessionRead> {
 		let data: Buffer | null

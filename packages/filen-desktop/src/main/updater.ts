@@ -1,3 +1,5 @@
+import type { AppUpdater } from "electron-updater"
+
 // The first check waits a little, so it never competes with startup; later ones run on an interval.
 export const UPDATE_FIRST_CHECK_DELAY_MS = 15 * 1000
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
@@ -22,8 +24,9 @@ export interface UpdaterLog {
 export interface Updater {
 	// The downloaded version waiting for a restart, if any.
 	ready(): string | null
-	// Quits and installs the downloaded update, relaunching after; nothing without one.
-	install(): void
+	// Starts the downloaded update's installer and quits, relaunching after. False when it could not start (nothing
+	// downloaded, the installer missing): the app keeps running and the update stays for the next quit.
+	install(): boolean
 }
 
 function messageOf(value: unknown): string {
@@ -35,6 +38,8 @@ function messageOf(value: unknown): string {
 // user restarts from the page's prompt or on the next quit. Loaded on first use, so startup never evaluates it.
 export function startUpdater(log: UpdaterLog, onReady: (version: string) => void): Updater {
 	const state: UpdateCheckState = { checking: false, ready: null }
+	// Set with `ready`: a download implies the module loaded.
+	let loaded: AppUpdater | null = null
 	const updaterLog = {
 		info: (message?: unknown) => {
 			log.info(`updater: ${messageOf(message)}`)
@@ -51,6 +56,7 @@ export function startUpdater(log: UpdaterLog, onReady: (version: string) => void
 		autoUpdater.autoDownload = true
 		autoUpdater.autoInstallOnAppQuit = true
 		autoUpdater.on("update-downloaded", info => {
+			loaded = autoUpdater
 			state.ready = info.version
 			onReady(info.version)
 		})
@@ -91,14 +97,32 @@ export function startUpdater(log: UpdaterLog, onReady: (version: string) => void
 	return {
 		ready: () => state.ready,
 		install: () => {
-			if (state.ready === null) {
-				return
+			const updater = loaded
+
+			if (state.ready === null || updater === null) {
+				return false
 			}
 
-			void loading.then(updater => {
+			// A failure to start the installer is reported synchronously, as an error event; one after it has started
+			// does not stop the quit.
+			let failed = false
+			const onError = () => {
+				failed = true
+			}
+
+			updater.once("error", onError)
+
+			try {
 				// Silent on Windows (the NSIS installer runs without its wizard, elevating if needed) and relaunched.
 				updater.quitAndInstall(true, true)
-			})
+			} catch (error) {
+				log.warn(`updater: install failed: ${messageOf(error)}`)
+				failed = true
+			} finally {
+				updater.off("error", onError)
+			}
+
+			return !failed
 		}
 	}
 }

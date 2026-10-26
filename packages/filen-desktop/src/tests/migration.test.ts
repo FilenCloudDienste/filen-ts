@@ -9,8 +9,8 @@ import {
 	parseMarker,
 	serializeMarker,
 	startupDecision,
-	verificationExpired,
 	verifiedBy,
+	waitExpired,
 	WIPE_AFTER_MS
 } from "../main/migration.ts"
 import type { SessionRead } from "../shared/channels.ts"
@@ -18,7 +18,17 @@ import type { SessionRead } from "../shared/channels.ts"
 const DAY = 24 * 60 * 60 * 1000
 
 function marker(overrides: Partial<MigrationMarker> = {}): MigrationMarker {
-	return { stage: "imported", failedStarts: 1, userId: 123456, importedAt: 0, wiped: false, purged: false, ...overrides }
+	return {
+		stage: "imported",
+		failedStarts: 1,
+		startedAt: 0,
+		stashOnly: false,
+		userId: 123456,
+		importedAt: 0,
+		wiped: false,
+		purged: false,
+		...overrides
+	}
 }
 
 const SESSION_OF = (userId: string) => JSON.stringify({ userId: `$bigint:${userId}n` })
@@ -43,12 +53,18 @@ describe("parseMarker", () => {
 
 		expect(parseMarker(JSON.stringify({ version: 1, ...older }))?.purged).toBe(false)
 	})
+
+	it("reads a marker written before the first attempt's time and the stash-only mode existed", () => {
+		const { startedAt: _startedAt, stashOnly: _stashOnly, ...older } = marker({ stage: "started" })
+
+		expect(parseMarker(JSON.stringify({ version: 1, ...older }))).toMatchObject({ startedAt: null, stashOnly: false })
+	})
 })
 
 describe("startupDecision", () => {
 	it("decides afresh without a marker", () => {
 		expect(startupDecision(null, false, "absent")).toBe("skip-fresh")
-		expect(startupDecision(null, true, "present")).toBe("skip-session")
+		expect(startupDecision(null, true, "present")).toBe("stash")
 		expect(startupDecision(null, true, "unreadable")).toBe("defer")
 		expect(startupDecision(null, true, "absent")).toBe("run")
 	})
@@ -59,23 +75,40 @@ describe("startupDecision", () => {
 		expect(startupDecision(started, true, "present")).toBe("run")
 		expect(startupDecision(started, true, "absent")).toBe("run")
 		expect(startupDecision(started, true, "unreadable")).toBe("defer")
-		expect(startupDecision({ ...started, failedStarts: MAX_FAILED_STARTS }, true, "absent")).toBe("skip-failed")
+		expect(startupDecision({ ...started, failedStarts: MAX_FAILED_STARTS }, true, "absent")).toBe("abandon")
 	})
 
-	it("never imports again once imported or skipped", () => {
-		for (const stage of ["imported", "verified", "skipped"] as const) {
+	it("keeps a stash-only attempt stash-only on a rerun, whatever the vault holds now", () => {
+		const started = marker({ stage: "started", stashOnly: true })
+
+		expect(startupDecision(started, true, "absent")).toBe("stash")
+		expect(startupDecision(started, true, "unreadable")).toBe("stash")
+		expect(startupDecision({ ...started, failedStarts: MAX_FAILED_STARTS }, true, "present")).toBe("abandon")
+	})
+
+	it("never imports again once imported, abandoned or skipped", () => {
+		for (const stage of ["imported", "abandoned", "verified", "skipped"] as const) {
 			expect(startupDecision(marker({ stage }), true, "absent")).toBe("none")
 		}
 	})
 })
 
-describe("verificationExpired", () => {
+describe("waitExpired", () => {
 	it("expires at once without an account, else after the time limit", () => {
-		expect(verificationExpired(marker({ userId: null }), 0)).toBe(true)
-		expect(verificationExpired(marker({ importedAt: 0 }), WIPE_AFTER_MS - 1)).toBe(false)
-		expect(verificationExpired(marker({ importedAt: 0 }), WIPE_AFTER_MS)).toBe(true)
-		expect(verificationExpired(marker({ importedAt: 10 * DAY }), 0)).toBe(false)
-		expect(verificationExpired(marker({ stage: "verified" }), WIPE_AFTER_MS)).toBe(false)
+		expect(waitExpired(marker({ userId: null }), 0)).toBe(true)
+		expect(waitExpired(marker({ importedAt: 0 }), WIPE_AFTER_MS - 1)).toBe(false)
+		expect(waitExpired(marker({ importedAt: 0 }), WIPE_AFTER_MS)).toBe(true)
+		expect(waitExpired(marker({ importedAt: 10 * DAY }), 0)).toBe(false)
+		expect(waitExpired(marker({ stage: "verified" }), WIPE_AFTER_MS)).toBe(false)
+	})
+
+	it("expires an abandoned import the time limit after its first attempt", () => {
+		const abandoned = marker({ stage: "abandoned", userId: null, importedAt: null, startedAt: DAY })
+
+		expect(waitExpired(abandoned, DAY + WIPE_AFTER_MS - 1)).toBe(false)
+		expect(waitExpired(abandoned, DAY + WIPE_AFTER_MS)).toBe(true)
+		expect(waitExpired(abandoned, 0)).toBe(false)
+		expect(waitExpired(marker({ stage: "started", startedAt: 0 }), WIPE_AFTER_MS)).toBe(false)
 	})
 })
 
@@ -144,6 +177,7 @@ function setup(
 		readLegacy: vi.fn(() => Promise.resolve(options.read ?? legacyRead(SIGNED_IN))),
 		readOptions: vi.fn(() => Promise.resolve<string | null>(JSON.stringify({ startMinimized: true }))),
 		wipeLegacy: vi.fn(() => Promise.resolve()),
+		removeRcloneConfig: vi.fn(() => Promise.resolve()),
 		purgeLegacyStores: vi.fn(() => Promise.resolve()),
 		vault: {
 			get: vi.fn(() => Promise.resolve(state.vault)),
@@ -189,7 +223,17 @@ describe("createMigration", () => {
 		expect(deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true })
 		expect(JSON.parse(deps.writeStash.mock.calls[0]?.[0] ?? "")).toMatchObject({ userId: 123456 })
 		expect(deps.wipeLegacy).not.toHaveBeenCalled()
-		expect(stored()).toEqual({ stage: "imported", failedStarts: 1, userId: 123456, importedAt: 1000, wiped: false, purged: false })
+		expect(deps.removeRcloneConfig).toHaveBeenCalledTimes(1)
+		expect(stored()).toEqual({
+			stage: "imported",
+			failedStarts: 1,
+			startedAt: 1000,
+			stashOnly: false,
+			userId: 123456,
+			importedAt: 1000,
+			wiped: false,
+			purged: false
+		})
 	})
 
 	it("logs counts and reasons, never a value", async () => {
@@ -259,6 +303,7 @@ describe("createMigration", () => {
 
 		await second.migration.start()
 		await settle()
+		expect(second.deps.removeRcloneConfig).toHaveBeenCalledTimes(1)
 		expect(second.deps.wipeLegacy).toHaveBeenCalledTimes(1)
 		expect(second.stored()).toMatchObject({ wiped: true })
 	})
@@ -267,29 +312,74 @@ describe("createMigration", () => {
 		let current: MigrationMarker | undefined
 
 		for (let attempt = 1; attempt <= MAX_FAILED_STARTS; attempt++) {
-			const run = setup({ marker: current, read: { count: 0, values: {} } })
+			const run = setup({ marker: current, read: { count: 0, values: {} }, now: attempt * DAY })
 
 			await run.migration.start()
 			expect(run.deps.vault.set).not.toHaveBeenCalled()
 			expect(run.deps.wipeLegacy).not.toHaveBeenCalled()
+			expect(run.deps.removeRcloneConfig).not.toHaveBeenCalled()
 			current = run.stored() ?? undefined
-			expect(current).toMatchObject({ stage: "started", failedStarts: attempt })
+			expect(current).toMatchObject({ stage: "started", failedStarts: attempt, startedAt: DAY })
 		}
 
-		const last = setup({ marker: current })
+		const last = setup({ marker: current, now: 4 * DAY })
 
 		await last.migration.start()
+		await settle()
 		expect(last.deps.readLegacy).not.toHaveBeenCalled()
-		expect(last.stored()).toMatchObject({ stage: "skipped" })
+		expect(last.deps.removeRcloneConfig).toHaveBeenCalledTimes(1)
+		expect(last.deps.wipeLegacy).not.toHaveBeenCalled()
+		expect(last.stored()).toMatchObject({ stage: "abandoned", startedAt: DAY })
 	})
 
-	it("never runs over a session stored before it", async () => {
+	it("still wipes a given-up import, the time limit after its first attempt", async () => {
+		const abandoned = marker({ stage: "abandoned", failedStarts: MAX_FAILED_STARTS, userId: null, importedAt: null, startedAt: DAY })
+		const early = setup({ marker: abandoned, now: DAY + WIPE_AFTER_MS - 1 })
+
+		await early.migration.start()
+		await settle()
+		expect(early.deps.wipeLegacy).not.toHaveBeenCalled()
+		expect(early.stored()).toEqual(abandoned)
+
+		const due = setup({ marker: abandoned, now: DAY + WIPE_AFTER_MS })
+
+		await due.migration.start()
+		await settle()
+		expect(due.deps.readLegacy).not.toHaveBeenCalled()
+		expect(due.deps.wipeLegacy).toHaveBeenCalledTimes(1)
+		expect(due.stored()).toMatchObject({ stage: "verified", wiped: true })
+	})
+
+	it("imports only the stash over a session stored before it, and wipes later", async () => {
 		const { deps, migration, stored } = setup({ vault: { status: "present", blob: SESSION_OF("777") } })
+
+		deps.launchesAtLogin.mockReturnValue(true)
+
+		await expect(migration.start()).resolves.toEqual({ pinImported: false })
+		await settle()
+
+		expect(deps.vault.set).not.toHaveBeenCalled()
+		expect(deps.lock.set).not.toHaveBeenCalled()
+		expect(deps.prefs.set).not.toHaveBeenCalled()
+		expect(deps.applyLaunchAtLogin).not.toHaveBeenCalled()
+		expect(deps.writeStash).toHaveBeenCalledTimes(1)
+		expect(deps.removeRcloneConfig).toHaveBeenCalledTimes(1)
+		expect(deps.wipeLegacy).not.toHaveBeenCalled()
+		expect(stored()).toMatchObject({ stage: "imported", stashOnly: true, userId: 123456 })
+	})
+
+	it("stays stash-only when rerun after a crash, even once the vault is empty", async () => {
+		const { deps, migration, stored } = setup({
+			marker: marker({ stage: "started", stashOnly: true, userId: null, importedAt: null }),
+			vault: { status: "absent" }
+		})
 
 		await migration.start()
 
-		expect(deps.readLegacy).not.toHaveBeenCalled()
-		expect(stored()).toMatchObject({ stage: "skipped" })
+		expect(deps.vault.set).not.toHaveBeenCalled()
+		expect(deps.lock.set).not.toHaveBeenCalled()
+		expect(deps.prefs.set).not.toHaveBeenCalled()
+		expect(stored()).toMatchObject({ stage: "imported", stashOnly: true, failedStarts: 2 })
 	})
 
 	it("skips a fresh install and does nothing more after", async () => {
@@ -297,6 +387,7 @@ describe("createMigration", () => {
 
 		await first.migration.start()
 		expect(first.deps.vault.get).not.toHaveBeenCalled()
+		expect(first.deps.removeRcloneConfig).not.toHaveBeenCalled()
 		expect(first.stored()).toMatchObject({ stage: "skipped" })
 
 		const second = setup({ marker: first.stored() ?? undefined })
@@ -372,15 +463,17 @@ describe("failure logging", () => {
 })
 
 describe("purging the old stores", () => {
+	const SIGNED_IN_VAULT: SessionRead = { status: "present", blob: SESSION_OF("123456") }
+
 	it("deletes them on the launch after the wipe, once", async () => {
-		const first = setup({ marker: marker({ stage: "verified", wiped: true }) })
+		const first = setup({ marker: marker({ stage: "verified", wiped: true }), vault: SIGNED_IN_VAULT })
 
 		await first.migration.start()
 
 		expect(first.deps.purgeLegacyStores).toHaveBeenCalledTimes(1)
 		expect(first.stored()).toMatchObject({ wiped: true, purged: true })
 
-		const second = setup({ marker: first.stored() ?? undefined })
+		const second = setup({ marker: first.stored() ?? undefined, vault: SIGNED_IN_VAULT })
 
 		await second.migration.start()
 
@@ -395,12 +488,25 @@ describe("purging the old stores", () => {
 		expect(run.deps.purgeLegacyStores).not.toHaveBeenCalled()
 	})
 
-	it("tries again next launch when deleting fails", async () => {
-		const run = setup({ marker: marker({ stage: "verified", wiped: true }) })
+	it("waits for a launch with a stored session, so a sign-out cut short keeps the page's flag", async () => {
+		for (const vault of [{ status: "absent" }, { status: "unreadable" }] as const) {
+			const run = setup({ marker: marker({ stage: "verified", wiped: true }), vault })
 
-		run.deps.purgeLegacyStores.mockRejectedValueOnce(new Error("EBUSY"))
-		await run.migration.start()
+			await run.migration.start()
 
+			expect(run.deps.purgeLegacyStores).not.toHaveBeenCalled()
+			expect(run.stored()).toMatchObject({ purged: false })
+		}
+	})
+
+	it("tries again next launch when deleting fails, logging it once", async () => {
+		const run = setup({ marker: marker({ stage: "verified", wiped: true }), vault: SIGNED_IN_VAULT })
+
+		run.deps.purgeLegacyStores.mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
+		await expect(run.migration.start()).resolves.toEqual({ pinImported: false })
+
+		expect(run.deps.warn).toHaveBeenCalledTimes(1)
+		expect(run.deps.warn).toHaveBeenCalledWith("migration: deleting the old stores failed, tried again next launch: EBUSY")
 		expect(run.stored()).toMatchObject({ purged: false })
 	})
 })

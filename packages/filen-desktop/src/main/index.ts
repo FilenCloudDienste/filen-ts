@@ -8,6 +8,7 @@ import {
 	type NativeImage,
 	nativeImage,
 	nativeTheme,
+	powerMonitor,
 	protocol,
 	safeStorage,
 	session,
@@ -23,7 +24,7 @@ import path from "node:path"
 import type { DesktopLogsExport, DesktopMenuAction, DesktopPlatform, WindowState } from "@filen/shared/desktop"
 import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
-import { type AppLock, LOCK_AFTER_HIDDEN_MS, loadAppLock } from "./appLock.ts"
+import { type AppLock, hiddenLockDue, LOCK_AFTER_HIDDEN_MS, loadAppLock } from "./appLock.ts"
 import { atomicFile, codedError } from "./atomicFile.ts"
 import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
@@ -41,10 +42,9 @@ import { registerAppProtocol } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { createSessionVault, isSessionBlob, lazyCipher, vaultMode, type VaultCipher } from "./sessionVault.ts"
 import { startUpdater, type Updater } from "./updater.ts"
-import { drawsOwnBorder, initialColors, windowOptions } from "./window.ts"
+import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } from "./window.ts"
 
 // Payloads from the renderer are untrusted input.
-const titleBarColorsSchema = type({ color: "string", symbolColor: "string", border: "string" })
 const countSchema = type("0 <= number.integer < 1000000")
 const audioPlayingSchema = type("boolean")
 const menuShortcutsSchema = type({ "[string]": "string <= 64" })
@@ -153,10 +153,9 @@ const migration = createMigration({
 		if ((await runInLegacyOrigin(WIPE_SCRIPT)) !== true) {
 			throw codedError("indexeddb not deleted")
 		}
-
-		// The old client's generated rclone remote: the account's keys, merely obscured.
-		await rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true })
 	},
+	// The old client's generated rclone remote: the account's keys, merely obscured.
+	removeRcloneConfig: () => rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true }),
 	purgeLegacyStores: async () => {
 		const indexedDb = path.join(userDataPath, "IndexedDB")
 		const oldOrigin = (await readdir(indexedDb).catch(() => [])).filter(name => name.startsWith("filendesktop_bundle_0."))
@@ -203,8 +202,13 @@ function currentPrefs() {
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false
-// activate and second-instance can fire before the app protocol exists; the window waits for it.
+// Set once the update installer is launched: the page's unload confirm was answered for it (or there was nothing to
+// confirm), and a cancel could not stop the installer anyway.
+let installingUpdate = false
+// The window needs the app protocol and the migration; a show asked for before (activate, second-instance, the
+// tray) is remembered and honoured once startup finished.
 let started = false
+let showRequested = false
 
 // What the current page reported; a new page starts from nothing.
 let unloadHolds = 0
@@ -222,8 +226,13 @@ function resetPageState(): void {
 
 function showWindow(): void {
 	if (!started) {
+		showRequested = true
+
 		return
 	}
+
+	// Before anything shows again, so a window hidden through a sleep never shows its page unlocked.
+	lockIfHiddenTooLong()
 
 	if (mainWindow === null) {
 		createWindow()
@@ -319,17 +328,29 @@ function lockNow(): void {
 }
 
 let lockTimer: NodeJS.Timeout | undefined
+// When the window went out of sight (hidden, minimized or destroyed while hidden); null while it is visible.
+let hiddenAt: number | null = null
 
-// A window hidden (or minimized) for a while locks, whether or not its page is still alive by then, so it is locked
-// before anything shows it again.
-function armHiddenLock(): void {
+// A window hidden (or minimized) for a while locks, whether or not its page is still alive by then. The timer covers
+// an awake machine; it stops while the machine sleeps, so every way back (showing, resume, screen unlock) also
+// compares the clock.
+function windowHidden(): void {
+	hiddenAt ??= Date.now()
 	clearTimeout(lockTimer)
-	lockTimer = setTimeout(lockNow, LOCK_AFTER_HIDDEN_MS)
+	lockTimer = setTimeout(lockNow, Math.max(0, hiddenAt + LOCK_AFTER_HIDDEN_MS - Date.now()))
 }
 
-function disarmHiddenLock(): void {
+function windowShown(): void {
+	lockIfHiddenTooLong()
+	hiddenAt = null
 	clearTimeout(lockTimer)
 	lockTimer = undefined
+}
+
+function lockIfHiddenTooLong(): void {
+	if (hiddenLockDue(hiddenAt, Date.now())) {
+		lockNow()
+	}
 }
 
 function hideWindow(window: BrowserWindow): void {
@@ -343,14 +364,14 @@ function hideWindow(window: BrowserWindow): void {
 }
 
 // The page's beforeunload asks to stay only while lib/unloadGuard.ts holds something (transfers, unsaved changes).
-function confirmUnload(window: BrowserWindow): boolean {
+function confirmUnload(window: BrowserWindow, action: string): boolean {
 	if (!window.isVisible()) {
 		window.show()
 	}
 
 	const choice = dialog.showMessageBoxSync(window, {
 		type: "warning",
-		buttons: [quitting ? "Quit" : "Leave", "Cancel"],
+		buttons: [action, "Cancel"],
 		defaultId: 1,
 		cancelId: 1,
 		message: "Filen is still working",
@@ -413,10 +434,35 @@ function createWindow(): void {
 	})
 
 	window.webContents.on("did-navigate", resetPageState)
-	window.webContents.on("render-process-gone", resetPageState)
+
+	// A reload after a crash that crashes again before its page came up leaves the window to be recreated.
+	let recovering = false
+
+	window.webContents.on("dom-ready", () => {
+		recovering = false
+	})
+
+	// The page and its unsaved state are gone either way. A visible window loads the app again; a hidden one, or one
+	// whose reload crashed too, is destroyed, and the next show creates a fresh one.
+	window.webContents.on("render-process-gone", (_event, details) => {
+		resetPageState()
+
+		if (details.reason === "clean-exit") {
+			return
+		}
+
+		warn(`renderer gone: ${details.reason}`)
+
+		if (window.isVisible() && !recovering) {
+			recovering = true
+			window.webContents.reload()
+		} else {
+			window.destroy()
+		}
+	})
 
 	window.webContents.on("will-prevent-unload", event => {
-		if (confirmUnload(window)) {
+		if (installingUpdate || confirmUnload(window, quitting ? "Quit" : "Leave")) {
 			event.preventDefault()
 		} else {
 			quitting = false
@@ -450,14 +496,14 @@ function createWindow(): void {
 
 	window.on("hide", () => {
 		scheduleIdleDestroy()
-		armHiddenLock()
+		windowHidden()
 	})
 	window.on("show", () => {
 		scheduleIdleDestroy()
-		disarmHiddenLock()
+		windowShown()
 	})
-	window.on("minimize", armHiddenLock)
-	window.on("restore", disarmHiddenLock)
+	window.on("minimize", windowHidden)
+	window.on("restore", windowShown)
 
 	window.on("closed", () => {
 		if (mainWindow === window) {
@@ -601,6 +647,20 @@ if (!app.requestSingleInstanceLock()) {
 		quitting = true
 	})
 	app.on("activate", showWindow)
+	// Every web contents, including any created later: no <webview>, no new windows and no navigation off the app
+	// origin. A window's own handlers come on top (its window-open handler replaces this default); the legacy-origin
+	// window loads its page through loadURL, which no navigation guard sees.
+	app.on("web-contents-created", (_event, contents) => {
+		contents.on("will-attach-webview", event => {
+			event.preventDefault()
+		})
+		contents.setWindowOpenHandler(() => ({ action: "deny" }))
+		contents.on("will-navigate", (event, url) => {
+			if (classifyNavigation(url, APP_ORIGIN) !== "inApp") {
+				event.preventDefault()
+			}
+		})
+	})
 	// The app outlives its window everywhere: macOS in the dock, Windows and Linux in the tray (minimize to tray, idle
 	// destroy). Quitting is always explicit.
 	app.on("window-all-closed", () => undefined)
@@ -749,13 +809,27 @@ if (!app.requestSingleInstanceLock()) {
 	})
 
 	ipcMain.on(CHANNELS.installUpdate, event => {
-		if (!isTrusted(event.senderFrame) || updater === null || updater.ready() === null) {
+		const window = BrowserWindow.fromWebContents(event.sender)
+
+		if (!isTrusted(event.senderFrame) || updater === null || updater.ready() === null || installingUpdate || window === null) {
+			return
+		}
+
+		// Asked here, before the installer starts (Windows and Linux launch it before quitting, so the page's own
+		// unload confirm would come too late). A cancel installs nothing; the update still installs on the next quit.
+		if (unloadHolds > 0 && !confirmUnload(window, "Restart")) {
 			return
 		}
 
 		// The window's close handler would otherwise only hide it, and the install waits for every window to close.
 		quitting = true
-		updater.install()
+		installingUpdate = true
+
+		if (!updater.install()) {
+			warn("updater: the update could not be installed")
+			quitting = false
+			installingUpdate = false
+		}
 	})
 
 	handle(CHANNELS.lockStatus, async () => {
@@ -864,6 +938,11 @@ if (!app.requestSingleInstanceLock()) {
 				isPermissionAllowed(permission, requestingOrigin, APP_ORIGIN)
 			)
 
+			// A sleep stops the hidden-window timer; the screen lock is a moment to lock too.
+			powerMonitor.on("resume", lockIfHiddenTooLong)
+			powerMonitor.on("unlock-screen", lockIfHiddenTooLong)
+			powerMonitor.on("lock-screen", lockNow)
+
 			// Without its headers the web app cannot run (no cross-origin isolation, no CSP), so a missing file is fatal.
 			registerAppProtocol(SCHEME, webDist, parseHeaders(readFileSync(path.join(webDist, "_headers"), "utf8")))
 
@@ -876,7 +955,7 @@ if (!app.requestSingleInstanceLock()) {
 
 			const openedAtLogin = PLATFORM === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin
 
-			if (!startsHidden(process.argv, prefs.get().startMinimized, openedAtLogin)) {
+			if (showRequested || !startsHidden(process.argv, prefs.get().startMinimized, openedAtLogin)) {
 				showWindow()
 			}
 		})

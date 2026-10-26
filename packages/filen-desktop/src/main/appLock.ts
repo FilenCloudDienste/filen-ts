@@ -2,6 +2,7 @@ import { randomBytes, scrypt, timingSafeEqual } from "node:crypto"
 import { type } from "arktype"
 import type { DesktopLockAttempt, DesktopLockStatus } from "@filen/shared/desktop"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
+import { serialQueue } from "./serial.ts"
 import type { VaultCipher } from "./sessionVault.ts"
 
 // scrypt cost for new PINs: 32 MiB and roughly 50-100 ms per check on current hardware, off the main thread (libuv's
@@ -18,6 +19,12 @@ export const BACKOFF_MAX_MS = 60 * 60 * 1000
 
 // How long the window may stay hidden (or minimized) before the app locks itself.
 export const LOCK_AFTER_HIDDEN_MS = 5 * 60 * 1000
+
+// Whether a window out of sight since `hiddenAt` (null: in sight) has been so long enough to lock. By the clock, so time
+// asleep counts; a clock set back counts as not yet.
+export function hiddenLockDue(hiddenAt: number | null, now: number): boolean {
+	return hiddenAt !== null && now - hiddenAt >= LOCK_AFTER_HIDDEN_MS
+}
 
 export interface PinHash {
 	salt: Buffer
@@ -168,15 +175,7 @@ export async function loadAppLock(
 	let record: LockRecord | null = null
 	// "unreadable" may clear up on a later read; "invalid" never does.
 	let fault: "unreadable" | "invalid" | null = null
-	let tail: Promise<unknown> = Promise.resolve()
-
-	function serial<T>(operation: () => Promise<T>): Promise<T> {
-		const run = tail.then(operation, operation)
-
-		tail = run.catch(() => undefined)
-
-		return run
-	}
+	const serial = serialQueue()
 
 	async function read(): Promise<void> {
 		let data: Buffer | null

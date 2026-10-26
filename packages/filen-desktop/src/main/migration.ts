@@ -1,22 +1,41 @@
 import { type } from "arktype"
 import type { SessionRead } from "../shared/channels.ts"
 import { type AtomicFile, codedError, errorCode } from "./atomicFile.ts"
-import { legacyPin, legacyPrefs, type LegacyPrefs, legacySession, legacyStash, parseReadResult, sessionUserId } from "./legacyData.ts"
+import {
+	legacyPin,
+	legacyPrefs,
+	type LegacyPrefs,
+	legacySession,
+	type LegacySession,
+	type LegacySnapshot,
+	legacyStash,
+	parseReadResult,
+	sessionUserId
+} from "./legacyData.ts"
+import { serialQueue } from "./serial.ts"
 
 // The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where
 // it got to:
 //   started   a read began; `failedStarts` counts the attempts that never reached `imported`
-//   imported  session, PIN, prefs and the stash are stored; the old origin still holds its plaintext secrets
+//   imported  session, PIN, prefs and the stash are stored (only the stash when `stashOnly`); the old origin still
+//             holds its plaintext secrets
+//   abandoned the read failed too often; nothing is imported, the old secrets are still wiped once the wait ran out
 //   verified  the migrated account proved itself (an authed request, a sign-in as the same user) or the wait ran out;
 //             the old secrets are wiped, `wiped` says whether that finished; LevelDB keeps deleted values on disk
-//             until a compaction that may never come, so the launch after the wipe deletes the old origin's stores
-//             before anything opens them, and `purged` records that
-//   skipped   nothing to import (a fresh install, a session already in the vault) or too many failed attempts
-export type MigrationStage = "started" | "imported" | "verified" | "skipped"
+//             until a compaction that may never come, so a later launch deletes the old origin's stores before
+//             anything opens them, and `purged` records that
+//   skipped   nothing to import (a fresh install)
+// The old client's rclone config (the account's keys, merely obscured) is deleted once the import is done or given up.
+export type MigrationStage = "started" | "imported" | "abandoned" | "verified" | "skipped"
 
 export interface MigrationMarker {
 	stage: MigrationStage
 	failedStarts: number
+	// When the first attempt began (null: before it, or a marker older than the field).
+	startedAt: number | null
+	// The vault held a session before the first attempt (signed in to this app already): the session, PIN and prefs
+	// the user has here are left alone and only the stash is imported.
+	stashOnly: boolean
 	// The old signed-in account, once imported (null: it had none).
 	userId: number | null
 	importedAt: number | null
@@ -28,13 +47,15 @@ export interface MigrationMarker {
 export const MAX_FAILED_STARTS = 3
 
 // The old origin's secrets are wiped at the latest this long after the import, verified or not (offline, an account
-// whose session the server no longer takes).
+// whose session the server no longer takes), or after the first attempt of an import that was given up.
 export const WIPE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 
 const markerSchema = type({
 	version: "1",
-	stage: "'started' | 'imported' | 'verified' | 'skipped'",
+	stage: "'started' | 'imported' | 'abandoned' | 'verified' | 'skipped'",
 	failedStarts: "0 <= number.integer < 1000",
+	"startedAt?": type("number.integer >= 0").or("null"),
+	"stashOnly?": "boolean",
 	userId: type("1 < number.integer <= 9007199254740991").or("null"),
 	importedAt: type("number.integer >= 0").or("null"),
 	wiped: "boolean",
@@ -64,6 +85,8 @@ export function parseMarker(data: string | null): MigrationMarker | null {
 	return {
 		stage: marker.stage,
 		failedStarts: marker.failedStarts,
+		startedAt: marker.startedAt ?? null,
+		stashOnly: marker.stashOnly ?? false,
 		userId: marker.userId,
 		importedAt: marker.importedAt,
 		wiped: marker.wiped,
@@ -77,16 +100,19 @@ export function serializeMarker(marker: MigrationMarker): string {
 
 export type StartupDecision =
 	| "run"
+	// Imports the stash only: the user is signed in to this app already.
+	| "stash"
 	// Nothing written: the vault cannot be read right now (a keychain locked at login), so ask again next launch.
 	| "defer"
 	| "skip-fresh"
-	| "skip-session"
-	| "skip-failed"
+	// Too many failed attempts: no more reads, the old secrets are wiped once the wait ran out.
+	| "abandon"
 	| "none"
 
 // Whether this launch imports. Only a launch with no marker can see a session the user stored in 4.x itself, so that
-// is where a stored session ends it (a newer sign-in is never overwritten). A rerun after a crash imports again but
-// leaves a session the earlier attempt already stored alone.
+// is where a stored session limits it to the stash (a newer sign-in, its PIN and prefs are never overwritten); the
+// marker keeps that for reruns. A rerun after a crash imports again but leaves a session the earlier attempt already
+// stored alone.
 export function startupDecision(marker: MigrationMarker | null, legacyProfile: boolean, vault: SessionRead["status"]): StartupDecision {
 	if (marker === null) {
 		if (!legacyProfile) {
@@ -94,7 +120,7 @@ export function startupDecision(marker: MigrationMarker | null, legacyProfile: b
 		}
 
 		if (vault === "present") {
-			return "skip-session"
+			return "stash"
 		}
 
 		return vault === "unreadable" ? "defer" : "run"
@@ -105,15 +131,24 @@ export function startupDecision(marker: MigrationMarker | null, legacyProfile: b
 	}
 
 	if (marker.failedStarts >= MAX_FAILED_STARTS) {
-		return "skip-failed"
+		return "abandon"
+	}
+
+	if (marker.stashOnly) {
+		return "stash"
 	}
 
 	return vault === "unreadable" ? "defer" : "run"
 }
 
-// Whether an imported marker stops waiting for verification: at once without an imported account (nothing to
-// verify), else once the time limit passed. A clock set back counts from now.
-export function verificationExpired(marker: MigrationMarker, now: number): boolean {
+// Whether the wipe stops waiting for verification: at once after an import without an account (nothing to verify),
+// else once the time limit passed since the import, or since the first attempt of one given up. A clock set back
+// counts from now.
+export function waitExpired(marker: MigrationMarker, now: number): boolean {
+	if (marker.stage === "abandoned") {
+		return now - (marker.startedAt ?? now) >= WIPE_AFTER_MS
+	}
+
 	return marker.stage === "imported" && (marker.userId === null || now - (marker.importedAt ?? now) >= WIPE_AFTER_MS)
 }
 
@@ -135,10 +170,13 @@ export interface MigrationDeps {
 	readLegacy(): Promise<unknown>
 	// The old options.v1.json, null when absent.
 	readOptions(): Promise<string | null>
-	// Runs WIPE_SCRIPT in the old origin (and removes the old rclone config); rejects unless all of it worked.
+	// Runs WIPE_SCRIPT in the old origin; rejects unless all of it worked.
 	wipeLegacy(): Promise<void>
+	// Deletes the old client's rclone config; nothing when it is gone already.
+	removeRcloneConfig(): Promise<void>
 	// Deletes the old origin's IndexedDB and the Local Storage store on disk. Only called before any window or storage
-	// use in this launch; the new page loses its few localStorage values (theme choice, splash hint) once.
+	// use in this launch, and only with a session in the vault (see `purge`); the new page loses its few localStorage
+	// values (theme choice, splash hint) once.
 	purgeLegacyStores(): Promise<void>
 	vault: { get(): Promise<SessionRead>; set(blob: string): Promise<void> }
 	lock: { enabled(): boolean; set(pin: string): Promise<boolean> }
@@ -167,15 +205,7 @@ export interface Migration {
 
 export function createMigration(deps: MigrationDeps): Migration {
 	let marker: MigrationMarker | null = null
-	let tail: Promise<unknown> = Promise.resolve()
-
-	function serial(operation: () => Promise<void>): Promise<void> {
-		const run = tail.then(operation, operation)
-
-		tail = run.catch(() => undefined)
-
-		return run
-	}
+	const serial = serialQueue()
 
 	async function save(next: MigrationMarker): Promise<void> {
 		await deps.marker.write(Buffer.from(serializeMarker(next)))
@@ -183,12 +213,25 @@ export function createMigration(deps: MigrationDeps): Migration {
 	}
 
 	function fresh(stage: MigrationStage): MigrationMarker {
-		return { stage, failedStarts: 0, userId: null, importedAt: null, wiped: false, purged: false }
+		return { stage, failedStarts: 0, startedAt: null, stashOnly: false, userId: null, importedAt: null, wiped: false, purged: false }
+	}
+
+	// Once the import is done or given up; a failure is tried again by the wipe.
+	async function removeRcloneConfig(): Promise<void> {
+		await deps.removeRcloneConfig().catch((error: unknown) => {
+			deps.warn(`migration: the old rclone config was not deleted: ${errorCode(error)}`)
+		})
 	}
 
 	// Errors are logged by their code only: none of this may ever log a value.
-	async function attempt(previous: MigrationMarker | null): Promise<MigrationResult> {
-		await save({ ...(previous ?? fresh("started")), stage: "started", failedStarts: (previous?.failedStarts ?? 0) + 1 })
+	async function attempt(previous: MigrationMarker | null, stashOnly: boolean): Promise<MigrationResult> {
+		await save({
+			...(previous ?? fresh("started")),
+			stage: "started",
+			failedStarts: (previous?.failedStarts ?? 0) + 1,
+			startedAt: previous?.startedAt ?? deps.now(),
+			stashOnly
+		})
 
 		const read = parseReadResult(await deps.readLegacy())
 
@@ -206,6 +249,30 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 		const { snapshot } = read
 		const session = legacySession(snapshot)
+
+		if (stashOnly) {
+			deps.info("migration: signed in here already; importing the stash only")
+		} else {
+			await importSession(session)
+		}
+
+		const userId = session.ok ? session.userId : null
+		const stash = legacyStash(snapshot, userId)
+
+		if (stash !== null) {
+			await deps.writeStash(JSON.stringify(stash))
+			deps.info("migration: sync and mount settings stashed")
+		}
+
+		const pinImported = stashOnly ? false : await importSettings(snapshot, session.ok)
+
+		await removeRcloneConfig()
+		await save({ ...(marker ?? fresh("started")), stage: "imported", userId, importedAt: deps.now() })
+
+		return { pinImported }
+	}
+
+	async function importSession(session: LegacySession): Promise<void> {
 		const stored = await deps.vault.get()
 
 		if (stored.status === "unreadable") {
@@ -220,17 +287,12 @@ export function createMigration(deps: MigrationDeps): Migration {
 			await deps.vault.set(session.blob)
 			deps.info("migration: session imported")
 		}
+	}
 
-		const userId = session.ok ? session.userId : null
-		const stash = legacyStash(snapshot, userId)
-
-		if (stash !== null) {
-			await deps.writeStash(JSON.stringify(stash))
-			deps.info("migration: sync and mount settings stashed")
-		}
-
+	// The PIN (only with the imported account) and the prefs; whether a PIN was imported.
+	async function importSettings(snapshot: LegacySnapshot, signedIn: boolean): Promise<boolean> {
 		let pinImported = false
-		const pin = session.ok ? legacyPin(snapshot) : null
+		const pin = signedIn ? legacyPin(snapshot) : null
 
 		if (pin !== null && !deps.lock.enabled()) {
 			pinImported = await deps.lock.set(pin)
@@ -252,9 +314,33 @@ export function createMigration(deps: MigrationDeps): Migration {
 			})
 		}
 
-		await save({ ...(marker ?? fresh("started")), stage: "imported", userId, importedAt: deps.now() })
+		return pinImported
+	}
 
-		return { pinImported }
+	// LevelDB keeps deleted values until a compaction, so the stores go once the secrets are wiped. Deleting the Local
+	// Storage store also deletes the page's own flag that finishes a sign-out cut short (filen-web signOutPending.ts),
+	// whose loss would leave the signed-out account's local data behind. That flag can outlive the session only:
+	// sign-out clears the vault first among its wipes, and a stored session means the user is signed in (or the
+	// sign-out stopped before clearing anything, which the page then shows as still signed in). So the purge waits for
+	// a launch with a session in the vault; a vault kept in memory only never has one, and keeps the stores.
+	async function purge(current: MigrationMarker): Promise<void> {
+		if ((await deps.vault.get()).status !== "present") {
+			deps.info("migration: deleting the old stores waits for a launch with a stored session")
+
+			return
+		}
+
+		try {
+			await deps.purgeLegacyStores()
+		} catch (error) {
+			// Windows: a file held open (EBUSY, EPERM) by a scanner or indexer.
+			deps.warn(`migration: deleting the old stores failed, tried again next launch: ${errorCode(error)}`)
+
+			return
+		}
+
+		await save({ ...current, purged: true })
+		deps.info("migration: the old client's stores were deleted from disk")
 	}
 
 	// From `verified` until the wipe worked once; a failure retries on the next confirmation or launch.
@@ -263,7 +349,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 			return
 		}
 
-		if (verificationExpired(marker, deps.now())) {
+		if (waitExpired(marker, deps.now())) {
 			await save({ ...marker, stage: "verified" })
 		}
 
@@ -271,6 +357,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 			return
 		}
 
+		await deps.removeRcloneConfig()
 		await deps.wipeLegacy()
 		await save({ ...marker, wiped: true })
 		deps.info("migration: the old client's secrets were wiped")
@@ -291,9 +378,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 				if (marker?.wiped === true) {
 					if (!marker.purged) {
-						await deps.purgeLegacyStores()
-						await save({ ...marker, purged: true })
-						deps.info("migration: the old client's stores were deleted from disk")
+						await purge(marker)
 					}
 
 					return result
@@ -315,14 +400,20 @@ export function createMigration(deps: MigrationDeps): Migration {
 						return result
 					}
 
-					if (decision !== "run") {
-						deps.info(`migration: ${decision}`)
-						await save({ ...(marker ?? fresh("skipped")), stage: "skipped" })
+					if (decision === "skip-fresh") {
+						deps.info("migration: skip-fresh")
+						await save(fresh("skipped"))
 
 						return result
 					}
 
-					result = await attempt(marker)
+					if (decision === "abandon") {
+						deps.info(`migration: given up after ${String(MAX_FAILED_STARTS)} failed attempts`)
+						await save({ ...(marker ?? fresh("abandoned")), stage: "abandoned", startedAt: marker?.startedAt ?? deps.now() })
+						await removeRcloneConfig()
+					} else if (decision === "run" || decision === "stash") {
+						result = await attempt(marker, decision === "stash")
+					}
 				}
 			} catch (error) {
 				deps.warn(`migration: failed: ${errorCode(error)}`)
