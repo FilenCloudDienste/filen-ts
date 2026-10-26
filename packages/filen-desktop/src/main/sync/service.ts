@@ -22,7 +22,7 @@ import type {
 	DesktopSyncUserIgnore
 } from "@filen/shared/desktop"
 import { CHANNELS } from "../../shared/channels.ts"
-import type { NativeOp, NativeOpArgs, NativePairRuntime } from "../../shared/nativeProtocol.ts"
+import type { NativeOpArgs, NativePairRuntime, SyncOp } from "../../shared/nativeProtocol.ts"
 import type { NativeResult } from "../native/rpc.ts"
 import type { NativeEvent, NativeSupervisor } from "../native/supervisor.ts"
 import { errorCode } from "../atomicFile.ts"
@@ -56,6 +56,8 @@ export interface SyncServiceDeps {
 		showOpenDialog(options: OpenDialogOptions): Promise<OpenDialogReturnValue>
 		// Where no pair may be; the pairs and mounts are added here.
 		rootContext(): Omit<LocalRootContext, "pairRoots" | "mountPoints">
+		// The user's network drive mount points, mounted now or not.
+		mountPoints(userId: string): Promise<readonly string[]>
 	}
 	shell: { openPath(target: string): Promise<string> }
 	// The old client's sync config the migration stashed for a user.
@@ -185,7 +187,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 	}
 
 	// A pair the engine holds, by its engine id.
-	async function engineCall<K extends NativeOp>(
+	async function engineCall<K extends SyncOp>(
 		pairId: string,
 		op: K,
 		args: (enginePairId: string) => NativeOpArgs<K>
@@ -199,8 +201,12 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		return updatePairs(store, pairs => pairs.map(pair => (shellPairId(pair) === pairId ? { ...pair, ...patch } : pair)))
 	}
 
-	async function rootContext(store: SyncStore): Promise<LocalRootContext> {
-		return { ...deps.dialogs.rootContext(), pairRoots: store.get().pairs.map(pair => pair.localRoot), mountPoints: [] }
+	async function rootContext(userId: string, store: SyncStore): Promise<LocalRootContext> {
+		return {
+			...deps.dialogs.rootContext(),
+			pairRoots: store.get().pairs.map(pair => pair.localRoot),
+			mountPoints: await deps.dialogs.mountPoints(userId)
+		}
 	}
 
 	async function evaluate(page: SyncPage, pairId: string): Promise<Result<DesktopSyncPlan | null>> {
@@ -387,13 +393,15 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		overview,
 		activity: (pairId, limit) => activityLog.list(pairId, limit),
 		chooseLocalDirectory: async () => {
-			const store = await currentStore()
+			const user = await supervisor.user()
 
-			if (store === null) {
+			if (user === null) {
 				return { status: "canceled" }
 			}
 
-			return chooseLocalDirectory(deps.dialogs.showOpenDialog, () => rootContext(store), deps.tokens)
+			const store = await deps.storeFor(user.userId)
+
+			return chooseLocalDirectory(deps.dialogs.showOpenDialog, () => rootContext(user.userId, store), deps.tokens)
 		},
 		addPair: async (page, { localRootId, remoteRoot, mode, name }) => {
 			const chosen = deps.tokens.take(localRootId)
@@ -414,7 +422,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
 			const store = await deps.storeFor(user.userId)
 			// The directory may have changed since it was chosen.
-			const inspected = await inspectLocalRoot(chosen, await rootContext(store))
+			const inspected = await inspectLocalRoot(chosen, await rootContext(user.userId, store))
 
 			if (inspected.problem !== null) {
 				return fail("rootRefused", inspected.problem)

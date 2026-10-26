@@ -3,12 +3,20 @@ import { type } from "arktype"
 import type { DesktopSyncHostState } from "@filen/shared/desktop"
 import { parseSessionBlob } from "@filen/shared/session"
 import type { SessionRead } from "../../shared/channels.ts"
-import { type FromNative, fromNativeSchema, type NativeOp, type NativeOpArgs, type ToNative } from "../../shared/nativeProtocol.ts"
+import {
+	type FromNative,
+	fromNativeSchema,
+	type MountsOp,
+	type NativeOp,
+	type NativeOpArgs,
+	type SyncOp,
+	type ToNative
+} from "../../shared/nativeProtocol.ts"
 import { errorCode } from "../atomicFile.ts"
 import { redact } from "../redact.ts"
 import { serialQueue } from "../serial.ts"
 import { createCrashHistory } from "./backoff.ts"
-import { CALL_TIMEOUT_MS, createRpc, type NativeResult, type NativeRpc } from "./rpc.ts"
+import { CALL_TIMEOUT_MS, createRpc, type NativeMountsResult, type NativeResult, type NativeRpc } from "./rpc.ts"
 
 // A host nothing needs any more stops after this long, so a page closed and reopened keeps it.
 export const IDLE_STOP_MS = 60_000
@@ -33,7 +41,10 @@ export interface SyncUser {
 }
 
 // What the host reports that the supervisor passes on.
-export type NativeEvent = Extract<FromNative, { t: "ready" | "overview" | "aggregate" | "activity" }>
+export type NativeEvent = Extract<FromNative, { t: "ready" | "overview" | "aggregate" | "activity" | "mounts" | "mountsStats" }>
+
+// What a page listens to: the sync runtime, or the mounts stats.
+export type NativeTopic = "overview" | "mounts"
 
 export interface NativeSupervisorDeps {
 	fork(): UtilityProcessLike
@@ -42,7 +53,7 @@ export interface NativeSupervisorDeps {
 	addonPath(): string | null
 	// The user's engine directory, created owner-only.
 	dirFor(userId: string): Promise<string>
-	// The user has sync work: recorded pairs, or old pairs waiting to be imported.
+	// The user has work for the host: sync pairs or mounts, or old ones waiting to be imported.
 	demand(userId: string): Promise<boolean>
 	log: { info(message: string): void; warn(message: string): void }
 	onMessage(message: NativeEvent, userId: string): void
@@ -60,9 +71,11 @@ export interface NativeSupervisor {
 	signedOut(): void
 	// Starts the host when needed and waits for it to be ready. With `userId`, only that user's host answers (work
 	// begun for one user never reaches the next one's engine).
-	call<K extends NativeOp>(op: K, args: NativeOpArgs<K>, userId?: string): Promise<NativeResult<K>>
-	// A page shows the overview: the host streams it and stays up.
-	subscribe(on: boolean): void
+	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>, userId?: string): Promise<NativeResult<K>>
+	// The same for rclone. `timeoutMs` for the calls that wait long (draining an old cache).
+	callMounts<K extends MountsOp>(op: K, args: NativeOpArgs<K>, userId?: string, timeoutMs?: number): Promise<NativeMountsResult<K>>
+	// A page shows the overview (or the mounts stats): the host streams it and stays up.
+	subscribe(on: boolean, topic?: NativeTopic): void
 	// After a failure: start again from a clean slate.
 	retry(): void
 	// The signed-in user, from the vault; null when signed out or unreadable.
@@ -72,6 +85,17 @@ export interface NativeSupervisor {
 	active(): boolean
 	// For quitting: stops the host for good, killing it after SHUTDOWN_TIMEOUT_MS.
 	stop(): Promise<void>
+}
+
+// Whether the user has work for the host: true once any source says so, and the later ones are not read.
+export async function anyDemand(sources: readonly (() => boolean | Promise<boolean>)[]): Promise<boolean> {
+	for (const source of sources) {
+		if (await source()) {
+			return true
+		}
+	}
+
+	return false
 }
 
 interface Child {
@@ -96,6 +120,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 	const crashes = createCrashHistory()
 	let state: DesktopSyncHostState = { state: "off" }
 	let current: Child | null = null
+	const topics: Record<NativeTopic, boolean> = { overview: false, mounts: false }
 	let subscribed = false
 	let inFlight = 0
 	let quitting = false
@@ -438,7 +463,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 				setState({ state: "running" })
 
 				if (subscribed) {
-					send(child, { t: "subscribe", overview: true })
+					send(child, { t: "subscribe", ...topics })
 				}
 
 				deps.onMessage(message, child.userId)
@@ -471,6 +496,37 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 
 	function ready(): boolean {
 		return current?.ready === true
+	}
+
+	// Starts the host when needed and waits for it to be ready, then calls through its rpc.
+	async function invoke<R>(
+		op: NativeOp,
+		userId: string | undefined,
+		through: (rpc: NativeRpc) => Promise<R>
+	): Promise<R | typeof UNAVAILABLE> {
+		inFlight++
+
+		try {
+			if (!ready()) {
+				await serial(() => evaluate(`call ${op}`))
+
+				const pending = state.state === "starting" || state.state === "restarting"
+
+				if (!ready() && !(pending && (await waitReady()))) {
+					return UNAVAILABLE
+				}
+			}
+
+			const child = current
+
+			return child?.ready === true && (userId === undefined || child.userId === userId) ? await through(child.rpc) : UNAVAILABLE
+		} finally {
+			inFlight--
+
+			if (inFlight === 0 && !subscribed) {
+				ensure("call settled")
+			}
+		}
 	}
 
 	function waitReady(): Promise<boolean> {
@@ -519,45 +575,21 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 				setState({ state: "off" })
 			})
 		},
-		call: async (op, args, userId) => {
-			inFlight++
-
-			try {
-				if (!ready()) {
-					await serial(() => evaluate(`call ${op}`))
-
-					const pending = state.state === "starting" || state.state === "restarting"
-
-					if (!ready() && !(pending && (await waitReady()))) {
-						return UNAVAILABLE
-					}
-				}
-
-				const child = current
-
-				return child?.ready === true && (userId === undefined || child.userId === userId)
-					? await child.rpc.call(op, args)
-					: UNAVAILABLE
-			} finally {
-				inFlight--
-
-				if (inFlight === 0 && !subscribed) {
-					ensure("call settled")
-				}
-			}
-		},
-		subscribe: on => {
-			if (on === subscribed) {
+		call: (op, args, userId) => invoke(op, userId, rpc => rpc.call(op, args)),
+		callMounts: (op, args, userId, timeoutMs) => invoke(op, userId, rpc => rpc.callMounts(op, args, timeoutMs)),
+		subscribe: (on, topic = "overview") => {
+			if (on === topics[topic]) {
 				return
 			}
 
-			subscribed = on
+			topics[topic] = on
+			subscribed = topics.overview || topics.mounts
 
 			if (current?.ready === true) {
-				send(current, { t: "subscribe", overview: on })
+				send(current, { t: "subscribe", ...topics })
 			}
 
-			ensure(on ? "subscribed" : "unsubscribed")
+			ensure(on ? `subscribed (${topic})` : `unsubscribed (${topic})`)
 		},
 		retry: () => {
 			stuck = false

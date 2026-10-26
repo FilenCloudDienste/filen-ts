@@ -1,22 +1,31 @@
 import { type, type Type } from "arktype"
-import type { DesktopSyncResult } from "@filen/shared/desktop"
+import type { DesktopMountsError, DesktopMountsResult, DesktopSyncError, DesktopSyncResult } from "@filen/shared/desktop"
 import {
 	type FromNative,
+	type MountsOp,
 	type NativeCall,
 	type NativeOp,
 	type NativeOpArgs,
 	type NativeOpResult,
-	opResult
+	opError,
+	opResult,
+	type SyncOp
 } from "../../shared/nativeProtocol.ts"
 
 export const CALL_TIMEOUT_MS = 120_000
 
 export type NativeReply = Extract<FromNative, { t: "reply" }>
 
-export type NativeResult<K extends NativeOp> = DesktopSyncResult<NativeOpResult<K>>
+export type NativeResult<K extends SyncOp> = DesktopSyncResult<NativeOpResult<K>>
+
+export type NativeMountsResult<K extends MountsOp> = DesktopMountsResult<NativeOpResult<K>>
+
+// Either family's result, before it is narrowed to the op's own.
+type AnyResult = { ok: true; value: unknown } | { ok: false; error: DesktopSyncError | DesktopMountsError }
 
 export interface NativeRpc {
-	call<K extends NativeOp>(op: K, args: NativeOpArgs<K>, timeoutMs?: number): Promise<NativeResult<K>>
+	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>, timeoutMs?: number): Promise<NativeResult<K>>
+	callMounts<K extends MountsOp>(op: K, args: NativeOpArgs<K>, timeoutMs?: number): Promise<NativeMountsResult<K>>
 	// false: the value is not what the call returns, so the host is broken. A reply nothing waits for (its call timed
 	// out) is dropped.
 	settle(reply: NativeReply): boolean
@@ -26,7 +35,7 @@ export interface NativeRpc {
 
 interface Waiting {
 	op: NativeOp
-	resolve: (result: DesktopSyncResult<unknown>) => void
+	resolve: (result: AnyResult) => void
 	timer: NodeJS.Timeout
 }
 
@@ -36,27 +45,33 @@ export function createRpc(send: (call: NativeCall) => void): NativeRpc {
 	let nextId = 0
 	const waiting = new Map<number, Waiting>()
 
+	// settle checks the reply against the op, so its result is the op's own.
+	function request(op: NativeOp, args: unknown, timeoutMs: number): Promise<AnyResult> {
+		const id = nextId++
+
+		return new Promise(resolve => {
+			const timer = setTimeout(() => {
+				waiting.delete(id)
+				resolve({ ok: false, error: { code: "timeout" } })
+			}, timeoutMs)
+
+			waiting.set(id, { op, resolve, timer })
+
+			try {
+				send({ t: "call", id, op, args } as NativeCall)
+			} catch {
+				clearTimeout(timer)
+				waiting.delete(id)
+				resolve({ ok: false, error: { code: "hostUnavailable" } })
+			}
+		})
+	}
+
 	return {
-		call: (op, args, timeoutMs = CALL_TIMEOUT_MS) => {
-			const id = nextId++
-
-			return new Promise(resolve => {
-				const timer = setTimeout(() => {
-					waiting.delete(id)
-					resolve({ ok: false, error: { code: "timeout" } })
-				}, timeoutMs)
-
-				waiting.set(id, { op, resolve: resolve as Waiting["resolve"], timer })
-
-				try {
-					send({ t: "call", id, op, args } as NativeCall)
-				} catch {
-					clearTimeout(timer)
-					waiting.delete(id)
-					resolve({ ok: false, error: { code: "hostUnavailable" } })
-				}
-			})
-		},
+		call: <K extends SyncOp>(op: K, args: NativeOpArgs<K>, timeoutMs = CALL_TIMEOUT_MS) =>
+			request(op, args, timeoutMs) as Promise<NativeResult<K>>,
+		callMounts: <K extends MountsOp>(op: K, args: NativeOpArgs<K>, timeoutMs = CALL_TIMEOUT_MS) =>
+			request(op, args, timeoutMs) as Promise<NativeMountsResult<K>>,
 		settle: reply => {
 			const entry = waiting.get(reply.id)
 
@@ -68,6 +83,15 @@ export function createRpc(send: (call: NativeCall) => void): NativeRpc {
 			clearTimeout(entry.timer)
 
 			if (!reply.ok) {
+				const error: Type<unknown> = opError(entry.op)
+
+				// An error the op cannot report (a sync code for a mounts call) is a broken host like a wrong value.
+				if (error(reply.error) instanceof type.errors) {
+					entry.resolve({ ok: false, error: { code: "hostUnavailable" } })
+
+					return false
+				}
+
 				entry.resolve({ ok: false, error: reply.error })
 
 				return true

@@ -30,6 +30,7 @@
 		"@eslint/js": "^10.0.1",
 		"@filen/sdk-rs": "0.5.7",
 		"@filen/shared": "workspace:*",
+		"@peculiar/x509": "^2.2.0",
 		"@types/node": "^24.19.2",
 		"arktype": "^2.2.9",
 		"electron": "45.0.0",
@@ -39,6 +40,7 @@
 		"eslint": "^10.13.0",
 		"eslint-config-prettier": "^10.1.8",
 		"prettier": "^3.9.10",
+		"reflect-metadata": "^0.2.2",
 		"typescript": "6.0.3",
 		"typescript-eslint": "^8.72.0",
 		"vitest": "^5.0.5"

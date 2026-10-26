@@ -323,6 +323,27 @@ describe("createNativeSupervisor", () => {
 		expect(last().killed).toBe(true)
 	})
 
+	it("a mounts call takes the mounts errors; a sync code for it is malformed", async () => {
+		const { supervisor, last } = harness()
+
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+
+		const refused = supervisor.callMounts("fuseStatus", {})
+
+		await settle()
+		last().reply({ t: "reply", id: last().calls()[0]?.id ?? -1, ok: false, error: { code: "fuseMissing" } })
+		expect(await refused).toEqual({ ok: false, error: { code: "fuseMissing" } })
+
+		const broken = supervisor.callMounts("driveLetters", {})
+
+		await settle()
+		last().reply({ t: "reply", id: last().calls()[1]?.id ?? -1, ok: false, error: { code: "pairNotFound" } })
+		expect(await broken).toEqual({ ok: false, error: { code: "hostUnavailable" } })
+		expect(last().killed).toBe(true)
+	})
+
 	it("a call starts the host and waits for it to be ready", async () => {
 		const { supervisor, deps, last } = harness()
 
@@ -373,9 +394,23 @@ describe("createNativeSupervisor", () => {
 		await settle()
 		expect(last().sent).toHaveLength(1)
 		ready(last())
-		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: true })
+		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: true, mounts: false })
 		supervisor.subscribe(false)
-		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: false })
+		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: false, mounts: false })
+	})
+
+	it("mounts stats are a topic of their own", async () => {
+		const { supervisor, last } = harness()
+
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+		supervisor.subscribe(true, "mounts")
+		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: false, mounts: true })
+		supervisor.subscribe(true)
+		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: true, mounts: true })
+		supervisor.subscribe(false, "mounts")
+		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: true, mounts: false })
 	})
 
 	it("signed out stops the host", async () => {

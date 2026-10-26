@@ -14,6 +14,10 @@ const RULES: readonly [RegExp, string][] = [
 		/(["']?\b(?:api[_-]?key|apikey|password|passwd|secret|token|access[_-]?token|refresh[_-]?token|auth[_-]?info|master[_-]?keys?|private[_-]?key|authorization|cookie)\b["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;}&]+)/gi,
 		`$1${MASK}`
 	],
+	// rclone rc bodies: a serve's `pass` and s3 `auth_key` (a list of "id,secret"), and the remote's keys.
+	[/("(?:pass|auth_key|secret_access_key|access_key_id)"\s*:\s*)("(?:[^"\\]|\\.)*"|\[[^\]]*\])/g, `$1${MASK}`],
+	// An htpasswd SHA1 entry.
+	[/\{SHA\}[A-Za-z0-9+/=]+/g, `{SHA}${MASK}`],
 	// JWTs.
 	[/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, MASK],
 	// Long opaque runs mixing letters and digits: keys, tokens, hashes. Paths and words do not mix like this.

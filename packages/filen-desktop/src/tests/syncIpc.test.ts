@@ -88,7 +88,8 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		tokens,
 		dialogs: {
 			showOpenDialog: () => Promise.reject(new Error("unused")),
-			rootContext: () => ({ platform: process.platform, home: "/nonexistent-home", appData: [], temporary: [], oneDrive: [] })
+			rootContext: () => ({ platform: process.platform, home: "/nonexistent-home", appData: [], temporary: [], oneDrive: [] }),
+			mountPoints: () => Promise.resolve([])
 		},
 		shell: { openPath: vi.fn(() => Promise.resolve("")) },
 		legacySync: { pending: () => Promise.resolve(undefined), consume: () => Promise.resolve() },

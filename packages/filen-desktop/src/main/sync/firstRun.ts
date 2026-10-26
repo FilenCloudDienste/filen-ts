@@ -7,7 +7,7 @@ import type {
 	DesktopSyncReview,
 	DesktopSyncReviewFinding
 } from "@filen/shared/desktop"
-import type { NativeOp, NativeOpArgs } from "../../shared/nativeProtocol.ts"
+import type { NativeOpArgs, SyncOp } from "../../shared/nativeProtocol.ts"
 import { errorCode } from "../atomicFile.ts"
 import type { NativeResult } from "../native/rpc.ts"
 import { DOT_FILE_RULES, withRules } from "./legacyPairs.ts"
@@ -19,7 +19,7 @@ import { isRefusedNotice, type ShellPair, type SyncStore } from "./store.ts"
 
 export interface FirstRunDeps {
 	// Engine calls for the user this run is for; another user's host answers none of them.
-	call<K extends NativeOp>(op: K, args: NativeOpArgs<K>): Promise<NativeResult<K>>
+	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>): Promise<NativeResult<K>>
 	store: SyncStore
 	now(): number
 	log: { info(message: string): void; warn(message: string): void }

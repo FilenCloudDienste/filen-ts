@@ -1,12 +1,13 @@
 import { type } from "arktype"
 import {
 	type FromNative,
+	isMountsOp,
 	type NativeError,
 	type NativeFatalReason,
 	type NativeInit,
-	type NativeOp,
 	type NativeOpArgs,
 	type NativeOpResult,
+	type SyncOp,
 	type ToNative,
 	toNativeSchema
 } from "../shared/nativeProtocol.ts"
@@ -31,7 +32,7 @@ export interface HostPort {
 	postMessage(message: FromNative): void
 }
 
-function run<K extends NativeOp>(ops: OpHandlers, op: K, args: NativeOpArgs<K>): Promise<NativeOpResult<K>> {
+function run<K extends SyncOp>(ops: OpHandlers, op: K, args: NativeOpArgs<K>): Promise<NativeOpResult<K>> {
 	return ops[op](args)
 }
 
@@ -190,6 +191,13 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		if (revoked) {
 			reply({ code: "unauthenticated" })
+
+			return
+		}
+
+		// This host runs no rclone yet.
+		if (isMountsOp(message.op)) {
+			reply({ code: "unknown", message: "mounts are not available" })
 
 			return
 		}

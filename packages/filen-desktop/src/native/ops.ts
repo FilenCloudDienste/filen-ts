@@ -1,6 +1,6 @@
 import type { SyncPairInfo } from "@filen/sdk-rs"
 import { oldWouldIgnore } from "../shared/legacyIgnore.ts"
-import type { NativeOp, NativeOpArgs, NativeOpResult, NativePair } from "../shared/nativeProtocol.ts"
+import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
 import type { Convergence } from "./convergence.ts"
 import { classify, clip, HostError, invalidIgnore } from "./errors.ts"
@@ -25,7 +25,7 @@ export interface OpsContext {
 	convergenceTimeoutMs?: number
 }
 
-export type OpHandlers = { [K in NativeOp]: (args: NativeOpArgs<K>) => Promise<NativeOpResult<K>> }
+export type OpHandlers = { [K in SyncOp]: (args: NativeOpArgs<K>) => Promise<NativeOpResult<K>> }
 
 export interface HostEngine {
 	ops: OpHandlers

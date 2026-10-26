@@ -39,7 +39,13 @@ import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
 import { createMigration, createStashStore } from "./migration.ts"
 import { addonPath } from "./native/addonPath.ts"
-import { createNativeSupervisor } from "./native/supervisor.ts"
+import { listenAddresses } from "./mounts/addresses.ts"
+import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
+import { mountsDesired, wantsRoles } from "./mounts/desired.ts"
+import { configuredMountPoints } from "./mounts/mountPoint.ts"
+import { loadMountsStore, type MountsStore } from "./mounts/store.ts"
+import { ensureCertificate } from "./mounts/tls.ts"
+import { anyDemand, createNativeSupervisor } from "./native/supervisor.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
@@ -224,8 +230,117 @@ function syncStoreFor(userId: string): Promise<SyncStore> {
 	return store
 }
 
+// Mounts: config, credentials and certificates per user, beside the user's rclone cache.
+const mountsRoot = path.join(userDataPath, "mounts")
+const mountsStores = new Map<string, Promise<MountsStore>>()
+const credentialStores = new Map<string, CredentialStore>()
+
+async function mountsDir(userId: string): Promise<string> {
+	const dir = path.join(mountsRoot, userId)
+
+	await mkdir(dir, { recursive: true, mode: 0o700 })
+
+	return dir
+}
+
+// Read once per user; the directory is created by the first write.
+function mountsStoreFor(userId: string): Promise<MountsStore> {
+	let store = mountsStores.get(userId)
+
+	if (store === undefined) {
+		const file = atomicFile(path.join(mountsRoot, userId, "mounts.json"))
+
+		store = loadMountsStore(
+			{
+				...file,
+				write: async data => {
+					await mountsDir(userId)
+					await file.write(data)
+				}
+			},
+			warn
+		)
+		mountsStores.set(userId, store)
+	}
+
+	return store
+}
+
+function credentialStoreFor(userId: string): CredentialStore {
+	let store = credentialStores.get(userId)
+
+	if (store === undefined) {
+		const file = atomicFile(path.join(mountsRoot, userId, "credentials.bin"))
+
+		store = createCredentialStore(
+			{
+				...file,
+				write: async data => {
+					await mountsDir(userId)
+					await file.write(data)
+				}
+			},
+			vaultCipher,
+			warn
+		)
+		credentialStores.set(userId, store)
+	}
+
+	return store
+}
+
+// The bundled rclone and, on Linux, its checksum; no rclone ships in this build yet.
+function rcloneBinary(): { path: string; sha256: string | null } | null {
+	return null
+}
+
+// Every host start: the roles the user enabled. A fresh host runs none, so nothing is sent while none is wanted.
+async function applyMounts(userId: string): Promise<void> {
+	const config = (await mountsStoreFor(userId)).get()
+
+	if (!wantsRoles(config, process.platform)) {
+		return
+	}
+
+	const binary = rcloneBinary()
+
+	if (binary === null) {
+		warn("mounts: no rclone in this build")
+
+		return
+	}
+
+	const dir = await mountsDir(userId)
+	const stateDir = path.join(dir, "state")
+	const cacheDir = path.join(dir, "cache")
+
+	await Promise.all([mkdir(stateDir, { recursive: true, mode: 0o700 }), mkdir(cacheDir, { recursive: true, mode: 0o700 })])
+
+	const desired = await mountsDesired(config, {
+		platform: process.platform,
+		binary,
+		stateDir,
+		cacheDir,
+		logFile: path.join(userDataPath, "logs", "rclone.log"),
+		credentials: credentialStoreFor(userId),
+		certificate: (protocol, host) =>
+			ensureCertificate(
+				path.join(dir, "tls"),
+				protocol,
+				host === "0.0.0.0" ? listenAddresses(os.networkInterfaces()).map(entry => entry.address) : [host],
+				Date.now()
+			),
+		warn
+	})
+	const applied = await nativeSupervisor.callMounts("mountsApply", { desired }, userId)
+
+	if (!applied.ok) {
+		warn(`mounts: not applied: ${applied.error.code}`)
+	}
+}
+
 const nativeSupervisor = createNativeSupervisor({
-	fork: () => utilityProcess.fork(path.join(import.meta.dirname, "native.js"), [], { serviceName: "Filen Sync", stdio: "pipe" }),
+	fork: () => utilityProcess.fork(path.join(import.meta.dirname, "native.js"), [], { serviceName: "Filen Helper", stdio: "pipe" }),
 	vault: sessionVault,
 	addonPath: () =>
 		addonPath({
@@ -238,9 +353,24 @@ const nativeSupervisor = createNativeSupervisor({
 			exists: existsSync
 		}),
 	dirFor: engineDir,
-	demand: async userId => (await syncStoreFor(userId)).hasPairs() || (await migrationStash.pending(userId, "sync")) !== undefined,
+	demand: userId =>
+		anyDemand([
+			async () => (await syncStoreFor(userId)).hasPairs(),
+			async () => (await migrationStash.pending(userId, "sync")) !== undefined,
+			async () => (await mountsStoreFor(userId)).anyEnabled()
+		]),
 	log: { info, warn },
 	onMessage: (message, userId) => {
+		if (message.t === "mounts" || message.t === "mountsStats") {
+			return
+		}
+
+		if (message.t === "ready") {
+			applyMounts(userId).catch((error: unknown) => {
+				warn(`mounts: not applied: ${errorCode(error)}`)
+			})
+		}
+
 		if (message.t === "aggregate") {
 			syncAggregate = message.state
 			applySyncTray()
@@ -286,7 +416,8 @@ const syncService = createSyncService({
 							return dir === undefined || dir.length === 0 ? [] : [dir]
 						})
 					: []
-		})
+		}),
+		mountPoints: async userId => configuredMountPoints((await mountsStoreFor(userId)).get(), process.platform)
 	},
 	shell: { openPath: target => shell.openPath(target) },
 	legacySync: {

@@ -445,3 +445,123 @@ export interface DesktopSync {
 	// A pair to show, from a clicked notification. Calls back with what was asked before subscribing.
 	onOpenPair(callback: (pairId: string) => void): () => void
 }
+
+// Mounts: the network drive and the protocols the drive is served over, all run by one rclone in the native host.
+
+export type DesktopServeProtocol = "webdav" | "s3" | "ftp" | "sftp" | "http" | "restic" | "nfs"
+
+export type DesktopMountsRole = "drive" | DesktopServeProtocol
+
+export type DesktopMountsRoleState = "off" | "starting" | "running" | "stopping" | "error"
+
+// What mounts the drive: macFUSE when installed, else rclone's NFS mount (macOS); WinFsp; Linux fuse3. `installable`:
+// the app ships an installer for the missing one.
+export type DesktopFuseStatus =
+	| { state: "ready"; provider: "macFuse" | "nfsMount" | "winFsp" | "fuse3" }
+	| { state: "missing"; installable: boolean }
+
+export type DesktopMountsErrorCode =
+	| "hostUnavailable"
+	| "fuseMissing"
+	| "mountPointInvalid"
+	| "mountPointNotEmpty"
+	| "mountPointInUse"
+	| "driveLetterInUse"
+	| "portInUse"
+	| "addressUnavailable"
+	| "authRequired"
+	| "uploadsPending"
+	| "unsupportedProtocol"
+	| "binaryInvalid"
+	| "unauthenticated"
+	| "timeout"
+	| "unknown"
+
+export interface DesktopMountsError {
+	code: DesktopMountsErrorCode
+	message?: string
+}
+
+export type DesktopMountsResult<T> = { ok: true; value: T } | { ok: false; error: DesktopMountsError }
+
+// Told once until dismissed: weak or default serve credentials were replaced; a LAN server with such credentials was
+// turned off; the old mount point cannot be used; the old client's caches still hold uploads, or uploads that failed;
+// a server's certificate was made anew.
+export type DesktopMountsNotice =
+	| "credentialsRegenerated"
+	| "lanBindDisabled"
+	| "mountPointInvalid"
+	| "legacyUploadsPending"
+	| "legacyCacheErrored"
+	| "certificateRegenerated"
+
+// `mountPoint` (macOS, Linux) or `driveLetter` (Windows, "D".."Z").
+export interface DesktopDrive {
+	enabled: boolean
+	state: DesktopMountsRoleState
+	mountPoint: string | null
+	driveLetter: string | null
+	readOnly: boolean
+	error: DesktopMountsError | null
+}
+
+// `address` is the IP the server listens on; `authenticated` is false for nfs only.
+export interface DesktopServe {
+	protocol: DesktopServeProtocol
+	enabled: boolean
+	state: DesktopMountsRoleState
+	address: string
+	port: number
+	https: boolean
+	readOnly: boolean
+	authenticated: boolean
+	url: string | null
+	tlsFingerprint: string | null
+	error: DesktopMountsError | null
+}
+
+// The VFS cache every mount and server shares.
+export interface DesktopVfsTuning {
+	cacheMaxGiB: number
+	cacheMinFreeGiB: number
+	cacheMaxAgeHours: number
+	dirCacheSeconds: number
+}
+
+export interface DesktopMountsOverview {
+	host: DesktopSyncHostState
+	// null until the host reported it.
+	fuse: DesktopFuseStatus | null
+	drive: DesktopDrive
+	serves: DesktopServe[]
+	// The protocols this platform offers.
+	protocols: DesktopServeProtocol[]
+	cache: { usedBytes: number; freeBytes: number; pendingUploads: number; erroredFiles: number }
+	tuning: DesktopVfsTuning
+	notices: DesktopMountsNotice[]
+}
+
+// `speed` in bytes per second.
+export interface DesktopMountsStats {
+	transfers: { name: string; bytes: number; total: number; speed: number }[]
+	uploadsInProgress: number
+	uploadsQueued: number
+}
+
+// Why a chosen directory cannot be the drive's mount point.
+export type DesktopMountPointProblem =
+	| "notDirectory"
+	| "notEmpty"
+	| "symlink"
+	| "outsideHome"
+	| "homeDirectory"
+	| "appData"
+	| "temporary"
+	| "insidePair"
+	| "containsPair"
+
+// `id` stands for the chosen directory in a later setDrive; the page never sends a path back.
+export type DesktopMountPointChoice =
+	| { status: "canceled" }
+	| { status: "refused"; path: string; problem: DesktopMountPointProblem }
+	| { status: "ok"; id: string; path: string }

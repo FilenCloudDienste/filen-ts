@@ -1,5 +1,12 @@
 import { type, type Type } from "arktype"
 import type {
+	DesktopFuseStatus,
+	DesktopMountsError,
+	DesktopMountsErrorCode,
+	DesktopMountsRole,
+	DesktopMountsRoleState,
+	DesktopMountsStats,
+	DesktopServeProtocol,
 	DesktopSyncActivity,
 	DesktopSyncActivityKind,
 	DesktopSyncConflict,
@@ -15,7 +22,8 @@ import type {
 	DesktopSyncPlanPage,
 	DesktopSyncPlanSummary,
 	DesktopSyncTransfer,
-	DesktopSyncUnsyncable
+	DesktopSyncUnsyncable,
+	DesktopVfsTuning
 } from "@filen/shared/desktop"
 import { SESSION_BLOB_MAX_LENGTH } from "./channels.ts"
 
@@ -267,7 +275,7 @@ const evaluationSchema = type({ status: "'unconverged'", "+": "reject" }).or({
 })
 
 // Every engine call main can make, with its arguments and result.
-export const NATIVE_OPS = {
+export const SYNC_OPS = {
 	listPairs: { args: noArgs, result: nativePairSchema.array() },
 	addPair: {
 		args: type({ localRoot: localPathSchema, remoteRoot: "string.uuid", mode: syncModeSchema, "+": "reject" }),
@@ -317,7 +325,190 @@ export const NATIVE_OPS = {
 	seedLegacy: { args: pairArgs, result: type("'seeded' | 'unsupported'") }
 } as const
 
+// Mounts. Every role serves the whole drive; the host runs one rclone for all of them and reconciles it to the last
+// desired state main sent.
+
+export const SERVE_PROTOCOLS = ["webdav", "s3", "ftp", "sftp", "http", "restic", "nfs"] as const satisfies readonly DesktopServeProtocol[]
+
+const serveProtocolSchema = pinned<DesktopServeProtocol>()(type.enumerated(...SERVE_PROTOCOLS))
+
+const roleSchema = pinned<DesktopMountsRole>()(type.enumerated("drive", ...SERVE_PROTOCOLS))
+
+const roleStateSchema = pinned<DesktopMountsRoleState>()(type("'off' | 'starting' | 'running' | 'stopping' | 'error'"))
+
+// The protocols that can serve over https: the HTTP-based ones.
+export const HTTPS_PROTOCOLS: ReadonlySet<DesktopServeProtocol> = new Set(["webdav", "s3", "http", "restic"])
+
+const mountsErrorCodeSchema = pinned<DesktopMountsErrorCode>()(
+	type.enumerated(
+		"hostUnavailable",
+		"fuseMissing",
+		"mountPointInvalid",
+		"mountPointNotEmpty",
+		"mountPointInUse",
+		"driveLetterInUse",
+		"portInUse",
+		"addressUnavailable",
+		"authRequired",
+		"uploadsPending",
+		"unsupportedProtocol",
+		"binaryInvalid",
+		"unauthenticated",
+		"timeout",
+		"unknown"
+	)
+)
+
+export const mountsErrorSchema = pinned<DesktopMountsError>()(type({ code: mountsErrorCodeSchema, "message?": textSchema, "+": "reject" }))
+
+export type NativeMountsError = DesktopMountsError
+
+export const vfsTuningSchema = pinned<DesktopVfsTuning>()(
+	type({
+		cacheMaxGiB: "1 <= number.integer <= 65536",
+		cacheMinFreeGiB: "0 <= number.integer <= 65536",
+		cacheMaxAgeHours: "1 <= number.integer <= 87600",
+		dirCacheSeconds: "1 <= number.integer <= 86400",
+		"+": "reject"
+	})
+)
+
+// An explicit listen address: an IP literal or "localhost", never empty (rclone would bind every interface).
+export const listenHostSchema = type("string.ip").or("'localhost'")
+
+export function isLoopbackHost(host: string): boolean {
+	return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+}
+
+export const portSchema = type("1 <= number.integer <= 65535")
+
+// rclone splits basic credentials at ":" and its s3 key pair at ",".
+const credentialTextSchema = type("0 < string <= 256").narrow(value => !/[:\p{Cc}]/u.test(value))
+
+export const basicAuthSchema = type({ kind: "'basic'", user: credentialTextSchema, password: credentialTextSchema, "+": "reject" })
+
+export const s3AuthSchema = type({
+	kind: "'s3'",
+	accessKeyId: /^[A-Za-z0-9]{16,128}$/,
+	secretAccessKey: /^[A-Za-z0-9+/=_-]{16,128}$/,
+	"+": "reject"
+})
+
+const serveAuthSchema = basicAuthSchema.or(s3AuthSchema).or({ kind: "'none'", "+": "reject" })
+
+export type NativeServeAuth = typeof serveAuthSchema.infer
+
+// The credentials a protocol takes: none for nfs, which has no authentication and only ever listens on loopback.
+export function authKindOf(protocol: DesktopServeProtocol): NativeServeAuth["kind"] {
+	return protocol === "nfs" ? "none" : protocol === "s3" ? "s3" : "basic"
+}
+
+const serveSchema = type({
+	protocol: serveProtocolSchema,
+	host: listenHostSchema,
+	port: portSchema,
+	auth: serveAuthSchema,
+	tls: type({ cert: localPathSchema, key: localPathSchema, "+": "reject" }).or("null"),
+	readOnly: "boolean",
+	"+": "reject"
+}).narrow(
+	(serve, ctx) =>
+		(serve.auth.kind === authKindOf(serve.protocol) || ctx.mustBe(`${serve.protocol} credentials`)) &&
+		(serve.auth.kind !== "none" || isLoopbackHost(serve.host) || ctx.mustBe("a loopback address")) &&
+		(serve.tls === null || HTTPS_PROTOCOLS.has(serve.protocol) || ctx.mustBe("served without tls"))
+)
+
+export type NativeServe = typeof serveSchema.infer
+
+// The bundled rclone; `sha256` is checked where nothing re-signs the binary (Linux).
+const binarySchema = type({ path: localPathSchema, sha256: type(/^[0-9a-f]{64}$/).or("null"), "+": "reject" })
+
+const desiredSchema = type({
+	binary: binarySchema,
+	stateDir: localPathSchema,
+	cacheDir: localPathSchema,
+	logFile: localPathSchema.or("null"),
+	tuning: vfsTuningSchema,
+	drive: type({ mountPoint: localPathSchema, readOnly: "boolean", "+": "reject" }).or("null"),
+	serves: serveSchema
+		.array()
+		.narrow(
+			(serves, ctx) => new Set(serves.map(serve => serve.protocol)).size === serves.length || ctx.mustBe("one entry per protocol")
+		),
+	"+": "reject"
+})
+
+// Everything the host should run; anything running that this does not name is stopped.
+export type NativeMountsDesired = typeof desiredSchema.infer
+
+const nativeMountsStatusSchema = type({
+	roles: type({ role: roleSchema, state: roleStateSchema, error: mountsErrorSchema.or("null"), "+": "reject" }).array(),
+	// null while no rclone runs.
+	uploads: type({ pending: countSchema, errored: countSchema, "+": "reject" }).or("null"),
+	"+": "reject"
+})
+
+export type NativeMountsStatus = typeof nativeMountsStatusSchema.infer
+
+const mountsStatsSchema = pinned<DesktopMountsStats>()(
+	type({
+		transfers: type({ name: textSchema, bytes: countSchema, total: countSchema, speed: countSchema, "+": "reject" }).array(),
+		uploadsInProgress: countSchema,
+		uploadsQueued: countSchema,
+		"+": "reject"
+	})
+)
+
+const fuseStatusSchema = pinned<DesktopFuseStatus>()(
+	type({ state: "'ready'", provider: "'macFuse' | 'nfsMount' | 'winFsp' | 'fuse3'", "+": "reject" }).or({
+		state: "'missing'",
+		installable: "boolean",
+		"+": "reject"
+	})
+)
+
+// A Windows drive letter the drive may take; A-C are never offered.
+export const driveLetterSchema = type(/^[D-Z]$/)
+
+const dirArgs = type({ dir: localPathSchema, "+": "reject" })
+
+// The calls that drive rclone. `quiesceLegacy` stops the old client's rclone and unmounts its stale mount; `drainCache`
+// runs a temporary rclone on an old cache until its uploads finished or the timeout passed.
+export const MOUNTS_OPS = {
+	mountsApply: { args: type({ desired: desiredSchema, "+": "reject" }), result: nativeMountsStatusSchema },
+	mountsStatus: { args: noArgs, result: nativeMountsStatusSchema },
+	mountsStats: { args: noArgs, result: mountsStatsSchema },
+	fuseStatus: { args: noArgs, result: fuseStatusSchema },
+	driveLetters: { args: noArgs, result: driveLetterSchema.array() },
+	cacheUsage: { args: dirArgs, result: type({ usedBytes: countSchema, freeBytes: countSchema, "+": "reject" }) },
+	clearCache: { args: dirArgs, result: done },
+	quiesceLegacy: {
+		args: type({ binDir: localPathSchema, mountPoints: localPathSchema.array().atMostLength(16), "+": "reject" }),
+		result: type({ stopped: countSchema, unmounted: localPathSchema.array(), "+": "reject" })
+	},
+	drainCache: {
+		args: type({
+			binary: binarySchema,
+			stateDir: localPathSchema,
+			dir: localPathSchema,
+			timeoutMs: "1000 <= number.integer <= 7200000",
+			"+": "reject"
+		}),
+		result: type({ pending: countSchema, errored: countSchema, "+": "reject" })
+	}
+} as const
+
+export const NATIVE_OPS = { ...SYNC_OPS, ...MOUNTS_OPS } as const
+
+export type SyncOp = keyof typeof SYNC_OPS
+
+export type MountsOp = keyof typeof MOUNTS_OPS
+
 export type NativeOp = keyof typeof NATIVE_OPS
+
+export function isMountsOp(op: NativeOp): op is MountsOp {
+	return Object.hasOwn(MOUNTS_OPS, op)
+}
 
 export type NativeOpArgs<K extends NativeOp> = (typeof NATIVE_OPS)[K]["args"]["infer"]
 
@@ -329,6 +520,11 @@ export function opArgs<K extends NativeOp>(op: K): (typeof NATIVE_OPS)[K]["args"
 
 export function opResult<K extends NativeOp>(op: K): (typeof NATIVE_OPS)[K]["result"] {
 	return NATIVE_OPS[op].result
+}
+
+// What a failed call may report: a mounts call its own codes, an engine call the sync ones.
+export function opError(op: NativeOp): Type<DesktopSyncError> | Type<DesktopMountsError> {
+	return isMountsOp(op) ? mountsErrorSchema : nativeErrorSchema
 }
 
 const opSchema = type.enumerated(...(Object.keys(NATIVE_OPS) as NativeOp[]))
@@ -347,7 +543,8 @@ export interface NativeInit {
 
 export type NativeCall = { [K in NativeOp]: { t: "call"; id: number; op: K; args: NativeOpArgs<K> } }[NativeOp]
 
-export type ToNative = NativeInit | NativeCall | { t: "subscribe"; overview: boolean } | { t: "shutdown" }
+// `overview`: the sync runtime; `mounts`: mounts stats at 1 Hz.
+export type ToNative = NativeInit | NativeCall | { t: "subscribe"; overview: boolean; mounts: boolean } | { t: "shutdown" }
 
 const initSchema = pinned<NativeInit>()(
 	type({
@@ -368,7 +565,7 @@ const callSchema = type({ t: "'call'", id: callIdSchema, op: opSchema, args: "un
 
 export const toNativeSchema = initSchema
 	.or(callSchema)
-	.or({ t: "'subscribe'", overview: "boolean", "+": "reject" })
+	.or({ t: "'subscribe'", overview: "boolean", mounts: "boolean", "+": "reject" })
 	.or({ t: "'shutdown'", "+": "reject" })
 	.as<ToNative>()
 
@@ -381,10 +578,12 @@ export type NativeFatalReason = "addonLoad" | "session" | "baselineInUse" | "ope
 export type FromNative =
 	| { t: "ready"; pairs: NativePair[]; reset: boolean }
 	| { t: "reply"; id: number; ok: true; value: unknown }
-	| { t: "reply"; id: number; ok: false; error: NativeError }
+	| { t: "reply"; id: number; ok: false; error: NativeError | NativeMountsError }
 	| { t: "overview"; pairs: NativePairRuntime[] }
 	| { t: "aggregate"; state: NativeAggregate }
 	| { t: "activity"; entries: NativeActivity[] }
+	| { t: "mounts"; status: NativeMountsStatus }
+	| { t: "mountsStats"; stats: DesktopMountsStats }
 	| { t: "authRevoked" }
 	| { t: "fatal"; reason: NativeFatalReason }
 	| { t: "stopped" }
@@ -392,10 +591,12 @@ export type FromNative =
 export const fromNativeSchema = pinned<FromNative>()(
 	type({ t: "'ready'", pairs: nativePairSchema.array(), reset: "boolean", "+": "reject" })
 		.or({ t: "'reply'", id: callIdSchema, ok: "true", value: "unknown", "+": "reject" })
-		.or({ t: "'reply'", id: callIdSchema, ok: "false", error: nativeErrorSchema, "+": "reject" })
+		.or({ t: "'reply'", id: callIdSchema, ok: "false", error: nativeErrorSchema.or(mountsErrorSchema), "+": "reject" })
 		.or({ t: "'overview'", pairs: nativePairRuntimeSchema.array(), "+": "reject" })
 		.or({ t: "'aggregate'", state: "'idle' | 'syncing' | 'attention'", "+": "reject" })
 		.or({ t: "'activity'", entries: nativeActivitySchema.array(), "+": "reject" })
+		.or({ t: "'mounts'", status: nativeMountsStatusSchema, "+": "reject" })
+		.or({ t: "'mountsStats'", stats: mountsStatsSchema, "+": "reject" })
 		.or({ t: "'authRevoked'", "+": "reject" })
 		.or({ t: "'fatal'", reason: "'addonLoad' | 'session' | 'baselineInUse' | 'open'", "+": "reject" })
 		.or({ t: "'stopped'", "+": "reject" })

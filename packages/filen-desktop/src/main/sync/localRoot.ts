@@ -50,6 +50,15 @@ function within(child: string, parent: string, separator: string): boolean {
 	return child === parent || child.startsWith(parent.endsWith(separator) ? parent : `${parent}${separator}`)
 }
 
+// `child` is `parent` or inside it, compared the way the platform's file systems do.
+export function isWithin(child: string, parent: string, platform: NodeJS.Platform): boolean {
+	return within(comparable(child, platform), comparable(parent, platform), pathsOf(platform).sep)
+}
+
+export function samePath(a: string, b: string, platform: NodeJS.Platform): boolean {
+	return comparable(a, platform) === comparable(b, platform)
+}
+
 export function localRootProblem(realPath: string, ctx: LocalRootContext, entry: LocalRootEntry): DesktopSyncRootProblem | null {
 	if (!entry.directory) {
 		return "notDirectory"
@@ -130,7 +139,7 @@ export interface InspectedRoot {
 	warnings: DesktopSyncRootWarning[]
 }
 
-async function realOrSelf(value: string): Promise<string> {
+export async function realOrSelf(value: string): Promise<string> {
 	try {
 		return await realpath(value)
 	} catch {

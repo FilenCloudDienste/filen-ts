@@ -30,6 +30,9 @@ packageExtensions:
 # react-native-worklets accepts any @react-native/metro-config; keep the one that matches
 # react-native 0.88.0 instead of the latest. Remove when worklets narrows its peer range.
 overrides:
+  # @peculiar/x509 (desktop TLS) breaks with two copies of asn1-schema ("Cannot get schema for
+  # 'BasicConstraints'"), so the whole tree shares one. Drop once the @peculiar packages agree on their own.
+  '@peculiar/asn1-schema': 2.11.1
   '@react-native/metro-config': 0.88.0
   # uniwind's metro peers are `*`; keep them on the Metro line Expo's metro-config ships (0.87.1),
   # and its optional @expo/metro-config peer on Expo's own copy (its transformer hands every JS file
