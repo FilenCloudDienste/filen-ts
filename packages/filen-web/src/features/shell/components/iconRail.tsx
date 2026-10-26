@@ -44,6 +44,7 @@ import { saveRailOrder, useRailOrderQuery } from "@/features/shell/queries/railO
 import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
 import { RailProgressBar, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
+import { useSyncAggregate } from "@/features/sync/lib/syncStore"
 import { useTheme } from "@/providers/themeProvider"
 import { desktopBridge, desktopPlatform } from "@/lib/desktop"
 import { Button } from "@/components/ui/button"
@@ -339,17 +340,29 @@ function TransfersEntry({ active, reordering }: RailEntryProps) {
 }
 
 // Desktop app only: visibleRailOrder leaves it out of a browser's rail.
+// The aggregate dot: attention (a failed host, a pair in error, review or missing its directory, open issues)
+// wins over a running pass. Selects one string, so progress pushes re-render nothing here.
 function SyncEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation("common")
+	const { t } = useTranslation(["common", "sync"])
+	const aggregate = useSyncAggregate()
+	const dot = aggregate === "attention" ? "bg-destructive" : aggregate === "syncing" ? "bg-primary" : null
 
 	return (
 		<RailLink
 			active={active}
 			reordering={reordering}
-			label={t("moduleSync")}
+			label={t("common:moduleSync")}
+			ariaLabel={aggregate === "attention" ? t("sync:railAttention") : aggregate === "syncing" ? t("sync:railSyncing") : undefined}
 			icon={FolderSyncIcon}
 			linkOptions={{ to: "/sync" }}
-		/>
+		>
+			{dot === null ? null : (
+				<span
+					aria-hidden="true"
+					className={cn("absolute top-1 right-1 size-2 rounded-full ring-2 ring-canvas", dot)}
+				/>
+			)}
+		</RailLink>
 	)
 }
 

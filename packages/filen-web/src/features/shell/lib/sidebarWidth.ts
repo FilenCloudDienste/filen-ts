@@ -6,7 +6,7 @@ import { splitterKeyValue, type SplitterKeyBounds } from "@/lib/useSeparatorValu
 // panels — each persists its own width independently, same per-module split as old-web's own
 // separate "…ResizablePanelSizes" / "…ResizablePanelSizes:notes" localStorage keys. "assistant" is the
 // right-hand panel after the content card.
-export type SidebarModule = "drive" | "notes" | "chats" | "playlists" | "videos" | "assistant"
+export type SidebarModule = "drive" | "notes" | "chats" | "playlists" | "videos" | "sync" | "assistant"
 
 // Which edge of the panel the drag handle sits on: the left sidebars grow from their trailing (right)
 // edge, the right-hand assistant panel from its leading (left) edge.
@@ -18,6 +18,7 @@ export const SIDEBAR_EDGE: Record<SidebarModule, SidebarEdge> = {
 	chats: "trailing",
 	playlists: "trailing",
 	videos: "trailing",
+	sync: "trailing",
 	assistant: "leading"
 }
 
@@ -89,6 +90,7 @@ const sidebarWidthPreferences: Record<SidebarModule, KvPreference<number>> = {
 	chats: sidebarWidthPreference("chats"),
 	playlists: sidebarWidthPreference("playlists"),
 	videos: sidebarWidthPreference("videos"),
+	sync: sidebarWidthPreference("sync"),
 	assistant: sidebarWidthPreference("assistant")
 }
 

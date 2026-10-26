@@ -16,6 +16,7 @@ import { archive } from "@/locales/en/archive"
 import { events } from "@/locales/en/events"
 import { assistant } from "@/locales/en/assistant"
 import { desktop } from "@/locales/en/desktop"
+import { sync } from "@/locales/en/sync"
 
 // The app's namespace list and English catalogs, side-effect free. Deliberately NOT `@/lib/i18n`:
 // that module runs `i18n.init(…)` at import time, which the translation pipeline (scripts/
@@ -43,7 +44,8 @@ export const EN_CATALOGS = {
 	archive,
 	events,
 	assistant,
-	desktop
+	desktop,
+	sync
 } satisfies Record<string, Record<string, string>>
 
 export type EnNamespace = keyof typeof EN_CATALOGS

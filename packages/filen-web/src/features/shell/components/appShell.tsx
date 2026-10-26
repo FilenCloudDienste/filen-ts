@@ -58,9 +58,9 @@ export function AppShell() {
 	// The sidebar panel is contextual: /chats* gets the ChatsSidebar, /notes* the NotesSidebar,
 	// /settings* the SettingsSidebar, /contacts the ContactsSidebar, /playlists the PlaylistsSidebar,
 	// /videos* the VideosSidebar, /sync* the SyncSidebar, everything else the DriveSidebar. All eight share
-	// the same panel styling (rounded-xl, --shell-border outline); drive, notes, chats, playlists and videos
-	// are user-resizable (useResizableSidebar) and render a trailing drag-handle sibling — settings,
-	// contacts and sync stay fixed at w-52.
+	// the same panel styling (rounded-xl, --shell-border outline); drive, notes, chats, playlists, videos
+	// and sync are user-resizable (useResizableSidebar) and render a trailing drag-handle sibling —
+	// settings and contacts stay fixed at w-52.
 	const { t } = useTranslation("common")
 	const router = useRouter()
 	const pathname = useRouterState({ select: state => state.location.pathname })

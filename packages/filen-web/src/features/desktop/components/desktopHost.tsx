@@ -12,6 +12,8 @@ import type { TypedChatSocketEvent } from "@/features/chats/lib/socketHandlers"
 import { chatMessageNotification, type NotificationContent } from "@/features/desktop/lib/notifications"
 import { loadDesktopPrefs, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { isDesktopLocked } from "@/features/desktop/lib/lock"
+import { performLogout } from "@/features/shell/lib/performLogout"
+import { loadSync } from "@/features/sync/lib/syncStore"
 import { i18n } from "@/lib/i18n"
 
 // One prompt however often main reports the same download (each page load hears it again).
@@ -40,7 +42,7 @@ function notify(content: NotificationContent, tag: string, open: () => void): vo
 
 // Desktop-only duties of the authed shell: notifications for new chat messages and contact requests, which come
 // from this page's socket (main has none yet, so the shell keeps a hidden window's page alive while they are on),
-// and the prompt to restart into a downloaded update. Mounted by appShell only with the desktop bridge. Renders
+// the sync overview and the sign-out after a revoked session, and the prompt to restart into a downloaded update. Mounted by appShell only with the desktop bridge. Renders
 // nothing.
 export function DesktopHost(): null {
 	const { t } = useTranslation(["chats", "contacts", "common"])
@@ -54,6 +56,31 @@ export function DesktopHost(): null {
 			void Notification.requestPermission()
 		}
 	}, [])
+
+	// The shell removed a session the server rejected while syncing with it: a forced sign-out, like the
+	// socket's after a password change (an unsaved preview may delay it, never veto it). Sync follows the shell's overview for this page's whole life
+	// (the rail's dot reads it); a clicked sync notification opens that pair's issues.
+	useEffect(() => {
+		const bridge = desktopBridge()
+
+		if (bridge === undefined) {
+			return
+		}
+
+		loadSync()
+
+		const unsubscribeRevoked = bridge.session.onRevoked(() => {
+			void performLogout({ forced: true })
+		})
+		const unsubscribeOpenPair = bridge.sync.onOpenPair(pairId => {
+			void navigate({ to: "/sync/$pairId", params: { pairId }, search: { tab: "issues" } })
+		})
+
+		return () => {
+			unsubscribeRevoked()
+			unsubscribeOpenPair()
+		}
+	}, [navigate])
 
 	useEffect(() => {
 		const bridge = desktopBridge()

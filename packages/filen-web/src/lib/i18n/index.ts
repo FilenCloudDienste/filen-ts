@@ -40,6 +40,8 @@ export type EventsKey = NamespaceKey<"events">
 
 export type AssistantKey = NamespaceKey<"assistant">
 
+export type SyncKey = NamespaceKey<"sync">
+
 // `Intl.PluralRules` gate: i18next's plural-key resolution (`_one`/
 // `_other` suffixes, unused by rev 1's catalogs but load-bearing the moment a count-based key
 // lands) needs it. Unlike React Native/Hermes — which mobile polyfills via `intl-pluralrules` —
