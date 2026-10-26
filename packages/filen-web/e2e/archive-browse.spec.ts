@@ -20,8 +20,9 @@ const [HUNDRED_K] = FIXTURE_FILES["archive-huge"]
 const textBytes = (path: keyof typeof TREE_FILES): number => Buffer.byteLength(TREE_FILES[path])
 
 // A listing of every entry is the one that takes long: a tarball is downloaded whole, the 100k zip's
-// index is 5 MB. Everything else here answers from a zip index read in well under the UI default.
-const LISTING_TIMEOUT_MS = 60_000
+// index is 5 MB, and slower on a CI runner (budget). Everything else here answers from a zip index read in well
+// under the UI default.
+const LISTING_TIMEOUT_MS = budget(60_000)
 
 test.describe("archive browser", () => {
 	test("a zip lists at once and its directories navigate by row, crumb and folded crumb", async ({ page }) => {
@@ -447,6 +448,9 @@ test.describe("archive browser", () => {
 	})
 
 	test("a 100 000-entry zip lists, selects and scrolls without stalling", async ({ page, browserName }) => {
+		// Its listing alone may take LISTING_TIMEOUT_MS.
+		test.slow()
+
 		const cspViolations = trackCspViolations(page)
 		const heapBytes = (): Promise<number> =>
 			page.evaluate(() => (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0)

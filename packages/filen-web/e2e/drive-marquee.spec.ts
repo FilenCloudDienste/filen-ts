@@ -159,10 +159,16 @@ test.describe("drive rubber-band selection", () => {
 		const header = page.locator("header", { has: crumbs })
 		const headerBox = await boxOf(header)
 		const breadcrumbBox = await boxOf(crumbs)
+		// The middle of the gap, not a fixed step past the breadcrumb: a long breadcrumb (the fixture root's name)
+		// leaves little room before the buttons.
+		const buttonsBox = await boxOf(header.getByRole("button", { name: "New directory", exact: true }))
+		const gapStart = breadcrumbBox.x + breadcrumbBox.width
+
+		expect(buttonsBox.x - gapStart).toBeGreaterThan(16)
 
 		await first.click()
 		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
-		await page.mouse.click(breadcrumbBox.x + breadcrumbBox.width + 40, headerBox.y + headerBox.height / 2)
+		await page.mouse.click((gapStart + buttonsBox.x) / 2, headerBox.y + headerBox.height / 2)
 		await expect(selectedBar).toHaveCount(0)
 
 		// A control that acts around the selection keeps it — including the press that closes its menu.
