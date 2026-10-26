@@ -30,6 +30,7 @@
 		"@eslint/js": "^10.0.1",
 		"@filen/shared": "workspace:*",
 		"@types/node": "^24.19.2",
+		"arktype": "^2.2.9",
 		"electron": "45.0.0",
 		"electron-builder": "26.18.0",
 		"esbuild": "^0.28.2",

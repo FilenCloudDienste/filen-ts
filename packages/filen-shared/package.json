@@ -45,6 +45,7 @@
 		"vitest": "^5.0.5"
 	},
 	"dependencies": {
+		"arktype": "^2.2.9",
 		"clsx": "^2.1.1",
 		"js-xxhash": "^5.0.1",
 		"node-html-better-parser": "^1.5.9",

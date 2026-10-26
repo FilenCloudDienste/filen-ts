@@ -1,4 +1,5 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
+import { type } from "arktype"
 import { sessionSchema } from "@filen/shared/session"
 import { sdkApi } from "@/lib/sdk/client"
 import { kvGet, kvSetJson, kvDelete, kvHas } from "@/lib/storage/adapter"
@@ -60,16 +61,16 @@ function decodeSession(raw: string): StringifiedClient | null {
 		return null
 	}
 
-	const result = sessionSchema.safeParse(parsed)
+	const result = sessionSchema(parsed)
 
-	if (!result.success) {
-		// Paths only: an issue never carries the value, but the path list is all a report needs.
-		log.warn("session", "dropping invalid persisted session", result.error.issues.map(issue => issue.path.join(".")).join(", "))
+	if (result instanceof type.errors) {
+		// Paths only, never values: the path list is all a report needs.
+		log.warn("session", "dropping invalid persisted session", result.map(error => error.path.join(".")).join(", "))
 
 		return null
 	}
 
-	return result.data
+	return result
 }
 
 // Read the persisted blob, validate it, and inject it into the worker. Returns false when there is

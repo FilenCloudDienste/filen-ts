@@ -252,6 +252,9 @@ importers:
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
+      arktype:
+        specifier: ^2.2.9
+        version: 2.2.9
       electron:
         specifier: 45.0.0
         version: 45.0.0(supports-color@8.1.1)
@@ -869,6 +872,9 @@ importers:
 
   packages/filen-shared:
     dependencies:
+      arktype:
+        specifier: ^2.2.9
+        version: 2.2.9
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

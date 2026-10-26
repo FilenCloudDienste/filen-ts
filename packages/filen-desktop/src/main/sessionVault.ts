@@ -1,4 +1,5 @@
 import { open, readFile, rename, rm } from "node:fs/promises"
+import { type } from "arktype"
 import { sessionEnvelopeSchema } from "@filen/shared/session"
 import type { SessionRead } from "../shared/channels.ts"
 
@@ -14,7 +15,7 @@ export function isSessionBlob(value: unknown): value is string {
 	}
 
 	try {
-		return sessionEnvelopeSchema.safeParse(JSON.parse(value)).success
+		return !(sessionEnvelopeSchema(JSON.parse(value)) instanceof type.errors)
 	} catch {
 		return false
 	}

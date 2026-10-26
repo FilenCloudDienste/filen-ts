@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, nativeTheme, protocol, safeStorage, session, shell } from "electron"
 import { readFileSync } from "node:fs"
+import { type } from "arktype"
 import path from "node:path"
 import type { DesktopPlatform, WindowState } from "@filen/shared/desktop"
 import { CHANNELS } from "../shared/channels.ts"
@@ -9,6 +10,9 @@ import { isPermissionAllowed } from "./permissions.ts"
 import { registerAppProtocol } from "./serve.ts"
 import { createSessionVault, isSessionBlob, vaultFile, vaultMode, type VaultCipher } from "./sessionVault.ts"
 import { drawsOwnBorder, initialColors, windowOptions } from "./window.ts"
+
+// Payloads from the renderer are untrusted input.
+const titleBarColorsSchema = type({ color: "string", symbolColor: "string", border: "string" })
 
 const SCHEME = "filen"
 const APP_ORIGIN = `${SCHEME}://app`
@@ -187,29 +191,24 @@ if (!app.requestSingleInstanceLock()) {
 		}
 	})
 
-	ipcMain.on(CHANNELS.setTitleBarColors, (event, colors: unknown) => {
+	ipcMain.on(CHANNELS.setTitleBarColors, (event, payload: unknown) => {
 		if (!isTrustedSender(event.senderFrame?.url, APP_ORIGIN) || PLATFORM === "darwin") {
 			return
 		}
 
-		if (
-			typeof colors === "object" &&
-			colors !== null &&
-			"color" in colors &&
-			"symbolColor" in colors &&
-			"border" in colors &&
-			typeof colors.color === "string" &&
-			typeof colors.symbolColor === "string" &&
-			typeof colors.border === "string"
-		) {
-			const window = BrowserWindow.fromWebContents(event.sender)
+		const colors = titleBarColorsSchema(payload)
 
-			window?.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor })
+		if (colors instanceof type.errors) {
+			return
+		}
 
-			// Windows 11 draws the border in this colour (a no-op on Windows 10, which gets the page's border).
-			if (PLATFORM === "win32") {
-				window?.setAccentColor(colors.border)
-			}
+		const window = BrowserWindow.fromWebContents(event.sender)
+
+		window?.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor })
+
+		// Windows 11 draws the border in this colour (a no-op on Windows 10, which gets the page's border).
+		if (PLATFORM === "win32") {
+			window?.setAccentColor(colors.border)
 		}
 	})
 
