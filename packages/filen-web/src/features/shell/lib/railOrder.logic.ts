@@ -7,6 +7,7 @@ export const RAIL_ENTRY_IDS = [
 	"videos",
 	"transfers",
 	"sync",
+	"mounts",
 	"notes",
 	"chats",
 	"playlists",
@@ -20,7 +21,7 @@ export const DEFAULT_RAIL_ORDER: readonly RailEntryId[] = RAIL_ENTRY_IDS
 
 // Entries only the desktop app can serve. The stored order still holds them in a browser, so a reorder
 // there never loses their slot for a later desktop session on the same origin.
-const DESKTOP_ONLY = new Set<RailEntryId>(["sync"])
+const DESKTOP_ONLY = new Set<RailEntryId>(["sync", "mounts"])
 
 const KNOWN = new Set<string>(RAIL_ENTRY_IDS)
 
@@ -133,7 +134,7 @@ export function railShift(index: number, from: number, to: number, pitch: number
 	return 0
 }
 
-// Whether `pathname` is inside the section an entry links to. Drive, Videos, Sync, Notes, Chats and Settings nest
+// Whether `pathname` is inside the section an entry links to. Drive, Videos, Sync, Mounts, Notes, Chats and Settings nest
 // deeper routes under their root; the others are single pages.
 export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 	switch (id) {
@@ -153,6 +154,8 @@ export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 			return pathname === "/transfers"
 		case "sync":
 			return pathIsUnder(pathname, "/sync")
+		case "mounts":
+			return pathIsUnder(pathname, "/mounts")
 		case "playlists":
 			return pathname === "/playlists"
 		case "contacts":

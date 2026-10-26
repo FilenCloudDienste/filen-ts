@@ -18,6 +18,7 @@ describe("normalizeRailOrder", () => {
 			"videos",
 			"transfers",
 			"sync",
+			"mounts",
 			"notes",
 			"chats",
 			"playlists",
@@ -27,7 +28,7 @@ describe("normalizeRailOrder", () => {
 	})
 
 	it("keeps a stored order", () => {
-		const stored = ["settings", "chats", "drive", "photos", "videos", "transfers", "sync", "notes", "playlists", "contacts"]
+		const stored = ["settings", "chats", "drive", "photos", "videos", "transfers", "sync", "mounts", "notes", "playlists", "contacts"]
 
 		expect(normalizeRailOrder(stored)).toEqual(stored)
 	})
@@ -43,6 +44,7 @@ describe("normalizeRailOrder", () => {
 			"videos",
 			"transfers",
 			"sync",
+			"mounts",
 			"notes"
 		])
 	})
@@ -54,6 +56,7 @@ describe("normalizeRailOrder", () => {
 			"videos",
 			"transfers",
 			"sync",
+			"mounts",
 			"notes",
 			"chats",
 			"playlists",
@@ -67,6 +70,7 @@ describe("normalizeRailOrder", () => {
 			"drive",
 			"transfers",
 			"sync",
+			"mounts",
 			"notes",
 			"chats",
 			"playlists",
@@ -86,6 +90,11 @@ describe("visibleRailOrder", () => {
 		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: false })).not.toContain("sync")
 		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: true })).toEqual(DEFAULT_RAIL_ORDER)
 	})
+
+	it("mounts hidden in browser", () => {
+		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: false })).not.toContain("mounts")
+		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: true })).toContain("mounts")
+	})
 })
 
 describe("mergeRailOrder", () => {
@@ -94,8 +103,43 @@ describe("mergeRailOrder", () => {
 		const visible = visibleRailOrder(full, { desktop: false })
 		const merged = mergeRailOrder(full, moveRailEntry(visible, 0, visible.length - 1))
 
-		expect(merged).toEqual(["photos", "videos", "transfers", "notes", "sync", "chats", "playlists", "contacts", "settings", "drive"])
+		expect(merged).toEqual([
+			"photos",
+			"videos",
+			"transfers",
+			"notes",
+			"sync",
+			"mounts",
+			"chats",
+			"playlists",
+			"contacts",
+			"settings",
+			"drive"
+		])
 		expect(visibleRailOrder(merged, { desktop: false })).toEqual(moveRailEntry(visible, 0, visible.length - 1))
+	})
+
+	it("reorder keeps hidden mounts", () => {
+		const full = normalizeRailOrder([
+			"mounts",
+			"drive",
+			"photos",
+			"videos",
+			"transfers",
+			"sync",
+			"notes",
+			"chats",
+			"playlists",
+			"contacts",
+			"settings"
+		])
+		const visible = visibleRailOrder(full, { desktop: false })
+		const next = moveRailEntry(visible, visible.length - 1, 0)
+		const merged = mergeRailOrder(full, next)
+
+		expect(merged[0]).toBe("mounts")
+		expect(merged.indexOf("sync")).toBe(full.indexOf("sync"))
+		expect(visibleRailOrder(merged, { desktop: false })).toEqual(next)
 	})
 
 	it("is the reordered list itself when nothing is hidden", () => {
@@ -155,6 +199,8 @@ describe("railEntryActive", () => {
 		expect(railEntryActive("videos", "/videosx")).toBe(false)
 		expect(railEntryActive("sync", "/sync/1")).toBe(true)
 		expect(railEntryActive("sync", "/syncx")).toBe(false)
+		expect(railEntryActive("mounts", "/mounts/webdav")).toBe(true)
+		expect(railEntryActive("mounts", "/mountsx")).toBe(false)
 	})
 
 	it("matches the single-page sections exactly", () => {

@@ -19,6 +19,7 @@ import { Route as AppChatsRouteImport } from './routes/_app/chats'
 import { Route as AppContactsRouteImport } from './routes/_app/contacts'
 import { Route as AppFavoritesRouteImport } from './routes/_app/favorites'
 import { Route as AppLinksRouteImport } from './routes/_app/links'
+import { Route as AppMountsRouteImport } from './routes/_app/mounts'
 import { Route as AppNotesRouteImport } from './routes/_app/notes'
 import { Route as AppPhotosRouteImport } from './routes/_app/photos'
 import { Route as AppPlaylistsRouteImport } from './routes/_app/playlists'
@@ -34,6 +35,8 @@ import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppChatsIndexRouteImport } from './routes/_app/chats.index'
 import { Route as AppChatsUuidRouteImport } from './routes/_app/chats.$uuid'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
+import { Route as AppMountsIndexRouteImport } from './routes/_app/mounts.index'
+import { Route as AppMountsRoleRouteImport } from './routes/_app/mounts.$role'
 import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
 import { Route as AppNotesUuidRouteImport } from './routes/_app/notes.$uuid'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
@@ -105,6 +108,11 @@ const AppFavoritesRoute = AppFavoritesRouteImport.update({
 const AppLinksRoute = AppLinksRouteImport.update({
   id: '/links',
   path: '/links',
+  getParentRoute: () => AppRouteRoute,
+} as any)
+const AppMountsRoute = AppMountsRouteImport.update({
+  id: '/mounts',
+  path: '/mounts',
   getParentRoute: () => AppRouteRoute,
 } as any)
 const AppNotesRoute = AppNotesRouteImport.update({
@@ -181,6 +189,16 @@ const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
   id: '/drive/$',
   path: '/drive/$',
   getParentRoute: () => AppRouteRoute,
+} as any)
+const AppMountsIndexRoute = AppMountsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppMountsRoute,
+} as any)
+const AppMountsRoleRoute = AppMountsRoleRouteImport.update({
+  id: '/$role',
+  path: '/$role',
+  getParentRoute: () => AppMountsRoute,
 } as any)
 const AppNotesIndexRoute = AppNotesIndexRouteImport.update({
   id: '/',
@@ -309,6 +327,7 @@ export interface FileRoutesByFullPath {
   '/contacts': typeof AppContactsRoute
   '/favorites': typeof AppFavoritesRoute
   '/links': typeof AppLinksRoute
+  '/mounts': typeof AppMountsRouteWithChildren
   '/notes': typeof AppNotesRouteWithChildren
   '/photos': typeof AppPhotosRoute
   '/playlists': typeof AppPlaylistsRoute
@@ -322,6 +341,7 @@ export interface FileRoutesByFullPath {
   '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
+  '/mounts/$role': typeof AppMountsRoleRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
@@ -339,6 +359,7 @@ export interface FileRoutesByFullPath {
   '/videos/search': typeof AppVideosSearchRoute
   '/videos/shows': typeof AppVideosShowsRoute
   '/chats/': typeof AppChatsIndexRoute
+  '/mounts/': typeof AppMountsIndexRoute
   '/notes/': typeof AppNotesIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/sync/': typeof AppSyncIndexRoute
@@ -366,6 +387,7 @@ export interface FileRoutesByTo {
   '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
   '/drive/$': typeof AppDriveSplatRoute
+  '/mounts/$role': typeof AppMountsRoleRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
@@ -383,6 +405,7 @@ export interface FileRoutesByTo {
   '/videos/search': typeof AppVideosSearchRoute
   '/videos/shows': typeof AppVideosShowsRoute
   '/chats': typeof AppChatsIndexRoute
+  '/mounts': typeof AppMountsIndexRoute
   '/notes': typeof AppNotesIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/sync': typeof AppSyncIndexRoute
@@ -404,6 +427,7 @@ export interface FileRoutesById {
   '/_app/contacts': typeof AppContactsRoute
   '/_app/favorites': typeof AppFavoritesRoute
   '/_app/links': typeof AppLinksRoute
+  '/_app/mounts': typeof AppMountsRouteWithChildren
   '/_app/notes': typeof AppNotesRouteWithChildren
   '/_app/photos': typeof AppPhotosRoute
   '/_app/playlists': typeof AppPlaylistsRoute
@@ -417,6 +441,7 @@ export interface FileRoutesById {
   '/reset/$token': typeof ResetTokenRoute
   '/_app/chats/$uuid': typeof AppChatsUuidRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
+  '/_app/mounts/$role': typeof AppMountsRoleRoute
   '/_app/notes/$uuid': typeof AppNotesUuidRoute
   '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
@@ -434,6 +459,7 @@ export interface FileRoutesById {
   '/_app/videos/search': typeof AppVideosSearchRoute
   '/_app/videos/shows': typeof AppVideosShowsRoute
   '/_app/chats/': typeof AppChatsIndexRoute
+  '/_app/mounts/': typeof AppMountsIndexRoute
   '/_app/notes/': typeof AppNotesIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/sync/': typeof AppSyncIndexRoute
@@ -455,6 +481,7 @@ export interface FileRouteTypes {
     | '/contacts'
     | '/favorites'
     | '/links'
+    | '/mounts'
     | '/notes'
     | '/photos'
     | '/playlists'
@@ -468,6 +495,7 @@ export interface FileRouteTypes {
     | '/reset/$token'
     | '/chats/$uuid'
     | '/drive/$'
+    | '/mounts/$role'
     | '/notes/$uuid'
     | '/settings/account'
     | '/settings/advanced'
@@ -485,6 +513,7 @@ export interface FileRouteTypes {
     | '/videos/search'
     | '/videos/shows'
     | '/chats/'
+    | '/mounts/'
     | '/notes/'
     | '/settings/'
     | '/sync/'
@@ -512,6 +541,7 @@ export interface FileRouteTypes {
     | '/reset/$token'
     | '/chats/$uuid'
     | '/drive/$'
+    | '/mounts/$role'
     | '/notes/$uuid'
     | '/settings/account'
     | '/settings/advanced'
@@ -529,6 +559,7 @@ export interface FileRouteTypes {
     | '/videos/search'
     | '/videos/shows'
     | '/chats'
+    | '/mounts'
     | '/notes'
     | '/settings'
     | '/sync'
@@ -549,6 +580,7 @@ export interface FileRouteTypes {
     | '/_app/contacts'
     | '/_app/favorites'
     | '/_app/links'
+    | '/_app/mounts'
     | '/_app/notes'
     | '/_app/photos'
     | '/_app/playlists'
@@ -562,6 +594,7 @@ export interface FileRouteTypes {
     | '/reset/$token'
     | '/_app/chats/$uuid'
     | '/_app/drive/$'
+    | '/_app/mounts/$role'
     | '/_app/notes/$uuid'
     | '/_app/settings/account'
     | '/_app/settings/advanced'
@@ -579,6 +612,7 @@ export interface FileRouteTypes {
     | '/_app/videos/search'
     | '/_app/videos/shows'
     | '/_app/chats/'
+    | '/_app/mounts/'
     | '/_app/notes/'
     | '/_app/settings/'
     | '/_app/sync/'
@@ -670,6 +704,13 @@ declare module '@tanstack/react-router' {
       path: '/links'
       fullPath: '/links'
       preLoaderRoute: typeof AppLinksRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
+    '/_app/mounts': {
+      id: '/_app/mounts'
+      path: '/mounts'
+      fullPath: '/mounts'
+      preLoaderRoute: typeof AppMountsRouteImport
       parentRoute: typeof AppRouteRoute
     }
     '/_app/notes': {
@@ -776,6 +817,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/drive/$'
       preLoaderRoute: typeof AppDriveSplatRouteImport
       parentRoute: typeof AppRouteRoute
+    }
+    '/_app/mounts/': {
+      id: '/_app/mounts/'
+      path: '/'
+      fullPath: '/mounts/'
+      preLoaderRoute: typeof AppMountsIndexRouteImport
+      parentRoute: typeof AppMountsRoute
+    }
+    '/_app/mounts/$role': {
+      id: '/_app/mounts/$role'
+      path: '/$role'
+      fullPath: '/mounts/$role'
+      preLoaderRoute: typeof AppMountsRoleRouteImport
+      parentRoute: typeof AppMountsRoute
     }
     '/_app/notes/': {
       id: '/_app/notes/'
@@ -982,6 +1037,20 @@ const AppChatsRouteWithChildren = AppChatsRoute._addFileChildren(
   AppChatsRouteChildren,
 )
 
+interface AppMountsRouteChildren {
+  AppMountsRoleRoute: typeof AppMountsRoleRoute
+  AppMountsIndexRoute: typeof AppMountsIndexRoute
+}
+
+const AppMountsRouteChildren: AppMountsRouteChildren = {
+  AppMountsRoleRoute: AppMountsRoleRoute,
+  AppMountsIndexRoute: AppMountsIndexRoute,
+}
+
+const AppMountsRouteWithChildren = AppMountsRoute._addFileChildren(
+  AppMountsRouteChildren,
+)
+
 interface AppNotesRouteChildren {
   AppNotesUuidRoute: typeof AppNotesUuidRoute
   AppNotesIndexRoute: typeof AppNotesIndexRoute
@@ -1041,6 +1110,7 @@ interface AppRouteRouteChildren {
   AppContactsRoute: typeof AppContactsRoute
   AppFavoritesRoute: typeof AppFavoritesRoute
   AppLinksRoute: typeof AppLinksRoute
+  AppMountsRoute: typeof AppMountsRouteWithChildren
   AppNotesRoute: typeof AppNotesRouteWithChildren
   AppPhotosRoute: typeof AppPhotosRoute
   AppPlaylistsRoute: typeof AppPlaylistsRoute
@@ -1060,6 +1130,7 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppContactsRoute: AppContactsRoute,
   AppFavoritesRoute: AppFavoritesRoute,
   AppLinksRoute: AppLinksRoute,
+  AppMountsRoute: AppMountsRouteWithChildren,
   AppNotesRoute: AppNotesRouteWithChildren,
   AppPhotosRoute: AppPhotosRoute,
   AppPlaylistsRoute: AppPlaylistsRoute,

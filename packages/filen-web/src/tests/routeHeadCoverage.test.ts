@@ -13,7 +13,7 @@ const NO_HEAD = new Set([
 	"_app/settings/index.tsx",
 	// Pathless auth layout; every child declares a title.
 	"_app/route.tsx",
-	// Inherit their notes/chats/videos/sync layout title — the deepest declared title wins, and per-item titles are
+	// Inherit their notes/chats/videos/sync/mounts layout title — the deepest declared title wins, and per-item titles are
 	// deliberately out of scope.
 	"_app/notes.index.tsx",
 	"_app/notes.$uuid.tsx",
@@ -22,7 +22,9 @@ const NO_HEAD = new Set([
 	"_app/videos.index.tsx",
 	"_app/videos.library.$uuid.tsx",
 	"_app/sync.index.tsx",
-	"_app/sync.$pairId.tsx"
+	"_app/sync.$pairId.tsx",
+	"_app/mounts.index.tsx",
+	"_app/mounts.$role.tsx"
 ])
 
 function routeFiles(dir: string, prefix = ""): string[] {

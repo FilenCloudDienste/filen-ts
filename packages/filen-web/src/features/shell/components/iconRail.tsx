@@ -18,6 +18,7 @@ import {
 	UserIcon,
 	CircleHelpIcon,
 	FolderSyncIcon,
+	HardDriveIcon,
 	type LucideIcon
 } from "lucide-react"
 import { formatBytesPerSecond } from "@filen/shared"
@@ -366,6 +367,21 @@ function SyncEntry({ active, reordering }: RailEntryProps) {
 	)
 }
 
+// Desktop app only: visibleRailOrder leaves it out of a browser's rail.
+function MountsEntry({ active, reordering }: RailEntryProps) {
+	const { t } = useTranslation("common")
+
+	return (
+		<RailLink
+			active={active}
+			reordering={reordering}
+			label={t("moduleMounts")}
+			icon={HardDriveIcon}
+			linkOptions={{ to: "/mounts" }}
+		/>
+	)
+}
+
 // Previously playlists only lived inside the now-playing popover's Playlists tab, unreachable without a
 // playing queue — this entry (plus nowPlayingPanel.tsx dropping that tab) fixes that reachability gap.
 function PlaylistsEntry({ active, reordering }: RailEntryProps) {
@@ -513,6 +529,7 @@ const RAIL_ENTRIES: Record<RailEntryId, (props: RailEntryProps) => ReactElement>
 	videos: VideosEntry,
 	transfers: TransfersEntry,
 	sync: SyncEntry,
+	mounts: MountsEntry,
 	notes: NotesEntry,
 	chats: ChatsEntry,
 	playlists: PlaylistsEntry,
