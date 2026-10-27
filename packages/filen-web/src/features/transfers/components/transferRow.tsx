@@ -101,15 +101,47 @@ function TransferGlyph({
 	}
 
 	return (
+		<ProgressGlyph
+			label={transfer.name}
+			progress={active ? progress : null}
+			valueText={t(activeStatusLabelKey(transfer.direction, transfer.paused, waiting))}
+			stalled={transfer.paused || trashing}
+			icon={icon}
+			badge={badge}
+			badgeClassName={badgeTone(transfer, trashing)}
+		/>
+	)
+}
+
+// The glyph's drawing: `progress` (0-100) rings the icon as a progressbar, null leaves a plain disc; a stalled ring
+// is quieter.
+export function ProgressGlyph({
+	label,
+	progress,
+	valueText,
+	stalled,
+	icon,
+	badge,
+	badgeClassName
+}: {
+	label: string
+	progress: number | null
+	valueText: string
+	stalled: boolean
+	icon: ReactNode
+	badge: ReactNode
+	badgeClassName: string
+}) {
+	return (
 		<div className="relative size-10 shrink-0">
-			{active ? (
+			{progress !== null ? (
 				<div
 					role="progressbar"
-					aria-label={transfer.name}
+					aria-label={label}
 					aria-valuemin={0}
 					aria-valuemax={100}
 					aria-valuenow={Math.round(progress)}
-					aria-valuetext={t(activeStatusLabelKey(transfer.direction, transfer.paused, waiting))}
+					aria-valuetext={valueText}
 					className="absolute inset-0"
 				>
 					<svg
@@ -136,7 +168,7 @@ function TransferGlyph({
 							strokeDashoffset={RING_CIRCUMFERENCE * (1 - progress / 100)}
 							className={cn(
 								"transition-[stroke-dashoffset] duration-300 ease-out",
-								transfer.paused || trashing ? "stroke-muted-foreground/50" : "stroke-primary"
+								stalled ? "stroke-muted-foreground/50" : "stroke-primary"
 							)}
 						/>
 					</svg>
@@ -149,7 +181,7 @@ function TransferGlyph({
 				aria-hidden="true"
 				className={cn(
 					"absolute -right-0.5 -bottom-0.5 flex size-[18px] items-center justify-center rounded-full ring-2 ring-background [&_svg]:size-2.5 [&_svg]:stroke-[3]",
-					badgeTone(transfer, trashing)
+					badgeClassName
 				)}
 			>
 				{badge}
@@ -172,6 +204,9 @@ function badgeTone(transfer: Transfer, trashing: boolean): string {
 
 	return "bg-primary text-primary-foreground"
 }
+
+// A row of the transfers screen; a fixed height the screen's virtualizer counts in (ROW_STRIDE).
+export const TRANSFER_ROW_CLASS = "flex items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-accent/40"
 
 const ROW_ACTION_CLASS = "text-muted-foreground hover:text-foreground"
 
@@ -251,7 +286,7 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 	return (
 		<li
 			aria-label={transfer.name}
-			className="flex items-center gap-3 rounded-xl px-3 py-2 transition-colors hover:bg-accent/40"
+			className={TRANSFER_ROW_CLASS}
 		>
 			<TransferGlyph
 				transfer={transfer}

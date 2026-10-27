@@ -128,6 +128,10 @@ const nativePairSchema = type({ ...pairFields, "+": "reject" })
 
 export type NativePair = typeof nativePairSchema.infer
 
+// The transfers a pair reports: every one in flight. A pass moves at most the client's concurrency of files at once (16
+// chunks by default, the SDK's JsClientConfig.concurrency), so the cap only drops a transfer whose end went unreported.
+export const SYNC_TRANSFERS_KEPT = 16
+
 const transferSchema = pinned<DesktopSyncTransfer>()(
 	type({ relPath: relPathSchema, direction: "'upload' | 'download'", bytes: countSchema, total: countSchema, "+": "reject" })
 )
@@ -141,7 +145,7 @@ const nativePairRuntimeSchema = type({
 	...pairFields,
 	syncing: "boolean",
 	progress: type({ done: countSchema, total: countSchema, "+": "reject" }).or("null"),
-	transfers: transferSchema.array(),
+	transfers: transferSchema.array().atMostLength(SYNC_TRANSFERS_KEPT),
 	lastSyncedAt: countSchema.or("null"),
 	lastError: textSchema.or("null"),
 	issues: issueCountsSchema,

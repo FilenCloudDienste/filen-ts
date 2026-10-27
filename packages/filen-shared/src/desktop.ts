@@ -211,6 +211,7 @@ export interface DesktopSyncPair {
 	paused: boolean
 	phase: DesktopSyncPhase
 	progress: { done: number; total: number } | null
+	// The files moving now, newest first; at most 16.
 	transfers: DesktopSyncTransfer[]
 	// Epoch ms of the last completed pass this run saw.
 	lastSyncedAt: number | null

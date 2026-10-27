@@ -10,6 +10,7 @@ import {
 	opArgs,
 	opError,
 	opResult,
+	SYNC_TRANSFERS_KEPT,
 	toNativeSchema,
 	vfsTuningSchema
 } from "../shared/nativeProtocol.ts"
@@ -203,6 +204,18 @@ describe("fromNativeSchema", () => {
 		expect(accepts(fromNativeSchema, { t: "overview", pairs: [{ ...runtime, id: 1 }] })).toBe(false)
 		expect(accepts(fromNativeSchema, { t: "overview", pairs: [{ ...runtime, secret: "x" }] })).toBe(false)
 		expect(accepts(fromNativeSchema, { t: "activity", entries: [{ pairId: "1", at: 1, kind: "passCompleted", relPath: "a\0" }] })).toBe(
+			false
+		)
+	})
+})
+
+describe("overview transfers", () => {
+	it("carries at most the transfers a pass can run at once", () => {
+		const transfers = (count: number) =>
+			Array.from({ length: count }, (_, index) => ({ relPath: `f${String(index)}`, direction: "download", bytes: 0, total: 1 }))
+
+		expect(accepts(fromNativeSchema, { t: "overview", pairs: [{ ...runtime, transfers: transfers(SYNC_TRANSFERS_KEPT) }] })).toBe(true)
+		expect(accepts(fromNativeSchema, { t: "overview", pairs: [{ ...runtime, transfers: transfers(SYNC_TRANSFERS_KEPT + 1) }] })).toBe(
 			false
 		)
 	})

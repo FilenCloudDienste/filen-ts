@@ -26,6 +26,16 @@ import {
 } from "@/features/transfers/screens/transfers.logic"
 import { cancelTransfer, cancelTransfers, cancelUploadRuns, setTransfersPaused } from "@/features/transfers/lib/control"
 import { TransferRow } from "@/features/transfers/components/transferRow"
+import { ExternalTransferRowView } from "@/features/transfers/components/externalTransferRow"
+import {
+	attributeMounts,
+	mountsRunning,
+	mountsTransferRows,
+	syncTransferRows,
+	type ExternalTransferRow
+} from "@/features/transfers/lib/externalTransfers.logic"
+import { useSyncStore } from "@/features/sync/lib/syncStore"
+import { useMountsStats, useMountsStore } from "@/features/mounts/lib/mountsStore"
 import { percentFormat, runningPercentFraction } from "@/features/transfers/components/transferRow.logic"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import type { DriveItem } from "@/features/drive/lib/item"
@@ -35,9 +45,22 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
+// The desktop app's sync and mounts transfers (externalTransfers.logic.ts), live: empty in a browser, where both
+// overviews stay null. rclone's stats are followed only while this screen is mounted and a role runs, which is what
+// keeps the shell's 1 s poll of them running.
+function useExternalTransfers(): ExternalTransferRow[] {
+	const syncPairs = useSyncStore(state => state.overview?.pairs)
+	const drive = useMountsStore(state => state.overview?.drive)
+	const serves = useMountsStore(state => state.overview?.serves)
+	const stats = useMountsStats(mountsRunning(drive, serves))
+
+	return [...syncTransferRows(syncPairs), ...mountsTransferRows(stats, attributeMounts(drive, serves))]
+}
+
 // Full-page transfers surface, reached from the rail entry (iconRail.tsx's TransfersEntry). One header
-// row carries the live summary and the bulk actions; below it, the active transfers, then the finished
-// ones.
+// row carries the live summary and the bulk actions, which act on this page's own transfers only; below
+// it, the active transfers (the desktop app's sync and mounts ones after the page's own, read-only), then
+// the finished ones.
 export function TransfersScreen() {
 	const { t, i18n } = useTranslation(["transfers", "common"])
 	const navigate = useNavigate()
@@ -45,6 +68,7 @@ export function TransfersScreen() {
 	// Changes when a drive job ends, which takes its row out of the bulk actions.
 	const endedJobs = useDriveJobsStore(useShallow(state => endedJobIds(state.jobs)))
 	const { active, finished } = buildTransfersDisplayList(transfers)
+	const external = useExternalTransfers()
 	// Samples age out through the rail's own tick (iconRail.tsx's TransfersEntry), mounted beside this.
 	const { activeCount, percent, speed } = useTransfersAggregate()
 	const cancellable = cancellableTransferIds(transfers, endedJobs)
@@ -157,7 +181,7 @@ export function TransfersScreen() {
 				</div>
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				{active.length === 0 && finished.length === 0 ? (
+				{active.length === 0 && finished.length === 0 && external.length === 0 ? (
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
@@ -172,6 +196,7 @@ export function TransfersScreen() {
 				) : (
 					<TransfersList
 						active={active}
+						external={external}
 						finished={finished}
 						onRequestCancel={requestRowCancel}
 						onShowInDirectory={handleShowInDirectory}
@@ -246,11 +271,14 @@ const LIST_OVERSCAN = 8
 // run of heading, rows, heading, rows.
 function TransfersList({
 	active,
+	external,
 	finished,
 	onRequestCancel,
 	onShowInDirectory
 }: {
 	active: Transfer[]
+	// Listed after the active rows, in their section.
+	external: ExternalTransferRow[]
 	finished: Transfer[]
 	onRequestCancel: (transfer: Transfer) => void
 	onShowInDirectory: (item: DriveItem) => void
@@ -258,16 +286,16 @@ function TransfersList({
 	const { t } = useTranslation("transfers")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const sections = [
-		{ key: "active", title: t("transfersScreenSectionActive"), rows: active },
-		{ key: "finished", title: t("transfersScreenSectionFinished"), rows: finished }
-	].filter(section => section.rows.length > 0)
+		{ key: "active", title: t("transfersScreenSectionActive"), own: active, external },
+		{ key: "finished", title: t("transfersScreenSectionFinished"), own: finished, external: [] }
+	].filter(section => section.own.length + section.external.length > 0)
 	// Each section's heading index in the virtualizer's run.
 	const headings: number[] = []
 	let count = 0
 
 	for (const section of sections) {
 		headings.push(count)
-		count += 1 + section.rows.length
+		count += 1 + section.own.length + section.external.length
 	}
 
 	const virtualizer = useVirtualizer({
@@ -288,7 +316,8 @@ function TransfersList({
 		>
 			{sections.map((section, sectionIndex) => {
 				const rowsStart = (headings[sectionIndex] ?? 0) + 1
-				const total = section.rows.length
+				const ownCount = section.own.length
+				const total = ownCount + section.external.length
 				const from = Math.min(total, Math.max(0, first - rowsStart))
 				const to = Math.max(from, Math.min(total, last - rowsStart + 1))
 
@@ -304,13 +333,19 @@ function TransfersList({
 							className="flex flex-col"
 							style={{ gap: ROW_GAP, paddingTop: from * ROW_STRIDE, paddingBottom: (total - to) * ROW_STRIDE }}
 						>
-							{section.rows.slice(from, to).map(transfer => (
+							{section.own.slice(Math.min(from, ownCount), Math.min(to, ownCount)).map(transfer => (
 								<TransferRow
 									key={transfer.id}
 									transfer={transfer}
 									// Only an active row renders its Cancel button (TransferRow's active branch).
 									onRequestCancel={onRequestCancel}
 									onShowInDirectory={onShowInDirectory}
+								/>
+							))}
+							{section.external.slice(Math.max(0, from - ownCount), Math.max(0, to - ownCount)).map(row => (
+								<ExternalTransferRowView
+									key={row.id}
+									row={row}
 								/>
 							))}
 						</ul>

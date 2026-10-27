@@ -85,7 +85,15 @@ describe("bubbleRailDot", () => {
 describe("transfersRingState", () => {
 	it("is hidden with no transfers, except on the transfers screen", () => {
 		expect(transfersRingState([], false).visible).toBe(false)
-		expect(transfersRingState([], true)).toEqual({ visible: true, empty: true, activeCount: 0, percent: 0, failed: false })
+		expect(transfersRingState([], true)).toEqual({
+			visible: true,
+			empty: true,
+			activeCount: 0,
+			ownActive: false,
+			ownRows: false,
+			percent: 0,
+			failed: false
+		})
 	})
 
 	it("shows the aggregate progress of the active transfers", () => {
@@ -98,7 +106,15 @@ describe("transfersRingState", () => {
 				],
 				false
 			)
-		).toEqual({ visible: true, empty: false, activeCount: 2, percent: 25, failed: false })
+		).toEqual({
+			visible: true,
+			empty: false,
+			activeCount: 2,
+			ownActive: true,
+			ownRows: true,
+			percent: 25,
+			failed: false
+		})
 	})
 
 	it("leaves a transfer of unknown size out of the progress", () => {
@@ -112,6 +128,8 @@ describe("transfersRingState", () => {
 			visible: true,
 			empty: false,
 			activeCount: 0,
+			ownActive: false,
+			ownRows: true,
 			percent: 100,
 			failed: false
 		})
@@ -122,6 +140,44 @@ describe("transfersRingState", () => {
 		expect(transfersRingState([transfer({ status: "completedWithErrors", direction: "copy" })], false).failed).toBe(true)
 		expect(transfersRingState([transfer({ id: "a" }), transfer({ id: "b", status: "error" })], false)).toMatchObject({
 			activeCount: 1,
+			failed: true
+		})
+	})
+
+	it("shows while the desktop app's sync moves files, counting their bytes", () => {
+		const sync = { count: 2, bytes: 30, total: 100 }
+
+		expect(transfersRingState([], false, sync)).toEqual({
+			visible: true,
+			empty: false,
+			activeCount: 2,
+			ownActive: false,
+			ownRows: false,
+			percent: 30,
+			failed: false
+		})
+		// Folded into the page's own: (50 + 30) of (100 + 100).
+		expect(transfersRingState([transfer({ size: 100, bytesTransferred: 50 })], false, sync)).toMatchObject({
+			activeCount: 3,
+			ownActive: true,
+			percent: 40
+		})
+	})
+
+	it("shows while the drive's cache has uploads pending, without progress of its own", () => {
+		expect(transfersRingState([], false, undefined, 3)).toEqual({
+			visible: true,
+			empty: false,
+			activeCount: 3,
+			ownActive: false,
+			ownRows: false,
+			percent: 0,
+			failed: false
+		})
+		// Finished rows of the page's own stay as they were; the ring runs for the uploads.
+		expect(transfersRingState([transfer({ status: "error" })], false, undefined, 1)).toMatchObject({
+			activeCount: 1,
+			ownRows: true,
 			failed: true
 		})
 	})

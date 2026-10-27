@@ -5,17 +5,24 @@ import { ArrowDownUpIcon, CheckIcon, CircleAlertIcon } from "lucide-react"
 import { cn, formatBytesPerSecond } from "@filen/shared"
 import { computeTransfersSpeed, useSpeedSampleAging, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { transfersRingState } from "@/features/transfers/screens/transfers.logic"
+import { syncActivity } from "@/features/transfers/lib/externalTransfers.logic"
+import { useSyncStore } from "@/features/sync/lib/syncStore"
+import { useMountsStore } from "@/features/mounts/lib/mountsStore"
 import { RAIL_ITEM_BOX_CLASS, railItemStateClass } from "@/features/shell/lib/railItem"
 import { RailStatusDot, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 // The footer's transfers button: a ring of the aggregate progress around the transfers glyph, a check once
 // everything finished, an alert glyph and a red ring once nothing runs and something failed (a dot while
-// others still run). transfersRingState holds the visibility rule.
+// others still run). transfersRingState holds the visibility rule, and what it counts from the desktop app's sync and
+// mounts (in a browser both overviews stay null, so nothing changes there).
 export function TransfersRing({ active }: { active: boolean }) {
 	const { t } = useTranslation(["common", "transfers"])
-	const { visible, empty, activeCount, percent, failed } = useTransfersStore(
-		useShallow(state => transfersRingState(state.transfers, active))
+	// Counts and bytes only, so a sync push that moves nothing here re-renders nothing.
+	const sync = useSyncStore(useShallow(state => syncActivity(state.overview?.pairs)))
+	const mountsPending = useMountsStore(state => state.overview?.cache.pendingUploads ?? 0)
+	const { visible, empty, activeCount, ownActive, ownRows, percent, failed } = useTransfersStore(
+		useShallow(state => transfersRingState(state.transfers, active, sync, mountsPending))
 	)
 	// The samples, not the speed: the speed reads the clock, which a store selector must not.
 	const speedSamples = useTransfersStore(state => state.speedSamples)
@@ -37,13 +44,19 @@ export function TransfersRing({ active }: { active: boolean }) {
 			: failed
 				? t("transfers:transfersRingFailed")
 				: t("transfers:transfersRingDone")
-	const detail = empty
-		? null
-		: running
-			? formatBytesPerSecond(computeTransfersSpeed(speedSamples))
+	const own = ownActive
+		? formatBytesPerSecond(computeTransfersSpeed(speedSamples))
+		: !ownRows
+			? null
 			: failed
 				? t("transfers:transfersRingFailedDetail")
 				: t("transfers:transfersRingDoneDetail")
+	const detailParts = [
+		own,
+		sync.count > 0 ? t("transfers:transfersRingSyncDetail", { count: sync.count }) : null,
+		mountsPending > 0 ? t("transfers:transfersRingMountsDetail", { count: mountsPending }) : null
+	].filter(part => part !== null)
+	const detail = detailParts.length === 0 ? null : detailParts.join(" · ")
 	const Glyph = running || empty ? ArrowDownUpIcon : failed ? CircleAlertIcon : CheckIcon
 
 	return (

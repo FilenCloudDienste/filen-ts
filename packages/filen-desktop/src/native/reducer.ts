@@ -1,13 +1,17 @@
 import type { SyncPairInfo, SyncPassEvent, SyncPassReport, WatchStatus } from "@filen/sdk-rs"
 import type { DesktopSyncIssueCounts, DesktopSyncTransfer } from "@filen/shared/desktop"
-import type { FromNative, NativeActivity, NativeAggregate, NativePairRuntime } from "../shared/nativeProtocol.ts"
+import {
+	type FromNative,
+	type NativeActivity,
+	type NativeAggregate,
+	type NativePairRuntime,
+	SYNC_TRANSFERS_KEPT
+} from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk } from "./addon.ts"
 import { clip } from "./errors.ts"
 
 // How often at most the host reports what changed: overview pushes stay at 4 Hz however fast the engine emits.
 export const FEED_INTERVAL_MS = 250
-// The transfers a pair shows, newest first.
-const TRANSFERS_SHOWN = 3
 // Activity waiting for the next report; main keeps 200 per pair, so a burst past this drops its oldest entries.
 const ACTIVITY_BUFFER = 1000
 
@@ -17,6 +21,7 @@ export interface PairRuntime {
 	// The running pass's planned actions, and how many of them it has begun.
 	planned: number | null
 	done: number
+	// In flight, newest first: a transfer leaves once its bytes reach its size, it fails, or the pass ends.
 	transfers: DesktopSyncTransfer[]
 	lastSyncedAt: number | null
 	lastError: string | null
@@ -95,6 +100,16 @@ function endPass(runtime: PairRuntime): void {
 	runtime.pending = null
 }
 
+// Adds a transfer in front, replacing an older entry for the same file.
+function started(runtime: PairRuntime, transfer: DesktopSyncTransfer): void {
+	runtime.transfers = [
+		transfer,
+		...runtime.transfers
+			.filter(entry => entry.relPath !== transfer.relPath || entry.direction !== transfer.direction)
+			.slice(0, SYNC_TRANSFERS_KEPT - 1)
+	]
+}
+
 // Folds a chunk of engine events into the pairs' runtime. Progress only updates the transfer it belongs to: it never
 // becomes activity, and what reaches main is the coalesced state.
 export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, events: readonly SyncPassEvent[]): Reduced {
@@ -124,10 +139,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				const relPath = clip(event.inner.relPath)
 
 				begin(runtime, activity, { pairId, at, kind: BEGIN_KINDS[event.tag], relPath })
-				runtime.transfers = [
-					{ relPath, direction: event.tag === "Uploading" ? "upload" : "download", bytes: 0, total: 0 },
-					...runtime.transfers.slice(0, TRANSFERS_SHOWN - 1)
-				]
+				started(runtime, { relPath, direction: event.tag === "Uploading" ? "upload" : "download", bytes: 0, total: 0 })
 				break
 			}
 			case "Progress": {
@@ -137,11 +149,16 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				const bytes = Number(event.inner.bytes)
 				const total = Number(event.inner.total)
 
-				if (transfer !== undefined) {
+				// The engine reports no end of its own: the last progress, at the full size, is it.
+				if (total > 0 && bytes >= total) {
+					if (transfer !== undefined) {
+						runtime.transfers = runtime.transfers.filter(entry => entry !== transfer)
+					}
+				} else if (transfer !== undefined) {
 					transfer.bytes = bytes
 					transfer.total = total
 				} else {
-					runtime.transfers = [{ relPath, direction, bytes, total }, ...runtime.transfers.slice(0, TRANSFERS_SHOWN - 1)]
+					started(runtime, { relPath, direction, bytes, total })
 				}
 
 				break
@@ -177,6 +194,8 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 					runtime.pending = null
 				}
 
+				runtime.transfers = runtime.transfers.filter(entry => entry.relPath !== relPath)
+
 				activity.push({ pairId, at, kind: "failed", relPath, detail: clip(event.inner.error) })
 				break
 			}
@@ -187,8 +206,9 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				activity.push({ pairId, at, kind: "deletionsHeld", detail: event.inner.count.toString() })
 				break
 			case "Interrupted":
-				// The action in flight was given up with the rest.
+				// The actions in flight were given up with the rest.
 				runtime.pending = null
+				runtime.transfers = []
 				break
 			case "Refused":
 				break

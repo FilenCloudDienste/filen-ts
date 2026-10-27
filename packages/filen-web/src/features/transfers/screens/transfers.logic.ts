@@ -1,6 +1,7 @@
 import { clampedRatio, isJobRunning } from "@filen/shared"
 import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import type { DriveJob } from "@/features/drive/lib/driveJobs.logic"
+import { NO_SYNC_ACTIVITY, type SyncActivity } from "@/features/transfers/lib/externalTransfers.logic"
 
 // The screen's two rendered sections. Active on top, oldest-running first (ASC startedAt) — the
 // longest-waiting transfer stays anchored at the top instead of being bumped down every time a newer
@@ -96,23 +97,35 @@ export function shouldShowTransfersAggregate(activeCount: number): boolean {
 
 export interface TransfersRingState {
 	visible: boolean
-	// No rows at all: shown only because the transfers screen is open.
+	// Nothing at all: shown only because the transfers screen is open.
 	empty: boolean
+	// The page's active rows, the sync transfers and the drive cache's pending uploads.
 	activeCount: number
-	// 0-100 over the active rows of known size; 100 once only finished rows are left, 0 with none.
+	// The page's own active rows: the speed is theirs alone.
+	ownActive: boolean
+	// The page holds rows, of any status.
+	ownRows: boolean
+	// 0-100 over the active rows and sync transfers of known size; 100 once only finished rows are left, 0 with none.
 	percent: number
 	// A row failed, wholly or in part, and was not cleared yet.
 	failed: boolean
 }
 
-// The rail's transfers ring. Shown while the store holds any row (active, failed or finished and not yet
-// cleared), so exactly while the transfers screen has something to list, and always on that screen so its
-// own entry never vanishes under the pointer when the list is cleared. Rows live in memory and leave on
-// "Clear finished", a row's remove, or a reload.
-export function transfersRingState(transfers: readonly Transfer[], onTransfersScreen: boolean): TransfersRingState {
-	let activeCount = 0
-	let transferred = 0
-	let total = 0
+// The rail's transfers ring. Shown while the store holds any row (active, failed or finished and not yet cleared), so
+// exactly while the transfers screen has something to list, and always on that screen so its own entry never vanishes
+// under the pointer when the list is cleared. Rows live in memory and leave on "Clear finished", a row's remove, or a
+// reload. In the desktop app it also shows while sync moves files or the drive's cache has uploads pending, from what
+// reaches the page without subscribing (externalTransfers.logic.ts): sync's bytes count towards the ring, the drive's
+// uploads only keep it up, as their bytes are not known without the 1 s stats poll.
+export function transfersRingState(
+	transfers: readonly Transfer[],
+	onTransfersScreen: boolean,
+	sync: SyncActivity = NO_SYNC_ACTIVITY,
+	mountsPending = 0
+): TransfersRingState {
+	let ownActive = 0
+	let transferred = sync.bytes
+	let total = sync.total
 	let failed = false
 
 	for (const transfer of transfers) {
@@ -124,7 +137,7 @@ export function transfersRingState(transfers: readonly Transfer[], onTransfersSc
 			continue
 		}
 
-		activeCount++
+		ownActive++
 
 		// computeTransfersAggregate's rule: a row of unknown size (a zip still walking its tree) has no share.
 		if (transfer.size > 0) {
@@ -133,11 +146,16 @@ export function transfersRingState(transfers: readonly Transfer[], onTransfersSc
 		}
 	}
 
+	const activeCount = ownActive + sync.count + mountsPending
+	const empty = transfers.length === 0 && activeCount === 0
+
 	return {
-		visible: onTransfersScreen || transfers.length > 0,
-		empty: transfers.length === 0,
+		visible: onTransfersScreen || !empty,
+		empty,
 		activeCount,
-		percent: transfers.length === 0 ? 0 : activeCount === 0 ? 100 : clampedRatio(transferred, total, 100),
+		ownActive: ownActive > 0,
+		ownRows: transfers.length > 0,
+		percent: empty ? 0 : activeCount === 0 ? 100 : clampedRatio(transferred, total, 100),
 		failed
 	}
 }

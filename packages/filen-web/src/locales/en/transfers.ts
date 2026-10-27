@@ -24,6 +24,14 @@ export const transfers = {
 	transfersRingFailedDetail: "Some failed",
 	/** Icon-rail transfers ring — tooltip detail after the label once every transfer finished */
 	transfersRingDoneDetail: "Finished",
+	/** Icon-rail transfers ring (desktop app) — tooltip detail while the desktop app's sync moves files; singular */
+	transfersRingSyncDetail_one: "Syncing {{count}} file",
+	/** Icon-rail transfers ring (desktop app) — tooltip detail while the desktop app's sync moves files; plural */
+	transfersRingSyncDetail_other: "Syncing {{count}} files",
+	/** Icon-rail transfers ring (desktop app) — tooltip detail while the network drive's and servers' cache (the Mounts module) has uploads pending; singular */
+	transfersRingMountsDetail_one: "Uploading {{count}} file from Mounts",
+	/** Icon-rail transfers ring (desktop app) — tooltip detail while the network drive's and servers' cache (the Mounts module) has uploads pending; plural */
+	transfersRingMountsDetail_other: "Uploading {{count}} files from Mounts",
 
 	// ── Panel ────────────────────────────────────────────────────────────────
 	/** Empty-state title shown when there are no transfers (rail entry's accessible summary + the /transfers screen) */
@@ -38,6 +46,14 @@ export const transfers = {
 	transfersScreenSectionActive: "Active",
 	/** Transfers screen — heading above the section listing finished (done/error) transfers */
 	transfersScreenSectionFinished: "Finished",
+	/** Transfers screen (desktop app) — read-only row summing the network drive cache's uploads that wait their turn (rclone does not name them); singular */
+	transfersExternalQueued_one: "{{count}} upload waiting",
+	/** Transfers screen (desktop app) — read-only row summing the network drive cache's uploads that wait their turn; plural */
+	transfersExternalQueued_other: "{{count}} uploads waiting",
+	/** Transfers screen (desktop app) — detail line of the waiting-uploads row */
+	transfersExternalQueuedDetail: "Waiting in the cache to upload",
+	/** Transfers screen (desktop app) — source tag of a mounts transfer when it cannot be told which of the network drive and the servers made it (they share one cache); links to Mounts */
+	transfersSourceMountsShared: "Network drive & servers",
 	/** Transfers screen header — how many transfers are running; singular */
 	transfersScreenActiveCount_one: "{{count}} active",
 	/** Transfers screen header — how many transfers are running; plural */

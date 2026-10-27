@@ -51,10 +51,14 @@ function SectionLabel({ children }: { children: string }) {
 	return <h2 className="px-4 pt-4 pb-1.5 text-xs font-medium tracking-wider text-muted-foreground uppercase sm:px-6">{children}</h2>
 }
 
-// The transfers the running pass is on (the shell keeps the latest three), with their progress.
+// The latest of the transfers the running pass is on (the transfers screen lists them all), with their progress.
+const NOW_SYNCING_SHOWN = 3
+
 function NowSyncing({ pairId }: { pairId: string }) {
 	const { t } = useTranslation("sync")
-	const transfers = useSyncStore(useShallow(state => state.overview?.pairs.find(pair => pair.id === pairId)?.transfers ?? []))
+	const transfers = useSyncStore(
+		useShallow(state => state.overview?.pairs.find(pair => pair.id === pairId)?.transfers.slice(0, NOW_SYNCING_SHOWN) ?? [])
+	)
 
 	if (transfers.length === 0) {
 		return null

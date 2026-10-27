@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { FromNative } from "../shared/nativeProtocol.ts"
+import { type FromNative, SYNC_TRANSFERS_KEPT } from "../shared/nativeProtocol.ts"
 import { createPairRuntime, createRuntimeFeed, FEED_INTERVAL_MS, reduceEvents, type PairRuntime } from "../native/reducer.ts"
 import { fakeSdk, pairInfo, passEvent, report } from "./nativeFakes.ts"
 
@@ -43,7 +43,7 @@ describe("reduceEvents", () => {
 							relPath: "big.bin",
 							direction: fakeSdk.TransferDirection.Upload,
 							bytes: BigInt(chunk * 10 + i + 1),
-							total: 500n
+							total: 1000n
 						}
 					})
 				)
@@ -59,12 +59,56 @@ describe("reduceEvents", () => {
 		expect(overviews).toHaveLength(2)
 		expect(overviews[1]).toMatchObject({
 			pairs: [
-				{ id: "1", syncing: true, progress: { done: 1, total: 3 }, transfers: [{ relPath: "big.bin", bytes: 500, total: 500 }] }
+				{ id: "1", syncing: true, progress: { done: 1, total: 3 }, transfers: [{ relPath: "big.bin", bytes: 500, total: 1000 }] }
 			]
 		})
 		// The upload is reported once it is done, not per progress step.
 		expect(of("activity")).toHaveLength(0)
 		expect(of("aggregate")).toEqual([{ t: "aggregate", state: "syncing" }])
+	})
+
+	it("keeps every transfer in flight and only those", () => {
+		const state = new Map<string, PairRuntime>()
+		const progress = (relPath: string, bytes: bigint, total: bigint, direction = fakeSdk.TransferDirection.Upload) =>
+			passEvent({ tag: "Progress", inner: { relPath, direction, bytes, total } })
+
+		reduceEvents(fakeSdk, state, [
+			passEvent({ tag: "PassStarted", inner: { mode: fakeSdk.SyncMode.TwoWay } }),
+			...Array.from({ length: SYNC_TRANSFERS_KEPT }, (_, index) =>
+				passEvent({ tag: "Uploading", inner: { relPath: `f${String(index)}` } })
+			),
+			passEvent({ tag: "Downloading", inner: { relPath: "late.bin" } })
+		])
+
+		const transfers = () => state.get("1")?.transfers.map(transfer => transfer.relPath)
+
+		// Newest first, at most what a pass runs at once.
+		expect(transfers()).toHaveLength(SYNC_TRANSFERS_KEPT)
+		expect(transfers()?.[0]).toBe("late.bin")
+		expect(transfers()).not.toContain("f0")
+
+		reduceEvents(fakeSdk, state, [
+			progress("f15", 10n, 20n),
+			progress("f14", 20n, 20n),
+			progress("late.bin", 5n, 5n, fakeSdk.TransferDirection.Download),
+			passEvent({ tag: "ActionFailed", inner: { relPath: "f13", error: "denied" } }),
+			// Begun again: one entry, in front.
+			passEvent({ tag: "Uploading", inner: { relPath: "f12" } })
+		])
+
+		expect(transfers()?.slice(0, 2)).toEqual(["f12", "f15"])
+		expect(transfers()).not.toContain("f14")
+		expect(transfers()).not.toContain("f13")
+		expect(transfers()).not.toContain("late.bin")
+		expect(transfers()?.filter(relPath => relPath === "f12")).toHaveLength(1)
+		expect(state.get("1")?.transfers[1]).toEqual({ relPath: "f15", direction: "upload", bytes: 10, total: 20 })
+
+		// Progress past its start that was never seen begins one; its last step ends it.
+		reduceEvents(fakeSdk, state, [progress("new.bin", 1n, 4n)])
+		expect(transfers()?.[0]).toBe("new.bin")
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "Interrupted", inner: { actions: 3n } })])
+		expect(transfers()).toEqual([])
 	})
 
 	it("pushes no overview while main is not subscribed, but always activity and the aggregate", async () => {
