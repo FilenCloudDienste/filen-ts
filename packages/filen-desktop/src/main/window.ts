@@ -26,8 +26,8 @@ export function drawsOwnBorder(platform: DesktopPlatform, systemVersion: string)
 // The web reserves this band through env(titlebar-area-height) on Windows and Linux.
 export const TITLE_BAR_OVERLAY_HEIGHT = 32
 
-// macOS: the lights sit centred in the web's 64px icon rail (iconRail.tsx), above the brand.
-const TRAFFIC_LIGHT_POSITION = { x: 14, y: 14 }
+// macOS: the lights sit centred over the web's icon rail (iconRail.tsx), their top level with the panels' top edge.
+const TRAFFIC_LIGHT_POSITION = { x: 10, y: 8 }
 
 export function windowOptions(
 	platform: DesktopPlatform,

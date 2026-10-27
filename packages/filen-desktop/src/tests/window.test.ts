@@ -9,7 +9,7 @@ describe("windowOptions", () => {
 		const options = windowOptions("darwin", colors, "/p.cjs", false, "4.0.0")
 
 		expect(options.titleBarStyle).toBe("hidden")
-		expect(options.trafficLightPosition).toEqual({ x: 14, y: 14 })
+		expect(options.trafficLightPosition).toEqual({ x: 10, y: 8 })
 		expect(options.titleBarOverlay).toBeUndefined()
 	})
 
