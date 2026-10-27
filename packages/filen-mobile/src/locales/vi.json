@@ -495,6 +495,7 @@
 	"links": "Liên kết",
 	"lock_app_after": "Khóa ứng dụng sau",
 	"lock_app_after_description": "Chọn thời điểm khóa ứng dụng sau khi không hoạt động",
+	"lock_lost": "Có thể một thiết bị khác đang thay đổi mục này. Vui lòng thử lại.",
 	"log_level_all": "Tất cả",
 	"log_level_debug": "Gỡ lỗi",
 	"log_level_errors": "Lỗi",

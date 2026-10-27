@@ -495,6 +495,7 @@
 	"links": "लिंक",
 	"lock_app_after": "इसके बाद ऐप लॉक करें",
 	"lock_app_after_description": "चुनें कि निष्क्रियता के बाद ऐप कब लॉक हो",
+	"lock_lost": "हो सकता है कि कोई अन्य डिवाइस अभी इसे बदल रहा हो। कृपया फिर से प्रयास करें।",
 	"log_level_all": "सभी",
 	"log_level_debug": "डीबग",
 	"log_level_errors": "त्रुटियाँ",

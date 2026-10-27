@@ -495,6 +495,7 @@
 	"links": "Links",
 	"lock_app_after": "App sperren nach",
 	"lock_app_after_description": "Wähle, wann die App nach Inaktivität gesperrt wird",
+	"lock_lost": "Möglicherweise wird dies gerade auf einem anderen Gerät geändert. Bitte versuche es erneut.",
 	"log_level_all": "Alle",
 	"log_level_debug": "Debug",
 	"log_level_errors": "Fehler",

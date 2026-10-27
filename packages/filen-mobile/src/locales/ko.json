@@ -495,6 +495,7 @@
 	"links": "링크",
 	"lock_app_after": "앱 잠금 시점",
 	"lock_app_after_description": "비활성 후 앱을 잠글 시점을 선택하세요",
+	"lock_lost": "다른 기기에서 지금 이 항목을 변경하고 있을 수 있습니다. 다시 시도해 주세요.",
 	"log_level_all": "전체",
 	"log_level_debug": "디버그",
 	"log_level_errors": "오류",

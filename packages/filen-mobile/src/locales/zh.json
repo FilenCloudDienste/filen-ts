@@ -495,6 +495,7 @@
 	"links": "链接",
 	"lock_app_after": "无操作后锁定",
 	"lock_app_after_description": "选择应用在无操作后多久锁定",
+	"lock_lost": "另一台设备可能正在更改此内容，请重试。",
 	"log_level_all": "全部",
 	"log_level_debug": "调试",
 	"log_level_errors": "错误",

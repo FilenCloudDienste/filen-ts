@@ -495,6 +495,7 @@
 	"links": "Links",
 	"lock_app_after": "Lock app after",
 	"lock_app_after_description": "Choose when to lock the app after inactivity",
+	"lock_lost": "Another device may be changing this right now. Please try again.",
 	"log_level_all": "All",
 	"log_level_debug": "Debug",
 	"log_level_errors": "Errors",

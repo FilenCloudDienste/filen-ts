@@ -509,6 +509,7 @@
 	"links": "Odkazy",
 	"lock_app_after": "Zamknout aplikaci po",
 	"lock_app_after_description": "Zvolte, kdy se aplikace zamkne po nečinnosti",
+	"lock_lost": "Toto může právě teď měnit jiné zařízení. Zkuste to prosím znovu.",
 	"log_level_all": "Vše",
 	"log_level_debug": "Ladění",
 	"log_level_errors": "Chyby",
