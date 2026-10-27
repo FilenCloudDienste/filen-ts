@@ -3,6 +3,7 @@ import {
 	FRAGMENT_FLOATS,
 	FRAGMENT_INTS,
 	FRAGMENT_KIND_MASK,
+	FRAGMENT_LEVEL_SHIFT,
 	FragmentKind,
 	HitTester,
 	LINE_FLOATS,
@@ -139,6 +140,7 @@ export class LayoutMap {
 	readonly layout: TextLayout
 	readonly texts: readonly string[]
 	private readonly tester: HitTester
+	private readonly styles: StyleTable
 	private readonly paragraphs: ParagraphMap[] = []
 	// Per paragraph, its lines [first, end).
 	private readonly lineStart: Int32Array
@@ -148,7 +150,8 @@ export class LayoutMap {
 	constructor(doc: Node, body: TextBody, transferred: RunOffsets, cache: MeasureCache) {
 		this.layout = textLayoutOf(transferred)
 		this.texts = transferred.texts
-		this.tester = new HitTester(styleTableOf(transferred, cache))
+		this.styles = styleTableOf(transferred, cache)
+		this.tester = new HitTester(this.styles)
 
 		const count = body.paragraphs.length
 
@@ -313,6 +316,43 @@ export class LayoutMap {
 			top: this.lineFloat(line, 0),
 			height: this.lineFloat(line, 1)
 		}
+	}
+
+	// Where text typed at `pos` shows before the worker lays it out again (the editor's echo): the paragraph and laid-out
+	// offset it goes in and the caret after it, measured in the style of the text fragment it extends on this thread's
+	// fonts (the worker's layout then confirms or corrects it). Undefined where no text fragment takes it (an empty
+	// line, an atom, right-to-left text).
+	echo(pos: number, inserted: string): { readonly paragraph: number; readonly offset: number; readonly caret: CaretBox } | undefined {
+		const { paragraph, offset } = this.toLayout(pos)
+		const line = this.lineOf(paragraph, offset)
+
+		if (line < 0 || inserted.length === 0) return undefined
+
+		const first = this.lineInt(line, LineInt.FIRST_FRAGMENT)
+		const count = this.lineInt(line, LineInt.FRAGMENT_COUNT)
+		let fragment = -1
+
+		for (let f = first; f < first + count; f++) {
+			const start = this.layout.fragmentInts[f * FRAGMENT_INTS] ?? 0
+			const info = this.layout.fragmentInts[f * FRAGMENT_INTS + 3] ?? 0
+
+			if ((info & FRAGMENT_KIND_MASK) !== FragmentKind.TEXT || (info >> FRAGMENT_LEVEL_SHIFT) % 2 === 1 || start > offset) continue
+
+			fragment = f
+		}
+
+		const at = this.caret(pos)
+
+		if (fragment < 0 || at === undefined) return undefined
+
+		const style = this.layout.fragmentInts[fragment * FRAGMENT_INTS + 2] ?? 0
+		const letter = (this.styles.letterSpacing[style] ?? 0) + (this.layout.fragmentFloats[fragment * FRAGMENT_FLOATS + 3] ?? 0)
+		const text = (this.styles.caps[style] ?? 0) === 0 ? inserted : inserted.toUpperCase()
+		const width =
+			this.styles.cache.measure(this.styles.fontKey[style] ?? 0, text, 0, text.length) * (this.styles.scaleX[style] ?? 1) +
+			letter * text.length
+
+		return { paragraph, offset, caret: { x: at.x + width, top: at.top, height: at.height } }
 	}
 
 	// The boxes of [from, to): one per line it covers, from the start (or the line's start) to the end (or the line's

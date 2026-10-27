@@ -31,6 +31,7 @@ import { deleteBeforeComposition, deleteSelectionKey, inputTransaction } from ".
 import { safeClipboardHtml } from "../../../docx/edit/clipboard"
 import { TextEditController } from "./controller"
 import type { TextEditing } from "./editing"
+import { pendingInsertion, TextEcho } from "./echo"
 import { DEFAULT_TEXT_BINDINGS, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./keys"
 import { measureCacheFor } from "./layoutMap"
 
@@ -247,6 +248,7 @@ export function PresentationTextEditor({
 		let paintedPage = controller.page
 		let painted = paintPage(controller.page.page, { document, tables: controller.page, paints: controller.page })
 		let paintedTables = tablesKey(controller.page)
+		const echo = new TextEcho()
 		let offsetX = 0
 		let offsetY = 0
 		let blink: Animation | undefined
@@ -515,6 +517,9 @@ export function PresentationTextEditor({
 		}
 
 		const draw = (): void => {
+			// The echo of typing the worker has not laid out yet is drawn again from scratch on every draw.
+			echo.restore()
+
 			if (controller.page !== paintedPage) {
 				const page = controller.page
 				const tables = tablesKey(page)
@@ -556,7 +561,13 @@ export function PresentationTextEditor({
 				children.push(mark)
 			}
 
-			const place = controller.map.caret(head)
+			const typed = selection.empty ? pendingInsertion(controller.mapDoc, state.doc) : undefined
+			const echoed = typed === undefined || typed.end !== selection.head ? undefined : controller.map.echo(typed.pos, typed.text)
+			const place =
+				echoed !== undefined &&
+				echo.apply(painted, echoed.paragraph, echoed.offset, typed?.text ?? "", controller.map.texts[echoed.paragraph] ?? "")
+					? echoed.caret
+					: controller.map.caret(head)
 
 			if (place !== undefined && selection.empty) {
 				caret.style.left = `${String(place.x)}px`
