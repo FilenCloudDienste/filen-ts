@@ -538,8 +538,6 @@ describe("purging the old stores", () => {
 	})
 })
 
-const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
-
 function oldPair(uuid: string, localPath: string) {
 	return {
 		name: localPath,
@@ -547,7 +545,7 @@ function oldPair(uuid: string, localPath: string) {
 		localPath,
 		remoteParentUUID: uuid,
 		mode: "twoWay",
-		excludeDotFiles: false,
+		excludeDotFiles: true,
 		paused: false,
 		localTrashDisabled: true
 	}
@@ -573,7 +571,7 @@ function legacySetup(options: { pairs?: Parameters<typeof memoryStore>[0]; legac
 			return Promise.resolve()
 		})
 	}
-	const deps: LegacySyncDeps = { ...native.deps, rootUuid: ACCOUNT_ROOT, stash }
+	const deps: LegacySyncDeps = { ...native.deps, stash }
 
 	return { store, native, stash, deps }
 }
@@ -596,7 +594,7 @@ describe("applyLegacySync", () => {
 
 		expect(stash.consume).toHaveBeenCalledOnce()
 		expect(native.ops()).toEqual(["userIgnore", "setUserIgnore"])
-		expect(native.argsOf("setUserIgnore")).toEqual([{ text: ".filen.trash.local/\n" }])
+		expect(native.argsOf("setUserIgnore")).toEqual([{ text: ".*\n!/.filenignore\n" }])
 	})
 
 	it("keeps the stash and records nothing while the device-wide ignore cannot be set", async () => {

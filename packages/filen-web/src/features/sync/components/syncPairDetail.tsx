@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { runSyncAction } from "@/features/sync/lib/syncActions"
-import { issueTotal, NOTICE_ROLE, PHASE_KEY } from "@/features/sync/lib/syncStatus.logic"
+import { issueTotal, PHASE_KEY } from "@/features/sync/lib/syncStatus.logic"
 import type { SyncTab } from "@/features/sync/lib/syncTabs"
 import { useRemoteDirectoryName } from "@/features/sync/hooks/useRemoteDirectoryName"
 import { SyncPhaseIcon } from "@/features/sync/components/syncPhaseIcon"
@@ -273,9 +273,6 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 						/>
 					)}
 					{pair.phase === "waitingForRoot" ? <DesktopCallout tone="warning">{t("detailWaitingForRoot")}</DesktopCallout> : null}
-					{pair.phase === "unsupported" && pair.notices.every(notice => NOTICE_ROLE[notice] === "info") ? (
-						<DesktopCallout tone="info">{t("detailUnsupported")}</DesktopCallout>
-					) : null}
 					{pair.degraded.local ? <DesktopCallout tone="info">{t("detailDegradedLocal")}</DesktopCallout> : null}
 					{pair.degraded.remote ? <DesktopCallout tone="info">{t("detailDegradedRemote")}</DesktopCallout> : null}
 					<NoticeBanner

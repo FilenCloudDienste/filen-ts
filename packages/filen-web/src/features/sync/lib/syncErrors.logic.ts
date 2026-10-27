@@ -15,7 +15,6 @@ export const SYNC_ERROR_KEY: Record<DesktopSyncErrorCode, SyncKey> = {
 	planExpired: "errorPlanExpired",
 	rootExpired: "errorRootExpired",
 	rootRefused: "errorRootRefused",
-	accountRoot: "errorAccountRoot",
 	localRootMissing: "errorLocalRootMissing",
 	remoteRootMissing: "errorRemoteRootMissing",
 	localRootInUse: "errorLocalRootInUse",

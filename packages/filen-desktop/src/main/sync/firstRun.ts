@@ -21,6 +21,8 @@ export interface FirstRunDeps {
 	// Engine calls for the user this run is for; another user's host answers none of them.
 	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>): Promise<NativeResult<K>>
 	store: SyncStore
+	// The old client's state directory of a pair it had (by its uuid there).
+	legacyStateDir(legacyUuid: string): string
 	now(): number
 	log: { info(message: string): void; warn(message: string): void }
 }
@@ -101,15 +103,6 @@ function patchPair(store: SyncStore, matches: (pair: ShellPair) => boolean, patc
 // The pair (an engine id) is held and paused already. A failed call leaves it paused in the review it has.
 export async function runFirstRun(deps: FirstRunDeps, pairId: string, options: FirstRunOptions): Promise<void> {
 	const patch = (fields: Partial<ShellPair>) => patchPair(deps.store, pair => pair.pairId === pairId, fields)
-
-	if (options.reason === "migrated") {
-		const seeded = await deps.call("seedLegacy", { pairId })
-
-		if (seeded.ok && seeded.value === "seeded") {
-			deps.log.info("sync: a migrated pair was seeded from the previous app's state")
-		}
-	}
-
 	const evaluated = await deps.call("evaluatePlan", { pairId, check: { legacy: options.legacy } })
 
 	if (!evaluated.ok) {
@@ -156,6 +149,17 @@ export async function runFirstRun(deps: FirstRunDeps, pairId: string, options: F
 			? { paused: false, state: "active", review: null }
 			: { paused: true, state: "review", review: { reason: options.reason, findings: [], summary } }
 	)
+}
+
+// Best effort: a pair the import fails for (the host logs why) is planned without it.
+async function seedLegacy(deps: FirstRunDeps, pairId: string, legacyUuid: string): Promise<void> {
+	const seeded = await deps.call("seedLegacy", { pairId, stateDir: deps.legacyStateDir(legacyUuid) })
+
+	if (!seeded.ok) {
+		deps.log.warn(`sync: the previous app's state was not imported: ${seeded.error.code}`)
+	} else if (seeded.value !== null) {
+		deps.log.info(`sync: imported ${String(seeded.value.imported)} entries of the previous app's state`)
+	}
 }
 
 // Refusals no retry changes, and the notice each one is told with: the pair is kept, never added again, until the
@@ -206,14 +210,13 @@ async function ensureRules(file: string, blocks: readonly (readonly string[])[])
 async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 	const id = shellPairId(pair)
 	const patch = (fields: Partial<ShellPair>) => patchPair(deps.store, entry => shellPairId(entry) === id, fields)
-	const unsupported = pair.state === "unsupported"
-	const migrated = pair.legacyUuid !== null && (unsupported || pair.state === "waitingForRoot")
+	const migrated = pair.legacyUuid !== null && pair.state === "waitingForRoot"
 	const reason = migrated ? "migrated" : "baselineReset"
 	const dotFilesPerPair = migrated && pair.legacyDotFiles === "pair"
 	const localRoot = await realDirectory(pair.localRoot)
 
 	if (localRoot === null) {
-		if (!unsupported && pair.state !== "waitingForRoot") {
+		if (pair.state !== "waitingForRoot") {
 			await patch({ state: "waitingForRoot", review: null })
 		}
 
@@ -227,10 +230,7 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 	}
 	const restore = { state: pair.state, review: pair.review }
 
-	// An account-root pair only tries whether the engine takes it now; until then nothing changes.
-	if (!unsupported) {
-		await patch({ localRoot, state: "review", review })
-	}
+	await patch({ localRoot, state: "review", review })
 
 	const added = await deps.call("addPair", { localRoot, remoteRoot: pair.remoteRoot, mode: pair.mode })
 
@@ -238,11 +238,7 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 		const { code } = added.error
 		const refused = REFUSED[code]
 
-		if (unsupported) {
-			if (code !== "accountRoot") {
-				deps.log.warn(`sync: an account-root pair was not added: ${code}`)
-			}
-		} else if (code === "localRootMissing") {
+		if (code === "localRootMissing") {
 			await patch({ state: "waitingForRoot", review: null })
 		} else if (refused !== undefined) {
 			deps.log.warn(`sync: the engine refuses a pair: ${code}`)
@@ -266,20 +262,19 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 		return
 	}
 
-	await patch({
-		pairId,
-		localRoot,
-		paused: true,
-		state: "review",
-		review,
-		notices: pair.notices.filter(notice => notice !== "accountRootUnsupported")
-	})
+	await patch({ pairId, localRoot, paused: true, state: "review", review })
 
 	// The pair's own rule file, written before its first plan; it syncs only once the user starts the pair.
 	if (dotFilesPerPair) {
 		await ensureRules(path.join(localRoot, ".filenignore"), [DOT_FILE_RULES]).catch((error: unknown) => {
 			deps.log.warn(`sync: the pair's .filenignore was not written: ${errorCode(error)}`)
 		})
+	}
+
+	// Before the first plan, so the old client's evidence keeps a migrated pair's first run from transferring what it
+	// had in sync. Also after a baseline reset, which emptied the baseline the engine would refuse to seed.
+	if (pair.legacyUuid !== null) {
+		await seedLegacy(deps, pairId, pair.legacyUuid)
 	}
 
 	await runFirstRun(deps, pairId, {
@@ -290,8 +285,8 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 	})
 }
 
-// Every pair the engine does not hold, one at a time: migrated ones, ones waiting for their directory, account-root
-// ones (in case the engine takes them now) and ones a baseline reset lost. A pair the engine refused waits for the user.
+// Every pair the engine does not hold, one at a time: migrated ones, ones waiting for their directory and ones a
+// baseline reset lost. A pair the engine refused waits for the user.
 export async function attachUnheld(deps: FirstRunDeps): Promise<void> {
 	for (const pair of deps.store.get().pairs) {
 		if (pair.pairId === null && !pair.notices.some(isRefusedNotice)) {

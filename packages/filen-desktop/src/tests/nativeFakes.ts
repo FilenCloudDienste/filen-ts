@@ -177,7 +177,6 @@ export function fakeRclone() {
 }
 
 export const REMOTE_ROOT = "6b1f0d2e-3c4a-4b5d-8e9f-0a1b2c3d4e5f"
-export const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
 
 export function pairInfo(overrides: Partial<SyncPairInfo> = {}): SyncPairInfo {
 	return {
@@ -284,6 +283,7 @@ export function fakeEngine(pairs: SyncPairInfo[] = [pairInfo()]) {
 		retryPath: vi.fn(() => Promise.resolve()),
 		userIgnore: vi.fn(() => Promise.resolve("")),
 		setUserIgnore: vi.fn(() => Promise.resolve()),
+		importLegacyState: vi.fn(() => Promise.resolve({ imported: 0n, skipped: 0n })),
 		close: vi.fn(() => Promise.resolve())
 	}
 

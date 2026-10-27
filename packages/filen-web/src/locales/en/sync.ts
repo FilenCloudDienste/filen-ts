@@ -48,8 +48,8 @@ export const sync = {
 	phaseReview: "Needs review",
 	/** Pair phase — its local directory is missing */
 	phaseWaitingForRoot: "Directory missing",
-	/** Pair phase — the engine cannot sync it yet */
-	phaseUnsupported: "Not supported yet",
+	/** Pair phase — the engine refused it */
+	phaseUnsupported: "Can't be synced",
 	/** Pair phase — the last pass failed */
 	phaseError: "Error",
 
@@ -102,8 +102,6 @@ export const sync = {
 	detailDegradedRemote: "Filen can't follow changes in the cloud directory live, so it checks it every few minutes instead.",
 	/** Detail — the local directory is missing */
 	detailWaitingForRoot: "The directory on this device is missing. Filen starts syncing it again once it's back.",
-	/** Detail — the engine cannot sync this pair yet */
-	detailUnsupported: "Filen can't sync this pair yet.",
 	/** Detail — pause the pair */
 	detailPause: "Pause",
 	/** Detail — resume the pair */
@@ -116,11 +114,9 @@ export const sync = {
 	detailRemote: "In the cloud",
 
 	// ── Notices ─────────────────────────────────────────────────────────
-	/** Notice — the old app's local trash is no longer used */
-	noticeLocalTrashDropped:
-		"Filen no longer keeps deleted local files in .filen.trash.local. Files the sync replaces or deletes on this device now go to .filen-sync-trash in this pair's directory.",
-	/** Notice — the account's whole drive cannot be a pair yet */
-	noticeAccountRootUnsupported: "Syncing your whole Cloud Drive isn't supported yet. This pair starts once it is.",
+	/** Notice — the old app's local trash is moved into the pair's bin */
+	noticeLocalTrashMoved:
+		"The previous app's local trash (.filen.trash.local) is moved into this pair's bin, .filen-sync-trash, when the pair first syncs. Items in the bin are deleted permanently after 30 days.",
 	/** Notice — the local directory of a pair the previous app synced can't be a sync root */
 	noticeRefusedLocalRoot:
 		"Filen can't sync this pair from the previous app: its directory on this device can't be synced. Add it again with another directory.",
@@ -154,8 +150,8 @@ export const sync = {
 	activityMovedRemote: "Moved in the cloud",
 	/** Activity — moved on this device */
 	activityMovedLocal: "Moved on this device",
-	/** Activity — a replaced or deleted local file went to the sync trash */
-	activityQuarantined: "Moved to the sync trash",
+	/** Activity — a replaced or deleted local file went to the pair's bin */
+	activityBinned: "Moved to the bin",
 	/** Activity — an item failed */
 	activityFailed: "Failed",
 	/** Activity — a conflict was found */
@@ -214,10 +210,10 @@ export const sync = {
 	heldApproveTitle: "Approve these deletions?",
 	/** Held deletions — confirm body */
 	heldApproveBody_one:
-		"{{count}} item is deleted on the other side. This device's deletions go to the sync trash, the cloud's to the cloud trash.",
+		"{{count}} item is deleted on the other side. This device's deletions go to the pair's bin, the cloud's to the cloud trash.",
 	/** Held deletions — confirm body */
 	heldApproveBody_other:
-		"{{count}} items are deleted on the other side. This device's deletions go to the sync trash, the cloud's to the cloud trash.",
+		"{{count}} items are deleted on the other side. This device's deletions go to the pair's bin, the cloud's to the cloud trash.",
 	/** Held deletions — how many more are not listed */
 	heldMore: "and {{count}} more",
 	/** Held reason — a scan did not finish */
@@ -298,11 +294,11 @@ export const sync = {
 	settingsRemote: "Directory in the cloud",
 	/** Settings — show the local directory */
 	settingsRevealAction: "Show",
-	/** Settings — sync trash row */
-	settingsQuarantine: "Sync trash",
-	/** Settings — sync trash description */
-	settingsQuarantineDescription:
-		"Files the sync replaces or deletes on this device are moved to .filen-sync-trash in the pair's directory.",
+	/** Settings — the pair's bin row */
+	settingsBin: "Bin",
+	/** Settings — the pair's bin description */
+	settingsBinDescription:
+		"Items the sync replaces or deletes on this device are filed by date in .filen-sync-trash in the pair's directory and deleted permanently after 30 days.",
 	/** Settings — mode row */
 	settingsMode: "Sync mode",
 	/** Settings — pause row */
@@ -469,8 +465,6 @@ export const sync = {
 	errorRootExpired: "The chosen directory expired. Choose it again.",
 	/** Error — the local directory was refused */
 	errorRootRefused: "This directory can't be synced.",
-	/** Error — the whole drive */
-	errorAccountRoot: "Your whole Cloud Drive can't be synced. Choose a directory inside it.",
 	/** Error — the local directory is gone */
 	errorLocalRootMissing: "The directory on this device is missing.",
 	/** Error — the cloud directory is gone */
@@ -537,8 +531,6 @@ export const sync = {
 	addRemoteTitle: "Directory in the cloud",
 	/** Add — remote step description */
 	addRemoteDescription: "Open the directory in your Cloud Drive to sync with. Double-click a directory to open it.",
-	/** Add — the drive's top level is not a valid pick */
-	addRemoteRootHint: "Your whole Cloud Drive can't be synced. Open a directory inside it.",
 	/** Add — remote filter placeholder */
 	addRemoteFilter: "Filter directories",
 	/** Add — the remote pick */

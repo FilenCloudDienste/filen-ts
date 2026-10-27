@@ -107,7 +107,7 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	userIgnore: {},
 	setUserIgnore: { text: ".*\n!/.filenignore\n" },
 	defaultIgnore: {},
-	seedLegacy: { pairId: "18446744073709551615" },
+	seedLegacy: { pairId: "18446744073709551615", stateDir: "/old/sync/state/v2/u" },
 	...MOUNTS_ARGS
 }
 
@@ -213,7 +213,9 @@ describe("opResult", () => {
 		expect(accepts(opResult("addPair"), { pairId: "5" })).toBe(true)
 		expect(accepts(opResult("addPair"), { pairId: 5 })).toBe(false)
 		expect(accepts(opResult("pause"), null)).toBe(true)
-		expect(accepts(opResult("seedLegacy"), "unsupported")).toBe(true)
+		expect(accepts(opResult("seedLegacy"), { imported: 3, skipped: 0 })).toBe(true)
+		expect(accepts(opResult("seedLegacy"), null)).toBe(true)
+		expect(accepts(opResult("seedLegacy"), "unsupported")).toBe(false)
 		expect(accepts(opResult("evaluatePlan"), { status: "unconverged" })).toBe(true)
 		expect(
 			accepts(opResult("evaluatePlan"), {

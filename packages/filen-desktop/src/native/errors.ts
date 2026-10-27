@@ -71,6 +71,17 @@ export function classify(sdk: NativeSdk, error: unknown): NativeError | "unauthe
 	return { code: "unknown", message: clip(message) }
 }
 
+// The SDK error kind's name, for a log.
+export function errorKind(sdk: NativeSdk, error: unknown): string {
+	if (!sdk.FilenSdkError.hasInner(error)) {
+		return "unknown"
+	}
+
+	const kind = sdk.FilenSdkError.getInner(error).kind()
+
+	return Object.entries(sdk.ErrorKind).find(([, value]) => value === kind)?.[0] ?? String(kind)
+}
+
 // A refused user ignore text, with the 1-based line the engine names
 // (`refusing the user ignore patterns: user ignore patterns:3: …`); null for any other error.
 export function invalidIgnore(error: NativeError | "unauthenticated"): NativeError | null {

@@ -1,13 +1,14 @@
+import path from "node:path"
 import { type } from "arktype"
-import type { DesktopSyncMode, DesktopSyncNotice } from "@filen/shared/desktop"
+import type { DesktopSyncMode } from "@filen/shared/desktop"
 import { localPathSchema } from "../../shared/nativeProtocol.ts"
 import { codedError, errorCode } from "../atomicFile.ts"
 import type { FirstRunDeps } from "./firstRun.ts"
 import { basename } from "./mirror.ts"
 import type { ShellPair } from "./store.ts"
 
-// The old client's (3.0.53) sync pairs, PLAN §6 step 6. Only its config is read: its engine state under
-// userData/sync, the stored copies of its ignore rules included, is never read, written or deleted.
+// The old client's (3.0.53) sync pairs, PLAN §6 step 6: its config, and its engine state under userData/sync, which
+// only the engine reads (to seed each pair, see firstRun.ts) and nothing writes or deletes.
 
 const MODES = {
 	twoWay: "twoWay",
@@ -45,8 +46,6 @@ export interface LegacyPair {
 	excludeDotFiles: boolean
 	paused: boolean
 	localTrashDisabled: boolean
-	// The account's root directory, which the engine cannot sync yet.
-	accountRoot: boolean
 }
 
 export interface LegacyImport {
@@ -58,7 +57,7 @@ export interface LegacyImport {
 }
 
 // The user's effective old sync config (effectiveConfig), null when there is none to import.
-export function legacySyncImport(effective: unknown, rootUuid: string): LegacyImport | null {
+export function legacySyncImport(effective: unknown): LegacyImport | null {
 	const config = configSchema(effective)
 
 	if (config instanceof type.errors) {
@@ -87,16 +86,17 @@ export function legacySyncImport(effective: unknown, rootUuid: string): LegacyIm
 			mode: mapLegacyMode(pair.mode),
 			excludeDotFiles: pair.excludeDotFiles,
 			paused: pair.paused,
-			localTrashDisabled: pair.localTrashDisabled,
-			accountRoot: pair.remoteParentUUID.toLowerCase() === rootUuid.toLowerCase()
+			localTrashDisabled: pair.localTrashDisabled
 		})
 	}
 
 	return { enabled: config.enabled, pairs, dropped }
 }
 
-// The old client's local trash in every pair root; the engine would otherwise sync it.
-export const LEGACY_TRASH_RULE = ".filen.trash.local/"
+// Where the old client kept a pair's last local and remote trees, under its userData (the new app's too).
+export function legacyStateDir(userData: string, legacyUuid: string): string {
+	return path.join(userData, "sync", "state", "v2", legacyUuid)
+}
 
 // Dot files hidden, rule files still synced (the engine reads them as rules either way).
 export const DOT_FILE_RULES = [".*", "!/.filenignore"] as const
@@ -125,10 +125,11 @@ export function withRules(text: string, blocks: readonly (readonly string[])[]):
 	return `${text}${separator}${added.join("\n")}\n`
 }
 
-// The device-wide user ignore after the import: the old trash always; dot files only when every pair hid them
-// (otherwise each such pair gets its own rule file). The old client's other built-in patterns are not carried over.
+// The device-wide user ignore after the import: dot files when every pair hid them (otherwise each such pair gets its
+// own rule file). The old trash needs no rule (the engine reserves it); the old client's other built-in patterns are
+// not carried over.
 export function legacyUserIgnore(pairs: readonly LegacyPair[], existing: string): string {
-	return withRules(existing, dotFilesUniform(pairs) ? [[LEGACY_TRASH_RULE], DOT_FILE_RULES] : [[LEGACY_TRASH_RULE]])
+	return dotFilesUniform(pairs) ? withRules(existing, [DOT_FILE_RULES]) : existing
 }
 
 function dotFilesUniform(pairs: readonly LegacyPair[]): boolean {
@@ -138,43 +139,28 @@ function dotFilesUniform(pairs: readonly LegacyPair[]): boolean {
 const NAME_MAX = 1024
 
 // The shell's records of the imported pairs, before the engine holds any: the attach step (firstRun.ts) adds them.
-// Each starts waiting for its directory, or unsupported for an account-root pair; a pair the old client kept from
-// running stays paused.
+// Each starts waiting for its directory; a pair the old client kept from running stays paused.
 export function legacyRecords(imported: LegacyImport, now: number): ShellPair[] {
 	const uniform = dotFilesUniform(imported.pairs)
 
-	return imported.pairs.map(pair => {
-		const notices: DesktopSyncNotice[] = []
-
-		// Only a pair that used the old local trash lost something.
-		if (!pair.localTrashDisabled) {
-			notices.push("localTrashDropped")
-		}
-
-		if (pair.accountRoot) {
-			notices.push("accountRootUnsupported")
-		}
-
-		return {
-			pairId: null,
-			name: pair.name.trim().slice(0, NAME_MAX) || basename(pair.localPath).slice(0, NAME_MAX),
-			localRoot: pair.localPath,
-			remoteRoot: pair.remoteRoot,
-			mode: pair.mode,
-			paused: pair.paused || !imported.enabled,
-			state: pair.accountRoot ? "unsupported" : "waitingForRoot",
-			review: null,
-			legacyUuid: pair.uuid,
-			legacyDotFiles: pair.excludeDotFiles ? (uniform ? "device" : "pair") : null,
-			notices,
-			createdAt: now
-		}
-	})
+	return imported.pairs.map(pair => ({
+		pairId: null,
+		name: pair.name.trim().slice(0, NAME_MAX) || basename(pair.localPath).slice(0, NAME_MAX),
+		localRoot: pair.localPath,
+		remoteRoot: pair.remoteRoot,
+		mode: pair.mode,
+		paused: pair.paused || !imported.enabled,
+		state: "waitingForRoot",
+		review: null,
+		legacyUuid: pair.uuid,
+		legacyDotFiles: pair.excludeDotFiles ? (uniform ? "device" : "pair") : null,
+		// Only a pair that used the old local trash has one to move.
+		notices: pair.localTrashDisabled ? [] : ["localTrashMoved"],
+		createdAt: now
+	}))
 }
 
 export interface LegacySyncDeps extends FirstRunDeps {
-	// The user's account root directory.
-	rootUuid: string
 	stash: {
 		// The user's effective old sync config; undefined when none is waiting.
 		pending(): Promise<unknown>
@@ -192,7 +178,7 @@ export async function applyLegacySync(deps: LegacySyncDeps): Promise<void> {
 		return
 	}
 
-	const imported = deps.store.get().legacyApplied ? null : legacySyncImport(effective, deps.rootUuid)
+	const imported = deps.store.get().legacyApplied ? null : legacySyncImport(effective)
 
 	if (imported !== null) {
 		const current = await deps.call("userIgnore", {})

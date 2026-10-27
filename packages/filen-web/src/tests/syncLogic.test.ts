@@ -78,7 +78,7 @@ describe("sync copy", () => {
 			"deletedLocal",
 			"movedRemote",
 			"movedLocal",
-			"quarantined",
+			"binned",
 			"failed",
 			"conflict",
 			"deletionsHeld",
@@ -97,7 +97,6 @@ describe("sync copy", () => {
 			"planExpired",
 			"rootExpired",
 			"rootRefused",
-			"accountRoot",
 			"localRootMissing",
 			"remoteRootMissing",
 			"localRootInUse",
@@ -133,8 +132,7 @@ describe("sync copy", () => {
 		expectAllKeysExist(MODE_KEY, [...MODES])
 		expectAllKeysExist(MODE_DESCRIPTION_KEY, [...MODES])
 		expectAllKeysExist(NOTICE_KEY, [
-			"localTrashDropped",
-			"accountRootUnsupported",
+			"localTrashMoved",
 			"refusedLocalRoot",
 			"refusedRemoteMissing",
 			"refusedLocalOverlap",

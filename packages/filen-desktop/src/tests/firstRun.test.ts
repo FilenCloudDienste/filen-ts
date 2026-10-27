@@ -8,6 +8,7 @@ import type { ShellPair } from "../main/sync/store.ts"
 import { CLEAN_SUMMARY, fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
 
 const REMOTE = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
+const LEGACY = "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b"
 const MIB = 1_048_576
 
 const { passToken: _passToken, ...SUMMARY } = CLEAN_SUMMARY
@@ -118,13 +119,13 @@ describe("runFirstRun", () => {
 		})
 	})
 
-	it("seeds and checks against the old rules only for a migrated pair", async () => {
+	it("checks against the old rules only for a migrated pair", async () => {
 		const store = memoryStore([shellPair({ pairId: "1" })])
 		const { deps, ops, argsOf } = fakeNative(store, { evaluatePlan: () => ({ status: "unconverged" }) })
 
 		await runFirstRun(deps, "1", { ...options, reason: "migrated", legacy: { excludeDotFiles: true } })
 
-		expect(ops()).toEqual(["seedLegacy", "evaluatePlan"])
+		expect(ops()).toEqual(["evaluatePlan"])
 		expect(argsOf("evaluatePlan")).toEqual([{ pairId: "1", check: { legacy: { excludeDotFiles: true } } }])
 		expect(store.get().pairs[0]?.review).toEqual({ reason: "migrated", findings: ["unconverged"], summary: null })
 	})
@@ -166,12 +167,46 @@ describe("attachUnheld", () => {
 		expect(store.get().pairs).toEqual([shellPair({ pairId: "1", name: "Kept", paused: true, state: "active" })])
 	})
 
+	it("seeds a migrated pair from the old client's state before its first plan", async () => {
+		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "waitingForRoot" })])
+		const { deps, ops, argsOf } = fakeNative(store)
+
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual(["addPair", "pause", "seedLegacy", "evaluatePlan", "releasePlan", "resume"])
+		expect(argsOf("seedLegacy")).toEqual([{ pairId: "1", stateDir: `/old/sync/state/v2/${LEGACY}` }])
+		expect(store.get().pairs[0]?.state).toBe("active")
+	})
+
+	it("seeds a migrated pair a baseline reset lost again", async () => {
+		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "review" })])
+		const { deps, ops, argsOf } = fakeNative(store)
+
+		await attachUnheld(deps)
+
+		expect(ops()).toContain("seedLegacy")
+		expect(argsOf("evaluatePlan")).toEqual([{ pairId: "1", check: { legacy: null } }])
+	})
+
+	it.each([
+		["refused", () => new Refusal("unknown")],
+		["not imported", () => null]
+	])("plans a pair whose seeding was %s anyway", async (_name, seedLegacy) => {
+		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "waitingForRoot" })])
+		const { deps, ops } = fakeNative(store, { seedLegacy })
+
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual(["addPair", "pause", "seedLegacy", "evaluatePlan", "releasePlan", "resume"])
+		expect(store.get().pairs[0]?.state).toBe("active")
+	})
+
 	it("keeps a pair the engine refuses for good, unsynced with the reason, and one a passing failure hit for the next start", async () => {
-		const store = memoryStore([shellPair({ notices: ["localTrashDropped"] })])
+		const store = memoryStore([shellPair({ notices: ["localTrashMoved"] })])
 		const refused = fakeNative(store, { addPair: () => new Refusal("remoteRootNested") })
 
 		await attachUnheld(refused.deps)
-		expect(store.get().pairs).toEqual([shellPair({ state: "unsupported", notices: ["localTrashDropped", "refusedRemoteOverlap"] })])
+		expect(store.get().pairs).toEqual([shellPair({ state: "unsupported", notices: ["localTrashMoved", "refusedRemoteOverlap"] })])
 
 		// Never offered to the engine again.
 		await attachUnheld(refused.deps)

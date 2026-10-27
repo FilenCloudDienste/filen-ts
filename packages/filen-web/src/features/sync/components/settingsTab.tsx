@@ -69,7 +69,7 @@ function NameRow({ pairId, name }: { pairId: string; name: string }) {
 }
 
 // The pair's settings: its name and directories, mode (leaving a backup mode asks about the backlog), pause and
-// sync now, the sync trash (reveal only: emptying it is the user's call, in their file manager), and removal.
+// sync now, the bin (reveal only: emptying it is the user's call, in their file manager), and removal.
 export function SettingsTab({ pairId }: { pairId: string }) {
 	const { t } = useTranslation("sync")
 	const id = useId()
@@ -122,10 +122,10 @@ export function SettingsTab({ pairId }: { pairId: string }) {
 					description={remoteName ?? "…"}
 				/>
 				<ActionRow
-					label={t("settingsQuarantine")}
-					description={t("settingsQuarantineDescription")}
+					label={t("settingsBin")}
+					description={t("settingsBinDescription")}
 					action={t("settingsRevealAction")}
-					run={() => runSyncAction(() => syncApi().reveal(pairId, "quarantine"))}
+					run={() => runSyncAction(() => syncApi().reveal(pairId, "bin"))}
 				/>
 			</SettingsGroup>
 			<SettingsGroup title={t("settingsGroupSyncing")}>

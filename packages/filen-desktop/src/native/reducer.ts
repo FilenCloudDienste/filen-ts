@@ -168,7 +168,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				runtime.done++
 				break
 			case "Quarantined":
-				activity.push({ pairId, at, kind: "quarantined", relPath: clip(event.inner.relPath), to: clip(event.inner.binPath) })
+				activity.push({ pairId, at, kind: "binned", relPath: clip(event.inner.relPath), to: clip(event.inner.binPath) })
 				break
 			case "ActionFailed": {
 				const relPath = clip(event.inner.relPath)

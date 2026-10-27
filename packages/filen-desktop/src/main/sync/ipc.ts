@@ -59,7 +59,7 @@ const CALLS: Record<SyncCall, CheckedCall<SyncService>> = {
 	ignoredPaths: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.ignoredPaths(...args)),
 	userIgnore: call(type([]), service => service.userIgnore()),
 	setUserIgnore: call(type([ignoreTextSchema]), (service, _page, [text]) => service.setUserIgnore(text)),
-	reveal: call(type([pairIdSchema, type("'root' | 'quarantine'")]), (service, _page, args) => service.reveal(...args)),
+	reveal: call(type([pairIdSchema, type("'root' | 'bin'")]), (service, _page, args) => service.reveal(...args)),
 	dismissNotice: call(type([pairIdSchema, noticeSchema]), (service, _page, args) => service.dismissNotice(...args)),
 	retryHost: call(type([]), service => {
 		service.retryHost()

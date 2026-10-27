@@ -3,7 +3,7 @@ import { oldWouldIgnore } from "../shared/legacyIgnore.ts"
 import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
 import type { Convergence } from "./convergence.ts"
-import { classify, clip, HostError, invalidIgnore } from "./errors.ts"
+import { classify, clip, errorKind, HostError, invalidIgnore } from "./errors.ts"
 import { checkPlan } from "./legacyCheck.ts"
 import { heldReason, planPage, type PlanRegistry, toAction, toConflict, toIgnored, toSummary } from "./plans.ts"
 import type { RuntimeFeed } from "./reducer.ts"
@@ -15,14 +15,13 @@ export const CONVERGENCE_TIMEOUT_MS = 60_000
 export interface OpsContext {
 	sdk: NativeSdk
 	engine: SyncEngine
-	// The account's root directory, which no pair may sync.
-	rootUuid: string
 	feed: RuntimeFeed
 	plans: PlanRegistry
 	convergence: Convergence
 	// Aborted on shutdown.
 	signal: AbortSignal
 	convergenceTimeoutMs?: number
+	log: { info(message: string): void; warn(message: string): void }
 }
 
 export type OpHandlers = { [K in SyncOp]: (args: NativeOpArgs<K>) => Promise<NativeOpResult<K>> }
@@ -89,10 +88,6 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 	const ops: OpHandlers = {
 		listPairs: async () => (await refreshPairs()).map(info => toNativePair(sdk, info)),
 		addPair: async ({ localRoot, remoteRoot, mode }) => {
-			if (remoteRoot.toLowerCase() === ctx.rootUuid.toLowerCase()) {
-				throw new HostError({ code: "accountRoot" })
-			}
-
 			let id: bigint
 
 			try {
@@ -263,11 +258,22 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			return defaults
 		},
-		// The engine has no way yet to seed a pair from the old client's state.
-		seedLegacy: async ({ pairId }) => {
-			held(pairId)
+		seedLegacy: async ({ pairId, stateDir }) => {
+			const { id } = held(pairId)
 
-			return "unsupported"
+			try {
+				const { imported, skipped } = await engine.importLegacyState(id, stateDir)
+
+				if (skipped > 0n) {
+					ctx.log.info(`sync: ${skipped.toString()} entries of the previous app's state were not imported`)
+				}
+
+				return { imported: Number(imported), skipped: Number(skipped) }
+			} catch (error) {
+				ctx.log.warn(`sync: the previous app's state was not imported: ${errorKind(sdk, error)}`)
+
+				return null
+			}
 		}
 	}
 

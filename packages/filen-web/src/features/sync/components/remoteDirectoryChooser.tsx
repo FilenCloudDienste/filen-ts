@@ -9,8 +9,8 @@ import { isHiddenRemoteRow } from "@/features/sync/components/addPairDialog.logi
 export type DirectoryPicker = ReturnType<typeof useDirectoryPicker>
 
 // The add-pair dialog's remote step: the shared drive picker pieces over the own drive. The directory open in it
-// is the pick, so the top level (the account's root, which the engine cannot sync) picks nothing; Filen's own
-// `.filen` directory is hidden. The picker state lives in the dialog, so going back to this step keeps the path.
+// is the pick, the top level picking the account's root; Filen's own `.filen` directory, which the engine reserves,
+// is hidden. The picker state lives in the dialog, so going back to this step keeps the path.
 export function RemoteDirectoryChooser({ picker, disabled }: { picker: DirectoryPicker; disabled: boolean }) {
 	const { t } = useTranslation("sync")
 	const { pathStack, listingQuery, items, namesQuery, descend, goRoot, goTo } = picker

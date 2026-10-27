@@ -17,9 +17,9 @@ describe("oldWouldIgnore", () => {
 		expect(oldWouldIgnore(".filenignore", { excludeDotFiles: true })).toBe(false)
 	})
 
-	it("always hides the old local trash", () => {
-		expect(oldWouldIgnore(".filen.trash.local", { excludeDotFiles: false })).toBe(true)
-		expect(oldWouldIgnore(".filen.trash.local/old.txt", { excludeDotFiles: false })).toBe(true)
+	it("leaves the old local trash to the engine, which reserves it", () => {
+		expect(oldWouldIgnore(".filen.trash.local", { excludeDotFiles: false })).toBe(false)
+		expect(oldWouldIgnore("d/.filen.trash.local/old.txt", { excludeDotFiles: false })).toBe(false)
 	})
 
 	it("adds none of the old always-on patterns", () => {

@@ -35,14 +35,9 @@ export function localChoiceOutcome(choice: DesktopSyncLocalRootChoice): LocalCho
 	}
 }
 
-// The remote pick: the directory open in the chooser. The account's root is never one (the engine cannot sync
-// it), so the top level picks nothing.
+// The remote pick: the directory open in the chooser, at the top level the account's root (null until it is known).
 export function remotePick(openUuid: string | null, accountRootUuid: string | undefined): string | null {
-	if (openUuid === null || openUuid.length === 0 || openUuid === accountRootUuid) {
-		return null
-	}
-
-	return openUuid
+	return openUuid === null || openUuid.length === 0 ? (accountRootUuid ?? null) : openUuid
 }
 
 export function defaultPairName(choice: LocalChoice): string {

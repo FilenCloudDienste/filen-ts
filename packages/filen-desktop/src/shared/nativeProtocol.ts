@@ -76,7 +76,6 @@ const errorCodeSchema = pinned<DesktopSyncErrorCode>()(
 		"planExpired",
 		"rootExpired",
 		"rootRefused",
-		"accountRoot",
 		"localRootMissing",
 		"remoteRootMissing",
 		"localRootInUse",
@@ -101,7 +100,7 @@ const activityKindSchema = pinned<DesktopSyncActivityKind>()(
 		"deletedLocal",
 		"movedRemote",
 		"movedLocal",
-		"quarantined",
+		"binned",
 		"failed",
 		"conflict",
 		"deletionsHeld",
@@ -320,8 +319,12 @@ export const SYNC_OPS = {
 	userIgnore: { args: noArgs, result: ignoreTextSchema },
 	setUserIgnore: { args: type({ text: ignoreTextSchema, "+": "reject" }), result: done },
 	defaultIgnore: { args: noArgs, result: textSchema.array() },
-	// "unsupported" while the engine has no way to seed a pair from the old client's state.
-	seedLegacy: { args: pairArgs, result: type("'seeded' | 'unsupported'") }
+	// Seeds a pair without a baseline from the old client's state directory, which main locates. Null when nothing was
+	// imported because the import failed (logged by the host): it is best effort and never blocks the first run.
+	seedLegacy: {
+		args: type({ pairId: pairIdSchema, stateDir: localPathSchema, "+": "reject" }),
+		result: type({ imported: countSchema, skipped: countSchema, "+": "reject" }).or("null")
+	}
 } as const
 
 // Mounts. Every role serves the whole drive; the host runs one rclone for all of them and reconciles it to the last

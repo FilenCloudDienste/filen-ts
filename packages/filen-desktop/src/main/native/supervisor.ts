@@ -37,7 +37,6 @@ export interface UtilityProcessLike {
 
 export interface SyncUser {
 	userId: string
-	rootUuid: string
 }
 
 // What the host reports that the supervisor passes on.
@@ -154,7 +153,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		if (parsed?.blob !== blob) {
 			const session = parseSessionBlob(blob)
 
-			parsed = { blob, user: session === null ? null : { userId: session.userId.toString(), rootUuid: session.rootUuid } }
+			parsed = { blob, user: session === null ? null : { userId: session.userId.toString() } }
 		}
 
 		return parsed.user

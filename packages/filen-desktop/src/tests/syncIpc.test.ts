@@ -79,7 +79,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		subscribe: vi.fn(),
 		ensure: vi.fn(),
 		retry: vi.fn(),
-		user: () => Promise.resolve({ userId: "1", rootUuid: ACCOUNT_ROOT }),
+		user: () => Promise.resolve({ userId: "1" }),
 		state: () => host
 	}
 	const tokens = createRootTokens(() => clock)
@@ -93,7 +93,11 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 			mountPoints: () => Promise.resolve([])
 		},
 		shell: { openPath: vi.fn(() => Promise.resolve("")) },
-		legacySync: { pending: () => Promise.resolve(undefined), consume: () => Promise.resolve() },
+		legacySync: {
+			pending: () => Promise.resolve(undefined),
+			consume: () => Promise.resolve(),
+			stateDir: legacyUuid => `/old/sync/state/v2/${legacyUuid}`
+		},
 		now: () => clock,
 		log: { info: vi.fn(), warn: vi.fn() }
 	})
@@ -141,7 +145,8 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 			return handler(event, ...args)
 		},
 		subscribe: (on: unknown) => listeners.get(CHANNELS.syncSubscribe)?.(event, on),
-		ops: () => call.mock.calls.map(([op]) => op)
+		ops: () => call.mock.calls.map(([op]) => op),
+		argsOf: (op: NativeOp) => call.mock.calls.filter(([name]) => name === op).map(([, args]) => args)
 	}
 }
 
@@ -189,14 +194,11 @@ describe("registerSyncIpc", () => {
 		expect(ops()).toEqual([])
 	})
 
-	it("rejects account root", async () => {
-		const { invoke, tokens, ops } = setup()
+	it("accepts the account root", async () => {
+		const { invoke, tokens, argsOf } = setup()
 
-		expect(await invoke("addPair", newPair(tokens.issue(directory), { remoteRoot: ACCOUNT_ROOT.toUpperCase() }))).toEqual({
-			ok: false,
-			error: { code: "accountRoot" }
-		})
-		expect(ops()).toEqual([])
+		expect(await invoke("addPair", newPair(tokens.issue(directory), { remoteRoot: ACCOUNT_ROOT }))).toMatchObject({ ok: true })
+		expect(argsOf("addPair")).toEqual([{ localRoot: directory, remoteRoot: ACCOUNT_ROOT, mode: "twoWay" }])
 	})
 
 	it("re-checks the root when the pair is added", async () => {
@@ -308,21 +310,21 @@ describe("registerSyncIpc", () => {
 		const legacy = "11111111-2222-4333-8444-555555555555"
 		const { invoke, store } = setup({
 			pairs: [
-				shellPair({ notices: ["localTrashDropped"] }),
+				shellPair({ notices: ["localTrashMoved"] }),
 				shellPair({ pairId: null, legacyUuid: legacy, state: "unsupported", notices: ["refusedRemoteMissing"] })
 			]
 		})
 
-		await invoke("dismissNotice", "7", "localTrashDropped")
+		await invoke("dismissNotice", "7", "localTrashMoved")
 		await invoke("dismissNotice", `legacy:${legacy}`, "refusedRemoteMissing")
 
 		expect(store.get().pairs).toEqual([shellPair()])
 	})
 
-	it("reveals the root or the quarantine only", async () => {
+	it("reveals the root or the bin only", async () => {
 		const { invoke, service } = setup({ pairs: [shellPair()] })
 
-		expect(await invoke("reveal", "7", "quarantine")).toEqual({ ok: true, value: null })
+		expect(await invoke("reveal", "7", "bin")).toEqual({ ok: true, value: null })
 		expect(await service.reveal("8", "root")).toEqual({ ok: false, error: { code: "pairNotFound" } })
 		await expect(invoke("reveal", "7", "empty")).rejects.toThrow("invalid sync payload")
 	})

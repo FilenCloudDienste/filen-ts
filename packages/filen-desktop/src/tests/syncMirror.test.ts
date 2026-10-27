@@ -71,7 +71,7 @@ describe("reconcileMirror", () => {
 	})
 
 	it("matches a verbatim Windows root and keeps the shell's fields", () => {
-		const mirror = [shellPair({ localRoot: "C:\\Users\\u\\Work", name: "Mine", state: "review", notices: ["localTrashDropped"] })]
+		const mirror = [shellPair({ localRoot: "C:\\Users\\u\\Work", name: "Mine", state: "review", notices: ["localTrashMoved"] })]
 		const engine = [enginePair({ id: "4", localRoot: "\\\\?\\C:\\Users\\u\\work" })]
 
 		const { pairs } = reconcileMirror(mirror, engine, { reset: false, now: 0 })
@@ -82,7 +82,7 @@ describe("reconcileMirror", () => {
 				localRoot: "\\\\?\\C:\\Users\\u\\work",
 				name: "Mine",
 				state: "review",
-				notices: ["localTrashDropped"]
+				notices: ["localTrashMoved"]
 			})
 		])
 	})
@@ -109,9 +109,9 @@ describe("reconcileMirror", () => {
 		])
 	})
 
-	it("waitingForRoot survives", () => {
+	it("waiting and refused pairs survive", () => {
 		const waiting = shellPair({ pairId: null, state: "waitingForRoot", legacyUuid: LEGACY, localRoot: "/Volumes/USB/Docs" })
-		const unsupported = shellPair({ pairId: null, state: "unsupported", legacyUuid: REMOTE_B, notices: ["accountRootUnsupported"] })
+		const unsupported = shellPair({ pairId: null, state: "unsupported", legacyUuid: REMOTE_B, notices: ["refusedRemoteMissing"] })
 
 		expect(reconcileMirror([waiting, unsupported], [], { reset: false, now: 0 })).toEqual({ pairs: [waiting, unsupported], readd: [] })
 		expect(reconcileMirror([waiting, unsupported], [], { reset: true, now: 0 })).toEqual({ pairs: [waiting, unsupported], readd: [] })
@@ -160,7 +160,7 @@ describe("mergeOverview", () => {
 			issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
 			degraded: { local: true, remote: false }
 		})
-		const overview = mergeOverview(host, [live], [shellPair({ paused: true, notices: ["localTrashDropped"] })])
+		const overview = mergeOverview(host, [live], [shellPair({ paused: true, notices: ["localTrashMoved"] })])
 
 		expect(overview).toEqual({
 			host,
@@ -180,7 +180,7 @@ describe("mergeOverview", () => {
 					issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
 					degraded: { local: true, remote: false },
 					review: null,
-					notices: ["localTrashDropped"]
+					notices: ["localTrashMoved"]
 				}
 			]
 		})
@@ -212,6 +212,23 @@ describe("sync store", () => {
 		expect(parseSyncState("{", warn)).toEqual({ version: 1, pairs: [], legacyApplied: false })
 		expect(parseSyncState(JSON.stringify({ version: 2, pairs: [] }), warn)).toEqual({ version: 1, pairs: [], legacyApplied: false })
 		expect(parseSyncState(null, warn)).toEqual({ version: 1, pairs: [], legacyApplied: false })
+	})
+
+	it("reads earlier builds' notices: an account-root pair waits for its directory again", () => {
+		const warn = vi.fn()
+		const accountRoot = {
+			...shellPair({ pairId: null, legacyUuid: LEGACY }),
+			state: "unsupported",
+			notices: ["localTrashDropped", "accountRootUnsupported"]
+		}
+		const refused = shellPair({ pairId: null, legacyUuid: REMOTE_B, state: "unsupported", notices: ["refusedRemoteMissing"] })
+		const state = parseSyncState(JSON.stringify({ version: 1, pairs: [accountRoot, refused], legacyApplied: true }), warn)
+
+		expect(state.pairs).toEqual([
+			shellPair({ pairId: null, legacyUuid: LEGACY, state: "waitingForRoot", notices: ["localTrashMoved"] }),
+			refused
+		])
+		expect(warn).not.toHaveBeenCalled()
 	})
 
 	it("writes updates in order and reads them back", async () => {

@@ -66,6 +66,14 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 	let revoked = false
 	const plans = createPlanRegistry()
 	const abort = new AbortController()
+	const log = {
+		info: (message: string) => {
+			console.log(message)
+		},
+		warn: (message: string) => {
+			console.error(message)
+		}
+	}
 
 	// Read through a call: the phase changes in other handlers while init awaits.
 	function stopping(): boolean {
@@ -113,9 +121,9 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		sdk = addon
 
-		const session = clientFromSession(addon, message.session, message.logLevel)
+		const client = clientFromSession(addon, message.session, message.logLevel)
 
-		if (session === null) {
+		if (client === null) {
 			fatal("session")
 
 			return
@@ -123,7 +131,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		mounts = createMountsHost({
 			sdk: addon,
-			client: session.client,
+			client,
 			platform: process.platform,
 			userAgent: USER_AGENT,
 			verifyBinary: createBinaryCheck({
@@ -137,14 +145,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 			post,
 			now: Date.now,
 			onAuthFailed: authRevoked,
-			log: {
-				info: message => {
-					console.log(message)
-				},
-				warn: message => {
-					console.error(message)
-				}
-			}
+			log
 		})
 		mounts.subscribe(mountsSubscribed)
 
@@ -155,7 +156,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		runtime.subscribe(subscribed)
 
 		try {
-			const opened = await openEngine(addon, session.client, message.dir, {
+			const opened = await openEngine(addon, client, message.dir, {
 				cache: convergence,
 				sync: {
 					onEvents: events => {
@@ -187,11 +188,11 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 			const current = createHostEngine({
 				sdk: addon,
 				engine: opened.engine,
-				rootUuid: session.rootUuid,
 				feed: runtime,
 				plans,
 				convergence,
-				signal: abort.signal
+				signal: abort.signal,
+				log
 			})
 
 			host = current

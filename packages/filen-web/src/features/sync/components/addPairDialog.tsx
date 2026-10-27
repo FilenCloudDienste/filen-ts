@@ -89,7 +89,7 @@ async function discardPair(added: AddedPair): Promise<void> {
 // → remote directory → mode → name → addPair, which adds the pair paused and dry-runs it → the review, where
 // Start starts it and closing removes it again.
 export function AddPairDialog({ onClose }: { onClose: () => void }) {
-	const { t } = useTranslation(["sync", "common"])
+	const { t } = useTranslation(["sync", "common", "drive"])
 	const navigate = useNavigate()
 	const id = useId()
 	const accountRoot = useAccountQuery().data?.rootDirUuid
@@ -104,7 +104,8 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 	const unstartedRef = useRef<AddedPair | null>(null)
 	const remote = remotePick(picker.targetUuid, accountRoot)
 	const form: AddPairForm = { ...fields, remote }
-	const remoteName = remote === null ? null : (picker.namesQuery.data?.[remote] ?? null)
+	const remoteName =
+		remote === null ? null : remote === accountRoot ? t("drive:driveMyDrive") : (picker.namesQuery.data?.[remote] ?? null)
 
 	useEffect(() => {
 		return () => {
@@ -275,9 +276,7 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 							picker={picker}
 							disabled={busy !== null}
 						/>
-						<p className="text-xs text-muted-foreground">
-							{remote === null ? t("addRemoteRootHint") : t("addRemotePick", { name: remoteName ?? "…" })}
-						</p>
+						<p className="text-xs text-muted-foreground">{t("addRemotePick", { name: remoteName ?? "…" })}</p>
 					</>
 				)
 			case "mode":

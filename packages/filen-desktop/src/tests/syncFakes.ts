@@ -53,7 +53,7 @@ export function fakeNative(store: SyncStore, answers: Answers = {}) {
 		resume: () => null,
 		removePair: () => null,
 		releasePlan: () => null,
-		seedLegacy: () => "unsupported",
+		seedLegacy: () => ({ imported: 0, skipped: 0 }),
 		evaluatePlan: () => ({
 			status: "ok",
 			planId: "plan",
@@ -71,6 +71,7 @@ export function fakeNative(store: SyncStore, answers: Answers = {}) {
 	const deps: FirstRunDeps = {
 		call: call as unknown as FirstRunDeps["call"],
 		store,
+		legacyStateDir: legacyUuid => `/old/sync/state/v2/${legacyUuid}`,
 		now: () => 5,
 		log: { info: vi.fn(), warn: vi.fn() }
 	}

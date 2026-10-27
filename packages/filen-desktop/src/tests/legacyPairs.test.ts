@@ -6,14 +6,14 @@ import { effectiveConfig, type LegacyStash } from "../main/legacyData.ts"
 import { attachUnheld } from "../main/sync/firstRun.ts"
 import {
 	DOT_FILE_RULES,
-	LEGACY_TRASH_RULE,
 	legacyRecords,
+	legacyStateDir,
 	legacySyncImport,
 	legacyUserIgnore,
 	type LegacyPair,
 	withRules
 } from "../main/sync/legacyPairs.ts"
-import { fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
+import { fakeNative, memoryStore } from "./syncFakes.ts"
 
 const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
 const REMOTE = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
@@ -58,7 +58,6 @@ function legacyPair(overrides: Partial<LegacyPair> = {}): LegacyPair {
 		excludeDotFiles: false,
 		paused: false,
 		localTrashDisabled: false,
-		accountRoot: false,
 		...overrides
 	}
 }
@@ -70,27 +69,24 @@ function lines(text: string): string[] {
 describe("legacySyncImport", () => {
 	it("modes map 1:1", () => {
 		const modes = ["twoWay", "localToCloud", "cloudToLocal", "localBackup", "cloudBackup"]
-		const imported = legacySyncImport(
-			{
-				enabled: true,
-				dbPath: "/old",
-				syncPairs: modes.map((mode, index) => oldPair({ mode, uuid: `${String(index)}${UUID_A.slice(1)}` }))
-			},
-			ACCOUNT_ROOT
-		)
+		const imported = legacySyncImport({
+			enabled: true,
+			dbPath: "/old",
+			syncPairs: modes.map((mode, index) => oldPair({ mode, uuid: `${String(index)}${UUID_A.slice(1)}` }))
+		})
 
 		expect(imported?.pairs.map(pair => pair.mode)).toEqual(["twoWay", "localToRemote", "remoteToLocal", "localBackup", "remoteBackup"])
 	})
 
 	it("drops entries that are no pair, and a pair listed twice", () => {
-		const imported = legacySyncImport(
-			{ enabled: false, syncPairs: [oldPair(), oldPair({ mode: "mirror" }), oldPair({ localPath: "" }), oldPair(), 7] },
-			ACCOUNT_ROOT
-		)
+		const imported = legacySyncImport({
+			enabled: false,
+			syncPairs: [oldPair(), oldPair({ mode: "mirror" }), oldPair({ localPath: "" }), oldPair(), 7]
+		})
 
 		expect(imported).toEqual({ enabled: false, pairs: [legacyPair()], dropped: 4 })
-		expect(legacySyncImport({ syncPairs: [] }, ACCOUNT_ROOT)).toBeNull()
-		expect(legacySyncImport(undefined, ACCOUNT_ROOT)).toBeNull()
+		expect(legacySyncImport({ syncPairs: [] })).toBeNull()
+		expect(legacySyncImport(undefined)).toBeNull()
 	})
 
 	it("effective config fallback only for the stashed user", () => {
@@ -102,18 +98,18 @@ describe("legacySyncImport", () => {
 			fallback: { sync: config }
 		}
 
-		expect(legacySyncImport(effectiveConfig(stash, "1001", "sync"), ACCOUNT_ROOT)?.pairs).toHaveLength(1)
-		expect(legacySyncImport(effectiveConfig(stash, "1002", "sync"), ACCOUNT_ROOT)?.pairs).toEqual([])
+		expect(legacySyncImport(effectiveConfig(stash, "1001", "sync"))?.pairs).toHaveLength(1)
+		expect(legacySyncImport(effectiveConfig(stash, "1002", "sync"))?.pairs).toEqual([])
 		expect(effectiveConfig(stash, "1003", "sync")).toBeUndefined()
 	})
 })
 
 describe("legacyRecords", () => {
-	it("account-root pair recorded unsupported with notice", async () => {
-		const imported = legacySyncImport(
-			{ enabled: true, syncPairs: [oldPair({ remoteParentUUID: ACCOUNT_ROOT.toUpperCase(), localPath: directory })] },
-			ACCOUNT_ROOT
-		)
+	it("records an account-root pair like any other, and it is added", async () => {
+		const imported = legacySyncImport({
+			enabled: true,
+			syncPairs: [oldPair({ remoteParentUUID: ACCOUNT_ROOT.toUpperCase(), localPath: directory })]
+		})
 
 		expect(imported).not.toBeNull()
 
@@ -127,25 +123,21 @@ describe("legacyRecords", () => {
 				remoteRoot: ACCOUNT_ROOT.toUpperCase(),
 				mode: "twoWay",
 				paused: false,
-				state: "unsupported",
+				state: "waitingForRoot",
 				review: null,
 				legacyUuid: UUID_A,
 				legacyDotFiles: null,
-				notices: ["localTrashDropped", "accountRootUnsupported"],
+				notices: ["localTrashMoved"],
 				createdAt: 5
 			}
 		])
 
-		// Retried on every start; it is added once the engine takes an account root.
 		const store = memoryStore(records)
-		const refusing = fakeNative(store, { addPair: () => new Refusal("accountRoot") })
+		const { deps, argsOf } = fakeNative(store)
 
-		await attachUnheld(refusing.deps)
-		expect(store.get().pairs).toEqual(records)
-		expect(refusing.deps.log.warn).not.toHaveBeenCalled()
-
-		await attachUnheld(fakeNative(store).deps)
-		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "active", notices: ["localTrashDropped"] })
+		await attachUnheld(deps)
+		expect(argsOf("addPair")).toEqual([{ localRoot: directory, remoteRoot: ACCOUNT_ROOT.toUpperCase(), mode: "twoWay" }])
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "active", notices: ["localTrashMoved"] })
 	})
 
 	it("keeps an old pair paused when it or the old sync switch was off, and names it", () => {
@@ -163,8 +155,16 @@ describe("legacyRecords", () => {
 
 		expect(records.map(pair => [pair.name, pair.paused, pair.state, pair.notices])).toEqual([
 			["Photos", true, "waitingForRoot", []],
-			["Docs", true, "waitingForRoot", ["localTrashDropped"]]
+			["Docs", true, "waitingForRoot", ["localTrashMoved"]]
 		])
+	})
+})
+
+describe("legacyStateDir", () => {
+	it("is the pair's directory under the old client's sync state", () => {
+		expect(legacyStateDir(path.join("/data", "@filen", "desktop"), UUID_A)).toBe(
+			path.join("/data", "@filen", "desktop", "sync", "state", "v2", UUID_A)
+		)
 	})
 })
 
@@ -175,7 +175,7 @@ describe("dot files and the old trash", () => {
 			legacyPair({ uuid: UUID_B, excludeDotFiles: true, remoteRoot: REMOTE_B })
 		]
 
-		expect(lines(legacyUserIgnore(pairs, ""))).toEqual([LEGACY_TRASH_RULE, ...DOT_FILE_RULES])
+		expect(lines(legacyUserIgnore(pairs, ""))).toEqual([...DOT_FILE_RULES])
 
 		const records = legacyRecords({ enabled: true, pairs, dropped: 0 }, 0)
 
@@ -204,8 +204,8 @@ describe("dot files and the old trash", () => {
 			legacyPair({ uuid: UUID_B, excludeDotFiles: false, localPath: shown, remoteRoot: REMOTE_B })
 		]
 
-		// Only the trash goes device-wide.
-		expect(lines(legacyUserIgnore(pairs, ""))).toEqual([LEGACY_TRASH_RULE])
+		// Nothing goes device-wide.
+		expect(legacyUserIgnore(pairs, "")).toBe("")
 
 		const store = memoryStore(legacyRecords({ enabled: true, pairs, dropped: 0 }, 0))
 		const { deps } = fakeNative(store)
@@ -222,9 +222,9 @@ describe("dot files and the old trash", () => {
 		])
 	})
 
-	it("trash dir always ignored", () => {
-		expect(lines(legacyUserIgnore([legacyPair()], ""))).toEqual([LEGACY_TRASH_RULE])
-		expect(lines(legacyUserIgnore([], ""))).toEqual([LEGACY_TRASH_RULE])
+	it("adds no rule for the old trash, which the engine reserves", () => {
+		expect(legacyUserIgnore([legacyPair()], "")).toBe("")
+		expect(legacyUserIgnore([], "")).toBe("")
 	})
 
 	it("no other old patterns added", () => {

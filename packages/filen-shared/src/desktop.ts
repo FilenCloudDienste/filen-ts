@@ -152,10 +152,9 @@ export type DesktopSyncPhase = "idle" | "syncing" | "paused" | "review" | "waiti
 // or the pair overlaps another one on this device or in the cloud.
 export type DesktopSyncRefusedNotice = "refusedLocalRoot" | "refusedRemoteMissing" | "refusedLocalOverlap" | "refusedRemoteOverlap"
 
-// Told once per pair until dismissed: the old client's local trash is no longer used; the engine cannot sync an
-// account's root directory yet; the engine refused the pair, which is kept (not synced) until this is dismissed, and
-// dismissing it removes the pair.
-export type DesktopSyncNotice = "localTrashDropped" | "accountRootUnsupported" | DesktopSyncRefusedNotice
+// Told once per pair until dismissed: the old client's local trash is moved into the pair's bin on its first sync; the
+// engine refused the pair, which is kept (not synced) until this is dismissed, and dismissing it removes the pair.
+export type DesktopSyncNotice = "localTrashMoved" | DesktopSyncRefusedNotice
 
 // Why deletions were held back for approval.
 export type DesktopSyncHeldReason =
@@ -237,7 +236,7 @@ export type DesktopSyncActivityKind =
 	| "deletedLocal"
 	| "movedRemote"
 	| "movedLocal"
-	| "quarantined"
+	| "binned"
 	| "failed"
 	| "conflict"
 	| "deletionsHeld"
@@ -327,7 +326,6 @@ export type DesktopSyncErrorCode =
 	| "planExpired"
 	| "rootExpired"
 	| "rootRefused"
-	| "accountRoot"
 	| "localRootMissing"
 	| "remoteRootMissing"
 	| "localRootInUse"
@@ -438,8 +436,8 @@ export interface DesktopSync {
 	userIgnore(): Promise<DesktopSyncResult<DesktopSyncUserIgnore>>
 	// Rejected as `invalidIgnore` with the first bad line.
 	setUserIgnore(text: string): Promise<DesktopSyncResult<null>>
-	// Opens the pair's directory, or the directory the engine moves replaced and deleted local files to.
-	reveal(pairId: string, target: "root" | "quarantine"): Promise<DesktopSyncResult<null>>
+	// Opens the pair's directory, or its bin: where the engine moves replaced and deleted local files.
+	reveal(pairId: string, target: "root" | "bin"): Promise<DesktopSyncResult<null>>
 	dismissNotice(pairId: string, notice: DesktopSyncNotice): Promise<void>
 	// Starts the native host again after it failed.
 	retryHost(): void

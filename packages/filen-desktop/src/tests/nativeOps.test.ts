@@ -5,7 +5,7 @@ import { classify } from "../native/errors.ts"
 import { createHostEngine } from "../native/ops.ts"
 import { createPlanRegistry } from "../native/plans.ts"
 import { createRuntimeFeed } from "../native/reducer.ts"
-import { ACCOUNT_ROOT, action, fakeEngine, fakePlan, fakeSdk, pairInfo, REMOTE_ROOT, sdkError } from "./nativeFakes.ts"
+import { action, fakeEngine, fakePlan, fakeSdk, pairInfo, REMOTE_ROOT, sdkError } from "./nativeFakes.ts"
 
 beforeEach(() => {
 	vi.useFakeTimers()
@@ -17,21 +17,22 @@ afterEach(() => {
 
 function setup(pairs = [pairInfo()]) {
 	const fake = fakeEngine(pairs)
+	const log = { info: vi.fn(), warn: vi.fn() }
 	const convergence = createConvergence()
 	const plans = createPlanRegistry()
 	const feed = createRuntimeFeed(fakeSdk, { post: () => undefined, onAuthFailed: () => undefined })
 	const host = createHostEngine({
 		sdk: fakeSdk,
 		engine: fake.handle,
-		rootUuid: ACCOUNT_ROOT,
 		feed,
 		plans,
 		convergence,
 		signal: new AbortController().signal,
-		convergenceTimeoutMs: 5000
+		convergenceTimeoutMs: 5000,
+		log
 	})
 
-	return { ...fake, convergence, plans, host }
+	return { ...fake, convergence, plans, host, log }
 }
 
 const resync = (roots: string[], converged: boolean): CacheStatusMessage[] => [
@@ -134,7 +135,7 @@ describe("native ops", () => {
 		expect(plan.actions).toHaveBeenCalledTimes(3)
 
 		await expect(host.ops.evaluatePlan({ pairId: "1", check: { legacy: { excludeDotFiles: false } } })).resolves.toMatchObject({
-			check: { legacyHits: { count: 1, sample: [".filen.trash.local"] } }
+			check: { legacyHits: { count: 0, sample: [] } }
 		})
 		await expect(host.ops.evaluatePlan({ pairId: "1", check: { legacy: null } })).resolves.toMatchObject({
 			check: { uploads: 3, downloads: 1, legacyHits: null }
@@ -167,18 +168,35 @@ describe("native ops", () => {
 		})
 	})
 
-	it("refuses the account root and pairs the engine does not list", async () => {
+	it("refuses pairs the engine does not list", async () => {
 		const { engine, host } = setup()
 
 		await host.refreshPairs()
-		await expect(
-			failure(host.ops.addPair({ localRoot: "/x", remoteRoot: ACCOUNT_ROOT.toUpperCase(), mode: "twoWay" }))
-		).resolves.toEqual({
-			code: "accountRoot"
-		})
-		expect(engine.addPair).not.toHaveBeenCalled()
 		await expect(failure(host.ops.pause({ pairId: "9" }))).resolves.toEqual({ code: "pairNotFound", pairId: "9" })
 		expect(engine.pausePair).not.toHaveBeenCalled()
+	})
+
+	it("seeds a pair from the old client's state, logging what it skipped", async () => {
+		const { engine, host, log } = setup()
+
+		engine.importLegacyState.mockResolvedValue({ imported: 120n, skipped: 3n })
+		await host.refreshPairs()
+		await expect(host.ops.seedLegacy({ pairId: "1", stateDir: "/old/sync/state/v2/u" })).resolves.toEqual({ imported: 120, skipped: 3 })
+		expect(engine.importLegacyState).toHaveBeenCalledWith(1n, "/old/sync/state/v2/u")
+		expect(log.info).toHaveBeenCalledWith("sync: 3 entries of the previous app's state were not imported")
+	})
+
+	it("answers null for a failed seed and logs the error kind", async () => {
+		const { engine, host, log } = setup()
+
+		engine.importLegacyState.mockRejectedValue(sdkError(fakeSdk.ErrorKind.InvalidState, "pair already has a baseline"))
+		await host.refreshPairs()
+		await expect(host.ops.seedLegacy({ pairId: "1", stateDir: "/old" })).resolves.toBeNull()
+		expect(log.warn).toHaveBeenCalledWith("sync: the previous app's state was not imported: InvalidState")
+		await expect(failure(host.ops.seedLegacy({ pairId: "9", stateDir: "/old" }))).resolves.toEqual({
+			code: "pairNotFound",
+			pairId: "9"
+		})
 	})
 
 	it("names the line of a refused user ignore text", async () => {

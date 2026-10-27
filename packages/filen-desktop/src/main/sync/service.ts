@@ -39,8 +39,8 @@ import { isRefusedNotice, type ShellPair, type SyncStore } from "./store.ts"
 // Overview pushes to a page at most this often.
 export const OVERVIEW_PUSH_INTERVAL_MS = 250
 
-// Where the engine moves local files it replaced or deleted, inside the pair's root.
-const QUARANTINE_DIR = ".filen-sync-trash"
+// The pair's bin: where the engine moves local files it replaced or deleted, filed by day and deleted after 30 days.
+const BIN_DIR = ".filen-sync-trash"
 
 export interface SyncServiceDeps {
 	supervisor: Pick<NativeSupervisor, "call" | "subscribe" | "ensure" | "retry" | "user" | "state">
@@ -55,8 +55,12 @@ export interface SyncServiceDeps {
 		mountPoints(userId: string): Promise<readonly string[]>
 	}
 	shell: { openPath(target: string): Promise<string> }
-	// The old client's sync config the migration stashed for a user.
-	legacySync: { pending(userId: string): Promise<unknown>; consume(userId: string): Promise<void> }
+	// The old client's sync config the migration stashed for a user, and where it kept a pair's state.
+	legacySync: {
+		pending(userId: string): Promise<unknown>
+		consume(userId: string): Promise<void>
+		stateDir(legacyUuid: string): string
+	}
 	now(): number
 	log: { info(message: string): void; warn(message: string): void }
 }
@@ -92,7 +96,7 @@ export interface SyncService {
 	ignoredPaths(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncIgnored>>>
 	userIgnore(): Promise<Result<DesktopSyncUserIgnore>>
 	setUserIgnore(text: string): Promise<Result<null>>
-	reveal(pairId: string, target: "root" | "quarantine"): Promise<Result<null>>
+	reveal(pairId: string, target: "root" | "bin"): Promise<Result<null>>
 	dismissNotice(pairId: string, notice: DesktopSyncNotice): Promise<void>
 	retryHost(): void
 }
@@ -255,6 +259,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 					return next
 				}
 			},
+			legacyStateDir: deps.legacySync.stateDir,
 			now: deps.now,
 			log: deps.log
 		}
@@ -265,7 +270,6 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				() =>
 					applyLegacySync({
 						...run,
-						rootUuid: user.rootUuid,
 						stash: { pending: () => deps.legacySync.pending(userId), consume: () => deps.legacySync.consume(userId) }
 					})
 			],
@@ -401,10 +405,6 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
 			if (user === null) {
 				return fail("hostUnavailable")
-			}
-
-			if (remoteRoot.toLowerCase() === user.rootUuid.toLowerCase()) {
-				return fail("accountRoot")
 			}
 
 			const store = await deps.storeFor(user.userId)
@@ -569,7 +569,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				return fail("pairNotFound")
 			}
 
-			const directory = target === "root" ? found.pair.localRoot : path.join(found.pair.localRoot, QUARANTINE_DIR)
+			const directory = target === "root" ? found.pair.localRoot : path.join(found.pair.localRoot, BIN_DIR)
 
 			// openPath answers with an error message, "" on success.
 			return (await deps.shell.openPath(directory)) === "" ? DONE : fail("localRootMissing")

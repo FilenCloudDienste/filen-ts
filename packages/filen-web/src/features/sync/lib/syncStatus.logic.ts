@@ -91,19 +91,16 @@ export function modeChangeNeedsBacklog(from: DesktopSyncMode, to: DesktopSyncMod
 }
 
 export const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
-	localTrashDropped: "noticeLocalTrashDropped",
-	accountRootUnsupported: "noticeAccountRootUnsupported",
+	localTrashMoved: "noticeLocalTrashMoved",
 	refusedLocalRoot: "noticeRefusedLocalRoot",
 	refusedRemoteMissing: "noticeRefusedRemoteMissing",
 	refusedLocalOverlap: "noticeRefusedLocalOverlap",
 	refusedRemoteOverlap: "noticeRefusedRemoteOverlap"
 }
 
-// What a notice is about: "unsupported" and "refused" say why the pair is not synced (the generic line is then left
-// out); dismissing a "refused" one removes the pair the engine would not take.
-export const NOTICE_ROLE: Record<DesktopSyncNotice, "info" | "unsupported" | "refused"> = {
-	localTrashDropped: "info",
-	accountRootUnsupported: "unsupported",
+// What a notice is about: dismissing a "refused" one removes the pair the engine would not take.
+export const NOTICE_ROLE: Record<DesktopSyncNotice, "info" | "refused"> = {
+	localTrashMoved: "info",
 	refusedLocalRoot: "refused",
 	refusedRemoteMissing: "refused",
 	refusedLocalOverlap: "refused",

@@ -62,7 +62,7 @@ export function isRefusedNotice(notice: DesktopSyncNotice): notice is DesktopSyn
 }
 
 export const noticeSchema = pinned<DesktopSyncNotice>()(
-	type.enumerated("localTrashDropped", "accountRootUnsupported", ...(Object.keys(REFUSED_NOTICES) as DesktopSyncRefusedNotice[]))
+	type.enumerated("localTrashMoved", ...(Object.keys(REFUSED_NOTICES) as DesktopSyncRefusedNotice[]))
 )
 
 const shellPairSchema = pinned<ShellPair>()(
@@ -87,6 +87,29 @@ const shellPairSchema = pinned<ShellPair>()(
 		"+": "delete"
 	})
 )
+
+const earlierNoticesSchema = type({ state: "unknown", notices: "string[]" })
+
+// Notices earlier builds wrote: the old trash one under its former name, and an account-root pair the engine could not
+// sync then, which now waits for its directory like any other.
+function withCurrentNotices(entry: unknown): unknown {
+	const pair = earlierNoticesSchema(entry)
+
+	if (
+		pair instanceof type.errors ||
+		!pair.notices.some(notice => notice === "localTrashDropped" || notice === "accountRootUnsupported")
+	) {
+		return entry
+	}
+
+	return {
+		...pair,
+		state: pair.state === "unsupported" && pair.notices.includes("accountRootUnsupported") ? "waitingForRoot" : pair.state,
+		notices: pair.notices.flatMap(notice =>
+			notice === "accountRootUnsupported" ? [] : [notice === "localTrashDropped" ? "localTrashMoved" : notice]
+		)
+	}
+}
 
 const fileSchema = type({ version: "1", pairs: "unknown[]", legacyApplied: "boolean", "+": "delete" })
 
@@ -118,7 +141,7 @@ export function parseSyncState(data: string | null, warn: (message: string) => v
 	const pairs: ShellPair[] = []
 
 	for (const entry of file.pairs) {
-		const pair = shellPairSchema(entry)
+		const pair = shellPairSchema(withCurrentNotices(entry))
 
 		if (pair instanceof type.errors) {
 			warn("dropping an invalid sync pair record")

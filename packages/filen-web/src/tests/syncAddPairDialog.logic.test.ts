@@ -100,9 +100,10 @@ describe("add pair dialog", () => {
 		expect(canAdvance("local", withLocalChoice(INITIAL_ADD_PAIR_FORM, warned))).toBe(true)
 	})
 
-	it("account root not selectable", () => {
-		expect(remotePick(null, "root-uuid")).toBeNull()
-		expect(remotePick("root-uuid", "root-uuid")).toBeNull()
+	it("the top level picks the account root", () => {
+		expect(remotePick(null, "root-uuid")).toBe("root-uuid")
+		expect(remotePick("", "root-uuid")).toBe("root-uuid")
+		expect(remotePick(null, undefined)).toBeNull()
 		expect(remotePick("child-uuid", "root-uuid")).toBe("child-uuid")
 		expect(isHiddenRemoteRow(".filen", true)).toBe(true)
 		expect(isHiddenRemoteRow(".filen", false)).toBe(false)
