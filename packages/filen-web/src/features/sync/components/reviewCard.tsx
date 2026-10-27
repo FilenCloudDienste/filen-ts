@@ -12,6 +12,7 @@ import type {
 	DesktopSyncReviewFinding,
 	DesktopSyncUnsyncable
 } from "@filen/shared/desktop"
+import { ListChecksIcon } from "lucide-react"
 import { cn, formatBytes } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { CARD_SURFACE_CLASS, SURFACE_RING } from "@/components/ui/surface"
@@ -242,7 +243,8 @@ export function ReviewSummary({ summary, findings, planId }: ReviewSummaryProps)
 	)
 }
 
-// A pair held paused until the user checks its first run, in the pair's detail. `actions` are its buttons.
+// A pair held paused until the user checks its first run, docked under the pair's overview: a warning-toned card
+// whose summary lines up under its title, the actions in a footer. `actions` are its buttons.
 export function ReviewCard({
 	title,
 	description,
@@ -250,13 +252,25 @@ export function ReviewCard({
 	...summary
 }: ReviewSummaryProps & { title: string; description: string; actions: ReactNode }) {
 	return (
-		<section className={cn(CARD_SURFACE_CLASS, "flex flex-col gap-4 p-5")}>
-			<div className="flex flex-col gap-1">
-				<h2 className="font-heading text-base font-medium">{title}</h2>
-				<p className="text-sm text-muted-foreground">{description}</p>
+		<section className={cn(CARD_SURFACE_CLASS, "flex flex-col ring-warning/30 dark:ring-warning/25")}>
+			<div className="flex flex-col gap-3 p-5">
+				<div className="flex items-start gap-3">
+					<span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-warning/15 text-warning-foreground">
+						<ListChecksIcon
+							aria-hidden="true"
+							className="size-4.5"
+						/>
+					</span>
+					<div className="flex min-w-0 flex-col gap-1">
+						<h2 className="font-heading text-base font-medium">{title}</h2>
+						<p className="text-sm text-muted-foreground">{description}</p>
+					</div>
+				</div>
+				<div className="sm:pl-12">
+					<ReviewSummary {...summary} />
+				</div>
 			</div>
-			<ReviewSummary {...summary} />
-			<div className="flex flex-wrap justify-end gap-2">{actions}</div>
+			<div className="flex flex-wrap justify-end gap-2 border-t border-border/60 bg-muted/30 px-5 py-3">{actions}</div>
 		</section>
 	)
 }

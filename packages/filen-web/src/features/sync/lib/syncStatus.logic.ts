@@ -73,6 +73,26 @@ export const MODE_KEY: Record<DesktopSyncMode, SyncKey> = {
 	remoteBackup: "modeRemoteBackup"
 }
 
+// The pair page's mode chip between its two directories.
+export const MODE_SHORT_KEY: Record<DesktopSyncMode, SyncKey> = {
+	twoWay: "modeShortTwoWay",
+	localToRemote: "modeShortLocalToRemote",
+	remoteToLocal: "modeShortRemoteToLocal",
+	localBackup: "modeShortLocalBackup",
+	remoteBackup: "modeShortRemoteBackup"
+}
+
+// Which way changes flow between the local directory (drawn first) and the cloud one.
+export type SyncDirection = "both" | "toRemote" | "toLocal"
+
+export const MODE_DIRECTION: Record<DesktopSyncMode, SyncDirection> = {
+	twoWay: "both",
+	localToRemote: "toRemote",
+	remoteToLocal: "toLocal",
+	localBackup: "toRemote",
+	remoteBackup: "toLocal"
+}
+
 export const MODE_DESCRIPTION_KEY: Record<DesktopSyncMode, SyncKey> = {
 	twoWay: "modeTwoWayDescription",
 	localToRemote: "modeLocalToRemoteDescription",
@@ -186,6 +206,19 @@ export function pathBasename(path: string): string {
 	const index = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"))
 
 	return index === -1 ? (trimmed.length > 0 ? trimmed : path) : trimmed.slice(index + 1)
+}
+
+// Everything before the last segment of a path, either separator, keeping a root's own separator ("/", "C:\");
+// "" for a path with no parent segment.
+export function pathParent(path: string): string {
+	const trimmed = path.replace(/[\\/]+$/, "")
+	const index = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"))
+
+	if (index === -1) {
+		return ""
+	}
+
+	return index === 0 || trimmed[index - 1] === ":" ? trimmed.slice(0, index + 1) : trimmed.slice(0, index)
 }
 
 // How a conflict came about: a side is null where that side deleted the path.

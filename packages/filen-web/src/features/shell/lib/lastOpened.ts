@@ -4,8 +4,9 @@ import { kvPreference, type KvPreference } from "@/lib/storage/preference"
 import { log } from "@/lib/log"
 
 // The last item opened per selection-keyed module, so the module's bare index route can reopen it —
-// across reloads too. kv is per account and wiped on logout.
-export type LastOpenedModule = "chats" | "notes" | "playlists"
+// across reloads too. kv is per account and wiped on logout. Sync keeps a pair id, Mounts a role or "overview",
+// and each rail group (media, computer) the child module it showed last.
+export type LastOpenedModule = "chats" | "notes" | "playlists" | "sync" | "mounts" | "media" | "computer"
 
 const lastOpenedSchema: Type<string | null> = type("string | null")
 
@@ -16,7 +17,11 @@ function lastOpenedPreference(module: LastOpenedModule): KvPreference<string | n
 const lastOpenedPreferences: Record<LastOpenedModule, KvPreference<string | null>> = {
 	chats: lastOpenedPreference("chats"),
 	notes: lastOpenedPreference("notes"),
-	playlists: lastOpenedPreference("playlists")
+	playlists: lastOpenedPreference("playlists"),
+	sync: lastOpenedPreference("sync"),
+	mounts: lastOpenedPreference("mounts"),
+	media: lastOpenedPreference("media"),
+	computer: lastOpenedPreference("computer")
 }
 
 // Session mirror of the stored values: after the first read (or any write) an index visit decides
@@ -64,16 +69,27 @@ export function readLastOpened(module: LastOpenedModule): Promise<string | null>
 	return read
 }
 
-export function rememberLastOpened(module: LastOpenedModule, uuid: string): void {
-	if (mirror.get(module) === uuid) {
+function storeLastOpened(module: LastOpenedModule, value: string | null): void {
+	if (mirror.get(module) === value) {
 		return
 	}
 
-	mirror.set(module, uuid)
+	mirror.set(module, value)
 
-	void lastOpenedPreferences[module].set(uuid).catch((e: unknown) => {
+	void lastOpenedPreferences[module].set(value).catch((e: unknown) => {
 		log.warn("lastOpened", `write failed for ${module}`, e)
 	})
+}
+
+export function rememberLastOpened(module: LastOpenedModule, uuid: string): void {
+	storeLastOpened(module, uuid)
+}
+
+// For an item removed from this page: the index must not reopen it while the list still lags behind.
+export function forgetLastOpened(module: LastOpenedModule, uuid: string): void {
+	if (mirror.get(module) === uuid) {
+		storeLastOpened(module, null)
+	}
 }
 
 // The stored uuid (null when none), or undefined while the first read of the session is in flight.

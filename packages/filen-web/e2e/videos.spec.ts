@@ -6,6 +6,7 @@ import {
 	bootTo,
 	clickLinkUntilUrl,
 	enterScratchDirectory,
+	openRailGroupChild,
 	reloadToShell,
 	trashScratchDirectory,
 	uploadFiles,
@@ -209,7 +210,7 @@ test("videos: first-run directory, scan, direct and remuxed playback, watch stat
 		await waitForSwReady(page)
 
 		// ---- first run: pick the scratch directory ----
-		await clickLinkUntilUrl(page, page.getByRole("link", { name: "Videos", exact: true }).first(), /\/videos\/?$/)
+		await openRailGroupChild(page, "Media", "Videos", /\/videos\/?$/)
 
 		const libraryOnAccount = snapshot.files.length > 0
 

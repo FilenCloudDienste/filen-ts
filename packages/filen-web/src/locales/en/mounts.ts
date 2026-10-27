@@ -9,6 +9,8 @@ export const mounts = {
 	mountsNetworkDrive: "Network drive",
 	/** Sidebar — heading over the protocol servers that expose the drive */
 	mountsServersHeading: "Servers",
+	/** Sidebar — the row opening the overview of the drive and every server */
+	mountsOverview: "Overview",
 
 	/** Rail — accessible name of the Mounts entry when a mount or server needs attention */
 	railAttention: "Mounts, needs attention",
@@ -60,12 +62,6 @@ export const mounts = {
 	stateStopping: "Stopping…",
 	/** Role state — failed */
 	stateError: "Error",
-
-	// ── Index ───────────────────────────────────────────────────────────
-	/** Index — title when nothing is picked */
-	placeholderTitle: "Network drive and servers",
-	/** Index — under the title */
-	placeholderDescription: "Mount your Filen drive as a disk on this device, or serve it to other apps over WebDAV, S3 and more.",
 
 	// ── Shared ──────────────────────────────────────────────────────────
 	/** Callout — this build has no usable rclone */
@@ -235,10 +231,8 @@ export const mounts = {
 	serveTitle: "{{protocol}} server",
 	/** Server page — group heading */
 	serveGroupServer: "Server",
-	/** Server page — enable switch */
-	serveEnable: "Run the server",
-	/** Server page — enable switch, description */
-	serveEnableDescription: "Serves your Filen drive over {{protocol}} to apps on this device or your network.",
+	/** Server switch — accessible name; {{protocol}} is the protocol name */
+	serveEnableNamed: "Run the {{protocol}} server",
 	/** Server page — address row */
 	serveAddress: "Listen on",
 	/** Server page — address row, description */
@@ -273,8 +267,6 @@ export const mounts = {
 	serveReadOnly: "Read-only",
 	/** Server page — read-only switch, description */
 	serveReadOnlyDescription: "Clients can open files but not change them.",
-	/** Server page — connect group heading */
-	serveGroupConnect: "Connect",
 	/** Server page — address clients connect to */
 	serveUrl: "Address",
 	/** Server page — address while the server is off */
@@ -283,8 +275,6 @@ export const mounts = {
 	serveUrlCopy: "Copy the address",
 	/** Toast — the address was copied */
 	serveUrlCopied: "Address copied",
-	/** Server page — how-to row */
-	serveHowTo: "How to connect",
 	/** Connect hint — WebDAV */
 	connectHintWebdav: 'Use a WebDAV client or your file manager\'s "Connect to server" with the user name and password below.',
 	/** Connect hint — S3 */

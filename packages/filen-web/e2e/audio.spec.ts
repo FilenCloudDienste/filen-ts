@@ -5,6 +5,7 @@ import {
 	enterScratchDirectory,
 	trashScratchDirectory,
 	dismissOverlays,
+	openRailGroupChild,
 	LIVE_WRITE_TIMEOUT_MS,
 	uploadFiles
 } from "./helpers/listing"
@@ -175,7 +176,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 	// listing sweeps never descend into, so the only other thing that would ever remove a leaked one is
 	// the NEXT run's cleanup setup.
 	async function deleteScratchPlaylist(): Promise<void> {
-		await page.getByRole("link", { name: "Playlists", exact: true }).click()
+		await openRailGroupChild(page, "Media", "Playlists", /\/playlists$/)
 		await expect(page.getByRole("heading", { name: "Playlists", exact: true })).toBeVisible()
 
 		const present = await playlistRow
@@ -216,8 +217,8 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 			listbox
 		)
 
-		// The rail's dedicated Playlists entry — no queue needed first, unlike the old popover-tab route.
-		await page.getByRole("link", { name: "Playlists", exact: true }).click()
+		// The rail's Media group reaches Playlists — no queue needed first, unlike the old popover-tab route.
+		await openRailGroupChild(page, "Media", "Playlists", /\/playlists$/)
 		await expect(page.getByRole("heading", { name: "Playlists", exact: true })).toBeVisible()
 
 		// Not visible until the "Play" click below actually starts a queue.

@@ -12,23 +12,11 @@ import {
 
 describe("normalizeRailOrder", () => {
 	it("defaults when nothing is stored", () => {
-		expect(normalizeRailOrder(null)).toEqual([
-			"drive",
-			"photos",
-			"videos",
-			"transfers",
-			"sync",
-			"mounts",
-			"notes",
-			"chats",
-			"playlists",
-			"contacts",
-			"settings"
-		])
+		expect(normalizeRailOrder(null)).toEqual(["drive", "media", "notes", "chats", "contacts", "computer", "settings"])
 	})
 
 	it("keeps a stored order", () => {
-		const stored = ["settings", "chats", "drive", "photos", "videos", "transfers", "sync", "mounts", "notes", "playlists", "contacts"]
+		const stored = ["settings", "chats", "drive", "computer", "media", "notes", "contacts"]
 
 		expect(normalizeRailOrder(stored)).toEqual(stored)
 	})
@@ -36,110 +24,73 @@ describe("normalizeRailOrder", () => {
 	it("drops unknown and repeated ids and puts each entry the stored order lacks after its default predecessor", () => {
 		expect(normalizeRailOrder(["chats", "gone", "chats", "drive"])).toEqual([
 			"chats",
-			"playlists",
 			"contacts",
+			"computer",
 			"settings",
 			"drive",
-			"photos",
-			"videos",
-			"transfers",
-			"sync",
-			"mounts",
+			"media",
 			"notes"
 		])
 	})
 
-	it("inserts an entry added since the order was saved after its default predecessor, wherever that was moved", () => {
-		expect(normalizeRailOrder(["drive", "photos", "transfers", "notes", "chats", "playlists", "contacts", "settings"])).toEqual([
-			"drive",
-			"photos",
-			"videos",
-			"transfers",
-			"sync",
-			"mounts",
-			"notes",
-			"chats",
-			"playlists",
-			"contacts",
-			"settings"
-		])
-		expect(normalizeRailOrder(["settings", "photos", "drive", "transfers", "notes", "chats", "playlists", "contacts"])).toEqual([
-			"settings",
-			"photos",
-			"videos",
-			"drive",
-			"transfers",
-			"sync",
-			"mounts",
-			"notes",
-			"chats",
-			"playlists",
-			"contacts"
-		])
+	it("puts a missing first entry first", () => {
+		expect(normalizeRailOrder(["media", "notes", "chats", "contacts", "computer", "settings"])).toEqual(normalizeRailOrder(null))
+	})
+})
+
+describe("normalizeRailOrder on an order stored before groups", () => {
+	it("reads the old default as the new one", () => {
+		expect(
+			normalizeRailOrder([
+				"drive",
+				"photos",
+				"videos",
+				"transfers",
+				"sync",
+				"mounts",
+				"notes",
+				"chats",
+				"playlists",
+				"contacts",
+				"settings"
+			])
+		).toEqual(DEFAULT_RAIL_ORDER)
 	})
 
-	it("puts a missing first entry first", () => {
-		expect(normalizeRailOrder(["photos", "videos", "transfers", "notes", "chats", "playlists", "contacts", "settings"])).toEqual(
-			normalizeRailOrder(null)
-		)
+	it("puts Media where the first media module was and Computer in its default slot", () => {
+		expect(
+			normalizeRailOrder([
+				"settings",
+				"playlists",
+				"chats",
+				"mounts",
+				"drive",
+				"photos",
+				"transfers",
+				"sync",
+				"notes",
+				"videos",
+				"contacts"
+			])
+		).toEqual(["settings", "media", "chats", "drive", "notes", "contacts", "computer"])
 	})
 })
 
 describe("visibleRailOrder", () => {
-	it("sync hidden in browser", () => {
-		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: false })).not.toContain("sync")
+	it("hides the Computer group in a browser", () => {
+		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: false })).not.toContain("computer")
 		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: true })).toEqual(DEFAULT_RAIL_ORDER)
-	})
-
-	it("mounts hidden in browser", () => {
-		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: false })).not.toContain("mounts")
-		expect(visibleRailOrder(DEFAULT_RAIL_ORDER, { desktop: true })).toContain("mounts")
 	})
 })
 
 describe("mergeRailOrder", () => {
-	it("reorder keeps hidden sync", () => {
+	it("a browser reorder keeps the hidden Computer group's slot", () => {
 		const full = normalizeRailOrder(null)
 		const visible = visibleRailOrder(full, { desktop: false })
 		const merged = mergeRailOrder(full, moveRailEntry(visible, 0, visible.length - 1))
 
-		expect(merged).toEqual([
-			"photos",
-			"videos",
-			"transfers",
-			"notes",
-			"sync",
-			"mounts",
-			"chats",
-			"playlists",
-			"contacts",
-			"settings",
-			"drive"
-		])
+		expect(merged).toEqual(["media", "notes", "chats", "contacts", "settings", "computer", "drive"])
 		expect(visibleRailOrder(merged, { desktop: false })).toEqual(moveRailEntry(visible, 0, visible.length - 1))
-	})
-
-	it("reorder keeps hidden mounts", () => {
-		const full = normalizeRailOrder([
-			"mounts",
-			"drive",
-			"photos",
-			"videos",
-			"transfers",
-			"sync",
-			"notes",
-			"chats",
-			"playlists",
-			"contacts",
-			"settings"
-		])
-		const visible = visibleRailOrder(full, { desktop: false })
-		const next = moveRailEntry(visible, visible.length - 1, 0)
-		const merged = mergeRailOrder(full, next)
-
-		expect(merged[0]).toBe("mounts")
-		expect(merged.indexOf("sync")).toBe(full.indexOf("sync"))
-		expect(visibleRailOrder(merged, { desktop: false })).toEqual(next)
 	})
 
 	it("is the reordered list itself when nothing is hidden", () => {
@@ -151,11 +102,11 @@ describe("mergeRailOrder", () => {
 
 describe("moveRailEntry", () => {
 	it("moves an entry down, the others keeping their order", () => {
-		expect(moveRailEntry(["drive", "photos", "transfers", "notes"], 0, 2)).toEqual(["photos", "transfers", "drive", "notes"])
+		expect(moveRailEntry(["drive", "media", "chats", "notes"], 0, 2)).toEqual(["media", "chats", "drive", "notes"])
 	})
 
 	it("moves an entry up", () => {
-		expect(moveRailEntry(["drive", "photos", "transfers", "notes"], 3, 1)).toEqual(["drive", "notes", "photos", "transfers"])
+		expect(moveRailEntry(["drive", "media", "chats", "notes"], 3, 1)).toEqual(["drive", "notes", "media", "chats"])
 	})
 
 	it("leaves the order alone for a move onto itself or an unknown slot", () => {
@@ -194,19 +145,20 @@ describe("railEntryActive", () => {
 		expect(railEntryActive("notes", "/notes/uuid")).toBe(true)
 		expect(railEntryActive("chats", "/chats")).toBe(true)
 		expect(railEntryActive("settings", "/settings/appearance")).toBe(true)
-		expect(railEntryActive("videos", "/videos")).toBe(true)
-		expect(railEntryActive("videos", "/videos/library/abc")).toBe(true)
-		expect(railEntryActive("videos", "/videosx")).toBe(false)
-		expect(railEntryActive("sync", "/sync/1")).toBe(true)
-		expect(railEntryActive("sync", "/syncx")).toBe(false)
-		expect(railEntryActive("mounts", "/mounts/webdav")).toBe(true)
-		expect(railEntryActive("mounts", "/mountsx")).toBe(false)
 	})
 
 	it("matches the single-page sections exactly", () => {
-		expect(railEntryActive("photos", "/photos")).toBe(true)
 		expect(railEntryActive("contacts", "/contacts")).toBe(true)
-		expect(railEntryActive("transfers", "/transfers/x")).toBe(false)
 		expect(railEntryActive("drive", "/drivers")).toBe(false)
+	})
+
+	it("marks a group active inside any of its children", () => {
+		expect(railEntryActive("media", "/photos")).toBe(true)
+		expect(railEntryActive("media", "/videos/library/abc")).toBe(true)
+		expect(railEntryActive("media", "/playlists")).toBe(true)
+		expect(railEntryActive("media", "/transfers")).toBe(false)
+		expect(railEntryActive("computer", "/sync/1")).toBe(true)
+		expect(railEntryActive("computer", "/mounts/webdav")).toBe(true)
+		expect(railEntryActive("computer", "/syncx")).toBe(false)
 	})
 })

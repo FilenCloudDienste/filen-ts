@@ -1,21 +1,17 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { ArrowLeftRightIcon, PauseIcon, PlayIcon, RefreshCwIcon } from "lucide-react"
+import { PauseIcon, PlayIcon, RefreshCwIcon } from "lucide-react"
 import type { DesktopSyncPair, DesktopSyncPlan, DesktopSyncReview } from "@filen/shared/desktop"
-import { cn } from "@filen/shared"
 import { log } from "@/lib/log"
-import { formatRelativeTime } from "@/lib/relativeTime"
-import { useNowMinute } from "@/lib/useNowMinute"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { runSyncAction } from "@/features/sync/lib/syncActions"
-import { issueTotal, PHASE_KEY } from "@/features/sync/lib/syncStatus.logic"
+import { issueTotal } from "@/features/sync/lib/syncStatus.logic"
 import type { SyncTab } from "@/features/sync/lib/syncTabs"
-import { useRemoteDirectoryName } from "@/features/sync/hooks/useRemoteDirectoryName"
-import { SyncPhaseIcon } from "@/features/sync/components/syncPhaseIcon"
+import { PairHero } from "@/features/sync/components/pairHero"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 import { NoticeBanner } from "@/features/sync/components/noticeBanner"
 import { ReviewCard } from "@/features/sync/components/reviewCard"
@@ -160,18 +156,45 @@ function ReviewPanel({ pair, review }: { pair: Pick<DesktopSyncPair, "id" | "nam
 	)
 }
 
-function tabClass(active: boolean): string {
-	return cn(buttonVariants({ variant: active ? "secondary" : "ghost", size: "sm" }), "rounded-full")
+const TAB_CLASS =
+	"flex h-11 shrink-0 items-center gap-1.5 border-b-2 border-transparent px-1 text-sm whitespace-nowrap text-muted-foreground focus-ring transition-colors outline-none hover:text-foreground focus-visible:rounded-md aria-[current=page]:border-primary aria-[current=page]:font-medium aria-[current=page]:text-foreground"
+
+// The four sections as an underline tab bar across the card, pinned while the page scrolls under it.
+function PairTabs({ pairId, tab, issues }: { pairId: string; tab: SyncTab; issues: number }) {
+	const { t } = useTranslation("sync")
+
+	return (
+		<nav
+			aria-label={t("detailTabsLabel")}
+			className="sticky top-0 z-10 flex shrink-0 gap-5 overflow-x-auto bg-card px-4 shadow-[inset_0_-1px_0_0_color-mix(in_oklab,var(--color-border)_50%,transparent)] sm:px-6"
+		>
+			{TABS.map(entry => (
+				<Link
+					key={entry.tab}
+					to="/sync/$pairId"
+					params={{ pairId }}
+					search={{ tab: entry.tab }}
+					replace
+					aria-current={entry.tab === tab ? "page" : undefined}
+					className={TAB_CLASS}
+				>
+					{t(entry.key)}
+					{entry.tab === "issues" && issues > 0 ? (
+						<span className="rounded-full bg-destructive/10 px-1.5 text-xs font-medium text-destructive tabular-nums">
+							{issues}
+						</span>
+					) : null}
+				</Link>
+			))}
+		</nav>
+	)
 }
 
-// One pair: its header (phase, directories, progress, pause and sync now), what the shell wants it to say
-// (review, notices, missing directory, degraded watchers), and the four tabs. Each tab takes only the pair id
-// and selects what it shows, so a progress push re-renders the header and none of the tab bodies.
+// One pair: a title bar with pause and sync now, its overview (directories, mode, live state), what the shell wants it
+// to say (review, notices, missing directory, degraded watchers), and the four tabs. Each tab takes only the pair id
+// and selects what it shows, so a progress push re-renders the overview and none of the tab bodies.
 export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: SyncTab }) {
 	const { t } = useTranslation("sync")
-	const { t: tCommon } = useTranslation("common")
-	const now = useNowMinute()
-	const remoteName = useRemoteDirectoryName(pair.remoteRoot)
 	const issues = issueTotal(pair.issues)
 	const [toggling, setToggling] = useState(false)
 	const [refreshing, setRefreshing] = useState(false)
@@ -188,26 +211,10 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 		setRefreshing(false)
 	}
 
-	const status =
-		pair.phase === "syncing" && pair.progress !== null && pair.progress.total > 0
-			? t("detailProgress", { done: pair.progress.done, total: pair.progress.total })
-			: pair.lastSyncedAt !== null
-				? t("detailLastSynced", { time: formatRelativeTime(pair.lastSyncedAt, tCommon, now) })
-				: null
-
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
-				<SyncPhaseIcon
-					phase={pair.phase}
-					hasIssues={issues > 0}
-				/>
-				<div className="flex min-w-0 flex-1 items-baseline gap-2">
-					<h1 className="truncate font-heading text-base font-medium tracking-tight">{pair.name}</h1>
-					<p className="hidden shrink-0 truncate text-xs text-muted-foreground tabular-nums sm:block">
-						{status === null ? t(PHASE_KEY[pair.phase]) : `${t(PHASE_KEY[pair.phase])} · ${status}`}
-					</p>
-				</div>
+			<header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/50 px-4">
+				<h1 className="min-w-0 flex-1 truncate font-heading text-base font-medium tracking-tight">{pair.name}</h1>
 				<div className="flex shrink-0 items-center gap-1">
 					<TooltipIconButton
 						label={pair.paused ? t("detailResume") : t("detailPause")}
@@ -229,42 +236,9 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 					</TooltipIconButton>
 				</div>
 			</header>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-2 pb-12 sm:px-6">
-				<div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-					<div className="flex min-w-0 flex-col gap-2">
-						<p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-							<span
-								className="min-w-0 truncate"
-								title={pair.localRoot}
-							>
-								<span className="sr-only">{t("detailLocal")}: </span>
-								{pair.localRoot}
-							</span>
-							<ArrowLeftRightIcon
-								aria-hidden="true"
-								className="size-3.5 shrink-0"
-							/>
-							<span className="min-w-0 truncate">
-								<span className="sr-only">{t("detailRemote")}: </span>
-								{remoteName ?? "…"}
-							</span>
-						</p>
-						{pair.phase === "syncing" && pair.progress !== null && pair.progress.total > 0 ? (
-							<div
-								role="progressbar"
-								aria-valuemin={0}
-								aria-valuemax={pair.progress.total}
-								aria-valuenow={pair.progress.done}
-								aria-label={t("phaseSyncing")}
-								className="h-1 overflow-hidden rounded-full bg-muted"
-							>
-								<div
-									className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
-									style={{ width: `${String(Math.min(100, (pair.progress.done / pair.progress.total) * 100))}%` }}
-								/>
-							</div>
-						) : null}
-					</div>
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+				<div className="flex flex-col gap-3 px-4 pt-4 pb-5 sm:px-6">
+					<PairHero pair={pair} />
 					{pair.review === null ? null : (
 						<ReviewPanel
 							key={pair.id}
@@ -279,39 +253,25 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 						pairId={pair.id}
 						notices={pair.notices}
 					/>
-					<nav
-						aria-label={t("detailTabsLabel")}
-						className="-mx-1 flex gap-1 overflow-x-auto px-1 py-0.5"
-					>
-						{TABS.map(entry => (
-							<Link
-								key={entry.tab}
-								to="/sync/$pairId"
-								params={{ pairId: pair.id }}
-								search={{ tab: entry.tab }}
-								replace
-								aria-current={entry.tab === tab ? "page" : undefined}
-								className={tabClass(entry.tab === tab)}
-							>
-								{t(entry.key)}
-								{entry.tab === "issues" && issues > 0 ? (
-									<span className="ml-0.5 rounded-full bg-destructive/10 px-1.5 text-xs text-destructive tabular-nums">
-										{issues}
-									</span>
-								) : null}
-							</Link>
-						))}
-					</nav>
-					{tab === "activity" ? (
-						<ActivityTab pairId={pair.id} />
-					) : tab === "issues" ? (
-						<IssuesTab pairId={pair.id} />
-					) : tab === "ignored" ? (
-						<IgnoredTab pairId={pair.id} />
-					) : (
-						<SettingsTab pairId={pair.id} />
-					)}
 				</div>
+				<PairTabs
+					pairId={pair.id}
+					tab={tab}
+					issues={issues}
+				/>
+				{tab === "activity" ? (
+					<ActivityTab pairId={pair.id} />
+				) : (
+					<div className="mx-auto flex w-full max-w-3xl flex-col px-4 pt-6 pb-12 sm:px-6">
+						{tab === "issues" ? (
+							<IssuesTab pairId={pair.id} />
+						) : tab === "ignored" ? (
+							<IgnoredTab pairId={pair.id} />
+						) : (
+							<SettingsTab pairId={pair.id} />
+						)}
+					</div>
+				)}
 			</div>
 		</>
 	)

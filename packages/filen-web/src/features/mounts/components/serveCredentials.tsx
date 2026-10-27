@@ -1,6 +1,7 @@
-import { useId, useState } from "react"
+import { useId, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
+import { CopyIcon, EyeIcon, EyeOffIcon } from "lucide-react"
 import type { DesktopCredentialProtocol, DesktopServeCredentials } from "@filen/shared/desktop"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,18 +13,13 @@ import { SettingsGroup, SettingsRow } from "@/features/settings/components/setti
 import { mountsApi } from "@/features/mounts/lib/mountsStore"
 import { callMounts, mountsErrorLabel, runMountsAction } from "@/features/mounts/lib/mountsActions"
 import { credentialLabels } from "@/features/mounts/lib/mountsStatus.logic"
+import type { ServeCredentialsState } from "@/features/mounts/hooks/useServeCredentials"
 
 const MASK = "••••••••••••"
 
 // Typed credentials: a user and password, or an s3 key pair.
 function credentialsOf(protocol: DesktopCredentialProtocol, user: string, secret: string): DesktopServeCredentials {
 	return protocol === "s3" ? { kind: "s3", accessKeyId: user, secretAccessKey: secret } : { kind: "basic", user, password: secret }
-}
-
-function partsOf(credentials: DesktopServeCredentials): { user: string; secret: string } {
-	return credentials.kind === "s3"
-		? { user: credentials.accessKeyId, secret: credentials.secretAccessKey }
-		: { user: credentials.user, secret: credentials.password }
 }
 
 // The user's own credentials. The shell judges them; a weak or unusable pair is told under the fields.
@@ -127,17 +123,20 @@ function CustomCredentialsDialog({
 	)
 }
 
-// One credential part: hidden until revealed, copied by the shell straight to the clipboard.
+// One credential part: hidden until revealed, copied by the shell straight to the clipboard. `children` trail the copy
+// button (the show/hide toggle on the last part).
 function CredentialRow({
 	protocol,
 	part,
 	label,
-	value
+	value,
+	children
 }: {
 	protocol: DesktopCredentialProtocol
 	part: "user" | "secret"
 	label: string
 	value: string | null
+	children?: ReactNode
 }) {
 	const { t } = useTranslation("mounts")
 
@@ -157,37 +156,55 @@ function CredentialRow({
 					})
 				}}
 			>
+				<CopyIcon data-icon="inline-start" />
 				{t("copy")}
 			</Button>
+			{children}
 		</SettingsRow>
 	)
 }
 
-// A server's credentials: made at random by the shell, shown on request (and forgotten with this page), copied,
-// made anew, or set by the user.
-export function ServeCredentials({ protocol }: { protocol: DesktopCredentialProtocol }) {
-	const { t } = useTranslation(["mounts", "common"])
+// The two parts as rows, with the show/hide toggle beside the secret's copy button.
+export function CredentialRows({ credentials }: { credentials: ServeCredentialsState }) {
+	const { t } = useTranslation("mounts")
+	const { protocol, revealed, revealing, toggle } = credentials
 	const labels = credentialLabels(protocol)
-	const [revealed, setRevealed] = useState<{ user: string; secret: string } | null>(null)
-	const [revealing, setRevealing] = useState(false)
+
+	return (
+		<>
+			<CredentialRow
+				protocol={protocol}
+				part="user"
+				label={t(labels.user)}
+				value={revealed?.user ?? null}
+			/>
+			<CredentialRow
+				protocol={protocol}
+				part="secret"
+				label={t(labels.secret)}
+				value={revealed?.secret ?? null}
+			>
+				<Button
+					variant="ghost"
+					aria-label={revealed === null ? t("credentialsReveal") : t("credentialsHide")}
+					title={t("credentialsRevealDescription")}
+					disabled={revealing}
+					onClick={toggle}
+				>
+					{revealed === null ? <EyeIcon data-icon="inline-start" /> : <EyeOffIcon data-icon="inline-start" />}
+					{revealed === null ? t("credentialsRevealAction") : t("credentialsHideAction")}
+				</Button>
+			</CredentialRow>
+		</>
+	)
+}
+
+// Replacing a server's credentials: made anew at random, or set by the user. The parts themselves sit in the hero.
+export function ServeCredentials({ credentials }: { credentials: ServeCredentialsState }) {
+	const { t } = useTranslation(["mounts", "common"])
+	const { protocol, changed } = credentials
 	const [dialog, setDialog] = useState<"regenerate" | "custom" | null>(null)
 	const [regenerating, setRegenerating] = useState(false)
-
-	async function reveal(): Promise<void> {
-		setRevealing(true)
-
-		const done = await runMountsAction(() => mountsApi().credentials(protocol))
-
-		setRevealing(false)
-		setRevealed(done === null ? null : partsOf(done.value))
-	}
-
-	// Shown ones are read again so the page never shows credentials that no longer work.
-	function changed(): void {
-		if (revealed !== null) {
-			void reveal()
-		}
-	}
 
 	async function regenerate(): Promise<void> {
 		setRegenerating(true)
@@ -208,37 +225,6 @@ export function ServeCredentials({ protocol }: { protocol: DesktopCredentialProt
 			title={t("serveGroupCredentials")}
 			description={t("serveCredentialsDescription")}
 		>
-			<CredentialRow
-				protocol={protocol}
-				part="user"
-				label={t(labels.user)}
-				value={revealed?.user ?? null}
-			/>
-			<CredentialRow
-				protocol={protocol}
-				part="secret"
-				label={t(labels.secret)}
-				value={revealed?.secret ?? null}
-			/>
-			<SettingsRow
-				label={t("credentialsReveal")}
-				description={t("credentialsRevealDescription")}
-			>
-				<Button
-					variant="outline"
-					aria-label={revealed === null ? t("credentialsReveal") : t("credentialsHide")}
-					disabled={revealing}
-					onClick={() => {
-						if (revealed === null) {
-							void reveal()
-						} else {
-							setRevealed(null)
-						}
-					}}
-				>
-					{revealed === null ? t("credentialsRevealAction") : t("credentialsHideAction")}
-				</Button>
-			</SettingsRow>
 			<SettingsRow
 				label={t("credentialsRegenerate")}
 				description={t("credentialsRegenerateDescription")}

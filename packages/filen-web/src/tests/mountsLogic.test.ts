@@ -19,12 +19,16 @@ import {
 	NOTICE_SCOPE,
 	portInput,
 	ROLE_STATE_KEY,
+	ROLE_STATE_TONE,
 	roleStateKey,
+	roleSummary,
+	serveHostPort,
 	sendsPlainText,
 	tuningInput
 } from "@/features/mounts/lib/mountsStatus.logic"
 import { hostBanner } from "@/features/desktop/lib/hostBanner.logic"
 import { PROTOCOL_LABEL_KEY, SERVE_PROTOCOLS } from "@/features/mounts/lib/mountsRoles"
+import { PROTOCOL_ICON, ROLE_ICON } from "@/features/mounts/lib/mountsIcons"
 
 const CATALOG: Record<string, string> = mounts
 
@@ -197,6 +201,37 @@ describe("aggregateMountsState", () => {
 
 		expect(aggregateMountsState(overview({ host: failed }))).toBe("attention")
 		expect(aggregateMountsState(overview({ host: failed, serves: [{ ...SERVE, enabled: false, state: "off" }] }))).toBe("idle")
+	})
+})
+
+describe("role status", () => {
+	it("tones every state for its dot", () => {
+		expect(ROLE_STATE_TONE).toEqual({ off: "off", starting: "busy", running: "on", stopping: "busy", error: "error" })
+	})
+
+	it("gives the drive and every protocol its own icon", () => {
+		expect(Object.keys(PROTOCOL_ICON).sort()).toEqual([...SERVE_PROTOCOLS].sort())
+		expect(new Set(Object.values(ROLE_ICON)).size).toBe(SERVE_PROTOCOLS.length + 1)
+	})
+
+	it("writes where a server listens without its scheme, bracketing IPv6", () => {
+		expect(serveHostPort(SERVE)).toBe("127.0.0.1:1900")
+		expect(serveHostPort({ address: "::1", port: 80 })).toBe("[::1]:80")
+	})
+
+	it("summarises a role for its sidebar row", () => {
+		expect(roleSummary(null, "drive")).toBeNull()
+		expect(roleSummary(overview(), "drive")).toEqual({ state: "off", address: null })
+		expect(roleSummary(overview({ drive: { ...overview().drive, state: "running", mountPoint: "/Users/a/Filen" } }), "drive")).toEqual({
+			state: "running",
+			address: "/Users/a/Filen"
+		})
+		expect(roleSummary(overview({ drive: { ...overview().drive, driveLetter: "X" } }), "drive")).toEqual({
+			state: "off",
+			address: "X:"
+		})
+		expect(roleSummary(overview(), "webdav")).toEqual({ state: "running", address: "127.0.0.1:1900" })
+		expect(roleSummary(overview(), "s3")).toBeNull()
 	})
 })
 

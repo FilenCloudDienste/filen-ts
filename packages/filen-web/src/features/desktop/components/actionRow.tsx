@@ -1,15 +1,16 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
 
-// A settings row whose one button runs a shell call, spinning while it does.
+// A settings row whose one button runs a shell call, spinning (in place of its `icon`) while it does.
 export function ActionRow({
 	label,
 	description,
 	action,
 	disabled,
 	variant,
+	icon,
 	run
 }: {
 	label: string
@@ -17,6 +18,7 @@ export function ActionRow({
 	action: string
 	disabled?: boolean
 	variant?: "outline" | "destructive"
+	icon?: ReactNode
 	run: () => Promise<unknown>
 }) {
 	const [running, setRunning] = useState(false)
@@ -37,7 +39,7 @@ export function ActionRow({
 					})
 				}}
 			>
-				{running ? <Spinner data-icon="inline-start" /> : null}
+				{running ? <Spinner data-icon="inline-start" /> : (icon ?? null)}
 				{action}
 			</Button>
 		</SettingsRow>

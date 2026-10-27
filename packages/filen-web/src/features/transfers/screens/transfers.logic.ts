@@ -1,4 +1,4 @@
-import { isJobRunning } from "@filen/shared"
+import { clampedRatio, isJobRunning } from "@filen/shared"
 import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import type { DriveJob } from "@/features/drive/lib/driveJobs.logic"
 
@@ -84,7 +84,7 @@ export function resumableTransferIds(transfers: Transfer[], endedJobs: ReadonlyS
 	return transfers.filter(transfer => isControllableTransfer(transfer, endedJobs) && transfer.paused).map(transfer => transfer.id)
 }
 
-// The aggregate speed/progress readout's own render gate (iconRail.tsx's TransfersEntry, this screen's
+// The aggregate speed/progress readout's own render gate (the rail's transfers ring tooltip, this screen's
 // header) — mirrors mobile's floating pill: nothing renders while no transfer is active, even if a
 // just-settled batch left a stale percent/speed sitting in the aggregate object for one more tick
 // (useTransfersAggregate/computeTransfersAggregate — store/useTransfersStore.ts — never itself resets
@@ -92,4 +92,52 @@ export function resumableTransferIds(transfers: Transfer[], endedJobs: ReadonlyS
 // few seconds). A single shared predicate keeps both call sites' "when do we show this" rule in sync.
 export function shouldShowTransfersAggregate(activeCount: number): boolean {
 	return activeCount > 0
+}
+
+export interface TransfersRingState {
+	visible: boolean
+	// No rows at all: shown only because the transfers screen is open.
+	empty: boolean
+	activeCount: number
+	// 0-100 over the active rows of known size; 100 once only finished rows are left, 0 with none.
+	percent: number
+	// A row failed, wholly or in part, and was not cleared yet.
+	failed: boolean
+}
+
+// The rail's transfers ring. Shown while the store holds any row (active, failed or finished and not yet
+// cleared), so exactly while the transfers screen has something to list, and always on that screen so its
+// own entry never vanishes under the pointer when the list is cleared. Rows live in memory and leave on
+// "Clear finished", a row's remove, or a reload.
+export function transfersRingState(transfers: readonly Transfer[], onTransfersScreen: boolean): TransfersRingState {
+	let activeCount = 0
+	let transferred = 0
+	let total = 0
+	let failed = false
+
+	for (const transfer of transfers) {
+		if (transfer.status === "error" || transfer.status === "completedWithErrors") {
+			failed = true
+		}
+
+		if (!isActiveTransfer(transfer.status)) {
+			continue
+		}
+
+		activeCount++
+
+		// computeTransfersAggregate's rule: a row of unknown size (a zip still walking its tree) has no share.
+		if (transfer.size > 0) {
+			transferred += transfer.bytesTransferred
+			total += transfer.size
+		}
+	}
+
+	return {
+		visible: onTransfersScreen || transfers.length > 0,
+		empty: transfers.length === 0,
+		activeCount,
+		percent: transfers.length === 0 ? 0 : activeCount === 0 ? 100 : clampedRatio(transferred, total, 100),
+		failed
+	}
 }

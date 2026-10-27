@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
+import { forgetLastOpened } from "@/features/shell/lib/lastOpened"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { runSyncAction } from "@/features/sync/lib/syncActions"
 
@@ -20,6 +21,8 @@ export function RemovePairDialog({ pairId, name, onClose }: { pairId: string; na
 		setPending(false)
 
 		if (done !== null) {
+			// The overview may still list the pair when the index decides where to go.
+			forgetLastOpened("sync", pairId)
 			onClose()
 			void navigate({ to: "/sync" })
 		}

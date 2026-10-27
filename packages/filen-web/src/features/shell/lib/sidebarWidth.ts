@@ -26,11 +26,16 @@ export const SIDEBAR_EDGE: Record<SidebarModule, SidebarEdge> = {
 export const DEFAULT_SIDEBAR_WIDTH = 300
 // Markdown replies and confirmation cards need more room than a list of rows.
 export const DEFAULT_ASSISTANT_WIDTH = 360
-
-export function defaultSidebarWidth(module: SidebarModule): number {
-	return module === "assistant" ? DEFAULT_ASSISTANT_WIDTH : DEFAULT_SIDEBAR_WIDTH
-}
 export const SIDEBAR_WIDTH_MIN = 240
+
+// Sync's pairs and Mounts' roles are a short list of one-line rows, like a nav list: they start at the narrowest width.
+export function defaultSidebarWidth(module: SidebarModule): number {
+	if (module === "assistant") {
+		return DEFAULT_ASSISTANT_WIDTH
+	}
+
+	return module === "sync" || module === "mounts" ? SIDEBAR_WIDTH_MIN : DEFAULT_SIDEBAR_WIDTH
+}
 export const SIDEBAR_WIDTH_MAX = 520
 
 export function clampSidebarWidth(width: number): number {

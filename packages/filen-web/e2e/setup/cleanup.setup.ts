@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test"
 import { test as setup, expect } from "../fixtures"
-import { bootTo, clickLinkUntilUrl } from "../helpers/listing"
+import { bootTo, openRailGroupChild } from "../helpers/listing"
 import { waitForE2eHooks } from "../helpers/e2eHooks"
 import { FIXTURE_FILES } from "../helpers/fixtures"
 import {
@@ -88,8 +88,8 @@ async function sweepDriveSurface(page: Page, target: "root" | "trash"): Promise<
 async function sweepPlaylistDebris(page: Page): Promise<void> {
 	// Retried until the URL commits: this runs straight after the drive sweep, so an uncommitted click
 	// would have scanned whatever listing was still mounted and reported "nothing to sweep". Unscoped,
-	// not clickSidebarLink: Playlists is an icon-RAIL entry, not in the contextual sidebar.
-	await clickLinkUntilUrl(page, page.getByRole("link", { name: "Playlists", exact: true }), /\/playlists$/)
+	// not clickSidebarLink: Playlists sits in the icon rail's Media group, not in the contextual sidebar.
+	await openRailGroupChild(page, "Media", "Playlists", /\/playlists$/)
 	await expect(page.getByRole("heading", { name: "Playlists", exact: true })).toBeVisible()
 
 	const deadline = Date.now() + SWEEP_BUDGET_MS

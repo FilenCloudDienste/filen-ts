@@ -12,11 +12,14 @@ import {
 	HELD_REASON_KEY,
 	isLargePlan,
 	MODE_DESCRIPTION_KEY,
+	MODE_DIRECTION,
 	MODE_KEY,
+	MODE_SHORT_KEY,
 	modeChangeNeedsBacklog,
 	MODES,
 	NOTICE_KEY,
 	pathBasename,
+	pathParent,
 	PHASE_KEY,
 	PLAN_LIST_KEY,
 	planListsWithEntries,
@@ -131,6 +134,7 @@ describe("sync copy", () => {
 		expectAllKeysExist(PHASE_KEY, ["idle", "syncing", "paused", "review", "waitingForRoot", "unsupported", "error"])
 		expectAllKeysExist(MODE_KEY, [...MODES])
 		expectAllKeysExist(MODE_DESCRIPTION_KEY, [...MODES])
+		expectAllKeysExist(MODE_SHORT_KEY, [...MODES])
 		expectAllKeysExist(NOTICE_KEY, [
 			"localTrashMoved",
 			"refusedLocalRoot",
@@ -180,6 +184,7 @@ describe("sync copy", () => {
 
 	it("ships both plural forms of every counted string", () => {
 		for (const base of [
+			"detailIssues",
 			"issuesFailed",
 			"heldApproveBody",
 			"reviewActions",
@@ -247,6 +252,27 @@ describe("sync status helpers", () => {
 		expect(pathBasename("/Users/a/Documents/")).toBe("Documents")
 		expect(pathBasename("C:\\Users\\a\\Work")).toBe("Work")
 		expect(pathBasename("/")).toBe("/")
+	})
+
+	it("takes a path's parent, keeping a root's separator", () => {
+		expect(pathParent("/Users/a/Documents")).toBe("/Users/a")
+		expect(pathParent("/Users/a/Documents/")).toBe("/Users/a")
+		expect(pathParent("/backup")).toBe("/")
+		expect(pathParent("C:\\Users\\a\\Work")).toBe("C:\\Users\\a")
+		expect(pathParent("C:\\Work")).toBe("C:\\")
+		expect(pathParent("Pictures/2024/a.jpg")).toBe("Pictures/2024")
+		expect(pathParent("a.jpg")).toBe("")
+		expect(pathParent("/")).toBe("")
+	})
+
+	it("draws each mode's flow from the local directory to the cloud one", () => {
+		expect(MODE_DIRECTION).toEqual({
+			twoWay: "both",
+			localToRemote: "toRemote",
+			localBackup: "toRemote",
+			remoteToLocal: "toLocal",
+			remoteBackup: "toLocal"
+		})
 	})
 
 	it("lists only plan lists that hold entries, and flags very large plans", () => {

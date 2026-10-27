@@ -67,6 +67,31 @@ describe("lastOpened", () => {
 		expect(peekLastOpened("notes")).toBe("note-b")
 	})
 
+	it("keeps Sync and Mounts under their own keys", async () => {
+		const { rememberLastOpened } = await freshModule()
+
+		rememberLastOpened("sync", "2")
+		rememberLastOpened("mounts", "webdav")
+		await vi.waitFor(() => {
+			expect(kvStore.get("shell.lastOpened.sync.v1")).toBe("2")
+			expect(kvStore.get("shell.lastOpened.mounts.v1")).toBe("webdav")
+		})
+	})
+
+	it("forgets a removed item, and only that item", async () => {
+		const { rememberLastOpened, forgetLastOpened, peekLastOpened } = await freshModule()
+
+		rememberLastOpened("sync", "2")
+		forgetLastOpened("sync", "1")
+		expect(peekLastOpened("sync")).toBe("2")
+
+		forgetLastOpened("sync", "2")
+		expect(peekLastOpened("sync")).toBeNull()
+		await vi.waitFor(() => {
+			expect(kvStore.get("shell.lastOpened.sync.v1")).toBeNull()
+		})
+	})
+
 	it("reads the kv once per session", async () => {
 		kvStore.set("shell.lastOpened.chats.v1", "chat-a")
 		const { readLastOpened } = await freshModule()

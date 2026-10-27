@@ -96,6 +96,12 @@ export const common = {
 	moduleSync: "Sync",
 	/** Mounts module (desktop app only) — icon rail tooltip/accessible label and the Mounts sidebar title */
 	moduleMounts: "Mounts",
+	/** Icon rail group holding Photos, Videos and Playlists — accessible label and the heading of its flyout */
+	moduleMedia: "Media",
+	/** Icon rail group holding Sync and Mounts (desktop app only) — accessible label and the heading of its flyout */
+	moduleComputer: "Computer",
+	/** Icon rail group — accessible label while a child module shows a status dot; {{group}} is the group name, {{status}} the child's own status label (e.g. "Sync, needs attention") */
+	railGroupWithStatus: "{{group}}: {{status}}",
 	// Account menu
 	/** Account menu — trigger's accessible label and the dropdown's heading */
 	account: "Account",

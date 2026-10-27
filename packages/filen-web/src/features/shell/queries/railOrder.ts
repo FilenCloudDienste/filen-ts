@@ -1,6 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query"
 import { getRailOrder, setRailOrder } from "@/features/shell/lib/railOrder"
-import type { RailEntryId } from "@/features/shell/lib/railOrder.logic"
+import { normalizeRailOrder, type RailEntryId } from "@/features/shell/lib/railOrder.logic"
 import { queryClient } from "@/queries/client"
 
 const RAIL_ORDER_QUERY_KEY = ["shell", "railOrder"] as const
@@ -8,7 +8,9 @@ const RAIL_ORDER_QUERY_KEY = ["shell", "railOrder"] as const
 export function useRailOrderQuery(): UseQueryResult<RailEntryId[]> {
 	return useQuery({
 		queryKey: RAIL_ORDER_QUERY_KEY,
-		queryFn: getRailOrder
+		queryFn: getRailOrder,
+		// The persisted query cache can hand back an order an older build stored, before the read below normalized it.
+		select: normalizeRailOrder
 	})
 }
 

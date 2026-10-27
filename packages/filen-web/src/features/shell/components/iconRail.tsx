@@ -19,9 +19,10 @@ import {
 	CircleHelpIcon,
 	FolderSyncIcon,
 	HardDriveIcon,
+	ImagePlayIcon,
+	MonitorIcon,
 	type LucideIcon
 } from "lucide-react"
-import { formatBytesPerSecond } from "@filen/shared"
 import { cn } from "@filen/shared"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { flushOutboxes, performLogout } from "@/features/shell/lib/performLogout"
@@ -30,8 +31,7 @@ import { logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.log
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { useAccountQuery } from "@/queries/account"
-import { useHasActiveTransfers, useSpeedSampleAging, useTransfersAggregate } from "@/features/transfers/store/useTransfersStore"
-import { shouldShowTransfersAggregate } from "@/features/transfers/screens/transfers.logic"
+import { useHasActiveTransfers } from "@/features/transfers/store/useTransfersStore"
 import { Logo } from "@/features/shell/components/logo"
 import { useRailReorder } from "@/features/shell/hooks/useRailReorder"
 import {
@@ -44,7 +44,9 @@ import {
 import { saveRailOrder, useRailOrderQuery } from "@/features/shell/queries/railOrder"
 import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
-import { RailProgressBar, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
+import { RailGroup } from "@/features/shell/components/railGroup"
+import { TransfersRing } from "@/features/shell/components/transfersRing"
+import { railItemClass } from "@/features/shell/lib/railItem"
 import { useSyncAggregate } from "@/features/sync/lib/syncStore"
 import { useMountsAggregate } from "@/features/mounts/lib/mountsStore"
 import { useTheme } from "@/providers/themeProvider"
@@ -68,28 +70,18 @@ import { useAction } from "@/lib/keymap/useAction"
 import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
 
-// Rail section slot: the active section rides a white chip (soft shadow); inactive glyphs are plain
-// muted marks on the canvas that tint on hover. No borders — the chip and hover fills carry the
-// state entirely. Reused by every real section entry (Drive, Contacts, Transfers) so they stay
-// visually identical.
+// macOS desktop: the rail holds the native traffic lights.
 const RAIL_HOLDS_TRAFFIC_LIGHTS = desktopPlatform() === "darwin"
 
 // The bridge never appears or disappears mid-session.
 const IS_DESKTOP = desktopBridge() !== undefined
 
-function railItemClass(active: boolean): string {
-	return cn(
-		// app-region-no-drag: every rail item is a real click target inside the rail's own drag region
-		// (see IconRail's <nav> below).
-		"flex size-9 items-center justify-center rounded-lg focus-ring transition-colors outline-none app-region-no-drag [&_svg]:size-[22px] [&_svg]:shrink-0",
-		active ? "bg-rail-chip text-rail-chip-foreground shadow-sm" : "text-muted-foreground hover:bg-rail-hover hover:text-foreground"
-	)
-}
-
 interface RailEntryProps {
 	active: boolean
-	// Tooltips stay closed while an entry is being dragged.
+	// Tooltips and flyouts stay closed while an entry is being dragged.
 	reordering: boolean
+	// A group marks the child it is in.
+	pathname: string
 }
 
 // Help destination ships later (the real support URL is a pending product decision) — rendered inert
@@ -200,6 +192,19 @@ function AccountMenu() {
 								<Kbd action="app.openSettings" />
 							</span>
 						</DropdownMenuItem>
+						{/* The rail shows its transfers ring only while there are transfers; this keeps the screen
+						    one click away when there are none. */}
+						<DropdownMenuItem
+							onClick={() => {
+								void navigate({ to: "/transfers" })
+							}}
+						>
+							<ArrowDownUpIcon />
+							{t("moduleTransfers")}
+							<span className="ml-auto">
+								<Kbd action="app.openTransfers" />
+							</span>
+						</DropdownMenuItem>
 						<DropdownMenuItem
 							onClick={() => {
 								setShortcutsOpen(true)
@@ -259,7 +264,7 @@ function AccountMenu() {
 // One section entry: a nav Link in a right-side tooltip. `ariaLabel` replaces `label` as the Link's name
 // when a count is folded in; `tooltipExtra` trails the label in the tooltip; `children` overlay the icon.
 // `relative` anchors the badge and overlays, so it is only added for entries that carry them.
-interface RailLinkProps<TOptions = unknown> extends RailEntryProps {
+interface RailLinkProps<TOptions = unknown> extends Omit<RailEntryProps, "pathname"> {
 	label: string
 	ariaLabel?: string | undefined
 	icon: LucideIcon
@@ -309,135 +314,60 @@ function RailLink({ active, reordering, label, ariaLabel, icon: Icon, linkOption
 	)
 }
 
-// This used to be a Popover trigger showing a quick-glance panel, with a "See all" footer link
-// to the real screen; the extra click/indirection was not worth it, so it is now a plain nav Link like
-// every other rail entry, straight to /transfers. Also renders the aggregate {percent,
-// speed} computeTransfersAggregate already computes (previously only activeCount was read anywhere):
-// a slim progress sliver along the icon's own bottom edge for `percent`, and the live rolling-window
-// `speed` folded into the tooltip text — mirrors mobile's floating pill's own speed+progress readout,
-// condensed to fit this narrow rail slot instead of a separate persistent surface.
-function TransfersEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation(["common", "transfers"])
-	const { activeCount, percent, speed } = useTransfersAggregate()
-	const showAggregate = shouldShowTransfersAggregate(activeCount)
-
-	// Ticks in the always-mounted rail, not only on /transfers: a paused or stalled transfer writes
-	// nothing more, so without the tick this tooltip would keep its last speed on every other screen.
-	useSpeedSampleAging()
-
-	return (
-		<RailLink
-			active={active}
-			reordering={reordering}
-			label={t("common:moduleTransfers")}
-			ariaLabel={activeCount > 0 ? t("transfers:transfersActiveBadge", { count: activeCount }) : undefined}
-			icon={ArrowDownUpIcon}
-			linkOptions={{ to: "/transfers" }}
-			badgeCount={activeCount}
-			tooltipExtra={showAggregate ? <RailTooltipDetail>{formatBytesPerSecond(speed)}</RailTooltipDetail> : null}
-		>
-			{showAggregate ? <RailProgressBar percent={percent} /> : null}
-		</RailLink>
-	)
-}
-
-// Desktop app only: visibleRailOrder leaves it out of a browser's rail.
-// The aggregate dot: attention (a failed host, a pair in error, review or missing its directory, open issues)
-// wins over a running pass. Selects one string, so progress pushes re-render nothing here.
-function SyncEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation(["common", "sync"])
-	const aggregate = useSyncAggregate()
-	const dot = aggregate === "attention" ? "bg-destructive" : aggregate === "syncing" ? "bg-primary" : null
-
-	return (
-		<RailLink
-			active={active}
-			reordering={reordering}
-			label={t("common:moduleSync")}
-			ariaLabel={aggregate === "attention" ? t("sync:railAttention") : aggregate === "syncing" ? t("sync:railSyncing") : undefined}
-			icon={FolderSyncIcon}
-			linkOptions={{ to: "/sync" }}
-		>
-			{dot === null ? null : (
-				<span
-					aria-hidden="true"
-					className={cn("absolute top-1 right-1 size-2 rounded-full ring-2 ring-canvas", dot)}
-				/>
-			)}
-		</RailLink>
-	)
-}
-
-// Desktop app only: visibleRailOrder leaves it out of a browser's rail.
-function MountsEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation(["common", "mounts"])
-	const aggregate = useMountsAggregate()
-	const dot = aggregate === "attention" ? "bg-destructive" : aggregate === "uploading" ? "bg-primary" : null
-
-	return (
-		<RailLink
-			active={active}
-			reordering={reordering}
-			label={t("common:moduleMounts")}
-			ariaLabel={
-				aggregate === "attention" ? t("mounts:railAttention") : aggregate === "uploading" ? t("mounts:railUploading") : undefined
-			}
-			icon={HardDriveIcon}
-			linkOptions={{ to: "/mounts" }}
-		>
-			{dot === null ? null : (
-				<span
-					aria-hidden="true"
-					className={cn("absolute top-1 right-1 size-2 rounded-full ring-2 ring-canvas", dot)}
-				/>
-			)}
-		</RailLink>
-	)
-}
-
-// Previously playlists only lived inside the now-playing popover's Playlists tab, unreachable without a
-// playing queue — this entry (plus nowPlayingPanel.tsx dropping that tab) fixes that reachability gap.
-function PlaylistsEntry({ active, reordering }: RailEntryProps) {
+// Media groups the modules that view the drive's photos, videos and music; each child is the page it was.
+function MediaEntry({ reordering, pathname }: RailEntryProps) {
 	const { t } = useTranslation("common")
 
 	return (
-		<RailLink
-			active={active}
+		<RailGroup
+			group="media"
+			label={t("moduleMedia")}
+			icon={ImagePlayIcon}
+			pathname={pathname}
 			reordering={reordering}
-			label={t("modulePlaylists")}
-			icon={ListMusicIcon}
-			linkOptions={{ to: "/playlists" }}
+			items={[
+				{ id: "photos", label: t("modulePhotos"), icon: ImagesIcon, dot: null },
+				{ id: "videos", label: t("moduleVideos"), icon: ClapperboardIcon, dot: null },
+				{ id: "playlists", label: t("modulePlaylists"), icon: ListMusicIcon, dot: null }
+			]}
 		/>
 	)
 }
 
-// Default order puts Photos next to Drive rather than beside Transfers/Playlists/Chats: photos is a
-// derived VIEW over a directory the user picks from their own drive, not an independent module with
-// its own storage the way playlists/transfers are.
-function PhotosEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation("common")
+// Desktop app only: visibleRailOrder leaves it out of a browser's rail. Each child's dot: attention (a failed
+// host, a pair in error, review or missing its directory, open issues; a failed mount or server) wins over
+// work in progress. The aggregates select one string each, so progress pushes re-render nothing here.
+function ComputerEntry({ reordering, pathname }: RailEntryProps) {
+	const { t } = useTranslation(["common", "sync", "mounts"])
+	const syncAggregate = useSyncAggregate()
+	const mountsAggregate = useMountsAggregate()
+	const syncDot = syncAggregate === "attention" ? "attention" : syncAggregate === "syncing" ? "busy" : null
+	const mountsDot = mountsAggregate === "attention" ? "attention" : mountsAggregate === "uploading" ? "busy" : null
 
 	return (
-		<RailLink
-			active={active}
+		<RailGroup
+			group="computer"
+			label={t("common:moduleComputer")}
+			icon={MonitorIcon}
+			pathname={pathname}
 			reordering={reordering}
-			label={t("modulePhotos")}
-			icon={ImagesIcon}
-			linkOptions={{ to: "/photos" }}
-		/>
-	)
-}
-
-function VideosEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation("common")
-
-	return (
-		<RailLink
-			active={active}
-			reordering={reordering}
-			label={t("moduleVideos")}
-			icon={ClapperboardIcon}
-			linkOptions={{ to: "/videos" }}
+			items={[
+				{
+					id: "sync",
+					label: t("common:moduleSync"),
+					icon: FolderSyncIcon,
+					dot: syncDot,
+					statusLabel: syncDot === "attention" ? t("sync:railAttention") : syncDot === "busy" ? t("sync:railSyncing") : undefined
+				},
+				{
+					id: "mounts",
+					label: t("common:moduleMounts"),
+					icon: HardDriveIcon,
+					dot: mountsDot,
+					statusLabel:
+						mountsDot === "attention" ? t("mounts:railAttention") : mountsDot === "busy" ? t("mounts:railUploading") : undefined
+				}
+			]}
 		/>
 	)
 }
@@ -538,15 +468,11 @@ function SettingsEntry({ active, reordering }: RailEntryProps) {
 
 const RAIL_ENTRIES: Record<RailEntryId, (props: RailEntryProps) => ReactElement> = {
 	drive: DriveEntry,
-	photos: PhotosEntry,
-	videos: VideosEntry,
-	transfers: TransfersEntry,
-	sync: SyncEntry,
-	mounts: MountsEntry,
+	media: MediaEntry,
 	notes: NotesEntry,
 	chats: ChatsEntry,
-	playlists: PlaylistsEntry,
 	contacts: ContactsEntry,
+	computer: ComputerEntry,
 	settings: SettingsEntry
 }
 
@@ -599,7 +525,7 @@ export function IconRail() {
 			// options), so the rail widens to hold them and the brand moves below them.
 			className={cn(
 				"flex shrink-0 flex-col items-center gap-1.5 overflow-y-auto app-region-drag",
-				RAIL_HOLDS_TRAFFIC_LIGHTS ? "w-16 pt-8 pb-1.5" : "w-12 py-1.5"
+				RAIL_HOLDS_TRAFFIC_LIGHTS ? "w-16 pt-6.5 pb-1.5" : "w-12 py-1.5"
 			)}
 		>
 			<Link
@@ -636,15 +562,17 @@ export function IconRail() {
 							<Entry
 								active={railEntryActive(id, pathname)}
 								reordering={reordering}
+								pathname={pathname}
 							/>
 						</div>
 					)
 				})}
 			</div>
 
-			{/* Pinned footer — the rail's extensible utility slot list; future entries stack above the
-			    account menu. */}
+			{/* Pinned footer — the rail's extensible utility slot list; the transfers ring shows above it
+			    only while there are transfers to list. */}
 			<div className="mt-auto flex w-full flex-col items-center gap-1.5">
+				<TransfersRing active={pathname === "/transfers"} />
 				<AssistantToggle itemClass={railItemClass} />
 				<HelpEntry />
 				<AccountMenu />

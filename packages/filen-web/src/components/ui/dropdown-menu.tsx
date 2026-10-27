@@ -7,6 +7,9 @@ import { stopRowPropagation } from "@/lib/domEvents"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 import { MENU_POPUP_CLASS } from "@/components/ui/menuStyles"
 
+const ITEM_CLASS =
+	"relative flex min-h-7 items-center gap-2 rounded-xl px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-destructive"
+
 const CHECK_ITEM_CLASS =
 	"relative flex min-h-7 items-center gap-2 rounded-xl py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 
@@ -102,10 +105,18 @@ function DropdownMenuItem({
 		<MenuPrimitive.Item
 			data-slot="dropdown-menu-item"
 			data-variant={variant}
-			className={cn(
-				"relative flex min-h-7 items-center gap-2 rounded-xl px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[variant=destructive]:*:[svg]:text-destructive",
-				className
-			)}
+			className={cn(ITEM_CLASS, className)}
+			{...props}
+		/>
+	)
+}
+
+// An item that navigates: render a router Link through `render`. Looks like DropdownMenuItem.
+function DropdownMenuLinkItem({ className, ...props }: MenuPrimitive.LinkItem.Props) {
+	return (
+		<MenuPrimitive.LinkItem
+			data-slot="dropdown-menu-item"
+			className={cn(ITEM_CLASS, className)}
 			{...props}
 		/>
 	)
@@ -209,6 +220,7 @@ export {
 	DropdownMenuGroup,
 	DropdownMenuLabel,
 	DropdownMenuItem,
+	DropdownMenuLinkItem,
 	DropdownMenuCheckboxItem,
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,

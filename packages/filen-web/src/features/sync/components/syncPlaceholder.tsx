@@ -4,14 +4,14 @@ import { EmptyMessage } from "@/components/emptyMessage"
 import { LoadingState } from "@/components/loadingState"
 import { useSyncPairIds } from "@/features/sync/lib/syncStore"
 
-// The content card when no pair is shown: loading until the first overview, then the select prompt, or
-// (`missing`) a pair id that no longer exists. With no pairs the sidebar alone carries the empty state and
+// The content card when no pair is shown: loading until the first overview (and while the index reopens the last
+// pair), then the select prompt, or (`missing`) a pair id that no longer exists. With no pairs the sidebar alone carries the empty state and
 // its add entry point, as in Notes and Chats.
-export function SyncPlaceholder({ missing }: { missing?: boolean }) {
+export function SyncPlaceholder({ missing, loading }: { missing?: boolean; loading?: boolean }) {
 	const { t } = useTranslation("sync")
 	const pairIds = useSyncPairIds()
 
-	if (pairIds === null) {
+	if (pairIds === null || loading === true) {
 		return <LoadingState size="lg" />
 	}
 

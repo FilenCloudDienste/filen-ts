@@ -12,14 +12,15 @@ import { desktopPlatform } from "@/lib/desktop"
 import { log } from "@/lib/log"
 import { SettingsGroup, SettingsRow } from "@/features/settings/components/settingsLayout"
 import { PreferenceToggleRow, SettingsSelectRow } from "@/features/settings/components/settingRows"
-import { ActionRow } from "@/features/desktop/components/actionRow"
 import { EntryRow } from "@/features/desktop/components/entryRow"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
-import { mountsApi, useMountsDrive, useMountsStats, useMountsStore } from "@/features/mounts/lib/mountsStore"
+import { mountsApi, useMountsStats, useMountsStore } from "@/features/mounts/lib/mountsStore"
 import { callMounts, runMountsAction } from "@/features/mounts/lib/mountsActions"
 import { MOUNT_POINT_PROBLEM_KEY } from "@/features/mounts/lib/mountsErrors.logic"
-import { driveReadOnlyLocked, FUSE_PROVIDER_KEY, roleBusy } from "@/features/mounts/lib/mountsStatus.logic"
-import { MountsNoticeBanner, MountsPage, RoleErrorCallout } from "@/features/mounts/components/mountsPage"
+import { driveReadOnlyLocked } from "@/features/mounts/lib/mountsStatus.logic"
+import { useDriveControls } from "@/features/mounts/hooks/useDriveControls"
+import { HeroSection, MountsNoticeBanner, MountsPage, RoleErrorCallout } from "@/features/mounts/components/mountsPage"
+import { DriveHero } from "@/features/mounts/components/driveHero"
 import { FuseCallout } from "@/features/mounts/components/fuseCallout"
 import { TuningDialog } from "@/features/mounts/components/tuningDialog"
 
@@ -142,10 +143,6 @@ function CacheGroup() {
 
 	return (
 		<SettingsGroup title={t("driveGroupCache")}>
-			<SettingsRow
-				label={t("cacheUsage")}
-				description={t("cacheUsageDescription", { used: formatBytes(cache.usedBytes), free: formatBytes(cache.freeBytes) })}
-			/>
 			{pending ? (
 				<SettingsRow
 					label={t("cachePendingLabel")}
@@ -251,48 +248,34 @@ function TransfersGroup({ mounted }: { mounted: boolean }) {
 	)
 }
 
-// The network drive: whether it is mounted and where, read-only, opening it, its cache and what it is uploading.
+// The network drive: a hero with its switch, where it mounts with Open and its cache, then where and how it mounts,
+// what it is uploading, and the cache's own settings.
 export function DrivePage() {
 	const { t } = useTranslation("mounts")
-	const drive = useMountsDrive()
-	const available = useMountsStore(state => state.overview?.available ?? true)
-	const fuse = useMountsStore(useShallow(state => state.overview?.fuse ?? null))
-	const [pending, setPending] = useState(false)
+	const controls = useDriveControls()
 
-	if (drive === null) {
+	if (controls === null) {
 		return <LoadingState size="lg" />
 	}
 
-	const busy = pending || roleBusy(drive.state)
-	const cannotMount = !available || fuse?.state === "missing"
-
-	function setDrive(patch: { enabled?: boolean; readOnly?: boolean }): void {
-		setPending(true)
-		void runMountsAction(() => mountsApi().setDrive(patch)).finally(() => {
-			setPending(false)
-		})
-	}
+	const { drive, available, busy, setDrive } = controls
 
 	return (
 		<MountsPage
 			role="drive"
 			title={t("mountsNetworkDrive")}
-			state={drive.state}
 		>
-			{available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
-			<FuseCallout />
-			<MountsNoticeBanner scope="drive" />
-			<RoleErrorCallout error={drive.error} />
-			<SettingsGroup title={t("driveGroupDrive")}>
-				<PreferenceToggleRow
-					title={t("driveEnable")}
-					description={t("driveEnableDescription")}
-					checked={drive.enabled}
-					disabled={busy || (cannotMount && !drive.enabled)}
-					onCheckedChange={enabled => {
-						setDrive({ enabled })
-					}}
+			<HeroSection>
+				<DriveHero
+					controls={controls}
+					overview={false}
 				/>
+				{available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
+				<FuseCallout />
+				<MountsNoticeBanner scope="drive" />
+				<RoleErrorCallout error={drive.error} />
+			</HeroSection>
+			<SettingsGroup title={t("driveGroupDrive")}>
 				{WINDOWS ? (
 					<DriveLetterRow
 						driveLetter={drive.driveLetter}
@@ -312,15 +295,6 @@ export function DrivePage() {
 					onCheckedChange={readOnly => {
 						setDrive({ readOnly })
 					}}
-				/>
-				<ActionRow
-					label={t("driveOpen")}
-					description={
-						fuse?.state === "ready" ? t("driveOpenDescription", { provider: t(FUSE_PROVIDER_KEY[fuse.provider]) }) : undefined
-					}
-					action={t("driveOpenAction")}
-					disabled={drive.state !== "running"}
-					run={() => runMountsAction(() => mountsApi().revealDrive())}
 				/>
 			</SettingsGroup>
 			<TransfersGroup mounted={drive.state === "running"} />

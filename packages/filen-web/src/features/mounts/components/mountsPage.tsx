@@ -1,57 +1,39 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
-import { CircleAlertIcon, CircleCheckIcon, CircleIcon, LoaderCircleIcon } from "lucide-react"
-import type { DesktopMountsError, DesktopMountsRoleState } from "@filen/shared/desktop"
-import { cn } from "@filen/shared"
+import type { DesktopMountsError } from "@filen/shared/desktop"
 import { Button } from "@/components/ui/button"
 import { log } from "@/lib/log"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 import { mountsApi, useMountsStore } from "@/features/mounts/lib/mountsStore"
-import { NOTICE_KEY, NOTICE_SCOPE, roleStateKey } from "@/features/mounts/lib/mountsStatus.logic"
+import { NOTICE_KEY, NOTICE_SCOPE } from "@/features/mounts/lib/mountsStatus.logic"
+import { ROLE_ICON } from "@/features/mounts/lib/mountsIcons"
 import { mountsErrorLabel } from "@/features/mounts/lib/mountsActions"
 import type { MountsRole } from "@/features/mounts/lib/mountsRoles"
 
-const STATE_ICON: Record<DesktopMountsRoleState, { icon: typeof CircleIcon; className: string }> = {
-	off: { icon: CircleIcon, className: "text-muted-foreground" },
-	starting: { icon: LoaderCircleIcon, className: "animate-spin text-primary motion-reduce:animate-none" },
-	running: { icon: CircleCheckIcon, className: "text-emerald-600 dark:text-emerald-500" },
-	stopping: { icon: LoaderCircleIcon, className: "animate-spin text-muted-foreground motion-reduce:animate-none" },
-	error: { icon: CircleAlertIcon, className: "text-destructive" }
-}
-
-// One Mounts page: its title and state over the one scroll container, laid out like a sync pair's page.
-export function MountsPage({
-	role,
-	title,
-	state,
-	children
-}: {
-	role: MountsRole
-	title: string
-	state: DesktopMountsRoleState
-	children: ReactNode
-}) {
-	const { t } = useTranslation("mounts")
-	const { icon: Icon, className } = STATE_ICON[state]
+// One Mounts page: a title bar like Drive's over the one scroll container, in the Settings column.
+export function MountsPage({ role, title, children }: { role: MountsRole; title: string; children: ReactNode }) {
+	const Icon = ROLE_ICON[role]
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
+			<header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/50 px-4">
 				<Icon
 					aria-hidden="true"
-					className={cn("size-4 shrink-0", className)}
+					className="size-4 shrink-0 text-muted-foreground"
 				/>
-				<div className="flex min-w-0 flex-1 items-baseline gap-2">
-					<h1 className="truncate font-heading text-base font-medium tracking-tight">{title}</h1>
-					<p className="shrink-0 text-xs text-muted-foreground">{t(roleStateKey(role, state))}</p>
-				</div>
+				<h1 className="truncate font-heading text-base font-medium tracking-tight">{title}</h1>
 			</header>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-2 pb-12 sm:px-6">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-6 pb-12 sm:px-6">
 				<div className="mx-auto flex w-full max-w-3xl flex-col gap-8">{children}</div>
 			</div>
 		</>
 	)
+}
+
+// A page's hero with the callouts docked under it, closer together than the sections below.
+export function HeroSection({ children }: { children: ReactNode }) {
+	return <div className="flex flex-col gap-3">{children}</div>
 }
 
 // Why a role is down, as the shell reported it.

@@ -38,7 +38,7 @@
 
 /* Desktop window chrome (lib/desktop.ts sets data-desktop; every inset is 0 in a browser). Windows and
    Linux: the window-controls overlay, a band across the top whose controls sit at the right. macOS: the
-   traffic lights at x 14-68, y 14-28, gone in fullscreen. A full-window layer's top bar leaves
+   traffic lights at x 10-70, y 8-22, gone in fullscreen. A full-window layer's top bar leaves
    --window-inset-top above itself and --window-inset-left before its first control; a panel in the
    top-left corner starts --window-inset-corner down. */
 :root {

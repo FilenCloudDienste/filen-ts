@@ -141,6 +141,11 @@ describe("sidebar width: get/set", () => {
 		await expect(getSidebarWidth("drive")).resolves.toBe(DEFAULT_SIDEBAR_WIDTH)
 	})
 
+	it("starts the Sync and Mounts lists at the narrowest width", async () => {
+		await expect(getSidebarWidth("sync")).resolves.toBe(SIDEBAR_WIDTH_MIN)
+		await expect(getSidebarWidth("mounts")).resolves.toBe(SIDEBAR_WIDTH_MIN)
+	})
+
 	it("roundtrips a stored in-range value through set/get", async () => {
 		await setSidebarWidth("drive", 400)
 

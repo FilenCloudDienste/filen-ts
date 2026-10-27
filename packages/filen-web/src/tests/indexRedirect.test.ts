@@ -3,6 +3,8 @@ import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { chatsIndexRedirectTarget } from "@/features/chats/lib/indexRedirect.logic"
 import { notesIndexRedirectTarget } from "@/features/notes/lib/indexRedirect.logic"
+import { syncIndexRedirectTarget } from "@/features/sync/lib/indexRedirect.logic"
+import { MOUNTS_OVERVIEW, mountsIndexRedirectTarget } from "@/features/mounts/lib/indexRedirect.logic"
 import { mockNote } from "@/tests/fixtures/notes"
 import { mockPlainBlockedContact } from "@/tests/support/contactFixtures"
 import { testUuid } from "@/tests/support/uuid"
@@ -115,5 +117,42 @@ describe("notesIndexRedirectTarget", () => {
 	it("stays undecided while the list or the stored value is loading", () => {
 		expect(notesIndexRedirectTarget({ storedUuid: null, notes: undefined, pending: true })).toBeUndefined()
 		expect(notesIndexRedirectTarget({ storedUuid: undefined, notes, pending: false })).toBeUndefined()
+	})
+})
+
+describe("syncIndexRedirectTarget", () => {
+	it("waits for the stored id and the first overview", () => {
+		expect(syncIndexRedirectTarget({ storedId: undefined, pairIds: ["1"] })).toBeUndefined()
+		expect(syncIndexRedirectTarget({ storedId: "1", pairIds: null })).toBeUndefined()
+	})
+
+	it("shows the prompt with nothing stored, even before the overview", () => {
+		expect(syncIndexRedirectTarget({ storedId: null, pairIds: null })).toBeNull()
+		expect(syncIndexRedirectTarget({ storedId: null, pairIds: ["1"] })).toBeNull()
+	})
+
+	it("reopens the stored pair only while the overview holds it", () => {
+		expect(syncIndexRedirectTarget({ storedId: "2", pairIds: ["1", "2"] })).toBe("2")
+		expect(syncIndexRedirectTarget({ storedId: "3", pairIds: ["1", "2"] })).toBeNull()
+		expect(syncIndexRedirectTarget({ storedId: "1", pairIds: [] })).toBeNull()
+	})
+})
+
+describe("mountsIndexRedirectTarget", () => {
+	it("waits for the stored value", () => {
+		expect(mountsIndexRedirectTarget(undefined, "darwin")).toBeUndefined()
+	})
+
+	it("stays on the overview with nothing stored or the overview stored", () => {
+		expect(mountsIndexRedirectTarget(null, "darwin")).toBeNull()
+		expect(mountsIndexRedirectTarget(MOUNTS_OVERVIEW, "darwin")).toBeNull()
+	})
+
+	it("reopens a role the platform offers, and nothing else", () => {
+		expect(mountsIndexRedirectTarget("drive", "darwin")).toBe("drive")
+		expect(mountsIndexRedirectTarget("webdav", "win32")).toBe("webdav")
+		expect(mountsIndexRedirectTarget("nfs", "linux")).toBe("nfs")
+		expect(mountsIndexRedirectTarget("nfs", "win32")).toBeNull()
+		expect(mountsIndexRedirectTarget("gopher", "darwin")).toBeNull()
 	})
 })

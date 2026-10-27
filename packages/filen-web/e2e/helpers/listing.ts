@@ -279,17 +279,30 @@ export async function clearSelection(page: Page): Promise<void> {
 	}
 }
 
+// A module behind a rail group (Media: Photos, Videos, Playlists): hovering the group icon opens its flyout,
+// whose entry is clicked. Retried until the URL commits, like clickLinkUntilUrl.
+export async function openRailGroupChild(page: Page, group: string, child: string, urlPattern: RegExp): Promise<void> {
+	await expect(async () => {
+		await page.getByRole("navigation", { name: "Filen", exact: true }).getByRole("link", { name: group, exact: true }).hover()
+		await page.getByRole("menuitem", { name: child, exact: true }).click({ timeout: 5_000 })
+		await expect(page).toHaveURL(urlPattern, { timeout: 5_000 })
+	}).toPass({ timeout: 30_000 })
+}
+
 // The rail's Photos entry; callers wait on a landmark of the photos screen itself, since the URL flips
 // before React commits the route.
 export async function openPhotos(page: Page): Promise<void> {
-	await clickLinkUntilUrl(page, page.getByRole("link", { name: "Photos", exact: true }).first(), /\/photos$/)
+	await openRailGroupChild(page, "Media", "Photos", /\/photos$/)
 }
 
-// The Transfers entry lives in the icon rail (a `navigation` landmark), not the sidebar, so
-// clickSidebarLink cannot reach it — and its accessible name carries an active-count badge while
-// anything is running (iconRail.tsx), hence the regex.
+// The rail shows its transfers ring only while there are transfers, so this goes through the account
+// menu's Transfers entry, which is always there.
 export async function openTransfers(page: Page): Promise<void> {
-	await clickLinkUntilUrl(page, page.getByRole("link", { name: /Transfers/i }).first(), /\/transfers$/)
+	await expect(async () => {
+		await page.getByRole("button", { name: "Account", exact: true }).click()
+		await page.getByRole("menuitem", { name: "Transfers", exact: true }).click({ timeout: 5_000 })
+		await expect(page).toHaveURL(/\/transfers$/, { timeout: 5_000 })
+	}).toPass({ timeout: 30_000 })
 }
 
 // The listing virtualizes its rows (directoryListing.tsx's useVirtualizer, keyed by item uuid) — on a

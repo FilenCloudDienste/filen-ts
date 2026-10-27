@@ -49,6 +49,43 @@ export function roleStateKey(role: DesktopMountsRole, state: DesktopMountsRoleSt
 	return role === "drive" && state === "running" ? "stateMounted" : ROLE_STATE_KEY[state]
 }
 
+// A role's state as the status dot beside it draws it.
+export type RoleTone = "off" | "busy" | "on" | "error"
+
+export const ROLE_STATE_TONE: Record<DesktopMountsRoleState, RoleTone> = {
+	off: "off",
+	starting: "busy",
+	running: "on",
+	stopping: "busy",
+	error: "error"
+}
+
+// Where a server listens, as a client types it (no scheme); the full url is what gets copied.
+export function serveHostPort(serve: Pick<DesktopServe, "address" | "port">): string {
+	return serve.address.includes(":") ? `[${serve.address}]:${String(serve.port)}` : `${serve.address}:${String(serve.port)}`
+}
+
+// A sidebar row's state and where the role is reachable: the drive's mount point (or letter), a server's address. null
+// before the first overview and for a protocol this platform does not offer; a drive not yet given a place has none.
+export function roleSummary(
+	overview: DesktopMountsOverview | null,
+	role: DesktopMountsRole
+): { state: DesktopMountsRoleState; address: string | null } | null {
+	if (overview === null) {
+		return null
+	}
+
+	if (role === "drive") {
+		const { drive } = overview
+
+		return { state: drive.state, address: drive.mountPoint ?? (drive.driveLetter === null ? null : `${drive.driveLetter}:`) }
+	}
+
+	const serve = overview.serves.find(candidate => candidate.protocol === role)
+
+	return serve === undefined ? null : { state: serve.state, address: serveHostPort(serve) }
+}
+
 // Mid-transition: its switch waits for the shell to settle the role.
 export function roleBusy(state: DesktopMountsRoleState): boolean {
 	return state === "starting" || state === "stopping"

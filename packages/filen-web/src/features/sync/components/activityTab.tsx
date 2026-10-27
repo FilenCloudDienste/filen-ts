@@ -2,22 +2,53 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { ArrowDownIcon, ArrowUpIcon, CircleAlertIcon, CircleCheckIcon, HistoryIcon, TriangleAlertIcon } from "lucide-react"
-import type { DesktopSyncActivity } from "@filen/shared/desktop"
+import type { DesktopSyncActivity, DesktopSyncActivityKind } from "@filen/shared/desktop"
 import { cn, formatBytes } from "@filen/shared"
 import { log } from "@/lib/log"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { EmptyMessage } from "@/components/emptyMessage"
-import { MiddleEllipsis } from "@/components/middleEllipsis"
-import { SettingsGroup, SettingsPanel } from "@/features/settings/components/settingsLayout"
+import { DirectoryGlyph, FileTypeIcon } from "@/features/drive/components/itemIcon"
+import { fileIconKey } from "@/features/drive/lib/icon.logic"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { ACTIVITY_KIND_KEY, ACTIVITY_KIND_TONE, ACTIVITY_LIMIT, mergeActivity, type ActivityTone } from "@/features/sync/lib/activity.logic"
-import { EntryRow } from "@/features/desktop/components/entryRow"
+import { pathBasename, pathParent } from "@/features/sync/lib/syncStatus.logic"
 
 const TONE_ICON: Record<ActivityTone, { icon: typeof HistoryIcon; className: string }> = {
 	normal: { icon: CircleCheckIcon, className: "text-muted-foreground" },
 	warning: { icon: TriangleAlertIcon, className: "text-warning-foreground" },
 	error: { icon: CircleAlertIcon, className: "text-destructive" }
+}
+
+const TONE_LABEL_CLASS: Record<ActivityTone, string> = {
+	normal: "text-muted-foreground",
+	warning: "text-warning-foreground",
+	error: "text-destructive"
+}
+
+const DIRECTORY_KINDS: ReadonlySet<DesktopSyncActivityKind> = new Set(["createdRemoteDirectory", "createdLocalDirectory"])
+
+const ROW_CLASS = "flex min-h-11 items-center gap-3 px-4 py-1.5 text-sm transition-colors hover:bg-accent/50 sm:px-6"
+const PARENT_COLUMN_CLASS = "hidden w-48 shrink-0 truncate text-xs text-muted-foreground lg:block"
+const TRAILING_COLUMN_CLASS = "w-24 shrink-0 truncate text-right text-xs text-muted-foreground tabular-nums"
+
+// A path row's leading glyph: the drive's own directory or file-type icon, so the list reads like a listing.
+function PathIcon({ relPath, directory }: { relPath: string; directory: boolean }) {
+	return directory ? (
+		<DirectoryGlyph
+			color="default"
+			className="size-6 shrink-0"
+		/>
+	) : (
+		<FileTypeIcon
+			iconKey={fileIconKey(pathBasename(relPath))}
+			className="size-6 shrink-0"
+		/>
+	)
+}
+
+function SectionLabel({ children }: { children: string }) {
+	return <h2 className="px-4 pt-4 pb-1.5 text-xs font-medium tracking-wider text-muted-foreground uppercase sm:px-6">{children}</h2>
 }
 
 // The transfers the running pass is on (the shell keeps the latest three), with their progress.
@@ -30,72 +61,103 @@ function NowSyncing({ pairId }: { pairId: string }) {
 	}
 
 	return (
-		<SettingsGroup title={t("activityNowSyncing")}>
-			{transfers.map(transfer => {
-				const Icon = transfer.direction === "upload" ? ArrowUpIcon : ArrowDownIcon
+		<section>
+			<SectionLabel>{t("activityNowSyncing")}</SectionLabel>
+			<ul className="flex flex-col">
+				{transfers.map(transfer => {
+					const Icon = transfer.direction === "upload" ? ArrowUpIcon : ArrowDownIcon
 
-				return (
-					<EntryRow
-						key={transfer.relPath}
-						path={transfer.relPath}
-						detail={`${formatBytes(transfer.bytes)} / ${formatBytes(transfer.total)}`}
-					>
-						<Icon
-							aria-hidden="true"
-							className="size-4 text-muted-foreground"
-						/>
-					</EntryRow>
-				)
-			})}
-		</SettingsGroup>
+					return (
+						<li
+							key={transfer.relPath}
+							className={ROW_CLASS}
+						>
+							<PathIcon
+								relPath={transfer.relPath}
+								directory={false}
+							/>
+							<span
+								title={transfer.relPath}
+								className="min-w-0 flex-1 truncate"
+							>
+								{pathBasename(transfer.relPath)}
+							</span>
+							<span className={PARENT_COLUMN_CLASS}>{pathParent(transfer.relPath)}</span>
+							<Icon
+								aria-hidden="true"
+								className="size-3.5 shrink-0 text-primary"
+							/>
+							<span
+								className={TRAILING_COLUMN_CLASS}
+							>{`${formatBytes(transfer.bytes)} / ${formatBytes(transfer.total)}`}</span>
+						</li>
+					)
+				})}
+			</ul>
+		</section>
 	)
 }
 
+// One entry as a listing row: the item's icon and name (a pass-level entry shows its tone instead), what happened and
+// why, the directory it is in, and when.
 function ActivityRow({ entry, now }: { entry: DesktopSyncActivity; now: number }) {
 	const { t } = useTranslation("sync")
 	const { t: tCommon } = useTranslation("common")
-	const tone = TONE_ICON[ACTIVITY_KIND_TONE[entry.kind]]
-	const Icon = tone.icon
+	const toneKey = ACTIVITY_KIND_TONE[entry.kind]
+	const tone = TONE_ICON[toneKey]
+	const ToneIcon = tone.icon
 	const label = t(ACTIVITY_KIND_KEY[entry.kind])
-	const detail: string[] = [formatRelativeTime(entry.at, tCommon, now)]
-
-	if (entry.to !== undefined) {
-		detail.unshift(t("activityMovedTo", { path: entry.to }))
-	}
+	const detail: string[] = []
 
 	if (entry.detail !== undefined) {
-		detail.unshift(entry.detail)
+		detail.push(entry.detail)
+	}
+
+	if (entry.to !== undefined) {
+		detail.push(t("activityMovedTo", { path: entry.to }))
 	}
 
 	return (
-		<li
-			data-slot="settings-row"
-			className="flex items-start gap-3 px-5 py-2.5"
-		>
-			<Icon
-				aria-hidden="true"
-				className={cn("mt-0.5 size-4 shrink-0", tone.className)}
-			/>
-			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+		<li className={ROW_CLASS}>
+			{entry.relPath === undefined ? (
+				<span className="flex size-6 shrink-0 items-center justify-center">
+					<ToneIcon
+						aria-hidden="true"
+						className={cn("size-4", tone.className)}
+					/>
+				</span>
+			) : (
+				<PathIcon
+					relPath={entry.relPath}
+					directory={DIRECTORY_KINDS.has(entry.kind)}
+				/>
+			)}
+			<div className="flex min-w-0 flex-1 flex-col">
 				{entry.relPath === undefined ? (
-					<p className="text-sm font-medium">{label}</p>
+					<span className="truncate font-medium">{label}</span>
 				) : (
-					<>
-						<MiddleEllipsis
-							value={entry.relPath}
-							className="text-sm font-medium"
-						/>
-						<p className="text-xs text-muted-foreground">{label}</p>
-					</>
+					<span
+						title={entry.relPath}
+						className="truncate"
+					>
+						{pathBasename(entry.relPath)}
+					</span>
 				)}
-				<p className="truncate text-xs text-muted-foreground">{detail.join(" · ")}</p>
+				{detail.length > 0 ? <span className="truncate text-xs text-muted-foreground">{detail.join(" · ")}</span> : null}
 			</div>
+			{entry.relPath === undefined ? null : (
+				<>
+					<span className={PARENT_COLUMN_CLASS}>{pathParent(entry.relPath)}</span>
+					<span className={cn("hidden w-40 shrink-0 truncate text-xs sm:block", TONE_LABEL_CLASS[toneKey])}>{label}</span>
+				</>
+			)}
+			<span className={TRAILING_COLUMN_CLASS}>{formatRelativeTime(entry.at, tCommon, now)}</span>
 		</li>
 	)
 }
 
-// What the pair did this run, newest first: the shell's ring of the latest entries, read once and then followed
-// live. Only this pair's entries are kept, so another pair's activity re-renders nothing here.
+// What the pair did this run, newest first, as full-width listing rows: the shell's ring of the latest entries, read
+// once and then followed live. Only this pair's entries are kept, so another pair's activity re-renders nothing here.
 export function ActivityTab({ pairId }: { pairId: string }) {
 	const { t } = useTranslation("sync")
 	const now = useNowMinute()
@@ -133,7 +195,7 @@ export function ActivityTab({ pairId }: { pairId: string }) {
 	}, [pairId])
 
 	return (
-		<div className="flex flex-col gap-6">
+		<div className="flex flex-col pb-12">
 			<NowSyncing pairId={pairId} />
 			{entries.length === 0 ? (
 				read ? (
@@ -144,10 +206,11 @@ export function ActivityTab({ pairId }: { pairId: string }) {
 					/>
 				) : null
 			) : (
-				<SettingsPanel>
+				<section>
+					<SectionLabel>{t("activityListLabel")}</SectionLabel>
 					<ul
 						aria-label={t("activityListLabel")}
-						className="flex flex-col divide-y divide-border/60"
+						className="flex flex-col"
 					>
 						{entries.map(entry => (
 							<ActivityRow
@@ -157,7 +220,7 @@ export function ActivityTab({ pairId }: { pairId: string }) {
 							/>
 						))}
 					</ul>
-				</SettingsPanel>
+				</section>
 			)}
 		</div>
 	)

@@ -75,6 +75,17 @@ export const sync = {
 	/** Sync mode — cloud backup, description */
 	modeRemoteBackupDescription: "Files in the cloud are copied to this device. Nothing is ever deleted on this device.",
 
+	/** Sync mode — two-way, short label on the pair page between its two directories */
+	modeShortTwoWay: "Two-way",
+	/** Sync mode — local to cloud, short label */
+	modeShortLocalToRemote: "Upload",
+	/** Sync mode — cloud to local, short label */
+	modeShortRemoteToLocal: "Download",
+	/** Sync mode — local backup, short label */
+	modeShortLocalBackup: "Backup",
+	/** Sync mode — cloud backup, short label */
+	modeShortRemoteBackup: "Backup",
+
 	// ── Detail ──────────────────────────────────────────────────────────
 	/** Index — no pair selected */
 	detailSelectPrompt: "Select a sync pair",
@@ -112,6 +123,14 @@ export const sync = {
 	detailLocal: "On this device",
 	/** Detail — remote directory label */
 	detailRemote: "In the cloud",
+	/** Detail — the local directory's tile, accessible name; opens it in the system file manager */
+	detailOpenLocal: "Open {{name}} on this device",
+	/** Detail — the cloud directory's tile, accessible name; opens it in Cloud Drive */
+	detailOpenRemote: "Open {{name}} in Cloud Drive",
+	/** Detail — open issues beside the pair's status */
+	detailIssues_one: "{{count}} issue",
+	/** Detail — open issues beside the pair's status */
+	detailIssues_other: "{{count}} issues",
 
 	// ── Notices ─────────────────────────────────────────────────────────
 	/** Notice — the old app's local trash is moved into the pair's bin */

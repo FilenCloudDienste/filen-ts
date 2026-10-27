@@ -1,4 +1,4 @@
-// English source catalog — "transfers" namespace: the icon-rail Transfers trigger (a direct nav link
+// English source catalog — "transfers" namespace: the icon-rail transfers ring (a direct nav link
 // to the /transfers screen — it no longer opens its own popover) and the full /transfers screen
 // (features/transfers/components/*, features/transfers/screens/*) tracking in-flight and finished
 // uploads, downloads, copies and archive jobs (compress, extract), plus the upload/download-summary toasts startUploads (features/drive/lib/upload.ts) /
@@ -16,6 +16,14 @@ export const transfers = {
 	transfersActiveBadge_one: "Transfers, {{count}} active",
 	/** Icon-rail Transfers trigger — accessible label while at least one upload is active; replaces the plain moduleTransfers label so the count is announced, not just shown in the visual badge; plural */
 	transfersActiveBadge_other: "Transfers, {{count}} active",
+	/** Icon-rail transfers ring — accessible label once nothing is active and a transfer failed */
+	transfersRingFailed: "Transfers, some failed",
+	/** Icon-rail transfers ring — accessible label once every transfer finished */
+	transfersRingDone: "Transfers, finished",
+	/** Icon-rail transfers ring — tooltip detail after the label when a transfer failed */
+	transfersRingFailedDetail: "Some failed",
+	/** Icon-rail transfers ring — tooltip detail after the label once every transfer finished */
+	transfersRingDoneDetail: "Finished",
 
 	// ── Panel ────────────────────────────────────────────────────────────────
 	/** Empty-state title shown when there are no transfers (rail entry's accessible summary + the /transfers screen) */

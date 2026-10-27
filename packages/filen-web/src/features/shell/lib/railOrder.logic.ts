@@ -1,19 +1,9 @@
 import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
+import { activeRailChild } from "@/features/shell/lib/railGroups.logic"
 
-// The icon rail's reorderable links. The logo above them and the help/account footer below stay put.
-export const RAIL_ENTRY_IDS = [
-	"drive",
-	"photos",
-	"videos",
-	"transfers",
-	"sync",
-	"mounts",
-	"notes",
-	"chats",
-	"playlists",
-	"contacts",
-	"settings"
-] as const
+// The icon rail's reorderable links, groups included. The logo above them and the transfers/help/account
+// footer below stay put.
+export const RAIL_ENTRY_IDS = ["drive", "media", "notes", "chats", "contacts", "computer", "settings"] as const
 
 export type RailEntryId = (typeof RAIL_ENTRY_IDS)[number]
 
@@ -21,9 +11,19 @@ export const DEFAULT_RAIL_ORDER: readonly RailEntryId[] = RAIL_ENTRY_IDS
 
 // Entries only the desktop app can serve. The stored order still holds them in a browser, so a reorder
 // there never loses their slot for a later desktop session on the same origin.
-const DESKTOP_ONLY = new Set<RailEntryId>(["sync", "mounts"])
+const DESKTOP_ONLY = new Set<RailEntryId>(["computer"])
 
 const KNOWN = new Set<string>(RAIL_ENTRY_IDS)
+
+// Ids an order stored before the rail had groups may hold. A grouped module takes its group's slot at its
+// first occurrence. Transfers moved to the footer, and Sync and Mounts are dropped rather than mapped, so
+// Computer lands in its default slot: they were new when grouping came, and an unchanged old order then
+// reads as the new default.
+const LEGACY_IDS: ReadonlyMap<string, RailEntryId> = new Map([
+	["photos", "media"],
+	["videos", "media"],
+	["playlists", "media"]
+])
 
 function isRailEntryId(id: string): id is RailEntryId {
 	return KNOWN.has(id)
@@ -40,7 +40,9 @@ export function normalizeRailOrder(stored: readonly string[] | null): RailEntryI
 
 	const order: RailEntryId[] = []
 
-	for (const id of stored) {
+	for (const storedId of stored) {
+		const id = LEGACY_IDS.get(storedId) ?? storedId
+
 		if (isRailEntryId(id) && !order.includes(id)) {
 			order.push(id)
 		}
@@ -134,8 +136,8 @@ export function railShift(index: number, from: number, to: number, pitch: number
 	return 0
 }
 
-// Whether `pathname` is inside the section an entry links to. Drive, Videos, Sync, Mounts, Notes, Chats and Settings nest
-// deeper routes under their root; the others are single pages.
+// Whether `pathname` is inside the section an entry links to: a group's when it is inside any child's.
+// Drive, Notes, Chats and Settings nest deeper routes under their root; Contacts is a single page.
 export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 	switch (id) {
 		case "drive":
@@ -146,19 +148,10 @@ export function railEntryActive(id: RailEntryId, pathname: string): boolean {
 			return pathIsUnder(pathname, "/chats")
 		case "settings":
 			return pathIsUnder(pathname, "/settings")
-		case "photos":
-			return pathname === "/photos"
-		case "videos":
-			return pathIsUnder(pathname, "/videos")
-		case "transfers":
-			return pathname === "/transfers"
-		case "sync":
-			return pathIsUnder(pathname, "/sync")
-		case "mounts":
-			return pathIsUnder(pathname, "/mounts")
-		case "playlists":
-			return pathname === "/playlists"
 		case "contacts":
 			return pathname === "/contacts"
+		case "media":
+		case "computer":
+			return activeRailChild(id, pathname) !== null
 	}
 }

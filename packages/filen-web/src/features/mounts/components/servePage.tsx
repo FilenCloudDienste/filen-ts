@@ -6,28 +6,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
-import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { copyText } from "@/lib/copyText"
 import { log } from "@/lib/log"
 import { SettingsGroup, SettingsRow } from "@/features/settings/components/settingsLayout"
 import { PreferenceToggleRow, SettingsSelectRow } from "@/features/settings/components/settingRows"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
-import { mountsApi, useMountsServe, useMountsStore } from "@/features/mounts/lib/mountsStore"
-import { runMountsAction } from "@/features/mounts/lib/mountsActions"
+import { mountsApi } from "@/features/mounts/lib/mountsStore"
 import { PROTOCOL_LABEL_KEY } from "@/features/mounts/lib/mountsRoles"
-import {
-	ADDRESS_KIND_KEY,
-	addressChoices,
-	CONNECT_HINT_KEY,
-	enableNeedsAcknowledgement,
-	httpsOffNeedsWarning,
-	portInput,
-	roleBusy,
-	sendsPlainText
-} from "@/features/mounts/lib/mountsStatus.logic"
-import { MountsNoticeBanner, MountsPage, RoleErrorCallout } from "@/features/mounts/components/mountsPage"
+import { ADDRESS_KIND_KEY, addressChoices, portInput, sendsPlainText } from "@/features/mounts/lib/mountsStatus.logic"
+import { useServeControls } from "@/features/mounts/hooks/useServeControls"
+import { HeroSection, MountsNoticeBanner, MountsPage, RoleErrorCallout } from "@/features/mounts/components/mountsPage"
 import { ServeCredentials } from "@/features/mounts/components/serveCredentials"
-import { UnauthenticatedDialog } from "@/features/mounts/components/unauthenticatedDialog"
+import { useServeCredentials } from "@/features/mounts/hooks/useServeCredentials"
+import { ServeHero } from "@/features/mounts/components/serveHero"
 
 // The addresses this device can listen on, read once per visit; null while in flight.
 function useListenAddresses(): DesktopListenAddress[] | null {
@@ -159,87 +149,37 @@ function PortRow({ port, disabled, onSave }: { port: number; disabled: boolean; 
 	)
 }
 
-// What a client connects to, and what else it needs to know.
-function ConnectGroup({ serve }: { serve: DesktopServe }) {
-	const { t } = useTranslation("mounts")
-	const url = serve.url
-
-	return (
-		<SettingsGroup title={t("serveGroupConnect")}>
-			<SettingsRow
-				label={t("serveUrl")}
-				description={url === null ? t("serveUrlOff") : <span className="font-mono break-all">{url}</span>}
-			>
-				{url === null ? undefined : (
-					<Button
-						variant="outline"
-						aria-label={t("serveUrlCopy")}
-						onClick={() => {
-							void copyText(url, t("serveUrlCopied"))
-						}}
-					>
-						{t("copy")}
-					</Button>
-				)}
-			</SettingsRow>
-			<SettingsRow
-				label={t("serveHowTo")}
-				description={t(CONNECT_HINT_KEY[serve.protocol])}
-			/>
-		</SettingsGroup>
-	)
-}
-
-// One protocol's server: running it, where it listens, https, read-only, how to connect and its credentials.
+// One protocol's server: a hero with its switch, how to connect, address and credentials, then where it listens,
+// https, read-only and replacing its credentials.
 export function ServePage({ protocol }: { protocol: DesktopServeProtocol }) {
-	const { t } = useTranslation(["mounts", "common"])
-	const serve = useMountsServe(protocol)
-	const available = useMountsStore(state => state.overview?.available ?? true)
-	const [pending, setPending] = useState(false)
-	const [dialog, setDialog] = useState<"acknowledge" | "httpsOff" | null>(null)
+	const { t } = useTranslation("mounts")
+	const controls = useServeControls(protocol)
+	const credentials = useServeCredentials(protocol)
 
-	if (serve === null) {
+	if (controls === null) {
 		return <LoadingState size="lg" />
 	}
 
+	const { serve, available, busy, update, setHttps } = controls
 	const name = t(PROTOCOL_LABEL_KEY[protocol])
-	const busy = pending || roleBusy(serve.state)
-
-	async function update(patch: DesktopServePatch): Promise<boolean> {
-		setPending(true)
-
-		const done = await runMountsAction(() => mountsApi().setServe(protocol, patch))
-
-		setPending(false)
-
-		return done !== null
-	}
 
 	return (
 		<MountsPage
 			role={protocol}
 			title={t("serveTitle", { protocol: name })}
-			state={serve.state}
 		>
-			{available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
-			<MountsNoticeBanner scope="serve" />
-			<RoleErrorCallout error={serve.error} />
-			{sendsPlainText(serve) ? <DesktopCallout tone="warning">{t("servePlainText")}</DesktopCallout> : null}
-			{serve.authenticated ? null : <DesktopCallout tone="info">{t("serveUnauthenticated", { protocol: name })}</DesktopCallout>}
-			<SettingsGroup title={t("serveGroupServer")}>
-				<PreferenceToggleRow
-					title={t("serveEnable")}
-					description={t("serveEnableDescription", { protocol: name })}
-					checked={serve.enabled}
-					disabled={busy || (!available && !serve.enabled)}
-					onCheckedChange={enabled => {
-						if (enabled && enableNeedsAcknowledgement(serve)) {
-							setDialog("acknowledge")
-						} else {
-							void update({ enabled })
-						}
-					}}
+			<HeroSection>
+				<ServeHero
+					controls={controls}
+					credentials={credentials}
 				/>
+				{available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
+				<MountsNoticeBanner scope="serve" />
+				<RoleErrorCallout error={serve.error} />
+				{sendsPlainText(serve) ? <DesktopCallout tone="warning">{t("servePlainText")}</DesktopCallout> : null}
+				{serve.authenticated ? null : <DesktopCallout tone="info">{t("serveUnauthenticated", { protocol: name })}</DesktopCallout>}
+			</HeroSection>
+			<SettingsGroup title={t("serveGroupServer")}>
 				<AddressRow
 					serve={serve}
 					disabled={busy}
@@ -263,13 +203,7 @@ export function ServePage({ protocol }: { protocol: DesktopServeProtocol }) {
 						}
 						checked={serve.https}
 						disabled={busy}
-						onCheckedChange={https => {
-							if (!https && httpsOffNeedsWarning(serve)) {
-								setDialog("httpsOff")
-							} else {
-								void update({ https })
-							}
-						}}
+						onCheckedChange={setHttps}
 					/>
 				) : null}
 				<PreferenceToggleRow
@@ -282,35 +216,8 @@ export function ServePage({ protocol }: { protocol: DesktopServeProtocol }) {
 					}}
 				/>
 			</SettingsGroup>
-			<ConnectGroup serve={serve} />
-			{serve.protocol === "nfs" ? null : <ServeCredentials protocol={serve.protocol} />}
-			{dialog === "acknowledge" ? (
-				<UnauthenticatedDialog
-					protocol={protocol}
-					onClose={() => {
-						setDialog(null)
-					}}
-				/>
-			) : null}
-			<ConfirmDialog
-				open={dialog === "httpsOff"}
-				pending={pending}
-				title={t("httpsOffTitle")}
-				body={t("httpsOffBody", { address: serve.address })}
-				confirmLabel={t("httpsOffConfirm")}
-				cancelLabel={t("common:cancel")}
-				destructive
-				onOpenChange={next => {
-					if (!next) {
-						setDialog(null)
-					}
-				}}
-				onConfirm={() => {
-					void update({ https: false }).then(() => {
-						setDialog(null)
-					})
-				}}
-			/>
+			{credentials === null ? null : <ServeCredentials credentials={credentials} />}
+			{controls.dialogs}
 		</MountsPage>
 	)
 }
