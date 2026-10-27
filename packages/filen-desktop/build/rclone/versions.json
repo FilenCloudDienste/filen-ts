@@ -1,12 +1,12 @@
 {
-	"rclone": "1.74.3",
+	"rclone": "1.74.4",
 	"rcloneSha256": {
-		"mac-x64": "417cabd402d57806d597bd0ba8fb33a434ca8c2a1a5aa98de5a0bd4b52b39202",
-		"mac-arm64": "33a435ab17023b686918ce9a3975aceb75fe1796c694f38f1993024be1f063f5",
-		"win-x64": "ecb0ed9006e0d1a693757007716a11dab6c2cde6dac3f2fd87da962eaa73d11d",
-		"win-arm64": "5b6dcef9272f81caa44da9f9c216c385309b78cf53ebe1bd83a45bced50fc991",
-		"linux-x64": "dbee7ccd7a5d617e4ed4cd4555c16669b511abfe8d31164f61be35ac9e999bd2",
-		"linux-arm64": "8f8d47446e061f80c3256659fe8e21f56d72d96aaefe1275d088ea5eb6b42aa7"
+		"mac-x64": "4188aa84043d7a6240912923f47639a9d2da21f3b40a521c065c8d92e66563f6",
+		"mac-arm64": "c2100e2d4a4b3be04c55cd45380cafe7647e1ad772bb055f52f00876ed701167",
+		"win-x64": "ef097ef9de37a57feb7d9f9c7afb34148ad3c65be8025f1d8f7f521554a701ea",
+		"win-arm64": "72194ad0aaf210d7a55808801191fecc7e175444dab7be7491b7a63074521f3a",
+		"linux-x64": "fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d",
+		"linux-arm64": "97685285c9ad6a0cf17d5844115d2a67245af6444db672187074bd9c358de419"
 	},
 	"winfsp": "2.1.25156",
 	"winfspUrl": "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi",

@@ -175,7 +175,7 @@ packageExtensionsChecksum: sha256-WvolJfSGQJYPVAY/Wpe3uAn8qrVKdv44J+fDoGbIHAw=
 patchedDependencies:
   '@blazejkustra/react-native-alert@1.1.1': e949eaee37f063c5208ac3caae1ef519d37b4692d7592ac914c2fd26b5cfbae4
   '@expo/dom-webview@58.0.2': 174f9b0c4f5122b5bf78771e236f2a48ae6a7349dd700b726c3a9e775c411921
-  '@filen/sdk-rs@0.5.7': 8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e
+  '@filen/sdk-rs@0.5.8': 8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e
   '@react-native-menu/menu@2.0.0': 71967c075f3a5d9a5f2793f44c961ed8f60c0906049d431d5867750b78fc9110
   '@shopify/flash-list@2.3.3': 4b848b6ef2a088880fae7be52cdccf3b4eedaa31e193e609b471c4e2397bf815
   '@wllama/wllama@3.8.1': bac6c3dcc6089774f199f36f59a0579762a384be2acd80b97b9633c032a67737
@@ -248,8 +248,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
       '@filen/sdk-rs':
-        specifier: 0.5.7
-        version: 0.5.7(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
+        specifier: 0.5.8
+        version: 0.5.8(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -317,8 +317,8 @@ importers:
         specifier: ^15.1.1
         version: 15.1.1(expo-font@58.0.9(expo@58.0.16)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0))(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
       '@filen/sdk-rs':
-        specifier: 0.5.7
-        version: 0.5.7(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
+        specifier: 0.5.8
+        version: 0.5.8(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -1049,8 +1049,8 @@ importers:
         specifier: workspace:*
         version: link:../filen-office
       '@filen/sdk-rs':
-        specifier: 0.5.7
-        version: 0.5.7(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
+        specifier: 0.5.8
+        version: 0.5.8(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)
       '@filen/shared':
         specifier: workspace:*
         version: link:../filen-shared
@@ -2801,46 +2801,46 @@ packages:
     resolution: {integrity: sha512-EbxYllZ7/ozONVZd425cm4XnolfW+AmSFT5aP7Jdno6oc3WrYQcHz2CO20z/2rwWwYgztmV2PXvYH+BQ8YFjqg==}
     hasBin: true
 
-  '@filen/sdk-rs-darwin-arm64@0.5.7':
-    resolution: {integrity: sha512-vRYRodoR/r9wzDJFfWrr9IK+uWjfuK/xV9een8bLdOHJVLqVl7kS+yKFbmvU3gOWsx+qqXT6oWFUQwP7SZIddw==}
+  '@filen/sdk-rs-darwin-arm64@0.5.8':
+    resolution: {integrity: sha512-oGI1cmy7WrEV1TshFSKc5fN0JHotPBnmdeC/roLceoaSMvuHdO9X6R0NjZ/+gqk9O7BwXz+Jv5NbeUxQkKcSwQ==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [darwin]
 
-  '@filen/sdk-rs-darwin-x64@0.5.7':
-    resolution: {integrity: sha512-vQ1HF2on0UKBdwHV7dpp/TfsXg5aZfHHZzUOMShfjGegrdALoyCy70+Tn6jcZFx/X8zqJPeMzj6GhavCi7zzvA==}
+  '@filen/sdk-rs-darwin-x64@0.5.8':
+    resolution: {integrity: sha512-k6RfWJmvxkNyY0S+WaR04OndJNvJZJN/awoCRPNTKzT6wj0Ael1ZFUEapZA7WPtWK9gFkhYZiQyaAbdK+PHy5g==}
     engines: {node: '>=23'}
     cpu: [x64]
     os: [darwin]
 
-  '@filen/sdk-rs-linux-arm64-gnu@0.5.7':
-    resolution: {integrity: sha512-YUWpN7O3J5AjQGikH5Bvfcx40WQFoY0h8WIzCK9iCZ+O2ISxypTI5Gmk+1F5Yu5GMcts/+83pNwpa8PPXjZeZg==}
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.8':
+    resolution: {integrity: sha512-iZnsPMgwKH0laMOZBeF30LBLfSlhSEHPFWy7eklPQTjUAeWeaLwbUyKajhh0z8JINfH32s4SurxKCwVJDDYskA==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@filen/sdk-rs-linux-x64-gnu@0.5.7':
-    resolution: {integrity: sha512-LaZlqgKx2ntowmGPZoT26UKPzDAAZDMyqGjtt5NPLrBNed6mtEijevTnikX673bTdZnNxA9gNAa1Ol76dkwoqQ==}
+  '@filen/sdk-rs-linux-x64-gnu@0.5.8':
+    resolution: {integrity: sha512-Cn7lZIFVDQPxgOqUJ8RQzxHrjMjZDf5T7qagIC7+BqHBOggV6cx6hNU1xhJBzjpLm/xPCe5jDdK0nDSBRwXoDA==}
     engines: {node: '>=23'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@filen/sdk-rs-win32-arm64-msvc@0.5.7':
-    resolution: {integrity: sha512-WuwqmXk5SQps41Ew0DU4pVmLHvyBOIbIyRvIC3qnju7RuebZOsTPD+r+QQcsAZf+HvjC9lefD5TPTWWbCSyE3Q==}
+  '@filen/sdk-rs-win32-arm64-msvc@0.5.8':
+    resolution: {integrity: sha512-ztINGsEfT76rGBMWmloV6+LVrKU1rEpDx+5K7tKDJal2VGe3CGAOQJkxzRMvzycvy/Itsn/jmJcQRkgZZSosUg==}
     engines: {node: '>=23'}
     cpu: [arm64]
     os: [win32]
 
-  '@filen/sdk-rs-win32-x64-msvc@0.5.7':
-    resolution: {integrity: sha512-Lb+KV6752l6SZy5kgoeMyKyDrFMNHEd7wm1TV2EyIeUzNbC33Jixp8Cyl2RnRSm9N11ERZ/0/u7+kQtRYEsPYA==}
+  '@filen/sdk-rs-win32-x64-msvc@0.5.8':
+    resolution: {integrity: sha512-TeEYypO0b3c5ajIdiFqpY8p1/5q9Tu0BibVIi/VPDvG/mkkckz+ok4Na+Mij/g25O8fC2iqAilt05OPnYlcUcg==}
     engines: {node: '>=23'}
     cpu: [x64]
     os: [win32]
 
-  '@filen/sdk-rs@0.5.7':
-    resolution: {integrity: sha512-BYjFZV2RBGDLs+g5jwL6rg/g0ZorwKrPi3V1RW1Q+kMvNdSS1hJghyj7ij5HbkCQm1hDAmWKIeUNpcddswAiUw==}
+  '@filen/sdk-rs@0.5.8':
+    resolution: {integrity: sha512-+QgNQGBnSQm3zUoM0tHEf8Ay9LC+tIDMlW6nFDprRk3eGzJ5xLypEdkrP1vxhVOhLGHl3yM4DYPspFHacxuH6g==}
     engines: {node: '>=23'}
 
   '@floating-ui/core@1.8.0':
@@ -12972,34 +12972,34 @@ snapshots:
       chalk: 4.1.2
       js-yaml: 4.3.2
 
-  '@filen/sdk-rs-darwin-arm64@0.5.7':
+  '@filen/sdk-rs-darwin-arm64@0.5.8':
     optional: true
 
-  '@filen/sdk-rs-darwin-x64@0.5.7':
+  '@filen/sdk-rs-darwin-x64@0.5.8':
     optional: true
 
-  '@filen/sdk-rs-linux-arm64-gnu@0.5.7':
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.8':
     optional: true
 
-  '@filen/sdk-rs-linux-x64-gnu@0.5.7':
+  '@filen/sdk-rs-linux-x64-gnu@0.5.8':
     optional: true
 
-  '@filen/sdk-rs-win32-arm64-msvc@0.5.7':
+  '@filen/sdk-rs-win32-arm64-msvc@0.5.8':
     optional: true
 
-  '@filen/sdk-rs-win32-x64-msvc@0.5.7':
+  '@filen/sdk-rs-win32-x64-msvc@0.5.8':
     optional: true
 
-  '@filen/sdk-rs@0.5.7(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)':
+  '@filen/sdk-rs@0.5.8(patch_hash=8eca943c7af42b13271f9663a30cedb769f5ee87fba8b1a7b767b6a4bbdbff4e)':
     dependencies:
       uniffi-bindgen-react-native: https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd
     optionalDependencies:
-      '@filen/sdk-rs-darwin-arm64': 0.5.7
-      '@filen/sdk-rs-darwin-x64': 0.5.7
-      '@filen/sdk-rs-linux-arm64-gnu': 0.5.7
-      '@filen/sdk-rs-linux-x64-gnu': 0.5.7
-      '@filen/sdk-rs-win32-arm64-msvc': 0.5.7
-      '@filen/sdk-rs-win32-x64-msvc': 0.5.7
+      '@filen/sdk-rs-darwin-arm64': 0.5.8
+      '@filen/sdk-rs-darwin-x64': 0.5.8
+      '@filen/sdk-rs-linux-arm64-gnu': 0.5.8
+      '@filen/sdk-rs-linux-x64-gnu': 0.5.8
+      '@filen/sdk-rs-win32-arm64-msvc': 0.5.8
+      '@filen/sdk-rs-win32-x64-msvc': 0.5.8
 
   '@floating-ui/core@1.8.0':
     dependencies:

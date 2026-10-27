@@ -28,7 +28,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
-		"@filen/sdk-rs": "0.5.7",
+		"@filen/sdk-rs": "0.5.8",
 		"@filen/shared": "workspace:*",
 		"@peculiar/x509": "^2.2.0",
 		"@types/node": "^24.19.2",
