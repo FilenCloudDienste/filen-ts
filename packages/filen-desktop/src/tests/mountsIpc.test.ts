@@ -480,9 +480,9 @@ describe("registerMountsIpc", () => {
 	})
 
 	it("dismissing a notice removes it", async () => {
-		const { invoke, store } = await setup({ config: { ...DEFAULT_MOUNTS, notices: ["credentialsRegenerated", "lanBindDisabled"] } })
+		const { invoke, store } = await setup({ config: { ...DEFAULT_MOUNTS, notices: ["credentialsRegenerated", "addressInvalid"] } })
 
-		await invoke("dismissNotice", "lanBindDisabled")
+		await invoke("dismissNotice", "addressInvalid")
 		expect(store.get().notices).toEqual(["credentialsRegenerated"])
 		await expect(invoke("dismissNotice", "dlna")).rejects.toThrow("invalid mounts payload")
 	})

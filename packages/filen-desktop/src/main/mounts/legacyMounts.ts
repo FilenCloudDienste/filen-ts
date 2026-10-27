@@ -1,7 +1,7 @@
 import path from "node:path"
 import { type } from "arktype"
 import type { DesktopMountsNotice } from "@filen/shared/desktop"
-import { isLoopbackHost, listenHostSchema, localPathSchema, portSchema } from "../../shared/nativeProtocol.ts"
+import { listenHostSchema, localPathSchema, portSchema } from "../../shared/nativeProtocol.ts"
 import { type CredentialProtocol, credentialsProblem, type ServeCredentials } from "./credentials.ts"
 import { type MountPointContext, mountPointProblem } from "./mountPoint.ts"
 import { DEFAULT_MOUNTS, defaultServe, type MountsConfig, type MountsDrive, type MountsServe } from "./store.ts"
@@ -109,25 +109,38 @@ interface OldServe {
 	credentials: ServeCredentials | null
 }
 
+// The address this machine resolves a host name to, among its own; null when none (see createHostResolver).
+export type HostResolver = (name: string) => Promise<string | null>
+
+// An IP or localhost as it is; a host name as the local address it resolves to (the old client let rclone resolve it).
+async function listenHostOf(hostname: string | undefined, resolveHost: HostResolver): Promise<string | null> {
+	const host = listenHostSchema(hostname)
+
+	if (!(host instanceof type.errors)) {
+		return host
+	}
+
+	return hostname === undefined || hostname === "" ? null : resolveHost(hostname)
+}
+
 function importServe(
 	protocol: CredentialProtocol,
 	old: OldServe,
+	host: string | null,
 	notices: Set<DesktopMountsNotice>
 ): { serve: MountsServe; credentials: ServeCredentials | null } {
-	const host = listenHostSchema(old.hostname)
 	const port = portSchema(old.port)
-	const known = !(host instanceof type.errors)
-	const loopback = known && isLoopbackHost(host)
-	const strong = old.credentials !== null && credentialsProblem(old.credentials) === null
-	// A name rclone cannot listen on, or a LAN address with credentials anyone could guess, never starts on its own.
-	const lanRefused = old.enabled && (!known || (!loopback && !strong))
+	const known = host !== null
+	// Kept as they were, weak ones included; only ones the wipe took or rclone cannot take are made anew.
+	const usable = old.credentials !== null && credentialsProblem(old.credentials) !== "invalid"
 
-	if (old.enabled && !strong) {
+	if (old.enabled && !usable) {
 		notices.add("credentialsRegenerated")
 	}
 
-	if (lanRefused) {
-		notices.add("lanBindDisabled")
+	// No address of this machine.
+	if (old.enabled && !known) {
+		notices.add("addressInvalid")
 	}
 
 	if (old.enabled && old.https) {
@@ -137,18 +150,22 @@ function importServe(
 	return {
 		serve: {
 			...defaultServe(protocol),
-			enabled: old.enabled && !lanRefused,
-			host: known ? host : "127.0.0.1",
+			enabled: old.enabled && known,
+			host: host ?? "127.0.0.1",
 			port: port instanceof type.errors ? defaultServe(protocol).port : port,
 			https: old.https
 		},
-		credentials: strong ? old.credentials : null
+		credentials: usable ? old.credentials : null
 	}
 }
 
 // The new mounts config for the user from the old one. Pure: the migration writes the result and the credentials,
-// then consumes the stash.
-export function legacyMountsImport(effective: LegacyMountsInput, ctx: MountPointContext): LegacyMountsImport {
+// then consumes the stash. Host names are resolved through `resolveHost`, which bounds its own wait.
+export async function legacyMountsImport(
+	effective: LegacyMountsInput,
+	ctx: MountPointContext,
+	resolveHost: HostResolver
+): Promise<LegacyMountsImport> {
 	const notices = new Set<DesktopMountsNotice>()
 	const drive = importDrive(effective.networkDrive, ctx, notices)
 	const serves: MountsConfig["serves"] = {}
@@ -188,9 +205,11 @@ export function legacyMountsImport(effective: LegacyMountsInput, ctx: MountPoint
 		]
 	]
 
-	for (const [protocol, old] of olds) {
+	const hosts = await Promise.all(olds.map(([, old]) => (old === null ? null : listenHostOf(old.hostname, resolveHost))))
+
+	for (const [index, [protocol, old]] of olds.entries()) {
 		if (old !== null) {
-			const imported = importServe(protocol, old, notices)
+			const imported = importServe(protocol, old, hosts[index] ?? null, notices)
 
 			serves[protocol] = imported.serve
 

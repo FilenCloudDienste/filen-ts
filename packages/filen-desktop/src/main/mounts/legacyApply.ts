@@ -9,7 +9,7 @@ import type { NativeMountsResult } from "../native/rpc.ts"
 import { serialQueue } from "../../shared/serial.ts"
 import { CREDENTIAL_PROTOCOLS, type CredentialStore } from "./credentials.ts"
 import { wantsRoles } from "./desired.ts"
-import { legacyDriveMountPoint, legacyMountsImport, type LegacyMountsInput } from "./legacyMounts.ts"
+import { type HostResolver, legacyDriveMountPoint, legacyMountsImport, type LegacyMountsInput } from "./legacyMounts.ts"
 import type { MountPointContext } from "./mountPoint.ts"
 import { anyEnabled, type MountsConfig, type MountsStore } from "./store.ts"
 
@@ -64,6 +64,8 @@ export interface LegacyMountsDeps {
 	storeFor(userId: string): Promise<MountsStore>
 	credentialsFor(userId: string): CredentialStore
 	mountPointContext(userId: string): Promise<MountPointContext>
+	// For an old server address that is a host name; bounded, never rejects.
+	resolveHost: HostResolver
 	log: { info(message: string): void; warn(message: string): void }
 }
 
@@ -219,7 +221,7 @@ export function createLegacyMounts(deps: LegacyMountsDeps): LegacyMounts {
 				deps.log.info("mounts: settings made in this app kept; the previous app's are not imported")
 				await store.update(config => ({ ...config, legacyApplied: true }))
 			} else {
-				const imported = legacyMountsImport(input, await deps.mountPointContext(userId))
+				const imported = await legacyMountsImport(input, await deps.mountPointContext(userId), deps.resolveHost)
 				const credentials = deps.credentialsFor(userId)
 
 				for (const protocol of CREDENTIAL_PROTOCOLS) {

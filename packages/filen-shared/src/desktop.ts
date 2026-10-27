@@ -489,12 +489,13 @@ export interface DesktopMountsError {
 
 export type DesktopMountsResult<T> = { ok: true; value: T } | { ok: false; error: DesktopMountsError }
 
-// Told once until dismissed: weak or default serve credentials were replaced; a LAN server with such credentials was
-// turned off; the old mount point cannot be used; the old client's caches still hold uploads, or uploads that failed;
-// a server's certificate was made anew.
+// Told once until dismissed, each for an old (3.x) setting this app could not keep: serve credentials were made anew
+// (the old ones are gone or cannot be served); a server's old address cannot be listened on, so it is off; the old
+// mount point cannot be used; the old client's caches still hold uploads, or uploads that failed; a server's
+// certificate was made anew.
 export type DesktopMountsNotice =
 	| "credentialsRegenerated"
-	| "lanBindDisabled"
+	| "addressInvalid"
 	| "mountPointInvalid"
 	| "legacyUploadsPending"
 	| "legacyCacheErrored"

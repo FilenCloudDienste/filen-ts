@@ -115,7 +115,7 @@ describe("mounts copy", () => {
 	it("maps every notice to a key and a page", () => {
 		const notices = [
 			"credentialsRegenerated",
-			"lanBindDisabled",
+			"addressInvalid",
 			"mountPointInvalid",
 			"legacyUploadsPending",
 			"legacyCacheErrored",

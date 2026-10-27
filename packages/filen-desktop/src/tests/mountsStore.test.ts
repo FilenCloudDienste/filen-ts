@@ -26,7 +26,7 @@ describe("parseMountsConfig", () => {
 				},
 				tuning: { ...DEFAULT_TUNING, cacheMaxGiB: -1 },
 				legacyApplied: true,
-				notices: ["lanBindDisabled", "boom", "lanBindDisabled"]
+				notices: ["addressInvalid", "boom", "addressInvalid"]
 			}),
 			vi.fn()
 		)
@@ -37,7 +37,7 @@ describe("parseMountsConfig", () => {
 			serves: { webdav: { ...defaultServe("webdav"), enabled: true } },
 			tuning: DEFAULT_TUNING,
 			legacyApplied: true,
-			notices: ["lanBindDisabled"]
+			notices: ["addressInvalid"]
 		})
 	})
 })

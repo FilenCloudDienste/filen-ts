@@ -24,3 +24,40 @@ export function listenAddresses(interfaces: NodeJS.Dict<NetworkInterfaceInfo[]>)
 
 	return [{ address: "127.0.0.1", kind: "loopback", interface: null }, ...lan, { address: "0.0.0.0", kind: "all", interface: null }]
 }
+
+export interface HostLookup {
+	lookup(name: string, options: { all: true }): Promise<{ address: string; family: number }[]>
+	interfaces(): NodeJS.Dict<NetworkInterfaceInfo[]>
+	timeoutMs: number
+}
+
+// The address `name` resolves to that this machine can listen on (loopback or one of listenAddresses' LAN ones); null
+// when it resolves to none of them, fails, or takes longer than `timeoutMs`.
+export function createHostResolver(deps: HostLookup): (name: string) => Promise<string | null> {
+	return async name => {
+		let timer: NodeJS.Timeout | undefined
+
+		try {
+			const resolved = await Promise.race([
+				deps.lookup(name, { all: true }),
+				new Promise<null>(resolve => {
+					timer = setTimeout(() => {
+						resolve(null)
+					}, deps.timeoutMs)
+				})
+			])
+
+			if (resolved === null) {
+				return null
+			}
+
+			const lan = new Set(listenAddresses(deps.interfaces()).flatMap(entry => (entry.kind === "lan" ? [entry.address] : [])))
+
+			return resolved.find(entry => isLoopbackHost(entry.address) || lan.has(entry.address))?.address ?? null
+		} catch {
+			return null
+		} finally {
+			clearTimeout(timer)
+		}
+	}
+}

@@ -79,7 +79,7 @@ export function defaultServe(protocol: DesktopServeProtocol): MountsServe {
 export const mountsNoticeSchema = pinned<DesktopMountsNotice>()(
 	type.enumerated(
 		"credentialsRegenerated",
-		"lanBindDisabled",
+		"addressInvalid",
 		"mountPointInvalid",
 		"legacyUploadsPending",
 		"legacyCacheErrored",

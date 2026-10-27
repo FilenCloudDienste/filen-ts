@@ -113,6 +113,7 @@ function setup(
 		credentialsFor: () => credentials,
 		mountPointContext: () =>
 			Promise.resolve({ platform: "linux", home: path.join(directory, "home"), appData: [], temporary: [], pairRoots: [] }),
+		resolveHost: () => Promise.resolve(null),
 		log: { info: vi.fn(), warn }
 	}
 

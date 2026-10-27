@@ -61,7 +61,7 @@ export function driveReadOnlyLocked(state: DesktopMountsRoleState): boolean {
 
 export const NOTICE_KEY: Record<DesktopMountsNotice, MountsKey> = {
 	credentialsRegenerated: "noticeCredentialsRegenerated",
-	lanBindDisabled: "noticeLanBindDisabled",
+	addressInvalid: "noticeAddressInvalid",
 	mountPointInvalid: "noticeMountPointInvalid",
 	legacyUploadsPending: "noticeLegacyUploadsPending",
 	legacyCacheErrored: "noticeLegacyCacheErrored",
@@ -71,7 +71,7 @@ export const NOTICE_KEY: Record<DesktopMountsNotice, MountsKey> = {
 // Which page tells a notice: the drive's own, or every server's.
 export const NOTICE_SCOPE: Record<DesktopMountsNotice, "drive" | "serve"> = {
 	credentialsRegenerated: "serve",
-	lanBindDisabled: "serve",
+	addressInvalid: "serve",
 	mountPointInvalid: "drive",
 	legacyUploadsPending: "drive",
 	legacyCacheErrored: "drive",

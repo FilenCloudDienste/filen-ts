@@ -23,6 +23,7 @@ import {
 } from "electron"
 import { existsSync, readFileSync } from "node:fs"
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { lookup } from "node:dns/promises"
 import os from "node:os"
 import { type } from "arktype"
 import path from "node:path"
@@ -52,6 +53,7 @@ import { addonPath } from "./native/addonPath.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
 import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
 import { registerMountsIpc } from "./mounts/ipc.ts"
+import { createHostResolver } from "./mounts/addresses.ts"
 import { createLegacyMounts } from "./mounts/legacyApply.ts"
 import { configuredMountPoints } from "./mounts/mountPoint.ts"
 import { bakedRcloneSha256, rclonePaths } from "./mounts/rclonePath.ts"
@@ -455,6 +457,9 @@ async function mountPointContext(userId: string) {
 	return { ...reservedDirectories(), pairRoots: (await syncStoreFor(userId)).get().pairs.map(pair => pair.localRoot) }
 }
 
+// A slow DNS answer for an old server's host name only turns that server off.
+const LEGACY_HOST_LOOKUP_TIMEOUT_MS = 3000
+
 // The old client's rclone, caches and mount settings (PLAN §6.7).
 const legacyMounts = createLegacyMounts({
 	userData: userDataPath,
@@ -467,6 +472,7 @@ const legacyMounts = createLegacyMounts({
 	storeFor: mountsStoreFor,
 	credentialsFor: credentialStoreFor,
 	mountPointContext,
+	resolveHost: createHostResolver({ lookup, interfaces: () => os.networkInterfaces(), timeoutMs: LEGACY_HOST_LOOKUP_TIMEOUT_MS }),
 	log: { info, warn }
 })
 

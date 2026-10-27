@@ -76,12 +76,12 @@ export const mounts = {
 	noticeDismiss: "Dismiss",
 
 	// ── Notices (told once until dismissed) ─────────────────────────────
-	/** Notice — weak or default server credentials from the old app were replaced */
+	/** Notice — a server's credentials from the old app could not be kept, so new ones were made */
 	noticeCredentialsRegenerated:
-		"Some servers had weak or default credentials, so Filen made new ones. Clients using the old credentials must sign in with the new ones.",
-	/** Notice — a server on the local network with weak credentials was turned off */
-	noticeLanBindDisabled:
-		"A server listening on your network had weak credentials, so Filen turned it off. Check its settings before you run it again.",
+		"Some servers' credentials from the previous version of Filen couldn't be kept, so Filen made new ones. Clients using the old credentials must sign in with the new ones.",
+	/** Notice — a server's address from the old app can't be listened on, so the server is off */
+	noticeAddressInvalid:
+		"A server's address from the previous version of Filen can't be used any more, so the server is off. Choose an address to run it again.",
 	/** Notice — the old mount point can't be used */
 	noticeMountPointInvalid:
 		"The network drive's old mount point can't be used any more, so the drive is off. Choose a new one to mount it.",
