@@ -14,13 +14,17 @@ function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
 	)
 }
 
+// The unselected ring is the only boundary of an empty radio, so it keeps --muted-foreground (3:1 or more
+// against card, dialog and popover surfaces) even while focused; focus shows as the ring halo.
 function RadioGroupItem({ className, ...props }: RadioPrimitive.Root.Props) {
 	return (
 		<RadioPrimitive.Root
 			data-slot="radio-group-item"
 			className={cn(
-				"group/radio-group-item peer relative flex aspect-square size-4 shrink-0 rounded-2xl border border-transparent bg-input/90 focus-ring outline-none group-has-[:focus-visible]/field-label:border-transparent group-has-[:focus-visible]/field-label:ring-0 after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring data-checked:bg-primary data-checked:text-primary-foreground dark:data-checked:bg-primary data-disabled:cursor-not-allowed data-disabled:opacity-50",
+				"group/radio-group-item peer relative flex aspect-square size-4 shrink-0 rounded-2xl border border-muted-foreground bg-input/90 focus-ring outline-none group-has-[:focus-visible]/field-label:ring-0 after:absolute after:-inset-x-3 after:-inset-y-2 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground dark:data-checked:bg-primary data-disabled:cursor-not-allowed data-disabled:opacity-50",
 				INVALID_RING_CLASS,
+				// The shared dark invalid border is half-strength (2.3:1); an empty radio has no other edge.
+				"dark:aria-invalid:border-destructive",
 				className
 			)}
 			{...props}
