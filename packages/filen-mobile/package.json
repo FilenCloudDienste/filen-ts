@@ -59,7 +59,7 @@
 		"@expo/react-native-action-sheet": "^4.1.1",
 		"@expo/ui": "~58.0.21",
 		"@expo/vector-icons": "^15.1.1",
-		"@filen/sdk-rs": "0.5.8",
+		"@filen/sdk-rs": "0.5.9",
 		"@filen/shared": "workspace:*",
 		"@lezer/highlight": "^1.2.5",
 		"@op-engineering/op-sqlite": "^18.2.5",
