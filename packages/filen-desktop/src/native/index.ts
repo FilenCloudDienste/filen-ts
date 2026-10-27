@@ -2,9 +2,11 @@ import { type } from "arktype"
 import {
 	type FromNative,
 	isMountsOp,
+	type MountsOp,
 	type NativeError,
 	type NativeFatalReason,
 	type NativeInit,
+	type NativeMountsError,
 	type NativeOpArgs,
 	type NativeOpResult,
 	type SyncOp,
@@ -16,6 +18,9 @@ import { clientFromSession } from "./client.ts"
 import { createConvergence } from "./convergence.ts"
 import { openEngine } from "./engine.ts"
 import { classify } from "./errors.ts"
+import { createBinaryCheck, runProgram } from "./mounts/binaryCheck.ts"
+import { classifyMounts } from "./mounts/errors.ts"
+import { createMountsHost, type MountsHost, type MountsOpHandlers } from "./mounts/host.ts"
 import { createHostEngine, type HostEngine, type OpHandlers, toNativePair } from "./ops.ts"
 import { createPlanRegistry } from "./plans.ts"
 import { createRuntimeFeed, type RuntimeFeed } from "./reducer.ts"
@@ -23,8 +28,14 @@ import { createRuntimeFeed, type RuntimeFeed } from "./reducer.ts"
 // The native host: a utility process that owns the account's one SDK client and sync engine and runs every engine call
 // main asks for. Everything crossing to main is validated there; what comes in is validated here.
 
-// How long a shutdown waits for the engine to close (a transfer in flight finishes first); main kills at 25 s.
+// How long a shutdown waits for the engine to close (a transfer in flight finishes first) and rclone to stop; main
+// kills at 25 s.
 const CLOSE_TIMEOUT_MS = 20_000
+
+// The app's version, which scripts/build.ts bakes in; rclone sends it as its user agent.
+declare const __FILEN_DESKTOP_VERSION__: string | undefined
+
+const USER_AGENT = `filen-desktop/${typeof __FILEN_DESKTOP_VERSION__ === "undefined" ? "0.0.0-dev" : __FILEN_DESKTOP_VERSION__}`
 
 // The part of Electron's parentPort the host uses.
 export interface HostPort {
@@ -33,6 +44,10 @@ export interface HostPort {
 }
 
 function run<K extends SyncOp>(ops: OpHandlers, op: K, args: NativeOpArgs<K>): Promise<NativeOpResult<K>> {
+	return ops[op](args)
+}
+
+function runMounts<K extends MountsOp>(ops: MountsOpHandlers, op: K, args: NativeOpArgs<K>): Promise<NativeOpResult<K>> {
 	return ops[op](args)
 }
 
@@ -45,7 +60,9 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 	let feed: RuntimeFeed | null = null
 	let engine: SyncEngine | null = null
 	let host: HostEngine | null = null
+	let mounts: MountsHost | null = null
 	let subscribed = false
+	let mountsSubscribed = false
 	let revoked = false
 	const plans = createPlanRegistry()
 	const abort = new AbortController()
@@ -103,6 +120,33 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 			return
 		}
+
+		mounts = createMountsHost({
+			sdk: addon,
+			client: session.client,
+			platform: process.platform,
+			userAgent: USER_AGENT,
+			verifyBinary: createBinaryCheck({
+				platform: process.platform,
+				execPath: process.execPath,
+				run: runProgram,
+				log: message => {
+					console.log(message)
+				}
+			}),
+			post,
+			now: Date.now,
+			onAuthFailed: authRevoked,
+			log: {
+				info: message => {
+					console.log(message)
+				},
+				warn: message => {
+					console.error(message)
+				}
+			}
+		})
+		mounts.subscribe(mountsSubscribed)
 
 		const runtime = createRuntimeFeed(addon, { post, onAuthFailed: authRevoked })
 		const convergence = createConvergence()
@@ -179,11 +223,11 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 	}
 
 	async function call(message: Extract<ToNative, { t: "call" }>): Promise<void> {
-		const reply = (error: NativeError) => {
+		const reply = (error: NativeError | NativeMountsError) => {
 			post({ t: "reply", id: message.id, ok: false, error })
 		}
 
-		if (phase !== "ready" || host === null || sdk === null) {
+		if (phase !== "ready" || host === null || mounts === null || sdk === null) {
 			reply({ code: "hostUnavailable" })
 
 			return
@@ -195,9 +239,19 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 			return
 		}
 
-		// This host runs no rclone yet.
 		if (isMountsOp(message.op)) {
-			reply({ code: "unknown", message: "mounts are not available" })
+			try {
+				post({ t: "reply", id: message.id, ok: true, value: await runMounts(mounts.ops, message.op, message.args) })
+			} catch (error) {
+				const failure = classifyMounts(sdk, error)
+
+				if (failure === "unauthenticated") {
+					authRevoked()
+					reply({ code: "unauthenticated" })
+				} else {
+					reply(failure)
+				}
+			}
 
 			return
 		}
@@ -226,16 +280,28 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		feed?.stop()
 		plans.releaseAll()
 
+		const closing: Promise<void>[] = []
+
 		if (engine !== null) {
+			closing.push(
+				engine.close().catch((error: unknown) => {
+					console.error(`engine close failed: ${sdk === null ? String(error) : describe(classify(sdk, error))}`)
+				})
+			)
+		}
+
+		if (mounts !== null) {
+			closing.push(mounts.shutdown())
+		}
+
+		if (closing.length > 0) {
 			let timer: NodeJS.Timeout | undefined
 
 			await Promise.race([
-				engine.close().catch((error: unknown) => {
-					console.error(`engine close failed: ${sdk === null ? String(error) : describe(classify(sdk, error))}`)
-				}),
+				Promise.all(closing),
 				new Promise<void>(resolve => {
 					timer = setTimeout(() => {
-						console.error("engine close timed out")
+						console.error("engine close or rclone stop timed out")
 						resolve()
 					}, CLOSE_TIMEOUT_MS)
 				})
@@ -278,7 +344,9 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 				return
 			case "subscribe":
 				subscribed = message.overview
+				mountsSubscribed = message.mounts
 				feed?.subscribe(message.overview)
+				mounts?.subscribe(message.mounts)
 
 				return
 			case "shutdown":

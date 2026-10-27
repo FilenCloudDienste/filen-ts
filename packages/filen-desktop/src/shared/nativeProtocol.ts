@@ -1,6 +1,5 @@
 import { type, type Type } from "arktype"
 import type {
-	DesktopFuseStatus,
 	DesktopMountsError,
 	DesktopMountsErrorCode,
 	DesktopMountsRole,
@@ -377,6 +376,9 @@ export const vfsTuningSchema = pinned<DesktopVfsTuning>()(
 	})
 )
 
+// The old client's tuning.
+export const DEFAULT_TUNING: DesktopVfsTuning = { cacheMaxGiB: 32, cacheMinFreeGiB: 16, cacheMaxAgeHours: 720, dirCacheSeconds: 15 }
+
 // An explicit listen address: an IP literal or "localhost", never empty (rclone would bind every interface).
 export const listenHostSchema = type("string.ip").or("'localhost'")
 
@@ -463,18 +465,13 @@ const mountsStatsSchema = pinned<DesktopMountsStats>()(
 	})
 )
 
-const fuseStatusSchema = pinned<DesktopFuseStatus>()(
-	type({ state: "'ready'", provider: "'macFuse' | 'nfsMount' | 'winFsp' | 'fuse3'", "+": "reject" }).or({
-		state: "'missing'",
-		installable: "boolean",
-		"+": "reject"
-	})
-)
-
 // A Windows drive letter the drive may take; A-C are never offered.
 export const driveLetterSchema = type(/^[D-Z]$/)
 
 const dirArgs = type({ dir: localPathSchema, "+": "reject" })
+
+// rclone refuses to clear a cache the daemon on `stateDir` runs on.
+const clearCacheArgs = type({ stateDir: localPathSchema, dir: localPathSchema, "+": "reject" })
 
 // The calls that drive rclone. `quiesceLegacy` stops the old client's rclone and unmounts its stale mount; `drainCache`
 // runs a temporary rclone on an old cache until its uploads finished or the timeout passed.
@@ -482,10 +479,9 @@ export const MOUNTS_OPS = {
 	mountsApply: { args: type({ desired: desiredSchema, "+": "reject" }), result: nativeMountsStatusSchema },
 	mountsStatus: { args: noArgs, result: nativeMountsStatusSchema },
 	mountsStats: { args: noArgs, result: mountsStatsSchema },
-	fuseStatus: { args: noArgs, result: fuseStatusSchema },
 	driveLetters: { args: noArgs, result: driveLetterSchema.array() },
 	cacheUsage: { args: dirArgs, result: type({ usedBytes: countSchema, freeBytes: countSchema, "+": "reject" }) },
-	clearCache: { args: dirArgs, result: done },
+	clearCache: { args: clearCacheArgs, result: done },
 	quiesceLegacy: {
 		args: type({ binDir: localPathSchema, mountPoints: localPathSchema.array().atMostLength(16), "+": "reject" }),
 		result: type({ stopped: countSchema, unmounted: localPathSchema.array(), "+": "reject" })

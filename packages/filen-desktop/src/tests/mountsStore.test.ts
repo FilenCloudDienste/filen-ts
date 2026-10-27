@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { anyDemand } from "../main/native/supervisor.ts"
-import { DEFAULT_MOUNTS, DEFAULT_TUNING, defaultServe, loadMountsStore, parseMountsConfig } from "../main/mounts/store.ts"
+import { DEFAULT_MOUNTS, defaultServe, loadMountsStore, parseMountsConfig } from "../main/mounts/store.ts"
+import { DEFAULT_TUNING } from "../shared/nativeProtocol.ts"
 import { memoryFile } from "./fileFakes.ts"
 
 describe("parseMountsConfig", () => {

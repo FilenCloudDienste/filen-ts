@@ -14,7 +14,7 @@ import {
 } from "../../shared/nativeProtocol.ts"
 import { errorCode } from "../atomicFile.ts"
 import { redact } from "../redact.ts"
-import { serialQueue } from "../serial.ts"
+import { serialQueue } from "../../shared/serial.ts"
 import { createCrashHistory } from "./backoff.ts"
 import { CALL_TIMEOUT_MS, createRpc, type NativeMountsResult, type NativeResult, type NativeRpc } from "./rpc.ts"
 

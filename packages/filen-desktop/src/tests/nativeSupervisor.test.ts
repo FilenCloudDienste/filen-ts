@@ -330,7 +330,7 @@ describe("createNativeSupervisor", () => {
 		await settle()
 		ready(last())
 
-		const refused = supervisor.callMounts("fuseStatus", {})
+		const refused = supervisor.callMounts("mountsStatus", {})
 
 		await settle()
 		last().reply({ t: "reply", id: last().calls()[0]?.id ?? -1, ok: false, error: { code: "fuseMissing" } })

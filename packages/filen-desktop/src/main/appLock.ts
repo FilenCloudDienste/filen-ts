@@ -2,7 +2,7 @@ import { randomBytes, scrypt, timingSafeEqual } from "node:crypto"
 import { type } from "arktype"
 import type { DesktopLockAttempt, DesktopLockStatus } from "@filen/shared/desktop"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
-import { serialQueue } from "./serial.ts"
+import { serialQueue } from "../shared/serial.ts"
 import type { VaultCipher } from "./sessionVault.ts"
 
 // scrypt cost for new PINs: 32 MiB and roughly 50-100 ms per check on current hardware, off the main thread (libuv's

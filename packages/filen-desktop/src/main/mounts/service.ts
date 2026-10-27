@@ -34,7 +34,7 @@ import {
 import type { NativeEvent, NativeSupervisor } from "../native/supervisor.ts"
 import { errorCode } from "../atomicFile.ts"
 import { type Page, pushThrottle } from "../pages.ts"
-import { serialQueue } from "../serial.ts"
+import { serialQueue } from "../../shared/serial.ts"
 import type { RootTokens } from "../sync/localRoot.ts"
 import { mountsAggregate, newlyFailedRoles } from "../tray.ts"
 import { listenAddresses } from "./addresses.ts"
@@ -468,7 +468,7 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 					await send(userId, nothing(desired), SIGN_OUT_STEP_TIMEOUT_MS)
 				}
 
-				const { cache } = dirs(userId)
+				const { state, cache } = dirs(userId)
 
 				if ((pending?.pending ?? 0) + (pending?.errored ?? 0) > 0) {
 					deps.log.info("mounts: signed out with uploads pending; the cache is kept")
@@ -486,7 +486,7 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 				}
 
 				// rclone refuses while its metadata still marks items to upload.
-				const cleared = await supervisor.callMounts("clearCache", { dir: cache }, userId, SIGN_OUT_STEP_TIMEOUT_MS)
+				const cleared = await supervisor.callMounts("clearCache", { stateDir: state, dir: cache }, userId, SIGN_OUT_STEP_TIMEOUT_MS)
 
 				deps.log.info(cleared.ok ? "mounts: cache deleted on sign-out" : `mounts: cache kept on sign-out: ${cleared.error.code}`)
 			}).catch((error: unknown) => {
@@ -798,8 +798,8 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 						}
 					}
 
-					const { cache } = dirs(userId)
-					const cleared = await supervisor.callMounts("clearCache", { dir: cache }, userId)
+					const { state, cache } = dirs(userId)
+					const cleared = await supervisor.callMounts("clearCache", { stateDir: state, dir: cache }, userId)
 
 					await apply(userId)
 

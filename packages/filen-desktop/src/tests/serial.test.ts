@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { serialQueue } from "../main/serial.ts"
+import { serialQueue } from "../shared/serial.ts"
 
 describe("serialQueue", () => {
 	it("runs one operation at a time, in call order", async () => {

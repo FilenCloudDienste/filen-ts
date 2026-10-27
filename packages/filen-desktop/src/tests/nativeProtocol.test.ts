@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { type } from "arktype"
-import type { DesktopFuseStatus, DesktopMountsError, DesktopMountsStats, DesktopVfsTuning } from "@filen/shared/desktop"
+import type { DesktopMountsError, DesktopMountsStats, DesktopVfsTuning } from "@filen/shared/desktop"
 import {
 	fromNativeSchema,
 	mountsErrorSchema,
@@ -79,10 +79,9 @@ const MOUNTS_ARGS = {
 	mountsApply: { desired: DESIRED },
 	mountsStatus: {},
 	mountsStats: {},
-	fuseStatus: {},
 	driveLetters: {},
 	cacheUsage: { dir: "/data/mounts/1/cache" },
-	clearCache: { dir: "/data/mounts/1/cache" },
+	clearCache: { stateDir: "/data/mounts/1/state", dir: "/data/mounts/1/cache" },
 	quiesceLegacy: { binDir: "/data/rclone/bin", mountPoints: ["/tmp/filen"] },
 	drainCache: { binary: DESIRED.binary, stateDir: "/data/mounts/1/drain", dir: "/data/rclone-cache/webdav", timeoutMs: 1_800_000 }
 }
@@ -269,8 +268,6 @@ describe("mounts", () => {
 		}
 
 		expect(accepts(opResult("mountsApply"), STATUS)).toBe(true)
-		expect(accepts(opResult("fuseStatus"), { state: "ready", provider: "nfsMount" })).toBe(true)
-		expect(accepts(opResult("fuseStatus"), { state: "missing", installable: true })).toBe(true)
 		expect(accepts(opResult("driveLetters"), ["D", "X", "Z"])).toBe(true)
 		expect(accepts(opResult("quiesceLegacy"), { stopped: 1, unmounted: ["/tmp/filen"] })).toBe(true)
 		expect(accepts(opResult("drainCache"), { pending: 0, errored: 0 })).toBe(true)
@@ -316,16 +313,7 @@ describe("mounts", () => {
 	})
 
 	it("pinned types match the bridge", () => {
-		const fuse: DesktopFuseStatus[] = [
-			{ state: "ready", provider: "macFuse" },
-			{ state: "ready", provider: "winFsp" },
-			{ state: "missing", installable: false }
-		]
 		const error: DesktopMountsError = { code: "driveLetterInUse", message: "X:" }
-
-		for (const value of fuse) {
-			expect(accepts(opResult("fuseStatus"), value)).toBe(true)
-		}
 
 		expect(accepts(mountsErrorSchema, error)).toBe(true)
 		expect(accepts(vfsTuningSchema, TUNING)).toBe(true)

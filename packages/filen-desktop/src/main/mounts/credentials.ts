@@ -3,7 +3,7 @@ import { type } from "arktype"
 import type { DesktopServeProtocol } from "@filen/shared/desktop"
 import { authKindOf, basicAuthSchema, type NativeServeAuth, s3AuthSchema, SERVE_PROTOCOLS } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, codedError, errorCode } from "../atomicFile.ts"
-import { serialQueue } from "../serial.ts"
+import { serialQueue } from "../../shared/serial.ts"
 import type { VaultCipher } from "../sessionVault.ts"
 
 // The servers' credentials, encrypted with the session vault's cipher. They reach rclone only in the body of an

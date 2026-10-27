@@ -2,7 +2,7 @@ import { type } from "arktype"
 import { parseSessionBlob, sessionEnvelopeSchema } from "@filen/shared/session"
 import { SESSION_BLOB_MAX_LENGTH, type SessionRead } from "../shared/channels.ts"
 import { errorCode, type AtomicFile } from "./atomicFile.ts"
-import { serialQueue } from "./serial.ts"
+import { serialQueue } from "../shared/serial.ts"
 
 // The shape check main does before storing what the renderer sent. Main never uses the keys; the web's resume is
 // the real check.

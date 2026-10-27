@@ -400,7 +400,9 @@ describe("registerMountsIpc", () => {
 
 		expect(stop?.desired).toMatchObject({ drive: null, serves: [] })
 		expect(restore?.desired.drive).not.toBeNull()
-		expect(context.argsOf("clearCache")).toEqual([{ dir: path.join(context.mountsDir, "cache") }])
+		expect(context.argsOf("clearCache")).toEqual([
+			{ stateDir: path.join(context.mountsDir, "state"), dir: path.join(context.mountsDir, "cache") }
+		])
 	})
 
 	it("mounts the host cannot run are an error, not a retry loop", async () => {
@@ -531,7 +533,9 @@ describe("signing out", () => {
 		const ops = context.ops()
 
 		expect(ops.slice(-3)).toEqual(["mountsStatus", "mountsApply", "clearCache"])
-		expect(context.argsOf("clearCache")).toEqual([{ dir: path.join(context.mountsDir, "cache") }])
+		expect(context.argsOf("clearCache")).toEqual([
+			{ stateDir: path.join(context.mountsDir, "state"), dir: path.join(context.mountsDir, "cache") }
+		])
 	})
 
 	it("roles start only after quiesce", async () => {

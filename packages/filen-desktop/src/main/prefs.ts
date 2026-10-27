@@ -1,7 +1,7 @@
 import { type } from "arktype"
 import type { DesktopPrefs } from "@filen/shared/desktop"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
-import { serialQueue } from "./serial.ts"
+import { serialQueue } from "../shared/serial.ts"
 
 export const DEFAULT_PREFS: DesktopPrefs = {
 	minimizeToTray: false,

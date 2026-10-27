@@ -16,7 +16,7 @@ import {
 	parseReadResult,
 	parseStash
 } from "./legacyData.ts"
-import { serialQueue } from "./serial.ts"
+import { serialQueue } from "../shared/serial.ts"
 import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 
 // The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where

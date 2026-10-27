@@ -1,5 +1,17 @@
 import { vi } from "vitest"
-import type { JsSyncPlan, PlannedAction, SyncPairInfo, SyncPassEvent, SyncPassReport, SyncPlanSummary, SyncRefusal } from "@filen/sdk-rs"
+import type {
+	JsRcloneDaemon,
+	JsSyncPlan,
+	PlannedAction,
+	RcloneExit,
+	RcloneRefusal,
+	RcloneStats,
+	SyncPairInfo,
+	SyncPassEvent,
+	SyncPassReport,
+	SyncPlanSummary,
+	SyncRefusal
+} from "@filen/sdk-rs"
 import type { NativeSdk, SyncEngine } from "../native/addon.ts"
 
 // The addon's values the host reads, with the napi enums' numbers.
@@ -7,11 +19,13 @@ class FakeInner {
 	readonly #kind: number
 	readonly #message: string
 	readonly #refusal: SyncRefusal | undefined
+	readonly #rcloneRefusal: RcloneRefusal | undefined
 
-	constructor(kind: number, message: string, refusal: SyncRefusal | undefined) {
+	constructor(kind: number, message: string, refusal: SyncRefusal | undefined, rcloneRefusal?: RcloneRefusal) {
 		this.#kind = kind
 		this.#message = message
 		this.#refusal = refusal
+		this.#rcloneRefusal = rcloneRefusal
 	}
 
 	kind(): number {
@@ -28,6 +42,10 @@ class FakeInner {
 
 	syncRefusal(): SyncRefusal | undefined {
 		return this.#refusal
+	}
+
+	rcloneRefusal(): RcloneRefusal | undefined {
+		return this.#rcloneRefusal
 	}
 }
 
@@ -51,6 +69,7 @@ export const fakeSdk = {
 	RefuseReason: { RemoteCollision: 0, LocalCollision: 1 },
 	TransferDirection: { Upload: 0, Download: 1 },
 	WatchState: { Running: 0, Paused: 1, Stopped: 2, PairRemoved: 3 },
+	ServeProtocol: { Webdav: 0, S3: 1, Ftp: 2, Sftp: 3, Http: 4, Restic: 5, Nfs: 6 },
 	FilenSdkError: {
 		hasInner: (error: unknown) => error instanceof FakeThrown,
 		getInner: (error: FakeThrown) => error.inner
@@ -62,6 +81,99 @@ export const fakeSdk = {
 // What an SDK call throws.
 export function sdkError(kind: number, message = "", refusal?: SyncRefusal): Error {
 	return new FakeThrown(new FakeInner(kind, message, refusal))
+}
+
+// What the SDK's rclone module throws when it refuses.
+export function rcloneError(refusal: RcloneRefusal, message = "refused"): Error {
+	return new FakeThrown(new FakeInner(fakeSdk.ErrorKind.Io, message, undefined, refusal))
+}
+
+export function rcloneStats(overrides: Partial<RcloneStats> = {}): RcloneStats {
+	return {
+		uploadsInProgress: 0,
+		uploadsQueued: 0,
+		erroredFiles: 0,
+		cacheBytesUsed: 0n,
+		outOfSpace: false,
+		transfers: [],
+		mounts: [],
+		serves: [],
+		...overrides
+	}
+}
+
+// One rclone the fake client started: its calls are spies, `crash` ends it by itself.
+export function fakeDaemon(pid: number) {
+	let ended: (exit: RcloneExit) => void = () => undefined
+	const exit = new Promise<RcloneExit>(resolve => {
+		ended = resolve
+	})
+	const state = { stats: rcloneStats(), mounts: [] as string[], serves: 0 }
+	const daemon = {
+		pid: () => pid,
+		exited: () => exit,
+		stats: vi.fn(() => Promise.resolve({ ...state.stats, mounts: [...state.mounts] })),
+		mount: vi.fn((options: { mountPoint: string }) => {
+			state.mounts.push(options.mountPoint)
+
+			return Promise.resolve({ mountPoint: options.mountPoint, provider: 0 })
+		}),
+		unmount: vi.fn((mountPoint: string) => {
+			state.mounts = state.mounts.filter(point => point !== mountPoint)
+
+			return Promise.resolve()
+		}),
+		startServe: vi.fn((options: { protocol: number; host: string; port: number }) =>
+			Promise.resolve({
+				id: `serve-${String(++state.serves)}`,
+				protocol: options.protocol,
+				addr: `${options.host}:${String(options.port)}`
+			})
+		),
+		stopServe: vi.fn(() => Promise.resolve()),
+		serveTypes: vi.fn(() => Promise.resolve([])),
+		stop: vi.fn(() => {
+			ended({ tag: "Stopped" })
+
+			return Promise.resolve({ pendingUploads: 0, forced: false })
+		})
+	}
+
+	return {
+		daemon,
+		handle: daemon as unknown as JsRcloneDaemon,
+		state,
+		crash: (code = 2) => {
+			ended({ tag: "Crashed", inner: { code, stderrTail: "panic" } })
+		}
+	}
+}
+
+// The addon's rclone functions plus a client whose daemons the test reaches.
+export function fakeRclone() {
+	const daemons: ReturnType<typeof fakeDaemon>[] = []
+	// What a daemon started from now on reads at first.
+	const initial = { stats: rcloneStats() }
+	const sdk = {
+		...fakeSdk,
+		rcloneAvailableDriveLetters: vi.fn(() => Promise.resolve(["D", "X", "Z"])),
+		rcloneClearCache: vi.fn(() => Promise.resolve()),
+		rcloneForceUnmount: vi.fn(() => Promise.resolve(false)),
+		rcloneRecoverStale: vi.fn(() => Promise.resolve({ stopped: false, unmounted: [] })),
+		rcloneStopUnder: vi.fn(() => Promise.resolve(0))
+	}
+	const client = {
+		startRcloneDaemon: vi.fn(() => {
+			const started = fakeDaemon(1000 + daemons.length)
+
+			started.state.stats = initial.stats
+			daemons.push(started)
+
+			return Promise.resolve(started.handle)
+		})
+	}
+
+	return { sdk, nativeSdk: sdk as unknown as NativeSdk, client, daemons, initial }
 }
 
 export const REMOTE_ROOT = "6b1f0d2e-3c4a-4b5d-8e9f-0a1b2c3d4e5f"

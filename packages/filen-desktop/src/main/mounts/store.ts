@@ -1,6 +1,7 @@
 import { type } from "arktype"
 import type { DesktopMountsNotice, DesktopServeProtocol, DesktopVfsTuning } from "@filen/shared/desktop"
 import {
+	DEFAULT_TUNING,
 	driveLetterSchema,
 	listenHostSchema,
 	localPathSchema,
@@ -10,7 +11,7 @@ import {
 	vfsTuningSchema
 } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, errorCode } from "../atomicFile.ts"
-import { serialQueue } from "../serial.ts"
+import { serialQueue } from "../../shared/serial.ts"
 
 // What the user set up for the network drive and the servers, per user. Credentials live apart, encrypted
 // (credentials.ts); certificates are files beside them (tls.ts).
@@ -53,9 +54,6 @@ export const DEFAULT_PORTS: Record<DesktopServeProtocol, number> = {
 	restic: 1600,
 	nfs: 2049
 }
-
-// The old client's tuning.
-export const DEFAULT_TUNING: DesktopVfsTuning = { cacheMaxGiB: 32, cacheMinFreeGiB: 16, cacheMaxAgeHours: 720, dirCacheSeconds: 15 }
 
 export const DEFAULT_MOUNTS: MountsConfig = {
 	version: 1,

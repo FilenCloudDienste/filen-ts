@@ -6,7 +6,7 @@ import type { MountsOp, NativeMountsDesired, NativeOpArgs } from "../../shared/n
 import { atomicFile, errorCode } from "../atomicFile.ts"
 import type { LegacyFeature } from "../legacyData.ts"
 import type { NativeMountsResult } from "../native/rpc.ts"
-import { serialQueue } from "../serial.ts"
+import { serialQueue } from "../../shared/serial.ts"
 import { CREDENTIAL_PROTOCOLS, type CredentialStore } from "./credentials.ts"
 import { wantsRoles } from "./desired.ts"
 import { legacyDriveMountPoint, legacyMountsImport, type LegacyMountsInput } from "./legacyMounts.ts"

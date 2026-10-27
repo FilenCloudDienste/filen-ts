@@ -8,7 +8,7 @@ import type {
 } from "@filen/shared/desktop"
 import { localPathSchema, pairIdSchema, pinned, planSummarySchema, syncModeSchema } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, errorCode } from "../atomicFile.ts"
-import { serialQueue } from "../serial.ts"
+import { serialQueue } from "../../shared/serial.ts"
 
 // What the shell keeps about each sync pair beside the engine: the name, the review and notices, the old client's
 // pair uuid, and pairs the engine does not hold. It is also the recovery copy of the engine's pairs, which live in

@@ -23,6 +23,8 @@ const esmRequire = {
 // binary against; {} elsewhere, where the binary is signed instead.
 const rcloneManifest = "build/rclone/manifest.json"
 const rcloneSha256 = existsSync(rcloneManifest) ? readFileSync(rcloneManifest, "utf8").trim() : "{}"
+// The native host sends the app's version as rclone's user agent.
+const { version } = JSON.parse(readFileSync("package.json", "utf8")) as { version: string }
 
 await Promise.all([
 	build({
@@ -40,7 +42,8 @@ await Promise.all([
 		outfile: "dist/native.js",
 		format: "esm",
 		conditions: ["filen-desktop"],
-		banner: esmRequire
+		banner: esmRequire,
+		define: { __FILEN_DESKTOP_VERSION__: JSON.stringify(version) }
 	}),
 	build({ ...common, entryPoints: ["src/preload/index.ts"], outfile: "dist/preload.cjs", format: "cjs" })
 ])

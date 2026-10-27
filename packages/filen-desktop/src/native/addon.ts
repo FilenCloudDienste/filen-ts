@@ -22,8 +22,14 @@ export type NativeSdk = Pick<
 	| "ResyncProgressMessage_Tags"
 	| "SyncRefusal_Tags"
 	| "WatchState"
+	| "ServeProtocol"
 	| "defaultSyncIgnorePatterns"
 	| "init"
+	| "rcloneAvailableDriveLetters"
+	| "rcloneClearCache"
+	| "rcloneForceUnmount"
+	| "rcloneRecoverStale"
+	| "rcloneStopUnder"
 >
 
 export type SyncEngine = sdk.JsSyncEngine

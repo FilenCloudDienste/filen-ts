@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import { effectiveConfig, type LegacyStash } from "../main/legacyData.ts"
 import { legacyDriveMountPoint, legacyMountsImport } from "../main/mounts/legacyMounts.ts"
 import type { MountPointContext } from "../main/mounts/mountPoint.ts"
-import { DEFAULT_MOUNTS, DEFAULT_TUNING, defaultServe } from "../main/mounts/store.ts"
+import { DEFAULT_MOUNTS, defaultServe } from "../main/mounts/store.ts"
+import { DEFAULT_TUNING } from "../shared/nativeProtocol.ts"
 
 const darwin: MountPointContext = {
 	platform: "darwin",
