@@ -71,6 +71,11 @@ export interface PresentationDocument {
 	readonly thumbs: ReadonlyMap<SlideRef, PresentationThumb>
 	readonly revision: number
 	readonly dirty: boolean
+	// The history has a step to undo / redo (false until a change says so).
+	readonly canUndo: boolean
+	readonly canRedo: boolean
+	// Net bytes dirty as the session last reported them; undefined when it has not.
+	readonly dirtyBytes: number | undefined
 	readonly notices: readonly PresentationNotice[]
 	readonly password: { readonly wrong: boolean } | undefined
 	readonly error: { readonly reason: PresentationRefusal; readonly message: string } | undefined
@@ -100,6 +105,9 @@ export const IDLE_PRESENTATION: PresentationDocument = {
 	thumbs: new Map(),
 	revision: 0,
 	dirty: false,
+	canUndo: false,
+	canRedo: false,
+	dirtyBytes: undefined,
 	notices: [],
 	password: undefined,
 	error: undefined,
@@ -459,6 +467,9 @@ class Store implements PresentationStore {
 			slides,
 			revision: event.revision,
 			dirty: event.dirty,
+			canUndo: event.canUndo ?? this.snapshot.canUndo,
+			canRedo: event.canRedo ?? this.snapshot.canRedo,
+			dirtyBytes: event.dirtyBytes,
 			window: center,
 			renders: new Map(this.renders),
 			...(thumbsChanged ? { thumbs: new Map(this.thumbs) } : {})

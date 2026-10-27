@@ -193,6 +193,11 @@ export class MeasureCache {
 		return this.fontNames[font] ?? ""
 	}
 
+	// Whether `font` is measured with kerning.
+	kerning(font: number): boolean {
+		return this.fontKerning[font] ?? true
+	}
+
 	get entries(): number {
 		return this.current.size + (this.previous?.size ?? 0)
 	}

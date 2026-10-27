@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { conflictCopyName, decideRevision, driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { runPreviewSave } from "@/features/drive/lib/previewSave.logic"
+import { runPreviewSave, type PresentationSaveEdits, type PreviewSaveContent } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import {
 	cachedListing,
@@ -25,6 +25,7 @@ import { dropPreviewBuffer, usePreviewUnsavedGuardStore } from "@/features/previ
 import { queryClient } from "@/queries/client"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import { i18n } from "@/lib/i18n"
 
@@ -46,8 +47,8 @@ interface UsePreviewRemoteChangesParams {
 	savedRef: RefObject<ReadonlyMap<string, DriveItem>>
 	commitSaved: (frozenUuid: string, item: DriveItem) => void
 	contentRef: RefObject<(() => string) | null>
-	// The unsaved edits as they stand, encoded.
-	readEdits: () => Promise<Uint8Array | null>
+	// The unsaved edits as they stand: encoded, or a deck's save its session streams to an upload.
+	readEdits: () => Promise<Uint8Array | PresentationSaveEdits | null>
 	onItemRemoved: (frozenUuid: string) => void
 }
 
@@ -432,11 +433,12 @@ function handleEvent(ctx: RemoteChangeContext, event: PreviewReconcileEvent): vo
 // The upload behind the hook's saveMineAsNewFile; null when there was nothing to write or the upload
 // failed (either already told). Module scope: the React Compiler cannot lower an await inside a
 // conditional expression, and would skip the whole hook. `bytes`: a copy of what was uploaded (the upload
-// hands its buffer to the SDK worker), kept only where the preview goes on to show the new file.
+// hands its buffer to the SDK worker), kept only where the preview goes on to show the new file. A deck's
+// edits are a save its session streams to the upload (never bytes here): its copy opens anew from the drive.
 async function writeAsNewFile(
 	asked: RemoteChangePrompt,
 	item: DriveItem,
-	readEdits: () => Promise<Uint8Array | null>,
+	readEdits: () => Promise<Uint8Array | PresentationSaveEdits | null>,
 	t: TFunction<"preview">
 ): Promise<{ item: DriveItem; name: string; bytes: Uint8Array | null } | null> {
 	const content = await readEdits()
@@ -444,12 +446,16 @@ async function writeAsNewFile(
 
 	// Not offered without a save source; never silent if it gets here anyway.
 	if (content === null || base.type !== "file") {
+		if (content !== null && "kind" in content) {
+			content.port.close()
+		}
+
 		toast.error(t("previewSaveAsNewFileFailed"))
 
 		return null
 	}
 
-	const bytes = asked.kind === "deleted" ? content.slice() : null
+	const bytes = asked.kind === "deleted" && !("kind" in content) ? content.slice() : null
 
 	const rootUuid = currentRootUuid()
 	const parent = normalizeParentUuid(base.data.parent, rootUuid)
@@ -459,18 +465,70 @@ async function writeAsNewFile(
 		asked.kind === "deleted" && !(await taken(original))
 			? original
 			: await conflictCopyName(original, new Date(), args => t("previewConflictCopyName", args), taken)
-	const outcome = await runPreviewSave(
-		{ uploadFileBytes: (...args) => sdkApi.uploadFileBytes(...args), patchListing: driveListingQueryUpdate, rootUuid },
-		{ item, content, asNewFile: name }
-	)
+	const outcome =
+		"kind" in content ? await uploadDeckCopy(item, content, name, rootUuid) : await uploadCopy(item, content, name, rootUuid)
 
 	if (outcome.status === "error") {
-		toast.error(errorLabel(outcome.dto))
+		if (outcome.dto !== null) {
+			toast.error(errorLabel(outcome.dto))
+		} else {
+			toast.error(t("previewSaveAsNewFileFailed"))
+		}
 
 		return null
 	}
 
 	return { item: outcome.item, name, bytes }
+}
+
+type CopyOutcome = { status: "success"; item: DriveItem } | { status: "error"; dto: ErrorDTO | null }
+
+async function uploadCopy(item: DriveItem, content: PreviewSaveContent, name: string, rootUuid: string): Promise<CopyOutcome> {
+	return await runPreviewSave(
+		{
+			uploadFileBytes: (...args) => sdkApi.uploadFileBytes(...args),
+			uploadFileFromPort: (parentUuid, port, fileName, mime, size) =>
+				sdkApi.uploadFileFromPort(parentUuid, fileName, mime, port, size),
+			patchListing: driveListingQueryUpdate,
+			rootUuid
+		},
+		{ item, content, asNewFile: name }
+	)
+}
+
+// A deck's copy: the session writes its whole package (the edits on the file as it opened) to the upload, opened
+// only once the session says it writes. The session is not moved onto the copy: the preview reopens on whichever
+// file it shows next, and the session closes with the editor that held it.
+async function uploadDeckCopy(item: DriveItem, edits: PresentationSaveEdits, name: string, rootUuid: string): Promise<CopyOutcome> {
+	const writes = await Promise.race([
+		edits.announced,
+		edits.result.then(
+			() => false,
+			() => false
+		)
+	])
+
+	if (!writes) {
+		edits.port.close()
+		await edits.result.catch(() => undefined)
+
+		return { status: "error", dto: null }
+	}
+
+	const [outcome, result] = await Promise.all([
+		uploadCopy(item, { port: edits.port }, name, rootUuid),
+		edits.result.catch((e: unknown) => {
+			log.error("preview", "the presentation copy failed", e)
+
+			return { kind: "refused" as const }
+		})
+	])
+
+	if (outcome.status === "error") {
+		return outcome
+	}
+
+	return result.kind === "written" ? outcome : { status: "error", dto: null }
 }
 
 // Keeps an open preview on the latest version of its files, and asks before that would lose unsaved

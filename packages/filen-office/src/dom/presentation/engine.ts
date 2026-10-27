@@ -250,6 +250,20 @@ export function openInfo(deck: Deck, opened: OpenedPackage, viewOnly = opened.vi
 		format: deck.format,
 		variant: deck.variant,
 		slides: deck.slides.map(ref => ({ ref, hidden: deck.nodes.get(ref)?.hidden ?? deck.hiddenSlides?.has(ref) ?? false })),
+		layouts: deck.layouts.flatMap(ref => {
+			const node = deck.nodes.get(ref)
+
+			return node === undefined || node.parent === undefined
+				? []
+				: [
+						{
+							ref,
+							master: node.parent,
+							...(node.layoutType === undefined ? {} : { type: node.layoutType }),
+							...(node.name === undefined ? {} : { name: node.name })
+						}
+					]
+		}),
 		size: { ...deck.size },
 		notesSize: { ...deck.notesSize },
 		sections: deck.sections,

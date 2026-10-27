@@ -1,10 +1,7 @@
-import { compositeLayout } from "./algorithms/composite"
-import { linLayout } from "./algorithms/lin"
-import { snakeLayout } from "./algorithms/snake"
-import { customScale } from "./algorithms/shared"
-import { spLayout } from "./algorithms/sp"
-import { txLayout } from "./algorithms/tx"
-import { matchesType, resolveChildren, type Cap } from "./constraints"
+import { rerouteConnectors } from "./algorithms/conn"
+import { layoutAlgorithm } from "./algorithms/index"
+import { customScale, turnedBox } from "./algorithms/shared"
+import { FONT_TYPES, matchesType, resolveChildren, type Cap } from "./constraints"
 import { DEFAULT_SMARTART_BUDGETS, SmartArtError, type DataModel, type DataPoint, type SmartArtBudgets } from "./data"
 import type { Algorithm, Atom, Body, Constraint, IfDef, IteratorStep, LayoutDefinition, LayoutNodeDef, Rule, ShapeDef } from "./layoutDef"
 import type { TextMeasurer } from "./measure"
@@ -109,11 +106,34 @@ function siblings(point: DataPoint): readonly DataPoint[] {
 	return point.parent === undefined ? [point] : point.parent.children
 }
 
+// The points under `point` in document order (pre-order), without recursion.
 function descendants(point: DataPoint, out: DataPoint[]): void {
-	for (const child of point.children) {
-		out.push(child)
-		descendants(child, out)
+	const stack: DataPoint[] = []
+
+	for (let i = point.children.length - 1; i >= 0; i--) stack.push(point.children[i] as DataPoint)
+
+	while (stack.length > 0) {
+		const at = stack.pop() as DataPoint
+
+		out.push(at)
+
+		for (let i = at.children.length - 1; i >= 0; i--) stack.push(at.children[i] as DataPoint)
 	}
+}
+
+// Expansion work charged against one budget (SmartArtBudgets.maxExpansionWork): every body applied and every point
+// an iteration or a test visits, so nested root/des iterations that make no layout nodes stay bounded.
+export interface ExpansionWork {
+	done: number
+	readonly limit: number
+}
+
+function charge(work: ExpansionWork | undefined, amount: number): void {
+	if (work === undefined) return
+
+	work.done += amount
+
+	if (work.done > work.limit) throw new SmartArtError("tooLarge", "too much expansion work")
 }
 
 function axisPoints(model: DataModel, point: DataPoint, axis: string): DataPoint[] {
@@ -163,17 +183,19 @@ function axisPoints(model: DataModel, point: DataPoint, axis: string): DataPoint
 
 			return out
 		}
+		// The axes before the point run in document order, as every other axis does: st -1 is the nearest (orgChart1
+		// joins each child to the parTrans just before it with precedSib st="-1" cnt="1").
 		case "precedSib": {
 			const list = siblings(point)
 
-			return list.slice(0, Math.max(0, list.indexOf(point))).reverse()
+			return list.slice(0, Math.max(0, list.indexOf(point)))
 		}
 		case "preced": {
-			// The peers before the point, nearest first, each followed by its descendants.
+			// The peers before the point, each followed by its descendants.
 			const out: DataPoint[] = []
 			const list = siblings(point)
 
-			for (const peer of list.slice(0, Math.max(0, list.indexOf(point))).reverse()) {
+			for (const peer of list.slice(0, Math.max(0, list.indexOf(point)))) {
 				out.push(peer)
 				descendants(peer, out)
 			}
@@ -202,8 +224,12 @@ function isLastTrans(point: DataPoint): boolean {
 	return true
 }
 
-function selectStep(model: DataModel, point: DataPoint, step: IteratorStep): DataPoint[] {
-	const all = axisPoints(model, point, step.axis).filter(p => matchesType(p, step.ptType) && !(step.hideLastTrans && isLastTrans(p)))
+function selectStep(model: DataModel, point: DataPoint, step: IteratorStep, work?: ExpansionWork): DataPoint[] {
+	const axis = axisPoints(model, point, step.axis)
+
+	charge(work, axis.length + 1)
+
+	const all = axis.filter(p => matchesType(p, step.ptType) && !(step.hideLastTrans && isLastTrans(p)))
 	const start = step.st > 0 ? step.st - 1 : step.st < 0 ? all.length + step.st : 0
 	const stride = step.step === 0 ? 1 : step.step
 	const out: DataPoint[] = []
@@ -217,13 +243,13 @@ function selectStep(model: DataModel, point: DataPoint, step: IteratorStep): Dat
 	return out
 }
 
-export function selectPoints(model: DataModel, point: DataPoint, steps: readonly IteratorStep[]): DataPoint[] {
+export function selectPoints(model: DataModel, point: DataPoint, steps: readonly IteratorStep[], work?: ExpansionWork): DataPoint[] {
 	let current: DataPoint[] = [point]
 
 	for (const step of steps) {
 		const next: DataPoint[] = []
 
-		for (const p of current) next.push(...selectStep(model, p, step))
+		for (const p of current) for (const q of selectStep(model, p, step, work)) next.push(q)
 
 		current = next
 	}
@@ -296,6 +322,9 @@ function compare(op: string, left: number | string, right: string): boolean {
 
 class Expander {
 	private count = 0
+	readonly work: ExpansionWork
+	// cnt and maxDepth answers per test and point: a test inside an iteration asks the same question again.
+	private readonly answers = new WeakMap<IfDef, Map<DataPoint, number>>()
 
 	readonly model: DataModel
 	readonly def: LayoutDefinition
@@ -307,6 +336,67 @@ class Expander {
 		this.def = def
 		this.budgets = budgets
 		this.presByKey = presByKey
+		this.work = { done: 0, limit: budgets.maxExpansionWork ?? DEFAULT_SMARTART_BUDGETS.maxExpansionWork ?? 2_000_000 }
+	}
+
+	private order: Map<DataPoint, number> | undefined
+
+	// Each point's place in document order (pre-order from the root), counted once per expansion.
+	private documentIndex(): Map<DataPoint, number> {
+		if (this.order !== undefined) return this.order
+
+		const order = new Map<DataPoint, number>()
+		const stack: DataPoint[] = [this.model.root]
+
+		while (stack.length > 0) {
+			const point = stack.pop() as DataPoint
+
+			order.set(point, order.size)
+
+			for (let i = point.children.length - 1; i >= 0; i--) stack.push(point.children[i] as DataPoint)
+		}
+
+		charge(this.work, order.size)
+		this.order = order
+
+		return order
+	}
+
+	// The 1-based document-order rank of each iterated point, when the iteration does not already walk them in that
+	// order; undefined when it does (the common case costs nothing).
+	private documentRanks(points: readonly DataPoint[]): Map<DataPoint, number> | undefined {
+		if (points.length < 2) return undefined
+
+		const order = this.documentIndex()
+		let sorted = true
+
+		for (let i = 1; i < points.length && sorted; i++)
+			sorted = (order.get(points[i - 1] as DataPoint) ?? 0) < (order.get(points[i] as DataPoint) ?? 0)
+
+		if (sorted) return undefined
+
+		const ranked = [...points].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))
+
+		return new Map(ranked.map((point, i) => [point, i + 1]))
+	}
+
+	private answer(branch: IfDef, point: DataPoint, compute: () => number): number {
+		let byPoint = this.answers.get(branch)
+
+		if (byPoint === undefined) {
+			byPoint = new Map()
+			this.answers.set(branch, byPoint)
+		}
+
+		const known = byPoint.get(point)
+
+		if (known !== undefined) return known
+
+		const value = compute()
+
+		byPoint.set(point, value)
+
+		return value
 	}
 
 	node(def: LayoutNodeDef, point: DataPoint, parent: LayoutNode | undefined, iteration: Iteration): LayoutNode {
@@ -343,16 +433,25 @@ class Expander {
 
 		this.body(node, def, point, iteration, 0)
 
+		// A text node with no presOf at all (not an empty one, which presents nothing) presents its own node: the
+		// Pitchbook template's hierarchy boxes (txOne, txTwo) carry no presOf, and PowerPoint shows their text.
+		if (!PRESENTED.has(node) && node.alg.type === "tx" && (point.type === "node" || point.type === "asst")) node.text = [point]
+
 		return node
 	}
 
 	// Applies one body (a layoutNode's own, or a taken branch, or a forEach's) to `node`.
 	private body(node: LayoutNode, body: Body, point: DataPoint, iteration: Iteration, depth: number): void {
+		charge(this.work, 1 + (body.constraints?.length ?? 0) + (body.rules?.length ?? 0))
+
 		if (body.alg !== undefined) node.alg = body.alg
 		if (body.shape !== undefined) node.shape = body.shape
-		if (body.presOf !== undefined) node.text = selectPoints(this.model, point, body.presOf)
-		if (body.constraints !== undefined) node.constraints = [...node.constraints, ...body.constraints]
-		if (body.rules !== undefined) node.rules = [...node.rules, ...body.rules]
+		if (body.presOf !== undefined) {
+			node.text = selectPoints(this.model, point, body.presOf, this.work)
+			PRESENTED.add(node)
+		}
+		if (body.constraints !== undefined) for (const constraint of body.constraints) node.constraints.push(constraint)
+		if (body.rules !== undefined) for (const rule of body.rules) node.rules.push(rule)
 
 		for (const atom of body.children) this.atom(node, atom, point, iteration, depth)
 	}
@@ -375,10 +474,15 @@ class Expander {
 		if (depth + 1 > this.budgets.maxForEachDepth) throw new SmartArtError("tooDeep", "forEach nested too deeply")
 
 		const source = atom.ref !== undefined && atom.ref !== "" ? (this.def.forEachByName.get(atom.ref) ?? atom) : atom
-		const points = selectPoints(this.model, point, atom.steps.length > 0 ? atom.steps : source.steps)
+		const points = selectPoints(this.model, point, atom.steps.length > 0 ? atom.steps : source.steps, this.work)
+
+		// pos and revPos (ECMA-376 §21.4.7.32 ST_FunctionType: "the position of the node in the specified set of
+		// nodes", and its reverse) count in the set's own order, the data's, however the iteration walks it: process4
+		// walks its steps backwards (st="-1" step="-1") and gives revPos 1, the plain box, to the last step.
+		const ranks = this.documentRanks(points)
 
 		points.forEach((p, index) => {
-			this.body(node, source, p, { pos: index + 1, count: points.length }, depth + 1)
+			this.body(node, source, p, { pos: ranks?.get(p) ?? index + 1, count: points.length }, depth + 1)
 		})
 	}
 
@@ -397,7 +501,11 @@ class Expander {
 				return compare(branch.op, Number.isNaN(Number(normalized)) ? normalized : Number(normalized), branch.val)
 			}
 			case "cnt":
-				return compare(branch.op, selectPoints(this.model, point, branch.steps).length, branch.val)
+				return compare(
+					branch.op,
+					this.answer(branch, point, () => selectPoints(this.model, point, branch.steps, this.work).length),
+					branch.val
+				)
 			case "pos":
 				return compare(branch.op, iteration.pos, branch.val)
 			case "revPos":
@@ -409,10 +517,17 @@ class Expander {
 			case "depth":
 				return compare(branch.op, point.depth, branch.val)
 			case "maxDepth": {
-				const targets = branch.steps.length > 0 ? selectPoints(this.model, point, branch.steps) : [point]
-				let max = 0
+				const max = this.answer(branch, point, () => {
+					const targets = branch.steps.length > 0 ? selectPoints(this.model, point, branch.steps, this.work) : [point]
+					let deepest = 0
 
-				for (const target of targets) max = Math.max(max, target.depth - point.depth + treeHeight(target, 0, 64))
+					for (const target of targets) {
+						charge(this.work, 1)
+						deepest = Math.max(deepest, target.depth - point.depth + treeHeight(target, 0, 64))
+					}
+
+					return deepest
+				})
 
 				return compare(branch.op, max, branch.val)
 			}
@@ -429,23 +544,7 @@ function place(node: LayoutNode, context: LayoutContext): void {
 	if (++context.placements > context.budgets.maxLayoutNodes * LAYOUT_WORK_PER_NODE)
 		throw new SmartArtError("tooLarge", "too much layout work")
 
-	switch (node.alg.type) {
-		case "composite":
-			compositeLayout(node, context)
-			break
-		case "lin":
-			linLayout(node, context)
-			break
-		case "snake":
-			snakeLayout(node, context)
-			break
-		case "tx":
-			txLayout(node, context)
-			break
-		default:
-			// Algorithms without an implementation yet give every child its constraint size at the node's origin.
-			spLayout(node, context)
-	}
+	layoutAlgorithm(node, context)
 }
 
 // Scales a child's box about its centre by the user's custom scale, unless its parent's algorithm laid the scaled
@@ -531,7 +630,59 @@ function layoutOnce(node: LayoutNode, context: LayoutContext): boolean {
 
 	equalizeFonts(node)
 
+	// A node whose rules shrink its descendants' text sizes (on ch or des) also overflows when shapes sized from
+	// those sizes reach out of it: process3's boxes are so many font sizes high, and its primFontSz rule is what
+	// brings them into the frame.
+	if (!overflow && shrinksFonts(node) && spills(node, context)) overflow = true
+
 	return overflow
+}
+
+function shrinksFonts(node: LayoutNode): boolean {
+	return node.rules.some(rule => rule.for !== "self" && FONT_TYPES.has(rule.type) && rule.val < Number.POSITIVE_INFINITY)
+}
+
+// Whether a constraint sizes `node` from a text size (process3's boxes are so many font sizes high): only such a box
+// comes back into the frame as the text sizes go down.
+function fontSized(node: LayoutNode): boolean {
+	for (let owner: LayoutNode | undefined = node; owner !== undefined; owner = owner.parent) {
+		for (const constraint of owner.constraints) {
+			if (constraint.type !== "w" && constraint.type !== "h") continue
+			if (!FONT_TYPES.has(constraint.refType)) continue
+			if (owner === node ? constraint.for === "self" : constraint.forName === node.name) return true
+		}
+	}
+
+	return false
+}
+
+// Whether a drawn, text-sized descendant reaches out of `node`'s box by more than a hundredth of it.
+function spills(node: LayoutNode, context: LayoutContext): boolean {
+	const box = node.box
+	const dx = box.w / 100
+	const dy = box.h / 100
+	const stack = [...node.children]
+
+	for (let visited = 0; stack.length > 0 && visited <= context.budgets.maxLayoutNodes; visited++) {
+		const at = stack.pop() as LayoutNode
+		const shape = at.shape
+		const draws =
+			(shape !== undefined && shape.type !== "none" && shape.type !== "conn" && !shape.hideGeom) ||
+			(at.text.length > 0 && at.alg.type === "tx")
+		const b = at.box
+
+		if (
+			draws &&
+			(b.w > 0 || b.h > 0) &&
+			fontSized(at) &&
+			(b.x < box.x - dx || b.y < box.y - dy || b.x + b.w > box.x + box.w + dx || b.y + b.h > box.y + box.h + dy)
+		)
+			return true
+
+		for (const child of at.children) stack.push(child)
+	}
+
+	return false
 }
 
 // Lays out `node`'s subtree; true when text still overflows in it.
@@ -608,17 +759,17 @@ function applyOffsets(root: LayoutNode, frame: Box): void {
 	if (dx !== 0 || dy !== 0) translate(root, dx, dy)
 }
 
+// Layout nodes whose definition (or a branch taken) has a presOf.
+const PRESENTED = new WeakSet<LayoutNode>()
+
 function collect(node: LayoutNode, out: LaidShape[]): void {
 	const shape = node.shape
 	const visible = shape !== undefined && shape.type !== "none" && shape.type !== "conn" && !shape.hideGeom
 
 	if (visible || (shape?.hideGeom !== true && node.text.length > 0 && node.alg.type === "tx")) {
 		const rot = shape?.rot ?? 0
-		const quarter = Math.abs(Math.round(rot / 90)) % 2 === 1 && Math.abs(rot % 90) < 1e-9
-		const box = node.box
-		// A shape turned a quarter turn fills its layout box with its rotated footprint: the unrotated box (what xfrm
-		// holds) has the sides swapped about the same centre.
-		const drawn = quarter ? { x: box.x + (box.w - box.h) / 2, y: box.y + (box.h - box.w) / 2, w: box.h, h: box.w } : { ...box }
+		// A turned shape fills its layout box with its turned footprint.
+		const drawn = node.box.w > 0 && node.box.h > 0 ? turnedBox(node, node.box, rot) : { ...node.box }
 
 		out.push({
 			name: node.name,
@@ -703,6 +854,7 @@ export function layoutDiagram(
 	root.box = { ...frame }
 	layoutNode(root, context)
 	applyOffsets(root, frame)
+	rerouteConnectors(root, context)
 
 	const shapes: LaidShape[] = []
 

@@ -34,7 +34,7 @@ function isRefused(value: unknown): value is Refused {
 }
 
 // A source whose checked reads are checked again on arrival: what the far side checksummed must be what came.
-function arrivalChecked(source: ByteSource): ByteSource {
+export function arrivalChecked(source: ByteSource): ByteSource {
 	const checked = source.readChecked?.bind(source)
 
 	if (checked === undefined) return source
@@ -77,7 +77,7 @@ class CrcChunks implements ByteChunks {
 
 // The plan's items one at a time; once the last is written (the writer asks for the next before its central directory),
 // every stored piece-wise part's CRC and the number of copies are checked.
-async function* checkedItems(plan: ZipPlan, expectedCopies: number): AsyncIterable<ZipPlanItem> {
+export async function* checkedItems(plan: ZipPlan, expectedCopies: number): AsyncIterable<ZipPlanItem> {
 	const watched: { readonly name: string; readonly chunks: CrcChunks; readonly expected: number }[] = []
 	let copies = 0
 

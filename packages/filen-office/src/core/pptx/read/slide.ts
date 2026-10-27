@@ -14,6 +14,7 @@ import type {
 	PlaceholderType,
 	SchemeSlot,
 	ShapeKind,
+	ShapeLocks,
 	ShapeNode,
 	ShapeStyleRefs,
 	SlideKind,
@@ -27,11 +28,13 @@ import { CLR_MAP_KEYS } from "../../presentation/theme"
 import type { XmlDocument } from "../../xml/index"
 import { colorIn, fillOf, readListStyle, readTable, readTextBody, readXfrm, relPart, sourceRef, type ReadContext } from "./drawing"
 import { readMedia, type MediaFacts } from "./media"
+import { readTiming } from "./timing"
 import { G, partReader, type PartReader } from "./xml"
 
 // A slide, layout, master, notes slide, notes master or handout master part (ECMA-376 Part 1 §19.3) into a
 // SlideNode: its own levels only (inheritance is resolved in core/presentation/inherit.ts). Geometry, fills, lines,
-// effects, timing and transitions stay in the source, reached through `src`; anything unread is kept there.
+// effects and transitions stay in the source, reached through `src`; anything unread is kept there. A slide's timing
+// is read whole (read/timing.ts) and written back by span where unedited.
 
 const ROOTS: Readonly<Record<string, SlideKind>> = {
 	sld: "slide",
@@ -213,6 +216,43 @@ function placeholderOf(r: PartReader, nvPr: number): Placeholder | undefined {
 	}
 }
 
+// The cNv*Pr element of a shape's non-visual properties and the locks element it may hold (ECMA-376 Part 1
+// §20.1.2.2: a:spLocks, a:cxnSpLocks, a:picLocks, a:grpSpLocks, a:graphicFrameLocks).
+const LOCK_ELEMENTS: readonly (readonly [string, string])[] = [
+	["cNvSpPr", "spLocks"],
+	["cNvCxnSpPr", "cxnSpLocks"],
+	["cNvPicPr", "picLocks"],
+	["cNvGrpSpPr", "grpSpLocks"],
+	["cNvGraphicFramePr", "graphicFrameLocks"]
+]
+const LOCK_FLAGS: readonly (keyof ShapeLocks)[] = ["noGrp", "noUngrp", "noSelect", "noRot", "noChangeAspect", "noMove", "noResize"]
+
+// The file's own locks on a shape (what the editor should not let the user change), absent when it sets none.
+function lockedBy(r: PartReader, nv: number, nvGroup: G): { locks?: ShapeLocks } {
+	for (const [cNv, name] of LOCK_ELEMENTS) {
+		const holder = r.child(nv, nvGroup, cNv)
+
+		if (holder < 0) continue
+
+		const element = r.child(holder, G.A, name)
+
+		if (element < 0) return {}
+
+		let locks: Record<string, true> | undefined
+
+		for (const flag of LOCK_FLAGS) {
+			if (r.bool(element, flag) !== true) continue
+
+			locks ??= {}
+			locks[flag] = true
+		}
+
+		return locks === undefined ? {} : { locks: Object.freeze(locks) }
+	}
+
+	return {}
+}
+
 class ShapeReader {
 	private readonly context: ReadContext
 	private readonly input: SlideReadInput
@@ -351,6 +391,7 @@ class ShapeReader {
 			kind,
 			...(ph === undefined ? {} : { ph }),
 			...(kind === "sp" && r.bool(r.child(nv, nvGroup, "cNvSpPr"), "txBox") === true ? { txBox: true as const } : {}),
+			...lockedBy(r, nv, nvGroup),
 			...(xfrm === undefined ? {} : { xfrm }),
 			...(style === undefined ? {} : { style }),
 			...(clickAction !== undefined || hoverAction !== undefined
@@ -531,6 +572,11 @@ export function readSlidePart(input: SlideReadInput): SlideRead {
 		txStyles = { title: EMPTY_LIST, body: notesStyle < 0 ? EMPTY_LIST : readListStyle(context, notesStyle), other: EMPTY_LIST }
 	}
 
+	// Only a slide's timing plays (layouts and masters keep theirs as source).
+	const timing =
+		kind === "slide"
+			? readTiming({ reader: r, part: input.part, epoch: input.epoch, budgets: input.tally.budgets.timing }, root)
+			: undefined
 	const node: SlideNode = {
 		ref: input.ref,
 		kind,
@@ -550,6 +596,7 @@ export function readSlidePart(input: SlideReadInput): SlideRead {
 		...(txStyles === undefined ? {} : { txStyles }),
 		...(hf === undefined ? {} : { hf }),
 		shapes,
+		...(timing === undefined ? {} : { timing }),
 		comments: [],
 		revision: 0
 	}

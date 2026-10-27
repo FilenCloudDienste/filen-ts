@@ -25,6 +25,12 @@
 	outline: 1px solid var(--fo-page-edge, transparent);
 }
 
+/* In the editor the frame shows what lies past the slide edge (handles of a shape at the edge), as PowerPoint's
+   editing view does; the view itself still clips. */
+.fo-slide-view[data-fo-mode="edit"] .fo-slide-frame {
+	overflow: visible;
+}
+
 .fo-slide-frame[data-fo-pending] {
 	background: var(--fo-page-pending, #f4f4f5);
 }
@@ -174,7 +180,7 @@
 	box-shadow: 0 0 0 2px var(--fo-rail-selected, #2563eb);
 }
 
-.fo-slide-rail:focus-visible .fo-slide-rail-item[aria-selected="true"] .fo-slide-rail-thumb {
+.fo-slide-rail:focus-visible .fo-slide-rail-item[aria-current="true"] .fo-slide-rail-thumb {
 	box-shadow:
 		0 0 0 2px var(--fo-rail-selected, #2563eb),
 		0 0 0 4px var(--fo-focus-ring, #2563eb);
@@ -187,6 +193,67 @@
 
 .fo-slide-rail-item[data-fo-hidden] .fo-slide-rail-number {
 	text-decoration: line-through;
+}
+
+/* Section headers: the section's name before its first slide, in the rail's own number font. */
+.fo-slide-rail-section {
+	position: absolute;
+	box-sizing: border-box;
+	display: flex;
+	align-items: flex-end;
+	overflow: hidden;
+	contain: layout paint;
+	color: var(--fo-rail-number, #52525b);
+	font: var(--fo-rail-number-font, 12px / 1.2 system-ui, sans-serif);
+	font-weight: 600;
+}
+
+.fo-slide-rail[data-fo-orientation="vertical"] .fo-slide-rail-section {
+	left: 0;
+	right: 0;
+	padding: 0 8px 4px;
+}
+
+/* In the phone's strip the header is a narrow column: its name runs upward. */
+.fo-slide-rail[data-fo-orientation="horizontal"] .fo-slide-rail-section {
+	top: 0;
+	bottom: 0;
+	justify-content: center;
+	align-items: center;
+	padding: 4px 0;
+	writing-mode: vertical-rl;
+	transform: rotate(180deg);
+}
+
+.fo-slide-rail-section-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Where dragged slides land. */
+.fo-slide-rail-drop {
+	position: absolute;
+	z-index: 2;
+	pointer-events: none;
+	background: var(--fo-rail-selected, #2563eb);
+}
+
+.fo-slide-rail[data-fo-orientation="vertical"] .fo-slide-rail-drop {
+	left: 4px;
+	right: 4px;
+	height: 2px;
+}
+
+.fo-slide-rail[data-fo-orientation="horizontal"] .fo-slide-rail-drop {
+	top: 4px;
+	bottom: 4px;
+	width: 2px;
+}
+
+.fo-slide-rail[data-fo-dragging] .fo-slide-rail-item {
+	cursor: grabbing;
 }
 
 /* Notes panel */

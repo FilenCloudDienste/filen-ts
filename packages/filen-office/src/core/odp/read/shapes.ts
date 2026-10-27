@@ -16,6 +16,7 @@ import {
 	type ListStyle,
 	type MediaRef,
 	type PlaceholderType,
+	type ShapeLocks,
 	type ShapeNode,
 	type ShapePropsEdit,
 	type TableCell,
@@ -376,6 +377,23 @@ function styleOf(context: OdpContext, fragment: Fragment, attributes: ReadonlyMa
 		paragraph: context.shapeProperties(graphic, presentation, scope, "paragraph", base),
 		text: context.shapeProperties(graphic, presentation, scope, "text", base)
 	}
+}
+
+// style:protect (ODF 1.3 §20.351, a space-separated list of content, position and size, or none) as the shape's locks:
+// a protected position also stops turning (LibreOffice offers no rotation for it), a protected size stops resizing.
+function protectionOf(value: string | undefined): ShapeLocks | undefined {
+	if (value === undefined) return undefined
+
+	const tokens = value.trim().split(/\s+/u)
+	const position = tokens.includes("position")
+	const size = tokens.includes("size")
+
+	if (!position && !size) return undefined
+
+	return Object.freeze({
+		...(position ? { noMove: true as const, noRot: true as const } : {}),
+		...(size ? { noResize: true as const } : {})
+	})
 }
 
 // An empty presentation object (presentation:placeholder="true", §19.418) is a prompt, drawn by neither LibreOffice
@@ -873,11 +891,13 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 	const style = styleOf(context, fragment, attributes, masterStyleOf(context, scope.masterName, presentationClass))
 	const alt = altOf(fragment, node)
 	const action = eventAction(context, fragment, node) ?? link
+	const locks = protectionOf(style.graphic.attributes.get("style:protect"))
 	const base = {
 		id,
 		name: attributes.get("draw:name") ?? "",
 		hidden,
 		...(alt === undefined ? {} : { alt }),
+		...(locks === undefined ? {} : { locks }),
 		...(phType === undefined ? {} : { ph: { type: phType, idx: 0 } }),
 		...(action === undefined ? {} : { actions: { click: action } }),
 		src: fragment.src(node)

@@ -6,6 +6,7 @@ import { QueryClient } from "@tanstack/react-query"
 import type { File, FileMeta, SharingRole } from "@filen/sdk-rs"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { testUuid } from "@/tests/support/uuid"
+import type { PresentationSaveEdits } from "@/features/drive/lib/previewSave.logic"
 
 const { toast, runPreviewSave, nameExistsInDirectory, listings, cachedListings } = vi.hoisted(() => ({
 	toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
@@ -82,7 +83,7 @@ function nameOf(item: DriveItem | undefined): string | undefined {
 function setup(
 	items = [file("a"), file("b", { stableUUID: "other" as File["stableUUID"] })],
 	index = 0,
-	readEdits?: () => Promise<Uint8Array | null>,
+	readEdits?: () => Promise<Uint8Array | PresentationSaveEdits | null>,
 	variant: DriveVariant = "drive"
 ) {
 	const savedRef = { current: new Map<string, DriveItem>() as ReadonlyMap<string, DriveItem> }
@@ -653,6 +654,72 @@ describe("usePreviewRemoteChanges", () => {
 		})
 
 		expect(getPreviewBytes("authed", testUuid("copy"))).toBeUndefined()
+	})
+
+	// A deck's edits are a save its session streams to the upload: its copy goes over the port, never as bytes.
+	function deckEdits(
+		announced: boolean,
+		result: "written" | "unchanged"
+	): PresentationSaveEdits & { closed: () => boolean; commits: () => number } {
+		let closed = false
+		let commits = 0
+
+		return {
+			kind: "port",
+			port: { close: () => (closed = true) } as unknown as MessagePort,
+			announced: Promise.resolve(announced),
+			result: Promise.resolve(result === "written" ? { kind: "written", bytes: 3, revision: 2, notices: [] } : { kind: "unchanged" }),
+			commit: () => {
+				commits++
+
+				return Promise.resolve({ dirty: false })
+			},
+			closed: () => closed,
+			commits: () => commits
+		}
+	}
+
+	it("keeps a deck's edits as a conflicted copy uploaded from its session's port, without moving the session onto it", async () => {
+		clearPreviewCache()
+		const edits = deckEdits(true, "written")
+		const { hook, commitSaved } = setup(undefined, undefined, () => Promise.resolve(edits))
+		const theirs = file("a1")
+
+		runPreviewSave.mockResolvedValueOnce({ status: "success", item: file("copy", { stableUUID: "copy" as File["stableUUID"] }) })
+
+		act(() => {
+			emitPreviewFileRevised({ item: theirs })
+		})
+
+		await act(async () => {
+			await hook.result.current.saveMineAsNewFile()
+		})
+
+		expect(runPreviewSave.mock.lastCall?.[1]).toMatchObject({
+			content: { port: edits.port },
+			asNewFile: expect.stringContaining("a") as unknown
+		})
+		expect(edits.commits()).toBe(0)
+		expect(commitSaved.mock.lastCall?.[1].data.uuid).toBe(testUuid("a1"))
+		expect(getPreviewBytes("authed", testUuid("copy"))).toBeUndefined()
+		expect(toast.success).toHaveBeenCalled()
+	})
+
+	it("opens no upload for a deck whose session has nothing to write, and says the copy failed", async () => {
+		const edits = deckEdits(false, "unchanged")
+		const { hook } = setup(undefined, undefined, () => Promise.resolve(edits))
+
+		act(() => {
+			emitPreviewFileRevised({ item: file("a1") })
+		})
+
+		await act(async () => {
+			await hook.result.current.saveMineAsNewFile()
+		})
+
+		expect(runPreviewSave).not.toHaveBeenCalled()
+		expect(edits.closed()).toBe(true)
+		expect(toast.error).toHaveBeenCalledWith("previewSaveAsNewFileFailed")
 	})
 
 	it("drops a deleted file kept on screen from the pager once the user steps away from it", () => {

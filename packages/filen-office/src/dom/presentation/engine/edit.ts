@@ -1,18 +1,13 @@
+import { proveOdpSlide } from "../../../core/odp/write/proof"
+import { odpSourceReading } from "../../../core/odp/write/session"
+import { odpWriteSource } from "../../../core/odp/write/source"
 import { encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../../core/xml/index"
 import { parseRelationships, partKey, relationshipsPartName, Relationships } from "../../../core/opc/index"
 import type { PptxParts } from "../../../core/pptx/package"
 import { readSlidePart } from "../../../core/pptx/read/slide"
 import { P_MAIN } from "../../../core/pptx/read/xml"
 import { DeckTally } from "../../../core/presentation/budget"
-import {
-	applyOp,
-	opTouches,
-	type ApplyContext,
-	type DeckChanges,
-	type Dirt,
-	type Inverse,
-	type Touch
-} from "../../../core/presentation/edit/apply"
+import { applyAll, applyOp, opTouches, type DeckChanges, type Dirt, type Inverse, type Touch } from "../../../core/presentation/edit/apply"
 import { isRefused } from "../../../core/presentation/edit/apply/shape"
 import type { SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
 import { inheritedDeclarations } from "../../../core/presentation/edit/canonical"
@@ -55,6 +50,7 @@ import type { TextSeed } from "../../../core/presentation/output"
 import type { CallContext, EditCapability, EngineSession } from "../engine"
 import type { CommandResult } from "../protocol"
 import { bindSaveHistory, deckTurn } from "../save"
+import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
 import { textCapability } from "./text"
 
@@ -158,6 +154,9 @@ function stateOf(session: EngineSession): EditState {
 		get dirty() {
 			return state.history.dirty
 		},
+		get dirtyBytes() {
+			return state.history.dirtyBytes
+		},
 		changes: () => deckChanges(session.deck, state.history, fingerprint),
 		savePoint: () => state.history.savePoint(),
 		commit: point => {
@@ -218,7 +217,11 @@ function withAncestorDeclarations(document: XmlDocument, node: number): Uint8Arr
 }
 
 function sourceBytes(session: EngineSession, raw: ReadonlyMap<string, RawDocument>, src: SourceRef): Uint8Array | Refused {
-	if (src.format !== "pptx") return refused("notImplemented", `${src.format} source`)
+	if (src.format === "odp") {
+		const odp = odpParts(session.deck)
+
+		return odp === undefined ? refused("notImplemented", "source") : odpWriteSource(odp).sourceBytes(src)
+	}
 
 	const held = raw.get(src.part)
 
@@ -514,6 +517,14 @@ function rawDocumentOf(state: EditState, part: string): XmlDocument | undefined 
 // The engine's half of the apply context: allocators, source bytes, and reading held markup back. Synchronous: what
 // it reads was prepared (prepare()).
 function contextFor(session: EngineSession, state: EditState): SlideSourceReading {
+	if (session.deck.format === "odp") {
+		const odp = odpParts(session.deck)
+
+		if (odp === undefined) throw new PresentationError("notImplemented", "editing odp")
+
+		return odpSourceReading(session.deck, odpWriteSource(odp), { next: () => slideRef(state.nextRef++) })
+	}
+
 	const parts = partsOf(session)
 	const deck = session.deck
 	const facts = factsOf(state)
@@ -725,6 +736,59 @@ async function prove(session: EngineSession, state: EditState, node: SlideNode, 
 	notify(node.shapes)
 }
 
+// An ODP op's slides parsed and proved (core/odp/write/proof.ts); a delete also parses the pages that link to the
+// deleted ones by name, so their jumps are rewritten. ODF has no relationships: no reference graph to load.
+async function prepareOdp(
+	session: EngineSession,
+	state: EditState,
+	op: DeckOp,
+	slicing: CallContext["slicing"] | undefined
+): Promise<void> {
+	const parts = odpParts(session.deck)
+
+	if (parts === undefined) throw new PresentationError("notImplemented", "editing odp")
+
+	const deck = session.deck
+	const source = odpWriteSource(parts)
+	const slides = slidesOf(opTouches(op))
+
+	if (op.family === "slide") {
+		if (op.kind === "delete" || op.kind === "hide" || op.kind === "move") for (const ref of op.slides) slides.add(ref)
+		if (op.kind === "duplicate" || op.kind === "setLayout" || op.kind === "reset") slides.add(op.slide)
+		if (op.kind === "delete") for (const ref of await source.linkingTo(op.slides, deck)) slides.add(ref)
+	}
+
+	for (const ref of slides) {
+		if (!deck.nodes.has(ref) && !deck.slides.includes(ref)) continue
+
+		const node = await parts.slide(ref, slicing)
+
+		if (state.proved.has(ref) || node.kind !== "slide") continue
+
+		const lockedBefore = new Set<ShapeNode>()
+		const collect = (shapes: readonly ShapeNode[]): void => {
+			for (const shape of shapes) {
+				if (shape.lock !== undefined) lockedBefore.add(shape)
+				if (shape.children !== undefined) collect(shape.children)
+			}
+		}
+		const notify = (shapes: readonly ShapeNode[]): void => {
+			for (const shape of shapes) {
+				if (shape.lock === "proofFailed" && !lockedBefore.has(shape))
+					session.emit({
+						type: "notice",
+						notice: { kind: "lock", shape: { slide: node.ref, id: shape.id }, reason: "proofFailed" }
+					})
+				if (shape.children !== undefined) notify(shape.children)
+			}
+		}
+
+		collect(node.shapes)
+		state.proved.set(ref, proveOdpSlide({ deck, slide: node, source }))
+		notify(node.shapes)
+	}
+}
+
 // Everything an op needs before it applies: its slides parsed and proved, their relationships, and for the
 // structure ops the reference graph, the slides that jump to a deleted one, and the parts an inverse holds.
 async function prepare(
@@ -734,6 +798,15 @@ async function prepare(
 	slicing: CallContext["slicing"] | undefined,
 	options: EditOptions
 ): Promise<void> {
+	// A batch's ops each, before any applies (they name what the deck has now).
+	if (op.family === "batch") {
+		for (const each of op.ops) await prepare(session, state, each, slicing, options)
+
+		return
+	}
+
+	if (session.deck.format === "odp") return prepareOdp(session, state, op, slicing)
+
 	const parts = partsOf(session)
 	const deck = session.deck
 	// Only a listed slide is read from the package (a deleted one's ref may still name its old part).
@@ -821,27 +894,6 @@ async function prepare(
 	if (size <= state.history.limits.maxBytes / SHARED_SHARE) for (const part of shared) await read(part)
 }
 
-// Applies ops in order; on a refusal, what applied is undone in reverse and the refusal returned.
-function applyAll(deck: Deck, ops: readonly DeckOp[], context: ApplyContext): { readonly inverses: Inverse[] } | Refused {
-	const inverses: Inverse[] = []
-
-	for (const op of ops) {
-		const result = applyOp(deck, op, context)
-
-		if (result.kind === "refused") {
-			for (let index = inverses.length - 1; index >= 0; index--) {
-				for (const back of (inverses[index] as Inverse).ops) applyOp(deck, back, context)
-			}
-
-			return result
-		}
-
-		inverses.push(result.inverse)
-	}
-
-	return { inverses }
-}
-
 function unique(touches: readonly Touch[]): Touch[] {
 	return [...new Map(touches.map(touch => [touchKey(touch), touch])).values()]
 }
@@ -850,6 +902,8 @@ function unique(touches: readonly Touch[]): Touch[] {
 // its inverse will name (the children of a group, a deleted slide's notes, the placeholders a reset or a layout
 // change rewrites).
 function predictedTouches(deck: Deck, op: DeckOp): Touch[] {
+	if (op.family === "batch") return op.ops.flatMap(each => predictedTouches(deck, each))
+
 	const out = [...opTouches(op)]
 
 	if (op.family === "shape" && (op.kind === "ungroup" || op.kind === "group")) {
@@ -983,6 +1037,9 @@ function coveredBy(key: TouchKey, touches: readonly Touch[]): boolean {
 // What an op made, once applied: the touches its applied form names that its request did not (an allocated shape
 // id, a new slide ref) and a new slide's notes.
 function madeTouches(deck: Deck, requested: DeckOp, applied: DeckOp): Touch[] {
+	if (requested.family === "batch" && applied.family === "batch")
+		return applied.ops.flatMap((each, index) => madeTouches(deck, requested.ops[index] ?? each, each))
+
 	const asked = new Set(opTouches(requested).map(touchKey))
 	const out = opTouches(applied).filter(touch => !asked.has(touchKey(touch)))
 
@@ -1009,12 +1066,20 @@ function burstOf(op: DeckOp): string | undefined {
 
 function changed(session: EngineSession, state: EditState, touches: readonly Touch[]): void {
 	const deck = session.deck
-	const listChanged = touches.some(touch => touch.kind === "presentation" && touch.what === "slideList")
+	// The slide list (its order, and each slide's hidden flag) and the sections, re-sent when an op changed them.
+	const listChanged = touches.some(
+		touch =>
+			(touch.kind === "presentation" && (touch.what === "slideList" || touch.what === "sections")) ||
+			(touch.kind === "slide" && touch.dirt.kind === "slidePart" && touch.dirt.part === "attributes")
+	)
 
 	session.emit({
 		type: "changed",
 		revision: state.history.revision,
 		dirty: state.history.dirty,
+		dirtyBytes: state.history.dirtyBytes,
+		canUndo: state.history.canUndo,
+		canRedo: state.history.canRedo,
 		slides: [...slidesOf(touches)].filter(ref => deck.slides.includes(ref)),
 		...(listChanged
 			? {
@@ -1093,14 +1158,22 @@ function fingerprintBytes(map: ReadonlyMap<TouchKey, Fingerprint>): number {
 	return bytes
 }
 
-async function command(context: CallContext, op: DeckOp, options: EditOptions): Promise<CommandResult> {
+// `open`: the body open in the text editor view, answered as a seed when the step touched it.
+async function command(context: CallContext, op: DeckOp, options: EditOptions, open?: ShapeRef): Promise<CommandResult> {
 	const session = context.session
 	const state = stateOf(session)
 
 	return serial(session, async () => {
 		if (session.deck.gate.length > 0) return { ok: false, refusal: "viewOnly" }
 
-		return applyStep(session, state, op, context.slicing, options)
+		const revision = state.history.revision
+		const result = await applyStep(session, state, op, context.slicing, options)
+
+		if (!result.ok || open === undefined || state.history.revision === revision) return result
+
+		const seed = await seedFor(context, open, state.history.peekUndo()?.touches ?? [])
+
+		return seed === undefined ? result : { ...result, seed }
 	})
 }
 
@@ -1300,7 +1373,7 @@ async function revert(session: EngineSession, state: EditState, parts: ReadonlyS
 // The edit capability, proving slides with `options.emit` (tests pass their own emitters).
 export function createEditCapability(options: EditOptions = {}): EditCapability {
 	return {
-		command: (context, op) => command(context, op, options),
+		command: (context, op, open) => command(context, op, options, open),
 		undo: (context, open) => step(context, "undo", open, options),
 		redo: (context, open) => step(context, "redo", open, options)
 	}

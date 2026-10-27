@@ -1,6 +1,7 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/presentation"
+import { savePortAnnounced } from "@filen/office/dom/presentation/savePort"
 import { driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
@@ -185,10 +186,28 @@ function upload(deps: PreviewSaveDeps, parent: string | null, content: PreviewSa
 // reads of the old file (which a drive without versioning deletes) until then.
 export interface PresentationSaveEdits {
 	readonly kind: "port"
-	// The upload's end of the channel.
+	// The upload's end of the channel: handed to the upload only once `announced` is true.
 	readonly port: MessagePort
+	// The session is going to write (true), or ended first with nothing to upload (false: unchanged, refused), so no
+	// upload is opened at all.
+	readonly announced: Promise<boolean>
 	readonly result: Promise<SaveResult>
 	commit(file: DriveItem): Promise<{ readonly dirty: boolean }>
+}
+
+// What the user is told when the session refuses a save: the presentation's own reasons, else the editors' common one.
+export function presentationSaveRefusalKey(reason: Extract<SaveResult, { kind: "refused" }>["reason"]): PreviewKey {
+	switch (reason) {
+		case "proofFailed":
+			return "previewPptxSaveRefusedCheck"
+		case "notImplemented":
+		case "unsupported":
+			return "previewPptxSaveRefusedUnsupported"
+		case "stale":
+			return "previewPptxSaveRefusedStale"
+		default:
+			return "previewSaveFailed"
+	}
 }
 
 export type PresentationSaveSource = (options: { auto: boolean }) => Promise<PresentationSaveEdits | null>
@@ -212,11 +231,14 @@ export function presentationSaveEdits(
 	auto: boolean
 ): PresentationSaveEdits {
 	const channel = new MessageChannel()
+	// Listening before the session can say anything.
+	const announced = savePortAnnounced(channel.port2)
 	const result = session.save({ reason: auto ? "auto" : "user", port: channel.port1 })
 
 	return {
 		kind: "port",
 		port: channel.port2,
+		announced,
 		result,
 		async commit(file) {
 			const answer = await result

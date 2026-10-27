@@ -1,0 +1,230 @@
+import { refused, type Deck, type Refused, type SlideRef } from "../../presentation/model"
+import { XmlEditor, escapeAttribute, type XmlDocument } from "../../xml/index"
+
+// The references between pages an ODP save keeps whole (ODF 1.3 Part 3 §9.7 presentation:show, §19.416
+// presentation:pages; §10.4.3 and §6.1.8 page links "#name"; §19.914 xml:id, §19.135 draw:id):
+//   - every page has a draw:name unique in the document: a duplicated page gets a free one (the source's name with a
+//     number), so links and custom shows naming the original still name it;
+//   - custom shows list the names of the pages they hold, as the deck now has them (a deleted page leaves them);
+//   - the show's start page, when it is gone, is no longer named;
+//   - a copied page's xml:id and draw:id values are renamed (an ID is unique in the document) and the references
+//     inside the copy to them follow (animation targets, connector ends, caption ids).
+
+// The pages' names after the save: each page's own, a duplicate's made unique.
+export function pageNames(
+	deck: Deck,
+	nameOf: (ref: SlideRef) => string | undefined,
+	owns: (ref: SlideRef) => boolean = () => false
+): Map<SlideRef, string> {
+	const out = new Map<SlideRef, string>()
+	const used = new Set<string>()
+	const later: SlideRef[] = []
+
+	// A page the file already names so keeps its name first (the jumps to it name it); then the rest keep theirs in
+	// order; a name already taken (a duplicate's) is given anew after.
+	for (const ref of deck.slides) {
+		const name = nameOf(ref)
+
+		if (name === undefined || name === "" || used.has(name) || !owns(ref)) continue
+
+		used.add(name)
+		out.set(ref, name)
+	}
+
+	for (const ref of deck.slides) {
+		if (out.has(ref)) continue
+
+		const name = nameOf(ref)
+
+		if (name === undefined || name === "" || used.has(name)) {
+			later.push(ref)
+
+			continue
+		}
+
+		used.add(name)
+		out.set(ref, name)
+	}
+
+	for (const ref of later) {
+		const base = (nameOf(ref) ?? "").replace(/ \(\d+\)$/u, "")
+		const stem = base === "" ? "page" : base
+		let count = base === "" ? deck.slides.indexOf(ref) + 1 : 2
+		let name = base === "" ? `${stem}${String(count)}` : `${stem} (${String(count)})`
+
+		while (used.has(name)) {
+			count++
+			name = base === "" ? `${stem}${String(count)}` : `${stem} (${String(count)})`
+		}
+
+		used.add(name)
+		out.set(ref, name)
+	}
+
+	return out
+}
+
+const ID_ATTRIBUTES: ReadonlySet<string> = new Set(["xml:id", "draw:id", "text:id"])
+// Elements whose draw:id is a number local to its shape (§19.135: a glue point's), not a document ID.
+const LOCAL_IDS: ReadonlySet<string> = new Set(["draw:glue-point"])
+// Attributes holding an ID of the same page (IDREF), by their local names in the namespaces ODF defines them in.
+const IDREF_ATTRIBUTES: ReadonlySet<string> = new Set([
+	"smil:targetElement",
+	"anim:sub-item",
+	"draw:start-shape",
+	"draw:end-shape",
+	"draw:caption-id",
+	"presentation:master-element",
+	"draw:chain-next-name"
+])
+
+// A copied page's IDs renamed (`taken`: the IDs in use in the document, grown by the new ones) and its references
+// to them following. `canonical(document, node, attribute)` gives an attribute's canonical name.
+export function renameIds(
+	document: XmlDocument,
+	root: number,
+	taken: Set<string>,
+	canonical: (node: number, name: string) => string,
+	elementName: (node: number) => string
+): XmlEditor | undefined {
+	const renamed = new Map<string, string>()
+	const visit = (node: number, depth: number, act: (node: number) => void): void => {
+		if (depth > 256) return
+
+		act(node)
+
+		for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child))
+			visit(child, depth + 1, act)
+	}
+
+	visit(root, 0, node => {
+		if (LOCAL_IDS.has(elementName(node))) return
+
+		for (const attribute of document.attributes(node)) {
+			if (!ID_ATTRIBUTES.has(canonical(node, attribute.name))) continue
+
+			const old = attribute.value
+
+			if (renamed.has(old)) continue
+
+			let k = 2
+			let name = `${old}_${String(k)}`
+
+			while (taken.has(name)) name = `${old}_${String(++k)}`
+
+			taken.add(name)
+			renamed.set(old, name)
+		}
+	})
+
+	if (renamed.size === 0) return undefined
+
+	const editor = new XmlEditor(document)
+
+	visit(root, 0, node => {
+		if (LOCAL_IDS.has(elementName(node))) return
+
+		for (const attribute of document.attributes(node)) {
+			const name = canonical(node, attribute.name)
+
+			if (ID_ATTRIBUTES.has(name) || IDREF_ATTRIBUTES.has(name)) {
+				const value = attribute.value
+				const next = name === "anim:sub-item" ? undefined : renamed.get(value)
+
+				if (next !== undefined) editor.setAttribute(node, attribute.name, next)
+			}
+		}
+	})
+
+	return editor
+}
+
+// presentation:settings rewritten for the deck: each custom show's page list by the pages' names now, the start page
+// dropped when its page is gone. `settings` is the element parsed on its own (with its scope's declarations).
+export function settingsMarkup(
+	document: XmlDocument,
+	node: number,
+	deck: Deck,
+	names: ReadonlyMap<SlideRef, string>,
+	canonical: (node: number, name: string) => string,
+	nameOf: (node: number) => string
+): Uint8Array | Refused {
+	const editor = new XmlEditor(document)
+	const shows = new Map(deck.customShows.map(show => [show.name, show]))
+	const present = new Set(names.values())
+	const written = new Set<string>()
+	let changed = false
+
+	for (const attribute of document.attributes(node)) {
+		if (canonical(node, attribute.name) === "presentation:start-page" && !present.has(attribute.value)) {
+			editor.removeAttribute(node, attribute.name)
+			changed = true
+		}
+	}
+
+	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
+		if (nameOf(child) !== "presentation:show") continue
+
+		let showName: string | undefined
+		let pagesAttribute: { name: string; value: string } | undefined
+
+		for (const attribute of document.attributes(child)) {
+			const name = canonical(child, attribute.name)
+
+			if (name === "presentation:name") showName = attribute.value
+			else if (name === "presentation:pages") pagesAttribute = attribute
+		}
+
+		const show = showName === undefined ? undefined : shows.get(showName)
+
+		if (show === undefined) {
+			// A show the deck no longer has (none is deleted by any op today): kept as written.
+			continue
+		}
+
+		written.add(show.name)
+
+		const pages = show.slides
+			.map(ref => names.get(ref))
+			.filter(name => name !== undefined)
+			.join(",")
+
+		if (pagesAttribute?.value === pages) continue
+
+		if (pagesAttribute === undefined) editor.setAttribute(child, "presentation:pages", pages)
+		else editor.setAttribute(child, pagesAttribute.name, pages)
+
+		changed = true
+	}
+
+	for (const show of deck.customShows) {
+		if (written.has(show.name)) continue
+
+		return refused("unsupported", `a custom show the file does not have (${show.name})`)
+	}
+
+	if (!changed) return document.raw(node)
+
+	const out = editor.serialize()
+
+	return out.subarray(document.start(node), out.length - (document.bytes.length - document.end(node)))
+}
+
+// A custom show list as new markup (a deck whose content.xml has no presentation:settings).
+export function newSettingsMarkup(deck: Deck, names: ReadonlyMap<SlideRef, string>): string {
+	if (deck.customShows.length === 0) return ""
+
+	const shows = deck.customShows
+		.map(
+			show =>
+				`<presentation:show presentation:name="${escapeAttribute(show.name)}" presentation:pages="${escapeAttribute(
+					show.slides
+						.map(ref => names.get(ref))
+						.filter(name => name !== undefined)
+						.join(",")
+				)}"/>`
+		)
+		.join("")
+
+	return `<presentation:settings>${shows}</presentation:settings>`
+}

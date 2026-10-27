@@ -39,3 +39,22 @@ export { SlideRail, type SlideRailProps } from "./rail/SlideRail"
 export { NotesPanel, type NotesPanelProps } from "./notes/NotesPanel"
 export { StaticShow, type StaticShowProps } from "./show/static"
 export { paintSlide } from "./paint/slide"
+export {
+	boundsOf,
+	createShapeSelection,
+	selectedShapes,
+	selectionKinds,
+	slideShapes,
+	useShapeSelection,
+	type Bounds,
+	type SelectionKind,
+	type ShapeSelection,
+	type ShapeSelectionState,
+	type SlideShape
+} from "./edit/selection"
+export { ShapeEditLayer, HANDLES_LIMIT, type ShapeEditLabels, type ShapeEditLayerProps } from "./edit/overlay"
+export { OBJECT_COMMANDS, type ObjectCommand, type ObjectKeyBindings } from "./edit/keyboard"
+export { PresentationTextEditor, type PresentationTextEditorProps, type TextEditorLabels } from "./edit/text/TextEditor"
+export { TextEditController, COMMIT_IDLE_MS, type TextEditFormat } from "./edit/text/controller"
+export { createTextEditing, formatShapes, useTextEditing, type TextEditing } from "./edit/text/editing"
+export { DEFAULT_TEXT_BINDINGS, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./edit/text/keys"

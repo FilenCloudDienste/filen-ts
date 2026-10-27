@@ -197,6 +197,19 @@ export interface Placeholder {
 	hasCustomPrompt?: boolean
 }
 
+// The file's own locks on a shape (ECMA-376 Part 1 §20.1.2.2: a:spLocks, a:picLocks, a:cxnSpLocks, a:grpSpLocks,
+// a:graphicFrameLocks; ODF style:protect): what the editor does not let the user change, as PowerPoint does. Read
+// only; the writer keeps them from the source.
+export interface ShapeLocks {
+	readonly noGrp?: true
+	readonly noUngrp?: true
+	readonly noSelect?: true
+	readonly noRot?: true
+	readonly noChangeAspect?: true
+	readonly noMove?: true
+	readonly noResize?: true
+}
+
 export interface ShapeNode {
 	// Unique per slide. Real decks repeat cNvPr ids: ids.ts reassigns duplicates on read and keeps the written one in
 	// `sourceId`, which emit writes back and a rebase rebinds by.
@@ -224,6 +237,7 @@ export interface ShapeNode {
 	children?: ShapeNode[]
 	src?: SourceRef
 	lock?: LockReason
+	locks?: ShapeLocks
 }
 
 // a:xfrm (EMU; rot in 60,000ths of a degree). chOff/chExt only on groups.

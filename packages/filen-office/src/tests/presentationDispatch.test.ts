@@ -55,9 +55,10 @@ const SAMPLE_OPS: { readonly [F in DeckOpFamily]: OpOf<F> } = {
 }
 
 // What the slices have built so far: the loops below cover only what still refuses as notImplemented.
-const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set(["slide", "shape"])
-const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set(["shape", "slide", "text"])
-const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved"])
+const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set(["slide", "shape", "text"])
+const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set(["shape", "slide", "text", "timing"])
+const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set(["shape", "slide", "text", "timing"])
+const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved", "find"])
 
 const context: ApplyContext = {
 	sourceBytes: () => new Uint8Array(0),
@@ -89,7 +90,11 @@ describe("presentation dispatch seams", () => {
 			const before = structuredClone(deck)
 			const op = SAMPLE_OPS[family]
 
-			expect(applyOp(deck, op, context), family).toEqual({ kind: "refused", reason: "notImplemented", detail: `apply ${family}` })
+			// A family built in part (timing: setTiming) names the kind it does not apply yet.
+			expect(applyOp(deck, op, context), family).toMatchObject({ kind: "refused", reason: "notImplemented" })
+			expect((applyOp(deck, op, context) as { readonly detail?: string }).detail, family).toMatch(
+				new RegExp(`^apply ${family}( |$)`, "u")
+			)
 			expect(opTouches(op), family).toEqual([])
 			expect(deck, family).toEqual(before)
 		}
@@ -119,11 +124,15 @@ describe("presentation dispatch seams", () => {
 				})
 			}
 
-			expect(emitOdp(family, request, odp), family).toEqual({
-				kind: "refused",
-				reason: "notImplemented",
-				detail: `odp emit ${family}`
-			})
+			if (!BUILT_ODP_EMIT.has(family)) {
+				expect(emitOdp(family, request, odp), family).toEqual({
+					kind: "refused",
+					reason: "notImplemented",
+					detail: `odp emit ${family}`
+				})
+			} else {
+				expect(emitOdp(family, request, odp), family).not.toMatchObject({ reason: "notImplemented" })
+			}
 		}
 	})
 
@@ -197,18 +206,16 @@ describe("presentation dispatch seams", () => {
 		}
 	})
 
-	it("refuses the fonts and SmartArt services as notImplemented, and empty bytes in every reader typed", async () => {
+	it("refuses the fonts service as notImplemented, SmartArt before any render as notFound, and empty bytes in every reader typed", async () => {
 		const session = { s: 1 } as unknown as EngineSession
 
 		await expect(SERVICES.fonts.faces(session)).rejects.toMatchObject({ reason: "notImplemented" })
 		const slicing = { pause: () => Promise.resolve(), sliceMs: 8, now: () => 0 }
 
-		await expect(SERVICES.smartart.relayout(session, target, slicing)).rejects.toMatchObject({ reason: "notImplemented" })
+		await expect(SERVICES.smartart.relayout(session, target, slicing)).rejects.toMatchObject({ reason: "notFound" })
 		await expect(
 			SERVICES.smartart.preview(session, { uniqueId: "urn:x", source: "gallery" }, { widthPx: 96 }, slicing)
-		).rejects.toMatchObject({
-			reason: "notImplemented"
-		})
+		).rejects.toBeInstanceOf(PresentationError)
 
 		// Every reader is built: bytes that are no presentation are refused typed, never as notImplemented.
 		for (const format of ["pptx", "odp", "ppt"] as const) {

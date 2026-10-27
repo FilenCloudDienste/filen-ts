@@ -17,6 +17,11 @@ export const MAX_MASTER_LAYOUT_ID = 4_294_967_295
 export class SlideRefs {
 	private last = 0
 
+	// The last ref handed out (0 before any).
+	get issued(): number {
+		return this.last
+	}
+
 	next(): SlideRef {
 		return slideRef(++this.last)
 	}

@@ -24,6 +24,7 @@ export {
 	type PresentationCall,
 	type PresentationEvent,
 	type PresentationMethod,
+	type PresentationLayoutInfo,
 	type PresentationNotice,
 	type PresentationOpenOptions,
 	type PresentationResult,
@@ -120,3 +121,4 @@ export {
 	type RealmCanvas
 } from "./services"
 export { paintSlideCanvas, rasterizeSlide, ThumbnailCache, type RasterizedSlide } from "./thumbs"
+export { TextMailbox, type TextMailboxTicket } from "./textMailbox"

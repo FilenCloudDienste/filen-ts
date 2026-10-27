@@ -3,7 +3,8 @@ import { NodeKind, type XmlDocument } from "../xml/index"
 
 // An element of one document found again in another written from it (a save's rewrite, a slide's copy): by the path
 // from the root, each step an element's name and its position among same-named siblings, and for a shape its cNvPr id
-// too (the position then counts only siblings with that id, which a source may repeat).
+// too, and for a time node its cTn id (the position then counts only siblings with that id, which a source may
+// repeat).
 
 export interface PathStep {
 	readonly name: string
@@ -13,10 +14,20 @@ export interface PathStep {
 
 const ELEMENT = NodeKind.Element
 
-// The cNvPr id of a shape-like element (one with a p:nv*Pr child holding a p:cNvPr), or undefined.
+// The identity of an element among its siblings: a shape-like element's cNvPr id (a p:nv*Pr child holding a
+// p:cNvPr), a time node's p:cTn id (its own p:cTn child, or its behaviour's p:cBhvr/p:cMediaNode one; unique on a
+// slide, ECMA-376 §19.5.33), or undefined.
 function shapeId(document: XmlDocument, node: number): string | undefined {
 	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
 		const local = document.localName(child)
+
+		if (local === "cTn") return timeId(document, child)
+
+		if (local === "cBhvr" || local === "cMediaNode") {
+			for (let inner = document.firstChildElement(child); inner >= 0; inner = document.nextSiblingElement(inner)) {
+				if (document.localName(inner) === "cTn") return timeId(document, inner)
+			}
+		}
 
 		if (!local.startsWith("nv") || !local.endsWith("Pr")) continue
 
@@ -26,6 +37,12 @@ function shapeId(document: XmlDocument, node: number): string | undefined {
 	}
 
 	return undefined
+}
+
+function timeId(document: XmlDocument, cTn: number): string | undefined {
+	const id = document.attribute(cTn, "id")
+
+	return id === undefined ? undefined : `cTn:${id}`
 }
 
 export function structuralPath(document: XmlDocument, node: number): readonly PathStep[] | undefined {

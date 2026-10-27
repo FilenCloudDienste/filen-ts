@@ -131,6 +131,30 @@ describe("presentation transfer rule", () => {
 		expect([image.byteLength, workbook.byteLength]).toEqual([0, 0])
 	})
 
+	it("transfers the inserted bytes of the ops a batch holds, nested batches included, and keeps their model values", () => {
+		const outer = new Uint8Array(16)
+		const inner = new Uint8Array(24)
+		const { shape, path } = freeform()
+		const insert = (bytes: Uint8Array): DeckOp => ({
+			family: "picture",
+			kind: "insert",
+			slide: target.slide,
+			shape,
+			image: { bytes, contentType: "image/png", width: 4, height: 4 }
+		})
+
+		post({
+			t: "call",
+			s: 1,
+			id: 3,
+			method: "command",
+			args: [{ family: "batch", kind: "batch", ops: [insert(outer), { family: "batch", kind: "batch", ops: [insert(inner)] }] }]
+		})
+
+		expect([outer.byteLength, inner.byteLength]).toEqual([0, 0])
+		expect(path.coords.byteLength).toBeGreaterThan(0)
+	})
+
 	it("transfers rendered slides and find results, and the deck's bytes on open", () => {
 		const render = fixtureSlideRender(fixtureDeck(), 0)
 		const found = new Int32Array(6)

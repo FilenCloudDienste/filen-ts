@@ -1,4 +1,5 @@
 import { D, drawingReader, type DrawingReader } from "../drawingml/reader"
+import type { Spacing } from "../presentation/model"
 import type { XmlDocument } from "../xml/index"
 
 // The diagram data model (ECMA-376 §21.4.3): points joined by parOf connections into a tree under the doc
@@ -13,6 +14,8 @@ export interface SmartArtBudgets {
 	readonly maxForEachDepth: number
 	readonly maxConstraintPasses: number
 	readonly maxRuleSteps: number
+	// Expansion steps (bodies applied, points an iteration or a test visits), whether or not they make layout nodes.
+	readonly maxExpansionWork?: number
 }
 
 export const DEFAULT_SMARTART_BUDGETS: SmartArtBudgets = {
@@ -20,7 +23,8 @@ export const DEFAULT_SMARTART_BUDGETS: SmartArtBudgets = {
 	maxLayoutNodes: 100_000,
 	maxForEachDepth: 32,
 	maxConstraintPasses: 64,
-	maxRuleSteps: 200
+	maxRuleSteps: 200,
+	maxExpansionWork: 2_000_000
 }
 
 export type SmartArtRefusal = "tooLarge" | "tooDeep" | "malformed"
@@ -51,11 +55,33 @@ export interface PresProps {
 	readonly vars?: ReadonlyMap<string, string> | undefined
 }
 
+// What text measurement needs of a run beyond its characters (§21.1.2.3.9 rPr): its weight, slant and face, and
+// its own size (kept by custom text only).
+export interface RichRun {
+	readonly text: string
+	readonly b?: boolean | undefined
+	readonly i?: boolean | undefined
+	// Hundredths of a point.
+	readonly sz?: number | undefined
+	readonly latin?: string | undefined
+}
+
+// A paragraph's runs and the spacing its own pPr sets (a:lnSpc/spcBef/spcAft as ParaProps carry them: spcPct in
+// thousandths of a percent, spcPts in hundredths of a point).
+export interface RichParagraph {
+	readonly runs: readonly RichRun[]
+	readonly lnSpc?: Spacing | undefined
+	readonly spcBef?: Spacing | undefined
+	readonly spcAft?: Spacing | undefined
+}
+
 export interface DataPoint {
 	readonly id: string
 	readonly type: PointType
 	// One string per paragraph of dgm:t.
 	readonly paragraphs: readonly string[]
+	// The same paragraphs with their run and spacing properties, only when some run or paragraph sets one.
+	readonly rich?: readonly RichParagraph[] | undefined
 	readonly props: PresProps
 	parent: DataPoint | undefined
 	// The ordered axis of this point's children: per parOf connection in srcOrd order, its parent
@@ -105,24 +131,86 @@ function readPresProps(reader: DrawingReader, prSet: number): PresProps {
 	}
 }
 
-function readParagraphs(reader: DrawingReader, t: number): string[] {
-	if (t < 0) return []
+function spacingOf(reader: DrawingReader, node: number): Spacing | undefined {
+	if (node < 0) return undefined
 
-	const out: string[] = []
+	const pct = reader.child(node, D.A, "spcPct")
+
+	if (pct >= 0) {
+		const value = reader.fraction(pct, "val", Number.NaN)
+
+		return Number.isFinite(value) ? { pct: Math.max(0, value * 100000) } : undefined
+	}
+
+	const pts = reader.number(reader.child(node, D.A, "spcPts"), "val", Number.NaN)
+
+	return Number.isFinite(pts) ? { pts: Math.max(0, pts) } : undefined
+}
+
+function richRun(reader: DrawingReader, rPr: number, text: string): RichRun {
+	if (rPr < 0) return { text }
+
+	const has = (name: string): boolean => reader.attr(rPr, name) !== undefined
+	const sz = reader.number(rPr, "sz", Number.NaN)
+	const latin = reader.attr(reader.child(rPr, D.A, "latin"), "typeface")
+
+	return {
+		text,
+		...(has("b") ? { b: reader.bool(rPr, "b", false) } : {}),
+		...(has("i") ? { i: reader.bool(rPr, "i", false) } : {}),
+		...(Number.isFinite(sz) && sz > 0 ? { sz } : {}),
+		...(latin === undefined || latin === "" ? {} : { latin })
+	}
+}
+
+function styled(paragraph: RichParagraph): boolean {
+	if (paragraph.lnSpc !== undefined || paragraph.spcBef !== undefined || paragraph.spcAft !== undefined) return true
+
+	return paragraph.runs.some(run => run.b !== undefined || run.i !== undefined || run.sz !== undefined || run.latin !== undefined)
+}
+
+// dgm:t's paragraphs as text, and with their properties when any is set.
+function readParagraphs(reader: DrawingReader, t: number): { paragraphs: string[]; rich: RichParagraph[] | undefined } {
+	if (t < 0) return { paragraphs: [], rich: undefined }
+
+	const paragraphs: string[] = []
+	const rich: RichParagraph[] = []
+	const document = reader.document
+	let anyStyle = false
 
 	for (const p of reader.children(t, D.A, "p")) {
 		let text = ""
-		const document = reader.document
+		const runs: RichRun[] = []
 
 		for (let r = document.firstChildElement(p); r >= 0; r = document.nextSiblingElement(r)) {
-			if (reader.is(r, D.A, "r") || reader.is(r, D.A, "fld")) text += reader.text(reader.child(r, D.A, "t"))
-			else if (reader.is(r, D.A, "br")) text += "\n"
+			if (reader.is(r, D.A, "r") || reader.is(r, D.A, "fld")) {
+				const value = reader.text(reader.child(r, D.A, "t"))
+
+				text += value
+				runs.push(richRun(reader, reader.child(r, D.A, "rPr"), value))
+			} else if (reader.is(r, D.A, "br")) {
+				text += "\n"
+				runs.push({ text: "\n" })
+			}
 		}
 
-		out.push(text)
+		const pPr = reader.child(p, D.A, "pPr")
+		const paragraph: RichParagraph =
+			pPr < 0
+				? { runs }
+				: {
+						runs,
+						lnSpc: spacingOf(reader, reader.child(pPr, D.A, "lnSpc")),
+						spcBef: spacingOf(reader, reader.child(pPr, D.A, "spcBef")),
+						spcAft: spacingOf(reader, reader.child(pPr, D.A, "spcAft"))
+					}
+
+		anyStyle ||= styled(paragraph)
+		paragraphs.push(text)
+		rich.push(paragraph)
 	}
 
-	return out
+	return { paragraphs, rich: anyStyle ? rich : undefined }
 }
 
 interface Cxn {
@@ -153,10 +241,12 @@ export function parseDataModel(document: XmlDocument, budgets: SmartArtBudgets =
 
 		const typeText = reader.attr(pt, "type") ?? "node"
 		const type = (POINT_TYPES.has(typeText) ? typeText : "node") as PointType
+		const text = readParagraphs(reader, reader.child(pt, D.Dgm, "t"))
 		const point: DataPoint = {
 			id,
 			type,
-			paragraphs: readParagraphs(reader, reader.child(pt, D.Dgm, "t")),
+			paragraphs: text.paragraphs,
+			...(text.rich === undefined ? {} : { rich: text.rich }),
 			props: readPresProps(reader, reader.child(pt, D.Dgm, "prSet")),
 			parent: undefined,
 			children: [],
@@ -194,40 +284,53 @@ export function parseDataModel(document: XmlDocument, budgets: SmartArtBudgets =
 
 	cxns.sort((a, b) => a.srcOrd - b.srcOrd)
 
+	// Whether `point` may hang under `parent`: one parent per point, never the root, never the parent itself or one
+	// of its ancestors (a transition id naming the doc point or an ancestor would make the tree its own descendant).
+	// The walk up is bounded by the point count, so a hostile chain cannot make it run on.
+	const attachable = (point: DataPoint, parent: DataPoint): boolean => {
+		if (point === root || point.parent !== undefined) return false
+
+		let ancestor: DataPoint | undefined = parent
+
+		for (let steps = 0; ancestor !== undefined && steps <= points.size; steps++) {
+			if (ancestor === point) return false
+
+			ancestor = ancestor.parent
+		}
+
+		return ancestor === undefined
+	}
+
 	for (const cxn of cxns) {
 		const parent = points.get(cxn.src)
 		const child = points.get(cxn.dest)
 
-		// One parent per point; a cycle back to an ancestor is dropped from the tree, never followed.
-		if (parent === undefined || child === undefined || child.parent !== undefined || child === root) continue
-
-		let ancestor: DataPoint | undefined = parent
-
-		while (ancestor !== undefined && ancestor !== child) ancestor = ancestor.parent
-
-		if (ancestor === child) continue
+		if (parent === undefined || child === undefined || !attachable(child, parent)) continue
 
 		child.parent = parent
 
 		const parTrans = cxn.parTrans === undefined ? undefined : points.get(cxn.parTrans)
 		const sibTrans = cxn.sibTrans === undefined ? undefined : points.get(cxn.sibTrans)
 
-		if (parTrans !== undefined && parTrans.parent === undefined) {
+		if (parTrans !== undefined && parTrans !== child && attachable(parTrans, parent)) {
 			parTrans.parent = parent
 			parent.children.push(parTrans)
 		}
 
 		parent.children.push(child)
 
-		if (sibTrans !== undefined && sibTrans.parent === undefined) {
+		if (sibTrans !== undefined && sibTrans !== child && attachable(sibTrans, parent)) {
 			sibTrans.parent = parent
 			parent.children.push(sibTrans)
 		}
 	}
 
+	// Depths from the root; every point is visited at most once (the links above keep the tree a tree).
 	const stack: DataPoint[] = [root]
 
-	while (stack.length > 0) {
+	for (let visited = 0; stack.length > 0; visited++) {
+		if (visited > points.size) throw new SmartArtError("malformed", "the data model's connections do not form a tree")
+
 		const point = stack.pop() as DataPoint
 
 		for (const child of point.children) {

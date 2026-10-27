@@ -18,7 +18,7 @@ export const FONT_TYPES: ReadonlySet<string> = new Set(["primFontSz", "secFontSz
 const MARGIN_TYPES: ReadonlySet<string> = new Set(["lMarg", "rMarg", "tMarg", "bMarg", "begMarg", "endMarg"])
 const SIZE_TYPES: ReadonlySet<string> = new Set(["w", "h"])
 // Ratios and the user's own variables carry no unit.
-const RAW_TYPES: ReadonlySet<string> = new Set(["pyraAcctRatio", "unknown", "none"])
+const RAW_TYPES: ReadonlySet<string> = new Set(["pyraAcctRatio", "alignOff", "unknown", "none"])
 
 type UnitClass = "emu" | "pt" | "raw"
 
@@ -41,9 +41,20 @@ export function literal(type: string, val: number): number {
 // A referenced value in the unit of the constraint it sets. A font size read by a margin is points of inset (the
 // cached bodyPr insets are fact × size in points); read by any other geometry it counts as millimetres (the cached
 // heights of hList1-style text boxes are fact × size in millimetres).
+// Geometry read by a margin keeps its number and changes its unit, millimetres to points (list1's insets are 0.075 ×
+// the diagram's width in millimetres, as points), and back.
 export function convert(value: number, fromType: string, toType: string): number {
 	const from = unitOf(fromType)
 	const to = unitOf(toType)
+
+	if (from === "emu" && to === "emu") {
+		const fromMargin = MARGIN_TYPES.has(fromType)
+		const toMargin = MARGIN_TYPES.has(toType)
+
+		if (fromMargin === toMargin) return value
+
+		return toMargin ? (value / EMU_PER_MM) * EMU_PER_PT : (value / EMU_PER_PT) * EMU_PER_MM
+	}
 
 	if (from === to || from === "raw" || to === "raw") return value
 	if (from === "pt") return value * (MARGIN_TYPES.has(toType) ? EMU_PER_PT : EMU_PER_MM)
@@ -61,9 +72,9 @@ export function matchesType(point: DataPoint, ptType: string): boolean {
 		case "norm":
 			return point.type === "node"
 		case "nonNorm":
-			return point.type !== "node"
+			return point.type === "asst"
 		case "nonAsst":
-			return point.type !== "asst"
+			return point.type === "node"
 		default:
 			return point.type === ptType
 	}
@@ -74,22 +85,62 @@ function matchName(node: LayoutNode, name: string, ptType: string): boolean {
 }
 
 // The layout nodes a constraint or rule of `owner` names (§21.4.7.43 ST_ConstraintRelationship): itself, its
-// children or its descendants in document order, filtered by layout node name and point type.
-export function targets(owner: LayoutNode, rel: "self" | "ch" | "des", name: string, ptType: string): LayoutNode[] {
+// children or its descendants in document order, filtered by layout node name and point type. A layout node tree
+// does not change once expanded, so each owner's answers are kept: constraints are resolved per layout node and a
+// root's des constraints would otherwise walk the whole tree for every node below it. The list is shared; callers
+// never change it.
+const TARGETS = new WeakMap<LayoutNode, Map<string, readonly LayoutNode[]>>()
+// The same answers as sets, for membership tests (a cap is asked of every node a rule's owner may target).
+const TARGET_SETS = new WeakMap<readonly LayoutNode[], ReadonlySet<LayoutNode>>()
+
+// Whether `node` is among `owner`'s targets for (rel, name, ptType), in constant time once the targets are known.
+export function isTarget(owner: LayoutNode, rel: "self" | "ch" | "des", name: string, ptType: string, node: LayoutNode): boolean {
+	if (rel === "self") return node === owner && (name === "" || owner.name === name)
+
+	const list = targets(owner, rel, name, ptType)
+	let set = TARGET_SETS.get(list)
+
+	if (set === undefined) {
+		set = new Set(list)
+		TARGET_SETS.set(list, set)
+	}
+
+	return set.has(node)
+}
+
+export function targets(owner: LayoutNode, rel: "self" | "ch" | "des", name: string, ptType: string): readonly LayoutNode[] {
 	if (rel === "self") return name === "" || owner.name === name ? [owner] : []
 
-	if (rel === "ch") return owner.children.filter(c => matchName(c, name, ptType))
+	let byKey = TARGETS.get(owner)
 
-	const out: LayoutNode[] = []
-	const stack = [...owner.children].reverse()
-
-	while (stack.length > 0) {
-		const node = stack.pop() as LayoutNode
-
-		if (matchName(node, name, ptType)) out.push(node)
-
-		for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i] as LayoutNode)
+	if (byKey === undefined) {
+		byKey = new Map()
+		TARGETS.set(owner, byKey)
 	}
+
+	const key = `${rel}\u0000${name}\u0000${ptType}`
+	const known = byKey.get(key)
+
+	if (known !== undefined) return known
+
+	let out: LayoutNode[]
+
+	if (rel === "ch") out = owner.children.filter(c => matchName(c, name, ptType))
+	else {
+		out = []
+
+		const stack = [...owner.children].reverse()
+
+		while (stack.length > 0) {
+			const node = stack.pop() as LayoutNode
+
+			if (matchName(node, name, ptType)) out.push(node)
+
+			for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i] as LayoutNode)
+		}
+	}
+
+	byKey.set(key, out)
 
 	return out
 }
@@ -179,7 +230,7 @@ export function cappedValue(node: LayoutNode, type: string, value: number): numb
 		for (const [rule, cap] of owner.caps) {
 			if (rule.type !== type) continue
 			if (owner === node ? rule.for !== "self" : rule.for === "self") continue
-			if (owner !== node && !targets(owner, rule.for, rule.forName, rule.ptType).includes(node)) continue
+			if (owner !== node && !isTarget(owner, rule.for, rule.forName, rule.ptType, node)) continue
 
 			out = cap.grow ? Math.max(out, cap.value) : Math.min(out, cap.value)
 		}
@@ -204,7 +255,10 @@ export function capImplicit(node: LayoutNode, parentBox: { readonly w: number; r
 	}
 }
 
-export function setValue(node: LayoutNode, constraint: Constraint, value: number): void {
+// `clamp`: a bound on another node's value, met in order while the value it bounds is already set, also clamps that
+// value (hProcess3's spacer is no taller than 0.4 of its width in PowerPoint's caches); a literal bound, or one whose
+// reference resolves only later, bounds rules alone (list1's overlap keeps -0.41 of the font size, its bounds on the header's height notwithstanding).
+export function setValue(node: LayoutNode, constraint: Constraint, value: number, clamp = false): void {
 	// An unbounded or undefined value (val="INF", a NaN factor) bounds nothing and sets nothing, except an unbounded
 	// size: the node is then as large as its content (lin measures it).
 	if (!Number.isFinite(value)) {
@@ -217,14 +271,100 @@ export function setValue(node: LayoutNode, constraint: Constraint, value: number
 
 	const capped = cappedValue(node, constraint.type, value)
 
-	if (constraint.op === "gte") node.lower.set(constraint.type, capped)
-	else if (constraint.op === "lte") node.upper.set(constraint.type, capped)
-	else node.values.set(constraint.type, capped)
+	if (constraint.op === "gte" || constraint.op === "lte") {
+		;(constraint.op === "gte" ? node.lower : node.upper).set(constraint.type, capped)
+
+		const set = node.values.get(constraint.type)
+
+		if (clamp && set !== undefined && Number.isFinite(set))
+			node.values.set(constraint.type, constraint.op === "gte" ? Math.max(set, capped) : Math.min(set, capped))
+	} else node.values.set(constraint.type, capped)
+}
+
+// A value the owner's constraints give nodes named `name`, under the caps of the rules relaxing those nodes' value:
+// a reference read before the nodes are resolved (list1's child text, as many font sizes high as its parent text
+// below it in the tree) sees the size the rule is trying, as the nodes themselves will.
+function namedCap(owner: LayoutNode, name: string, type: string, value: number): number {
+	let out = value
+
+	for (let at: LayoutNode | undefined = owner; at !== undefined; at = at.parent) {
+		for (const [rule, cap] of at.caps) {
+			if (rule.type !== type || rule.for === "self" || (rule.forName !== "" && rule.forName !== name)) continue
+
+			out = cap.grow ? Math.max(out, cap.value) : Math.min(out, cap.value)
+		}
+	}
+
+	return out
+}
+
+// How deep a reference to a layout node that does not exist follows the owner's own constraints.
+const MAX_VIRTUAL_DEPTH = 8
+
+function covers(written: Constraint["for"], asked: Constraint["for"]): boolean {
+	return written === asked || (written === "des" && asked === "ch")
+}
+
+// The value `owner`'s own constraints give layout nodes named `name` (for `rel`) of `type`, for a reference to such
+// a node when the data has none: the constraint list is a table of named values, so hierarchy4's sibling spaces
+// still read the top level's spacing (half of it per level down) when the top level has a single node and so no
+// space of its own. Undefined when no constraint of the owner sets it.
+export function virtualValue(
+	owner: LayoutNode,
+	rel: Constraint["for"],
+	name: string,
+	type: string,
+	box: { readonly w: number; readonly h: number },
+	depth = 0
+): number | undefined {
+	if (depth > MAX_VIRTUAL_DEPTH || rel === "self" || name === "") return undefined
+
+	for (const constraint of owner.constraints) {
+		if (constraint.type !== type || constraint.forName !== name || !covers(constraint.for, rel)) continue
+		if (constraint.op === "gte" || constraint.op === "lte") continue
+
+		if (constraint.refType === "none" || constraint.refType === "unknown") {
+			if (constraint.val === 0 && SIZE_TYPES.has(constraint.type)) continue
+
+			const value = literal(constraint.type, constraint.val)
+
+			if (Number.isFinite(value)) return namedCap(owner, name, type, value)
+
+			continue
+		}
+
+		const ref = targets(owner, constraint.refFor, constraint.refForName, constraint.refPtType)[0]
+		const raw =
+			ref === undefined
+				? virtualValue(owner, constraint.refFor, constraint.refForName, constraint.refType, box, depth + 1)
+				: valueOf(ref, constraint.refType, ref === owner ? box : undefined)
+
+		if (raw === undefined) continue
+
+		const value = convert(raw, constraint.refType, constraint.type) * constraint.fact
+
+		if (Number.isFinite(value)) return value
+	}
+
+	return undefined
 }
 
 // One constraint of `owner` (whose own extent is `box`); false when its reference is not known yet.
-function applyConstraint(owner: LayoutNode, constraint: Constraint, box: { w: number; h: number }, only?: LayoutNode): boolean {
-	const hits = targets(owner, constraint.for, constraint.forName, constraint.ptType).filter(n => only === undefined || n === only)
+function applyConstraint(
+	owner: LayoutNode,
+	constraint: Constraint,
+	box: { w: number; h: number },
+	only: LayoutNode | undefined,
+	clamp: boolean
+): boolean {
+	// An ancestor's des constraint resolved for one child: the child is its descendant, so only its name and type
+	// decide.
+	const hits =
+		only === undefined
+			? targets(owner, constraint.for, constraint.forName, constraint.ptType)
+			: matchName(only, constraint.forName, constraint.ptType)
+				? [only]
+				: []
 
 	if (hits.length === 0) return true
 
@@ -236,19 +376,35 @@ function applyConstraint(owner: LayoutNode, constraint: Constraint, box: { w: nu
 		if (constraint.val === 0 && SIZE_TYPES.has(constraint.type)) return true
 
 		value = literal(constraint.type, constraint.val)
+		// A literal bound bounds rules only.
+		clamp = false
 	} else {
 		const ref = targets(owner, constraint.refFor, constraint.refForName, constraint.refPtType)[0]
 
-		if (ref === undefined) return true
+		if (ref === undefined) {
+			const virtual = virtualValue(owner, constraint.refFor, constraint.refForName, constraint.refType, box)
 
-		const raw = valueOf(ref, constraint.refType, ref === owner ? box : undefined)
+			if (virtual === undefined) return true
 
-		if (raw === undefined) return false
+			value = convert(virtual, constraint.refType, constraint.type) * constraint.fact
+		} else {
+			// A deeper node still holds what the last layout gave it: where the owner's own constraints give that value,
+			// they answer (under the rules' caps), as the node will be given it again (list1's child text is so many of
+			// its parent text's font sizes high while a rule lowers that size).
+			const deep = ref !== owner && ref.parent !== owner
+			const virtual = deep ? virtualValue(owner, constraint.refFor, constraint.refForName, constraint.refType, box) : undefined
+			const raw = virtual ?? valueOf(ref, constraint.refType, ref === owner ? box : undefined)
 
-		value = convert(raw, constraint.refType, constraint.type) * constraint.fact
+			if (raw === undefined) return false
+
+			value = convert(raw, constraint.refType, constraint.type) * constraint.fact
+			// Only a reference this resolution sets (the owner or one of its children) clamps: a deeper node still
+			// holds what the last layout gave it.
+			clamp &&= ref === owner || ref.parent === owner
+		}
 	}
 
-	for (const hit of hits) setValue(hit, constraint, value)
+	for (const hit of hits) setValue(hit, constraint, value, clamp)
 
 	return true
 }
@@ -295,7 +451,7 @@ export function resolveChildren(node: LayoutNode, w: number, h: number, budgets:
 		for (const item of pending) {
 			const box = item.owner === node ? { w, h } : item.owner.box
 
-			if (!applyConstraint(item.owner, item.constraint, box, item.only)) deferred.push(item)
+			if (!applyConstraint(item.owner, item.constraint, box, item.only, pass === 0)) deferred.push(item)
 		}
 
 		if (deferred.length === pending.length) break
@@ -317,7 +473,10 @@ export function resolveChildren(node: LayoutNode, w: number, h: number, budgets:
 
 		for (const item of open) {
 			const { owner, constraint } = item
-			const isGeometryDefault = constraint.refType === "none" && constraint.val === 0 && constraint.op === "none"
+			// A bare constraint (val 0, no reference) leaves a size or place to the algorithm; a margin of 0 is a
+			// margin (list1's parent text sits on its band with no top or bottom inset in PowerPoint's caches).
+			const isGeometryDefault =
+				constraint.refType === "none" && constraint.val === 0 && constraint.op === "none" && !MARGIN_TYPES.has(constraint.type)
 
 			if (owner.values.has(constraint.type) || isGeometryDefault) continue
 

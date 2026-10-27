@@ -1,5 +1,5 @@
 import type { Deck, Refused, SlideRef, SourceRef } from "../model"
-import type { DeckOp, DeckOpFamily, OpOf } from "./ops"
+import type { BatchOp, DeckOp, DeckOpFamily, FamilyOp, OpOf } from "./ops"
 import { applyChart } from "./apply/chart"
 import { applyComment } from "./apply/comment"
 import { applyDesign } from "./apply/design"
@@ -104,13 +104,64 @@ export const APPLY_FAMILIES: Families = {
 }
 
 export function applyOp(deck: Deck, op: DeckOp, context: ApplyContext): ApplyResult {
-	const family: ApplyFamily<DeckOp> = APPLY_FAMILIES[op.family]
+	if (op.family === "batch") return applyBatch(deck, op, context)
+
+	const family: ApplyFamily<FamilyOp> = APPLY_FAMILIES[op.family]
 
 	return family.apply(deck, op, context)
 }
 
+// Applies ops in order; on a refusal, what applied is undone in reverse and the refusal returned.
+export function applyAll(
+	deck: Deck,
+	ops: readonly DeckOp[],
+	context: ApplyContext
+): { readonly inverses: Inverse[]; readonly applied: DeckOp[] } | Refused {
+	const inverses: Inverse[] = []
+	const applied: DeckOp[] = []
+
+	for (const op of ops) {
+		const result = applyOp(deck, op, context)
+
+		if (result.kind === "refused") {
+			for (let index = inverses.length - 1; index >= 0; index--) {
+				for (const back of (inverses[index] as Inverse).ops) applyOp(deck, back, context)
+			}
+
+			return result
+		}
+
+		inverses.push(result.inverse)
+		applied.push(result.op)
+	}
+
+	return { inverses, applied }
+}
+
+// A batch, all or nothing. Its inverse is its ops' inverses, the last op's first; as applied, it holds each op as
+// applied.
+function applyBatch(deck: Deck, op: BatchOp, context: ApplyContext): ApplyResult<BatchOp> {
+	const result = applyAll(deck, op.ops, context)
+
+	if ("kind" in result) return result
+
+	const ops: DeckOp[] = []
+	let bytes = 0
+
+	for (let index = result.inverses.length - 1; index >= 0; index--) {
+		const inverse = result.inverses[index] as Inverse
+
+		ops.push(...inverse.ops)
+		bytes += inverse.bytes
+	}
+
+	return { kind: "applied", inverse: { ops, bytes }, op: { family: "batch", kind: "batch", ops: result.applied } }
+}
+
 export function opTouches(op: DeckOp): readonly Touch[] {
-	const family: ApplyFamily<DeckOp> = APPLY_FAMILIES[op.family]
+	if (op.family === "batch") return op.ops.flatMap(each => opTouches(each))
+
+	const family: ApplyFamily<FamilyOp> = APPLY_FAMILIES[op.family]
 
 	return family.touches(op)
 }

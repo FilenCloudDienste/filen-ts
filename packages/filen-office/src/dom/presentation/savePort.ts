@@ -118,6 +118,8 @@ function isAbortReason(value: unknown): value is SavePortAbortReason {
 export interface SavePortWriter extends ByteSink {
 	// Bytes sent so far.
 	readonly sent: number
+	// Tells the reading side now that bytes will follow (one "alive"): the page opens the upload only then.
+	announce(): void
 	// Ends the upload with the file it received (after close()).
 	commit(): void
 	abort(reason: SavePortAbortReason): void
@@ -261,6 +263,12 @@ export function savePortWriter(
 			if (filled > 0) await send()
 			if (ended !== undefined) throw failure()
 		},
+		announce() {
+			if (ended !== undefined) return
+
+			clearTimer(alive)
+			beat()
+		},
 		commit() {
 			if (ended !== undefined) throw failure()
 			if (filled > 0) throw new Error("commit before close")
@@ -288,6 +296,35 @@ export function savePortWriter(
 	}
 
 	return writer
+}
+
+// The page's look at its end of a save channel before it hands it to the upload: true at the writer's first word
+// ("alive": it is going to write; a chunk never comes before the upload asks), false when the writer aborted first
+// (nothing to save, or refused), acknowledged so the writer closes at once. A message read here is not seen by the
+// upload, which only ever needs the chunks it asks for.
+export function savePortAnnounced(port: SavePortEnd): Promise<boolean> {
+	return new Promise(resolve => {
+		const listener = (event: { readonly data: unknown }): void => {
+			const message = messageOf(event.data) as ToReader | undefined
+
+			if (message === undefined) return
+
+			port.removeEventListener("message", listener)
+
+			if (message[KEY] === "abort") {
+				port.postMessage({ [KEY]: "closed" } satisfies Ack)
+				port.close()
+				resolve(false)
+
+				return
+			}
+
+			resolve(true)
+		}
+
+		port.addEventListener("message", listener)
+		port.start?.()
+	})
 }
 
 // The reading end: chunks in order, undefined once the writer committed. A read rejects with SavePortAbortedError

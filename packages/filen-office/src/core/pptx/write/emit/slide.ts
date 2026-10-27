@@ -32,12 +32,13 @@ import {
 	type Slot
 } from "./shape"
 import { listStyleXml } from "./text"
+import { timingPieces } from "./timing"
 
 // The slide family's PresentationML: the root of a slide, layout, master, notes slide, notes master or handout master
 // part (ECMA-376 Part 1 §19.3.1.38 p:sld, .39 p:sldLayout, .42 p:sldMaster, .26 p:notes, .27 p:notesMaster, .24
 // p:handoutMaster) with its common slide data (p:cSld: background and shape tree) and its own levels (colour map or
-// override, header/footer flags, text styles). Transitions, timing and extension lists stay as their source; the
-// layout list of a master is the source's unless the fresh writer gives one.
+// override, header/footer flags, text styles) and its timing (through emit/timing.ts). Transitions and extension
+// lists stay as their source; the layout list of a master is the source's unless the fresh writer gives one.
 
 const ROOTS: Readonly<Record<SlideKind, string>> = {
 	slide: "sld",
@@ -302,7 +303,11 @@ export function slideRoot(context: EmitContext, node: SlideNode, options: SlideR
 
 	slots.push(
 		own("transition", () => "keep"),
-		own("timing", () => "keep")
+		own("timing", child =>
+			child >= 0 && (pristine === undefined || sameModel(node.timing, pristine.timing))
+				? "keep"
+				: take(timingPieces(context, node.timing, node.shapes))
+		)
 	)
 
 	if (node.kind !== "slide" && node.kind !== "notes") {
@@ -348,7 +353,8 @@ function sameSlideContent(node: SlideNode, pristine: SlideNode): boolean {
 		clrMapOvr: slide.clrMapOvr,
 		background: slide.background,
 		hf: slide.hf,
-		txStyles: slide.txStyles
+		txStyles: slide.txStyles,
+		timing: slide.timing
 	})
 
 	return (

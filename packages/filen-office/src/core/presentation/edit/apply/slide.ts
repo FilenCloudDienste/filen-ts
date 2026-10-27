@@ -1,3 +1,4 @@
+import { matchShapes } from "./match"
 import { layoutPlaceholder } from "../../inherit"
 import {
 	refused,
@@ -304,7 +305,7 @@ function sameRawParts(live: readonly RawPart[] | Refused, held: readonly RawPart
 	})
 }
 
-// A held node with the source refs of its re-read (shapes by id): every typed field from the held copy.
+// A held node with the source refs of its re-read (shapes matched by matchShapes): every typed field from the held copy.
 function overlayNode(typed: SlideNode, read: SlideNode | undefined): SlideNode {
 	if (read === undefined) return typed
 
@@ -313,28 +314,22 @@ function overlayNode(typed: SlideNode, read: SlideNode | undefined): SlideNode {
 	if (read.src === undefined) delete out.src
 	else out.src = read.src
 
-	const byId = new Map<number, ShapeNode>()
-	const index = (shapes: readonly ShapeNode[]): void => {
-		for (const shape of shapes) {
-			byId.set(shape.sourceId ?? shape.id, shape)
-			if (shape.children !== undefined) index(shape.children)
-		}
-	}
-	const rebind = (shapes: readonly ShapeNode[]): void => {
-		for (const shape of shapes) {
-			const match = byId.get(shape.sourceId ?? shape.id)
+	const rebind = (shapes: readonly ShapeNode[], read: readonly ShapeNode[]): void => {
+		const matches = matchShapes(shapes, read)
+
+		shapes.forEach((shape, k) => {
+			const match = matches[k]
 
 			if (match?.src === undefined) delete shape.src
 			else shape.src = match.src
 
 			if (match?.text !== undefined && shape.text !== undefined && digestOf(shape.text) === digestOf(match.text))
 				shape.text = match.text
-			if (shape.children !== undefined) rebind(shape.children)
-		}
+			if (shape.children !== undefined) rebind(shape.children, match?.children ?? [])
+		})
 	}
 
-	index(read.shapes)
-	rebind(out.shapes)
+	rebind(out.shapes, read.shapes)
 
 	return out
 }

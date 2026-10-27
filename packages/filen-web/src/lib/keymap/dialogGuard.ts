@@ -23,6 +23,12 @@ export function isAnyDialogOpen(): boolean {
 	return document.querySelector(OPEN_DIALOG_SELECTOR) !== null
 }
 
+// The dialog a node is shown in (the preview overlay, a dialog over it), or null on the page itself: a key belongs to
+// an editor only when it was pressed in the editor's own layer, whatever dialogs that layer is.
+export function dialogLayerOf(node: Element): Element | null {
+	return node.closest('[role="dialog"], [role="alertdialog"]')
+}
+
 // Base UI menus (dropdown AND context) carry `role="menu"` + the same `data-open` marker while open.
 // Escape belongs to an open menu — Base UI closes it on Escape itself — so a global Escape action must
 // stand down, exactly as it already does for dialogs. Without this a bulk context menu is

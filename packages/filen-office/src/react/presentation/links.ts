@@ -1,3 +1,4 @@
+import { classifyHref } from "../../core/presentation/actions"
 import type { Action, ShapeRef, SlideRef } from "../../core/presentation/model"
 import type { DocxLinkTarget } from "../../dom/docx/protocol"
 import type { PresentationNotice } from "../../dom/presentation/protocol"
@@ -50,12 +51,12 @@ export interface PresentationActionActivator {
 
 export const PRESENTATION_URL_SCHEMES: readonly string[] = ["http:", "https:", "mailto:"]
 
-// Whether `href` is an absolute http, https or mailto URL. The reader classified it already; this is the same rule
-// again at the moment of the click.
+// Whether `href` is an absolute http, https or mailto URL: the reader's rule (classifyHref, which the save proof reads
+// back with) again at the moment of the click, and one the URL parser takes.
 export function isPresentationUrl(href: string): boolean {
 	const trimmed = href.trim()
 
-	if (!URL.canParse(trimmed)) return false
+	if (classifyHref(trimmed).kind !== "url" || !URL.canParse(trimmed)) return false
 
 	const url = new URL(trimmed)
 

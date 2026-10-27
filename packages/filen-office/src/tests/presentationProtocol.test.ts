@@ -185,6 +185,7 @@ describe("the presentation protocol", () => {
 					{ ref: slideRef(11), hidden: true },
 					{ ref: slideRef(12), hidden: false }
 				],
+				layouts: [{ ref: slideRef(2), master: slideRef(1), type: "obj", name: "Title and Content" }],
 				size: { cx: 12_192_000, cy: 6_858_000 },
 				notesSize: { cx: 6_858_000, cy: 9_144_000 },
 				sections: fixtureDeck().sections,
@@ -387,8 +388,8 @@ describe("the presentation protocol", () => {
 			freshParts: () => session.call("freshParts", "pptx", ports()).answer
 		}
 
-		// Built by their slices: edits (command, undo, redo) and saving (save, commitSaved).
-		const built: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved"])
+		// Built by their slices: edits (command, undo, redo), saving (save, commitSaved) and find.
+		const built: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved", "find"])
 
 		for (const method of PRESENTATION_METHODS.filter(method => !built.has(method))) {
 			const error: unknown = await calls[method]().then(

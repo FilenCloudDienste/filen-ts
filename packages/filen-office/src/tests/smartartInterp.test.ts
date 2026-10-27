@@ -3,7 +3,7 @@ import { DEFAULT_SMARTART_BUDGETS, parseDataModel, SmartArtError } from "../core
 import { layoutDiagram, type Box } from "../core/smartart/interp"
 import { parseLayoutDef } from "../core/smartart/layoutDef"
 import { encodeUtf8, parseXml } from "../core/xml/index"
-import { boxes, data, DGM, layout, measurer, MM, round, run } from "./smartartFixtures"
+import { boxes, data, DGM, layout, measurer, MM, NO_MARGINS, round, run } from "./smartartFixtures"
 
 // The layout interpreter over small layout definitions written for these tests (ECMA-376 §21.4).
 
@@ -174,7 +174,7 @@ describe("SmartArt constraints and algorithms", () => {
 	it("lowers the font size to fit within the rule's floor in half points", () => {
 		const xml =
 			layout(`<dgm:alg type="composite"/><dgm:constrLst><dgm:constr type="primFontSz" for="ch" forName="t" val="40"/></dgm:constrLst>
-			<dgm:layoutNode name="t"><dgm:alg type="tx"/><dgm:shape type="rect"/><dgm:presOf axis="ch" ptType="node" cnt="1"/>
+			<dgm:layoutNode name="t"><dgm:alg type="tx"/>${NO_MARGINS}<dgm:shape type="rect"/><dgm:presOf axis="ch" ptType="node" cnt="1"/>
 			<dgm:ruleLst><dgm:rule type="primFontSz" val="10"/></dgm:ruleLst></dgm:layoutNode>`)
 		// "One": 3 chars × 0.5 em must fit 1 in (72 pt): 48 pt fits, 40 pt is the start.
 		const wide = run(data(NODES), xml, 914400, 914400).shapes[0]
@@ -326,7 +326,7 @@ describe("SmartArt rules", () => {
 		layout(`<dgm:alg type="composite"/><dgm:constrLst><dgm:constr type="w" for="ch" forName="t" ${size}/>
 			<dgm:constr type="h" for="ch" forName="t" val="20"/><dgm:constr type="primFontSz" for="ch" forName="t" val="20"/></dgm:constrLst>
 			<dgm:ruleLst>${ruleLst}</dgm:ruleLst>
-			<dgm:layoutNode name="t"><dgm:alg type="tx"/><dgm:shape type="rect"/><dgm:presOf axis="ch" ptType="node" st="3" cnt="1"/></dgm:layoutNode>`)
+			<dgm:layoutNode name="t"><dgm:alg type="tx"/>${NO_MARGINS}<dgm:shape type="rect"/><dgm:presOf axis="ch" ptType="node" st="3" cnt="1"/></dgm:layoutNode>`)
 
 	it("shrinks a font size by a des rule in half points until the text fits", () => {
 		// 10 mm wide holds 5 chars × 0.5 em up to 11.34 pt: the rule takes 20 pt down to 11 pt.

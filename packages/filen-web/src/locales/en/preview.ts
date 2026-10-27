@@ -23,6 +23,11 @@ import { previewCommandBar } from "@/locales/en/previewOffice/commandBar"
 import { previewSheetViewer } from "@/locales/en/previewSheet/viewer"
 import { previewPptxViewer } from "@/locales/en/previewPptx/viewer"
 import { previewPptxLegacy } from "@/locales/en/previewPptx/legacy"
+import { previewPptxRibbon } from "@/locales/en/previewPptx/ribbon"
+import { previewPptxEditor } from "@/locales/en/previewPptx/editor"
+import { previewPptxArrange } from "@/locales/en/previewPptx/arrange"
+import { previewPptxText } from "@/locales/en/previewPptx/text"
+import { previewPptxFind } from "@/locales/en/previewPptx/find"
 import { previewSheetFormat } from "@/locales/en/previewSheet/format"
 import { previewSheetSave } from "@/locales/en/previewSheet/save"
 import { previewSheetStructure } from "@/locales/en/previewSheet/structure"
@@ -733,6 +738,11 @@ export const preview = {
 	...previewSheetViewer,
 	...previewPptxViewer,
 	...previewPptxLegacy,
+	...previewPptxRibbon,
+	...previewPptxEditor,
+	...previewPptxArrange,
+	...previewPptxText,
+	...previewPptxFind,
 	...previewSheetSave,
 	...previewSheetFormat,
 	...previewSheetKeys,

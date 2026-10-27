@@ -1,5 +1,8 @@
 import { OpcPackage, partKey, PRESENTATION_ZIP_LIMITS, type ByteSource } from "../../../core/opc/index"
 import { PresentationError, type Deck } from "../../../core/presentation/model"
+import { rebaseOdpDeck } from "../../../core/odp/write/rebase"
+import { odpSpliceWriter } from "../../../core/odp/write/save"
+import type { OdpSaveSource } from "../../../core/odp/write/splice"
 import { pptxSpliceWriter } from "../../../core/pptx/write/save"
 import type { PptxSpliceSource } from "../../../core/pptx/write/splice"
 import type { XmlDocument } from "../../../core/xml/index"
@@ -15,6 +18,7 @@ import {
 	type SealPackage
 } from "../save"
 import { sessionEdits } from "./edit"
+import { bindOdpParts, odpParts } from "./open/odp"
 import { pptxDecrypted, pptxParts } from "./open/pptx"
 
 // The save capability: save() streams the session's changes to the upload's port, commitSaved() moves the session
@@ -99,9 +103,36 @@ export function pptxSaveSource(session: EngineSession): PptxSpliceSource {
 	}
 }
 
+// An ODP session onto its saved file: the saved package read again taking over the session's deck (OdpOpenOptions
+// adopt), every parsed page's refs rebound into the page written for it (core/odp/write/rebase.ts).
+export async function rebaseOdp(session: EngineSession, source: ByteSource): Promise<OpenedPackage> {
+	const parts = odpParts(session.deck)
+
+	if (parts === undefined) throw new PresentationError("notImplemented", "rebase without the deck's parts")
+
+	const rebased = await rebaseOdpDeck(session.deck, parts, source)
+
+	if ("kind" in rebased) throw new PresentationError(rebased.reason, rebased.detail ?? "rebase")
+
+	bindOdpParts(session.deck, rebased)
+
+	return { ...session.package, bytes: source.size, source, archive: rebased.odf.archive }
+}
+
+export function odpSaveSource(session: EngineSession): OdpSaveSource {
+	const parts = odpParts(session.deck)
+
+	if (parts === undefined) throw new PresentationError("notImplemented", "an ODP deck without its parts cannot be saved")
+
+	return { parts }
+}
+
 export const SAVE_DEPENDENCIES: SaveDependencies = {
-	savers: { pptx: { writer: pptxSpliceWriter, source: pptxSaveSource, seal: sealPptx } },
-	rebasers: { pptx: rebasePptx }
+	savers: {
+		pptx: { writer: pptxSpliceWriter, source: pptxSaveSource, seal: sealPptx },
+		odp: { writer: odpSpliceWriter, source: odpSaveSource }
+	},
+	rebasers: { pptx: rebasePptx, odp: rebaseOdp }
 }
 
 export const saveCapability: SaveCapability = {

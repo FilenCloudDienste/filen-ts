@@ -24,6 +24,10 @@ export const measurer: TextMeasurer = {
 	}
 }
 
+// A tx node's constraints for no margins (a side no constraint sets takes 0.56 of the font size).
+export const NO_MARGINS =
+	'<dgm:constrLst><dgm:constr type="lMarg"/><dgm:constr type="rMarg"/><dgm:constr type="tMarg"/><dgm:constr type="bMarg"/></dgm:constrLst>'
+
 export interface PointSpec {
 	readonly id: string
 	readonly text?: string
@@ -93,17 +97,32 @@ export function presented(result: DiagramLayout, name?: string): string[] {
 
 // The slide text adapter on the bundled OFL faces (Carlito for Calibri, the minor font of the default theme): a
 // fresh measurer per call over one prepared environment.
-export async function adapterMeasurers(texts: readonly string[]): Promise<() => TextMeasurer> {
+export async function adapterMeasurers(texts: readonly string[], bold = false): Promise<() => TextMeasurer> {
 	const fonts = new FontManager(nodeFontHost, nodeFontAssets, undefined, "fotest")
 	const textFonts: TextFonts = { color: () => undefined, typeface: typeface => (typeface.startsWith("+") ? "Calibri" : typeface) }
 
 	await fonts.prepare(smartArtFontRequests(texts, textFonts))
+
+	if (bold) {
+		const points = texts.map(text => ({
+			id: text,
+			type: "node" as const,
+			paragraphs: [text],
+			rich: [{ runs: [{ text, b: true }] }],
+			props: {},
+			parent: undefined,
+			children: [],
+			depth: 0
+		}))
+
+		await fonts.prepare(smartArtFontRequests(points, textFonts))
+	}
 
 	const env = { fonts, cache: new MeasureCache(new HmtxMeasurer()) }
 
 	return () => textAdapterMeasurer(env, textFonts)
 }
 
-export async function adapterMeasurer(texts: readonly string[]): Promise<TextMeasurer> {
-	return (await adapterMeasurers(texts))()
+export async function adapterMeasurer(texts: readonly string[], bold = false): Promise<TextMeasurer> {
+	return (await adapterMeasurers(texts, bold))()
 }

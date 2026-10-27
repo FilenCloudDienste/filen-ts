@@ -1,3 +1,7 @@
+import type { TimeNode } from "../../../anim/model"
+import { holdMarkup, timingTargets, withoutShapes } from "../../../anim/prune"
+import { matchShapes } from "./match"
+import { classifyHref } from "../../actions"
 import { resolveShape } from "../../inherit"
 import {
 	refused,
@@ -13,6 +17,7 @@ import {
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, digestOf, findShape } from "../changes"
 import type { DeckOp, OpOf, ShapeOp } from "../ops"
+import { xmlSafeText } from "../xmlText"
 
 // The shape ops on the model, in place. Inverses follow ops.ts: typed values where the prior state was an edit
 // (a local xfrm, `props`), bytes where it was source. A content op on a shape backed by source is undone by
@@ -151,7 +156,7 @@ function replaceInverse(slide: SlideRef, at: At, context: ApplyContext): Inverse
 	return inverseOf([{ family: "shape", kind: "delete", slide, shapes: [at.shape.id] }, back])
 }
 
-// A re-read shape takes the typed state it had (children by id); the source backing comes from the bytes. Text and
+// A re-read shape takes the typed state it had (children matched by matchShapes); the source backing comes from the bytes. Text and
 // frames equal to what the bytes read keep the fresh read (its source refs are live).
 function overlay(typed: ShapeNode, read: ShapeNode): ShapeNode {
 	const out: ShapeNode = { ...typed }
@@ -163,12 +168,10 @@ function overlay(typed: ShapeNode, read: ShapeNode): ShapeNode {
 	if (typed.frame !== undefined && read.frame !== undefined && digestOf(typed.frame) === digestOf(read.frame)) out.frame = read.frame
 
 	if (typed.children !== undefined) {
-		const byId = new Map<number, ShapeNode>()
+		const matches = matchShapes(typed.children, read.children ?? [])
 
-		for (const child of read.children ?? []) byId.set(child.sourceId ?? child.id, child)
-
-		out.children = typed.children.map(child => {
-			const match = byId.get(child.sourceId ?? child.id)
+		out.children = typed.children.map((child, k) => {
+			const match = matches[k]
 
 			return match === undefined ? child : overlay(child, match)
 		})
@@ -399,7 +402,10 @@ function group(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "group" 
 	const placed = placedSiblings(deck, node, op.shapes, structureLock)
 
 	if (isRefused(placed)) return placed
-	if (placed.some(item => item.shape.ph !== undefined)) return refused("unsupported", "placeholders cannot be grouped")
+	// PowerPoint groups no placeholders; ODF presentation objects (presentation:class) may sit in a draw:g (ODF 1.3
+	// Part 3 §10.3.14 allows any shape there), as LibreOffice groups them.
+	if (deck.format !== "odp" && placed.some(item => item.shape.ph !== undefined))
+		return refused("unsupported", "placeholders cannot be grouped")
 	if (placed.some(item => item.shape.xfrm === undefined)) return refused("unsupported", "a shape without its own box")
 
 	const parent = placed[0]?.parent ?? 0
@@ -560,7 +566,12 @@ function ungroup(node: SlideNode, op: OpOf<"shape"> & { kind: "ungroup" }, conte
 
 	back.push(put)
 
-	for (const child of children) child.xfrm = childInParent(xfrm, child.xfrm as Xfrm)
+	// A child group without a child space keeps the one its own children were placed in (its box) as it scales.
+	for (const child of children) {
+		const own = child.xfrm as Xfrm
+
+		child.xfrm = childInParent(xfrm, child.kind === "grpSp" ? withChildSpace(own, own) : own)
+	}
 
 	siblings.splice(at.index, 1, ...children)
 	bump(node)
@@ -781,6 +792,51 @@ function remove(node: SlideNode, op: OpOf<"shape"> & { kind: "delete" }, context
 		back.push(put)
 	}
 
+	// The effects that animate the removed shapes (or that a click on one of them triggers) go with them, as in
+	// PowerPoint; the inverse puts the slide's timing back first, so a refusal there leaves nothing half undone.
+	const gone = new Set<number>()
+
+	for (const item of removed) collectIds(item.shape, gone)
+
+	const timing = node.timing
+	let heldBytes = 0
+
+	if (timing !== undefined && timingTargets(timing, gone)) {
+		const roots: TimeNode[] = []
+		const pruned = withoutShapes(timing, gone, roots)
+		// The inverse keeps a copy of its own (the live tree shares the nodes the pruning kept). In it, each removed
+		// subtree carries its source markup as bytes (empty for one an edit made): the mark of what the undo puts back
+		// into the slide's timing as it then is, written as it was even once a save took its source out.
+		const prior = cloneModel(timing)
+		const removedRoots = new Set(roots)
+		const mark = (live: TimeNode, held: TimeNode): void => {
+			delete held.ctn.raw
+
+			if (removedRoots.has(live)) {
+				const bytes = live.ctn.src === undefined ? undefined : context.sourceBytes(live.ctn.src)
+				const raw = bytes instanceof Uint8Array ? bytes : (live.ctn.raw ?? new Uint8Array(0))
+
+				holdMarkup(held.ctn, raw)
+				heldBytes += raw.length
+
+				return
+			}
+
+			live.ctn.children.forEach((child, k) => {
+				const copy = held.ctn.children[k]
+
+				if (copy !== undefined) mark(child, copy)
+			})
+		}
+
+		mark(timing.root, prior.root)
+
+		back.unshift({ family: "timing", kind: "setTiming", slide: node.ref, timing: prior })
+
+		if (pruned === undefined) delete node.timing
+		else node.timing = pruned
+	}
+
 	for (const item of removed) {
 		const siblings = siblingsOf(node, item.parent)
 		const index = siblings?.indexOf(item.shape) ?? -1
@@ -790,7 +846,15 @@ function remove(node: SlideNode, op: OpOf<"shape"> & { kind: "delete" }, context
 
 	bump(node)
 
-	return { kind: "applied", inverse: inverseOf(back), op }
+	const inverse = inverseOf(back)
+
+	return { kind: "applied", inverse: { ops: inverse.ops, bytes: inverse.bytes + heldBytes }, op }
+}
+
+function collectIds(shape: ShapeNode, into: Set<number>): void {
+	into.add(shape.id)
+
+	for (const child of shape.children ?? []) collectIds(child, into)
 }
 
 // The element replaced by `raw` exactly (no typed overlay): the shape as that markup reads.
@@ -865,6 +929,49 @@ function setXfrm(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrm" }, conte
 	}
 }
 
+// setXfrm for several shapes as one step; refused whole when one is missing, named twice or cannot move.
+function setXfrms(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrms" }, context: ApplyContext): ApplyResult<typeof op> {
+	if (op.xfrms.length === 0) return refused("malformed", "no shapes")
+
+	const shapes: ShapeNode[] = []
+	const seen = new Set<number>()
+
+	for (const { id } of op.xfrms) {
+		if (seen.has(id)) return refused("malformed", `shape ${String(id)} twice`)
+
+		seen.add(id)
+
+		const at = findShape(node.shapes, id)
+
+		if (at === undefined) return refused("notFound", `shape ${String(id)}`)
+
+		const locked = moveLock(at.shape, context)
+
+		if (locked !== undefined) return locked
+
+		shapes.push(at.shape)
+	}
+
+	const back: { id: number; xfrm: Xfrm | undefined }[] = []
+
+	op.xfrms.forEach(({ xfrm }, index) => {
+		const shape = shapes[index] as ShapeNode
+		const prior = shape.xfrm
+
+		back.push({ id: shape.id, xfrm: prior === undefined ? undefined : { ...prior } })
+
+		if (xfrm === undefined) delete shape.xfrm
+		else shape.xfrm = shape.kind === "grpSp" ? withChildSpace(xfrm, prior) : { ...xfrm }
+	})
+	bump(node)
+
+	return { kind: "applied", inverse: { ops: [{ family: "shape", kind: "setXfrms", slide: node.ref, xfrms: back }], bytes: 0 }, op }
+}
+
+function carries(text: string | undefined): boolean {
+	return text === undefined || xmlSafeText(text) === text
+}
+
 function applied<O extends ShapeOp>(back: Inverse | Refused, op: O): ApplyResult<O> {
 	return isRefused(back) ? back : { kind: "applied", inverse: back, op }
 }
@@ -883,6 +990,8 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 			return remove(node, op, context)
 		case "setXfrm":
 			return setXfrm(node, op, context)
+		case "setXfrms":
+			return setXfrms(node, op, context)
 		case "restore":
 			return restore(node, op, context)
 		case "setProps":
@@ -907,6 +1016,10 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 				op
 			)
 		case "setAlt":
+			// Text the writer could not carry would read back as another value and refuse the save.
+			if (op.alt !== undefined && (!carries(op.alt.descr) || !carries(op.alt.title)))
+				return refused("malformed", "alt text holds characters XML cannot carry")
+
 			return applied(
 				setField(
 					node,
@@ -927,6 +1040,10 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 				op
 			)
 		case "setAction":
+			// A url the reader would not read back as one (a space, a control character) would refuse every save.
+			if (op.action?.kind === "url" && classifyHref(op.action.href).kind !== "url")
+				return refused("malformed", "not a link the deck can carry")
+
 			return applied(
 				setField(
 					node,
@@ -975,6 +1092,7 @@ function shapeTouches(op: ShapeOp): readonly Touch[] {
 	switch (op.kind) {
 		case "insert":
 			return [nodeTouch(op.slide, op.shape.id)]
+		// A delete that takes effects out of the slide's timing names it through its inverse (timing.setTiming).
 		case "delete":
 		case "zOrder":
 			return op.shapes.map(id => nodeTouch(op.slide, id))
@@ -1000,6 +1118,8 @@ function shapeTouches(op: ShapeOp): readonly Touch[] {
 		case "align":
 		case "distribute":
 			return op.shapes.map(id => ({ kind: "shape", slide: op.slide, shape: id, dirt: { kind: "xfrm" } }) as const)
+		case "setXfrms":
+			return op.xfrms.map(({ id }) => ({ kind: "shape", slide: op.slide, shape: id, dirt: { kind: "xfrm" } }) as const)
 	}
 }
 

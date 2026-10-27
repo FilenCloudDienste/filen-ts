@@ -46,6 +46,10 @@ export function transferableLayout(result: BodyLayout): TransferableTextLayout {
 		styleInts,
 		styleFloats,
 		fonts,
-		texts: page.sourceTexts
+		texts: page.sourceTexts,
+		prefixes: result.prefixes.slice(),
+		runStarts: result.runStarts.slice(),
+		runEnds: result.runEnds.slice(),
+		kerning: Uint8Array.from(fonts, (_, key) => (styles.cache.kerning(key) ? 1 : 0))
 	}
 }

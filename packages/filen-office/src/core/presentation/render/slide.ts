@@ -39,7 +39,7 @@ import {
 	writeXfrm,
 	type ResolveLevel
 } from "./resolve"
-import type { PlaceholderLevel, RenderServices, TableTextStyle } from "./services"
+import type { PlaceholderLevel, RenderServices, TableTextStyle, TextLayoutRequest } from "./services"
 import { finishPictures } from "./pictures"
 import { renderTableSteps, type TableRenderInput } from "./table"
 import { fitTextWarp, readTextWarp } from "./warp"
@@ -61,7 +61,13 @@ interface TextTarget {
 	readonly chain: readonly PlaceholderLevel[]
 	readonly body: TextBody
 	readonly bodyPr: TextBodyProps
+	// Nothing visible in it (no body, or no characters): its layer carries the text box for the editor to enter it,
+	// and nothing is laid out for painting.
+	readonly empty?: true
 }
+
+// The body of a shape without one (read only).
+const NO_BODY: TextBody = { bodyPr: {}, paragraphs: [] }
 
 interface Entry {
 	readonly owner: SlideNode
@@ -185,11 +191,40 @@ function writeChildren(
 
 		if (xfrm === undefined) continue
 
-		writeElement(writer, deck, services, owner, child, levels, [], xfrm, false, texts, frames, depth + 1)
+		writeElement(writer, deck, services, owner, child, levels, [], xfrm, false, texts, frames, depth + 1, false)
 	}
 }
 
+// Presets drawn from the box's top-left to its bottom-right corner (ECMA-376 Part 1 §20.1.10.56 ST_ShapeType: line
+// and the connectors), whose ends the editor drags.
+const LINE_PRESETS: ReadonlySet<string> = new Set([
+	"line",
+	"straightConnector1",
+	"bentConnector2",
+	"bentConnector3",
+	"bentConnector4",
+	"bentConnector5",
+	"curvedConnector2",
+	"curvedConnector3",
+	"curvedConnector4",
+	"curvedConnector5"
+])
+
+// Whether an entry draws as a line between two ends: a connector, or a shape whose resolved geometry (as written to
+// the scratch tree) is a line preset.
+function drawnAsLine(entry: Entry, reader: DrawingReader, document: XmlDocument, tree: number): boolean {
+	if (entry.shape.kind === "cxnSp") return true
+	if (entry.shape.kind !== "sp" || tree < 0) return false
+
+	const element = document.firstChildElement(tree)
+	const preset = reader.attr(reader.child(reader.child(element, D.P, "spPr"), D.A, "prstGeom"), "prst")
+
+	return preset !== undefined && LINE_PRESETS.has(preset)
+}
+
 // One resolved element. `local`: the top-level element in its own box (offset and rotation in the layer matrix).
+// `editable`: a top-level shape of the rendered node (what the editor enters), so one with no visible text still gets
+// its text box (a group's children are not entered: they keep one layer for the group's drawing).
 function writeElement(
 	writer: ScratchWriter,
 	deck: Deck,
@@ -202,17 +237,22 @@ function writeElement(
 	local: boolean,
 	texts: TextTarget[],
 	frames: ShapeNode[],
-	depth: number
+	depth: number,
+	editable: boolean
 ): void {
 	const source = levels[0]?.source
 	// A shape drawn from its Fallback (math): its text is the Fallback picture.
 	const fallback = source !== undefined && shape.src?.format === "pptx" && source.element !== shape.src.node
 	const text = (): void => {
-		if (fallback || shape.text === undefined || !hasText(shape)) return
+		if (fallback) return
+
+		const empty = shape.text === undefined || !hasText(shape)
+
+		if (empty && (!editable || shape.kind !== "sp")) return
 
 		const bodyPr = resolvedBodyPr(deck, owner, shape)
 
-		texts.push({ owner, shape, chain, body: shape.text, bodyPr })
+		texts.push({ owner, shape, chain, body: shape.text ?? NO_BODY, bodyPr, ...(empty ? { empty } : {}) })
 		writeTextMarker(writer, texts.length - 1, bodyPr)
 	}
 
@@ -346,7 +386,7 @@ function buildScratch(deck: Deck, node: SlideNode, services: RenderServices): Sc
 		if (shape.kind === "frame") continue
 
 		writer.push("<p:spTree>")
-		writeElement(writer, deck, services, owner, shape, levels, chain, xfrm, !slideSpace, texts, frames, 0)
+		writeElement(writer, deck, services, owner, shape, levels, chain, xfrm, !slideSpace, texts, frames, 0, owner === node)
 		writer.push("</p:spTree>")
 	}
 
@@ -566,12 +606,26 @@ async function renderOnce(
 		if (scratch.overPath[k] === true) {
 			report.refuse("custGeom:tooLarge")
 			layers.push({
-				...layerBase(entry, node.ref, entry.shape.id),
+				...layerBase(entry, entry.shape.id),
 				drawing: emptyDrawing(entry.xfrm.cx / EMU_PER_PX, entry.xfrm.cy / EMU_PER_PX),
 				matrix: entryMatrix(entry)
 			})
 		} else {
 			await renderEntry(deck, node, entry, scratch, scratch.trees[k] ?? -1, scratchReader, theme, services, clock, report, layers)
+		}
+
+		// The slide's own shapes carry their box for the editor (every layer the entry made, overlays included).
+		if (entry.owner === node) {
+			const shape = entry.shape
+			const box = {
+				id: shape.id,
+				xfrm: { ...entry.xfrm },
+				...(shape.alt === undefined ? {} : { alt: { ...shape.alt } }),
+				...(shape.locks === undefined ? {} : { locks: shape.locks }),
+				...(drawnAsLine(entry, scratchReader, scratch.document, scratch.trees[k] ?? -1) ? { line: true as const } : {})
+			}
+
+			for (let layer = first; layer < layers.length; layer++) layers[layer] = { ...(layers[layer] as SlideLayer), box }
 		}
 
 		for (let layer = first; layer < layers.length; layer++) tally.layer(layers[layer]?.drawing)
@@ -588,6 +642,7 @@ async function renderOnce(
 		index: deck.slides.indexOf(ref),
 		revision: node.revision,
 		hidden: node.hidden,
+		...(node.parent === undefined ? {} : { layout: node.parent }),
 		background: drawingData(background),
 		layers,
 		notesText: notesText(deck, node),
@@ -636,17 +691,36 @@ function entryMatrix(entry: Entry): number[] {
 	return boxMatrix(xfrm.x / EMU_PER_PX, xfrm.y / EMU_PER_PX, xfrm.cx / EMU_PER_PX, xfrm.cy / EMU_PER_PX, xfrm.rot / 60000, false, false)
 }
 
-function layerBase(entry: Entry, slideRef: SlideRef, id: number): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock"> {
-	const shape = entry.shape
+// A layer's identity: the shape it draws, named in the node that owns it (a layout's or master's shape drawn on a
+// slide names that layout or master, so it never shares a ref with a slide shape of the same id). `child` names the
+// group child (of entry.shape) the layer draws, with its own role and alt text (the group's actions and lock hold for
+// its children unless the child has its own).
+function layerBase(entry: Entry, id: number, child?: ShapeNode): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock"> {
+	const shape = child ?? entry.shape
 	const alt = shape.alt?.decorative === true ? undefined : (shape.alt?.descr ?? shape.alt?.title)
+	const actions = shape.actions ?? entry.shape.actions
+	const lock = shape.lock ?? entry.shape.lock
 
 	return {
-		shape: { slide: slideRef, id },
-		role: entry.role,
+		shape: { slide: entry.owner.ref, id },
+		role: child === undefined ? entry.role : roleOf(entry.owner, child),
 		...(alt === undefined || alt === "" ? {} : { alt }),
-		...(shape.actions === undefined ? {} : { actions: shape.actions }),
-		...(shape.lock === undefined ? {} : { lock: shape.lock })
+		...(actions === undefined ? {} : { actions }),
+		...(lock === undefined ? {} : { lock })
 	}
+}
+
+// The descendant of a group with this id.
+function childShape(shapes: readonly ShapeNode[] | undefined, id: number): ShapeNode | undefined {
+	for (const shape of shapes ?? []) {
+		if (shape.id === id) return shape
+
+		const found = childShape(shape.children, id)
+
+		if (found !== undefined) return found
+	}
+
+	return undefined
 }
 
 function layoutText(
@@ -660,7 +734,17 @@ function layoutText(
 ): TextPage | undefined {
 	if (target.bodyPr.rotation !== 0) report.approximate("bodyPr:rot")
 
-	return services.layoutText?.({
+	return services.layoutText?.(textRequest(deck, slide, theme, target, box))?.page
+}
+
+function textRequest(
+	deck: Deck,
+	slide: SlideNode,
+	theme: DrawingTheme,
+	target: TextTarget,
+	box: { readonly width: number; readonly height: number }
+): TextLayoutRequest {
+	return {
 		deck,
 		slide,
 		owner: target.owner,
@@ -671,7 +755,7 @@ function layoutText(
 		width: box.width,
 		height: box.height,
 		theme
-	})?.page
+	}
 }
 
 async function renderEntry(
@@ -692,7 +776,7 @@ async function renderEntry(
 	const h = xfrm.cy / EMU_PER_PX
 	const matrix = entryMatrix(entry)
 	const drawn = new DrawingList()
-	const base = layerBase(entry, slide.ref, entry.shape.id)
+	const base = layerBase(entry, entry.shape.id)
 	const images = (id: string): ReturnType<ScratchWriter["image"]> => scratch.writer.image(id)
 
 	if (entry.shape.kind === "frame") {
@@ -894,7 +978,9 @@ async function layersOf(input: {
 		end: number,
 		id: number
 	): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock"> & Pick<SlideLayer, "drawing"> => {
-		const piece = first ? base : layerBase(entry, slide.ref, id)
+		// The entry's own base (its effects, alt, actions) only for its own layer: a group child's text layer is the child's.
+		const piece =
+			id === entry.shape.id ? (first ? base : layerBase(entry, id)) : layerBase(entry, id, childShape(entry.shape.children, id))
 		const part = start === 0 && end === list.itemCount ? drawing : drawingSlice(drawing, start, end)
 
 		start = end
@@ -925,8 +1011,11 @@ async function layersOf(input: {
 				list.itemFloat(item, ItemFloat.HEIGHT),
 				target.bodyPr
 			)
-			const page = layoutText(deck, slide, services, theme, target, box, report)
+			const page = target.empty === true ? undefined : layoutText(deck, slide, services, theme, target, box, report)
 			const warp = page === undefined ? undefined : warpOf(services, target, box, page, report)
+
+			// The text adapter still hears of an empty body (the editor's text context is read from it); nothing paints.
+			if (target.empty === true) services.layoutText?.(textRequest(deck, slide, theme, target, box))
 
 			push({
 				...segment(cut.at, target.shape.id),
@@ -1015,7 +1104,7 @@ async function renderOverlay(
 		0
 	])
 	const own = new DrawingList()
-	const overlayBase = layerBase({ ...entry, role: frame?.kind === "table" ? "table" : "smartart" }, slide.ref, overlay.shape.id)
+	const overlayBase = layerBase({ ...entry, role: frame?.kind === "table" ? "table" : "smartart" }, overlay.shape.id)
 
 	own.width = cx / EMU_PER_PX
 	own.height = cy / EMU_PER_PX

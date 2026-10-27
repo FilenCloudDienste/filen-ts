@@ -304,9 +304,10 @@ class DefReader {
 
 		return {
 			type: reader.attr(node, "type") ?? "none",
-			rot: toNumber(reader.attr(node, "rot"), 0),
+			// A turn that is no number (INF, NaN) turns nothing.
+			rot: finiteOr(toNumber(reader.attr(node, "rot"), 0), 0),
 			hideGeom: reader.bool(node, "hideGeom", false),
-			zOrderOff: Math.trunc(toNumber(reader.attr(node, "zOrderOff"), 0)),
+			zOrderOff: Math.trunc(finiteOr(toNumber(reader.attr(node, "zOrderOff"), 0), 0)),
 			adj: reader.children(reader.child(node, D.Dgm, "adjLst"), D.Dgm, "adj").map(adj => ({
 				idx: Math.trunc(toNumber(reader.attr(adj, "idx"), 1)),
 				val: toNumber(reader.attr(adj, "val"), 0)
@@ -361,4 +362,8 @@ export function parseLayoutDef(document: XmlDocument): LayoutDefinition {
 	const defs = new DefReader(reader)
 
 	return { uniqueId: reader.attr(root, "uniqueId") ?? "", root: defs.layoutNode(node, 0), forEachByName: defs.forEachByName }
+}
+
+function finiteOr(value: number, fallback: number): number {
+	return Number.isFinite(value) ? value : fallback
 }

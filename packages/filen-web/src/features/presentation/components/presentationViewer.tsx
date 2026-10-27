@@ -1,20 +1,16 @@
-import { useEffect, useEffectEvent, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { TFunction } from "i18next"
 import * as Comlink from "comlink"
 import { DownloadIcon, MaximizeIcon, PanelLeftIcon, PresentationIcon, StickyNoteIcon } from "lucide-react"
 import { driveItemName } from "@filen/shared"
-import type { Action, Format, GateReason, PresentationRefusal, SlideRef } from "@filen/office/core/presentation"
-import type { SlideLayer, SourceSpec } from "@filen/office/dom/presentation"
+import type { Format, PresentationRefusal, SlideRef } from "@filen/office/core/presentation"
+import type { SourceSpec } from "@filen/office/dom/presentation"
 import {
 	createPresentationStore,
 	paintSlide,
-	presentationActions,
 	SlideView,
-	StaticShow,
 	usePresentationDocument,
 	type PresentationDocument,
-	type PresentationJump,
 	type PresentationStore
 } from "@filen/office/react/presentation"
 // The slide text's paragraph classes (hanging indents, link underlines) are the docx engine's.
@@ -37,6 +33,11 @@ import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading }
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode, usePreviewByteSource, usePreviewDownload } from "@/features/preview/lib/accessMode"
+import { DeckNotes } from "@/features/presentation/components/deckChrome"
+import { actionLabel, DEFAULT_SLIDE_SIZE, onPageKey } from "@/features/presentation/components/deckChrome.logic"
+import { useDeckPresentation } from "@/features/presentation/hooks/useDeckPresentation"
+import { PresentationEditor } from "@/features/presentation/components/presentationEditor"
+import type { PresentationEditing } from "@/features/presentation/hooks/usePresentationSession"
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
 import { PresentationSlideRail } from "@/features/presentation/components/slideRail"
 import { LegacyPresentationBar } from "@/features/presentation/components/legacyView"
@@ -50,16 +51,14 @@ import { connectPresentation, presentationPool } from "@/features/presentation/l
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { rangePortReader } from "@/lib/media/rangePort"
 import { sdkApi } from "@/lib/sdk/client"
-import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
-import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
-import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 import type { PreviewKey } from "@/lib/i18n"
 
 // A presentation in the preview: the slide in view (fit inside the canvas), the slide list beside it (a strip under
 // it at phone widths), the speaker notes under it and a read-only command bar (slides, Present, the list and notes
-// toggles, full screen, Download where the file may be saved). The deck lives in a presentation worker: a drive file
+// toggles, full screen, Download where the file may be saved). A drive deck the overlay may edit opens in the editor
+// (presentationEditor.tsx) instead. The deck lives in a presentation worker: a drive file
 // is read there in ranges straight from the SDK worker, so no deck of any size is ever held whole on the page; an
 // archive's entry is handed over as bytes. Arrow keys page slides, not files; Escape ends the slide show before it
 // closes the preview.
@@ -67,16 +66,26 @@ import type { PreviewKey } from "@/lib/i18n"
 export interface PresentationViewerProps {
 	item: DriveItem
 	alt: string
-	// The drive listing the file was opened from (every deck is view-only here for now).
+	// The drive listing the file was opened from (a view-only reason outside the user's own drive).
 	variant?: DriveVariant
+	// The overlay's editing side: the deck opens in the editor (view-only there when it cannot be saved). Absent (a
+	// public link, an archive's entry, outside the drive): the viewer.
+	editing?: PresentationEditing
 	canSaveCopy?: boolean
 	onOpenFile?: (item: DriveItem) => void
+}
+
+// Where a drive deck opens: the editor (with the overlay's editing side) or the viewer.
+interface DeckPlace {
+	readonly item: DriveItem
+	readonly variant: DriveVariant | undefined
+	readonly editing: PresentationEditing | undefined
 }
 
 // Slides rendered first around the one shown.
 const OPEN_WINDOW = 3
 
-export function PresentationViewer({ item, alt }: PresentationViewerProps) {
+export function PresentationViewer({ item, alt, variant, editing }: PresentationViewerProps) {
 	useLeaveViewerFullScreen()
 
 	const archive = usePreviewByteSource() !== null
@@ -90,6 +99,7 @@ export function PresentationViewer({ item, alt }: PresentationViewerProps) {
 		<DriveDeck
 			item={item}
 			alt={alt}
+			place={{ item, variant, editing }}
 		/>
 	)
 }
@@ -169,6 +179,7 @@ function ArchiveBytes({ bytes, item, alt }: { bytes: Uint8Array; item: DriveItem
 			}
 			item={item}
 			alt={alt}
+			place={undefined}
 			onRetry={undefined}
 		/>
 	)
@@ -177,13 +188,17 @@ function ArchiveBytes({ bytes, item, alt }: { bytes: Uint8Array; item: DriveItem
 // A drive file (or a public link's): a range port from the SDK worker, served for as long as the deck is open. The
 // port follows the file's content (uuid and size), not the item object: a rename or a favourite hands the viewer a
 // new item for the same bytes, and the open deck keeps reading through its port.
-function DriveDeck({ item, alt }: { item: DriveItem; alt: string }) {
+function DriveDeck({ item, alt, place }: { item: DriveItem; alt: string; place: DeckPlace }) {
 	const anon = usePreviewAccessMode() === "anon"
 	const [prepared, setPrepared] = useState<Prepared>({ status: "pending" })
 	const [sniffed, setSniffed] = useState<Format | "text" | undefined>(undefined)
 	const [attempt, setAttempt] = useState(0)
-	const uuid = item.data.uuid
-	const size = item.data.size
+	// An editor's session moves onto each file it saves (commitSaved): its deck is opened once per mount, whatever
+	// uuid the saves give the item. The viewer follows the file's content.
+	const [mounted] = useState(() => ({ uuid: item.data.uuid, size: item.data.size }))
+	const editing = place.editing !== undefined
+	const uuid = editing ? mounted.uuid : item.data.uuid
+	const size = editing ? mounted.size : item.data.size
 	const latestItem = useEffectEvent(() => item)
 
 	useRecordVerdict(item, sniffed)
@@ -267,6 +282,7 @@ function DriveDeck({ item, alt }: { item: DriveItem; alt: string }) {
 			prepared={prepared}
 			item={item}
 			alt={alt}
+			place={place}
 			onRetry={() => {
 				setPrepared({ status: "pending" })
 				setAttempt(value => value + 1)
@@ -279,11 +295,13 @@ function PreparedDeck({
 	prepared,
 	item,
 	alt,
+	place,
 	onRetry
 }: {
 	prepared: Prepared
 	item: DriveItem
 	alt: string
+	place: DeckPlace | undefined
 	onRetry: (() => void) | undefined
 }) {
 	const { t } = useTranslation("preview")
@@ -314,6 +332,7 @@ function PreparedDeck({
 					source={prepared.source}
 					format={prepared.format}
 					alt={alt}
+					place={place}
 					onRetry={onRetry}
 				/>
 			)
@@ -331,13 +350,6 @@ const REFUSAL_KEYS: Partial<Record<PresentationRefusal, PreviewKey>> = {
 	notImplemented: "previewPptxUnsupported"
 }
 
-const GATE_KEYS: Record<GateReason, PreviewKey> = {
-	signed: "previewPptxReadOnlySigned",
-	strict: "previewPptxReadOnlyStrict",
-	writeProtected: "previewPptxReadOnlyWriteProtected",
-	malformed: "previewPptxReadOnlyMalformed"
-}
-
 // Failures a second try can fix (the worker went away, the open was called off).
 const RETRYABLE: ReadonlySet<PresentationRefusal> = new Set(["failed", "aborted", "closed"])
 
@@ -345,11 +357,13 @@ function DeckSession({
 	source,
 	format,
 	alt,
+	place,
 	onRetry
 }: {
 	source: SourceSpec
 	format: Format
 	alt: string
+	place: DeckPlace | undefined
 	onRetry: (() => void) | undefined
 }) {
 	const { t } = useTranslation("preview")
@@ -358,7 +372,8 @@ function DeckSession({
 			host: (spec, listener, options) => connectPresentation(presentationPool, spec, listener, options),
 			// A copy of an entry's bytes is what goes over (transferred): the preview cache keeps its buffer.
 			source: source.kind === "bytes" ? { kind: "bytes", bytes: source.bytes.slice() } : source,
-			options: { format, fileName: alt, viewOnly: true, window: { from: 0, count: OPEN_WINDOW } }
+			// Editable only where the overlay can save the file as it mounts (the worker gates the deck's own reasons).
+			options: { format, fileName: alt, viewOnly: place?.editing?.writable !== true, window: { from: 0, count: OPEN_WINDOW } }
 		})
 	)
 	const document = usePresentationDocument(store)
@@ -395,6 +410,19 @@ function DeckSession({
 	}
 
 	if (document.info === undefined) return <PreviewLoading />
+
+	if (place?.editing !== undefined) {
+		return (
+			<PresentationEditor
+				store={store}
+				document={document}
+				alt={alt}
+				item={place.item}
+				variant={place.variant}
+				editing={place.editing}
+			/>
+		)
+	}
 
 	return (
 		<DeckSurface
@@ -434,60 +462,19 @@ function verifyPassword(store: PresentationStore, password: string, signal: Abor
 	})
 }
 
-// The accessible name of a clickable shape: what a click does, after the shape's alt text when it has one.
-function actionLabel(t: TFunction<"preview">, action: Action, layer: SlideLayer): string {
-	const does =
-		action.kind === "url"
-			? t("previewPptxActionLink", { target: action.href })
-			: action.kind === "media"
-				? t("previewPptxActionMedia")
-				: action.kind === "refused"
-					? t("previewPptxActionRefused")
-					: t("previewPptxActionJump")
-	const name = layer.alt?.trim() ?? ""
-
-	return name === "" ? does : t("previewPptxActionNamed", { name, action: does.charAt(0).toLowerCase() + does.slice(1) })
-}
-
-// How long the note about a refused action stays.
-const REFUSED_NOTE_MS = 4000
-
-// Keys that page slides (and never the preview's files): the rail and the show take their own first.
-const PAGE_KEYS: Readonly<Record<string, -1 | 1 | "first" | "last">> = {
-	ArrowLeft: -1,
-	ArrowUp: -1,
-	PageUp: -1,
-	ArrowRight: 1,
-	ArrowDown: 1,
-	PageDown: 1,
-	Home: "first",
-	End: "last"
-}
-
-function isTextField(target: EventTarget | null): boolean {
-	return target instanceof HTMLElement && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")
-}
-
 function DeckSurface({ store, document: deck, alt }: { store: PresentationStore; document: PresentationDocument; alt: string }) {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
 	const download = usePreviewDownload()
-	const linkGate = useTrustedLinkGate()
 	const [current, setCurrent] = useState(0)
 	const [railOpen, setRailOpen] = useState(true)
 	const [notesOpen, setNotesOpen] = useState(true)
-	const [showing, setShowing] = useState(false)
-	const [dismissed, setDismissed] = useState(false)
-	// Counts refused actions while their note is up (0: none shown).
-	const [refusedAt, setRefusedAt] = useState(0)
-	const lastViewed = useRef(0)
-	const enteredFullscreen = useRef(false)
 	const canvasRef = useRef<HTMLDivElement | null>(null)
 	const count = deck.slides.length
 	const index = Math.min(current, Math.max(0, count - 1))
 	const ref: SlideRef | undefined = deck.slides[index]?.ref
 	const render = ref === undefined ? undefined : deck.renders.get(ref)
-	const size = deck.info?.size ?? { cx: 12_192_000, cy: 6_858_000 }
+	const size = deck.info?.size ?? DEFAULT_SLIDE_SIZE
 
 	useEffect(() => {
 		store.setWindow(index)
@@ -506,142 +493,10 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 	const go = (next: number): void => {
 		if (count === 0 || next < 0) return
 
-		const clamped = Math.min(Math.max(0, next), count - 1)
-
-		if (clamped !== index) lastViewed.current = index
-
-		setCurrent(clamped)
+		setCurrent(Math.min(Math.max(0, next), count - 1))
 	}
 
-	const jump = (target: PresentationJump): void => {
-		switch (target.kind) {
-			case "internal":
-				switch (target.jump) {
-					case "next":
-						go(index + 1)
-						return
-					case "previous":
-						go(index - 1)
-						return
-					case "first":
-						go(0)
-						return
-					case "last":
-						go(count - 1)
-						return
-					case "lastViewed":
-						go(lastViewed.current)
-						return
-					// Ending the show means nothing outside it.
-					case "end":
-						return
-				}
-
-				return
-			case "slide":
-				go(deck.slides.findIndex(slide => slide.ref === target.slide))
-				return
-			case "customShow": {
-				const first = deck.info?.customShows.find(show => show.id === target.id)?.slides[0]
-
-				if (first !== undefined) go(deck.slides.findIndex(slide => slide.ref === first))
-			}
-		}
-	}
-
-	// A refused action (a program, a macro, a local file) says so for a moment, in the viewer and in the show.
-	useEffect(() => {
-		if (refusedAt === 0) return
-
-		const timer = setTimeout(() => {
-			setRefusedAt(0)
-		}, REFUSED_NOTE_MS)
-
-		return () => {
-			clearTimeout(timer)
-		}
-	}, [refusedAt])
-
-	const actions = presentationActions({
-		link: {
-			allow: isSafeAbsoluteHref,
-			open: href => {
-				if (!linkGate.intercept(href)) window.open(href, "_blank", "noopener,noreferrer")
-			}
-		},
-		navigate: jump,
-		refused: () => {
-			setRefusedAt(at => at + 1)
-		}
-	})
-
-	// In the show it sits over the stage, which stacks itself at the top (presentation.css --fo-show-z).
-	const refusedNote = (over: "canvas" | "show") =>
-		refusedAt === 0 ? null : (
-			<div
-				role="status"
-				className={`pointer-events-none absolute bottom-3 left-1/2 max-w-[90%] -translate-x-1/2 rounded-md bg-popover px-3 py-1.5 text-center text-xs text-popover-foreground shadow-md ${over === "show" ? "z-[2147483647]" : "z-10"}`}
-			>
-				{t("previewPptxRefusedAction")}
-			</div>
-		)
-
-	const startShow = (): void => {
-		setShowing(true)
-
-		// The whole page, inside the click's activation (menus and dialogs portal to the body).
-		if (fullscreenSupported() && document.fullscreenElement === null) {
-			enteredFullscreen.current = true
-			document.documentElement.requestFullscreen().catch((error: unknown) => {
-				enteredFullscreen.current = false
-				log.warn("presentation", "full screen refused", { error })
-			})
-		}
-	}
-
-	const endShow = (): void => {
-		setShowing(false)
-
-		if (enteredFullscreen.current && document.fullscreenElement !== null) void document.exitFullscreen().catch(() => undefined)
-
-		enteredFullscreen.current = false
-		canvasRef.current?.focus({ preventScroll: true })
-	}
-
-	// Escape in full screen is the browser's (Firefox and Safari never pass it on): leaving the full screen the show
-	// entered ends the show too.
-	useEffect(() => {
-		if (!showing) return
-
-		const onChange = (): void => {
-			if (document.fullscreenElement === null && enteredFullscreen.current) {
-				enteredFullscreen.current = false
-				setShowing(false)
-				canvasRef.current?.focus({ preventScroll: true })
-			}
-		}
-
-		document.addEventListener("fullscreenchange", onChange)
-
-		return () => {
-			document.removeEventListener("fullscreenchange", onChange)
-		}
-	}, [showing])
-
-	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-		const step = PAGE_KEYS[event.key]
-
-		// A key in an open menu (it portals inside this subtree) is the menu's, and the slide under it stays.
-		if (step === undefined || showing || event.altKey || event.ctrlKey || event.metaKey || isAnyMenuOpen()) return
-
-		// Slides page, files don't, whoever handled the key.
-		event.stopPropagation()
-
-		if (event.defaultPrevented || isTextField(event.target)) return
-
-		event.preventDefault()
-		go(step === "first" ? 0 : step === "last" ? count - 1 : index + step)
-	}
+	const show = useDeckPresentation({ store, deck, index, go, focusSlide: canvasRef })
 
 	const groups: RibbonGroup[] = [
 		{
@@ -687,7 +542,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 					label={t("previewPptxStartShow")}
 					icon={<PresentationIcon />}
 					disabled={count === 0}
-					onClick={startShow}
+					onClick={show.startShow}
 				/>
 			)
 		},
@@ -734,13 +589,6 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 		})
 	}
 
-	const notes: string[] = [
-		...(deck.info?.gate ?? []).map(reason => t(GATE_KEYS[reason])),
-		...deck.notices.flatMap(notice =>
-			notice.kind === "macros" ? [t("previewPptxMacros")] : notice.kind === "linkedFile" ? [t("previewPptxLinkedFile")] : []
-		)
-	]
-
 	return (
 		<div
 			role="region"
@@ -750,7 +598,9 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 				onCommandBarF6(event, () => {
 					canvasRef.current?.focus()
 				})
-				onKeyDown(event)
+				onPageKey(event, show.showing, step => {
+					go(step === "first" ? 0 : step === "last" ? count - 1 : index + step)
+				})
 			}}
 		>
 			<OfficeCommandBar
@@ -768,27 +618,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 				groups={groups}
 			/>
 			<LegacyPresentationBar format={deck.info?.format} />
-			{notes.length > 0 && !dismissed ? (
-				<div
-					role="status"
-					className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-1.5 text-xs text-muted-foreground"
-				>
-					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-						{[...new Set(notes)].map(note => (
-							<p key={note}>{note}</p>
-						))}
-					</div>
-					<button
-						type="button"
-						className="shrink-0 underline-offset-2 hover:underline"
-						onClick={() => {
-							setDismissed(true)
-						}}
-					>
-						{t("previewPptxDismiss")}
-					</button>
-				</div>
-			) : null}
+			<DeckNotes deck={deck} />
 			<div className={phone ? "flex min-h-0 flex-1 flex-col-reverse" : "flex min-h-0 flex-1"}>
 				{railOpen && count > 0 ? (
 					<PresentationSlideRail
@@ -810,7 +640,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 							<p className="flex size-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
 								{t("previewPptxEmptyDeck")}
 							</p>
-						) : showing ? null : (
+						) : show.showing ? null : (
 							<SlideView
 								render={render}
 								size={size}
@@ -819,11 +649,11 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 								label={t("previewPptxSlideLabel", { current: index + 1, total: count })}
 								actionLabel={(action, layer) => actionLabel(t, action, layer)}
 								mode="view"
-								actions={actions}
+								actions={show.actions}
 								className="size-full"
 							/>
 						)}
-						{showing ? null : refusedNote("canvas")}
+						{show.showing ? null : show.refusedNote("canvas")}
 					</div>
 					{notesOpen && count > 0 ? (
 						<PresentationNotesPane
@@ -833,33 +663,7 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 					) : null}
 				</div>
 			</div>
-			{showing ? (
-				<div
-					data-preview-surface
-					className="fixed inset-0 z-50 bg-black"
-				>
-					<StaticShow
-						slides={deck.slides}
-						customShows={deck.info?.customShows ?? []}
-						renders={deck.renders}
-						size={size}
-						painter={paintSlide}
-						{...(deck.session === undefined ? {} : { session: deck.session })}
-						from={{ index }}
-						onSlide={slide => {
-							setCurrent(slide)
-							store.setWindow(slide)
-						}}
-						onEnd={endShow}
-						label={t("previewPptxShowLabel")}
-						slideLabel={(slide, total) => t("previewPptxSlideLabel", { current: slide + 1, total })}
-						actionLabel={(action, layer) => actionLabel(t, action, layer)}
-						actions={actions}
-					/>
-					{refusedNote("show")}
-				</div>
-			) : null}
-			{linkGate.dialog}
+			{show.layer}
 		</div>
 	)
 }

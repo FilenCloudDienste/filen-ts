@@ -13,6 +13,11 @@ export function odpParts(deck: Deck): OdpParts | undefined {
 	return parts.get(deck)
 }
 
+// After a save's rebase the deck reads through the parts of its saved file.
+export function bindOdpParts(deck: Deck, odp: OdpParts): void {
+	parts.set(deck, odp)
+}
+
 export const openOdpCapability: OpenCapability = {
 	async open(request) {
 		const opened = await openOdp(request.source)

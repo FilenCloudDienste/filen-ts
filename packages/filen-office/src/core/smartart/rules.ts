@@ -1,6 +1,7 @@
 import { FONT_TYPES, literal, targets } from "./constraints"
 import type { LayoutContext, LayoutNode } from "./interp"
 import type { Rule } from "./layoutDef"
+import { settleFontSize } from "./algorithms/tx"
 
 // Rules (ECMA-376 §21.4.2.24, L.4.15.6.3.22) run after the diagram is laid out and change the value of an existing
 // constraint when the content does not fit: towards `val` (an absolute limit, in the constraint's unit) or `fact`
@@ -22,11 +23,23 @@ interface Relaxable {
 	readonly targets: readonly LayoutNode[]
 }
 
+// A column (lin fromT/fromB) already gives a text child whose height may grow without bound the height of its text
+// (lin.ts): relaxing that rule again would lay the whole column out once per child (list1's child texts).
+function grownByLine(node: LayoutNode, rule: Rule): boolean {
+	if (node.alg.type !== "lin" || rule.val !== Number.POSITIVE_INFINITY) return false
+
+	const dir = node.alg.params.get("linDir") ?? "fromL"
+
+	return rule.type === (dir === "fromT" || dir === "fromB" ? "h" : "w") && rule.type === "h"
+}
+
 function relaxables(node: LayoutNode): Relaxable[] {
 	const out: Relaxable[] = []
 
 	for (const child of node.children) {
 		for (const rule of child.rules) {
+			if (child.alg.type === "tx" && grownByLine(node, rule)) continue
+
 			if (rule.for === "self" && !FONT_TYPES.has(rule.type) && (rule.forName === "" || rule.forName === child.name)) {
 				out.push({ owner: child, rule, targets: [child] })
 			}
@@ -152,20 +165,39 @@ export function relax(node: LayoutNode, context: LayoutContext, overflow: boolea
 	return overflow
 }
 
-// primFontSz/secFontSz constraints with op equ share one size: the smallest any target came to.
+// The nodes one primFontSz/secFontSz constraint sets (for ch/des) share one size: the smallest any of them came to
+// (PowerPoint's caches give every hierarchy4 text box of a level, and every node a list's constraint sizes, one size,
+// whether or not the constraint says op="equ"). A size bounded by another node's (op lte, txTwo no larger than txOne)
+// then takes no more than that node's.
 export function equalizeFonts(node: LayoutNode): void {
 	for (const constraint of node.constraints) {
-		if (constraint.op !== "equ" || !FONT_TYPES.has(constraint.type) || constraint.for === "self") continue
+		if (!FONT_TYPES.has(constraint.type) || constraint.for === "self") continue
+		if (constraint.op === "gte") continue
 
 		const group = targets(node, constraint.for, constraint.forName, constraint.ptType).filter(t => t.fontPt !== undefined)
 
-		if (group.length < 2) continue
+		if (group.length === 0) continue
 
-		let min = Number.POSITIVE_INFINITY
+		let size = Number.POSITIVE_INFINITY
 
-		for (const target of group) min = Math.min(min, target.fontPt as number)
+		for (const target of group) size = Math.min(size, target.fontPt as number)
 
-		for (const target of group) target.fontPt = min
+		if (constraint.op === "lte" && constraint.refType !== "none" && constraint.refType !== "unknown") {
+			const ref = targets(node, constraint.refFor, constraint.refForName, constraint.refPtType)[0]
+			const bound = ref?.fontPt
+
+			if (bound === undefined || !Number.isFinite(constraint.fact)) continue
+
+			size = Math.min(size, bound * constraint.fact)
+
+			for (const target of group) if ((target.fontPt as number) > size) settleFontSize(target, size)
+
+			continue
+		}
+
+		if (constraint.op === "lte" || group.length < 2) continue
+
+		for (const target of group) settleFontSize(target, size)
 	}
 }
 

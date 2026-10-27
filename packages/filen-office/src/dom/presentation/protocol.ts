@@ -13,6 +13,7 @@ import type {
 } from "../../core/presentation/model"
 import type { SlideRender, TextPage, TextSeed, TransferableTextLayout } from "../../core/presentation/output"
 import type { DocxFontFace } from "../docx/protocol"
+import type { TextMailboxTicket } from "./textMailbox"
 
 export type {
 	ActionSummary,
@@ -58,6 +59,8 @@ export interface OpenInfo {
 	readonly variant: DeckVariant
 	// Every slide in order, parsed or not (the rail, render and thumbnails name slides by ref).
 	readonly slides: readonly { readonly ref: SlideRef; readonly hidden: boolean }[]
+	// Every layout, master by master in each master's order (ODP: the synthesized ones), for New slide and Layout.
+	readonly layouts?: readonly PresentationLayoutInfo[]
 	// EMU.
 	readonly size: { readonly cx: number; readonly cy: number; readonly type?: string }
 	readonly notesSize: { readonly cx: number; readonly cy: number }
@@ -70,6 +73,14 @@ export interface OpenInfo {
 	readonly locks: number
 	readonly packageBytes: number
 	readonly source: "bytes" | "range"
+}
+
+// A layout as the editor offers it: its master, ST_SlideLayoutType ("title", "obj"…) and name, when the file has them.
+export interface PresentationLayoutInfo {
+	readonly ref: SlideRef
+	readonly master: SlideRef
+	readonly type?: string
+	readonly name?: string
 }
 
 // Typed notices: none is ever an untyped string for the user.
@@ -114,6 +125,9 @@ export type PresentationEvent =
 			readonly dirty: boolean
 			// Net bytes dirty against the saved state as the history estimates them (the autosave tiers' 1 KiB rule).
 			readonly dirtyBytes?: number
+			// Whether the history has a step to undo / redo now (absent: unknown).
+			readonly canUndo?: boolean
+			readonly canRedo?: boolean
 			readonly slides: readonly SlideRef[]
 			readonly info?: Partial<OpenInfo>
 	  }
@@ -207,10 +221,13 @@ export interface PresentationSessionApi {
 	layoutText(
 		shape: ShapeRef,
 		body: TextBody,
-		caretHint?: number
+		caretHint?: number,
+		// Where a cross-origin isolated page reads the answer inside its next frame (textMailbox.ts); the answer is
+		// posted as well.
+		mailbox?: TextMailboxTicket
 	): Promise<{ readonly page: TextPage; readonly layout: TransferableTextLayout; readonly revision: number }>
-	command(op: DeckOp): Promise<CommandResult>
-	// `open`: the body open in the text editor view, reseeded in the answer when the step touches it.
+	// `open`: the body open in the text editor view, reseeded in the answer when the command or step touches it.
+	command(op: DeckOp, open?: ShapeRef): Promise<CommandResult>
 	undo(open?: ShapeRef): Promise<CommandResult>
 	redo(open?: ShapeRef): Promise<CommandResult>
 	// PRESENTATION_FIND_INTS per match.
@@ -359,16 +376,9 @@ function callTransferables(call: PresentationCall, into: Set<unknown>): void {
 		case "freshParts":
 			addPort(call.args[1], into)
 			return
-		case "command": {
-			const op = call.args[0]
-
-			if (op.family === "picture" && (op.kind === "insert" || op.kind === "replace")) addView(op.image.bytes, into)
-			else if (op.family === "media" && op.kind === "insert" && op.media.poster !== undefined) addView(op.media.poster.bytes, into)
-			else if (op.family === "media" && op.kind === "setPoster") addView(op.poster.bytes, into)
-			else if (op.family === "chart" && op.kind === "setWorkbook") addView(op.workbook, into)
-
+		case "command":
+			addOpBytes(call.args[0], into)
 			return
-		}
 		default:
 			return
 	}
@@ -419,6 +429,15 @@ function renderTransferables(render: SlideRender, into: Set<unknown>): void {
 
 		if (layer.text !== undefined) presentationTransferables(layer.text, into)
 	}
+}
+
+// The inserted bytes an op carries (a batch's, at any depth): the page no longer needs them once sent.
+function addOpBytes(op: DeckOp, into: Set<unknown>): void {
+	if (op.family === "batch") for (const each of op.ops) addOpBytes(each, into)
+	else if (op.family === "picture" && (op.kind === "insert" || op.kind === "replace")) addView(op.image.bytes, into)
+	else if (op.family === "media" && op.kind === "insert" && op.media.poster !== undefined) addView(op.media.poster.bytes, into)
+	else if (op.family === "media" && op.kind === "setPoster") addView(op.poster.bytes, into)
+	else if (op.family === "chart" && op.kind === "setWorkbook") addView(op.workbook, into)
 }
 
 function addView(view: ArrayBufferView, into: Set<unknown>): void {

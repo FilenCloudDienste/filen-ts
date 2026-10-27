@@ -13,6 +13,11 @@ import type { DeckOp } from "./ops"
 // the timeline (trimmed from the bottom, or a redo branch discarded by a new op), their saved fingerprints are kept
 // in the anchor's baseline, so a different state at the same position never looks saved. Kept incrementally: each
 // step updates only the keys it touched.
+//
+// The net bytes dirty (the autosave tiers' threshold) are estimated as the ops and inverses of the steps between the
+// anchor and now that still leave one of their keys dirty, plus those of the steps that left the timeline into the
+// baseline while one of their keys is dirty. Kept as a running total (each step counts its dirty keys), so reading it
+// is O(1) and a change costs only the keys that flipped.
 
 // A key's state: a stable digest of the model values it covers; `part` is the part it lives in (a slide's), so a
 // removed slide still names its part. `exists` false: the thing is absent.
@@ -42,6 +47,8 @@ export interface HistoryStep {
 	bytes: number
 	// A typing burst's identity (family, target, burst id): later transactions of the same burst coalesce.
 	readonly burst: string | undefined
+	// The history's own: the step as the dirty total counts it.
+	counted?: StepCount | undefined
 }
 
 export interface HistoryLimits {
@@ -58,6 +65,8 @@ export type FingerprintOf = (key: TouchKey) => Fingerprint
 interface Anchor {
 	pos: number
 	readonly baseline: Map<TouchKey, Fingerprint>
+	// The steps whose fingerprints went into the baseline, counted as one: their bytes and their keys.
+	readonly lost: Counted
 }
 
 // A save in flight: the state it serializes, made the saved state when the save commits.
@@ -71,6 +80,26 @@ function sameFingerprint(a: Fingerprint, b: Fingerprint): boolean {
 
 let nextId = 1
 
+// A step's bytes as the dirty total counts them, its keys, and how many of them are dirty now.
+export interface StepCount extends Counted {
+	// Counted in the total now (the step is in the saved anchor's range).
+	live: boolean
+}
+
+interface Counted {
+	bytes: number
+	readonly keys: { keys(): Iterable<TouchKey> }
+	dirty: number
+}
+
+function noneLost(): Counted {
+	return { bytes: 0, keys: new Set<TouchKey>(), dirty: 0 }
+}
+
+function stepCount(step: HistoryStep): StepCount {
+	return { bytes: opBytesOf(step.op) + step.inverse.bytes, keys: step.before, dirty: 0, live: false }
+}
+
 export class DeckHistory {
 	readonly limits: HistoryLimits
 	// Bumps on every applied step, undo and redo (the page's change events).
@@ -78,7 +107,7 @@ export class DeckHistory {
 	private readonly entries: HistoryStep[] = []
 	private cursor = 0
 	private bytes = 0
-	private saved: Anchor = { pos: 0, baseline: new Map() }
+	private saved: Anchor = { pos: 0, baseline: new Map(), lost: noneLost() }
 	// Whether the saved anchor is a step of the timeline (false once its branch was discarded or trimmed away).
 	private savedReachable = true
 	private readonly pending = new Map<SavePoint, Anchor>()
@@ -86,6 +115,9 @@ export class DeckHistory {
 	private readonly savedValue = new Map<TouchKey, Fingerprint>()
 	private readonly inRange = new Map<TouchKey, number>()
 	private readonly dirtyKeys = new Set<TouchKey>()
+	// The counted steps of the saved anchor's range and baseline by key, the range's by step, and their dirty total.
+	private readonly countedByKey = new Map<TouchKey, Set<Counted>>()
+	private dirtyTotal = 0
 	private readonly fingerprint: FingerprintOf
 
 	constructor(fingerprint: FingerprintOf, limits: HistoryLimits = DECK_HISTORY_LIMITS) {
@@ -119,6 +151,11 @@ export class DeckHistory {
 		return this.savedReachable && this.saved.pos === this.cursor && this.saved.baseline.size === 0
 	}
 
+	// The net bytes dirty against the saved state, estimated (0 when clean).
+	get dirtyBytes(): number {
+		return this.dirtyKeys.size === 0 ? 0 : this.dirtyTotal
+	}
+
 	// The keys dirty against the saved state.
 	dirtyTouchKeys(): ReadonlySet<TouchKey> {
 		return this.dirtyKeys
@@ -139,7 +176,7 @@ export class DeckHistory {
 			return this.coalesce(top, step)
 		}
 
-		const entry: HistoryStep = { ...step, id: nextId++ }
+		const entry: HistoryStep = { ...step, id: nextId++, counted: undefined }
 
 		this.entries.push(entry)
 		this.cursor++
@@ -203,7 +240,7 @@ export class DeckHistory {
 	savePoint(): SavePoint {
 		const point: SavePoint = { revision: this.revision }
 
-		this.pending.set(point, { pos: this.cursor, baseline: new Map() })
+		this.pending.set(point, { pos: this.cursor, baseline: new Map(), lost: noneLost() })
 
 		return point
 	}
@@ -231,7 +268,7 @@ export class DeckHistory {
 		this.cursor = 0
 		this.bytes = 0
 		this.pending.clear()
-		this.saved = { pos: 0, baseline: new Map() }
+		this.saved = { pos: 0, baseline: new Map(), lost: noneLost() }
 		this.savedReachable = true
 		this.rebuild()
 	}
@@ -268,7 +305,8 @@ export class DeckHistory {
 			before,
 			after,
 			bytes: top.bytes - opBytesOf(top.op) + opBytesOf(step.op),
-			burst: top.burst
+			burst: top.burst,
+			counted: undefined
 		}
 
 		this.leave(top)
@@ -300,6 +338,8 @@ export class DeckHistory {
 				const entry = this.entries[index] as HistoryStep
 
 				for (const [key, value] of entry.after) if (!anchor.baseline.has(key)) anchor.baseline.set(key, value)
+
+				this.lose(anchor, entry)
 			}
 
 			anchor.pos = from
@@ -339,6 +379,8 @@ export class DeckHistory {
 				// The anchor is at the bottom: the step leaves its range, its before-state is what the anchor held.
 				for (const [key, value] of oldest.before) if (!anchor.baseline.has(key)) anchor.baseline.set(key, value)
 
+				this.lose(anchor, oldest)
+
 				if (anchor === this.saved) {
 					this.savedReachable = false
 					this.leave(oldest)
@@ -353,6 +395,8 @@ export class DeckHistory {
 	// one when ahead: a key new to the range takes it from this step; one already in range keeps its own.
 	private enter(entry: HistoryStep): void {
 		const behind = this.saved.pos <= this.cursor
+
+		this.countStep(entry)
 
 		for (const key of entry.before.keys()) {
 			const count = this.inRange.get(key) ?? 0
@@ -369,6 +413,13 @@ export class DeckHistory {
 
 	// A step leaving the range at the side away from the anchor's derivation: the keys it alone touched leave.
 	private leave(entry: HistoryStep): void {
+		const counted = entry.counted
+
+		if (counted?.live === true) {
+			counted.live = false
+			this.uncount(counted)
+		}
+
 		for (const key of entry.before.keys()) {
 			const count = (this.inRange.get(key) ?? 1) - 1
 
@@ -385,12 +436,21 @@ export class DeckHistory {
 	private rebuild(): void {
 		this.inRange.clear()
 		this.savedValue.clear()
+		for (const entry of this.entries) if (entry.counted !== undefined) entry.counted.live = false
+
+		this.countedByKey.clear()
+		this.dirtyKeys.clear()
+		this.dirtyTotal = 0
+
+		this.count(this.saved.lost)
 
 		const { pos } = this.saved
 
 		if (pos <= this.cursor) {
 			for (let index = pos; index < this.cursor; index++) {
 				const entry = this.entries[index] as HistoryStep
+
+				this.countStep(entry)
 
 				for (const key of entry.before.keys()) {
 					this.inRange.set(key, (this.inRange.get(key) ?? 0) + 1)
@@ -404,6 +464,8 @@ export class DeckHistory {
 			for (let index = pos - 1; index >= this.cursor; index--) {
 				const entry = this.entries[index] as HistoryStep
 
+				this.countStep(entry)
+
 				for (const key of entry.before.keys()) {
 					this.inRange.set(key, (this.inRange.get(key) ?? 0) + 1)
 
@@ -414,8 +476,6 @@ export class DeckHistory {
 			}
 		}
 
-		this.dirtyKeys.clear()
-
 		const keys = new Set<TouchKey>([...this.inRange.keys(), ...this.saved.baseline.keys()])
 
 		this.refreshKeys(keys)
@@ -424,16 +484,89 @@ export class DeckHistory {
 	private refreshKeys(keys: Iterable<TouchKey>): void {
 		for (const key of keys) {
 			const saved = this.saved.baseline.get(key) ?? this.savedValue.get(key)
+			const dirty = saved === undefined ? this.inRange.has(key) : !sameFingerprint(saved, this.fingerprint(key))
 
-			if (saved === undefined) {
-				if (this.inRange.has(key)) this.dirtyKeys.add(key)
-				else this.dirtyKeys.delete(key)
+			if (dirty === this.dirtyKeys.has(key)) continue
 
-				continue
+			if (dirty) this.dirtyKeys.add(key)
+			else this.dirtyKeys.delete(key)
+
+			for (const counted of this.countedByKey.get(key) ?? []) {
+				if (dirty) {
+					if (counted.dirty++ === 0) this.dirtyTotal += counted.bytes
+				} else if (--counted.dirty === 0) {
+					this.dirtyTotal -= counted.bytes
+				}
 			}
+		}
+	}
 
-			if (sameFingerprint(saved, this.fingerprint(key))) this.dirtyKeys.delete(key)
-			else this.dirtyKeys.add(key)
+	// A step entering the saved anchor's range is counted (anew: a step re-entering is counted as it is now).
+	private countStep(entry: HistoryStep): void {
+		const counted = (entry.counted ??= stepCount(entry))
+
+		if (counted.live) this.uncount(counted)
+
+		counted.live = true
+		this.count(counted)
+	}
+
+	// A step leaves the timeline into an anchor's baseline: its bytes and keys join the anchor's lost count.
+	private lose(anchor: Anchor, entry: HistoryStep): void {
+		const lost = anchor.lost
+		const keys = lost.keys as Set<TouchKey>
+		const counted = anchor === this.saved
+		const bytes = (entry.counted ??= stepCount(entry)).bytes
+
+		if (counted && lost.dirty > 0) this.dirtyTotal += bytes
+
+		lost.bytes += bytes
+
+		for (const key of entry.before.keys()) {
+			if (keys.has(key)) continue
+
+			keys.add(key)
+
+			if (!counted) continue
+
+			this.indexed(key).add(lost)
+
+			if (this.dirtyKeys.has(key) && lost.dirty++ === 0) this.dirtyTotal += lost.bytes
+		}
+	}
+
+	private indexed(key: TouchKey): Set<Counted> {
+		let set = this.countedByKey.get(key)
+
+		if (set === undefined) {
+			set = new Set()
+			this.countedByKey.set(key, set)
+		}
+
+		return set
+	}
+
+	private count(counted: Counted): void {
+		counted.dirty = 0
+
+		for (const key of counted.keys.keys()) {
+			this.indexed(key).add(counted)
+
+			if (this.dirtyKeys.has(key)) counted.dirty++
+		}
+
+		if (counted.dirty > 0) this.dirtyTotal += counted.bytes
+	}
+
+	private uncount(counted: Counted): void {
+		if (counted.dirty > 0) this.dirtyTotal -= counted.bytes
+
+		for (const key of counted.keys.keys()) {
+			const set = this.countedByKey.get(key)
+
+			set?.delete(counted)
+
+			if (set?.size === 0) this.countedByKey.delete(key)
 		}
 	}
 }

@@ -17,6 +17,7 @@ import {
 } from "../../presentation/model"
 import { encodeUtf8, escapeAttribute, escapeText, type XmlDocument, type XmlEditor } from "../../xml/index"
 import { readSlidePart } from "../read/slide"
+import { timingElement } from "../read/timing"
 import { G, P_MAIN, partReader, type PartReader } from "../read/xml"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { URIS, alternateUnit, childElements, sameModel, xfrmXml, type EmitContext, type Pristine } from "./emit/shape"
@@ -1028,6 +1029,9 @@ class Splice {
 			)
 
 			if (result.kind === "refused") return result
+
+			// A whole-root rewrite writes the timing in its slot; a surgical one puts it in place here.
+			if (surgical && slideDirt.part === "timing" && result.kind === "markup") placeTiming(editor, document, r, root, result.pieces)
 		}
 
 		if (node.kind === "slide" && node.parent !== undefined) {
@@ -1467,6 +1471,28 @@ function rootAttributes(editor: XmlEditor, r: PartReader, root: number, node: Sl
 		if (node.name === undefined) editor.removeAttribute(cSld, "name")
 		else editor.setAttribute(cSld, "name", node.name)
 	}
+}
+
+// The slide's p:timing (ECMA-376 Part 1 §19.3.1.38: after p:transition, before p:extLst) replaced, removed or added.
+function placeTiming(editor: XmlEditor, document: XmlDocument, r: PartReader, root: number, pieces: readonly EmitPiece[]): void {
+	const bytes = assemble(document, pieces)
+	const current = timingElement(r, root)
+
+	if (current >= 0) {
+		if (bytes.length === 0) editor.remove(current)
+		else replaceChanged(editor, document, current, bytes)
+
+		return
+	}
+
+	if (bytes.length === 0) return
+
+	let anchor = -1
+
+	for (let child = r.first(root); child >= 0; child = r.next(child)) if (!r.is(child, G.P, "extLst")) anchor = child
+
+	if (anchor >= 0) editor.insertAfter(anchor, bytes)
+	else editor.prepend(root, bytes)
 }
 
 // Replaces a node only when its bytes change (an unchanged UTF-16 part stays as it was, never transcoded).

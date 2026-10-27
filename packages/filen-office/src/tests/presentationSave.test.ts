@@ -19,7 +19,7 @@ import {
 	type SaveDependencies,
 	type SaveHistory
 } from "../dom/presentation/save"
-import { savePortReader, type SavePortEnd } from "../dom/presentation/savePort"
+import { savePortAnnounced, savePortReader, type SavePortEnd } from "../dom/presentation/savePort"
 import { agileStreams, encryptedOfficeFile } from "./encryption/testing"
 import { writeBigDeck, type BigDeckSpec } from "./fixtures/presentation/bigDeck"
 
@@ -85,6 +85,10 @@ class FakeDrive {
 	passes = 0
 	passBytes = 0
 	closed = 0
+	// The files whose sources were closed, in order.
+	readonly closedFiles: string[] = []
+	// A read of this file and length waits until the test lets it go.
+	heldRead: { readonly uuid: string; readonly length: number; readonly until: Promise<void> } | undefined
 	private inPass = false
 	readonly versioning: boolean
 	private next = 1
@@ -106,14 +110,12 @@ class FakeDrive {
 
 		return {
 			size: bytesOf().length,
-			read: (offset, length) => {
+			read: async (offset, length) => {
 				this.reads++
 
-				try {
-					return Promise.resolve(bytesOf().slice(offset, offset + length))
-				} catch (error) {
-					return Promise.reject(error as Error)
-				}
+				if (this.heldRead?.uuid === uuid && this.heldRead.length === length) await this.heldRead.until
+
+				return bytesOf().slice(offset, offset + length)
 			},
 			readChecked: (offset, length, crc) => {
 				this.reads++
@@ -146,6 +148,7 @@ class FakeDrive {
 			},
 			close: () => {
 				this.closed++
+				this.closedFiles.push(uuid)
 			}
 		}
 	}
@@ -549,7 +552,69 @@ describe("presentation save", () => {
 		const saved = await h.save(deps)
 
 		await h.commit(deps, saved)
-		expect(h.drive.closed).toBe(1)
+		// The saved file's port at once, then the old file's, which the session no longer reads.
+		expect(h.drive.closedFiles).toEqual(["v2", "v1"])
+	})
+
+	it("a dirty deck with nothing net to write answers unchanged and reads clean from then on", async () => {
+		const h = await harness()
+		const deps = dependencies(testWriter(() => new Map()))
+
+		h.history.edit()
+		// Dirty keys that name no part to write (the history's changes are empty).
+		h.history.changes = () => ({ empty: true, parts: new Map(), presentation: new Set() })
+		expect((await h.save(deps)).result).toEqual({ kind: "unchanged" })
+		expect(h.history.dirty).toBe(false)
+		expect(h.events.at(-1)).toMatchObject({ type: "changed", dirty: false, slides: [] })
+	})
+
+	it("a snapshot the writer finds nothing to write in commits its state as saved", async () => {
+		const h = await harness()
+		const writer = testWriter(() => new Map([[SLIDE1, new TextEncoder().encode("<p:sld/>")]]))
+		const deps = dependencies({ snapshot: input => writer.snapshot(input), write: () => Promise.resolve({ kind: "unchanged" }) })
+
+		h.history.edit()
+		expect((await h.save(deps)).result).toEqual({ kind: "unchanged" })
+		expect(h.history.dirty).toBe(false)
+		expect(h.history.abandoned).toEqual([])
+		expect(h.events.at(-1)).toMatchObject({ type: "changed", dirty: false })
+	})
+
+	it("closes the old file's range port once the session reads the saved file", async () => {
+		const h = await harness({ versioning: true })
+		const deps = dependencies(
+			testWriter(() => new Map([[SLIDE1, new TextEncoder().encode("<p:sld/>")]])),
+			1024
+		)
+
+		h.history.edit()
+
+		const saved = await h.save(deps)
+
+		expect(await h.commit(deps, saved)).toEqual({ dirty: false })
+		expect(h.drive.closedFiles).toEqual(["v1"])
+	})
+
+	it("closes the old file's range port only after a read of it in flight ends", async () => {
+		const h = await harness({ versioning: true })
+		const deps = dependencies(
+			testWriter(() => new Map([[SLIDE1, new TextEncoder().encode("<p:sld/>")]])),
+			1024
+		)
+
+		const gate = Promise.withResolvers<undefined>()
+
+		h.drive.heldRead = { uuid: "v1", length: 3, until: gate.promise }
+
+		// A read of the old file (a slide's media) started before the save, still running when it commits.
+		const reading = h.session.package.source.read(0, 3)
+
+		h.history.edit()
+		await h.commit(deps, await h.save(deps))
+		expect(h.drive.closedFiles).toEqual([])
+		gate.resolve(undefined)
+		expect((await reading).length).toBe(3)
+		expect(h.drive.closedFiles).toEqual(["v1"])
 	})
 
 	for (const path of ["in memory", "streamed"] as const) {
@@ -794,6 +859,38 @@ describe("presentation save of edits", () => {
 
 		return new TextDecoder().decode(await archive.read(archive.get(SLIDE1)!))
 	}
+
+	it("tells the page before any upload whether the save writes, and that the deck is clean once the save is committed", async () => {
+		const h = await editHarness()
+		const idle = new MessageChannel()
+		const idleAnnounced = savePortAnnounced(idle.port2 as unknown as SavePortEnd)
+
+		expect(await saveSession(h.context, { reason: "user", port: idle.port1 as unknown as SavePortEnd }, SAVE_DEPENDENCIES)).toEqual({
+			kind: "unchanged"
+		})
+		expect(await idleAnnounced).toBe(false)
+
+		await h.move(3_000_000)
+
+		const { port1, port2 } = new MessageChannel()
+		const announced = savePortAnnounced(port2 as unknown as SavePortEnd)
+		const saving = saveSession(h.context, { reason: "user", port: port1 as unknown as SavePortEnd }, SAVE_DEPENDENCIES)
+
+		expect(await announced).toBe(true)
+
+		const uuid = await h.drive.upload(port2)
+		const result = await saving
+
+		expect(result).toMatchObject({ kind: "written" })
+		expect(await h.commit(SAVE_DEPENDENCIES, { result, uuid })).toEqual({ dirty: false })
+		expect(h.events.at(-1)).toEqual({
+			type: "changed",
+			revision: expect.any(Number) as number,
+			dirty: false,
+			dirtyBytes: 0,
+			slides: []
+		})
+	})
 
 	it("saves an op, then nothing once it is undone, and rebases with versioning off", async () => {
 		const h = await editHarness()

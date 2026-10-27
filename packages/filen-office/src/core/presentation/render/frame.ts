@@ -11,6 +11,7 @@ import type { FrameRef, ShapeRef } from "../model"
 import type { RenderReport } from "./effects"
 import type { RenderServices } from "./services"
 import type { SmartArtTexts } from "./smartartText"
+import { drawingMarkup } from "../../smartart/style"
 
 // Graphic frames other than tables: charts (the shared chart converter), SmartArt (the drawing PowerPoint caches
 // beside the diagram, else the SmartArt engine), OLE objects and media (their preview picture). Each draws into a
@@ -24,6 +25,43 @@ function imagesOf(services: RenderServices, part: string): PaintContext["images"
 			? undefined
 			: { partName: relationship.target, contentType: services.contentType(relationship.target) }
 	}
+}
+
+const DIAGRAM_FILLS = new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"])
+
+// A diagram's background and outline (ECMA-376 §21.4.3.1 bg, §21.4.3.10 whole): the data model's fill and line over
+// the whole frame, drawn under its shapes. The drawing cache leaves them out, so they come from the data part (its
+// pictures are relationships of that part).
+function diagramBackdrop(context: ShapeContext, services: RenderServices, data: string, width: number, height: number): boolean {
+	const document = services.xml(data)
+
+	if (document === undefined) return false
+
+	const reader = drawingReader(document)
+	const root = document.documentElement()
+	const bg = reader.child(root, D.Dgm, "bg")
+	const whole = reader.child(root, D.Dgm, "whole")
+	let fill = ""
+
+	for (let child = bg < 0 ? -1 : document.firstChildElement(bg); child >= 0; child = document.nextSiblingElement(child)) {
+		if (reader.group(child) === D.A && DIAGRAM_FILLS.has(document.localName(child))) fill = drawingMarkup(reader, child, 0, true)
+	}
+
+	const ln = whole < 0 ? -1 : reader.child(whole, D.A, "ln")
+	const line = ln < 0 ? "" : drawingMarkup(reader, ln)
+
+	if ((fill === "" || fill.startsWith("<a:noFill")) && line === "") return false
+
+	const markup =
+		'<dsp:drawing xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+		'<dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/><dsp:sp modelId="0"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>' +
+		`<dsp:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${String(Math.round(width))}" cy="${String(Math.round(height))}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+		`${fill === "" ? "<a:noFill/>" : fill}${line === "" ? "<a:ln><a:noFill/></a:ln>" : line}</dsp:spPr></dsp:sp></dsp:spTree></dsp:drawing>`
+
+	return (
+		convertSmartArt({ ...context, images: imagesOf(services, data) }, parseXml(new TextEncoder().encode(markup)), width, height) !==
+		undefined
+	)
 }
 
 // The drawing PowerPoint caches for a diagram (MS-ODRAWXML §2.4.10 dsp:dataModelExt@relId in the data part's
@@ -154,17 +192,20 @@ export async function drawFrame(
 				}
 			}
 
-			if (document === undefined) {
-				report.refuse(empty ? "smartartCacheEmpty" : "smartartUncached")
+			if (matrix !== undefined) {
+				// The cached drawing is a shape tree of its own frame; inside a group it is not placed.
+				report.refuse(document === undefined ? (empty ? "smartartCacheEmpty" : "smartartUncached") : "smartartInGroup")
 
 				return false
 			}
 
-			if (matrix !== undefined) {
-				// The cached drawing is a shape tree of its own frame; inside a group it is not placed.
-				report.refuse("smartartInGroup")
+			// A diagram without nodes may still have its background (a picture of its own).
+			const backdrop = diagramBackdrop(context, services, frame.data, width, height)
 
-				return false
+			if (document === undefined) {
+				report.refuse(empty ? "smartartCacheEmpty" : "smartartUncached")
+
+				return backdrop
 			}
 
 			const drawn = document

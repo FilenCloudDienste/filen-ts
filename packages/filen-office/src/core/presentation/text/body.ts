@@ -73,6 +73,9 @@ export interface BodyLayout {
 	readonly turn: 0 | 90 | 270
 	// Per paragraph, the length of the generated marker (bullet or number and its tab) its text starts with.
 	readonly prefixes: Int32Array
+	// Per paragraph p, its model runs' end offsets in its text are runEnds[runStarts[p] .. runStarts[p + 1]).
+	readonly runStarts: Int32Array
+	readonly runEnds: Int32Array
 }
 
 const ALIGNMENT: Readonly<Record<string, number>> = {
@@ -604,17 +607,29 @@ function appendBullet(session: Session, builder: ParagraphBuilder, paragraph: Re
 	return builder.length - before
 }
 
-function appendRuns(session: Session, builder: ParagraphBuilder, paragraph: ResolvedParagraph, source: number, fields: FieldContext): void {
+// Appends the paragraph's runs, recording where each model run ends in the paragraph text (one entry per run).
+function appendRuns(
+	session: Session,
+	builder: ParagraphBuilder,
+	paragraph: ResolvedParagraph,
+	source: number,
+	fields: FieldContext,
+	runEnds: number[]
+): void {
 	for (const run of paragraph.runs) {
 		if (run.kind === "br") {
 			builder.lineBreak(session.look(run.rPr, "latin"))
+			runEnds.push(builder.length)
 			continue
 		}
 
 		const props = run.kind === "opaque" ? paragraph.defRPr : run.rPr
 		const text = run.kind === "fld" ? fieldText(run.type, run.text, fields) : run.text
 
-		if (text.length === 0) continue
+		if (text.length === 0) {
+			runEnds.push(builder.length)
+			continue
+		}
 
 		const symbol =
 			props.sym === undefined
@@ -635,6 +650,8 @@ function appendRuns(session: Session, builder: ParagraphBuilder, paragraph: Reso
 
 			if (link >= 0) session.linkInts.push(source, start, builder.length, link)
 		}
+
+		runEnds.push(builder.length)
 	}
 }
 
@@ -745,6 +762,8 @@ function layoutAt(
 	const fields = options.fields ?? {}
 	const texts: string[] = []
 	const prefixes = new Int32Array(resolved.paragraphs.length)
+	const runStarts = new Int32Array(resolved.paragraphs.length + 1)
+	const runEnds: number[] = []
 	const kept: number[] = []
 	const groups: number[] = []
 	const columns = Math.max(1, Math.min(16, Math.trunc(bodyPr.columns)))
@@ -778,7 +797,8 @@ function layoutAt(
 
 		const linksFrom = session.linkInts.length
 
-		appendRuns(session, builder, paragraph, index, fields)
+		runStarts[index] = runEnds.length
+		appendRuns(session, builder, paragraph, index, fields, runEnds)
 
 		const text = builder.finish()
 
@@ -865,7 +885,9 @@ function layoutAt(
 		? stackUpright(out, texts, session, frameWidth, frameHeight, vertical === "wordArtVert")
 		: assemblePage(laid, texts, session, frameWidth, frameHeight)
 
-	return { page, layout: laid, styles: session.styles, height, overflow, turn, prefixes }
+	runStarts[resolved.paragraphs.length] = runEnds.length
+
+	return { page, layout: laid, styles: session.styles, height, overflow, turn, prefixes, runStarts, runEnds: Int32Array.from(runEnds) }
 }
 
 export type { Session as BodySession }

@@ -1,11 +1,14 @@
 import type { TFunction } from "i18next"
+import type { DeckOp } from "@filen/office/core/presentation"
+import type { CommandResult, OpenInfo, PresentationSessionApi, SlideRender } from "@filen/office/dom/presentation"
+import type { ShapeSelection, TextEditing } from "@filen/office/react/presentation"
 import type { RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
 import { animationsGroups } from "@/features/presentation/components/ribbon/animations"
 import { arrangeGroups } from "@/features/presentation/components/ribbon/arrange"
 import { audioGroups } from "@/features/presentation/components/ribbon/audio"
 import { chartGroups } from "@/features/presentation/components/ribbon/chart"
 import { designGroups } from "@/features/presentation/components/ribbon/design"
-import { homeGroups } from "@/features/presentation/components/ribbon/home"
+import { homeEditingGroups, homeGroups } from "@/features/presentation/components/ribbon/home"
 import { homeTextGroups } from "@/features/presentation/components/ribbon/homeText"
 import { insertGroups } from "@/features/presentation/components/ribbon/insert"
 import { insertChartsGroups } from "@/features/presentation/components/ribbon/insertCharts"
@@ -35,11 +38,26 @@ export type PresentationContextualTabId =
 // What the selection holds, for the contextual tabs.
 export type PresentationSelectionKind = "shape" | "text" | "picture" | "table" | "chart" | "video" | "audio" | "smartart"
 
+// The editor a group's commands act on (absent in the viewer).
+export interface PresentationRibbonEditor {
+	readonly info: OpenInfo
+	// The slide in view.
+	readonly render: SlideRender | undefined
+	// The shapes selected on it (the canvas, the ribbon and the keys share one store).
+	readonly selection: ShapeSelection
+	// Runs one op through the session; the shell reports a refusal before it resolves.
+	command(op: DeckOp): Promise<CommandResult>
+	readonly session: PresentationSessionApi
+	// The text editing store (the body open in the text editor, its flush).
+	readonly text?: TextEditing
+}
+
 export interface PresentationRibbonContext {
 	readonly editable: boolean
 	readonly phone: boolean
 	readonly selection: ReadonlySet<PresentationSelectionKind>
 	readonly t: TFunction
+	readonly editor?: PresentationRibbonEditor
 }
 
 // A group file: the groups it adds to its tab for this context (none when they do not apply).
@@ -54,7 +72,7 @@ export type PresentationTab =
 	  }
 
 export const PRESENTATION_TABS: readonly PresentationTab[] = [
-	{ id: "home", groups: [homeGroups, homeTextGroups] },
+	{ id: "home", groups: [homeGroups, homeTextGroups, homeEditingGroups] },
 	{ id: "insert", groups: [insertGroups, insertObjectsGroups, insertChartsGroups, insertMediaGroups, insertSmartArtGroups] },
 	{ id: "design", groups: [designGroups] },
 	{ id: "transitions", groups: [transitionsGroups] },

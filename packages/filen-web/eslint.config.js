@@ -229,6 +229,14 @@ export default defineConfig([
 			"react-refresh/only-export-components": "off"
 		}
 	},
+	{
+		// Ribbon group files export their `<tab>Groups` function (the tabs.ts registry contract) beside the
+		// components it renders.
+		files: ["src/features/presentation/components/ribbon/*.tsx"],
+		rules: {
+			"react-refresh/only-export-components": "off"
+		}
+	},
 	// Must stay last — turns off stylistic rules that would otherwise fight prettier's output.
 	eslintConfigPrettier
 ])

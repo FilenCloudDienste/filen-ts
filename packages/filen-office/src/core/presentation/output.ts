@@ -1,6 +1,6 @@
 import type { DrawingData, Paint, Rgba, Stroke } from "../drawingml/index"
 import type { DecorationValue, DocxLinkTarget, DocxPageData, DocxTextStyle } from "../docx/layout/index"
-import type { Action, LockReason, ParaProps, RunProps, ShapeRef, SlideRef, TextBody } from "./model"
+import type { Action, LockReason, ParaProps, RunProps, ShapeLocks, ShapeNode, ShapeRef, SlideRef, TextBody, Xfrm } from "./model"
 
 // What the presentation engine hands a painter: plain data (numbers, strings, typed arrays) that crosses a worker
 // boundary by structured clone with its typed arrays transferred, never copied. The text and drawing data are the
@@ -67,6 +67,13 @@ export interface TransferableTextLayout {
 	readonly fonts: readonly string[]
 	// Per paragraph source, its text (line and fragment offsets index it).
 	readonly texts: readonly string[]
+	// Per paragraph, the length of the generated marker (bullet or number and its tab) its text starts with.
+	readonly prefixes?: Int32Array
+	// Per paragraph p, its model runs' end offsets in texts[p] are runEnds[runStarts[p] .. runStarts[p + 1]).
+	readonly runStarts?: Int32Array
+	readonly runEnds?: Int32Array
+	// Per font key, 1 when the font is measured with kerning.
+	readonly kerning?: Uint8Array
 }
 
 export const TEXT_STYLE_INTS = 3
@@ -85,13 +92,15 @@ export interface ActionSummary {
 }
 
 export interface SlideLayer {
+	// The shape the layer draws, named in the node that owns it: a layout's or master's shape drawn on a slide names
+	// that layout or master (never the slide, whose own shapes may repeat its ids).
 	readonly shape: ShapeRef
 	readonly drawing: DrawingData
 	readonly text?: TextPage
 	// Slide px: a b c d e f, placing the layer's drawing on the slide.
 	readonly matrix: readonly number[]
 	// TextPage px → slide px: the text box (geometry text rectangle minus insets, turned for vert/vert270); absent =
-	// `matrix`.
+	// `matrix`. A slide's top-level shape that can hold text has it even with no text to paint (the editor enters it).
 	readonly textMatrix?: readonly number[]
 	// Shape effects drawn around the drawing (glow, soft edge, reflection…).
 	readonly effects?: RenderEffects
@@ -101,6 +110,18 @@ export interface SlideLayer {
 	// Paragraph or character runs of the text the timing animates on their own.
 	readonly subLayers?: readonly { readonly target: "para" | "char"; readonly range: readonly [number, number] }[]
 	readonly lock?: LockReason
+	// The slide's own top-level shape this layer draws (absent on master and layout layers): its id (a group's for a
+	// layer of one of its children), its box as the model resolves it (EMU; a placeholder's inherited box when it has
+	// none of its own) and its alt text. What the editor's selection and arrange commands start from.
+	// `locks`: the file's own locks; `line`: drawn from the box's top-left to its bottom-right corner (flips swap the
+	// ends), a connector or a line preset: the editor drags its two ends, not its box.
+	readonly box?: {
+		readonly id: number
+		readonly xfrm: Xfrm
+		readonly alt?: ShapeNode["alt"]
+		readonly locks?: ShapeLocks
+		readonly line?: true
+	}
 }
 
 export interface SlideRender {
@@ -108,6 +129,8 @@ export interface SlideRender {
 	readonly index: number
 	readonly revision: number
 	readonly hidden: boolean
+	// The slide's layout (its parent), when it has one.
+	readonly layout?: SlideRef
 	// Drawn over the deck's size (OpenInfo.size, EMU / 9525 px).
 	readonly background: DrawingData
 	readonly layers: readonly SlideLayer[]

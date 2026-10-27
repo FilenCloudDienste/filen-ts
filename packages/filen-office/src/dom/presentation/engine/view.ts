@@ -3,13 +3,15 @@ import { FontManager, type FontRequest } from "../../../core/fonts/index"
 import { partKey, type Relationships, type Slicing, type ZipEntry } from "../../../core/opc/index"
 import { imageWithinBudget } from "../../../core/opc/mediaPolicy"
 import type { PresentationBudgets } from "../../../core/presentation/budget"
-import { PresentationError, refused, type ShapeRef, type SlideNode, type SlideRef } from "../../../core/presentation/model"
+import { PresentationError, refused, type Deck, type ShapeRef, type SlideNode, type SlideRef } from "../../../core/presentation/model"
 import type { SlideRender } from "../../../core/presentation/output"
 import type { RenderServices, TextLayoutRequest, TextLayoutResult } from "../../../core/presentation/render/services"
 import { renderSlide } from "../../../core/presentation/render/slide"
 import { fontRequests, layoutBody, type TextEnvironment } from "../../../core/presentation/text/body"
 import { resolveBody, shapeBodyContext, type BodyContext, type TextFonts } from "../../../core/presentation/text/resolve"
 import { effectiveClrMap, resolveColor, themeOf, themeTypeface, toRgba, type PresentationTheme } from "../../../core/presentation/theme"
+import type { DataPoint } from "../../../core/smartart/data"
+import { smartArtFontRequests, textAdapterMeasurer, type TextMeasurer } from "../../../core/smartart/measure"
 import { MeasureCache } from "../../../core/text/index"
 import type { XmlDocument } from "../../../core/xml/index"
 import type { DocxFontFace } from "../../docx/protocol"
@@ -18,6 +20,7 @@ import { presentationRealm, type PresentationRealm } from "../services"
 import type { ShapeTextContext, TextServices } from "./text"
 import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
+import { smartArtRenderer } from "./smartart"
 
 // Slide renders for the page's SVG canvas, the raster path and the jobs worker: each slide parsed with its layout,
 // master and notes (parse before touch), the XML parts its frames draw from (charts, diagrams) read ahead, then
@@ -135,6 +138,23 @@ function stateOf(session: EngineSession): ViewState {
 		...(text === undefined ? {} : { layoutText: request => layoutRequest(parts, text, request) })
 	}
 	const state: ViewState = { parts, text, documents, relationships, services, located: false }
+
+	// Diagrams without a drawing cache are laid out by the SmartArt engine over these parts and this text adapter.
+	state.services = {
+		...services,
+		smartart: smartArtRenderer(session, {
+			get services() {
+				return state.services
+			},
+			...(text === undefined
+				? {}
+				: {
+						measurer: (slide: SlideNode, texts: readonly (string | DataPoint)[]) =>
+							smartArtMeasurer(parts, text, session, slide, texts),
+						fontGeneration: () => text.prepared.size
+					})
+		})
+	}
 
 	session.onClose(() => {
 		documents.clear()
@@ -280,11 +300,53 @@ export function bodyContextOf(parts: ViewParts, request: TextLayoutRequest): Bod
 	return shapeBodyContext(deck, request.owner, request.shape, fonts, request.bodyPr, request.cell)
 }
 
+// The theme fonts and colours text of `slide` resolves against.
+function slideFonts(parts: ViewParts, deck: Deck, slide: SlideNode): TextFonts {
+	const themeRef = themeOf(deck.nodes, slide)
+	const theme = themeRef === undefined ? undefined : parts.theme(themeRef.part)
+	const clrMap = effectiveClrMap(deck.nodes, slide)
+
+	return {
+		color: color => {
+			const resolved = resolveColor(color, { theme, clrMap })
+
+			return resolved === undefined ? undefined : toRgba(resolved)
+		},
+		typeface: (typeface, lang) => themeTypeface(theme, typeface, scriptForLanguage(lang))
+	}
+}
+
+// A SmartArt measurer over the slide text adapter; the faces it needs are requested like a body's (the render that
+// asked is redone once they are loaded, and the engine's cache keys on fontGeneration).
+function smartArtMeasurer(
+	parts: ViewParts,
+	text: ViewText,
+	session: EngineSession,
+	slide: SlideNode,
+	texts: readonly (string | DataPoint)[]
+): TextMeasurer {
+	const fonts = slideFonts(parts, session.deck, slide)
+
+	for (const font of smartArtFontRequests(texts, fonts)) {
+		const key = requestKey(font)
+
+		if (!text.prepared.has(key)) text.missing.set(key, font)
+	}
+
+	return textAdapterMeasurer(text.environment, fonts)
+}
+
 function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequest): TextLayoutResult | undefined {
 	const capture = text.capture
+	const own = request.cell === undefined
 
-	if (capture !== undefined && capture.shape.slide === request.slide.ref && capture.shape.id === request.shape.id)
+	// A layer names the node that owns its shape (a layout's or master's shape drawn on a slide names that layout or
+	// master), so the slide shape's own body is the one captured; a table cell's body is not the frame's.
+	if (own && capture !== undefined && capture.shape.slide === request.owner.ref && capture.shape.id === request.shape.id)
 		capture.request = request
+
+	// A shape body with nothing visible in it paints nothing: the render hands it over only so the editor can enter it.
+	if (own && !visibleText(request.body)) return undefined
 
 	const resolved = resolveBody(request.body, bodyContextOf(parts, request))
 
@@ -303,6 +365,10 @@ function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequ
 	})
 
 	return { page: result.page, height: result.height }
+}
+
+function visibleText(body: TextLayoutRequest["body"]): boolean {
+	return body.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== ""))
 }
 
 // Loads the faces text asked for and sends the page the ones newly registered; whether any was missing.

@@ -1,12 +1,21 @@
 import type { Box, LayoutContext, LayoutNode } from "../interp"
+import { isConnector } from "./conn"
 import { customScale, param, sizeOf } from "./shared"
 
 function isSpacer(child: LayoutNode): boolean {
 	return child.alg.type === "sp" && (child.shape === undefined || child.shape.type === "none") && child.children.length === 0
 }
 
-function isConnector(child: LayoutNode): boolean {
-	return child.alg.type === "conn" || child.shape?.type === "conn"
+// A composite with an aspect ratio flows at the largest box of that shape inside its constraint size (PictureStrips'
+// strips, ar 3, stack in one column).
+function arBox(child: LayoutNode, size: { w: number; h: number }): { w: number; h: number } {
+	const ar = child.alg.type === "composite" ? Number(child.alg.params.get("ar") ?? "0") : 0
+
+	if (!(ar > 0) || !Number.isFinite(ar) || !(size.w > 0 && size.h > 0)) return size
+
+	const w = Math.min(size.w, size.h * ar)
+
+	return { w, h: w / ar }
 }
 
 interface Item {
@@ -77,7 +86,7 @@ export function snakeLayout(node: LayoutNode, _context: LayoutContext): void {
 
 	const byRow = param(node, "flowDir", "row") !== "col"
 	const items: Item[] = flow.map(child => {
-		const size = sizeOf(child, node)
+		const size = arBox(child, sizeOf(child, node))
 		const scale = customScale(child)
 		const baseA = byRow ? size.w : size.h
 		const baseB = byRow ? size.h : size.w
@@ -132,6 +141,11 @@ export function snakeLayout(node: LayoutNode, _context: LayoutContext): void {
 
 			child.box = byRow ? { x: box.x + cursorA, y: box.y + pb, w: a, h: b } : { x: box.x + pb, y: box.y + cursorA, w: b, h: a }
 			child.base = byRow ? { w: item.baseA * scale, h: item.baseB * scale } : { w: item.baseB * scale, h: item.baseA * scale }
+			// The fitted size is the child's size from now on: its own children's constraints on it read this one.
+			if (scale < 1) {
+				child.values.set("w", child.base.w)
+				child.values.set("h", child.base.h)
+			}
 			child.scaledInPlace = true
 			placed.set(child, child.box)
 			cursorA += a + gapA * scale

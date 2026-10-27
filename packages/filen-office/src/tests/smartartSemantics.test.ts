@@ -45,8 +45,13 @@ describe("SmartArt axes (ST_AxisType)", () => {
 		["ancstOrSelf", 'axis="ch ch ancstOrSelf" ptType="node node all" cnt="1 1 2"', ["a1", "a"]],
 		["followSib: later peers only", 'axis="ch followSib" ptType="node node"', ["b", "c", "c"]],
 		["follow: later peers and their descendants", 'axis="ch follow" ptType="node node"', ["b", "b1", "c", "c"]],
-		["precedSib: earlier peers, nearest first", 'axis="ch precedSib" ptType="node node" st="3 1"', ["b", "a"]],
-		["preced: earlier peers and their descendants", 'axis="ch preced" ptType="node node" st="3 1"', ["b", "b1", "a", "a1", "a2"]],
+		["precedSib: earlier peers in document order", 'axis="ch precedSib" ptType="node node" st="3 1"', ["a", "b"]],
+		[
+			"precedSib st -1: the nearest earlier peer (orgChart1's parTrans)",
+			'axis="ch precedSib" ptType="node node" st="3 -1" cnt="1 1"',
+			["b"]
+		],
+		["preced: earlier peers and their descendants", 'axis="ch preced" ptType="node node" st="3 1"', ["a", "a1", "a2", "b", "b1"]],
 		["none selects nothing", 'axis="none"', []]
 	])("%s", (_name, attributes, expected) => {
 		expect(iterate(attributes)).toEqual(expected)
@@ -60,8 +65,9 @@ describe("SmartArt point types (ST_ElementType)", () => {
 		["node: normal and assistant nodes", "node", ["a", "b", "c"]],
 		["norm: normal nodes only", "norm", ["a", "c"]],
 		["asst", "asst", ["b"]],
-		["nonAsst: everything but assistants", "nonAsst", ["ap", "a", "as", "bp", "bs", "cp", "c"]],
-		["nonNorm: everything but normal nodes", "nonNorm", ["ap", "as", "bp", "b", "bs", "cp"]],
+		// Both partition the nodes (§21.4.7.20 lists them beside norm and asst): transitions are neither.
+		["nonAsst: the nodes that are not assistants", "nonAsst", ["a", "c"]],
+		["nonNorm: the nodes that are not normal", "nonNorm", ["b"]],
 		["parTrans", "parTrans", ["ap", "bp", "cp"]],
 		["sibTrans, the last hidden", "sibTrans", ["as", "bs"]]
 	])("%s", (_name, ptType, expected) => {
@@ -144,6 +150,24 @@ describe("SmartArt conditions and functions (ST_FunctionType)", () => {
 		expect(shapes("revPos", "1")).toEqual(["c"])
 		expect(shapes("posEven", "1")).toEqual(["b"])
 		expect(shapes("posOdd", "1")).toEqual(["a", "c"])
+	})
+
+	it("counts pos and revPos in the set's own (data) order when the forEach walks it backwards", () => {
+		// ECMA-376 §21.4.7.32 ST_FunctionType: pos is "the position of the node in the specified set of nodes" and revPos
+		// its reverse; a walk with st="-1" step="-1" (process4) changes the order of the iterations, not the positions.
+		const shapes = (func: string, val: string) =>
+			presented(
+				run(
+					data(TREE),
+					layout(`<dgm:forEach name="f" axis="ch" ptType="node" st="-1" step="-1"><dgm:choose name="c"><dgm:if name="i" axis="self" ptType="node" func="${func}" op="equ" val="${val}">
+						${SHAPE}</dgm:if></dgm:choose></dgm:forEach>`),
+					100,
+					100
+				)
+			)
+
+		expect(shapes("revPos", "1")).toEqual(["c"])
+		expect(shapes("pos", "1")).toEqual(["a"])
 	})
 
 	it("reads depth at the iterated point", () => {

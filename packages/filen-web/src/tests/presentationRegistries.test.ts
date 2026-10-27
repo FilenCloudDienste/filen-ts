@@ -9,12 +9,13 @@ import {
 	PRESENTATION_TABS,
 	presentationTabGroups,
 	presentationTabs,
-	type PresentationRibbonContext
+	type PresentationRibbonContext,
+	type PresentationTab
 } from "@/features/presentation/components/ribbon/tabs"
 import { PRESENTATION_ACTIONS } from "@/features/presentation/lib/keymap"
 
 // The presentation editor's static registries: the ribbon's tabs and their group files, the File menu's entry files
-// and the keymap, before any slice fills them.
+// and the keymap, and what each must keep as slices fill them.
 
 function context(selection: PresentationRibbonContext["selection"]): PresentationRibbonContext {
 	return { editable: true, phone: false, selection, t: ((key: string) => key) as unknown as TFunction }
@@ -57,25 +58,49 @@ describe("presentation registries", () => {
 		).toEqual(["shapeFormat"])
 	})
 
-	it("gives every tab its group files, none with groups yet", () => {
+	it("gives every tab its group files with unique group ids, and offers no edit groups in a view-only deck", () => {
 		const all = context(new Set(["shape", "text", "picture", "table", "chart", "video", "audio", "smartart"]))
+		const viewOnly = { ...all, editable: false }
 
 		for (const tab of PRESENTATION_TABS) {
 			expect(tab.groups.length, tab.id).toBeGreaterThan(0)
-			expect(presentationTabGroups(tab, all), tab.id).toEqual([])
+			const ids = presentationTabGroups(tab, all).map(group => group.id)
+
+			expect(new Set(ids).size, tab.id).toBe(ids.length)
 		}
+
+		const tab = (id: string): PresentationTab => {
+			const found = PRESENTATION_TABS.find(entry => entry.id === id)
+
+			if (found === undefined) throw new Error(`no tab ${id}`)
+
+			return found
+		}
+
+		expect(presentationTabGroups(tab("home"), all).map(group => group.id)).toEqual(expect.arrayContaining(["history", "slides"]))
+		expect(presentationTabGroups(tab("insert"), all).map(group => group.id)).toContain("slides")
+		expect(presentationTabGroups(tab("home"), viewOnly).map(group => group.id)).not.toContain("slides")
+		expect(presentationTabGroups(tab("insert"), viewOnly)).toEqual([])
+		expect(presentationTabGroups(tab("view"), viewOnly).map(group => group.id)).toEqual(["panes"])
 	})
 
-	it("renders no File menu entries and registers no keys yet", () => {
-		const props = { context: { editable: true, downloads: true, close: () => undefined } }
+	it("lists one File menu entry component per owner, and names its keys uniquely", () => {
+		for (const entry of [
+			PresentationSaveEntries,
+			PresentationExportEntries,
+			PresentationDownloadAsEntries,
+			PresentationTemplatesEntries
+		]) {
+			expect(typeof entry).toBe("function")
+		}
 
-		expect([
-			PresentationSaveEntries(props),
-			PresentationExportEntries(props),
-			PresentationDownloadAsEntries(props),
-			PresentationTemplatesEntries(props)
-		]).toEqual([null, null, null, null])
-		expect(PRESENTATION_ACTIONS).toEqual([])
+		expect(new Set(PRESENTATION_ACTIONS.map(action => action.id)).size).toBe(PRESENTATION_ACTIONS.length)
+
+		for (const action of PRESENTATION_ACTIONS) {
+			expect(action.id).toMatch(/^presentation\./u)
+			expect(action.scope).toBe("editor")
+			expect(action.descriptionKey).toMatch(/^preview:previewPptx/u)
+		}
 	})
 
 	it("reaches the presentation protocol through the office package", () => {

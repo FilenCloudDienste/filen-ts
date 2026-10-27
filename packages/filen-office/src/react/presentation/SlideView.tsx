@@ -40,6 +40,9 @@ export interface SlideViewProps {
 	readonly onScale?: (scale: number) => void
 	readonly className?: string
 	readonly ref?: Ref<HTMLDivElement>
+	// Drawn over the slide inside its frame, at screen px (the frame's own size; it is positioned relative). The
+	// editor's selection layer.
+	readonly overlay?: ReactNode
 }
 
 // Mod: Cmd on Apple platforms, Ctrl elsewhere.
@@ -79,7 +82,8 @@ export function SlideView({
 	actionLabel,
 	onScale,
 	className,
-	ref
+	ref,
+	overlay
 }: SlideViewProps) {
 	const mode = modeProp ?? "view"
 	const slideWidth = size.cx / EMU_PER_PX
@@ -238,6 +242,7 @@ export function SlideView({
 					/>
 					{hotspots.length === 0 ? null : <div className="fo-slide-hotspots">{hotspots}</div>}
 				</div>
+				{overlay}
 			</div>
 		</div>
 	)

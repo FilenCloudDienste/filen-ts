@@ -32,6 +32,7 @@ import {
 	isEditable,
 	isTextCategory,
 	isUnresolvableParentError,
+	presentationSaveRefusalKey,
 	runPreviewSave,
 	SaveRefusedError,
 	type PresentationSaveEdits,
@@ -236,15 +237,12 @@ export function PreviewOverlay({
 	const presentationRef = useRef<PresentationSaveSource | null>(null)
 	const cacheScope = usePreviewCacheScope()
 
-	// The open editor's unsaved edits, encoded. A deck's are never held here as bytes (it may be gigabytes): none.
-	async function readEdits(): Promise<Uint8Array | null> {
-		if (presentationRef.current !== null) {
-			return null
-		}
-
+	// The open editor's unsaved edits: encoded, or for a deck (never held here as bytes, it may be gigabytes) a save its
+	// session streams to an upload.
+	async function readEdits(): Promise<Uint8Array | PresentationSaveEdits | null> {
 		const edits = await readSaveEdits(false)
 
-		return edits === null || "kind" in edits ? null : edits.bytes
+		return edits === null ? null : "kind" in edits ? edits : edits.bytes
 	}
 
 	// Override for the currently-displayed item, accumulated per pager slot across the whole overlay
@@ -852,23 +850,62 @@ export function PreviewOverlay({
 	// upload made the new file, the session moves onto it (commit), so a drive without versioning deleting the old one
 	// never leaves it reading a file that is gone. The editor stays mounted (bodyKey) with its history.
 	async function savePresentation(edits: PresentationSaveEdits, targetItem: DriveItem, targetRawItem: DriveItem): Promise<void> {
-		const [outcome, result] = await Promise.all([
-			runPreviewSave(
-				{
-					uploadFileBytes: (parentUuid, data, name, mime) => sdkApi.uploadFileBytes(parentUuid, data, name, mime),
-					uploadFileFromPort: (parentUuid, port, name, mime, size) =>
-						sdkApi.uploadFileFromPort(parentUuid, name, mime, port, size),
-					patchListing: driveListingQueryUpdate,
-					rootUuid: currentRootUuid()
-				},
-				{ item: targetItem, content: { port: edits.port } }
-			),
-			edits.result.catch((e: unknown) => {
+		// No upload at all unless the session is going to write (an untouched or fully undone deck, a refusal).
+		const writes = await Promise.race([
+			edits.announced,
+			edits.result.then(
+				() => false,
+				() => false
+			)
+		])
+
+		if (!writes) {
+			edits.port.close()
+
+			const result = await edits.result.catch((e: unknown) => {
 				log.error("preview", "the presentation save failed", e)
 
 				return { kind: "refused" as const, reason: "failed" as const }
 			})
-		])
+
+			setSaving(false)
+			remote.saveSettled(null)
+
+			if (result.kind === "refused") {
+				toast.error(t(presentationSaveRefusalKey(result.reason)))
+			}
+
+			return
+		}
+
+		const upload = runPreviewSave(
+			{
+				uploadFileBytes: (parentUuid, data, name, mime) => sdkApi.uploadFileBytes(parentUuid, data, name, mime),
+				uploadFileFromPort: (parentUuid, port, name, mime, size) => sdkApi.uploadFileFromPort(parentUuid, name, mime, port, size),
+				patchListing: driveListingQueryUpdate,
+				rootUuid: currentRootUuid()
+			},
+			{ item: targetItem, content: { port: edits.port } }
+		)
+		const result = await edits.result.catch((e: unknown) => {
+			log.error("preview", "the presentation save failed", e)
+
+			return { kind: "refused" as const, reason: "failed" as const }
+		})
+
+		// A refusal is told at once and the upload behind the port ended (no new version), never waited for: an upload
+		// whose reader missed the abort would never settle.
+		if (result.kind === "refused") {
+			edits.port.close()
+			void upload.catch(() => undefined)
+			setSaving(false)
+			remote.saveSettled(null)
+			toast.error(t(presentationSaveRefusalKey(result.reason)))
+
+			return
+		}
+
+		const outcome = await upload
 
 		// Nothing to save (every edit undone): the upload was ended without a file.
 		if (result.kind === "unchanged") {
@@ -878,12 +915,12 @@ export function PreviewOverlay({
 			return
 		}
 
-		if (result.kind === "refused" || outcome.status === "error") {
+		if (outcome.status === "error") {
 			setSaving(false)
 			remote.saveSettled(null)
-			toast.error(outcome.status === "error" ? errorLabel(outcome.dto) : t("previewSaveFailed"))
+			toast.error(errorLabel(outcome.dto))
 
-			if (outcome.status === "error" && isUnresolvableParentError(outcome.dto)) {
+			if (isUnresolvableParentError(outcome.dto)) {
 				setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
 				toast.warning(t("previewReadOnlyAfterSaveFailure"))
 			}
@@ -1045,6 +1082,12 @@ export function PreviewOverlay({
 		// CURRENT slot — so the next click would act on a file the user never opened it for.
 		// directoryListing.tsx guards its own clear-selection action off the same signal.
 		if (isAnyMenuOpen()) {
+			return
+		}
+
+		// Ctrl, Alt or Cmd with an arrow is what has focus's (a word or line jump, an editor's own command, the
+		// browser's), never a step to another file.
+		if (event.altKey || event.ctrlKey || event.metaKey) {
 			return
 		}
 
@@ -1260,6 +1303,8 @@ export function PreviewOverlay({
 													contentRef={contentRef}
 													spreadsheetRef={spreadsheetRef}
 													docxRef={docxRef}
+													presentationRef={presentationRef}
+													onSave={() => performSaveRef.current()}
 													onAutosave={() => performSaveRef.current(true)}
 													canSaveCopy={canSaveCopyBeside(driveItem, variant)}
 													onOpenFile={opened => {
@@ -1460,6 +1505,10 @@ interface PreviewBodyProps {
 	contentRef: RefObject<(() => string) | null>
 	spreadsheetRef: RefObject<SpreadsheetSaveSource | null>
 	docxRef: RefObject<DocxSaveSource | null>
+	// The presentation editor's save source (its session streams each save to the upload).
+	presentationRef: RefObject<PresentationSaveSource | null>
+	// A save the user asked for in the viewer (a deck's File ▸ Save); true when one started.
+	onSave: () => boolean
 	// Idle autosave asks the overlay to save; true when a save started.
 	onAutosave: () => boolean
 	// Shows another file in this slot's place (the .xlsx an .xls was just saved as).
@@ -1494,6 +1543,8 @@ function PreviewBody({
 	contentRef,
 	spreadsheetRef,
 	docxRef,
+	presentationRef,
+	onSave,
 	onAutosave,
 	onOpenFile,
 	canSaveCopy
@@ -1579,7 +1630,7 @@ function PreviewBody({
 				/>
 			)
 		// An editable deck is keyed by its document (bodyKey): its own saves move the session onto the saved file and
-		// keep it mounted. The editing surface fills the overlay's presentationRef.
+		// keep it mounted. The editor fills the overlay's presentationRef; one that cannot save shows the deck view-only.
 		case "presentation":
 			return (
 				<PresentationViewer
@@ -1588,6 +1639,18 @@ function PreviewBody({
 					variant={variant}
 					canSaveCopy={canSaveCopy}
 					onOpenFile={onOpenFile}
+					{...(neverEditable
+						? {}
+						: {
+								editing: {
+									writable: editable,
+									renamed: renamedReadOnly,
+									onDirtyChange,
+									saveRef: presentationRef,
+									onSave,
+									onAutosave
+								}
+							})}
 				/>
 			)
 		case "text":

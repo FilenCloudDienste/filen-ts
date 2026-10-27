@@ -339,6 +339,34 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 	const setPeek = peek.setOpen
 	// A tab chosen from the keyboard takes focus into the row it shows.
 	const [peekFocus, setPeekFocus] = useState(false)
+	// The tab list scrolls when a narrow screen has no room for every tab; the clipped sides fade out as the cue.
+	const [tabList, setTabList] = useState<HTMLDivElement | null>(null)
+	const [overflow, setOverflow] = useState({ start: false, end: false })
+	const measureTabs = (list: HTMLElement): void => {
+		const start = list.scrollLeft > 1
+		const end = list.scrollLeft + list.clientWidth < list.scrollWidth - 1
+
+		setOverflow(previous => (previous.start === start && previous.end === end ? previous : { start, end }))
+	}
+
+	// Measured when the list resizes (its first observation included) and when its tabs change (a contextual tab).
+	useEffect(() => {
+		if (tabList === null) return undefined
+
+		const measure = (): void => {
+			measureTabs(tabList)
+		}
+		const resized = new ResizeObserver(measure)
+		const changed = new MutationObserver(measure)
+
+		resized.observe(tabList)
+		changed.observe(tabList, { childList: true, subtree: true, characterData: true })
+
+		return () => {
+			resized.disconnect()
+			changed.disconnect()
+		}
+	}, [tabList])
 
 	// Ctrl+F1 anywhere in the editor shows or hides the command row, as in Office.
 	useEffect(() => {
@@ -386,8 +414,23 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 			>
 				{props.file}
 				<Tabs.List
+					ref={setTabList}
 					aria-label={props.label}
-					className="-mb-px flex min-w-0 [scrollbar-width:none] items-stretch self-stretch overflow-x-auto [&::-webkit-scrollbar]:hidden"
+					data-overflow-start={overflow.start ? "" : undefined}
+					data-overflow-end={overflow.end ? "" : undefined}
+					className={cn(
+						"-mb-px flex min-w-0 [scrollbar-width:none] items-stretch self-stretch overflow-x-auto [&::-webkit-scrollbar]:hidden",
+						overflow.start && overflow.end
+							? "[mask-image:linear-gradient(to_right,transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]"
+							: overflow.start
+								? "[mask-image:linear-gradient(to_right,transparent,black_1.5rem)]"
+								: overflow.end
+									? "[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]"
+									: undefined
+					)}
+					onScroll={event => {
+						measureTabs(event.currentTarget)
+					}}
 				>
 					{props.tabs.map(tab => (
 						<Tabs.Tab

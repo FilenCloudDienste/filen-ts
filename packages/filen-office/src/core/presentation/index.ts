@@ -52,6 +52,7 @@ export {
 	type SchemeSlot,
 	type Section,
 	type ShapeKind,
+	type ShapeLocks,
 	type ShapeNode,
 	type ShapePropsEdit,
 	type ShapeRef,
@@ -92,7 +93,9 @@ export {
 	type ChartOp,
 	type CommentModel,
 	type CommentOp,
+	type BatchOp,
 	type DeckOp,
+	type FamilyOp,
 	type DeckOpFamily,
 	type DesignOp,
 	type EffectTiming,
@@ -134,6 +137,68 @@ export {
 	type PartChanges,
 	type Touch
 } from "./edit/apply"
+export {
+	addSectionOp,
+	addSlideOp,
+	deleteSlidesOp,
+	duplicateSlideOps,
+	inDeckOrder,
+	moveSlidesOp,
+	newSlideLayout,
+	nudgeSlidesOp,
+	removeSectionOp,
+	renameSectionOp,
+	resetSlideOps,
+	setLayoutOps,
+	slideListRows,
+	toggleHiddenOp,
+	type SlideLayoutChoice,
+	type SlideListRow
+} from "./edit/commands/slide"
+export { actionOp, altOp, flipOp, nudgeOp, rotateOp, settableAction, type AltText, type PlacedShape } from "./edit/commands/shape"
+export { canZOrder, zOrderOp, Z_ORDERS } from "./edit/commands/arrange"
+export { presentationHref, xmlSafeText } from "./edit/xmlText"
+export { canGroup, canUngroup, groupOp, ungroupOps } from "./edit/commands/group"
+export {
+	ALIGN_EDGES,
+	alignOp,
+	alignTarget,
+	canAlign,
+	canDistribute,
+	distributeOp,
+	type AlignEdge,
+	type AlignTarget,
+	type DistributeAxis
+} from "./edit/commands/align"
+export {
+	DEFAULT_BULLET,
+	DEFAULT_NUMBERING,
+	FONT_SIZES,
+	NO_DEFAULTS,
+	changeLevel,
+	clearFormatting,
+	effectiveParaProps,
+	effectiveRunProps,
+	mapParaProps,
+	mapRunProps,
+	selectionParaProps,
+	selectionRunProps,
+	setBullet,
+	setHyperlink,
+	setParaProps,
+	setRunProps,
+	stepFontSize,
+	steppedSize,
+	toggleBaseline,
+	toggleRunFlag,
+	toggleStrike,
+	toggleUnderline,
+	type ParaPatch,
+	type RunPatch,
+	type TextCommand,
+	type TextDefaults
+} from "./edit/commands/text"
+export { findText, matcherOf, tableParagraph, type FindQuery, type Matcher } from "./edit/find"
 export {
 	RenderReport,
 	placeholderChain,

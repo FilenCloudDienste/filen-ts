@@ -25,6 +25,7 @@ import { EMU_PER_PT, fillOf } from "./fills"
 import { pageFragment, scanPages, ScanError, type ContentPages, type PageSpan } from "./scan"
 import { CLASS_TYPES, readShapeElements, readShapes, type ShapeScope } from "./shapes"
 import { levelStyle, listStyleOf } from "./text"
+import { readOdpTiming } from "../../anim/odf"
 import { readTransition } from "./transitions"
 
 // Opening an OpenDocument presentation (.odp, .otp; ODF 1.3 Part 3 §3.2, §10) into the shared model, the reader
@@ -39,13 +40,20 @@ import { readTransition } from "./transitions"
 //   drawing-page styles → backgrounds, hidden slides, master-shape visibility and transitions;
 //   presentation:settings → show settings and custom shows.
 // Encrypted packages are refused "encrypted" (as ODT and ODS are); packages signed in META-INF/documentsignatures.xml
-// open view-only (gate "signed"). Animations stay in the page source (the timing engine reads them).
+// open view-only (gate "signed"). A page's animations are read into its timing (core/anim/odf.ts).
 
 export interface OdpOpenOptions {
 	readonly slicing?: Slicing
 	readonly budgets?: PresentationBudgets
 	// The base source's generation (SourceRef.epoch): 0 at open, +1 per save rebase.
 	readonly epoch?: number
+	// A rebase onto the deck's saved file: the reading takes over this deck (its nodes, refs and history stay the
+	// session's) instead of the one it builds. The saved file's pages are the deck's slides in order and its master
+	// pages the deck's masters in order (the writer keeps both); layouts match by master and layout name.
+	readonly adopt?: Deck
+	// With adopt: refs at or below this number are never handed out (the previous reading's, which the session's
+	// history may still name); OdpParts.refsIssued() of that reading.
+	readonly refsAbove?: number
 }
 
 export type OdpOpen = { readonly kind: "opened"; readonly deck: Deck; readonly parts: OdpParts } | Refused
@@ -232,6 +240,8 @@ export class OdpParts {
 	private readonly decls = new Map<string, Map<string, { readonly text: string; readonly fixed: boolean }>>()
 	private readonly slicing: Slicing | undefined
 	private readonly refs = new SlideRefs()
+	// Refs a reading must never hand out: those of the deck it took over (adopt).
+	private taken: ReadonlySet<SlideRef> | undefined
 
 	constructor(
 		odf: OdfPackage,
@@ -377,6 +387,40 @@ export class OdpParts {
 		return node
 	}
 
+	// A page's background and transition as a reading of the page gives them, for a page in any fragment (one an
+	// undo holds, read again by the writer), its styles resolved through `context` (the deck's by default).
+	pageFields(
+		fragment: Fragment,
+		page: number,
+		context: OdpContext = this.context
+	): { readonly background: SlideNode["background"]; readonly transition: SlideNode["transition"] } {
+		let filter: ReadonlyMap<string, string> | undefined
+
+		for (let child = fragment.document.firstChildElement(page); child >= 0; child = fragment.document.nextSiblingElement(child)) {
+			if (fragment.name(child) === "anim:par") filter = transitionFilter(fragment, child)
+		}
+
+		return this.fieldsOf(this.pageStyle(fragment.attributes(page).get("draw:style-name"), "content", context), filter)
+	}
+
+	private fieldsOf(
+		style: OdfProperties,
+		filter: ReadonlyMap<string, string> | undefined
+	): { readonly background: SlideNode["background"]; readonly transition: SlideNode["transition"] } {
+		const attributes = style.attributes
+		const transition = readTransition(attributes, filter)
+		// The page's own fill, else (when the page hides its master's background) white paper, else the master's.
+		const own = fillOf(style, this.sheet.drawResources)
+		const fill =
+			own !== undefined && own !== "none"
+				? own
+				: attributes.get("presentation:background-visible") === "false"
+					? { kind: "solid" as const, color: { kind: "srgb" as const, rgb: "FFFFFF" } }
+					: undefined
+
+		return { background: fill === undefined ? undefined : { kind: "fill", fill }, transition }
+	}
+
 	private readPage(
 		ref: SlideRef,
 		fragment: Fragment,
@@ -459,28 +503,22 @@ export class OdpParts {
 			else if (name === "anim:par") filter = transitionFilter(fragment, child)
 		}
 
-		const transition = readTransition(attributes, filter)
-		// The page's own fill, else (when the page hides its master's background) white paper, else the master's.
-		const own = fillOf(style, this.sheet.drawResources)
-		const background =
-			own !== undefined && own !== "none"
-				? own
-				: attributes.get("presentation:background-visible") === "false"
-					? { kind: "solid" as const, color: { kind: "srgb" as const, rgb: "FFFFFF" } }
-					: undefined
+		const { background, transition } = this.fieldsOf(style, filter)
+		const timing = page < 0 ? undefined : readOdpTiming(fragment, page, shapes, this.budgets.timing)
 		const layout = this.layoutOf.get(`${head.master}\u0000${head.layout}`)
 		const node: SlideNode = {
 			ref,
 			kind: "slide",
-			part: "/content.xml",
+			part: `/content.xml#${String(ref)}`,
 			src: fragment.src(page < 0 ? document.documentElement() : page),
 			name: head.name,
 			...(layout === undefined ? {} : { parent: layout }),
-			...(background === undefined ? {} : { background: { kind: "fill" as const, fill: background } }),
+			...(background === undefined ? {} : { background }),
 			showMasterShapes: attributes.get("presentation:background-objects-visible") !== "false",
 			hidden: attributes.get("presentation:visibility") === "hidden",
 			shapes,
 			...(transition === undefined ? {} : { transition }),
+			...(timing === undefined ? {} : { timing }),
 			...(notes === undefined ? {} : { notes }),
 			comments,
 			revision: 0
@@ -491,8 +529,108 @@ export class OdpParts {
 		return node
 	}
 
+	// The pages in content order, by the refs the deck names them with.
+	pageRefs(): readonly SlideRef[] {
+		return [...this.spans.keys()]
+	}
+
+	// A page's byte span in content.xml (the writer copies an untouched page by it).
+	span(ref: SlideRef): PageSpan | undefined {
+		return this.spans.get(ref)
+	}
+
+	// This reading takes over `target` (OdpOpenOptions.adopt): the refs it built are mapped onto the deck's (pages and
+	// masters by position, notes masters by master, layouts by master and name; a layout the deck lacks is added to it
+	// under a ref the deck does not use), and every table keyed by ref is keyed by the deck's.
+	// The highest ref this reading's allocator has handed out (what a rebase reading must stay above).
+	refsIssued(): number {
+		return this.refs.issued
+	}
+
+	adopt(target: Deck, refsAbove = 0): void {
+		const built = this.deck
+
+		// Never at or below the previous reading's refs.
+		while (this.refs.issued < refsAbove) this.refs.next()
+
+		if (built.slides.length !== target.slides.length || built.masters.length !== target.masters.length)
+			throw new PresentationError("stale", "the saved file's pages are not the deck's")
+
+		this.taken = new Set<SlideRef>([...target.nodes.keys(), ...target.slides, ...target.masters, ...target.layouts])
+
+		const map = new Map<SlideRef, SlideRef>()
+
+		built.slides.forEach((ref, index) => map.set(ref, target.slides[index] as SlideRef))
+		built.masters.forEach((ref, index) => map.set(ref, target.masters[index] as SlideRef))
+
+		for (const master of built.masters) {
+			const notes = [...this.masters.values()].find(info => info.ref === master)?.notesMaster
+			const targetMaster = target.nodes.get(map.get(master) as SlideRef)
+			const targetNotes = [...target.nodes.values()].find(node => node.kind === "notesMaster" && node.name === targetMaster?.name)
+
+			if (notes !== undefined && targetNotes !== undefined) map.set(notes, targetNotes.ref)
+		}
+
+		const key = (deck: Deck, ref: SlideRef, parent: (ref: SlideRef) => SlideRef | undefined): string => {
+			const node = deck.nodes.get(ref)
+
+			return `${String(node?.parent === undefined ? "" : parent(node.parent))}\u0000${node?.layoutType ?? node?.name ?? ""}`
+		}
+		const targetLayouts = new Map(target.layouts.map(ref => [key(target, ref, parent => parent), ref]))
+
+		for (const ref of built.layouts) {
+			const found = targetLayouts.get(key(built, ref, parent => map.get(parent)))
+
+			if (found !== undefined) {
+				map.set(ref, found)
+
+				continue
+			}
+
+			const node = built.nodes.get(ref) as SlideNode
+			const fresh = this.nextRef()
+
+			map.set(ref, fresh)
+			target.layouts.push(fresh)
+			target.nodes.set(fresh, {
+				...node,
+				ref: fresh,
+				...(node.parent === undefined ? {} : { parent: map.get(node.parent) ?? node.parent })
+			})
+		}
+
+		const rekey = <T>(table: Map<SlideRef, T>): void => {
+			const entries = [...table]
+
+			table.clear()
+
+			for (const [ref, value] of entries) table.set(map.get(ref) ?? ref, value)
+		}
+
+		rekey(this.spans)
+		rekey(this.heads)
+
+		for (const [name, ref] of this.layoutOf) this.layoutOf.set(name, map.get(ref) ?? ref)
+		for (const [name, info] of this.masters)
+			this.masters.set(name, {
+				...info,
+				ref: map.get(info.ref) ?? info.ref,
+				notesMaster: info.notesMaster === undefined ? undefined : (map.get(info.notesMaster) ?? info.notesMaster)
+			})
+
+		this.deck = target
+	}
+
+	private nextRef(): SlideRef {
+		let ref = this.refs.next()
+
+		while (this.taken?.has(ref) === true) ref = this.refs.next()
+
+		return ref
+	}
+
 	private readNotes(fragment: Fragment, element: number, master: MasterInfo | undefined): SlideRef {
-		const ref = this.refs.next()
+		const ref = this.nextRef()
 		let next = 1
 		const scope: ShapeScope = {
 			fragment,
@@ -510,7 +648,7 @@ export class OdpParts {
 		this.deck.nodes.set(ref, {
 			ref,
 			kind: "notes",
-			part: "/content.xml",
+			part: `/content.xml#${String(ref)}`,
 			src: fragment.src(element),
 			...(master?.notesMaster === undefined ? {} : { parent: master.notesMaster }),
 			showMasterShapes: true,
@@ -528,8 +666,8 @@ export class OdpParts {
 	}
 
 	// A drawing-page style's properties (§17.25), its chain resolved.
-	pageStyle(name: string | undefined, scope: "content" | "styles"): OdfProperties {
-		return name === undefined ? NO_PROPERTIES : this.context.resolver.resolve("drawing-page", name, scope).properties("drawing-page")
+	pageStyle(name: string | undefined, scope: "content" | "styles", context: OdpContext = this.context): OdfProperties {
+		return name === undefined ? NO_PROPERTIES : context.resolver.resolve("drawing-page", name, scope).properties("drawing-page")
 	}
 
 	private async translateChart(path: string, node: SlideNode, slicing: Slicing | undefined): Promise<void> {
@@ -787,6 +925,8 @@ export class OdpParts {
 		const slides: SlideRef[] = []
 		const hiddenSlides = new Set<SlideRef>()
 		const pageLayouts = this.presentationPageLayouts()
+		const pageLayoutNames = this.pageLayoutNames()
+		const shownNames = new Map<string, number>()
 
 		for (const [index, span] of this.content.pages.entries()) {
 			const ref = refs.next()
@@ -807,12 +947,26 @@ export class OdpParts {
 				layout = refs.next()
 				this.layoutOf.set(key, layout)
 				layouts.push(layout)
+
+				// Shown by the names the file gives for display: the presentation page layout's (§16.41 style:display-name,
+				// else the style:name of one styles.xml defines), else its master page's style:display-name (§16.9). A
+				// master's internal style:name is never shown: with neither, the layout has no name and the page shows
+				// "Layout N", as PowerPoint shows an unnamed layout. Two layouts that would read the same are numbered.
+				const pageLayout = pageLayoutNames.get(layoutName)
+				const masterDisplay = sheet.masterPages.get(master.name)?.displayName
+				let display = pageLayout ?? masterDisplay ?? ""
+				const seen = shownNames.get(display) ?? 0
+
+				shownNames.set(display, seen + 1)
+
+				if (seen > 0 && display !== "") display = `${display} ${String(seen + 1)}`
+
 				nodes.set(layout, {
 					ref: layout,
 					kind: "layout",
 					part: "/styles.xml",
 					synthetic: true,
-					name: layoutName,
+					...(display === "" ? {} : { name: display }),
 					...(layoutName === "" ? {} : { layoutType: layoutName }),
 					parent: master.ref,
 					showMasterShapes: true,
@@ -880,6 +1034,35 @@ export class OdpParts {
 	}
 
 	// style:presentation-page-layout (§16.43): its placeholders' classes and boxes (lengths, or percents of the page).
+	// style:presentation-page-layout display names by style:name (§16.41: style:display-name, else style:name).
+	private pageLayoutNames(): Map<string, string> {
+		const out = new Map<string, string>()
+		const fragment = this.stylesFragment
+
+		if (fragment === undefined) return out
+
+		const document = fragment.document
+
+		for (
+			let section = document.firstChildElement(document.documentElement());
+			section >= 0;
+			section = document.nextSiblingElement(section)
+		) {
+			if (fragment.name(section) !== "office:styles") continue
+
+			for (let layout = document.firstChildElement(section); layout >= 0; layout = document.nextSiblingElement(layout)) {
+				if (fragment.name(layout) !== "style:presentation-page-layout") continue
+
+				const attributes = fragment.attributes(layout)
+				const name = attributes.get("style:name")
+
+				if (name !== undefined && !out.has(name)) out.set(name, attributes.get("style:display-name") ?? name)
+			}
+		}
+
+		return out
+	}
+
 	private presentationPageLayouts(): Map<string, { readonly kind: string; readonly box: readonly (string | undefined)[] }[]> {
 		const out = new Map<string, { readonly kind: string; readonly box: readonly (string | undefined)[] }[]>()
 		const fragment = this.stylesFragment
@@ -1374,15 +1557,17 @@ export async function openOdp(source: ByteSource, options: OdpOpenOptions = {}):
 					: new Fragment(sheet.stylesDocument, sheet.stylesNamespaces, "styles.xml", -1, "styles", 0)
 			)
 		)
-		const deck = parts.build(odf.facts.template, odf.facts.signed, odf.facts.macros)
+		parts.build(odf.facts.template, odf.facts.signed, odf.facts.macros)
 
-		for (const [index, ref] of deck.slides.entries()) {
+		if (options.adopt !== undefined) parts.adopt(options.adopt, options.refsAbove)
+
+		for (const [index, ref] of parts.deck.slides.entries()) {
 			const name = parts.pageName(ref) ?? `page${String(index + 1)}`
 
 			if (!pages.has(name)) pages.set(name, ref)
 		}
 
-		return { kind: "opened", deck, parts }
+		return { kind: "opened", deck: parts.deck, parts }
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
 		if (error instanceof ZipError) return refused(error.code === "tooLarge" ? "tooLarge" : "malformed", error.message)

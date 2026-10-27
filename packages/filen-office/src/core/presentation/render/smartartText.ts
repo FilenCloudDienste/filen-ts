@@ -9,6 +9,7 @@ import type { XmlDocument } from "../../xml/index"
 import { classifyAction } from "../actions"
 import { DeckTally } from "../budget"
 import type { ColorModel, Deck, ShapeNode, SlideNode, TextBody } from "../model"
+import { pickColor } from "../../smartart/style"
 import type { RenderServices } from "./services"
 
 // The text of a SmartArt diagram's cached drawing (dsp:sp dsp:txBody), laid out by the text adapter like a slide
@@ -200,20 +201,4 @@ function diagramTextColors(services: RenderServices, frame: ShapeNode): Map<stri
 	return out
 }
 
-// Which of `count` listed colours the `index`th of `total` styled shapes takes (§21.4.7.16 ST_ClrAppMethod): "repeat"
-// runs through the list and starts over, "cycle" runs there and back, "span" (the default) spreads the list over the
-// shapes; its interpolation between listed colours is drawn as the nearest one.
-export function pickColor(method: string | undefined, index: number, total: number, count: number): number {
-	const at = Math.max(0, Math.floor(index))
-
-	if (count <= 1) return 0
-	if (method === "repeat") return at % count
-
-	if (method === "cycle") {
-		const turn = at % (2 * (count - 1))
-
-		return turn < count ? turn : 2 * (count - 1) - turn
-	}
-
-	return total <= 1 ? 0 : Math.min(count - 1, Math.round((Math.min(at, total - 1) / (total - 1)) * (count - 1)))
-}
+export { pickColor }

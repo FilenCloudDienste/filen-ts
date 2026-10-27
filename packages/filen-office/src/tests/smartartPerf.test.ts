@@ -27,7 +27,7 @@ const LAYOUTS: readonly {
 		file: "pptx/govuk__Workshop_in_a_box_slides_standard.pptx",
 		part: "ppt/diagrams/layout1.xml",
 		nodes: flat(30),
-		shapes: 30
+		shapes: 59
 	},
 	{ name: "hList1", file: "pptx/poi__customGeo.pptx", part: "ppt/diagrams/layout10.xml", nodes: twoLevels(10, 2), shapes: 20 }
 ]

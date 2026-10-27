@@ -208,8 +208,8 @@ describe("presentation engine connection", () => {
 		)
 
 		await heard.next("opened")
-		// No finder in this worker: the stub's typed refusal comes back as such.
-		await expect(connection.session.find("x")).rejects.toMatchObject({ reason: "notImplemented" })
+		// Find is served by the worker: no match in the deck answers an empty result, not a refusal.
+		await expect(connection.session.find("x")).resolves.toHaveLength(0)
 
 		connection.dispose()
 

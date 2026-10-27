@@ -126,6 +126,14 @@ export type ShapeOp =
 	| { readonly family: "shape"; readonly kind: "delete"; readonly slide: SlideRef; readonly shapes: readonly number[] }
 	// undefined removes the local xfrm (the placeholder inherits its box again).
 	| { readonly family: "shape"; readonly kind: "setXfrm"; readonly target: ShapeRef; readonly xfrm: Xfrm | undefined }
+	// Several shapes of one slide moved, resized or turned at once (a drag or nudge of a multi-selection): one step.
+	// undefined removes that shape's local xfrm.
+	| {
+			readonly family: "shape"
+			readonly kind: "setXfrms"
+			readonly slide: SlideRef
+			readonly xfrms: readonly { readonly id: number; readonly xfrm: Xfrm | undefined }[]
+	  }
 	// The shape's element replaced by these bytes (whole-node dirt): the inverse of setProps, setStyle, setAlt,
 	// setAction, picture crop/adjust/replace, media setPoster/setPlayback, every mediaTiming op and the table ops
 	// (the graphicFrame) when their prior state was source.
@@ -197,6 +205,24 @@ export type TextOp =
 			readonly fontScale?: number
 			readonly lnSpcReduction?: number
 			readonly height?: number
+	  }
+	// Every match of `query` in the target bodies replaced by `replacement` (each takes the formatting of the first
+	// character it replaces); `match` (paragraph, start, end in find text, edit/find.ts) limits a target to that one
+	// match, refused as stale when it no longer holds there.
+	| {
+			readonly family: "text"
+			readonly kind: "replace"
+			readonly query: string
+			readonly replacement: string
+			readonly caseSensitive?: boolean
+			readonly wholeWord?: boolean
+			readonly targets: readonly {
+				readonly target: ShapeRef
+				// The body is the notes of slide `target.slide` (target.id is the notes body's shape id); applied, the op
+				// names the notes slide's own ref instead.
+				readonly notes?: boolean
+				readonly match?: readonly [number, number, number]
+			}[]
 	  }
 
 export interface CellRange {
@@ -555,7 +581,16 @@ export type MediaTimingOp =
 	  }
 	| { readonly family: "mediaTiming"; readonly kind: "removeBookmark"; readonly target: ShapeRef; readonly name: string }
 
-export type DeckOp =
+// Several ops as one step, applied in order and all or nothing: a refusal undoes the ones before it, in reverse,
+// and refuses the batch. Its inverse is its ops' inverses, the last op's first.
+export interface BatchOp {
+	readonly family: "batch"
+	readonly kind: "batch"
+	readonly ops: readonly DeckOp[]
+}
+
+// One family's op (every op but a batch).
+export type FamilyOp =
 	| SlideOp
 	| ShapeOp
 	| TextOp
@@ -572,5 +607,7 @@ export type DeckOp =
 	| SmartArtOp
 	| InkOp
 	| MediaTimingOp
+
+export type DeckOp = FamilyOp | BatchOp
 
 export type OpOf<F extends DeckOpFamily> = Extract<DeckOp, { readonly family: F }>

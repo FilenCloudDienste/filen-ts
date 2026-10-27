@@ -12,6 +12,7 @@ import { parseXml, type XmlDocument } from "../core/xml/index"
 import type { Slicing } from "../core/slicing"
 import {
 	LAYOUT_PART,
+	MASTER,
 	MASTER_PART,
 	NS,
 	SLIDE,
@@ -356,7 +357,8 @@ describe("renderSlide", () => {
 
 		expect(render.layers.map(layer => layer.role)).toEqual(["master"])
 		expect(render.layers[0]?.actions?.click).toEqual({ kind: "url", href: "https://example.org/master" })
-		expect(render.layers[0]?.shape).toEqual({ slide: SLIDE, id: 7 })
+		// Named by the master that owns it: a slide shape with the same id is a different shape.
+		expect(render.layers[0]?.shape).toEqual({ slide: MASTER, id: 7 })
 	})
 
 	it("never paints layout or master placeholders, and honours showMasterSp on the slide and the layout", async () => {
@@ -856,7 +858,7 @@ describe("tables", () => {
 		)
 		const render = await renderSlide(deck, SLIDE, fixture.services, SLICING)
 
-		expect(render.layers.map(layer => `${layer.role}:${String(layer.shape.id)}`)).toEqual(["group:2", "group:4", "table:5", "table:5"])
+		expect(render.layers.map(layer => `${layer.role}:${String(layer.shape.id)}`)).toEqual(["shape:3", "shape:4", "table:5", "table:5"])
 
 		// Each child's drawing with its text, in spTree order.
 		const offsets = render.layers
@@ -904,7 +906,8 @@ describe("tables", () => {
 		expect(fills).toEqual([["AA0000"], ["00AA00"]])
 		expect(render.layers[0]?.text).toBeDefined()
 		expect(render.layers[1]?.text).toBeUndefined()
-		expect(render.layers.map(layer => layer.shape.id)).toEqual([2, 2])
+		// The text layer names the child whose body it is; the rest of the group's drawing keeps the group's id.
+		expect(render.layers.map(layer => layer.shape.id)).toEqual([3, 2])
 	})
 
 	it("refuses a table over the cell budget rather than drawing part of it", async () => {

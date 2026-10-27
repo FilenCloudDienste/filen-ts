@@ -26,6 +26,9 @@ export interface CommonTimeNode {
 	presetID?: number
 	presetClass?: PresetClass
 	presetSubtype?: number
+	// An ODF preset id and subtype with no ECMA number (another application's names), as written.
+	presetName?: string
+	presetSubtypeName?: string
 	nodeType?: TimeNodeType
 	grpId?: number
 	fill?: "remove" | "freeze" | "hold" | "transition"
@@ -57,6 +60,9 @@ export interface CommonTimeNode {
 	nextCondLst?: TimeCondition[]
 	children: TimeNode[]
 	src?: SourceRef
+	// The node's source element as bytes, held by an inverse after a save took that element out of the file: written
+	// as it was while the node has no live source.
+	raw?: Uint8Array
 }
 
 export type TimeEventName =

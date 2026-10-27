@@ -18,6 +18,7 @@ import {
 	type SourceRef
 } from "../../core/presentation/model"
 import { resolvePath, structuralPath, visitSources } from "../../core/pptx/sourcePath"
+import type { OdpSaveSource } from "../../core/odp/write/splice"
 import { IN_MEMORY_LIMIT } from "../../core/pptx/write/save"
 import type { PptxSaveOptions, PptxSnapshot, PptxSource, SpliceWriter } from "../../core/pptx/write/types"
 import type { XmlDocument } from "../../core/xml/index"
@@ -44,6 +45,8 @@ export interface SaveHistory {
 	readonly revision: number
 	// The current state differs from the saved one.
 	readonly dirty: boolean
+	// The net bytes dirty against the saved state, estimated (absent: unknown).
+	readonly dirtyBytes?: number
 	// The net changes against the saved state, recomputed.
 	changes(): DeckChanges
 	// The state a save starts from; committed when the save lands, abandoned when it does not.
@@ -110,6 +113,10 @@ interface SourceGate {
 	release: (() => void) | undefined
 	retired: boolean
 	relocate: Relocate | undefined
+	// Reads of the source itself still running, and whether it is closed once they end (it was retired).
+	reading: number
+	closing: boolean
+	close: (() => void) | undefined
 }
 
 const gates = new WeakMap<ByteSource, SourceGate>()
@@ -119,7 +126,26 @@ function staleError(): PresentationError {
 }
 
 export function rebasableSource(source: RemoteByteSource): RemoteByteSource {
-	const gate: SourceGate = { held: undefined, release: undefined, retired: false, relocate: undefined }
+	const gate: SourceGate = {
+		held: undefined,
+		release: undefined,
+		retired: false,
+		relocate: undefined,
+		reading: 0,
+		closing: false,
+		close: source.close === undefined ? undefined : () => source.close?.()
+	}
+	// A read of the source itself: a retired source is closed once the last one ends.
+	const own = async <T>(read: () => Promise<T>): Promise<T> => {
+		gate.reading++
+
+		try {
+			return await read()
+		} finally {
+			gate.reading--
+			closeIfIdle(gate)
+		}
+	}
 	// The source to read [offset, offset + length) from once any hold ended.
 	const target = async (offset: number, length: number): Promise<{ readonly source: ByteSource; readonly offset: number }> => {
 		while (gate.held !== undefined) await gate.held
@@ -135,7 +161,7 @@ export function rebasableSource(source: RemoteByteSource): RemoteByteSource {
 	const read: ByteSource["read"] = async (offset, length) => {
 		const at = await target(offset, length)
 
-		return at.source.read(at.offset, length)
+		return at.source === source ? own(() => source.read(offset, length)) : at.source.read(at.offset, length)
 	}
 	const wrapped: RemoteByteSource = { size: source.size, read }
 	const checked = source.readChecked
@@ -144,7 +170,7 @@ export function rebasableSource(source: RemoteByteSource): RemoteByteSource {
 		wrapped.readChecked = async (offset, length, crc) => {
 			const at = await target(offset, length)
 
-			if (at.source === source) return checked.call(source, offset, length, crc)
+			if (at.source === source) return own(() => checked.call(source, offset, length, crc))
 
 			const moved = at.source.readChecked
 
@@ -164,6 +190,24 @@ export function rebasableSource(source: RemoteByteSource): RemoteByteSource {
 	gates.set(wrapped, gate)
 
 	return wrapped
+}
+
+function closeIfIdle(gate: SourceGate): void {
+	if (!gate.closing || gate.reading > 0) return
+
+	gate.closing = false
+	gate.close?.()
+	gate.close = undefined
+}
+
+// A retired source is read no more: its host lets go of it (a range port's serving side) once reads in flight end.
+function closeRetired(source: ByteSource): void {
+	const gate = gates.get(source)
+
+	if (gate === undefined) return
+
+	gate.closing = true
+	closeIfIdle(gate)
 }
 
 function holdReads(source: ByteSource): () => void {
@@ -243,11 +287,19 @@ function relocation(from: ZipArchive, to: ZipArchive, target: ByteSource, writte
 // Seals a written zip for an encrypted deck (MS-OFFCRYPTO Agile) with the key the session opened it with.
 export type SealPackage = (zip: Uint8Array, deck: Deck, slicing: Slicing) => Promise<Uint8Array>
 
-// A format's save: the splice writer, what it reads the session's package as (the archive and package, plus what
-// the format's writer needs of the open deck), and the sealing of encrypted packages.
-export interface DeckSaver {
-	readonly writer: SpliceWriter
-	readonly source?: (session: EngineSession) => PptxSource
+// A format's save: the splice writer, what it reads the session's package as (pptx: the archive and package plus the
+// deck's part map; odp: the reader's parts), and the sealing of encrypted packages.
+export interface DeckSaver<S = PptxSource> {
+	readonly writer: {
+		snapshot(input: {
+			readonly deck: Deck
+			readonly source: S
+			readonly changes: DeckChanges
+			readonly revision: number
+		}): Promise<PptxSnapshot | Refused>
+		write: SpliceWriter["write"]
+	}
+	readonly source?: (session: EngineSession) => S
 	readonly seal?: SealPackage
 }
 
@@ -255,7 +307,7 @@ export interface DeckSaver {
 export type DeckRebaser = (session: EngineSession, source: ByteSource, saved: SavedPackage) => Promise<OpenedPackage>
 
 export interface SaveDependencies {
-	readonly savers: { readonly [F in Format]?: DeckSaver }
+	readonly savers: { readonly pptx?: DeckSaver; readonly ppt?: DeckSaver; readonly odp?: DeckSaver<OdpSaveSource> }
 	readonly rebasers: { readonly [F in Format]?: DeckRebaser }
 	// Packages up to this size are written in memory (default IN_MEMORY_LIMIT).
 	readonly inMemoryLimit?: number
@@ -441,7 +493,8 @@ export async function saveSession(
 	if (saver === undefined) return end("refused", refusedResult("notImplemented"))
 	if (deck.protection.encrypted !== undefined && saver.seal === undefined) return end("refused", refusedResult("notImplemented"))
 
-	const active: DeckSaver = saver
+	// The format's saver over its own source type (a saver without `source` reads the pptx package).
+	const active = saver as DeckSaver<unknown>
 
 	const saves = savesOf(session)
 
@@ -463,7 +516,13 @@ export async function saveSession(
 		const taken = await deckTurn(deck, async () => {
 			const changes = history.changes()
 
-			if (changes.empty) return undefined
+			// Dirty keys with nothing net to write (no part names them, an order no shape moved in): the file holds
+			// this state, so it is the saved one from now and the page reads clean, not dirty with nothing to save.
+			if (changes.empty) {
+				history.commit(history.savePoint())
+
+				return undefined
+			}
 
 			point = history.savePoint()
 
@@ -479,16 +538,25 @@ export async function saveSession(
 				revision: point.revision,
 				snapshot: await active.writer.snapshot({
 					deck,
-					source: (active.source ?? packageSource)(session),
+					source: active.source === undefined ? packageSource(session) : active.source(session),
 					changes,
 					revision: point.revision
 				})
 			}
 		})
 
-		if (taken === undefined) return end("unchanged", { kind: "unchanged" })
-		if ("retained" in taken) return await resend(taken.retained)
+		if (taken === undefined) return unchanged()
+
+		// From here the save writes: the page opens the upload now (savePortAnnounced).
+		if ("retained" in taken) {
+			writer.announce()
+
+			return await resend(taken.retained)
+		}
+
 		if (isRefused(taken.snapshot)) return await refuse(taken.snapshot.reason, taken.snapshot.detail)
+
+		writer.announce()
 
 		return await write(taken.snapshot, taken.revision)
 	} catch (error) {
@@ -506,6 +574,13 @@ export async function saveSession(
 		return end(reason === "aborted" ? "cancelled" : "failed", refusedResult(reason))
 	} finally {
 		saves.running = false
+	}
+
+	// Nothing written while the deck read dirty: the saved state moved, so the page's indicator follows.
+	function unchanged(): SaveResult {
+		if (history !== undefined) emitSavedState(session, history)
+
+		return end("unchanged", { kind: "unchanged" })
 	}
 
 	// The writer's check refused the changes of some parts: their ops are reverted (when the history can) and the
@@ -552,9 +627,10 @@ export async function saveSession(
 		}
 
 		if (outcome.kind === "unchanged") {
-			if (point !== undefined) history?.abandon(point)
+			// The file already holds the snapshot's state: it is the saved one.
+			if (point !== undefined) history?.commit(point)
 
-			return end("unchanged", { kind: "unchanged" })
+			return unchanged()
 		}
 
 		if (outcome.kind === "refused") return refuse(outcome.reason, outcome.detail)
@@ -652,10 +728,10 @@ export async function saveSession(
 	}
 }
 
-// The part names a writer refusal's detail mentions ("/ppt/slides/slide2.xml reads back … differently"), as model part
-// names; undefined when it names none.
+// The part names a writer refusal's detail mentions ("/ppt/slides/slide2.xml reads back … differently", an ODP page
+// "/content.xml#12"), as model part names; undefined when it names none.
 function partsNamed(detail: string): ReadonlySet<string> | undefined {
-	const names = detail.match(/[\w.-]+(?:\/[\w.-]+)*\.(?:xml|rels)\b/gu)
+	const names = detail.match(/[\w.-]+(?:\/[\w.-]+)*\.(?:xml|rels)(?:#[\w.-]+|\b)/gu)
 
 	return names === null ? undefined : new Set(names.map(name => (name.startsWith("/") ? name : `/${name}`)))
 }
@@ -711,6 +787,7 @@ export async function commitSavedSession(
 		;(raw as RemoteByteSource).close?.()
 		// The old file may be gone: the session cannot read on safely.
 		retire(old.source)
+		closeRetired(old.source)
 		session.emit({ type: "error", reason: "stale", message: error instanceof Error ? error.message : String(error) })
 
 		throw error
@@ -726,8 +803,25 @@ export async function commitSavedSession(
 			? undefined
 			: relocation(old.archive, archive, session.package.source, pending.saved.written)
 	)
+	closeRetired(old.source)
 
-	return { dirty: history?.dirty ?? false }
+	const dirty = history?.dirty ?? false
+
+	// The saved state moved: the page's dirty indicator and unsaved guard follow (no slide changed).
+	if (history === undefined) session.emit({ type: "changed", revision: 0, dirty, slides: [] })
+	else emitSavedState(session, history)
+
+	return { dirty }
+}
+
+function emitSavedState(session: EngineSession, history: SaveHistory): void {
+	session.emit({
+		type: "changed",
+		revision: history.revision,
+		dirty: history.dirty,
+		...(history.dirtyBytes === undefined ? {} : { dirtyBytes: history.dirtyBytes }),
+		slides: []
+	})
 }
 
 // The saved file's port when the session does not read through it: closed through the host, which shuts its serving
