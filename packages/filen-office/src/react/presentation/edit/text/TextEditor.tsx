@@ -219,6 +219,8 @@ export function PresentationTextEditor({
 
 		render.layers.forEach((layer, index) => {
 			if (layer.shape.slide !== shape.slide || layer.shape.id !== shape.id || layer.text === undefined) return
+			// A table cell's body hides that cell's text only.
+			if (shape.cell !== undefined && (layer.cell?.[0] !== shape.cell.row || layer.cell[1] !== shape.cell.col)) return
 
 			const painted = frame.querySelector<HTMLElement>(`.fo-slide-content [data-fo-layer="${String(index)}"] > .fo-slide-text`)
 

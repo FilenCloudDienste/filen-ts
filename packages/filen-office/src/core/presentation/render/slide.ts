@@ -17,11 +17,21 @@ import { convertShapeTree, type ShapeContext } from "../../drawingml/shape"
 import { NodeKind, parseXml, sliceClock, type SliceClock, type XmlDocument } from "../../xml/index"
 import { runSliced, type Slicing } from "../../slicing"
 import { DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../budget"
-import { PresentationError, type Deck, type ShapeNode, type SlideNode, type SlideRef, type TextBody, type Xfrm } from "../model"
-import type { LayerRole, SlideLayer, SlideRender, TextPage } from "../output"
+import { mediaPlayback } from "../edit/apply/media"
+import {
+	PresentationError,
+	type Deck,
+	type MediaRef,
+	type ShapeNode,
+	type SlideNode,
+	type SlideRef,
+	type TextBody,
+	type Xfrm
+} from "../model"
+import type { LayerRole, SlideLayer, SlideMediaInfo, SlideRender, TextPage } from "../output"
 import { turnOf } from "../text/vertical"
 import { FLAT, RenderReport, layerEffects } from "./effects"
-import { drawFrame } from "./frame"
+import { drawFrame, olePicture } from "./frame"
 import { SmartArtTexts } from "./smartartText"
 import { ScratchWriter, colorXml, fillXml } from "./markup"
 import {
@@ -183,9 +193,10 @@ function writeChildren(
 ): void {
 	if (depth > 128) return
 
-	for (const child of shapes) {
-		if (child.hidden) continue
+	for (const member of shapes) {
+		if (member.hidden) continue
 
+		const child = olePicture(services, member) ?? member
 		const levels = resolveLevels(services, owner, child, [])
 		const xfrm = child.xfrm
 
@@ -374,12 +385,14 @@ function buildScratch(deck: Deck, node: SlideNode, services: RenderServices): Sc
 
 	backgroundMarkup(writer, services, deck, node)
 
-	for (const { owner, shape } of painting) {
+	for (const painted of painting) {
+		const owner = painted.owner
+		const shape = olePicture(services, painted.shape) ?? painted.shape
 		const chain = owner === node ? placeholderChain(deck, owner, shape) : []
 		const levels = resolveLevels(services, owner, shape, chain)
 		const slideSpace = (shape.kind === "ink" || shape.kind === "opaque") && levels[0]?.source !== undefined
 		const xfrm = slideSpace ? slideXfrm(deck) : resolvedXfrm(levels)
-		const entry: Entry = { owner, shape, role: roleOf(owner, shape), levels, chain, xfrm, slideSpace }
+		const entry: Entry = { owner, shape, role: roleOf(owner, painted.shape), levels, chain, xfrm, slideSpace }
 
 		entries.push(entry)
 
@@ -695,7 +708,7 @@ function entryMatrix(entry: Entry): number[] {
 // slide names that layout or master, so it never shares a ref with a slide shape of the same id). `child` names the
 // group child (of entry.shape) the layer draws, with its own role and alt text (the group's actions and lock hold for
 // its children unless the child has its own).
-function layerBase(entry: Entry, id: number, child?: ShapeNode): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock"> {
+function layerBase(entry: Entry, id: number, child?: ShapeNode): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock" | "media"> {
 	const shape = child ?? entry.shape
 	const alt = shape.alt?.decorative === true ? undefined : (shape.alt?.descr ?? shape.alt?.title)
 	const actions = shape.actions ?? entry.shape.actions
@@ -706,7 +719,22 @@ function layerBase(entry: Entry, id: number, child?: ShapeNode): Pick<SlideLayer
 		role: child === undefined ? entry.role : roleOf(entry.owner, child),
 		...(alt === undefined || alt === "" ? {} : { alt }),
 		...(actions === undefined ? {} : { actions }),
-		...(lock === undefined ? {} : { lock })
+		...(lock === undefined ? {} : { lock }),
+		...(shape.media === undefined ? {} : { media: mediaInfo(shape.media, entry.owner, shape.id) })
+	}
+}
+
+// What a medium's layer plays, with its playback options from the slide's timing.
+function mediaInfo(media: MediaRef, owner: SlideNode, id: number): SlideMediaInfo {
+	const playback = mediaPlayback(owner.timing, id)
+
+	return {
+		kind: media.kind,
+		...(media.part === undefined ? {} : { part: media.part }),
+		...(media.external === undefined ? {} : { external: media.external }),
+		contentType: media.contentType,
+		...(media.size === undefined ? {} : { size: media.size }),
+		...(Object.keys(playback).length === 0 ? {} : { playback })
 	}
 }
 
@@ -977,7 +1005,7 @@ async function layersOf(input: {
 	const segment = (
 		end: number,
 		id: number
-	): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock"> & Pick<SlideLayer, "drawing"> => {
+	): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock" | "media"> & Pick<SlideLayer, "drawing"> => {
 		// The entry's own base (its effects, alt, actions) only for its own layer: a group child's text layer is the child's.
 		const piece =
 			id === entry.shape.id ? (first ? base : layerBase(entry, id)) : layerBase(entry, id, childShape(entry.shape.children, id))
@@ -1240,7 +1268,34 @@ async function renderTableLayer(
 
 	if (rendered.refused !== undefined) report.refuse("table:tooLarge")
 
-	layers.push({ ...base, drawing: drawingData(list), matrix })
+	const areas = new Int32Array(rendered.cells.length * 4)
+	const textBoxes = new Float64Array(rendered.cells.length * 4)
+
+	rendered.cells.forEach((cell, k) => {
+		areas.set([cell.row, cell.column, cell.rowSpan, cell.columnSpan], k * 4)
+		textBoxes.set(
+			[
+				cell.x + cell.marL,
+				cell.y + cell.marT,
+				Math.max(0, cell.width - cell.marL - cell.marR),
+				Math.max(0, cell.height - cell.marT - cell.marB)
+			],
+			k * 4
+		)
+	})
+	layers.push({
+		...base,
+		drawing: drawingData(list),
+		matrix,
+		table: {
+			columnEdges: rendered.columnEdges,
+			rowEdges: rendered.rowEdges,
+			areas,
+			textBoxes,
+			...(table.styleId === undefined ? {} : { styleId: table.styleId }),
+			flags: { ...table.flags }
+		}
+	})
 
 	for (const cell of rendered.cells) {
 		if (clock.due) await clock.pause()
@@ -1261,7 +1316,8 @@ async function renderTableLayer(
 			drawing: emptyDrawing(0, 0),
 			text: result.page,
 			matrix,
-			textMatrix: multiply(matrix, [1, 0, 0, 1, cell.x + cell.marL, cell.y + cell.marT + Math.max(0, offset)])
+			textMatrix: multiply(matrix, [1, 0, 0, 1, cell.x + cell.marL, cell.y + cell.marT + Math.max(0, offset)]),
+			cell: [cell.row, cell.column]
 		})
 	}
 }

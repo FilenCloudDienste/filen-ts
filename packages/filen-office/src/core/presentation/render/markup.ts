@@ -19,6 +19,7 @@ import {
 	type LineProps
 } from "../model"
 import type { RenderServices } from "./services"
+import type { PictureAdjust } from "../edit/ops"
 
 // The scratch document of one slide: resolved DrawingML elements written as markup, parsed once, and handed to the
 // shared shape converter. Copied source groups are re-serialized with one prefix per namespace group (Strict URIs
@@ -259,7 +260,23 @@ function edges(name: string, value: EdgeFractions | undefined): string {
 	return `<a:${name}${attribute("l", value.l)}${attribute("t", value.t)}${attribute("r", value.r)}${attribute("b", value.b)}/>`
 }
 
-// A fill; a picture fill names its image through `image` (a scratch id).
+// a:blip's adjustment children (in CT_Blip's order: alphaModFix, biLevel, duotone, grayscl, lum).
+export function adjustXml(adjust: PictureAdjust): string {
+	let out = ""
+
+	// alpha: transparency, 0 (opaque) to 100,000.
+	if (adjust.alpha !== undefined) out += `<a:alphaModFix${attribute("amt", 100_000 - Math.max(0, Math.min(100_000, adjust.alpha)))}/>`
+	if (adjust.biLevel !== undefined) out += `<a:biLevel${attribute("thresh", Math.max(0, adjust.biLevel))}/>`
+	if (adjust.duotone !== undefined) out += `<a:duotone>${colorXml(adjust.duotone[0])}${colorXml(adjust.duotone[1])}</a:duotone>`
+	if (adjust.grayscale === true) out += "<a:grayscl/>"
+	if ((adjust.brightness ?? 0) !== 0 || (adjust.contrast ?? 0) !== 0)
+		out += `<a:lum${attribute("bright", adjust.brightness)}${attribute("contrast", adjust.contrast)}/>`
+
+	return out
+}
+
+// A fill; a picture fill names its image through `image` (a scratch id), its adjustments (an edit's typed fill)
+// drawn as the blip's.
 export function fillXml(fill: FillProps | "none", image: (fill: Extract<FillProps, { kind: "picture" }>) => string | undefined): string {
 	if (fill === "none") return "<a:noFill/>"
 
@@ -281,7 +298,8 @@ export function fillXml(fill: FillProps | "none", image: (fill: Extract<FillProp
 			return `<a:pattFill${attribute("prst", fill.preset)}><a:fgClr>${colorXml(fill.fg)}</a:fgClr><a:bgClr>${colorXml(fill.bg)}</a:bgClr></a:pattFill>`
 		case "picture": {
 			const id = image(fill)
-			const blip = id === undefined ? "<a:blip/>" : `<a:blip${attribute("r:embed", id)}/>`
+			const adjust = "adjust" in fill ? adjustXml(fill.adjust as PictureAdjust) : ""
+			const blip = `<a:blip${id === undefined ? "" : attribute("r:embed", id)}${adjust === "" ? "/>" : `>${adjust}</a:blip>`}`
 			const placement =
 				fill.tile !== undefined
 					? `<a:tile${attribute("tx", fill.tile.tx)}${attribute("ty", fill.tile.ty)}${attribute("sx", fill.tile.sx)}${attribute("sy", fill.tile.sy)}${attribute("flip", fill.tile.flip)}${attribute("algn", fill.tile.algn)}/>`

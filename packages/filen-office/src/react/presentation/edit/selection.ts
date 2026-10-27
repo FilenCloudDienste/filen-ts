@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 import type { Action, LockReason, ShapeLocks, ShapeNode, SlideRef, Xfrm } from "../../../core/presentation/model"
-import type { LayerRole, SlideRender } from "../../../core/presentation/output"
+import type { LayerRole, SlideMediaInfo, SlideRender } from "../../../core/presentation/output"
 
 // The editor's shape selection: which top-level shapes of the slide in view are selected, as an external store
 // the canvas overlay, the ribbon and the keyboard share. The shapes themselves come from the slide's render (each
@@ -18,6 +18,8 @@ export interface SlideShape {
 	readonly lock?: LockReason
 	// The file's own locks (selection, move, resize, turn, aspect, grouping).
 	readonly locks?: ShapeLocks
+	// What the shape plays, when it is a medium (the Video and Audio tabs).
+	readonly media?: SlideMediaInfo
 	// Drawn as a line between two ends (a connector or a line preset).
 	readonly line?: true
 }
@@ -73,7 +75,8 @@ export function slideShapes(render: SlideRender | undefined): readonly SlideShap
 			...(box.locks === undefined ? {} : { locks: box.locks }),
 			...(box.line === true ? { line: true as const } : {}),
 			...(layer.actions === undefined || layer.shape.id !== box.id ? {} : { actions: layer.actions }),
-			...(layer.lock === undefined || layer.shape.id !== box.id ? {} : { lock: layer.lock })
+			...(layer.lock === undefined || layer.shape.id !== box.id ? {} : { lock: layer.lock }),
+			...(layer.media === undefined || layer.shape.id !== box.id ? {} : { media: layer.media })
 		}
 		const entry = { shape, layers }
 
@@ -274,12 +277,18 @@ export function selectedShapes(render: SlideRender | undefined, state: ShapeSele
 }
 
 // What the selection holds, for the ribbon's contextual tabs.
-export type SelectionKind = "shape" | "picture" | "table" | "chart" | "smartart"
+export type SelectionKind = "shape" | "picture" | "table" | "chart" | "smartart" | "video" | "audio"
 
 export function selectionKinds(shapes: readonly SlideShape[]): ReadonlySet<SelectionKind> {
 	const kinds = new Set<SelectionKind>()
 
 	for (const shape of shapes) {
+		if (shape.media !== undefined) {
+			kinds.add(shape.media.kind)
+
+			continue
+		}
+
 		switch (shape.role) {
 			case "picture":
 			case "table":

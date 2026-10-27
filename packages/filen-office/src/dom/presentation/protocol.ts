@@ -1,5 +1,6 @@
 import type { CompiledTimegraph } from "../../core/anim/model"
-import type { DeckOp, SmartArtDefRef } from "../../core/presentation/edit/ops"
+import type { DeckOp, FileLike, InsertedMedia, SmartArtDefRef } from "../../core/presentation/edit/ops"
+import type { SmartArtInfo } from "../../core/smartart/edit"
 import type {
 	CustomShow,
 	DeckVariant,
@@ -8,6 +9,7 @@ import type {
 	PresentationRefusal,
 	Section,
 	ShapeRef,
+	ShowSettings,
 	SlideRef,
 	TextBody
 } from "../../core/presentation/model"
@@ -21,6 +23,7 @@ export type {
 	RenderEffect,
 	RenderEffects,
 	SlideLayer,
+	SlideMediaInfo,
 	SlideRender,
 	TextPage,
 	TextSeed,
@@ -73,6 +76,8 @@ export interface OpenInfo {
 	readonly locks: number
 	readonly packageBytes: number
 	readonly source: "bytes" | "range"
+	// The deck's slide show settings (p:showPr, presentation:settings) as the file has them.
+	readonly show?: ShowSettings
 }
 
 // A layout as the editor offers it: its master, ST_SlideLayoutType ("title", "obj"…) and name, when the file has them.
@@ -156,6 +161,8 @@ export const PRESENTATION_FIND_INTS = 6
 export const FIND_IN_NOTES = 1
 export const FIND_IN_TABLE = 2
 export const FIND_IN_SMARTART = 4
+// The match is in a shape no edit may change (ShapeNode.lock): found, never replaced.
+export const FIND_LOCKED = 8
 
 // A media stream registered on the port: its size and type, and whether ranges can be served.
 export interface PortStreamMeta {
@@ -168,6 +175,19 @@ export type MediaRefusal = {
 	readonly kind: "refused"
 	readonly reason: "notFound" | "linked" | "notMedia" | "preparing" | "tooLarge" | "notImplemented"
 }
+
+// A medium to insert: a device file (structured-cloned) or a drive file's range port (sdkApi.openRangePort). The
+// worker reads it once for its CRC-32, size and container, and again at save; the page keeps nothing.
+export type MediaInsertSource =
+	| { readonly kind: "file"; readonly file: FileLike }
+	| {
+			readonly kind: "range"
+			readonly port: PortLike
+			readonly size: number
+			readonly checked: boolean
+			readonly name: string
+			readonly type: string
+	  }
 
 // What the show asks layers for: per step, the shapes it animates and how (bitmap, or the DOM layer).
 export interface LayerPlan {
@@ -233,6 +253,8 @@ export interface PresentationSessionApi {
 	// PRESENTATION_FIND_INTS per match.
 	find(query: string, options?: FindOptions): Promise<Int32Array>
 	media(part: string, port: PortLike): Promise<PortStreamMeta | MediaRefusal>
+	// Registers a medium for media.insert (InsertedMedia without poster or duration: the page probes those).
+	registerMedia(source: MediaInsertSource): Promise<InsertedMedia | MediaRefusal>
 	// A picture's bytes for the SVG painter (a part name, or "inserted:<id>" for an image an op inserted); null when
 	// the package has none.
 	image(part: string): Promise<{ readonly bytes: Uint8Array; readonly type: string } | null>
@@ -247,6 +269,8 @@ export interface PresentationSessionApi {
 			readonly sample?: readonly string[]
 		}
 	): Promise<BitmapLike>
+	// A diagram's nodes as the text pane lists them, the definitions it names and those the deck embeds.
+	smartArtInfo(target: ShapeRef): Promise<SmartArtInfo>
 	timegraph(slide: SlideRef): Promise<CompiledTimegraph>
 	layers(slide: SlideRef, widthPx: number, plan: LayerPlan): Promise<readonly ShowLayer[]>
 	// Writes to the save port (pull protocol, ≤ 1 MiB chunks, ≤ 4 in flight).
@@ -278,8 +302,10 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"redo",
 	"find",
 	"media",
+	"registerMedia",
 	"image",
 	"smartArtPreview",
+	"smartArtInfo",
 	"timegraph",
 	"layers",
 	"save",
@@ -365,6 +391,9 @@ function callTransferables(call: PresentationCall, into: Set<unknown>): void {
 	switch (call.method) {
 		case "media":
 			addPort(call.args[1], into)
+			return
+		case "registerMedia":
+			if (call.args[0].kind === "range") addPort(call.args[0].port, into)
 			return
 		case "save":
 		case "commitSaved":

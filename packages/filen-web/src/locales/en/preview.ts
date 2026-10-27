@@ -28,6 +28,12 @@ import { previewPptxEditor } from "@/locales/en/previewPptx/editor"
 import { previewPptxArrange } from "@/locales/en/previewPptx/arrange"
 import { previewPptxText } from "@/locales/en/previewPptx/text"
 import { previewPptxFind } from "@/locales/en/previewPptx/find"
+import { previewPptxObjects } from "@/locales/en/previewPptx/objects"
+import { previewPptxMedia } from "@/locales/en/previewPptx/media"
+import { previewPptxShow } from "@/locales/en/previewPptx/show"
+import { previewPptxPresenter } from "@/locales/en/previewPptx/presenter"
+import { previewPptxInk } from "@/locales/en/previewPptx/ink"
+import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
 import { previewSheetFormat } from "@/locales/en/previewSheet/format"
 import { previewSheetSave } from "@/locales/en/previewSheet/save"
 import { previewSheetStructure } from "@/locales/en/previewSheet/structure"
@@ -743,6 +749,12 @@ export const preview = {
 	...previewPptxArrange,
 	...previewPptxText,
 	...previewPptxFind,
+	...previewPptxObjects,
+	...previewPptxMedia,
+	...previewPptxShow,
+	...previewPptxPresenter,
+	...previewPptxInk,
+	...previewPptxSmartArt,
 	...previewSheetSave,
 	...previewSheetFormat,
 	...previewSheetKeys,

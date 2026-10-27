@@ -26,6 +26,12 @@ export interface FixtureShape {
 	readonly rawStyle?: Uint8Array
 	// A mouse-click InteractiveInfo (§2.6.7): InteractiveInfoAtom action and oleVerb, and its MacroNameAtom.
 	readonly click?: { readonly action: number; readonly oleVerb?: number; readonly name?: string }
+	// More records of the shape's OfficeArtClientData (an AnimationInfoContainer, an ExObjRefAtom).
+	readonly clientData?: readonly Uint8Array[]
+	// FSP fOleShape (MS-ODRAW §2.2.40): the shape shows an OLE object.
+	readonly oleShape?: boolean
+	// FSP fFlipH.
+	readonly flipH?: boolean
 }
 
 export interface FixtureSlide {
@@ -33,6 +39,8 @@ export interface FixtureSlide {
 	readonly hidden?: boolean
 	// Bodies of text in the slide list after the slide's persist atom.
 	readonly outline?: readonly { readonly type: number; readonly text: string }[]
+	// More records of the SlideContainer (a SlideShowSlideInfoAtom, a SlideProgTagsContainer).
+	readonly records?: readonly Uint8Array[]
 }
 
 export interface FixtureOptions {
@@ -46,6 +54,12 @@ export interface FixtureOptions {
 	// BLIP store entries written as they are (replaces the png entry), and Pictures stream bytes (hostile input).
 	readonly store?: readonly Uint8Array[]
 	readonly picturesStream?: Uint8Array
+	// More records of the DocumentContainer (an ExObjListContainer, a SoundCollectionContainer).
+	readonly documentRecords?: readonly Uint8Array[]
+	// More persist objects by persist id (100 and up; an ExOleObjStg).
+	readonly objects?: ReadonlyMap<number, Uint8Array>
+	// The main master's shapes (spids from 0x401), in place of its title and body placeholders.
+	readonly masterShapes?: readonly FixtureShape[]
 }
 
 function u16(value: number): Uint8Array {
@@ -105,7 +119,12 @@ function properties(entries: readonly (readonly [number, number])[]): Uint8Array
 function shapeContainer(shape: FixtureShape, spid: number): Uint8Array {
 	const [top, left, right, bottom] = shape.anchor
 	const children: Uint8Array[] = [
-		record(0xf00a, concat(u32(spid), u32(0xa00)), shape.shapeType ?? (shape.picture === true ? 75 : 1), 2),
+		record(
+			0xf00a,
+			concat(u32(spid), u32(0xa00 | (shape.oleShape === true ? 0x10 : 0) | (shape.flipH === true ? 0x40 : 0))),
+			shape.shapeType ?? (shape.picture === true ? 75 : 1),
+			2
+		),
 		properties([...(shape.properties ?? []), ...(shape.picture === true ? ([[0x4104, 1]] as const) : [])]),
 		record(0xf010, concat(u16(top), u16(left), u16(right), u16(bottom)))
 	]
@@ -122,6 +141,8 @@ function shapeContainer(shape: FixtureShape, spid: number): Uint8Array {
 
 		client.push(container(0x0ff2, [atom, ...name]))
 	}
+
+	client.push(...(shape.clientData ?? []))
 
 	if (client.length > 0) children.push(container(0xf011, client))
 
@@ -174,7 +195,13 @@ function slideRecord(slide: FixtureSlide, spidBase: number): Uint8Array {
 			? [record(0x03f9, concat(u32(0), u32(0), Uint8Array.of(0, 0), u16(0x4 | 0x1), Uint8Array.of(0, 0, 0, 0)))]
 			: []
 
-	return container(0x03ee, [slideAtom(1, 0x80000000, 0x7), ...show, drawing(slide.shapes, spidBase, 0x08000000), scheme()])
+	return container(0x03ee, [
+		slideAtom(1, 0x80000000, 0x7),
+		...show,
+		drawing(slide.shapes, spidBase, 0x08000000),
+		scheme(),
+		...(slide.records ?? [])
+	])
 }
 
 // A 1 × 1 PNG (signature, IHDR, IDAT, IEND).
@@ -272,6 +299,7 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 		]),
 		container(0x0ff0, [record(0x03f3, concat(u32(2), u32(0), u32(0), u32(0x80000000), u32(0)))], 1),
 		container(0x0ff0, list, 0),
+		...(options.documentRecords ?? []),
 		record(0x03ea, new Uint8Array(0))
 	])
 	const master = container(0x03f8, [
@@ -279,7 +307,7 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 		masterStyle(0, 44),
 		masterStyle(1, 32),
 		drawing(
-			[
+			options.masterShapes ?? [
 				{ text: "Master title", textType: 0, placeholder: { type: 1, position: 0 }, anchor: [100, 300, 5400, 700] },
 				{ text: "Master body", textType: 1, placeholder: { type: 2, position: 1 }, anchor: [900, 300, 5400, 4000] }
 			],
@@ -294,6 +322,8 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 	])
 
 	slides.forEach((slide, index) => objects.set(3 + index, slideRecord(slide, 0x800 * (index + 2))))
+
+	for (const [id, bytes] of options.objects ?? []) objects.set(id, bytes)
 
 	let session: number | undefined
 
@@ -421,3 +451,122 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 }
 
 export const FIXTURE_PNG = png()
+
+// --- A deck holding every reader past the slides: a PowerPoint 2002 time tree and a comment in the PP10 tag, a
+// transition with a sound, an Office 97 build, a linked movie, an embedded object with its storage, an embedded sound.
+
+const cString = (instance: number, text: string): Uint8Array => record(0x0fba, utf16(text), instance)
+const timeInt = (id: number, value: number): Uint8Array => record(0xf142, concat(Uint8Array.of(1), u32(value)), id)
+const timeNode = (...children: Uint8Array[]): Uint8Array => container(0xf144, children, 1)
+
+function timeNodeAtom(type: number, duration?: number): Uint8Array {
+	return record(
+		0xf127,
+		concat(u32(0), u32(0), u32(type), u32(0), u32(0), u32(0), u32(duration ?? 0), u32(0x8 | (duration === undefined ? 0 : 0x10)))
+	)
+}
+
+const timeTarget = (spid: number): Uint8Array => container(0xf13c, [record(0x2afb, concat(u32(0), u32(1), u32(spid), u32(0), u32(0)))])
+const timeCondition = (instance: number, delay: number): Uint8Array =>
+	container(0xf125, [record(0xf128, concat(u32(0), u32(0), u32(0), u32(delay)))], instance)
+
+// The SlideProgTagsContainer of the rich deck's first slide: one click fading shape 1024 in and playing movie 1025, and
+// a comment.
+export const RICH_TAG = container(0x1388, [
+	container(0x138a, [
+		cString(0, "___PPT10"),
+		record(
+			0x138b,
+			concat(
+				timeNode(
+					timeNodeAtom(0, -1),
+					container(0xf13d, [timeInt(20, 9)]),
+					timeNode(
+						timeNodeAtom(1, -1),
+						container(0xf13d, [timeInt(20, 4)]),
+						timeNode(
+							timeNodeAtom(0),
+							timeCondition(1, -1),
+							timeNode(
+								timeNodeAtom(0),
+								container(0xf13d, [timeInt(20, 1), timeInt(9, 10), timeInt(11, 1)]),
+								timeNode(
+									timeNodeAtom(3, 500),
+									container(0xf12d, [
+										record(0xf136, concat(u32(0x3), u32(0))),
+										record(0xf142, concat(Uint8Array.of(3), utf16("fade")), 1),
+										container(0xf12a, [record(0xf133, concat(u32(0), u32(0), u32(0), u32(0))), timeTarget(1024)])
+									])
+								),
+								timeNode(timeNodeAtom(4, 500), timeTarget(1025), container(0xf13d, [timeInt(22, 50000)]))
+							)
+						)
+					)
+				),
+				container(0x2ee0, [
+					cString(0, "Ann"),
+					cString(1, "Looks good"),
+					cString(2, "A"),
+					record(0x2ee1, concat(u32(1), ...[2020, 5, 1, 4, 10, 30, 0, 0].map(u16), u32(100), u32(200)))
+				])
+			)
+		)
+	])
+])
+// A SlideShowSlideInfoAtom: a 2 s automatic advance, a wipe with a sound.
+export const RICH_TRANSITION = record(
+	0x03f9,
+	concat(u32(2000), u32(3), Uint8Array.of(2, 10), u16(0x1 | 0x10 | 0x400), Uint8Array.of(2, 0, 0, 0))
+)
+// An AnimationInfoContainer: a fly-in.
+export const RICH_BUILD = container(0x1014, [
+	record(
+		0x0ff1,
+		concat(Uint8Array.of(0, 0, 0, 0xfe, 0, 0x44, 0, 0), u32(0), u32(0), Uint8Array.of(1, 0, 0, 0, 1, 12, 0, 0, 0, 0, 0, 0)),
+		0,
+		1
+	)
+])
+const RICH_STORAGE = Uint8Array.from({ length: 4096 }, (_, k) => (k * 31) % 251)
+
+export function richDeck(): Promise<BuiltPpt> {
+	return buildPpt({
+		png: FIXTURE_PNG,
+		slides: [
+			{ shapes: [{ text: "Fly in", anchor: [100, 100, 2000, 600] }], records: [RICH_TRANSITION, RICH_TAG] },
+			{
+				shapes: [
+					{ text: "Built", anchor: [100, 100, 2000, 600], clientData: [RICH_BUILD] },
+					{ picture: true, anchor: [100, 100, 1000, 800], clientData: [record(0x0bc1, u32(1))] },
+					{ picture: true, oleShape: true, anchor: [1000, 100, 2000, 800], clientData: [record(0x0bc1, u32(2))] },
+					{ picture: true, anchor: [100, 900, 1000, 1600], clientData: [record(0x0bc1, u32(3))] }
+				]
+			}
+		],
+		documentRecords: [
+			container(0x0409, [
+				container(0x1006, [container(0x1005, [record(0x1004, concat(u32(1), u32(0))), cString(0, "C:\\clips\\intro.avi")])]),
+				container(0x0fcc, [
+					record(0x0fcd, concat(u32(0), u32(0))),
+					record(0x0fc3, concat(u32(1), u32(0), u32(2), u32(3), u32(100), u32(0))),
+					cString(2, "Excel.Sheet.8")
+				]),
+				container(0x100f, [record(0x1004, concat(u32(3), u32(0))), record(0x1013, concat(u32(3), u32(0), u32(0)))])
+			]),
+			container(
+				0x07e4,
+				[
+					record(0x07e5, u32(3)),
+					container(0x07e6, [
+						cString(0, "Chime"),
+						cString(1, ".wav"),
+						cString(2, "3"),
+						record(0x07e7, Uint8Array.of(82, 73, 70, 70))
+					])
+				],
+				5
+			)
+		],
+		objects: new Map([[100, record(0x1011, concat(u32(RICH_STORAGE.length), new Uint8Array(deflateSync(RICH_STORAGE))), 1)]])
+	})
+}

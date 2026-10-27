@@ -22,6 +22,9 @@ import { G, P_MAIN, partReader, type PartReader } from "../read/xml"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { URIS, alternateUnit, childElements, sameModel, xfrmXml, type EmitContext, type Pristine } from "./emit/shape"
 import { slideRoot } from "./emit/slide"
+import { builtinTableStyleIds, builtinTableStylesPart } from "./emit/table"
+import { showPrMarkup, spliceShowPr } from "./emit/presentation"
+import { DEFAULT_SHOW } from "../read/props"
 import {
 	PART_CONTENT_TYPES,
 	PackageWriter,
@@ -555,6 +558,23 @@ class Splice {
 			for (const name of skipped)
 				if (!gone.has(partKey(name))) return refused("failed", `The changed part ${name} stays, but was planned for removal`)
 		}
+
+		// The built-in table styles named by the tables this save writes from the model (on added slides, and the
+		// edited shapes of changed ones), defined in the deck; an untouched table keeps the deck as it was.
+		const styled = new Set<string>()
+
+		for (const { node } of added) builtinTableStyleIds(node.shapes, styled)
+
+		for (const [part, change] of this.input.changes.parts) {
+			if (change.change === "removed" || change.shapes.size === 0) continue
+
+			const ref = this.index.refOf(modelName(zipName(part)))
+			const node = ref === undefined ? undefined : deck.nodes.get(ref)
+
+			if (node !== undefined) builtinTableStyleIds(node.shapes, styled, change.shapes)
+		}
+
+		if (styled.size > 0) await this.tableStyles(styled)
 
 		const presentationResult = await this.presentation(presentation)
 
@@ -1180,6 +1200,72 @@ class Splice {
 
 		if (touched.has("sections") || listChanged || removed) this.sections(document, editor, ids)
 		if (touched.has("customShows") || removed) this.customShows(document, editor, rIds, q, rel)
+
+		return touched.has("show") ? this.showProperties() : undefined
+	}
+
+	// A deck without a tableStyles part (§19.3.3.1) gets one holding every built-in style in `ids`, related from
+	// presentation.xml with its content type: LibreOffice 7.5 draws no table style without the part.
+	private async tableStyles(ids: ReadonlySet<string>): Promise<void> {
+		const writer = this.writer
+		const main = this.mainPart
+		const relationships = await writer.loadRelationships(main)
+		const existing = relationships
+			.all()
+			.find(
+				relationship =>
+					!relationship.external && relationshipKind(relationship.type) === "tableStyles" && writer.exists(relationship.target)
+			)
+
+		// A deck with the part keeps it as it is: readers draw a built-in style its tables name from the part's presence
+		// (LibreOffice 7.5 measured, PowerPoint knows them), and a save that rewrote it would change an untouched deck.
+		if (existing !== undefined) return
+
+		const markup = builtinTableStylesPart(ids)
+
+		if (markup === undefined) return
+
+		const name = writer.claim("ppt/tableStyles.xml")
+			? "ppt/tableStyles.xml"
+			: writer.allocate(undefined, PART_CONTENT_TYPES.tableStyles, "ppt/tableStyles.xml")
+
+		writer.add(name, PART_CONTENT_TYPES.tableStyles, encodeUtf8(markup))
+		writer.relate(main, name, `${RELATIONSHIPS}tableStyles`)
+	}
+
+	// presProps.xml's p:showPr as the deck's show settings; the part, its relationship and its content type made when
+	// the package has none and the settings are not the defaults.
+	private async showProperties(): Promise<Refused | undefined> {
+		const writer = this.writer
+		const main = this.mainPart
+		const relationships = await writer.loadRelationships(main)
+		const existing = relationships
+			.all()
+			.find(
+				relationship =>
+					!relationship.external && relationshipKind(relationship.type) === "presProps" && writer.exists(relationship.target)
+			)
+
+		if (existing !== undefined) {
+			const document = await writer.loadDocument(existing.target)
+
+			return spliceShowPr(document, writer.editor(existing.target), this.deck.show)
+		}
+
+		if (sameModel(this.deck.show, DEFAULT_SHOW)) return undefined
+
+		const name = writer.claim("ppt/presProps.xml")
+			? "ppt/presProps.xml"
+			: writer.allocate(undefined, PART_CONTENT_TYPES.presProps, "ppt/presProps.xml")
+
+		writer.add(
+			name,
+			PART_CONTENT_TYPES.presProps,
+			encodeUtf8(
+				`${XML_DECLARATION}<p:presentationPr xmlns:a="${URIS["a"] ?? ""}" xmlns:r="${URIS["r"] ?? ""}" xmlns:p="${P_MAIN}">${showPrMarkup(this.deck.show)}</p:presentationPr>`
+			)
+		)
+		writer.relate(main, name, `${RELATIONSHIPS}presProps`)
 
 		return undefined
 	}

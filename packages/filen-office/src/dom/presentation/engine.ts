@@ -1,5 +1,6 @@
 import { bytesSource, type ByteSource, type OpcPackage, type Slicing, type ZipArchive } from "../../core/opc/index"
 import type { SmartArtDefRef } from "../../core/presentation/edit/ops"
+import type { SmartArtInfo } from "../../core/smartart/edit"
 import {
 	PresentationError,
 	type Deck,
@@ -16,6 +17,7 @@ import {
 	type BitmapLike,
 	type FromPresentationWorker,
 	type OpenInfo,
+	type PortLike,
 	type PresentationArgs,
 	type PresentationEvent,
 	type PresentationMethod,
@@ -81,8 +83,10 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	redo: "priority",
 	find: "background",
 	media: "background",
+	registerMedia: "background",
 	image: "background",
 	smartArtPreview: "background",
+	smartArtInfo: "priority",
 	timegraph: "background",
 	layers: "background",
 	save: "background",
@@ -106,9 +110,17 @@ export interface PresentationScheduler {
 	schedule(lane: Lane, task: Task, signal: CallSignal): void
 }
 
+// Serves one medium's bytes on the port the page handed to media(): the web's range-port protocol
+// (lib/media/rangePort.ts exposeRangePort). `read` answers [start, end) of the medium; `closed` ends serving.
+export interface MediaPortServer {
+	serve(port: PortLike, read: (start: number, end: number, signal: CallSignal) => Promise<Uint8Array>, closed: CallSignal): void
+}
+
 export interface EngineServices {
 	readonly fonts: FontsCapability
 	readonly smartart: SmartArtCapability
+	// Serves media() on the page's port; absent: media() is refused notImplemented.
+	readonly media?: MediaPortServer
 	// A shape's text chain, box and measuring environment (layoutText); absent: layoutText is refused notImplemented.
 	readonly text?: TextServices
 }
@@ -149,7 +161,7 @@ export type ThumbsCapability = Capability<"thumbnails">
 export type TextCapability = Capability<"textSeed" | "layoutText">
 export type EditCapability = Capability<"command" | "undo" | "redo">
 export type SaveCapability = Capability<"save" | "commitSaved">
-export type MediaCapability = Capability<"media">
+export type MediaCapability = Capability<"media" | "registerMedia">
 export type ShowCapability = Capability<"timegraph" | "layers">
 export type FindCapability = Capability<"find">
 export type JobsCapability = Capability<"jobsPort">
@@ -162,7 +174,7 @@ export interface FontsCapability {
 
 // The SmartArt engine: the renderer and the editor reach a diagram's relayout through it, and the gallery its
 // previews (the protocol's smartArtPreview).
-export interface SmartArtCapability extends Capability<"smartArtPreview"> {
+export interface SmartArtCapability extends Capability<"smartArtPreview" | "smartArtInfo"> {
 	relayout(
 		session: EngineSession,
 		target: ShapeRef,
@@ -179,6 +191,8 @@ export interface SmartArtCapability extends Capability<"smartArtPreview"> {
 		},
 		slicing: Slicing
 	): Promise<BitmapLike>
+	// The text pane's outline of a diagram and the definitions the deck embeds.
+	info(session: EngineSession, target: ShapeRef): Promise<SmartArtInfo>
 }
 
 export interface OpenRequest {
@@ -229,7 +243,8 @@ export const METHOD_HANDLERS: Handlers = {
 	...CAPABILITIES.find,
 	...CAPABILITIES.jobs,
 	...CAPABILITIES.convert,
-	smartArtPreview: (context, ...args) => context.session.services.smartart.smartArtPreview(context, ...args)
+	smartArtPreview: (context, ...args) => context.session.services.smartart.smartArtPreview(context, ...args),
+	smartArtInfo: (context, ...args) => context.session.services.smartart.smartArtInfo(context, ...args)
 }
 
 // What the methods that edit or save the deck in place answer in a view-only session (Save as a copy still works):
@@ -273,7 +288,8 @@ export function openInfo(deck: Deck, opened: OpenedPackage, viewOnly = opened.vi
 		editable: deck.gate.length === 0 && !viewOnly,
 		locks: opened.locks,
 		packageBytes: opened.bytes,
-		source: opened.sourceKind
+		source: opened.sourceKind,
+		show: deck.show
 	}
 }
 

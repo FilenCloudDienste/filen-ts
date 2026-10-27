@@ -40,7 +40,7 @@ import { PresentationEditor } from "@/features/presentation/components/presentat
 import type { PresentationEditing } from "@/features/presentation/hooks/usePresentationSession"
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
 import { PresentationSlideRail } from "@/features/presentation/components/slideRail"
-import { LegacyPresentationBar } from "@/features/presentation/components/legacyView"
+import { LegacyPresentationBar, type LegacySaveCopy } from "@/features/presentation/components/legacyView"
 import {
 	PRESENTATION_SNIFF_BYTES,
 	presentationFileKind,
@@ -51,6 +51,7 @@ import { connectPresentation, presentationPool } from "@/features/presentation/l
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { rangePortReader } from "@/lib/media/rangePort"
 import { sdkApi } from "@/lib/sdk/client"
+import { PresentationMediaFrames } from "@/features/presentation/components/mediaFrame"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
 import type { PreviewKey } from "@/lib/i18n"
@@ -80,12 +81,14 @@ interface DeckPlace {
 	readonly item: DriveItem
 	readonly variant: DriveVariant | undefined
 	readonly editing: PresentationEditing | undefined
+	// A copy may be saved beside the file (Save as .pptx of a PowerPoint 97–2003 deck), opened where it lands.
+	readonly copy?: { readonly onOpenFile: ((item: DriveItem) => void) | undefined } | undefined
 }
 
 // Slides rendered first around the one shown.
 const OPEN_WINDOW = 3
 
-export function PresentationViewer({ item, alt, variant, editing }: PresentationViewerProps) {
+export function PresentationViewer({ item, alt, variant, editing, canSaveCopy, onOpenFile }: PresentationViewerProps) {
 	useLeaveViewerFullScreen()
 
 	const archive = usePreviewByteSource() !== null
@@ -99,7 +102,7 @@ export function PresentationViewer({ item, alt, variant, editing }: Presentation
 		<DriveDeck
 			item={item}
 			alt={alt}
-			place={{ item, variant, editing }}
+			place={{ item, variant, editing, copy: canSaveCopy === true ? { onOpenFile } : undefined }}
 		/>
 	)
 }
@@ -411,6 +414,16 @@ function DeckSession({
 
 	if (document.info === undefined) return <PreviewLoading />
 
+	const saveCopy: LegacySaveCopy | undefined =
+		place?.copy === undefined || document.session === undefined
+			? undefined
+			: {
+					item: place.item,
+					session: document.session,
+					encrypted: document.info.protection.encrypted,
+					onOpenFile: place.copy.onOpenFile
+				}
+
 	if (place?.editing !== undefined) {
 		return (
 			<PresentationEditor
@@ -420,6 +433,7 @@ function DeckSession({
 				item={place.item}
 				variant={place.variant}
 				editing={place.editing}
+				saveCopy={saveCopy}
 			/>
 		)
 	}
@@ -429,6 +443,7 @@ function DeckSession({
 			store={store}
 			document={document}
 			alt={alt}
+			saveCopy={saveCopy}
 		/>
 	)
 }
@@ -462,7 +477,17 @@ function verifyPassword(store: PresentationStore, password: string, signal: Abor
 	})
 }
 
-function DeckSurface({ store, document: deck, alt }: { store: PresentationStore; document: PresentationDocument; alt: string }) {
+function DeckSurface({
+	store,
+	document: deck,
+	alt,
+	saveCopy
+}: {
+	store: PresentationStore
+	document: PresentationDocument
+	alt: string
+	saveCopy: LegacySaveCopy | undefined
+}) {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
 	const download = usePreviewDownload()
@@ -497,6 +522,8 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 	}
 
 	const show = useDeckPresentation({ store, deck, index, go, focusSlide: canvasRef })
+	// SlideView's fit: the media frames over the slide are placed in screen px.
+	const [scale, setScale] = useState(1)
 
 	const groups: RibbonGroup[] = [
 		{
@@ -595,6 +622,8 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 			aria-label={alt}
 			className="flex size-full flex-col"
 			onKeyDown={event => {
+				if (show.onKey(event)) return
+
 				onCommandBarF6(event, () => {
 					canvasRef.current?.focus()
 				})
@@ -617,7 +646,10 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 				}
 				groups={groups}
 			/>
-			<LegacyPresentationBar format={deck.info?.format} />
+			<LegacyPresentationBar
+				format={deck.info?.format}
+				saveCopy={saveCopy}
+			/>
 			<DeckNotes deck={deck} />
 			<div className={phone ? "flex min-h-0 flex-1 flex-col-reverse" : "flex min-h-0 flex-1"}>
 				{railOpen && count > 0 ? (
@@ -651,6 +683,16 @@ function DeckSurface({ store, document: deck, alt }: { store: PresentationStore;
 								mode="view"
 								actions={show.actions}
 								className="size-full"
+								onScale={setScale}
+								overlay={
+									<PresentationMediaFrames
+										render={render}
+										session={deck.session}
+										scale={scale}
+										notices={deck.notices}
+										actions={show.actions}
+									/>
+								}
 							/>
 						)}
 						{show.showing ? null : show.refusedNote("canvas")}

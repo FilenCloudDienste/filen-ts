@@ -24,6 +24,8 @@ export function slideRef(value: number): SlideRef {
 export interface ShapeRef {
 	readonly slide: SlideRef
 	readonly id: number
+	// A cell of the shape's table (its merged area's origin): the body a text op and the text editor address there.
+	readonly cell?: { readonly row: number; readonly col: number }
 }
 
 export type Format = "pptx" | "odp" | "ppt"
@@ -238,6 +240,8 @@ export interface ShapeNode {
 	src?: SourceRef
 	lock?: LockReason
 	locks?: ShapeLocks
+	// A stroke of ink the session kept (applyInk): written whole by the ink family while it has no source.
+	ink?: true
 }
 
 // a:xfrm (EMU; rot in 60,000ths of a degree). chOff/chExt only on groups.

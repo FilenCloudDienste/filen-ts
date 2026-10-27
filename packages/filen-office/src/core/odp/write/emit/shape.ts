@@ -153,6 +153,8 @@ export interface Aspects {
 	readonly name?: boolean
 	readonly hidden?: boolean
 	readonly actions?: boolean
+	// The frame's content (a table's cells): its family writes the element.
+	readonly frame?: boolean
 	// The shape as the source holds it (what a line's ends and dashes were).
 	readonly pristine?: ShapeNode
 }
@@ -281,7 +283,7 @@ const BOXED: ReadonlySet<string> = new Set([
 const LINES: ReadonlySet<string> = new Set(["draw:line", "draw:connector", "draw:measure"])
 const TEXT_ELEMENTS: ReadonlySet<string> = new Set(["text:p", "text:h", "text:list"])
 
-interface AttributeChange {
+export interface AttributeChange {
 	// Canonical name ("svg:x"); written with the element's own prefix for the namespace.
 	readonly name: string
 	readonly value: string | null
@@ -351,6 +353,25 @@ export class OdpShapeWriter {
 			if (isRefused(pieces)) return pieces
 
 			return pieces.map(piece => (typeof piece === "object" && "hole" in piece ? foreign.document.raw(piece.hole) : piece))
+		}
+
+		// Content a family of its own writes (a table's cells; a picture's image, crop and adjustments): that family writes
+		// the element, patching the frame through this writer for the rest.
+		if (own.frame === true || (own.fill === true && shape.kind === "pic")) {
+			const request: EmitRequest = {
+				slide: this.slide,
+				shape,
+				touch: { kind: "shape", slide: this.slide.ref, shape: shape.id, dirt: { kind: "node" } }
+			}
+			const family = this.styles.env.familyOf(request)
+
+			if (family === "table" || family === "picture") {
+				if (moved) return refused("unsupported", `a ${family} moved with its group`)
+
+				const markup = markupOf(this.styles.env.dispatch(family, request, this.context))
+
+				return isRefused(markup) ? markup : [markup]
+			}
 		}
 
 		const changed = hasAspects(own) || moved || force
@@ -1100,7 +1121,7 @@ function hasText(shape: ShapeNode): boolean {
 }
 
 // svg:x/y/width/height of an unturned box; a turned one is placed by draw:transform about its corner.
-function boxAttributes(box: Xfrm): AttributeChange[] {
+export function boxAttributes(box: Xfrm): AttributeChange[] {
 	const size = [
 		{ name: "svg:width", value: cm(box.cx) },
 		{ name: "svg:height", value: cm(box.cy) }

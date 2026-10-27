@@ -835,9 +835,17 @@ function escapeXml(text: string): string {
 		else if (code === 0x3c) out += "&lt;"
 		else if (code === 0x3e) out += "&gt;"
 		else if (code === 0x22) out += "&quot;"
-		// XML 1.0 has no control characters but tab, line feed and carriage return; surrogates stay paired.
+		// XML 1.0 has no control characters but tab, line feed and carriage return.
 		else if ((code < 0x20 && code !== 0x09 && code !== 0x0a) || code === 0xfffe || code === 0xffff) out += ""
-		else out += text[k]
+		// Surrogates stay paired; an unpaired one is U+FFFD.
+		else if (code >= 0xd800 && code <= 0xdfff) {
+			const next = text.charCodeAt(k + 1)
+
+			if (code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+				out += text.slice(k, k + 2)
+				k++
+			} else out += "\ufffd"
+		} else out += text[k]
 	}
 
 	return out

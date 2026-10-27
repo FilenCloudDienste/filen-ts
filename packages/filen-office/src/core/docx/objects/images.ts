@@ -349,8 +349,9 @@ function svg(b: Uint8Array): DocxImageInfo | "format" | undefined {
 	return info("svg", Math.max(1, Math.round(width)), Math.max(1, Math.round(height)))
 }
 
-// The picture `bytes` hold, or why it cannot be inserted.
-export function sniffImage(bytes: Uint8Array): DocxImageInfo | DocxImageRefusal {
+// The picture `bytes` hold, or why it cannot be inserted. `maxPixels`: the decoded raster budget (Word's by default; a
+// presentation allows more).
+export function sniffImage(bytes: Uint8Array, maxPixels = MAX_IMAGE_PIXELS): DocxImageInfo | DocxImageRefusal {
 	if (bytes.length > MAX_IMAGE_BYTES) return "tooLarge"
 
 	let found: DocxImageInfo | "format" | undefined
@@ -371,7 +372,7 @@ export function sniffImage(bytes: Uint8Array): DocxImageInfo | DocxImageRefusal 
 	if (found === undefined) return "corrupt"
 	if (found.width < 1 || found.height < 1) return "corrupt"
 	// Vector pictures are drawn at the size shown, never decoded at the size they declare.
-	if (found.width * found.height > MAX_IMAGE_PIXELS && !VECTOR.has(found.format)) return "pixels"
+	if (found.width * found.height > maxPixels && !VECTOR.has(found.format)) return "pixels"
 
 	return found
 }

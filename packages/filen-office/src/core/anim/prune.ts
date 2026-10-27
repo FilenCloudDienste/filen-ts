@@ -85,6 +85,7 @@ export function timingTargets(tree: TimingTree | undefined, gone: ReadonlySet<nu
 			return true
 
 		for (const child of ctn.children) stack.push(child)
+		for (const child of ctn.subTnLst ?? []) stack.push(child)
 	}
 
 	return false
@@ -108,7 +109,12 @@ export function withoutShapes(tree: TimingTree, gone: ReadonlySet<number>, roots
 			return undefined
 		}
 
-		if (ctn.children.length === 0) return node
+		// After-effects of a node that stays go with what they name.
+		const subs = ctn.subTnLst?.map(keep).filter((child): child is TimeNode => child !== undefined)
+		const subsSame =
+			subs === undefined || (subs.length === ctn.subTnLst?.length && subs.every((child, k) => child === ctn.subTnLst?.[k]))
+
+		if (ctn.children.length === 0) return subsSame ? node : ({ ...node, ctn: { ...ctn, subTnLst: subs } } as TimeNode)
 
 		const children = ctn.children.map(keep).filter((child): child is TimeNode => child !== undefined)
 
@@ -118,9 +124,9 @@ export function withoutShapes(tree: TimingTree, gone: ReadonlySet<number>, roots
 			return undefined
 		}
 
-		return children.length === ctn.children.length && children.every((child, k) => child === ctn.children[k])
+		return subsSame && children.length === ctn.children.length && children.every((child, k) => child === ctn.children[k])
 			? node
-			: ({ ...node, ctn: { ...ctn, children } } as TimeNode)
+			: ({ ...node, ctn: { ...ctn, children, ...(subs === undefined ? {} : { subTnLst: subs }) } } as TimeNode)
 	}
 	const root = keep(tree.root)
 
@@ -140,12 +146,14 @@ function topmost(node: TimeNode, removed: ReadonlySet<number>, out: TimeNode[]):
 	}
 
 	for (const child of node.ctn.children) topmost(child, removed, out)
+	for (const child of node.ctn.subTnLst ?? []) topmost(child, removed, out)
 }
 
 function collect(node: TimeNode, into: Set<number>): void {
 	into.add(node.ctn.id)
 
 	for (const child of node.ctn.children) collect(child, into)
+	for (const child of node.ctn.subTnLst ?? []) collect(child, into)
 }
 
 // Node conditions that named a removed node dropped (nothing would ever resolve them).
@@ -156,7 +164,9 @@ function withoutReferences(node: TimeNode, removed: ReadonlySet<number>): TimeNo
 	const keep = (list: TimeCondition[]): TimeCondition[] =>
 		named(list) ? list.filter(condition => condition.tn === undefined || !removed.has(condition.tn)) : list
 	const children = ctn.children.map(child => withoutReferences(child, removed))
+	const subs = ctn.subTnLst?.map(child => withoutReferences(child, removed))
 	const changed =
+		subs?.some((child, k) => child !== ctn.subTnLst?.[k]) === true ||
 		named(ctn.stCondLst) ||
 		named(ctn.endCondLst) ||
 		named(ctn.prevCondLst) ||
@@ -173,6 +183,7 @@ function withoutReferences(node: TimeNode, removed: ReadonlySet<number>): TimeNo
 			endCondLst: keep(ctn.endCondLst),
 			...(ctn.prevCondLst === undefined ? {} : { prevCondLst: keep(ctn.prevCondLst) }),
 			...(ctn.nextCondLst === undefined ? {} : { nextCondLst: keep(ctn.nextCondLst) }),
+			...(subs === undefined ? {} : { subTnLst: subs }),
 			children
 		}
 	} as TimeNode

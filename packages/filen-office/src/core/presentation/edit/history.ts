@@ -183,8 +183,9 @@ export class DeckHistory {
 		this.bytes += entry.bytes
 		this.revision++
 		this.enter(entry)
-		this.refreshKeys(entry.before.keys())
-		this.trim()
+		// The step's after-state is the model's now (its caller read it just before): no key it names is read again.
+		this.refreshKeys(entry.before.keys(), entry.after)
+		this.trim(entry.after)
 
 		return entry
 	}
@@ -356,7 +357,8 @@ export class DeckHistory {
 		this.rebuild()
 	}
 
-	private trim(): void {
+	// `now`: fingerprints of the model as it is, where known.
+	private trim(now?: ReadonlyMap<TouchKey, Fingerprint>): void {
 		while (this.entries.length > 0 && (this.entries.length > this.limits.maxSteps || this.bytes > this.limits.maxBytes)) {
 			if (this.cursor === 0) {
 				this.dropFrom(this.entries.length - 1)
@@ -384,7 +386,7 @@ export class DeckHistory {
 				if (anchor === this.saved) {
 					this.savedReachable = false
 					this.leave(oldest)
-					this.refreshKeys(oldest.before.keys())
+					this.refreshKeys(oldest.before.keys(), now)
 				}
 			}
 		}
@@ -481,10 +483,11 @@ export class DeckHistory {
 		this.refreshKeys(keys)
 	}
 
-	private refreshKeys(keys: Iterable<TouchKey>): void {
+	// `now`: fingerprints of the model as it is, where known (the rest are read).
+	private refreshKeys(keys: Iterable<TouchKey>, now?: ReadonlyMap<TouchKey, Fingerprint>): void {
 		for (const key of keys) {
 			const saved = this.saved.baseline.get(key) ?? this.savedValue.get(key)
-			const dirty = saved === undefined ? this.inRange.has(key) : !sameFingerprint(saved, this.fingerprint(key))
+			const dirty = saved === undefined ? this.inRange.has(key) : !sameFingerprint(saved, now?.get(key) ?? this.fingerprint(key))
 
 			if (dirty === this.dirtyKeys.has(key)) continue
 

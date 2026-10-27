@@ -32,7 +32,7 @@ import {
 
 // The timing family's PresentationML: a slide's p:timing (ECMA-376 Part 1 §19.5) out of its TimingTree. A node the
 // model holds as it was read is its source span; an edited node is written again with the attributes and children the
-// model does not hold (tmFilter, p:subTnLst, p:progress, extLst…) copied from its source element, so only what
+// model does not hold (tmFilter, p:progress, extLst…) copied from its source element, so only what
 // changed is rewritten. The result is the whole p:timing element, or no pieces when the slide has no timing any more;
 // the splice writer puts it in place of the source element (or at its schema place, after p:transition).
 
@@ -73,6 +73,7 @@ function index(tree: TimingTree | undefined): Map<number, TimeNode> {
 		if (node.ctn.src?.format === "pptx") out.set(node.ctn.src.node, node)
 
 		for (const child of node.ctn.children) visit(child)
+		for (const child of node.ctn.subTnLst ?? []) visit(child)
 	}
 
 	if (tree !== undefined) visit(tree.root)
@@ -248,7 +249,14 @@ class TimingWriter {
 								: conditionXml("endSync", ctn.endSync)
 				},
 				{ match: p("iterate"), write: child => (child >= 0 && this.same(ctn.iterate, before?.iterate) ? "keep" : iterateXml(ctn)) },
-				{ match: p("childTnLst"), write: child => this.children(ctn.children, child) }
+				{ match: p("childTnLst"), write: child => this.children(ctn.children, child) },
+				{
+					match: p("subTnLst"),
+					write: child =>
+						child >= 0 && this.same(ctn.subTnLst, before?.subTnLst)
+							? "keep"
+							: this.children(ctn.subTnLst ?? [], child, "subTnLst")
+				}
 			],
 			out
 		)
@@ -259,7 +267,7 @@ class TimingWriter {
 		return out.text("</p:cTn>").out
 	}
 
-	private children(children: readonly TimeNode[], source: number): readonly EmitPiece[] | string {
+	private children(children: readonly TimeNode[], source: number, local = "childTnLst"): readonly EmitPiece[] | string {
 		const r = readerOf(this.context)
 		const out = new Pieces()
 		// Elements of the source list that are no time node (an mc:AlternateContent we did not read) stay, after ours.
@@ -273,12 +281,12 @@ class TimingWriter {
 
 		if (children.length === 0 && kept.length === 0) return ""
 
-		out.text("<p:childTnLst>")
+		out.text(`<p:${local}>`)
 
 		for (const child of children) out.append(this.node(child))
 		for (const child of kept) out.hole(child)
 
-		return out.text("</p:childTnLst>").out
+		return out.text(`</p:${local}>`).out
 	}
 
 	private conditionList(

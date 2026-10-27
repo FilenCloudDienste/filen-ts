@@ -6,6 +6,7 @@ import {
 	FIND_IN_NOTES,
 	FIND_IN_SMARTART,
 	FIND_IN_TABLE,
+	FIND_LOCKED,
 	PRESENTATION_FIND_INTS,
 	PRESENTATION_FIND_LIMIT,
 	type FindOptions
@@ -15,7 +16,7 @@ import { viewParts, type ViewParts } from "./view"
 
 // Find across the deck, slide by slide in deck order. Per match, PRESENTATION_FIND_INTS ints: the slide's index in the
 // deck, the shape's id, the paragraph, the match's start and end in that paragraph's find text (core edit/find.ts),
-// and FIND_IN_* flags. Within a slide: its shapes back to front, groups entered in place; then its notes body (flag
+// and FIND_IN_* flags (FIND_LOCKED: the shape is locked, so the match is never replaced). Within a slide: its shapes back to front, groups entered in place; then its notes body (flag
 // FIND_IN_NOTES, the shape id is the notes body's, the slide index is the slide's: a text.replace target names the
 // slide's ref with `notes: true`). In a table (FIND_IN_TABLE) the paragraph counts the table's paragraphs across its
 // cells in row-major order (edit/find.ts tableParagraph turns it into a cell). In SmartArt (FIND_IN_SMARTART) the
@@ -132,15 +133,18 @@ async function searchShapes(search: Search, shapes: readonly ShapeNode[], slide:
 		if (shape.children !== undefined && !(await searchShapes(search, shape.children, slide))) return false
 
 		const frame = shape.frame
+		// A locked shape's matches are found and flagged: no edit may replace them.
+		const locked = shape.lock === undefined ? 0 : FIND_LOCKED
 
-		if (shape.text !== undefined && search.scopes.has("slides") && !searchBody(search, shape.text, slide, shape.id, 0)) return false
+		if (shape.text !== undefined && search.scopes.has("slides") && !searchBody(search, shape.text, slide, shape.id, locked))
+			return false
 
 		if (frame?.kind === "table" && search.scopes.has("tables")) {
 			let base = 0
 
 			for (const row of frame.table.rows) {
 				for (const cell of row.cells) {
-					if (!searchBody(search, cell.text, slide, shape.id, FIND_IN_TABLE, base)) return false
+					if (!searchBody(search, cell.text, slide, shape.id, FIND_IN_TABLE | locked, base)) return false
 
 					base += cell.text.paragraphs.length
 				}
@@ -150,7 +154,7 @@ async function searchShapes(search: Search, shapes: readonly ShapeNode[], slide:
 
 			for (let index = 0; index < texts.length; index++) {
 				matchesIn(texts[index] ?? "", search.matcher, (start, end) =>
-					search.results.push(slide, shape.id, index, start, end, FIND_IN_SMARTART)
+					search.results.push(slide, shape.id, index, start, end, FIND_IN_SMARTART | locked)
 				)
 
 				if (search.results.full) return false
@@ -203,7 +207,7 @@ export async function findInDeck(context: CallContext, query: string, options: F
 			for (const shape of notes?.shapes ?? []) {
 				if (shape.ph?.type !== "body" || shape.text === undefined) continue
 
-				if (!searchBody(search, shape.text, index, shape.id, FIND_IN_NOTES)) {
+				if (!searchBody(search, shape.text, index, shape.id, FIND_IN_NOTES | (shape.lock === undefined ? 0 : FIND_LOCKED))) {
 					stopped = true
 					break
 				}

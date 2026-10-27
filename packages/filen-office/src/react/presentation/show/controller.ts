@@ -9,7 +9,15 @@ export type ShowScreen = "slide" | "black" | "white"
 
 export type ShowEvent =
 	// The slide on stage and its main-sequence step (0 before the first click).
-	| { readonly type: "slide"; readonly index: number; readonly slide: SlideRef; readonly step: number; readonly steps: number }
+	| {
+			readonly type: "slide"
+			readonly index: number
+			readonly slide: SlideRef
+			readonly step: number
+			readonly steps: number
+			// The deck index the show goes to after this slide; null when this is the last; absent when the player does not say.
+			readonly next?: number | null
+	  }
 	| { readonly type: "step"; readonly index: number; readonly step: number }
 	| { readonly type: "screen"; readonly screen: ShowScreen }
 	| { readonly type: "notice"; readonly notice: PresentationNotice }
@@ -28,6 +36,9 @@ export interface ShowController {
 	next(): void
 	prev(): void
 	goto(index: number): void
+	// The first and last slide of the running sequence (custom show or visible slides).
+	first?(): void
+	last?(): void
 	// Black or white screen; again the same one returns to the slide.
 	black(): void
 	white(): void

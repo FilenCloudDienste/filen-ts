@@ -61,6 +61,27 @@ describe("the timegraph", () => {
 		expect(t.nextActivation()).toBe(1001)
 	})
 
+	it("answers the next begin or end after a sampled time, and none once everything has ended", () => {
+		const t = started(b =>
+			b.root([
+				b.mainSeq([
+					b.click([
+						[0, [b.flyIn(4, "clickEffect")]],
+						[500, [b.spin(2, "afterEffect")]]
+					])
+				])
+			])
+		)
+
+		t.fire({ kind: "next" }, 1000)
+
+		// From the click's time: the fly-in under way. Sampled past the fly-in's end (1500): the spin's end (it runs
+		// 1500–3500); past that, nothing is left to wait for.
+		expect(t.nextActivation()).toBe(1001)
+		expect(t.nextActivation(1600)).toBe(3500)
+		expect(t.nextActivation(10_000)).toBeUndefined()
+	})
+
 	it("seeks a running step to its end on next when nextAc is seek, spending the click", () => {
 		const t = started(b =>
 			b.root([b.mainSeq([b.click([[0, [b.spin(2, "clickEffect", 2000)]]]), b.click([[0, [b.flyIn(4, "clickEffect")]]])])])

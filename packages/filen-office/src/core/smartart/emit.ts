@@ -39,6 +39,8 @@ export interface EmitOptions {
 export interface EmittedDiagram {
 	readonly shapes: ShapeNode[]
 	readonly drawingXml: string
+	// The text boxes of the shapes whose points hold no text (EMU in the frame): where an editor shows its prompt.
+	readonly prompts: readonly Box[]
 }
 
 function emu(value: number): string {
@@ -485,5 +487,10 @@ export function emitDiagram(layout: DiagramLayout, options: EmitOptions = {}): E
 		`<dsp:drawing xmlns:dgm="${NS_DGM}" xmlns:dsp="${NS_DSP}" xmlns:a="${NS_A}" xmlns:r="${NS_R}">` +
 		`<dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/>${tree}</dsp:spTree></dsp:drawing>`
 
-	return { shapes: modelShapes(drawingXml, drawn, geometries), drawingXml }
+	// A shape that presents text points none of which holds text (its alg tx lays text out, or no text node covers it).
+	const prompts = drawn
+		.filter(item => item.text === undefined && item.shape.text.length > 0 && !item.shape.hideGeom)
+		.map(item => item.shape.box)
+
+	return { shapes: modelShapes(drawingXml, drawn, geometries), drawingXml, prompts }
 }

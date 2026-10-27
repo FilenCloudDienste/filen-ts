@@ -59,6 +59,9 @@ export interface CommonTimeNode {
 	prevCondLst?: TimeCondition[]
 	nextCondLst?: TimeCondition[]
 	children: TimeNode[]
+	// p:subTnLst: nodes played relative to this one by their masterRel (after-effects such as dim or hide, and their
+	// sounds), read for playback and written back from the model where the source has none.
+	subTnLst?: TimeNode[]
 	src?: SourceRef
 	// The node's source element as bytes, held by an inverse after a save took that element out of the file: written
 	// as it was while the node has no live source.
@@ -220,6 +223,25 @@ export interface CompiledTimegraph {
 	readonly mainSteps: number
 	readonly interactive: readonly { readonly trigger: ShapeRef; readonly seq: number }[]
 	readonly tracks: readonly Track[]
+	// What a realm that plays the graph compiles its own from (compile() output never crosses a realm boundary).
+	readonly source?: TimegraphSource
+}
+
+// A slide's timing as the worker resolved it, for compile() where the graph plays (compileSource).
+export interface TimegraphSource {
+	readonly timing: TimingTree | undefined
+	readonly layers: LayerIndex
+	// Per layer of `layers`, the layer it moves with (a paragraph range its shape's, a shape its nearest animated
+	// group's), -1 for none: the player composes a layer's state after its parent's.
+	readonly parents: Int32Array
+	// EMU.
+	readonly slideSize: { readonly cx: number; readonly cy: number }
+	// Per shape the timing targets: id, x, y, cx, cy (EMU, as rendered: inherited placeholder boxes included).
+	readonly geometry: Float64Array
+	// animClr/set colours resolved against the slide's theme and colour map: [JSON.stringify(ColorModel), Rgba].
+	readonly colors: readonly (readonly [string, Rgba])[]
+	// The transition the slide is entered with.
+	readonly transition?: Transition
 }
 
 // One animated attribute of one layer over one behaviour's active interval.
@@ -264,7 +286,13 @@ export interface LayerState {
 	}
 	// A sampled font size (points) the layer's text is laid out again at.
 	readonly fontSize?: number
-	readonly media?: { readonly command: "play" | "pause" | "stop" | "resume" | "seek"; readonly atMs?: number }
+	// toggle: play when paused or stopped, else pause (a togglePause call). `activation`: when the command's node began
+	// (graph ms), so each trigger activation is a new command even when it says the same.
+	readonly media?: {
+		readonly command: "play" | "pause" | "stop" | "resume" | "seek" | "toggle"
+		readonly atMs?: number
+		readonly activation?: number
+	}
 }
 
 // Opaque to callers: restore() takes back what snapshot() gave.
@@ -282,8 +310,9 @@ export interface TimegraphInstance {
 	snapshot(): TimegraphSnapshot
 	// "previous" restores the boundary snapshot.
 	restore(snapshot: TimegraphSnapshot): void
-	// For timed advance and afterEffect scheduling.
-	nextActivation(): number | undefined
+	// For timed advance and afterEffect scheduling: the first begin or end after `after` (default: the last event's
+	// time).
+	nextActivation(after?: number): number | undefined
 }
 
 // The slide's layers as the graph addresses them: per layer, its shape and its text sub-range when the layer is
@@ -291,6 +320,12 @@ export interface TimegraphInstance {
 export interface LayerIndex {
 	readonly shapes: Int32Array
 	readonly ranges?: readonly ({ readonly unit: "para" | "char"; readonly start: number; readonly end: number } | undefined)[]
+	// Per layer that is a run of a by-letter or by-word build (a "char" range; [-1, -1] is its shape's drawing without
+	// the text, played as the build's first element), RUN_INTS ints: its paragraph, its first letter's ordinal in that
+	// paragraph, its letter count, its first word's ordinal, its word count; -1s for every other layer.
+	readonly runs?: Int32Array
+	// Per layer, its own box (EMU: x, y, cx, cy) when it is not its shape's (a run's glyphs); NaN otherwise.
+	readonly boxes?: Float64Array
 }
 
 // The timing budgets of a hostile deck (values in core/presentation/budget.ts); exceeding one refuses `tooLarge`

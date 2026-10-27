@@ -177,6 +177,27 @@ describe("a save's copy pass over a range port", () => {
 		return { source: rangeByteSource({ kind: "range", port: port2, size: bytes.length, checked: true }, new Map()), reads, lifetime }
 	}
 
+	it("reads media through a cache of its own, so a medium never evicts the deck's blocks", async () => {
+		const bytes = pattern(12 * MiB)
+		const { source, reads } = served(bytes)
+		// The central directory's block, as an open reads it.
+		const tail = await source.read(bytes.length - 100, 100)
+
+		expect(same(tail, bytes.subarray(bytes.length - 100))).toBe(true)
+
+		for (let offset = 0; offset < 8 * MiB; offset += MiB) {
+			const piece = await source.readMedia?.(offset, MiB)
+
+			expect(same(piece ?? new Uint8Array(0), bytes.subarray(offset, offset + MiB))).toBe(true)
+		}
+
+		const before = reads.length
+
+		// The deck's block is still resident: reading it again downloads nothing.
+		await source.read(bytes.length - 100, 100)
+		expect(reads.length).toBe(before)
+	})
+
 	it("reads each 4 MiB block of the file once, in order, checks it, and answers the bytes it downloaded", async () => {
 		const bytes = pattern(10 * MiB + 321)
 		const { source, reads } = served(bytes)

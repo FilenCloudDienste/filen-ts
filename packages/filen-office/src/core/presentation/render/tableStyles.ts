@@ -40,6 +40,18 @@ function mediumStyle2(id: string, accent: string): string {
 	)
 }
 
+// The built-in style `id` names as the a:tblStyle markup a tableStyles part holds; undefined for ids not built in.
+export function builtinTableStyleXml(id: string): string | undefined {
+	const accent = Object.hasOwn(MEDIUM_STYLE_2, id) ? MEDIUM_STYLE_2[id] : undefined
+
+	if (accent === undefined) return undefined
+
+	// CT_TableStyle requires its name (§20.1.4.2.26).
+	const name = accent === "dk1" ? "Medium Style 2" : `Medium Style 2 - Accent ${accent.slice("accent".length)}`
+
+	return mediumStyle2(id, accent).replace(` styleId="${id}"`, ` styleId="${id}" styleName="${name}"`)
+}
+
 const parsed = new Map<string, { readonly reader: DrawingReader; readonly node: number }>()
 
 // The built-in style `id` names, as an a:tblStyle element; undefined for ids that are not built in.
@@ -48,11 +60,11 @@ export function builtinTableStyle(id: string): { readonly reader: DrawingReader;
 
 	if (known !== undefined) return known
 
-	const accent = Object.hasOwn(MEDIUM_STYLE_2, id) ? MEDIUM_STYLE_2[id] : undefined
+	const markup = builtinTableStyleXml(id)
 
-	if (accent === undefined) return undefined
+	if (markup === undefined) return undefined
 
-	const document = parseXml(new TextEncoder().encode(mediumStyle2(id, accent)))
+	const document = parseXml(new TextEncoder().encode(markup))
 	const style = { reader: drawingReader(document), node: document.documentElement() }
 
 	parsed.set(id, style)

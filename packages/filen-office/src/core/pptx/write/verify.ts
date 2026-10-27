@@ -28,7 +28,7 @@ import {
 	type SlideRef
 } from "../../presentation/model"
 import { Namespaces, NodeKind, parseXml, type XmlDocument } from "../../xml/index"
-import { fillChild, readEffects, readFill, readLine, type ReadContext } from "../read/drawing"
+import { fillChild, readBlipFill, readEffects, readFill, readLine, type ReadContext } from "../read/drawing"
 import { readSlidePart } from "../read/slide"
 import { G, partReader, type PartReader } from "../read/xml"
 import { sameModel } from "./emit/shape"
@@ -73,6 +73,16 @@ function clean(value: unknown, partOf: PartOf): unknown {
 	return out
 }
 
+// A picture fill without what names its image: an inserted image is a registry id in the session and a part once
+// written (the relationship check proves the part is there), and its adjustments are only partly modelled.
+function normalFill(fill: unknown): unknown {
+	if (fill === null || typeof fill !== "object" || (fill as { kind?: unknown }).kind !== "picture") return fill
+
+	const { part: _part, inserted: _inserted, adjust: _adjust, ...rest } = fill as Record<string, unknown>
+
+	return rest
+}
+
 function normalShape(shape: ShapeNode, partOf: PartOf): Record<string, unknown> {
 	const props = shape.props
 	const text =
@@ -94,7 +104,7 @@ function normalShape(shape: ShapeNode, partOf: PartOf): Record<string, unknown> 
 			actions: shape.actions,
 			text,
 			geometry: props?.geometry,
-			fill: props?.fill,
+			fill: normalFill(props?.fill),
 			ln: props?.ln,
 			effects: props?.effects?.effects,
 			children: shape.children?.map(child => normalShape(child, partOf))
@@ -381,7 +391,9 @@ async function readWritten(
 			const spPr = r.child(shape.src.node, G.P, shape.kind === "grpSp" ? "grpSpPr" : "spPr")
 
 			if (spPr >= 0) {
-				const fill = readFill(context, fillChild(r, spPr))
+				const blipFill = shape.kind === "pic" ? r.child(shape.src.node, G.P, "blipFill") : -1
+				// A picture's own fill is its p:blipFill (the model's picture fill on a p:pic).
+				const fill = blipFill >= 0 ? readBlipFill(context, blipFill) : readFill(context, fillChild(r, spPr))
 				const ln = r.child(spPr, G.A, "ln")
 				const effects = r.child(spPr, G.A, "effectLst")
 				const geometry = readGeometry(r, spPr)

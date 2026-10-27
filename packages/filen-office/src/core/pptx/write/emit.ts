@@ -16,6 +16,7 @@ import { emitPptxDesign } from "./emit/design"
 import { emitPptxSmartArt } from "./emit/smartart"
 import { emitPptxInk } from "./emit/ink"
 import { emitPptxMediaTiming } from "./emit/mediaTiming"
+import { emitPptxPresentation } from "./emit/presentation"
 
 // PresentationML out of the model, by family: the splice writer asks the family that owns a dirty element
 // (emitFamilyOf) for its markup, and proof gate 1 asks the same for an unedited one and compares it with the source.
@@ -39,7 +40,8 @@ export const PPTX_EMIT_FAMILIES: { readonly [F in DeckOpFamily]: PptxEmitFamily 
 	design: emitPptxDesign,
 	smartart: emitPptxSmartArt,
 	ink: emitPptxInk,
-	mediaTiming: emitPptxMediaTiming
+	mediaTiming: emitPptxMediaTiming,
+	presentation: emitPptxPresentation
 }
 
 export function emitPptx(family: DeckOpFamily, request: EmitRequest, context: PptxEmitContext): EmitResult {
@@ -70,6 +72,9 @@ export function emitFamilyOf(request: EmitRequest): DeckOpFamily {
 			return shape.media === undefined ? "picture" : "media"
 		case "ink":
 			return "ink"
+		// A stroke of kept ink the session made: written whole by the ink family (ODF: draw:path).
+		case "sp":
+			return shape.ink === true && shape.src === undefined ? "ink" : "shape"
 		case "frame":
 			switch (shape.frame?.kind) {
 				case "table":

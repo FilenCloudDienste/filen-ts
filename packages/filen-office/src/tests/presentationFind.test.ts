@@ -13,7 +13,7 @@ import {
 import type { Paragraph, ShapeNode, SourceRef, TextBody } from "../core/presentation/model"
 import { sessionEdits } from "../dom/presentation/engine/edit"
 import { findInDeck } from "../dom/presentation/engine/find"
-import { FIND_IN_NOTES, FIND_IN_TABLE, PRESENTATION_FIND_INTS } from "../dom/presentation/protocol"
+import { FIND_IN_NOTES, FIND_IN_TABLE, FIND_LOCKED, PRESENTATION_FIND_INTS } from "../dom/presentation/protocol"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
 import { editHarness, shapeById, type EditHarness } from "./presentationEditFixtures"
 import { changedParts, partsOf, saveEdits, text } from "./pptxWriteFixtures"
@@ -200,6 +200,22 @@ describe("presentation find in a deck", () => {
 		expect(rows(await findInDeck(h.context, "apple", { limit: 2 }))).toHaveLength(3)
 		expect(rows(await findInDeck(h.context, "apple", { wholeWord: true, scope: ["slides"] }))).toHaveLength(2)
 		expect(await findInDeck(h.context, "")).toHaveLength(0)
+		h.close()
+	})
+
+	it("flags a match inside a locked shape as found but not replaceable", async () => {
+		const h = await harness()
+		const node = await h.slide(0)
+		const title = shapeById(node.shapes, 2)
+
+		if (title === undefined) throw new Error("no title")
+
+		title.lock = "proofFailed"
+
+		const found = rows(await findInDeck(h.context, "apple"))
+
+		expect(found[0]).toEqual([0, 2, 0, 3, 8, FIND_LOCKED])
+		expect(found.slice(1).every(row => ((row[5] ?? 0) & FIND_LOCKED) === 0)).toBe(true)
 		h.close()
 	})
 })

@@ -1,3 +1,4 @@
+import type { PartBytes } from "../../opc/index"
 import type { XmlDocument, XmlEditor } from "../../xml/index"
 import type { DeckOpFamily } from "../../presentation/edit/ops"
 import type { Deck } from "../../presentation/model"
@@ -18,6 +19,7 @@ import { emitOdpDesign } from "./emit/design"
 import { emitOdpSmartArt } from "./emit/smartart"
 import { emitOdpInk } from "./emit/ink"
 import { emitOdpMediaTiming } from "./emit/mediaTiming"
+import { emitOdpPresentation } from "./emit/presentation"
 
 // ODF presentation markup out of the model, by family, as the pptx emit (core/pptx/write/emit.ts): a touched
 // draw:page is parsed as a fragment and spliced per element, so only edited shapes are written again.
@@ -30,8 +32,16 @@ export interface OdpStylesApi {
 		family: "graphic" | "presentation" | "paragraph" | "text" | "drawing-page" | "table" | "table-cell",
 		properties: string
 	): string
-	// A Pictures/ or media entry of the package, with its manifest entry.
-	addEntry(path: string, content: Uint8Array, mediaType: string): string
+	// A Pictures/ or media entry of the package, with its manifest entry; stored when `compress` is false (media),
+	// streamed (PartBytes) and checked against `crc32` when given. Returns the entry's path.
+	addEntry(
+		path: string,
+		content: PartBytes,
+		mediaType: string,
+		options?: { readonly compress?: boolean; readonly crc32?: number }
+	): string
+	// Whether the package written holds an entry at `path` (a source entry, or one this save added).
+	hasEntry?(path: string): boolean
 }
 
 export interface OdpEmitContext {
@@ -62,7 +72,8 @@ export const ODP_EMIT_FAMILIES: { readonly [F in DeckOpFamily]: OdpEmitFamily } 
 	design: emitOdpDesign,
 	smartart: emitOdpSmartArt,
 	ink: emitOdpInk,
-	mediaTiming: emitOdpMediaTiming
+	mediaTiming: emitOdpMediaTiming,
+	presentation: emitOdpPresentation
 }
 
 export function emitOdp(family: DeckOpFamily, request: EmitRequest, context: OdpEmitContext): EmitResult {

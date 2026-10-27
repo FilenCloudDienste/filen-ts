@@ -2,6 +2,7 @@ import { crc32 } from "@filen/office/core/opc"
 import {
 	servePresentationWorker,
 	type CopyPass,
+	type MediaPortServer,
 	type PresentationWorkerOptions,
 	type PresentationWorkerScope,
 	type RemoteByteSource,
@@ -10,7 +11,7 @@ import {
 } from "@filen/office/dom/presentation"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import { BlockCache, MAX_RUN_BLOCKS } from "@/lib/media/blockCache"
-import { closeRangePort, rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
+import { closeRangePort, exposeRangePort, rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
 
 // The presentation worker's server (presentation.worker.ts runs it on its scope): the engine's host with the web's
 // range source. A drive file is read through a
@@ -19,6 +20,10 @@ import { closeRangePort, rangePortReader, type RangePortReader } from "@/lib/med
 
 // Resident blocks per open deck (1 MiB each): the central directory, the parts being parsed and a picture or two.
 export const DECK_BLOCK_CAPACITY = 24
+
+// Resident blocks of the media cache per open deck (1 MiB each): a stored medium's sequential reads and an index
+// build's input, kept apart from the deck's blocks.
+export const MEDIA_BLOCK_CAPACITY = 2
 
 // A save's copies are read in blocks of this many bytes: one range request each, whose 1 MiB chunks the SDK downloads
 // in parallel (as the block cache's longest run).
@@ -155,12 +160,14 @@ export function rangeByteSource(spec: Extract<SourceSpec, { kind: "range" }>, de
 			capacity: DECK_BLOCK_CAPACITY
 		}
 	)
+	let mediaCache: BlockCache | undefined
 	const close = (): void => {
 		if (closed) return
 
 		closed = true
 		abort.abort()
 		cache.dispose()
+		mediaCache?.dispose()
 
 		if (decks.get(spec.port)?.cache === cache) decks.delete(spec.port)
 
@@ -179,6 +186,17 @@ export function rangeByteSource(spec: Extract<SourceSpec, { kind: "range" }>, de
 			if (outside(offset, length)) return Promise.reject(new RangeError("Read outside the source"))
 
 			return pass?.plain(offset, length) ?? Promise.resolve(cache.read(offset, offset + length))
+		},
+		readMedia(offset, length) {
+			if (outside(offset, length)) return Promise.reject(new RangeError("Read outside the source"))
+
+			mediaCache ??= new BlockCache(
+				spec.size,
+				(start, end, signal) => readerOf().readRange(start, end, AbortSignal.any([signal, abort.signal])),
+				{ capacity: MEDIA_BLOCK_CAPACITY }
+			)
+
+			return Promise.resolve(mediaCache.read(offset, offset + length))
 		},
 		close
 	}
@@ -224,6 +242,31 @@ function isMessage(data: unknown): data is ToPresentationWorker {
 	)
 }
 
+// A medium's bytes served on the page's port as a range port (the service worker reads it like a drive file's).
+const rangePortMediaServer: MediaPortServer = {
+	serve(port, read, closed) {
+		const lifetime = new AbortController()
+
+		closed.onAbort(() => {
+			lifetime.abort()
+		})
+		exposeRangePort(
+			port as MessagePort,
+			(start, end, signal) =>
+				read(start, end, {
+					get aborted() {
+						return signal.aborted
+					},
+					onAbort: listener => {
+						signal.addEventListener("abort", listener, { once: true })
+					}
+				}),
+			lifetime,
+			(bytes, crc) => crc32(bytes, crc)
+		)
+	}
+}
+
 // Serves the protocol on `scope` (the engine's host, with the realm in `options`). A deck's port, block cache and
 // reader go when its session is disposed or the same session id opens another source.
 export function servePresentationDeckWorker(
@@ -265,7 +308,11 @@ export function servePresentationDeckWorker(
 	// Seen before the server handles the message, so a reopen releases the old source first.
 	scope.addEventListener("message", watch)
 
-	const stop = servePresentationWorker(scope, { ...options, rangeSource: spec => rangeByteSource(spec, decks) })
+	const stop = servePresentationWorker(scope, {
+		...options,
+		services: { media: rangePortMediaServer, ...options.services },
+		rangeSource: spec => rangeByteSource(spec, decks)
+	})
 
 	return () => {
 		stop()

@@ -1,6 +1,7 @@
 import { DrawingList, IDENTITY } from "../../../core/drawingml/displayList"
 import { D, EMU_PER_PX, drawingReader, type DrawingReader } from "../../../core/drawingml/reader"
 import { convertSmartArt } from "../../../core/drawingml/smartart"
+import type { DeckChanges } from "../../../core/presentation/edit/apply"
 import type { SmartArtDefRef } from "../../../core/presentation/edit/ops"
 import {
 	PresentationError,
@@ -17,6 +18,7 @@ import { ThemeCache } from "../../../core/presentation/render/theme"
 import { themeOf } from "../../../core/presentation/theme"
 import { sliceClock, type Slicing } from "../../../core/slicing"
 import { parseDataModel, pointText, SmartArtError, type DataModel, type DataPoint } from "../../../core/smartart/data"
+import { diagramInfo, drawingKey, rememberDrawing, type SmartArtInfo } from "../../../core/smartart/edit"
 import { emitDiagram, type EmittedDiagram } from "../../../core/smartart/emit"
 import { smartArtColorsDef, smartArtLayoutDef, smartArtStyleDef } from "../../../core/smartart/gallery/defs"
 import { smartArtLayout } from "../../../core/smartart/gallery/index"
@@ -27,6 +29,7 @@ import { parseXml, type XmlDocument } from "../../../core/xml/index"
 import type { EngineSession, SmartArtCapability } from "../engine"
 import { presentationRealm } from "../services"
 import { rasterizeSlide } from "../thumbs"
+import { pptxParts } from "./open/pptx"
 
 // The SmartArt engine in the presentation worker: a diagram without a usable drawing cache is laid out from its
 // data and its definitions (core/smartart) and drawn as the drawing PowerPoint would cache (emit.ts); the editor
@@ -164,6 +167,23 @@ function frameOf(deck: Deck, target: ShapeRef): { shape: ShapeNode; frame: Extra
 	return { shape, frame }
 }
 
+// The prompt boxes of each diagram as last laid out (slide:id → the data part it was laid out from and its boxes).
+const prompts = new WeakMap<EngineSession, Map<string, { readonly data: string; readonly boxes: EmittedDiagram["prompts"] }>>()
+
+function promptsOf(session: EngineSession): Map<string, { readonly data: string; readonly boxes: EmittedDiagram["prompts"] }> {
+	let held = prompts.get(session)
+
+	if (held === undefined) {
+		const created = new Map<string, { readonly data: string; readonly boxes: EmittedDiagram["prompts"] }>()
+
+		prompts.set(session, created)
+		session.onClose(() => created.clear())
+		held = created
+	}
+
+	return held
+}
+
 function sessionCache(session: EngineSession): Map<string, EmittedDiagram> {
 	let cache = caches.get(session)
 
@@ -218,10 +238,19 @@ async function relayoutTarget(
 	].join("\u0000")
 	const cache = sessionCache(session)
 	const known = cache.get(key)
+	// The drawing the writer saves for an edited diagram is the one laid out here (core/smartart/edit.ts).
+	const remember = (emitted: EmittedDiagram): void => {
+		const data = host.services.xml(frame.data)
+
+		promptsOf(session).set(`${String(target.slide)}:${String(target.id)}`, { data: frame.data, boxes: emitted.prompts })
+
+		if (data !== undefined) rememberDrawing(data, drawingKey(frame.layout, frame.style, frame.colors, box.w, box.h), emitted.drawingXml)
+	}
 
 	if (known !== undefined) {
 		cache.delete(key)
 		cache.set(key, known)
+		remember(known)
 
 		return known
 	}
@@ -241,6 +270,7 @@ async function relayoutTarget(
 	)
 
 	cache.set(key, emitted)
+	remember(emitted)
 
 	if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value as string)
 
@@ -371,6 +401,126 @@ export function sampleData(sample: readonly { readonly level: number; readonly t
 
 const EMPTY_SAMPLE = [1, 1, 1].map(level => ({ level, text: "" }))
 
+const KIND_OF_TYPE: ReadonlyMap<string, DefinitionKind> = new Map([
+	["application/vnd.openxmlformats-officedocument.drawingml.diagramLayout+xml", "layout"],
+	["application/vnd.openxmlformats-officedocument.drawingml.diagramStyle+xml", "style"],
+	["application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml", "colors"]
+])
+
+// A diagram part read once into the package's documents (an op's prepare reads the same way), or one an op held.
+async function diagramPart(session: EngineSession, part: string): Promise<XmlDocument | undefined> {
+	const parts = pptxParts(session.deck)
+
+	if (parts === undefined || part === "") return undefined
+
+	const held = parts.document(part)
+
+	if (held !== undefined || part.startsWith("raw:") || !parts.opc.has(part)) return held
+	if ((parts.opc.entry(part)?.uncompressedSize ?? 0) > parts.budgets.xmlPartBytes) throw new PresentationError("tooLarge", part)
+
+	const document = await parts.opc.xml(part)
+
+	parts.adopt(part, document)
+
+	return document
+}
+
+// Edited diagrams (a frame whose data an op holds) laid out before a save's snapshot, so the writer saves the drawing
+// the renderer draws even for a slide never shown since the edit (Replace All). One the renderer has not registered
+// for, or that does not lay out, is saved without a drawing: the consumer lays it out.
+export async function layoutEditedDiagrams(session: EngineSession, changes: DeckChanges, slicing: Slicing): Promise<void> {
+	const host = hosts.get(session)
+
+	if (host === undefined) return
+
+	for (const [part, change] of changes.parts) {
+		const node = [...session.deck.nodes.values()].find(each => each.part === part)
+
+		if (node === undefined) continue
+
+		for (const id of change.shapes.keys()) {
+			const shape = findShape(node.shapes, id, 0)
+			const frame = shape?.frame
+
+			if (frame?.kind !== "smartart" || !frame.data.startsWith("raw:") || shape?.xfrm === undefined) continue
+			if (!(shape.xfrm.cx > 0 && shape.xfrm.cy > 0)) continue
+
+			try {
+				await relayoutTarget(session, host, { slide: node.ref, id }, frame, { w: shape.xfrm.cx, h: shape.xfrm.cy }, slicing)
+			} catch (error) {
+				if (error instanceof PresentationError && error.reason === "aborted") throw error
+			}
+		}
+	}
+}
+
+// The text pane's outline of a diagram and the definitions the deck's parsed diagrams embed.
+// Without a slice clock (a caller outside a call) the layout runs to its end.
+const UNSLICED: Slicing = { pause: () => Promise.resolve(), sliceMs: Number.POSITIVE_INFINITY, now: () => 0 }
+
+async function diagramInfoOf(session: EngineSession, target: ShapeRef, slicing: Slicing = UNSLICED): Promise<SmartArtInfo> {
+	const { shape, frame } = frameOf(session.deck, target)
+	const data = await diagramPart(session, frame.data)
+
+	if (data === undefined) throw new PresentationError("notFound", "smartart data")
+
+	// The deck's own definitions: every layout, style and colours part of the package, and those an op holds.
+	const definitions: { kind: DefinitionKind; document: XmlDocument }[] = []
+	const parts = pptxParts(session.deck)
+	const seen = new Set<string>()
+	const named = new Map<string, DefinitionKind>()
+
+	for (const node of session.deck.nodes.values())
+		for (const each of frames(node.shapes, 0))
+			for (const kind of ["layout", "style", "colors"] as const) named.set(partOf(each, kind), kind)
+
+	for (const entry of parts?.opc.entries() ?? []) {
+		const kind = KIND_OF_TYPE.get(parts?.contentTypes.typeOf(entry.name) ?? "")
+
+		if (kind !== undefined) named.set(`/${entry.name}`, kind)
+	}
+
+	for (const [part, kind] of named) {
+		if (part === "" || seen.has(part)) continue
+
+		seen.add(part)
+
+		const document = await diagramPart(session, part)
+
+		if (document !== undefined) definitions.push({ kind, document })
+	}
+
+	try {
+		const info = diagramInfo(data, definitions)
+
+		if ("kind" in info) throw new PresentationError(info.reason, info.detail ?? "smartart data")
+
+		let laid = promptsOf(session).get(`${String(target.slide)}:${String(target.id)}`)
+
+		// A diagram drawn from its saved drawing (or laid out from older data): laid out now, for an empty node's prompt.
+		const host = hosts.get(session)
+		const xfrm = shape.xfrm
+
+		if (
+			(laid === undefined || laid.data !== frame.data) &&
+			host !== undefined &&
+			xfrm !== undefined &&
+			xfrm.cx > 0 &&
+			xfrm.cy > 0 &&
+			info.nodes.some(node => node.text === "")
+		) {
+			await relayoutTarget(session, host, target, frame, { w: xfrm.cx, h: xfrm.cy }, slicing)
+			laid = promptsOf(session).get(`${String(target.slide)}:${String(target.id)}`)
+		}
+
+		return laid === undefined || laid.data !== frame.data
+			? info
+			: { ...info, prompts: laid.boxes.map(box => ({ x: box.x, y: box.y, w: box.w, h: box.h })) }
+	} catch (error) {
+		throw refusal(error)
+	}
+}
+
 export const smartartCapability: SmartArtCapability = {
 	async relayout(session, target, slicing) {
 		const host = hostOf(session)
@@ -458,5 +608,7 @@ export const smartartCapability: SmartArtCapability = {
 
 		return raster.bitmap
 	},
-	smartArtPreview: (context, layout, options) => smartartCapability.preview(context.session, layout, options, context.slicing)
+	info: (session, target) => diagramInfoOf(session, target),
+	smartArtPreview: (context, layout, options) => smartartCapability.preview(context.session, layout, options, context.slicing),
+	smartArtInfo: (context, target) => diagramInfoOf(context.session, target, context.slicing)
 }

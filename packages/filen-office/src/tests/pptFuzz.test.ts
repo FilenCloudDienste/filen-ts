@@ -7,7 +7,7 @@ import { CfbFile, cfbBytes } from "../core/cfb/index"
 import { pptToPptx } from "../core/ppt/toPptx"
 import { openPptxPackage } from "../core/pptx/package"
 import { CORPUS_DIR } from "./corpusDir"
-import { buildPpt, FIXTURE_PNG } from "./pptFixtures"
+import { buildPpt, FIXTURE_PNG, richDeck } from "./pptFixtures"
 
 // Hostile .ppt input: the PowerPoint Document stream of a synthetic deck (and of a corpus deck when present) with
 // bytes flipped and cut, decrypted or not. Every outcome is a converted deck the pptx reader opens and parses, or a
@@ -57,7 +57,8 @@ async function outcome(bytes: Uint8Array, password: boolean): Promise<string> {
 	await opened.parts.parseAll()
 
 	for (const entry of converted.pptx.entries())
-		if (entry.name.startsWith("ppt/media/")) await converted.pptx.read(entry.name).catch(() => undefined)
+		if (entry.name.startsWith("ppt/media/") || entry.name.startsWith("ppt/embeddings/"))
+			await converted.pptx.read(entry.name).catch(() => undefined)
 
 	return "converted"
 }
@@ -121,6 +122,17 @@ describe("ppt fuzz", () => {
 		expect([...seen.keys()].every(key => key === "converted" || !key.includes(" "))).toBe(true)
 		expect(seen.get("converted") ?? 0).toBeGreaterThan(0)
 	})
+
+	it(
+		"answers a damaged deck with timing, comments, builds, media and embedded objects with a deck or a typed refusal",
+		{ timeout: 120_000 },
+		async () => {
+			const seen = await fuzz((await richDeck()).bytes, 400, 0x9a11, false)
+
+			expect([...seen.keys()].every(key => key === "converted" || !key.includes(" "))).toBe(true)
+			expect(seen.get("converted") ?? 0).toBeGreaterThan(0)
+		}
+	)
 
 	it("answers a damaged encrypted deck with a deck or a typed refusal", { timeout: 120_000 }, async () => {
 		const seen = await fuzz((await buildPpt({ ...DECK, password: "secret" })).bytes, 300, 0xc0ffee, true)

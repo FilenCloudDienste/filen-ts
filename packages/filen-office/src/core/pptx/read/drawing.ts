@@ -250,10 +250,20 @@ export function readFill(context: ReadContext, node: number): FillProps | "none"
 	}
 }
 
+const SVG_BLIP_EXT = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
+
+function svgBlip(r: ReadContext["reader"], blip: number): number {
+	for (const ext of r.children(r.child(blip, G.A, "extLst"), G.A, "ext"))
+		if (r.attr(ext, "uri") === SVG_BLIP_EXT) return r.child(ext, G.Asvg, "svgBlip")
+
+	return -1
+}
+
 export function readBlipFill(context: ReadContext, node: number): FillProps {
 	const r = context.reader
 	const blip = r.child(node, G.A, "blip")
-	const part = relPart(context, r.rel(blip, "embed"))
+	// An SVG-only picture (a:blip without r:embed, its image in the a:extLst's asvg:svgBlip) names that image.
+	const part = relPart(context, r.rel(blip, "embed")) ?? relPart(context, r.rel(svgBlip(r, blip), "embed"))
 	const crop = edges(r, r.child(node, G.A, "srcRect"))
 	const stretch = r.child(node, G.A, "stretch")
 	const tile = r.child(node, G.A, "tile")

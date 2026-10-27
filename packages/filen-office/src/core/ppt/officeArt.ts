@@ -54,8 +54,8 @@ export interface PptShape {
 	readonly click?: Interaction
 	readonly hover?: Interaction
 	readonly exObjRef?: number
-	// An Office 97 build (§2.8.1 AnimationInfoContainer) on the shape.
-	readonly animated?: true
+	// An Office 97 build on the shape: its §2.8.1 AnimationInfoContainer's data range.
+	readonly animation?: { readonly start: number; readonly end: number }
 	// Inline text (ClientTextbox), or the index of the slide list's text body (OutlineTextRefAtom).
 	readonly text?: TextBlock
 	readonly outlineRef?: number
@@ -132,7 +132,13 @@ class ShapeReader {
 	// §2.7.3 OfficeArtClientData.
 	private clientData(
 		record: ArtRecord,
-		into: { placeholder?: Placeholder; click?: Interaction; hover?: Interaction; exObjRef?: number; animated?: true }
+		into: {
+			placeholder?: Placeholder
+			click?: Interaction
+			hover?: Interaction
+			exObjRef?: number
+			animation?: { start: number; end: number }
+		}
 	): void {
 		for (const child of this.records(record.start, record.end)) {
 			if (child.type === RT.placeholderAtom && child.end - child.start >= 8) {
@@ -152,7 +158,7 @@ class ShapeReader {
 			} else if (child.type === RT.externalObjectRefAtom && child.end - child.start >= 4) {
 				into.exObjRef = u32(this.data, child.start)
 			} else if (child.type === RT.animationInfo) {
-				into.animated = true
+				into.animation = { start: child.start, end: child.end }
 			}
 		}
 	}
@@ -167,7 +173,13 @@ class ShapeReader {
 		let groupRect: Rect | undefined
 		let text: TextBlock | undefined
 		let outlineRef: number | undefined
-		const client: { placeholder?: Placeholder; click?: Interaction; hover?: Interaction; exObjRef?: number; animated?: true } = {}
+		const client: {
+			placeholder?: Placeholder
+			click?: Interaction
+			hover?: Interaction
+			exObjRef?: number
+			animation?: { start: number; end: number }
+		} = {}
 		let propertyBytes = 0
 
 		for (const record of this.records(container.start, container.end)) {
@@ -239,7 +251,7 @@ class ShapeReader {
 			...(client.click === undefined ? {} : { click: client.click }),
 			...(client.hover === undefined ? {} : { hover: client.hover }),
 			...(client.exObjRef === undefined ? {} : { exObjRef: client.exObjRef }),
-			...(client.animated === undefined ? {} : { animated: true as const }),
+			...(client.animation === undefined ? {} : { animation: client.animation }),
 			...(text === undefined ? {} : { text }),
 			...(outlineRef === undefined ? {} : { outlineRef })
 		}

@@ -117,9 +117,9 @@ export const previewPptxEditor = {
 	previewPptxEditorKeyRedo: "Redo (presentations)",
 	/** Shortcuts list — selects every slide in the slide list of the presentation editor */
 	previewPptxEditorKeySelectAll: "Select all slides (presentations)",
-	/** Presentation editor — toast when a save is refused because the written file did not pass the check; the edits stay open and unsaved (cf. the document editor's previewDocxSaveRefused) */
+	/** Presentation editor — toast when a save is refused because the written file did not pass the check; the changes that failed it were undone, other edits stay open and unsaved (cf. the document editor's previewDocxSaveRefused) */
 	previewPptxSaveRefusedCheck:
-		"The presentation couldn't be saved without risking damage to it. It stays open with your changes, unsaved.",
+		"The presentation couldn't be saved without risking damage to it. The changes that couldn't be saved were undone; your other changes are still unsaved.",
 	/** Presentation editor — toast when a save is refused because a change can't be written in the file's format yet */
 	previewPptxSaveRefusedUnsupported: "This presentation has a change that can't be saved in this format yet.",
 	/** Presentation editor — toast when a save is refused because the file changed on the drive while it saved */

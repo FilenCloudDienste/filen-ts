@@ -36,6 +36,9 @@ interface Region {
 export interface TableCellBox {
 	readonly row: number
 	readonly column: number
+	// The grid cells it spans, as drawn (cut to the grid and to the positions no earlier span holds).
+	readonly rowSpan: number
+	readonly columnSpan: number
 	readonly cell: TableCell
 	// The cell box (px, frame-local).
 	readonly x: number
@@ -260,6 +263,11 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 	const cellReader = cellSource === undefined ? undefined : drawingReader(cellSource)
 	const cellContext: PaintContext = { ...input.context, images: imagesOf(services, input.part) }
 	const edits = editedProps(input, table)
+	// What the style's regions give, read once per render: the same holders serve every cell (their paints and strokes
+	// are this render's list's).
+	const regionFills = new Map<number, number | undefined>()
+	const regionBorders = new Map<string, number>()
+	const regionTexts = new Map<string, TableTextStyle | undefined>()
 
 	// Pass 1: cell boxes in grid terms, margins, text styles and the text heights rows grow to.
 	interface Pending {
@@ -323,9 +331,19 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 			const regionsHere = covering(styleRegions, r, c, r + rowSpan - 1, c + columnSpan - 1)
 			let textStyle: TableTextStyle | undefined
 
-			if (style !== undefined && styleContext !== undefined)
-				for (const region of regionsHere.filter(candidate => covers(candidate, r, c)))
-					textStyle = textStyleOf(style.reader, style.reader.child(region.node, D.A, "tcTxStyle"), styleContext, textStyle)
+			if (style !== undefined && styleContext !== undefined) {
+				const own = regionsHere.filter(candidate => covers(candidate, r, c))
+				const key = own.map(region => region.node).join(",")
+
+				if (regionTexts.has(key)) {
+					textStyle = regionTexts.get(key)
+				} else {
+					for (const region of own)
+						textStyle = textStyleOf(style.reader, style.reader.child(region.node, D.A, "tcTxStyle"), styleContext, textStyle)
+
+					regionTexts.set(key, textStyle)
+				}
+			}
 
 			const entry: Pending = {
 				row: r,
@@ -355,6 +373,28 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 
 			yield
 		}
+	}
+
+	// A vertical merge's text grows the last row it spans by what the rows lack (PowerPoint; LibreOffice 7.5 measured),
+	// the shorter spans first so a longer one sees the rows they grew.
+	const spanning = pending.filter(entry => entry.rowSpan > 1).sort((a, b) => a.rowSpan - b.rowSpan)
+
+	for (const entry of spanning) {
+		const width = (columnEdges[entry.column + entry.columnSpan] ?? 0) - (columnEdges[entry.column] ?? 0) - entry.marL - entry.marR
+		const text = input.textHeight(entry.cell, entry.row, entry.column, Math.max(0, width), entry.textStyle)
+
+		if (text <= 0) continue
+
+		const last = entry.row + entry.rowSpan - 1
+		let spanned = 0
+
+		for (let r = entry.row; r <= last; r++) spanned += heights[r] ?? 0
+
+		const lack = text + entry.marT + entry.marB - spanned
+
+		if (lack > 0) heights[last] = (heights[last] ?? 0) + lack
+
+		yield
 	}
 
 	const rowEdges = [0]
@@ -401,11 +441,18 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 			for (const region of entry.regions) {
 				if (!covers(region, entry.row, entry.column)) continue
 
-				const paint = paintOf(
-					styleContext,
-					style.reader,
-					style.reader.child(style.reader.child(region.node, D.A, "tcStyle"), D.A, "fill")
-				)
+				let paint: number | undefined
+
+				if (regionFills.has(region.node)) {
+					paint = regionFills.get(region.node)
+				} else {
+					paint = paintOf(
+						styleContext,
+						style.reader,
+						style.reader.child(style.reader.child(region.node, D.A, "tcStyle"), D.A, "fill")
+					)
+					regionFills.set(region.node, paint)
+				}
 
 				if (paint !== undefined) fill = paint
 			}
@@ -429,12 +476,20 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 
 			if (stroke === undefined && style !== undefined && styleContext !== undefined) {
 				for (const region of entry.regions) {
-					const border = style.reader.child(style.reader.child(region.node, D.A, "tcStyle"), D.A, "tcBdr")
-					const holder = style.reader.child(border, D.A, regionSide(region, side, top, left, bottom, right))
+					const which = regionSide(region, side, top, left, bottom, right)
+					const key = `${String(region.node)}:${which}`
+					let held = regionBorders.get(key)
 
-					if (holder < 0) continue
+					if (held === undefined) {
+						const border = style.reader.child(style.reader.child(region.node, D.A, "tcStyle"), D.A, "tcBdr")
+						const holder = style.reader.child(border, D.A, which)
 
-					stroke = borderOf(styleContext, style.reader, holder)
+						// -2: the region draws no line on this side (an earlier region's stays).
+						held = holder < 0 ? -2 : borderOf(styleContext, style.reader, holder)
+						regionBorders.set(key, held)
+					}
+
+					if (held !== -2) stroke = held
 				}
 			}
 
@@ -457,6 +512,8 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 		cells.push({
 			row: entry.row,
 			column: entry.column,
+			rowSpan: entry.rowSpan,
+			columnSpan: entry.columnSpan,
 			cell: entry.cell,
 			x,
 			y,

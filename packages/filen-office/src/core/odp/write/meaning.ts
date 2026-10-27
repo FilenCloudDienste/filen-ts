@@ -1,7 +1,9 @@
 import { digestOf } from "../../presentation/edit/changes"
 import type {
 	Action,
+	FrameRef,
 	Geometry,
+	MediaRef,
 	Paragraph,
 	ParaProps,
 	Run,
@@ -9,6 +11,7 @@ import type {
 	ShapeNode,
 	SlideNode,
 	SlideRef,
+	TableModel,
 	TextBody,
 	Xfrm
 } from "../../presentation/model"
@@ -25,7 +28,11 @@ import { isRefused } from "./styles"
 //   - what the session leaves to inheritance (an undefined property group, bullet, margin or indent of a paragraph)
 //     against whatever the file inherits;
 //   - adjacent runs of the same properties as one, an empty paragraph's bullet, the autofit scale DrawingML caches
-//     (ODF shrinks text as it lays it out).
+//     (ODF shrinks text as it lays it out);
+//   - what names a picture's image (a registry id in the session, an entry once written; the zip holds it) and a
+//     stretch over the whole box (ODF draws every picture so);
+//   - a table cell by cell: its columns and rows by size (within 2 EMU), spans, whether a cell is covered (ODF has no
+//     direction for it), properties and text as a shape's body.
 // The first difference found is answered as a path, for the refusal's detail.
 
 const TOLERANCE = 2
@@ -248,7 +255,17 @@ function shapeDiffers(expected: ShapeNode, read: ShapeNode, m: Affine, readM: Af
 		const want = expected.props?.[group]
 
 		if (want === undefined) continue
-		if (group === "geometry" ? !sameGeometry(want as Geometry, read.props?.geometry) : !same(want, read.props?.[group])) return group
+		if (group === "fill" && expected.kind === "pic") {
+			if (!same(pictureMeaning(want), pictureMeaning(read.props?.fill))) return group
+
+			continue
+		}
+		if (
+			group === "geometry"
+				? !sameGeometry(want as Geometry, read.props?.geometry)
+				: !same(want, inherited(group, want, read.props?.[group]))
+		)
+			return group
 	}
 
 	if (expected.text !== undefined) {
@@ -257,8 +274,22 @@ function shapeDiffers(expected: ShapeNode, read: ShapeNode, m: Affine, readM: Af
 		if (differs !== undefined) return differs
 	}
 
-	if (!same(stripped(expected.frame), stripped(read.frame))) return "frame"
-	if (!same(expected.media, read.media)) return "media"
+	// A medium the session inserted: what it is (audio or video, linked or not), not what names it (registry ids in the
+	// session, entries once written; the reader takes its type from the file name).
+	const inserted = expected.media?.part?.startsWith("inserted:") === true
+	const mediaMeaning = (media: MediaRef | undefined): unknown =>
+		media === undefined || !inserted ? media : { kind: media.kind, linked: media.external !== undefined }
+	const frameMeaning = (frame: FrameRef | undefined): unknown =>
+		frame?.kind === "media" && inserted ? { kind: "media", media: mediaMeaning(frame.media) } : stripped(frame)
+
+	if (expected.frame?.kind === "table" && read.frame?.kind === "table") {
+		const differs = tableDiffers(expected.frame.table, read.frame.table)
+
+		if (differs !== undefined) return `table ${differs}`
+	} else if (!same(frameMeaning(expected.frame), frameMeaning(read.frame))) {
+		return "frame"
+	}
+	if (!same(mediaMeaning(expected.media), mediaMeaning(read.media))) return "media"
 
 	if (expected.kind === "grpSp") {
 		const now = groupAffine(expected.xfrm)
@@ -275,6 +306,19 @@ function shapeDiffers(expected: ShapeNode, read: ShapeNode, m: Affine, readM: Af
 	return undefined
 }
 
+// A line the session gives only some properties of (a new shape: its width and colour) against the file's, which
+// inherits the rest (its join and cap) from the graphic style's defaults: those the session leaves to inheritance are
+// not compared, as for a paragraph's level fields.
+function inherited(group: string, want: unknown, got: unknown): unknown {
+	if (group !== "ln" || typeof want !== "object" || want === null || typeof got !== "object" || got === null) return got
+
+	const out: Record<string, unknown> = { ...(got as Record<string, unknown>) }
+
+	for (const key of Object.keys(out)) if ((want as Record<string, unknown>)[key] === undefined) delete out[key]
+
+	return out
+}
+
 // An outline compared as ODF draws it: a custom one's paths are evaluated for the shape's box (its formulas may use
 // the box's size), so their commands compare, not their coordinates.
 function sameGeometry(want: Geometry, got: Geometry | undefined): boolean {
@@ -287,6 +331,56 @@ function sameGeometry(want: Geometry, got: Geometry | undefined): boolean {
 
 		return other !== undefined && path.fill === other.fill && path.stroke === other.stroke && same(path.commands, other.commands)
 	})
+}
+
+function pictureMeaning(fill: unknown): unknown {
+	if (fill === null || typeof fill !== "object" || (fill as { kind?: unknown }).kind !== "picture") return fill
+
+	const { part: _part, inserted: _inserted, adjust: _adjust, stretch, ...rest } = fill as Record<string, unknown>
+	const whole = (edges: unknown): boolean =>
+		edges === undefined || Object.values(edges as Record<string, number>).every(value => value === 0)
+
+	return whole(stretch) ? rest : { ...rest, stretch }
+}
+
+// A cell's body compared as a shape's: its list styles are the table's, not its own.
+function withoutListStyle(body: TextBody): TextBody {
+	const { lstStyle: _lstStyle, ...rest } = body
+
+	return rest
+}
+
+function tableDiffers(expected: TableModel, read: TableModel): string | undefined {
+	if (expected.grid.length !== read.grid.length || expected.grid.some((width, k) => !near(width, read.grid[k] ?? Number.NaN)))
+		return "grid"
+	if (expected.rows.length !== read.rows.length) return "rows"
+	if (!same(expected.flags, read.flags)) return "flags"
+
+	for (let r = 0; r < expected.rows.length; r++) {
+		const want = expected.rows[r] as TableModel["rows"][number]
+		const got = read.rows[r] as TableModel["rows"][number]
+
+		if (!near(want.h, got.h)) return `row ${String(r)} height`
+		if (want.cells.length !== got.cells.length) return `row ${String(r)} cells`
+
+		for (let c = 0; c < want.cells.length; c++) {
+			const a = want.cells[c] as TableModel["rows"][number]["cells"][number]
+			const b = got.cells[c] as TableModel["rows"][number]["cells"][number]
+			const covered = (cell: typeof a): boolean => cell.hMerge === true || cell.vMerge === true
+			const at = `cell ${String(r)},${String(c)}`
+
+			if (covered(a) !== covered(b)) return `${at} covered`
+			if (covered(a)) continue
+			if ((a.gridSpan ?? 1) !== (b.gridSpan ?? 1) || (a.rowSpan ?? 1) !== (b.rowSpan ?? 1)) return `${at} span`
+			if (!same(a.props ?? {}, b.props ?? {})) return `${at} props`
+
+			const differs = bodyDiffers(withoutListStyle(a.text), withoutListStyle(b.text))
+
+			if (differs !== undefined) return `${at} ${differs}`
+		}
+	}
+
+	return undefined
 }
 
 // A frame's model without its source refs (a table's cells and their paragraphs carry them).

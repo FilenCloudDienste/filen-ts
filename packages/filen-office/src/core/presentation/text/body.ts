@@ -6,8 +6,14 @@ import type { DocxLinkTarget, DocxTextStyle } from "../../docx/layout/index"
 import {
 	Alignment,
 	Caps,
+	FRAGMENT_FLOATS,
 	FRAGMENT_INTS,
+	FragmentFloat,
+	FragmentInt,
+	LINE_FLOATS,
 	LINE_INTS,
+	LineFloat,
+	LineInt,
 	LayoutCursor,
 	LayoutStatus,
 	MeasureCache,
@@ -30,7 +36,7 @@ import type { RenderEffects, TextPage } from "../output"
 import { AutonumberCounters, autonumberText } from "./autonum"
 import { resolveTextEffects, resolveTextFill, resolveTextLine } from "./color"
 import { fieldText, type FieldContext } from "./fields"
-import { assemblePage } from "./page"
+import { assemblePage, PICTURE_BULLET_OBJECT, type PageObjects } from "./page"
 import type { ResolvedBody, ResolvedParagraph, TextFonts } from "./resolve"
 import { lineSpacing, paragraphSpace, PT_PX } from "./spacing"
 import { mirrorLines, splitUpright, stackUpright, turnOf } from "./vertical"
@@ -211,6 +217,8 @@ class Session {
 	readonly effects: RenderEffects[] = []
 	readonly links: DocxLinkTarget[] = []
 	readonly linkInts: number[] = []
+	// Picture bullets: the paragraph, its marker's style and the image part (drawn over the marker's place).
+	readonly pictureBullets: { readonly paragraph: number; readonly style: number; readonly part: string }[] = []
 	// Per style id, the run's font size as drawn before any superscript or subscript reduction (px): percentage
 	// paragraph spacing is taken from it.
 	readonly sizes: number[] = []
@@ -543,7 +551,13 @@ function hasText(paragraph: ResolvedParagraph): boolean {
 
 // Appends a paragraph's marker (bullet character, number or picture stand-in) and its tab when it leaves room for
 // one; returns its length.
-function appendBullet(session: Session, builder: ParagraphBuilder, paragraph: ResolvedParagraph, counters: AutonumberCounters): number {
+function appendBullet(
+	session: Session,
+	builder: ParagraphBuilder,
+	paragraph: ResolvedParagraph,
+	counters: AutonumberCounters,
+	index: number
+): number {
 	const pPr = paragraph.pPr
 	const bullet = pPr.bullet
 
@@ -562,7 +576,7 @@ function appendBullet(session: Session, builder: ParagraphBuilder, paragraph: Re
 		text = autonumberText(bullet.scheme, counters.next(paragraph.level, bullet.scheme, bullet.startAt ?? 1))
 	} else {
 		counters.skip(paragraph.level)
-		// A picture bullet is drawn as a bullet character at the picture's size until pictures reach text pages.
+		// A picture bullet keeps a bullet character's place, drawn transparent: the picture is drawn over it.
 		text = bullet.kind === "char" ? bullet.char : "•"
 	}
 
@@ -584,15 +598,20 @@ function appendBullet(session: Session, builder: ParagraphBuilder, paragraph: Re
 	const factor = size === undefined || size === "text" ? 1 : "pct" in size ? size.pct / 100000 : size.pts / (first.sz ?? DEFAULT_SIZE)
 	const colorModel = pPr.buClr
 	const color = colorModel === undefined || colorModel === "text" ? undefined : session.body.fonts.color(colorModel)
+	// A picture bullet's place: the marker drawn transparent, without outline or effects.
+	const { effects: _effects, ...plain } = first
 	const props: RunProps = {
-		...first,
+		...(bullet.kind === "blip" ? plain : first),
 		u: "none",
 		strike: "noStrike",
 		baseline: 0,
-		...(bullet.kind === "autoNum" ? {} : { b: false, i: false })
+		...(bullet.kind === "autoNum" ? {} : { b: false, i: false }),
+		...(bullet.kind === "blip" ? { fill: "none" as const, ln: "none" as const } : {})
 	}
-	const style = session.look(props, "latin", Math.max(0.05, Math.min(4, factor)), color, font, true)
+	const style = session.look(props, "latin", Math.max(0.05, Math.min(4, factor)), bullet.kind === "blip" ? undefined : color, font, true)
 	const before = builder.length
+
+	if (bullet.kind === "blip") session.pictureBullets.push({ paragraph: index, style, part: bullet.part })
 
 	builder.append(text, style)
 
@@ -793,7 +812,7 @@ function layoutAt(
 		const markStyle = session.look(paragraph.endRPr, "latin")
 
 		builder.reset(markStyle)
-		prefixes[index] = appendBullet(session, builder, paragraph, counters)
+		prefixes[index] = appendBullet(session, builder, paragraph, counters, index)
 
 		const linksFrom = session.linkInts.length
 
@@ -883,7 +902,7 @@ function layoutAt(
 	const laid = sideways ? splitUpright(out, texts, session) : out
 	const page = stacked
 		? stackUpright(out, texts, session, frameWidth, frameHeight, vertical === "wordArtVert")
-		: assemblePage(laid, texts, session, frameWidth, frameHeight)
+		: assemblePage(laid, texts, session, frameWidth, frameHeight, pictureBullets(laid, session))
 
 	runStarts[resolved.paragraphs.length] = runEnds.length
 
@@ -891,6 +910,65 @@ function layoutAt(
 }
 
 export type { Session as BodySession }
+
+// A picture bullet's side against its bullet size, and how far its bottom sits above the baseline (of its side), as
+// LibreOffice 7.5 draws a:buBlip (measured on poi customGeo, 22 px for 24 pt text at 1280 px; ECMA and MS-OI29500 are
+// silent on the picture's size).
+const PICTURE_BULLET_SCALE = 0.7
+const PICTURE_BULLET_RISE = 0.22
+
+// The picture bullets of a laid-out body as page objects (PICTURE_BULLET_OBJECT, id = index into the page's
+// images): each square over its marker's place on its paragraph's first line.
+function pictureBullets(out: TextLayout, session: Session): PageObjects | undefined {
+	const bullets = session.pictureBullets
+
+	if (bullets.length === 0) return undefined
+
+	const floats: number[] = []
+	const ints: number[] = []
+	const images: string[] = []
+	const parts = new Map<string, number>()
+
+	for (const bullet of bullets) {
+		for (let line = 0; line < out.lineCount; line++) {
+			if (out.lineInts[line * LINE_INTS + LineInt.SOURCE] !== bullet.paragraph) continue
+
+			const first = out.lineInts[line * LINE_INTS + LineInt.FIRST_FRAGMENT] ?? 0
+			const count = out.lineInts[line * LINE_INTS + LineInt.FRAGMENT_COUNT] ?? 0
+			let fragment = -1
+
+			for (let k = first; k < first + count && fragment < 0; k++)
+				if (out.fragmentInts[k * FRAGMENT_INTS + FragmentInt.STYLE] === bullet.style) fragment = k
+
+			if (fragment >= 0) {
+				const size = (session.sizes[bullet.style] ?? 0) * PICTURE_BULLET_SCALE
+				const baseline = out.lineFloats[line * LINE_FLOATS + LineFloat.BASELINE] ?? 0
+				const x = out.fragmentFloats[fragment * FRAGMENT_FLOATS + FragmentFloat.X] ?? 0
+				let image = parts.get(bullet.part)
+
+				if (image === undefined) {
+					image = images.push(bullet.part) - 1
+					parts.set(bullet.part, image)
+				}
+
+				floats.push(x, baseline - size * PICTURE_BULLET_RISE - size, size, size)
+				// Layer 1: the page's text layer.
+				ints.push(image, 1, bullet.paragraph)
+			}
+
+			break
+		}
+	}
+
+	return images.length === 0
+		? undefined
+		: {
+				floats: Float32Array.from(floats),
+				ints: Int32Array.from(ints),
+				kinds: new Uint8Array(floats.length / 4).fill(PICTURE_BULLET_OBJECT),
+				images
+			}
+}
 
 // What a paragraph keeps on one line, as [start, end) pairs into `out` (reused): its marker (`prefix` long) with the
 // text after it, as LibreOffice 7.5 draws a marker outside the text's lines; and each space-free stretch of its

@@ -3,7 +3,19 @@ import { FontManager, type FontRequest } from "../../../core/fonts/index"
 import { partKey, type Relationships, type Slicing, type ZipEntry } from "../../../core/opc/index"
 import { imageWithinBudget } from "../../../core/opc/mediaPolicy"
 import type { PresentationBudgets } from "../../../core/presentation/budget"
-import { PresentationError, refused, type Deck, type ShapeRef, type SlideNode, type SlideRef } from "../../../core/presentation/model"
+import { insertedImage, insertedImageWritten } from "../../../core/presentation/edit/apply/picture"
+import { diagramRelationshipOwner } from "../../../core/presentation/edit/apply/smartart"
+import { prepareSlideMedia } from "../media"
+import { cloneModel } from "../../../core/presentation/edit/changes"
+import {
+	PresentationError,
+	refused,
+	type Deck,
+	type ShapeRef,
+	type SlideNode,
+	type SlideRef,
+	type TextBody
+} from "../../../core/presentation/model"
 import type { SlideRender } from "../../../core/presentation/output"
 import type { RenderServices, TextLayoutRequest, TextLayoutResult } from "../../../core/presentation/render/services"
 import { renderSlide } from "../../../core/presentation/render/slide"
@@ -67,6 +79,8 @@ interface ViewText {
 	readonly environment: TextEnvironment
 	readonly prepared: Set<string>
 	readonly missing: Map<string, FontRequest>
+	// The face preparation in flight (a render that found nothing missing waits for it when it ran meanwhile).
+	pending: Promise<boolean> | undefined
 	// Registrations of `fonts` already sent to the page.
 	replayed: number
 	// The request of one shape's body, captured during a render (shapeText).
@@ -110,6 +124,7 @@ function stateOf(session: EngineSession): ViewState {
 						environment: { fonts, cache: new MeasureCache(realm.text.measurer) },
 						prepared: new Set<string>(),
 						missing: new Map<string, FontRequest>(),
+						pending: undefined,
 						replayed: 0,
 						capture: undefined,
 						shapes: new Map()
@@ -118,7 +133,8 @@ function stateOf(session: EngineSession): ViewState {
 	const services: RenderServices = {
 		xml: part => parts.document(part) ?? documents.get(partKey(part)) ?? undefined,
 		relationship(part, id) {
-			const relationship = relationships.get(partKey(part))?.byId(id)
+			// A held diagram edit's pictures are its package data part's relationships.
+			const relationship = relationships.get(partKey(diagramRelationshipOwner(session.deck, part) ?? part))?.byId(id)
 
 			if (relationship === undefined) return undefined
 
@@ -126,7 +142,7 @@ function stateOf(session: EngineSession): ViewState {
 				? { target: relationship.target, external: true, type: relationship.type }
 				: { target: `/${relationship.partName}`, external: false, type: relationship.type }
 		},
-		contentType: part => parts.contentTypes.typeOf(partKey(part)),
+		contentType: part => insertedContentType(session.deck, part) ?? parts.contentTypes.typeOf(partKey(part)),
 		budgets: parts.budgets,
 		// EMF/WMF pictures and OLE previews, converted into the drawing by the renderer.
 		async bytes(part, limit) {
@@ -339,21 +355,43 @@ function smartArtMeasurer(
 function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequest): TextLayoutResult | undefined {
 	const capture = text.capture
 	const own = request.cell === undefined
+	const wanted = capture?.shape.cell
 
 	// A layer names the node that owns its shape (a layout's or master's shape drawn on a slide names that layout or
-	// master), so the slide shape's own body is the one captured; a table cell's body is not the frame's.
-	if (own && capture !== undefined && capture.shape.slide === request.owner.ref && capture.shape.id === request.shape.id)
+	// master), so the slide shape's own body is the one captured; a table cell's body is captured for that cell only.
+	if (
+		capture !== undefined &&
+		capture.shape.slide === request.owner.ref &&
+		capture.shape.id === request.shape.id &&
+		(wanted === undefined ? own : request.cell?.row === wanted.row && request.cell.column === wanted.col)
+	)
 		capture.request = request
 
 	// A shape body with nothing visible in it paints nothing: the render hands it over only so the editor can enter it.
 	if (own && !visibleText(request.body)) return undefined
 
+	// A table cell's text laid out before, unchanged (its body is the same object until an edit replaces it): a copy
+	// of that layout (the answer transfers its buffers), so a one-cell edit lays out one cell.
+	// A row's measure (height 0: only the laid-out height is read, the page is never sent) takes the held layout as
+	// it is; a held layout whose buffers went with an answer anyway is laid out again.
+	const cellKey = request.cell === undefined ? undefined : cellLayoutKey(request)
+	const measure = request.cell !== undefined && request.height === 0
+	const held = cellKey === undefined ? undefined : cellLayouts.get(request.body)?.get(cellKey)
+
+	if (held !== undefined && !detached(held)) return measure ? held : copyCellLayout(held)
+
 	const resolved = resolveBody(request.body, bodyContextOf(parts, request))
+	// Whether a face this body names is not prepared yet (an earlier cell of the same render may already have asked
+	// for it, so the missing set alone does not tell).
+	let unprepared = false
 
 	for (const font of fontRequests(resolved)) {
 		const key = requestKey(font)
 
-		if (!text.prepared.has(key)) text.missing.set(key, font)
+		if (!text.prepared.has(key)) {
+			text.missing.set(key, font)
+			unprepared = true
+		}
 	}
 
 	const index = request.deck.slides.indexOf(request.slide.ref)
@@ -363,8 +401,77 @@ function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequ
 		// Table cells keep the face's own line height (LibreOffice 7.5, measured).
 		...(request.cell === undefined ? {} : { lineMetrics: "face" as const })
 	})
+	const answer = { page: result.page, height: result.height }
 
-	return { page: result.page, height: result.height }
+	// Laid out with every face it names (a missing one renders the slide again once loaded).
+	if (cellKey !== undefined && !unprepared) {
+		let layouts = cellLayouts.get(request.body)
+
+		// A render lays a cell out twice (its row's height, then its box): two entries, a box change drops the rest.
+		if (layouts === undefined || layouts.size >= 2) {
+			layouts = new Map()
+			cellLayouts.set(request.body, layouts)
+		}
+
+		layouts.set(cellKey, measure ? answer : copyCellLayout(answer))
+	}
+
+	return answer
+}
+
+// Whether a layout's buffers were transferred away (a detached buffer reads as empty).
+function detached(layout: TextLayoutResult): boolean {
+	const page = layout.page.page
+
+	return page.fragmentCount > 0 && page.fragmentInts.length === 0
+}
+
+const cellLayouts = new WeakMap<TextBody, Map<string, TextLayoutResult>>()
+
+// A held cell layout apart from the answer that transfers its buffers: every typed array copied, the values nothing
+// changes (strings, numbers, the style rows) shared; the few paints, strokes and effects copied whole (a shaded paint
+// or a custom dash holds a typed array).
+function copyCellLayout(layout: TextLayoutResult): TextLayoutResult {
+	const text = layout.page
+	const page: Record<string, unknown> = { ...text.page }
+
+	for (const key in page) {
+		const value = page[key]
+
+		if (ArrayBuffer.isView(value)) page[key] = (value as Uint8Array).slice()
+	}
+
+	return {
+		height: layout.height,
+		page: {
+			...text,
+			page: page as unknown as TextLayoutResult["page"]["page"],
+			paints: cloneModel(text.paints),
+			strokes: cloneModel(text.strokes),
+			textEffects: cloneModel(text.textEffects)
+		}
+	}
+}
+
+// What a cell's layout depends on beside its body: its box, its table style's text, the deck's text defaults, its
+// slide's layout and master (their text styles and theme).
+function cellLayoutKey(request: TextLayoutRequest): string {
+	const layout = request.slide.parent === undefined ? undefined : request.deck.nodes.get(request.slide.parent)
+	const master = layout?.parent === undefined ? undefined : request.deck.nodes.get(layout.parent)
+	const style = request.cell?.style
+
+	return [
+		request.width,
+		request.height,
+		request.deck.revision,
+		layout?.revision,
+		master?.revision,
+		master?.theme?.revision,
+		style?.bold,
+		style?.italic,
+		style?.color,
+		style?.font
+	].join("|")
 }
 
 function visibleText(body: TextLayoutRequest["body"]): boolean {
@@ -412,15 +519,28 @@ export async function renderSlideFor(context: CallContext, ref: SlideRef): Promi
 	const render = await renderSlide(context.session.deck, ref, state.services, context.slicing)
 	const text = state.text
 
-	if (text === undefined || text.missing.size === 0) return render
+	if (text === undefined) return render
+
+	if (text.missing.size === 0) {
+		// Another render took the missing faces this one also asked for: wait for them as it does.
+		const pending = text.pending
+
+		return pending !== undefined && (await pending) ? renderSlide(context.session.deck, ref, state.services, context.slicing) : render
+	}
 
 	const missing = [...text.missing.values()]
 
 	text.missing.clear()
 
-	return (await prepareFaces(context.session, text, missing))
-		? renderSlide(context.session.deck, ref, state.services, context.slicing)
-		: render
+	const pending = prepareFaces(context.session, text, missing)
+
+	text.pending = pending
+
+	try {
+		return (await pending) ? renderSlide(context.session.deck, ref, state.services, context.slicing) : render
+	} finally {
+		if (text.pending === pending) text.pending = undefined
+	}
 }
 
 // The text context of one shape for the editor's layoutText: what the render resolved for its body (chain, theme,
@@ -432,7 +552,7 @@ export const presentationTextServices: TextServices = {
 
 		if (text === undefined) return refused("notImplemented", "text needs a measuring realm")
 
-		const key = `${String(shape.slide)}:${String(shape.id)}`
+		const key = `${String(shape.slide)}:${String(shape.id)}${shape.cell === undefined ? "" : `:${String(shape.cell.row)}:${String(shape.cell.col)}`}`
 		const node = session.deck.nodes.get(shape.slide) ?? (await state.parts.slide(shape.slide, slicing))
 		let held = text.shapes.get(key)
 
@@ -480,6 +600,16 @@ export const presentationTextServices: TextServices = {
 
 const IMAGE_TYPES = /^image\/(?:png|jpeg|gif|bmp|webp|svg\+xml|tiff|x-emf|x-wmf|emf|wmf)$/u
 
+// The type of an image an op inserted ("inserted:<id>", edit/apply/picture.ts), held or written by a save; undefined
+// for any other part.
+function insertedContentType(deck: Deck, part: string): string | undefined {
+	if (!part.startsWith("inserted:")) return undefined
+
+	const id = Number(part.slice("inserted:".length))
+
+	return insertedImage(deck, id)?.contentType ?? insertedImageWritten(deck, id)?.contentType
+}
+
 // An image part's bytes and type; null when the package has none (or the part is not an image). Decks of the other
 // formats are refused until their readers serve pictures.
 export async function readImage(
@@ -489,6 +619,19 @@ export async function readImage(
 	const parts = viewParts(session.deck)
 
 	if (parts === undefined) throw new PresentationError("notImplemented", "image")
+
+	// An image an op inserted, not stored yet (edit/apply/picture.ts): a copy, as the answer transfers its bytes. Once
+	// a save wrote it, the part it was written to.
+	if (part.startsWith("inserted:")) {
+		const id = Number(part.slice("inserted:".length))
+		const image = insertedImage(session.deck, id)
+
+		if (image !== undefined) return { bytes: image.bytes.slice(), type: image.contentType }
+
+		const written = insertedImageWritten(session.deck, id)
+
+		return written === undefined ? null : readImage(session, written.part)
+	}
 
 	const key = partKey(part)
 	const type = parts.contentTypes.typeOf(key)?.toLowerCase()
@@ -519,6 +662,8 @@ export const viewCapability: ViewCapability = {
 			if (context.signal.aborted) throw new PresentationError("aborted", "render")
 
 			out.push(await renderSlideFor(context, ref))
+			// Its deflated media start preparing now, in the background lane.
+			prepareSlideMedia(context.session, ref)
 		}
 
 		return out

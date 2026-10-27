@@ -14,7 +14,7 @@ import {
 	type SlideNode,
 	type SlideRef
 } from "../../presentation/model"
-import { Namespaces, XmlEditor, decodeUtf8, encodeUtf8, parseXml, type XmlDocument } from "../../xml/index"
+import { Namespaces, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import type { Fragment } from "../read/context"
 import type { OdpParts } from "../read/document"
 import type { PageSpan } from "../read/scan"
@@ -24,7 +24,9 @@ import { IDENTITY, OdpShapeWriter, hasAspects, type Aspects } from "./emit/shape
 import { newPage, pageAspects, pageChanges, startTag, timingPieces } from "./emit/slide"
 import { odpTimingRoot } from "../../anim/odf"
 import { newSettingsMarkup, pageNames, renameIds, settingsMarkup } from "./integrity"
+import { settingsAttributes, type SettingsAttribute } from "./emit/presentation"
 import { OdpWriteSource, odpWriteSource } from "./source"
+import { notesDiffer, slideDiffers } from "./meaning"
 import { OdpStyles, declared, isRefused, styleDeclarations, takenInStreams, type OdpWriteEnv } from "./styles"
 
 // The splice of an ODP save (§1.5.4): content.xml is written as the pages of the deck in order, each untouched page
@@ -61,9 +63,9 @@ export interface OdpSplice {
 	readonly add: readonly PartChange[]
 }
 
-// Presentation-level changes the ODP writer writes (the slide list and the custom shows); the rest belong to the
-// families that edit them.
-const WRITTEN_PRESENTATION: ReadonlySet<string> = new Set(["slideList", "customShows", "sections"])
+// Presentation-level changes the ODP writer writes (the slide list, the custom shows and the show settings); the rest
+// belong to the families that edit them.
+const WRITTEN_PRESENTATION: ReadonlySet<string> = new Set(["slideList", "customShows", "sections", "show"])
 
 function concat(chunks: readonly Uint8Array[]): Uint8Array {
 	let length = 0
@@ -139,7 +141,8 @@ export function shapeAspects(target: readonly ShapeNode[], pristine: readonly Sh
 			...(same(shape.alt, was.alt) ? {} : { alt: true }),
 			...(shape.name === was.name ? {} : { name: true }),
 			...(shape.hidden === was.hidden ? {} : { hidden: true }),
-			...(same(shape.actions, was.actions) ? {} : { actions: true })
+			...(same(shape.actions, was.actions) ? {} : { actions: true }),
+			...(shape.frame?.kind === "table" && !same(shape.frame, was.frame) ? { frame: true } : {})
 		}
 
 		out.set(shape, aspects)
@@ -148,8 +151,8 @@ export function shapeAspects(target: readonly ShapeNode[], pristine: readonly Sh
 	return out
 }
 
-// Content a shape's family alone writes (a table's cells, a chart, media): differs → refused until that family is
-// built, never dropped.
+// Content a shape's family alone writes (a chart, media): differs → refused until that family is built, never
+// dropped. A table's cells are written by the table family (the frame aspect).
 function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNode[]): Refused | undefined {
 	const before = new Map<string, ShapeNode>()
 
@@ -169,7 +172,10 @@ function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNod
 
 		if (was === undefined) return
 		if (shape.kind !== was.kind) found = refused("unsupported", "a shape of another kind")
-		else if (digestOf(shape.frame) !== digestOf(was.frame) || digestOf(shape.media) !== digestOf(was.media))
+		else if (
+			(shape.frame?.kind !== "table" && digestOf(shape.frame) !== digestOf(was.frame)) ||
+			digestOf(shape.media) !== digestOf(was.media)
+		)
 			found = refused("notImplemented", `odp emit ${shape.frame?.kind ?? "media"}`)
 		else if (digestOf(shape.ph) !== digestOf(was.ph)) found = refused("unsupported", "a placeholder of another kind")
 	})
@@ -665,6 +671,23 @@ function startTagEnd(bytes: Uint8Array): number {
 	return bytes.length
 }
 
+// What an edited slide whose page the splice copies (nothing found to write) still holds that its source page does not
+// say, or undefined: the slide against the source's reading, as gate 2 compares a written page.
+export function copiedPageDiffers(
+	deck: Deck,
+	node: SlideNode,
+	pristine: { readonly slide: SlideNode; readonly notes: SlideNode | undefined },
+	name: string
+): string | undefined {
+	const at = deck.slides.indexOf(node.ref)
+	const index = deck.slides.indexOf.bind(deck.slides)
+	const differs = slideDiffers(node, pristine.slide, name, { at, count: deck.slides.length, expected: index, read: index })
+
+	if (differs !== undefined) return differs
+
+	return notesDiffer(node.notes === undefined ? undefined : deck.nodes.get(node.notes), pristine.notes)
+}
+
 // The save's splice: content.xml as the deck now is, or undefined parts when nothing differs from the source.
 export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refused> {
 	const { deck, changes } = input
@@ -770,8 +793,15 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 			if (isRefused(bytes)) return bytes
 
-			if (bytes === undefined) pages.push({ kind: "copied", ref, span })
-			else pages.push({ kind: "written", ref, bytes, name: names.get(ref) ?? "", source: span })
+			if (bytes === undefined) {
+				// Nothing written for an edited page: decisive only when the page's source reads as the slide does.
+				const differs = copiedPageDiffers(deck, node, pristine, names.get(ref) ?? "")
+
+				if (differs !== undefined)
+					return refused("failed", `page ${String(index + 1)} (${node.part}) differs from its source unwritten: ${differs}`)
+
+				pages.push({ kind: "copied", ref, span })
+			} else pages.push({ kind: "written", ref, bytes, name: names.get(ref) ?? "", source: span })
 		}
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
@@ -779,26 +809,82 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 		throw error
 	}
 
-	const settingsChanged = structural || changes.presentation.has("customShows")
+	const show = changes.presentation.has("show") ? settingsAttributes(deck, deck.show, names) : undefined
+
+	if (show !== undefined && isRefused(show)) return show
+
+	const settingsChanged = structural || changes.presentation.has("customShows") || show !== undefined
 	const rewritten = pages.some(page => page.kind === "written")
 
 	if (!rewritten && !structural && !settingsChanged && splicer.styles.empty)
 		return { revision: input.revision, content: undefined, pages, names, replace: [], add: [] }
 
-	const whole = assemble(parts, pages, splicer, structural, settingsChanged)
+	const whole = assemble(parts, pages, splicer, structural, settingsChanged, show)
 
 	if (isRefused(whole)) return whole
 
 	const assembled = withRetired(withoutOrphans(parts.content.bytes, whole, source.retired), source.retired)
+
+	// Entries the written pages added (an inserted picture), each with its manifest entry.
+	const added = splicer.styles.added()
+	const manifest = parts.odf.manifest
+
+	if (added.length > 0 && manifest === undefined) return refused("unsupported", "a package without a manifest")
+
+	// The manifest as the package has it (its version, its namespaces, every entry byte for byte), the new entries
+	// added before its end tag.
+	const manifestEntry = parts.odf.archive.entries.find(entry => entry.name === "META-INF/manifest.xml")
+	const manifestBytes =
+		added.length === 0 || manifestEntry === undefined
+			? undefined
+			: withManifestEntries(
+					await parts.odf.archive.read(manifestEntry),
+					added.map(entry => ({ path: entry.path, mediaType: entry.mediaType }))
+				)
+
+	if (added.length > 0 && manifestBytes === undefined) return refused("unsupported", "a manifest that cannot take new entries")
 
 	return {
 		revision: input.revision,
 		content: assembled,
 		pages,
 		names,
-		replace: [{ name: "content.xml", bytes: assembled }],
-		add: []
+		replace: [
+			{ name: "content.xml", bytes: assembled },
+			...(manifestBytes === undefined ? [] : [{ name: "META-INF/manifest.xml", bytes: manifestBytes }])
+		],
+		// Pictures (PNG, JPEG, GIF) and media are compressed already: stored, as LibreOffice stores them; a medium streams
+		// once, checked against its CRC-32.
+		add: added.map(entry => ({
+			name: entry.path,
+			bytes: entry.content,
+			compress: entry.compress ?? !/^(?:image\/(?:png|jpeg|gif)|video\/|audio\/)/u.test(entry.mediaType),
+			...(entry.crc32 === undefined ? {} : { crc32: entry.crc32 })
+		}))
 	}
+}
+
+// META-INF/manifest.xml with `entries` added as manifest:file-entry elements (Part 2 §4.3) before the root's end tag,
+// in the prefix the root uses; undefined when the root's end cannot be found.
+function withManifestEntries(
+	bytes: Uint8Array,
+	entries: readonly { readonly path: string; readonly mediaType: string }[]
+): Uint8Array | undefined {
+	const text = decodeUtf8(bytes, 0, bytes.length)
+	const close = /<\/([\w.-]+:)?manifest>\s*$/u.exec(text)
+
+	if (close === null) return undefined
+
+	const prefix = close[1] ?? ""
+	const lines = entries
+		.map(
+			entry =>
+				` <${prefix}file-entry ${prefix}full-path="${escapeAttribute(entry.path)}" ${prefix}media-type="${escapeAttribute(entry.mediaType)}"/>\n`
+		)
+		.join("")
+	const at = encodeUtf8(text.slice(0, close.index)).length
+
+	return concat([bytes.subarray(0, at), encodeUtf8(lines), bytes.subarray(at)])
 }
 
 // Names a stream refers to styles by (§19.4xx *-style-name, list styles, data styles, master pages): every value of
@@ -942,7 +1028,8 @@ function assemble(
 	pages: readonly WrittenPage[],
 	splicer: Splicer,
 	structural: boolean,
-	settingsChanged: boolean
+	settingsChanged: boolean,
+	show: readonly SettingsAttribute[] | undefined
 ): Uint8Array | Refused {
 	const content = parts.content
 	const bytes = content.bytes
@@ -960,6 +1047,62 @@ function assemble(
 
 		return located.namespaces.prefixFor(located.root, "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0")
 	})()
+
+	if (show !== undefined && (presentationPrefix === undefined || presentationPrefix === ""))
+		return refused("unsupported", "content.xml binds no presentation prefix")
+
+	// The settings as the deck has them after the pages (which end at `from`): rewritten, written new, or kept.
+	const tail = (from: number): Refused | undefined => {
+		const settings = settingsChanged && presentationPrefix !== undefined ? settingsRange(bytes, from, presentationPrefix) : undefined
+
+		if (settings === undefined) {
+			const fresh =
+				settingsChanged && presentationPrefix !== undefined
+					? newSettingsMarkup(splicer.deck, splicer.names, presentationPrefix, show)
+					: ""
+
+			if (fresh !== "") {
+				const close = lastClose(bytes)
+
+				if (close < from) return refused("malformed", "content.xml without its presentation's end")
+
+				chunks.push(bytes.subarray(from, close), encodeUtf8(fresh), bytes.subarray(close))
+			} else {
+				chunks.push(bytes.subarray(from))
+			}
+
+			return undefined
+		}
+
+		const scope = new Map<string, string>()
+		const rootDocument = parseXml(concat([content.rootOpen, content.rootClose]))
+		const rootNamespaces = new Namespaces(rootDocument)
+
+		for (const [prefix, uri] of rootNamespaces.inScope(rootDocument.documentElement())) scope.set(prefix, uri)
+
+		const parsed = parseInScope(bytes.subarray(settings.start, settings.end), scope)
+		const settingsNamespaces = new Namespaces(parsed.document, { lenient: true })
+		const canonical = (node: number, name: string): string => {
+			const colon = name.indexOf(":")
+
+			return colon < 0 ? name : canonicalName(settingsNamespaces.uri(node, name.slice(0, colon)), name.slice(colon + 1))
+		}
+		const rewritten = settingsMarkup(
+			parsed.document,
+			parsed.node,
+			splicer.deck,
+			splicer.names,
+			canonical,
+			node => canonicalName(settingsNamespaces.elementUri(node), parsed.document.localName(node)),
+			show === undefined || presentationPrefix === undefined ? undefined : { attributes: show, prefix: presentationPrefix }
+		)
+
+		if (isRefused(rewritten)) return rewritten
+
+		chunks.push(bytes.subarray(from, settings.start), rewritten, bytes.subarray(settings.end))
+
+		return undefined
+	}
 
 	// The prologue, its automatic styles grown.
 	chunks.push(bytes.subarray(0, layout.stylesAt))
@@ -979,9 +1122,9 @@ function assemble(
 
 		for (const page of pages) chunks.push(page.kind === "copied" ? bytes.subarray(page.span.start, page.span.end) : page.bytes)
 
-		chunks.push(bytes.subarray(insertAt))
+		const failed = tail(insertAt)
 
-		return concat(chunks)
+		return failed ?? concat(chunks)
 	}
 
 	chunks.push(bytes.subarray(bodyFrom, firstStart))
@@ -1005,45 +1148,10 @@ function assemble(
 		for (const page of pages) chunks.push(page.kind === "copied" ? bytes.subarray(page.span.start, page.span.end) : page.bytes)
 	}
 
-	// The tail: the settings (custom shows, start page) as the deck has them.
-	const settings = settingsChanged && presentationPrefix !== undefined ? settingsRange(bytes, lastEnd, presentationPrefix) : undefined
+	// The tail: the settings (custom shows, start page, the show's attributes) as the deck has them.
+	const failed = tail(lastEnd)
 
-	if (settings === undefined) {
-		if (settingsChanged && splicer.deck.customShows.length > 0 && presentationPrefix !== undefined) {
-			const close = lastClose(bytes)
-
-			if (close < lastEnd) return refused("malformed", "content.xml without its presentation's end")
-
-			chunks.push(bytes.subarray(lastEnd, close), encodeUtf8(newSettingsMarkup(splicer.deck, splicer.names)), bytes.subarray(close))
-		} else {
-			chunks.push(bytes.subarray(lastEnd))
-		}
-
-		return concat(chunks)
-	}
-
-	const scope = new Map<string, string>()
-	const rootDocument = parseXml(concat([content.rootOpen, content.rootClose]))
-	const rootNamespaces = new Namespaces(rootDocument)
-
-	for (const [prefix, uri] of rootNamespaces.inScope(rootDocument.documentElement())) scope.set(prefix, uri)
-
-	const parsed = parseInScope(bytes.subarray(settings.start, settings.end), scope)
-	const settingsNamespaces = new Namespaces(parsed.document, { lenient: true })
-	const canonical = (node: number, name: string): string => {
-		const colon = name.indexOf(":")
-
-		return colon < 0 ? name : canonicalName(settingsNamespaces.uri(node, name.slice(0, colon)), name.slice(colon + 1))
-	}
-	const rewritten = settingsMarkup(parsed.document, parsed.node, splicer.deck, splicer.names, canonical, node =>
-		canonicalName(settingsNamespaces.elementUri(node), parsed.document.localName(node))
-	)
-
-	if (isRefused(rewritten)) return rewritten
-
-	chunks.push(bytes.subarray(lastEnd, settings.start), rewritten, bytes.subarray(settings.end))
-
-	return concat(chunks)
+	return failed ?? concat(chunks)
 }
 
 // The start of office:presentation's end tag (the last "</" before office:body ends): where pages and settings go

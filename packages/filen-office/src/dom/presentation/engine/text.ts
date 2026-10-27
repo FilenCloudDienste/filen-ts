@@ -2,7 +2,7 @@ import type { FontRequest } from "../../../core/fonts/index"
 import type { Slicing } from "../../../core/opc/index"
 import { findShape } from "../../../core/presentation/edit/changes"
 import { PresentationError, type Refused, type RunProps, type ShapeRef, type TextBody } from "../../../core/presentation/model"
-import type { TextPage, TextSeed, TransferableTextLayout } from "../../../core/presentation/output"
+import type { SlideLayer, TextPage, TextSeed, TransferableTextLayout } from "../../../core/presentation/output"
 import { fontRequests, layoutBody, type LayoutOptions, type TextEnvironment } from "../../../core/presentation/text/body"
 import { resolveBody, type BodyContext } from "../../../core/presentation/text/resolve"
 import { transferableLayout } from "../../../core/presentation/text/transfer"
@@ -70,11 +70,23 @@ export async function textSeedOf(context: CallContext, shape: ShapeRef): Promise
 	const node = session.deck.nodes.get(shape.slide)
 	const model = node === undefined ? undefined : findShape(node.shapes, shape.id)?.shape
 
-	// One body per shape: a table holds one per cell, a picture, a group or a frame none.
-	if (model !== undefined && model.kind !== "sp") throw new PresentationError("unsupported", `a ${model.kind} holds no text body`)
+	const cell = shape.cell
+	const table = model?.frame?.kind === "table" ? model.frame.table : undefined
+	const cellModel = cell === undefined ? undefined : table?.rows[cell.row]?.cells[cell.col]
 
-	// The slide's own layer of the shape (a layout's or master's layer names its own node).
-	const layer = render.layers.find(item => item.shape.slide === shape.slide && item.shape.id === shape.id)
+	// One body per shape, a table one per cell; a picture, a group or another frame none.
+	if (model !== undefined && (cell === undefined ? model.kind !== "sp" : cellModel === undefined))
+		throw new PresentationError("unsupported", cell === undefined ? `a ${model.kind} holds no text body` : "no such table cell")
+	if (cellModel?.hMerge === true || cellModel?.vMerge === true) throw new PresentationError("unsupported", "a cell another cell covers")
+
+	// The slide's own layer of the shape (a layout's or master's layer names its own node); a cell's text layer, else
+	// the table's own layer with the cell's text box.
+	const layers = render.layers.filter(item => item.shape.slide === shape.slide && item.shape.id === shape.id)
+	const layer =
+		cell === undefined
+			? layers[0]
+			: (layers.find(item => item.cell?.[0] === cell.row && item.cell[1] === cell.col) ??
+				layers.find(item => item.table !== undefined))
 
 	if (layer === undefined || model === undefined) throw new PresentationError("notFound", "the shape is not on the slide")
 	if (layer.lock !== undefined) throw new PresentationError("locked", layer.lock)
@@ -83,7 +95,7 @@ export async function textSeedOf(context: CallContext, shape: ShapeRef): Promise
 
 	if (found.kind === "refused") throw new PresentationError(found.reason, found.detail ?? "textSeed")
 
-	const body: TextBody = model.text ?? { bodyPr: {}, paragraphs: [] }
+	const body: TextBody = cellModel?.text ?? model.text ?? { bodyPr: {}, paragraphs: [] }
 	const resolved = resolveBody(body, found.context)
 
 	await found.prepare(fontRequests(resolved))
@@ -100,8 +112,27 @@ export async function textSeedOf(context: CallContext, shape: ShapeRef): Promise
 		})),
 		page: result.page,
 		layout: transferableLayout(result),
-		matrix: layer.textMatrix ?? layer.matrix
+		matrix: layer.textMatrix ?? cellMatrix(layer, cell) ?? layer.matrix
 	}
+}
+
+// A cell's text box on the table's own layer, as a matrix (a cell with no text has no text layer of its own).
+function cellMatrix(layer: SlideLayer, cell: ShapeRef["cell"]): readonly number[] | undefined {
+	const table = layer.table
+
+	if (cell === undefined || table === undefined) return undefined
+
+	for (let k = 0; k * 4 + 3 < table.areas.length; k++) {
+		if (table.areas[k * 4] !== cell.row || table.areas[k * 4 + 1] !== cell.col) continue
+
+		const [a = 1, b = 0, c = 0, d = 1, e = 0, f = 0] = layer.matrix
+		const x = table.textBoxes[k * 4] ?? 0
+		const y = table.textBoxes[k * 4 + 1] ?? 0
+
+		return [a, b, c, d, a * x + c * y + e, b * x + d * y + f]
+	}
+
+	return undefined
 }
 
 export const textCapability: TextCapability = {

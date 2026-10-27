@@ -51,14 +51,58 @@ const SAMPLE_OPS: { readonly [F in DeckOpFamily]: OpOf<F> } = {
 		strokes: [{ points: new Float64Array([0, 0, 100, 100]), width: 9525, color: { kind: "srgb", rgb: "FF0000" }, highlighter: false }],
 		name: "Ink"
 	},
-	mediaTiming: { family: "mediaTiming", kind: "setTrim", target, startMs: 0, endMs: 1000 }
+	mediaTiming: { family: "mediaTiming", kind: "setTrim", target, startMs: 0, endMs: 1000 },
+	presentation: {
+		family: "presentation",
+		kind: "setShow",
+		show: { kind: "present", loop: false, showNarration: false, showAnimation: true, useTimings: true, range: { kind: "all" } }
+	}
 }
 
 // What the slices have built so far: the loops below cover only what still refuses as notImplemented.
-const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set(["slide", "shape", "text"])
-const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set(["shape", "slide", "text", "timing"])
-const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set(["shape", "slide", "text", "timing"])
-const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved", "find"])
+const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set([
+	"slide",
+	"shape",
+	"text",
+	"table",
+	"picture",
+	"smartart",
+	"ink",
+	"media",
+	"presentation"
+])
+const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
+	"shape",
+	"slide",
+	"text",
+	"timing",
+	"table",
+	"picture",
+	"smartart",
+	"ink",
+	"presentation"
+])
+const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
+	"shape",
+	"slide",
+	"text",
+	"timing",
+	"table",
+	"picture",
+	"smartart",
+	"ink",
+	"presentation"
+])
+const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
+	"command",
+	"undo",
+	"redo",
+	"save",
+	"commitSaved",
+	"find",
+	"smartArtInfo",
+	"registerMedia"
+])
 
 const context: ApplyContext = {
 	sourceBytes: () => new Uint8Array(0),
@@ -116,20 +160,19 @@ describe("presentation dispatch seams", () => {
 		}
 
 		for (const family of DECK_OP_FAMILIES) {
+			// A family built in part (media: pictures that play, not yet frames) names what it does not write yet.
 			if (!BUILT_PPTX_EMIT.has(family)) {
-				expect(emitPptx(family, request, pptx), family).toEqual({
-					kind: "refused",
-					reason: "notImplemented",
-					detail: `pptx emit ${family}`
-				})
+				const result = emitPptx(family, request, pptx)
+
+				expect(result, family).toMatchObject({ kind: "refused", reason: "notImplemented" })
+				expect((result as { readonly detail?: string }).detail, family).toMatch(new RegExp(`^pptx emit ${family}( |$)`, "u"))
 			}
 
 			if (!BUILT_ODP_EMIT.has(family)) {
-				expect(emitOdp(family, request, odp), family).toEqual({
-					kind: "refused",
-					reason: "notImplemented",
-					detail: `odp emit ${family}`
-				})
+				const result = emitOdp(family, request, odp)
+
+				expect(result, family).toMatchObject({ kind: "refused", reason: "notImplemented" })
+				expect((result as { readonly detail?: string }).detail, family).toMatch(new RegExp(`^odp emit ${family}( |$)`, "u"))
 			} else {
 				expect(emitOdp(family, request, odp), family).not.toMatchObject({ reason: "notImplemented" })
 			}
@@ -159,6 +202,12 @@ describe("presentation dispatch seams", () => {
 			"ink"
 		])
 		expect(on("pic", { media: { kind: "video", contentType: "video/mp4" } })).toBe("media")
+		// A stroke of kept ink goes to the ink family while it has no source; any other new freeform stays a shape.
+		const custom = { props: { geometry: { kind: "custom" as const, guides: [], paths: [] } } }
+
+		expect(on("sp", { ...custom, ink: true })).toBe("ink")
+		expect(on("sp", custom)).toBe("shape")
+		expect(on("sp", { ...custom, ink: true, src: { format: "pptx", part: "/ppt/slides/slide1.xml", node: 3, epoch: 0 } })).toBe("shape")
 		expect(on("frame", { frame: { kind: "chart", part: "/ppt/charts/chart1.xml" } })).toBe("chart")
 		expect(on("frame", { frame: { kind: "smartart", data: "d", layout: "l", style: "s", colors: "c" } })).toBe("smartart")
 		expect(
@@ -185,7 +234,7 @@ describe("presentation dispatch seams", () => {
 	})
 
 	it("routes every protocol method to a capability, each not built yet refusing as notImplemented", async () => {
-		const owned = [...Object.values(CAPABILITIES).flatMap(capability => Object.keys(capability)), "smartArtPreview"]
+		const owned = [...Object.values(CAPABILITIES).flatMap(capability => Object.keys(capability)), "smartArtPreview", "smartArtInfo"]
 
 		expect(owned.sort()).toEqual([...PRESENTATION_METHODS].sort())
 		expect(new Set(owned).size).toBe(owned.length)
@@ -269,8 +318,9 @@ describe("presentation dispatch seams", () => {
 		expect(unavailablePresenterPortal().open()).toEqual({ kind: "refused", reason: "notImplemented", detail: "presenter" })
 	})
 
-	it("starts with an empty SmartArt gallery, finding nothing", () => {
-		expect([SMARTART_LAYOUTS, SMARTART_STYLES, SMARTART_COLORS]).toEqual([[], [], []])
+	it("registers our SmartArt gallery, finding nothing it does not hold", () => {
+		expect(SMARTART_LAYOUTS.length).toBeGreaterThanOrEqual(2)
+		expect(Math.min(SMARTART_STYLES.length, SMARTART_COLORS.length)).toBeGreaterThanOrEqual(1)
 		expect([smartArtLayout("urn:x"), smartArtStyle("urn:x"), smartArtColors("urn:x")]).toEqual([undefined, undefined, undefined])
 		expect([smartArtLayoutDef("urn:x"), smartArtStyleDef("urn:x"), smartArtColorsDef("urn:x")]).toEqual([
 			undefined,

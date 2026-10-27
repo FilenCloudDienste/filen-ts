@@ -15,6 +15,7 @@ export {
 	type TimegraphEngine,
 	type TimegraphInstance,
 	type TimegraphSnapshot,
+	type TimegraphSource,
 	type TimeNode,
 	type TimeNodeKind,
 	type TimeNodeType,
@@ -24,7 +25,7 @@ export {
 	type Track,
 	type Transition
 } from "./model"
-export { compile, instantiate, type CompileOptions } from "./timegraph"
+export { compile, compileSource, instantiate, type CompileOptions } from "./timegraph"
 export {
 	ATTRIBUTE_MATRIX,
 	attributeEntry,

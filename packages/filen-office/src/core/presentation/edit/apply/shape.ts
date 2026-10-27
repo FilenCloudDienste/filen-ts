@@ -731,15 +731,22 @@ function insert(node: SlideNode, op: OpOf<"shape"> & { kind: "insert" }, context
 	if (isRefused(shape)) return shape
 
 	const used = idsOf(node.shapes)
+	// newShapeId reads the slide as it is (the new shape not in it yet): ids handed out here skip those already taken.
+	let next = context.newShapeId(node.ref)
+	const fresh = (): number => {
+		while (used.has(next)) next++
 
-	if (shape.id <= 0 || used.has(shape.id)) shape.id = context.newShapeId(node.ref)
+		return next
+	}
+
+	if (shape.id <= 0 || used.has(shape.id)) shape.id = fresh()
 
 	used.add(shape.id)
 
 	// An inserted group's children keep ids unique on the slide.
 	if (shape.children !== undefined) {
 		eachShape(shape.children, child => {
-			if (child.id <= 0 || used.has(child.id)) child.id = context.newShapeId(node.ref)
+			if (child.id <= 0 || used.has(child.id)) child.id = fresh()
 
 			used.add(child.id)
 		})
@@ -903,7 +910,35 @@ function withChildSpace(xfrm: Xfrm, prior: Xfrm | undefined): Xfrm {
 	}
 }
 
+// ST_Coordinate's range (§20.1.10.16); a size is ST_PositiveCoordinate (§20.1.10.42).
+const MAX_COORDINATE = 27_273_042_316_900
+
+// Whether a box an op sets is whole: every field present, finite and in range (a partial one would reach the writer and
+// fail every later save).
+function wellFormedXfrm(xfrm: Xfrm): boolean {
+	const coordinate = (value: unknown): boolean => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= MAX_COORDINATE
+	const size = (value: unknown): boolean => coordinate(value) && (value as number) >= 0
+	const child = xfrm as Partial<Record<"chX" | "chY" | "chCx" | "chCy", unknown>>
+
+	return (
+		coordinate(xfrm.x) &&
+		coordinate(xfrm.y) &&
+		size(xfrm.cx) &&
+		size(xfrm.cy) &&
+		typeof xfrm.rot === "number" &&
+		Number.isFinite(xfrm.rot) &&
+		typeof xfrm.flipH === "boolean" &&
+		typeof xfrm.flipV === "boolean" &&
+		(child.chX === undefined || coordinate(child.chX)) &&
+		(child.chY === undefined || coordinate(child.chY)) &&
+		(child.chCx === undefined || size(child.chCx)) &&
+		(child.chCy === undefined || size(child.chCy))
+	)
+}
+
 function setXfrm(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrm" }, context: ApplyContext): ApplyResult<typeof op> {
+	if (op.xfrm !== undefined && !wellFormedXfrm(op.xfrm)) return refused("malformed", "a box without all its fields in range")
+
 	const at = findShape(node.shapes, op.target.id)
 
 	if (at === undefined) return refused("notFound", `shape ${String(op.target.id)}`)
@@ -932,6 +967,8 @@ function setXfrm(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrm" }, conte
 // setXfrm for several shapes as one step; refused whole when one is missing, named twice or cannot move.
 function setXfrms(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrms" }, context: ApplyContext): ApplyResult<typeof op> {
 	if (op.xfrms.length === 0) return refused("malformed", "no shapes")
+	if (op.xfrms.some(({ xfrm }) => xfrm !== undefined && !wellFormedXfrm(xfrm)))
+		return refused("malformed", "a box without all its fields in range")
 
 	const shapes: ShapeNode[] = []
 	const seen = new Set<number>()

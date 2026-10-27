@@ -4,7 +4,7 @@ import type { ColorModel, ShapeNode, SourceRef } from "../presentation/model"
 import { tooDeep, tooLarge } from "../presentation/refusal"
 import { OdfNs, canonicalName } from "../odf/index"
 import { decodeCharacterData, decodeUtf8, encodeUtf8, escapeAttribute } from "../xml/index"
-import { attributeFromOdf, attributeToOdf, isMediaBehavior } from "./attributes"
+import { attributeEntry, attributeFromOdf, attributeToOdf, isMediaBehavior } from "./attributes"
 import { heldMarkup, inScope } from "./prune"
 import type {
 	AnimTarget,
@@ -469,6 +469,47 @@ export function parseClock(text: string | undefined): TimeValue | undefined {
 	return undefined
 }
 
+// How long a node's content plays once from its begin: its own duration, else its children's by their delays.
+function naturalSpan(node: TimeNode): number {
+	const dur = node.ctn.dur
+
+	if (typeof dur === "number") return dur
+	if (dur === "indefinite") return 0
+
+	let span = 0
+
+	for (const child of node.ctn.children) {
+		const delay = child.ctn.stCondLst.find(c => c.evt === undefined && c.tn === undefined && typeof c.delay === "number")?.delay
+		const at = (typeof delay === "number" ? delay : 0) + naturalSpan(child)
+
+		span = node.kind === "seq" ? span + at : Math.max(span, at)
+	}
+
+	return span
+}
+
+// The smil:attributeName written on an anim:animateMotion whose model names no attribute.
+const MOTION_ATTRIBUTE = "translate"
+
+// anim:iterate-interval is an xsd:duration (LibreOffice writes "PT00H00M00.1S"); a SMIL clock value is read too.
+export function parseDuration(text: string | undefined): number | undefined {
+	const match = text === undefined ? null : /^\s*PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?\s*$/u.exec(text)
+
+	if (match === null) {
+		const clock = parseClock(text)
+
+		return typeof clock === "number" ? clock : undefined
+	}
+
+	const ms = ((Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0)) * 60 + Number(match[3] ?? 0)) * 1000
+
+	return Number.isFinite(ms) ? Math.round(ms * 1000) / 1000 : undefined
+}
+
+export function formatDuration(ms: number): string {
+	return `PT${(Math.round(ms * 1000) / 1e6).toFixed(6).replace(/\.?0+$/u, "")}S`
+}
+
 export function formatClock(value: TimeValue): string {
 	if (value === "indefinite") return "indefinite"
 
@@ -577,8 +618,12 @@ class OdfTimingReader {
 	private readonly fragment: Fragment
 	private readonly budgets: TimingBudgets
 	private readonly shapes: Map<string, number>
+	// The smil:targetElement of the anim:iterate being read: its children animate what it iterates.
+	private iterated: string | undefined
 	// Anim node xml:ids to the ctn ids given in document order.
 	private readonly nodeIds = new Map<string, number>()
+	// Nodes naming a presentation:master-element: after-effects (LibreOffice's dim and hide), put under their master.
+	private readonly afterEffects: { readonly time: TimeNode; readonly element: number; readonly master: string }[] = []
 	private readonly order = new Map<number, number>()
 	private count = 0
 
@@ -690,6 +735,59 @@ class OdfTimingReader {
 	}
 
 	node(node: number): TimeNode | undefined {
+		const time = this.read(node)
+		const master = time === undefined ? undefined : this.fragment.attributes(node).get("presentation:master-element")
+
+		if (time !== undefined && master !== undefined) this.afterEffects.push({ time, element: node, master })
+
+		return time
+	}
+
+	// An after-effect (a node with presentation:master-element, ODF 1.3 §19.402) as the p:subTnLst member PresentationML
+	// holds it in: one inside its master (or beside a master that is a behaviour) plays from the master's begin by its
+	// delay (masterRel sameClick), one elsewhere (LibreOffice puts "dim / hide on next click" in the next click's group)
+	// at the next click, as one inside its master that waits indefinitely (written so when the slide has no next click).
+	afterEffectsOf(root: TimeNode): void {
+		if (this.afterEffects.length === 0) return
+
+		const document = this.fragment.document
+		const byId = new Map<number, TimeNode>()
+		const parents = new Map<TimeNode, TimeNode>()
+		const stack: TimeNode[] = [root]
+
+		for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+			byId.set(node.ctn.id, node)
+
+			for (const child of node.ctn.children) {
+				parents.set(child, node)
+				stack.push(child)
+			}
+		}
+
+		const within = (inner: number, outer: number): boolean =>
+			document.start(inner) >= document.start(outer) && document.end(inner) <= document.end(outer)
+
+		for (const { time, element, master } of this.afterEffects) {
+			const id = this.nodeIds.get(master)
+			const owner = id === undefined ? undefined : byId.get(id)
+			const parent = parents.get(time)
+			const ownerElement = owner?.ctn.src?.format === "odp" ? owner.ctn.src.node : -1
+
+			if (owner === undefined || parent === undefined || ownerElement < 0 || within(ownerElement, element)) continue
+
+			const beside = owner.kind === "behavior" && document.parent(element) === document.parent(ownerElement)
+			const inside = within(element, ownerElement) || beside
+			const waits = time.ctn.stCondLst.length > 0 && time.ctn.stCondLst.every(c => c.delay === "indefinite" && c.evt === undefined)
+
+			parent.ctn.children.splice(parent.ctn.children.indexOf(time), 1)
+			time.ctn.masterRel = inside && !waits ? "sameClick" : "nextClick"
+
+			if (waits) time.ctn.stCondLst = [{ delay: 0 }]
+			;(owner.ctn.subTnLst ??= []).push(time)
+		}
+	}
+
+	private read(node: number): TimeNode | undefined {
 		const fragment = this.fragment
 		const document = fragment.document
 		const name = fragment.name(node)
@@ -749,7 +847,7 @@ class OdfTimingReader {
 			if (name === "anim:iterate") {
 				const type = a.get("anim:iterate-type")
 				const interval = a.get("anim:iterate-interval")
-				const ms = parseClock(interval)
+				const ms = parseDuration(interval)
 
 				ctn.iterate = {
 					type: type === "by-word" ? "wd" : type === "by-letter" ? "lt" : "el",
@@ -758,10 +856,18 @@ class OdfTimingReader {
 				}
 			}
 
-			for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
-				const time = this.node(child)
+			const outer = this.iterated
 
-				if (time !== undefined) ctn.children.push(time)
+			if (name === "anim:iterate") this.iterated = a.get("smil:targetElement") ?? outer
+
+			try {
+				for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
+					const time = this.node(child)
+
+					if (time !== undefined) ctn.children.push(time)
+				}
+			} finally {
+				this.iterated = outer
 			}
 
 			return { kind: name === "anim:seq" ? "seq" : "par", ctn }
@@ -773,8 +879,9 @@ class OdfTimingReader {
 	}
 
 	private behavior(name: string, a: ReadonlyMap<string, string>): Behavior | undefined {
-		const target = this.target(a.get("smil:targetElement"), a.get("anim:sub-item"))
-		const odfAttribute = a.get("smil:attributeName")
+		const target = this.target(a.get("smil:targetElement") ?? this.iterated, a.get("anim:sub-item"))
+		const named = a.get("smil:attributeName")
+		const odfAttribute = name === "anim:animateMotion" && named === MOTION_ATTRIBUTE ? undefined : named
 		const attribute = odfAttribute === undefined ? undefined : (attributeFromOdf(odfAttribute) ?? odfAttribute)
 		const additive = a.get("smil:additive")
 		const accumulate = a.get("smil:accumulate")
@@ -788,8 +895,11 @@ class OdfTimingReader {
 		switch (name) {
 			case "anim:set": {
 				const to = a.get("smil:to")
+				// A colour attribute's value (LibreOffice's "dim" after-effect sets color) is a colour, as p:clrVal.
+				const dom = attribute === undefined ? undefined : attributeEntry(attribute)?.dom
+				const color = dom === "fill" || dom === "stroke" || dom === "textColor" ? colorFromOdf(to) : undefined
 
-				return { type: "set", common, ...(to === undefined ? {} : { to }) }
+				return { type: "set", common, ...(color !== undefined ? { to: color } : to === undefined ? {} : { to }) }
 			}
 			case "anim:animate": {
 				const values = (a.get("smil:values") ?? "").split(";").filter(value => value.trim() !== "")
@@ -926,8 +1036,9 @@ export function readOdpTiming(
 	budgets: TimingBudgets
 ): TimingTree | undefined {
 	const root = odpTimingRoot(fragment, page)
+	const media = pluginPlayback(fragment, shapes)
 
-	if (root < 0) return undefined
+	if (root < 0) return media.length === 0 ? undefined : { root: mediaRoot(media), builds: [] }
 
 	const reader = new OdfTimingReader(fragment, budgets, shapes)
 
@@ -935,9 +1046,124 @@ export function readOdpTiming(
 
 	const tree = reader.node(root)
 
-	if (tree === undefined || tree.ctn.children.length === 0) return undefined
+	if (tree !== undefined) reader.afterEffectsOf(tree)
+	if (tree === undefined || (tree.ctn.children.length === 0 && media.length === 0)) return undefined
 
-	return { root: tree, builds: [], src: fragment.src(root) }
+	return { root: media.length === 0 ? tree : withMedia(tree, media), builds: [], src: fragment.src(root) }
+}
+
+// A medium's playback options the frame's draw:plugin gives (ODF 1.3 §10.4.7 draw:param, the names LibreOffice
+// writes: Loop, Mute, VolumeDB), as the media node PresentationML holds them in (p:video/p:audio of the shape, a
+// child of the timing root started by an event): only where they differ from the defaults. Never written back as
+// timing (OdfTimingWriter skips them); the plugin keeps them (core/odp/write/emit/media.ts).
+type MediaNodeOptions = { readonly shape: ShapeNode; readonly loop: boolean; readonly mute: boolean; readonly vol: number | undefined }
+
+function pluginPlayback(fragment: Fragment, shapes: readonly ShapeNode[]): MediaNodeOptions[] {
+	const out: MediaNodeOptions[] = []
+	const document = fragment.document
+	const visit = (list: readonly ShapeNode[], depth: number): void => {
+		if (depth > 64) return
+
+		for (const shape of list) {
+			if (shape.children !== undefined) visit(shape.children, depth + 1)
+
+			const src = shape.src
+
+			if (shape.frame?.kind !== "media" || src?.format !== "odp" || src.fragment !== fragment.offset) continue
+
+			let loop = false
+			let mute = false
+			let vol: number | undefined
+
+			for (let child = document.firstChildElement(src.node); child >= 0; child = document.nextSiblingElement(child)) {
+				if (fragment.name(child) !== "draw:plugin") continue
+
+				for (let param = document.firstChildElement(child); param >= 0; param = document.nextSiblingElement(param)) {
+					if (fragment.name(param) !== "draw:param") continue
+
+					const attributes = fragment.attributes(param)
+					const value = attributes.get("draw:value")?.trim().toLowerCase()
+
+					switch (attributes.get("draw:name")) {
+						case "Loop":
+							loop = value === "true"
+							break
+						case "Mute":
+							mute = value === "true"
+							break
+						case "VolumeDB": {
+							const db = Number(value)
+
+							vol =
+								Number.isFinite(db) && db < 0
+									? Math.max(0, Math.min(100_000, Math.round(100_000 * 10 ** (db / 20))))
+									: undefined
+							break
+						}
+					}
+				}
+
+				break
+			}
+
+			if (loop || mute || vol !== undefined) out.push({ shape, loop, mute, vol })
+		}
+	}
+
+	visit(shapes, 0)
+
+	return out
+}
+
+function mediaNode(options: MediaNodeOptions, id: number): TimeNode {
+	const media = options.shape.media ?? (options.shape.frame?.kind === "media" ? options.shape.frame.media : undefined)
+
+	return {
+		kind: "behavior",
+		behavior: {
+			type: media?.kind ?? "video",
+			target: { kind: "shape", shape: options.shape.id },
+			...(options.vol === undefined ? {} : { vol: options.vol }),
+			...(options.mute ? { mute: true } : {})
+		},
+		ctn: {
+			id,
+			fill: "hold",
+			stCondLst: [{ delay: "indefinite" }],
+			endCondLst: [],
+			children: [],
+			...(options.loop ? { repeatCount: "indefinite" as const } : {})
+		}
+	}
+}
+
+function largestId(node: TimeNode): number {
+	let max = node.ctn.id
+
+	for (const child of node.ctn.children) max = Math.max(max, largestId(child))
+
+	return max
+}
+
+function mediaRoot(media: readonly MediaNodeOptions[]): TimeNode {
+	return {
+		kind: "par",
+		ctn: {
+			id: 1,
+			nodeType: "tmRoot",
+			dur: "indefinite",
+			restart: "never",
+			stCondLst: [],
+			endCondLst: [],
+			children: media.map((options, k) => mediaNode(options, k + 2))
+		}
+	}
+}
+
+function withMedia(tree: TimeNode, media: readonly MediaNodeOptions[]): TimeNode {
+	const first = largestId(tree) + 1
+
+	return { ...tree, ctn: { ...tree.ctn, children: [...tree.ctn.children, ...media.map((options, k) => mediaNode(options, first + k))] } }
 }
 
 // --- Writing ---
@@ -998,6 +1224,7 @@ const MODELED: ReadonlySet<string> = new Set([
 	"presentation:preset-id",
 	"presentation:preset-sub-type",
 	"presentation:group-id",
+	"presentation:master-element",
 	"smil:targetElement",
 	"smil:attributeName",
 	"smil:to",
@@ -1054,6 +1281,7 @@ export function odpTargetIds(tree: TimingTree | undefined): ReadonlySet<number> 
 		if (node.kind === "behavior") add(isMediaBehavior(node.behavior) ? node.behavior.target : node.behavior.common.target)
 
 		for (const child of node.ctn.children) visit(child)
+		for (const child of node.ctn.subTnLst ?? []) visit(child)
 	}
 
 	if (tree !== undefined) visit(tree.root)
@@ -1093,6 +1321,11 @@ class OdfTimingWriter {
 
 	// The source's id maps, for reading its begin and end lists again.
 	private readonly reader: OdfTimingReader | undefined
+	// After-effects (p:subTnLst members) and the xml:id of their master; the next-click ones per the node they are
+	// written in (the next click's first group), and those with no next click (written in the master, waiting).
+	private readonly masters = new Map<TimeNode, number>()
+	private readonly placed = new Map<TimeNode, TimeNode[]>()
+	private readonly waiting = new Set<TimeNode>()
 
 	constructor(context: OdpTimingContext, tree: TimingTree, pristine: TimingTree | undefined) {
 		this.fragment = context.fragment
@@ -1109,6 +1342,7 @@ class OdfTimingWriter {
 			if (node.ctn.src !== undefined) index.set(node.ctn.src.node, node)
 
 			for (const child of node.ctn.children) visitPristine(child)
+			for (const child of node.ctn.subTnLst ?? []) visitPristine(child)
 		}
 
 		if (pristine !== undefined) visitPristine(pristine.root)
@@ -1134,9 +1368,17 @@ class OdfTimingWriter {
 			for (const c of [...node.ctn.stCondLst, ...node.ctn.endCondLst]) if (c.tn !== undefined) this.referenced.set(c.tn, "")
 
 			for (const child of node.ctn.children) collect(child)
+
+			for (const sub of node.ctn.subTnLst ?? []) {
+				// An after-effect names its master by the master's xml:id.
+				this.referenced.set(node.ctn.id, "")
+				this.masters.set(sub, node.ctn.id)
+				collect(sub)
+			}
 		}
 
 		collect(tree.root)
+		this.placeAfterEffects(tree.root)
 
 		for (const id of this.referenced.keys()) {
 			const node = byId.get(id)
@@ -1152,6 +1394,70 @@ class OdfTimingWriter {
 		}
 	}
 
+	// "On next click" after-effects go to the first group of the main sequence's next click (where LibreOffice plays
+	// them); without one they wait in their master.
+	private placeAfterEffects(root: TimeNode): void {
+		const nexts: TimeNode[] = []
+		const stack: TimeNode[] = [root]
+
+		for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+			for (const sub of node.ctn.subTnLst ?? []) if (sub.ctn.masterRel === "nextClick") nexts.push(sub)
+
+			stack.push(...node.ctn.children)
+		}
+
+		if (nexts.length === 0) return
+
+		const find = (node: TimeNode): TimeNode | undefined =>
+			node.ctn.nodeType === "mainSeq" ? node : node.ctn.children.map(find).find(found => found !== undefined)
+		const clicks = find(root)?.ctn.children ?? []
+		const clickOf = new Map<number, number>()
+
+		clicks.forEach((click, k) => {
+			const inner: TimeNode[] = [click]
+
+			for (let node = inner.pop(); node !== undefined; node = inner.pop()) {
+				clickOf.set(node.ctn.id, k)
+				inner.push(...node.ctn.children)
+			}
+		})
+
+		for (const sub of nexts) {
+			const click = clickOf.get(this.masters.get(sub) ?? -1)
+			const next = click === undefined ? undefined : clicks[click + 1]
+			const target = next === undefined ? undefined : (next.ctn.children[0] ?? next)
+
+			if (target === undefined) {
+				this.waiting.add(sub)
+				continue
+			}
+
+			const list = this.placed.get(target)
+
+			if (list === undefined) this.placed.set(target, [sub])
+			else list.push(sub)
+		}
+	}
+
+	// Whether the source element of `node` already holds the after-effects written in it.
+	private holds(node: TimeNode, source: number): boolean {
+		const document = this.fragment?.document
+
+		for (const sub of this.placed.get(node) ?? []) {
+			const own = this.sourceOf(sub)
+
+			if (
+				document === undefined ||
+				own < 0 ||
+				document.start(own) < document.start(source) ||
+				document.end(own) > document.end(source)
+			)
+				return false
+		}
+
+		return true
+	}
+
 	private sourceOf(node: TimeNode): number {
 		const src = node.ctn.src
 		const fragment = this.fragment
@@ -1159,6 +1465,24 @@ class OdfTimingWriter {
 		return fragment !== undefined && src?.format === "odp" && src.fragment === fragment.offset && src.epoch === fragment.epoch
 			? src.node
 			: -1
+	}
+
+	// The element an iterated container's first behaviour animates.
+	private iteratedName(node: TimeNode): string | undefined {
+		const stack: TimeNode[] = [node]
+
+		for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
+			if (at.kind === "behavior")
+				return this.targetName(isMediaBehavior(at.behavior) ? at.behavior.target : at.behavior.common.target)
+
+			for (let k = at.ctn.children.length - 1; k >= 0; k--) {
+				const child = at.ctn.children[k]
+
+				if (child !== undefined) stack.push(child)
+			}
+		}
+
+		return undefined
 	}
 
 	private targetName(target: AnimTarget): string | undefined {
@@ -1220,7 +1544,10 @@ class OdfTimingWriter {
 		const xmlId = this.referenced.get(ctn.id)
 
 		return (
-			attribute("smil:begin", this.conditionText(node, "smil:begin", ctn.stCondLst)) +
+			attribute(
+				"smil:begin",
+				this.waiting.has(node) && node.kind !== "behavior" ? "indefinite" : this.conditionText(node, "smil:begin", ctn.stCondLst)
+			) +
 			attribute("smil:end", this.conditionText(node, "smil:end", ctn.endCondLst)) +
 			attribute("smil:dur", ctn.dur === undefined ? undefined : formatClock(ctn.dur)) +
 			attribute(
@@ -1242,7 +1569,12 @@ class OdfTimingWriter {
 			attribute("presentation:preset-id", preset.id ?? ctn.presetName) +
 			attribute("presentation:preset-sub-type", preset.subtype ?? ctn.presetSubtypeName) +
 			attribute("presentation:group-id", ctn.grpId === undefined ? undefined : String(ctn.grpId)) +
-			(xmlId === undefined || this.hasOwnXmlId(node) ? "" : attribute("xml:id", xmlId))
+			(xmlId === undefined || this.hasOwnXmlId(node) ? "" : attribute("xml:id", xmlId)) +
+			// ODF 1.3 allows it on containers (common-anim-attlist): a behaviour's goes on the par afterEffect() wraps it in.
+			attribute(
+				"presentation:master-element",
+				node.kind === "behavior" ? undefined : this.referenced.get(this.masters.get(node) ?? -1)
+			)
 		)
 	}
 
@@ -1377,7 +1709,9 @@ class OdfTimingWriter {
 					)
 				)
 			case "animMotion":
-				return head + attribute("svg:path", behavior.path)
+				// ODF 1.3 requires smil:attributeName on anim:animateMotion (common-anim-named-target-attlist); a motion that
+				// names none is written "translate", which reads back as naming none.
+				return head + attribute("smil:attributeName", name ?? MOTION_ATTRIBUTE) + attribute("svg:path", behavior.path)
 			case "animRot": {
 				const angle = (value: number | undefined): string | undefined => (value === undefined ? undefined : decimal(value / 60000))
 
@@ -1462,6 +1796,10 @@ class OdfTimingWriter {
 
 	// `around`: the source element of the nearest written ancestor that has one (whose namespace scope this node is in).
 	node(node: TimeNode, out: EmitPiece[], around = -1): void {
+		// A medium's own playback node: ODF keeps those options in its frame's draw:plugin (pluginPlayback), and
+		// anim:audio plays a sound, never a shape.
+		if (node.kind === "behavior" && isMediaBehavior(node.behavior) && node.behavior.target.kind === "shape") return
+
 		const source = this.sourceOf(node)
 		const before = source >= 0 ? this.pristine.get(source) : undefined
 		const held = source < 0 ? heldMarkup(node.ctn) : undefined
@@ -1477,8 +1815,13 @@ class OdfTimingWriter {
 			return
 		}
 
-		if (source >= 0 && before !== undefined && sameModel(node, before)) {
+		if (source >= 0 && before !== undefined && sameModel(node, before) && this.holds(node, source)) {
 			out.push({ hole: source })
+
+			// A behaviour's after-effects stand beside it, outside its element.
+			if (node.kind === "behavior")
+				for (const sub of node.ctn.subTnLst ?? [])
+					if (sub.ctn.masterRel !== "nextClick" || this.waiting.has(sub)) this.afterEffect(sub, out, around)
 
 			return
 		}
@@ -1501,8 +1844,14 @@ class OdfTimingWriter {
 			const iterate = node.ctn.iterate
 
 			head +=
+				// What it iterates (its children animate the same element).
+				attribute("smil:targetElement", this.iteratedName(node)) +
 				attribute("anim:iterate-type", iterate.type === "wd" ? "by-word" : iterate.type === "lt" ? "by-letter" : "by-paragraph") +
-				attribute("anim:iterate-interval", "ms" in iterate.interval ? formatClock(iterate.interval.ms) : undefined)
+				// ODF has no share of the duration (tmPct): its time from the effect's duration.
+				attribute(
+					"anim:iterate-interval",
+					formatDuration("ms" in iterate.interval ? iterate.interval.ms : (iterate.interval.pct / 100000) * naturalSpan(node))
+				)
 		}
 
 		head += this.unmodeled(
@@ -1510,12 +1859,17 @@ class OdfTimingWriter {
 			node.kind === "behavior" && !isMediaBehavior(node.behavior) && node.behavior.common.target.kind === "text"
 		)
 
+		// After-effects: in their master, after its children (a behaviour's beside it), and those of the click before.
+		const subs = (node.ctn.subTnLst ?? []).filter(sub => sub.ctn.masterRel !== "nextClick" || this.waiting.has(sub))
 		const children = node.ctn.children
+		const after = [...(node.kind === "behavior" ? [] : subs), ...(this.placed.get(node) ?? [])]
 		// The source's own start tag when it says the same (its attribute order and quoting kept).
 		const open = sameElement ? (this.sourceHead(source, head) ?? head) : head
 
-		if (children.length === 0 && node.kind === "behavior") {
+		if (children.length === 0 && after.length === 0 && node.kind === "behavior") {
 			out.push(typeof open === "string" ? `${open}/>` : concatBytes(open, encodeUtf8("/>")))
+
+			for (const sub of subs) this.afterEffect(sub, out, around)
 
 			return
 		}
@@ -1530,8 +1884,28 @@ class OdfTimingWriter {
 		}
 
 		for (const child of children) this.node(child, out, sameElement ? source : around)
+		for (const sub of after) this.afterEffect(sub, out, sameElement ? source : around)
 
 		out.push(`</${name}>`)
+	}
+
+	// An after-effect: a container carries presentation:master-element itself; a behaviour (which may not) is wrapped in
+	// a par that does, beginning with where it is written (or waiting, when the slide has no next click).
+	private afterEffect(sub: TimeNode, out: EmitPiece[], around: number): void {
+		if (sub.kind !== "behavior") {
+			this.node(sub, out, around)
+
+			return
+		}
+
+		out.push(
+			`<anim:par${attribute("smil:begin", this.waiting.has(sub) ? "indefinite" : undefined)} smil:fill="hold"${attribute(
+				"presentation:master-element",
+				this.referenced.get(this.masters.get(sub) ?? -1)
+			)}>`
+		)
+		this.node(sub, out, around)
+		out.push("</anim:par>")
 	}
 }
 

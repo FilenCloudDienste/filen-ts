@@ -1,6 +1,7 @@
 import { OpcPackage, partKey, PRESENTATION_ZIP_LIMITS, type ByteSource } from "../../../core/opc/index"
-import { PresentationError, type Deck } from "../../../core/presentation/model"
+import { PresentationError, type Deck, type ShapeNode } from "../../../core/presentation/model"
 import { rebaseOdpDeck } from "../../../core/odp/write/rebase"
+import { noteDiagramWritten } from "../../../core/presentation/edit/apply/smartart"
 import { odpSpliceWriter } from "../../../core/odp/write/save"
 import type { OdpSaveSource } from "../../../core/odp/write/splice"
 import { pptxSpliceWriter } from "../../../core/pptx/write/save"
@@ -60,11 +61,123 @@ export async function rebasePptx(session: EngineSession, source: ByteSource, sav
 
 	// Read before the swap, so the swap itself stays one synchronous step.
 	const plan = await parts.prepareRebase(opc)
+	const diagrams = await insertedDiagrams(session.deck, opc, rewritten, epoch)
 
 	rebindSources(session.deck, epoch, rewritten)
+
+	for (const bind of diagrams) bind()
+
 	parts.rebase(opc, contentTypes, epoch, documents, plan)
 
 	return { ...session.package, bytes: source.size, source, archive: opc.zip, opc }
+}
+
+// Diagrams an op inserted (their parts held by the edit session, the frame with no source) that the save wrote: each
+// becomes the diagram the saved slide holds, its frame naming the parts written and its source the written
+// p:graphicFrame (found by its cNvPr id), so a later save edits those parts in place or leaves them, as for a diagram
+// the file had, instead of adding them again. Answers the binds, run in the rebase's synchronous step.
+async function insertedDiagrams(
+	deck: Deck,
+	opc: OpcPackage,
+	rewritten: ReadonlyMap<string, { readonly from: XmlDocument; readonly to: XmlDocument }>,
+	epoch: number
+): Promise<(() => void)[]> {
+	const binds: (() => void)[] = []
+
+	for (const node of deck.nodes.values()) {
+		const written = rewritten.get(partKey(node.part))
+		const inserted: ShapeNode[] = []
+		const visit = (shapes: readonly ShapeNode[], depth: number): void => {
+			for (const shape of shapes) {
+				if (shape.src === undefined && shape.frame?.kind === "smartart") inserted.push(shape)
+				if (shape.children !== undefined && depth < 64) visit(shape.children, depth + 1)
+			}
+		}
+
+		if (written === undefined) continue
+
+		visit(node.shapes, 0)
+
+		if (inserted.length === 0) continue
+
+		const document = written.to
+		// By its zip name, as every reader of the package asks (the parse is cached per part).
+		const relationships = await opc.relationships(node.part.replace(/^\/+/u, ""))
+		const frames = graphicFramesById(document)
+
+		for (const shape of inserted) {
+			const element = frames.get(String(shape.id))
+			const ids = element === undefined ? undefined : diagramRelIds(document, element)
+			const target = (id: string | undefined): string | undefined => {
+				const name = id === undefined ? undefined : relationships.byId(id)?.partName
+
+				return name === undefined ? undefined : `/${name.replace(/^\/+/u, "")}`
+			}
+			const data = target(ids?.dm)
+
+			if (element === undefined || ids === undefined || data === undefined) continue
+
+			const frame = {
+				kind: "smartart" as const,
+				data,
+				layout: target(ids.lo) ?? "",
+				style: target(ids.qs) ?? "",
+				colors: target(ids.cs) ?? ""
+			}
+			const part = node.part
+
+			binds.push(() => {
+				shape.frame = frame
+				shape.src = { format: "pptx", part, node: element, epoch }
+				noteDiagramWritten(deck, node.ref, shape.id, frame)
+			})
+		}
+	}
+
+	return binds
+}
+
+// The p:graphicFrame elements of a slide by their cNvPr id.
+function graphicFramesById(document: XmlDocument): Map<string, number> {
+	const out = new Map<string, number>()
+	const visit = (node: number, depth: number): void => {
+		for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
+			if (document.localName(child) === "graphicFrame") {
+				const nv = document.firstChildElement(child)
+				const cNvPr = nv < 0 ? -1 : document.firstChildElement(nv)
+				const id = cNvPr < 0 ? undefined : document.attribute(cNvPr, "id")
+
+				if (id !== undefined && !out.has(id)) out.set(id, child)
+			} else if (depth < 64) visit(child, depth + 1)
+		}
+	}
+
+	visit(document.documentElement(), 0)
+
+	return out
+}
+
+// A diagram frame's dgm:relIds relationship ids (a:graphic/a:graphicData/dgm:relIds r:dm, r:lo, r:qs, r:cs).
+function diagramRelIds(document: XmlDocument, frame: number): Partial<Record<"dm" | "lo" | "qs" | "cs", string>> | undefined {
+	const childNamed = (node: number, local: string): number => {
+		for (let child = node < 0 ? -1 : document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child))
+			if (document.localName(child) === local) return child
+
+		return -1
+	}
+	const relIds = childNamed(childNamed(childNamed(frame, "graphic"), "graphicData"), "relIds")
+
+	if (relIds < 0) return undefined
+
+	const out: Partial<Record<"dm" | "lo" | "qs" | "cs", string>> = {}
+
+	for (const attribute of document.attributes(relIds)) {
+		const local = attribute.name.slice(attribute.name.indexOf(":") + 1)
+
+		if (local === "dm" || local === "lo" || local === "qs" || local === "cs") out[local] = attribute.value
+	}
+
+	return out
 }
 
 // One sealer per encrypted deck, over the key its session unlocked (the session's close releases that key).

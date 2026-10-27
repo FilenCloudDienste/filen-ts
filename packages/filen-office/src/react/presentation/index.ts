@@ -58,3 +58,17 @@ export { PresentationTextEditor, type PresentationTextEditorProps, type TextEdit
 export { TextEditController, COMMIT_IDLE_MS, type TextEditFormat } from "./edit/text/controller"
 export { createTextEditing, formatShapes, useTextEditing, type TextEditing } from "./edit/text/editing"
 export { DEFAULT_TEXT_BINDINGS, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./edit/text/keys"
+export { SlideShow, type SlideShowProps } from "./show/player"
+export { type ShowMediaEvents, type ShowMediaHandle, type ShowMediaMount } from "./show/stage"
+export { DEFAULT_SHOW_OPTIONS, showOptionsOf, type ShowOptions } from "./show/timeline"
+export {
+	showMediaMount,
+	type MediaCommand,
+	type MediaRemux,
+	type ShowMediaLabels,
+	type ShowMediaOptions,
+	type ShowMediaStatus,
+	type ShowMediaStreams
+} from "./show/media"
+export * from "./presenter/index"
+export * from "./ink/index"

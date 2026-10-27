@@ -522,10 +522,10 @@ export class PackageWriter {
 
 		return {
 			owner,
-			addPart: (kind, content, contentType) => {
+			addPart: (kind, content, contentType, options) => {
 				const name = this.allocate(kind, contentType)
 
-				this.add(name, contentType, content)
+				this.add(name, contentType, content, options?.crc32 === undefined ? {} : { crc32: options.crc32 })
 
 				const rId = this.relate(ownerName, name, RELATIONSHIP_TYPES[kind])
 
@@ -544,6 +544,15 @@ export class PackageWriter {
 				return relationship === undefined || relationship.external ? undefined : `/${relationship.target}`
 			},
 			removePart: part => this.remove(part.startsWith("/") ? part.slice(1) : part),
+			replacePart: (part, content) => {
+				const name = part.startsWith("/") ? part.slice(1) : part
+
+				if (!this.exists(name) || this.isAdded(name)) return false
+
+				this.replace(name, content)
+
+				return true
+			},
 			editor: part => this.editor(part.startsWith("/") ? part.slice(1) : part)
 		}
 	}

@@ -1,6 +1,6 @@
 import { bytesSource } from "../core/opc/index"
 import { openPptxCapability, pptxParts } from "../dom/presentation/engine/open/pptx"
-import { SERVICES, type CallContext, type EditCapability, type EngineSession } from "../dom/presentation/engine"
+import { SERVICES, type CallContext, type EditCapability, type EngineServices, type EngineSession } from "../dom/presentation/engine"
 import { createEditCapability, type EditOptions } from "../dom/presentation/engine/edit"
 import type { CommandResult, PresentationEvent } from "../dom/presentation/protocol"
 import type { EmitFunction } from "../core/presentation/edit/proof"
@@ -35,7 +35,12 @@ export interface EditHarness {
 	close(): void
 }
 
-export async function editHarness(bytes: Uint8Array, options: EditOptions = { emit: SOURCE_EMITTER }): Promise<EditHarness> {
+// `services` replaces the session's own (the text services a render of cell text needs, say).
+export async function editHarness(
+	bytes: Uint8Array,
+	options: EditOptions = { emit: SOURCE_EMITTER },
+	services: Partial<EngineServices> = {}
+): Promise<EditHarness> {
 	const outcome = await openPptxCapability.open({
 		source: bytesSource(bytes),
 		sourceKind: "bytes",
@@ -51,7 +56,7 @@ export async function editHarness(bytes: Uint8Array, options: EditOptions = { em
 		deck: outcome.deck,
 		package: outcome.package,
 		options: { format: "pptx", fileName: "deck.pptx" },
-		services: SERVICES,
+		services: { ...SERVICES, ...services },
 		rangeSource: undefined,
 		schedule: () => undefined,
 		emit: event => events.push(event),

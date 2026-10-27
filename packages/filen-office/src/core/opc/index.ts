@@ -62,3 +62,11 @@ export {
 	type MediaNotice,
 	type PackagePolicy
 } from "./mediaPolicy"
+export {
+	INFLATE_CHECKPOINT_BYTES,
+	InflateIndex,
+	type InflateCheckpoint,
+	type InflateIndexBuild,
+	type InflateInput,
+	type InflateReadStats
+} from "./inflateIndex"

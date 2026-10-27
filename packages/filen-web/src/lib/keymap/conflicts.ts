@@ -46,7 +46,39 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["drive.download", "preview.save"],
 	["drive.search", "editor.find"],
 	["photos.search", "editor.find"],
-	["notes.saveNow", "preview.save"]
+	["notes.saveNow", "preview.save"],
+	// The presentation editor's keys act only where focus is: the slide rail (select all slides, delete slides), the
+	// slide canvas (select all objects), a body being edited (align left/centre), the running show (its stage and the
+	// presenter view stop every key they take), so the listings under the preview (drive, photos, chats), whose
+	// handlers stand down while a dialog is open, and the notes route (which never mounts the preview) never see them.
+	// Mod+E centres text in a slide body and is editor.code only in the code and Markdown editors, which never mount
+	// inside a presentation.
+	["presentation.deleteSlide", "drive.trash"],
+	["presentation.deleteSlide", "photos.trash"],
+	["presentation.deleteSlide", "notes.trash"],
+	["presentation.selectAllSlides", "presentation.objects.selectAll"],
+	["presentation.selectAllSlides", "drive.selectAll"],
+	["presentation.selectAllSlides", "photos.selectAll"],
+	["presentation.selectAllSlides", "chats.selectAll"],
+	["presentation.selectAllSlides", "notes.selectAll"],
+	["presentation.objects.selectAll", "drive.selectAll"],
+	["presentation.objects.selectAll", "photos.selectAll"],
+	["presentation.objects.selectAll", "chats.selectAll"],
+	["presentation.objects.selectAll", "notes.selectAll"],
+	["presentation.text.alignCenter", "editor.code"],
+	["presentation.text.alignLeft", "presentation.show.laser"],
+	["presentation.show.arrow", "presentation.selectAllSlides"],
+	["presentation.show.arrow", "presentation.objects.selectAll"],
+	["presentation.show.arrow", "drive.selectAll"],
+	["presentation.show.arrow", "photos.selectAll"],
+	["presentation.show.arrow", "chats.selectAll"],
+	["presentation.show.arrow", "notes.selectAll"],
+	["presentation.show.next", "drive.newDirectory"],
+	["presentation.show.next", "notes.newNote"],
+	["presentation.show.end", "drive.clearSelection"],
+	["presentation.show.end", "photos.clearSelection"],
+	["presentation.show.end", "chats.clearSelection"],
+	["presentation.show.end", "notes.clearSelection"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

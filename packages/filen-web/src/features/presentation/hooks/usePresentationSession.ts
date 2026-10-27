@@ -21,7 +21,7 @@ import {
 	type SlideRef
 } from "@filen/office/core/presentation"
 import type { CommandResult, PresentationLayoutInfo, PresentationSessionApi, SaveResult } from "@filen/office/dom/presentation"
-import type { PresentationDocument, PresentationStore } from "@filen/office/react/presentation"
+import type { PresentationDocument, PresentationStore, ShowFrom } from "@filen/office/react/presentation"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { presentationSaveEdits, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import { autosaveTier, type AutosaveTier } from "@/features/presentation/lib/autosavePolicy"
@@ -108,6 +108,10 @@ export interface PresentationEditorView {
 	readonly toggleRail: () => void
 	readonly toggleNotes: () => void
 	readonly startShow: () => void
+	// From a slide or as a custom show (the show's first slide without one), and with the presenter view (the Slide
+	// Show tab).
+	readonly startShowFrom: (from?: ShowFrom) => void
+	readonly startPresenter?: (from: ShowFrom) => void
 	// Saves now (the overlay's save, as Mod+S).
 	readonly save: () => void
 	// Opens the section dialog for a new section at the current slide, or to rename its section.

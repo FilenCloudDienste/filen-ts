@@ -82,6 +82,7 @@ export {
 	type RenderEffect,
 	type RenderEffects,
 	type SlideLayer,
+	type SlideMediaInfo,
 	type SlideRender,
 	type TextPage,
 	type TextSeed,
@@ -112,6 +113,7 @@ export {
 	type OpOf,
 	type PictureAdjust,
 	type PictureOp,
+	type PresentationOp,
 	type RawPart,
 	type ShapeOp,
 	type SlideOp,
@@ -159,6 +161,37 @@ export { actionOp, altOp, flipOp, nudgeOp, rotateOp, settableAction, type AltTex
 export { canZOrder, zOrderOp, Z_ORDERS } from "./edit/commands/arrange"
 export { presentationHref, xmlSafeText } from "./edit/xmlText"
 export { canGroup, canUngroup, groupOp, ungroupOps } from "./edit/commands/group"
+export { oneStep } from "./edit/commands/batch"
+export {
+	DEFAULT_TABLE_STYLE,
+	MAX_INSERT_COLS,
+	MAX_INSERT_ROWS,
+	SHAPE_GALLERY,
+	insertPictureOp,
+	insertShapeOp,
+	insertTableOp,
+	insertTextBoxOp,
+	nextShapeIdOf,
+	pictureBox,
+	type GalleryPreset,
+	type InsertDeck,
+	type ShapeGalleryGroup
+} from "./edit/commands/insert"
+export {
+	TABLE_STYLE_GALLERY,
+	canMerge,
+	canSplit,
+	cellAt,
+	cellPropsOp,
+	selectionRange,
+	tableCommandOps,
+	tableShapeOf,
+	tableShapeOfLayer,
+	tableStyleOp,
+	wholeTable,
+	type TableCommand,
+	type TableShape
+} from "./edit/commands/table"
 export {
 	ALIGN_EDGES,
 	alignOp,

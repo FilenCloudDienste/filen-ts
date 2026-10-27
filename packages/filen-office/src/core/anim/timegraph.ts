@@ -1,5 +1,5 @@
 import type { Rgba } from "../drawingml/index"
-import { PresentationError, type ColorModel, type ShapeNode, type SlideNode } from "../presentation/model"
+import { PresentationError, type ColorModel, type ShapeNode, type SlideNode, type SlideRef } from "../presentation/model"
 import { tooDeep, tooLarge } from "../presentation/refusal"
 import { decodeUtf8, encodeUtf8 } from "../xml/index"
 import {
@@ -28,11 +28,13 @@ import type {
 	TimeEvent,
 	TimegraphInstance,
 	TimegraphSnapshot,
+	TimegraphSource,
 	TimeNode,
 	TimingBudgets,
 	Track
 } from "./model"
 import { parseMotionPath, pointAt, type MotionPath } from "./motion"
+import { DRAWING_RUN, RUN_INTS, RunInt, isRunLayer } from "./runs"
 
 // The event-driven timegraph of one slide (ECMA-376 Part 1 §19.5, the SMIL timing model PresentationML profiles).
 // compile() flattens the slide's TimingTree into typed arrays in document order (parents before children); an
@@ -106,6 +108,9 @@ interface CompiledBehavior {
 	readonly from?: Rgba
 	readonly to?: Rgba
 	readonly path?: MotionPath
+	// Under a by-letter or by-word build: per layer of `layers`, how long after the behaviour's begin its element
+	// begins (ms).
+	readonly offsets?: Float64Array
 }
 
 type GraphFields = Omit<Graph, "activeDuration">
@@ -120,6 +125,14 @@ class Graph implements CompiledTimegraph {
 	readonly kind: Uint8Array
 	readonly parent: Int32Array
 	readonly children: readonly Int32Array[]
+	// p:subTnLst members per node (their parent is that node, their master), and per node 1 when it begins at the
+	// first "next" after its master began (masterRel nextClick).
+	readonly subs: readonly Int32Array[]
+	readonly nextClick: Uint8Array
+	readonly hasNextClick: boolean
+	// Per behaviour node under a by-letter or by-word build, its last element's offset: the build's active duration
+	// is the behaviour's plus this.
+	readonly extension: Float64Array
 	readonly dur: Float64Array
 	readonly repeat: Float64Array
 	readonly repeatDur: Float64Array
@@ -160,6 +173,10 @@ class Graph implements CompiledTimegraph {
 		this.kind = fields.kind
 		this.parent = fields.parent
 		this.children = fields.children
+		this.subs = fields.subs
+		this.nextClick = fields.nextClick
+		this.hasNextClick = fields.hasNextClick
+		this.extension = fields.extension
 		this.dur = fields.dur
 		this.repeat = fields.repeat
 		this.repeatDur = fields.repeatDur
@@ -203,6 +220,7 @@ class Graph implements CompiledTimegraph {
 		if (!Number.isNaN(repeatDur)) active = Math.min(active, repeatDur)
 
 		active /= this.speed[n] ?? 1
+		active += this.extension[n] ?? 0
 
 		return Number.isFinite(active) ? Math.min(active, this.budgets.scheduleMs) : active
 	}
@@ -337,11 +355,12 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 	const slidePx = { w: size.cx * PX_PER_EMU, h: size.cy * PX_PER_EMU }
 	const nodes: TimeNode[] = []
 	const parents: number[] = []
-	const depths: number[] = []
+	// Per node: 0, or 1 for a p:subTnLst member played from its master's begin, 2 for one played at the next click.
+	const subKinds: number[] = []
 	const root = slide.timing?.root
 
 	if (root !== undefined) {
-		const stack: { node: TimeNode; parent: number; depth: number }[] = [{ node: root, parent: -1, depth: 0 }]
+		const stack: { node: TimeNode; parent: number; depth: number; sub: number }[] = [{ node: root, parent: -1, depth: 0, sub: 0 }]
 
 		while (stack.length > 0) {
 			const item = stack.pop()
@@ -354,14 +373,23 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 
 			nodes.push(item.node)
 			parents.push(item.parent)
-			depths.push(item.depth)
+			subKinds.push(item.sub)
 
 			const children = item.node.ctn.children
+			const subs = item.node.ctn.subTnLst ?? []
+
+			// Sub-nodes after the whole child subtree (document order keeps parents before children).
+			for (let k = subs.length - 1; k >= 0; k--) {
+				const sub = subs[k]
+
+				if (sub !== undefined)
+					stack.push({ node: sub, parent: index, depth: item.depth + 1, sub: sub.ctn.masterRel === "nextClick" ? 2 : 1 })
+			}
 
 			for (let k = children.length - 1; k >= 0; k--) {
 				const child = children[k]
 
-				if (child !== undefined) stack.push({ node: child, parent: index, depth: item.depth + 1 })
+				if (child !== undefined) stack.push({ node: child, parent: index, depth: item.depth + 1, sub: 0 })
 			}
 		}
 	}
@@ -370,6 +398,8 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 	const kind = new Uint8Array(count)
 	const parent = Int32Array.from(parents)
 	const childLists: number[][] = nodes.map(() => [])
+	const subLists: number[][] = nodes.map(() => [])
+	const nextClick = Uint8Array.from(subKinds, kind => (kind === 2 ? 1 : 0))
 	const dur = new Float64Array(count)
 	const repeat = new Float64Array(count)
 	const repeatDur = new Float64Array(count)
@@ -392,7 +422,7 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 
 		const p = parent[n] ?? -1
 
-		if (p >= 0) childLists[p]?.push(n)
+		if (p >= 0) ((subKinds[n] ?? 0) === 0 ? childLists : subLists)[p]?.push(n)
 	}
 
 	const condition = (c: TimeCondition, implicitShape: number): Condition => {
@@ -551,8 +581,144 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 
 		const whole = candidates.filter(layer => layers.ranges?.[layer] === undefined)
 
-		return Int32Array.from(whole.length > 0 ? whole : candidates)
+		return Int32Array.from(whole.length > 0 ? whole : candidates.filter(layer => !isRunLayer(layers, layer)))
 	}
+
+	// Per iterated node, the time between its elements (ms); NaN until asked.
+	const intervals = new Float64Array(count).fill(Number.NaN)
+	// The span a node's content plays once from its begin: its own duration, else its children's by their delays.
+	const natural = (n: number): number => {
+		const own = dur[n] ?? Number.NaN
+
+		if (!Number.isNaN(own)) return Number.isFinite(own) ? own * ((autoRev[n] ?? 0) === 1 ? 2 : 1) * Math.min(repeat[n] ?? 1, 1e6) : 0
+
+		let span = 0
+
+		for (const child of childLists[n] ?? []) {
+			const delay = (begins[child] ?? []).find(c => c.key === undefined && c.node < 0 && Number.isFinite(c.delay))?.delay ?? 0
+			const childSpan = natural(child)
+
+			span = kind[n] === KIND_SEQ ? span + delay + childSpan : Math.max(span, delay + childSpan)
+		}
+
+		return span
+	}
+	const intervalOf = (n: number): number => {
+		const held = intervals[n] ?? Number.NaN
+
+		if (!Number.isNaN(held)) return held
+
+		const interval = nodes[n]?.ctn.iterate?.interval
+		// tmPct: a share (1/100,000) of the duration of the effect that is iterated.
+		const value =
+			interval === undefined ? 0 : "ms" in interval ? Math.max(0, interval.ms) : Math.max(0, interval.pct / 100000) * natural(n)
+
+		intervals[n] = Number.isFinite(value) ? Math.min(value, budgets.scheduleMs) : 0
+
+		return intervals[n] ?? 0
+	}
+
+	// Per node, the by-letter or by-word build it plays in (itself or its nearest container with p:iterate), -1 for none.
+	const iteratedBy = new Int32Array(count).fill(-1)
+
+	for (let n = 0; n < count; n++) {
+		const type = (nodes[n] as TimeNode).ctn.iterate?.type
+
+		iteratedBy[n] = type === "lt" || type === "wd" ? n : (iteratedBy[parent[n] ?? -1] ?? -1)
+	}
+
+	// Run layers per shape (by-letter and by-word layers, the drawing run first), in text order.
+	const runsOf = new Map<number, number[]>()
+	const runs = layers.runs
+
+	for (let layer = 0; layer < layerCount; layer++) {
+		if (!isRunLayer(layers, layer)) continue
+
+		const shape = layers.shapes[layer] ?? -1
+		const at = runsOf.get(shape)
+
+		if (at === undefined) runsOf.set(shape, [layer])
+		else at.push(layer)
+	}
+
+	const runInt = (layer: number, field: number): number => runs?.[layer * RUN_INTS + field] ?? -1
+
+	for (const list of runsOf.values())
+		list.sort(
+			(a, b) => runInt(a, RunInt.PARAGRAPH) - runInt(b, RunInt.PARAGRAPH) || runInt(a, RunInt.LETTER) - runInt(b, RunInt.LETTER)
+		)
+
+	// The run layers an iterated behaviour plays on and each one's offset (ms), or undefined when the target has none.
+	const iteratedLayers = (target: AnimTarget, n: number): { layers: Int32Array; offsets: Float64Array } | undefined => {
+		const build = iteratedBy[n] ?? -1
+
+		if (build < 0 || (target.kind !== "shape" && target.kind !== "text")) return undefined
+
+		const list = runsOf.get(target.shape)
+
+		if (list === undefined) return undefined
+
+		const words = nodes[build]?.ctn.iterate?.type === "wd"
+		const backwards = nodes[build]?.ctn.iterate?.backwards === true
+		const interval = intervalOf(build)
+		// Per paragraph, the ordinal of its first element in the whole text (paragraphs in order).
+		const firsts = new Map<number, number>()
+		let total = 0
+
+		for (const layer of list) {
+			const paragraph = runInt(layer, RunInt.PARAGRAPH)
+
+			if (paragraph < 0) continue
+			if (!firsts.has(paragraph)) firsts.set(paragraph, total)
+
+			total += Math.max(0, runInt(layer, words ? RunInt.WORDS : RunInt.LETTERS))
+		}
+
+		const chosen = list.filter(layer => {
+			const paragraph = runInt(layer, RunInt.PARAGRAPH)
+			const range = layers.ranges?.[layer]
+
+			if (paragraph < 0) return target.kind === "shape"
+			if (target.kind === "shape") return true
+			if (target.unit === "para") return paragraph >= target.start && paragraph <= target.end
+
+			return range !== undefined && range.start >= target.start && range.end <= target.end
+		})
+
+		if (!chosen.some(layer => runInt(layer, RunInt.PARAGRAPH) >= 0)) return undefined
+
+		const first = new Float64Array(chosen.length)
+		const last = new Float64Array(chosen.length)
+		let low = Number.POSITIVE_INFINITY
+		let high = Number.NEGATIVE_INFINITY
+
+		chosen.forEach((layer, k) => {
+			const paragraph = runInt(layer, RunInt.PARAGRAPH)
+
+			if (paragraph < 0) return
+
+			const ordinal = (firsts.get(paragraph) ?? 0) + Math.max(0, runInt(layer, words ? RunInt.WORD : RunInt.LETTER))
+			const units = Math.max(1, runInt(layer, words ? RunInt.WORDS : RunInt.LETTERS))
+
+			first[k] = ordinal
+			last[k] = ordinal + units - 1
+			low = Math.min(low, ordinal)
+			high = Math.max(high, ordinal + units - 1)
+		})
+
+		const offsets = new Float64Array(chosen.length)
+
+		chosen.forEach((layer, k) => {
+			// The drawing run plays as the first element.
+			if (runInt(layer, RunInt.PARAGRAPH) === DRAWING_RUN) return
+
+			offsets[k] = (backwards ? high - (last[k] ?? 0) : (first[k] ?? 0) - low) * interval
+		})
+
+		return { layers: Int32Array.from(chosen), offsets }
+	}
+
+	const extension = new Float64Array(count)
 
 	const behaviors: CompiledBehavior[] = []
 	const tracks: Track[] = []
@@ -574,8 +740,17 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 		const target = isMediaBehavior(behavior) ? behavior.target : behavior.common.target
 		const attribute = isMediaBehavior(behavior) ? "" : (behavior.common.attrNames[0] ?? "")
 		const entry = attributeEntry(attribute)
-		const targets = layersFor(target)
+		const iterated = iteratedLayers(target, n)
+		const targets = iterated?.layers ?? layersFor(target)
 		let extra: Partial<CompiledBehavior> = {}
+
+		if (iterated !== undefined) {
+			let longest = 0
+
+			for (const offset of iterated.offsets) longest = Math.max(longest, offset)
+
+			extension[n] = longest
+		}
 
 		switch (behavior.type) {
 			case "anim": {
@@ -653,7 +828,16 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 
 		const kindOfTrack = trackKind(behavior)
 
-		behaviors.push({ node: n, kind: kindOfTrack, behavior, attribute, entry, layers: targets, ...extra })
+		behaviors.push({
+			node: n,
+			kind: kindOfTrack,
+			behavior,
+			attribute,
+			entry,
+			layers: targets,
+			...extra,
+			...(iterated === undefined ? {} : { offsets: iterated.offsets })
+		})
 
 		for (const layer of targets) {
 			const range =
@@ -671,7 +855,12 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 
 	for (let layer = 0; layer < layerCount; layer++) {
 		const shapeId = layers.shapes[layer] ?? -1
-		const box = options.geometry?.(shapeId) ?? findShape(slide.shapes, shapeId)?.xfrm ?? { x: 0, y: 0, cx: size.cx, cy: size.cy }
+		const own = layers.boxes
+		// A run's own box (its glyphs), else its shape's.
+		const box =
+			own !== undefined && Number.isFinite(own[layer * 4] ?? Number.NaN)
+				? { x: own[layer * 4] ?? 0, y: own[layer * 4 + 1] ?? 0, cx: own[layer * 4 + 2] ?? 0, cy: own[layer * 4 + 3] ?? 0 }
+				: (options.geometry?.(shapeId) ?? findShape(slide.shapes, shapeId)?.xfrm ?? { x: 0, y: 0, cx: size.cx, cy: size.cy })
 
 		base[layer * 4] = (box.x + box.cx / 2) * PX_PER_EMU
 		base[layer * 4 + 1] = (box.y + box.cy / 2) * PX_PER_EMU
@@ -714,6 +903,10 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 		kind,
 		parent,
 		children: childLists.map(list => Int32Array.from(list)),
+		subs: subLists.map(list => Int32Array.from(list)),
+		nextClick,
+		hasNextClick: nextClick.includes(1),
+		extension,
 		dur,
 		repeat,
 		repeatDur,
@@ -741,6 +934,35 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 		base,
 		slidePx,
 		budgets
+	})
+}
+
+// compile() over a TimegraphSource (the slide's timing as the worker resolved it): the worker compiles one to check
+// the budgets, the page the one it plays.
+export function compileSource(slide: SlideRef, source: TimegraphSource, budgets: TimingBudgets): CompiledTimegraph {
+	const boxes = new Map<number, { readonly x: number; readonly y: number; readonly cx: number; readonly cy: number }>()
+	const g = source.geometry
+
+	for (let k = 0; k + 4 < g.length; k += 5)
+		boxes.set(g[k] ?? 0, { x: g[k + 1] ?? 0, y: g[k + 2] ?? 0, cx: g[k + 3] ?? 0, cy: g[k + 4] ?? 0 })
+
+	const colors = new Map<string, Rgba>(source.colors)
+	const node: SlideNode = {
+		ref: slide,
+		kind: "slide",
+		part: "",
+		showMasterShapes: true,
+		hidden: false,
+		shapes: [],
+		comments: [],
+		revision: 0,
+		...(source.timing === undefined ? {} : { timing: source.timing })
+	}
+
+	return compile(node, source.layers, budgets, {
+		slideSize: source.slideSize,
+		geometry: shape => boxes.get(shape),
+		color: color => colors.get(JSON.stringify(color))
 	})
 }
 
@@ -803,6 +1025,8 @@ class Instance implements TimegraphInstance {
 	private readonly dirtyFlag: Uint8Array
 	// Scheduling steps left in one event's propagation (a hostile graph refuses tooLarge instead of running on).
 	private work = 0
+	// masterRel="nextClick" sub-nodes waiting for a click: (sub, the begin of its master that armed it) pairs.
+	private readonly armed: number[] = []
 	private readonly vars = new Float64Array(5)
 	private readonly point = new Float64Array(2)
 
@@ -835,6 +1059,7 @@ class Instance implements TimegraphInstance {
 		this.head = 0
 		this.notices.length = 0
 		this.noticeHead = 0
+		this.armed.length = 0
 		for (const n of this.dirty) this.dirtyFlag[n] = 0
 		this.dirty.length = 0
 	}
@@ -860,7 +1085,8 @@ class Instance implements TimegraphInstance {
 		this.simple[n] = Number.NaN
 		this.current[n] = -1
 
-		for (const child of this.graph.children[n] ?? []) if (!Number.isNaN(this.begin[child] ?? Number.NaN)) this.clear(child)
+		for (const list of [this.graph.children[n], this.graph.subs[n]])
+			for (const child of list ?? []) if (!Number.isNaN(this.begin[child] ?? Number.NaN)) this.clear(child)
 	}
 
 	// The earliest begin `n`'s delay conditions give relative to `origin`, or NaN when none is a plain delay.
@@ -924,9 +1150,51 @@ class Instance implements TimegraphInstance {
 			}
 		}
 
+		// Sub-nodes: from this begin by their delays, or armed for the next click.
+		for (const sub of g.subs[n] ?? []) {
+			if (g.nextClick[sub] === 1) {
+				this.armed.push(sub, at)
+
+				continue
+			}
+
+			const when = this.timedBegin(sub, at)
+
+			if (!Number.isNaN(when)) this.start(sub, when)
+		}
+
 		if (Number.isNaN(active) && g.kind[n] !== KIND_BEHAVIOR) this.containerChanged(n)
 
 		for (const listener of g.onBegin.get(n) ?? []) this.notices.push(listener, n, at)
+	}
+
+	// A click at `t`: the sub-nodes armed by masters that began before it begin by their delays from it.
+	private click(t: number): void {
+		const g = this.graph
+		const armed = this.armed
+		let kept = 0
+
+		for (let k = 0; k + 1 < armed.length; k += 2) {
+			const sub = armed[k] as number
+			const at = armed[k + 1] as number
+			const master = g.parent[sub] ?? -1
+
+			// Its master began again (or was cleared) since: that begin armed it anew.
+			if (this.begin[master] !== at) continue
+
+			if (at >= t) {
+				armed[kept++] = sub
+				armed[kept++] = at
+
+				continue
+			}
+
+			const when = this.timedBegin(sub, t)
+
+			if (!Number.isNaN(when)) this.start(sub, when)
+		}
+
+		armed.length = kept
 	}
 
 	// A listener of `source`'s begin or end at `time`.
@@ -1137,6 +1405,7 @@ class Instance implements TimegraphInstance {
 			f(node)
 
 			for (const child of this.graph.children[node] ?? []) visit(child, f)
+			for (const sub of this.graph.subs[node] ?? []) visit(sub, f)
 		}
 
 		visit(n, node => {
@@ -1218,6 +1487,9 @@ class Instance implements TimegraphInstance {
 
 		if (key === undefined) return
 
+		// After-effects waiting for this click (dim, hide on next click) begin with it.
+		if (key === "next" && this.armed.length > 0) this.click(t)
+
 		// Ends first: "until next click" ends with the click that also begins the next step.
 		for (const n of g.endOn.get(key) ?? []) {
 			if (!this.active(n, t)) continue
@@ -1289,7 +1561,8 @@ class Instance implements TimegraphInstance {
 		const key = eventKey(event)
 
 		// Events nothing listens for are not kept (hover over a shape without a trigger).
-		if (key !== undefined && !g.beginOn.has(key) && !g.nextOn.has(key) && !g.endOn.has(key)) return
+		if (key !== undefined && !g.beginOn.has(key) && !g.nextOn.has(key) && !g.endOn.has(key) && !(key === "next" && g.hasNextClick))
+			return
 		if (this.log.length >= g.budgets.eventsPerShow) tooLarge("timing events", g.budgets.eventsPerShow)
 
 		this.log.push([event, atMs])
@@ -1298,15 +1571,35 @@ class Instance implements TimegraphInstance {
 
 	// --- Sampling ---
 
-	// The simple-time progress of behaviour node `n` at `t`, 0..1, or NaN when it has no effect at `t`.
-	private progress(n: number, t: number, alive: Uint8Array): number {
+	// The simple-time progress of behaviour node `n` at `t`, 0..1, or NaN when it has no effect at `t`. `offset`: the
+	// element of a by-letter or by-word build begins this long after the behaviour.
+	private progress(n: number, t: number, alive: Uint8Array, offset: number): number {
 		const g = this.graph
 		const begin = this.begin[n] ?? Number.NaN
 
-		if (Number.isNaN(begin) || begin > t || alive[n] !== 1) return Number.NaN
+		if (Number.isNaN(begin) || alive[n] !== 1) return Number.NaN
 
 		const end = this.end[n] ?? Number.NaN
-		const local = ((Number.isFinite(end) ? Math.min(t, end) : t) - begin) * (g.speed[n] ?? 1)
+		let at = (Number.isFinite(end) ? Math.min(t, end) : t) - offset
+
+		// The element has not begun (or the build ended before it did).
+		if (begin > at || begin > t) return Number.NaN
+
+		const extension = g.extension[n] ?? 0
+
+		if (extension > 0) {
+			// The element's own active interval within the build's.
+			const own = begin + g.activeDuration(n) - extension
+
+			if (at > own) {
+				// An element whose interval ended holds its end value only when the behaviour freezes.
+				if (g.frozen[n] !== 1) return Number.NaN
+
+				at = own
+			}
+		}
+
+		const local = (at - begin) * (g.speed[n] ?? 1)
 		const dur = g.dur[n] ?? Number.NaN
 
 		// No simple duration (a set, or indefinite): the start value holds; a zero duration is at its end at once.
@@ -1387,14 +1680,26 @@ class Instance implements TimegraphInstance {
 		for (const compiled of g.behaviors) {
 			const n = compiled.node
 			const p = g.parent[n] ?? -1
-			const u = this.progress(n, p < 0 ? t : (local[p] ?? t), alive)
+			const x = p < 0 ? t : (local[p] ?? t)
+			const offsets = compiled.offsets
+			let u = offsets === undefined ? this.progress(n, x, alive, 0) : 0
 
 			if (Number.isNaN(u)) continue
 
-			const begin = this.begin[n] ?? 0
 			const behavior = compiled.behavior
+			const layerList = compiled.layers
 
-			for (const layer of compiled.layers) {
+			for (let k = 0; k < layerList.length; k++) {
+				const layer = layerList[k] as number
+				const offset = offsets?.[k] ?? 0
+
+				if (offsets !== undefined) {
+					u = this.progress(n, x, alive, offset)
+
+					if (Number.isNaN(u)) continue
+				}
+
+				const begin = (this.begin[n] ?? 0) + offset
 				const o = layer * 8
 				const state = states[layer] as SampleState
 
@@ -1479,7 +1784,7 @@ class Instance implements TimegraphInstance {
 							: command === "stop"
 								? { command: "stop" }
 								: command === "togglePause"
-									? { command: "pause" }
+									? { command: "toggle", activation: begin }
 									: command === "resume"
 										? { command: "resume" }
 										: { command: "play" }
@@ -1488,7 +1793,7 @@ class Instance implements TimegraphInstance {
 					}
 					case "audio":
 					case "video":
-						state.media = { command: "play", atMs: Math.max(0, (p < 0 ? t : (local[p] ?? t)) - begin) }
+						state.media = { command: "play", atMs: Math.max(0, x - begin) }
 						break
 				}
 			}
@@ -1742,9 +2047,9 @@ class Instance implements TimegraphInstance {
 		this.now = Math.max(this.now, now)
 	}
 
-	nextActivation(): number | undefined {
+	nextActivation(after?: number): number | undefined {
 		let best = Number.POSITIVE_INFINITY
-		const now = this.now
+		const now = Math.max(this.now, after ?? Number.NEGATIVE_INFINITY)
 
 		for (let n = 0; n < this.graph.count; n++) {
 			const begin = this.begin[n] ?? Number.NaN

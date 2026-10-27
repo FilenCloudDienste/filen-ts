@@ -7,7 +7,8 @@ import type { ActionTrigger, PresentationActionActivator } from "./links"
 // One slide: a fixed-size paper at slide px, scaled by a CSS transform to fit the element (or to a zoom), white in
 // both themes, painted by the compositor it is given. Click actions get a focusable hotspot over their shape; hover
 // actions are never wired. Text links (paintPage's data-fo-link inside a layer's data-fo-layer) go through the
-// same action policy, judged on click.
+// same action policy, judged on click. In the editor the selection layer lies over the slide, so a Mod+click is
+// matched to the link or hotspot under its point.
 
 export interface SlidePaintContext {
 	readonly document: Document
@@ -152,6 +153,30 @@ export function SlideView({
 		return layer === undefined || link === undefined ? undefined : { layer, link }
 	}
 
+	// What lies under a Mod+click in the editor, whose selection layer covers the slide: a text link, else a shape's
+	// action hotspot (the topmost one).
+	const underPoint = (
+		event: MouseEvent<HTMLDivElement>
+	):
+		| { readonly kind: "link"; readonly found: NonNullable<ReturnType<typeof linkAt>> }
+		| { readonly kind: "action"; readonly layer: SlideLayer }
+		| undefined => {
+		const elements = event.currentTarget.ownerDocument.elementsFromPoint?.(event.clientX, event.clientY) ?? []
+
+		for (const element of elements) {
+			const found = linkAt(element)
+
+			if (found !== undefined) return { kind: "link", found }
+
+			const hotspot = element.closest<HTMLElement>("[data-fo-hotspot]")
+			const layer = render?.layers[Number(hotspot?.dataset["foHotspot"] ?? Number.NaN)]
+
+			if (layer?.actions?.click !== undefined) return { kind: "action", layer }
+		}
+
+		return undefined
+	}
+
 	const onClick = (event: MouseEvent<HTMLDivElement>): void => {
 		if (actions === undefined || event.button !== 0) return
 
@@ -160,9 +185,23 @@ export function SlideView({
 
 		const found = linkAt(event.target)
 
-		if (found === undefined) return
+		if (found !== undefined) {
+			if (actions.link(found.link, trigger(found.layer, event)) !== "ignored") event.preventDefault()
 
-		if (actions.link(found.link, trigger(found.layer, event)) !== "ignored") event.preventDefault()
+			return
+		}
+
+		if (mode !== "edit" || !modifierOf(event)) return
+
+		const under = underPoint(event)
+
+		if (under?.kind === "link" && actions.link(under.found.link, trigger(under.found.layer, event)) !== "ignored")
+			event.preventDefault()
+
+		const click = under?.kind === "action" ? under.layer.actions?.click : undefined
+
+		if (under?.kind === "action" && click !== undefined && actions.action(click, trigger(under.layer, event)) !== "ignored")
+			event.preventDefault()
 	}
 
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -189,6 +228,7 @@ export function SlideView({
 					type="button"
 					className="fo-slide-hotspot"
 					data-fo-action={action.kind}
+					data-fo-hotspot={index}
 					aria-label={
 						actionLabel?.(action, layer) ?? layer.alt ?? (action.kind === "url" ? action.href : layer.shape.id.toString())
 					}

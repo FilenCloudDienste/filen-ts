@@ -18,6 +18,7 @@ import { cloneModel, digestOf, findShape } from "../changes"
 import { matcherOf, replaceInBody } from "../find"
 import type { DeckOp, OpOf, TextOp } from "../ops"
 import { isRefused, type SourceReading } from "./shape"
+import { applyTable, replaceInFrame } from "./table"
 
 // The text ops on the model, in place. setText puts a whole new body on one shape; its inverse is a setText of the
 // body it had, with the shape's source markup as bytes when that body came from the source (`raw`), so an undo after
@@ -326,6 +327,27 @@ function putBody(node: SlideNode, shape: ShapeNode, body: TextBody): void {
 }
 
 function setText(deck: Deck, op: SetText, context: ApplyContext): ApplyResult<SetText> {
+	// A table cell's body (the text editor open on a cell): the table family's setCellText.
+	if (op.target.cell !== undefined) {
+		const { cell, ...frame } = op.target
+		const result = applyTable.apply(
+			deck,
+			{
+				family: "table",
+				kind: "setCellText",
+				target: frame,
+				row: cell.row,
+				col: cell.col,
+				body: op.body,
+				...(op.burst === undefined ? {} : { burst: op.burst }),
+				...(op.raw === undefined ? {} : { raw: op.raw })
+			},
+			context
+		)
+
+		return result.kind === "refused" ? result : { kind: "applied", inverse: result.inverse, op }
+	}
+
 	const found = editable(deck, op.target)
 
 	if (isRefused(found)) return found
@@ -394,10 +416,27 @@ function replace(deck: Deck, op: Replace, context: ApplyContext): ApplyResult<Re
 
 	const back: DeckOp[] = []
 	const applied: Replace["targets"][number][] = []
-	const puts: { readonly node: SlideNode; readonly shape: ShapeNode; readonly body: TextBody }[] = []
+	const puts: (() => void)[] = []
+	let heldBytes = 0
 
 	for (const entry of op.targets) {
 		let target = entry.target
+
+		// A table's cells (edit/apply/table.ts): one frame, every match in its cells, undone as one.
+		if (entry.notes !== true && isTable(deck, target)) {
+			const replaced = replaceInFrame(deck, target, matcher, op.replacement, entry.match, context)
+
+			if (replaced === undefined) return refused("stale", "the match is no longer there")
+			if (isRefused(replaced)) return replaced
+			if (replaced.count === 0) continue
+
+			back.push({ family: "batch", kind: "batch", ops: replaced.inverse.ops })
+			heldBytes += replaced.inverse.bytes
+			applied.push(entry)
+			puts.push(replaced.put)
+
+			continue
+		}
 
 		if (entry.notes === true) {
 			const notes = deck.nodes.get(target.slide)?.notes
@@ -432,13 +471,21 @@ function replace(deck: Deck, op: Replace, context: ApplyContext): ApplyResult<Re
 
 		back.push(inverse)
 		applied.push({ target, ...(entry.match === undefined ? {} : { match: entry.match }) })
-		puts.push({ node: found.node, shape: found.shape, body: replaced.body })
+		puts.push(() => putBody(found.node, found.shape, replaced.body))
 	}
 
 	// Nothing changes before every target is known to apply.
-	for (const put of puts) putBody(put.node, put.shape, put.body)
+	for (const put of puts) put()
 
-	return { kind: "applied", inverse: inverseOf(back.reverse()), op: { ...op, targets: applied } }
+	const inverse = inverseOf(back.reverse())
+
+	return { kind: "applied", inverse: { ops: inverse.ops, bytes: inverse.bytes + heldBytes }, op: { ...op, targets: applied } }
+}
+
+function isTable(deck: Deck, target: ShapeRef): boolean {
+	const node = deck.nodes.get(target.slide)
+
+	return node !== undefined && findShape(node.shapes, target.id)?.shape.frame?.kind === "table"
 }
 
 export const applyText: ApplyFamily<TextOp> = {

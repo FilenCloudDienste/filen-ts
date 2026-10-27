@@ -11,11 +11,20 @@ import { registerPptxParts } from "./pptx"
 // capability reads it as a pptx. An encrypted file asks for its password; a wrong one asks again. Edits and saves in
 // place are refused viewOnly; Save as writes a new file.
 
-const losses = new WeakMap<Deck, readonly PptLoss[]>()
+// The conversion of each ppt deck, whose losses grow when Save as finds an embedded object's storage damaged.
+const conversions = new WeakMap<Deck, { readonly losses: readonly PptLoss[] }>()
 
 // What the conversion of a ppt deck could not carry over, by kind (Save as and the viewer's notice read it).
 export function pptLosses(deck: Deck): readonly PptLoss[] | undefined {
-	return losses.get(deck)
+	return conversions.get(deck)?.losses
+}
+
+// The open password of an encrypted deck, which its Save as .pptx is sealed under; held only in this worker's session
+// and dropped when the session closes.
+const passwords = new WeakMap<Deck, string>()
+
+export function pptPassword(deck: Deck): string | undefined {
+	return passwords.get(deck)
 }
 
 const VARIANTS: ReadonlyMap<string, DeckVariant> = new Map([
@@ -63,7 +72,9 @@ export const openPptCapability: OpenCapability = {
 		deck.format = "ppt"
 		deck.variant = variantOf(request.options.fileName)
 		registerPptxParts(deck, opened.parts)
-		losses.set(deck, converted.losses)
+		conversions.set(deck, converted)
+
+		if (converted.encrypted && request.password !== undefined) passwords.set(deck, request.password)
 
 		return {
 			kind: "opened",
@@ -77,7 +88,10 @@ export const openPptCapability: OpenCapability = {
 				opc: opened.parts.opc,
 				locks: 0,
 				// The key stays for the pictures, decrypted as they are read, until the session closes.
-				release: converted.release,
+				release: () => {
+					passwords.delete(deck)
+					converted.release()
+				},
 				viewOnly: true
 			}
 		}

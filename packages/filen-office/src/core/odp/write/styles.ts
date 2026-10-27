@@ -7,6 +7,7 @@ import {
 	type OdfStyleSheet,
 	type StyleScope
 } from "../../odf/index"
+import type { PartBytes } from "../../opc/index"
 import { StyleRegistry } from "../../odt/write/emit"
 import type { TextBodyProps } from "../../drawingml/index"
 import {
@@ -627,6 +628,15 @@ export function styleDeclarations(scope: ReadonlyMap<string, string>): string {
 	return out
 }
 
+// An entry the written pages added (a picture, a medium), with how it is stored.
+export interface OdpAddedEntry {
+	readonly path: string
+	readonly content: PartBytes
+	readonly mediaType: string
+	readonly compress?: boolean
+	readonly crc32?: number
+}
+
 // The automatic styles of one stream that a save adds: patched copies of styles the source has, new ones, and list
 // styles; named past every name either stream uses, deduplicated by what they say.
 export class OdpStyles implements OdpStylesApi {
@@ -634,7 +644,7 @@ export class OdpStyles implements OdpStylesApi {
 	readonly scope: StyleScope
 	readonly env: OdpWriteEnv
 	private readonly registry: StyleRegistry
-	private readonly entries: { readonly path: string; readonly content: Uint8Array; readonly mediaType: string }[] = []
+	private readonly entries: OdpAddedEntry[] = []
 
 	// The declarations every new style element carries (the prefixes the stream's root does not bind as written).
 	private readonly declarations: string
@@ -651,14 +661,25 @@ export class OdpStyles implements OdpStylesApi {
 		return this.registry.style(family, PREFIXES[family] ?? "S", "", properties)
 	}
 
-	addEntry(path: string, content: Uint8Array, mediaType: string): string {
-		this.entries.push({ path, content, mediaType })
+	// The first entry of a path is kept (a medium or picture written once however many shapes name it).
+	addEntry(
+		path: string,
+		content: PartBytes,
+		mediaType: string,
+		options: { readonly compress?: boolean; readonly crc32?: number } = {}
+	): string {
+		if (!this.entries.some(entry => entry.path === path)) this.entries.push({ path, content, mediaType, ...options })
 
 		return path
 	}
 
-	added(): readonly { readonly path: string; readonly content: Uint8Array; readonly mediaType: string }[] {
+	added(): readonly OdpAddedEntry[] {
 		return this.entries
+	}
+
+	// Whether the package written holds an entry at `path`: the source's, or one this save added.
+	hasEntry(path: string): boolean {
+		return this.entries.some(entry => entry.path === path) || this.env.context.hasPart(path)
 	}
 
 	// A new style of `family` whose own properties are `base`'s (an automatic style is copied whole with its parent; a

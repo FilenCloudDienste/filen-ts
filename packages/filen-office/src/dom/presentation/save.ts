@@ -1,6 +1,7 @@
 import {
 	chunksSource,
 	crc32,
+	joinBytes,
 	partKey,
 	type ByteSink,
 	type ByteSource,
@@ -24,6 +25,8 @@ import type { PptxSaveOptions, PptxSnapshot, PptxSource, SpliceWriter } from "..
 import type { XmlDocument } from "../../core/xml/index"
 import type { CallContext, EngineSession, OpenedPackage } from "./engine"
 import type { DriveFileRef, PortLike, PresentationNotice, SaveResult } from "./protocol"
+import { layoutEditedDiagrams } from "./engine/smartart"
+import { commitInsertedWrites, insertedWrites, type InsertedWrites } from "./media"
 import { SavePortAbortedError, savePortWriter, type SavePortAbortReason, type SavePortEnd, type SavePortWriter } from "./savePort"
 
 // Saving a session: the snapshot of the changed parts at revision R, taken while commands wait; the package the
@@ -99,6 +102,9 @@ export interface CopyPass {
 export interface RemoteByteSource extends ByteSource {
 	beginCopies?(): CopyPass
 	close?(): void
+	// A read for media (a stored medium's range, an index build's input) through the host's own small cache, so a
+	// medium's blocks never evict the deck's.
+	readMedia?(offset: number, length: number): Promise<Uint8Array>
 }
 
 // Where a retired source's reads go: the same bytes in the saved file (a copied entry moved, its bytes did not), or
@@ -186,6 +192,20 @@ export function rebasableSource(source: RemoteByteSource): RemoteByteSource {
 	const begin = source.beginCopies
 
 	if (begin !== undefined) wrapped.beginCopies = () => begin.call(source)
+
+	const media = source.readMedia
+
+	if (media !== undefined) {
+		wrapped.readMedia = async (offset, length) => {
+			const at = await target(offset, length)
+
+			if (at.source === source) return own(() => media.call(source, offset, length))
+
+			const moved = (at.source as RemoteByteSource).readMedia
+
+			return moved === undefined ? at.source.read(at.offset, length) : moved.call(at.source, at.offset, length)
+		}
+	}
 
 	gates.set(wrapped, gate)
 
@@ -324,6 +344,8 @@ export interface SavedPackage {
 	// Entry names the writer wrote anew (replaced or added): the rest are byte copies.
 	readonly written: ReadonlySet<string>
 	readonly report: WriteZipReport
+	// The inserted media and images it wrote, which become their parts when it commits.
+	readonly inserted?: InsertedWrites | undefined
 }
 
 interface PendingSave {
@@ -342,6 +364,7 @@ interface RetainedSave {
 	readonly upload: readonly Uint8Array[]
 	readonly written: ReadonlySet<string>
 	readonly report: WriteZipReport
+	readonly inserted: InsertedWrites | undefined
 }
 
 interface SessionSaves {
@@ -433,6 +456,28 @@ function lengthOf(chunks: readonly Uint8Array[]): number {
 	return chunks.reduce((sum, chunk) => sum + chunk.length, 0)
 }
 
+// The parts a snapshot replaces, adds or removes whose bytes are not the source's (an entry it adds or removes always
+// is). Read only for a writer that answered "unchanged", so at most the few parts it was asked about.
+async function partsDiffering(snapshot: PptxSnapshot, archive: ZipArchive | undefined): Promise<string[]> {
+	const changes = snapshot.changes
+	const out = [...(changes.add ?? []).map(part => part.name), ...(changes.remove ?? [])]
+
+	for (const part of changes.replace ?? []) {
+		const entry = archive?.entries.find(candidate => partKey(candidate.name) === partKey(part.name))
+		if (entry === undefined || entry.uncompressedSize !== part.bytes.length) {
+			out.push(part.name)
+
+			continue
+		}
+
+		const [source, bytes] = await Promise.all([archive!.read(entry), joinBytes(part.bytes)])
+
+		if (source.length !== bytes.length || source.some((byte, k) => byte !== bytes[k])) out.push(part.name)
+	}
+
+	return out
+}
+
 // Bytes this save read from the base source when the source cannot tell (no copy pass): the copies.
 function downloadedBytes(pkg: OpenedPackage, report: WriteZipReport, written: ReadonlySet<string>): number {
 	if (pkg.sourceKind !== "range") return 0
@@ -511,10 +556,14 @@ export async function saveSession(
 	})
 
 	let point: { readonly revision: number } | undefined
+	// The parts the snapshot was taken for: a writer that then finds nothing to write in them is wrong, never "saved".
+	let changedParts = 0
 
 	try {
 		const taken = await deckTurn(deck, async () => {
 			const changes = history.changes()
+
+			changedParts = changes.parts.size + changes.presentation.size
 
 			// Dirty keys with nothing net to write (no part names them, an order no shape moved in): the file holds
 			// this state, so it is the saved one from now and the page reads clean, not dirty with nothing to save.
@@ -525,6 +574,9 @@ export async function saveSession(
 			}
 
 			point = history.savePoint()
+
+			// Edited diagrams laid out first: the writer saves the drawing the renderer draws.
+			await layoutEditedDiagrams(session, changes, context.slicing)
 
 			const retained = saves.retained
 
@@ -627,7 +679,15 @@ export async function saveSession(
 		}
 
 		if (outcome.kind === "unchanged") {
-			// The file already holds the snapshot's state: it is the saved one.
+			// The snapshot was taken because parts changed: "nothing to write" marks them saved only when what the
+			// snapshot holds for them is the source's own bytes. A part that differs refuses the save (the deck stays
+			// dirty) rather than be dropped as saved.
+			const differing = changedParts > 0 ? await partsDiffering(snapshot, pkg.archive) : []
+
+			if (differing.length > 0) {
+				return refuse("failed", `unwritten parts differ from the source: ${differing.join(", ")}`)
+			}
+
 			if (point !== undefined) history?.commit(point)
 
 			return unchanged()
@@ -649,8 +709,9 @@ export async function saveSession(
 
 		const written = writtenNames(snapshot)
 		const transfer = { downloaded: downloaded ?? downloadedBytes(pkg, outcome.report, written) }
+		const inserted = insertedWrites(deck, snapshot.changes.add)
 
-		return land({ revision, zip, upload, written, report: outcome.report, package: pkg }, transfer.downloaded)
+		return land({ revision, zip, upload, written, report: outcome.report, package: pkg, inserted }, transfer.downloaded)
 	}
 
 	// A retained package sent again: nothing is read from the source.
@@ -672,7 +733,7 @@ export async function saveSession(
 		},
 		downloaded: number
 	): Promise<SaveResult> {
-		const { revision, zip, upload, written, report } = saved
+		const { revision, zip, upload, written, report, inserted } = saved
 		const release = holdReads(saved.package.source)
 
 		writer.commit()
@@ -692,7 +753,7 @@ export async function saveSession(
 
 			// Kept for a retry at this revision (an autosave after a failed upload sends it again, downloading nothing).
 			if (zip !== undefined && upload !== undefined) {
-				savesOf(session).retained = { revision, package: saved.package, zip, upload, written, report }
+				savesOf(session).retained = { revision, package: saved.package, zip, upload, written, report, inserted }
 			}
 
 			throw new PresentationError("failed", "the upload did not make the file")
@@ -707,7 +768,8 @@ export async function saveSession(
 				zip,
 				size: report.size,
 				written,
-				report
+				report,
+				inserted
 			},
 			release
 		}
@@ -804,6 +866,8 @@ export async function commitSavedSession(
 			: relocation(old.archive, archive, session.package.source, pending.saved.written)
 	)
 	closeRetired(old.source)
+	// Inserted media and images are the parts the save wrote from now on (their device files, drive ports and bytes let go).
+	commitInsertedWrites(session, pending.saved.inserted)
 
 	const dirty = history?.dirty ?? false
 

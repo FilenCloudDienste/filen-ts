@@ -184,15 +184,28 @@ export function length(record: PptRecord): number {
 	return record.end - record.start
 }
 
-// UTF-16LE text of [start, end), up to a NUL unless `whole`.
+// UTF-16LE text of [start, end), up to a NUL unless `whole`. An unpaired surrogate reads as U+FFFD, so the text is
+// well formed wherever it goes (XML, a URI).
 export function utf16Text(data: Uint8Array, start: number, end: number, whole = false): string {
 	const parts: string[] = []
 	let chunk: number[] = []
 
 	for (let at = start; at + 1 < end; at += 2) {
-		const unit = u16(data, at)
+		let unit = u16(data, at)
 
 		if (unit === 0 && !whole) break
+
+		if (unit >= 0xd800 && unit <= 0xdfff) {
+			const next = at + 3 < end ? u16(data, at + 2) : 0
+
+			if (unit <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+				chunk.push(unit)
+				unit = next
+				at += 2
+			} else {
+				unit = 0xfffd
+			}
+		}
 
 		chunk.push(unit)
 

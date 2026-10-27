@@ -146,9 +146,16 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 
 			return Promise.resolve({ size: 1024, contentType: "video/mp4", seekable: true })
 		},
+		registerMedia: () => Promise.resolve({ kind: "refused", reason: "notImplemented" }),
 		image: (_context, part) =>
 			Promise.resolve(part === "/ppt/media/image1.png" ? { bytes: new Uint8Array([0x89, 0x50]), type: "image/png" } : null),
 		smartArtPreview: (_context, _layout, options) => Promise.resolve(bitmap(options.widthPx, options.widthPx)),
+		smartArtInfo: (_context, target) =>
+			Promise.resolve({
+				root: `doc${String(target.id)}`,
+				nodes: [{ id: "a", level: 1, type: "node", text: "A" }],
+				deckDefinitions: []
+			}),
 		timegraph: () => Promise.resolve(timegraph),
 		layers: (_context, _slide, widthPx, plan) =>
 			Promise.resolve(plan.shapes.map(id => ({ shape: id, bitmap: bitmap(widthPx, 10), x: 0, y: 0, width: widthPx, height: 10 }))),
@@ -190,6 +197,7 @@ describe("the presentation protocol", () => {
 				notesSize: { cx: 6_858_000, cy: 9_144_000 },
 				sections: fixtureDeck().sections,
 				customShows: [],
+				show: fixtureDeck().show,
 				protection: { writeProtected: false, encrypted: false },
 				gate: [],
 				editable: true,
@@ -277,6 +285,20 @@ describe("the presentation protocol", () => {
 			seekable: true
 		})
 		expect(await mediaMessage).toEqual({ part: "/ppt/media/media1.mp4" })
+		expect(
+			await session.call("registerMedia", {
+				kind: "range",
+				port: port().theirs,
+				size: 1,
+				checked: false,
+				name: "a.mp4",
+				type: "video/mp4"
+			}).answer
+		).toEqual({ kind: "refused", reason: "notImplemented" })
+		expect(await session.call("smartArtInfo", shape).answer).toMatchObject({
+			root: `doc${String(shape.id)}`,
+			nodes: [{ id: "a", text: "A" }]
+		})
 		expect(await session.call("timegraph", slideRef(10)).answer).toEqual(timegraph)
 		expect(await session.call("layers", slideRef(10), 1280, { shapes: [2, 3], dpr: 2 }).answer).toMatchObject([
 			{ shape: 2, width: 1280 },
@@ -378,18 +400,32 @@ describe("the presentation protocol", () => {
 			redo: () => session.call("redo").answer,
 			find: () => session.call("find", "x").answer,
 			media: () => session.call("media", "/ppt/media/media1.mp4", ports()).answer,
+			registerMedia: () =>
+				session.call("registerMedia", { kind: "range", port: ports(), size: 1, checked: false, name: "a.mp4", type: "video/mp4" })
+					.answer,
 			timegraph: () => session.call("timegraph", slideRef(10)).answer,
 			layers: () => session.call("layers", slideRef(10), 1280, { shapes: [], dpr: 1 }).answer,
 			save: () => session.call("save", { reason: "auto", port: ports() }).answer,
 			commitSaved: () => session.call("commitSaved", { file: { uuid: "u", name: "n" }, port: ports(), size: 1, revision: 1 }).answer,
 			image: () => session.call("image", "/ppt/media/image1.png").answer,
 			smartArtPreview: () => session.call("smartArtPreview", { uniqueId: "urn:x", source: "gallery" }, { widthPx: 96 }).answer,
+			smartArtInfo: () => session.call("smartArtInfo", shape).answer,
 			jobsPort: () => session.call("jobsPort", ports()).answer,
 			freshParts: () => session.call("freshParts", "pptx", ports()).answer
 		}
 
-		// Built by their slices: edits (command, undo, redo), saving (save, commitSaved) and find.
-		const built: ReadonlySet<PresentationMethod> = new Set(["command", "undo", "redo", "save", "commitSaved", "find"])
+		// Built by their slices: edits (command, undo, redo), saving (save, commitSaved), find, the SmartArt text pane's
+		// info, and registerMedia (it answers a typed MediaRefusal value: this host serves no range sources).
+		const built: ReadonlySet<PresentationMethod> = new Set([
+			"command",
+			"undo",
+			"redo",
+			"save",
+			"commitSaved",
+			"find",
+			"smartArtInfo",
+			"registerMedia"
+		])
 
 		for (const method of PRESENTATION_METHODS.filter(method => !built.has(method))) {
 			const error: unknown = await calls[method]().then(

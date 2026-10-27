@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutColumn
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:column">
+	<dgm:title val="Column of blocks"/>
+	<dgm:desc val="Each top-level item is a full-width band, top to bottom; its sub-items are bullets inside it."/>
+	<dgm:catLst>
+		<dgm:cat type="list" pri="200"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="4" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="5" srcId="0" destId="2" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="6" srcId="0" destId="3" srcOrd="2" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="column">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:alg type="lin">
+			<dgm:param type="linDir" val="fromT"/>
+			<dgm:param type="nodeHorzAlign" val="ctr"/>
+		</dgm:alg>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="h" for="ch" forName="band" refType="h"/>
+			<dgm:constr type="w" for="ch" forName="band" refType="w"/>
+			<dgm:constr type="h" for="ch" forName="gap" refType="h" refFor="ch" refForName="band" fact="0.15"/>
+			<dgm:constr type="primFontSz" for="ch" forName="band" op="equ" val="32"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:forEach name="items" axis="ch" ptType="node">
+			<dgm:layoutNode name="band" styleLbl="node1">
+				<dgm:varLst>
+					<dgm:bulletEnabled val="1"/>
+				</dgm:varLst>
+				<dgm:alg type="tx">
+					<dgm:param type="parTxLTRAlign" val="l"/>
+					<dgm:param type="txAnchorVert" val="mid"/>
+				</dgm:alg>
+				<dgm:shape type="rect">
+					<dgm:adjLst/>
+				</dgm:shape>
+				<dgm:presOf axis="desOrSelf" ptType="node"/>
+				<dgm:constrLst>
+					<dgm:constr type="lMarg" refType="primFontSz" fact="0.35"/>
+					<dgm:constr type="rMarg" refType="primFontSz" fact="0.35"/>
+					<dgm:constr type="tMarg" refType="primFontSz" fact="0.25"/>
+					<dgm:constr type="bMarg" refType="primFontSz" fact="0.25"/>
+				</dgm:constrLst>
+				<dgm:ruleLst>
+					<dgm:rule type="primFontSz" val="6" fact="NaN" max="NaN"/>
+				</dgm:ruleLst>
+			</dgm:layoutNode>
+			<dgm:forEach name="gaps" axis="followSib" ptType="sibTrans" cnt="1">
+				<dgm:layoutNode name="gap">
+					<dgm:alg type="sp"/>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+				</dgm:layoutNode>
+			</dgm:forEach>
+		</dgm:forEach>
+	</dgm:layoutNode>
+</dgm:layoutDef>

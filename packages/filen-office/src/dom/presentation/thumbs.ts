@@ -6,8 +6,9 @@ import {
 	type Canvas2DLike,
 	type CanvasPaintContext
 } from "../../core/drawingml/canvas"
-import { EMU_PER_PX, type DrawingImage } from "../../core/drawingml/index"
-import type { RenderEffects, SlideRender } from "../../core/presentation/output"
+import { EMU_PER_PX, MISSING_IMAGE, imageFormat, imageHandling, type DrawingImage } from "../../core/drawingml/index"
+import type { RenderEffects, SlideRender, TextPage } from "../../core/presentation/output"
+import { PICTURE_BULLET_OBJECT } from "../../core/presentation/text/page"
 import { realmSurface, type RasterImage, type RealmCanvas } from "./services"
 
 // Slides drawn on a canvas: the raster path of thumbnails, PNG/JPEG export, show layers and handout previews. A
@@ -94,15 +95,17 @@ function paintEffects(
 	}
 }
 
-// Paints a rendered slide onto `ctx` at `scale` device px per slide px; the effects it could not draw, by kind.
+// Paints a rendered slide onto `ctx` at `scale` device px per slide px, slide point `origin` (slide px) at the canvas
+// origin; the effects it could not draw, by kind.
 export function paintSlideCanvas(
 	ctx: Canvas2DLike<RasterImage>,
 	render: SlideRender,
 	scale: number,
-	images: CanvasPaintContext<RasterImage>
+	images: CanvasPaintContext<RasterImage>,
+	origin: { readonly x: number; readonly y: number } = { x: 0, y: 0 }
 ): Map<UndrawnEffect, number> {
 	const undrawn = new Map<UndrawnEffect, number>()
-	const base = [scale, 0, 0, scale, 0, 0]
+	const base = [scale, 0, 0, scale, -origin.x * scale, -origin.y * scale]
 	// Further than any layer reaches: copies drawn this far left cast only their shadows onto the canvas.
 	const away = Math.max(render.background.width, render.background.height, 1) * 4
 
@@ -112,7 +115,12 @@ export function paintSlideCanvas(
 		const paint = (extra: Matrix): void => {
 			paintDrawingCanvas(ctx, layer.drawing, times(base, times(extra, layer.matrix)), images)
 
-			if (layer.text !== undefined) paintTextPageCanvas(ctx, layer.text, times(base, times(extra, layer.textMatrix ?? layer.matrix)))
+			if (layer.text !== undefined) {
+				const matrix = times(base, times(extra, layer.textMatrix ?? layer.matrix))
+
+				paintTextPageCanvas(ctx, layer.text, matrix)
+				paintPictureBullets(ctx, layer.text, matrix, images)
+			}
 		}
 		const effects = layer.effects ?? []
 
@@ -128,10 +136,50 @@ export function paintSlideCanvas(
 	return undrawn
 }
 
-// Every picture a slide shows, once each.
+// The picture a picture bullet shows, as a drawing image of its part (looked up by its part name).
+function bulletImage(part: string): DrawingImage {
+	const format = imageFormat(part, undefined)
+
+	return { ...MISSING_IMAGE, partName: part, format, handling: imageHandling(format) }
+}
+
+// A text page's picture bullets drawn over their places (the page's objects of PICTURE_BULLET_OBJECT).
+function paintPictureBullets(
+	ctx: Canvas2DLike<RasterImage>,
+	text: TextPage,
+	matrix: Matrix,
+	images: CanvasPaintContext<RasterImage>
+): void {
+	const page = text.page
+
+	for (let k = 0; k < page.objectCount; k++) {
+		const part = page.objectKinds[k] === PICTURE_BULLET_OBJECT ? text.images?.[page.objectInts[k * 3] ?? -1] : undefined
+		const bitmap = part === undefined ? undefined : images.image(bulletImage(part))
+
+		if (bitmap === undefined) continue
+
+		const [x = 0, y = 0, w = 0, h = 0] = page.objectFloats.subarray(k * 4, k * 4 + 4)
+
+		ctx.save()
+		ctx.setTransform(matrix[0] ?? 1, matrix[1] ?? 0, matrix[2] ?? 0, matrix[3] ?? 1, matrix[4] ?? 0, matrix[5] ?? 0)
+		ctx.drawImage(bitmap, x, y, w, h)
+		ctx.restore()
+	}
+}
+
+// Every picture a slide shows, once each (a picture bullet's too).
 export function slideImages(render: SlideRender): DrawingImage[] {
 	const seen = new Set<string>()
 	const out: DrawingImage[] = []
+
+	for (const layer of render.layers) {
+		for (const part of layer.text?.images ?? []) {
+			if (seen.has(part)) continue
+
+			seen.add(part)
+			out.push(bulletImage(part))
+		}
+	}
 
 	for (const drawing of [render.background, ...render.layers.map(layer => layer.drawing)]) {
 		for (const image of canvasDrawingImages(drawing)) {
@@ -209,27 +257,29 @@ export interface RasterizedSlide {
 	readonly undrawn: ReadonlyMap<UndrawnEffect, number>
 }
 
-// A slide as a bitmap `widthPx` wide (its height from the deck's aspect): pictures decoded at most twice the width
-// (a cropped picture shows more of its pixels than its box), faces loaded, painted, the canvas handed off as the
-// bitmap. Undefined when the realm has no canvas of that size.
-export async function rasterizeSlide(render: SlideRender, options: RasterizeOptions): Promise<RasterizedSlide | undefined> {
-	const slideWidth = Math.max(1, options.size.cx / EMU_PER_PX)
-	const slideHeight = Math.max(1, options.size.cy / EMU_PER_PX)
-	const width = Math.max(1, Math.round(options.widthPx))
-	const height = Math.max(1, Math.round((width * slideHeight) / slideWidth))
-	const canvas = options.canvas.canvas(width, height)
-	const ctx = canvas?.getContext("2d") ?? null
+// A slide's pictures decoded for the canvas painter (at most `maxSide` px a side) and its faces loaded; release()
+// closes the decodes it owns and gives back the shared ones it holds. On a failure everything is released first.
+export interface SlidePictures {
+	readonly images: CanvasPaintContext<RasterImage>
+	release(): void
+}
 
-	if (canvas === undefined || ctx === null) return undefined
-
+export async function decodeSlidePictures(render: SlideRender, options: RasterizeOptions, maxSide: number): Promise<SlidePictures> {
 	const decoded = new Map<DrawingImage, RasterImage>()
 	const byPart = new Map<string, RasterImage | undefined>()
-	const maxSide = Math.min(4096, width * 2)
 	const pictures = options.pictures
 	// Decodes this slide owns (closed after), and the shared ones it holds (released after).
 	const owned: RasterImage[] = []
 	const held: string[] = []
 	const jobs: (() => Promise<void>)[] = []
+	const release = (): void => {
+		for (const bitmap of owned) bitmap.close()
+
+		for (const key of held) pictures?.release(key)
+
+		owned.length = 0
+		held.length = 0
+	}
 
 	for (const image of slideImages(render)) {
 		// An SVG picture without a raster fallback (asvg:svgBlip alone) is rasterised where SVG can be decoded.
@@ -284,22 +334,43 @@ export async function rasterizeSlide(render: SlideRender, options: RasterizeOpti
 
 	try {
 		await settleAll(jobs, DECODE_CONCURRENCY)
-
 		await options.canvas.fontsReady(slideFonts(render))
+	} catch (error) {
+		release()
 
-		const lookup = (image: DrawingImage): RasterImage | undefined =>
-			decoded.get(image) ?? (image.partName === undefined ? undefined : byPart.get(image.partName))
+		throw error
+	}
 
+	const lookup = (image: DrawingImage): RasterImage | undefined =>
+		decoded.get(image) ?? (image.partName === undefined ? undefined : byPart.get(image.partName))
+
+	return { images: { image: lookup, surface: realmSurface(options.canvas) }, release }
+}
+
+// A slide as a bitmap `widthPx` wide (its height from the deck's aspect): pictures decoded at most twice the width
+// (a cropped picture shows more of its pixels than its box), faces loaded, painted, the canvas handed off as the
+// bitmap. Undefined when the realm has no canvas of that size.
+export async function rasterizeSlide(render: SlideRender, options: RasterizeOptions): Promise<RasterizedSlide | undefined> {
+	const slideWidth = Math.max(1, options.size.cx / EMU_PER_PX)
+	const slideHeight = Math.max(1, options.size.cy / EMU_PER_PX)
+	const width = Math.max(1, Math.round(options.widthPx))
+	const height = Math.max(1, Math.round((width * slideHeight) / slideWidth))
+	const canvas = options.canvas.canvas(width, height)
+	const ctx = canvas?.getContext("2d") ?? null
+
+	if (canvas === undefined || ctx === null) return undefined
+
+	const pictures = await decodeSlidePictures(render, options, Math.min(4096, width * 2))
+
+	try {
 		ctx.fillStyle = "#ffffff"
 		ctx.fillRect(0, 0, width, height)
 
-		const undrawn = paintSlideCanvas(ctx, render, width / slideWidth, { image: lookup, surface: realmSurface(options.canvas) })
+		const undrawn = paintSlideCanvas(ctx, render, width / slideWidth, pictures.images)
 
 		return { bitmap: canvas.transferToImageBitmap(), width, height, undrawn }
 	} finally {
-		for (const bitmap of owned) bitmap.close()
-
-		for (const key of held) pictures?.release(key)
+		pictures.release()
 	}
 }
 

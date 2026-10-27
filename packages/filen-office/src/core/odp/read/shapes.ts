@@ -1,6 +1,7 @@
 import { NO_PROPERTIES, parseLength, type OdfListStyle, type OdfProperties } from "../../odf/index"
 import { Evaluator, GeometryError, enhancedPath, pointsPath, svgPath, type SubPath } from "../../odt/geometry"
 import { classifyHref } from "../../presentation/actions"
+import type { PictureAdjust } from "../../presentation/edit/ops"
 import { tooDeep, tooLarge } from "../../presentation/refusal"
 import {
 	PATH_CLOSE,
@@ -986,7 +987,10 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 
 			if (picture !== undefined && textBox === undefined) {
 				const props = graphicProps(context, style, empty, RECT, true)
-				const shape: ShapeNode = { ...base, kind: "pic", xfrm, props: { ...props, fill: { kind: "picture", part: picture } } }
+				const adjust = pictureAdjust(style.graphic.attributes)
+				const fill =
+					adjust === undefined ? { kind: "picture" as const, part: picture } : { kind: "picture" as const, part: picture, adjust }
+				const shape: ShapeNode = { ...base, kind: "pic", xfrm, props: { ...props, fill } }
 				const clip = clipOf(style.graphic.attributes.get("fo:clip"))
 
 				if (clip !== undefined) scope.clips.push({ shape, part: picture, clip })
@@ -1220,6 +1224,31 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 		props: { ...props, bodyPr: bodyPrOf(style.graphic, style.paragraph) },
 		...(text === undefined ? {} : { text })
 	}
+}
+
+// A picture's adjustments in its graphic style (draw:luminance §20.123, draw:contrast §20.120, draw:color-mode §20.121,
+// draw:image-opacity §20.125) as the model's (edit/ops.ts PictureAdjust); undefined when every one is the default.
+// "mono" is a bi-level picture at the middle threshold (LibreOffice draws it so).
+function pictureAdjust(attributes: ReadonlyMap<string, string>): PictureAdjust | undefined {
+	const percent = (name: string): number | undefined => {
+		const match = /^(-?\d+(?:\.\d+)?)%$/u.exec(attributes.get(name)?.trim() ?? "")
+		const value = match === null ? undefined : Number(match[1])
+
+		return value === undefined || !Number.isFinite(value) ? undefined : Math.round(Math.max(-100, Math.min(100, value)) * 1000)
+	}
+	const brightness = percent("draw:luminance")
+	const contrast = percent("draw:contrast")
+	const opacity = percent("draw:image-opacity")
+	const mode = attributes.get("draw:color-mode")
+	const adjust: { -readonly [K in keyof PictureAdjust]: PictureAdjust[K] } = {}
+
+	if (brightness !== undefined && brightness !== 0) adjust.brightness = brightness
+	if (contrast !== undefined && contrast !== 0) adjust.contrast = contrast
+	if (mode === "greyscale") adjust.grayscale = true
+	if (mode === "mono") adjust.biLevel = 50_000
+	if (opacity !== undefined && opacity < 100_000) adjust.alpha = 100_000 - Math.max(0, opacity)
+
+	return Object.keys(adjust).length === 0 ? undefined : adjust
 }
 
 // fo:clip="rect(top, right, bottom, left)" (§20.180) in points; undefined for none, "auto" sides or all zero.

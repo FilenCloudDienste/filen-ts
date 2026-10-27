@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import type { Node } from "prosemirror-model"
 import type { DeckOp, ShapeRef } from "@filen/office/core/presentation"
 import {
 	FIND_IN_NOTES,
 	FIND_IN_SMARTART,
 	FIND_IN_TABLE,
+	FIND_LOCKED,
 	PRESENTATION_FIND_INTS,
 	PRESENTATION_FIND_LIMIT,
 	type CommandResult,
@@ -17,9 +20,11 @@ import type { DocxFindControls } from "@/features/preview/components/docxViewer.
 // Find and replace in the presentation editor, as the document viewers' find field drives it (DocxFindControls, so
 // the shell mounts DocxFindField unchanged). The worker searches the deck (slides, notes, tables, SmartArt) and
 // answers PRESENTATION_FIND_INTS per match: slide index, shape id, paragraph, start, end, flags. A step shows the
-// match's slide, selects its shape and opens a slide shape's text with the match selected. Replace sends one
-// text.replace op (one undo step) after the open body's pending text; table cells and SmartArt nodes are not plain
-// bodies, so their targets go in an op of their own, whose refusal the shell reports.
+// match's slide, selects its shape and opens a slide shape's text with the match selected. Replace sends the open
+// body's pending text, then one command: a text.replace (slide shapes, notes, table cells) and a smartart.replace per
+// diagram, batched when there are both (one undo step); the shell reports its refusal. A match in a locked shape
+// (FIND_LOCKED) is found but never replaced: Replace all leaves those shapes out and says how many matches it skipped,
+// Replace on one says it cannot. Replace all over more matches than a find lists refuses (its targets would be partial).
 
 export interface PresentationFindEditor {
 	readonly text: TextEditing
@@ -95,22 +100,42 @@ export function findOffsetToPos(doc: Node, paragraph: number, offset: number): n
 	return Math.min(at, pos + node.content.size)
 }
 
-// Replace-all targets: one per shape (notes bodies apart), slide shapes and notes in a text.replace, the rest (table
-// cells, SmartArt) apart.
+export function replaceable(match: FindMatch): boolean {
+	return (match.flags & FIND_LOCKED) === 0
+}
+
+// Replace-all targets: one per shape (notes bodies apart); slide shapes, notes and tables in a text.replace, each
+// SmartArt diagram in a smartart.replace of its own. Matches in locked shapes are no target: `skipped` counts them,
+// `replaced` the others.
 export function replaceTargets(
 	matches: Int32Array,
 	count: number,
 	info: OpenInfo
-): { readonly text: { target: ShapeRef; notes?: true }[]; readonly other: { target: ShapeRef }[] } {
+): {
+	readonly text: { target: ShapeRef; notes?: true }[]
+	readonly smartart: ShapeRef[]
+	readonly replaced: number
+	readonly skipped: number
+} {
 	const seen = new Set<string>()
 	const text: { target: ShapeRef; notes?: true }[] = []
-	const other: { target: ShapeRef }[] = []
+	const smartart: ShapeRef[] = []
+	let replaced = 0
+	let skipped = 0
 
 	for (let index = 0; index < count; index++) {
 		const match = matchAt(matches, index)
 		const slide = match === undefined ? undefined : info.slides[match.slide]?.ref
 
 		if (match === undefined || slide === undefined) continue
+
+		if (!replaceable(match)) {
+			skipped++
+
+			continue
+		}
+
+		replaced++
 
 		const notes = (match.flags & FIND_IN_NOTES) !== 0
 		const key = `${String(match.slide)}:${String(match.shape)}:${notes ? "n" : "s"}`
@@ -121,23 +146,17 @@ export function replaceTargets(
 
 		const target = { slide, id: match.shape }
 
-		if ((match.flags & (FIND_IN_TABLE | FIND_IN_SMARTART)) !== 0) other.push({ target })
+		if ((match.flags & FIND_IN_SMARTART) !== 0) smartart.push(target)
 		else text.push(notes ? { target, notes: true } : { target })
 	}
 
-	return { text, other }
+	return { text, smartart, replaced, skipped }
 }
 
-function countIn(matches: Int32Array, count: number, take: (match: FindMatch) => boolean): number {
-	let taken = 0
+function someReplaceable(matches: Int32Array, count: number): boolean {
+	for (let index = 0; index < count; index++) if (((matches[index * PRESENTATION_FIND_INTS + 5] ?? 0) & FIND_LOCKED) === 0) return true
 
-	for (let index = 0; index < count; index++) {
-		const match = matchAt(matches, index)
-
-		if (match !== undefined && take(match)) taken++
-	}
-
-	return taken
+	return false
 }
 
 interface FindState {
@@ -152,6 +171,7 @@ interface FindState {
 const EMPTY: FindState = { query: "", caseSensitive: false, matches: new Int32Array(0), count: 0, capped: false, active: -1 }
 
 export function usePresentationFind({ session, info, editor, onReplaced }: PresentationFindInput): DocxFindControls {
+	const { t } = useTranslation("preview")
 	const [state, setState] = useState<FindState>(EMPTY)
 	const sequence = useRef(0)
 	// A body to select once the shell has opened it.
@@ -245,37 +265,47 @@ export function usePresentationFind({ session, info, editor, onReplaced }: Prese
 
 		await editor.text.flush()
 
-		const base = { family: "text", kind: "replace", query: state.query, replacement, caseSensitive: state.caseSensitive } as const
+		const query = { query: state.query, replacement, caseSensitive: state.caseSensitive } as const
 		let replaced = 0
 
 		if (all) {
-			const { text, other } = replaceTargets(state.matches, state.count, info)
+			// The listed matches are not all of them: replacing only theirs would leave the rest unannounced.
+			if (state.capped) {
+				toast.error(t("previewPptxFindReplaceCapped", { count: PRESENTATION_FIND_LIMIT }))
 
-			if (text.length > 0) {
-				const result = await editor.command({ ...base, targets: text })
-
-				if (result.ok)
-					replaced = countIn(state.matches, state.count, match => (match.flags & (FIND_IN_TABLE | FIND_IN_SMARTART)) === 0)
+				return
 			}
 
-			if (other.length > 0) await editor.command({ ...base, targets: other })
+			const { text, smartart, replaced: replaceableCount, skipped } = replaceTargets(state.matches, state.count, info)
+			// Text bodies, tables and every diagram in one command: one undo step.
+			const ops: DeckOp[] = [
+				...(text.length > 0 ? [{ family: "text", kind: "replace", ...query, targets: text } as const] : []),
+				...smartart.map(target => ({ family: "smartart", kind: "replace", target, ...query }) as const)
+			]
+			const op: DeckOp | undefined = ops.length === 1 ? ops[0] : ops.length > 1 ? { family: "batch", kind: "batch", ops } : undefined
+
+			if (op !== undefined && (await editor.command(op)).ok) replaced = replaceableCount
+			if (skipped > 0) toast.warning(t("previewPptxFindSkippedLocked", { count: skipped }))
 		} else {
 			const match = matchAt(state.matches, Math.max(0, state.active))
 			const slide = match === undefined ? undefined : info.slides[match.slide]?.ref
 
 			if (match === undefined || slide === undefined) return
 
+			if (!replaceable(match)) {
+				toast.error(t("previewPptxFindLocked"))
+
+				return
+			}
+
+			const target = { slide, id: match.shape }
+			const at = [match.paragraph, match.start, match.end] as const
 			const notes = (match.flags & FIND_IN_NOTES) !== 0
-			const result = await editor.command({
-				...base,
-				targets: [
-					{
-						target: { slide, id: match.shape },
-						...(notes ? { notes: true } : {}),
-						match: [match.paragraph, match.start, match.end]
-					}
-				]
-			})
+			const result = await editor.command(
+				(match.flags & FIND_IN_SMARTART) !== 0
+					? { family: "smartart", kind: "replace", target, ...query, match: at }
+					: { family: "text", kind: "replace", ...query, targets: [{ target, ...(notes ? { notes: true } : {}), match: at }] }
+			)
 
 			if (result.ok) replaced = 1
 		}
@@ -310,7 +340,8 @@ export function usePresentationFind({ session, info, editor, onReplaced }: Prese
 		...(info?.editable === true && editor !== undefined
 			? {
 					replace: {
-						disabled: false,
+						// Nothing found can be replaced: every match is in a locked shape.
+						disabled: state.count > 0 && !someReplaceable(state.matches, state.count),
 						one: (replacement: string) => {
 							void replace(replacement, false)
 						},

@@ -9,6 +9,7 @@ import { applyMediaTiming } from "./apply/mediaTiming"
 import { applyMotionPath } from "./apply/motionPath"
 import { applyNotes } from "./apply/notes"
 import { applyPicture } from "./apply/picture"
+import { applyPresentation, SLIDE_LIST_SHOW_TOUCH, withFittedShowRange } from "./apply/presentation"
 import { applyShape } from "./apply/shape"
 import { applySlide } from "./apply/slide"
 import { applySmartArt } from "./apply/smartart"
@@ -100,7 +101,8 @@ export const APPLY_FAMILIES: Families = {
 	design: applyDesign,
 	smartart: applySmartArt,
 	ink: applyInk,
-	mediaTiming: applyMediaTiming
+	mediaTiming: applyMediaTiming,
+	presentation: applyPresentation
 }
 
 export function applyOp(deck: Deck, op: DeckOp, context: ApplyContext): ApplyResult {
@@ -108,7 +110,10 @@ export function applyOp(deck: Deck, op: DeckOp, context: ApplyContext): ApplyRes
 
 	const family: ApplyFamily<FamilyOp> = APPLY_FAMILIES[op.family]
 
-	return family.apply(deck, op, context)
+	const result = family.apply(deck, op, context)
+
+	// A slide op keeps the show's slide range inside the deck.
+	return op.family === "slide" ? withFittedShowRange(deck, result) : result
 }
 
 // Applies ops in order; on a refusal, what applied is undone in reverse and the refusal returned.
@@ -163,5 +168,7 @@ export function opTouches(op: DeckOp): readonly Touch[] {
 
 	const family: ApplyFamily<FamilyOp> = APPLY_FAMILIES[op.family]
 
-	return family.touches(op)
+	const touches = family.touches(op)
+
+	return op.family === "slide" ? [...touches, SLIDE_LIST_SHOW_TOUCH] : touches
 }

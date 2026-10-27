@@ -15,6 +15,9 @@ export interface TrustedLinkGate {
 	onAuxClick: (event: MouseEvent<HTMLElement>) => void
 	// The confirmation, rendered by the caller.
 	dialog: ReactNode
+	// The confirmation is open; cancel() closes it without opening the link (its surface went away).
+	readonly pending: boolean
+	cancel: () => void
 }
 
 // The one-time-per-domain confirmation before an external link opens (chat messages, documents, markdown,
@@ -82,6 +85,10 @@ export function useTrustedLinkGate(): TrustedLinkGate {
 				onClick(event)
 			}
 		},
-		dialog
+		dialog,
+		pending: pending !== null,
+		cancel: () => {
+			setPending(null)
+		}
 	}
 }

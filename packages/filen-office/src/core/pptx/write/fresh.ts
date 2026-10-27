@@ -16,6 +16,7 @@ import { G, partReader, type PartReader } from "../read/xml"
 import { PREFIXES, URIS, attr, type EmitContext, type SourceCopier } from "./emit/shape"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { slideRoot } from "./emit/slide"
+import { spliceShowPr } from "./emit/presentation"
 import { listStyleXml } from "./emit/text"
 import { PART_CONTENT_TYPES, PackageWriter, RELATIONSHIPS, modelName, zipName } from "./parts"
 import type { EmitPiece, FreshPptx, PptxSaveOptions, PptxSaveOutcome, PptxSource } from "./types"
@@ -758,6 +759,13 @@ class Fresh {
 
 			presentationRels.add(`${RELATIONSHIPS}${kind}`, name, false)
 		}
+
+		// p:showPr says the deck's show settings, not the source's.
+		writer.patchAfter("ppt/presProps.xml", (document, editor) => {
+			const failed = spliceShowPr(document, editor, deck.show)
+
+			if (failed !== undefined) throw new PresentationError(failed.reason, failed.detail)
+		})
 
 		writer.add("ppt/viewProps.xml", PART_CONTENT_TYPES.viewProps, encodeUtf8(`${XML_DECLARATION}<p:viewPr${ROOT_NAMESPACES}/>`))
 		presentationRels.add(`${RELATIONSHIPS}viewProps`, "ppt/viewProps.xml", false)

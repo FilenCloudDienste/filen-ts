@@ -401,6 +401,33 @@ describe("presentation editor ribbon", () => {
 	})
 })
 
+describe("presentation editor slide show keys", () => {
+	it("starts the show with F5 and Shift+F5, and takes no editor key while it runs", async () => {
+		await openEditor()
+
+		const f5 = new KeyboardEvent("keydown", { key: "F5", code: "F5", bubbles: true, cancelable: true })
+
+		act(() => {
+			rail().dispatchEvent(f5)
+		})
+		expect(f5.defaultPrevented).toBe(true)
+
+		const stage = await screen.findByRole("region", { name: "Slide show" })
+
+		for (const key of ["m", "d", "z"]) fireEvent.keyDown(stage, { key, code: `Key${key.toUpperCase()}`, ctrlKey: true, metaKey: true })
+
+		fireEvent.keyDown(stage, { key: "Escape", code: "Escape" })
+		await waitFor(() => {
+			expect(screen.queryByRole("region", { name: "Slide show" })).toBeNull()
+		})
+		expect(engine.commands).toEqual([])
+		expect(engine.steps).toEqual([])
+
+		fireEvent.keyDown(rail(), { key: "F5", code: "F5", shiftKey: true })
+		expect(await screen.findByRole("region", { name: "Slide show" })).toBeTruthy()
+	})
+})
+
 describe("presentation editor slide list", () => {
 	it("deletes, moves, extends and duplicates with the keys, on the selection", async () => {
 		await openEditor()

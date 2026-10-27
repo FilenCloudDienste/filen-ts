@@ -3,6 +3,8 @@
 // it; the definitions themselves (defs.ts) are worker-only, kept out of the main bundle. Each family's generated
 // data is one names module listed here and one definitions module listed in defs.ts, in gallery order.
 
+import { TEST_COLORS, TEST_LAYOUTS, TEST_STYLES } from "./test"
+
 export type SmartArtCategory = "list" | "process" | "cycle" | "hierarchy" | "relationship" | "matrix" | "pyramid" | "picture"
 
 export interface SmartArtLayoutEntry {
@@ -25,11 +27,11 @@ export interface SmartArtColorsEntry {
 	readonly nameKey: string
 }
 
-export const SMARTART_LAYOUTS: readonly SmartArtLayoutEntry[] = []
+export const SMARTART_LAYOUTS: readonly SmartArtLayoutEntry[] = [...TEST_LAYOUTS]
 
-export const SMARTART_STYLES: readonly SmartArtStyleEntry[] = []
+export const SMARTART_STYLES: readonly SmartArtStyleEntry[] = [...TEST_STYLES]
 
-export const SMARTART_COLORS: readonly SmartArtColorsEntry[] = []
+export const SMARTART_COLORS: readonly SmartArtColorsEntry[] = [...TEST_COLORS]
 
 export function smartArtLayout(uniqueId: string): SmartArtLayoutEntry | undefined {
 	return SMARTART_LAYOUTS.find(entry => entry.uniqueId === uniqueId)

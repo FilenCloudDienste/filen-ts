@@ -15,6 +15,7 @@ import type {
 	Section,
 	SlideNode,
 	SlideRef,
+	ShowSettings,
 	TableCellProps,
 	TextBody,
 	Xfrm
@@ -49,6 +50,7 @@ export type DeckOpFamily =
 	| "smartart"
 	| "ink"
 	| "mediaTiming"
+	| "presentation"
 
 export const DECK_OP_FAMILIES: readonly DeckOpFamily[] = [
 	"slide",
@@ -66,7 +68,8 @@ export const DECK_OP_FAMILIES: readonly DeckOpFamily[] = [
 	"design",
 	"smartart",
 	"ink",
-	"mediaTiming"
+	"mediaTiming",
+	"presentation"
 ]
 
 // A source part of a removed slide (the slide, its notes, its comments, its charts…), to restore on undo.
@@ -541,6 +544,20 @@ export type SmartArtOp =
 			readonly target: ShapeRef
 			readonly def: SmartArtDefRef
 	  }
+	// Every match of `query` in the diagram's node texts replaced by `replacement` (each takes the formatting of the
+	// first character it replaces). A node's find text is its paragraphs joined by "\n", the nodes in data order
+	// (FIND_IN_SMARTART); `match` (that node's index, start, end) limits it to one match, refused as stale when it no
+	// longer holds there.
+	| {
+			readonly family: "smartart"
+			readonly kind: "replace"
+			readonly target: ShapeRef
+			readonly query: string
+			readonly replacement: string
+			readonly caseSensitive?: boolean
+			readonly wholeWord?: boolean
+			readonly match?: readonly [number, number, number]
+	  }
 	// The diagram's parts as they were (the inverse of any of the above).
 	| { readonly family: "smartart"; readonly kind: "restore"; readonly target: ShapeRef; readonly parts: readonly RawPart[] }
 
@@ -581,6 +598,10 @@ export type MediaTimingOp =
 	  }
 	| { readonly family: "mediaTiming"; readonly kind: "removeBookmark"; readonly target: ShapeRef; readonly name: string }
 
+// Presentation-level settings: Set Up Slide Show (p:showPr in presProps.xml; ODF presentation:settings), replaced
+// whole.
+export type PresentationOp = { readonly family: "presentation"; readonly kind: "setShow"; readonly show: ShowSettings }
+
 // Several ops as one step, applied in order and all or nothing: a refusal undoes the ones before it, in reverse,
 // and refuses the batch. Its inverse is its ops' inverses, the last op's first.
 export interface BatchOp {
@@ -607,6 +628,7 @@ export type FamilyOp =
 	| SmartArtOp
 	| InkOp
 	| MediaTimingOp
+	| PresentationOp
 
 export type DeckOp = FamilyOp | BatchOp
 

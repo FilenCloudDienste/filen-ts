@@ -1,12 +1,25 @@
 import { blipFile, blipKind, blipSize, type ArtProperty, type ArtRecord } from "../doc/toDocx/officeArt"
-import { OpcPackage, type ByteSource } from "../opc/index"
+import {
+	OpcPackage,
+	writeZip,
+	type ByteChunks,
+	type ByteSink,
+	type ByteSource,
+	type Slicing,
+	type WriteZipReport,
+	type ZipPlanItem
+} from "../opc/index"
 import type { LinkedPart } from "../opc/package"
 import { PresentationError, refused, type Refused } from "../presentation/model"
 import { tooLarge } from "../presentation/refusal"
 import { encodeUtf8 } from "../xml/utf8"
+import { paragraphSpans, pp10Records, timingOf, type PptAnimShape, type PptLegacyBuild } from "./anim"
+import { CommentAuthors, commentsXml, slideComments, type PptComment } from "./comments"
 import { decryptPicture } from "./decrypt"
 import {
+	kids,
 	openPptFile,
+	persistRecord,
 	readDocument,
 	type BlipStoreEntry,
 	type PptFile,
@@ -21,6 +34,7 @@ import {
 	colorRef,
 	colorXml,
 	emu,
+	EMU_PER_MASTER,
 	flag,
 	hex,
 	isConnector,
@@ -35,7 +49,9 @@ import {
 	type PropertyChain,
 	type Rect
 } from "./officeArt"
-import { i32, u16, u32 } from "./records"
+import { PptMedia } from "./media"
+import { PptOle } from "./ole"
+import { i32, RT, u16, u32, type PptRecord as PptRecordRef } from "./records"
 import { PptReport, type PptLoss } from "./report"
 import { readSlides, SLIDE_FLAGS, type PptSlide, type PptSlides } from "./slides"
 import {
@@ -51,6 +67,7 @@ import {
 	type TextBlock,
 	type TextEmitContext
 } from "./text"
+import { transitionXml } from "./transitions"
 
 // A PowerPoint 97–2003 deck as an in-memory PresentationML package ([MS-PPT] → ECMA-376 Part 1 §19), the doc→docx
 // pattern: the pptx reader then reads it, so viewing, rendering, conversion and Save as are one path. Main masters
@@ -87,6 +104,8 @@ const CT = {
 	handoutMaster: "application/vnd.openxmlformats-officedocument.presentationml.handoutMaster+xml",
 	theme: "application/vnd.openxmlformats-officedocument.theme+xml",
 	presProps: "application/vnd.openxmlformats-officedocument.presentationml.presProps+xml",
+	comments: "application/vnd.openxmlformats-officedocument.presentationml.comments+xml",
+	commentAuthors: "application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml",
 	rels: "application/vnd.openxmlformats-package.relationships+xml"
 } as const
 
@@ -324,11 +343,21 @@ class Converter {
 	readonly document: PptDocument
 	readonly pictures: readonly (Picture | undefined)[]
 	readonly slidePartOf: ReadonlyMap<number, string>
+	readonly sounds: PptMedia
+	readonly ole: PptOle
+	readonly authors = new CommentAuthors()
 
-	constructor(document: PptDocument, pictures: readonly (Picture | undefined)[], slidePartOf: ReadonlyMap<number, string>) {
+	constructor(
+		document: PptDocument,
+		pictures: readonly (Picture | undefined)[],
+		slidePartOf: ReadonlyMap<number, string>,
+		documentRecords: readonly PptRecordRef[]
+	) {
 		this.document = document
 		this.pictures = pictures
 		this.slidePartOf = slidePartOf
+		this.sounds = new PptMedia(document.file.stream, documentRecords, document.file.counter)
+		this.ole = new PptOle(document.file, documentRecords, this.report)
 	}
 
 	add(name: string, xml: string, contentType: string): void {
@@ -675,6 +704,9 @@ class Converter {
 			}
 			case 5:
 				return `<a:${element} r:id="" action="ppaction://ole?verb=${String(interaction.oleVerb)}"/>`
+			// §2.13.13 II_MediaAction: the shape's own movie or sound plays.
+			case 6:
+				return `<a:${element} r:id="" action="ppaction://media"/>`
 			case 0:
 				return ""
 			default:
@@ -732,7 +764,9 @@ class Converter {
 		return id
 	}
 
-	shapeXml(shape: PptShape, context: PartContext, child: boolean): string {
+	// `scale`: EMU per unit of the coordinate space the shape is placed in (master units on a slide, a group's own
+	// units inside it).
+	shapeXml(shape: PptShape, context: PartContext, child: boolean, scale = EMU_PER_MASTER): string {
 		const master = shape.properties.get(P.hspMaster)?.value
 		const masterShape = master === undefined ? undefined : context.masterShapes.get(master)
 		const chain: PropertyChain =
@@ -750,7 +784,7 @@ class Converter {
 		const offExt =
 			box === undefined
 				? ""
-				: `<a:off x="${String(emu(box.x))}" y="${String(emu(box.y))}"/><a:ext cx="${String(Math.max(0, emu(box.w)))}" cy="${String(Math.max(0, emu(box.h)))}"/>`
+				: `<a:off x="${String(Math.round(box.x * scale))}" y="${String(Math.round(box.y * scale))}"/><a:ext cx="${String(Math.max(0, Math.round(box.w * scale)))}" cy="${String(Math.max(0, Math.round(box.h * scale)))}"/>`
 		const id = this.nextId(context, shape.spid)
 		const name = textProperty(lookup(chain, P.wzName)) ?? `${shape.children === undefined ? "Shape" : "Group"} ${String(id)}`
 		const description = textProperty(shape.properties.get(P.wzDescription))
@@ -765,18 +799,19 @@ class Converter {
 			shape.groupRect !== undefined &&
 			((value([shape.properties], P.tableProperties) ?? 0) & 1) !== 0
 		) {
-			const table = this.tableXml(shape.children, shape.groupRect, box, context, cNvPr)
+			const table = this.tableXml(shape.children, shape.groupRect, box, context, cNvPr, scale)
 
 			if (table !== undefined) return table
 		}
 
 		if (shape.children !== undefined) {
 			const group = shape.groupRect
+			const inner = childScale(shape)
 			const xfrm =
 				box === undefined || group === undefined
 					? ""
-					: `<a:xfrm${xfrmAttributes}>${offExt}<a:chOff x="${String(emu(group.left))}" y="${String(emu(group.top))}"/><a:chExt cx="${String(Math.max(0, emu(group.right - group.left)))}" cy="${String(Math.max(0, emu(group.bottom - group.top)))}"/></a:xfrm>`
-			const members = shape.children.map(member => this.shapeXml(member, context, true)).join("")
+					: `<a:xfrm${xfrmAttributes}>${offExt}<a:chOff x="${String(Math.round(group.left * inner))}" y="${String(Math.round(group.top * inner))}"/><a:chExt cx="${String(Math.max(0, Math.round((group.right - group.left) * inner)))}" cy="${String(Math.max(0, Math.round((group.bottom - group.top) * inner)))}"/></a:xfrm>`
+			const members = shape.children.map(member => this.shapeXml(member, context, true, inner)).join("")
 
 			return `<p:grpSp><p:nvGrpSpPr>${cNvPr}<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr>${xfrm}</p:grpSpPr>${members}</p:grpSp>`
 		}
@@ -787,19 +822,52 @@ class Converter {
 			placeholder === undefined || shape.placeholder === undefined
 				? ""
 				: `<p:ph type="${placeholder[0]}"${placeholder[1] === undefined ? "" : ` orient="${placeholder[1]}"`}${shape.placeholder.size > 0 && shape.placeholder.size < 3 ? ` sz="${SIZES[shape.placeholder.size] ?? "full"}"` : ""}${placeholder[0] === "title" || placeholder[0] === "ctrTitle" || shape.placeholder.position < 0 ? "" : ` idx="${String(shape.placeholder.position)}"`}/>`
-		const media = shape.exObjRef !== undefined && this.document.media.has(shape.exObjRef)
+		// A movie's ExMediaAtom sits in its ExVideoContainer: the media reader finds those the document list does not.
+		const media =
+			shape.exObjRef !== undefined &&
+			(this.document.media.has(shape.exObjRef) || this.sounds.mediaObject(shape.exObjRef) !== undefined)
 		const ole = (shape.flags & 0x10) !== 0 || (shape.exObjRef !== undefined && this.document.oleObjects.has(shape.exObjRef))
 		const pib = value(chain, P.pib)
 
-		if (shape.animated === true && context.kind === "slide") this.report.note("animation", context.slideNumber)
+		const exObjRef = shape.exObjRef
+		const add = (type: string, target: string, external?: boolean): string => context.rels.add(type, target, external === true)
+		const part = pib !== undefined && pib > 0 ? this.picture(pib, context.slideNumber) : undefined
+
+		if (part !== undefined) {
+			if (media && exObjRef !== undefined) {
+				const element = this.sounds.nvPrXml(exObjRef, add)
+
+				if (element === undefined) this.report.note("media", context.slideNumber)
+
+				return this.pictureXml(shape, chain, context, cNvPr, ph, xfrm, part, element ?? "")
+			}
+
+			if (ole) {
+				const frame =
+					exObjRef === undefined
+						? undefined
+						: this.ole.frameXml(
+								exObjRef,
+								{
+									cNvPr,
+									xfrm: box === undefined ? "" : `<p:xfrm${xfrmAttributes}>${offExt}</p:xfrm>`,
+									ph,
+									picture: this.pictureXml(shape, chain, context, '<p:cNvPr id="0" name=""/>', "", xfrm, part)
+								},
+								add,
+								context.slideNumber
+							)
+
+				if (frame !== undefined) return frame
+
+				this.report.note("oleObject", context.slideNumber)
+			}
+
+			return this.pictureXml(shape, chain, context, cNvPr, ph, xfrm, part)
+		}
+
 		if (media) this.report.note("media", context.slideNumber)
 		else if (ole) this.report.note("oleObject", context.slideNumber)
-
-		if (pib !== undefined && pib > 0) {
-			const part = this.picture(pib, context.slideNumber)
-
-			if (part !== undefined) return this.pictureXml(shape, chain, context, cNvPr, ph, xfrm, part)
-		}
 
 		const block = shape.outlineRef !== undefined ? context.outline[shape.outlineRef] : shape.text
 		const wordArt = isWordArt(shape.shapeType) ? textProperty(lookup(chain, P.gtextUNICODE)) : undefined
@@ -831,7 +899,8 @@ class Converter {
 		space: Rect,
 		box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
 		context: PartContext,
-		cNvPr: string
+		cNvPr: string,
+		scale: number
 	): string | undefined {
 		const cells = members.filter(
 			member =>
@@ -920,7 +989,7 @@ class Converter {
 		}
 		const gridXml = Array.from(
 			{ length: columns },
-			(_, c) => `<a:gridCol w="${String(Math.max(0, emu(((xs[c + 1] ?? 0) - (xs[c] ?? 0)) * scaleX)))}"/>`
+			(_, c) => `<a:gridCol w="${String(Math.max(0, Math.round(((xs[c + 1] ?? 0) - (xs[c] ?? 0)) * scaleX * scale)))}"/>`
 		).join("")
 		let rowsXml = ""
 
@@ -957,10 +1026,10 @@ class Converter {
 				row += `<a:tc${span.c1 - span.c0 > 1 ? ` gridSpan="${String(span.c1 - span.c0)}"` : ""}${span.r1 - span.r0 > 1 ? ` rowSpan="${String(span.r1 - span.r0)}"` : ""}>${body}<a:tcPr marL="${String(margins[0])}" marR="${String(margins[1])}" marT="${String(margins[2])}" marB="${String(margins[3])}" anchor="${anchor}">${border(cell, "lnL")}${border(cell, "lnR")}${border(cell, "lnT")}${border(cell, "lnB")}${fill}</a:tcPr></a:tc>`
 			}
 
-			rowsXml += `<a:tr h="${String(Math.max(0, emu(((ys[r + 1] ?? 0) - (ys[r] ?? 0)) * scaleY)))}">${row}</a:tr>`
+			rowsXml += `<a:tr h="${String(Math.max(0, Math.round(((ys[r + 1] ?? 0) - (ys[r] ?? 0)) * scaleY * scale)))}">${row}</a:tr>`
 		}
 
-		return `<p:graphicFrame><p:nvGraphicFramePr>${cNvPr}<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="${String(emu(box.x))}" y="${String(emu(box.y))}"/><a:ext cx="${String(Math.max(0, emu(box.w)))}" cy="${String(Math.max(0, emu(box.h)))}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr/><a:tblGrid>${gridXml}</a:tblGrid>${rowsXml}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
+		return `<p:graphicFrame><p:nvGraphicFramePr>${cNvPr}<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="${String(Math.round(box.x * scale))}" y="${String(Math.round(box.y * scale))}"/><a:ext cx="${String(Math.max(0, Math.round(box.w * scale)))}" cy="${String(Math.max(0, Math.round(box.h * scale)))}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr/><a:tblGrid>${gridXml}</a:tblGrid>${rowsXml}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`
 	}
 
 	private wordArtBody(text: string, chain: PropertyChain, context: PartContext, box: { readonly h: number } | undefined): string {
@@ -986,7 +1055,8 @@ class Converter {
 		cNvPr: string,
 		ph: string,
 		xfrm: string,
-		part: string
+		part: string,
+		mediaXml = ""
 	): string {
 		const id = context.rels.add("image", `../media/${part.slice(part.lastIndexOf("/") + 1)}`)
 		const crop = (pid: number): number => Math.round((i32Value(value(chain, pid)) * 100000) / 65536)
@@ -1001,7 +1071,7 @@ class Converter {
 		const line = flag(chain, P.lineStyleBooleans, 3) === true ? this.line(chain, context.scheme) : ""
 		const gray = flag(chain, P.blipBooleans, 2) === true ? "<a:grayscl/>" : ""
 
-		return `<p:pic><p:nvPicPr>${cNvPr}<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr>${ph}</p:nvPr></p:nvPicPr><p:blipFill><a:blip r:embed="${id}">${gray}</a:blip>${srcRect}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm}<a:prstGeom prst="${presetOf(shape.shapeType) ?? "rect"}"><a:avLst/></a:prstGeom>${line}${this.effects(chain, context.scheme)}</p:spPr></p:pic>`
+		return `<p:pic><p:nvPicPr>${cNvPr}<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr>${ph}${mediaXml}</p:nvPr></p:nvPicPr><p:blipFill><a:blip r:embed="${id}">${gray}</a:blip>${srcRect}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm}<a:prstGeom prst="${presetOf(shape.shapeType) ?? "rect"}"><a:avLst/></a:prstGeom>${line}${this.effects(chain, context.scheme)}</p:spPr></p:pic>`
 	}
 
 	background(shape: PptShape | undefined, scheme: readonly number[], context: PartContext): string {
@@ -1095,21 +1165,66 @@ async function converted(file: PptFile): Promise<PptConversion> {
 
 	document.slides.forEach((entry, index) => slidePartOf.set(entry.id, `slide${String(index + 1)}.xml`))
 
-	const converter = new Converter(document, pictures, slidePartOf)
+	const documentRecords = kids(file, persistRecord(file, file.directory.current.docPersistIdRef, RT.document))
+	const converter = new Converter(document, pictures, slidePartOf, documentRecords)
 	const written = new PackageWriter(converter, document, slides).write()
 
 	converter.finishMedia()
 
 	if (document.macros) converter.report.note("macros")
 
+	const pptx = OpcPackage.fromParts(written)
+
+	streamedParts.set(pptx, written)
+
 	return {
 		kind: "converted",
-		pptx: OpcPackage.fromParts(written),
-		losses: converter.report.losses(),
+		pptx,
+		// Read again after a Save as: an embedded object's storage found damaged as it is written is counted then.
+		get losses() {
+			return converter.report.losses()
+		},
 		slides: document.slides.length,
 		encrypted: file.encrypted,
 		release: () => file.key?.wipe()
 	}
+}
+
+// The parts of each converted package, so Save as streams those that can be read in pieces.
+const streamedParts = new WeakMap<OpcPackage, ReadonlyMap<string, Uint8Array | LinkedPart>>()
+
+function streams(part: Uint8Array | LinkedPart): part is LinkedPart & ByteChunks {
+	return !(part instanceof Uint8Array) && "chunks" in part
+}
+
+// Extensions of parts whose content is compressed already: stored as they are, not deflated again.
+const STORED = new Set(["png", "jpeg", "jpg", "gif", "mp3", "mp4", "m4a", "wma", "wmv", "avi", "mov"])
+
+// The converted package as a .pptx file (Save as): its parts read one at a time (pictures decrypted and the embedded
+// objects' storages inflated as they are reached) and zipped to `sink`, [Content_Types].xml first. The same deck
+// always gives the same bytes.
+export async function writePptConversion(
+	pptx: OpcPackage,
+	sink: ByteSink,
+	options: { readonly slicing?: Slicing } = {}
+): Promise<WriteZipReport> {
+	const names = [...pptx.entries()].map(entry => entry.name)
+	const ordered = [...names.filter(name => name === "[Content_Types].xml"), ...names.filter(name => name !== "[Content_Types].xml")]
+
+	const held = streamedParts.get(pptx)
+
+	async function* items(): AsyncIterable<ZipPlanItem> {
+		for (const name of ordered) {
+			const extension = name.slice(name.lastIndexOf(".") + 1).toLowerCase()
+			const part = held?.get(name)
+			// A part that streams its pieces (an embedded object's storage) is never joined.
+			const bytes = part !== undefined && streams(part) ? part : await pptx.read(name)
+
+			yield { kind: "data", name, bytes, compress: !STORED.has(extension) }
+		}
+	}
+
+	return writeZip({ items: items() }, null, sink, options.slicing === undefined ? {} : { slicing: options.slicing })
 }
 
 // --- Parts ---
@@ -1411,6 +1526,11 @@ class PackageWriter {
 		presentationRels.add("theme", "theme/theme1.xml")
 		presentationRels.add("presProps", "presProps.xml")
 
+		if (converter.authors.size > 0) {
+			presentationRels.add("commentAuthors", "commentAuthors.xml")
+			converter.add("ppt/commentAuthors.xml", `${DECLARATION}${converter.authors.xml()}`, CT.commentAuthors)
+		}
+
 		const shows = document.namedShows
 			.map(
 				(show, index) =>
@@ -1438,6 +1558,9 @@ class PackageWriter {
 		)
 		converter.addRels("ppt/presentation.xml", presentationRels)
 		converter.add("ppt/presProps.xml", `${DECLARATION}<p:presentationPr ${ROOT_NS}/>`, CT.presProps)
+
+		converter.sounds.finish(converter.parts, converter.defaults)
+		converter.ole.finish(converter.parts, converter.defaults)
 
 		const packageRels = new Rels()
 
@@ -1622,14 +1745,46 @@ class PackageWriter {
 		const hidden = slide.show?.hidden === true ? ' show="0"' : ""
 		const showMaster = (slide.flags & SLIDE_FLAGS.masterObjects) === 0 ? ' showMasterSp="0"' : ""
 
-		if (slide.show !== undefined && (slide.show.effectType !== 0 || (slide.show.flags & 0x400) !== 0))
-			converter.report.note("transition", number)
+		const sound = (soundIdRef: number): { readonly rId: string; readonly name: string } | undefined =>
+			converter.sounds.sound(soundIdRef, (type, target) => rels.add(type, target))
+		const transition = slide.show === undefined ? undefined : transitionXml(slide.show, sound)
+
+		if (transition?.unsupported === true) converter.report.note("transition", number)
+
+		const [builds, animShapes] = this.animated(slide, outline, owner)
+		const tag = this.pp10(slide.record, number)
+		const timing = timingOf(tag, builds, {
+			data: this.document.file.stream,
+			shapes: animShapes,
+			counter: this.document.file.counter,
+			sound,
+			embeddedSound: container => {
+				const held = converter.sounds.embeddedSoundPart(container)
+
+				return held === undefined
+					? undefined
+					: { rId: rels.add("audio", `../media/${held.part.slice(held.part.lastIndexOf("/") + 1)}`), name: held.name }
+			},
+			scheme,
+			budgets: this.document.file.deckBudgets.timing
+		})
+
+		if (timing.lost) converter.report.note("animation", number)
 
 		converter.add(
 			`ppt/slides/slide${String(number)}.xml`,
-			`${DECLARATION}<p:sld ${ROOT_NS}${showMaster}${hidden}><p:cSld${slide.name === undefined ? "" : ` name="${xmlText(slide.name)}"`}>${background}${this.spTree(shapes)}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`,
+			`${DECLARATION}<p:sld ${ROOT_NS}${showMaster}${hidden}><p:cSld${slide.name === undefined ? "" : ` name="${xmlText(slide.name)}"`}>${background}${this.spTree(shapes)}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${transition?.xml ?? ""}${timing.xml}</p:sld>`,
 			CT.slide
 		)
+
+		const comments = tag === undefined ? [] : this.comments(tag, number)
+
+		if (comments.length > 0) {
+			const part = `ppt/comments/comment${String(number)}.xml`
+
+			rels.add("comments", `../comments/comment${String(number)}.xml`)
+			converter.add(part, `${DECLARATION}${commentsXml(comments, converter.authors)}`, CT.comments)
+		}
 
 		const notes = slide.notesIdRef === 0 ? undefined : this.slides.notes.get(slide.notesIdRef)
 
@@ -1639,6 +1794,76 @@ class PackageWriter {
 		}
 
 		converter.addRels(`ppt/slides/slide${String(number)}.xml`, rels)
+	}
+
+	// The records of a slide's "___PPT10" tag; a damaged tag loses the slide's timing and comments, never the deck.
+	private pp10(slide: PptRecordRef, number: number): readonly PptRecordRef[] | undefined {
+		try {
+			return pp10Records(this.document.file.stream, slide, this.document.file.counter)
+		} catch (error) {
+			if (!(error instanceof PresentationError) || error.reason !== "malformed") throw error
+
+			this.converter.report.note("animation", number)
+			this.converter.report.note("comment", number)
+
+			return undefined
+		}
+	}
+
+	private comments(tag: readonly PptRecordRef[], number: number): readonly PptComment[] {
+		try {
+			return slideComments(this.document.file.stream, tag, this.document.file.counter)
+		} catch (error) {
+			if (!(error instanceof PresentationError) || error.reason !== "malformed") throw error
+
+			this.converter.report.note("comment", number)
+
+			return []
+		}
+	}
+
+	// The slide's shapes as its timing addresses them (by spid, with their paragraphs) and their Office 97 builds. A
+	// placeholder without a build of its own plays its master placeholder's (§2.8.1 on a master shape; PowerPoint and
+	// LibreOffice 7.5 play it on each slide that shows the placeholder).
+	private animated(
+		slide: PptSlide,
+		outline: readonly TextBlock[],
+		master: PptSlide | undefined
+	): [readonly PptLegacyBuild[], ReadonlyMap<number, PptAnimShape>] {
+		const builds: PptLegacyBuild[] = []
+		const shapes = new Map<number, PptAnimShape>()
+		const inherited = new Map<string, { readonly start: number; readonly end: number }>()
+
+		for (const shape of master?.drawing.shapes ?? []) {
+			const family = buildFamily(shape)
+
+			if (family !== undefined && shape.animation !== undefined && !inherited.has(family)) inherited.set(family, shape.animation)
+		}
+
+		const visit = (list: readonly PptShape[], top: boolean): void => {
+			for (const shape of list) {
+				const block = shape.outlineRef !== undefined ? outline[shape.outlineRef] : shape.text
+
+				if (!shapes.has(shape.spid)) shapes.set(shape.spid, { paragraphs: paragraphSpans(block) })
+
+				// A build plays on a shape of the slide; one inside a group plays with its group (§2.8.1 is per shape on
+				// the slide, and PowerPoint animates a group whole).
+				if (top) {
+					const family = buildFamily(shape)
+					const master = shape.animation === undefined && family !== undefined ? inherited.get(family) : undefined
+
+					if (shape.animation !== undefined)
+						builds.push({ spid: shape.spid, start: shape.animation.start, end: shape.animation.end })
+					else if (master !== undefined) builds.push({ spid: shape.spid, start: master.start, end: master.end, inherited: true })
+				}
+
+				if (shape.children !== undefined) visit(shape.children, false)
+			}
+		}
+
+		visit(slide.drawing.shapes, true)
+
+		return [builds, shapes]
 	}
 
 	private writeNotesMaster(notesMaster: PptSlide | undefined): void {
@@ -1708,6 +1933,38 @@ class PackageWriter {
 		converter.addRels(`ppt/notesSlides/notesSlide${String(number)}.xml`, rels)
 	}
 }
+
+// The master placeholder a slide placeholder takes its build from: titles from the master's title, bodies, subtitles and
+// objects from its body (§2.13.21: a slide placeholder's master counterpart).
+function buildFamily(shape: PptShape): string | undefined {
+	const type = shape.placeholder === undefined ? undefined : PLACEHOLDERS.get(shape.placeholder.type)?.[0]
+
+	if (type === "title" || type === "ctrTitle") return "title"
+	if (type === "body" || type === "subTitle" || type === "obj") return "body"
+
+	return undefined
+}
+
+// EMU per unit of a group's own coordinate space: as on the slide, unless that space is so large its coordinates
+// would leave ST_Coordinate's 32-bit range; then the largest scale that keeps them in it (the group's transform maps
+// the space onto its extent either way).
+function childScale(group: PptShape): number {
+	let largest = 0
+	const note = (rect: Rect | undefined): void => {
+		if (rect === undefined) return
+
+		largest = Math.max(largest, Math.abs(rect.left), Math.abs(rect.top), Math.abs(rect.right), Math.abs(rect.bottom))
+		largest = Math.max(largest, Math.abs(rect.right - rect.left), Math.abs(rect.bottom - rect.top))
+	}
+
+	note(group.groupRect)
+
+	for (const member of group.children ?? []) note(member.childAnchor)
+
+	return largest * EMU_PER_MASTER <= INT32_MAX ? EMU_PER_MASTER : INT32_MAX / Math.max(1, largest) / 2
+}
+
+const INT32_MAX = 2147483647
 
 function clampSize(value: number): number {
 	return Math.max(914400, Math.min(51206400, value))

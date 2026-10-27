@@ -29,16 +29,24 @@ import {
 	type SlideNode,
 	type SlideRef,
 	type SourceRef,
+	type TableCell,
+	type TableCellProps,
+	type TableModel,
 	type TextBody
 } from "../../presentation/model"
+import { builtinTableStyle } from "../../presentation/render/tableStyles"
+import { D } from "../../drawingml/reader"
 import { resolveColor, themeTypeface, type ColorContext, type PresentationTheme } from "../../presentation/theme"
-import { encodeUtf8, escapeAttribute } from "../../xml/index"
+import { decodeUtf8, encodeUtf8, escapeAttribute } from "../../xml/index"
+import { odpTargetId, odpTargetIds, odpTimingMarkup } from "../../anim/odf"
+import { withoutShapes } from "../../anim/prune"
 import { OdpContext } from "../read/context"
 import { openOdp } from "../read/document"
 import { IDENTITY, OdpShapeWriter, markupOf, compose, groupAffine, placed, type Affine } from "./emit/shape"
 import { pageNames } from "./integrity"
 import { OdpStyles, cm, fillChanges, isRefused, setProperty, styleChanges, type OdpWriteEnv } from "./styles"
 import { emitOdp, type OdpEmitContext } from "./emit"
+import { newSettingsAttributes, odfShow, settingsAttributes } from "./emit/presentation"
 
 // The fresh writer (§1.5.7): a whole ODP package from the model, for conversions (a pptx deck to ODP), templates and
 // Save as. Everything a shape inherits is resolved and written on the shape (ODF's presentation styles are not the
@@ -47,8 +55,11 @@ import { emitOdp, type OdpEmitContext } from "./emit"
 // paint on slides become the master page of the slides on that layout (one style:master-page per layout used, as
 // LibreOffice converts one), its background the master page's. Pictures are copied into Pictures/ from the source.
 // What ODF cannot hold as the model has it is written as the nearest form and named in the report (a gradient fill
-// as its first colour, an outline ODF has no preset for as a rectangle); what this writer cannot write (tables,
-// charts, diagrams, media: their families') is left out and named, never silently.
+// as its first colour, an outline ODF has no preset for as a rectangle); what this writer cannot write (charts,
+// diagrams, media: their families') is left out and named, never silently. A table is written by the table family
+// with its cells' properties and text resolved; PowerPoint's built-in Medium Style 2 (its default, written into a
+// cell's properties: ODF table templates are not the model's) as PowerPoint draws it, any other table style named as
+// approximated.
 
 const MEDIA_TYPE = "application/vnd.oasis.opendocument.presentation"
 const TEMPLATE_MEDIA_TYPE = "application/vnd.oasis.opendocument.presentation-template"
@@ -193,6 +204,18 @@ class Flattener {
 
 	// A shape with everything it inherits on it, colours and fonts as values.
 	shape(shape: ShapeNode, node: SlideNode): ShapeNode | undefined {
+		if (shape.frame?.kind === "table" && shape.kind === "frame") return this.table(shape, shape.frame.table, node)
+
+		// A diagram laid out (its shapes as children, in the frame's own space) is the group of them.
+		if (shape.kind === "frame" && shape.frame?.kind === "smartart" && shape.xfrm !== undefined && (shape.children?.length ?? 0) > 0) {
+			const { frame: _frame, ...own } = shape
+
+			return this.shape(
+				{ ...own, kind: "grpSp", xfrm: { ...shape.xfrm, chX: 0, chY: 0, chCx: shape.xfrm.cx, chCy: shape.xfrm.cy } },
+				node
+			)
+		}
+
 		if (shape.frame !== undefined && shape.kind === "frame") {
 			count(this.report.omitted, `${shape.frame.kind} frame`)
 
@@ -257,6 +280,95 @@ class Flattener {
 		}
 
 		return out
+	}
+
+	// A table with its cells resolved: the style's look and each cell's own properties as sRGB, its text with every
+	// property its chain gives.
+	private table(shape: ShapeNode, table: TableModel, node: SlideNode): ShapeNode | undefined {
+		const resolved = resolveShape(this.deck, node.ref, shape, this.services.documents)
+		const colors = this.colorContext(node)
+		const xfrm = resolved.xfrm
+
+		if (xfrm === undefined) {
+			count(this.report.omitted, "table frame without a box")
+
+			return undefined
+		}
+
+		const look = mediumStyle2(table.styleId)
+
+		if (table.styleId !== undefined && look === undefined) count(this.report.approximated, "table style")
+
+		const solid = (slot: string, mods?: { name: string; value: number }[]): FillProps | undefined => {
+			const color = srgb({ kind: "scheme", slot: slot as "accent1", ...(mods === undefined ? {} : { mods }) }, colors)
+
+			return color === undefined ? undefined : { kind: "solid", color }
+		}
+		const firstBand = table.flags.firstRow ? 1 : 0
+		const lastBand = table.flags.lastRow ? table.rows.length - 2 : table.rows.length - 1
+		const rows = table.rows.map((row, r) => ({
+			h: row.h,
+			cells: row.cells.map((cell, c): TableCell => {
+				const header = (table.flags.firstRow && r === 0) || (table.flags.lastRow && r === table.rows.length - 1)
+				const strong = header || (table.flags.firstCol && c === 0) || (table.flags.lastCol && c === row.cells.length - 1)
+				let props: TableCellProps = {}
+				let text = this.text(resolved, cell.text, colors, node)
+
+				if (look !== undefined) {
+					const banded = table.flags.bandRow && !header && r >= firstBand && r <= lastBand && (r - firstBand) % 2 === 0
+					const fill = strong ? solid(look) : solid(look, [{ name: "tint", value: banded ? 40_000 : 20_000 }])
+					const white = solid("lt1")
+					const edge: LineProps | undefined = white === undefined ? undefined : { w: 12_700, fill: white }
+
+					props = {
+						...(fill === undefined ? {} : { fill }),
+						...(edge === undefined ? {} : { borders: { l: edge, r: edge, t: edge, b: edge } })
+					}
+
+					if (strong) text = strongText(text, white, cell.text)
+				}
+
+				const own = cell.props
+				const ownFill = own?.fill === undefined ? undefined : this.fill(own.fill, colors)
+				const borders: Record<string, LineProps | "none"> = { ...props.borders }
+
+				for (const [side, line] of Object.entries(own?.borders ?? {})) {
+					// A cell border has no line ends (§21.1.3.5 a:lnL… take them, nothing draws them).
+					const { head: _head, tail: _tail, ...edge } = line === "none" ? { head: undefined, tail: undefined } : line
+					const flat = this.line(line === "none" ? "none" : edge, colors)
+
+					if (flat !== undefined) borders[side] = flat
+				}
+
+				const { fill: _ownFill, borders: _ownBorders, ...rest } = own ?? {}
+
+				props = {
+					...props,
+					...rest,
+					...(ownFill === undefined ? {} : { fill: ownFill }),
+					...(Object.keys(borders).length === 0 ? {} : { borders })
+				}
+
+				return {
+					text,
+					...(cell.gridSpan === undefined ? {} : { gridSpan: cell.gridSpan }),
+					...(cell.rowSpan === undefined ? {} : { rowSpan: cell.rowSpan }),
+					...(cell.hMerge === undefined ? {} : { hMerge: cell.hMerge }),
+					...(cell.vMerge === undefined ? {} : { vMerge: cell.vMerge }),
+					...(Object.keys(props).length === 0 ? {} : { props })
+				}
+			})
+		}))
+
+		return {
+			id: shape.id,
+			name: shape.name,
+			hidden: shape.hidden,
+			kind: "frame",
+			xfrm,
+			...(shape.alt === undefined ? {} : { alt: shape.alt }),
+			frame: { kind: "table", table: { grid: [...table.grid], rows, flags: { ...table.flags } } }
+		}
 	}
 
 	private geometry(geometry: Geometry | undefined, shape: ShapeNode): Geometry | undefined {
@@ -351,9 +463,37 @@ class Flattener {
 		}
 	}
 
-	// A bullet ODF can label: a picture bullet as none, a numbering ODF has no format for as Arabic numbers.
+	// The picture bullets a shape's paragraphs show (their chain gives them), to copy into Pictures/ before it is
+	// written.
+	bulletPictures(shape: ShapeNode, node: SlideNode): string[] {
+		const out: string[] = []
+		const walk = (each: ShapeNode): void => {
+			if (each.text !== undefined) {
+				const resolved = resolveShape(this.deck, node.ref, each, this.services.documents)
+
+				for (const paragraph of each.text.paragraphs) {
+					const bullet = resolveParagraph(resolved, paragraph).pPr.bullet
+
+					if (bullet?.kind === "blip" && !this.pictures.has(bullet.part)) out.push(bullet.part)
+				}
+			}
+
+			for (const child of each.children ?? []) walk(child)
+		}
+
+		walk(shape)
+
+		return out
+	}
+
+	// A bullet ODF can label: a picture bullet as its picture in Pictures/ (§16.33 text:list-level-style-image), a
+	// numbering ODF has no format for as Arabic numbers.
 	private bullet(bullet: NonNullable<Paragraph["pPr"]["bullet"]>): NonNullable<Paragraph["pPr"]["bullet"]> {
 		if (bullet.kind === "blip") {
+			const path = this.pictures.get(bullet.part)
+
+			if (path !== undefined) return { kind: "blip", part: `/${path}` }
+
 			count(this.report.approximated, "picture bullet")
 
 			return { kind: "none" }
@@ -406,6 +546,48 @@ class Flattener {
 		if (rPr.hlinkClick !== undefined && rPr.hlinkClick.kind !== "refused") out["hlinkClick"] = rPr.hlinkClick
 
 		return out as RunProps
+	}
+}
+
+// The accent slot of a table style of PowerPoint's built-in Medium Style 2 family (render/tableStyles.ts), from its
+// whole-table fill; undefined for any other style.
+function mediumStyle2(id: string | undefined): string | undefined {
+	const style = id === undefined ? undefined : builtinTableStyle(id)
+
+	if (style === undefined) return undefined
+
+	const r = style.reader
+	const fill = r.child(r.child(r.child(r.child(style.node, D.A, "wholeTbl"), D.A, "tcStyle"), D.A, "fill"), D.A, "solidFill")
+
+	return r.attr(r.child(fill, D.A, "schemeClr"), "val")
+}
+
+// A strong cell's text (a header row, a first column): bold in the style's text colour where the source's runs say
+// neither (the style's text properties come before the master's, which the resolved runs carry).
+function strongText(body: TextBody, color: FillProps | undefined, source: TextBody): TextBody {
+	const strong = (rPr: RunProps, own: RunProps | undefined): RunProps => ({
+		...rPr,
+		...(own?.b === undefined ? { b: true } : {}),
+		...(own?.fill === undefined && color !== undefined ? { fill: color } : {})
+	})
+
+	return {
+		...body,
+		paragraphs: body.paragraphs.map((paragraph, p) => {
+			const from = source.paragraphs[p]
+
+			return {
+				...paragraph,
+				runs: paragraph.runs.map((run, k) => {
+					const own = from?.runs[k]
+
+					return run.kind === "opaque"
+						? run
+						: { ...run, rPr: strong(run.rPr, own === undefined || own.kind === "opaque" ? undefined : own.rPr) }
+				}),
+				endRPr: strong(paragraph.endRPr ?? {}, from?.endRPr)
+			}
+		})
 	}
 }
 
@@ -537,6 +719,13 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		let out = ""
 
 		for (const { shape, node } of shapes) {
+			// Picture bullets are copied before the text that shows them is written.
+			for (const part of flattener.bulletPictures(shape, node)) {
+				const path = await picture(part)
+
+				if (path !== undefined) flattener.pictures.set(part, path)
+			}
+
 			const flat = flattener.shape(shape, node)
 
 			if (flat === undefined) continue
@@ -695,7 +884,29 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 			if (markup !== "") notes = `<presentation:notes>${markup}</presentation:notes>`
 		}
 
-		pages += `<draw:page draw:name="${escapeAttribute(names.get(ref) ?? "")}"${style === undefined ? "" : ` draw:style-name="${style}"`} draw:master-page-name="${master}">${shapes}${notes}</draw:page>`
+		// The slide's timing (after the shapes, before the notes), on the shapes written with the ids it names them by: an
+		// effect on a shape the page could not hold goes with it.
+		let timing = ""
+
+		if (slide.timing !== undefined) {
+			const gone = new Set<number>()
+
+			for (const id of odpTargetIds(slide.timing)) {
+				const shape = findShape(slide.shapes, id)
+
+				if (shape === undefined || !shapes.includes(` xml:id="${escapeAttribute(odpTargetId(shape))}"`)) gone.add(id)
+			}
+
+			const kept = withoutShapes(slide.timing, gone)
+
+			if (kept !== slide.timing) count(report.omitted, "animation of a shape not written")
+			if (kept !== undefined)
+				timing = odpTimingMarkup({ fragment: undefined, shapes: slide.shapes }, kept, undefined)
+					.map(piece => (typeof piece === "string" ? piece : piece instanceof Uint8Array ? decodeUtf8(piece) : ""))
+					.join("")
+		}
+
+		pages += `<draw:page draw:name="${escapeAttribute(names.get(ref) ?? "")}"${style === undefined ? "" : ` draw:style-name="${style}"`} draw:master-page-name="${master}">${shapes}${timing}${notes}</draw:page>`
 	}
 
 	if (deck.slides.length === 0) {
@@ -724,7 +935,17 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 				)}"/>`
 		)
 		.join("")
-	const settings = shows === "" ? "" : `<presentation:settings>${shows}</presentation:settings>`
+	const nearest = odfShow(deck, deck.show)
+
+	for (const what of nearest.approximated) count(report.approximated, what)
+	for (const what of nearest.omitted) count(report.omitted, what)
+
+	const showAttributes = settingsAttributes(deck, nearest.show, names)
+
+	if (isRefused(showAttributes)) return showAttributes
+
+	const attributes = newSettingsAttributes(showAttributes, "presentation")
+	const settings = shows === "" && attributes === "" ? "" : `<presentation:settings${attributes}>${shows}</presentation:settings>`
 	const content = `<?xml version="1.0" encoding="UTF-8"?><office:document-content ${NAMESPACES} office:version="1.3"><office:automatic-styles>${contentStyles.markup([pages])}</office:automatic-styles><office:body><office:presentation>${pages}${settings}</office:presentation></office:body></office:document-content>`
 	const pageLayout = `<style:page-layout style:name="PM1"><style:page-layout-properties fo:margin-top="0cm" fo:margin-bottom="0cm" fo:margin-left="0cm" fo:margin-right="0cm" fo:page-width="${cm(deck.size.cx)}" fo:page-height="${cm(deck.size.cy)}" style:print-orientation="${deck.size.cx >= deck.size.cy ? "landscape" : "portrait"}"/></style:page-layout>`
 	const styles = `<?xml version="1.0" encoding="UTF-8"?><office:document-styles ${NAMESPACES} office:version="1.3"><office:styles><style:default-style style:family="graphic"><style:graphic-properties draw:fill="none" draw:stroke="none" draw:shadow="hidden"/></style:default-style></office:styles><office:automatic-styles>${pageLayout}${stylesStyles.markup(masterMarkup)}</office:automatic-styles><office:master-styles>${masterMarkup.join("")}</office:master-styles></office:document-styles>`
@@ -808,4 +1029,16 @@ export async function writeFreshOdp(
 	await sink.close()
 
 	return { report: fresh.report }
+}
+
+function findShape(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
+	for (const shape of shapes) {
+		if (shape.id === id) return shape
+
+		const inner = shape.children === undefined ? undefined : findShape(shape.children, id)
+
+		if (inner !== undefined) return inner
+	}
+
+	return undefined
 }

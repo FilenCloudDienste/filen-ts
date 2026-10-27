@@ -34,7 +34,7 @@ describe("ALL_ACTIONS", () => {
 
 	it("namespaces every id as <feature>.<name> and describes every action", () => {
 		for (const def of ALL_ACTIONS) {
-			expect(def.id, def.id).toMatch(/^[a-z]+\.[A-Za-z]+$/)
+			expect(def.id, def.id).toMatch(/^[a-z]+(?:\.[a-z]+)?\.[A-Za-z]+$/)
 			expect(def.descriptionKey.length, def.id).toBeGreaterThan(0)
 		}
 	})

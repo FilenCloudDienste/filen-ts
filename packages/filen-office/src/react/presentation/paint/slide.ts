@@ -1,8 +1,9 @@
 import { IDENTITY, multiply, type DrawingData, type DrawingImage, type Rgba } from "../../../core/drawingml/index"
-import type { RenderEffects, SlideLayer } from "../../../core/presentation/output"
+import type { RenderEffects, SlideLayer, TextPage } from "../../../core/presentation/output"
+import { PICTURE_BULLET_OBJECT } from "../../../core/presentation/text/page"
 import type { PresentationSessionApi } from "../../../dom/presentation/protocol"
 import { drawingImages, paintDrawing } from "../../docx/paint/drawing"
-import { paintPage } from "../../docx/paint/page"
+import { paintPage, type PaintedPage } from "../../docx/paint/page"
 import type { SlidePainter } from "../SlideView"
 
 // The slide compositor: a SlideRender as DOM. The background, then per layer its drawing (one SVG from paintDrawing,
@@ -384,6 +385,48 @@ export const paintSlide: SlidePainter = (render, context) => {
 			})
 	}
 
+	// A text page's picture bullets: each object box shows its picture, now when the session holds it, else once it
+	// arrives (as a drawing's pictures do).
+	const bulletPictures = (painted: PaintedPage, text: TextPage): void => {
+		for (const object of painted.objects) {
+			const key = object.kind === PICTURE_BULLET_OBJECT ? text.images?.[object.id] : undefined
+
+			if (key === undefined) continue
+
+			const show = (): void => {
+				const url = urls.get(key)
+
+				if (url !== undefined)
+					object.element.style.background = `center / contain no-repeat url("${url.replace(/["\\]/gu, "\\$&")}")`
+			}
+
+			if (!urls.has(key) && !pending.has(key)) {
+				const url = session === undefined || window === null ? undefined : picturesOf(session, window).take(key)
+
+				if (url !== undefined) {
+					held.push(key)
+					urls.set(key, url)
+				}
+			}
+
+			if (urls.has(key)) {
+				show()
+
+				continue
+			}
+
+			let waiting = pending.get(key)
+
+			if (waiting === undefined) {
+				waiting = []
+				pending.set(key, waiting)
+				load(key)
+			}
+
+			waiting.push(show)
+		}
+	}
+
 	const background = document.createElement("div")
 
 	background.className = "fo-slide-background"
@@ -455,6 +498,7 @@ export const paintSlide: SlidePainter = (render, context) => {
 			// the nearest one to its links, so they go.
 			for (const inner of page.root.querySelectorAll<HTMLElement>("[data-fo-layer]")) delete inner.dataset["foLayer"]
 
+			bulletPictures(page, text)
 			holder.append(page.root)
 			element.append(holder)
 		}

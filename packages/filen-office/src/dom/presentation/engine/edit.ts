@@ -1,3 +1,4 @@
+import { prepareOdpPictureOp } from "../../../core/odp/write/emit/picture"
 import { proveOdpSlide } from "../../../core/odp/write/proof"
 import { odpSourceReading } from "../../../core/odp/write/session"
 import { odpWriteSource } from "../../../core/odp/write/source"
@@ -6,9 +7,12 @@ import { parseRelationships, partKey, relationshipsPartName, Relationships } fro
 import type { PptxParts } from "../../../core/pptx/package"
 import { readSlidePart } from "../../../core/pptx/read/slide"
 import { P_MAIN } from "../../../core/pptx/read/xml"
+import { sourcePictureFill } from "../../../core/pptx/write/emit/picture"
 import { DeckTally } from "../../../core/presentation/budget"
 import { applyAll, applyOp, opTouches, type DeckChanges, type Dirt, type Inverse, type Touch } from "../../../core/presentation/edit/apply"
+import type { PictureReading } from "../../../core/presentation/edit/apply/picture"
 import { isRefused } from "../../../core/presentation/edit/apply/shape"
+import { deckDefinitionType, diagramPartsOf, type SmartArtSourceReading } from "../../../core/presentation/edit/apply/smartart"
 import type { SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
 import { inheritedDeclarations } from "../../../core/presentation/edit/canonical"
 import { deckChanges, deckFingerprints, findShape, fingerprintTouches, orderKey } from "../../../core/presentation/edit/changes"
@@ -516,7 +520,7 @@ function rawDocumentOf(state: EditState, part: string): XmlDocument | undefined 
 
 // The engine's half of the apply context: allocators, source bytes, and reading held markup back. Synchronous: what
 // it reads was prepared (prepare()).
-function contextFor(session: EngineSession, state: EditState): SlideSourceReading {
+function contextFor(session: EngineSession, state: EditState): SlideSourceReading & Partial<PictureReading & SmartArtSourceReading> {
 	if (session.deck.format === "odp") {
 		const odp = odpParts(session.deck)
 
@@ -553,7 +557,7 @@ function contextFor(session: EngineSession, state: EditState): SlideSourceReadin
 		return node
 	}
 
-	return {
+	const reading: SlideSourceReading & PictureReading & SmartArtSourceReading = {
 		sourceBytes: src => sourceBytes(session, state.raw, src),
 		newShapeId: slide => nextShapeId(deck.nodes.get(slide)?.shapes ?? []),
 		newSlideRef: () => slideRef(state.nextRef++),
@@ -679,8 +683,50 @@ function contextFor(session: EngineSession, state: EditState): SlideSourceReadin
 		},
 		newPart: kind => newPartName(state, deck, parts, kind),
 		facts,
-		partOf: partOf(deck, parts)
+		partOf: partOf(deck, parts),
+		pictureFill(slide, shape) {
+			if (shape.src?.format !== "pptx") return undefined
+
+			const document = parts.document(shape.src.part) ?? state.raw.get(shape.src.part)?.document
+
+			if (document === undefined) return refused("stale", "the picture's source is not held")
+
+			return sourcePictureFill(document, shape, cache.relationships.get(partKey(slide.part)) ?? new Relationships([]), parts.tally)
+		},
+		// A diagram part prepare read (one the package no longer has is no part to name), or one an op held.
+		diagramDocument: part =>
+			part.startsWith(RAW_PREFIX) ? state.raw.get(part)?.document : parts.opc.has(part) ? parts.document(part) : undefined,
+		holdDiagram: (document, name) => {
+			// An undo holds a part again under the name it had, so the frame reads as it did.
+			if (name === undefined || !name.startsWith(RAW_PREFIX) || state.raw.has(name)) return holdRaw(state, parts, document)
+
+			state.raw.set(name, { document })
+			parts.adopt(name, document)
+
+			return name
+		},
+		releaseDiagram: name => {
+			const held = state.raw.get(name)
+
+			// Only a part an op held (no restored slide's markup, which the writer reads by name).
+			if (held === undefined || held.part !== undefined || held.parts !== undefined || held.nodePart !== undefined) return
+
+			state.raw.delete(name)
+			parts.forget(name)
+		},
+		partsOfType: type => diagramPartsOfType(parts, type)
 	}
+
+	return reading
+}
+
+// The package's parts of a content type ("/ppt/diagrams/layout1.xml"…), in package order.
+function diagramPartsOfType(parts: PptxParts, type: string): string[] {
+	const out: string[] = []
+
+	for (const entry of parts.opc.entries()) if (parts.contentTypes.typeOf(entry.name) === type) out.push(`/${entry.name}`)
+
+	return out
 }
 
 function partOf(deck: Deck, parts: PptxParts): PartOf {
@@ -787,6 +833,9 @@ async function prepareOdp(
 		state.proved.set(ref, proveOdpSlide({ deck, slide: node, source }))
 		notify(node.shapes)
 	}
+
+	// A crop of a source picture is written in lengths of its image's own size: read from the entry's header.
+	await prepareOdpPictureOp(deck, op, parts.opc, slicing)
 }
 
 // Everything an op needs before it applies: its slides parsed and proved, their relationships, and for the
@@ -833,6 +882,17 @@ async function prepare(
 		await relationshipsOf(state, parts, node.part)
 		await scopeOf(state, parts, node.part)
 		await prove(session, state, node, options)
+	}
+
+	// The diagram parts a smartart op reads (apply/smartart.ts), parsed beside the package's other documents; one past
+	// the XML part budget is not read (the op is refused).
+	const definitionType = deckDefinitionType(op)
+
+	for (const part of [...diagramPartsOf(deck, op), ...(definitionType === undefined ? [] : diagramPartsOfType(parts, definitionType))]) {
+		if (part.startsWith(RAW_PREFIX) || parts.document(part) !== undefined || !parts.opc.has(part)) continue
+		if ((parts.opc.entry(part)?.uncompressedSize ?? 0) > parts.budgets.xmlPartBytes) continue
+
+		parts.adopt(part, await parts.opc.xml(part))
 	}
 
 	if (op.family !== "slide" || !(op.kind === "delete" || op.kind === "restore" || op.kind === "duplicate")) return
@@ -1072,6 +1132,7 @@ function changed(session: EngineSession, state: EditState, touches: readonly Tou
 			(touch.kind === "presentation" && (touch.what === "slideList" || touch.what === "sections")) ||
 			(touch.kind === "slide" && touch.dirt.kind === "slidePart" && touch.dirt.part === "attributes")
 	)
+	const showChanged = touches.some(touch => touch.kind === "presentation" && touch.what === "show")
 
 	session.emit({
 		type: "changed",
@@ -1081,14 +1142,19 @@ function changed(session: EngineSession, state: EditState, touches: readonly Tou
 		canUndo: state.history.canUndo,
 		canRedo: state.history.canRedo,
 		slides: [...slidesOf(touches)].filter(ref => deck.slides.includes(ref)),
-		...(listChanged
+		...(listChanged || showChanged
 			? {
 					info: {
-						slides: deck.slides.map(ref => ({
-							ref,
-							hidden: deck.nodes.get(ref)?.hidden ?? deck.hiddenSlides?.has(ref) ?? false
-						})),
-						sections: deck.sections
+						...(listChanged
+							? {
+									slides: deck.slides.map(ref => ({
+										ref,
+										hidden: deck.nodes.get(ref)?.hidden ?? deck.hiddenSlides?.has(ref) ?? false
+									})),
+									sections: deck.sections
+								}
+							: {}),
+						...(showChanged ? { show: deck.show } : {})
 					}
 				}
 			: {})

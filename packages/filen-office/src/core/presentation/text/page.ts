@@ -5,11 +5,30 @@ import type { TextPage } from "../output"
 import type { BodySession } from "./body"
 
 // A laid-out body as the docx painters' page data: one page the size of the body's box (turned for vertical
-// text), every count and array present, graphics and objects empty, one source per paragraph (region TEXTBOX,
+// text), every count and array present, graphics empty, objects the picture bullets, one source per paragraph (region TEXTBOX,
 // item = paragraph index), links over the runs that carry one. Arrays are tight copies, so a page can be
 // transferred while the layout stays usable.
 
-export function assemblePage(out: TextLayout, texts: readonly string[], session: BodySession, width: number, height: number): TextPage {
+// An object of a text page that is a picture bullet (objectInts: index into TextPage.images, layer, paragraph); above
+// the docx object kinds.
+export const PICTURE_BULLET_OBJECT = 64
+
+// The objects a body's page carries (picture bullets), OBJECT_FLOATS and OBJECT_INTS per object.
+export interface PageObjects {
+	readonly floats: Float32Array
+	readonly ints: Int32Array
+	readonly kinds: Uint8Array
+	readonly images: readonly string[]
+}
+
+export function assemblePage(
+	out: TextLayout,
+	texts: readonly string[],
+	session: BodySession,
+	width: number,
+	height: number,
+	objects?: PageObjects
+): TextPage {
 	const tight = out.compact()
 
 	return pageOf(
@@ -27,7 +46,8 @@ export function assemblePage(out: TextLayout, texts: readonly string[], session:
 		texts,
 		session,
 		width,
-		height
+		height,
+		objects
 	)
 }
 
@@ -43,7 +63,14 @@ export interface PageLines {
 	readonly decorationInts: Int32Array
 }
 
-export function pageOf(lines: PageLines, texts: readonly string[], session: BodySession, width: number, height: number): TextPage {
+export function pageOf(
+	lines: PageLines,
+	texts: readonly string[],
+	session: BodySession,
+	width: number,
+	height: number,
+	objects?: PageObjects
+): TextPage {
 	const sourceInts = new Int32Array(SOURCE_INTS * texts.length)
 
 	for (let source = 0; source < texts.length; source++) sourceInts.set([Region.TEXTBOX, 0, source, 0], source * SOURCE_INTS)
@@ -59,10 +86,10 @@ export function pageOf(lines: PageLines, texts: readonly string[], session: Body
 		graphicCount: 0,
 		graphicFloats: new Float32Array(0),
 		graphicInts: new Int32Array(0),
-		objectCount: 0,
-		objectFloats: new Float32Array(0),
-		objectInts: new Int32Array(0),
-		objectKinds: new Uint8Array(0),
+		objectCount: objects?.kinds.length ?? 0,
+		objectFloats: objects?.floats ?? new Float32Array(0),
+		objectInts: objects?.ints ?? new Int32Array(0),
+		objectKinds: objects?.kinds ?? new Uint8Array(0),
 		sourceCount: texts.length,
 		sourceInts,
 		sourceTexts: texts,
@@ -77,7 +104,8 @@ export function pageOf(lines: PageLines, texts: readonly string[], session: Body
 		strokes: session.strokes,
 		textEffects: session.effects,
 		decorations: session.decorations.values,
-		links: session.links
+		links: session.links,
+		...(objects === undefined ? {} : { images: objects.images })
 	}
 }
 

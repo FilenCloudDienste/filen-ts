@@ -18,7 +18,7 @@ import { G, type PartReader } from "./xml"
 
 // A slide's p:timing (ECMA-376 Part 1 §19.5) into the model's TimingTree: the time node tree and the
 // build list (p:bldLst). Every node's `ctn.src` is its time node element (p:par, p:anim…), so the emit keeps an
-// unedited node, and the children and attributes the model does not hold (p:subTnLst, p:progress, tmFilter,
+// unedited node, and the children and attributes the model does not hold (p:progress, tmFilter,
 // extLst…), by span. Targets address shapes by cNvPr id. Read eagerly with the slide: a slide's tree is small next
 // to its shapes, and the budgets bound a hostile one before it is held.
 
@@ -212,6 +212,14 @@ class TimingReader {
 			const time = this.node(child, depth + 1)
 
 			if (time !== undefined) ctn.children.push(time)
+		}
+
+		const subs = r.child(node, G.P, "subTnLst")
+
+		for (let child = r.first(subs); child >= 0; child = r.next(child)) {
+			const time = this.node(child, depth + 1)
+
+			if (time !== undefined) (ctn.subTnLst ??= []).push(time)
 		}
 
 		return ctn

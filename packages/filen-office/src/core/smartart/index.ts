@@ -10,3 +10,4 @@ export {
 	type SmartArtLayoutEntry,
 	type SmartArtStyleEntry
 } from "./gallery/index"
+export { diagramFindTexts, type SmartArtDefinitionInfo, type SmartArtInfo, type SmartArtNodeInfo } from "./edit"

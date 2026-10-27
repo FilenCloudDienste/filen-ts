@@ -41,11 +41,15 @@ import {
 	viewOnlyKey,
 	type PresentationViewOnlyReason
 } from "@/features/presentation/components/deckChrome.logic"
-import { LegacyPresentationBar } from "@/features/presentation/components/legacyView"
+import { LegacyPresentationBar, type LegacySaveCopy } from "@/features/presentation/components/legacyView"
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
+import { SmartArtPrompts, SmartArtTextPane } from "@/features/presentation/components/smartartTextPane"
 import { PresentationFileMenu } from "@/features/presentation/components/presentationFileMenu"
 import { usePresentationFind } from "@/features/presentation/components/presentationFind"
+import { PresentationMediaFrames } from "@/features/presentation/components/mediaFrame"
 import { PresentationShapeLayer } from "@/features/presentation/components/ribbon/arrange"
+import { usePresentationPictureDrop } from "@/features/presentation/components/ribbon/insertObjects"
+import { PresentationTableRange, tableCellAt } from "@/features/presentation/components/ribbon/table"
 import { presentationTextLabels } from "@/features/presentation/components/ribbon/homeText.logic"
 import { TextLinkHost } from "@/features/presentation/components/ribbon/homeTextControls"
 import { PresentationSlideRail } from "@/features/presentation/components/slideRail"
@@ -88,6 +92,8 @@ export interface PresentationEditorProps {
 	item: DriveItem
 	variant: DriveVariant | undefined
 	editing: PresentationEditing
+	// Save as .pptx of a PowerPoint 97–2003 deck, where a copy may be saved beside the file.
+	saveCopy?: LegacySaveCopy | undefined
 }
 
 function ViewOnlyBadge({ reasons }: { reasons: readonly PresentationViewOnlyReason[] }) {
@@ -336,7 +342,7 @@ function noticesToasts(deck: PresentationDocument, store: PresentationStore, t: 
 	}
 }
 
-export function PresentationEditor({ store, document: deck, alt, item, variant, editing }: PresentationEditorProps) {
+export function PresentationEditor({ store, document: deck, alt, item, variant, editing, saveCopy }: PresentationEditorProps) {
 	const { writable, renamed, onDirtyChange, saveRef, onSave, onAutosave } = editing
 
 	const { t } = useTranslation("preview")
@@ -346,6 +352,8 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const downloads = usePreviewDownloadable()
 	const overrides = useOverrides()
 	const [railOpen, setRailOpen] = useState(true)
+	// The media play controls' layer, above the selection layer.
+	const [mediaControls, setMediaControls] = useState<HTMLDivElement | null>(null)
 	const [notesOpen, setNotesOpen] = useState(true)
 	const [selectedTab, setSelectedTab] = useState<string>("home")
 	const [sectionDialog, setSectionDialog] = useState<"add" | "rename" | null>(null)
@@ -436,7 +444,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 		if (next >= 0) editor.go(next)
 	}
 
-	const show = useDeckPresentation({ store, deck, index, go, focusSlide: canvasRef })
+	const show = useDeckPresentation({ store, deck, index, go, focusSlide: canvasRef, editable: editor.editable })
 	const findControls = usePresentationFind({
 		session: deck.session,
 		info,
@@ -511,6 +519,8 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				setNotesOpen(open => !open)
 			},
 			startShow: show.startShow,
+			startShowFrom: show.startShowFrom,
+			startPresenter: show.startPresenter,
 			save: () => {
 				onSave()
 			},
@@ -524,6 +534,8 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 		info === undefined || session === undefined
 			? undefined
 			: { info, render, selection: shapes, command: editor.command, session, text }
+	// Pictures pasted or dropped on the slide go in as inserted pictures.
+	const pictureDrop = usePresentationPictureDrop(slideEditor)
 	const ribbonRender = shapeState.slide === ref && shapeState.ids.length > 0 ? render : undefined
 	const kinds = ribbonRender === undefined ? NO_KINDS : selectionKinds(selectedShapes(ribbonRender, shapeState))
 	const fileMenu = (
@@ -585,6 +597,9 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				aria-label={alt}
 				className="flex size-full flex-col"
 				onKeyDown={event => {
+					// The show's keys first: while it runs the editor takes none (no edit reaches the deck under it).
+					if (show.onKey(event)) return
+
 					// F6 and Shift+F6 move between the ribbon and the slide, as PowerPoint's panes.
 					if (event.key === "F6" && !event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.altKey) {
 						const ribbon = event.currentTarget.querySelector("[data-office-ribbon]")
@@ -621,7 +636,10 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					status={status}
 					replacement={replacement}
 				/>
-				<LegacyPresentationBar format={info?.format} />
+				<LegacyPresentationBar
+					format={info?.format}
+					saveCopy={saveCopy}
+				/>
 				<DeckNotes
 					deck={deck}
 					extra={autosaveNotice}
@@ -647,11 +665,19 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 							/>
 						</SlideListContextMenu>
 					) : null}
+					{show.showing ? null : (
+						<SmartArtTextPane
+							editor={slideEditor}
+							editable={editor.editable}
+							phone={phone}
+						/>
+					)}
 					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 						<div
 							ref={canvasRef}
 							data-preview-surface
 							tabIndex={0}
+							{...(slideEditor === undefined ? {} : pictureDrop)}
 							className="relative min-h-0 flex-1 bg-muted/40 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
 						>
 							{count === 0 ? (
@@ -670,42 +696,70 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 									actions={show.actions}
 									className="size-full"
 									onScale={setScale}
-									{...(slideEditor === undefined
-										? {}
-										: {
-												overlay: (
-													<>
-														<PresentationShapeLayer
-															editor={slideEditor}
-															scale={scale}
-															onEnterText={(shape, at) => {
-																setTextAt(at)
-																setEditingText(shape)
-															}}
-														/>
-														{editingText === undefined || editingText.slide !== ref ? null : (
-															<PresentationTextEditor
-																key={`${String(editingText.slide)}:${String(editingText.id)}`}
-																session={slideEditor.session}
-																shape={editingText}
-																scale={scale}
-																editing={text}
-																bindings={textBindings}
-																labels={presentationTextLabels(t)}
-																{...(render === undefined ? {} : { render })}
-																{...(textAt === undefined ? {} : { at: textAt })}
-																readOnly={!editor.editable}
-																onExit={() => {
-																	setEditingText(undefined)
-																}}
-																onRefused={reason => {
-																	toast.error(t(refusalKey(reason)))
-																}}
-															/>
-														)}
-													</>
-												)
-											})}
+									overlay={
+										slideEditor === undefined ? (
+											<PresentationMediaFrames
+												render={render}
+												session={session}
+												scale={scale}
+												notices={deck.notices}
+												actions={show.actions}
+											/>
+										) : (
+											<>
+												{/* The media under the selection layer; their play controls in the layer above it (below). */}
+												<PresentationMediaFrames
+													render={render}
+													session={slideEditor.session}
+													scale={scale}
+													notices={deck.notices}
+													actions={show.actions}
+													controlsHost={mediaControls}
+												/>
+												<PresentationShapeLayer
+													editor={slideEditor}
+													scale={scale}
+													onEnterText={(shape, at) => {
+														setTextAt(at)
+														// A table opens the cell under the press.
+														setEditingText(tableCellAt(render, shape, at))
+													}}
+												/>
+												<PresentationTableRange
+													editor={slideEditor}
+													scale={scale}
+												/>
+												<div
+													ref={setMediaControls}
+													className="pointer-events-none absolute inset-0"
+												/>
+												<SmartArtPrompts
+													editor={slideEditor}
+													scale={scale}
+												/>
+												{editingText === undefined || editingText.slide !== ref ? null : (
+													<PresentationTextEditor
+														key={`${String(editingText.slide)}:${String(editingText.id)}:${editingText.cell === undefined ? "" : `${String(editingText.cell.row)}:${String(editingText.cell.col)}`}`}
+														session={slideEditor.session}
+														shape={editingText}
+														scale={scale}
+														editing={text}
+														bindings={textBindings}
+														labels={presentationTextLabels(t)}
+														{...(render === undefined ? {} : { render })}
+														{...(textAt === undefined ? {} : { at: textAt })}
+														readOnly={!editor.editable}
+														onExit={() => {
+															setEditingText(undefined)
+														}}
+														onRefused={reason => {
+															toast.error(t(refusalKey(reason)))
+														}}
+													/>
+												)}
+											</>
+										)
+									}
 								/>
 							)}
 							{show.showing ? null : show.refusedNote("canvas")}

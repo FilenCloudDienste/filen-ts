@@ -1,6 +1,7 @@
 import { kids, persistRecord, readHeadersFootersOf, type HeadersFooters, type PptDocument, type PptFile } from "./document"
 import { readDrawing, type Drawing } from "./officeArt"
 import { tooLarge } from "../presentation/refusal"
+import { PresentationError } from "../presentation/model"
 import { malformed, RT, u16, u32, utf16Text, type PptRecord } from "./records"
 import { readMasterStyle, type MasterStyle } from "./text"
 
@@ -159,8 +160,19 @@ const RT_PROG_BINARY_TAG = 0x138a
 const RT_BINARY_TAG_DATA_BLOB = 0x138b
 const RT_EXT_TIME_NODE_CONTAINER = 0xf144
 
-// §2.5.22–§2.5.24: the "___PPT10" binary tag of a slide's SlideProgTagsContainer and what it holds.
+// §2.5.22–§2.5.24: the "___PPT10" binary tag of a slide's SlideProgTagsContainer and what it holds; a damaged tag
+// holds nothing (the conversion reports the slide's timing and comments lost).
 function pp10(file: PptFile, records: readonly PptRecord[]): { readonly timeNodes: boolean; readonly comments: number } {
+	try {
+		return pp10Contents(file, records)
+	} catch (error) {
+		if (error instanceof PresentationError && error.reason === "malformed") return { timeNodes: false, comments: 0 }
+
+		throw error
+	}
+}
+
+function pp10Contents(file: PptFile, records: readonly PptRecord[]): { readonly timeNodes: boolean; readonly comments: number } {
 	let timeNodes = false
 	let comments = 0
 

@@ -1,5 +1,6 @@
 import { refused, type Deck, type Refused, type SlideRef } from "../../presentation/model"
 import { XmlEditor, escapeAttribute, type XmlDocument } from "../../xml/index"
+import { newSettingsAttributes, type SettingsAttribute } from "./emit/presentation"
 
 // The references between pages an ODP save keeps whole (ODF 1.3 Part 3 §9.7 presentation:show, §19.416
 // presentation:pages; §10.4.3 and §6.1.8 page links "#name"; §19.914 xml:id, §19.135 draw:id):
@@ -140,14 +141,16 @@ export function renameIds(
 }
 
 // presentation:settings rewritten for the deck: each custom show's page list by the pages' names now, the start page
-// dropped when its page is gone. `settings` is the element parsed on its own (with its scope's declarations).
+// dropped when its page is gone, and with `show` (an edited Set Up Slide Show) its attributes saying it, written in
+// the presentation namespace's `prefix`. `settings` is the element parsed on its own (with its scope's declarations).
 export function settingsMarkup(
 	document: XmlDocument,
 	node: number,
 	deck: Deck,
 	names: ReadonlyMap<SlideRef, string>,
 	canonical: (node: number, name: string) => string,
-	nameOf: (node: number) => string
+	nameOf: (node: number) => string,
+	show?: { readonly attributes: readonly SettingsAttribute[]; readonly prefix: string }
 ): Uint8Array | Refused {
 	const editor = new XmlEditor(document)
 	const shows = new Map(deck.customShows.map(show => [show.name, show]))
@@ -160,6 +163,21 @@ export function settingsMarkup(
 			editor.removeAttribute(node, attribute.name)
 			changed = true
 		}
+	}
+
+	for (const wanted of show?.attributes ?? []) {
+		const qualified = `presentation:${wanted.local}`
+		const current = document.attributes(node).find(attribute => canonical(node, attribute.name) === qualified)
+
+		if (wanted.holds(current?.value)) continue
+
+		if (wanted.value === undefined) {
+			if (current !== undefined) editor.removeAttribute(node, current.name)
+		} else {
+			editor.setAttribute(node, current?.name ?? `${show?.prefix ?? "presentation"}:${wanted.local}`, wanted.value)
+		}
+
+		changed = true
 	}
 
 	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
@@ -210,14 +228,22 @@ export function settingsMarkup(
 	return out.subarray(document.start(node), out.length - (document.bytes.length - document.end(node)))
 }
 
-// A custom show list as new markup (a deck whose content.xml has no presentation:settings).
-export function newSettingsMarkup(deck: Deck, names: ReadonlyMap<SlideRef, string>): string {
-	if (deck.customShows.length === 0) return ""
+// A custom show list and the edited show's attributes as new markup (a deck whose content.xml has no
+// presentation:settings), in the presentation namespace's `prefix`.
+export function newSettingsMarkup(
+	deck: Deck,
+	names: ReadonlyMap<SlideRef, string>,
+	prefix = "presentation",
+	show?: readonly SettingsAttribute[]
+): string {
+	const attributes = show === undefined ? "" : newSettingsAttributes(show, prefix)
+
+	if (deck.customShows.length === 0 && attributes === "") return ""
 
 	const shows = deck.customShows
 		.map(
 			show =>
-				`<presentation:show presentation:name="${escapeAttribute(show.name)}" presentation:pages="${escapeAttribute(
+				`<${prefix}:show ${prefix}:name="${escapeAttribute(show.name)}" ${prefix}:pages="${escapeAttribute(
 					show.slides
 						.map(ref => names.get(ref))
 						.filter(name => name !== undefined)
@@ -226,5 +252,5 @@ export function newSettingsMarkup(deck: Deck, names: ReadonlyMap<SlideRef, strin
 		)
 		.join("")
 
-	return `<presentation:settings>${shows}</presentation:settings>`
+	return `<${prefix}:settings${attributes}>${shows}</${prefix}:settings>`
 }

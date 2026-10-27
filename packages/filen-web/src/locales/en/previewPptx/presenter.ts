@@ -1,0 +1,86 @@
+// "preview" namespace, presentation slideshow: the presenter view (its window, current and next slide, notes, timer,
+// controls), starting full screen, and the show's keyboard shortcuts. Spread into preview.ts; same catalog rules.
+export const previewPptxPresenter = {
+	/** Presentation slideshow — title of the separate browser window that shows the presenter view */
+	previewPptxPresenterWindowTitle: "Presenter view",
+	/** Presentation slideshow — accessible name of the presenter view (current slide, next slide, notes, timer) */
+	previewPptxPresenterLabel: "Presenter view",
+	/** Presentation slideshow — accessible name of the current slide in the presenter view */
+	previewPptxPresenterCurrent: "Current slide",
+	/** Presentation slideshow — heading over the preview of the slide that comes next */
+	previewPptxPresenterNext: "Next",
+	/** Presentation slideshow — shown instead of the next slide when the next click plays an animation on this slide */
+	previewPptxPresenterNextStep: "Next animation on this slide",
+	/** Presentation slideshow — shown instead of the next slide after the last one */
+	previewPptxPresenterEndOfShow: "End of slideshow",
+	/** Presentation slideshow — heading of the speaker notes in the presenter view */
+	previewPptxPresenterNotes: "Notes",
+	/** Presenter view — accessible name of the speaker notes area (unique beside the editor's own notes pane) */
+	previewPptxPresenterNotesRegion: "Speaker notes",
+	/** Presentation slideshow — shown when the current slide has no speaker notes */
+	previewPptxPresenterNoNotes: "No notes for this slide",
+	/** Presentation slideshow — button that makes the notes text larger */
+	previewPptxPresenterNotesLarger: "Larger notes text",
+	/** Presentation slideshow — button that makes the notes text smaller */
+	previewPptxPresenterNotesSmaller: "Smaller notes text",
+	/** Presentation slideshow — accessible name of the timer showing how long the presentation has been running */
+	previewPptxPresenterTimer: "Time presenting",
+	/** Presentation slideshow — button that pauses the presentation timer */
+	previewPptxPresenterPause: "Pause timer",
+	/** Presentation slideshow — button that resumes the paused presentation timer */
+	previewPptxPresenterResume: "Resume timer",
+	/** Presentation slideshow — button that sets the presentation timer back to zero */
+	previewPptxPresenterResetTimer: "Restart timer",
+	/** Presentation slideshow — accessible name of the time of day shown in the presenter view */
+	previewPptxPresenterClock: "Current time",
+	/** Presentation slideshow — where the show is, e.g. "Slide 3 of 12" */
+	previewPptxPresenterSlideCount: "Slide {{current}} of {{total}}",
+	/** Presentation slideshow — button: previous slide or animation */
+	previewPptxPresenterPrevious: "Previous",
+	/** Presentation slideshow — button: next slide or animation */
+	previewPptxPresenterNextButton: "Next",
+	/** Presentation slideshow — button that blacks out the audience's screen (again to return) */
+	previewPptxPresenterBlack: "Black screen",
+	/** Presentation slideshow — button that whites out the audience's screen (again to return) */
+	previewPptxPresenterWhite: "White screen",
+	/** Presentation slideshow — button that ends the slideshow */
+	previewPptxPresenterEnd: "End slideshow",
+	/** Presentation slideshow — button in the slideshow window that shows it full screen, after the presenter view opened in its own window */
+	previewPptxPresenterStart: "Start slideshow",
+	/** Presentation slideshow — note in the presenter view when the browser would not show the slideshow full screen from there */
+	previewPptxPresenterStartHint: "Click Start slideshow in the slideshow window to show it full screen.",
+	/** Presentation slideshow — note when the browser blocked the presenter view's own window, so it is shown in this one */
+	previewPptxPresenterBlocked: "Your browser blocked the presenter window, so the presenter view is shown here.",
+	/** Presentation slideshow — button in the presenter view (shown in the same window) that shows the slideshow instead */
+	previewPptxPresenterShowAudience: "Show slideshow",
+	/** Presentation slideshow — button over the slideshow that brings the presenter view back */
+	previewPptxPresenterShowPresenter: "Show presenter view",
+	/** Presentation slideshow — button that starts the slideshow with the presenter view */
+	previewPptxPresenterOpen: "Presenter view",
+	/** Presentation shortcuts — next slide or animation in a slideshow */
+	previewPptxShortcutShowNext: "Slideshow: next slide or animation",
+	/** Presentation shortcuts — previous slide or animation in a slideshow */
+	previewPptxShortcutShowPrevious: "Slideshow: previous slide or animation",
+	/** Presentation shortcuts — first slide of a slideshow */
+	previewPptxShortcutShowFirst: "Slideshow: first slide",
+	/** Presentation shortcuts — last slide of a slideshow */
+	previewPptxShortcutShowLast: "Slideshow: last slide",
+	/** Presentation shortcuts — black screen in a slideshow */
+	previewPptxShortcutShowBlack: "Slideshow: black screen",
+	/** Presentation shortcuts — white screen in a slideshow */
+	previewPptxShortcutShowWhite: "Slideshow: white screen",
+	/** Presentation shortcuts — end a slideshow (or put down the pen first) */
+	previewPptxShortcutShowEnd: "Slideshow: end",
+	/** Presentation shortcuts — turn the laser pointer on or off in a slideshow */
+	previewPptxShortcutShowLaser: "Slideshow: laser pointer",
+	/** Presentation shortcuts — turn the pen on or off in a slideshow */
+	previewPptxShortcutShowPen: "Slideshow: pen",
+	/** Presentation shortcuts — back to the normal pointer (no pen) in a slideshow */
+	previewPptxShortcutShowArrow: "Slideshow: arrow pointer",
+	/** Presentation shortcuts — erase all ink on the current slide in a slideshow */
+	previewPptxShortcutShowEraseAll: "Slideshow: erase all ink on the slide",
+	/** Presentation shortcuts — start the slideshow from the first slide */
+	previewPptxShortcutShowStart: "Start slideshow from the beginning",
+	/** Presentation shortcuts — start the slideshow from the current slide */
+	previewPptxShortcutShowStartCurrent: "Start slideshow from the current slide"
+}

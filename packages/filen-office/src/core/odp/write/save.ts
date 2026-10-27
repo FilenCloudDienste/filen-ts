@@ -44,6 +44,8 @@ function isOdpSnapshot(snapshot: PptxSnapshot): snapshot is OdpSnapshot {
 }
 
 const CHUNK = 1024 * 1024
+// The entries the media emit adds (Media/media<id>.<ext>).
+const MEDIA_ENTRY = /^Media\//u
 
 export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Refused> {
 	const splice = await odpSplice(input)
@@ -207,10 +209,21 @@ async function verificationPackage(snapshot: OdpSnapshot, content: Uint8Array): 
 		}
 	}
 
-	const removed = archive.entries.filter(entry => !wanted.has(entry.name) && entry.name !== "content.xml").map(entry => entry.name)
+	const replaced = new Set((snapshot.changes.replace ?? []).map(change => change.name))
+	const removed = archive.entries.filter(entry => !wanted.has(entry.name) && !replaced.has(entry.name)).map(entry => entry.name)
+	// The manifest and the entries the splice added (an inserted picture) are the snapshot's.
 	const plan = planZip(
 		{ entries: archive.entries, comment: archive.comment, zip64: archive.zip64 },
-		{ replace: [{ name: "content.xml", bytes: content }], remove: removed }
+		{
+			replace: [
+				{ name: "content.xml", bytes: content },
+				...(snapshot.changes.replace ?? []).filter(change => change.name !== "content.xml")
+			],
+			remove: removed,
+			// Media entries stay out of the read-back package: the reader never reads a draw:plugin's bytes, and a medium
+			// may be far larger than memory should hold.
+			add: (snapshot.changes.add ?? []).filter(change => !MEDIA_ENTRY.test(change.name))
+		}
 	)
 	const sink = memorySink()
 

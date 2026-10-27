@@ -7,7 +7,7 @@ import { convertSmartArt } from "../../drawingml/smartart"
 import type { ShapeContext } from "../../drawingml/shape"
 import { parseXml, type XmlDocument } from "../../xml/index"
 import type { Slicing } from "../../slicing"
-import type { FrameRef, ShapeRef } from "../model"
+import type { FrameRef, ShapeNode, ShapeRef } from "../model"
 import type { RenderReport } from "./effects"
 import type { RenderServices } from "./services"
 import type { SmartArtTexts } from "./smartartText"
@@ -106,6 +106,27 @@ export function cacheHasShapes(document: XmlDocument): boolean {
 		if (!TREE_PROPERTIES.has(document.localName(child))) return true
 
 	return false
+}
+
+// An OLE object's frame as the picture its p:oleObj holds (ECMA-376 Part 1 §19.3.2.4: the p:pic shown in the object's
+// place), so the picture's crop, border and effects are drawn with it; undefined when it holds none (its preview alone
+// is drawn, drawFrame).
+export function olePicture(services: RenderServices, shape: ShapeNode): ShapeNode | undefined {
+	const src = shape.src
+
+	if (shape.kind !== "frame" || shape.frame?.kind !== "ole" || src?.format !== "pptx") return undefined
+
+	const document = services.xml(src.part)
+
+	if (document === undefined || src.node <= 0 || src.node >= document.count) return undefined
+
+	const reader = drawingReader(document)
+	// In the branch of an mc:AlternateContent that has one (PowerPoint's Fallback).
+	const picture = reader.descendant(reader.child(src.node, D.A, "graphic"), D.P, "pic")
+
+	if (picture < 0 || !reader.is(document.parent(picture), D.P, "oleObj")) return undefined
+
+	return { ...shape, kind: "pic", src: { ...src, node: picture } }
 }
 
 // A picture filling the frame (an OLE preview, a media poster).

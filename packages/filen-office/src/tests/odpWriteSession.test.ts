@@ -1,17 +1,21 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { MessageChannel } from "node:worker_threads"
 import { describe, expect, it } from "vitest"
-import { memorySink } from "../core/opc/index"
+import { ZipArchive, bytesSource, memorySink, planZip, writeZip } from "../core/opc/index"
 import { proveOdpSlide } from "../core/odp/write/proof"
 import { odpSnapshot, writeOdpSnapshot } from "../core/odp/write/save"
 import { odpWriteSource } from "../core/odp/write/source"
+import { copiedPageDiffers } from "../core/odp/write/splice"
 import type { PptxSaveOutcome } from "../core/pptx/write/types"
 import { refused, type Deck, type SlideNode, type SlideRef } from "../core/presentation/model"
 import { odpParts } from "../dom/presentation/engine/open/odp"
 import { SAVE_DEPENDENCIES } from "../dom/presentation/engine/save"
-import { saveSession, type SaveDependencies } from "../dom/presentation/save"
+import { saveHistoryOf, saveSession, type SaveDependencies } from "../dom/presentation/save"
+import { pptxParts } from "../dom/presentation/engine/open/pptx"
+import { buildPptx, sp, xfrm } from "./pptxFixtures"
 import { CORPUS_DIR } from "./corpusDir"
+import { insertPictureOp, insertShapeOp, SHAPE_GALLERY } from "../core/presentation/edit/commands/insert"
 import { odpBytes } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { ODP_DECK, changes, entriesOf, odpDeck, openOdpDeck, shapeNamed, slideAt, text, touched } from "./odpWriteFixtures"
@@ -416,5 +420,169 @@ describe.skipIf(!existsSync(WORKSHOP) || !existsSync(LIFECYCLE))("ODP layouts an
 				if (drawId !== undefined) expect(tag, path).toContain(`xml:id="${drawId}"`)
 			}
 		}
+	})
+})
+
+const PRESETS = Object.values(SHAPE_GALLERY).flat()
+
+describe("inserting preset shapes on ODP", () => {
+	const decks: (readonly [string, () => Uint8Array])[] = [
+		["fixture", odpDeck],
+		...(existsSync(WORKSHOP) ? [["Workshop", () => new Uint8Array(readFileSync(WORKSHOP))] as const] : [])
+	]
+
+	for (const [label, bytes] of decks)
+		it(`saves every gallery preset inserted through the command, and reads each back (${label})`, { timeout: 120_000 }, async () => {
+			const h = await driveSession(bytes())
+			const deck = h.session.deck
+
+			for (let index = 0; index < deck.slides.length; index++) await slide(h, index)
+
+			const page = await slide(h, 1)
+			const ids: number[] = []
+
+			for (const [k, preset] of PRESETS.entries()) {
+				const id = 1000 + k
+				const result = await h.command(insertShapeOp(deck, page.ref, preset, id))
+
+				expect(result, preset).toMatchObject({ ok: true })
+				ids.push(id)
+			}
+
+			const saved = await h.save()
+
+			expect(saved.result.kind).toBe("written")
+
+			if (process.env["FILEN_OFFICE_ODP_WRITE_OUT"] !== undefined)
+				writeFileSync(join(process.env["FILEN_OFFICE_ODP_WRITE_OUT"], `presets-${label}.odp`), saved.bytes!)
+
+			const back = slideAt(await openOdpDeck(saved.bytes!), 1)
+			const names = new Set(back.shapes.map(shape => shape.name))
+
+			const inserted = (deck.nodes.get(page.ref)?.shapes ?? []).filter(shape => ids.includes(shape.id)).map(shape => shape.name)
+
+			expect(inserted).toHaveLength(PRESETS.length)
+			expect(inserted.filter(name => !names.has(name))).toEqual([])
+		})
+})
+
+const PNG = new Uint8Array([
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0x90, 0x77,
+	0x53, 0xde, 0, 0, 0, 12, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0, 0, 3, 1, 1, 0, 0x18, 0xdd, 0x8d, 0xb0, 0, 0, 0,
+	0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
+])
+
+describe("the ODP package around a save", () => {
+	it("keeps the manifest as the package has it (ODF 1.4) when a picture adds an entry", async () => {
+		const source = odpBytes(ODP_DECK)
+		const entries = await entriesOf(source)
+		const manifest = text(entries.get("META-INF/manifest.xml")).replace('manifest:version="1.3"', 'manifest:version="1.4"')
+		const archive = await ZipArchive.open(bytesSource(source))
+		const sink = memorySink()
+
+		await writeZip(
+			planZip(
+				{ entries: archive.entries, comment: archive.comment, zip64: archive.zip64 },
+				{ replace: [{ name: "META-INF/manifest.xml", bytes: new TextEncoder().encode(manifest) }] }
+			),
+			archive,
+			sink
+		)
+
+		const h = await driveSession(sink.bytes())
+		const page = await slide(h, 0)
+
+		expect(
+			await h.command(insertPictureOp(h.session.deck, page.ref, { bytes: PNG, contentType: "image/png", width: 1, height: 1 }, 0))
+		).toMatchObject({
+			ok: true
+		})
+
+		const saved = await h.save()
+
+		expect(saved.result.kind).toBe("written")
+
+		const written = text((await entriesOf(saved.bytes!)).get("META-INF/manifest.xml"))
+
+		expect(written.startsWith(manifest.slice(0, manifest.lastIndexOf("</manifest:manifest>")))).toBe(true)
+		expect(written).toContain('manifest:media-type="image/png"')
+	})
+
+	for (const format of ["odp", "pptx"] as const)
+		it(`marks a save saved when the writer finds nothing to write and the parts are the source's, and refuses it when they differ (${format})`, async () => {
+			const part = format === "odp" ? "content.xml" : "ppt/slides/slide1.xml"
+
+			for (const equal of [true, false]) {
+				const source =
+					format === "odp" ? odpDeck() : buildPptx({ slides: [{ shapes: sp(2, "Box", undefined, xfrm(0, 0, 100, 100)) }] })
+				const original = (await entriesOf(source)).get(part)!
+				const h = await driveSession(source, format)
+				const deck = h.session.deck
+				const node = (format === "odp" ? await slide(h, 0) : await pptxParts(deck)?.slide(deck.slides[0]!)) as SlideNode
+				const shape = node.shapes.find(candidate => candidate.xfrm !== undefined)!
+
+				await h.command({
+					family: "shape",
+					kind: "setXfrm",
+					target: { slide: node.ref, id: shape.id },
+					xfrm: { ...shape.xfrm!, x: shape.xfrm!.x + 12700 }
+				})
+
+				let writes = 0
+				const saver = SAVE_DEPENDENCIES.savers[format]!
+				// A writer that answers "unchanged" over a snapshot replacing the slide's part with these bytes.
+				const bytes = equal ? original : new Uint8Array([...original, 0x20])
+				const silent: SaveDependencies = {
+					...SAVE_DEPENDENCIES,
+					savers: {
+						...SAVE_DEPENDENCIES.savers,
+						[format]: {
+							...saver,
+							writer: {
+								snapshot: async (input: never) => ({
+									...(await saver.writer.snapshot(input)),
+									changes: { replace: [{ name: part, bytes }] }
+								}),
+								write: () => {
+									writes++
+
+									return Promise.resolve({ kind: "unchanged" as const })
+								}
+							}
+						}
+					}
+				}
+				const save = async () => {
+					const { port1 } = new MessageChannel()
+					const result = await saveSession(h.context, { reason: "auto", port: port1 as never }, silent)
+
+					port1.close()
+
+					return result
+				}
+
+				if (equal) {
+					expect(await save()).toMatchObject({ kind: "unchanged" })
+					expect(saveHistoryOf(deck)?.dirty).toBe(false)
+					// Clean: the next (auto)save writes nothing and never reaches the writer again.
+					expect(await save()).toMatchObject({ kind: "unchanged" })
+					expect(writes).toBe(1)
+				} else {
+					expect(await save()).toMatchObject({ kind: "refused", reason: "failed" })
+					expect(saveHistoryOf(deck)?.dirty).toBe(true)
+				}
+			}
+		})
+
+	it("refuses to copy an edited page whose source does not read as the slide (nothing found to write)", async () => {
+		const opened = await openOdpDeck(odpDeck())
+		const middle = slideAt(opened, 1)
+		const pristine = await odpWriteSource(opened.parts).pristine(middle.ref)
+
+		expect(copiedPageDiffers(opened.deck, middle, pristine!, middle.name ?? "")).toBeUndefined()
+
+		middle.hidden = true
+
+		expect(copiedPageDiffers(opened.deck, middle, pristine!, middle.name ?? "")).toBe("hidden")
 	})
 })

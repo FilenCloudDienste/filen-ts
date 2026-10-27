@@ -37,7 +37,10 @@ describe.skipIf(FILES.length === 0)("fresh ODP writer", () => {
 		expect(content).toContain('office:version="1.3"')
 		expect([...entries.keys()].filter(name => name.startsWith("Pictures/")).length).toBeGreaterThan(10)
 		expect(texts.join(" ")).toContain("qualifications")
-		expect(fresh.report.omitted).toMatchObject({ "table frame": 1, "chart frame": 2, "smartart frame": 2 })
+		expect(fresh.report.omitted).toMatchObject({ "chart frame": 2, "smartart frame": 2 })
+		// Tables are written by the table family.
+		expect(fresh.report.omitted["table frame"]).toBeUndefined()
+		expect(content).toContain("<table:table")
 	})
 
 	it("converts every unencrypted pptx deck into a package that opens with its slide count", { timeout: budget(900_000) }, async () => {

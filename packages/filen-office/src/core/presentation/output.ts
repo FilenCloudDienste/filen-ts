@@ -1,6 +1,19 @@
 import type { DrawingData, Paint, Rgba, Stroke } from "../drawingml/index"
 import type { DecorationValue, DocxLinkTarget, DocxPageData, DocxTextStyle } from "../docx/layout/index"
-import type { Action, LockReason, ParaProps, RunProps, ShapeLocks, ShapeNode, ShapeRef, SlideRef, TextBody, Xfrm } from "./model"
+import type { MediaPlayback } from "./edit/ops"
+import type {
+	Action,
+	LockReason,
+	ParaProps,
+	RunProps,
+	ShapeLocks,
+	ShapeNode,
+	ShapeRef,
+	SlideRef,
+	TableModel,
+	TextBody,
+	Xfrm
+} from "./model"
 
 // What the presentation engine hands a painter: plain data (numbers, strings, typed arrays) that crosses a worker
 // boundary by structured clone with its typed arrays transferred, never copied. The text and drawing data are the
@@ -33,9 +46,9 @@ export type RenderEffect =
 
 export type RenderEffects = readonly RenderEffect[]
 
-// One text body laid out: a complete page (its size is the body's box, its graphic and object arrays empty) with
-// the tables its styles index (DocxTextStyle.paint → paints, .outline → strokes, .effects → textEffects; a stroke's
-// `paint` indexes paints too).
+// One text body laid out: a complete page (its size is the body's box, its graphic arrays empty, its objects the
+// picture bullets) with the tables its styles index (DocxTextStyle.paint → paints, .outline → strokes, .effects →
+// textEffects; a stroke's `paint` indexes paints too).
 export interface TextPage {
 	readonly page: DocxPageData
 	readonly styles: readonly DocxTextStyle[]
@@ -44,6 +57,9 @@ export interface TextPage {
 	readonly textEffects: readonly RenderEffects[]
 	readonly decorations: readonly DecorationValue[]
 	readonly links: readonly DocxLinkTarget[]
+	// The pictures the page's picture-bullet objects (text/page.ts PICTURE_BULLET_OBJECT) show, by object id: part
+	// names (an inserted image's "inserted:<id>"); absent when it has none.
+	readonly images?: readonly string[]
 }
 
 // A TextLayout (core/text/displayList.ts) with the StyleTable rows HitTester reads, as typed arrays the page
@@ -85,6 +101,21 @@ export const TextStyleFloat = { LETTER_SPACING: 0, SCALE_X: 1, EM: 2, ASCENT: 3,
 export type LayerRole =
 	"master" | "layout" | "placeholder" | "shape" | "picture" | "table" | "chart" | "smartart" | "media" | "ole" | "ink" | "group"
 
+// A medium a layer plays: a picture shape with a:videoFile/a:audioFile (p14:media), an ODP draw:plugin frame.
+export interface SlideMediaInfo {
+	readonly kind: "audio" | "video"
+	// The package part, or "inserted:<id>" for a medium inserted since the last save; served by media(part, port).
+	// Absent for linked media.
+	readonly part?: string
+	// A linked target: never fetched (an http(s) link is offered to open).
+	readonly external?: string
+	readonly contentType: string
+	readonly size?: number
+	// Its playback options from the slide's timing (core/presentation/edit/apply/media.ts mediaPlayback): what the
+	// Video/Audio tabs show checked and what the player applies (volume, mute, loop).
+	readonly playback?: MediaPlayback
+}
+
 // A shape's actions as the page may show and activate them (judged again on click, never on paint).
 export interface ActionSummary {
 	readonly click?: Action
@@ -110,6 +141,8 @@ export interface SlideLayer {
 	// Paragraph or character runs of the text the timing animates on their own.
 	readonly subLayers?: readonly { readonly target: "para" | "char"; readonly range: readonly [number, number] }[]
 	readonly lock?: LockReason
+	// What the layer plays, when it is a medium.
+	readonly media?: SlideMediaInfo
 	// The slide's own top-level shape this layer draws (absent on master and layout layers): its id (a group's for a
 	// layer of one of its children), its box as the model resolves it (EMU; a placeholder's inherited box when it has
 	// none of its own) and its alt text. What the editor's selection and arrange commands start from.
@@ -122,6 +155,20 @@ export interface SlideLayer {
 		readonly locks?: ShapeLocks
 		readonly line?: true
 	}
+	// On a table frame's base layer: its structure as drawn, for picking cells and building the table commands on the
+	// page. Column and row edges in px of the layer's matrix space (rows grown to their text), and the merged areas:
+	// row, col, rows, cols per origin cell, row-major; `textBoxes` each area's text box (x, y, width, height: the cell
+	// less its margins), where the editor places a cell's body; the table's style id and its style options.
+	readonly table?: {
+		readonly columnEdges: readonly number[]
+		readonly rowEdges: readonly number[]
+		readonly areas: Int32Array
+		readonly textBoxes: Float64Array
+		readonly styleId?: string
+		readonly flags: TableModel["flags"]
+	}
+	// On a table cell's text layer: the cell (row, col) it draws.
+	readonly cell?: readonly [number, number]
 }
 
 export interface SlideRender {

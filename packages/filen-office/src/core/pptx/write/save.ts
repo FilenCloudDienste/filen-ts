@@ -147,14 +147,29 @@ export async function writeSnapshot(snapshot: PptxSnapshot, sink: ByteSink, opti
 			...(options.deflate === undefined ? {} : { deflate: options.deflate })
 		}
 
-		if (source.archive.source.size <= limit) {
+		const changed = [...(snapshot.changes.replace ?? []), ...(snapshot.changes.add ?? [])]
+		// What the package holds in memory is the source and what the save adds (an inserted medium may be large).
+		const added = changed.reduce((sum, change) => sum + change.bytes.length, 0)
+
+		if (source.archive.source.size + added <= limit) {
 			const memory = memorySink()
 			const report = await writeZip(plan, source.archive, memory, zipOptions)
 			// Read back over the pieces as written: joining them would hold the package twice.
 			const chunks = memory.chunks()
 			const back = await ZipArchive.open(chunksSource(chunks))
 
-			for (const change of [...(snapshot.changes.replace ?? []), ...(snapshot.changes.add ?? [])]) {
+			for (const change of changed) {
+				// A piece-wise part with its CRC (an inserted medium) was checked as it streamed (its own chunks fail on
+				// any other byte): the zip's entry says what was written, without reading the medium again.
+				if (!(change.bytes instanceof Uint8Array) && change.crc32 !== undefined) {
+					const entry = back.entries.find(candidate => partKey(candidate.name) === partKey(change.name))
+
+					if (entry === undefined || entry.crc32 >>> 0 !== change.crc32 >>> 0 || entry.uncompressedSize !== change.bytes.length)
+						return refused("proofFailed", `${change.name} reads back from the zip differently`)
+
+					continue
+				}
+
 				if (!(await sameBytes(back, change.name, change.bytes)))
 					return refused("proofFailed", `${change.name} reads back from the zip differently`)
 			}

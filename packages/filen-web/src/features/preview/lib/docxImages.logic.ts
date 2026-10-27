@@ -217,8 +217,8 @@ function refused(refusal: DocxPictureRefusal): { ok: false; refusal: DocxPicture
 }
 
 // The header's verdict on bytes Word takes as they are (WebP is converted first).
-function sniffed(bytes: Uint8Array): PictureResult<DocxImageInfo> {
-	const info = sniffImage(bytes)
+function sniffed(bytes: Uint8Array, maxPixels: number): PictureResult<DocxImageInfo> {
+	const info = sniffImage(bytes, maxPixels)
 
 	switch (info) {
 		case "tooLarge":
@@ -236,11 +236,12 @@ function sniffed(bytes: Uint8Array): PictureResult<DocxImageInfo> {
 }
 
 // Steps up to registering it: size, read, header, WebP to PNG, SVG fallback. Throws an AbortError once
-// `signal` aborts; any other failure is a refusal.
+// `signal` aborts; any other failure is a refusal. `maxPixels`: the decoded raster budget (Word's by default).
 export async function preparePicture(
 	source: PictureSource,
 	codecs: PictureCodecs,
-	signal: AbortSignal
+	signal: AbortSignal,
+	maxPixels = MAX_IMAGE_PIXELS
 ): Promise<PictureResult<PreparedPicture>> {
 	const kind = sourceKind(source)
 
@@ -275,7 +276,7 @@ export async function preparePicture(
 				return refused("corrupt")
 			}
 
-			if (size.width * size.height > MAX_IMAGE_PIXELS) {
+			if (size.width * size.height > maxPixels) {
 				return refused("pixels")
 			}
 
@@ -283,7 +284,7 @@ export async function preparePicture(
 			signal.throwIfAborted()
 		}
 
-		const info = sniffed(bytes)
+		const info = sniffed(bytes, maxPixels)
 
 		if (!info.ok) {
 			return info

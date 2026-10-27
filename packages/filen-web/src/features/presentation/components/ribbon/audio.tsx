@@ -1,4 +1,5 @@
 import type { PresentationGroups } from "@/features/presentation/components/ribbon/tabs"
+import { mediaPlaybackGroups } from "@/features/presentation/components/ribbon/video"
 
-// The presentation ribbon's audio groups. None yet.
-export const audioGroups: PresentationGroups = () => []
+// The Audio tab: the selected audio clip's playback in the show (the Video tab's Playback group, without full screen).
+export const audioGroups: PresentationGroups = context => mediaPlaybackGroups("audio", context)

@@ -373,3 +373,58 @@
 	clip-path: inset(50%);
 	white-space: nowrap;
 }
+
+/* Show player */
+
+.fo-show-viewport {
+	position: absolute;
+	overflow: hidden;
+}
+
+.fo-show-host,
+.fo-show-overlay {
+	position: absolute;
+	top: 0;
+	left: 0;
+	transform-origin: 0 0;
+}
+
+.fo-show-layer {
+	will-change: transform, opacity;
+}
+
+.fo-show-bitmap,
+.fo-show-links {
+	pointer-events: none;
+}
+
+/* A layer's DOM paint while its colours or text style animate (custom properties set per frame by the player). */
+.fo-show-dom[data-fo-fill] path:not([fill="none"]) {
+	fill: var(--fo-show-fill) !important;
+}
+
+.fo-show-dom[data-fo-stroke] path:not([stroke="none"]) {
+	stroke: var(--fo-show-stroke) !important;
+}
+
+.fo-show-dom[data-fo-color] .fo-docx-run {
+	color: var(--fo-show-color) !important;
+}
+
+.fo-show-dom[data-fo-weight] .fo-docx-run {
+	font-weight: var(--fo-show-weight) !important;
+}
+
+.fo-show-dom[data-fo-italic] .fo-docx-run {
+	font-style: italic !important;
+}
+
+.fo-show-dom[data-fo-underline] .fo-docx-run {
+	text-decoration: underline !important;
+}
+
+/* A font-size effect: each run scaled about its baseline start (the fallback the plan allows, reported as a notice). */
+.fo-show-dom[data-fo-font-scale] .fo-docx-run {
+	scale: var(--fo-show-font-scale);
+	transform-origin: 0 75%;
+}

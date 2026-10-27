@@ -36,13 +36,22 @@ export interface PartsApi {
 	readonly owner: string
 	// A new part with a non-colliding name for its kind (slideN with the next free N…), its content type in
 	// [Content_Types].xml, and a relationship from `owner` with the next free rId.
-	addPart(kind: PptxPartKind, content: PartBytes, contentType: string): { readonly part: string; readonly rId: string }
+	addPart(
+		kind: PptxPartKind,
+		content: PartBytes,
+		contentType: string,
+		// crc32: the CRC-32 `content` must have (a stored medium streams once, checked as it goes).
+		options?: { readonly crc32?: number }
+	): { readonly part: string; readonly rId: string }
 	// A relationship from `owner` to an existing part (or an external target), reused when one exists.
 	relate(target: string, type: string, external?: boolean): string
 	// The part `rId` of `owner` names, undefined when none.
 	target(rId: string): string | undefined
 	// Removes a part with its relationships; references to it are the integrity graph's (edit/integrity.ts).
 	removePart(part: string): void
+	// Replaces an existing part's bytes whole (a part its family rebuilds, related as before: a diagram's data, layout,
+	// style, colours and drawing parts); false, changing nothing, when the package has no such part.
+	replacePart?(part: string, content: PartBytes): boolean
 	// The one editor of a touched part (opened on first use).
 	editor(part: string): XmlEditor
 }

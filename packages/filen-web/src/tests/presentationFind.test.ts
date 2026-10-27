@@ -8,6 +8,8 @@ import {
 	FIND_IN_NOTES,
 	FIND_IN_SMARTART,
 	FIND_IN_TABLE,
+	FIND_LOCKED,
+	PRESENTATION_FIND_LIMIT,
 	type CommandResult,
 	type OpenInfo,
 	type PresentationSessionApi
@@ -21,7 +23,8 @@ import {
 } from "@/features/presentation/components/presentationFind"
 
 // Find and replace in the presentation editor: find-text offsets map to editor positions through breaks, fields and
-// kept content; replace-all targets one op per shape (notes apart, tables and SmartArt in an op of their own); the
+// kept content; replace-all targets each shape once (notes apart, tables in the text op, each diagram in a smartart op),
+// sent as one command; the
 // controls search the worker, step to a match's slide and shape and select it in the opened body, and send the open
 // body's text before any replace.
 
@@ -74,7 +77,7 @@ describe("presentation find positions", () => {
 		expect(findOffsetToPos(doc, 2, 0)).toBeUndefined()
 	})
 
-	it("targets each shape once, notes bodies apart, tables and SmartArt in an op of their own", () => {
+	it("targets each shape once, notes bodies apart, tables with them and each diagram apart", () => {
 		const found = matches(
 			[0, 2, 0, 0, 1, 0],
 			[0, 2, 1, 0, 1, 0],
@@ -84,8 +87,10 @@ describe("presentation find positions", () => {
 		)
 
 		expect(replaceTargets(found, 5, INFO)).toEqual({
-			text: [{ target: { slide: S1, id: 2 } }, { target: { slide: S1, id: 3 }, notes: true }],
-			other: [{ target: { slide: S2, id: 4 } }, { target: { slide: S2, id: 5 } }]
+			text: [{ target: { slide: S1, id: 2 } }, { target: { slide: S1, id: 3 }, notes: true }, { target: { slide: S2, id: 4 } }],
+			smartart: [{ slide: S2, id: 5 }],
+			replaced: 5,
+			skipped: 0
 		})
 	})
 })
@@ -206,21 +211,199 @@ describe("presentation find controls", () => {
 			await Promise.resolve()
 		})
 		await waitFor(() => {
-			expect(sent).toHaveLength(3)
+			expect(sent).toHaveLength(2)
 		})
+		// Slide shapes, notes and the table's cells in one op: one undo step.
 		expect(sent[1]).toMatchObject({
 			kind: "replace",
-			targets: [{ target: { slide: S1, id: 2 } }, { target: { slide: S2, id: 3 }, notes: true }]
+			targets: [{ target: { slide: S1, id: 2 } }, { target: { slide: S2, id: 3 }, notes: true }, { target: { slide: S2, id: 4 } }]
 		})
-		// The table cell goes on its own (refused until tables are editable; the shell reports it).
-		expect(sent[2]).toMatchObject({ kind: "replace", targets: [{ target: { slide: S2, id: 4 } }] })
 		expect(order.slice(0, 2)).toEqual(["flush", "command"])
 		expect(order.indexOf("flush", 2)).toBeLessThan(order.indexOf("command", 2))
-		expect(replaced).toEqual([1, 3])
+		expect(replaced).toEqual([1, 4])
 		// Every replace searches again.
 		await waitFor(() => {
 			expect(find).toHaveBeenCalledTimes(3)
 		})
+	})
+
+	it("replaces all in text, tables and diagrams as one batch, and one SmartArt match by its node", async () => {
+		const found = matches(
+			[0, 2, 0, 1, 3, 0],
+			[1, 4, 0, 0, 2, FIND_IN_TABLE],
+			[1, 5, 2, 3, 5, FIND_IN_SMARTART],
+			[1, 6, 0, 0, 2, FIND_IN_SMARTART]
+		)
+		const session = { find: vi.fn(() => Promise.resolve(found)) } as unknown as PresentationSessionApi
+		const sent: DeckOp[] = []
+		const replaced: number[] = []
+		const editor = editorFor(sent, [])
+		const { result } = renderHook(() => usePresentationFind({ session, info: INFO, editor, onReplaced: count => replaced.push(count) }))
+
+		act(() => {
+			result.current.search("xy", true)
+		})
+		await waitFor(() => {
+			expect(result.current.count).toBe(4)
+		})
+
+		await act(async () => {
+			result.current.replace?.all("Z")
+			await Promise.resolve()
+		})
+		await waitFor(() => {
+			expect(sent).toHaveLength(1)
+		})
+
+		const query = { query: "xy", replacement: "Z", caseSensitive: true }
+
+		// One command, so one undo reverts the text, the table and both diagrams.
+		expect(sent[0]).toEqual({
+			family: "batch",
+			kind: "batch",
+			ops: [
+				{
+					family: "text",
+					kind: "replace",
+					...query,
+					targets: [{ target: { slide: S1, id: 2 } }, { target: { slide: S2, id: 4 } }]
+				},
+				{ family: "smartart", kind: "replace", target: { slide: S2, id: 5 }, ...query },
+				{ family: "smartart", kind: "replace", target: { slide: S2, id: 6 }, ...query }
+			]
+		})
+		expect(replaced).toEqual([4])
+
+		for (const expected of [1, 2]) {
+			act(() => {
+				result.current.step(1)
+			})
+			await waitFor(() => {
+				expect(result.current.active).toBe(expected)
+			})
+		}
+		await act(async () => {
+			result.current.replace?.one("Z")
+			await Promise.resolve()
+		})
+		await waitFor(() => {
+			expect(sent).toHaveLength(2)
+		})
+		expect(sent[1]).toEqual({ family: "smartart", kind: "replace", target: { slide: S2, id: 5 }, ...query, match: [2, 3, 5] })
+	})
+
+	it("sends a lone diagram's replace all as its own op", async () => {
+		const session = {
+			find: vi.fn(() => Promise.resolve(matches([1, 5, 0, 0, 2, FIND_IN_SMARTART])))
+		} as unknown as PresentationSessionApi
+		const sent: DeckOp[] = []
+		const editor = editorFor(sent, [])
+		const { result } = renderHook(() => usePresentationFind({ session, info: INFO, editor }))
+
+		act(() => {
+			result.current.search("xy", false)
+		})
+		await waitFor(() => {
+			expect(result.current.count).toBe(1)
+		})
+		await act(async () => {
+			result.current.replace?.all("Z")
+			await Promise.resolve()
+		})
+		await waitFor(() => {
+			expect(sent).toHaveLength(1)
+		})
+		expect(sent[0]).toEqual({
+			family: "smartart",
+			kind: "replace",
+			target: { slide: S2, id: 5 },
+			query: "xy",
+			replacement: "Z",
+			caseSensitive: false
+		})
+	})
+
+	it("replace all leaves locked shapes out, replaces the rest in one step and reports how many it skipped", async () => {
+		const found = matches(
+			[0, 2, 0, 1, 3, 0],
+			[0, 3, 0, 0, 2, FIND_LOCKED],
+			[1, 3, 1, 0, 2, FIND_LOCKED | FIND_IN_TABLE],
+			[1, 4, 0, 0, 2, 0]
+		)
+		const session = { find: vi.fn(() => Promise.resolve(found)) } as unknown as PresentationSessionApi
+		const sent: DeckOp[] = []
+		const replaced: number[] = []
+		const editor = editorFor(sent, [])
+		const { result } = renderHook(() => usePresentationFind({ session, info: INFO, editor, onReplaced: count => replaced.push(count) }))
+
+		act(() => {
+			result.current.search("xy", false)
+		})
+		await waitFor(() => {
+			expect(result.current.count).toBe(4)
+		})
+
+		expect(result.current.replace?.disabled).toBe(false)
+
+		await act(async () => {
+			result.current.replace?.all("Z")
+			await Promise.resolve()
+		})
+		await waitFor(() => {
+			expect(sent).toHaveLength(1)
+		})
+		expect(sent[0]).toEqual({
+			family: "text",
+			kind: "replace",
+			query: "xy",
+			replacement: "Z",
+			caseSensitive: false,
+			targets: [{ target: { slide: S1, id: 2 } }, { target: { slide: S2, id: 4 } }]
+		})
+		expect(replaced).toEqual([2])
+		expect(replaceTargets(found, 4, INFO)).toMatchObject({ replaced: 2, skipped: 2 })
+
+		// Replace on a locked match sends nothing.
+		act(() => {
+			result.current.step(1)
+		})
+		await waitFor(() => {
+			expect(result.current.active).toBe(1)
+		})
+		await act(async () => {
+			result.current.replace?.one("Z")
+			await Promise.resolve()
+		})
+		expect(sent).toHaveLength(1)
+	})
+
+	it("offers no replace when every match is locked, and refuses replace all past the find limit", async () => {
+		const locked = { find: vi.fn(() => Promise.resolve(matches([0, 3, 0, 0, 2, FIND_LOCKED]))) } as unknown as PresentationSessionApi
+		const sent: DeckOp[] = []
+		const first = renderHook(() => usePresentationFind({ session: locked, info: INFO, editor: editorFor(sent, []) }))
+
+		act(() => {
+			first.result.current.search("xy", false)
+		})
+		await waitFor(() => {
+			expect(first.result.current.replace?.disabled).toBe(true)
+		})
+
+		const many = Int32Array.from({ length: (PRESENTATION_FIND_LIMIT + 1) * 6 }, (_, k) => (k % 6 === 1 ? 2 : 0))
+		const capped = { find: vi.fn(() => Promise.resolve(many)) } as unknown as PresentationSessionApi
+		const second = renderHook(() => usePresentationFind({ session: capped, info: INFO, editor: editorFor(sent, []) }))
+
+		act(() => {
+			second.result.current.search("xy", false)
+		})
+		await waitFor(() => {
+			expect(second.result.current.capped).toBe(true)
+		})
+		await act(async () => {
+			second.result.current.replace?.all("Z")
+			await Promise.resolve()
+		})
+		expect(sent).toHaveLength(0)
 	})
 
 	it("has no replace in a deck that is only viewed", () => {
