@@ -59,8 +59,13 @@ const KEY_NAMES: Record<string, string> = {
 	right: "Right"
 }
 
-// The display accelerator for a web combo: its first alternative, or none when it is unassigned or uses a key Electron
-// cannot name. Display only; the menu never registers it.
+// A combo's Cmd/Ctrl/Alt modifiers, the keys that keep it from typing or editing text.
+const COMMAND_MODIFIERS = new Set(["CmdOrCtrl", "Command", "Ctrl", "Alt"])
+
+// The menu accelerator for a web combo: its first alternative, or none when it is unassigned or uses a key Electron
+// cannot name. macOS runs a menu's key equivalents itself whatever has focus (registerAccelerator only applies on
+// Windows and Linux), so a combo that a text field would take as typing, "d" or Shift+/ or Delete, gets none and
+// stays the page's alone; a function key needs no modifier.
 export function toAccelerator(combo: string): string | undefined {
 	const keys = (combo.split(",")[0] ?? "")
 		.toLowerCase()
@@ -84,6 +89,12 @@ export function toAccelerator(combo: string): string | undefined {
 		names.push(name)
 	}
 
+	const key = names.at(-1) ?? ""
+
+	if (!/^F\d+$/.test(key) && !names.some(name => COMMAND_MODIFIERS.has(name))) {
+		return undefined
+	}
+
 	return names.join("+")
 }
 
@@ -96,8 +107,8 @@ export interface MenuOptions {
 	onWebsite: () => void
 }
 
-// The macOS application menu. Edit and window management use roles; web actions show the web's combo without
-// registering it, so the page's own key handling stays the only dispatcher.
+// The macOS application menu. Edit and window management use roles; a web action's combo runs from the menu as
+// macOS dispatches key equivalents, through the same handler the page's keys run.
 export function menuTemplate({ shortcuts, devTools, onAction, onLock, onWebsite }: MenuOptions): MenuItemConstructorOptions[] {
 	const action = (id: DesktopMenuAction): MenuItemConstructorOptions => {
 		const accelerator = toAccelerator(shortcuts[id] ?? "")

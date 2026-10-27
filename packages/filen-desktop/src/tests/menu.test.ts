@@ -5,12 +5,9 @@ import { isMenuAction, menuTemplate, toAccelerator } from "../main/menu.ts"
 describe("toAccelerator", () => {
 	it.each([
 		["mod+shift+k", "CmdOrCtrl+Shift+K"],
-		["shift+slash", "Shift+/"],
-		["d", "D"],
 		["ctrl+alt+arrowup", "Ctrl+Alt+Up"],
 		["mod+comma", "CmdOrCtrl+,"],
 		["f5", "F5"],
-		["delete,backspace", "Delete"],
 		["Mod+K", "CmdOrCtrl+K"]
 	])("%s → %s", (combo, accelerator) => {
 		expect(toAccelerator(combo)).toBe(accelerator)
@@ -19,6 +16,11 @@ describe("toAccelerator", () => {
 	it("shows nothing for an unassigned combo or a key Electron cannot name", () => {
 		expect(toAccelerator("")).toBeUndefined()
 		expect(toAccelerator("mod+intlbackslash")).toBeUndefined()
+	})
+
+	// macOS fires a menu key equivalent even while a text field has focus.
+	it.each(["d", "shift+slash", "delete,backspace", "shift+k"])("shows nothing for %s, which a text field would take", combo => {
+		expect(toAccelerator(combo)).toBeUndefined()
 	})
 })
 
