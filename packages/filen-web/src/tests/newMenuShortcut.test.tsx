@@ -6,11 +6,22 @@ import type { ReactElement, ReactNode } from "react"
 
 // The real useAction + react-hotkeys-hook, with only the combo lookup pinned to the default "n".
 vi.mock("@/lib/keymap/registry", () => ({ isRecordingCombo: () => false, useComboFor: () => "n" }))
-vi.mock("@/lib/keymap/kbd", () => ({ Kbd: () => null }))
-vi.mock("@/components/ui/tooltip", () => ({
-	Tooltip: (props: { children: ReactNode }) => props.children,
-	TooltipTrigger: (props: { render: ReactElement }) => props.render,
-	TooltipContent: () => null
+vi.mock("@/components/ui/dropdown-menu", () => ({
+	DropdownMenu: (props: { children: ReactNode }) => props.children,
+	DropdownMenuTrigger: (props: { render: ReactElement }) => props.render,
+	DropdownMenuContent: () => null
+}))
+vi.mock("@/features/drive/components/destinationMenu", () => ({ DestinationEntries: () => null }))
+vi.mock("@/features/drive/components/directoryTreeSubmenu", () => ({ CONTEXT_TREE_MENU_FAMILY: {}, DROPDOWN_TREE_MENU_FAMILY: {} }))
+vi.mock("@/features/drive/hooks/useUploadMenuActions", () => ({
+	useUploadMenuActions: () => ({
+		newTextFile: vi.fn(),
+		newOffice: vi.fn(),
+		pickFiles: vi.fn(),
+		pickDirectory: vi.fn(),
+		busy: false,
+		host: null
+	})
 }))
 vi.mock("@/features/drive/queries/drive", () => ({ driveListingQueryUpdate: vi.fn() }))
 vi.mock("@/components/dialogs/inputDialog", () => ({
@@ -18,7 +29,7 @@ vi.mock("@/components/dialogs/inputDialog", () => ({
 }))
 
 import "@/lib/i18n"
-import { NewDirectory } from "@/features/drive/components/newDirectory"
+import { NewMenu } from "@/features/drive/components/uploadMenu"
 
 function pressN(): void {
 	act(() => {
@@ -28,20 +39,29 @@ function pressN(): void {
 
 afterEach(cleanup)
 
-describe("NewDirectory shortcut", () => {
+describe("NewMenu new-directory shortcut", () => {
 	it("opens the name dialog", () => {
-		render(<NewDirectory parentUuid={null} />)
+		render(
+			<NewMenu
+				parentUuid={null}
+				openPreview={vi.fn()}
+			/>
+		)
 		pressN()
 
 		expect(screen.getAllByTestId("new-directory-dialog")).toHaveLength(1)
 	})
 
-	// An empty writable listing shows the control twice: in the toolbar and in the empty state.
-	it("opens one dialog when a second copy of the control is on screen without the shortcut", () => {
+	// An empty writable listing shows the menu twice: in the toolbar and in the empty state.
+	it("opens one dialog when a second copy of the menu is on screen without the shortcut", () => {
 		render(
 			<>
-				<NewDirectory parentUuid={null} />
-				<NewDirectory
+				<NewMenu
+					parentUuid={null}
+					openPreview={vi.fn()}
+				/>
+				<NewMenu
+					openPreview={vi.fn()}
 					parentUuid={null}
 					shortcut={false}
 				/>
@@ -54,7 +74,8 @@ describe("NewDirectory shortcut", () => {
 
 	it("stays shut while disabled", () => {
 		render(
-			<NewDirectory
+			<NewMenu
+				openPreview={vi.fn()}
 				parentUuid={null}
 				disabled
 			/>
@@ -69,7 +90,12 @@ describe("NewDirectory shortcut", () => {
 		dialog.setAttribute("role", "dialog")
 		dialog.setAttribute("data-open", "")
 		document.body.append(dialog)
-		render(<NewDirectory parentUuid={null} />)
+		render(
+			<NewMenu
+				parentUuid={null}
+				openPreview={vi.fn()}
+			/>
+		)
 		pressN()
 		dialog.remove()
 

@@ -32,7 +32,7 @@ test.describe("narrow viewport", () => {
 		// Both drive chrome rows must sit fully inside the viewport, not merely intersect it — the default
 		// ratio (> 0) passes on an element clipped against the content card's own overflow.
 		await expect(page.getByRole("searchbox", { name: "Search", exact: true })).toBeInViewport({ ratio: 1 })
-		await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeInViewport({ ratio: 1 })
+		await expect(page.getByRole("button", { name: "New", exact: true })).toBeInViewport({ ratio: 1 })
 
 		await page.getByRole("button", { name: "Open navigation", exact: true }).click()
 

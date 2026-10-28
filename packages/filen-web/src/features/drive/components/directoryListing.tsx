@@ -59,9 +59,8 @@ import { Breadcrumb } from "@/features/drive/components/breadcrumb"
 import { SortMenu } from "@/features/drive/components/sortMenu"
 import { ListColumnHeader } from "@/features/drive/components/listColumnHeader"
 import { ViewModeToggle } from "@/features/drive/components/viewModeToggle"
-import { NewDirectory } from "@/features/drive/components/newDirectory"
 import { EmptyTrashButton } from "@/features/drive/components/emptyTrashButton"
-import { UploadContextMenu, UploadMenu } from "@/features/drive/components/uploadMenu"
+import { NewMenu, UploadContextMenu } from "@/features/drive/components/uploadMenu"
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
 import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
 import { EmptyState } from "@/features/drive/components/emptyState"
@@ -207,8 +206,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// New directory / upload make sense in the navigable "drive" variant AND inside an owned nested
 	// sharedOut directory (canWriteVariant) — recents/favorites/trash/links/sharedIn/the sharedOut ROOT
 	// have no directory to write into, and a still-loading listing has no confirmed uuid to target yet.
-	// Shared by NewDirectory, UploadMenu and UploadDropzone below (all three write into the same
-	// `uuid`). Offline folds in here too: all three write to the SDK, which has nothing to reach while
+	// Shared by NewMenu and UploadDropzone below (both write into the same
+	// `uuid`). Offline folds in here too: both write to the SDK, which has nothing to reach while
 	// offline.
 	const writeDisabled = !canWriteVariant(variant, uuid) || !listingReady || !isOnline
 	// Gates the underlying contacts/blocked fetch itself (see useBlockedUsers.ts) — only sharedIn
@@ -708,27 +707,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			<EmptyState
 				variant="empty"
 				driveVariant={variant}
-				// Inline "+ Add" affordance for an empty, writable location — reuses the exact same New-directory/Upload
-				// controls the toolbar above already renders (not a third create/upload implementation), so this can never
-				// drift from what the toolbar itself offers. Hidden wherever the toolbar's own two buttons are too
-				// (writeDisabled already covers non-writable variants, a still-loading listing and offline — see its own
-				// doc comment above).
+				// Inline affordance for an empty, writable location — the toolbar's own New menu (not a second
+				// create/upload implementation), so it can never drift from what the toolbar offers. Hidden wherever
+				// the toolbar's is disabled (writeDisabled covers non-writable variants, a still-loading listing and
+				// offline — see its own doc comment above).
 				action={
 					writeDisabled ? undefined : (
-						<>
-							{/* The toolbar's copy owns the shortcut: both registering it would open two dialogs. */}
-							<NewDirectory
-								parentUuid={uuid}
-								hiddenNotice={hideHidden}
-								shortcut={false}
-							/>
-							<UploadMenu
-								parentUuid={uuid}
-								openPreview={openPreview}
-								hiddenNotice={hideHidden}
-								paste={paste}
-							/>
-						</>
+						// The toolbar's copy owns the shortcut: both registering it would open two dialogs.
+						<NewMenu
+							parentUuid={uuid}
+							openPreview={openPreview}
+							hiddenNotice={hideHidden}
+							paste={paste}
+							shortcut={false}
+						/>
 					)
 				}
 			/>
@@ -923,13 +915,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							offlineTitle={!isOnline ? t("common:offlineActionDisabled") : undefined}
 						/>
 					) : null}
-					<NewDirectory
-						parentUuid={uuid}
-						disabled={writeDisabled}
-						offline={!isOnline}
-						hiddenNotice={hideHidden}
-					/>
-					<UploadMenu
+					<NewMenu
 						parentUuid={uuid}
 						disabled={writeDisabled}
 						openPreview={openPreview}

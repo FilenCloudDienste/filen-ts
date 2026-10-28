@@ -116,8 +116,8 @@ test.describe("context menus", () => {
 			await createDirectoryViaDialog(page, dirName, listbox)
 
 			// .first(): the fresh scratch directory starts empty, so its empty-state "+ Add" affordance
-			// renders a second identical Upload trigger; the toolbar's is always first in DOM order.
-			await page.getByRole("button", { name: "Upload", exact: true }).first().click()
+			// renders a second identical New trigger; the toolbar's is always first in DOM order.
+			await page.getByRole("button", { name: "New", exact: true }).first().click()
 			const uploadMenu = page.getByRole("menu")
 			await expect(uploadMenu).toBeVisible()
 			await uploadMenu.getByRole("menuitem", { name: "New text file", exact: true }).click()
@@ -308,13 +308,10 @@ test.describe("context menus", () => {
 			// transition commits, briefly matching each name twice (an observed intermittent strict-mode
 			// failure on this exact hop) — waiting for the count to settle to exactly one pins the
 			// assertion to the destination surface before the strict single-match assertions run.
-			const newDirectory = page.getByRole("button", { name: "New directory", exact: true })
-			const upload = page.getByRole("button", { name: "Upload", exact: true })
+			const newMenu = page.getByRole("button", { name: "New", exact: true })
 
-			await expect(newDirectory).toHaveCount(1)
-			await expect(upload).toHaveCount(1)
-			await expect(newDirectory).toBeDisabled()
-			await expect(upload).toBeDisabled()
+			await expect(newMenu).toHaveCount(1)
+			await expect(newMenu).toBeDisabled()
 			// No Move descriptor is reachable from this page at all — neither a per-item menu (the
 			// account has nothing to open one on) nor any other surface.
 			await expect(page.getByText(labelFor("move"), { exact: true })).toHaveCount(0)

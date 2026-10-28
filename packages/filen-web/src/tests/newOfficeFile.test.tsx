@@ -16,6 +16,8 @@ const { uploadFileBytes, nameTakenInDirectory, driveListingQueryUpdate, cachedLi
 	})
 )
 
+// The New menu's New directory shortcut; registering it needs the drive keymap, which this file never loads.
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFileBytes } }))
 vi.mock("@/features/drive/lib/nameTaken", () => ({ nameTakenInDirectory }))
 vi.mock("@/features/drive/queries/drive", async importOriginal => ({
@@ -35,7 +37,7 @@ vi.mock("@/lib/keymap/kbd", async () => {
 })
 
 import "@/lib/i18n"
-import { UploadMenu } from "@/features/drive/components/uploadMenu"
+import { NewMenu } from "@/features/drive/components/uploadMenu"
 import { DestinationEntries } from "@/features/drive/components/destinationMenu"
 import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -77,7 +79,7 @@ function renderMenu(options: { offline?: boolean; hiddenNotice?: boolean } = {})
 	const openPreview = vi.fn()
 
 	render(
-		<UploadMenu
+		<NewMenu
 			parentUuid="parent"
 			openPreview={openPreview}
 			offline={options.offline ?? false}
@@ -89,7 +91,7 @@ function renderMenu(options: { offline?: boolean; hiddenNotice?: boolean } = {})
 }
 
 async function openOffice(): Promise<void> {
-	fireEvent.click(screen.getByRole("button", { name: "Upload" }))
+	fireEvent.click(screen.getByRole("button", { name: "New" }))
 	await act(async () => {
 		fireEvent.click(screen.getByRole("menuitem", { name: "Office" }))
 		await Promise.resolve()

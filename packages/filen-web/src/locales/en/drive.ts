@@ -60,7 +60,7 @@ export const drive = {
 
 	// ── Upload ───────────────────────────────────────────────────────────────
 	/** Drive toolbar — trigger button opening the standalone upload menu (Upload files, later Upload directory) */
-	driveUploadMenuTrigger: "Upload",
+	driveNewMenuTrigger: "New",
 	/** Drive listing — overlay hint shown over the listing area while dragging files over it */
 	driveUploadDropHint: "Drop files to upload",
 	/** Drive listing — the same hint while the drag rests on a directory, which the drop uploads into */

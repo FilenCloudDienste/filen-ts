@@ -22,8 +22,8 @@ test("New text file: name without an extension defaults to .txt, the row appears
 		const nameTxt = `${baseName}.txt`
 
 		// .first(): the fresh scratch directory starts empty, so its empty-state "+ Add" affordance
-		// renders a second identical Upload trigger; the toolbar's is always first in DOM order.
-		await page.getByRole("button", { name: "Upload", exact: true }).first().click()
+		// renders a second identical New trigger; the toolbar's is always first in DOM order.
+		await page.getByRole("button", { name: "New", exact: true }).first().click()
 		const menu = page.getByRole("menu")
 		await expect(menu).toBeVisible()
 		await menu.getByRole("menuitem", { name: "New text file", exact: true }).click()

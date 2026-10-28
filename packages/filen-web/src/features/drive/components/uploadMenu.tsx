@@ -1,9 +1,12 @@
-import { type ReactElement, type SyntheticEvent } from "react"
+import { useState, type ReactElement, type SyntheticEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { UploadIcon } from "lucide-react"
+import { PlusIcon } from "lucide-react"
+import { useAction } from "@/lib/keymap/useAction"
+import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { isEmptySpaceTarget } from "@/features/drive/lib/clickAway.logic"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { useUploadMenuActions } from "@/features/drive/hooks/useUploadMenuActions"
+import { NewDirectoryDialog } from "@/features/drive/components/newDirectory"
 import { DestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { CONTEXT_TREE_MENU_FAMILY, DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { Button } from "@/components/ui/button"
@@ -11,12 +14,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/compon
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import type { DrivePasteAction } from "@/features/drive/hooks/useDriveClipboard"
 
-export interface UploadMenuProps {
-	// The directory uploaded files land in — the current listing's own uuid (null at My Drive's root).
+export interface NewMenuProps {
+	// The directory created and uploaded items land in — the current listing's own uuid (null at My Drive's root).
 	parentUuid: string | null
 	// True outside a writable location (canWriteVariant — the "drive" variant, or an owned nested
-	// sharedOut directory) or while the listing hasn't loaded yet — mirrors NewDirectory's
-	// disabled-not-hidden convention so the toolbar's layout stays stable across variant switches.
+	// sharedOut directory) or while the listing hasn't loaded yet — disabled rather than hidden, so the
+	// toolbar's layout stays stable across variant switches.
 	disabled?: boolean
 	// Opens the full-screen preview overlay on a frozen single-item snapshot — directoryListing.tsx's
 	// own useDriveDialogHost().openPreview, threaded in so the newly created text file opens its
@@ -24,12 +27,16 @@ export interface UploadMenuProps {
 	// upload settles).
 	openPreview: (items: DriveItem[], index: number) => void
 	// True only when `disabled` is caused specifically by the app being offline — surfaced as the
-	// trigger's native title, mirroring newDirectory.tsx's own offline/disabled split.
+	// trigger's native title.
 	offline?: boolean
-	// True when this listing would actually hide a dot-prefixed name — see NewDirectory's identical prop.
+	// True when this listing would actually hide a dot-prefixed name (the preference AND
+	// hiddenFilterAppliesTo) — computed once by the listing, since it already holds both halves.
 	hiddenNotice?: boolean
 	// Pastes the drive clipboard into the directory this menu writes into, or clears it (useDriveClipboard).
 	paste?: DrivePasteAction | undefined
+	// False for a second copy of the menu on the same screen, so one keypress opens one New directory dialog.
+	// Defaults to true.
+	shortcut?: boolean
 }
 
 // The listing's paste: its mod+v pastes into the same directory, and its menus alone offer Clear.
@@ -42,25 +49,52 @@ function pasteEntries(paste: DrivePasteAction | undefined) {
 			}
 }
 
-// Toolbar entry point for starting an upload.
-export function UploadMenu({
+// The toolbar's one entry point for creating and uploading into the directory on screen.
+export function NewMenu({
 	parentUuid,
 	disabled: disabledProp,
 	openPreview,
 	offline: offlineProp,
 	hiddenNotice: hiddenNoticeProp,
-	paste
-}: UploadMenuProps) {
+	paste,
+	shortcut
+}: NewMenuProps) {
 	// Not destructuring defaults, which the React Compiler cannot lower.
 	const disabled = disabledProp ?? false
 	const offline = offlineProp ?? false
 	const hiddenNotice = hiddenNoticeProp ?? false
 	const { t } = useTranslation(["drive", "common"])
-	const actions = useUploadMenuActions({ parentUuid, disabled, openPreview, hiddenNotice })
+	const upload = useUploadMenuActions({ parentUuid, disabled, openPreview, hiddenNotice })
+	const [newDirectoryOpen, setNewDirectoryOpen] = useState(false)
+	const actions: DestinationActions = {
+		...upload,
+		newDirectory: () => {
+			setNewDirectoryOpen(true)
+		}
+	}
+
+	// Guards on `disabled` and an open dialog itself, since a keyboard command's live handler must stay a plain
+	// hook call. A copy without the shortcut attaches no listener at all.
+	useAction(
+		"drive.newDirectory",
+		() => {
+			if (!disabled && !isAnyDialogOpen()) {
+				setNewDirectoryOpen(true)
+			}
+		},
+		{ enabled: shortcut !== false },
+		[disabled]
+	)
 
 	return (
 		<>
-			{actions.host}
+			{upload.host}
+			<NewDirectoryDialog
+				open={newDirectoryOpen}
+				onOpenChange={setNewDirectoryOpen}
+				parentUuid={parentUuid}
+				hiddenNotice={hiddenNotice}
+			/>
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					render={
@@ -69,17 +103,16 @@ export function UploadMenu({
 							// Label sheds below sm so this cluster stops pushing the breadcrumb — and itself — past
 							// the card edge; the aria-label is the same key, so the accessible name is unchanged at
 							// every width.
-							aria-label={t("driveUploadMenuTrigger")}
+							aria-label={t("driveNewMenuTrigger")}
 							disabled={disabled}
 							title={offline && disabled ? t("common:offlineActionDisabled") : undefined}
 						>
-							<UploadIcon />
-							<span className="hidden sm:inline">{t("driveUploadMenuTrigger")}</span>
+							<PlusIcon />
+							<span className="hidden sm:inline">{t("driveNewMenuTrigger")}</span>
 						</Button>
 					}
 				/>
 				<DropdownMenuContent align="end">
-					{/* No New directory: the toolbar has its own button beside this one. */}
 					<DestinationEntries
 						family={DROPDOWN_TREE_MENU_FAMILY}
 						actions={actions}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react"
+import { createElement, isValidElement, type ReactElement, type ReactNode } from "react"
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File, SharedFile, SharedRootDir, SharingRole } from "@filen/sdk-rs"
@@ -117,18 +117,16 @@ vi.mock("@/features/drive/components/emptyTrashButton", () => ({
 vi.mock("@/components/loadingState", () => ({ LoadingState: () => null }))
 vi.mock("@/features/drive/components/emptyState", () => ({ EmptyState }))
 vi.mock("@/features/drive/components/newDirectory", () => ({
-	NewDirectory: (props: { disabled?: boolean; shortcut?: boolean }) =>
-		createElement("div", {
-			"data-testid": "new-directory",
-			"data-disabled": String(props.disabled === true),
-			"data-shortcut": String(props.shortcut !== false)
-		}),
 	// The listing's destination host mounts its name dialog; closed, it renders nothing.
 	NewDirectoryDialog: () => null
 }))
 vi.mock("@/features/drive/components/uploadMenu", () => ({
-	UploadMenu: (props: { disabled?: boolean }) =>
-		createElement("div", { "data-testid": "upload-menu", "data-disabled": String(props.disabled === true) }),
+	NewMenu: (props: { disabled?: boolean; shortcut?: boolean }) =>
+		createElement("div", {
+			"data-testid": "new-menu",
+			"data-disabled": String(props.disabled === true),
+			"data-shortcut": String(props.shortcut !== false)
+		}),
 	// Keeps the surface it wraps (the listbox, or the empty-listing placeholder) and exposes its open hook.
 	UploadContextMenu: (props: { disabled?: boolean; render: ReactElement; onOpen: () => void }) =>
 		createElement(
@@ -202,7 +200,7 @@ import { deriveBlockedUsers, EMPTY_BLOCKED_USERS } from "@filen/shared"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { DirectoryListing } from "@/features/drive/components/directoryListing"
-import { NewDirectory } from "@/features/drive/components/newDirectory"
+import { NewMenu } from "@/features/drive/components/uploadMenu"
 import { testUuid } from "@/tests/support/uuid"
 import { receiverRole, sharerRole } from "@/tests/fixtures/sdk"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
@@ -299,8 +297,7 @@ function renderedNames(): string[] {
 
 function writeSurfaceStates(): Record<string, string> {
 	return {
-		newDirectory: screen.getByTestId("new-directory").getAttribute("data-disabled") ?? "",
-		uploadMenu: screen.getByTestId("upload-menu").getAttribute("data-disabled") ?? "",
+		newMenu: screen.getByTestId("new-menu").getAttribute("data-disabled") ?? "",
 		dropzone: screen.getByTestId("upload-dropzone").getAttribute("data-disabled") ?? "",
 		// Absent while the listing itself is (a loading or error state has no empty space of its own).
 		backgroundMenu: screen.queryByTestId("background-menu")?.getAttribute("data-disabled") ?? "absent"
@@ -326,21 +323,21 @@ describe("DirectoryListing — write gate", () => {
 	it("enables every write surface in an online, loaded drive listing", () => {
 		renderListing({ items: [narrowItem(mockDir("Documents"))] })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
+		expect(writeSurfaceStates()).toEqual({ newMenu: "false", dropzone: "false", backgroundMenu: "false" })
 	})
 
 	it("disables them while offline — every one of them writes through the SDK", () => {
 		useIsOnline.mockReturnValue(false)
 		renderListing({ items: [narrowItem(mockDir("Documents"))] })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "true" })
+		expect(writeSurfaceStates()).toEqual({ newMenu: "true", dropzone: "true", backgroundMenu: "true" })
 	})
 
 	it("disables them while the listing is still loading — there is no confirmed target uuid yet", () => {
 		listingQuery.current = { data: undefined, status: "pending", isRefetchError: false, error: null }
 		renderListing()
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "absent" })
+		expect(writeSurfaceStates()).toEqual({ newMenu: "true", dropzone: "true", backgroundMenu: "absent" })
 	})
 
 	// A failed background refetch keeps its rows (status "error" with data), and the listing keeps
@@ -355,26 +352,26 @@ describe("DirectoryListing — write gate", () => {
 		select([documents])
 
 		expect(renderedNames()).toEqual(["Documents"])
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
+		expect(writeSurfaceStates()).toEqual({ newMenu: "false", dropzone: "false", backgroundMenu: "false" })
 		expect(screen.getByTestId("bulk-bar").textContent).toBe("Documents")
 	})
 
 	it("disables them on the sharedOut ROOT but enables them inside an owned nested sharedOut directory", () => {
 		renderListing({ variant: "sharedOut", splat: "" })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "true" })
+		expect(writeSurfaceStates()).toEqual({ newMenu: "true", dropzone: "true", backgroundMenu: "true" })
 
 		cleanup()
 		renderListing({ variant: "sharedOut", splat: testUuid("nested") })
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
+		expect(writeSurfaceStates()).toEqual({ newMenu: "false", dropzone: "false", backgroundMenu: "false" })
 	})
 
 	it("disables them on every variant that has no directory to write into", () => {
 		for (const variant of ["trash", "favorites", "recents", "links", "sharedIn"] as const) {
 			renderListing({ variant })
 
-			expect(writeSurfaceStates()).toEqual({ newDirectory: "true", uploadMenu: "true", dropzone: "true", backgroundMenu: "true" })
+			expect(writeSurfaceStates()).toEqual({ newMenu: "true", dropzone: "true", backgroundMenu: "true" })
 
 			cleanup()
 		}
@@ -383,20 +380,18 @@ describe("DirectoryListing — write gate", () => {
 	it("wraps the empty-directory placeholder too, under the same gate", () => {
 		renderListing()
 
-		expect(writeSurfaceStates()).toEqual({ newDirectory: "false", uploadMenu: "false", dropzone: "false", backgroundMenu: "false" })
+		expect(writeSurfaceStates()).toEqual({ newMenu: "false", dropzone: "false", backgroundMenu: "false" })
 	})
 
 	// Both copies registering the shortcut would open two dialogs on one keypress.
-	it("leaves the New directory shortcut to the toolbar when the empty state offers the control too", () => {
+	it("leaves the New directory shortcut to the toolbar when the empty state offers the menu too", () => {
 		renderListing()
 
 		const action = EmptyState.mock.lastCall?.[0].action
-		const emptyStateCopy = Children.toArray(isValidElement<{ children: ReactNode }>(action) ? action.props.children : null).find(
-			(child): child is ReactElement<{ shortcut?: boolean }> => isValidElement(child) && child.type === NewDirectory
-		)
+		const emptyStateCopy = isValidElement<{ shortcut?: boolean }>(action) && action.type === NewMenu ? action : undefined
 
 		expect(emptyStateCopy?.props.shortcut).toBe(false)
-		expect(screen.getByTestId("new-directory").getAttribute("data-shortcut")).toBe("true")
+		expect(screen.getByTestId("new-menu").getAttribute("data-shortcut")).toBe("true")
 	})
 
 	it("drops the selection when the empty-space menu opens, as a click-away does", () => {

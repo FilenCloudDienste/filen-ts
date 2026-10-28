@@ -31,14 +31,14 @@ test.describe("drive bulk actions", () => {
 		// Enabled, not merely visible: every non-writable listing variant still RENDERS this button, just
 		// disabled (directoryListing.tsx's writeDisabled — menus.spec.ts asserts that state directly), so a
 		// visibility check would pass on a dead control and prove nothing about this listing being writable.
-		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeEnabled()
+		await expect(page.getByRole("button", { name: "New", exact: true }).first()).toBeEnabled()
 
 		await listbox.getByRole("option").first().click()
 
 		// The floating selection bar appears; the toolbar stays put — the two coexist.
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toBeVisible()
 		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
-		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeEnabled()
+		await expect(page.getByRole("button", { name: "New", exact: true }).first()).toBeEnabled()
 
 		// Trash is never gated by undecryptable — always present for a /drive selection regardless of
 		// what this unknown account's first item happens to be.
@@ -50,7 +50,7 @@ test.describe("drive bulk actions", () => {
 		await page.getByRole("button", { name: "Clear selection", exact: true }).click()
 
 		await expect(page.getByText("1 selected", { exact: true })).toHaveCount(0)
-		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeEnabled()
+		await expect(page.getByRole("button", { name: "New", exact: true }).first()).toBeEnabled()
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toHaveCount(0)
 	})
 
@@ -81,7 +81,7 @@ test.describe("drive bulk actions", () => {
 		// their directory name, so a live account whose drive root happens to hold a directory literally
 		// named "New directory" would strict-mode-violate a name-only locator. lucide-react stamps every
 		// icon with `lucide-<kebab-name>`, and no row renders that icon. Both locators are scoped to
-		// `dialog`, so the toolbar's own identically-named button behind the modal can never match.
+		// `dialog`, so nothing behind the modal can match.
 		const createButton = dialog
 			.getByRole("button", { name: "New directory", exact: true })
 			.filter({ has: page.locator("svg.lucide-folder-plus") })

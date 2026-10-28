@@ -515,7 +515,7 @@ describe("React Compiler coverage", () => {
 
 	// A destructuring default is what the compiler cannot lower; each of these had one.
 	it.each([
-		["src/features/drive/components/newDirectory.tsx", "NewDirectory"],
+		["src/features/drive/components/newDirectory.tsx", "NewDirectoryDialog"],
 		["src/features/drive/components/moveTargetDialog.tsx", "MoveTargetDialog"],
 		["src/features/drive/hooks/useUploadMenuActions.tsx", "useUploadMenuActions"],
 		["src/features/drive/hooks/useNewOfficeFile.tsx", "useNewOfficeFile"],
@@ -551,7 +551,7 @@ describe("React Compiler coverage", () => {
 		["src/features/publicLinks/components/publicArchive.tsx", "SaveAsArchiveButton"],
 		["src/features/publicLinks/components/fileHero.tsx", "FileHero"],
 		["src/features/drive/components/destinationMenu.tsx", "DestinationEntries"],
-		["src/features/drive/components/uploadMenu.tsx", "UploadMenu"],
+		["src/features/drive/components/uploadMenu.tsx", "NewMenu"],
 		["src/features/drive/components/uploadMenu.tsx", "UploadContextMenu"],
 		["src/features/drive/components/sortMenu.tsx", "SortMenu"],
 		["src/features/settings/components/events/eventDetailDialog.tsx", "EventDetailDialog"],

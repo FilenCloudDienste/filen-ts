@@ -237,9 +237,10 @@ test.describe("drive", () => {
 
 		// .first(): an EMPTY writable listing renders a second identical trigger inside its empty-state
 		// "+ Add" affordance; the toolbar's is always first in DOM order.
-		const newDirButton = page.getByRole("button", { name: "New directory", exact: true }).first()
-		await expect(newDirButton).toBeEnabled()
-		await newDirButton.click()
+		const newMenu = page.getByRole("button", { name: "New", exact: true }).first()
+		await expect(newMenu).toBeEnabled()
+		await newMenu.click()
+		await page.getByRole("menu").getByRole("menuitem", { name: "New directory", exact: true }).click()
 
 		// Filtered by its own heading: previewOverlay.tsx composes Base UI's dialog Popup directly, whose
 		// role defaults to "dialog" too, so a bare lookup can resolve to the wrong surface.

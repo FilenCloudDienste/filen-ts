@@ -35,7 +35,7 @@ test.describe("boot", () => {
 		// its toolbar is a stable, always-rendered proof the route mounted past the shell chrome. .first():
 		// an empty writable root also renders a second identical button in its empty-state "+ Add"; the
 		// toolbar's copy is always first in DOM order.
-		await expect(page.getByRole("button", { name: "New directory", exact: true }).first()).toBeVisible({
+		await expect(page.getByRole("button", { name: "New", exact: true }).first()).toBeVisible({
 			timeout: BOOT_SETTLE_TIMEOUT_MS
 		})
 

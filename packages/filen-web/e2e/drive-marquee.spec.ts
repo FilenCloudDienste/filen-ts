@@ -161,7 +161,7 @@ test.describe("drive rubber-band selection", () => {
 		const breadcrumbBox = await boxOf(crumbs)
 		// The middle of the gap, not a fixed step past the breadcrumb: a long breadcrumb (the fixture root's name)
 		// leaves little room before the buttons.
-		const buttonsBox = await boxOf(header.getByRole("button", { name: "New directory", exact: true }))
+		const buttonsBox = await boxOf(header.getByRole("button", { name: "New", exact: true }))
 		const gapStart = breadcrumbBox.x + breadcrumbBox.width
 
 		expect(buttonsBox.x - gapStart).toBeGreaterThan(16)

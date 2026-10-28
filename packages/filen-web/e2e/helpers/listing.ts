@@ -412,7 +412,8 @@ export async function createDirectoryViaDialog(
 	listbox?: Locator,
 	options?: { expectRow?: boolean; writeTimeoutMs?: number }
 ): Promise<void> {
-	await page.getByRole("button", { name: "New directory", exact: true }).first().click()
+	await page.getByRole("button", { name: "New", exact: true }).first().click()
+	await page.getByRole("menu").getByRole("menuitem", { name: "New directory", exact: true }).click()
 
 	// Filtered by its own heading: previewOverlay.tsx composes Base UI's dialog Popup directly, whose
 	// role defaults to "dialog" too, so a bare getByRole("dialog") can resolve to the preview surface

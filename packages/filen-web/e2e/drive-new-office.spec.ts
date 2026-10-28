@@ -12,7 +12,7 @@ test.describe.configure({ mode: "default" })
 
 async function startNew(page: Page, entry: string): Promise<Locator> {
 	// .first(): an empty scratch directory renders a second Upload trigger in its empty state.
-	await page.getByRole("button", { name: drive.driveUploadMenuTrigger, exact: true }).first().click()
+	await page.getByRole("button", { name: drive.driveNewMenuTrigger, exact: true }).first().click()
 	await page.getByRole("menuitem", { name: drive.driveNewOffice, exact: true }).click()
 	await page.getByRole("menuitem", { name: entry, exact: true }).click()
 

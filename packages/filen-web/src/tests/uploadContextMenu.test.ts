@@ -5,13 +5,15 @@ import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-l
 import { createElement } from "react"
 
 // The Paste entry's shortcut badge, reduced to its action id (the registry isn't loaded here).
+// The New menu's New directory shortcut; registering it needs the drive keymap, which this file never loads.
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
 vi.mock("@/lib/keymap/kbd", async () => {
 	const { createElement: element } = await import("react")
 	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
 })
 
 import "@/lib/i18n"
-import { UploadContextMenu, UploadMenu } from "@/features/drive/components/uploadMenu"
+import { UploadContextMenu, NewMenu } from "@/features/drive/components/uploadMenu"
 import type { DrivePasteAction } from "@/features/drive/hooks/useDriveClipboard"
 
 afterEach(() => {
@@ -67,9 +69,9 @@ function menuLabels(): string[] {
 }
 
 describe("UploadContextMenu", () => {
-	it("opens on the surface's empty space with the toolbar menu's entries plus New directory", () => {
-		render(createElement(UploadMenu, { parentUuid: null, openPreview: vi.fn() }))
-		fireEvent.click(screen.getByRole("button", { name: "Upload" }))
+	it("opens on the surface's empty space with the toolbar New menu's entries", () => {
+		render(createElement(NewMenu, { parentUuid: null, openPreview: vi.fn() }))
+		fireEvent.click(screen.getByRole("button", { name: "New" }))
 
 		const toolbarEntries = menuLabels()
 
@@ -79,9 +81,8 @@ describe("UploadContextMenu", () => {
 
 		rightClick(screen.getByTestId("blank"))
 
-		// The toolbar has its own New directory button beside its Upload menu.
-		expect(toolbarEntries).toEqual(["New text file", "Office", "Upload files", "Upload directory"])
-		expect(menuLabels()).toEqual(["New directory", ...toolbarEntries])
+		expect(toolbarEntries).toEqual(["New directory", "New text file", "Office", "Upload files", "Upload directory"])
+		expect(menuLabels()).toEqual(toolbarEntries)
 		expect(onOpen).toHaveBeenCalledOnce()
 	})
 
@@ -133,14 +134,13 @@ describe("UploadContextMenu", () => {
 		const run = vi.fn()
 		const clear = vi.fn()
 
-		render(
-			createElement(UploadMenu, { parentUuid: null, openPreview: vi.fn(), paste: { enabled: false, run, clearable: false, clear } })
-		)
-		fireEvent.click(screen.getByRole("button", { name: "Upload" }))
+		render(createElement(NewMenu, { parentUuid: null, openPreview: vi.fn(), paste: { enabled: false, run, clearable: false, clear } }))
+		fireEvent.click(screen.getByRole("button", { name: "New" }))
 
 		const toolbarPaste = screen.getByRole("menuitem", { name: /^Paste/ })
 
 		expect(menuLabels()).toEqual([
+			"New directory",
 			"New text file",
 			"Office",
 			"Upload files",
