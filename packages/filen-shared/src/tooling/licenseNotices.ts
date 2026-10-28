@@ -435,6 +435,29 @@ export function finalizeNotices<E extends string>(
 	return { texts, notices }
 }
 
+/**
+ * The payload with its texts in code-unit order and every entry's indices remapped. The table's order means nothing (an
+ * entry lists its own texts in order), and like texts side by side are what deflate's 32 KiB window can match, so the
+ * shipped payload compresses smaller.
+ */
+export function sortNoticeTexts<E extends string>(payload: { texts: string[]; notices: NoticeEntry<E>[] }): {
+	texts: string[]
+	notices: NoticeEntry<E>[]
+} {
+	const order = payload.texts.map((_, index) => index).sort((a, b) => {
+		const x = payload.texts[a] ?? ""
+		const y = payload.texts[b] ?? ""
+
+		return x < y ? -1 : x > y ? 1 : 0
+	})
+	const moved = new Map(order.map((from, to) => [from, to]))
+
+	return {
+		texts: order.map(index => payload.texts[index] ?? ""),
+		notices: payload.notices.map(notice => ({ ...notice, texts: notice.texts.map(index => moved.get(index) ?? index) }))
+	}
+}
+
 export function readJson(path: string): Record<string, unknown> | null {
 	try {
 		return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>

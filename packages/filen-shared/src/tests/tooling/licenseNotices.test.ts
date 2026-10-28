@@ -9,6 +9,7 @@ import {
 	finalizeNotices,
 	poolLicenseTexts,
 	repositoryOf,
+	sortNoticeTexts,
 	spdxOf,
 	vendoredNotice,
 	type PoolableNotice
@@ -137,6 +138,25 @@ describe("finalizeNotices", () => {
 			["b", "1.0.0", [0]]
 		])
 		expect(notices.every(notice => !("terms" in notice))).toBe(true)
+	})
+})
+
+describe("sortNoticeTexts", () => {
+	it("orders the texts and points every entry at the same texts as before", () => {
+		const entry = (name: string, texts: number[]) => ({
+			name,
+			version: "1.0.0",
+			license: "MIT",
+			ecosystem: "npm" as const,
+			copyright: [],
+			repository: null,
+			texts
+		})
+		const payload = { texts: ["MIT b", "Apache", "MIT a"], notices: [entry("x", [0, 2]), entry("y", [1]), entry("z", [])] }
+		const sorted = sortNoticeTexts(payload)
+
+		expect(sorted.texts).toEqual(["Apache", "MIT a", "MIT b"])
+		expect(sorted.notices.map(notice => notice.texts.map(index => sorted.texts[index]))).toEqual([["MIT b", "MIT a"], ["Apache"], []])
 	})
 })
 

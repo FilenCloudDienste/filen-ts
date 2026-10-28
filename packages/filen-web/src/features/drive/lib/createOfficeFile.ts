@@ -1,5 +1,8 @@
-import { blankDocx, blankOdp, blankOds, blankOdt, blankPptx, blankXlsx } from "@filen/office/core/templates"
+import * as Comlink from "comlink"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
+import type { OfficeTemplateApi } from "@/features/drive/lib/officeTemplates"
+import OfficeTemplateWorker from "@/features/drive/workers/officeTemplate.worker.ts?worker"
+import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 // The blank office files New ▸ Office creates.
 export type NewOfficeKind = "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp"
@@ -54,19 +57,23 @@ export interface OfficeTemplateLocale {
 	sheetName: string
 }
 
-export function officeFileBytes(kind: NewOfficeKind, { locale, sheetName }: OfficeTemplateLocale): Promise<Uint8Array> {
-	switch (kind) {
-		case "docx":
-			return blankDocx({ locale })
-		case "xlsx":
-			return blankXlsx({ locale, sheetName })
-		case "odt":
-			return blankOdt({ locale })
-		case "ods":
-			return blankOds({ locale, sheetName })
-		case "pptx":
-			return blankPptx({ locale })
-		case "odp":
-			return blankOdp({ locale })
+// The blank file, built in a worker spawned for it and ended after (officeTemplates.ts): New ▸ Office is rare, and
+// the templates would otherwise be parsed with the main bundle on every load.
+export async function officeFileBytes(kind: NewOfficeKind, locale: OfficeTemplateLocale): Promise<Uint8Array> {
+	const worker = new OfficeTemplateWorker()
+	const remote = Comlink.wrap<OfficeTemplateApi>(worker)
+	const failed = new Promise<never>((_, reject) => {
+		worker.addEventListener("error", event => {
+			// A deploy that changed this worker removes its old file (appUpdate.ts).
+			recoverIfNewerBuild()
+			reject(new Error(`office template worker failed: ${event.message}`))
+		})
+	})
+
+	try {
+		return await Promise.race([remote.bytes(kind, locale), failed])
+	} finally {
+		remote[Comlink.releaseProxy]()
+		worker.terminate()
 	}
 }

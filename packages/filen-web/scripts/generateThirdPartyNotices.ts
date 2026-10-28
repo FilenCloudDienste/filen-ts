@@ -10,6 +10,7 @@ import {
 	listInstalledNpm,
 	readJson,
 	repositoryOf,
+	sortNoticeTexts,
 	spdxOf,
 	splitCopyright,
 	vendoredNotice,
@@ -1055,8 +1056,9 @@ const dictionaries = spellcheckDictionaryNotices()
 const vendored = [...ffmpeg, ...engine, model, ...office, ...dictionaries]
 const collected = [...npm, ...rust.entries, ...spellcheckCrates, ...vendored]
 
-// Vendored entries promise their files verbatim (dictionaries ship them byte for byte).
-const { texts, notices } = finalizeNotices(collected, entry => entry.ecosystem === "vendored")
+// Vendored entries promise their files verbatim (dictionaries ship them byte for byte). Texts sorted: the payload ships
+// gzipped in the main bundle, and like texts side by side compress best.
+const { texts, notices } = sortNoticeTexts(finalizeNotices(collected, entry => entry.ecosystem === "vendored"))
 
 // No absolute path is ever written into the artifact: it is a committed source file, and a machine path
 // would make regeneration produce a spurious diff on the next machine. The repository, the ref it was

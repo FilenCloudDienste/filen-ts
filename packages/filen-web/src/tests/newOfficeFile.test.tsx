@@ -31,6 +31,7 @@ vi.mock("sonner", async importOriginal => {
 
 	return { ...actual, toast: Object.assign(vi.fn(), actual.toast, { info: toastInfo }) }
 })
+vi.mock("@/features/drive/workers/officeTemplate.worker.ts?worker", () => ({ default: vi.fn() }))
 vi.mock("@/lib/keymap/kbd", async () => {
 	const { createElement: element } = await import("react")
 	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }
@@ -42,6 +43,8 @@ import { DestinationEntries } from "@/features/drive/components/destinationMenu"
 import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { narrowItem } from "@/features/drive/lib/item"
+import OfficeTemplateWorker from "@/features/drive/workers/officeTemplate.worker.ts?worker"
+import { inProcessTemplateWorker } from "@/tests/support/officeTemplateWorker"
 
 const TAKEN = "A file or directory with this name already exists here."
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -50,6 +53,7 @@ const ODT_MIME = "application/vnd.oasis.opendocument.text"
 const ODS_MIME = "application/vnd.oasis.opendocument.spreadsheet"
 
 beforeEach(() => {
+	vi.mocked(OfficeTemplateWorker).mockImplementation(inProcessTemplateWorker())
 	nameTakenInDirectory.mockResolvedValue(false)
 	cachedListing.mockReturnValue(undefined)
 	isDriveListingCurrent.mockReturnValue(false)

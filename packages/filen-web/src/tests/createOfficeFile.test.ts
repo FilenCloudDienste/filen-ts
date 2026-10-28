@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ZipArchive, bytesSource } from "@filen/office/core/opc"
+
+vi.mock("@/features/drive/workers/officeTemplate.worker.ts?worker", () => ({ default: vi.fn() }))
+
+import OfficeTemplateWorker from "@/features/drive/workers/officeTemplate.worker.ts?worker"
 import { OFFICE_FILE_MIME, freeOfficeFileName, normalizeOfficeFileName, officeFileBytes } from "@/features/drive/lib/createOfficeFile"
+import { inProcessTemplateWorker } from "@/tests/support/officeTemplateWorker"
+
+const terminated = vi.fn()
 
 async function part(bytes: Uint8Array, name: string): Promise<string> {
 	const zip = await ZipArchive.open(bytesSource(bytes))
@@ -10,6 +17,10 @@ async function part(bytes: Uint8Array, name: string): Promise<string> {
 
 	return new TextDecoder().decode(await zip.read(entry))
 }
+
+beforeEach(() => {
+	vi.mocked(OfficeTemplateWorker).mockImplementation(inProcessTemplateWorker(terminated))
+})
 
 describe("normalizeOfficeFileName", () => {
 	it("adds the extension when the name has none, or another one", () => {
@@ -39,6 +50,29 @@ describe("freeOfficeFileName", () => {
 })
 
 describe("officeFileBytes", () => {
+	it("builds the file in a worker it ends afterwards", async () => {
+		const bytes = await officeFileBytes("docx", { locale: "en-US", sheetName: "Sheet1" })
+
+		expect(bytes.byteLength).toBeGreaterThan(0)
+		expect(OfficeTemplateWorker).toHaveBeenCalledTimes(1)
+		expect(terminated).toHaveBeenCalledTimes(1)
+	})
+
+	it("rejects, and ends the worker, when the worker fails to start", async () => {
+		const worker = Object.assign(new EventTarget(), { postMessage: vi.fn(), terminate: vi.fn() })
+
+		vi.mocked(OfficeTemplateWorker).mockImplementation(function () {
+			return worker as unknown as Worker
+		})
+
+		const bytes = officeFileBytes("pptx", { locale: "en-US", sheetName: "Sheet1" })
+
+		worker.dispatchEvent(Object.assign(new Event("error"), { message: "load" }))
+
+		await expect(bytes).rejects.toThrow("office template worker failed: load")
+		expect(worker.terminate).toHaveBeenCalledTimes(1)
+	})
+
 	it("builds a blank document in the user's language and paper", async () => {
 		const bytes = await officeFileBytes("docx", { locale: "de-DE", sheetName: "Sheet1" })
 
