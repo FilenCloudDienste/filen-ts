@@ -213,7 +213,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/50 px-4">
+			<header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/50 px-4 app-region-chrome">
 				<h1 className="min-w-0 flex-1 truncate font-heading text-base font-medium tracking-tight">{pair.name}</h1>
 				<div className="flex shrink-0 items-center gap-1">
 					<TooltipIconButton

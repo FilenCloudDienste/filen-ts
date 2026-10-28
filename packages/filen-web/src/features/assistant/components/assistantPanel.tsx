@@ -126,7 +126,7 @@ export function AssistantSidePanel() {
 		<SidebarPanelVisibilityProvider visible={true}>
 			<AssistantSurface
 				ref={attachInlinePanel}
-				className="shrink-0"
+				className="shrink-0 app-region-no-drag"
 				style={{ width: resize.width }}
 				onClose={closeInlinePanel}
 			/>
@@ -175,7 +175,7 @@ export function AssistantDrawer({ open, narrow }: { open: boolean; narrow: boole
 			<DrawerPrimitive.Portal>
 				<DrawerPrimitive.Backdrop className={SCRIM_CLASS} />
 				{/* Desktop: the right-docked panel starts below the Windows/Linux window-controls band. */}
-				<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex justify-end pt-(--window-inset-top)">
+				<DrawerPrimitive.Viewport className="fixed inset-0 z-50 flex justify-end pt-(--window-inset-top) app-region-no-drag">
 					<DrawerPrimitive.Popup
 						aria-label={t("assistantTitle")}
 						initialFocus={drawerInitialFocus}

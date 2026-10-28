@@ -15,7 +15,7 @@ export const MEDIA_GLASS_TONE_CLASS = "dark bg-black/65 text-foreground shadow-l
 export const MEDIA_GLASS_SURFACE_CLASS = `${MEDIA_GLASS_TONE_CLASS} backdrop-blur-xl`
 
 export const SCRIM_CLASS =
-	"fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+	"fixed inset-0 isolate z-50 bg-black/30 app-region-no-drag duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
 
 export const CARD_SURFACE_CLASS = `overflow-hidden rounded-[min(var(--radius-4xl),24px)] bg-card text-sm text-card-foreground shadow-sm ${SURFACE_RING}`
 

@@ -14,7 +14,7 @@ interface SettingsPageHeaderProps {
 // its accessible name is the plain section title and nothing else.
 function SettingsPageHeader({ icon: Icon, title }: SettingsPageHeaderProps) {
 	return (
-		<header className="flex h-14 shrink-0 items-center gap-3 px-4">
+		<header className="flex h-14 shrink-0 items-center gap-3 px-4 app-region-chrome">
 			<div className="flex items-center gap-2">
 				<Icon className="size-4 text-muted-foreground" />
 				<h1 className="font-heading text-base font-medium tracking-tight">{title}</h1>

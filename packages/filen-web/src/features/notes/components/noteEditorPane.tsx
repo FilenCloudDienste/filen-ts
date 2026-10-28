@@ -117,7 +117,7 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 		}
 
 		return (
-			<div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+			<div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center app-region-chrome">
 				<StickyNoteIcon className="size-8 text-muted-foreground/60" />
 				<div className="flex flex-col gap-1">
 					<p className="font-heading text-lg font-medium tracking-tight">{t("notesSelectPrompt")}</p>
@@ -153,7 +153,7 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4">
+			<header className="flex shrink-0 items-center gap-2.5 px-5 py-4 app-region-chrome">
 				<Icon className={`size-5 shrink-0 ${colorClass}`} />
 				<h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
 				{viewOnly ? (

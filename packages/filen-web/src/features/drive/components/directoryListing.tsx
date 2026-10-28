@@ -909,7 +909,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			{/* Card top row: breadcrumbs left, the action-button cluster right. Everything down to the
 			    listing runs full width at px-3, the listing rows' own inset, so the page's left and right
 			    content edges line up with the table's first column and its trailing ⋯ column. */}
-			<header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border/50 px-3">
+			<header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border/50 px-3 app-region-chrome">
 				<Breadcrumb
 					variant={variant}
 					splat={splat}
@@ -940,7 +940,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				</div>
 			</header>
 			{/* Controls row: sort + display left, search right — bordered controls, room to grow. */}
-			<div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-4">
+			<div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-4 app-region-chrome">
 				<div className="flex items-center gap-2">
 					<SortMenu
 						value={effectiveSort}

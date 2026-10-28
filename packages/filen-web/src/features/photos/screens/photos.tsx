@@ -121,7 +121,7 @@ export function PhotosScreen() {
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4">
+			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4 app-region-chrome">
 				<h1 className="flex min-w-0 items-baseline gap-1.5 text-sm font-medium">
 					<span className="shrink-0">{t("common:modulePhotos")}</span>
 					{rootName === undefined ? null : (

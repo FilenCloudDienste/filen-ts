@@ -13,6 +13,7 @@ export function ChatsPlaceholder({ loading: loadingProp }: { loading?: boolean }
 	return (
 		<EmptyMessage
 			icon={MessagesSquareIcon}
+			className="app-region-chrome"
 			title={loading ? t("chatsLoadingThread") : t("chatsSelectPrompt")}
 			description={loading ? undefined : t("chatsSelectPromptDescription")}
 		/>

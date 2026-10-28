@@ -125,7 +125,7 @@ export function TransfersScreen() {
 		<>
 			{/* One row at every width: below sm the summary goes and the buttons shed their labels, each
 			    keeping it as its accessible name. */}
-			<header className="flex h-14 shrink-0 items-center gap-3 px-4">
+			<header className="flex h-14 shrink-0 items-center gap-3 px-4 app-region-chrome">
 				<h1 className="shrink-0 text-sm font-medium">{t("common:moduleTransfers")}</h1>
 				{/* The same order as a row's line, for the same reason: the speed, the one figure that keeps
 				    changing length, goes last. */}

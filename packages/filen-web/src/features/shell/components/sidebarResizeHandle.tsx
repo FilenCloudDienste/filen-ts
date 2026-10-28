@@ -37,7 +37,7 @@ export function SidebarResizeHandle({ ariaLabel, handle, className }: SidebarRes
 			onKeyUp={handle.onKeyUp}
 			onBlur={handle.onBlur}
 			className={cn(
-				"absolute inset-y-0 hidden w-2 cursor-col-resize outline-none md:block",
+				"absolute inset-y-0 hidden w-2 cursor-col-resize outline-none app-region-no-drag md:block",
 				handle.edge === "leading" ? "right-full" : "left-full",
 				"after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 after:rounded-full after:transition-colors hover:after:bg-border focus-visible:after:bg-ring/50",
 				className

@@ -529,7 +529,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		<>
 			{/* Header, search and list share one centred column; the scroller itself stays full-width so its
 			scrollbar sits at the pane's edge rather than the column's. */}
-			<header className="flex h-14 shrink-0 items-center px-4">
+			<header className="flex h-14 shrink-0 items-center px-4 app-region-chrome">
 				<div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4">
 					<h1 className="truncate text-sm font-medium">
 						{section === "all" ? t("common:moduleContacts") : t(CONTACTS_SECTION_HEADER_KEY[section])}

@@ -17,7 +17,7 @@ export function MountsPage({ role, title, children }: { role: MountsRole; title:
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/50 px-4">
+			<header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/50 px-4 app-region-chrome">
 				<Icon
 					aria-hidden="true"
 					className="size-4 shrink-0 text-muted-foreground"

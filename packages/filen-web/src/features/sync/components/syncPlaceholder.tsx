@@ -18,6 +18,7 @@ export function SyncPlaceholder({ missing, loading }: { missing?: boolean; loadi
 	return (
 		<EmptyMessage
 			icon={FolderSyncIcon}
+			className="app-region-chrome"
 			title={missing === true ? t("detailMissingTitle") : t("detailSelectPrompt")}
 			description={t("detailSelectPromptDescription")}
 		/>

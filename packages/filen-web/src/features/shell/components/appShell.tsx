@@ -141,13 +141,13 @@ export function AppShell() {
 				open={narrow && assistantDrawerOpen}
 				narrow={narrow}
 			/>
-			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
+			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2 app-region-drag">
 				<IconRail />
 				{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
 				    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
 				    gap and make the sidebar-to-main spacing wider than the row's padding. */}
 				{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
-				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm">
+				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-no-drag">
 					<Outlet />
 				</main>
 				{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its

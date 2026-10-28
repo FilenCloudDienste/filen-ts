@@ -694,7 +694,7 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			{/* Side padding clears the absolute menu button, so a long title truncates before reaching it. */}
-			<header className="relative flex shrink-0 flex-col items-center gap-0.5 px-14 py-1.5">
+			<header className="relative flex shrink-0 flex-col items-center gap-0.5 px-14 py-1.5 app-region-chrome">
 				<UserAvatar
 					src={headerAvatarUrl}
 					name={headerTitle}

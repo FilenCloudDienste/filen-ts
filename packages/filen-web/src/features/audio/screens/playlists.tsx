@@ -46,7 +46,7 @@ export function PlaylistsScreen({ selectedUuid }: { selectedUuid: string | undef
 				/>
 			) : (
 				// None exist, or every one is degraded (those still list, muted, in the sidebar).
-				<Empty className="flex-1 border-none p-10">
+				<Empty className="flex-1 border-none p-10 app-region-chrome">
 					<EmptyHeader>
 						<EmptyMedia>
 							<ListMusicIcon />

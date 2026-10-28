@@ -106,7 +106,7 @@ export function VideosHeader({ section, roots }: { section: VideosSection; roots
 
 	return (
 		<>
-			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4">
+			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4 app-region-chrome">
 				<h1
 					id={VIDEOS_HEADING_ID}
 					tabIndex={-1}
