@@ -67,7 +67,7 @@ export function SettingsSidebar() {
 
 	return (
 		<SidebarPanel>
-			<div className="flex flex-1 flex-col overflow-y-auto p-3">
+			<div className="flex flex-1 flex-col overflow-y-auto p-3 app-region-pane">
 				<h2 className="truncate px-2.5 pt-1 pb-2.5 text-[15px] font-semibold">{t("common:settings")}</h2>
 				<div className="flex flex-col gap-0.5">
 					{SETTINGS_ITEMS.map(item => (

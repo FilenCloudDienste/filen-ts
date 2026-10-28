@@ -3,6 +3,7 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
 import { cn } from "@filen/shared"
+import { SuspendDragRegions } from "@/components/ui/suspendDragRegions"
 
 const Popover = PopoverPrimitive.Root
 
@@ -27,6 +28,7 @@ function PopoverContent({
 
 	return (
 		<PopoverPrimitive.Portal>
+			<SuspendDragRegions />
 			<PopoverPrimitive.Positioner
 				align={align}
 				alignOffset={0}

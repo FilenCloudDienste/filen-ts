@@ -72,7 +72,7 @@ export function SyncSidebar() {
 				</div>
 				<HostBanner />
 			</div>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 pb-3">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane">
 				{pairIds === null ? (
 					<LoadingState size="md" />
 				) : pairIds.length === 0 ? (

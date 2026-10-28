@@ -126,7 +126,7 @@ export function AssistantSidePanel() {
 		<SidebarPanelVisibilityProvider visible={true}>
 			<AssistantSurface
 				ref={attachInlinePanel}
-				className="shrink-0 app-region-no-drag"
+				className="shrink-0 app-region-pane"
 				style={{ width: resize.width }}
 				onClose={closeInlinePanel}
 			/>

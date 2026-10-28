@@ -6,6 +6,7 @@ import { ChevronDownIcon, ChevronUpIcon, MoreHorizontalIcon, type LucideIcon } f
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { SuspendDragRegions } from "@/components/ui/suspendDragRegions"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { setRibbonCollapsed, useRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
@@ -440,6 +441,7 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 					onOpenChange={setPeek}
 				>
 					<PopoverPrimitive.Portal>
+						<SuspendDragRegions />
 						<PopoverPrimitive.Positioner
 							anchor={tabRow}
 							side="bottom"

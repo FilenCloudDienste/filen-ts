@@ -38,7 +38,7 @@ export function PlaylistsSidebar() {
 			module="playlists"
 			resizeLabel={t("playlistsSidebarResize")}
 		>
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 app-region-pane">
 				<div className="flex items-center justify-between gap-2 pb-2.5 pl-2.5">
 					<h2 className="truncate pt-1 text-[15px] font-semibold">{t("common:modulePlaylists")}</h2>
 					<Button

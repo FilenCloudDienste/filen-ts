@@ -219,7 +219,7 @@ export function ChatsSidebar() {
 			<div className="relative flex min-h-0 flex-1 flex-col">
 				<div
 					ref={setScrollElement}
-					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3"
+					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"
 				>
 					<ChatsVirtualList
 						rows={rows}

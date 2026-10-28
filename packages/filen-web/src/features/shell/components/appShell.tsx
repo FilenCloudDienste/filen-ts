@@ -147,7 +147,7 @@ export function AppShell() {
 				    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
 				    gap and make the sidebar-to-main spacing wider than the row's padding. */}
 				{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
-				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-no-drag">
+				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane">
 					<Outlet />
 				</main>
 				{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its

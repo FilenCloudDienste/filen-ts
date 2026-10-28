@@ -148,7 +148,7 @@ export function VideosSidebar() {
 						<PlusIcon />
 					</Button>
 				</div>
-				<div className="flex min-h-0 flex-1 [scrollbar-gutter:stable] flex-col gap-0.5 overflow-y-auto px-3 pt-1 pb-3">
+				<div className="flex min-h-0 flex-1 [scrollbar-gutter:stable] flex-col gap-0.5 overflow-y-auto px-3 pt-1 pb-3 app-region-pane">
 					<NavRow
 						to="/videos"
 						icon={HouseIcon}

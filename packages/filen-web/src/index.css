@@ -13,8 +13,13 @@
     -webkit-app-region: drag;
 }
 
+/* Inert inside an app-region-pane (which already covers it, and whose descendants must build no region) unless
+   a drag region sits between the two, as a pane's own header does. */
 @utility app-region-no-drag {
-    -webkit-app-region: no-drag;
+    &:not(:where(.app-region-pane *)),
+    :where(.app-region-pane :is(.app-region-drag, .app-region-chrome)) & {
+        -webkit-app-region: no-drag;
+    }
 }
 
 /* Window chrome — a full-window layer's top bar, a page's bare background: drags the window while every
@@ -34,6 +39,31 @@
     :where([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]) {
         -webkit-app-region: no-drag;
     }
+
+    /* The region is inherited, and Chromium never clips it to a scroll container: a scrolled list row's
+       inherited no-drag box would sit over the header above it and win. Inside a pane nothing builds a
+       region unless it opts in (the pane's own no-drag box already covers it). `initial`, not `none`:
+       Chromium computes `none` as the inherited value. */
+    :where(.app-region-pane *) {
+        -webkit-app-region: initial;
+    }
+
+    /* A drag region swallows the press outside a popup that would close it. Base UI marks the page outside an
+       open modal popup inert (the popup itself is portalled out of it), so the page builds no region meanwhile. */
+    [data-base-ui-inert],
+    [data-base-ui-inert] * {
+        -webkit-app-region: initial !important;
+    }
+
+    /* The same for an open popover, which marks nothing inert (components/ui/suspendDragRegions.tsx). */
+    :root[data-popover-open] * {
+        -webkit-app-region: initial !important;
+    }
+}
+
+/* A content pane inside a drag region (the shell's main card, the inline assistant panel). */
+@utility app-region-pane {
+    -webkit-app-region: no-drag;
 }
 
 /* Desktop window chrome (lib/desktop.ts sets data-desktop; every inset is 0 in a browser). Windows and

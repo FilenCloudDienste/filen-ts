@@ -4,6 +4,7 @@ import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { CaptionsIcon, CheckIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { SuspendDragRegions } from "@/components/ui/suspendDragRegions"
 import { StageTooltip } from "@/components/media/video/stageButton"
 import { STAGE_POPUP_TONE_CLASS, useStagePopupOpen, useVideoStageContainer } from "@/components/media/video/stageContext"
 
@@ -181,6 +182,7 @@ export function TracksPopover({
 				</PopoverPrimitive.Trigger>
 			</StageTooltip>
 			<PopoverPrimitive.Portal container={container}>
+				<SuspendDragRegions />
 				<PopoverPrimitive.Positioner
 					side="top"
 					align="end"
