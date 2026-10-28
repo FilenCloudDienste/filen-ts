@@ -7,6 +7,7 @@ import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
 import { resolveSidebarKind, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
 import { subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
 import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
+import { WindowBarSlotContext } from "@/features/shell/lib/windowBarSlot"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
 import { ChatsSidebar } from "@/features/chats/components/chatsSidebar"
@@ -72,6 +73,7 @@ export function AppShell() {
 	const [sidebarOpen, setSidebarOpen] = useState(false)
 	const assistantPanelOpen = useAssistantStore(state => state.panelOpen)
 	const assistantDrawerOpen = useAssistantStore(state => state.drawerOpen)
+	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)
 
 	useDismissBootSplash()
 
@@ -141,22 +143,30 @@ export function AppShell() {
 				open={narrow && assistantDrawerOpen}
 				narrow={narrow}
 			/>
-			<div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2 app-region-drag">
-				<IconRail />
-				{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
-				    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
-				    gap and make the sidebar-to-main spacing wider than the row's padding. */}
-				{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
-				<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane">
-					<Outlet />
-				</main>
-				{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its
-				    leading-edge drag handle in the gap before it. Below the breakpoint it lives in its drawer. */}
-				{narrow || !assistantPanelOpen ? null : (
-					<div className="relative flex shrink-0">
-						<AssistantSidePanel />
-					</div>
-				)}
+			<div className="relative flex min-h-0 flex-1 gap-2 overflow-hidden p-2 app-region-drag">
+				<WindowBarSlotContext value={windowBarSlot}>
+					<IconRail />
+					{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
+					    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
+					    gap and make the sidebar-to-main spacing wider than the row's padding. */}
+					{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
+					<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane">
+						<Outlet />
+					</main>
+					{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its
+					    leading-edge drag handle in the gap before it. Below the breakpoint it lives in its drawer. */}
+					{narrow || !assistantPanelOpen ? null : (
+						<div className="relative flex shrink-0">
+							<AssistantSidePanel />
+						</div>
+					)}
+				</WindowBarSlotContext>
+				{/* Zero height, so it builds no drag region of its own and blocks nothing: a bar portalled in grows
+				    upwards from it (useWindowBarSlot). */}
+				<div
+					ref={setWindowBarSlot}
+					className="pointer-events-none absolute inset-x-6 bottom-6 z-10 flex h-0 items-end justify-center"
+				/>
 			</div>
 			{/* Persistent audio player — docked at the bottom of the authed shell, below the module row, the
 			    same shell-level docking the transfers rail established. Renders null until a queue exists;

@@ -19,6 +19,8 @@ function names(items: readonly NamedItem[]): string {
 	return items.map(item => item.data.decryptedMeta?.name ?? "").join("|")
 }
 
+// The bulk bar portals into the shell's bar slot, which this file renders no shell for.
+vi.mock("@/features/shell/lib/windowBarSlot", () => ({ useWindowBarSlot: () => document.body }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))

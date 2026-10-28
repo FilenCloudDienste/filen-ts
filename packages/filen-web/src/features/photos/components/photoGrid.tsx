@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { SearchXIcon } from "lucide-react"
 import { useShallow } from "zustand/shallow"
@@ -47,6 +48,7 @@ import { EmptyMessage } from "@/components/emptyMessage"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { ThumbnailRankContext } from "@/features/drive/lib/thumbnailRank"
 import { rowRank } from "@/features/drive/lib/thumbnails.logic"
+import { useWindowBarSlot } from "@/features/shell/lib/windowBarSlot"
 
 // Spacer between tiles only, never along the grid's outer edges: CSS grid gap separates columns and
 // the virtualizer's gap separates rows. 2px reads as a seam, not as padding.
@@ -71,6 +73,7 @@ export interface PhotoGridProps {
 export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 	const { t, i18n } = useTranslation(["drive", "photos"])
 	const isOnline = useIsOnline()
+	const windowBarSlot = useWindowBarSlot()
 	const densityQuery = usePhotosGridDensityQuery()
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const { width: containerWidth, height: containerHeight } = useElementSize(scrollElement)
@@ -394,15 +397,19 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 					) : null}
 				</div>
 			)}
-			{selectedItems.length >= BULK_BAR_MIN_SELECTION ? (
-				<div className="pointer-events-none absolute inset-x-6 bottom-6 z-10 flex justify-center">
-					<PhotosBulkActionBar
-						rootUuids={rootUuids}
-						selectedItems={selectedItems}
-						onDialogAction={handleBulkDialogAction}
-					/>
-				</div>
-			) : null}
+			{/* Centred on the whole window (the shell's bar slot, inside the row's drag region), as drive's is. */}
+			{selectedItems.length >= BULK_BAR_MIN_SELECTION && windowBarSlot !== null
+				? createPortal(
+						<div className="max-w-full app-region-no-drag">
+							<PhotosBulkActionBar
+								rootUuids={rootUuids}
+								selectedItems={selectedItems}
+								onDialogAction={handleBulkDialogAction}
+							/>
+						</div>,
+						windowBarSlot
+					)
+				: null}
 			{renderActiveDialog()}
 		</div>
 	)

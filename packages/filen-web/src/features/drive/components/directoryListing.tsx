@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { useShallow } from "zustand/shallow"
@@ -65,6 +66,7 @@ import { EmptyTrashButton } from "@/features/drive/components/emptyTrashButton"
 import { NewMenu, UploadContextMenu } from "@/features/drive/components/uploadMenu"
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
 import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
+import { useWindowBarSlot } from "@/features/shell/lib/windowBarSlot"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { LoadingState } from "@/components/loadingState"
 import { DriveRow } from "@/features/drive/components/driveRow"
@@ -212,6 +214,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// `uuid`). Offline folds in here too: both write to the SDK, which has nothing to reach while
 	// offline.
 	const writeDisabled = !canWriteVariant(variant, uuid) || !listingReady || !isOnline
+	const windowBarSlot = useWindowBarSlot()
 	// Gates the underlying contacts/blocked fetch itself (see useBlockedUsers.ts) — only sharedIn
 	// filters by it, so the other 5 variants skip the getContacts/getBlockedContacts worker round trip
 	// on every mount and window refocus.
@@ -1044,17 +1047,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							renderListboxContent()
 						)}
 					</div>
-					{/* Bottom-anchored floating selection bar — overlays the listing container, replacing
-					    nothing in the toolbar. */}
-					{listingReady && selectedItems.length > 0 ? (
-						<div className="pointer-events-none absolute inset-x-6 bottom-4 z-10 flex justify-center">
-							<BulkActionBar
-								variant={variant}
-								selectedItems={reconciledSelectedItems}
-								onDialogAction={handleBulkDialogAction}
-							/>
-						</div>
-					) : null}
+					{/* Floating selection bar, centred on the whole window (the shell's bar slot), replacing nothing in
+					    the toolbar. The slot sits in the row's drag region, so the bar opts out of it. */}
+					{listingReady && selectedItems.length > 0 && windowBarSlot !== null
+						? createPortal(
+								<div className="max-w-full app-region-no-drag">
+									<BulkActionBar
+										variant={variant}
+										selectedItems={reconciledSelectedItems}
+										onDialogAction={handleBulkDialogAction}
+									/>
+								</div>,
+								windowBarSlot
+							)
+						: null}
 				</ListingDropSurface>
 			</UploadDropzone>
 			{destination.host}

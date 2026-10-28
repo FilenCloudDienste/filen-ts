@@ -47,6 +47,8 @@ const {
 	}
 }))
 
+// The bulk bar portals into the shell's bar slot, which this file renders no shell for.
+vi.mock("@/features/shell/lib/windowBarSlot", () => ({ useWindowBarSlot: () => document.body }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
