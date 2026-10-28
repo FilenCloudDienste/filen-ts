@@ -3,9 +3,10 @@ import { join } from "node:path"
 import { AllSelection, TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import { DocxDocBuilder, DocxEditorSession, docxSchema } from "@filen/office/core/docx/edit"
-import { key, memory, openEditor, percentile as share, placeCaret, spreadPosition, typeBursts } from "../bench/editHarness"
+import { key, openEditor, percentile as share, placeCaret, spreadPosition, typeBursts } from "../bench/editHarness"
 import { CORPUS_DIR } from "./corpusDir"
 import { openBytes } from "./docxEditFixtures"
+import { liveHeap } from "./liveHeap"
 import { budget, cpuMs } from "./timing"
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "08-large-300p.docx")
@@ -15,10 +16,32 @@ function percentile(sorted: readonly number[], fraction: number): number {
 	return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0
 }
 
-function heapMb(): number {
-	globalThis.gc?.()
+const MiB = 1024 * 1024
+// What each holds, with room for the reading's noise and little else: the 300-page story 7.9 MB, its open editor
+// 20–21 MB (its turns vary the reading by about 1 MB), the Tariff story 122.9 MB.
+const BUILD_HEAP_MB = 9
+const EDITOR_HEAP_MB = 23
+const TARIFF_HEAP_MB = 135
 
-	return process.memoryUsage().heapUsed / 1048576
+// The live heap (liveHeap.ts) a piece of work leaves held while `hold` keeps its result reachable. Measured after the
+// timed runs and twice: the forced collections flush the engine's aged bytecode, which the first run recompiles (code
+// the heap would count, and CPU the timed runs would be billed), so only the second reads what the result holds.
+async function heldMb<T>(work: () => Promise<T> | T, hold: (result: T) => unknown): Promise<number> {
+	await heldOnce(work, hold)
+
+	return heldOnce(work, hold)
+}
+
+// A call of its own, so that its result is unreachable once it returns (a loop's binding in an async function lives on
+// in its context until the next iteration overwrites it, past the next run's first reading).
+async function heldOnce<T>(work: () => Promise<T> | T, hold: (result: T) => unknown): Promise<number> {
+	const before = await liveHeap()
+	const result = await work()
+	const held = ((await liveHeap()) - before) / MiB
+
+	expect(hold(result)).toBeTruthy()
+
+	return held
 }
 
 async function measureBuild(
@@ -29,14 +52,17 @@ async function measureBuild(
 
 	if (body === undefined) throw new Error("no body")
 
-	const heapBefore = heapMb()
 	const start = cpuMs()
 	const story = new DocxDocBuilder(opened.context).build(body)
 	const buildMs = cpuMs() - start
-	const heap = heapMb() - heapBefore
 	const sessionStart = cpuMs()
 	const session = new DocxEditorSession(opened.context)
 	const sessionMs = cpuMs() - sessionStart
+	// The built story: the document the session edits, over the open package the heap already held.
+	const heap = await heldMb(
+		() => new DocxDocBuilder(opened.context).build(body),
+		built => built.doc.childCount
+	)
 
 	return { session, buildMs, sessionMs, heap, blocks: story.doc.childCount }
 }
@@ -74,7 +100,7 @@ function keystrokes(session: DocxEditorSession, count: number, key: "type" | "ba
 }
 
 describe("docx editing performance", () => {
-	it("builds the 300-page fixture and types into it under a frame per keystroke", { timeout: 120_000 }, async () => {
+	it("builds the 300-page fixture and types into it under a frame per keystroke", { timeout: 120_000 }, async ({ task }) => {
 		const { session, buildMs, sessionMs, heap, blocks } = await measureBuild(FIXTURE)
 
 		keystrokes(session, 50)
@@ -99,7 +125,9 @@ describe("docx editing performance", () => {
 				`keystroke p50 ${p50.toFixed(2)} ms p95 ${p95.toFixed(2)} ms max ${(times[times.length - 1] ?? 0).toFixed(2)} ms; ` +
 				`backspace p95 ${percentile(backspace, 0.95).toFixed(2)} ms, enter p95 ${percentile(enter, 0.95).toFixed(2)} ms; select-all bold ${boldMs.toFixed(1)} ms`
 		)
+		Object.assign(task.meta, { perf: { docxBuildHeapMB: { value: heap, budget: BUILD_HEAP_MB } } })
 		expect(session.state.doc.type).toBe(docxSchema.nodes.doc)
+		expect(heap).toBeLessThanOrEqual(BUILD_HEAP_MB)
 		// The target is 16 ms of CPU time; the bound leaves room for noise.
 		expect(p95).toBeLessThan(budget(48))
 		expect(percentile(enter, 0.95)).toBeLessThan(budget(48))
@@ -111,10 +139,9 @@ describe("docx editing performance", () => {
 	it(
 		"opens the 300-page fixture for editing and types into it in page view under a frame per keystroke",
 		{ timeout: 120_000 },
-		async () => {
-			const before = memory()
-			const opened = await openEditor(new Uint8Array(readFileSync(FIXTURE)))
-			const heap = memory().heapMb - before.heapMb
+		async ({ task }) => {
+			const bytes = new Uint8Array(readFileSync(FIXTURE))
+			const opened = await openEditor(bytes)
 			const editor = opened.editor
 
 			placeCaret(editor, spreadPosition(editor.session.state, 5000))
@@ -125,17 +152,31 @@ describe("docx editing performance", () => {
 			const p95 = share(typed.cpu, 0.95)
 
 			console.log(
-				`300p page view: open ${opened.editorMs.toFixed(0)} ms, heap ${heap.toFixed(1)} MB, longest open task ${opened.tasks.maxMs.toFixed(0)} ms; ` +
+				`300p page view: open ${opened.editorMs.toFixed(0)} ms, longest open task ${opened.tasks.maxMs.toFixed(0)} ms; ` +
 					`first key ${first.toFixed(2)} ms; keystroke p50 ${share(typed.times, 0.5).toFixed(2)} ms p95 ${p95.toFixed(2)} ms; enter p95 ${share(enter.times, 0.95).toFixed(2)} ms`
 			)
 			opened.close()
+
+			// What the open editor holds (the session, the laid-out pages in view), the bytes of the file aside.
+			const heap = await heldMb(
+				() => openEditor(bytes),
+				open => {
+					open.close()
+
+					return true
+				}
+			)
+
+			console.log(`300p page view: open editor holds ${heap.toFixed(1)} MB`)
+			Object.assign(task.meta, { perf: { docxEditorOpenHeapMB: { value: heap, budget: EDITOR_HEAP_MB } } })
 			expect(typed.refused).toBe(0)
+			expect(heap).toBeLessThanOrEqual(EDITOR_HEAP_MB)
 			// The target is 16 ms (src/bench/editBench.ts measures the gate); the bound leaves room for loaded CI machines.
 			expect(p95).toBeLessThan(budget(48))
 		}
 	)
 
-	it.skipIf(!existsSync(TARIFF))("builds the Tariff document", { timeout: 300_000 }, async () => {
+	it.skipIf(!existsSync(TARIFF))("builds the Tariff document", { timeout: 300_000 }, async ({ task }) => {
 		const { session, buildMs, sessionMs, heap, blocks } = await measureBuild(TARIFF)
 		const times = keystrokes(session, 100)
 		const all = (): void => {
@@ -173,7 +214,9 @@ describe("docx editing performance", () => {
 				`keystroke p50 ${percentile(times, 0.5).toFixed(2)} ms p95 ${percentile(times, 0.95).toFixed(2)} ms; ` +
 				`select-all snapshot cold ${cold.toFixed(0)} ms, after an edit ${warm.toFixed(1)} ms; shift+arrow over half p50 ${percentile(arrows, 0.5).toFixed(2)} ms`
 		)
+		Object.assign(task.meta, { perf: { docxTariffBuildHeapMB: { value: heap, budget: TARIFF_HEAP_MB } } })
 		expect(blocks).toBeGreaterThan(0)
+		expect(heap).toBeLessThanOrEqual(TARIFF_HEAP_MB)
 		expect(warm).toBeLessThan(budget(150))
 		expect(percentile(arrows, 0.5)).toBeLessThan(budget(15))
 	})

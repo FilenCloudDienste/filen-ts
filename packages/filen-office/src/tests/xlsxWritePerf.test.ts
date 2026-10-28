@@ -8,11 +8,13 @@ import { bytesSource } from "../core/opc/index"
 import { openXlsx } from "../core/xlsx/read/index"
 import { R, SML } from "./xlsxWriteFixtures"
 import { ZIP_ENTRY_TIME } from "./zipTime"
+import { liveHeap, liveHeapNow } from "./liveHeap"
 import { budget } from "./timing"
 
 // The save budget at 1M cells: after a one-cell edit, ≤ 0.6 s of CPU on the thread that saves, only the edited
-// part deflated (every other entry copied as stored), and a peak of at most the open's memory plus twice the
-// edited part. Opt-in (FILEN_OFFICE_XLSX_PERF=1): the workbook is built in the test.
+// part deflated (every other entry copied as stored), and a live peak above the open workbook of at most 1.2 times
+// the edited part (the part it writes is held whole while it deflates). Opt-in (FILEN_OFFICE_XLSX_PERF=1): the
+// workbook is built in the test.
 
 const PERF = process.env["FILEN_OFFICE_XLSX_PERF"] === "1"
 const ROWS = 100_000
@@ -65,14 +67,8 @@ function bigWorkbook(): { bytes: Uint8Array; sheetBytes: number } {
 	return { bytes: zipSync(files, { level: 6, mtime: ZIP_ENTRY_TIME }), sheetBytes: sheet.length }
 }
 
-function memory(): number {
-	const usage = process.memoryUsage()
-
-	return usage.heapUsed + usage.arrayBuffers
-}
-
 describe.skipIf(!PERF)("xlsx save at 1M cells", () => {
-	it("saves a one-cell edit within budget", { timeout: 300_000 }, async () => {
+	it("saves a one-cell edit within budget", { timeout: 300_000 }, async ({ task }) => {
 		const { bytes, sheetBytes } = bigWorkbook()
 		// Inflated natively, as the worker does.
 		const inflate = (input: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> =>
@@ -86,14 +82,25 @@ describe.skipIf(!PERF)("xlsx save at 1M cells", () => {
 
 		expect(sheet.store.cellCount).toBe(ROWS * COLS)
 
-		sheet.store.setCell(ROWS / 2, 3, CellKind.NUMBER, 0.5, 0, -1)
-		workbook.changes.sheetRows(0)
+		const edit = (value: number): void => {
+			sheet.store.setCell(ROWS / 2, 3, CellKind.NUMBER, value, 0, -1)
+			workbook.changes.sheetRows(0)
+		}
 
+		edit(0.5)
+
+		// The live heap (liveHeap.ts) at every 16th chunk the edited part streams to its deflate, while the heap run saves.
+		let sampling = false
+		let chunks = 0
+		let peak = 0
+		const sample = (): void => {
+			if (sampling && chunks++ % 16 === 0) peak = Math.max(peak, liveHeapNow())
+		}
 		const native = nativeDeflate()
 		const nativeChunks = nativeDeflateChunks()
 		const deflated: number[] = []
 		const zip = {
-			...(native === undefined ? {} : { deflate: async (data: Uint8Array) => (deflated.push(data.length), native(data)) }),
+			...(native === undefined ? {} : { deflate: async (data: Uint8Array) => (deflated.push(data.length), sample(), native(data)) }),
 			...(nativeChunks === undefined
 				? {}
 				: {
@@ -102,6 +109,7 @@ describe.skipIf(!PERF)("xlsx save at 1M cells", () => {
 							const counted = async function* (): AsyncIterable<Uint8Array> {
 								for await (const chunk of chunks) {
 									length += chunk.length
+									sample()
 									yield chunk
 								}
 							}
@@ -113,11 +121,6 @@ describe.skipIf(!PERF)("xlsx save at 1M cells", () => {
 						}
 					})
 		}
-		const before = memory()
-		let peak = before
-		const sampler = setInterval(() => {
-			peak = Math.max(peak, memory())
-		}, 5)
 		// This thread's CPU, as the baseline measured it (zlib's native inflate and deflate run off it), and the
 		// whole process's.
 		const thread = process.threadCpuUsage()
@@ -126,21 +129,41 @@ describe.skipIf(!PERF)("xlsx save at 1M cells", () => {
 		const threadUsed = process.threadCpuUsage(thread)
 		const allUsed = process.cpuUsage(all)
 
-		clearInterval(sampler)
-		peak = Math.max(peak, memory())
-
 		const cpuMs = (threadUsed.user + threadUsed.system) / 1000
 		const processMs = (allUsed.user + allUsed.system) / 1000
-
-		console.log(
-			`xlsx save 1M cells: ${cpuMs.toFixed(0)} ms thread CPU, ${processMs.toFixed(0)} ms process CPU (${JSON.stringify(result.ok ? result.timings : result)}); deflated ${deflated.join(", ")} bytes; sheet ${sheetBytes} bytes; peak +${((peak - before) / 1048576).toFixed(1)} MB`
-		)
 
 		expect(result.ok).toBe(true)
 		// The edited sheet alone (its new size is within a few bytes of the source's).
 		expect(deflated.length).toBe(1)
 		expect(Math.abs((deflated[0] ?? 0) - sheetBytes)).toBeLessThan(64)
+
+		// A run of its own for the heap, after the timed one: its forced collections would bill the save's CPU. The open
+		// workbook is the baseline; the peak is the most the save holds above it, the saved file included.
+		const before = await liveHeap()
+
+		peak = before
+		await (async () => {
+			edit(0.25)
+			sampling = true
+
+			const saved = await saveXlsx({ opc: workbook.opc, workbook }, { zip })
+
+			sampling = false
+			peak = Math.max(peak, liveHeapNow())
+			expect(saved.ok).toBe(true)
+		})()
+
+		const peakMb = (peak - before) / 1048576
+		const peakBudget = (1.2 * sheetBytes) / 1048576
+
+		console.log(
+			`xlsx save 1M cells: ${cpuMs.toFixed(0)} ms thread CPU, ${processMs.toFixed(0)} ms process CPU (${JSON.stringify(result.ok ? result.timings : result)}); deflated ${deflated.join(", ")} bytes; sheet ${sheetBytes} bytes; live peak +${peakMb.toFixed(1)} MB`
+		)
+
+		Object.assign(task.meta, {
+			perf: { xlsxSaveCpuMs: { value: cpuMs, budget: 600 }, xlsxSavePeakMB: { value: peakMb, budget: peakBudget } }
+		})
 		expect(cpuMs).toBeLessThanOrEqual(budget(600))
-		expect(peak - before).toBeLessThanOrEqual(2 * sheetBytes)
+		expect(peakMb).toBeLessThanOrEqual(peakBudget)
 	})
 })

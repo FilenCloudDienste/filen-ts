@@ -6,7 +6,8 @@ import { budget } from "./timing"
 
 // The reader's budgets on the benchmark workbooks (100,000 x 10 values; the same with a formula column, without
 // and with stored results; 300,000 x 10 values), each opened in a process of its own: the open plus the first
-// sheet within 0.5 s of this thread's CPU time, at most 60 MB retained, and the 3M-cell workbook within a 600 MB
+// sheet within 0.5 s of this thread's CPU time, the live heap it retains and the store's estimate within about 1.15
+// times what they measure (values 18.5 MB, with a formula column 26.5 MB), and the 3M-cell workbook within a 600 MB
 // peak. Opt-in: FILEN_OFFICE_XLSX_PERF=<directory holding sheet-100000x10-m{0,1,2}.xlsx and sheet-300000x10-m0.xlsx>.
 
 const DIR = process.env["FILEN_OFFICE_XLSX_PERF"]
@@ -30,8 +31,12 @@ function measure(file: string, mode: "fflate" | "native"): Run {
 }
 
 describe.skipIf(DIR === undefined || DIR === "")("xlsx reader budgets", () => {
-	for (const name of ["sheet-100000x10-m0.xlsx", "sheet-100000x10-m1.xlsx", "sheet-100000x10-m2.xlsx"]) {
-		it(`opens ${name} and parses its sheet within 0.5 s CPU and 60 MB`, { timeout: 120_000 }, () => {
+	for (const [name, retained] of [
+		["sheet-100000x10-m0.xlsx", 21],
+		["sheet-100000x10-m1.xlsx", 30],
+		["sheet-100000x10-m2.xlsx", 30]
+	] as const) {
+		it(`opens ${name} and parses its sheet within 0.5 s CPU and ${String(retained)} MB`, { timeout: 120_000 }, () => {
 			const file = join(DIR ?? "", name)
 
 			expect(existsSync(file)).toBe(true)
@@ -42,7 +47,7 @@ describe.skipIf(DIR === undefined || DIR === "")("xlsx reader budgets", () => {
 				console.log(`${name} ${mode}: ${JSON.stringify(run)}`)
 				expect(run.cells).toBe(1_000_000)
 				expect(run.cpuMs).toBeLessThanOrEqual(budget(500))
-				expect(Math.max(run.retainedMB, run.storeMB)).toBeLessThanOrEqual(60)
+				expect(Math.max(run.retainedMB, run.storeMB)).toBeLessThanOrEqual(retained)
 			}
 		})
 	}
