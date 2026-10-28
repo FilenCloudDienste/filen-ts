@@ -21,7 +21,14 @@ const { exposed, fakeClient, fakeUnauth } = vi.hoisted(() => {
 		fakeClient: {
 			root: () => ({ uuid: "root" }),
 			getUnauthed: () => fakeUnauth,
-			uploadFileFromReader: vi.fn<(params: { progress: BytesProgress; knownSize: number | undefined }) => Promise<unknown>>(),
+			uploadFileFromReader:
+				vi.fn<
+					(params: {
+						progress: BytesProgress
+						knownSize: number | undefined
+						managedFuture: { abortSignal?: AbortSignal }
+					}) => Promise<unknown>
+				>(),
 			downloadFileToWriter: vi.fn<(params: { progress: BytesProgress }) => Promise<void>>(),
 			downloadItemsToZip: vi.fn<(items: unknown, writer: unknown, progress: ZipProgress, managedFuture: unknown) => Promise<void>>(),
 			free: vi.fn()
@@ -75,54 +82,141 @@ afterEach(() => {
 	vi.clearAllMocks()
 })
 
-describe("sdk worker byte progress", () => {
-	it("posts the first and the last value of a burst, the last before the download returns", async () => {
-		const onProgress = vi.fn<BytesProgress>()
-		let callsAtReturn: unknown[][] = []
+// Uploads and downloads post their bytes through the page's one sink, a batch by transfer id at a time.
+describe("sdk worker progress channel", () => {
+	const sink = vi.fn<(bytesById: Record<string, number>) => Promise<void>>()
 
+	beforeEach(async () => {
+		sink.mockReset()
+		sink.mockResolvedValue(undefined)
+
+		await api.setProgressSink(sink)
+	})
+
+	it("posts each transfer's last count of a burst in one batch, which the page has before the op returns", async () => {
+		let resolveSink: () => void = () => undefined
+		let returned = false
+
+		sink.mockImplementation(
+			() =>
+				new Promise(resolve => {
+					resolveSink = resolve
+				})
+		)
 		fakeClient.downloadFileToWriter.mockImplementation(params => {
 			chunks(params.progress, 50)
 
 			return Promise.resolve()
 		})
 
-		await api.downloadFileToWriter(FILE, "t1", WRITER, onProgress).then(() => {
-			callsAtReturn = [...onProgress.mock.calls]
+		const download = api.downloadFileToWriter(FILE, "t1", WRITER).then(() => {
+			returned = true
 		})
 
-		expect(callsAtReturn).toEqual([[1n], [50n]])
+		await vi.waitFor(() => {
+			expect(sink).toHaveBeenCalledExactlyOnceWith({ t1: 50 })
+		})
+		// Still waiting on the page's answer.
+		expect(returned).toBe(false)
+
+		resolveSink()
+		await download
 
 		vi.advanceTimersByTime(1000)
 
-		expect(onProgress).toHaveBeenCalledTimes(2)
+		expect(sink).toHaveBeenCalledTimes(1)
 	})
 
-	it("keeps posting at the throttle cadence while the op runs", async () => {
-		const onProgress = vi.fn<BytesProgress>()
+	it("batches every transfer in flight, posting at the throttle cadence while they run", async () => {
+		let release: () => void = () => undefined
+		const file = { name: "a.txt", size: 3, type: "", stream: () => new ReadableStream() } as unknown as File
+
+		fakeClient.uploadFileFromReader.mockImplementationOnce(params => {
+			params.progress(1n)
+
+			return new Promise(resolve => {
+				release = () => {
+					params.progress(3n)
+					resolve({ uuid: "a" })
+				}
+			})
+		})
+		fakeClient.uploadFileFromReader.mockImplementationOnce(params => {
+			params.progress(2n)
+
+			return new Promise(() => undefined)
+		})
+
+		const first = api.uploadFile(null, "a", file)
+
+		void api.uploadFile(null, "b", file)
+
+		await vi.waitFor(() => {
+			expect(fakeClient.uploadFileFromReader).toHaveBeenCalledTimes(2)
+		})
+
+		vi.advanceTimersByTime(100)
+
+		expect(sink).toHaveBeenCalledExactlyOnceWith({ a: 1, b: 2 })
+
+		release()
+
+		await expect(first).resolves.toEqual({ uuid: "a" })
+		expect(sink).toHaveBeenLastCalledWith({ a: 3 })
+	})
+
+	// Its settle counts its last bytes itself (settleRunFile), so a finished run file costs no post of its own.
+	it("returns a directory run's file without posting its last count", async () => {
+		const file = { name: "a.txt", size: 3, type: "", stream: () => new ReadableStream() } as unknown as File
 
 		fakeClient.uploadFileFromReader.mockImplementation(params => {
-			params.progress(1n)
-			params.progress(2n)
-			vi.advanceTimersByTime(100)
 			params.progress(3n)
 
 			return Promise.resolve({ uuid: "uploaded" })
 		})
 
-		const file = { name: "a.txt", size: 3, type: "", stream: () => new ReadableStream() } as unknown as File
+		await api.openTransferRun("run-quiet")
+		await expect(api.uploadFile(null, "quiet", file, "run-quiet")).resolves.toEqual({ uuid: "uploaded" })
 
-		await expect(api.uploadFile(null, "t2", file, onProgress)).resolves.toEqual({ uuid: "uploaded" })
-		expect(onProgress.mock.calls).toEqual([[1n], [2n], [3n]])
+		vi.advanceTimersByTime(1000)
+
+		expect(sink).not.toHaveBeenCalled()
+
+		await api.releaseJob("run-quiet")
 	})
 
+	it("stops and pauses every file of a directory run through the run's one control", async () => {
+		const signals: { abortSignal: AbortSignal | undefined }[] = []
+		const file = { name: "a.txt", size: 3, type: "", stream: () => new ReadableStream() } as unknown as File
+
+		fakeClient.uploadFileFromReader.mockImplementation(params => {
+			signals.push({ abortSignal: params.managedFuture.abortSignal })
+
+			return Promise.resolve({ uuid: "uploaded" })
+		})
+
+		await api.openTransferRun("run")
+		await api.uploadFile(null, "f1", file, "run")
+		await api.uploadFile(null, "f2", file, "run")
+		await api.cancelTransfer("run")
+
+		expect(signals).toHaveLength(2)
+		expect(signals[0]?.abortSignal).toBe(signals[1]?.abortSignal)
+		expect(signals[0]?.abortSignal?.aborted).toBe(true)
+
+		await api.releaseJob("run")
+	})
+})
+
+describe("sdk worker byte progress", () => {
 	it("leaves an empty file's size unknown, so the SDK reads it to EOF rather than into an empty buffer", async () => {
 		fakeClient.uploadFileFromReader.mockResolvedValue({ uuid: "uploaded" })
 
 		const empty = { name: "empty.txt", size: 0, type: "", stream: () => new ReadableStream() } as unknown as File
 		const sized = { name: "a.txt", size: 3, type: "", stream: () => new ReadableStream() } as unknown as File
 
-		await api.uploadFile(null, "t-empty", empty, vi.fn())
-		await api.uploadFile(null, "t-sized", sized, vi.fn())
+		await api.uploadFile(null, "t-empty", empty)
+		await api.uploadFile(null, "t-sized", sized)
 
 		expect(fakeClient.uploadFileFromReader.mock.calls.map(([params]) => params.knownSize)).toEqual([undefined, 3])
 	})

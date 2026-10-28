@@ -9,7 +9,7 @@ import { addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { invalidateUploadedDirectorySizes } from "@/features/drive/lib/upload"
 import { isDriveJobRunning } from "@/features/drive/lib/driveJobs.logic"
 import { forgetJobPassword } from "@/features/drive/lib/jobSecrets"
-import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { transferById, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 
 // What every drive job (copy, compress, extract) shares, whatever its kind.
@@ -44,11 +44,11 @@ export function patchJobCreatedItem(item: DriveItem): void {
 
 // A settled job stays while its card shows or its transfers row can reopen the card.
 export function pruneSettledDriveJobs(): void {
-	const rows = new Set(useTransfersStore.getState().transfers.map(transfer => transfer.id))
+	const { transfers } = useTransfersStore.getState()
 	const gone = new Set<string>()
 
 	for (const job of Object.values(useDriveJobsStore.getState().jobs)) {
-		if (!isDriveJobRunning(job) && !job.cardVisible && !rows.has(job.id)) {
+		if (!isDriveJobRunning(job) && !job.cardVisible && transferById(transfers, job.id) === undefined) {
 			gone.add(job.id)
 		}
 	}

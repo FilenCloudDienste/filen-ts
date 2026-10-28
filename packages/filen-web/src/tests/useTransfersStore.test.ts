@@ -10,6 +10,9 @@ import {
 	isActiveTransfer,
 	isDriveJobDirection,
 	JOB_ACTIVE_STATUS,
+	positionOf,
+	transferById,
+	transfersIndexOf,
 	useTransfersStore,
 	type SpeedSample,
 	type Transfer
@@ -535,14 +538,43 @@ describe("setProgress (speed sample recording)", () => {
 	})
 
 	it("counts nothing for a transfer that restarts from fewer bytes", () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(10_000)
+
 		const store = useTransfersStore.getState()
 
 		store.add(makeTransfer({ id: "a" }))
 		store.setProgress("a", 800)
+		vi.setSystemTime(10_200)
 		store.setProgress("a", 100)
+		vi.setSystemTime(10_400)
 		store.setProgress("a", 300)
 
 		expect(useTransfersStore.getState().speedSamples.map(sample => sample.totalBytes)).toEqual([800, 800, 1_000])
+	})
+
+	// Closer than that says nothing more about the speed: the window keeps its samples, not one per tick.
+	it("moves the last sample's bytes for a tick under 100 ms after it, keeping its time", () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(10_000)
+
+		const store = useTransfersStore.getState()
+
+		store.add(makeTransfer({ id: "a" }))
+		store.setProgress("a", 100)
+		vi.setSystemTime(10_050)
+		store.setProgress("a", 200)
+		vi.setSystemTime(10_100)
+		store.setProgress("a", 300)
+
+		expect(useTransfersStore.getState().speedSamples).toEqual([
+			{ timestamp: 10_000, totalBytes: 200 },
+			{ timestamp: 10_100, totalBytes: 300 }
+		])
+		expect(useTransfersStore.getState().rowSpeedSamples["a"]).toEqual([
+			{ timestamp: 10_000, totalBytes: 200 },
+			{ timestamp: 10_100, totalBytes: 300 }
+		])
 	})
 })
 
@@ -603,19 +635,19 @@ describe("speed samples never outlive their transfer", () => {
 		useTransfersStore.getState().setProgress("x", 25)
 
 		expect(useTransfersStore.getState().rowSpeedSamples).toEqual({})
-		expect(useTransfersStore.getState().speedSamples).toEqual([
-			{ timestamp: 10_000, totalBytes: 100 },
-			{ timestamp: 10_000, totalBytes: 150 },
-			{ timestamp: 10_000, totalBytes: 175 }
-		])
+		// One tick's worth of time apart from none: one sample counting all of it.
+		expect(useTransfersStore.getState().speedSamples).toEqual([{ timestamp: 10_000, totalBytes: 175 }])
 		expect(useTransfersStore.getState().transfers.map(transfer => transfer.bytesTransferred)).toEqual([100, 50, 25])
 	})
 
-	it("drops the samples of every row the settle leaves inactive, including rows the cap evicts", () => {
+	it("drops the samples of the row it settles and of the rows the cap evicts, and no others", () => {
+		const finished = Array.from({ length: 200 }, (_, i) => makeTransfer({ id: `done-${String(i)}`, status: "done" }))
+
 		useTransfersStore.setState({
-			transfers: [makeTransfer({ id: "old", status: "done" }), makeTransfer({ id: "a" }), makeTransfer({ id: "b" })],
+			transfers: [...finished, makeTransfer({ id: "a" }), makeTransfer({ id: "b" })],
 			rowSpeedSamples: {
-				old: [{ timestamp: 1, totalBytes: 1 }],
+				"done-0": [{ timestamp: 1, totalBytes: 1 }],
+				"done-1": [{ timestamp: 1, totalBytes: 1 }],
 				a: [{ timestamp: 1, totalBytes: 1 }],
 				b: [{ timestamp: 1, totalBytes: 1 }]
 			}
@@ -623,7 +655,8 @@ describe("speed samples never outlive their transfer", () => {
 
 		useTransfersStore.getState().settle("a", "done")
 
-		expect(Object.keys(useTransfersStore.getState().rowSpeedSamples)).toEqual(["b"])
+		expect(Object.keys(useTransfersStore.getState().rowSpeedSamples)).toEqual(["done-1", "b"])
+		expect(useTransfersStore.getState().transfers[0]?.id).toBe("done-1")
 	})
 
 	it("clearFinished drops the samples of the rows it clears", () => {
@@ -763,5 +796,220 @@ describe("computeTransfersAggregate", () => {
 		]
 
 		expect(computeTransfersAggregate([], samples).speed).toBe(2_000)
+	})
+})
+
+// The index every subscriber reads instead of a pass over the rows: carried from one write to the next,
+// it must always agree with what a fresh pass over the same rows says.
+describe("the rows' index", () => {
+	function readIndex(transfers: readonly Transfer[]) {
+		const { activeCount, activeJobs, activeSize, activeTransferred, failedCount, units } = transfersIndexOf(transfers)
+
+		return {
+			totals: { activeCount, activeJobs, activeSize, activeTransferred, failedCount },
+			// Positions are corrected lazily: read them the way every lookup does.
+			positions: transfers.map(transfer => [transfer.id, positionOf(transfers, transfer.id)]),
+			units: [...units].map(([parent, set]) => [parent, [...set.uploads], [...set.failed], [...set.jobs]])
+		}
+	}
+
+	it("agrees with a fresh pass after adds, progress, settles, removals and the cap", () => {
+		const batch = { id: "run", parentUuid: "dir" }
+		const store = useTransfersStore.getState()
+
+		store.startUploadBatch(batch, { files: 3, bytes: 3_000 })
+		store.addMany([makeTransfer({ id: "a", batch }), makeTransfer({ id: "b", batch }), makeTransfer({ id: "c", batch, size: 0 })])
+		store.add(makeTransfer({ id: "job", direction: "copy", status: "copying", parentUuid: "dir" }))
+		store.setProgressMany({ a: 400, b: 100, job: 50 })
+		store.settle("b", "error", sdkDto("UploadFailed"))
+		store.remove("a")
+		store.setSize("c", 700)
+		store.setProgress("c", 300)
+
+		const { transfers } = useTransfersStore.getState()
+
+		// A copy is indexed afresh, never through the index the store carried along.
+		expect(readIndex(transfers)).toEqual(readIndex([...transfers]))
+		expect(readIndex(transfers).positions).toEqual(transfers.map((transfer, i) => [transfer.id, i]))
+		expect(transfersIndexOf(transfers)).toMatchObject({
+			activeCount: 2,
+			activeJobs: 1,
+			failedCount: 1,
+			activeSize: 1_700,
+			activeTransferred: 350
+		})
+		expect(transferById(transfers, "a")).toBeUndefined()
+		expect(transferById(transfers, "c")?.bytesTransferred).toBe(300)
+	})
+
+	it("keeps a listing's running uploads in start order across progress ticks", () => {
+		const batch = { id: "run", parentUuid: "dir" }
+
+		useTransfersStore.getState().addMany([makeTransfer({ id: "a", batch }), makeTransfer({ id: "b", batch })])
+		useTransfersStore.getState().setProgress("a", 10)
+
+		expect([...(transfersIndexOf(useTransfersStore.getState().transfers).units.get("dir")?.uploads ?? [])]).toEqual(["a", "b"])
+	})
+
+	it("applies a whole progress batch in one write", () => {
+		useTransfersStore.setState({ transfers: [makeTransfer({ id: "a" }), makeTransfer({ id: "b" })] })
+
+		const listener = vi.fn()
+		const unsubscribe = useTransfersStore.subscribe(listener)
+
+		useTransfersStore.getState().setProgressMany({ a: 100, b: 200, gone: 5 })
+		unsubscribe()
+
+		expect(listener).toHaveBeenCalledTimes(1)
+		expect(useTransfersStore.getState().transfers.map(transfer => transfer.bytesTransferred)).toEqual([100, 200])
+	})
+})
+
+// A directory upload's top-level directory is ONE row, its run's: the files move it, and only a failed one
+// gets a row of its own.
+describe("directory runs", () => {
+	const run = { id: "run", parentUuid: null, directoryName: "photos" }
+
+	beforeEach(() => {
+		useTransfersStore.setState({ transfers: [], uploadBatches: {}, batchSpeedSamples: {}, rowSpeedSamples: {}, speedSamples: [] })
+	})
+
+	it("shows the run sized in full from the start, moved by its files' progress", () => {
+		const store = useTransfersStore.getState()
+
+		store.startUploadBatch(run, { files: 2, bytes: 1_000 })
+		store.startRunFile({ id: "f1", batchId: "run", size: 600, counted: 600 })
+		store.startRunFile({ id: "f2", batchId: "run", size: 400, counted: 400 })
+		store.setProgressMany({ f1: 300, f2: 100 })
+
+		expect(useTransfersStore.getState().transfers).toMatchObject([
+			{ id: "run", name: "photos", status: "uploading", size: 1_000, bytesTransferred: 400 }
+		])
+		expect(useTransfersStore.getState().rowSpeedSamples["run"]).toHaveLength(1)
+
+		store.settleRunFile("f1", "done")
+
+		expect(useTransfersStore.getState().transfers[0]).toMatchObject({ bytesTransferred: 700 })
+		expect(useTransfersStore.getState().uploadBatches["run"]).toMatchObject({ settledFiles: 1, transferred: 700 })
+	})
+
+	it("resizes the run for a file that changed size since it was counted", () => {
+		const store = useTransfersStore.getState()
+
+		store.startUploadBatch(run, { files: 1, bytes: 1_000 })
+		store.startRunFile({ id: "f1", batchId: "run", size: 600, counted: 1_000 })
+
+		expect(useTransfersStore.getState().transfers[0]?.size).toBe(600)
+	})
+
+	it("gives a failed file a row of its own and ends the run completed with errors", () => {
+		const store = useTransfersStore.getState()
+
+		store.startUploadBatch(run, { files: 2, bytes: 1_000 })
+		store.startRunFile({ id: "f1", batchId: "run", size: 600, counted: 600 })
+		store.startRunFile({ id: "f2", batchId: "run", size: 400, counted: 400 })
+		store.settleRunFile("f1", "done")
+		store.settleRunFile("f2", "error", sdkDto("UploadFailed"), { name: "photos/b.jpg", parentUuid: "sub" })
+		store.endUploadBatch("run")
+
+		expect(useTransfersStore.getState().transfers).toMatchObject([
+			{ id: "run", status: "completedWithErrors", failedItems: 1, size: 600, bytesTransferred: 600 },
+			{ id: "f2", name: "photos/b.jpg", status: "error", size: 400, parentUuid: "sub", batch: run }
+		])
+		// A failed file of a run is reported by its run in the listing, not as a plain failed upload.
+		expect(transfersIndexOf(useTransfersStore.getState().transfers).units.size).toBe(0)
+	})
+
+	it("ends a clean run done, and removes a cancelled one's row", () => {
+		const store = useTransfersStore.getState()
+		const other = { id: "other", parentUuid: null, directoryName: "music" }
+
+		store.startUploadBatch(run, { files: 1, bytes: 10 })
+		store.startUploadBatch(other, { files: 1, bytes: 10 })
+		store.startRunFile({ id: "f1", batchId: "run", size: 10, counted: 10 })
+		store.settleRunFile("f1", "done")
+		store.endUploadBatch("run")
+		store.cancelUploadBatches(new Set(["other"]))
+		store.endUploadBatch("other")
+
+		expect(useTransfersStore.getState().transfers).toMatchObject([{ id: "run", status: "done", size: 10, bytesTransferred: 10 }])
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+	})
+
+	it("counts what a scanning run's walk found, and drops its row at once when it is cancelled", () => {
+		const store = useTransfersStore.getState()
+
+		store.startUploadBatch(run, { files: 0, bytes: 0 }, { scanning: true })
+		store.updateUploadBatchScans(new Map([["run", { files: 3, bytes: 900 }]]))
+
+		expect(useTransfersStore.getState().uploadBatches["run"]).toMatchObject({ scanning: true, files: 3, bytes: 900 })
+		expect(useTransfersStore.getState().transfers[0]?.size).toBe(900)
+
+		store.startUploadBatch(run, { files: 4, bytes: 1_000 })
+
+		expect(useTransfersStore.getState().uploadBatches["run"]?.scanning).toBeUndefined()
+		expect(useTransfersStore.getState().transfers).toHaveLength(1)
+
+		store.startUploadBatch(run, { files: 0, bytes: 0 }, { scanning: true })
+		store.cancelUploadBatches(new Set(["run"]))
+
+		expect(useTransfersStore.getState().transfers).toEqual([])
+		expect(useTransfersStore.getState().uploadBatches["run"]?.cancelled).toBe(true)
+	})
+
+	it("discards a run that never uploaded, with its row", () => {
+		useTransfersStore.getState().startUploadBatch(run, { files: 0, bytes: 0 }, { scanning: true })
+		useTransfersStore.getState().discardUploadBatches(new Set(["run"]))
+
+		expect(useTransfersStore.getState().transfers).toEqual([])
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+	})
+})
+
+describe("directory runs — fewer writes", () => {
+	const run = { id: "run", parentUuid: null, directoryName: "photos" }
+
+	beforeEach(() => {
+		useTransfersStore.setState({ transfers: [], uploadBatches: {}, batchSpeedSamples: {}, rowSpeedSamples: {}, speedSamples: [] })
+	})
+
+	// The worker drops a run file's last count, so its settle counts those bytes: in the run and its speed.
+	it("counts a done file's last bytes in the run and its speed windows on settle", () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(10_000)
+
+		const store = useTransfersStore.getState()
+
+		store.startUploadBatch(run, { files: 1, bytes: 1_000 })
+		store.startRunFile({ id: "f1", batchId: "run", size: 1_000, counted: 1_000 })
+		store.setProgressMany({ f1: 400 })
+		vi.setSystemTime(12_000)
+		store.settleRunFile("f1", "done")
+
+		const state = useTransfersStore.getState()
+
+		expect(state.transfers[0]).toMatchObject({ bytesTransferred: 1_000 })
+		expect(state.speedSamples.at(-1)).toEqual({ timestamp: 12_000, totalBytes: 1_000 })
+		expect(state.batchSpeedSamples["run"]?.at(-1)).toEqual({ timestamp: 12_000, totalBytes: 1_000 })
+		expect(state.rowSpeedSamples["run"]?.at(-1)).toEqual({ timestamp: 12_000, totalBytes: 1_000 })
+	})
+
+	it("writes nothing for a scan report that found nothing new, or for a cancelled run", () => {
+		const store = useTransfersStore.getState()
+
+		store.startUploadBatch(run, { files: 0, bytes: 0 }, { scanning: true })
+		store.updateUploadBatchScans(new Map([["run", { files: 2, bytes: 20 }]]))
+
+		const listener = vi.fn()
+		const unsubscribe = useTransfersStore.subscribe(listener)
+
+		store.updateUploadBatchScans(new Map([["run", { files: 2, bytes: 20 }]]))
+		store.cancelUploadBatches(new Set(["run"]))
+		listener.mockClear()
+		store.updateUploadBatchScans(new Map([["run", { files: 5, bytes: 50 }]]))
+		unsubscribe()
+
+		expect(listener).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().uploadBatches["run"]).toMatchObject({ files: 2, bytes: 20 })
 	})
 })

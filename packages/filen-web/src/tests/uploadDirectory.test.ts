@@ -11,14 +11,18 @@ import type { Transfer, TerminalStatus } from "@/features/transfers/store/useTra
 // `@/features/drive/lib/upload`, or `@/features/drive/lib/createDirectory`) lets startDirectoryUpload's
 // real defaultDirectoryUploadDeps wiring — driveListingQueryUpdate, runCreateDirectory, runUpload,
 // defaultUploadDeps — run for real against those two mocked leaves.
-const { createDirectory, uploadFile, getUserInfo } = vi.hoisted(() => ({
+const { createDirectory, uploadFile, getUserInfo, openTransferRun, releaseJob, cancelTransfer } = vi.hoisted(() => ({
 	createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
-	uploadFile:
-		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
-	getUserInfo: vi.fn()
+	uploadFile: vi.fn<(parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>>(),
+	getUserInfo: vi.fn(),
+	openTransferRun: vi.fn(),
+	releaseJob: vi.fn(),
+	cancelTransfer: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createDirectory, uploadFile, getUserInfo } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: { createDirectory, uploadFile, getUserInfo, openTransferRun, releaseJob, cancelTransfer, setProgressSink: vi.fn() }
+}))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 // toastLoading returns a fixed id — startDirectoryUpload's own scanning-toast id — so assertions
@@ -48,6 +52,7 @@ import {
 } from "@/features/drive/lib/uploadDirectory"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { uploadBatchControl } from "@/features/drive/lib/upload"
+import { cancelTransfers } from "@/features/transfers/lib/control"
 import { testUuid } from "@/tests/support/uuid"
 
 // ---------------------------------------------------------------------------
@@ -325,10 +330,8 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 	function makeHarness() {
 		const create = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>()
 		const patchDirListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
-		const upload =
-			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		const upload = vi.fn<(parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>>()
 		const add = vi.fn<(t: Omit<Transfer, "paused">) => void>()
-		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
 		const patchFileCreated = vi.fn<(parentUuid: string | null, item: DriveItem) => void>()
@@ -337,7 +340,11 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 
 		const deps: RunDirectoryUploadDeps = {
 			createDirectory: { createDirectory: create, patchListing: patchDirListing },
-			upload: { upload, store: { add, setProgress, settle, setItem: vi.fn(), remove }, patchCreated: patchFileCreated },
+			upload: {
+				upload,
+				store: { add, startRunFile: vi.fn(), settleRunFile: vi.fn(), settle, setItem: vi.fn(), remove },
+				patchCreated: patchFileCreated
+			},
 			heic: { convert: { transform }, readPreference }
 		}
 
@@ -382,18 +389,8 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		// "a/x.txt"'s parent is "a" (created with basename "a", uuid testUuid("a")); "a/b/y.txt"'s
 		// parent is "a/b" (created with basename "b", uuid testUuid("b")) — each file must land under
 		// its OWN recreated parent, not just any created dir.
-		expect(h.upload).toHaveBeenCalledWith(
-			testUuid("a"),
-			expect.any(String),
-			expect.objectContaining({ name: "x.txt" }),
-			expect.any(Function)
-		)
-		expect(h.upload).toHaveBeenCalledWith(
-			testUuid("b"),
-			expect.any(String),
-			expect.objectContaining({ name: "y.txt" }),
-			expect.any(Function)
-		)
+		expect(h.upload).toHaveBeenCalledWith(testUuid("a"), expect.any(String), expect.objectContaining({ name: "x.txt" }))
+		expect(h.upload).toHaveBeenCalledWith(testUuid("b"), expect.any(String), expect.objectContaining({ name: "y.txt" }))
 	})
 
 	it("creates dirs in depth order even when the input array lists deeper paths first", async () => {
@@ -431,12 +428,7 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 		// Only the file directly under the successfully-created "a" uploads; both files nested under
 		// the failed "b" are skipped without ever calling upload.
 		expect(h.upload).toHaveBeenCalledTimes(1)
-		expect(h.upload).toHaveBeenCalledWith(
-			testUuid("a"),
-			expect.any(String),
-			expect.objectContaining({ name: "under-a.txt" }),
-			expect.any(Function)
-		)
+		expect(h.upload).toHaveBeenCalledWith(testUuid("a"), expect.any(String), expect.objectContaining({ name: "under-a.txt" }))
 
 		expect(toastError).toHaveBeenCalledTimes(1)
 		expect(toastSuccess).not.toHaveBeenCalled()
@@ -529,12 +521,7 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 
 		expect(h.transform).toHaveBeenCalledTimes(1)
 		// The rename never touches relPath, so the converted file still resolves "a" as its parent.
-		expect(h.upload).toHaveBeenCalledWith(
-			testUuid("a"),
-			expect.any(String),
-			expect.objectContaining({ name: "photo.jpg" }),
-			expect.any(Function)
-		)
+		expect(h.upload).toHaveBeenCalledWith(testUuid("a"), expect.any(String), expect.objectContaining({ name: "photo.jpg" }))
 	})
 
 	it("reads the preference exactly once for a multi-file, multi-directory walk", async () => {
@@ -592,14 +579,20 @@ describe("runDirectoryUpload (injected deps, real runCreateDirectory/runUpload)"
 describe("runDirectoryUpload — concurrency, cancels, skips and sizes", () => {
 	function makeHarness() {
 		const create = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>()
-		const upload =
-			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		const upload = vi.fn<(parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>>()
 		const invalidateDirectorySizes = vi.fn<(parentUuid: string | null, created?: readonly string[]) => void>()
 		const deps: RunDirectoryUploadDeps = {
 			createDirectory: { createDirectory: create, patchListing: vi.fn() },
 			upload: {
 				upload,
-				store: { add: vi.fn(), setProgress: vi.fn(), settle: vi.fn(), setItem: vi.fn(), remove: vi.fn() },
+				store: {
+					add: vi.fn(),
+					startRunFile: vi.fn(),
+					settleRunFile: vi.fn(),
+					settle: vi.fn(),
+					setItem: vi.fn(),
+					remove: vi.fn()
+				},
 				patchCreated: vi.fn(),
 				invalidateDirectorySizes
 			},
@@ -660,7 +653,7 @@ describe("runDirectoryUpload — concurrency, cancels, skips and sizes", () => {
 		})
 
 		await vi.waitFor(() => {
-			expect(h.upload).toHaveBeenCalledWith(testUuid("fast"), expect.any(String), expect.any(File), expect.any(Function))
+			expect(h.upload).toHaveBeenCalledWith(testUuid("fast"), expect.any(String), expect.any(File))
 		})
 
 		releaseSlow()
@@ -812,9 +805,13 @@ describe("startDirectoryUpload (real wiring)", () => {
 			"scan-toast-id"
 		)
 
+		// One row for the picked directory, which its files moved: they have none of their own.
 		const transfers = useTransfersStore.getState().transfers
-		expect(transfers).toHaveLength(2)
-		expect(transfers.every(transfer => transfer.status === "done")).toBe(true)
+		expect(transfers).toHaveLength(1)
+		expect(transfers[0]).toMatchObject({ name: "myfolder", status: "done", size: 128, bytesTransferred: 128 })
+		expect(transfers[0]?.item?.data.uuid).toBe(testUuid("myfolder"))
+		// Both files shared the run's stop and pause.
+		expect(uploadFile.mock.calls.map(call => call[3])).toEqual([transfers[0]?.id, transfers[0]?.id])
 
 		// The top-level directory landed in the root listing's own cache — driveListingQueryUpdate
 		// patches synchronously, no refetch needed (per createDirectory.ts/upload.ts's own contract).
@@ -881,8 +878,7 @@ describe("startDirectoryUpload (real wiring)", () => {
 describe("runDirectoryUpload — listing runs", () => {
 	function makeHarness() {
 		const create = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>()
-		const upload =
-			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
+		const upload = vi.fn<(parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>>()
 		const deps: RunDirectoryUploadDeps = {
 			createDirectory: { createDirectory: create, patchListing: vi.fn() },
 			upload: { upload, store: useTransfersStore.getState(), patchCreated: vi.fn() },
@@ -905,11 +901,12 @@ describe("runDirectoryUpload — listing runs", () => {
 		const h = makeHarness()
 		const seen: Record<string, { directoryName?: string; parentUuid: string | null; running: boolean } | undefined> = {}
 
-		h.upload.mockImplementation((_parentUuid, transferId) => {
-			const transfer = useTransfersStore.getState().transfers.find(candidate => candidate.id === transferId)
-			const batch = transfer?.batch === undefined ? undefined : useTransfersStore.getState().uploadBatches[transfer.batch.id]
+		h.upload.mockImplementation((_parentUuid, transferId, file, runId) => {
+			// A directory run's file has no row: it names its run instead.
+			const batchId = runId ?? useTransfersStore.getState().transfers.find(candidate => candidate.id === transferId)?.batch?.id
+			const batch = batchId === undefined ? undefined : useTransfersStore.getState().uploadBatches[batchId]
 
-			seen[transfer?.name ?? ""] =
+			seen[file.name] =
 				batch === undefined
 					? undefined
 					: {
@@ -991,5 +988,194 @@ describe("runDirectoryUpload — listing runs", () => {
 		expect(h.upload).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().uploadBatches).toEqual({})
 		expect(toastError).not.toHaveBeenCalled()
+	})
+})
+
+// A drop's top-level directories are rows from the drop on, scanning while their trees are walked; each is
+// ONE row, which its files move, and only a file that fails gets a row of its own.
+describe("startDirectoryUpload — a drop's directory rows", () => {
+	// A directory whose listing comes back only once `release` is called.
+	function deferredDirEntry(name: string, entries: FileSystemEntry[]): { entry: FileSystemDirectoryEntry; release: () => void } {
+		let deliver: () => void = () => undefined
+		let delivered = false
+
+		const reader: FileSystemDirectoryReader = {
+			readEntries: successCallback => {
+				if (delivered) {
+					successCallback([])
+
+					return
+				}
+
+				deliver = () => {
+					delivered = true
+					successCallback(entries)
+				}
+			}
+		}
+
+		return {
+			entry: mockDirEntry(name, reader),
+			release: () => {
+				deliver()
+			}
+		}
+	}
+
+	beforeEach(() => {
+		useTransfersStore.setState({ transfers: [], uploadBatches: {}, batchSpeedSamples: {}, rowSpeedSamples: {} })
+		createDirectory.mockImplementation((_parentUuid, name) =>
+			Promise.resolve(mockDir({ uuid: testUuid(name), meta: { type: "decoded", data: { name } } }))
+		)
+		uploadFile.mockResolvedValue(mockSdkFile())
+	})
+
+	it("shows a scanning row at once, counting what the walk finds, and creates nothing before the walk ends", async () => {
+		const { entry, release } = deferredDirEntry("photos", [
+			mockFileEntry("a.jpg", mockBrowserFile("a.jpg", 100)),
+			mockFileEntry("b.jpg", mockBrowserFile("b.jpg", 50))
+		])
+
+		const upload = startDirectoryUpload({ kind: "entries", entries: [entry] }, null)
+
+		expect(useTransfersStore.getState().transfers).toMatchObject([{ name: "photos", status: "uploading", size: 0 }])
+		expect(Object.values(useTransfersStore.getState().uploadBatches)).toMatchObject([{ scanning: true, files: 0 }])
+
+		release()
+		await upload
+
+		expect(createDirectory).toHaveBeenCalledTimes(1)
+		expect(uploadFile).toHaveBeenCalledTimes(2)
+		expect(useTransfersStore.getState().transfers).toMatchObject([{ name: "photos", status: "done", size: 150 }])
+	})
+
+	it("removes the scanning row when the quota blocks the upload, creating nothing", async () => {
+		testQueryClient.setQueryData(ACCOUNT_QUERY_KEY, { storageUsed: 0n, maxStorage: 10n })
+		// The pre-flight re-reads a cached account that does not fit before it blocks.
+		getUserInfo.mockResolvedValue({ storageUsed: 0n, maxStorage: 10n })
+
+		const root = mockDirEntry("photos", mockDirectoryReader([mockFileEntry("a.jpg", mockBrowserFile("a.jpg", 100))]))
+
+		await startDirectoryUpload({ kind: "entries", entries: [root] }, null)
+
+		expect(createDirectory).not.toHaveBeenCalled()
+		expect(uploadFile).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().transfers).toEqual([])
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+		expect(toastError).toHaveBeenCalledWith(expect.any(String), { id: "scan-toast-id" })
+	})
+
+	it("removes the scanning row when the walk fails", async () => {
+		await startDirectoryUpload({ kind: "entries", entries: [mockDirEntry("bad", mockFailingReader())] }, null)
+
+		expect(useTransfersStore.getState().transfers).toEqual([])
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+	})
+
+	it("uploads nothing of a directory cancelled while it was walked, its row gone at once", async () => {
+		const { entry, release } = deferredDirEntry("photos", [mockFileEntry("a.jpg", mockBrowserFile("a.jpg", 100))])
+
+		const upload = startDirectoryUpload({ kind: "entries", entries: [entry] }, null)
+		const [runId] = Object.keys(useTransfersStore.getState().uploadBatches)
+
+		cancelTransfers([runId ?? ""])
+
+		expect(useTransfersStore.getState().transfers).toEqual([])
+
+		release()
+		await upload
+
+		expect(createDirectory).not.toHaveBeenCalled()
+		expect(uploadFile).not.toHaveBeenCalled()
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+		expect(toastSuccess).not.toHaveBeenCalled()
+	})
+
+	it("ends a run with a failed file as completed with errors, the failed file with a row of its own", async () => {
+		uploadFile.mockReset()
+		uploadFile.mockResolvedValueOnce(mockSdkFile()).mockRejectedValueOnce(sdkDto("UploadFailed"))
+
+		const root = mockDirEntry(
+			"photos",
+			mockDirectoryReader([
+				mockFileEntry("a.jpg", mockBrowserFile("a.jpg", 100)),
+				mockFileEntry("b.jpg", mockBrowserFile("b.jpg", 50))
+			])
+		)
+
+		await startDirectoryUpload({ kind: "entries", entries: [root] }, null)
+
+		const [run, failed] = useTransfersStore.getState().transfers
+
+		expect(useTransfersStore.getState().transfers).toHaveLength(2)
+		expect(run).toMatchObject({ name: "photos", status: "completedWithErrors", failedItems: 1, size: 100, bytesTransferred: 100 })
+		expect(failed).toMatchObject({ name: "photos/b.jpg", status: "error", size: 50, error: { kind: "UploadFailed" } })
+		// The listing keeps the failed run until it is dismissed.
+		expect(Object.values(useTransfersStore.getState().uploadBatches)).toMatchObject([{ running: false, failed: 1 }])
+	})
+})
+
+describe("runDirectoryUpload — listing patches", () => {
+	it("holds the directory creates' listing patches in one batch until the tree exists", async () => {
+		const create = vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>((_parentUuid, name) =>
+			Promise.resolve(mockDir({ uuid: testUuid(name), meta: { type: "decoded", data: { name } } }))
+		)
+		const patchListing = vi.fn()
+		let batched = 0
+		async function batchPatches<T>(run: () => Promise<T>): Promise<T> {
+			batched++
+
+			const result = await run()
+
+			// Every directory patched inside the batch.
+			expect(patchListing).toHaveBeenCalledTimes(2)
+
+			return result
+		}
+
+		await runDirectoryUpload(
+			{
+				createDirectory: { createDirectory: create, patchListing },
+				upload: {
+					upload: vi.fn(),
+					store: useTransfersStore.getState(),
+					patchCreated: vi.fn()
+				},
+				heic: { convert: { transform: vi.fn() }, readPreference: vi.fn<() => Promise<boolean>>().mockResolvedValue(false) },
+				batchPatches
+			},
+			{ rootParentUuid: null, dirs: ["a", "a/b"], files: [] }
+		)
+
+		expect(batched).toBe(1)
+	})
+})
+
+describe("collectDirectoryUploads — a stopped run's tree", () => {
+	it("reads no further into a top-level directory once its run is stopped, letting go of what it read", async () => {
+		const stoppedNames = new Set<string>()
+		const heard: string[] = []
+		const inner = mockDirEntry("deep", mockDirectoryReader([mockFileEntry("never.txt", mockBrowserFile("never.txt"))]))
+		const stopped = mockDirEntry("a", mockDirectoryReader([mockFileEntry("first.txt", mockBrowserFile("first.txt")), inner]))
+		const kept = mockDirEntry("b", mockDirectoryReader([mockFileEntry("kept.txt", mockBrowserFile("kept.txt"))]))
+
+		const result = await collectDirectoryUploads(
+			{ kind: "entries", entries: [stopped, kept] },
+			{
+				onFile: relPath => {
+					heard.push(relPath)
+
+					// The first file of "a" read, its run is stopped.
+					if (relPath === "a/first.txt") {
+						stoppedNames.add("a")
+					}
+				},
+				isCancelled: topLevel => stoppedNames.has(topLevel)
+			}
+		)
+
+		expect(result.files.map(entry => entry.relPath)).toEqual(["b/kept.txt"])
+		expect(heard).not.toContain("a/deep/never.txt")
+		expect(result.dirs).not.toContain("a/deep")
 	})
 })

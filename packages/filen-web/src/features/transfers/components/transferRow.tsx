@@ -1,5 +1,6 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
+import { useShallow } from "zustand/shallow"
 import {
 	ArchiveIcon,
 	CheckIcon,
@@ -18,6 +19,7 @@ import {
 import { formatBytes, formatBytesFixed, isJobRunning, isWaitingForArchiveSlot, cn } from "@filen/shared"
 import {
 	isActiveTransfer,
+	isDirectoryRunRow,
 	isDriveJobDirection,
 	useTransfersStore,
 	type Transfer,
@@ -246,6 +248,16 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 	const rate = useTransferRate(transfer)
 	const runningDetails = useRunningDetails()
 	const revealItem = landed ? (transfer.item ?? jobItem ?? undefined) : undefined
+	// A directory upload's row counts its files off its run, while that runs.
+	const runFiles = useTransfersStore(
+		useShallow(state => {
+			const run = active && isDirectoryRunRow(transfer) ? state.uploadBatches[transfer.id] : undefined
+
+			return run === undefined
+				? null
+				: { files: run.files, settled: run.settledFiles, bytes: run.bytes, scanning: run.scanning === true }
+		})
+	)
 
 	// The running line keeps its figures still without reserving space for them (useRunningDetails); a
 	// finished row's figures no longer move, so they read plainly.
@@ -257,8 +269,11 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 		details = [t("transfersStatusPaused"), formatBytesFixed(transfer.bytesTransferred)]
 	} else if (active && (waiting || transfer.waitingForSlot === true)) {
 		details = [t("transfersStatusWaitingForSlot")]
+	} else if (runFiles?.scanning === true) {
+		details = [t("transfersRowScanning", { count: runFiles.files }), formatBytesFixed(runFiles.bytes)]
 	} else if (active) {
 		details = [
+			runFiles === null ? null : t("transfersRowFilesProgress", { done: runFiles.settled, count: runFiles.files }),
 			runningDetails({
 				transferred: transfer.bytesTransferred,
 				size: transfer.size,
@@ -271,6 +286,11 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 		details = [
 			t(finishedStatusLabelKey(transfer.status, transfer.direction)),
 			transfer.error === undefined ? null : errorLabel(transfer.error)
+		]
+	} else if (transfer.failedItems !== undefined) {
+		details = [
+			t(finishedStatusLabelKey(transfer.status, transfer.direction)),
+			t("transfersRowFailedItems", { count: transfer.failedItems })
 		]
 	} else {
 		details = [t(finishedStatusLabelKey(transfer.status, transfer.direction)), formatBytes(transfer.size)]

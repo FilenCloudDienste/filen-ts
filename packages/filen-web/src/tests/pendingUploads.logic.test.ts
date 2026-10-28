@@ -365,17 +365,13 @@ describe("pendingCancelTargets / pendingDismissTargets", () => {
 		})
 	})
 
-	it("cancels a directory upload's run and only its running files", () => {
-		const tree = directoryRun("tree", "A")
-		const other = directoryRun("other-tree", "B")
-
-		addUpload("a", tree)
-		addUpload("done", tree)
-		addUpload("b", other)
-		store().settle("done", "done")
+	// A directory run's one row stands for all of its files, which have none.
+	it("cancels a directory upload through its run's own row", () => {
+		directoryRun("tree", "A")
+		directoryRun("other-tree", "B")
 
 		expect(pendingCancelTargets(store(), "directory:tree", DIR)).toEqual({
-			transferIds: new Set(["a"]),
+			transferIds: new Set(["tree"]),
 			batchIds: new Set(["tree"]),
 			jobIds: new Set()
 		})
@@ -383,14 +379,15 @@ describe("pendingCancelTargets / pendingDismissTargets", () => {
 
 	it("cancels every running run into the directory from the summary row, and nothing elsewhere", () => {
 		const first = plainRun("first")
-		const tree = directoryRun("tree", "A")
 
+		directoryRun("tree", "A")
 		addUpload("a", first)
-		addUpload("b", tree)
+		addUpload("done", first)
+		store().settle("done", "done")
 		addUpload("elsewhere", plainRun("other", OTHER_DIR))
 
 		expect(pendingCancelTargets(store(), "uploading", DIR)).toEqual({
-			transferIds: new Set(["a", "b"]),
+			transferIds: new Set(["a", "tree"]),
 			batchIds: new Set(["first", "tree"]),
 			jobIds: new Set()
 		})
@@ -551,5 +548,22 @@ describe("pendingJobSpeed", () => {
 		const paused = { ...createCopyJob("b", { uuid: DIR, name: "Dir" }, 1), bytesPerSecond: 50, paused: true }
 
 		expect(pendingJobSpeed({ a: running, b: paused }, ["a", "b", "gone"])).toBe(100)
+	})
+})
+
+describe("directory runs in the listing", () => {
+	it("drops a cancelled directory run's row at once, before its files have all stopped", () => {
+		directoryRun("tree", "A")
+		directoryRun("kept", "B")
+		store().cancelUploadBatches(new Set(["tree"]))
+
+		expect(keys()).toEqual(["directory:kept"])
+		expect(pendingSummaryFigures(store(), DIR)).toMatchObject({ files: 0 })
+	})
+
+	it("sizes a run from its start, before any of its files has started", () => {
+		store().startUploadBatch({ id: "tree", parentUuid: DIR, directoryName: "A" }, { files: 3, bytes: 900 })
+
+		expect(pendingRunFigures(store(), "tree")).toEqual({ files: 3, jobs: 0, bytes: 900, transferred: 0 })
 	})
 })

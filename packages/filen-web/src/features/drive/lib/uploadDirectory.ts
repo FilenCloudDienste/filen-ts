@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { dirnameOf, pathSegmentDepth, sumBytes } from "@filen/shared"
+import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 import { i18n } from "@/lib/i18n"
@@ -10,20 +11,21 @@ import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/l
 import {
 	runUpload,
 	defaultUploadDeps,
+	discardUploadRuns,
 	newUploadBatchRef,
 	uploadBatchControl,
 	type RunUploadDeps,
 	type UploadBatchControl,
 	type UploadOutcome
 } from "@/features/drive/lib/upload"
-import type { UploadBatchRef } from "@/features/transfers/store/useTransfersStore"
+import { useTransfersStore, type UploadBatchRef, type UploadBatchTotals } from "@/features/transfers/store/useTransfersStore"
 import {
 	defaultHeicUploadDeps,
 	heicUploadConversionEnabled,
 	maybeConvertHeicUpload,
 	type HeicUploadDeps
 } from "@/features/drive/lib/heicUpload"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { batchListingPatches, driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
 
 // Directory upload: pick/drop a whole directory and recreate its sub-directory tree in the current
@@ -31,8 +33,8 @@ import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quo
 // primitive, so this module walks the picked tree in JS, creates each sub-directory
 // parent-before-child via runCreateDirectory (createDirectory.ts — the RAW worker op only caches
 // worker-side, it never patches the query cache, so a created sub-directory would stay invisible
-// until a refetch), then fans the files out through runUpload (upload.ts) exactly like a plain
-// multi-file upload.
+// until a refetch), then fans the files out through runUpload (upload.ts). Each top-level directory is
+// one run with one row, which its files move; only a file that fails gets a row of its own.
 
 // ---------------------------------------------------------------------------
 // collectDirectoryUploads — normalize both directory-pick shapes into one flat file list (each
@@ -61,12 +63,22 @@ export interface CollectedDirectoryUpload {
 // which this module walks itself. Both normalize to the same { dirs, files } shape.
 export type DirectoryUploadInput = { kind: "files"; files: File[] } | { kind: "entries"; entries: FileSystemEntry[] }
 
-export async function collectDirectoryUploads(input: DirectoryUploadInput): Promise<CollectedDirectoryUpload> {
+// A drop's walk as it goes: `onFile` hears of each file it reads, and `isCancelled` names a top-level
+// directory whose run was stopped, whose tree the walk then leaves.
+export interface DirectoryWalkHooks {
+	onFile?: (relPath: string, size: number) => void
+	isCancelled?: (topLevel: string) => boolean
+}
+
+export async function collectDirectoryUploads(
+	input: DirectoryUploadInput,
+	hooks: DirectoryWalkHooks = {}
+): Promise<CollectedDirectoryUpload> {
 	if (input.kind === "files") {
 		return collectFromFiles(input.files)
 	}
 
-	return collectFromEntries(input.entries)
+	return collectFromEntries(input.entries, hooks)
 }
 
 // A `webkitdirectory` FileList carries no directory entries of its own — only files, each stamped
@@ -100,11 +112,33 @@ function collectFromFiles(files: File[]): CollectedDirectoryUpload {
 // failing the walk, so it never strands the rest of the tree; a directory whose listing fails is not
 // recreated as an empty copy. Only when nothing at all was readable does the walk reject, with the
 // first error, since there is then no upload to run.
-async function collectFromEntries(entries: FileSystemEntry[]): Promise<CollectedDirectoryUpload> {
+async function collectFromEntries(
+	entries: FileSystemEntry[],
+	{ onFile, isCancelled }: DirectoryWalkHooks
+): Promise<CollectedDirectoryUpload> {
 	const dirs = new Set<string>()
-	const files: CollectedFile[] = []
+	let files: CollectedFile[] = []
 	let skipped = 0
 	let firstError: { error: unknown } | undefined
+	const cancelled = new Set<string>()
+
+	// A stopped run's tree is read no further, and the files already read of it are let go at once.
+	function stopped(relPath: string): boolean {
+		const top = topLevelOf(relPath) ?? relPath
+
+		if (cancelled.has(top)) {
+			return true
+		}
+
+		if (isCancelled?.(top) !== true) {
+			return false
+		}
+
+		cancelled.add(top)
+		files = files.filter(entry => (topLevelOf(entry.relPath) ?? entry.relPath) !== top)
+
+		return true
+	}
 
 	function skip(relPath: string, e: unknown): void {
 		log.warn("upload", "directory walk: skipped unreadable entry", relPath, e)
@@ -114,6 +148,10 @@ async function collectFromEntries(entries: FileSystemEntry[]): Promise<Collected
 	}
 
 	async function walk(entry: FileSystemEntry, relPath: string): Promise<void> {
+		if (stopped(relPath)) {
+			return
+		}
+
 		if (isDirectoryEntry(entry)) {
 			let children: FileSystemEntry[]
 
@@ -125,6 +163,10 @@ async function collectFromEntries(entries: FileSystemEntry[]): Promise<Collected
 				return
 			}
 
+			if (stopped(relPath)) {
+				return
+			}
+
 			dirs.add(relPath)
 
 			await Promise.all(children.map(child => walk(child, `${relPath}/${child.name}`)))
@@ -133,11 +175,22 @@ async function collectFromEntries(entries: FileSystemEntry[]): Promise<Collected
 		}
 
 		if (isFileEntry(entry)) {
+			let file: File
+
 			try {
-				files.push({ file: await readFileEntry(entry), relPath })
+				file = await readFileEntry(entry)
 			} catch (e) {
 				skip(relPath, e)
+
+				return
 			}
+
+			if (stopped(relPath)) {
+				return
+			}
+
+			files.push({ file, relPath })
+			onFile?.(relPath, file.size)
 		}
 	}
 
@@ -237,8 +290,12 @@ export interface RunDirectoryUploadDeps {
 	upload: RunUploadDeps
 	heic: HeicUploadDeps
 	// Optional for the same DI reason as RunUploadDeps' own: one run per top-level directory (and one for
-	// the files picked beside them), which the target listing shows as one row each and can cancel.
+	// the files picked beside them), which the target listing shows as one row each and can cancel. A
+	// directory's run is ONE row on the transfers screen too: its files have none unless they fail.
 	batches?: UploadBatchControl
+	// Optional for the same DI reason: holds the directory creates' listing patches, which land together on
+	// the batching timer instead of one listing write per directory.
+	batchPatches?: <T>(run: () => Promise<T>) => Promise<T>
 }
 
 // The top-level segment of a picked path: the directory a file or sub-directory lands under in the
@@ -249,9 +306,17 @@ function topLevelOf(relPath: string): string | null {
 	return index === -1 ? null : relPath.slice(0, index)
 }
 
+// `directoryRuns`: runs startDirectoryUpload already started for top-level directories while they were
+// walked, by name.
 export async function runDirectoryUpload(
 	deps: RunDirectoryUploadDeps,
-	args: { rootParentUuid: string | null; dirs: string[]; files: CollectedFile[]; skipped?: number }
+	args: {
+		rootParentUuid: string | null
+		dirs: string[]
+		files: CollectedFile[]
+		skipped?: number
+		directoryRuns?: ReadonlyMap<string, UploadBatchRef>
+	}
 ): Promise<void> {
 	const { rootParentUuid, dirs, files, skipped = 0 } = args
 
@@ -275,23 +340,40 @@ export async function runDirectoryUpload(
 	let failedDirs = 0
 	const batches = deps.batches
 	// Each top-level directory's run, and one for the files picked at the top level. Started before anything
-	// is created, so the row shows while the tree is still being made.
+	// is created and sized with all of their files, so the row shows the whole upload while the tree is
+	// still being made.
 	const directoryRuns = new Map<string, UploadBatchRef>()
 	let topLevelFilesRun: UploadBatchRef | undefined
 
 	if (batches !== undefined) {
 		for (const relPath of dirs) {
 			if (topLevelOf(relPath) === null) {
-				const ref = newUploadBatchRef(rootParentUuid, relPath)
-
-				directoryRuns.set(relPath, ref)
-				batches.start(ref)
+				directoryRuns.set(relPath, args.directoryRuns?.get(relPath) ?? newUploadBatchRef(rootParentUuid, relPath))
 			}
 		}
 
 		if (files.some(entry => topLevelOf(entry.relPath) === null)) {
 			topLevelFilesRun = newUploadBatchRef(rootParentUuid)
-			batches.start(topLevelFilesRun)
+		}
+
+		const totals = new Map<string, UploadBatchTotals>()
+
+		for (const { file, relPath } of files) {
+			const top = topLevelOf(relPath)
+			const run = top === null ? topLevelFilesRun : directoryRuns.get(top)
+
+			if (run !== undefined) {
+				const runTotals = totals.get(run.id) ?? { files: 0, bytes: 0 }
+
+				runTotals.files += 1
+				runTotals.bytes += file.size
+
+				totals.set(run.id, runTotals)
+			}
+		}
+
+		for (const ref of [...directoryRuns.values(), ...(topLevelFilesRun === undefined ? [] : [topLevelFilesRun])]) {
+			batches.start(ref, totals.get(ref.id) ?? { files: 0, bytes: 0 })
 		}
 	}
 
@@ -358,6 +440,10 @@ export async function runDirectoryUpload(
 
 			createdUuids.push(outcome.item.data.uuid)
 
+			if (run !== undefined && topLevelOf(relPath) === null) {
+				batches?.created(run.id, outcome.item)
+			}
+
 			return outcome.item.data.uuid
 		})()
 
@@ -373,6 +459,12 @@ export async function runDirectoryUpload(
 		files.map(entry => entry.file)
 	)
 
+	// Every create was issued above, and none patches its listing before its first await: the batch holds
+	// them all until the tree exists, the files' creates being queued apart (queueListingCreate).
+	const batchPatches = deps.batchPatches ?? (run => run())
+	// A directory with no file under it is still awaited, so its outcome is counted.
+	const directoriesCreated = batchPatches(() => Promise.all(dirUuids.values()))
+
 	// Files fan out in parallel — no JS queue/semaphore, same rationale as startUploads: the SDK's own
 	// Tower layer throttles real upload concurrency, never reimplemented here.
 	const [fileOutcomes] = await Promise.all([
@@ -387,7 +479,7 @@ export async function runDirectoryUpload(
 
 				if (parentUuid === undefined) {
 					if (run !== undefined) {
-						batches?.fail(run.id, 1)
+						batches?.fail(run.id, 1, undefined, file.size)
 					}
 
 					return "error"
@@ -400,11 +492,18 @@ export async function runDirectoryUpload(
 					return "cancelled"
 				}
 
-				return (await runUpload(deps.upload, { parentUuid, file: prepared, batch: run })).status
+				return (
+					await runUpload(deps.upload, {
+						parentUuid,
+						file: prepared,
+						batch: run,
+						name: relPath,
+						...(run === undefined ? {} : { counted: file.size })
+					})
+				).status
 			})
 		),
-		// A directory with no file under it is still awaited, so its outcome is counted.
-		Promise.all(dirUuids.values())
+		directoriesCreated
 	])
 
 	for (const ref of directoryRuns.values()) {
@@ -443,35 +542,118 @@ const defaultDirectoryUploadDeps: RunDirectoryUploadDeps = {
 	},
 	upload: defaultUploadDeps,
 	heic: defaultHeicUploadDeps,
-	batches: uploadBatchControl
+	batches: uploadBatchControl,
+	batchPatches: batchListingPatches
+}
+
+// A drop's top-level directories, each a run whose row shows from the drop on, scanning while its tree is
+// walked. A picked directory's files are known at once, so it needs none.
+function scanningRuns(input: DirectoryUploadInput, rootParentUuid: string | null): Map<string, UploadBatchRef> {
+	const runs = new Map<string, UploadBatchRef>()
+
+	if (input.kind === "entries") {
+		for (const entry of input.entries) {
+			if (entry.isDirectory && !runs.has(entry.name)) {
+				const ref = newUploadBatchRef(rootParentUuid, entry.name)
+
+				runs.set(entry.name, ref)
+				uploadBatchControl.start(ref, { files: 0, bytes: 0 }, { scanning: true })
+			}
+		}
+	}
+
+	return runs
 }
 
 // Both call sites (uploadMenu.tsx's directory picker, uploadDropzone.tsx's DnD drop) fire this
 // off with `void`, and the tree walk below (collectDirectoryUploads) can run for a while on a large
-// local directory with nothing else on screen changing — no transfer row exists yet, since none of the
-// files/dirs it discovers are known until the walk finishes. A loading toast is the spinner/indicator
-// for that gap: shown the instant the walk starts, replaced in place (same `id`, so it's a swap, not a
-// second toast) by the real error toast if the walk itself fails, or by the upload-started toast once the
-// (now known) tree starts actually uploading — runDirectoryUpload's own success/failure summary toast
-// takes over from there.
+// local directory. A drop's top-level directories show as scanning rows from the start, counting what
+// the walk finds; a loading toast says so too, shown the instant the walk starts, replaced in place (same
+// `id`, so it's a swap, not a second toast) by the real error toast if the walk itself fails, or by the
+// upload-started toast once the (now known) tree starts actually uploading — runDirectoryUpload's own
+// success/failure summary toast takes over from there. Nothing is created before the walk is done and the
+// quota passed; a run that cannot go on leaves with its row.
 export async function startDirectoryUpload(input: DirectoryUploadInput, rootParentUuid: string | null): Promise<void> {
 	const scanningToastId = toast.loading(i18n.t("transfers:transfersScanningDirectory"))
+	const scanning = scanningRuns(input, rootParentUuid)
+	const found = new Map<string, UploadBatchTotals>()
+	const reportFound = throttle(() => {
+		useTransfersStore.getState().updateUploadBatchScans(found)
+	}, PROGRESS_THROTTLE_MS)
 	let collected: CollectedDirectoryUpload
 
 	try {
-		collected = await collectDirectoryUploads(input)
+		collected = await collectDirectoryUploads(input, {
+			onFile: (relPath, size) => {
+				const run = scanning.get(topLevelOf(relPath) ?? "")
+
+				if (run === undefined) {
+					return
+				}
+
+				const totals = found.get(run.id) ?? { files: 0, bytes: 0 }
+
+				totals.files += 1
+				totals.bytes += size
+
+				found.set(run.id, totals)
+				reportFound()
+			},
+			isCancelled: topLevel => {
+				const run = scanning.get(topLevel)
+
+				return run !== undefined && uploadBatchControl.isCancelled(run.id)
+			}
+		})
 	} catch (e) {
 		// A hard walk failure (the browser couldn't even enumerate the dropped/picked tree) — nothing
 		// partial to report here, unlike runDirectoryUpload's own per-item failures above.
+		reportFound.flush()
+		discardUploadRuns(new Set([...scanning.values()].map(run => run.id)))
 		toast.error(errorLabel(e), { id: scanningToastId })
 
 		return
+	}
+
+	reportFound.flush()
+
+	// A run cancelled while it was walked uploads nothing, and a directory the walk could not read (a skip
+	// the summary counts) has nothing to upload.
+	const readable = new Set(collected.dirs.filter(path => topLevelOf(path) === null))
+	const directoryRuns = new Map<string, UploadBatchRef>()
+	const cancelled = new Set<string>()
+	const dropped = new Set<string>()
+
+	for (const [name, run] of scanning) {
+		if (uploadBatchControl.isCancelled(run.id)) {
+			cancelled.add(name)
+			dropped.add(run.id)
+		} else if (readable.has(name)) {
+			directoryRuns.set(name, run)
+		} else {
+			dropped.add(run.id)
+		}
+	}
+
+	if (dropped.size > 0) {
+		discardUploadRuns(dropped)
+	}
+
+	if (cancelled.size > 0) {
+		collected = withoutTopLevel(collected, cancelled)
+
+		if (collected.dirs.length === 0 && collected.files.length === 0) {
+			toast.dismiss(scanningToastId)
+
+			return
+		}
 	}
 
 	// Checked before any sub-directory is created, so a blocked upload leaves nothing behind.
 	const verdict = await checkUploadQuota(sumBytes(collected.files.map(entry => entry.file.size)))
 
 	if (verdict.status === "exceeds") {
+		discardUploadRuns(new Set([...directoryRuns.values()].map(run => run.id)))
 		toast.error(quotaExceededMessage(verdict), { id: scanningToastId })
 
 		return
@@ -485,5 +667,16 @@ export async function startDirectoryUpload(input: DirectoryUploadInput, rootPare
 		toastTransferStarted({ direction: "upload", name: topLevel[0] ?? "", count: topLevel.length, noun: "items" }, scanningToastId)
 	}
 
-	await runDirectoryUpload(defaultDirectoryUploadDeps, { rootParentUuid, ...collected })
+	await runDirectoryUpload(defaultDirectoryUploadDeps, { rootParentUuid, ...collected, directoryRuns })
+}
+
+// The collected tree without the top-level directories named in `names`.
+function withoutTopLevel(collected: CollectedDirectoryUpload, names: ReadonlySet<string>): CollectedDirectoryUpload {
+	const kept = (relPath: string): boolean => !names.has(topLevelOf(relPath) ?? relPath)
+
+	return {
+		dirs: collected.dirs.filter(kept),
+		files: collected.files.filter(entry => kept(entry.relPath)),
+		skipped: collected.skipped
+	}
 }

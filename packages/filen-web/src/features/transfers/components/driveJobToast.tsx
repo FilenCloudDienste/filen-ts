@@ -18,7 +18,7 @@ import { rerunCompress, retryFailedExtract } from "@/features/drive/lib/archiveJ
 import { setTransferPaused } from "@/features/transfers/lib/control"
 import { promptExtractPassword } from "@/features/transfers/lib/extractPasswordPrompt"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
-import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { transferById, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { jobCardModel, type JobCardKeyStatus, type JobCardModel } from "@/features/transfers/components/driveJobCard.logic"
 import { percentFormat } from "@/features/transfers/components/transferRow.logic"
 import { type DriveJob } from "@/features/drive/lib/driveJobs.logic"
@@ -46,7 +46,7 @@ export function DriveJobToast({ jobId, onHeightChange, onDismiss, onRetried, onS
 	const { t, i18n } = useTranslation("transfers")
 	const job = useDriveJobsStore(state => state.jobs[jobId])
 	// The row's flag flips on click; the job's own flags follow once the SDK reports the pause.
-	const rowPaused = useTransfersStore(state => state.transfers.find(transfer => transfer.id === jobId)?.paused ?? false)
+	const rowPaused = useTransfersStore(state => transferById(state.transfers, jobId)?.paused ?? false)
 	// Only a paused job can hold the slot that way, so nothing else is looked at for a running one.
 	const slotHeldWhilePaused = useDriveJobsStore(state => {
 		const own = state.jobs[jobId]

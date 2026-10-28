@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { ArrowUpIcon, FilesIcon, XIcon } from "lucide-react"
 import { cn, formatBytesFixed, isWaitingForArchiveSlot } from "@filen/shared"
-import { isDriveJobDirection, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { isDriveJobDirection, transferById, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { activeStatusLabelKey, transferProgress } from "@/features/transfers/components/transferRow.logic"
 import { TransferIcon } from "@/features/transfers/components/transferIcon"
@@ -223,7 +223,7 @@ function RowButton({ label, onClick }: { label: string; onClick: () => void }) {
 function PendingTransferRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps) {
 	const { t } = useTranslation(["transfers", "drive"])
 	const { kind, id } = parsePendingRowKey(rowKey)
-	const transfer = useTransfersStore(state => state.transfers.find(candidate => candidate.id === id))
+	const transfer = useTransfersStore(state => transferById(state.transfers, id))
 
 	if (transfer === undefined) {
 		return null
@@ -327,11 +327,24 @@ function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps
 	const name = useTransfersStore(state => state.uploadBatches[id]?.ref.directoryName ?? "")
 	const error = useTransfersStore(state => state.uploadBatches[id]?.error)
 	const samples = useTransfersStore(state => state.batchSpeedSamples[id])
+	const scanning = useTransfersStore(state => state.uploadBatches[id]?.scanning === true)
 	const runningDetails = useRunningDetails()
 	const failedDetails = useFailedDetails()
 	const failed = kind === "failedDirectory"
 	const speed = samples === undefined ? 0 : pendingGroupSpeed([samples])
 	const { percent, etaSeconds } = pendingGroupProgress(figures, speed)
+	let details: RunningDetails
+
+	if (failed) {
+		details = failedLine(failedDetails(error))
+	} else if (scanning) {
+		// Still being walked: what it found so far, and nothing to measure yet.
+		const status = t("transfersRowScanning", { count: figures.files })
+
+		details = { full: [status, formatBytesFixed(figures.bytes)].join(" · "), percent: status, medium: status, short: status }
+	} else {
+		details = runningDetails({ transferred: figures.transferred, size: figures.bytes, percent, etaSeconds, bytesPerSecond: speed })
+	}
 
 	return (
 		<PendingCell
@@ -343,18 +356,8 @@ function PendingDirectoryRow({ rowKey, viewMode, onCancel, onDismiss }: RowProps
 				/>
 			)}
 			name={name}
-			details={
-				failed
-					? failedLine(failedDetails(error))
-					: runningDetails({
-							transferred: figures.transferred,
-							size: figures.bytes,
-							percent,
-							etaSeconds,
-							bytesPerSecond: speed
-						})
-			}
-			progress={failed ? null : percent}
+			details={details}
+			progress={failed || scanning ? null : percent}
 			failed={failed}
 			action={
 				<RowButton

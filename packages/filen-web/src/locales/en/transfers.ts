@@ -102,6 +102,18 @@ export const transfers = {
 	transfersRowBytesProgress: "{{done}} of {{total}}",
 	/** Transfer row — estimated time left; {{eta}} = a pre-formatted m:ss (or h:mm:ss) duration */
 	transfersRowTimeLeft: "{{eta}} left",
+	/** Transfer row and listing row of a directory upload — status while the dropped directory is still being read, before anything uploads; {{count}} = files found so far; singular */
+	transfersRowScanning_one: "Scanning, {{count}} file found",
+	/** Transfer row and listing row of a directory upload — status while the dropped directory is still being read, before anything uploads; {{count}} = files found so far; plural */
+	transfersRowScanning_other: "Scanning, {{count}} files found",
+	/** Transfer row of a directory upload — files finished out of the directory's files; {{done}} = files finished so far, {{count}} = files in all; singular */
+	transfersRowFilesProgress_one: "{{done}} of {{count}} file",
+	/** Transfer row of a directory upload — files finished out of the directory's files; {{done}} = files finished so far, {{count}} = files in all; plural */
+	transfersRowFilesProgress_other: "{{done}} of {{count}} files",
+	/** Transfer row of a finished directory upload — how many of its files and sub-directories could not be uploaded; each failed file also has a row of its own; singular */
+	transfersRowFailedItems_one: "{{count}} failed",
+	/** Transfer row of a finished directory upload — how many of its files and sub-directories could not be uploaded; each failed file also has a row of its own; plural */
+	transfersRowFailedItems_other: "{{count}} failed",
 	/** Transfer row and archive job card — button opening the directory a finished upload, copy, archive or extracted directory landed in, with the item selected */
 	transfersRowShowInDirectory: "Show in directory",
 	/** Transfer row — status label when a file failed to upload; the row also surfaces the failing outcome's own error label */

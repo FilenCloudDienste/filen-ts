@@ -8,12 +8,13 @@ import { formatBytes } from "@filen/shared"
 // the pre-flight's request count.
 const { createDirectory, uploadFile, getUserInfo } = vi.hoisted(() => ({
 	createDirectory: vi.fn<(parentUuid: string | null, name: string) => Promise<Dir>>(),
-	uploadFile:
-		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
+	uploadFile: vi.fn<(parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>>(),
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { createDirectory, uploadFile, getUserInfo } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: { createDirectory, uploadFile, getUserInfo, setProgressSink: vi.fn(), openTransferRun: vi.fn(), releaseJob: vi.fn() }
+}))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 const { toastSuccess, toastError, toastLoading, toastDismiss } = vi.hoisted(() => ({

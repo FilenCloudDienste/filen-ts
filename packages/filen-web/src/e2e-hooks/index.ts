@@ -1,5 +1,4 @@
 import { type } from "arktype"
-import * as Comlink from "comlink"
 import type { StringifiedClient, File, Note, NoteType, DirMeta, FileMeta } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { accountQueryGet } from "@/queries/account"
@@ -195,12 +194,12 @@ interface E2eHooks {
 	// The SDK worker calls in flight, oldest first, for a failed test's diagnostics. Synchronous and
 	// main-thread only, so it answers even while the worker is stuck.
 	pendingSdkCalls: () => { method: string; ageMs: number }[]
-	// `.filen/Videos` as found (each file's text and version uuids), and putting it back that way afterwards — the
+	// `.filen/videos` as found (each file's text and version uuids), and putting it back that way afterwards — the
 	// Videos specs change the account's synced library and watch state. Restore from a freshly loaded page that has
 	// not opened Videos, or the app saves its own copy back over it.
 	videosSyncSnapshot: () => Promise<VideosSyncSnapshot>
 	videosSyncRestore: (snapshot: VideosSyncSnapshot) => Promise<void>
-	// Fresh server read of `.filen/Videos/<name>`; null when it doesn't exist.
+	// Fresh server read of `.filen/videos/<name>`; null when it doesn't exist.
 	videosSyncFileText: (name: string) => Promise<string | null>
 	// cleanup.setup.ts: removes library roots a killed Videos run left (directory gone or trashed, or scratch-named
 	// and older than `minAgeMs`) through the app's own configuration edit. Returns the count.
@@ -253,12 +252,7 @@ export function installE2eHooks(): void {
 		comboFor: actionId => comboFor(actionId),
 		rawStringifiedClient: ready(() => sdkApi.toStringified()),
 		createTestFile: ready((name, content, parentUuid = null) =>
-			sdkApi.uploadFile(
-				parentUuid,
-				crypto.randomUUID(),
-				new File([content], name, { type: "text/plain" }),
-				Comlink.proxy(() => undefined)
-			)
+			sdkApi.uploadFile(parentUuid, crypto.randomUUID(), new File([content], name, { type: "text/plain" }))
 		),
 		deleteTestNoteByUuid: ready(async uuid => {
 			const note = await noteByUuid(uuid)

@@ -435,3 +435,31 @@ describe("cancelUploadRuns", () => {
 		expect(useTransfersStore.getState().uploadBatches["run"]?.cancelled).toBe(true)
 	})
 })
+
+// A directory upload's one row stands for its whole run: its stop and pause reach every file of it at
+// once, through the run's own control in the worker.
+describe("a directory upload's row", () => {
+	const run = { id: "run", parentUuid: null, directoryName: "photos" }
+
+	beforeEach(() => {
+		useTransfersStore.getState().startUploadBatch(run, { files: 2, bytes: 100 })
+	})
+
+	it("stops the whole run: nothing more of it starts, and its files in flight abort", () => {
+		cancelTransfer("run")
+
+		expect(useTransfersStore.getState().uploadBatches["run"]?.cancelled).toBe(true)
+		expect(sdkCancel).toHaveBeenCalledExactlyOnceWith("run")
+	})
+
+	it("pauses and resumes the whole run", () => {
+		setTransferPaused("run", true)
+
+		expect(sdkPause).toHaveBeenCalledExactlyOnceWith("run")
+		expect(useTransfersStore.getState().transfers[0]?.paused).toBe(true)
+
+		setTransferPaused("run", false)
+
+		expect(sdkResume).toHaveBeenCalledExactlyOnceWith("run")
+	})
+})

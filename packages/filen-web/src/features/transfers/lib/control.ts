@@ -1,7 +1,14 @@
 import { isJobRunning } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { cancelSwDownload } from "@/features/drive/lib/saveDownload"
-import { isActiveTransfer, isDriveJobDirection, useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import {
+	isActiveTransfer,
+	isDirectoryRunRow,
+	isDriveJobDirection,
+	transferById,
+	useTransfersStore,
+	type Transfer
+} from "@/features/transfers/store/useTransfersStore"
 import { getDriveJob, useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 
 // A drive job's row stays active past its SDK job while what it made moves to the trash, which has no pause.
@@ -11,16 +18,11 @@ function isSettledJob(transfer: Transfer): boolean {
 	return job !== undefined && !isJobRunning(job)
 }
 
-// The rows by id, read once per batch: acting on one row never changes another synchronously (the SDK
-// calls are async posts), so a single snapshot answers every id without a scan each.
-function transfersById(): ReadonlyMap<string, Transfer> {
-	return new Map(useTransfersStore.getState().transfers.map(transfer => [transfer.id, transfer]))
-}
-
 // The row for an id, or undefined for an unknown id or an already-terminal transfer: nothing left to
-// abort, pause or resume.
-function activeIn(byId: ReadonlyMap<string, Transfer>, id: string): Transfer | undefined {
-	const transfer = byId.get(id)
+// abort, pause or resume. Read from one snapshot per batch: acting on one row never changes another
+// synchronously (the SDK calls are async posts).
+function activeIn(transfers: readonly Transfer[], id: string): Transfer | undefined {
+	const transfer = transferById(transfers, id)
 
 	return transfer !== undefined && isActiveTransfer(transfer.status) ? transfer : undefined
 }
@@ -60,12 +62,27 @@ export function requestJobCancel(jobId: string, mode: JobStopMode): void {
 // Reads the live transfers straight from the store — this fires outside any particular
 // runUpload/runDownload call's own scope, so there is no deps object to route through — and fires the
 // worker-side abort. The in-flight runUpload/runDownload catch does the actual store settle+remove once
-// the worker call rejects with "Cancelled"; this only triggers that rejection.
+// the worker call rejects with "Cancelled"; this only triggers that rejection. A directory upload's row
+// stops its whole run: marked first, so none of its files starts, then its files in flight abort through the
+// run's one stop (sdk.worker.ts's uploadFile).
 export function cancelTransfers(ids: readonly string[]): void {
-	const byId = transfersById()
+	const { transfers, cancelUploadBatches } = useTransfersStore.getState()
+	const runs = new Set<string>()
 
 	for (const id of ids) {
-		const transfer = activeIn(byId, id)
+		const transfer = activeIn(transfers, id)
+
+		if (transfer !== undefined && isDirectoryRunRow(transfer)) {
+			runs.add(id)
+		}
+	}
+
+	if (runs.size > 0) {
+		cancelUploadBatches(runs)
+	}
+
+	for (const id of ids) {
+		const transfer = activeIn(transfers, id)
 
 		if (transfer === undefined) {
 			continue
@@ -121,11 +138,11 @@ export function cancelUploadRuns(): void {
 // PauseSignal just stops delivering bytes/progress until resumed — so there is no later catch to react to,
 // and the paused flag is flipped right here, in one store update, so the rows reflect it immediately.
 export function setTransfersPaused(ids: readonly string[], paused: boolean): void {
-	const byId = transfersById()
+	const { transfers } = useTransfersStore.getState()
 	const eligible = new Set<string>()
 
 	for (const id of ids) {
-		const transfer = activeIn(byId, id)
+		const transfer = activeIn(transfers, id)
 
 		if (transfer === undefined || isSettledJob(transfer) || transfer.browserManaged === true) {
 			continue

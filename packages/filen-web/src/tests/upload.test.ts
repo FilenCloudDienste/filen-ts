@@ -3,20 +3,22 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, UuidStr } from "@filen/sdk-rs"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import type { Transfer, TerminalStatus, UploadBatchRef } from "@/features/transfers/store/useTransfersStore"
+import type { RunFileFailure, RunFileStart, Transfer, TerminalStatus, UploadBatchRef } from "@/features/transfers/store/useTransfersStore"
+import { makeTransfer } from "@/tests/fixtures/transfers"
+import { applyProgressBatch } from "@/features/transfers/lib/progressChannel"
 
 // The real sdk client/query client modules import a Vite `?worker` / touch an OPFS-backed
 // persister, unresolvable/unwanted under node vitest — mock both down to what this module actually
 // calls, mirroring drive/actions.test.ts's mock boundary. `sonner` is mocked to assert the summary
 // toast's call args without a mounted <Toaster/>.
-const { uploadFile, cancelTransfer, getUserInfo } = vi.hoisted(() => ({
-	uploadFile:
-		vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>(),
+const { uploadFile, cancelTransfer, getUserInfo, setProgressSink } = vi.hoisted(() => ({
+	uploadFile: vi.fn<(parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>>(),
 	cancelTransfer: vi.fn(),
-	getUserInfo: vi.fn()
+	getUserInfo: vi.fn(),
+	setProgressSink: vi.fn<(sink: (bytesById: Record<string, number>) => void) => Promise<void>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile, cancelTransfer, getUserInfo } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFile, cancelTransfer, getUserInfo, setProgressSink } }))
 
 // A bare, unconfigured QueryClient stands in for the real singleton — driveListingQueryUpdate only
 // needs genuine setQueryData/getQueryData cache mechanics, never the production client's OPFS-backed
@@ -115,10 +117,11 @@ afterEach(() => {
 
 describe("runUpload (injected deps, no worker or query client)", () => {
 	function makeHarness() {
-		const upload =
-			vi.fn<(parentUuid: string | null, transferId: string, file: File, onProgress: (bytes: bigint) => void) => Promise<SdkFile>>()
-		const add = vi.fn<(t: Omit<Transfer, "paused">) => void>()
-		const setProgress = vi.fn<(id: string, bytesTransferred: number) => void>()
+		const upload = vi.fn<(parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>>()
+		const add = vi.fn<(t: Omit<Transfer, "paused">, counted?: number) => void>()
+		const startRunFile = vi.fn<(file: RunFileStart) => void>()
+		const settleRunFile =
+			vi.fn<(id: string, status: "done" | "error" | "cancelled", error?: ErrorDTO, failure?: RunFileFailure) => void>()
 		const settle = vi.fn<(id: string, status: TerminalStatus, error?: ErrorDTO) => void>()
 		const remove = vi.fn<(id: string) => void>()
 		const setItem = vi.fn<(id: string, item: DriveItem) => void>()
@@ -128,7 +131,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 		const addStorageUsed = vi.fn<(bytes: bigint) => void>()
 		const deps: RunUploadDeps = {
 			upload,
-			store: { add, setProgress, settle, setItem, remove },
+			store: { add, startRunFile, settleRunFile, settle, setItem, remove },
 			patchCreated,
 			markAccountStale,
 			addStorageUsed,
@@ -138,7 +141,8 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			deps,
 			upload,
 			add,
-			setProgress,
+			startRunFile,
+			settleRunFile,
 			settle,
 			setItem,
 			remove,
@@ -263,38 +267,63 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 
 		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
 
-		expect(h.upload).toHaveBeenCalledWith(null, expect.any(String), expect.any(File), expect.any(Function))
+		expect(h.upload).toHaveBeenCalledWith(null, expect.any(String), expect.any(File))
 		expect(h.patchCreated).toHaveBeenCalledWith(null, expect.objectContaining({ type: "file" }))
 	})
 
-	it("reports the first progress notification through to store.setProgress, narrowed to a number", async () => {
+	it("adds nothing for a row already added, and counts a row its run was sized for at that size", async () => {
 		const h = makeHarness()
-		h.upload.mockImplementation((_parentUuid, _transferId, _file, onProgress) => {
-			onProgress(512n)
-			return Promise.resolve(mockSdkFile())
-		})
+		const batch: UploadBatchRef = { id: "run", parentUuid: null }
+		const row = { ...makeTransfer({ id: "pre-added", batch }) }
+		h.upload.mockResolvedValue(mockSdkFile())
 
-		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
+		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile(), batch, row })
+		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile("photo.jpg", 700), batch, counted: 900 })
 
-		expect(h.setProgress).toHaveBeenCalledWith(expect.any(String), 512)
+		expect(h.upload.mock.calls[0]?.[1]).toBe("pre-added")
+		expect(h.add).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: "photo.jpg", size: 700, batch }), 900)
 	})
 
-	it("throttles rapid progress callbacks, always delivering the final cumulative value", async () => {
-		vi.useFakeTimers()
-		const h = makeHarness()
-		h.upload.mockImplementation((_parentUuid, _transferId, _file, onProgress) => {
-			onProgress(100n) // leading edge -> fires immediately
-			onProgress(200n) // buffered
-			onProgress(300n) // buffered (overwrites 200n)
-			vi.advanceTimersByTime(100) // trailing edge -> fires with the final value
-			return Promise.resolve(mockSdkFile())
+	// A directory run is one row: its files move it, and only a failed one leaves a row of its own.
+	describe("a file of a directory run", () => {
+		const run: UploadBatchRef = { id: "run", parentUuid: null, directoryName: "photos" }
+
+		it("adds no row, sharing its run's stop and pause, and settles into the run", async () => {
+			const h = makeHarness()
+			h.upload.mockResolvedValue(mockSdkFile())
+
+			const outcome = await runUpload(h.deps, { parentUuid: "sub", file: mockBrowserFile("a.txt", 64), batch: run, counted: 64 })
+
+			expect(outcome).toEqual({ status: "success" })
+			expect(h.add).not.toHaveBeenCalled()
+			expect(h.settle).not.toHaveBeenCalled()
+
+			const id = h.startRunFile.mock.calls[0]?.[0].id
+
+			expect(h.startRunFile).toHaveBeenCalledExactlyOnceWith({ id, batchId: "run", size: 64, counted: 64 })
+			expect(h.upload).toHaveBeenCalledExactlyOnceWith("sub", id, expect.any(File), "run")
+			expect(h.settleRunFile).toHaveBeenCalledExactlyOnceWith(id, "done")
+			expect(h.patchCreated).toHaveBeenCalledOnce()
 		})
 
-		await runUpload(h.deps, { parentUuid: null, file: mockBrowserFile() })
+		it("leaves a failed row named by its path, and none for a cancelled one", async () => {
+			const h = makeHarness()
+			const dto = sdkDto("UploadFailed")
+			h.upload.mockRejectedValueOnce(dto).mockRejectedValueOnce(sdkDto("Cancelled"))
 
-		expect(h.setProgress).toHaveBeenCalledTimes(2)
-		expect(h.setProgress).toHaveBeenNthCalledWith(1, expect.any(String), 100)
-		expect(h.setProgress).toHaveBeenNthCalledWith(2, expect.any(String), 300)
+			await expect(
+				runUpload(h.deps, { parentUuid: "sub", file: mockBrowserFile("a.txt"), batch: run, name: "photos/sub/a.txt" })
+			).resolves.toEqual({ status: "error", dto })
+			await expect(runUpload(h.deps, { parentUuid: "sub", file: mockBrowserFile("b.txt"), batch: run })).resolves.toEqual({
+				status: "cancelled"
+			})
+
+			expect(h.settleRunFile.mock.calls.map(call => call.slice(1))).toEqual([
+				["error", dto, { name: "photos/sub/a.txt", parentUuid: "sub" }],
+				["cancelled"]
+			])
+			expect(h.patchCreated).not.toHaveBeenCalled()
+		})
 	})
 
 	it("returns an error outcome and settles error, without patching, when upload rejects", async () => {
@@ -423,21 +452,45 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 		expect(transfers.every(transfer => transfer.status === "done")).toBe(true)
 	})
 
-	// Proves progress survives the real defaultUploadDeps wiring — sdk/client.ts's onProgress crosses
-	// through Comlink.proxy (upload.ts) before reaching this mocked uploadFile, so invoking the proxied
-	// callback here and observing the REAL store exercises that wrap, not just the injected-deps harness
-	// runUpload's own describe block already covers above.
-	it("delivers progress through the Comlink.proxy wrap into the real transfers store", async () => {
-		uploadFile.mockImplementation(
-			(_parentUuid: string | null, _transferId: string, _file: File, onProgress: (bytes: bigint) => void) => {
-				onProgress(512n) // leading edge -> throttle forwards it synchronously
-				return Promise.resolve(mockSdkFile())
-			}
-		)
+	// Proves progress survives the real defaultUploadDeps wiring: the page's end of the worker's one progress
+	// channel lands a batch naming the upload's row in the REAL store.
+	it("delivers progress through the worker's progress channel into the real transfers store", async () => {
+		let bytesTransferred: number | undefined
+
+		uploadFile.mockImplementation((_parentUuid, transferId) => {
+			applyProgressBatch({ [transferId]: 512 })
+			bytesTransferred = useTransfersStore.getState().transfers.find(transfer => transfer.id === transferId)?.bytesTransferred
+
+			return Promise.resolve(mockSdkFile())
+		})
 
 		await startUploads([mockBrowserFile("a.txt", 1_024)], null)
 
-		expect(useTransfersStore.getState().transfers[0]?.bytesTransferred).toBe(512)
+		expect(bytesTransferred).toBe(512)
+	})
+
+	it("sizes its run with every file from the start, and adds the rows in one store write", async () => {
+		let writes = 0
+		let sized: { files: number; bytes: number } | undefined
+		const unsubscribe = useTransfersStore.subscribe((state, prev) => {
+			if (state.transfers !== prev.transfers && state.transfers.length > prev.transfers.length) {
+				writes++
+			}
+		})
+
+		uploadFile.mockImplementation(() => {
+			const [batch] = Object.values(useTransfersStore.getState().uploadBatches)
+
+			sized ??= batch === undefined ? undefined : { files: batch.files, bytes: batch.bytes }
+
+			return Promise.resolve(mockSdkFile())
+		})
+
+		await startUploads([mockBrowserFile("a.txt", 100), mockBrowserFile("b.txt", 200), mockBrowserFile("c.txt", 300)], null)
+		unsubscribe()
+
+		expect(sized).toEqual({ files: 3, bytes: 600 })
+		expect(writes).toBe(1)
 	})
 })
 
@@ -456,7 +509,7 @@ describe("startUploads — listing run", () => {
 
 		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt")], rootDirUuid)
 
-		expect(uploadFile).toHaveBeenCalledWith(rootDirUuid, expect.any(String), expect.anything(), expect.any(Function))
+		expect(uploadFile).toHaveBeenCalledWith(rootDirUuid, expect.any(String), expect.anything(), undefined)
 		expect(runs).toHaveLength(2)
 		expect(runs[0]?.parentUuid).toBeNull()
 		expect(runs[0]?.directoryName).toBeUndefined()
@@ -466,6 +519,7 @@ describe("startUploads — listing run", () => {
 	})
 
 	it("starts no file of a run cancelled while it was still being prepared", async () => {
+		heicUploadConversionEnabledMock.mockResolvedValue(true)
 		maybeConvertHeicUploadMock.mockImplementation((_deps, file) => {
 			const runIds = Object.keys(useTransfersStore.getState().uploadBatches)
 
@@ -474,7 +528,7 @@ describe("startUploads — listing run", () => {
 			return Promise.resolve(file)
 		})
 
-		await startUploads([mockBrowserFile("a.txt")], null)
+		await startUploads([mockBrowserFile("a.heic")], null)
 
 		expect(uploadFile).not.toHaveBeenCalled()
 		expect(toastSuccess).not.toHaveBeenCalled()
@@ -630,7 +684,7 @@ describe("invalidateUploadedDirectorySizes", () => {
 // ---------------------------------------------------------------------------
 
 describe("startUploads — HEIC convert-on-upload gating", () => {
-	it("hands every file the gate's answer for an all-non-HEIC batch, uploading the original files", async () => {
+	it("uploads the original files of an all-non-HEIC batch, converting none", async () => {
 		const first = mockBrowserFile("a.txt")
 		const second = mockBrowserFile("b.pdf")
 		uploadFile.mockResolvedValue(mockSdkFile())
@@ -639,9 +693,8 @@ describe("startUploads — HEIC convert-on-upload gating", () => {
 
 		expect(heicUploadConversionEnabledMock).toHaveBeenCalledTimes(1)
 		expect(heicUploadConversionEnabledMock).toHaveBeenCalledWith(expect.anything(), [first, second])
-		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), first, false)
-		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), second, false)
-		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), first, expect.any(Function))
+		expect(maybeConvertHeicUploadMock).not.toHaveBeenCalled()
+		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), first, undefined)
 	})
 
 	it("skips conversion when the gate resolves false with a HEIC present", async () => {
@@ -651,11 +704,11 @@ describe("startUploads — HEIC convert-on-upload gating", () => {
 
 		await startUploads([heicFile], null)
 
-		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), heicFile, false)
-		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), heicFile, expect.any(Function))
+		expect(maybeConvertHeicUploadMock).not.toHaveBeenCalled()
+		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), heicFile, undefined)
 	})
 
-	it("runs every file (HEIC and non-HEIC alike) through maybeConvertHeicUpload once the gate resolves true", async () => {
+	it("runs only the HEIC files through maybeConvertHeicUpload once the gate resolves true", async () => {
 		heicUploadConversionEnabledMock.mockResolvedValue(true)
 		const heicFile = mockBrowserFile("photo.heic")
 		const otherFile = mockBrowserFile("report.pdf")
@@ -663,9 +716,8 @@ describe("startUploads — HEIC convert-on-upload gating", () => {
 
 		await startUploads([heicFile, otherFile], null)
 
-		expect(maybeConvertHeicUploadMock).toHaveBeenCalledTimes(2)
-		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), heicFile, true)
-		expect(maybeConvertHeicUploadMock).toHaveBeenCalledWith(expect.anything(), otherFile, true)
+		expect(maybeConvertHeicUploadMock).toHaveBeenCalledExactlyOnceWith(expect.anything(), heicFile, true)
+		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), otherFile, undefined)
 	})
 
 	it("uploads whatever maybeConvertHeicUpload returns, not the original picked file", async () => {
@@ -676,7 +728,7 @@ describe("startUploads — HEIC convert-on-upload gating", () => {
 
 		await startUploads([mockBrowserFile("photo.heic")], null)
 
-		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), converted, expect.any(Function))
+		expect(uploadFile).toHaveBeenCalledWith(null, expect.any(String), converted, undefined)
 	})
 
 	it("consults the gate exactly once for a multi-file batch", async () => {

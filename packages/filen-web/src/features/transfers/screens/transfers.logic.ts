@@ -1,5 +1,5 @@
 import { clampedRatio, isJobRunning } from "@filen/shared"
-import { isActiveTransfer, type Transfer } from "@/features/transfers/store/useTransfersStore"
+import { isActiveTransfer, transfersIndexOf, type Transfer } from "@/features/transfers/store/useTransfersStore"
 import type { DriveJob } from "@/features/drive/lib/driveJobs.logic"
 import { NO_SYNC_ACTIVITY, type SyncActivity } from "@/features/transfers/lib/externalTransfers.logic"
 
@@ -116,36 +116,19 @@ export interface TransfersRingState {
 // under the pointer when the list is cleared. Rows live in memory and leave on "Clear finished", a row's remove, or a
 // reload. In the desktop app it also shows while sync moves files or the drive's cache has uploads pending, from what
 // reaches the page without subscribing (externalTransfers.logic.ts): sync's bytes count towards the ring, the drive's
-// uploads only keep it up, as their bytes are not known without the 1 s stats poll.
+// uploads only keep it up, as their bytes are not known without the 1 s stats poll. Read off the rows' index,
+// so a progress tick costs it nothing however many rows there are.
 export function transfersRingState(
 	transfers: readonly Transfer[],
 	onTransfersScreen: boolean,
 	sync: SyncActivity = NO_SYNC_ACTIVITY,
 	mountsPending = 0
 ): TransfersRingState {
-	let ownActive = 0
-	let transferred = sync.bytes
-	let total = sync.total
-	let failed = false
-
-	for (const transfer of transfers) {
-		if (transfer.status === "error" || transfer.status === "completedWithErrors") {
-			failed = true
-		}
-
-		if (!isActiveTransfer(transfer.status)) {
-			continue
-		}
-
-		ownActive++
-
-		// computeTransfersAggregate's rule: a row of unknown size (a zip still walking its tree) has no share.
-		if (transfer.size > 0) {
-			transferred += transfer.bytesTransferred
-			total += transfer.size
-		}
-	}
-
+	// computeTransfersAggregate's rule: a row of unknown size (a zip still walking its tree) has no share.
+	const { activeCount: ownActive, activeTransferred, activeSize, failedCount } = transfersIndexOf(transfers)
+	const transferred = sync.bytes + activeTransferred
+	const total = sync.total + activeSize
+	const failed = failedCount > 0
 	const activeCount = ownActive + sync.count + mountsPending
 	const empty = transfers.length === 0 && activeCount === 0
 

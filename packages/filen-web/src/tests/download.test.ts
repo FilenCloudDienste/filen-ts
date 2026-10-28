@@ -11,13 +11,14 @@ import type { FsaSaveTarget, SaveTarget, SwSaveTarget } from "@/features/drive/l
 // calls its real `saveDownload`/`isPickerCancelled` directly (they are not part of RunDownloadDeps),
 // so this file controls them the same way it controls the sdk client; saveDownload.test.ts is
 // where saveDownload's OWN mechanism-picking and SW-protocol correctness are proven.
-const { downloadFileToWriter, cancelTransfer, toStringified } = vi.hoisted(() => ({
+const { downloadFileToWriter, cancelTransfer, toStringified, setProgressSink } = vi.hoisted(() => ({
+	setProgressSink: vi.fn(),
 	downloadFileToWriter: vi.fn(),
 	cancelTransfer: vi.fn(),
 	toStringified: vi.fn()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadFileToWriter, cancelTransfer, toStringified } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { downloadFileToWriter, cancelTransfer, toStringified, setProgressSink } }))
 
 const { saveDownloadMock, isPickerCancelledMock, triggerSwDownloadMock, saveBlobMock } = vi.hoisted(() => ({
 	saveDownloadMock: vi.fn(),
@@ -333,7 +334,7 @@ describe("runDownload (injected deps, save-download mocked)", () => {
 // ---------------------------------------------------------------------------
 
 describe("defaultDownloadDeps.download — fsa branch", () => {
-	it("pipes bytes written to the transferred writer through to the fsa sink, and forwards progress", async () => {
+	it("pipes bytes written to the transferred writer through to the fsa sink", async () => {
 		const written: Uint8Array[] = []
 		const sinkAbort = vi.fn()
 		const remove = vi.fn(() => Promise.resolve())
@@ -343,38 +344,41 @@ describe("defaultDownloadDeps.download — fsa branch", () => {
 			writable: fsaWritable({ write: chunk => void written.push(chunk), abort: sinkAbort })
 		}
 
-		downloadFileToWriter.mockImplementation(
-			async (_file: AnyFile, _id: string, writer: WritableStream<Uint8Array>, onProgress: (bytes: bigint) => void) => {
-				const w = writer.getWriter()
-				await w.write(new Uint8Array([1, 2, 3]))
-				onProgress(3n)
-				await w.close()
-			}
-		)
+		downloadFileToWriter.mockImplementation(async (_file: AnyFile, _id: string, writer: WritableStream<Uint8Array>) => {
+			const w = writer.getWriter()
+			await w.write(new Uint8Array([1, 2, 3]))
+			await w.close()
+		})
 
-		const onProgress = vi.fn()
-
-		await defaultDownloadDeps.download(testFile(), "transfer-id", save, onProgress)
+		await defaultDownloadDeps.download(testFile(), "transfer-id", save, vi.fn())
 
 		expect(written).toEqual([new Uint8Array([1, 2, 3])])
-		expect(onProgress).toHaveBeenCalledWith(3n)
 		expect(sinkAbort).not.toHaveBeenCalled()
 		expect(remove).not.toHaveBeenCalled()
 	})
 
-	it("passes a directly-callable progress function through the Comlink.proxy wrap", async () => {
-		downloadFileToWriter.mockImplementation(
-			async (_file: AnyFile, _id: string, writer: WritableStream<Uint8Array>, onProgress: (bytes: bigint) => void) => {
-				onProgress(999n)
-				await writer.getWriter().close()
-			}
-		)
+	// The row's bytes come through the worker's one progress channel, registered ahead of the download,
+	// rather than a callback of its own.
+	it("reports through the worker's progress channel, opened before the download starts", async () => {
+		const order: string[] = []
+
+		setProgressSink.mockImplementation(() => {
+			order.push("sink")
+
+			return Promise.resolve()
+		})
+		downloadFileToWriter.mockImplementation(async (_file: AnyFile, _id: string, writer: WritableStream<Uint8Array>) => {
+			order.push("download")
+			await writer.getWriter().close()
+		})
 		const save: FsaSaveTarget = { kind: "fsa", handle: fsaHandle(), writable: fsaWritable() }
-		const onProgress = vi.fn()
 
-		await defaultDownloadDeps.download(testFile(), "transfer-id", save, onProgress)
+		await defaultDownloadDeps.download(testFile(), "transfer-id", save, vi.fn())
 
-		expect(onProgress).toHaveBeenCalledWith(999n)
+		expect(downloadFileToWriter).toHaveBeenCalledWith(expect.anything(), "transfer-id", expect.anything())
+		// Once for the page, ahead of the first transfer.
+		expect(order[order.length - 1]).toBe("download")
+		expect(order.filter(step => step === "sink").length).toBeLessThanOrEqual(1)
 	})
 
 	it("tears down (aborts) the fsa sink when the worker call rejects — coordinated teardown", async () => {

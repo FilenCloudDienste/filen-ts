@@ -12,7 +12,7 @@ import { runningPercentFraction, transferProgress, transferRate } from "@/featur
 import { driveJobRate } from "@/features/drive/lib/driveJobs.logic"
 import { driveName, showDrive, type ToolAdapter, type ToolScope } from "@/features/assistant/tools/entities"
 
-// A directory upload is one row per file: the model sees the longest-running few and the counts.
+// A many-file upload is one row per file: the model sees the longest-running few and the counts.
 const ACTIVE_LIMIT = 10
 const FINISHED_LIMIT = 10
 

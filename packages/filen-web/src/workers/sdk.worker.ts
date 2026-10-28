@@ -269,6 +269,52 @@ async function withTransferControls<T>(transferId: string, fn: (managedFuture: M
 	}
 }
 
+// Byte progress of uploads and downloads crosses to the page through ONE sink (setProgressSink), not a
+// Comlink proxy (and its MessageChannel) per transfer: each transfer's latest count is kept by id and the
+// lot posted every PROGRESS_THROTTLE_MS, which the page applies in one store write. An op awaits the post
+// carrying its own last count before it returns, so its final bytes are in the store before it settles: the
+// sink's port and this worker's own are different channels, with no order between them. A directory run's
+// file is the exception (see uploadFile).
+let progressSink: ((bytesById: Record<string, number>) => unknown) | undefined
+let pendingProgress = new Map<string, number>()
+let progressTimer: ReturnType<typeof setTimeout> | undefined
+let progressPosted: Promise<unknown> = Promise.resolve()
+
+function postProgress(): Promise<unknown> {
+	if (progressTimer !== undefined) {
+		clearTimeout(progressTimer)
+
+		progressTimer = undefined
+	}
+
+	if (pendingProgress.size === 0 || progressSink === undefined) {
+		return progressPosted
+	}
+
+	const bytesById = Object.fromEntries(pendingProgress)
+
+	pendingProgress = new Map()
+	// The page may be gone: nothing is waiting for its answer then.
+	progressPosted = Promise.resolve(progressSink(bytesById)).catch(() => undefined)
+
+	return progressPosted
+}
+
+// The `progress` an op hands the SDK for `transferId`.
+function progressTo(transferId: string): (bytes: bigint) => void {
+	return bytes => {
+		if (progressSink === undefined) {
+			return
+		}
+
+		pendingProgress.set(transferId, Number(bytes))
+
+		progressTimer ??= setTimeout(() => {
+			void postProgress()
+		}, PROGRESS_THROTTLE_MS)
+	}
+}
+
 // The SDK reports progress every 64 KiB and each call is a round trip to the page, so it is throttled
 // here. finish() posts the last value before the op returns; calls after it (zip progress can land
 // after the op resolves) go straight through.
@@ -1379,16 +1425,17 @@ const api = {
 	// is passed because every upload here reports bytes, not because the boundary demands it — the Rust
 	// field is `#[serde(default, with = "serde_wasm_bindgen::preserve")]` and the SDK branches on
 	// `progress.is_undefined()`, so the key itself is droppable. Its SHAPE is not: same as
-	// downloadFileToWriter, it must stay a plain worker-side fn wrapping the caller's Comlink proxy,
-	// never the proxy object itself (serde-rejected). managedFuture.abortSignal now deserializes here
+	// downloadFileToWriter, it must stay a plain worker-side fn (progressTo, feeding the page's one sink),
+	// never a proxy object (serde-rejected). managedFuture.abortSignal now deserializes here
 	// too: 0.4.33 stopped burying managed_future under serde(flatten), so cancelTransfer is a real cancel,
 	// same as downloadFileToWriter's own.
-	async uploadFile(parentUuid: string | null, transferId: string, file: BrowserFile, onProgress: (bytes: bigint) => void): Promise<File> {
+	// A file of a directory upload's run (`runId`) shares the run's stop and pause (openTransferRun), so the
+	// run's row stops or pauses every file of it at once, the ones not started yet included.
+	async uploadFile(parentUuid: string | null, transferId: string, file: BrowserFile, runId?: string): Promise<File> {
 		const c = requireClient()
-
-		return withTransferControls(transferId, async managedFuture => {
+		const upload = async (managedFuture: ManagedFuture): Promise<File> => {
 			const parent = await resolveNormalDirParent(c, parentUuid)
-			const { progress, finish } = throttledProgress(onProgress)
+			const progress = progressTo(transferId)
 
 			try {
 				return await c.uploadFileFromReader({
@@ -1404,9 +1451,23 @@ const api = {
 					managedFuture
 				})
 			} finally {
-				finish()
+				// A run file's settle counts its last bytes itself (settleRunFile), so it costs the page no
+				// post of its own; any other upload's last count lands before it returns.
+				if (runId === undefined) {
+					await postProgress()
+				} else {
+					pendingProgress.delete(transferId)
+				}
 			}
-		})
+		}
+
+		if (runId === undefined) {
+			return withTransferControls(transferId, upload)
+		}
+
+		const { abort, pause } = jobControls(runId)
+
+		return upload({ abortSignal: abort.signal, pauseSignal: pause })
 	},
 	// Whole-buffer save for the editable text/code preview — the non-streaming sibling of uploadFile
 	// above: a decoded string re-encoded to bytes is already fully in memory on the caller side, so
@@ -1468,24 +1529,17 @@ const api = {
 	// ── Download ───────────────────────────────────────────────────────────────
 	// The reverse of uploadFile: the WritableStream SINK arrives via Comlink.transfer (a transferable
 	// stream, moved once — the decrypted bytes stream through it and are pulled on the main side, never
-	// crossing Comlink as a buffer), and progress is a plain-fn-wrapped Comlink proxy (same as upload —
-	// wasm needs a plain preserved callable, not a proxy object). managedFuture.abortSignal IS accepted at
+	// crossing Comlink as a buffer), and progress goes to the page's one sink (same as upload — wasm needs
+	// a plain preserved callable, not a proxy object). managedFuture.abortSignal IS accepted at
 	// runtime — same as uploadFile now — so cancelTransfer is a real cancel.
-	async downloadFileToWriter(
-		file: AnyFile,
-		transferId: string,
-		writer: WritableStream<Uint8Array>,
-		onProgress: (bytes: bigint) => void
-	): Promise<void> {
+	async downloadFileToWriter(file: AnyFile, transferId: string, writer: WritableStream<Uint8Array>): Promise<void> {
 		const c = requireClient()
 
 		await withTransferControls(transferId, async managedFuture => {
-			const { progress, finish } = throttledProgress(onProgress)
-
 			try {
-				await c.downloadFileToWriter({ file, writer, progress, managedFuture })
+				await c.downloadFileToWriter({ file, writer, progress: progressTo(transferId), managedFuture })
 			} finally {
-				finish()
+				await postProgress()
 			}
 		})
 	},
@@ -1531,9 +1585,18 @@ const api = {
 			)
 		)
 	},
+	// The page's one progress sink (see postProgress), registered once before its first transfer.
+	setProgressSink(sink: (bytesById: Record<string, number>) => unknown): void {
+		progressSink = sink
+	},
 	// ── Transfer control ─────────────────────────────────────────────────────
-	// By upload/download transfer id or drive job id; each is a no-op once that transfer has settled or
-	// the job is released. Pause stops bytes/progress without erroring the call.
+	// A directory upload's run: one stop and pause for all of its files, opened before the first of them so
+	// a pause made meanwhile holds. releaseJob frees it once the run ended.
+	openTransferRun(runId: string): void {
+		jobControls(runId)
+	},
+	// By upload/download transfer id, upload run id or drive job id; each is a no-op once that transfer has
+	// settled or the job or run is released. Pause stops bytes/progress without erroring the call.
 	cancelTransfer(id: string): void {
 		transferControls.get(id)?.abort.abort()
 	},

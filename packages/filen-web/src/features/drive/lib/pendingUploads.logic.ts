@@ -2,10 +2,11 @@ import { clampedRatio } from "@filen/shared"
 import { driveJobRate, type DriveJob } from "@/features/drive/lib/driveJobs.logic"
 import {
 	computeTransfersSpeed,
-	isActiveTransfer,
-	isDriveJobDirection,
+	positionOf,
+	transferById,
+	transfersIndexOf,
+	type ParentUnits,
 	type SpeedSample,
-	type Transfer,
 	type TransfersStore,
 	type UploadBatch
 } from "@/features/transfers/store/useTransfersStore"
@@ -19,6 +20,7 @@ import type { DriveViewMode } from "@/features/drive/lib/preferences"
 // and more fold into one summary row; failed uploads the same, below them (a failed job is its card's to
 // report). Rows are keyed by string so the listing's membership read compares shallowly and
 // changes only when a row comes, goes, fails or a group crosses the threshold, never on a progress tick.
+// Plain uploads and jobs are read off the rows' index (transfersIndexOf), so no read walks the rows.
 export type PendingRowKey =
 	| `upload:${string}`
 	| `failedUpload:${string}`
@@ -49,17 +51,19 @@ const MAX_UNIT_ROWS = 3
 
 export type PendingUploadsState = Pick<TransfersStore, "transfers" | "uploadBatches" | "batchSpeedSamples">
 
-function isPlainUploadInto(transfer: Transfer, parentUuid: string | null): boolean {
-	return transfer.batch !== undefined && transfer.batch.directoryName === undefined && transfer.batch.parentUuid === parentUuid
-}
+const NO_UNITS: ParentUnits = { uploads: new Set(), failed: new Set(), jobs: new Set() }
 
-// A drive job's row names its destination, null for the root, as an upload run's does.
-function isRunningJobInto(transfer: Transfer, parentUuid: string | null): boolean {
-	return isDriveJobDirection(transfer.direction) && isActiveTransfer(transfer.status) && transfer.parentUuid === parentUuid
+function unitsInto(state: PendingUploadsState, parentUuid: string | null): ParentUnits {
+	return transfersIndexOf(state.transfers).units.get(parentUuid) ?? NO_UNITS
 }
 
 function isDirectoryRunInto(batch: UploadBatch, parentUuid: string | null): boolean {
 	return batch.ref.directoryName !== undefined && batch.ref.parentUuid === parentUuid
+}
+
+// A cancelled run starts nothing more and its files are on their way out: it leaves the listing at once.
+function isLiveRun(batch: UploadBatch): boolean {
+	return batch.running && !batch.cancelled
 }
 
 // A directory run that ended with failures stays as a failed unit until dismissed.
@@ -73,8 +77,9 @@ interface UnitCounts {
 }
 
 function countUnits(state: PendingUploadsState, parentUuid: string | null): UnitCounts {
-	let running = 0
-	let failed = 0
+	const units = unitsInto(state, parentUuid)
+	let running = units.uploads.size + units.jobs.size
+	let failed = units.failed.size
 
 	for (const id in state.uploadBatches) {
 		const batch = state.uploadBatches[id]
@@ -83,22 +88,10 @@ function countUnits(state: PendingUploadsState, parentUuid: string | null): Unit
 			continue
 		}
 
-		if (batch.running) {
+		if (isLiveRun(batch)) {
 			running++
 		} else if (isFailedDirectoryRun(batch)) {
 			failed++
-		}
-	}
-
-	for (const transfer of state.transfers) {
-		if (isRunningJobInto(transfer, parentUuid)) {
-			running++
-		} else if (isPlainUploadInto(transfer, parentUuid)) {
-			if (transfer.status === "uploading") {
-				running++
-			} else if (transfer.status === "error") {
-				failed++
-			}
 		}
 	}
 
@@ -124,7 +117,7 @@ export function pendingRowCount(state: PendingUploadsState, parentUuid: string |
 }
 
 // The rows, running units first (directory runs, then plain uploads and drive jobs, each in start order),
-// failed after. Two passes over the runs and the transfers, allocating nothing but the result.
+// failed after. Only the few rows it gives are ever put in order.
 export function pendingUploadRowKeys(state: PendingUploadsState, parentUuid: string | null): PendingRowKey[] {
 	const { running, failed } = countUnits(state, parentUuid)
 	const keys: PendingRowKey[] = []
@@ -152,29 +145,35 @@ function pushUnitRows(state: PendingUploadsState, parentUuid: string | null, key
 			continue
 		}
 
-		if (kind === "running" && batch.running) {
+		if (kind === "running" && isLiveRun(batch)) {
 			keys.push(`directory:${id}`)
 		} else if (kind === "failed" && isFailedDirectoryRun(batch)) {
 			keys.push(`failedDirectory:${id}`)
 		}
 	}
 
-	for (const transfer of state.transfers) {
-		if (kind === "running" && isRunningJobInto(transfer, parentUuid)) {
-			keys.push(`job:${transfer.id}`)
+	const units = unitsInto(state, parentUuid)
+	const rows: { position: number; key: PendingRowKey }[] = []
 
-			continue
+	if (kind === "running") {
+		for (const id of units.uploads) {
+			rows.push({ position: positionOf(state.transfers, id), key: `upload:${id}` })
 		}
 
-		if (!isPlainUploadInto(transfer, parentUuid)) {
-			continue
+		for (const id of units.jobs) {
+			rows.push({ position: positionOf(state.transfers, id), key: `job:${id}` })
 		}
+	} else {
+		for (const id of units.failed) {
+			rows.push({ position: positionOf(state.transfers, id), key: `failedUpload:${id}` })
+		}
+	}
 
-		if (kind === "running" && transfer.status === "uploading") {
-			keys.push(`upload:${transfer.id}`)
-		} else if (kind === "failed" && transfer.status === "error") {
-			keys.push(`failedUpload:${transfer.id}`)
-		}
+	// Start order, which is the rows' own.
+	rows.sort((a, b) => a.position - b.position)
+
+	for (const row of rows) {
+		keys.push(row.key)
 	}
 }
 
@@ -195,7 +194,7 @@ function addRun(figures: PendingGroupFigures, batch: UploadBatch): void {
 }
 
 function isRunningInto(batch: UploadBatch | undefined, parentUuid: string | null): batch is UploadBatch {
-	return batch?.running === true && batch.ref.parentUuid === parentUuid
+	return batch !== undefined && isLiveRun(batch) && batch.ref.parentUuid === parentUuid
 }
 
 // The summary row and the scrolled-away bar: every running run and drive job into the directory (the summary
@@ -213,11 +212,13 @@ export function pendingSummaryFigures(state: PendingUploadsState, parentUuid: st
 		}
 	}
 
-	for (const transfer of state.transfers) {
-		if (isRunningJobInto(transfer, parentUuid)) {
+	for (const id of unitsInto(state, parentUuid).jobs) {
+		const job = transferById(state.transfers, id)
+
+		if (job !== undefined) {
 			figures.jobs += 1
-			figures.bytes += transfer.size
-			figures.transferred += transfer.bytesTransferred
+			figures.bytes += job.size
+			figures.transferred += job.bytesTransferred
 		}
 	}
 
@@ -242,15 +243,7 @@ export function pendingSummarySamples(state: PendingUploadsState, parentUuid: st
 
 // The running drive jobs into the directory, by job id.
 export function pendingJobIds(state: PendingUploadsState, parentUuid: string | null): string[] {
-	const ids: string[] = []
-
-	for (const transfer of state.transfers) {
-		if (isRunningJobInto(transfer, parentUuid)) {
-			ids.push(transfer.id)
-		}
-	}
-
-	return ids
+	return [...unitsInto(state, parentUuid).jobs]
 }
 
 // Their combined speed, off each job's own rate, which also counts the files it has not reached yet.
@@ -334,26 +327,42 @@ export function pendingCancelTargets(state: PendingUploadsState, key: PendingRow
 		return targets
 	}
 
+	// A directory run stops through its own row, which stands for all of its files.
 	if (kind === "directory") {
 		targets.batchIds.add(id)
-	} else if (kind === "uploading") {
-		for (const batchId in state.uploadBatches) {
-			const batch = state.uploadBatches[batchId]
+		targets.transferIds.add(id)
 
-			if (batch?.running === true && batch.ref.parentUuid === parentUuid) {
-				targets.batchIds.add(batchId)
-			}
-		}
-	} else {
 		return targets
 	}
 
-	for (const transfer of state.transfers) {
-		if (transfer.status === "uploading" && transfer.batch !== undefined && targets.batchIds.has(transfer.batch.id)) {
-			targets.transferIds.add(transfer.id)
-		} else if (kind === "uploading" && isRunningJobInto(transfer, parentUuid)) {
-			targets.jobIds.add(transfer.id)
+	if (kind !== "uploading") {
+		return targets
+	}
+
+	for (const batchId in state.uploadBatches) {
+		const batch = state.uploadBatches[batchId]
+
+		if (batch?.running === true && batch.ref.parentUuid === parentUuid) {
+			targets.batchIds.add(batchId)
+
+			if (batch.ref.directoryName !== undefined) {
+				targets.transferIds.add(batchId)
+			}
 		}
+	}
+
+	const units = unitsInto(state, parentUuid)
+
+	for (const transferId of units.uploads) {
+		const batchId = transferById(state.transfers, transferId)?.batch?.id
+
+		if (batchId !== undefined && targets.batchIds.has(batchId)) {
+			targets.transferIds.add(transferId)
+		}
+	}
+
+	for (const jobId of units.jobs) {
+		targets.jobIds.add(jobId)
 	}
 
 	return targets
@@ -378,10 +387,8 @@ export function pendingDismissTargets(state: PendingUploadsState, key: PendingRo
 			}
 		}
 
-		for (const transfer of state.transfers) {
-			if (transfer.status === "error" && isPlainUploadInto(transfer, parentUuid)) {
-				targets.transferIds.add(transfer.id)
-			}
+		for (const transferId of unitsInto(state, parentUuid).failed) {
+			targets.transferIds.add(transferId)
 		}
 	}
 
@@ -398,12 +405,12 @@ function runningJobsInto(state: PendingUploadsState, parentUuid: string | null):
 	let extracted = false
 	let archives = 0
 
-	for (const transfer of state.transfers) {
-		if (isRunningJobInto(transfer, parentUuid)) {
-			copied ||= transfer.direction === "copy"
-			extracted ||= transfer.direction === "extract"
-			archives += transfer.direction === "compress" ? 1 : 0
-		}
+	for (const id of unitsInto(state, parentUuid).jobs) {
+		const direction = transferById(state.transfers, id)?.direction
+
+		copied ||= direction === "copy"
+		extracted ||= direction === "extract"
+		archives += direction === "compress" ? 1 : 0
 	}
 
 	return { kept: copied && extracted ? "copiedOrExtracted" : copied ? "copied" : extracted ? "extracted" : null, archives }
@@ -421,7 +428,7 @@ export function pendingCancelSubject(
 
 	switch (kind) {
 		case "upload": {
-			const transfer = state.transfers.find(candidate => candidate.id === id)
+			const transfer = transferById(state.transfers, id)
 
 			return transfer?.status === "uploading" ? { name: transfer.name } : null
 		}

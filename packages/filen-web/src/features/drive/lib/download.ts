@@ -1,4 +1,3 @@
-import * as Comlink from "comlink"
 import type { AnyFile } from "@filen/sdk-rs"
 import { driveItemName } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
@@ -23,6 +22,7 @@ import { useTransfersStore, type TransfersStore } from "@/features/transfers/sto
 import { settleTransferFailure, toastDownloadFailed, type DownloadOutcome } from "@/features/transfers/lib/settle"
 import { startZipDownload } from "@/features/drive/lib/downloadZip"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
+import { openProgressChannel } from "@/features/transfers/lib/progressChannel"
 
 // Extracts the SDK AnyFile a download op wants from a DriveItem's file arm. A directory item is a
 // contract violation here — startDownloads below routes any directory to the zip path instead — so
@@ -119,8 +119,11 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 	return { status: "success" }
 }
 
-function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget, onProgress: (bytes: bigint) => void): Promise<void> {
-	return pipeToPickedFile(save, transferred => sdkApi.downloadFileToWriter(file, transferId, transferred, Comlink.proxy(onProgress)))
+// Its progress reaches the store through the worker's one progress channel (progressChannel.ts).
+function downloadViaFsa(file: AnyFile, transferId: string, save: FsaSaveTarget): Promise<void> {
+	openProgressChannel()
+
+	return pipeToPickedFile(save, transferred => sdkApi.downloadFileToWriter(file, transferId, transferred))
 }
 
 // Saves a file the preview overlay already holds whole instead of downloading it again: everything it
@@ -144,9 +147,9 @@ async function saveHeldBytes(bytes: Uint8Array, save: SaveTarget, onProgress: (b
 }
 
 // The real wiring behind RunDownloadDeps.download: bytes the preview already holds first, else branches
-// on SaveTarget.kind, applying Comlink.transfer/Comlink.proxy on the fsa branch (mirrors
-// defaultUploadDeps' Comlink.proxy wrap). The sw branch settles on the service worker's own report of
-// the stream, progress included (saveDownload.ts's triggerSwDownload).
+// on SaveTarget.kind; the fsa branch reports through the worker's progress channel, as uploads do. The
+// sw branch settles on the service worker's own report of the stream, progress included
+// (saveDownload.ts's triggerSwDownload).
 export const defaultDownloadDeps: RunDownloadDeps = {
 	download: (file, transferId, save, onProgress) => {
 		const held = getPreviewBytes(previewCacheScope("authed", undefined), file.uuid)
@@ -156,7 +159,7 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 		}
 
 		return save.kind === "fsa"
-			? downloadViaFsa(file, transferId, save, onProgress)
+			? downloadViaFsa(file, transferId, save)
 			: triggerSwDownload(file, save, transferId, bytes => {
 					onProgress(BigInt(bytes))
 				})

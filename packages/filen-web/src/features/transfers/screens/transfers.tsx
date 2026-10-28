@@ -8,6 +8,7 @@ import { formatBytesPerSecond } from "@filen/shared"
 import {
 	isActiveTransfer,
 	isDriveJobDirection,
+	transferById,
 	useTransfersAggregate,
 	useTransfersStore,
 	type Transfer
@@ -88,7 +89,7 @@ export function TransfersScreen() {
 	// as an id (not the Transfer object) so it re-resolves the CURRENT transfer every render — see
 	// cancelTarget below.
 	const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
-	const cancelTarget = transfers.find(candidate => candidate.id === cancelTargetId) ?? null
+	const cancelTarget = (cancelTargetId === null ? undefined : transferById(transfers, cancelTargetId)) ?? null
 	// Only an id whose transfer is STILL ACTIVE keeps the dialog open — a transfer that settled
 	// naturally (or was removed) while the confirm was pending has nothing left to cancel, so the
 	// dialog closes itself gracefully on the next render instead of confirming a no-op or holding a
@@ -265,7 +266,7 @@ const ROW_GAP = 2
 const ROW_STRIDE = 56 + ROW_GAP
 const LIST_OVERSCAN = 8
 
-// Only the rows in view mount: a dropped directory adds a row per file up front, and every progress tick
+// Only the rows in view mount: a many-file upload adds a row per file up front, and every progress tick
 // re-renders the screen. The rows stay in flow inside each section's list, the ones out of view standing
 // as padding, so each row is still an <li> of its own <ul>. The virtualizer counts both sections as one
 // run of heading, rows, heading, rows.

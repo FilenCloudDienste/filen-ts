@@ -918,15 +918,20 @@ describe("afterDriveJobSettled", () => {
 		expect(queryClient.getQueryData<UserInfo>(ACCOUNT_QUERY_KEY)?.storageUsed).toBe(800n)
 	})
 
-	it("invalidates the destination's chain, the written directories and the sources' chains, each once", () => {
+	it("invalidates the cached sizes of the destination's chain, the written directories and the sources' chains, in one pass", () => {
 		const parent = testUuid("parent")
 		const child = testUuid("child")
 		const written = testUuid("written")
+		const unrelated = testUuid("unrelated")
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries")
 
 		queryClient.setQueryData<Partial<UserInfo>>(ACCOUNT_QUERY_KEY, { rootDirUuid: ROOT, maxStorage: 10_000n, storageUsed: 0n })
 		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: parent }), [narrowItem(mockDir("child", parent))])
 		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: null }), [narrowItem(mockDir("parent"))])
+
+		for (const uuid of [parent, child, written, unrelated, ROOT]) {
+			queryClient.setQueryData(directorySizeQueryKey(uuid), { size: 1n, files: 1n, dirs: 0n })
+		}
 
 		afterDriveJobSettled({
 			destinationUuid: child,
@@ -936,18 +941,17 @@ describe("afterDriveJobSettled", () => {
 			sourceParents: [parent, null]
 		})
 
-		const invalidated = invalidate.mock.calls.flatMap(call => {
-			const key = call[0]?.queryKey
-
-			return key?.[1] === "dirSize" ? [key] : []
-		})
+		const invalidations = invalidate.mock.calls.length
 
 		invalidate.mockRestore()
 
-		expect(invalidated).toEqual(
-			expect.arrayContaining([directorySizeQueryKey(child), directorySizeQueryKey(written), directorySizeQueryKey(parent)])
+		const invalidated = [parent, child, written, unrelated, ROOT].filter(
+			uuid => queryClient.getQueryCache().find({ queryKey: directorySizeQueryKey(uuid), exact: true })?.state.isInvalidated === true
 		)
-		expect(invalidated).toHaveLength(3)
+
+		expect(new Set(invalidated)).toEqual(new Set([child, written, parent]))
+		// Not one invalidation per directory: one per refetch type.
+		expect(invalidations).toBeLessThanOrEqual(2)
 	})
 })
 
