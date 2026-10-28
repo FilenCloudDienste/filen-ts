@@ -1,16 +1,16 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 import { filterHiddenItems } from "@filen/shared"
 
-const { inputPrompt, normal, cache, known } = vi.hoisted(() => ({
+const { inputPrompt, error, cache, known } = vi.hoisted(() => ({
 	inputPrompt: vi.fn(),
-	normal: vi.fn(),
+	error: vi.fn(),
 	cache: { rootUuid: "root" as string | null },
 	known: { dotFilen: null as string | null, dirs: new Set<string>() }
 }))
 
 vi.mock("@/lib/cache", () => ({ default: cache }))
 vi.mock("@/lib/promptFlow", () => ({ inputPrompt }))
-vi.mock("@/lib/alerts", () => ({ default: { normal } }))
+vi.mock("@/lib/alerts", () => ({ default: { error } }))
 vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 vi.mock("@/lib/dotFilenKnown", () => ({
 	getKnownDotFilenUuid: () => known.dotFilen,
@@ -95,14 +95,14 @@ describe("confirmDotFilenOperation", () => {
 		inputPrompt.mockResolvedValueOnce(".Filen")
 
 		await expect(confirmDotFilenOperation("rename", [dotFilen])).resolves.toBe(false)
-		expect(normal).toHaveBeenCalledOnce()
+		expect(error).toHaveBeenCalledOnce()
 	})
 
 	it("changes nothing on a cancel, silently", async () => {
 		inputPrompt.mockResolvedValueOnce(null)
 
 		await expect(confirmDotFilenOperation("delete", [dotFilen])).resolves.toBe(false)
-		expect(normal).not.toHaveBeenCalled()
+		expect(error).not.toHaveBeenCalled()
 	})
 })
 

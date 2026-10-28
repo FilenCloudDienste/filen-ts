@@ -125,7 +125,7 @@ export async function confirmDotFilenOperation(operation: DotFilenOperation, ite
 	}
 
 	if (typed !== DOT_FILEN_DIR_NAME) {
-		alerts.normal(t("dot_filen_confirm_mismatch", values))
+		alerts.error(t("dot_filen_confirm_mismatch", values))
 
 		return false
 	}
