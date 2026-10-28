@@ -283,7 +283,6 @@ export function fakeEngine(pairs: SyncPairInfo[] = [pairInfo()]) {
 		retryPath: vi.fn(() => Promise.resolve()),
 		userIgnore: vi.fn(() => Promise.resolve("")),
 		setUserIgnore: vi.fn(() => Promise.resolve()),
-		importLegacyState: vi.fn(() => Promise.resolve({ imported: 0n, skipped: 0n })),
 		close: vi.fn(() => Promise.resolve())
 	}
 

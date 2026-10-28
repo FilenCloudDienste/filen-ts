@@ -44,6 +44,8 @@ export const sync = {
 	phaseSyncing: "Syncing",
 	/** Pair phase — paused by the user */
 	phasePaused: "Paused",
+	/** Pair phase — a pair moved from the previous app waits for the cloud directory to be read before it starts */
+	phasePreparing: "Preparing",
 	/** Pair phase — kept paused until the user checks its first run */
 	phaseReview: "Needs review",
 	/** Pair phase — its local directory is missing */
@@ -133,9 +135,6 @@ export const sync = {
 	detailIssues_other: "{{count}} issues",
 
 	// ── Notices ─────────────────────────────────────────────────────────
-	/** Notice — the old app's local trash is moved into the pair's bin */
-	noticeLocalTrashMoved:
-		"The previous app's local trash (.filen.trash.local) is moved into this pair's bin, .filen-sync-trash, when the pair first syncs. Items in the bin are deleted permanently after 30 days.",
 	/** Notice — the local directory of a pair the previous app synced can't be a sync root */
 	noticeRefusedLocalRoot:
 		"Filen can't sync this pair from the previous app: its directory on this device can't be synced. Add it again with another directory.",
@@ -147,8 +146,6 @@ export const sync = {
 		"Filen can't sync this pair: its directory on this device is, contains or is inside another pair's directory.",
 	/** Notice — the cloud directory overlaps another pair's */
 	noticeRefusedRemoteOverlap: "Filen can't sync this pair: its cloud directory is, contains or is inside another pair's cloud directory.",
-	/** Notice — dismiss button */
-	noticeDismiss: "Dismiss",
 	/** Notice — remove the pair a refusal notice is about */
 	noticeRemove: "Remove pair",
 
@@ -371,7 +368,7 @@ export const sync = {
 	reviewTitleMigrated: "Check this pair before it starts",
 	/** Review — description for a moved pair */
 	reviewDescriptionMigrated:
-		"Filen brought this pair over from the previous desktop app and kept it paused, because its first sync would do more than expected.",
+		"Filen brought this pair over from the previous desktop app and kept it paused, because its first sync would replace a lot of what is already on the other side.",
 	/** Review — title after the sync state was rebuilt */
 	reviewTitleBaselineReset: "Check this pair before it starts again",
 	/** Review — description after the sync state was rebuilt */
@@ -387,13 +384,10 @@ export const sync = {
 	findingHeldDeletions: "It deletes items.",
 	/** Finding — refused */
 	findingRefused: "It can't sync as it is.",
-	/** Finding — newly synced */
-	findingNewlySynced: "It syncs items the previous app ignored.",
 	/** Finding — unconverged */
 	findingUnconverged: "Filen hadn't fully read the cloud directory yet.",
-	/** Finding — per-pair dot files */
-	findingDotFilesPerPair:
-		"The previous app ignored hidden files for this pair only. Filen added a .filenignore to its directory that keeps them ignored, and that file syncs to your other devices.",
+	/** Finding — a one-way pair moved from the previous app would overwrite many files on its destination */
+	findingOverwrites: "It overwrites a lot of files already on the other side.",
 	/** Review — changes count */
 	reviewActions_one: "{{count}} change",
 	/** Review — changes count */

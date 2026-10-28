@@ -218,7 +218,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 				<div className="flex shrink-0 items-center gap-1">
 					<TooltipIconButton
 						label={pair.paused ? t("detailResume") : t("detailPause")}
-						disabled={toggling || pair.phase === "waitingForRoot" || pair.phase === "unsupported"}
+						disabled={toggling || pair.phase === "preparing" || pair.phase === "waitingForRoot" || pair.phase === "unsupported"}
 						onClick={() => {
 							void togglePause()
 						}}
@@ -227,7 +227,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 					</TooltipIconButton>
 					<TooltipIconButton
 						label={t("detailSyncNow")}
-						disabled={refreshing || pair.paused || pair.phase === "syncing"}
+						disabled={refreshing || pair.paused || pair.phase === "syncing" || pair.phase === "preparing"}
 						onClick={() => {
 							void syncNow()
 						}}

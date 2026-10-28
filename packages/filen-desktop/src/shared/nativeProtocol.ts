@@ -261,8 +261,8 @@ const pageArgs = type({ pairId: pairIdSchema, offset: countSchema, limit: pageLi
 const done = type("null")
 
 // What evaluatePlan found. `check` (only when asked for): the first-run guard's scan of the plan's actions. The summary's
-// action count includes the adoptions that transfer nothing, so the scan counts the uploads and downloads; with `legacy`
-// it also finds the paths the plan would sync that the old client's rules hid, with a few of them as a sample.
+// action count includes the adoptions that transfer nothing, so the scan counts the uploads and downloads. With
+// `overwrites`, a one-way pair's transfers onto paths its destination may already hold (null for a two-way pair).
 const evaluationSchema = type({ status: "'unconverged'", "+": "reject" }).or({
 	status: "'ok'",
 	planId: planIdSchema,
@@ -270,7 +270,7 @@ const evaluationSchema = type({ status: "'unconverged'", "+": "reject" }).or({
 	check: type({
 		uploads: countSchema,
 		downloads: countSchema,
-		legacyHits: type({ count: countSchema, sample: relPathSchema.array().atMostLength(20), "+": "reject" }).or("null"),
+		overwrites: type({ files: countSchema, bytes: countSchema, "+": "reject" }).or("null"),
 		"+": "reject"
 	}).or("null"),
 	"+": "reject"
@@ -292,12 +292,10 @@ export const SYNC_OPS = {
 		result: done
 	},
 	requestPass: { args: pairArgs, result: done },
+	// Whether the cache has read the pair's cloud directory, waiting a while for it.
+	awaitConverged: { args: pairArgs, result: type("boolean") },
 	evaluatePlan: {
-		args: type({
-			pairId: pairIdSchema,
-			"check?": type({ legacy: type({ excludeDotFiles: "boolean", "+": "reject" }).or("null"), "+": "reject" }),
-			"+": "reject"
-		}),
+		args: type({ pairId: pairIdSchema, "check?": type({ overwrites: "boolean", "+": "reject" }), "+": "reject" }),
 		result: evaluationSchema
 	},
 	planPage: {
@@ -322,13 +320,7 @@ export const SYNC_OPS = {
 	ignoredPaths: { args: pageArgs, result: type({ total: countSchema, entries: ignoredSchema.array(), "+": "reject" }) },
 	userIgnore: { args: noArgs, result: ignoreTextSchema },
 	setUserIgnore: { args: type({ text: ignoreTextSchema, "+": "reject" }), result: done },
-	defaultIgnore: { args: noArgs, result: textSchema.array() },
-	// Seeds a pair without a baseline from the old client's state directory, which main locates. Null when nothing was
-	// imported because the import failed (logged by the host): it is best effort and never blocks the first run.
-	seedLegacy: {
-		args: type({ pairId: pairIdSchema, stateDir: localPathSchema, "+": "reject" }),
-		result: type({ imported: countSchema, skipped: countSchema, "+": "reject" }).or("null")
-	}
+	defaultIgnore: { args: noArgs, result: textSchema.array() }
 } as const
 
 // Mounts. Every role serves the whole drive; the host runs one rclone for all of them and reconciles it to the last

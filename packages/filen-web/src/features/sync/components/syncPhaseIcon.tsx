@@ -4,6 +4,7 @@ import {
 	CircleCheckIcon,
 	CirclePauseIcon,
 	FolderXIcon,
+	HourglassIcon,
 	ListChecksIcon,
 	RefreshCwIcon,
 	TriangleAlertIcon
@@ -15,6 +16,7 @@ const PHASE_ICON: Record<DesktopSyncPhase, { icon: typeof BanIcon; className: st
 	idle: { icon: CircleCheckIcon, className: "text-emerald-600 dark:text-emerald-500" },
 	syncing: { icon: RefreshCwIcon, className: "animate-spin text-primary motion-reduce:animate-none" },
 	paused: { icon: CirclePauseIcon, className: "text-muted-foreground" },
+	preparing: { icon: HourglassIcon, className: "text-muted-foreground" },
 	review: { icon: ListChecksIcon, className: "text-warning-foreground" },
 	waitingForRoot: { icon: FolderXIcon, className: "text-warning-foreground" },
 	unsupported: { icon: BanIcon, className: "text-muted-foreground" },

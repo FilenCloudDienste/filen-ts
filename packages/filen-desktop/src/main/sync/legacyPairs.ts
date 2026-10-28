@@ -1,4 +1,3 @@
-import path from "node:path"
 import { type } from "arktype"
 import type { DesktopSyncMode } from "@filen/shared/desktop"
 import { localPathSchema } from "../../shared/nativeProtocol.ts"
@@ -7,8 +6,8 @@ import type { FirstRunDeps } from "./firstRun.ts"
 import { basename } from "./mirror.ts"
 import type { ShellPair } from "./store.ts"
 
-// The old client's (3.0.53) sync pairs, PLAN §6 step 6: its config, and its engine state under userData/sync, which
-// only the engine reads (to seed each pair, see firstRun.ts) and nothing writes or deletes.
+// The old client's (3.0.53) sync pairs, PLAN §6 step 6: only its config. Its engine state under userData/sync is never
+// read; a migrated pair's first run proves what is in sync from both sides (see firstRun.ts).
 
 const MODES = {
 	twoWay: "twoWay",
@@ -93,11 +92,6 @@ export function legacySyncImport(effective: unknown): LegacyImport | null {
 	return { enabled: config.enabled, pairs, dropped }
 }
 
-// Where the old client kept a pair's last local and remote trees, under its userData (the new app's too).
-export function legacyStateDir(userData: string, legacyUuid: string): string {
-	return path.join(userData, "sync", "state", "v2", legacyUuid)
-}
-
 // Dot files hidden, rule files still synced (the engine reads them as rules either way).
 export const DOT_FILE_RULES = [".*", "!/.filenignore"] as const
 
@@ -154,8 +148,7 @@ export function legacyRecords(imported: LegacyImport, now: number): ShellPair[] 
 		review: null,
 		legacyUuid: pair.uuid,
 		legacyDotFiles: pair.excludeDotFiles ? (uniform ? "device" : "pair") : null,
-		// Only a pair that used the old local trash has one to move.
-		notices: pair.localTrashDisabled ? [] : ["localTrashMoved"],
+		notices: [],
 		createdAt: now
 	}))
 }
@@ -209,6 +202,13 @@ export async function applyLegacySync(deps: LegacySyncDeps): Promise<void> {
 			}
 		})
 		deps.log.info(`sync: imported ${String(records.length)} pairs of the previous app (${String(imported.dropped)} invalid)`)
+
+		const trashed = imported.pairs.filter(pair => !pair.localTrashDisabled).length
+
+		// The engine moves each such pair's .filen.trash.local into the pair's bin on its first sync.
+		if (trashed > 0) {
+			deps.log.info(`sync: ${String(trashed)} of them used the previous app's local trash`)
+		}
 	} else if (!deps.store.get().legacyApplied) {
 		await deps.store.update(state => ({ ...state, legacyApplied: true }))
 	}

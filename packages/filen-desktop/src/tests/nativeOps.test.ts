@@ -1,5 +1,8 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { CacheStatusMessage } from "@filen/sdk-rs"
+import type { CacheStatusMessage, PlannedAction } from "@filen/sdk-rs"
 import { createConvergence } from "../native/convergence.ts"
 import { classify } from "../native/errors.ts"
 import { createHostEngine } from "../native/ops.ts"
@@ -33,6 +36,10 @@ function setup(pairs = [pairInfo()]) {
 	})
 
 	return { ...fake, convergence, plans, host, log }
+}
+
+function sized(planned: PlannedAction, size: bigint): PlannedAction {
+	return { ...planned, size }
 }
 
 const resync = (roots: string[], converged: boolean): CacheStatusMessage[] => [
@@ -106,40 +113,65 @@ describe("native ops", () => {
 		expect(engine.planPair).not.toHaveBeenCalled()
 	})
 
-	it("evaluatePlan reports legacy hits", async () => {
-		const { engine, convergence, host } = setup()
-		const actions = [
-			action("UploadFile", ".hidden"),
-			action("UploadFile", "a.txt"),
-			action("UploadFile", ".filenignore"),
-			action("DownloadFile", "d/.git/config"),
-			action("AdoptBaseline", "c.txt"),
-			action("MoveRemote", "x.txt", ".x.txt"),
-			action("CreateRemoteDir", ".filen.trash.local"),
-			...Array.from({ length: 2500 }, (_, i) => action("AdoptBaseline", `bulk/${String(i)}`))
-		]
-		const { plan, handle } = fakePlan(actions)
+	it("awaitConverged answers whether the cache read the pair's cloud directory", async () => {
+		const { convergence, host } = setup()
 
-		engine.planPair.mockResolvedValue(handle)
 		await host.refreshPairs()
+
+		const unread = host.ops.awaitConverged({ pairId: "1" })
+
+		await vi.advanceTimersByTimeAsync(5000)
+		await expect(unread).resolves.toBe(false)
+
+		const read = host.ops.awaitConverged({ pairId: "1" })
+
 		convergence.onMessages(resync([REMOTE_ROOT], true))
+		await expect(read).resolves.toBe(true)
+	})
 
-		await expect(host.ops.evaluatePlan({ pairId: "1", check: { legacy: { excludeDotFiles: true } } })).resolves.toMatchObject({
-			check: {
-				uploads: 3,
-				downloads: 1,
-				legacyHits: { count: 4, sample: [".hidden", "d/.git/config", "x.txt", ".filen.trash.local"] }
+	it("evaluatePlan counts the transfers, and a one-way pair's overwrites when asked", async () => {
+		const local = await realpath(await mkdtemp(path.join(tmpdir(), "filen-plan-check-")))
+
+		try {
+			await mkdir(path.join(local, "d"))
+			await writeFile(path.join(local, "d", "kept.txt"), "old")
+
+			const actions = [
+				sized(action("UploadFile", "up.txt"), 7n),
+				sized(action("DownloadFile", "d/kept.txt"), 5n),
+				sized(action("DownloadFile", "new.txt"), 11n),
+				action("AdoptBaseline", "c.txt"),
+				...Array.from({ length: 2500 }, (_, i) => action("AdoptBaseline", `bulk/${String(i)}`))
+			]
+			const { plan, handle } = fakePlan(actions)
+			const modes = [
+				[fakeSdk.SyncMode.TwoWay, null],
+				[fakeSdk.SyncMode.LocalToRemote, { files: 1, bytes: 7 }],
+				[fakeSdk.SyncMode.LocalBackup, { files: 1, bytes: 7 }],
+				[fakeSdk.SyncMode.RemoteToLocal, { files: 1, bytes: 5 }],
+				[fakeSdk.SyncMode.RemoteBackup, { files: 1, bytes: 5 }]
+			] as const
+
+			for (const [mode, overwrites] of modes) {
+				const { engine, convergence, host } = setup([pairInfo({ mode, localRoot: local })])
+
+				engine.planPair.mockResolvedValue(handle)
+				await host.refreshPairs()
+				convergence.onMessages(resync([REMOTE_ROOT], true))
+
+				await expect(host.ops.evaluatePlan({ pairId: "1", check: { overwrites: true } })).resolves.toMatchObject({
+					check: { uploads: 1, downloads: 2, overwrites }
+				})
+				await expect(host.ops.evaluatePlan({ pairId: "1", check: { overwrites: false } })).resolves.toMatchObject({
+					check: { uploads: 1, downloads: 2, overwrites: null }
+				})
 			}
-		})
-		// Paged at the engine's limit.
-		expect(plan.actions).toHaveBeenCalledTimes(3)
 
-		await expect(host.ops.evaluatePlan({ pairId: "1", check: { legacy: { excludeDotFiles: false } } })).resolves.toMatchObject({
-			check: { legacyHits: { count: 0, sample: [] } }
-		})
-		await expect(host.ops.evaluatePlan({ pairId: "1", check: { legacy: null } })).resolves.toMatchObject({
-			check: { uploads: 3, downloads: 1, legacyHits: null }
-		})
+			// Paged at the engine's limit.
+			expect(plan.actions).toHaveBeenCalledTimes(30)
+		} finally {
+			await rm(local, { recursive: true, force: true })
+		}
 	})
 
 	it("plans expire and release", async () => {
@@ -174,29 +206,6 @@ describe("native ops", () => {
 		await host.refreshPairs()
 		await expect(failure(host.ops.pause({ pairId: "9" }))).resolves.toEqual({ code: "pairNotFound", pairId: "9" })
 		expect(engine.pausePair).not.toHaveBeenCalled()
-	})
-
-	it("seeds a pair from the old client's state, logging what it skipped", async () => {
-		const { engine, host, log } = setup()
-
-		engine.importLegacyState.mockResolvedValue({ imported: 120n, skipped: 3n })
-		await host.refreshPairs()
-		await expect(host.ops.seedLegacy({ pairId: "1", stateDir: "/old/sync/state/v2/u" })).resolves.toEqual({ imported: 120, skipped: 3 })
-		expect(engine.importLegacyState).toHaveBeenCalledWith(1n, "/old/sync/state/v2/u")
-		expect(log.info).toHaveBeenCalledWith("sync: 3 entries of the previous app's state were not imported")
-	})
-
-	it("answers null for a failed seed and logs the error kind", async () => {
-		const { engine, host, log } = setup()
-
-		engine.importLegacyState.mockRejectedValue(sdkError(fakeSdk.ErrorKind.InvalidState, "pair already has a baseline"))
-		await host.refreshPairs()
-		await expect(host.ops.seedLegacy({ pairId: "1", stateDir: "/old" })).resolves.toBeNull()
-		expect(log.warn).toHaveBeenCalledWith("sync: the previous app's state was not imported: InvalidState")
-		await expect(failure(host.ops.seedLegacy({ pairId: "9", stateDir: "/old" }))).resolves.toEqual({
-			code: "pairNotFound",
-			pairId: "9"
-		})
 	})
 
 	it("names the line of a refused user ignore text", async () => {

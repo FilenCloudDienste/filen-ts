@@ -3,16 +3,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { effectiveConfig, type LegacyStash } from "../main/legacyData.ts"
-import { attachUnheld } from "../main/sync/firstRun.ts"
-import {
-	DOT_FILE_RULES,
-	legacyRecords,
-	legacyStateDir,
-	legacySyncImport,
-	legacyUserIgnore,
-	type LegacyPair,
-	withRules
-} from "../main/sync/legacyPairs.ts"
+import { attachUnheld, startPreparing } from "../main/sync/firstRun.ts"
+import { DOT_FILE_RULES, legacyRecords, legacySyncImport, legacyUserIgnore, type LegacyPair, withRules } from "../main/sync/legacyPairs.ts"
 import { fakeNative, memoryStore } from "./syncFakes.ts"
 
 const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
@@ -127,7 +119,7 @@ describe("legacyRecords", () => {
 				review: null,
 				legacyUuid: UUID_A,
 				legacyDotFiles: null,
-				notices: ["localTrashMoved"],
+				notices: [],
 				createdAt: 5
 			}
 		])
@@ -137,7 +129,9 @@ describe("legacyRecords", () => {
 
 		await attachUnheld(deps)
 		expect(argsOf("addPair")).toEqual([{ localRoot: directory, remoteRoot: ACCOUNT_ROOT.toUpperCase(), mode: "twoWay" }])
-		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "active", notices: ["localTrashMoved"] })
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "preparing", paused: false })
+		await expect(startPreparing(deps)).resolves.toBe(false)
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "active", paused: false, notices: [] })
 	})
 
 	it("keeps an old pair paused when it or the old sync switch was off, and names it", () => {
@@ -155,16 +149,8 @@ describe("legacyRecords", () => {
 
 		expect(records.map(pair => [pair.name, pair.paused, pair.state, pair.notices])).toEqual([
 			["Photos", true, "waitingForRoot", []],
-			["Docs", true, "waitingForRoot", ["localTrashMoved"]]
+			["Docs", true, "waitingForRoot", []]
 		])
-	})
-})
-
-describe("legacyStateDir", () => {
-	it("is the pair's directory under the old client's sync state", () => {
-		expect(legacyStateDir(path.join("/data", "@filen", "desktop"), UUID_A)).toBe(
-			path.join("/data", "@filen", "desktop", "sync", "state", "v2", UUID_A)
-		)
 	})
 })
 
@@ -181,17 +167,17 @@ describe("dot files and the old trash", () => {
 
 		expect(records.map(pair => pair.legacyDotFiles)).toEqual(["device", "device"])
 
-		// No rule file is written into the pair and the clean run starts it.
+		// No rule file is written into the pair, which starts.
 		const store = memoryStore(records.slice(0, 1))
-		const { deps, argsOf } = fakeNative(store)
+		const { deps } = fakeNative(store)
 
 		await attachUnheld(deps)
-		expect(argsOf("evaluatePlan")).toEqual([{ pairId: "1", check: { legacy: { excludeDotFiles: true } } }])
+		await startPreparing(deps)
 		expect(store.get().pairs[0]).toMatchObject({ state: "active", paused: false })
 		await expect(readFile(path.join(directory, ".filenignore"), "utf8")).rejects.toThrow()
 	})
 
-	it("mixed excludeDotFiles goes to review", async () => {
+	it("mixed excludeDotFiles writes the pair's own rule file, and both pairs start", async () => {
 		const hidden = path.join(directory, "hidden")
 		const shown = path.join(directory, "shown")
 
@@ -212,12 +198,13 @@ describe("dot files and the old trash", () => {
 
 		await attachUnheld(deps)
 
-		// The pair that hid dot files gets its own rule file (the user's lines kept) and waits for the user even
-		// though its run is clean; the other one starts.
+		// The pair that hid dot files gets its own rule file (the user's lines kept) before it first runs.
 		expect(await readFile(path.join(hidden, ".filenignore"), "utf8")).toBe("build/\n.*\n!/.filenignore\n")
 		expect(await readFile(path.join(shown, ".filenignore"), "utf8").catch(() => null)).toBeNull()
-		expect(store.get().pairs.map(pair => [pair.state, pair.paused, pair.review?.findings ?? null])).toEqual([
-			["review", true, ["dotFilesPerPair"]],
+
+		await startPreparing(deps)
+		expect(store.get().pairs.map(pair => [pair.state, pair.paused, pair.review])).toEqual([
+			["active", false, null],
 			["active", false, null]
 		])
 	})

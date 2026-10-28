@@ -2,8 +2,8 @@ import { readFile, realpath, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import type {
 	DesktopSyncErrorCode,
+	DesktopSyncNotice,
 	DesktopSyncPlanSummary,
-	DesktopSyncRefusedNotice,
 	DesktopSyncReview,
 	DesktopSyncReviewFinding
 } from "@filen/shared/desktop"
@@ -12,30 +12,32 @@ import { errorCode } from "../atomicFile.ts"
 import type { NativeResult } from "../native/rpc.ts"
 import { DOT_FILE_RULES, withRules } from "./legacyPairs.ts"
 import { shellPairId } from "./mirror.ts"
-import { isRefusedNotice, type ShellPair, type SyncStore } from "./store.ts"
+import type { ShellPair, SyncStore } from "./store.ts"
 
-// The first run of a pair the user did not just add (PLAN §6.6): a migrated pair, or one a baseline reset lost. It is
-// added paused and dry-run; it starts by itself only when that run is close to nothing, else it waits in review.
+// The first run of a pair the user did not just add (PLAN §6.6). A migrated pair starts by itself once its cloud
+// directory is read; only a one-way pair that would overwrite a lot on its destination waits in review. One a baseline
+// reset lost is dry-run and starts only when that run is close to nothing, else it waits in review. Conflicts and held
+// deletions of a started pair are the engine's to hold, shown with the pair's issues.
 
 export interface FirstRunDeps {
 	// Engine calls for the user this run is for; another user's host answers none of them.
 	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>): Promise<NativeResult<K>>
 	store: SyncStore
-	// The old client's state directory of a pair it had (by its uuid there).
-	legacyStateDir(legacyUuid: string): string
 	now(): number
 	log: { info(message: string): void; warn(message: string): void }
 }
 
 export const FIRST_RUN_LIMITS = { maxBytes: 1_048_576, maxTransfers: 25 }
 
+// A migrated one-way pair waits in review when its first run would overwrite more than either on its destination.
+export const MAX_OVERWRITE_BYTES = 1_073_741_824
+export const MAX_OVERWRITE_FILES = 1000
+
 export interface FirstRunPlan {
 	summary: DesktopSyncPlanSummary
 	// The plan's upload and download actions.
 	uploads: number
 	downloads: number
-	// Paths the plan would sync that the old client's rules hid.
-	legacyHits: number
 }
 
 export type FirstRunVerdict = { start: true } | { start: false; findings: DesktopSyncReviewFinding[] }
@@ -43,57 +45,45 @@ export type FirstRunVerdict = { start: true } | { start: false; findings: Deskto
 // `plan` is null when the remote side had not converged, so nothing could be planned.
 export function firstRunVerdict(
 	plan: FirstRunPlan | null,
-	dotFilesPerPair: boolean,
 	limits: { maxBytes: number; maxTransfers: number } = FIRST_RUN_LIMITS
 ): FirstRunVerdict {
-	const findings: DesktopSyncReviewFinding[] = []
-
 	if (plan === null) {
-		findings.push("unconverged")
-	} else {
-		const { summary, uploads, downloads } = plan
+		return { start: false, findings: ["unconverged"] }
+	}
 
-		if (summary.uploadBytes + summary.downloadBytes > limits.maxBytes || uploads + downloads > limits.maxTransfers) {
-			if (uploads > 0 || summary.uploadBytes > 0) {
-				findings.push("uploads")
-			}
+	const findings: DesktopSyncReviewFinding[] = []
+	const { summary, uploads, downloads } = plan
 
-			if (downloads > 0 || summary.downloadBytes > 0) {
-				findings.push("downloads")
-			}
+	if (summary.uploadBytes + summary.downloadBytes > limits.maxBytes || uploads + downloads > limits.maxTransfers) {
+		if (uploads > 0 || summary.uploadBytes > 0) {
+			findings.push("uploads")
 		}
 
-		if (summary.conflicts > 0) {
-			findings.push("conflicts")
-		}
-
-		if (summary.heldDeletions > 0) {
-			findings.push("heldDeletions")
-		}
-
-		if (summary.refused !== null) {
-			findings.push("refused")
-		}
-
-		if (plan.legacyHits > 0) {
-			findings.push("newlySynced")
+		if (downloads > 0 || summary.downloadBytes > 0) {
+			findings.push("downloads")
 		}
 	}
 
-	if (dotFilesPerPair) {
-		findings.push("dotFilesPerPair")
+	if (summary.conflicts > 0) {
+		findings.push("conflicts")
+	}
+
+	if (summary.heldDeletions > 0) {
+		findings.push("heldDeletions")
+	}
+
+	if (summary.refused !== null) {
+		findings.push("refused")
 	}
 
 	return findings.length === 0 ? { start: true } : { start: false, findings }
 }
 
-export interface FirstRunOptions {
-	reason: DesktopSyncReview["reason"]
-	// The user had the pair paused: it stays paused even when the run is clean.
-	paused: boolean
-	// The old client's rules to check the plan against (migrated pairs only).
-	legacy: { excludeDotFiles: boolean } | null
-	dotFilesPerPair: boolean
+// A migrated one-way pair's verdict. `overwrites` is null when the host could not tell, which is held too.
+export function overwriteVerdict(overwrites: { files: number; bytes: number } | null): FirstRunVerdict {
+	return overwrites !== null && overwrites.files <= MAX_OVERWRITE_FILES && overwrites.bytes <= MAX_OVERWRITE_BYTES
+		? { start: true }
+		: { start: false, findings: ["overwrites"] }
 }
 
 function patchPair(store: SyncStore, matches: (pair: ShellPair) => boolean, patch: Partial<ShellPair>): Promise<unknown> {
@@ -101,9 +91,9 @@ function patchPair(store: SyncStore, matches: (pair: ShellPair) => boolean, patc
 }
 
 // The pair (an engine id) is held and paused already. A failed call leaves it paused in the review it has.
-export async function runFirstRun(deps: FirstRunDeps, pairId: string, options: FirstRunOptions): Promise<void> {
+export async function runFirstRun(deps: FirstRunDeps, pairId: string, options: { paused: boolean }): Promise<void> {
 	const patch = (fields: Partial<ShellPair>) => patchPair(deps.store, pair => pair.pairId === pairId, fields)
-	const evaluated = await deps.call("evaluatePlan", { pairId, check: { legacy: options.legacy } })
+	const evaluated = await deps.call("evaluatePlan", { pairId, check: { overwrites: false } })
 
 	if (!evaluated.ok) {
 		deps.log.warn(`sync: first run not planned: ${evaluated.error.code}`)
@@ -118,20 +108,15 @@ export async function runFirstRun(deps: FirstRunDeps, pairId: string, options: F
 		const { passToken: _passToken, ...summary } = native
 
 		await deps.call("releasePlan", { planId })
-		// A host that skipped the scan leaves every action and path in doubt.
-		plan = {
-			summary,
-			uploads: check?.uploads ?? summary.actions,
-			downloads: check?.downloads ?? summary.actions,
-			legacyHits: options.legacy === null ? 0 : (check?.legacyHits?.count ?? 1)
-		}
+		// A host that skipped the scan leaves every action in doubt.
+		plan = { summary, uploads: check?.uploads ?? summary.actions, downloads: check?.downloads ?? summary.actions }
 	}
 
-	const verdict = firstRunVerdict(plan, options.dotFilesPerPair)
+	const verdict = firstRunVerdict(plan)
 	const summary = plan?.summary ?? null
 
 	if (!verdict.start) {
-		await patch({ paused: true, state: "review", review: { reason: options.reason, findings: verdict.findings, summary } })
+		await patch({ paused: true, state: "review", review: { reason: "baselineReset", findings: verdict.findings, summary } })
 
 		return
 	}
@@ -147,24 +132,97 @@ export async function runFirstRun(deps: FirstRunDeps, pairId: string, options: F
 	await patch(
 		resumed.ok
 			? { paused: false, state: "active", review: null }
-			: { paused: true, state: "review", review: { reason: options.reason, findings: [], summary } }
+			: { paused: true, state: "review", review: { reason: "baselineReset", findings: [], summary } }
 	)
 }
 
-// Best effort: a pair the import fails for (the host logs why) is planned without it.
-async function seedLegacy(deps: FirstRunDeps, pairId: string, legacyUuid: string): Promise<void> {
-	const seeded = await deps.call("seedLegacy", { pairId, stateDir: deps.legacyStateDir(legacyUuid) })
+// Starts a preparing pair, or holds it in review. False when it stays preparing, to be tried again: its cloud
+// directory is not read yet (a one-way pair is never planned against a partial view, a two-way one never started on
+// one), or a call failed.
+async function startMigrated(deps: FirstRunDeps, pairId: string, converged: boolean): Promise<boolean> {
+	const pair = deps.store.get().pairs.find(entry => entry.pairId === pairId)
 
-	if (!seeded.ok) {
-		deps.log.warn(`sync: the previous app's state was not imported: ${seeded.error.code}`)
-	} else if (seeded.value !== null) {
-		deps.log.info(`sync: imported ${String(seeded.value.imported)} entries of the previous app's state`)
+	// Removed, or settled meanwhile.
+	if (pair?.state !== "preparing") {
+		return true
 	}
+
+	if (!converged) {
+		return false
+	}
+
+	const patch = (fields: Partial<ShellPair>) => patchPair(deps.store, entry => entry.pairId === pairId, fields)
+
+	if (pair.mode !== "twoWay") {
+		const evaluated = await deps.call("evaluatePlan", { pairId, check: { overwrites: true } })
+
+		if (!evaluated.ok) {
+			deps.log.warn(`sync: a migrated pair was not planned: ${evaluated.error.code}`)
+
+			return false
+		}
+
+		if (evaluated.value.status === "unconverged") {
+			return false
+		}
+
+		const { planId, summary: native, check } = evaluated.value
+		const { passToken: _passToken, ...summary } = native
+
+		await deps.call("releasePlan", { planId })
+
+		const overwrites = check?.overwrites ?? null
+		const verdict = overwriteVerdict(overwrites)
+
+		if (!verdict.start) {
+			deps.log.info(
+				`sync: a migrated pair waits for review: it would overwrite ${String(overwrites?.files ?? "?")} files (${String(overwrites?.bytes ?? "?")} bytes)`
+			)
+			await patch({ paused: true, state: "review", review: { reason: "migrated", findings: verdict.findings, summary } })
+
+			return true
+		}
+	}
+
+	if (pair.paused) {
+		await patch({ state: "active", review: null })
+
+		return true
+	}
+
+	const resumed = await deps.call("resume", { pairId })
+
+	if (!resumed.ok) {
+		deps.log.warn(`sync: a migrated pair was not started: ${resumed.error.code}`)
+
+		return false
+	}
+
+	await patch({ paused: false, state: "active", review: null })
+
+	return true
+}
+
+// Every preparing pair the engine holds, their cloud directories awaited together. True when some still wait.
+export async function startPreparing(deps: FirstRunDeps): Promise<boolean> {
+	const pairIds = deps.store.get().pairs.flatMap(pair => (pair.state === "preparing" && pair.pairId !== null ? [pair.pairId] : []))
+	const converged = await Promise.all(pairIds.map(pairId => deps.call("awaitConverged", { pairId })))
+	let waiting = false
+
+	for (const [index, pairId] of pairIds.entries()) {
+		const read = converged[index]
+
+		if (!(await startMigrated(deps, pairId, read?.ok === true && read.value))) {
+			waiting = true
+		}
+	}
+
+	return waiting
 }
 
 // Refusals no retry changes, and the notice each one is told with: the pair is kept, never added again, until the
 // user dismisses the notice (which removes it).
-const REFUSED: Partial<Record<DesktopSyncErrorCode, DesktopSyncRefusedNotice>> = {
+const REFUSED: Partial<Record<DesktopSyncErrorCode, DesktopSyncNotice>> = {
 	rootRefused: "refusedLocalRoot",
 	remoteRootMissing: "refusedRemoteMissing",
 	localRootInUse: "refusedLocalOverlap",
@@ -205,14 +263,12 @@ async function ensureRules(file: string, blocks: readonly (readonly string[])[])
 	}
 }
 
-// Adds one pair the engine does not hold. The real path is recorded and the pair put in review before the engine
-// gets it, so a crash in between leaves a pair the next `ready` matches and keeps paused in review.
+// Adds one pair the engine does not hold. The real path is recorded and the pair put in review (a migrated one in
+// preparing) before the engine gets it, so a crash in between leaves a pair the next `ready` matches and keeps paused.
 async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 	const id = shellPairId(pair)
 	const patch = (fields: Partial<ShellPair>) => patchPair(deps.store, entry => shellPairId(entry) === id, fields)
-	const migrated = pair.legacyUuid !== null && pair.state === "waitingForRoot"
-	const reason = migrated ? "migrated" : "baselineReset"
-	const dotFilesPerPair = migrated && pair.legacyDotFiles === "pair"
+	const migrated = pair.legacyUuid !== null && (pair.state === "waitingForRoot" || pair.state === "preparing")
 	const localRoot = await realDirectory(pair.localRoot)
 
 	if (localRoot === null) {
@@ -223,14 +279,11 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 		return
 	}
 
-	const review: DesktopSyncReview = {
-		reason,
-		findings: dotFilesPerPair ? ["unconverged", "dotFilesPerPair"] : ["unconverged"],
-		summary: null
-	}
+	const review: DesktopSyncReview = { reason: "baselineReset", findings: ["unconverged"], summary: null }
+	const held: Partial<ShellPair> = migrated ? { state: "preparing", review: null } : { state: "review", review }
 	const restore = { state: pair.state, review: pair.review }
 
-	await patch({ localRoot, state: "review", review })
+	await patch({ localRoot, ...held })
 
 	const added = await deps.call("addPair", { localRoot, remoteRoot: pair.remoteRoot, mode: pair.mode })
 
@@ -262,44 +315,46 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 		return
 	}
 
-	await patch({ pairId, localRoot, paused: true, state: "review", review })
+	// A preparing pair keeps the user's `paused`; the engine holds it paused regardless.
+	await patch({ pairId, localRoot, ...held, ...(migrated ? {} : { paused: true }) })
 
-	// The pair's own rule file, written before its first plan; it syncs only once the user starts the pair.
-	if (dotFilesPerPair) {
+	if (!migrated) {
+		await runFirstRun(deps, pairId, { paused: pair.paused })
+
+		return
+	}
+
+	// The pair's own rule file, written before it first runs (startPreparing starts it).
+	if (pair.legacyDotFiles === "pair") {
 		await ensureRules(path.join(localRoot, ".filenignore"), [DOT_FILE_RULES]).catch((error: unknown) => {
 			deps.log.warn(`sync: the pair's .filenignore was not written: ${errorCode(error)}`)
 		})
 	}
-
-	// Before the first plan, so the old client's evidence keeps a migrated pair's first run from transferring what it
-	// had in sync. Also after a baseline reset, which emptied the baseline the engine would refuse to seed.
-	if (pair.legacyUuid !== null) {
-		await seedLegacy(deps, pairId, pair.legacyUuid)
-	}
-
-	await runFirstRun(deps, pairId, {
-		reason,
-		paused: pair.paused,
-		legacy: migrated ? { excludeDotFiles: pair.legacyDotFiles !== null } : null,
-		dotFilesPerPair
-	})
 }
 
 // Every pair the engine does not hold, one at a time: migrated ones, ones waiting for their directory and ones a
 // baseline reset lost. A pair the engine refused waits for the user.
 export async function attachUnheld(deps: FirstRunDeps): Promise<void> {
 	for (const pair of deps.store.get().pairs) {
-		if (pair.pairId === null && !pair.notices.some(isRefusedNotice)) {
+		if (pair.pairId === null && pair.notices.length === 0) {
 			await attach(deps, pair)
 		}
 	}
 }
 
-// A pair in review never runs: one the engine holds unpaused (a crash between adding and pausing it) is paused.
+// A pair in review or preparing never runs: one the engine holds unpaused (a crash between adding and pausing it) is
+// paused. A preparing pair's `paused` is the user's, so it is paused whatever it says, and that stays.
 export async function holdReviewed(deps: FirstRunDeps): Promise<void> {
 	for (const pair of deps.store.get().pairs) {
-		if (pair.state === "review" && pair.pairId !== null && !pair.paused) {
-			const { pairId } = pair
+		if (pair.pairId === null) {
+			continue
+		}
+
+		const { pairId } = pair
+
+		if (pair.state === "preparing") {
+			await deps.call("pause", { pairId })
+		} else if (pair.state === "review" && !pair.paused) {
 			const paused = await deps.call("pause", { pairId })
 
 			if (paused.ok) {

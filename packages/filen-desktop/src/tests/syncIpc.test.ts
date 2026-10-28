@@ -95,8 +95,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		shell: { openPath: vi.fn(() => Promise.resolve("")) },
 		legacySync: {
 			pending: () => Promise.resolve(undefined),
-			consume: () => Promise.resolve(),
-			stateDir: legacyUuid => `/old/sync/state/v2/${legacyUuid}`
+			consume: () => Promise.resolve()
 		},
 		now: () => clock,
 		log: { info: vi.fn(), warn: vi.fn() }
@@ -306,19 +305,58 @@ describe("registerSyncIpc", () => {
 		expect(store.get().pairs).toEqual([shellPair({ localRoot: directory, name: "Mine" })])
 	})
 
-	it("dismissing a refusal removes the pair; other notices only go away", async () => {
+	it("dismissing a refusal removes the pair; a notice the pair lacks does nothing", async () => {
 		const legacy = "11111111-2222-4333-8444-555555555555"
 		const { invoke, store } = setup({
-			pairs: [
-				shellPair({ notices: ["localTrashMoved"] }),
-				shellPair({ pairId: null, legacyUuid: legacy, state: "unsupported", notices: ["refusedRemoteMissing"] })
-			]
+			pairs: [shellPair(), shellPair({ pairId: null, legacyUuid: legacy, state: "unsupported", notices: ["refusedRemoteMissing"] })]
 		})
 
-		await invoke("dismissNotice", "7", "localTrashMoved")
+		await invoke("dismissNotice", "7", "refusedRemoteMissing")
 		await invoke("dismissNotice", `legacy:${legacy}`, "refusedRemoteMissing")
 
 		expect(store.get().pairs).toEqual([shellPair()])
+	})
+
+	it("starts a migrated pair once its cloud directory is read, trying again in the background until then", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		const legacy = "11111111-2222-4333-8444-555555555555"
+		let read = false
+		const { service, store, ops } = setup({
+			pairs: [shellPair({ pairId: null, legacyUuid: legacy, localRoot: directory, state: "waitingForRoot" })],
+			answers: { awaitConverged: () => read }
+		})
+
+		await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		expect(ops()).toEqual(["addPair", "pause", "awaitConverged"])
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "7", state: "preparing", paused: false })
+
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(ops()).toEqual(["addPair", "pause", "awaitConverged", "awaitConverged"])
+
+		read = true
+		await vi.advanceTimersByTimeAsync(2000)
+		expect(ops()).toEqual(["addPair", "pause", "awaitConverged", "awaitConverged", "awaitConverged", "resume"])
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "7", state: "active", paused: false })
+
+		// Nothing waits any more.
+		await vi.advanceTimersByTimeAsync(600_000)
+		expect(ops()).toHaveLength(6)
+	})
+
+	it("stops trying migrated pairs again when the host stops", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		const legacy = "11111111-2222-4333-8444-555555555555"
+		const { service, ops } = setup({
+			pairs: [shellPair({ pairId: null, legacyUuid: legacy, localRoot: directory, state: "waitingForRoot" })],
+			answers: { awaitConverged: () => false }
+		})
+
+		await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		service.hostChanged({ state: "off" })
+		await vi.advanceTimersByTimeAsync(600_000)
+		expect(ops()).toEqual(["addPair", "pause", "awaitConverged"])
 	})
 
 	it("reveals the root or the bin only", async () => {

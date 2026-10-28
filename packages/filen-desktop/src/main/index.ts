@@ -68,7 +68,6 @@ import { registerAppProtocol } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { createSessionVault, isSessionBlob, lazyCipher, vaultMode, type VaultCipher } from "./sessionVault.ts"
 import { registerSyncIpc } from "./sync/ipc.ts"
-import { legacyStateDir } from "./sync/legacyPairs.ts"
 import { createRootTokens } from "./sync/localRoot.ts"
 import { createSyncService } from "./sync/service.ts"
 import { loadSyncStore, type SyncStore } from "./sync/store.ts"
@@ -432,8 +431,7 @@ const syncService = createSyncService({
 	shell: { openPath: target => shell.openPath(target) },
 	legacySync: {
 		pending: userId => migrationStash.pending(userId, "sync"),
-		consume: userId => migrationStash.consume(userId, "sync"),
-		stateDir: legacyUuid => legacyStateDir(userDataPath, legacyUuid)
+		consume: userId => migrationStash.consume(userId, "sync")
 	},
 	now: Date.now,
 	log: { info, warn }

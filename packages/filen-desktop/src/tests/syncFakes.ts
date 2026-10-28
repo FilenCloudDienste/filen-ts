@@ -53,12 +53,12 @@ export function fakeNative(store: SyncStore, answers: Answers = {}) {
 		resume: () => null,
 		removePair: () => null,
 		releasePlan: () => null,
-		seedLegacy: () => ({ imported: 0, skipped: 0 }),
+		awaitConverged: () => true,
 		evaluatePlan: () => ({
 			status: "ok",
 			planId: "plan",
 			summary: CLEAN_SUMMARY,
-			check: { uploads: 0, downloads: 0, legacyHits: { count: 0, sample: [] } }
+			check: { uploads: 0, downloads: 0, overwrites: { files: 0, bytes: 0 } }
 		}),
 		...answers
 	}
@@ -71,7 +71,6 @@ export function fakeNative(store: SyncStore, answers: Answers = {}) {
 	const deps: FirstRunDeps = {
 		call: call as unknown as FirstRunDeps["call"],
 		store,
-		legacyStateDir: legacyUuid => `/old/sync/state/v2/${legacyUuid}`,
 		now: () => 5,
 		log: { info: vi.fn(), warn: vi.fn() }
 	}

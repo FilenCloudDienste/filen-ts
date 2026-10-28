@@ -10,8 +10,9 @@ process.env["NODE_ENV"] = "production"
 
 // Loaded first so a missing web build fails before bundling.
 const { macMinimum } = await import("../electron-builder.ts")
+const { stageNapi } = await import("./stageNapi.ts")
 
-await import("./stageNapi.ts")
+stageNapi({ dev: false })
 await (await import("./stageRclone.ts")).stageRclone()
 await import("./build.ts")
 

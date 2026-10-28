@@ -1,15 +1,14 @@
 import type { SyncPairInfo } from "@filen/sdk-rs"
-import { oldWouldIgnore } from "../shared/legacyIgnore.ts"
 import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
 import type { Convergence } from "./convergence.ts"
-import { classify, clip, errorKind, HostError, invalidIgnore } from "./errors.ts"
-import { checkPlan } from "./legacyCheck.ts"
+import { classify, clip, HostError, invalidIgnore } from "./errors.ts"
+import { checkPlan, type OverwriteTarget } from "./planCheck.ts"
 import { heldReason, planPage, type PlanRegistry, toAction, toConflict, toIgnored, toSummary } from "./plans.ts"
 import type { RuntimeFeed } from "./reducer.ts"
 
-// How long a dry run waits for the cache to converge on the pair's remote root: well inside main's call timeout, which
-// also has to cover the plan itself.
+// How long a dry run (or awaitConverged) waits for the cache to converge on the pair's remote root: well inside main's
+// call timeout, which also has to cover the plan itself.
 export const CONVERGENCE_TIMEOUT_MS = 60_000
 
 export interface OpsContext {
@@ -77,6 +76,24 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 	async function watch(id: bigint): Promise<void> {
 		await engine.watchPair(id, undefined)
 		watched.add(id.toString())
+	}
+
+	function converged(info: SyncPairInfo): Promise<boolean> {
+		return ctx.convergence.awaitConverged(info.remoteRoot, ctx.convergenceTimeoutMs ?? CONVERGENCE_TIMEOUT_MS, ctx.signal)
+	}
+
+	// Where a one-way pair's transfers land; null for a two-way one.
+	function overwriteTarget(info: SyncPairInfo): OverwriteTarget | null {
+		switch (modeName(sdk, info.mode)) {
+			case "localToRemote":
+			case "localBackup":
+				return { side: "remote" }
+			case "remoteToLocal":
+			case "remoteBackup":
+				return { side: "local", localRoot: info.localRoot }
+			case "twoWay":
+				return null
+		}
 	}
 
 	async function changed(): Promise<null> {
@@ -153,22 +170,22 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			return null
 		},
+		awaitConverged: async ({ pairId }) => converged(held(pairId).info),
 		evaluatePlan: async ({ pairId, check }) => {
 			const { id, info } = held(pairId)
 
-			if (!(await ctx.convergence.awaitConverged(info.remoteRoot, ctx.convergenceTimeoutMs ?? CONVERGENCE_TIMEOUT_MS, ctx.signal))) {
+			if (!(await converged(info))) {
 				return { status: "unconverged" }
 			}
 
 			const plan = await engine.planPair(id)
 			const planId = plans.put(plan)
-			const legacy = check?.legacy ?? null
 
 			return {
 				status: "ok",
 				planId,
 				summary: toSummary(sdk, plan.summary()),
-				check: check === undefined ? null : checkPlan(plan, legacy === null ? null : relPath => oldWouldIgnore(relPath, legacy))
+				check: check === undefined ? null : await checkPlan(plan, check.overwrites ? overwriteTarget(info) : null)
 			}
 		},
 		planPage: async ({ planId, list, offset, limit }) => {
@@ -257,23 +274,6 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			defaults ??= sdk.defaultSyncIgnorePatterns().map(clip)
 
 			return defaults
-		},
-		seedLegacy: async ({ pairId, stateDir }) => {
-			const { id } = held(pairId)
-
-			try {
-				const { imported, skipped } = await engine.importLegacyState(id, stateDir)
-
-				if (skipped > 0n) {
-					ctx.log.info(`sync: ${skipped.toString()} entries of the previous app's state were not imported`)
-				}
-
-				return { imported: Number(imported), skipped: Number(skipped) }
-			} catch (error) {
-				ctx.log.warn(`sync: the previous app's state was not imported: ${errorKind(sdk, error)}`)
-
-				return null
-			}
 		}
 	}
 

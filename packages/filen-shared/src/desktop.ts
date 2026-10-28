@@ -146,15 +146,13 @@ export type DesktopSyncHostState =
 	| { state: "restarting"; retryAt: number }
 	| { state: "failed"; reason: "crashLoop" | "addonMissing" | "baselineInUse" | "keychainLocked" }
 
-export type DesktopSyncPhase = "idle" | "syncing" | "paused" | "review" | "waitingForRoot" | "unsupported" | "error"
+// `preparing`: a pair moved from the previous app, waiting for the cloud directory to be read before it starts.
+export type DesktopSyncPhase = "idle" | "syncing" | "paused" | "preparing" | "review" | "waitingForRoot" | "unsupported" | "error"
 
-// Why the engine refused for good a pair it had to add (a migrated one, or one a baseline reset lost): the local directory cannot be a root, the cloud directory is gone,
-// or the pair overlaps another one on this device or in the cloud.
-export type DesktopSyncRefusedNotice = "refusedLocalRoot" | "refusedRemoteMissing" | "refusedLocalOverlap" | "refusedRemoteOverlap"
-
-// Told once per pair until dismissed: the old client's local trash is moved into the pair's bin on its first sync; the
-// engine refused the pair, which is kept (not synced) until this is dismissed, and dismissing it removes the pair.
-export type DesktopSyncNotice = "localTrashMoved" | DesktopSyncRefusedNotice
+// Why the engine refused for good a pair it had to add (a migrated one, or one a baseline reset lost): the local
+// directory cannot be a root, the cloud directory is gone, or the pair overlaps another one on this device or in the
+// cloud. The pair is kept (not synced) until the notice is dismissed, which removes it.
+export type DesktopSyncNotice = "refusedLocalRoot" | "refusedRemoteMissing" | "refusedLocalOverlap" | "refusedRemoteOverlap"
 
 // Why deletions were held back for approval.
 export type DesktopSyncHeldReason =
@@ -176,8 +174,8 @@ export interface DesktopSyncPlanSummary {
 	refused: DesktopSyncRefusal | null
 }
 
-export type DesktopSyncReviewFinding =
-	"uploads" | "downloads" | "conflicts" | "heldDeletions" | "refused" | "newlySynced" | "unconverged" | "dotFilesPerPair"
+// `overwrites`: a migrated one-way pair would replace a lot on its destination.
+export type DesktopSyncReviewFinding = "uploads" | "downloads" | "conflicts" | "heldDeletions" | "refused" | "unconverged" | "overwrites"
 
 // A pair kept paused until the user looked at what its first run would do. `summary` is null when the remote side
 // never converged.

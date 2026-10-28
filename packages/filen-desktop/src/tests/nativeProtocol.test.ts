@@ -96,7 +96,8 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	resume: { pairId: "1" },
 	setMode: { pairId: "1", mode: "twoWay", backlog: "adoptDestination" },
 	requestPass: { pairId: "1" },
-	evaluatePlan: { pairId: "1", check: { legacy: { excludeDotFiles: true } } },
+	awaitConverged: { pairId: "1" },
+	evaluatePlan: { pairId: "1", check: { overwrites: true } },
 	planPage: { planId: "p1", list: "held", offset: 0, limit: 1000 },
 	releasePlan: { planId: "p1" },
 	conflicts: { pairId: "1", offset: 0, limit: 200 },
@@ -108,7 +109,6 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	userIgnore: {},
 	setUserIgnore: { text: ".*\n!/.filenignore\n" },
 	defaultIgnore: {},
-	seedLegacy: { pairId: "18446744073709551615", stateDir: "/old/sync/state/v2/u" },
 	...MOUNTS_ARGS
 }
 
@@ -138,9 +138,7 @@ describe("toNativeSchema", () => {
 		expect(accepts(toNativeSchema, call("deleteEverything", {}))).toBe(false)
 		expect(accepts(toNativeSchema, { ...call("pause", { pairId: "1" }), extra: 1 })).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: "1", extra: 1 }))).toBe(false)
-		expect(accepts(toNativeSchema, call("evaluatePlan", { pairId: "1", check: { legacy: { excludeDotFiles: true }, more: 1 } }))).toBe(
-			false
-		)
+		expect(accepts(toNativeSchema, call("evaluatePlan", { pairId: "1", check: { overwrites: true, more: 1 } }))).toBe(false)
 		expect(accepts(toNativeSchema, { t: "shutdown", now: true })).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: 1 }))).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: "1n" }))).toBe(false)
@@ -226,9 +224,8 @@ describe("opResult", () => {
 		expect(accepts(opResult("addPair"), { pairId: "5" })).toBe(true)
 		expect(accepts(opResult("addPair"), { pairId: 5 })).toBe(false)
 		expect(accepts(opResult("pause"), null)).toBe(true)
-		expect(accepts(opResult("seedLegacy"), { imported: 3, skipped: 0 })).toBe(true)
-		expect(accepts(opResult("seedLegacy"), null)).toBe(true)
-		expect(accepts(opResult("seedLegacy"), "unsupported")).toBe(false)
+		expect(accepts(opResult("awaitConverged"), false)).toBe(true)
+		expect(accepts(opResult("awaitConverged"), null)).toBe(false)
 		expect(accepts(opResult("evaluatePlan"), { status: "unconverged" })).toBe(true)
 		expect(
 			accepts(opResult("evaluatePlan"), {
@@ -246,7 +243,7 @@ describe("opResult", () => {
 					refused: null,
 					passToken: "token"
 				},
-				check: { uploads: 1, downloads: 0, legacyHits: { count: 1, sample: [".hidden"] } }
+				check: { uploads: 1, downloads: 0, overwrites: { files: 1, bytes: 10 } }
 			})
 		).toBe(true)
 		expect(

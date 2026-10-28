@@ -1,11 +1,5 @@
 import { type } from "arktype"
-import type {
-	DesktopSyncMode,
-	DesktopSyncNotice,
-	DesktopSyncRefusedNotice,
-	DesktopSyncReview,
-	DesktopSyncReviewFinding
-} from "@filen/shared/desktop"
+import type { DesktopSyncMode, DesktopSyncNotice, DesktopSyncReview, DesktopSyncReviewFinding } from "@filen/shared/desktop"
 import { localPathSchema, pairIdSchema, pinned, planSummarySchema, syncModeSchema } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, errorCode } from "../atomicFile.ts"
 import { serialQueue } from "../../shared/serial.ts"
@@ -14,7 +8,9 @@ import { serialQueue } from "../../shared/serial.ts"
 // pair uuid, and pairs the engine does not hold. It is also the recovery copy of the engine's pairs, which live in
 // the baseline DB and go with it when a schema change forces a reset. The engine is the source of truth whenever it
 // is open (see reconcileMirror).
-export type ShellPairState = "active" | "review" | "waitingForRoot" | "unsupported"
+// `preparing`: a migrated pair the engine holds paused until its first run may start; its `paused` is what the user
+// had, not the engine's.
+export type ShellPairState = "active" | "preparing" | "review" | "waitingForRoot" | "unsupported"
 
 export type LegacyDotFiles = "device" | "pair"
 
@@ -46,23 +42,12 @@ export interface ShellSyncState {
 const EMPTY: ShellSyncState = { version: 1, pairs: [], legacyApplied: false }
 
 const findingSchema = pinned<DesktopSyncReviewFinding>()(
-	type.enumerated("uploads", "downloads", "conflicts", "heldDeletions", "refused", "newlySynced", "unconverged", "dotFilesPerPair")
+	type.enumerated("uploads", "downloads", "conflicts", "heldDeletions", "refused", "unconverged", "overwrites")
 )
 
-// The notices that stand for an engine refusal; such a pair is never added, and dismissing one removes it.
-const REFUSED_NOTICES = {
-	refusedLocalRoot: true,
-	refusedRemoteMissing: true,
-	refusedLocalOverlap: true,
-	refusedRemoteOverlap: true
-} as const satisfies Record<DesktopSyncRefusedNotice, true>
-
-export function isRefusedNotice(notice: DesktopSyncNotice): notice is DesktopSyncRefusedNotice {
-	return Object.hasOwn(REFUSED_NOTICES, notice)
-}
-
+// Each one stands for an engine refusal: such a pair is never added, and dismissing the notice removes it.
 export const noticeSchema = pinned<DesktopSyncNotice>()(
-	type.enumerated("localTrashMoved", ...(Object.keys(REFUSED_NOTICES) as DesktopSyncRefusedNotice[]))
+	type.enumerated("refusedLocalRoot", "refusedRemoteMissing", "refusedLocalOverlap", "refusedRemoteOverlap")
 )
 
 const shellPairSchema = pinned<ShellPair>()(
@@ -73,7 +58,7 @@ const shellPairSchema = pinned<ShellPair>()(
 		remoteRoot: "string.uuid",
 		mode: syncModeSchema,
 		paused: "boolean",
-		state: "'active' | 'review' | 'waitingForRoot' | 'unsupported'",
+		state: "'active' | 'preparing' | 'review' | 'waitingForRoot' | 'unsupported'",
 		review: type({
 			reason: "'migrated' | 'baselineReset'",
 			findings: findingSchema.array(),
@@ -88,16 +73,21 @@ const shellPairSchema = pinned<ShellPair>()(
 	})
 )
 
-const earlierNoticesSchema = type({ state: "unknown", notices: "string[]" })
+const earlierSchema = type({ state: "unknown", notices: "string[]", review: type({ findings: "string[]" }).or("null") })
 
-// Notices earlier builds wrote: the old trash one under its former name, and an account-root pair the engine could not
-// sync then, which now waits for its directory like any other.
-function withCurrentNotices(entry: unknown): unknown {
-	const pair = earlierNoticesSchema(entry)
+// What earlier builds wrote and this one no longer does: the old trash notice (under either of its names), review
+// findings no longer given, and an account-root pair the engine could not sync then, which now waits for its directory
+// like any other.
+const DROPPED_NOTICES: ReadonlySet<string> = new Set(["localTrashMoved", "localTrashDropped", "accountRootUnsupported"])
+const DROPPED_FINDINGS: ReadonlySet<string> = new Set(["newlySynced", "dotFilesPerPair"])
+
+function withCurrentFields(entry: unknown): unknown {
+	const pair = earlierSchema(entry)
 
 	if (
 		pair instanceof type.errors ||
-		!pair.notices.some(notice => notice === "localTrashDropped" || notice === "accountRootUnsupported")
+		(!pair.notices.some(notice => DROPPED_NOTICES.has(notice)) &&
+			!(pair.review?.findings.some(finding => DROPPED_FINDINGS.has(finding)) ?? false))
 	) {
 		return entry
 	}
@@ -105,9 +95,11 @@ function withCurrentNotices(entry: unknown): unknown {
 	return {
 		...pair,
 		state: pair.state === "unsupported" && pair.notices.includes("accountRootUnsupported") ? "waitingForRoot" : pair.state,
-		notices: pair.notices.flatMap(notice =>
-			notice === "accountRootUnsupported" ? [] : [notice === "localTrashDropped" ? "localTrashMoved" : notice]
-		)
+		notices: pair.notices.filter(notice => !DROPPED_NOTICES.has(notice)),
+		review:
+			pair.review === null
+				? null
+				: { ...pair.review, findings: pair.review.findings.filter(finding => !DROPPED_FINDINGS.has(finding)) }
 	}
 }
 
@@ -141,7 +133,7 @@ export function parseSyncState(data: string | null, warn: (message: string) => v
 	const pairs: ShellPair[] = []
 
 	for (const entry of file.pairs) {
-		const pair = shellPairSchema(withCurrentNotices(entry))
+		const pair = shellPairSchema(withCurrentFields(entry))
 
 		if (pair instanceof type.errors) {
 			warn("dropping an invalid sync pair record")

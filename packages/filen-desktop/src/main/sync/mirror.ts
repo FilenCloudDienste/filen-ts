@@ -27,9 +27,10 @@ export interface Reconciled {
 }
 
 // Run on every `ready`: the engine's pairs win. Matched by roots (a reset engine numbers its pairs afresh); the
-// engine's id, local root, mode and paused flag replace the mirror's, the shell's own fields stay. An engine pair the
-// mirror lacks gets its directory's name. A mirror pair the engine lacks is gone (removed elsewhere, or a crash
-// between the two writes) unless the engine never held it (no engine id); after a reset it is re-added instead.
+// engine's id, local root, mode and paused flag replace the mirror's (a preparing pair keeps what the user had), the
+// shell's own fields stay. An engine pair the mirror lacks gets its directory's name. A mirror pair the engine lacks
+// is gone (removed elsewhere, or a crash between the two writes) unless the engine never held it (no engine id);
+// after a reset it is re-added instead.
 export function reconcileMirror(
 	pairs: readonly ShellPair[],
 	enginePairs: readonly NativePair[],
@@ -50,8 +51,8 @@ export function reconcileMirror(
 				pairId: engine.id,
 				localRoot: engine.localRoot,
 				mode: engine.mode,
-				paused: engine.paused,
-				state: pair.state === "review" ? "review" : "active"
+				paused: pair.state === "preparing" ? pair.paused : engine.paused,
+				state: pair.state === "review" || pair.state === "preparing" ? pair.state : "active"
 			})
 		} else if (pair.state === "waitingForRoot" || pair.state === "unsupported") {
 			next.push(pair)

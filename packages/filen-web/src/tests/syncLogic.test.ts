@@ -131,27 +131,12 @@ describe("sync copy", () => {
 	})
 
 	it("maps every phase, mode, notice, finding, held reason, refusal, list, action and unsyncable reason", () => {
-		expectAllKeysExist(PHASE_KEY, ["idle", "syncing", "paused", "review", "waitingForRoot", "unsupported", "error"])
+		expectAllKeysExist(PHASE_KEY, ["idle", "syncing", "paused", "preparing", "review", "waitingForRoot", "unsupported", "error"])
 		expectAllKeysExist(MODE_KEY, [...MODES])
 		expectAllKeysExist(MODE_DESCRIPTION_KEY, [...MODES])
 		expectAllKeysExist(MODE_SHORT_KEY, [...MODES])
-		expectAllKeysExist(NOTICE_KEY, [
-			"localTrashMoved",
-			"refusedLocalRoot",
-			"refusedRemoteMissing",
-			"refusedLocalOverlap",
-			"refusedRemoteOverlap"
-		])
-		expectAllKeysExist(FINDING_KEY, [
-			"uploads",
-			"downloads",
-			"conflicts",
-			"heldDeletions",
-			"refused",
-			"newlySynced",
-			"unconverged",
-			"dotFilesPerPair"
-		])
+		expectAllKeysExist(NOTICE_KEY, ["refusedLocalRoot", "refusedRemoteMissing", "refusedLocalOverlap", "refusedRemoteOverlap"])
+		expectAllKeysExist(FINDING_KEY, ["uploads", "downloads", "conflicts", "heldDeletions", "refused", "unconverged", "overwrites"])
 		expectAllKeysExist(HELD_REASON_KEY, [
 			"scanIncomplete",
 			"firstSyncWithDeletions",

@@ -71,7 +71,7 @@ describe("reconcileMirror", () => {
 	})
 
 	it("matches a verbatim Windows root and keeps the shell's fields", () => {
-		const mirror = [shellPair({ localRoot: "C:\\Users\\u\\Work", name: "Mine", state: "review", notices: ["localTrashMoved"] })]
+		const mirror = [shellPair({ localRoot: "C:\\Users\\u\\Work", name: "Mine", state: "review", notices: ["refusedLocalOverlap"] })]
 		const engine = [enginePair({ id: "4", localRoot: "\\\\?\\C:\\Users\\u\\work" })]
 
 		const { pairs } = reconcileMirror(mirror, engine, { reset: false, now: 0 })
@@ -82,9 +82,17 @@ describe("reconcileMirror", () => {
 				localRoot: "\\\\?\\C:\\Users\\u\\work",
 				name: "Mine",
 				state: "review",
-				notices: ["localTrashMoved"]
+				notices: ["refusedLocalOverlap"]
 			})
 		])
+	})
+
+	it("keeps a preparing pair preparing with the user's paused flag", () => {
+		const mirror = [shellPair({ pairId: "1", legacyUuid: LEGACY, state: "preparing", paused: false })]
+
+		const { pairs } = reconcileMirror(mirror, [enginePair({ id: "1", paused: true })], { reset: false, now: 0 })
+
+		expect(pairs).toEqual(mirror)
 	})
 
 	it("reset re-adds paused with names kept", () => {
@@ -160,7 +168,7 @@ describe("mergeOverview", () => {
 			issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
 			degraded: { local: true, remote: false }
 		})
-		const overview = mergeOverview(host, [live], [shellPair({ paused: true, notices: ["localTrashMoved"] })])
+		const overview = mergeOverview(host, [live], [shellPair({ paused: true, notices: ["refusedLocalOverlap"] })])
 
 		expect(overview).toEqual({
 			host,
@@ -180,7 +188,7 @@ describe("mergeOverview", () => {
 					issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
 					degraded: { local: true, remote: false },
 					review: null,
-					notices: ["localTrashMoved"]
+					notices: ["refusedLocalOverlap"]
 				}
 			]
 		})
@@ -214,18 +222,33 @@ describe("sync store", () => {
 		expect(parseSyncState(null, warn)).toEqual({ version: 1, pairs: [], legacyApplied: false })
 	})
 
-	it("reads earlier builds' notices: an account-root pair waits for its directory again", () => {
+	it("reads what earlier builds wrote: the old trash notice and findings go, an account-root pair waits for its directory again", () => {
 		const warn = vi.fn()
 		const accountRoot = {
 			...shellPair({ pairId: null, legacyUuid: LEGACY }),
 			state: "unsupported",
 			notices: ["localTrashDropped", "accountRootUnsupported"]
 		}
+		const trash = { ...shellPair({ pairId: "2", legacyUuid: REMOTE_C }), notices: ["localTrashMoved", "refusedLocalOverlap"] }
+		const reviewed = {
+			...shellPair({ pairId: "3", legacyUuid: REMOTE_A, state: "review" }),
+			review: { reason: "migrated", findings: ["conflicts", "newlySynced", "dotFilesPerPair"], summary: null }
+		}
 		const refused = shellPair({ pairId: null, legacyUuid: REMOTE_B, state: "unsupported", notices: ["refusedRemoteMissing"] })
-		const state = parseSyncState(JSON.stringify({ version: 1, pairs: [accountRoot, refused], legacyApplied: true }), warn)
+		const state = parseSyncState(
+			JSON.stringify({ version: 1, pairs: [accountRoot, trash, reviewed, refused], legacyApplied: true }),
+			warn
+		)
 
 		expect(state.pairs).toEqual([
-			shellPair({ pairId: null, legacyUuid: LEGACY, state: "waitingForRoot", notices: ["localTrashMoved"] }),
+			shellPair({ pairId: null, legacyUuid: LEGACY, state: "waitingForRoot" }),
+			shellPair({ pairId: "2", legacyUuid: REMOTE_C, notices: ["refusedLocalOverlap"] }),
+			shellPair({
+				pairId: "3",
+				legacyUuid: REMOTE_A,
+				state: "review",
+				review: { reason: "migrated", findings: ["conflicts"], summary: null }
+			}),
 			refused
 		])
 		expect(warn).not.toHaveBeenCalled()

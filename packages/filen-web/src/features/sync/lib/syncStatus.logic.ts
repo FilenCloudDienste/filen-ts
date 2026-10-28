@@ -57,6 +57,7 @@ export const PHASE_KEY: Record<DesktopSyncPhase, SyncKey> = {
 	idle: "phaseIdle",
 	syncing: "phaseSyncing",
 	paused: "phasePaused",
+	preparing: "phasePreparing",
 	review: "phaseReview",
 	waitingForRoot: "phaseWaitingForRoot",
 	unsupported: "phaseUnsupported",
@@ -111,20 +112,10 @@ export function modeChangeNeedsBacklog(from: DesktopSyncMode, to: DesktopSyncMod
 }
 
 export const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
-	localTrashMoved: "noticeLocalTrashMoved",
 	refusedLocalRoot: "noticeRefusedLocalRoot",
 	refusedRemoteMissing: "noticeRefusedRemoteMissing",
 	refusedLocalOverlap: "noticeRefusedLocalOverlap",
 	refusedRemoteOverlap: "noticeRefusedRemoteOverlap"
-}
-
-// What a notice is about: dismissing a "refused" one removes the pair the engine would not take.
-export const NOTICE_ROLE: Record<DesktopSyncNotice, "info" | "refused"> = {
-	localTrashMoved: "info",
-	refusedLocalRoot: "refused",
-	refusedRemoteMissing: "refused",
-	refusedLocalOverlap: "refused",
-	refusedRemoteOverlap: "refused"
 }
 
 export const FINDING_KEY: Record<DesktopSyncReviewFinding, SyncKey> = {
@@ -133,9 +124,8 @@ export const FINDING_KEY: Record<DesktopSyncReviewFinding, SyncKey> = {
 	conflicts: "findingConflicts",
 	heldDeletions: "findingHeldDeletions",
 	refused: "findingRefused",
-	newlySynced: "findingNewlySynced",
 	unconverged: "findingUnconverged",
-	dotFilesPerPair: "findingDotFilesPerPair"
+	overwrites: "findingOverwrites"
 }
 
 export const HELD_REASON_KEY: Record<DesktopSyncHeldReason, SyncKey> = {

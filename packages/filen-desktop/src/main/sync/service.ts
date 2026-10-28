@@ -23,18 +23,19 @@ import type {
 } from "@filen/shared/desktop"
 import { CHANNELS } from "../../shared/channels.ts"
 import type { NativeOpArgs, NativePairRuntime, SyncOp } from "../../shared/nativeProtocol.ts"
+import { backoffDelay } from "../native/backoff.ts"
 import type { NativeResult } from "../native/rpc.ts"
 import type { NativeEvent, NativeSupervisor } from "../native/supervisor.ts"
 import { errorCode } from "../atomicFile.ts"
 import { type Page, pushThrottle } from "../pages.ts"
 import { serialQueue } from "../../shared/serial.ts"
 import { createActivityLog } from "./activity.ts"
-import { attachUnheld, type FirstRunDeps, holdReviewed } from "./firstRun.ts"
+import { attachUnheld, type FirstRunDeps, holdReviewed, startPreparing } from "./firstRun.ts"
 import { applyLegacySync } from "./legacyPairs.ts"
 import { chooseLocalDirectory, inspectLocalRoot, type LocalRootContext, type RootTokens } from "./localRoot.ts"
 import { reconcileMirror, shellPairId } from "./mirror.ts"
 import { mergeOverview } from "./overview.ts"
-import { isRefusedNotice, type ShellPair, type SyncStore } from "./store.ts"
+import type { ShellPair, SyncStore } from "./store.ts"
 
 // Overview pushes to a page at most this often.
 export const OVERVIEW_PUSH_INTERVAL_MS = 250
@@ -55,11 +56,10 @@ export interface SyncServiceDeps {
 		mountPoints(userId: string): Promise<readonly string[]>
 	}
 	shell: { openPath(target: string): Promise<string> }
-	// The old client's sync config the migration stashed for a user, and where it kept a pair's state.
+	// The old client's sync config the migration stashed for a user.
 	legacySync: {
 		pending(userId: string): Promise<unknown>
 		consume(userId: string): Promise<void>
-		stateDir(legacyUuid: string): string
 	}
 	now(): number
 	log: { info(message: string): void; warn(message: string): void }
@@ -125,6 +125,9 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 	let hostUser: string | null = null
 	// What each `ready` does to the pairs runs one at a time.
 	const readyWork = serialQueue()
+	// The next try at starting the preparing pairs, and how many came before it since the last `ready`.
+	let preparingRetry: ReturnType<typeof setTimeout> | undefined
+	let preparingTries = 0
 
 	async function overview(): Promise<DesktopSyncOverview> {
 		const user = await supervisor.user()
@@ -237,17 +240,19 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		return DONE
 	}
 
-	// After the engine's pairs replaced the mirror's: pairs in review stay paused, the old client's pairs are imported
-	// once, and every pair the engine does not hold is added through the first-run guard. Each step is retried on the
-	// next `ready` when it fails.
-	async function afterReady(userId: string, store: SyncStore): Promise<void> {
+	function stopPreparingRetry(): void {
+		clearTimeout(preparingRetry)
+		preparingRetry = undefined
+	}
+
+	async function firstRunDeps(userId: string, store: SyncStore): Promise<FirstRunDeps | null> {
 		const user = await supervisor.user()
 
 		if (user?.userId !== userId) {
-			return
+			return null
 		}
 
-		const run: FirstRunDeps = {
+		return {
 			call: (op, args) => supervisor.call(op, args, userId),
 			store: {
 				...store,
@@ -259,10 +264,51 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 					return next
 				}
 			},
-			legacyStateDir: deps.legacySync.stateDir,
 			now: deps.now,
 			log: deps.log
 		}
+	}
+
+	// True when some pair still waits, or the step failed.
+	async function startPreparingLogged(run: FirstRunDeps): Promise<boolean> {
+		try {
+			return await startPreparing(run)
+		} catch (error) {
+			deps.log.warn(`sync: starting migrated pairs failed: ${errorCode(error)}`)
+
+			return true
+		}
+	}
+
+	// Migrated pairs whose cloud directory was not read yet are tried again in the background, backing off, until a
+	// `ready` starts over or the host stops.
+	function retryPreparing(userId: string, store: SyncStore): void {
+		stopPreparingRetry()
+		preparingRetry = setTimeout(() => {
+			preparingRetry = undefined
+			void readyWork(async () => {
+				const run = await firstRunDeps(userId, store)
+
+				if (run !== null && (await startPreparingLogged(run))) {
+					retryPreparing(userId, store)
+				}
+			})
+		}, backoffDelay(preparingTries++))
+	}
+
+	// After the engine's pairs replaced the mirror's: pairs in review stay paused, the old client's pairs are imported
+	// once, every pair the engine does not hold is added through the first-run guard, and migrated pairs start once
+	// their cloud directory is read. Each step is retried on the next `ready` when it fails.
+	async function afterReady(userId: string, store: SyncStore): Promise<void> {
+		stopPreparingRetry()
+		preparingTries = 0
+
+		const run = await firstRunDeps(userId, store)
+
+		if (run === null) {
+			return
+		}
+
 		const steps: [string, () => Promise<void>][] = [
 			["holding pairs in review", () => holdReviewed(run)],
 			[
@@ -282,6 +328,10 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			} catch (error) {
 				deps.log.warn(`sync: ${what} failed: ${errorCode(error)}`)
 			}
+		}
+
+		if (await startPreparingLogged(run)) {
+			retryPreparing(userId, store)
 		}
 	}
 
@@ -347,11 +397,13 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			if (state.state !== "running") {
 				runtime = []
 				plans.clear()
+				stopPreparingRetry()
 			}
 
 			schedulePush()
 		},
 		signedOut: () => {
+			stopPreparingRetry()
 			hostUser = null
 			runtime = []
 			plans.clear()
@@ -574,6 +626,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			// openPath answers with an error message, "" on success.
 			return (await deps.shell.openPath(directory)) === "" ? DONE : fail("localRootMissing")
 		},
+		// A pair kept only to tell the user the engine refused it goes with its notice.
 		dismissNotice: async (pairId, notice) => {
 			const found = await find(pairId)
 
@@ -581,14 +634,9 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				return
 			}
 
-			// A pair kept only to tell the user the engine refused it goes with its notice.
-			if (isRefusedNotice(notice)) {
-				await updatePairs(found.store, pairs => pairs.filter(pair => shellPairId(pair) !== pairId))
-				activityLog.drop(pairId)
-				supervisor.ensure("pair removed")
-			} else {
-				await patchPair(found.store, pairId, { notices: found.pair.notices.filter(entry => entry !== notice) })
-			}
+			await updatePairs(found.store, pairs => pairs.filter(pair => shellPairId(pair) !== pairId))
+			activityLog.drop(pairId)
+			supervisor.ensure("pair removed")
 		},
 		retryHost: () => {
 			supervisor.retry()

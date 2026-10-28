@@ -597,6 +597,22 @@ describe("applyLegacySync", () => {
 		expect(native.argsOf("setUserIgnore")).toEqual([{ text: ".*\n!/.filenignore\n" }])
 	})
 
+	it("logs the pairs that used the old local trash instead of telling the user", async () => {
+		const { store, stash, deps } = legacySetup()
+
+		stash.pending.mockResolvedValue({
+			...OLD_SYNC,
+			syncPairs: [
+				{ ...oldPair("11111111-2222-4333-8444-555555555555", "/nonexistent/a"), localTrashDisabled: false },
+				oldPair("22222222-3333-4444-8555-666666666666", "/nonexistent/b")
+			]
+		})
+		await applyLegacySync(deps)
+
+		expect(deps.log.info).toHaveBeenCalledWith("sync: 1 of them used the previous app's local trash")
+		expect(store.get().pairs.map(pair => pair.notices)).toEqual([[], []])
+	})
+
 	it("keeps the stash and records nothing while the device-wide ignore cannot be set", async () => {
 		const { store, stash, deps } = legacySetup()
 		const failing = fakeNative(store, { setUserIgnore: () => new Refusal("hostUnavailable") })
