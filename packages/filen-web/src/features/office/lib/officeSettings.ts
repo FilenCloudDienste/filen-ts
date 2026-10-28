@@ -24,7 +24,7 @@ import { OFFICE_DIR_NAME, officeDirectory } from "@/features/office/lib/officeDi
 import { SYNCED_FILE_UPLOAD_DEADLINE_MS, SyncedDotFilenFile, type SyncedFileCodec } from "@/lib/syncedDotFilenFile"
 
 // The user's document-editing settings (the author name comments and tracked changes carry, autosave), synced
-// end-to-end encrypted as `.filen/Office/settings.v1.json` beside the spelling dictionary
+// end-to-end encrypted as `.filen/office/settings.v1.json` beside the spelling dictionary
 // (lib/syncedDotFilenFile.ts). Read when an editor or the settings page first needs them.
 
 const CODEC: SyncedFileCodec<OfficeSettingsDoc> = {

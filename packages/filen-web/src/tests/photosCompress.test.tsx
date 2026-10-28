@@ -126,7 +126,7 @@ function renderBar(selectedItems: PhotoItem[]) {
 		createElement(
 			QueryClientProvider,
 			{ client: queryClient },
-			createElement(PhotosBulkActionBar, { rootUuid: PHOTOS_ROOT, selectedItems, onDialogAction })
+			createElement(PhotosBulkActionBar, { rootUuids: [PHOTOS_ROOT], selectedItems, onDialogAction })
 		)
 	)
 
@@ -193,7 +193,7 @@ describe("photos hidden actions", () => {
 
 describe("photosParentNaming", () => {
 	it("names a directory after its listing path's last segment, the root after the header's name, a mix after Photos", () => {
-		const naming = photosParentNaming(PHOTOS_ROOT, "Photos")
+		const naming = photosParentNaming([PHOTOS_ROOT], "Photos")
 
 		expect(naming.nameOf?.(ROME)).toBe("Rome")
 		expect(naming.nameOf?.(PARIS)).toBe("Paris")
@@ -279,7 +279,7 @@ describe("photo tile menu Compress", () => {
 						item: EIFFEL,
 						variant: "drive",
 						hiddenActionIds: PHOTOS_HIDDEN_ACTION_IDS,
-						compressParentNaming: photosParentNaming(PHOTOS_ROOT, "Photos"),
+						compressParentNaming: photosParentNaming([PHOTOS_ROOT], "Photos"),
 						onItemAction: vi.fn()
 					})
 				)
@@ -304,7 +304,7 @@ describe("photos dialog host Compress", () => {
 		const host: { current: PhotosDialogHost | null } = { current: null }
 
 		function Host() {
-			host.current = usePhotosDialogHost({ rootUuid: PHOTOS_ROOT, selectedItems })
+			host.current = usePhotosDialogHost({ rootUuids: [PHOTOS_ROOT], selectedItems })
 
 			return host.current.renderActiveDialog()
 		}

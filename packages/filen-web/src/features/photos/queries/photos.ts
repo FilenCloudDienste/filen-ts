@@ -1,8 +1,9 @@
-import { useSyncExternalStore } from "react"
-import { useQuery, type UseQueryResult } from "@tanstack/react-query"
+import { useEffect, useSyncExternalStore } from "react"
+import { useQueries } from "@tanstack/react-query"
 import { sdkApi } from "@/lib/sdk/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
+import { removeQueriesAndPersisted } from "@/queries/persist"
 import {
 	cachedQueriesWithPrefix,
 	cachedQuery,
@@ -16,7 +17,8 @@ import { isPhotoCandidate, isPhotoCategory } from "@/features/photos/lib/predica
 import { subscribeFileKindVerdicts } from "@/features/drive/lib/fileKindVerdicts"
 import { itemFileKind } from "@/features/drive/lib/preview.logic"
 import { createListenerSet } from "@/lib/listenerSet"
-import { sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
+import { mergePhotosByCaptureDesc, sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
+import { outermostOfRoots, useDirectoryRootChains } from "@/lib/directoryRoots"
 import { photoFolderPaths } from "@/features/photos/lib/search"
 
 // Owns the photos query-key namespace (["photos", …], per client.ts's [domain, entity, params?]
@@ -32,7 +34,7 @@ export function photosListingQueryKey(rootUuid: string) {
 
 export interface PhotosListing {
 	// Photos and the files a content verdict could still make one (isPhotoCandidate); what shows is
-	// decided as it is read (usePhotosListingQuery).
+	// decided as it is read (usePhotosTimeline).
 	photos: PhotoItem[]
 	// Path below the root of each directory directly holding a photo, for search (photoFolderPaths).
 	folders: Record<string, string>
@@ -171,35 +173,185 @@ function shownPhotos(listing: PhotosListing): PhotosListing {
 	return photos.length === listing.photos.length ? listing : { ...listing, photos }
 }
 
-// One select per version: the listing is filtered again only when its data or a verdict about one of its
-// watched files changes.
-let shownPhotosSelect: { version: number; select: (listing: PhotosListing) => PhotosListing } | null = null
+// The listing filtered again only when it or a verdict about one of its watched files changes.
+let shownCache: { listing: PhotosListing; version: number; shown: PhotosListing } | null = null
 
-function shownPhotosFor(version: number): (listing: PhotosListing) => PhotosListing {
-	if (shownPhotosSelect?.version !== version) {
-		shownPhotosSelect = { version, select: listing => shownPhotos(listing) }
+function shownPhotosOf(listing: PhotosListing, version: number): PhotosListing {
+	if (shownCache?.listing !== listing || shownCache.version !== version) {
+		shownCache = { listing, version, shown: shownPhotos(listing) }
 	}
 
-	return shownPhotosSelect.select
+	return shownCache.shown
 }
 
-export function usePhotosListingQuery(rootUuid: string | null): UseQueryResult<PhotosListing> {
-	return useQuery({
-		...photosListingQueryOptions(rootUuid ?? ""),
-		enabled: rootUuid !== null,
-		refetchOnReconnect: "always",
-		select: shownPhotosFor(useSyncExternalStore(subscribeShownPhotos, shownPhotosVersion))
+// The roots' listings as one: their photos in one capture-time order, merged rather than sorted again (each is
+// sorted already), and their directory paths. A single listing is itself.
+export function mergePhotosListings(listings: readonly PhotosListing[]): PhotosListing {
+	const [first] = listings
+
+	if (listings.length === 1 && first !== undefined) {
+		return first
+	}
+
+	const folders: Record<string, string> = {}
+
+	for (const listing of listings) {
+		Object.assign(folders, listing.folders)
+	}
+
+	return {
+		photos: mergePhotosByCaptureDesc(listings.map(listing => listing.photos)),
+		folders
+	}
+}
+
+let mergedCache: { listings: readonly PhotosListing[]; merged: PhotosListing } | null = null
+
+function mergedListing(listings: readonly PhotosListing[]): PhotosListing {
+	const known = mergedCache
+
+	if (known?.listings.length === listings.length && known.listings.every((listing, index) => listing === listings[index])) {
+		return known.merged
+	}
+
+	const merged = mergePhotosListings(listings)
+
+	mergedCache = { listings, merged }
+
+	return merged
+}
+
+export type PhotosTimeline =
+	| { status: "pending" }
+	// No root could be listed; `error` is the first root's failure.
+	| { status: "error"; error: unknown }
+	| { status: "success"; listing: PhotosListing }
+
+export interface PhotosTimelineResult {
+	timeline: PhotosTimeline
+	// The roots listed: the configured ones minus any another holds (resolved from their chains, only with two roots
+	// or more), so no directory is walked twice. Empty until known.
+	listedRoots: readonly string[]
+	// Roots whose listing failed (others may still have listed).
+	failures: readonly { rootUuid: string; error: unknown }[]
+	retry: () => void
+}
+
+// Every root's listing (one recursive walk each), merged into the one timeline the grid shows. Pending until every
+// root has a listing, failed, or waits for the network (offline, what is held shows at once), so the timeline
+// never reorders under the user as a late root lands.
+export function usePhotosTimeline(roots: readonly string[]): PhotosTimelineResult {
+	const chains = useDirectoryRootChains(roots, roots.length > 1)
+	// A chain not resolved yet (or waiting for the network) keeps its root: walking a nested root once costs less
+	// than holding every listing back, and the merge keeps a photo listed twice once.
+	const listedRoots = outermostOfRoots(roots, chains)
+	const droppedKey = roots.filter(root => !listedRoots.includes(root)).join(",")
+	const results = useQueries({
+		queries: listedRoots.map(rootUuid => ({
+			...photosListingQueryOptions(rootUuid),
+			refetchOnReconnect: "always" as const
+		}))
 	})
+
+	// A root another one holds is read through that one: its own listing goes.
+	useEffect(() => {
+		if (droppedKey.length > 0) {
+			forgetPhotosListings(droppedKey.split(","))
+		}
+	}, [droppedKey])
+
+	const version = useSyncExternalStore(subscribeShownPhotos, shownPhotosVersion)
+	const listings: PhotosListing[] = []
+	const failures: { rootUuid: string; error: unknown }[] = []
+	let pending = false
+
+	for (let index = 0; index < results.length; index++) {
+		const result = results[index]
+		const rootUuid = listedRoots[index]
+
+		if (result === undefined || rootUuid === undefined) {
+			continue
+		}
+
+		if (result.data !== undefined) {
+			listings.push(result.data)
+		}
+
+		if (result.status === "error") {
+			failures.push({ rootUuid, error: result.error })
+		} else if (result.data === undefined && result.fetchStatus !== "paused") {
+			pending = true
+		}
+	}
+
+	const [firstFailure] = failures
+	const timeline: PhotosTimeline = pending
+		? { status: "pending" }
+		: listings.length === 0 && firstFailure !== undefined
+			? { status: "error", error: firstFailure.error }
+			: { status: "success", listing: shownPhotosOf(mergedListing(listings), version) }
+
+	return {
+		timeline,
+		listedRoots,
+		failures,
+		retry: () => {
+			for (const result of results) {
+				if (result.status === "error") {
+					void result.refetch()
+				}
+			}
+		}
+	}
+}
+
+// Drops these roots' listings from memory and from disk: a listing is a whole recursive walk, and one of a root that
+// is no longer read would otherwise stay for as long as the persisted cache keeps anything.
+export function forgetPhotosListings(rootUuids: readonly string[]): void {
+	for (const rootUuid of rootUuids) {
+		readThisSession.delete(rootUuid)
+		walkStartSeq.delete(rootUuid)
+		removeQueriesAndPersisted(queryClient, photosListingQueryKey(rootUuid))
+	}
+}
+
+// forgetPhotosListings for every held listing of a root outside `active`.
+export function forgetPhotosListingsExcept(active: ReadonlySet<string>): void {
+	const stale: string[] = []
+
+	for (const query of cachedQueriesWithPrefix(PHOTOS_LISTING_KEY_PREFIX)) {
+		const rootUuid = query.queryKey[2]
+
+		if (typeof rootUuid === "string" && !active.has(rootUuid)) {
+			stale.push(rootUuid)
+		}
+	}
+
+	forgetPhotosListings(stale)
+}
+
+// photosListingQueryUpdate for the listings (of `rootUuids`) that hold one of `touched`: a photo is listed under
+// one root only, so the others aren't patched, nor their walks cancelled.
+export function photosListingsUpdate(
+	rootUuids: readonly string[],
+	touched: ReadonlySet<string>,
+	updater: (prev: PhotoItem[]) => PhotoItem[]
+): void {
+	for (const rootUuid of rootUuids) {
+		const photos = queryClient.getQueryData<PhotosListing>(photosListingQueryKey(rootUuid))?.photos
+
+		if (photos?.some(photo => touched.has(photo.data.uuid)) === true) {
+			photosListingQueryUpdate(rootUuid, updater)
+		}
+	}
 }
 
 // Single-key confirm-then-patch, mirroring driveListingQueryUpdate's own shape (features/drive/
-// queries/drive.ts) but scoped to the one photos key currently mounted for `rootUuid` — there is only
-// ever one photos listing query alive at a time (kv-persisted single root), so this needs no
-// "Global" fan-out counterpart the way drive's own multi-listing surface does. A cache miss (nobody
-// has viewed this root yet) is left alone; a photos patch is the tail of an action taken FROM an
-// already-rendered grid anyway. Unlike drive's patches it still cancels a walk under way, whose result
-// may predate the patched change; an active listing walks again at once, as the mutation behind the
-// patch has resolved by now, and an inactive one stays marked for its next mount.
+// queries/drive.ts) but scoped to one root's photos key (photosListingsUpdate picks the roots a change
+// concerns). A cache miss (nobody has viewed this root yet) is left alone; a photos patch is the tail of
+// an action taken FROM an already-rendered grid anyway. Unlike drive's patches it still cancels a walk
+// under way, whose result may predate the patched change; an active listing walks again at once, as the
+// mutation behind the patch has resolved by now, and an inactive one stays marked for its next mount.
 export function photosListingQueryUpdate(rootUuid: string, updater: (prev: PhotoItem[]) => PhotoItem[]): void {
 	const queryKey = photosListingQueryKey(rootUuid)
 	const query = cachedQuery<PhotosListing>(queryKey)

@@ -10,9 +10,7 @@ import {
 	cachedLibraryConfig,
 	fetchLibraryConfig,
 	updateLibraryConfig,
-	videoRootChainQueryOptions,
-	type LibraryConfigState,
-	type VideoRootChain
+	type LibraryConfigState
 } from "@/features/videos/lib/library"
 import { VIDEO_TITLE_DETAIL_KEY_PREFIX, videoLibrary, type VideoLibrarySnapshot } from "@/features/videos/lib/index"
 import type { VideoTitleDetail } from "@/workers/videoIndex/view.logic"
@@ -51,13 +49,6 @@ export async function saveLibraryConfig(edit: (doc: LibraryConfigDoc, stamp: Sta
 	await scanned
 
 	return saved
-}
-
-export function useVideoRootChainQuery(uuid: string, enabled: boolean): UseQueryResult<VideoRootChain> {
-	return useQuery({
-		...videoRootChainQueryOptions(uuid),
-		enabled
-	})
 }
 
 // The library's titles and roots, kept current by the index; opens the library on mount.

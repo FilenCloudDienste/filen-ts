@@ -28,3 +28,46 @@ export function sortPhotosByCaptureDesc(items: PhotoItem[]): PhotoItem[] {
 		})
 		.map(({ item }) => item)
 }
+
+// Lists each sorted by sortPhotosByCaptureDesc, merged into that same order in one pass over a handful of heads. A
+// photo listed twice (it sorts next to itself) is kept once.
+export function mergePhotosByCaptureDesc(lists: readonly (readonly PhotoItem[])[]): PhotoItem[] {
+	const positions = lists.map(() => 0)
+	// Each list's head's capture time, computed once per head.
+	const keys = lists.map(list => (list[0] === undefined ? 0 : captureTimestamp(list[0])))
+	const out: PhotoItem[] = []
+
+	for (;;) {
+		let best = -1
+		let bestItem: PhotoItem | undefined
+		let bestKey = 0
+
+		for (let index = 0; index < lists.length; index++) {
+			const item = lists[index]?.[positions[index] ?? 0]
+			const key = keys[index] ?? 0
+
+			if (
+				item !== undefined &&
+				(bestItem === undefined || key > bestKey || (key === bestKey && item.data.uuid < bestItem.data.uuid))
+			) {
+				best = index
+				bestItem = item
+				bestKey = key
+			}
+		}
+
+		if (bestItem === undefined) {
+			return out
+		}
+
+		const next = (positions[best] ?? 0) + 1
+		const following = lists[best]?.[next]
+
+		positions[best] = next
+		keys[best] = following === undefined ? 0 : captureTimestamp(following)
+
+		if (out.at(-1)?.data.uuid !== bestItem.data.uuid) {
+			out.push(bestItem)
+		}
+	}
+}

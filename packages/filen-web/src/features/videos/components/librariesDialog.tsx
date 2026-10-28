@@ -10,7 +10,8 @@ import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { videoLibrary } from "@/features/videos/lib/index"
-import { editLibraryConfig, useVideoRootChainQuery } from "@/features/videos/queries/library"
+import { editLibraryConfig } from "@/features/videos/queries/library"
+import { useDirectoryRootChainQuery } from "@/lib/directoryRoots"
 import { useVideoLibraryView, useVideoRootNames } from "@/features/videos/hooks/useVideoLibraryView"
 import { useCatalogHiddenQuery } from "@/features/videos/queries/catalog"
 import { detectedRootKind, isRootBusy, type VideoKindCounts, type VideoLibraryRootView } from "@/features/videos/lib/libraryView.logic"
@@ -77,7 +78,7 @@ function RootCard({
 	const navigate = useNavigate()
 	const isOnline = useIsOnline()
 	const now = useNowMinute()
-	const chainQuery = useVideoRootChainQuery(root.uuid, true)
+	const chainQuery = useDirectoryRootChainQuery(root.uuid, true)
 	const chain = chainQuery.data ?? null
 	const status = root.status
 	const detected = detectedRootKind(counts)

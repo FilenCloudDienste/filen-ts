@@ -38,7 +38,7 @@ import {
 	markPhotosListingStale,
 	photosListingQueryKey,
 	photosListingQueryUpdate,
-	usePhotosListingQuery,
+	usePhotosTimeline,
 	type PhotosListing
 } from "@/features/photos/queries/photos"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
@@ -99,7 +99,7 @@ let root: UuidStr
 const wrapper = queryClientWrapper(queryClient)
 
 function mountListing() {
-	return renderHook(() => usePhotosListingQuery(root), { wrapper })
+	return renderHook(() => usePhotosTimeline([root]), { wrapper })
 }
 
 async function drain(): Promise<void> {
@@ -756,7 +756,11 @@ describe("photos listing and content verdicts", () => {
 		)
 
 		const view = await mountRead()
-		const shown = (): string[] => (view.result.current.data?.photos ?? []).map(photo => photo.data.uuid)
+		const shown = (): string[] => {
+			const timeline = view.result.current.timeline
+
+			return (timeline.status === "success" ? timeline.listing.photos : []).map(photo => photo.data.uuid)
+		}
 
 		shownReads.count = 0
 

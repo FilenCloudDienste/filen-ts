@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { activeLibraryRoots, emptyLibraryConfig, withLibraryRoot } from "@filen/shared/videos"
-import {
-	addRootEdit,
-	chooserPickHint,
-	isHiddenChooserRow,
-	isRootRow,
-	stepAfterSize,
-	stepAfterValidation
-} from "@/features/videos/lib/addDirectory.logic"
+import { addRootEdit, stepAfterSize, stepAfterValidation } from "@/features/videos/lib/addDirectory.logic"
+import { chooserPickHint, isHiddenChooserRow, isRootRow } from "@/lib/rootChooser.logic"
 import { ROOT_ENTRIES_LARGE } from "@/features/videos/lib/library.logic"
 
 const ROOTS = [
@@ -59,6 +53,20 @@ describe("stepAfterValidation", () => {
 	it("offers to replace overlapping directories", () => {
 		expect(
 			stepAfterValidation({ uuid: "4k", validation: { ok: false, reason: "nested", replace: ["movies"] }, replacing: [] })
+		).toEqual({
+			kind: "replace",
+			uuid: "4k",
+			replace: ["movies"]
+		})
+	})
+
+	it("still offers a directory inside a library directory as its replacement", () => {
+		expect(
+			stepAfterValidation({
+				uuid: "4k",
+				validation: { ok: false, reason: "nested", replace: ["movies"], within: ["movies"] },
+				replacing: []
+			})
 		).toEqual({
 			kind: "replace",
 			uuid: "4k",

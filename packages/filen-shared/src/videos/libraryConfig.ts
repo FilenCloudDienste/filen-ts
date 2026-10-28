@@ -1,4 +1,4 @@
-// The synced Videos library configuration, `.filen/Videos/library.v1.json`: which directories are library roots
+// The synced Videos library configuration, `.filen/videos/library.v1.json`: which directories are library roots
 // (and how each is classified), library preferences, and manual corrections. Written rarely, by any device.
 //
 // Built from the watch state's register records: each root, preference and correction is a record of
@@ -13,22 +13,20 @@ import {
 	mergeRecordMaps,
 	mergeUnknownFields,
 	parseRegisterRecord,
+	serializeCanonical,
 	setRegister,
 	tombstoneRecord,
 	type Hlc,
 	type RegisterRecord,
-	type Stamp
-} from "./watchState"
+	type Stamp,
+	type ValueRegister
+} from "./registerRecords"
 
-export const VIDEOS_DIR_NAME = "Videos"
+// Its name under `.filen`, as DOT_FILEN_SUBDIRS (dotFilen.ts) names it.
+export const VIDEOS_DIR_NAME = "videos"
 export const LIBRARY_CONFIG_FILE_NAME = "library.v1.json"
 
 const ROOT_TYPES: ReadonlySet<unknown> = new Set<LibraryRootType>(["auto", "movies", "shows", "other"])
-
-export interface ValueRegister<V> extends Stamp {
-	v: V
-	[key: string]: unknown
-}
 
 // ty: root type, en: enabled, ad: wall-clock ms the root was added (orders the roots).
 export interface LibraryRootRecord extends RegisterRecord {
@@ -184,27 +182,9 @@ export function libraryConfigMaxStamp(doc: LibraryConfigDoc): Hlc {
 	return max
 }
 
-function canonical(value: unknown): unknown {
-	if (Array.isArray(value)) {
-		return value.map(canonical)
-	}
-
-	if (!isObject(value)) {
-		return value
-	}
-
-	const out: Record<string, unknown> = {}
-
-	for (const key of Object.keys(value).sort()) {
-		out[key] = canonical(value[key])
-	}
-
-	return out
-}
-
 // Key-order independent, so two documents with equal content serialize equally.
 export function serializeLibraryConfig(doc: LibraryConfigDoc): string {
-	return JSON.stringify(canonical(doc))
+	return serializeCanonical(doc)
 }
 
 export interface ActiveLibraryRoot {
@@ -465,72 +445,4 @@ export function withLibraryOverride({
 					}
 				})
 	)
-}
-
-// ── Root validation ──────────────────────────────────────────────────────────
-
-// A directory as the root chooser sees it: its uuid, and the uuids from the drive root (inclusive) down to its
-// parent; empty for the drive root itself. `ownDrive` is false for shared-in and public-link directories, which have
-// no stable file ids.
-export interface LibraryRootCandidate {
-	uuid: string
-	ancestors: readonly string[]
-	ownDrive: boolean
-}
-
-export type LibraryRootValidation =
-	| { ok: true }
-	| { ok: false; reason: "notOwnDrive" | "systemDirectory" | "alreadyRoot" }
-	// Overlaps existing roots (inside one, or holding some): offered as a replacement for them.
-	| { ok: false; reason: "nested"; replace: string[] }
-
-export function validateLibraryRoot({
-	candidate,
-	roots,
-	dotFilenUuid
-}: {
-	candidate: LibraryRootCandidate
-	// The current roots, each with its own ancestor chain.
-	roots: readonly { uuid: string; ancestors: readonly string[] }[]
-	// The `.filen` directory's uuid when known.
-	dotFilenUuid: string | null
-}): LibraryRootValidation {
-	if (!candidate.ownDrive) {
-		return {
-			ok: false,
-			reason: "notOwnDrive"
-		}
-	}
-
-	if (dotFilenUuid !== null && (candidate.uuid === dotFilenUuid || candidate.ancestors.includes(dotFilenUuid))) {
-		return {
-			ok: false,
-			reason: "systemDirectory"
-		}
-	}
-
-	const replace: string[] = []
-
-	for (const root of roots) {
-		if (root.uuid === candidate.uuid) {
-			return {
-				ok: false,
-				reason: "alreadyRoot"
-			}
-		}
-
-		if (candidate.ancestors.includes(root.uuid) || root.ancestors.includes(candidate.uuid)) {
-			replace.push(root.uuid)
-		}
-	}
-
-	return replace.length > 0
-		? {
-				ok: false,
-				reason: "nested",
-				replace
-			}
-		: {
-				ok: true
-			}
 }

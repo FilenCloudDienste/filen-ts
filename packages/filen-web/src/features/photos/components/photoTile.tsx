@@ -16,7 +16,7 @@ import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 export interface PhotoTileProps {
-	rootUuid: string
+	rootUuids: readonly string[]
 	item: PhotoItem
 	index: number
 	// The grid's full item count — see DriveTile's identical prop (virtualized set size).
@@ -44,7 +44,7 @@ export interface PhotoTileProps {
 // top-left placement, and no offline badge at all (web has no make-offline concept — see the study's
 // own honest enumeration).
 export function PhotoTile({
-	rootUuid,
+	rootUuids,
 	item,
 	index,
 	total,
@@ -58,7 +58,7 @@ export function PhotoTile({
 	const { t } = useTranslation(["drive", "photos", "common"])
 	const verdict = useFileKindVerdict(item.data.uuid)
 	const name = driveItemName(item)
-	const compressParentNaming = photosParentNaming(rootUuid, t("common:modulePhotos"))
+	const compressParentNaming = photosParentNaming(rootUuids, t("common:modulePhotos"))
 	const press = useTouchLongPress<HTMLDivElement>({
 		onLongPress: () => {
 			onTileToggle(index)
@@ -138,7 +138,7 @@ export function PhotoTile({
 										onItemAction(kind, item)
 									}}
 									onFavoriteToggled={updated => {
-										patchPhoto(rootUuid, updated)
+										patchPhoto(rootUuids, updated)
 									}}
 								/>
 							</DropdownMenu>
@@ -155,7 +155,7 @@ export function PhotoTile({
 					onItemAction(kind, item)
 				}}
 				onFavoriteToggled={updated => {
-					patchPhoto(rootUuid, updated)
+					patchPhoto(rootUuids, updated)
 				}}
 			/>
 		</ContextMenu>

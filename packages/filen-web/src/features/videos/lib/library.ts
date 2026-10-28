@@ -9,10 +9,8 @@ import {
 	mergeLibraryConfig,
 	parseLibraryConfigText,
 	serializeLibraryConfig,
-	validateLibraryRoot,
 	type Hlc,
 	type LibraryConfigDoc,
-	type LibraryRootValidation,
 	type Stamp
 } from "@filen/shared/videos"
 import { settleHeldRevisions } from "@filen/shared"
@@ -22,20 +20,14 @@ import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { readSignOutPending } from "@/lib/signOutPending"
-import {
-	DOT_FILEN_DIR_NAME,
-	dotFilenSubdirUuid,
-	findDotFilenSubdir,
-	getDotFilenSubdir,
-	noteDotFilenFile,
-	onDotFilenSubdirForgotten
-} from "@/lib/dotFilen"
+import { dotFilenSubdirUuid, findDotFilenSubdir, getDotFilenSubdir, noteDotFilenFile, onDotFilenSubdirForgotten } from "@/lib/dotFilen"
 import { queryClient } from "@/queries/client"
-import { noDiskPersister, persister } from "@/queries/persist"
+import { persister } from "@/queries/persist"
+import { checkDirectoryRoot } from "@/lib/directoryRoots"
 import { versionAsFile } from "@/features/videos/lib/library.logic"
 import { forgetVideosDirListing, listVideosDir } from "@/features/videos/lib/videosDirListing"
 
-// The synced library configuration, `.filen/Videos/library.v1.json`: read once per session (none at all when the
+// The synced library configuration, `.filen/videos/library.v1.json`: read once per session (none at all when the
 // drive hasn't changed since the cached copy was read), written only when an edit changes it. Each upload is a
 // new file version, six requests, and comes back to every session of the account as a socket event; this tab's
 // own can arrive before its upload resolves. Reads, edits and uploads run one at a time, each on what the previous
@@ -47,7 +39,7 @@ export interface LibraryConfigState {
 	// The account (its drive root uuid) the state was read under; a cached state of another account is ignored.
 	account: string
 	doc: LibraryConfigDoc
-	// `.filen/Videos` as of the last read, so a session served from the cache still recognizes saves made
+	// `.filen/videos` as of the last read, so a session served from the cache still recognizes saves made
 	// elsewhere without looking the directory up.
 	dirUuid: string | null
 	// Drive uuid of the file the document was read from or saved as; null when none exists yet.
@@ -208,7 +200,7 @@ async function readHead(head: SdkFile): Promise<LibraryConfigDoc | null> {
 	return null
 }
 
-// Reads only: a missing `.filen/Videos` is an empty configuration, created by the first save. A null doc is a
+// Reads only: a missing `.filen/videos` is an empty configuration, created by the first save. A null doc is a
 // head that can't be used (see readHead). The directory is listed as it is at `startedAfter` or later.
 async function readRemote(startedAfter: number): Promise<{ doc: LibraryConfigDoc | null; head: SdkFile | null; dirUuid: string | null }> {
 	const dirUuid = await findDotFilenSubdir(VIDEOS_DIR_NAME)
@@ -487,87 +479,12 @@ export function updateLibraryConfig(edit: (doc: LibraryConfigDoc, stamp: Stamp) 
 
 // ── Root validation ──
 
-export const VIDEO_ROOT_CHAIN_KEY_PREFIX = ["videos", "rootChain"] as const
-
-export type VideoRootChain = { uuid: string; name: string }[] | null
-
-// A directory's chain from the drive root down to itself (names for a path, uuids to open it in the drive); null
-// when it can't be resolved. Resolving costs a request per ancestor, so it is kept until a directory event
-// touches the chain (forgetRootChains).
-export function videoRootChainQueryOptions(uuid: string) {
-	return {
-		queryKey: [...VIDEO_ROOT_CHAIN_KEY_PREFIX, uuid] as const,
-		queryFn: () => runOp<VideoRootChain>(sdkApi.videoRootChain(uuid)),
-		staleTime: Infinity,
-		persister: noDiskPersister
-	}
-}
-
-function rootChain(uuid: string): Promise<VideoRootChain> {
-	return queryClient.query(videoRootChainQueryOptions(uuid))
-}
-
-// A directory moved, was renamed, trashed, restored or deleted: every kept chain through it is read again.
-function forgetRootChains(dirUuid: string): void {
-	void queryClient.invalidateQueries({
-		queryKey: VIDEO_ROOT_CHAIN_KEY_PREFIX,
-		predicate: query => {
-			const chain = query.state.data as VideoRootChain | undefined
-
-			return query.queryKey[2] === dirUuid || (chain?.some(link => link.uuid === dirUuid) ?? false)
-		}
-	})
-}
-
-// Whether `uuid` can become a library root, given the current roots: an own-drive directory outside `.filen`
-// that neither holds nor sits inside another root (the overlapped ones are offered for replacement). `ownDrive` is
-// false for a shared-in or public-link directory. Ancestors usually come from the directory cache, no request.
-export async function checkLibraryRoot({
-	uuid,
-	ownDrive
-}: {
-	uuid: string
-	ownDrive: boolean
-}): Promise<LibraryRootValidation | { ok: false; reason: "notFound" }> {
-	if (!ownDrive) {
-		return {
-			ok: false,
-			reason: "notOwnDrive"
-		}
-	}
-
-	const chain = await rootChain(uuid)
-
-	if (chain === null) {
-		return {
-			ok: false,
-			reason: "notFound"
-		}
-	}
-
-	const roots = await Promise.all(
-		activeLibraryRoots(cached()?.doc ?? emptyLibraryConfig()).map(async root => {
-			const chainOfRoot = await rootChain(root.dirUuid)
-
-			return chainOfRoot === null
-				? null
-				: {
-						uuid: root.dirUuid,
-						ancestors: chainOfRoot.slice(0, -1).map(entry => entry.uuid)
-					}
-		})
-	)
-	// `.filen` sits directly under the drive root.
-	const topLevel = chain[1]
-
-	return validateLibraryRoot({
-		candidate: {
-			uuid,
-			ancestors: chain.slice(0, -1).map(entry => entry.uuid),
-			ownDrive
-		},
-		roots: roots.filter(root => root !== null),
-		dotFilenUuid: topLevel?.name.toLowerCase() === DOT_FILEN_DIR_NAME ? topLevel.uuid : null
+// Whether `uuid` can become a library root next to the current ones (see checkDirectoryRoot).
+export function checkLibraryRoot({ uuid, ownDrive }: { uuid: string; ownDrive: boolean }): ReturnType<typeof checkDirectoryRoot> {
+	return checkDirectoryRoot({
+		uuid,
+		ownDrive,
+		roots: activeLibraryRoots(cached()?.doc ?? emptyLibraryConfig()).map(root => root.dirUuid)
 	})
 }
 
@@ -580,20 +497,6 @@ type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
 export function handleLibraryConfigDriveEvent(event: DriveSocketEvent): void {
 	const dirUuid = dotFilenSubdirUuid(VIDEOS_DIR_NAME) ?? cached()?.dirUuid ?? null
 	const inner = event.inner
-
-	switch (inner.type) {
-		case "folderMove":
-		case "folderRestore":
-			forgetRootChains(inner.dir.uuid)
-			break
-		case "folderTrash":
-		case "folderDeletedPermanent":
-		case "folderMetadataChanged":
-			forgetRootChains(inner.uuid)
-			break
-		default:
-			break
-	}
 
 	currentTo = currentTo !== null && event.driveMessageId === currentTo + 1n ? event.driveMessageId : null
 

@@ -1,7 +1,7 @@
 import { setFavoritedItems, trashItems, renameItem, type ActionOutcome } from "@/features/drive/lib/actions"
 import { type BulkOutcome, type BulkProgress } from "@/lib/actions/bulk"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { photosListingQueryUpdate } from "@/features/photos/queries/photos"
+import { photosListingsUpdate } from "@/features/photos/queries/photos"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
 
 export type { ActionOutcome }
@@ -10,7 +10,8 @@ export type { ActionOutcome }
 // network op + drive-cache patch runs unchanged; each wrapper only layers on the ONE extra patch the
 // photos surface itself needs. driveListingQueryUpdateGlobal only ever sweeps ["drive","listing",…]
 // keys (drive.ts's own doc comment), so a favorite/rename toggled from the photos grid would
-// otherwise sit stale in ["photos","listing",rootUuid] until the whole recursive walk refetches.
+// otherwise sit stale in ["photos","listing",rootUuid] until the whole recursive walk refetches. Each takes
+// the roots the grid lists; only the listings holding an affected photo are patched.
 //
 // Mirroring driveListingQueryUpdate's own single-key patch shape here (rather than folding photos
 // awareness into drive's shared updaters) keeps the dependency direction the same as everywhere
@@ -23,9 +24,11 @@ export type { ActionOutcome }
 // appends: the item may have left the listing meanwhile. Called with the favorite result of drive's
 // own item menu (tile and preview) and after a rename, so the grid updates at once rather than on the
 // socket echo.
-export function patchPhoto(rootUuid: string, item: DriveItem): void {
+export function patchPhoto(rootUuids: readonly string[], item: DriveItem): void {
 	if (item.type === "file") {
-		photosListingQueryUpdate(rootUuid, prev => prev.map(existing => (existing.data.uuid === item.data.uuid ? item : existing)))
+		photosListingsUpdate(rootUuids, new Set([item.data.uuid]), prev =>
+			prev.map(existing => (existing.data.uuid === item.data.uuid ? item : existing))
+		)
 	}
 }
 
@@ -34,7 +37,7 @@ export function patchPhoto(rootUuid: string, item: DriveItem): void {
 // re-deriving from each item's own mutation result, since the only field this write can ever change
 // is that one flag.
 export async function setFavoritedPhotos(
-	rootUuid: string,
+	rootUuids: readonly string[],
 	items: PhotoItem[],
 	favorited: boolean,
 	onSettled?: BulkProgress
@@ -44,7 +47,7 @@ export async function setFavoritedPhotos(
 	if (outcome.succeeded.length > 0) {
 		const succeededUuids = new Set(outcome.succeeded.map(succeeded => succeeded.data.uuid))
 
-		photosListingQueryUpdate(rootUuid, prev =>
+		photosListingsUpdate(rootUuids, succeededUuids, prev =>
 			prev.map(existing =>
 				succeededUuids.has(existing.data.uuid) ? { ...existing, data: { ...existing.data, favorited } } : existing
 			)
@@ -56,13 +59,17 @@ export async function setFavoritedPhotos(
 
 // A trashed item leaves the photos listing outright (it's no longer under the root at all) — no
 // listing membership to re-add later, unlike a drive "favorites" toggle which can also ADD a row.
-export async function trashPhotos(rootUuid: string, items: PhotoItem[], onSettled?: BulkProgress): Promise<BulkOutcome<PhotoItem>> {
+export async function trashPhotos(
+	rootUuids: readonly string[],
+	items: PhotoItem[],
+	onSettled?: BulkProgress
+): Promise<BulkOutcome<PhotoItem>> {
 	const outcome = await trashItems(items, onSettled)
 
 	if (outcome.succeeded.length > 0) {
 		const removedUuids = new Set(outcome.succeeded.map(succeeded => succeeded.data.uuid))
 
-		photosListingQueryUpdate(rootUuid, prev => prev.filter(existing => !removedUuids.has(existing.data.uuid)))
+		photosListingsUpdate(rootUuids, removedUuids, prev => prev.filter(existing => !removedUuids.has(existing.data.uuid)))
 	}
 
 	return outcome
@@ -70,11 +77,11 @@ export async function trashPhotos(rootUuid: string, items: PhotoItem[], onSettle
 
 // `newName` is passed through unchanged (not pre-trimmed) — mirrors renameItem's own contract; the
 // caller (the rename dialog) trims before calling in, same as useDriveDialogHost's handleRenameSubmit.
-export async function renamePhotoItem(rootUuid: string, item: PhotoItem, newName: string): Promise<ActionOutcome> {
+export async function renamePhotoItem(rootUuids: readonly string[], item: PhotoItem, newName: string): Promise<ActionOutcome> {
 	const outcome = await renameItem(item, newName)
 
 	if (outcome.status === "success") {
-		patchPhoto(rootUuid, outcome.item)
+		patchPhoto(rootUuids, outcome.item)
 	}
 
 	return outcome

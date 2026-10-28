@@ -60,7 +60,7 @@ let coordinator: WalkCoordinator<DirsAndFiles>
 let rootA: string
 let rootB: string
 let configFile: File | null
-// What exists of `.filen/Videos` on the server: neither, `.filen` alone, or both.
+// What exists of `.filen/videos` on the server: neither, `.filen` alone, or both.
 let existing: "none" | "dotFilen" | "both"
 
 function requests(): number {

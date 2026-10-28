@@ -97,7 +97,7 @@ afterEach(cleanup)
 describe("PhotoGrid — selection reconcile", () => {
 	it("hands the bulk bar and the dialogs a selected photo as the grid now holds it", () => {
 		const selected = [photo("p1", "old.jpg"), photo("p2", "beach.jpg")]
-		const { rerender } = render(createElement(PhotoGrid, { rootUuid: ROOT, listing: { photos: selected, folders: {} } }))
+		const { rerender } = render(createElement(PhotoGrid, { rootUuids: [ROOT], listing: { photos: selected, folders: {} } }))
 
 		// After the grid's own reset on mount, as a click would.
 		act(() => {
@@ -105,7 +105,7 @@ describe("PhotoGrid — selection reconcile", () => {
 		})
 		rerender(
 			createElement(PhotoGrid, {
-				rootUuid: ROOT,
+				rootUuids: [ROOT],
 				listing: { photos: [photo("p1", "new.jpg"), photo("p2", "beach.jpg")], folders: {} }
 			})
 		)
@@ -134,7 +134,7 @@ describe("PhotoGrid — thumbnail cache sizing", () => {
 				disconnect = vi.fn()
 			}
 		)
-		render(createElement(PhotoGrid, { rootUuid: ROOT, listing: { photos: [photo("p1", "a.jpg")], folders: {} } }))
+		render(createElement(PhotoGrid, { rootUuids: [ROOT], listing: { photos: [photo("p1", "a.jpg")], folders: {} } }))
 
 		act(() => {
 			resize(1_000, 400)

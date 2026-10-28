@@ -19,16 +19,8 @@ import { sdkApi } from "@/lib/sdk/client"
 import { checkLibraryRoot } from "@/features/videos/lib/library"
 import { editLibraryConfig } from "@/features/videos/queries/library"
 import { useVideoLibraryView, useVideoRootNames } from "@/features/videos/hooks/useVideoLibraryView"
-import {
-	addRootEdit,
-	chooserPickHint,
-	isHiddenChooserRow,
-	isRootRow,
-	stepAfterSize,
-	stepAfterValidation,
-	type AddDirectoryStep,
-	type ChooserRoot
-} from "@/features/videos/lib/addDirectory.logic"
+import { addRootEdit, stepAfterSize, stepAfterValidation, type AddDirectoryStep } from "@/features/videos/lib/addDirectory.logic"
+import { chooserPickHint, isHiddenChooserRow, isRootRow, type ChooserRoot } from "@/lib/rootChooser.logic"
 import { closeVideosChooser } from "@/features/videos/store/useVideosDialogStore"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"

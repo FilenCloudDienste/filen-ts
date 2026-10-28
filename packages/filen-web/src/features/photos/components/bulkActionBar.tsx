@@ -20,7 +20,7 @@ import { CompressMenuEntries } from "@/features/drive/components/archiveSubmenus
 import { BulkActionButton, BulkActionMenuButton, SelectionActionBar } from "@/components/selectionActionBar"
 
 export interface PhotosBulkActionBarProps {
-	rootUuid: string
+	rootUuids: readonly string[]
 	selectedItems: PhotoItem[]
 	onDialogAction: (kind: BulkDialogActionKind) => void
 }
@@ -33,7 +33,7 @@ const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
 
 // Floating selection bar for the photos grid — drive's own descriptors and gates, against the
 // photos-scoped selection store + cache-patching action wrappers instead of drive's own.
-export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }: PhotosBulkActionBarProps) {
+export function PhotosBulkActionBar({ rootUuids, selectedItems, onDialogAction }: PhotosBulkActionBarProps) {
 	const { t } = useTranslation(["drive", "photos", "common"])
 	const isOnline = useIsOnline()
 	const flags = aggregateDriveSelectionFlags(selectedItems)
@@ -48,7 +48,7 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 			driveActivity(
 				selectedItems,
 				favoriteKeys(favorited),
-				(targets, onSettled) => setFavoritedPhotos(rootUuid, targets, favorited, onSettled),
+				(targets, onSettled) => setFavoritedPhotos(rootUuids, targets, favorited, onSettled),
 				{ prune: prunePhotoSelection }
 			)
 		)
@@ -97,7 +97,7 @@ export function PhotosBulkActionBar({ rootUuid, selectedItems, onDialogAction }:
 								family={DROPDOWN_TREE_MENU_FAMILY}
 								items={selectedItems}
 								variant="drive"
-								parentNaming={photosParentNaming(rootUuid, t("common:modulePhotos"))}
+								parentNaming={photosParentNaming(rootUuids, t("common:modulePhotos"))}
 								onMoreOptions={() => {
 									onDialogAction("compress")
 								}}

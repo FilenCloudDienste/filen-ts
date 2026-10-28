@@ -45,7 +45,7 @@ function photo(): PhotoItem {
 function renderTile(onTileClick = vi.fn<PhotoTileProps["onTileClick"]>(), onTileToggle = vi.fn<PhotoTileProps["onTileToggle"]>()) {
 	render(
 		createElement(PhotoTile, {
-			rootUuid: "root",
+			rootUuids: ["root"],
 			item: photo(),
 			index: INDEX,
 			total: 9,

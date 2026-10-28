@@ -45,6 +45,7 @@ import {
 	type LibraryConfigState
 } from "@/features/videos/lib/library"
 import { resetDotFilen } from "@/lib/dotFilen"
+import { forgetDirectoryRootChains } from "@/lib/directoryRoots"
 import { listVideosDir } from "@/features/videos/lib/videosDirListing"
 import { queryClient } from "@/queries/client"
 
@@ -325,7 +326,7 @@ describe("library config", () => {
 		expect(sdkApi.videoRootChain).toHaveBeenCalledTimes(2)
 
 		// Media trashed: every chain through it is read again.
-		handleLibraryConfigDriveEvent(
+		forgetDirectoryRootChains(
 			driveEvent(++eventId, { type: "folderTrash", parent: hexUuid(), uuid: "media" as `${string}-${string}-${string}-${string}` })
 		)
 		await checkLibraryRoot({ uuid: "media", ownDrive: true })

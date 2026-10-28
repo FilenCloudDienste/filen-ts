@@ -1,29 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-
-// Same mock boundary/shape as sidebarWidth.test.ts/startScreen.test.ts: `@/lib/storage/adapter`
-// itself, backed by an in-memory Map reset per test.
-const { kvStore } = vi.hoisted(() => ({ kvStore: new Map<string, unknown>() }))
-
-vi.mock("@/lib/storage/adapter", () => ({
-	kvGetJson: (key: string) => Promise.resolve(kvStore.get(key) ?? null),
-	kvSetJson: (key: string, value: unknown) => {
-		kvStore.set(key, value)
-
-		return Promise.resolve()
-	},
-	kvDelete: (key: string) => {
-		kvStore.delete(key)
-
-		return Promise.resolve()
-	}
-}))
-
+import { describe, expect, it } from "vitest"
 import type { ErrorDTO } from "@/lib/sdk/errors"
-import { clearPhotosRoot, getPhotosRoot, isRootGoneError, setPhotosRoot, shouldResetRootOnError } from "@/features/photos/lib/root"
-
-beforeEach(() => {
-	kvStore.clear()
-})
+import { isRootGoneError, shouldResetRootOnError } from "@/features/photos/lib/root"
 
 function goneDto(): ErrorDTO {
 	return {
@@ -44,32 +21,6 @@ function transientDto(): ErrorDTO {
 function sdkKindDto(kind: string): ErrorDTO {
 	return { species: "sdk", kind, message: `directory not found: x`, label: `directory not found: x` }
 }
-
-describe("photos root: kv round-trip (unset -> chosen -> ready)", () => {
-	it("is unset (null) when nothing is persisted", async () => {
-		await expect(getPhotosRoot()).resolves.toBeNull()
-	})
-
-	it("roundtrips a chosen root through set/get (chosen -> ready)", async () => {
-		await setPhotosRoot("root-uuid-1")
-
-		await expect(getPhotosRoot()).resolves.toBe("root-uuid-1")
-	})
-
-	it("choosing a new root overwrites the previous one", async () => {
-		await setPhotosRoot("root-uuid-1")
-		await setPhotosRoot("root-uuid-2")
-
-		await expect(getPhotosRoot()).resolves.toBe("root-uuid-2")
-	})
-
-	it("clearPhotosRoot resets back to unset (the gone-root reset path)", async () => {
-		await setPhotosRoot("root-uuid-1")
-		await clearPhotosRoot()
-
-		await expect(getPhotosRoot()).resolves.toBeNull()
-	})
-})
 
 describe("isRootGoneError", () => {
 	it("matches a plain error whose message starts with the directory-not-found prefix", () => {

@@ -99,7 +99,7 @@ describe("setFavoritedPhotos", () => {
 		seedPhotosListing([a, b])
 		setFavorited.mockResolvedValue({ ...a.data, favorited: true })
 
-		await setFavoritedPhotos(ROOT_UUID, [a, b], true)
+		await setFavoritedPhotos([ROOT_UUID], [a, b], true)
 
 		const listing = getPhotosListing() ?? []
 		expect(listing.every(item => item.data.favorited)).toBe(true)
@@ -110,7 +110,7 @@ describe("setFavoritedPhotos", () => {
 		seedPhotosListing([a])
 		setFavorited.mockRejectedValueOnce(new Error("rejected"))
 
-		await setFavoritedPhotos(ROOT_UUID, [a], true)
+		await setFavoritedPhotos([ROOT_UUID], [a], true)
 
 		expect(getPhotosListing()?.[0]?.data.favorited).toBe(false)
 	})
@@ -124,7 +124,7 @@ describe("trashPhotos", () => {
 		// The worker op resolves the trashed File (sdk.worker.ts) — the trash-listing patch narrows it.
 		trashFile.mockResolvedValue(mockFile({ uuid: testUuid("a"), parent: "trash" }))
 
-		await trashPhotos(ROOT_UUID, [a])
+		await trashPhotos([ROOT_UUID], [a])
 
 		const listing = getPhotosListing() ?? []
 		expect(listing.map(item => item.data.uuid)).toEqual([b.data.uuid])
@@ -135,7 +135,7 @@ describe("trashPhotos", () => {
 		seedPhotosListing([a])
 		trashFile.mockRejectedValueOnce(new Error("rejected"))
 
-		await trashPhotos(ROOT_UUID, [a])
+		await trashPhotos([ROOT_UUID], [a])
 
 		expect(getPhotosListing()).toHaveLength(1)
 	})
@@ -148,7 +148,7 @@ describe("patchPhoto", () => {
 		const item = photoItem()
 		seedPhotosListing([item])
 
-		patchPhoto(ROOT_UUID, { ...item, data: { ...item.data, favorited: true } })
+		patchPhoto([ROOT_UUID], { ...item, data: { ...item.data, favorited: true } })
 
 		expect(getPhotosListing()?.[0]?.data.favorited).toBe(true)
 	})
@@ -158,7 +158,7 @@ describe("patchPhoto", () => {
 		seedPhotosListing([item])
 		const other = photoItem({ uuid: testUuid("other"), favorited: true })
 
-		patchPhoto(ROOT_UUID, other)
+		patchPhoto([ROOT_UUID], other)
 
 		expect(getPhotosListing()).toHaveLength(1)
 		expect(getPhotosListing()?.[0]?.data.favorited).toBe(false)
@@ -178,10 +178,29 @@ describe("renamePhotoItem", () => {
 			})
 		)
 
-		const outcome = await renamePhotoItem(ROOT_UUID, item, "renamed.jpg")
+		const outcome = await renamePhotoItem([ROOT_UUID], item, "renamed.jpg")
 
 		expect(outcome.status).toBe("success")
 		expect(getPhotosListing()).toHaveLength(1)
 		expect(getPhotosListing()?.[0]?.data.decryptedMeta?.name).toBe("renamed.jpg")
+	})
+})
+
+describe("several photos directories", () => {
+	const OTHER_ROOT = "other-root-uuid"
+
+	it("patches only the listing holding the photo", () => {
+		const item = photoItem()
+		const elsewhere = photoItem({ uuid: testUuid("elsewhere") })
+		const otherListing: PhotosListing = { photos: [elsewhere], folders: {} }
+
+		seedPhotosListing([item])
+		testQueryClient.setQueryData(photosListingQueryKey(OTHER_ROOT), otherListing)
+
+		patchPhoto([OTHER_ROOT, ROOT_UUID], { ...item, data: { ...item.data, favorited: true } })
+
+		expect(getPhotosListing()?.[0]?.data.favorited).toBe(true)
+		// The other listing is not even rewritten.
+		expect(testQueryClient.getQueryData(photosListingQueryKey(OTHER_ROOT))).toBe(otherListing)
 	})
 })

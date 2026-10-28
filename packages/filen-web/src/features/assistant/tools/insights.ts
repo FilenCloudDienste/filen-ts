@@ -3,8 +3,9 @@ import { storageSummary } from "@filen/shared"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY, ACCOUNT_STALE_TIME, fetchAccount } from "@/queries/account"
 import { previewType } from "@/features/drive/lib/preview.logic"
-import { photosListingQueryOptions } from "@/features/photos/queries/photos"
-import { photosRootQueryOptions } from "@/features/photos/queries/root"
+import { mergePhotosListings, photosListingQueryOptions } from "@/features/photos/queries/photos"
+import { photosLibraryRoots } from "@/features/photos/lib/library"
+import { resolveOutermostRoots } from "@/lib/directoryRoots"
 import { captureTimestamp } from "@/features/photos/lib/captureSort"
 import {
 	cachedDriveRows,
@@ -102,14 +103,17 @@ export const listPhotosTool: ToolAdapter = async (input, scope) => {
 	const selection = dateSelection(input, ["taken"], scope.calendar)
 	const kind = optionalString(input, "kind") ?? "any"
 	const oldestFirst = optionalString(input, "sort") === "oldest"
-	// Every write to the root invalidates its query, so a cached value stands.
-	const root = await queryClient.query({ ...photosRootQueryOptions(), staleTime: Infinity })
+	const roots = await photosLibraryRoots()
 
-	if (root === null) {
+	if (roots.length === 0) {
 		throw new AssistantToolError("Photos has no directory set up yet; the user chooses one on the Photos screen")
 	}
 
-	const { photos } = await queryClient.query({ ...photosListingQueryOptions(root), staleTime: Infinity })
+	// The roots the grid lists, each listing walked only when the grid doesn't hold it already.
+	const listed = await resolveOutermostRoots(roots)
+	const { photos } = mergePhotosListings(
+		await Promise.all(listed.map(root => queryClient.query({ ...photosListingQueryOptions(root), staleTime: Infinity })))
+	)
 
 	throwIfStopped(scope)
 

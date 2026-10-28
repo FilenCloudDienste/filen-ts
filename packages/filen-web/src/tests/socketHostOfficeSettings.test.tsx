@@ -19,6 +19,8 @@ vi.mock("@/lib/dotFilen", () => ({ registerDotFilenSocketHandlers: () => () => u
 vi.mock("@/features/videos/lib/library", () => ({ registerLibraryConfigSocketHandlers: () => () => undefined }))
 vi.mock("@/features/videos/lib/watchState", () => ({ registerWatchStateSocketHandlers: () => () => undefined }))
 vi.mock("@/features/spellcheck/lib/userDictionary", () => ({ registerUserDictionarySocketHandlers: () => () => undefined }))
+vi.mock("@/features/photos/lib/library", () => ({ registerPhotosLibrarySocketHandlers: () => () => undefined }))
+vi.mock("@/lib/directoryRoots", () => ({ registerDirectoryRootSocketHandlers: () => () => undefined }))
 
 const { SocketHost } = await import("@/features/shell/components/socketHost")
 

@@ -2,8 +2,8 @@ import { useSyncExternalStore } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { activeLibraryRoots } from "@filen/shared/videos"
-import { useLibraryConfigQuery, useVideoRootChainQuery } from "@/features/videos/queries/library"
-import { videoRootChainQueryOptions, type VideoRootChain } from "@/features/videos/lib/library"
+import { useLibraryConfigQuery } from "@/features/videos/queries/library"
+import { directoryRootChainQueryOptions, useDirectoryRootChainQuery, type DirectoryRootChain } from "@/lib/directoryRoots"
 import { videoLibrary } from "@/features/videos/lib/index"
 import { libraryRootViews, type VideoLibraryRootView } from "@/features/videos/lib/libraryView.logic"
 
@@ -21,7 +21,7 @@ export function useVideoLibraryView() {
 	}
 }
 
-function chainName(chain: VideoRootChain | undefined, driveName: string): string {
+function chainName(chain: DirectoryRootChain | undefined, driveName: string): string {
 	if (chain === undefined || chain === null) {
 		return ""
 	}
@@ -52,7 +52,7 @@ function needsChain(root: VideoLibraryRootView | undefined): boolean {
 export function useVideoRootName(uuid: string, root: VideoLibraryRootView | undefined): string {
 	const { t } = useTranslation("drive")
 	const indexName = root?.status?.name
-	const chainQuery = useVideoRootChainQuery(uuid, needsChain(root) && uuid.length > 0)
+	const chainQuery = useDirectoryRootChainQuery(uuid, needsChain(root) && uuid.length > 0)
 
 	return knownName(indexName) ? indexName : chainName(chainQuery.data, t("driveMyDrive"))
 }
@@ -62,7 +62,7 @@ export function useVideoRootNames(roots: readonly VideoLibraryRootView[]): Map<s
 	const { t } = useTranslation("drive")
 	const unnamed = roots.filter(needsChain)
 	const chains = useQueries({
-		queries: unnamed.map(root => videoRootChainQueryOptions(root.uuid))
+		queries: unnamed.map(root => directoryRootChainQueryOptions(root.uuid))
 	})
 	const names = new Map<string, string>()
 

@@ -35,7 +35,7 @@ export interface PhotosDialogHost {
 }
 
 interface UsePhotosDialogHostParams {
-	rootUuid: string
+	rootUuids: readonly string[]
 	selectedItems: PhotoItem[]
 }
 
@@ -46,11 +46,11 @@ interface UsePhotosDialogHostParams {
 // the preview overlay does — the overlay itself and the info dialog — get "drive", see their render-site
 // comments), so there is no photos-specific fork of any of them beyond props: the preview's favorite
 // patch, and the photos selection pruning plus directory naming the share and compress dialogs take.
-export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialogHostParams): PhotosDialogHost {
+export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialogHostParams): PhotosDialogHost {
 	const { t } = useTranslation("common")
 	// Compress (its dialog and the preview's menu) reads directory names from what Photos holds and names a
 	// mix of directories after Photos.
-	const compressParentNaming = photosParentNaming(rootUuid, t("modulePhotos"))
+	const compressParentNaming = photosParentNaming(rootUuids, t("modulePhotos"))
 	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActivePhotosDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
@@ -102,12 +102,12 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 	}
 
 	async function handleRenameSubmit(item: PhotoItem, value: string): Promise<void> {
-		await runDialogOutcome(() => renamePhotoItem(rootUuid, item, value.trim()))
+		await runDialogOutcome(() => renamePhotoItem(rootUuids, item, value.trim()))
 	}
 
 	async function handleTrashConfirm(items: PhotoItem[]): Promise<void> {
 		await runBulkDialogActivity(
-			driveActivity(items, DRIVE_TRASH, (targets, onSettled) => trashPhotos(rootUuid, targets, onSettled), {
+			driveActivity(items, DRIVE_TRASH, (targets, onSettled) => trashPhotos(rootUuids, targets, onSettled), {
 				prune: prunePhotoSelection
 			})
 		)
@@ -181,7 +181,7 @@ export function usePhotosDialogHost({ rootUuid, selectedItems }: UsePhotosDialog
 						onClose={closeActiveDialog}
 						onItemRemoved={removeCurrentPreviewItem}
 						onFavoriteToggled={item => {
-							patchPhoto(rootUuid, item)
+							patchPhoto(rootUuids, item)
 						}}
 						hiddenMenuActionIds={PHOTOS_HIDDEN_ACTION_IDS}
 						compressParentNaming={compressParentNaming}

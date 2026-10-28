@@ -1,52 +1,9 @@
-import { withLibraryRoot, withoutLibraryRoot, type LibraryConfigDoc, type LibraryRootValidation, type Stamp } from "@filen/shared/videos"
+import { withLibraryRoot, withoutLibraryRoot, type LibraryConfigDoc, type Stamp } from "@filen/shared/videos"
 import { ROOT_ENTRIES_LARGE } from "@/features/videos/lib/library.logic"
+import { rootPickVerdict, type RootPickValidation } from "@/lib/rootChooser.logic"
 
-// The "Add a directory" flow: which chooser rows can be picked, and the steps from a pick to the saved root
-// (overlap → replace offer, a very large directory → memory warning, then the save).
-
-export interface ChooserRoot {
-	uuid: string
-	name: string
-}
-
-// Filen's own directory at the drive root never shows in the chooser.
-export function isHiddenChooserRow({ name, atDriveRoot, systemName }: { name: string; atDriveRoot: boolean; systemName: string }): boolean {
-	return atDriveRoot && name.toLowerCase() === systemName
-}
-
-// A row that already is a library directory can't be picked again.
-export function isRootRow(uuid: string, roots: readonly ChooserRoot[]): boolean {
-	return roots.some(root => root.uuid === uuid)
-}
-
-// What the chooser says about the open directory before it is added: it is a library directory already, or
-// sits inside one (adding it is then offered as a replacement).
-export type ChooserPickHint = { kind: "none" } | { kind: "alreadyRoot" } | { kind: "insideRoot"; root: ChooserRoot }
-
-export function chooserPickHint({ pathStack, roots }: { pathStack: readonly string[]; roots: readonly ChooserRoot[] }): ChooserPickHint {
-	const current = pathStack.at(-1)
-
-	if (current !== undefined && isRootRow(current, roots)) {
-		return {
-			kind: "alreadyRoot"
-		}
-	}
-
-	for (let index = pathStack.length - 2; index >= 0; index--) {
-		const root = roots.find(candidate => candidate.uuid === pathStack[index])
-
-		if (root !== undefined) {
-			return {
-				kind: "insideRoot",
-				root
-			}
-		}
-	}
-
-	return {
-		kind: "none"
-	}
-}
+// The "Add a directory" flow: the steps from a pick to the saved root (overlap → replace offer, a very large
+// directory → memory warning, then the save). Which chooser rows can be picked: rootChooser.logic.ts.
 
 export type AddDirectoryStep =
 	| { kind: "browse" }
@@ -60,49 +17,34 @@ export type AddDirectoryStep =
 	| { kind: "blocked"; reason: "alreadyRoot" | "systemDirectory" | "notFound" | "notOwnDrive" }
 	| { kind: "saving" }
 
-function union(a: readonly string[], b: readonly string[]): string[] {
-	return [...new Set([...a, ...b])]
-}
-
-// After the pick was validated. `replacing` names directories the pick replaces regardless (the chooser was
-// opened to swap an empty one); a validation that finds only those overlapping still counts as clear.
+// After the pick was validated (see rootPickVerdict); a clear pick is sized next.
 export function stepAfterValidation({
 	uuid,
 	validation,
 	replacing
 }: {
 	uuid: string
-	validation: LibraryRootValidation | { ok: false; reason: "notFound" }
+	validation: RootPickValidation
 	replacing: readonly string[]
 }): AddDirectoryStep {
-	const sizing: AddDirectoryStep = {
-		kind: "sizing",
-		uuid,
-		replace: [...replacing]
-	}
+	const verdict = rootPickVerdict({ uuid, validation, replacing })
 
-	if (validation.ok) {
-		return sizing
-	}
-
-	if (validation.reason !== "nested") {
-		return validation.reason === "alreadyRoot" && replacing.includes(uuid)
-			? sizing
-			: {
-					kind: "blocked",
-					reason: validation.reason
-				}
-	}
-
-	const others = validation.replace.filter(root => !replacing.includes(root))
-
-	return others.length === 0
-		? sizing
-		: {
+	switch (verdict.kind) {
+		case "clear":
+			return {
+				kind: "sizing",
+				uuid,
+				replace: verdict.replace
+			}
+		case "replace":
+			return {
 				kind: "replace",
 				uuid,
-				replace: union(replacing, validation.replace)
+				replace: verdict.replace
 			}
+		case "blocked":
+			return verdict
+	}
 }
 
 // After the pick's size is known (files and directories below it, or null when it couldn't be read).

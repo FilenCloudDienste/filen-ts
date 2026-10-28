@@ -3,13 +3,17 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ImagesIcon } from "lucide-react"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { useAccountQuery } from "@/queries/account"
-import { usePhotosRootQuery, invalidatePhotosRoot } from "@/features/photos/queries/root"
-import { usePhotosListingQuery } from "@/features/photos/queries/photos"
-import { clearPhotosRoot, setPhotosRoot, shouldResetRootOnError } from "@/features/photos/lib/root"
+import { usePhotosTimeline } from "@/features/photos/queries/photos"
+import { loadPhotosLibrary, removePhotosRoot, usePhotosLibrary } from "@/features/photos/lib/library"
+import { shouldResetRootOnError } from "@/features/photos/lib/root"
+import { PHOTOS_CHOOSE_ACTION_ID } from "@/features/photos/lib/focusTargets"
+import { usePhotosRootViews } from "@/features/photos/hooks/usePhotosRootViews"
 import { DirectoryChooserDialog } from "@/features/photos/components/directoryChooserDialog"
+import { PhotosDirectoriesDialog } from "@/features/photos/components/directoriesDialog"
 import { PhotoGrid } from "@/features/photos/components/photoGrid"
 import { PhotosDensityControls } from "@/features/photos/components/densityControls"
 import { EmptyState } from "@/features/drive/components/emptyState"
@@ -17,78 +21,82 @@ import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
+const NO_ROOTS: readonly string[] = []
+
 // Root selection + persistence + unset/ready/gone states, reachable from the icon rail's own
-// /photos entry (iconRail.tsx). READY renders the grid (search, filters and timeline live there).
+// /photos entry (iconRail.tsx). READY renders the grid (search, filters and timeline live there) over every
+// photos directory at once.
 export function PhotosScreen() {
 	const { t } = useTranslation(["photos", "common", "drive"])
 	const isOnline = useIsOnline()
-	const rootQuery = usePhotosRootQuery()
-	const rootUuid = rootQuery.data ?? null
-	const [chooserOpen, setChooserOpen] = useState(false)
-	const [choosePending, setChoosePending] = useState(false)
-	// Guards the reset side-effect below against firing twice for the same errored query settle (e.g.
-	// a re-render triggered by isOnline flipping while the reset's own await is still in flight). A
-	// ref, not state: this guard is never read during render, only inside the effect itself, so it's
-	// "instance state" the React Compiler rules want kept out of useState (setting state synchronously
-	// inside an effect body also trips react-hooks/set-state-in-effect).
-	const resettingRef = useRef(false)
+	const library = usePhotosLibrary()
+	const roots = library.roots ?? NO_ROOTS
+	const [dialog, setDialog] = useState<"directories" | "chooser" | null>(null)
+	// Roots whose removal after going gone is under way, so one errored settle (and the re-renders while its
+	// removal runs) removes each once. A ref, not state: it is never read during render, only inside the effect.
+	const resettingRef = useRef(new Set<string>())
+
+	useEffect(() => {
+		void loadPhotosLibrary()
+	}, [])
 
 	// The whole drive is a valid photos root; it has no name to resolve, only the drive's own label.
 	const driveRootUuid = useAccountQuery().data?.rootDirUuid
-	const isWholeDrive = rootUuid !== null && rootUuid === driveRootUuid
-	const namesQuery = useDirectoryNamesQuery(rootUuid !== null && !isWholeDrive ? [rootUuid] : [])
-	const listingQuery = usePhotosListingQuery(rootUuid)
+	const [singleRoot] = roots.length === 1 ? roots : []
+	const isWholeDrive = singleRoot !== undefined && singleRoot === driveRootUuid
+	const namesQuery = useDirectoryNamesQuery(singleRoot !== undefined && !isWholeDrive ? [singleRoot] : [])
+	const { timeline, listedRoots, failures, retry } = usePhotosTimeline(roots)
+	const rootViews = usePhotosRootViews(roots, dialog !== null)
 
-	// Root-gone detection: an error whose message matches DIRECTORY_NOT_FOUND_PREFIX (isRootGoneError,
-	// features/photos/lib/root.ts) AND the tab believes it's online (shouldResetRootOnError's
-	// defense-in-depth second gate) resets the saved root — a transient network failure, or the same
-	// error while offline, leaves the saved root untouched so a flaky fetch can never wipe it.
+	// Root-gone detection, per root: an error whose message matches DIRECTORY_NOT_FOUND_PREFIX (isRootGoneError,
+	// features/photos/lib/root.ts) AND the tab believes it's online (shouldResetRootOnError's defense-in-depth
+	// second gate) drops that root from the library — a transient network failure, or the same error while offline,
+	// leaves it untouched so a flaky fetch can never remove it.
 	useEffect(() => {
-		if (listingQuery.status !== "error" || rootUuid === null || resettingRef.current) {
-			return
+		for (const { rootUuid, error } of failures) {
+			if (resettingRef.current.has(rootUuid) || !shouldResetRootOnError(asErrorDTO(error), isOnline)) {
+				continue
+			}
+
+			resettingRef.current.add(rootUuid)
+
+			void removePhotosRoot(rootUuid).then(
+				() => {
+					resettingRef.current.delete(rootUuid)
+					toast.error(t("photosRootGoneToast"))
+				},
+				(e: unknown) => {
+					resettingRef.current.delete(rootUuid)
+					log.warn("photos.library", "gone root not removed", e)
+				}
+			)
 		}
+	}, [failures, isOnline, t])
 
-		const dto = asErrorDTO(listingQuery.error)
-
-		if (!shouldResetRootOnError(dto, isOnline)) {
-			return
-		}
-
-		resettingRef.current = true
-
-		void (async () => {
-			await clearPhotosRoot()
-			invalidatePhotosRoot()
-			toast.error(t("photosRootGoneToast"))
-			resettingRef.current = false
-		})()
-	}, [listingQuery.status, listingQuery.error, isOnline, rootUuid, t])
-
-	async function handleChoose(nextRootUuid: string): Promise<void> {
-		setChoosePending(true)
-		await setPhotosRoot(nextRootUuid)
-		invalidatePhotosRoot()
-		setChoosePending(false)
-		setChooserOpen(false)
+	function closeDialog(): void {
+		setDialog(null)
 	}
 
-	const chooser = chooserOpen ? (
-		<DirectoryChooserDialog
-			pending={choosePending}
-			onChoose={choice => {
-				void handleChoose(choice)
-			}}
-			onClose={() => {
-				setChooserOpen(false)
-			}}
-		/>
-	) : null
+	const dialogs =
+		dialog === "directories" ? (
+			<PhotosDirectoriesDialog
+				roots={rootViews}
+				readOnly={library.readOnly}
+				onClose={closeDialog}
+			/>
+		) : dialog === "chooser" ? (
+			<DirectoryChooserDialog
+				roots={rootViews}
+				readOnly={library.readOnly}
+				onClose={closeDialog}
+			/>
+		) : null
 
-	if (rootQuery.status === "pending") {
+	if (library.roots === null) {
 		return <LoadingState size="lg" />
 	}
 
-	if (rootUuid === null) {
+	if (roots.length === 0) {
 		return (
 			<>
 				<div className="flex flex-1 overflow-y-auto">
@@ -102,8 +110,9 @@ export function PhotosScreen() {
 						</EmptyHeader>
 						<EmptyContent>
 							<Button
+								id={PHOTOS_CHOOSE_ACTION_ID}
 								onClick={() => {
-									setChooserOpen(true)
+									setDialog("chooser")
 								}}
 							>
 								{t("photosChooseDirectory")}
@@ -111,20 +120,26 @@ export function PhotosScreen() {
 						</EmptyContent>
 					</Empty>
 				</div>
-				{chooser}
+				{dialogs}
 			</>
 		)
 	}
 
-	// Unknown until the name lookup settles; the header then shows the module name alone.
-	const rootName = isWholeDrive ? t("drive:driveMyDrive") : namesQuery.data?.[rootUuid]
+	// One root keeps its name (unknown until the name lookup settles: the header then shows the module name
+	// alone); several are counted.
+	const rootsLabel =
+		singleRoot === undefined
+			? t("photosHeaderDirectories", { count: roots.length })
+			: isWholeDrive
+				? t("drive:driveMyDrive")
+				: namesQuery.data?.[singleRoot]
 
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center justify-between gap-3 px-4 app-region-chrome">
 				<h1 className="flex min-w-0 items-baseline gap-1.5 text-sm font-medium">
 					<span className="shrink-0">{t("common:modulePhotos")}</span>
-					{rootName === undefined ? null : (
+					{rootsLabel === undefined ? null : (
 						<>
 							<span
 								aria-hidden="true"
@@ -132,35 +147,33 @@ export function PhotosScreen() {
 							>
 								·
 							</span>
-							<span className="truncate font-normal text-muted-foreground">{rootName}</span>
+							<span className="truncate font-normal text-muted-foreground">{rootsLabel}</span>
 						</>
 					)}
 				</h1>
 				<div className="flex shrink-0 items-center gap-2">
-					{listingQuery.status === "success" && listingQuery.data.photos.length > 0 ? <PhotosDensityControls /> : null}
+					{timeline.status === "success" && timeline.listing.photos.length > 0 ? <PhotosDensityControls /> : null}
 					<Button
 						variant="outline"
 						size="sm"
 						onClick={() => {
-							setChooserOpen(true)
+							setDialog("directories")
 						}}
 					>
-						{t("photosChangeDirectory")}
+						{t("photosDirectoriesButton")}
 					</Button>
 				</div>
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				{listingQuery.status === "pending" ? (
+				{timeline.status === "pending" ? (
 					<LoadingState size="lg" />
-				) : listingQuery.status === "error" ? (
+				) : timeline.status === "error" ? (
 					<EmptyState
 						variant="error"
-						error={asErrorDTO(listingQuery.error)}
-						onRetry={() => {
-							void listingQuery.refetch()
-						}}
+						error={asErrorDTO(timeline.error)}
+						onRetry={retry}
 					/>
-				) : listingQuery.data.photos.length === 0 ? (
+				) : timeline.listing.photos.length === 0 ? (
 					<div className="flex flex-1 overflow-y-auto">
 						<Empty>
 							<EmptyHeader>
@@ -168,20 +181,20 @@ export function PhotosScreen() {
 									<ImagesIcon />
 								</EmptyMedia>
 								<EmptyTitle>{t("photosEmptyTitle")}</EmptyTitle>
-								<EmptyDescription>{t("photosEmptyBody")}</EmptyDescription>
+								<EmptyDescription>{t("photosEmptyBody", { count: roots.length })}</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					</div>
 				) : (
 					<PhotoGrid
-						// A new root starts with an empty search and a fresh scroll position.
-						key={rootUuid}
-						rootUuid={rootUuid}
-						listing={listingQuery.data}
+						// A new set of roots starts with an empty search and a fresh scroll position.
+						key={roots.join(",")}
+						rootUuids={listedRoots}
+						listing={timeline.listing}
 					/>
 				)}
 			</div>
-			{chooser}
+			{dialogs}
 		</>
 	)
 }

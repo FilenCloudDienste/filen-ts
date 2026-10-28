@@ -9,7 +9,6 @@ import {
 	parseLibraryConfig,
 	parseLibraryConfigText,
 	serializeLibraryConfig,
-	validateLibraryRoot,
 	withLibraryOverride,
 	withLibraryPref,
 	withLibraryRoot,
@@ -138,64 +137,5 @@ describe("library config merge", () => {
 		const reordered = { overrides: a.overrides, prefs: a.prefs, roots: a.roots, v: 1 as const }
 
 		expect(serializeLibraryConfig(reordered)).toBe(serializeLibraryConfig(a))
-	})
-})
-
-describe("library root validation", () => {
-	const DRIVE = "drive-root"
-	const DOT_FILEN = "dot-filen"
-	const roots = [
-		{ uuid: "movies", ancestors: [DRIVE, "media"] },
-		{ uuid: "shows", ancestors: [DRIVE, "media"] }
-	]
-
-	it("refuses shared-in and public-link directories", () => {
-		expect(validateLibraryRoot({ candidate: { uuid: "x", ancestors: [], ownDrive: false }, roots, dotFilenUuid: null })).toEqual({
-			ok: false,
-			reason: "notOwnDrive"
-		})
-	})
-
-	it("refuses .filen and anything inside it", () => {
-		for (const candidate of [
-			{ uuid: DOT_FILEN, ancestors: [DRIVE], ownDrive: true },
-			{ uuid: "videos", ancestors: [DRIVE, DOT_FILEN], ownDrive: true }
-		]) {
-			expect(validateLibraryRoot({ candidate, roots, dotFilenUuid: DOT_FILEN })).toEqual({ ok: false, reason: "systemDirectory" })
-		}
-	})
-
-	it("offers to replace the roots a nested candidate overlaps, either way round", () => {
-		expect(
-			validateLibraryRoot({ candidate: { uuid: "media", ancestors: [DRIVE], ownDrive: true }, roots, dotFilenUuid: null })
-		).toEqual({
-			ok: false,
-			reason: "nested",
-			replace: ["movies", "shows"]
-		})
-		expect(
-			validateLibraryRoot({
-				candidate: { uuid: "action", ancestors: [DRIVE, "media", "movies"], ownDrive: true },
-				roots,
-				dotFilenUuid: null
-			})
-		).toEqual({ ok: false, reason: "nested", replace: ["movies"] })
-		expect(validateLibraryRoot({ candidate: { uuid: DRIVE, ancestors: [], ownDrive: true }, roots, dotFilenUuid: null })).toMatchObject(
-			{
-				reason: "nested"
-			}
-		)
-	})
-
-	it("accepts a separate directory and refuses one already a root", () => {
-		expect(
-			validateLibraryRoot({ candidate: { uuid: "music", ancestors: [DRIVE], ownDrive: true }, roots, dotFilenUuid: null })
-		).toEqual({ ok: true })
-		expect(
-			validateLibraryRoot({ candidate: { uuid: "movies", ancestors: [DRIVE, "media"], ownDrive: true }, roots, dotFilenUuid: null })
-		).toEqual({
-			ok: false,
-			reason: "alreadyRoot"
-		})
 	})
 })

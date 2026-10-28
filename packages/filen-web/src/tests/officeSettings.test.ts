@@ -4,7 +4,7 @@ import { driveFile } from "@/tests/support/videoDrive"
 
 const OFFICE = "00000000-0000-4000-8000-0000000000f2"
 
-// A drive whose `.filen/Office` holds the settings file once uploaded (or `initial` from the start).
+// A drive whose `.filen/office` holds the settings file once uploaded (or `initial` from the start).
 const drive = vi.hoisted(() => ({
 	text: undefined as string | undefined,
 	uploads: [] as string[],
@@ -49,7 +49,7 @@ vi.mock("@/lib/sdk/client", () => ({
 }))
 
 const { ensureAuthorName, officeSettings, saveOfficeAutosave } = await import("@/features/office/lib/officeSettings")
-const { listOfficeDirectory } = await import("@/features/office/lib/officeDirectory")
+const { listDotFilenDirectory: listOfficeDirectory } = await import("@/lib/dotFilenDirectory")
 
 describe("office settings", () => {
 	beforeEach(() => {

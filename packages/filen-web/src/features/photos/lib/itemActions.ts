@@ -19,14 +19,16 @@ export const PHOTOS_HIDDEN_BULK_ACTION_IDS: ReadonlySet<BulkActionDescriptor["id
 // destination is made: the listing's path of each directory holding a photo (its last segment), then
 // the drive listings, then the root's name the header asked for. Photos from different directories
 // make an archive named after Photos itself (owner decision).
-export function photosParentNaming(rootUuid: string, mixedFallback: string): ParentNaming {
+export function photosParentNaming(rootUuids: readonly string[], mixedFallback: string): ParentNaming {
 	return {
 		nameOf: uuid => {
-			const path = queryClient.getQueryData<PhotosListing>(photosListingQueryKey(rootUuid))?.folders[uuid]
-			const name = path?.slice(path.lastIndexOf("/") + 1)
+			for (const rootUuid of rootUuids) {
+				const path = queryClient.getQueryData<PhotosListing>(photosListingQueryKey(rootUuid))?.folders[uuid]
+				const name = path?.slice(path.lastIndexOf("/") + 1)
 
-			if (name !== undefined && name.length > 0) {
-				return name
+				if (name !== undefined && name.length > 0) {
+					return name
+				}
 			}
 
 			return cachedDirectoryName(uuid) ?? queryClient.getQueryData<string | null>(driveNamesQueryKey("drive", uuid)) ?? undefined

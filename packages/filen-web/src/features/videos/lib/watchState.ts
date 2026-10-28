@@ -93,7 +93,7 @@ import {
 	type WatchMeta
 } from "@/features/videos/lib/watchState.logic"
 
-// Watch progress, played marks and per-series track languages, synced as `.filen/Videos/watch-state.v1.json`.
+// Watch progress, played marks and per-series track languages, synced as `.filen/videos/watch-state.v1.json`.
 //
 // Every change is a stamped register written first to a kv journal (any tab), then merged into the synced file by
 // one flush at a time per browser. A flush reads the file only when its uuid changed, and uploads only when the
@@ -141,15 +141,15 @@ export interface WatchStateKv extends RecordStoreKv {
 
 export interface WatchStateSdk {
 	account: () => Promise<string>
-	// `.filen/Videos`, resolved (memoized) or as already known; created when missing.
+	// `.filen/videos`, resolved (memoized) or as already known; created when missing.
 	videosDir: () => Promise<string>
-	// `.filen/Videos` when it exists, null otherwise; creates nothing.
+	// `.filen/videos` when it exists, null otherwise; creates nothing.
 	findVideosDir: () => Promise<string | null>
 	knownVideosDir: () => string | null
 	noteSystemFile: (uuid: string) => void
 	getFileByStableUuid: (stableUuid: string) => Promise<SdkFile | undefined>
 	listDirectory: (dirUuid: string) => Promise<SdkFile[]>
-	// `.filen/Videos` as listed at `startedAfter` (performance.now()) or later: a listing the library configuration
+	// `.filen/videos` as listed at `startedAfter` (performance.now()) or later: a listing the library configuration
 	// started since serves too. Without it, the directory is listed.
 	listVideosDir?: (dirUuid: string, startedAfter: number) => Promise<SdkFile[]>
 	download: (file: SdkFile) => Promise<Uint8Array>
@@ -207,7 +207,7 @@ interface HeadRef {
 interface Remote {
 	ref: HeadRef | null
 	doc: WatchStateDoc
-	// null: `.filen/Videos` doesn't exist yet; an upload creates it.
+	// null: `.filen/videos` doesn't exist yet; an upload creates it.
 	parent: string | null
 	// The head didn't parse and a previous version stood in: it is replaced whatever the merge says.
 	repair: boolean
@@ -655,7 +655,7 @@ export class WatchStateEngine {
 
 	// Looks the head up once: unchanged, it is confirmed for this page; moved (another device saved since), the new
 	// file becomes the save from elsewhere that readLatestSave reads. With no head cached yet (a new browser), the
-	// state file is found by listing `.filen/Videos` when that directory exists.
+	// state file is found by listing `.filen/videos` when that directory exists.
 	private async checkHead(): Promise<void> {
 		const epoch = this.epoch
 		const seq = this.saveSeq
@@ -822,7 +822,7 @@ export class WatchStateEngine {
 		this.vouchedSince = performance.now()
 	}
 
-	// `.filen/Videos` was trashed, moved or renamed: looked up again before the next upload.
+	// `.filen/videos` was trashed, moved or renamed: looked up again before the next upload.
 	public forgetDirectory(): void {
 		this.dirForgotten = true
 		this.loseHead()

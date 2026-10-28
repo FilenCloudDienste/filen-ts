@@ -55,6 +55,12 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient({ defaultOptio
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: toastError, info: vi.fn() } }))
 vi.mock("@/features/audio/lib/audioEngine", () => ({ audioEngine }))
 vi.mock("@/features/chats/lib/drafts", () => ({ loadDraft, saveDraftDebounced: vi.fn(), deleteDraft: vi.fn() }))
+// The Photos directories as the synced library holds them.
+const photosRoots = vi.hoisted(() => ({ value: [] as string[] }))
+vi.mock("@/features/photos/lib/library", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/photos/lib/library")>()),
+	photosLibraryRoots: () => Promise.resolve(photosRoots.value)
+}))
 vi.mock("@/features/audio/lib/playlists", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/audio/lib/playlists")>()),
 	fetchPlaylistEntries
@@ -98,7 +104,6 @@ import { createAssistantToolExecutor } from "@/features/assistant/tools/executor
 import { DIRECTORY_SIZE_READS, SEARCH_CAP_MS } from "@/features/assistant/tools/drive"
 import { userCalendar } from "@/features/assistant/tools/dates"
 import { photosListingQueryOptions } from "@/features/photos/queries/photos"
-import { photosRootQueryOptions } from "@/features/photos/queries/root"
 import type { AssistantToolExecution, ToolExecutor } from "@/features/assistant/runtime/executor"
 import { useTransfersStore, type Transfer } from "@/features/transfers/store/useTransfersStore"
 
@@ -1399,7 +1404,7 @@ describe("date filters and insights", () => {
 		const shot = (name: string, mime: string, taken: number) =>
 			narrowItem(dated(rawFile(testUuid(name), name, root, mime, 1_000n), BigInt(new Date(2024, 4, taken, 12).getTime())))
 
-		queryClient.setQueryData(photosRootQueryOptions().queryKey, root)
+		photosRoots.value = [root]
 		queryClient.setQueryData(photosListingQueryOptions(root).queryKey, {
 			photos: [shot("clip.mp4", "video/mp4", 20), shot("beach.jpg", "image/jpeg", 12), shot("old.jpg", "image/jpeg", 1)],
 			folders: {}
@@ -1422,7 +1427,7 @@ describe("date filters and insights", () => {
 	})
 
 	it("says when Photos has no directory yet", async () => {
-		queryClient.setQueryData(photosRootQueryOptions().queryKey, null)
+		photosRoots.value = []
 
 		expect(await call("list_photos", {})).toMatchObject({ ok: false })
 	})

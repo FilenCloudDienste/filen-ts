@@ -25,7 +25,7 @@ const OFFICE = "00000000-0000-4000-8000-0000000000f1"
 
 type DriveEvent = Extract<SocketEvent, { type: "drive" }>
 
-// A drive with `.filen/Office` (once created) holding the dictionary file's versions.
+// A drive with `.filen/office` (once created) holding the dictionary file's versions.
 function fakeDrive(initial?: string) {
 	let dir: string | null = initial === undefined ? null : OFFICE
 	let head: { file: File; text: string } | undefined

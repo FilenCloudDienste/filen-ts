@@ -78,14 +78,14 @@ afterEach(() => {
 describe("photos bulk favorite", () => {
 	it("runs as an activity, leaving only what failed selected", async () => {
 		setFavoritedPhotos.mockResolvedValueOnce({ succeeded: [A], failed: [{ item: B, error: ERROR }] })
-		render(createElement(PhotosBulkActionBar, { rootUuid: ROOT, selectedItems: [A, B], onDialogAction: vi.fn() }))
+		render(createElement(PhotosBulkActionBar, { rootUuids: [ROOT], selectedItems: [A, B], onDialogAction: vi.fn() }))
 
 		await act(async () => {
 			fireEvent.click(screen.getByRole("button", { name: "Favorite" }))
 			await Promise.resolve()
 		})
 
-		expect(setFavoritedPhotos).toHaveBeenCalledExactlyOnceWith(ROOT, [A, B], true, expect.any(Function))
+		expect(setFavoritedPhotos).toHaveBeenCalledExactlyOnceWith([ROOT], [A, B], true, expect.any(Function))
 		expect(toast).toHaveBeenCalledWith("Adding 2 items to favorites", expect.anything())
 		expect(toast.error).toHaveBeenCalledExactlyOnceWith("Added 1 item to favorites, 1 failed", expect.anything())
 		expect(usePhotosStore.getState().selectedItems).toEqual([B])
@@ -97,7 +97,7 @@ describe("photos bulk trash", () => {
 		const host: { current: PhotosDialogHost | null } = { current: null }
 
 		function Host() {
-			host.current = usePhotosDialogHost({ rootUuid: ROOT, selectedItems: [A, B] })
+			host.current = usePhotosDialogHost({ rootUuids: [ROOT], selectedItems: [A, B] })
 
 			return host.current.renderActiveDialog()
 		}
@@ -115,7 +115,7 @@ describe("photos bulk trash", () => {
 		})
 		fireEvent.click(screen.getByRole("button", { name: "Trash" }))
 
-		expect(trashPhotos).toHaveBeenCalledExactlyOnceWith(ROOT, [A, B], expect.any(Function))
+		expect(trashPhotos).toHaveBeenCalledExactlyOnceWith([ROOT], [A, B], expect.any(Function))
 		expect(host.current?.isDialogOpen).toBe(false)
 		expect(toast).toHaveBeenCalledWith("Moving 2 items to trash", expect.anything())
 

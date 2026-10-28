@@ -53,6 +53,14 @@ export interface SyncedFileCodec<Doc> {
 
 type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
 
+// The file was written by a newer app (or is too large to read): a change can't be stored.
+export class SyncedFileReadOnlyError extends Error {
+	constructor(fileName: string) {
+		super(`${fileName} was written by a newer version and is left unchanged`)
+		this.name = "SyncedFileReadOnlyError"
+	}
+}
+
 export class SyncedDotFilenFile<Doc> {
 	private readonly sdk: SyncedFileSdk
 	private readonly codec: SyncedFileCodec<Doc>
@@ -98,6 +106,16 @@ export class SyncedDotFilenFile<Doc> {
 	// Whether this session read the file (or found none) since signing in.
 	get isLoaded(): boolean {
 		return this.loaded
+	}
+
+	// The file as last read or written: what is stored, unlike value() while a change waits for its upload.
+	syncedValue(): Doc {
+		return this.synced
+	}
+
+	// The last read found the file written by a newer app (or too large): it is never overwritten.
+	get isReadOnly(): boolean {
+		return this.readOnly
 	}
 
 	subscribe(listener: (doc: Doc) => void): () => void {
@@ -152,15 +170,37 @@ export class SyncedDotFilenFile<Doc> {
 		}, delay)
 	}
 
-	// Applies a change at once and uploads it (merged with the file as it stands); resolves once stored.
-	change(edit: (doc: Doc) => Doc): Promise<void> {
+	// Applies a change at once and uploads it (merged with the file as it stands); resolves once stored. With
+	// `requireWritable`, a file this app can't overwrite rejects with SyncedFileReadOnlyError instead of keeping
+	// the change local only (it is then not applied when the read already knew).
+	change(edit: (doc: Doc) => Doc, options?: { requireWritable?: boolean }): Promise<void> {
+		const requireWritable = options?.requireWritable === true
+
+		if (requireWritable && this.loaded && this.readOnly) return Promise.reject(new SyncedFileReadOnlyError(this.codec.fileName))
+
 		const next = edit(this.doc)
 
 		if (next === this.doc) return Promise.resolve()
 
 		this.setDoc(next)
 
-		return this.enqueue(() => this.flush())
+		return this.enqueue(async () => {
+			await this.flush()
+
+			if (requireWritable && this.readOnly) throw new SyncedFileReadOnlyError(this.codec.fileName)
+		})
+	}
+
+	// Uploads what still differs from the file (a change whose upload failed); resolves once stored. Rejects with
+	// SyncedFileReadOnlyError, as change() with `requireWritable` does, when the file can't be overwritten.
+	save(): Promise<void> {
+		if (this.loaded && this.readOnly) return Promise.reject(new SyncedFileReadOnlyError(this.codec.fileName))
+
+		return this.enqueue(async () => {
+			await this.flush()
+
+			if (this.readOnly) throw new SyncedFileReadOnlyError(this.codec.fileName)
+		})
 	}
 
 	private enqueue(task: () => Promise<void>): Promise<void> {

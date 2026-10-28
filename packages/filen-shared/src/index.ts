@@ -12,6 +12,29 @@ export * from "./notes"
 export * from "./countries"
 export * from "./theme"
 export * from "./photos"
+export * from "./photosLibrary"
+export * from "./directoryRoots"
+export {
+	HLC_SPAN,
+	MAX_CLOCK_SKEW_MS,
+	compareStamps,
+	hasLiveRegister,
+	hlcObserve,
+	hlcPhysicalMs,
+	hlcTick,
+	mergeRecordMaps,
+	mergeUnknownFields,
+	parseRegisterRecord,
+	serializeCanonical,
+	setRegister,
+	tombstoneRecord,
+	type Hlc,
+	type RegisterDocMerge,
+	type RegisterRecord,
+	type Stamp,
+	type Tombstone,
+	type ValueRegister
+} from "./videos/registerRecords"
 export * from "./path"
 export * from "./ratio"
 export * from "./cacheEviction"

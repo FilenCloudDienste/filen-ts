@@ -64,11 +64,11 @@ const KIND_CHIPS: readonly {
 ]
 
 export interface PhotoGridProps {
-	rootUuid: string
+	rootUuids: readonly string[]
 	listing: PhotosListing
 }
 
-export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
+export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 	const { t, i18n } = useTranslation(["drive", "photos"])
 	const isOnline = useIsOnline()
 	const densityQuery = usePhotosGridDensityQuery()
@@ -97,7 +97,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 	const timeline = buildPhotosTimeline(filtered.entries, columns, cellSize, GRID_GAP)
 
 	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = usePhotosDialogHost({
-		rootUuid,
+		rootUuids,
 		selectedItems
 	})
 
@@ -110,11 +110,11 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 		}
 	}
 
-	// A fresh root must never inherit a previous root's selection — the store outlives this grid, which
-	// the screen remounts per root (so anchor, cursor and search start fresh on their own).
+	// A fresh set of roots must never inherit the previous set's selection — the store outlives this grid,
+	// which the screen remounts per set of roots (so anchor, cursor and search start fresh on their own).
 	useEffect(() => {
 		usePhotosStore.getState().clearSelectedItems()
-	}, [rootUuid])
+	}, [])
 
 	// This grid lays out its own tiles, so it sizes the shared thumbnail objectURL cache itself: the
 	// visible rows plus one partial row, the cache's headroom covering the overscan rows either side.
@@ -371,7 +371,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 								scrollElement={scrollElement}
 								timeline={timeline}
 								items={items}
-								rootUuid={rootUuid}
+								rootUuids={rootUuids}
 								columns={columns}
 								cellSize={cellSize}
 								language={language}
@@ -397,7 +397,7 @@ export function PhotoGrid({ rootUuid, listing }: PhotoGridProps) {
 			{selectedItems.length >= BULK_BAR_MIN_SELECTION ? (
 				<div className="pointer-events-none absolute inset-x-6 bottom-6 z-10 flex justify-center">
 					<PhotosBulkActionBar
-						rootUuid={rootUuid}
+						rootUuids={rootUuids}
 						selectedItems={selectedItems}
 						onDialogAction={handleBulkDialogAction}
 					/>
@@ -412,7 +412,7 @@ interface PhotoGridRowsProps {
 	scrollElement: HTMLDivElement | null
 	timeline: PhotosTimeline
 	items: PhotoItem[]
-	rootUuid: string
+	rootUuids: readonly string[]
 	columns: number
 	cellSize: number
 	language: string
@@ -432,7 +432,7 @@ function PhotoGridRows({
 	scrollElement,
 	timeline,
 	items,
-	rootUuid,
+	rootUuids,
 	columns,
 	cellSize,
 	language,
@@ -523,7 +523,7 @@ function PhotoGridRows({
 							return (
 								<PhotoTile
 									key={item.data.uuid}
-									rootUuid={rootUuid}
+									rootUuids={rootUuids}
 									item={item}
 									index={itemIndex}
 									total={items.length}

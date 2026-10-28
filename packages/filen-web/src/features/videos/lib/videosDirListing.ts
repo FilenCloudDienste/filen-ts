@@ -2,7 +2,7 @@ import type { File as SdkFile } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 
-// `.filen/Videos` holds both the library configuration and the watch state: the latest listing of it this session and
+// `.filen/videos` holds both the library configuration and the watch state: the latest listing of it this session and
 // when it started (performance.now()), so a reader that needs the directory as it was at some moment or later takes a
 // listing started since instead of listing again.
 let latest: { dirUuid: string; startedAt: number; files: Promise<SdkFile[]> } | null = null
