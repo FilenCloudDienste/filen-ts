@@ -759,7 +759,7 @@ describe("ignore rules", () => {
 			{
 				name: "Media",
 				paths: [
-					".filen/Videos/cache.mp4",
+					".filen/videos/cache.mp4",
 					"@eaDir/Alien (1979).mkv@SynoEAStream.mp4",
 					"#recycle/Deleted (2001).mkv",
 					"$RECYCLE.BIN/Gone (2002).mkv",

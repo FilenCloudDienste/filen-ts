@@ -6,6 +6,7 @@ import type { DriveItem, DriveItemFileExtracted } from "@/types"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import events from "@/lib/events"
 import {
+	DOT_FILEN_SUBDIRS,
 	run,
 	KeyedSemaphores,
 	driveItemName,
@@ -1096,7 +1097,7 @@ export class Audio {
 	}
 
 	public async getPlaylistsDirectory(signal?: AbortSignal): Promise<Dir> {
-		return await ensureDotFilenSubdirectory("Playlists", signal)
+		return await ensureDotFilenSubdirectory(DOT_FILEN_SUBDIRS.playlists, signal)
 	}
 
 	private playlistFileToDriveItem(file: PlaylistFile, now: number): DriveItemFileExtracted {

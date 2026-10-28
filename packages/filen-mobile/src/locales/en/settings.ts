@@ -229,6 +229,11 @@ export const settings = {
 	haptic_feedback: "Haptic feedback",
 	/** Advanced — description for the haptic feedback toggle */
 	haptic_feedback_description: "Play a subtle vibration when you tap buttons and controls.",
+	/** Advanced — toggle listing the root .filen directory; off by default. ".filen" is a directory name, never translated */
+	show_dot_filen: "Show .filen directory",
+	/** Advanced — description for show_dot_filen; independent of the hide hidden items toggle */
+	show_dot_filen_description:
+		"The .filen directory holds the settings Filen syncs between your devices. While this is off, it is left out of your drive, search and directory pickers.",
 	/** Appearance — row title: toggle that hides dot-prefixed files and directories from the drive listings */
 	hide_hidden_items: "Hide hidden items",
 	/** Appearance — description for the hide hidden items toggle. "hidden" here means the dot-prefix naming convention. States the scope explicitly: your own listings only — never the pickers, never content someone shared with you */

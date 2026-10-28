@@ -22,7 +22,8 @@ import {
 	type DriveLocation,
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
-import { hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
+import { dotFilenFilterAppliesTo, hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
+import { isDotFilenSystemDir } from "@/lib/dotFilen"
 import { DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
@@ -34,6 +35,7 @@ import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
 	useDirectoryListingQuery,
+	useHiddenDotFilenRoot,
 	useHideHiddenItemsPreferenceQuery,
 	useSortPreferencesQuery,
 	useViewModePreferencesQuery
@@ -226,6 +228,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const hiddenPref = hiddenPrefQuery.data ?? DEFAULT_HIDE_HIDDEN_ITEMS
 	const hiddenFilterApplies = hiddenFilterAppliesTo(variant)
 	const hideHidden = hiddenPref && hiddenFilterApplies
+	const hiddenDotFilenRoot = useHiddenDotFilenRoot()
+	const dotFilenRoot = dotFilenFilterAppliesTo(variant, uuid) ? hiddenDotFilenRoot : null
 
 	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directoryListing.logic.ts).
 	// Every other variant's listing data passes straight through, untouched.
@@ -289,9 +293,24 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				sortBy: effectiveSort,
 				directorySizes: sortDirectorySizes,
 				hide: hideHidden,
+				dotFilenRoot,
+				atDriveRoot: variant === "drive" && uuid === null,
+				variant,
+				isDotFilenSystemDir,
 				...(search.active ? { search: { total: search.total, parentPaths: search.parentPaths } } : {})
 			}),
-		[sourceItems, effectiveSort, sortDirectorySizes, hideHidden, search.active, search.total, search.parentPaths]
+		[
+			sourceItems,
+			effectiveSort,
+			sortDirectorySizes,
+			hideHidden,
+			dotFilenRoot,
+			variant,
+			uuid,
+			search.active,
+			search.total,
+			search.parentPaths
+		]
 	)
 	const sortedItems = display.items
 	const hiddenCount = display.hiddenCount

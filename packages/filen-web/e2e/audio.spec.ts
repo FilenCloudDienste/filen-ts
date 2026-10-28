@@ -155,7 +155,7 @@ test("drive audio double-click hands off to the persistent player and transport 
 // rail's dedicated /playlists entry (no queue-seeding preamble needed — the dedicated entry exists exactly
 // so playlists are reachable without a playing queue, see iconRail.tsx/nowPlayingPanel.tsx). Net-zero on the shared account:
 // everything created here (the two audio files, the playlist itself) is removed by the end — the
-// `.filen/Playlists` directory the app lazily creates is left behind, which is acceptable app
+// `.filen/playlists` directory the app lazily creates is left behind, which is acceptable app
 // infrastructure (mirrors mobile leaving it too).
 test("playlists: create, add tracks via the picker, reorder, play, and delete", async ({ page }) => {
 	const cspViolations = trackCspViolations(page)
@@ -172,7 +172,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 	const playlistRow = page.getByRole("listitem").filter({ hasText: playlistName })
 
 	// Idempotent by construction, so the same steps serve as this test's delete proof AND as the
-	// finally's net — a playlist lives in the app-created `.filen/Playlists` directory, which the drive
+	// finally's net — a playlist lives in the app-created `.filen/playlists` directory, which the drive
 	// listing sweeps never descend into, so the only other thing that would ever remove a leaked one is
 	// the NEXT run's cleanup setup.
 	async function deleteScratchPlaylist(): Promise<void> {
@@ -186,7 +186,7 @@ test("playlists: create, add tracks via the picker, reorder, play, and delete", 
 			.catch(() => false)
 
 		if (!present) {
-			// Named, not silently skipped: nothing else sweeps `.filen/Playlists`, so a leak that goes
+			// Named, not silently skipped: nothing else sweeps `.filen/playlists`, so a leak that goes
 			// unreported here is invisible until someone reads the next run's account by hand.
 			console.error(
 				`audio: playlist "${playlistName}" is not reachable in the Playlists listing — leaked, left for the next run's sweep`

@@ -30,6 +30,8 @@ interface TypedConfirmDialogProps {
 	matchValue: string
 	confirmLabel: string
 	cancelLabel: string
+	// Opens with Cancel focused rather than the input: where a stray Enter or a habit must not be the first step.
+	focusCancel?: boolean | undefined
 	onOpenChange: (open: boolean) => void
 	onConfirm: () => void
 }
@@ -61,6 +63,7 @@ function TypedConfirmDialog({
 	matchValue,
 	confirmLabel,
 	cancelLabel,
+	focusCancel,
 	onOpenChange,
 	onConfirm
 }: TypedConfirmDialogProps) {
@@ -103,7 +106,7 @@ function TypedConfirmDialog({
 						<Input
 							id="typed-confirm-value"
 							value={typed}
-							autoFocus
+							autoFocus={focusCancel !== true}
 							autoComplete="off"
 							autoCorrect="off"
 							spellCheck={false}
@@ -116,6 +119,7 @@ function TypedConfirmDialog({
 					<AlertDialogFooter>
 						<AlertDialogCancel
 							type="button"
+							autoFocus={focusCancel === true}
 							disabled={pending}
 						>
 							{cancelLabel}

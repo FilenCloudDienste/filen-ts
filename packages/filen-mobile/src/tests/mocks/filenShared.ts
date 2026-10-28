@@ -110,5 +110,12 @@ export const {
 	mergeInflightQueuesByUnion,
 	isPermanentRejection,
 	MAX_NON_RETRYABLE_REJECTIONS,
-	createTypingSender
+	createTypingSender,
+	DOT_FILEN_DIR_NAME,
+	DOT_FILEN_SUBDIRS,
+	dotFilenSubdirLookupNames,
+	dotFilenSubdirRename,
+	isDotFilenName,
+	isRootDotFilen,
+	filterHiddenItems
 } = await vi.importActual<typeof import("@filen/shared")>("@filen/shared")

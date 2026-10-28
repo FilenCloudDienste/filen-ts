@@ -1,6 +1,5 @@
-import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
-import { extensionStart, sumBytes } from "@filen/shared"
+import { DOT_FILEN_SUBDIRS, extensionStart, sumBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { attemptOp, runOp } from "@/lib/actions/outcome"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -15,7 +14,7 @@ import { createLink } from "@/features/drive/lib/actions"
 import { buildPublicLinkUrl } from "@/features/drive/components/linkDialog.logic"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { settleTransferFailure } from "@/features/transfers/lib/settle"
-import { throttle, PROGRESS_THROTTLE_MS } from "@/lib/throttle"
+import { onTransferProgress, openProgressChannel } from "@/features/transfers/lib/progressChannel"
 import { noop } from "@/lib/utils"
 import { getDotFilenSubdir } from "@/lib/dotFilen"
 import { markAccountStale } from "@/queries/account"
@@ -37,11 +36,11 @@ import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/q
 
 export type AttachmentOutcome = { status: "success"; url: string } | { status: "error"; dto: ErrorDTO }
 
-// Mirrors filen-mobile's chats.ts#getChatUploadsDirectory naming EXACTLY (".filen" then "Chat Uploads",
-// nested), so a file attached from web and one attached from mobile land in the one place. Resolved once
+// The same `.filen/chat-uploads` filen-mobile's chats.ts#getChatUploadsDirectory resolves (DOT_FILEN_SUBDIRS), so a
+// file attached from web and one attached from mobile land in the one place. Resolved once
 // per session through the shared `.filen` resolver, so a multi-file pick's concurrent uploads share one
 // lookup; logout drops it (resetDotFilen), since its uuid names a directory the next account cannot write to.
-const CHAT_UPLOADS_DIR_NAME = "Chat Uploads"
+const CHAT_UPLOADS_DIR_NAME = DOT_FILEN_SUBDIRS.chatUploads
 
 let lastAttachmentStamp = 0
 
@@ -141,24 +140,25 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 		startedAt: Date.now()
 	})
 
-	const reportProgress = throttle((bytes: bigint) => {
-		const numeric = Number(bytes)
-		onProgress(numeric)
-		store.setProgress(transferId, numeric)
-	}, PROGRESS_THROTTLE_MS)
+	// The row's bytes come through the worker's progress channel; the composer follows them too.
+	const stopFollowing = onTransferProgress(transferId, onProgress)
 
 	let uploaded: SdkFile
 	// Wraps the same bytes (no copy) under the unique name.
 	const named = new File([file], uniqueAttachmentName(file.name), { type: file.type, lastModified: file.lastModified })
 
+	openProgressChannel()
+
 	try {
-		uploaded = await runOp<SdkFile>(sdkApi.uploadFile(parentUuid, transferId, named, Comlink.proxy(reportProgress)))
+		uploaded = await runOp<SdkFile>(sdkApi.uploadFile(parentUuid, transferId, named))
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
 		settleTransferFailure(store, transferId, dto)
 
 		return { status: "error", dto }
+	} finally {
+		stopFollowing()
 	}
 
 	store.settle(transferId, "done")

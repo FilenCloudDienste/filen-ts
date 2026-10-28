@@ -11,7 +11,7 @@ import {
 } from "@/features/chats/queries/useChatMessages.query"
 import { cachedMessagesMatchLastMessage } from "@/features/chats/chatSelectors"
 import { wrapChat, wrapMessage, withoutInflight } from "@/features/chats/chatsWrap"
-import { Semaphore, run, runOrThrow } from "@filen/shared"
+import { DOT_FILEN_SUBDIRS, Semaphore, run, runOrThrow } from "@filen/shared"
 import transfers from "@/features/transfers/transfers"
 import drive from "@/features/drive/drive"
 import { unwrapFileMeta, unwrappedFileIntoDriveItem, makeDriveItemPublicLink } from "@/lib/sdkUnwrap"
@@ -495,7 +495,7 @@ class Chats {
 	}
 
 	public async getChatUploadsDirectory() {
-		return await ensureDotFilenSubdirectory("Chat Uploads")
+		return await ensureDotFilenSubdirectory(DOT_FILEN_SUBDIRS.chatUploads)
 	}
 
 	// Uploads the given local assets into the chat-uploads directory, enables a public

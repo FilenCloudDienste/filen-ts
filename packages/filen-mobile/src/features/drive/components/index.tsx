@@ -6,7 +6,8 @@ import useDriveItemsQuery from "@/features/drive/queries/useDriveItems.query"
 import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import type { DriveItem } from "@/types"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
-import { useHideHiddenItems } from "@/features/drive/driveHiddenItems"
+import { useHideHiddenItems, useShowDotFilen } from "@/features/drive/driveHiddenItems"
+import { rootDotFilenFilter } from "@/features/drive/dotFilenGuard"
 import VirtualList, { type ListRef, type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty, { NoResultsEmpty, LoadErrorEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
@@ -92,6 +93,7 @@ const Drive = () => {
 	const { searchQuery, setSearchQuery, searchResults, searchResultPaths, status, totalCount, isCacheSearch } = useDriveSearch({ drivePath })
 	const { sort } = useDriveSortPreference(drivePath)
 	const [hideHiddenItems] = useHideHiddenItems()
+	const [showDotFilen] = useShowDotFilen()
 	const blocked = useBlockedUsers()
 	const textForegroundColor = useResolveClassNames("text-foreground").color as string
 
@@ -144,15 +146,27 @@ const Drive = () => {
 	// Which contexts it applies to is `hiddenFilterAppliesTo`: the two browsing views only. See
 	// there for why every other list this screen backs shows everything.
 	const hidingActive = hideHiddenItems && hiddenFilterAppliesTo(drivePath)
-	const items = filterHiddenItems({
+	// Search is recursive: without the hit's ancestry, hiding `.thumb` from the browser would
+	// still flood the results with its contents — and the row prints the full relative path,
+	// naming the hidden directory right back at the user.
+	const searchParentPaths = isCacheSearch ? searchResultPaths : undefined
+	// The root `.filen` first, on its own setting, in every context but the trash — pickers included, so nothing is
+	// moved or copied into it. It never counts as a hidden item: the hidden-items toggle doesn't reveal it.
+	const listedItems = filterHiddenItems({
 		items: visibleItems,
-		hide: hidingActive,
-		// Search is recursive: without the hit's ancestry, hiding `.thumb` from the browser would
-		// still flood the results with its contents — and the row prints the full relative path,
-		// naming the hidden directory right back at the user.
-		searchParentPaths: isCacheSearch ? searchResultPaths : undefined
+		hide: false,
+		searchParentPaths,
+		rootDotFilen: rootDotFilenFilter({
+			show: showDotFilen,
+			drivePath
+		})
 	})
-	const hiddenCount = visibleItems.length - items.length
+	const items = filterHiddenItems({
+		items: listedItems,
+		hide: hidingActive,
+		searchParentPaths
+	})
+	const hiddenCount = listedItems.length - items.length
 
 	// Stable for the screen's lifetime: the rows read the list only at press time, so a getter over a
 	// ref keeps renderItem's identity across listing updates and FlashList's per-cell memo skips rows
@@ -238,7 +252,7 @@ const Drive = () => {
 	// must never speak for another's. A dot-name is hidden in every listing alike, so removing only
 	// those is correct from whichever instance runs it.
 	useEffect(() => {
-		if (hiddenCount === 0) {
+		if (items.length === visibleItems.length) {
 			return
 		}
 
@@ -246,7 +260,7 @@ const Drive = () => {
 		const removed = visibleItems.filter(item => !rendered.has(item.data.uuid)).map(item => item.data.uuid)
 
 		useDriveStore.getState().removeFromSelection(removed)
-	}, [items, visibleItems, hiddenCount])
+	}, [items, visibleItems])
 
 	// Stale-selection purge (sharedIn): if a sharer becomes blocked while their items are
 	// selected, drop those items from the selection so bulk actions / select-all stay honest.

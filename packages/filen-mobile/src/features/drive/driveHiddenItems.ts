@@ -28,6 +28,18 @@ export async function readHideHiddenItems(): Promise<boolean> {
 	return typeof stored === "boolean" ? stored : DEFAULT_HIDE_HIDDEN_ITEMS
 }
 
+export const SHOW_DOT_FILEN_SECURE_STORE_KEY = "drive.showDotFilen"
+
+/**
+ * The root `.filen` (Filen's own synced settings) is left out of every list but the trash until Advanced settings
+ * shows it (dotFilenGuard.ts's rootDotFilenFilter). The hidden-items toggle above never reveals it.
+ */
+export const DEFAULT_SHOW_DOT_FILEN = false
+
+export function useShowDotFilen(): [boolean, (next: boolean | ((prev: boolean) => boolean)) => void] {
+	return useSecureStore<boolean>(SHOW_DOT_FILEN_SECURE_STORE_KEY, DEFAULT_SHOW_DOT_FILEN)
+}
+
 /**
  * Applied to the name the row actually displays rather than the raw metadata — so an item whose
  * name could not be decrypted is judged by its `cannot_decrypt_…` placeholder and stays visible.

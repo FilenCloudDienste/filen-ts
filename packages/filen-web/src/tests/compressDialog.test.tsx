@@ -15,7 +15,8 @@ const {
 	startCompressWithCard,
 	setCompressPreferences,
 	online,
-	rememberedFormat
+	rememberedFormat,
+	confirmDotFilenOperation
 } = vi.hoisted(() => ({
 	archiveFormatInfo: vi.fn(),
 	archiveNameInfo: vi.fn(),
@@ -25,7 +26,8 @@ const {
 	startCompressWithCard: vi.fn((_request: Omit<CompressJobRequest, "id">, _password: string | undefined) => "job"),
 	setCompressPreferences: vi.fn(() => Promise.resolve()),
 	online: { current: true },
-	rememberedFormat: { current: "zip" }
+	rememberedFormat: { current: "zip" },
+	confirmDotFilenOperation: vi.fn((_operation: string, _items: unknown[]) => Promise.resolve(true))
 }))
 
 vi.mock("@/queries/client", async () => {
@@ -40,6 +42,10 @@ vi.mock("@/features/drive/lib/compressPreferences", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/lib/compressPreferences")>()),
 	loadCompressPreferences: () => Promise.resolve({ ...DEFAULT_PREFS, format: rememberedFormat.current }),
 	setCompressPreferences
+}))
+vi.mock("@/features/drive/lib/dotFilenGuard", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/lib/dotFilenGuard")>()),
+	confirmDotFilenOperation
 }))
 vi.mock("@tanstack/react-router", () => ({
 	Link: ({ children, to }: { children: ReactNode; to: string }) => createElement("a", { href: to }, children)
@@ -117,17 +123,19 @@ function file(name: string): DriveItem {
 	return narrowItem(raw)
 }
 
-function dir(name: string): DriveItem {
-	const raw: Dir = {
-		uuid: testUuid(name),
+function rawDir(name: string): Dir {
+	return {
+		uuid: testUuid(name.replace(".", "dot")),
 		parent: PARENT,
 		color: "default",
 		timestamp: 0n,
 		favorited: false,
 		meta: { type: "decoded", data: { name } }
 	}
+}
 
-	return narrowItem(raw)
+function dir(name: string): DriveItem {
+	return narrowItem(rawDir(name))
 }
 
 const onClose = vi.fn()
@@ -297,6 +305,31 @@ describe("CompressDialog", () => {
 		expect(startCompressWithCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ dispose: "deletePermanently" }), undefined)
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 		expect(onClose).toHaveBeenCalledTimes(1)
+	})
+
+	it("asks for the root .filen's name before trashing it afterwards, and starts nothing on a cancel", async () => {
+		const dotFilen = narrowItem({ ...rawDir(".filen"), parent: ROOT })
+
+		confirmDotFilenOperation.mockResolvedValueOnce(false)
+		await renderDialog([dotFilen, dir("Docs")])
+
+		fireEvent.click(screen.getByRole("radio", { name: "Move the originals to the trash" }))
+		await submitAndSettle()
+
+		expect(confirmDotFilenOperation).toHaveBeenCalledExactlyOnceWith("trash", [dotFilen, expect.anything()])
+		expect(startCompressWithCard).not.toHaveBeenCalled()
+
+		await submitAndSettle()
+
+		expect(startCompressWithCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ dispose: "trash" }), undefined)
+	})
+
+	it("asks nothing about the root .filen when the originals stay", async () => {
+		await renderDialog([narrowItem({ ...rawDir(".filen"), parent: ROOT })])
+		await submitAndSettle()
+
+		expect(confirmDotFilenOperation).not.toHaveBeenCalled()
+		expect(startCompressWithCard).toHaveBeenCalledTimes(1)
 	})
 
 	it("keeps the selection when the originals stay", async () => {

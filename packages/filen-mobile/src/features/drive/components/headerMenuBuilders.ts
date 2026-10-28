@@ -21,6 +21,7 @@ import { downloadDriveItemToDevice, ensureSaveToPhotosPermission, saveDriveItemT
 import { selectContacts } from "@/features/contacts/contactsSelect"
 import { buildCopyMenuButton, offersCopy } from "@/features/drive/components/item/menuActionsCopy"
 import { buildSaveToCloudDriveButton } from "@/features/drive/linkedSave"
+import { confirmDotFilenOperation, includesRootDotFilen, type DotFilenOperation } from "@/features/drive/dotFilenGuard"
 import logger from "@/lib/logger"
 
 export function buildSortMenuButton(current: SortByType, setSort: (next: SortByType) => void, t: TFunction): MenuButton {
@@ -148,7 +149,8 @@ export function buildBulkActionMenu({
 		okText,
 		destructive,
 		requiresOnline,
-		op
+		op,
+		dotFilenOperation
 	}: {
 		id: string
 		title: string
@@ -158,6 +160,8 @@ export function buildBulkActionMenu({
 		destructive?: boolean
 		requiresOnline?: boolean
 		op: (item: DriveItem) => Promise<unknown>
+		// A selection holding the root `.filen` is confirmed by typing its name instead (dotFilenGuard.ts).
+		dotFilenOperation?: DotFilenOperation
 	}): MenuButton => ({
 		id,
 		title,
@@ -165,16 +169,24 @@ export function buildBulkActionMenu({
 		destructive,
 		requiresOnline,
 		onPress: async () => {
+			const guarded = dotFilenOperation !== undefined && includesRootDotFilen(selectedDriveItems)
+
+			if (guarded && !(await confirmDotFilenOperation(dotFilenOperation, selectedDriveItems))) {
+				return
+			}
+
 			await runBulk({
 				items: selectedDriveItems,
 				clearSelection: clearDriveSelection,
-				confirm: {
-					title,
-					message,
-					okText,
-					cancelText: t("cancel"),
-					destructive
-				},
+				confirm: guarded
+					? undefined
+					: {
+							title,
+							message,
+							okText,
+							cancelText: t("cancel"),
+							destructive
+						},
 				op
 			})
 		}
@@ -202,7 +214,8 @@ export function buildBulkActionMenu({
 				okText: t("delete"),
 				destructive: true,
 				requiresOnline: true,
-				op: item => drive.deletePermanently({ item })
+				op: item => drive.deletePermanently({ item }),
+				dotFilenOperation: "delete"
 			})
 		)
 
@@ -489,7 +502,8 @@ export function buildBulkActionMenu({
 				okText: t("trash"),
 				destructive: true,
 				requiresOnline: true,
-				op: item => drive.trash({ item })
+				op: item => drive.trash({ item }),
+				dotFilenOperation: "trash"
 			})
 		)
 	}

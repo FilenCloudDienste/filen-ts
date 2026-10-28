@@ -84,7 +84,7 @@ describe("drive clipboard", () => {
 		settle({ succeeded: [DOCS, PHOTOS], failed: [] })
 		await pasted
 
-		expect(performMove).toHaveBeenCalledExactlyOnceWith([DOCS, PHOTOS], DESTINATION)
+		expect(performMove).toHaveBeenCalledExactlyOnceWith([DOCS, PHOTOS], DESTINATION, true)
 		expect(startCopyWithCard).not.toHaveBeenCalled()
 		expect(entry()).toBeNull()
 	})

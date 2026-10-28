@@ -122,7 +122,7 @@ beforeEach(() => {
 	vi.clearAllMocks()
 
 	findDirectoryUuid.mockImplementation((parentUuid: string | null, name: string) =>
-		Promise.resolve(name === "Playlists" && parentUuid === DOT_FILEN_UUID ? PLAYLISTS_DIR_UUID : DOT_FILEN_UUID)
+		Promise.resolve(name === "playlists" && parentUuid === DOT_FILEN_UUID ? PLAYLISTS_DIR_UUID : DOT_FILEN_UUID)
 	)
 	listDirectory.mockImplementation(() => Promise.resolve({ dirs: [], files: PLAYLIST_FILE_UUIDS.map(uuid => fakeJsonFile(uuid)) }))
 	downloadFileBytes.mockImplementation((file: SdkFile) => Promise.resolve(playlistBytes(file)))

@@ -23,6 +23,10 @@ import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
+import { DotFilenConfirmDialog } from "@/features/drive/components/dotFilenConfirmDialog"
+import { includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
+import { cachedListing } from "@/features/drive/queries/drive"
+import { DOT_FILEN_DIR_NAME } from "@filen/shared"
 
 // The listing-level dialog host's own state shape. Widens itemMenu.logic.ts's ItemActionDialogKind
 // with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
@@ -40,6 +44,8 @@ interface ActiveDialog {
 	index?: number
 	// kind:"preview" opened through "Open as text".
 	asText?: boolean
+	// kind:"rename" of the root `.filen`: its name was typed, so the rename dialog follows.
+	dotFilenConfirmed?: boolean
 }
 
 export interface DriveDialogHost {
@@ -152,6 +158,25 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 		await runDialogOutcome(emptyTrash)
 	}
 
+	// The root `.filen` among the items: its typed confirm stands in for the plain one (trash, delete) or comes first
+	// (rename). A move confirms when it runs (lib/dnd.ts's performMove, moveTargetDialog.tsx).
+	function renderDotFilenConfirm(operation: "trash" | "delete" | "rename", items: DriveItem[], onConfirm: () => void): ReactNode {
+		return (
+			<DotFilenConfirmDialog
+				open
+				pending={dialogPending}
+				operation={operation}
+				multiple={items.length > 1}
+				onOpenChange={open => {
+					if (!open) {
+						closeActiveDialog()
+					}
+				}}
+				onConfirm={onConfirm}
+			/>
+		)
+	}
+
 	// One instance of whichever dialog is active, switching on activeDialog.kind — never more than one
 	// mounted at a time.
 	function renderActiveDialog(): ReactNode {
@@ -167,6 +192,12 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 					return null
 				}
 
+				if (activeDialog.dotFilenConfirmed !== true && includesRootDotFilen(activeDialog.items)) {
+					return renderDotFilenConfirm("rename", activeDialog.items, () => {
+						setActiveDialog({ ...activeDialog, dotFilenConfirmed: true })
+					})
+				}
+
 				return (
 					<RenameItemDialog
 						item={item}
@@ -179,6 +210,12 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 				)
 			}
 			case "trash":
+				if (includesRootDotFilen(activeDialog.items)) {
+					return renderDotFilenConfirm("trash", activeDialog.items, () => {
+						void handleTrashConfirm(activeDialog.items)
+					})
+				}
+
 				return (
 					<TrashConfirmDialog
 						count={activeDialog.items.length}
@@ -190,6 +227,12 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 					/>
 				)
 			case "delete":
+				if (includesRootDotFilen(activeDialog.items)) {
+					return renderDotFilenConfirm("delete", activeDialog.items, () => {
+						void handleDeleteConfirm(activeDialog.items)
+					})
+				}
+
 				return (
 					<ConfirmDialog
 						open
@@ -230,13 +273,16 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 				)
 			case "emptyTrash": {
 				const phrase = t("driveEmptyTrashTypedConfirmPhrase")
+				const body = t("driveEmptyTrashConfirmBody", { phrase })
+				// The trash listing is on screen whenever its Empty trash trigger is, so this reads no more than the cache.
+				const holdsDotFilen = includesRootDotFilen(cachedListing("trash", null) ?? [])
 
 				return (
 					<TypedConfirmDialog
 						open
 						pending={dialogPending}
 						title={t("driveEmptyTrashConfirmTitle")}
-						body={t("driveEmptyTrashConfirmBody", { phrase })}
+						body={holdsDotFilen ? `${body} ${t("driveEmptyTrashDotFilenNote", { name: DOT_FILEN_DIR_NAME })}` : body}
 						matchLabel={t("common:confirmationPhrase")}
 						matchValue={phrase}
 						confirmLabel={t("driveActionEmptyTrash")}

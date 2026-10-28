@@ -1,5 +1,5 @@
 import type { DesktopSyncLocalRootChoice, DesktopSyncMode, DesktopSyncNewPair } from "@filen/shared/desktop"
-import { DOT_FILEN_DIR_NAME } from "@/lib/dotFilen.logic"
+import { isDotFilenName } from "@filen/shared"
 import type { SyncKey } from "@/lib/i18n"
 import { ROOT_PROBLEM_KEY, ROOT_WARNING_KEY } from "@/features/sync/lib/syncErrors.logic"
 import { pathBasename } from "@/features/sync/lib/syncStatus.logic"
@@ -88,5 +88,5 @@ export function withLocalChoice(form: AddPairForm, choice: LocalChoice): AddPair
 
 // The drive's own `.filen` directory at the top level: the app's data, never a sync root.
 export function isHiddenRemoteRow(name: string, atDriveRoot: boolean): boolean {
-	return atDriveRoot && name === DOT_FILEN_DIR_NAME
+	return atDriveRoot && isDotFilenName(name)
 }

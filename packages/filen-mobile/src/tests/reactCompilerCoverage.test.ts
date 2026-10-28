@@ -182,7 +182,8 @@ describe("the compiled drive Header", () => {
 			// A link someone else owns, whose downloads are allowed.
 			"@/features/drive/hooks/useLinkSaveable": withDefault(() => drivePath.type === "linked"),
 			"@/features/drive/linkedSave": { buildSaveLinkedDirectoryButton: buildSaveButton, linkSaveTarget: () => null },
-			"@/lib/logger": withDefault({})
+			"@/lib/logger": withDefault({}),
+			"@/features/drive/dotFilenGuard": { emptyTrashMessage: () => "" }
 		}
 		const Header = runCompiled<{ default?: (props: HeaderProps) => { props: StackHeaderProps } }>(code, modules, "Header").default
 

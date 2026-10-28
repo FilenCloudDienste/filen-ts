@@ -357,6 +357,34 @@ export const drive = {
 	/** Confirmation dialog title and button for disabling a public link */
 	confirm_disable_public_link: "Are you sure you want to disable the public link for this item?",
 
+	// ── Root .filen confirmation (dotFilenGuard.ts) ───────────────────────────
+	// ".filen" and {{name}} (always ".filen") name a directory and are never translated.
+	/** Typed-confirmation title before trashing the root .filen directory; {{name}} = ".filen" */
+	dot_filen_trash_title: "Trash the {{name}} directory?",
+	/** Typed-confirmation title before permanently deleting the root .filen directory; {{name}} = ".filen" */
+	dot_filen_delete_title: "Delete the {{name}} directory permanently?",
+	/** Typed-confirmation title before moving the root .filen directory; {{name}} = ".filen" */
+	dot_filen_move_title: "Move the {{name}} directory?",
+	/** Typed-confirmation title before renaming the root .filen directory; {{name}} = ".filen" */
+	dot_filen_rename_title: "Rename the {{name}} directory?",
+	/** Typed-confirmation body when .filen is the only item; ends with the instruction to type its name into the field below; {{name}} = ".filen" */
+	dot_filen_message: "{{name}} holds the settings Filen syncs between your devices (videos, playlists, office…).\n\nType {{name}} to confirm:",
+	/** Typed-confirmation body when .filen is one of several selected items; {{name}} = ".filen" */
+	dot_filen_message_selection:
+		"Your selection includes {{name}}, which holds the settings Filen syncs between your devices (videos, playlists, office…). Proceeding includes it.\n\nType {{name}} to confirm:",
+	/** Typed-confirmation destructive button, trash variant */
+	dot_filen_trash_confirm: "Trash anyway",
+	/** Typed-confirmation destructive button, permanent-delete variant */
+	dot_filen_delete_confirm: "Delete anyway",
+	/** Typed-confirmation destructive button, move variant */
+	dot_filen_move_confirm: "Move anyway",
+	/** Typed-confirmation destructive button, rename variant */
+	dot_filen_rename_confirm: "Rename anyway",
+	/** Empty-trash confirmation — extra paragraph when the trash holds the .filen directory; {{name}} = ".filen" */
+	empty_trash_dot_filen_note: "{{name}} is in the trash; emptying it deletes your synced settings.",
+	/** Toast when the typed text did not match .filen, so nothing happened; {{name}} = ".filen" */
+	dot_filen_confirm_mismatch: "That didn't match {{name}}, so nothing was changed.",
+
 	// ── DriveSelectToolbar (driveSelectToolbar.tsx) ───────────────────────────
 	/** Confirm button in the move toolbar: moves selected items into the current directory */
 	move_here: "Move here",

@@ -3,6 +3,7 @@ import { driveItemName } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { canDragVariant, assembleDragPayload } from "@/features/drive/lib/dnd.logic"
 import { moveItems } from "@/features/drive/lib/actions"
+import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { type BulkOutcome } from "@/lib/actions/bulk"
 import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { DRIVE_MOVE, driveActivity } from "@/features/drive/lib/activity"
@@ -228,9 +229,14 @@ export function moveActivity(items: readonly DriveItem[], destination: CopyDesti
 
 // Runs the move for a completed drop, a pick in the item menu's directory tree (transferSubmenu.tsx) or
 // a pasted cut (clipboard.ts), as an activity toast; the move dialog (moveTargetDialog.tsx) runs
-// moveActivity itself.
-export async function performMove(items: readonly DriveItem[], destination: CopyDestination): Promise<BulkOutcome<DriveItem>> {
-	if (items.length === 0) {
+// moveActivity itself. Moving the root `.filen` asks for its name first (lib/dotFilenGuard.ts) unless the caller
+// already did (`confirmed`); a cancel moves nothing.
+export async function performMove(
+	items: readonly DriveItem[],
+	destination: CopyDestination,
+	confirmed?: boolean
+): Promise<BulkOutcome<DriveItem>> {
+	if (items.length === 0 || (confirmed !== true && includesRootDotFilen(items) && !(await confirmDotFilenOperation("move", items)))) {
 		return { succeeded: [], failed: [] }
 	}
 

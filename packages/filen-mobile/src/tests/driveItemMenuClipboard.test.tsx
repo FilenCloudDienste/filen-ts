@@ -4,6 +4,12 @@ import { act, cleanup, render } from "@testing-library/react"
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
+// The root `.filen` guard reads the session cache and prompts natively; none of these items is the root `.filen`.
+vi.mock("@/features/drive/dotFilenGuard", () => ({
+	confirmDotFilenOperation: vi.fn(async () => true),
+	includesRootDotFilen: () => false,
+	isRootDotFilenItem: () => false
+}))
 vi.mock("@filen/sdk-rs", () => ({ AnyNormalDir_Tags: { Dir: "Dir", Root: "Root" } }))
 vi.mock("react-i18next", async () => await import("@/tests/mocks/reactI18next"))
 vi.mock("@/components/ui/menu", () => ({ default: ({ children }: { children: unknown }) => children }))

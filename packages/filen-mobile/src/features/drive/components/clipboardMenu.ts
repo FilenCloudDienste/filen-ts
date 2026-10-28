@@ -13,6 +13,7 @@ import copyRunner from "@/features/copy/copyRunner"
 import { canPasteInto } from "@/features/drive/clipboard"
 import { copyDestinationOf } from "@/features/drive/copyDestination"
 import { restoreFailedCut, takeCutForPaste } from "@/features/drive/clipboardFollow"
+import { confirmDotFilenOperation } from "@/features/drive/dotFilenGuard"
 import useDriveClipboardStore, { type DriveClipboardEntry } from "@/features/drive/store/useDriveClipboard.store"
 
 // Pastes the clipboard into `targetDir`. A copy starts one copy job and stays on the clipboard for more
@@ -40,6 +41,11 @@ export async function pasteClipboard({ targetDir, allowCut }: { targetDir: AnyNo
 			alerts.error(started.error)
 		}
 
+		return
+	}
+
+	// Asked before the cut is taken, so a cancel leaves it on the clipboard; a cut replaced meanwhile isn't pasted.
+	if (!(await confirmDotFilenOperation("move", entry.items)) || useDriveClipboardStore.getState().entry !== entry) {
 		return
 	}
 

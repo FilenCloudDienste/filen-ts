@@ -3,6 +3,7 @@ import { getSharerIdentity, type DriveItem } from "@/features/drive/lib/item"
 import { sortDriveItems, type DriveSortBy } from "@/features/drive/lib/sort"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
+import { rootDotFilenFilter } from "@/features/drive/lib/hiddenItems"
 
 // Fail-open visibility check for a sharedIn item: an unresolved sharer identity (getSharerIdentity
 // returns null — the item isn't shared, or its role couldn't be read) always KEEPS the item; only a
@@ -67,6 +68,7 @@ export interface ListingDisplayResult {
 	// search.total; comparing the post-hide count instead would make that notice permanent the moment
 	// one hit is hidden.
 	resolvedCount: number
+	// Removed by the dot-prefix toggle alone: the root `.filen`, which only its own setting reveals, never counts.
 	hiddenCount: number
 	// The uuids the hide filter removed — directoryListing.tsx's hidden-selection purge drops these from
 	// the selection, so a row nobody can see can never sit in the bulk bar's scope.
@@ -88,27 +90,46 @@ function collectHiddenUuids(resolved: DriveItem[], shownItems: DriveItem[]): str
 // the instant anything is hidden. Filtering an already-resolved array can only remove rows, never
 // reorder them, so this order is both correct and free. `search.total` is deliberately never adjusted
 // — subtracting the hidden count can only ever account for hits that already landed, so it would
-// misreport a truncated result set.
+// misreport a truncated result set. `dotFilenRoot` is the drive root uuid while the root `.filen` is hidden here
+// (null: shown, or it can't appear in this listing), `atDriveRoot` whether the listing (and so a search) is rooted
+// there, and `isDotFilenSystemDir` (lib/dotFilen.ts) lets recents and favorites drop what sits inside `.filen`.
 export function resolveListingDisplayItems(input: {
 	items: DriveItem[]
 	sortBy: DriveSortBy
 	directorySizes: ReadonlyMap<string, number>
 	hide: boolean
+	dotFilenRoot?: string | null
+	atDriveRoot?: boolean
+	variant?: DriveVariant
+	isDotFilenSystemDir?: (uuid: string) => boolean
 	search?: { total: bigint; parentPaths: ReadonlyMap<string, string> }
 }): ListingDisplayResult {
 	const resolved =
 		input.search === undefined
 			? sortDriveItems(input.items, input.sortBy, input.directorySizes)
 			: resolveSearchDisplayItems(input.items, input.search.total, input.sortBy, input.directorySizes)
-	const items = filterHiddenItems({
+	const searchParentPaths = input.search?.parentPaths
+	// The root `.filen` first, on its own, so it never counts as a hidden item.
+	const listed = filterHiddenItems({
 		items: resolved,
-		hide: input.hide,
-		...(input.search !== undefined ? { searchParentPaths: input.search.parentPaths } : {})
+		hide: false,
+		rootDotFilen: rootDotFilenFilter({
+			rootUuid: input.dotFilenRoot ?? null,
+			variant: input.variant ?? "drive",
+			searchAtDriveRoot: input.atDriveRoot === true,
+			isSystemDir: input.isDotFilenSystemDir
+		}),
+		...(searchParentPaths !== undefined ? { searchParentPaths } : {})
 	})
-	// filterHiddenItems returns its input array only when hiding is off, so nothing was removed.
+	const items = filterHiddenItems({
+		items: listed,
+		hide: input.hide,
+		...(searchParentPaths !== undefined ? { searchParentPaths } : {})
+	})
+	// filterHiddenItems returns its input array only when it removed nothing.
 	const hiddenUuids = items === resolved ? NO_HIDDEN_UUIDS : collectHiddenUuids(resolved, items)
 
-	return { items, resolvedCount: resolved.length, hiddenCount: hiddenUuids.length, hiddenUuids }
+	return { items, resolvedCount: resolved.length, hiddenCount: listed.length - items.length, hiddenUuids }
 }
 
 // Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/

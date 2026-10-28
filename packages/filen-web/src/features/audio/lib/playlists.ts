@@ -1,4 +1,5 @@
 import {
+	DOT_FILEN_SUBDIRS,
 	KeyedSemaphores,
 	driveItemName,
 	parsePlaylist,
@@ -35,14 +36,14 @@ import {
 	type PlaylistEntry
 } from "@/features/audio/queries/playlists"
 
-// The `.filen/Playlists` on-disk contract's read/write engine — mirrors mobile's audio.ts playlist
+// The `.filen/playlists` on-disk contract's read/write engine — mirrors mobile's audio.ts playlist
 // section (getPlaylistsDirectory/getPlaylists/mutatePlaylist/savePlaylist/reorderPlaylistFile), kept
 // framework-free (no React) so every function here is directly unit-testable against a mocked sdkApi,
 // same posture as features/drive/lib/actions.ts. UI components never talk to sdkApi directly for
 // playlists — they call into this module, which owns the write-lock, the freshest-copy recompose and
 // the query-cache patch.
 
-const PLAYLISTS_DIR_NAME = "Playlists"
+const PLAYLISTS_DIR_NAME = DOT_FILEN_SUBDIRS.playlists
 
 // Drive uuids of the files this tab knows the Playlists directory holds: the last listing plus its own
 // uploads since. What lets a uuid-only socket event be tied to a playlist.
@@ -52,12 +53,12 @@ const knownPlaylistFileUuids = new Set<string>()
 // content change, so the bytes behind one never change and its parse can be reused.
 let parsedByFileUuid = new Map<string, Playlist>()
 
-// `.filen/Playlists` at the drive root, shared with the other `.filen` consumers (lib/dotFilen.ts).
+// `.filen/playlists` at the drive root, shared with the other `.filen` consumers (lib/dotFilen.ts).
 export function getPlaylistsDirectoryUuid(): Promise<string> {
 	return getDotFilenSubdir(PLAYLISTS_DIR_NAME)
 }
 
-// `.filen` or `Playlists` itself was trashed, deleted, moved or renamed: the memo now names the wrong
+// `.filen` or `playlists` itself was trashed, deleted, moved or renamed: the memo now names the wrong
 // directory (or none), so the next use re-resolves it and the cache re-reads from there.
 onDotFilenSubdirForgotten(PLAYLISTS_DIR_NAME, () => {
 	knownPlaylistFileUuids.clear()

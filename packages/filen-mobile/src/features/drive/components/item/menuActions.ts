@@ -46,6 +46,7 @@ import {
 } from "@/features/drive/driveSelectors"
 import cache from "@/lib/cache"
 import logger from "@/lib/logger"
+import { confirmDotFilenOperation } from "@/features/drive/dotFilenGuard"
 
 // Warm the global uuid-keyed cache for the tapped item BEFORE navigating to a metadata
 // screen. A cache-search result from a directory the user never browsed is not yet in the
@@ -309,6 +310,10 @@ export function createMenuButtons({
 			title: t("rename"),
 			icon: "edit",
 			onPress: async () => {
+				if (!(await confirmDotFilenOperation("rename", [item]))) {
+					return
+				}
+
 				const newName = await inputPrompt(
 					{
 						title: t("rename"),

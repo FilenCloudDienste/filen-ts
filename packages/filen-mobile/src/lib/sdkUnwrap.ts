@@ -57,6 +57,11 @@ export function unwrapParentUuid(parent: ParentUuid): string | null {
 	}
 }
 
+// A trashed item's original parent, which ParentUuid.Trash carries; null for anything not trashed.
+export function trashedFromParentUuid(parent: ParentUuid): string | null {
+	return parent.tag === ParentUuid_Tags.Trash ? parent.inner[0] : null
+}
+
 // Only own files and directories have a parent listing; shared variants resolve to null.
 export function normalParentUuidOf(item: DriveItem): string | null {
 	return item.type === "file" || item.type === "directory" ? unwrapParentUuid(item.data.parent) : null

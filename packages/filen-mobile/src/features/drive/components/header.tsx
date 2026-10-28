@@ -29,6 +29,7 @@ import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.sto
 import useLinkSaveable from "@/features/drive/hooks/useLinkSaveable"
 import { buildSaveLinkedDirectoryButton, linkSaveTarget } from "@/features/drive/linkedSave"
 import logger from "@/lib/logger"
+import { emptyTrashMessage } from "@/features/drive/dotFilenGuard"
 
 const Header = ({
 	setSearchQuery,
@@ -231,7 +232,8 @@ const Header = ({
 					const confirmed = await confirmPrompt(
 						{
 							title: t("empty_trash"),
-							message: t("are_you_sure_empty_trash"),
+							// The trash listing is what this screen renders, so the `.filen` check reads nothing new.
+							message: emptyTrashMessage(listItems),
 							cancelText: t("cancel"),
 							okText: t("empty"),
 							destructive: true

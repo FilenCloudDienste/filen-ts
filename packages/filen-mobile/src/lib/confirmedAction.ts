@@ -18,7 +18,8 @@ export function confirmedAction({
 	promptDestructive = true,
 	action,
 	dismiss,
-	dismissPathnamePrefix
+	dismissPathnamePrefix,
+	confirm
 }: {
 	promptTitle: string
 	promptMessage: string
@@ -32,18 +33,22 @@ export function confirmedAction({
 	dismiss?: () => boolean
 	// Pop back on success when the current pathname starts with this. Takes precedence over `dismiss`.
 	dismissPathnamePrefix?: string
+	// Asks instead of the plain prompt (drive's typed confirm for the root `.filen`); true to go on.
+	confirm?: () => Promise<boolean>
 }): () => Promise<void> {
 	return async () => {
-		const confirmed = await confirmPrompt(
-			{
-				title: promptTitle,
-				message: promptMessage,
-				cancelText: t("cancel"),
-				okText: promptOkText,
-				destructive: promptDestructive
-			},
-			{ tag: "confirmedAction", message: "prompt threw unexpectedly" }
-		)
+		const confirmed = confirm
+			? await confirm()
+			: await confirmPrompt(
+					{
+						title: promptTitle,
+						message: promptMessage,
+						cancelText: t("cancel"),
+						okText: promptOkText,
+						destructive: promptDestructive
+					},
+					{ tag: "confirmedAction", message: "prompt threw unexpectedly" }
+				)
 
 		if (!confirmed) {
 			return

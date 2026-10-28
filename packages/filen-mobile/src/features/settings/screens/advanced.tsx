@@ -29,6 +29,7 @@ import useTransfersStore from "@/features/transfers/store/useTransfers.store"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import useCameraUploadStore from "@/features/cameraUpload/store/useCameraUpload.store"
 import { useSecureStore } from "@/lib/secureStore"
+import { useShowDotFilen } from "@/features/drive/driveHiddenItems"
 import foregroundService, {
 	TRANSFERS_FOREGROUND_SERVICE_ENABLED_SECURE_STORE_KEY,
 	DEFAULT_TRANSFERS_FOREGROUND_SERVICE_ENABLED,
@@ -175,6 +176,8 @@ function Advanced() {
 
 	const [hapticsEnabled, setHapticsEnabled] = useSecureStore<boolean>(HAPTICS_ENABLED_SECURE_STORE_KEY, DEFAULT_HAPTICS_ENABLED)
 
+	const [showDotFilen, setShowDotFilen] = useShowDotFilen()
+
 	const [transferPreset, setTransferPreset] = useTransferPerformancePreset()
 	const [uploadLimitKbps, setUploadLimitKbps] = useUploadLimitKbps()
 	const [downloadLimitKbps, setDownloadLimitKbps] = useDownloadLimitKbps()
@@ -310,6 +313,18 @@ function Advanced() {
 									value: hapticsEnabled,
 									onValueChange: () => {
 										setHapticsEnabled(prev => !prev)
+									}
+								}
+							},
+							{
+								icon: "eye-outline",
+								title: t("show_dot_filen"),
+								subTitle: t("show_dot_filen_description"),
+								rightItem: {
+									type: "switch",
+									value: showDotFilen,
+									onValueChange: () => {
+										setShowDotFilen(prev => !prev)
 									}
 								}
 							}

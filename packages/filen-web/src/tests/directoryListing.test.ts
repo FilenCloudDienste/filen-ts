@@ -14,6 +14,7 @@ import {
 } from "@/features/drive/components/directoryListing.logic"
 import { DRIVE_SORT_BY, DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { testUuid } from "@/tests/support/uuid"
+import { dotFilenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
 import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
@@ -246,6 +247,113 @@ describe("resolveListingDisplayItems", () => {
 	function named(label: string, name: string) {
 		return narrowItem(mockDir({ uuid: testUuid(label), meta: { type: "decoded", data: { name } } }))
 	}
+
+	describe("the root .filen", () => {
+		const ROOT = testUuid("parent")
+		const dotFilen = named("dotfilen", ".filen")
+		const env = named("env", ".env")
+		const docs = named("docs", "Docs")
+
+		it("is removed while hidden, never counting as a hidden item", () => {
+			const result = resolveListingDisplayItems({
+				items: [dotFilen, env, docs],
+				sortBy: "nameAsc",
+				directorySizes: NO_SIZES,
+				hide: true,
+				dotFilenRoot: ROOT,
+				atDriveRoot: true
+			})
+
+			expect(result.items).toEqual([docs])
+			expect(result.hiddenCount).toBe(1)
+			expect(result.hiddenUuids.sort()).toEqual([dotFilen.data.uuid, env.data.uuid].sort())
+		})
+
+		it("stays while shown, and the dot-prefix toggle alone never removes it", () => {
+			const shown = resolveListingDisplayItems({
+				items: [dotFilen, docs],
+				sortBy: "nameAsc",
+				directorySizes: NO_SIZES,
+				hide: false,
+				dotFilenRoot: null
+			})
+
+			expect(shown.items).toEqual([dotFilen, docs])
+		})
+
+		it("drops what sits inside .filen from recents and favorites, as the resolver knows it", () => {
+			const settings = narrowItem(mockFile({ uuid: testUuid("settings"), parent: testUuid("videosdir") }))
+			const mine = narrowItem(mockFile({ uuid: testUuid("mine") }))
+			const isSystemDir = (uuid: string) => uuid === testUuid("videosdir")
+
+			for (const variant of ["recents", "favorites"] as const) {
+				const result = resolveListingDisplayItems({
+					items: [settings, mine],
+					sortBy: "nameAsc",
+					directorySizes: NO_SIZES,
+					hide: false,
+					dotFilenRoot: ROOT,
+					variant,
+					isDotFilenSystemDir: isSystemDir
+				})
+
+				expect(result.items).toEqual([mine])
+				expect(result.hiddenCount).toBe(0)
+			}
+
+			const links = resolveListingDisplayItems({
+				items: [settings, mine],
+				sortBy: "nameAsc",
+				directorySizes: NO_SIZES,
+				hide: false,
+				dotFilenRoot: ROOT,
+				variant: "links",
+				isDotFilenSystemDir: isSystemDir
+			})
+
+			expect(links.items).toHaveLength(2)
+		})
+
+		it("removes nothing, and reports no hidden rows, where the filter finds nothing", () => {
+			const result = resolveListingDisplayItems({
+				items: [docs],
+				sortBy: "nameAsc",
+				directorySizes: NO_SIZES,
+				hide: true,
+				dotFilenRoot: ROOT,
+				atDriveRoot: true
+			})
+
+			expect(result.items).toEqual([docs])
+			expect(result.hiddenUuids).toHaveLength(0)
+		})
+
+		it("applies only where the root .filen can appear", () => {
+			expect(dotFilenFilterAppliesTo("drive", null)).toBe(true)
+			expect(dotFilenFilterAppliesTo("drive", testUuid("docs"))).toBe(false)
+			expect(dotFilenFilterAppliesTo("recents", null)).toBe(true)
+			expect(dotFilenFilterAppliesTo("favorites", null)).toBe(true)
+			expect(dotFilenFilterAppliesTo("trash", null)).toBe(false)
+			expect(dotFilenFilterAppliesTo("sharedIn", null)).toBe(false)
+		})
+
+		it("takes the search hits inside it along, keeping resolvedCount PRE-hide", () => {
+			const inside = narrowItem(mockFile({ uuid: testUuid("inside") }))
+			const result = resolveListingDisplayItems({
+				items: [inside, docs],
+				sortBy: "nameAsc",
+				directorySizes: NO_SIZES,
+				hide: false,
+				dotFilenRoot: ROOT,
+				atDriveRoot: true,
+				search: { total: 2n, parentPaths: new Map([[inside.data.uuid, ".filen/videos"]]) }
+			})
+
+			expect(result.items).toEqual([docs])
+			expect(result.resolvedCount).toBe(2)
+			expect(result.hiddenCount).toBe(0)
+		})
+	})
 
 	it("non-search arm sorts, then hides", () => {
 		const b = named("disp-b", "b")

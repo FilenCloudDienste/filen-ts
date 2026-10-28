@@ -19,7 +19,7 @@ import type {
 	GetItemPathResult,
 	SharingRole
 } from "@filen/sdk-rs"
-import { fastLocaleCompare, driveItemName, removeByUuid, upsertItems } from "@filen/shared"
+import { fastLocaleCompare, driveItemName, isDotFilenName, removeByUuid, upsertItems } from "@filen/shared"
 import {
 	narrowItem,
 	asDirectoryOrFile,
@@ -30,7 +30,9 @@ import {
 } from "@/features/drive/lib/item"
 import type { FlatListingKind } from "@/features/drive/lib/flatListing"
 import {
+	DEFAULT_SHOW_DOT_FILEN,
 	getHideHiddenItems,
+	getShowDotFilen,
 	getSortPreferences,
 	getViewModePreferences,
 	type DriveLocation,
@@ -40,6 +42,7 @@ import {
 } from "@/features/drive/lib/preferences"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { getHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
+import { useAccountQuery } from "@/queries/account"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): `uuid` is null for every flat
 // listing (recents/favorites/trash) and for My Drive's own root, so a fast nav between two
@@ -293,10 +296,17 @@ export function projectTreeChildren(items: DriveItem[]): DirectoryTreeChild[] {
 // listing's socket patches. Same options as useDirectoryListingQuery — two observers on one key must
 // never disagree on how it is fetched. Lazy per node: a node's query only mounts once its subtree does
 // (see directoryTree.tsx), so an unopened node never fetches.
+// The root level without the root `.filen`, while its setting hides it. Every directory there sits at the root.
+function projectRootTreeChildren(items: DriveItem[]): DirectoryTreeChild[] {
+	return projectTreeChildren(items).filter(child => !isDotFilenName(child.name))
+}
+
 export function useDirectoryTreeChildrenQuery(uuid: string | null): UseQueryResult<DirectoryTreeChild[]> {
+	const showDotFilen = useShowDotFilenPreferenceQuery().data ?? DEFAULT_SHOW_DOT_FILEN
+
 	return useQuery({
 		...driveListingQueryOptions("drive", uuid),
-		select: projectTreeChildren
+		select: uuid === null && !showDotFilen ? projectRootTreeChildren : projectTreeChildren
 	})
 }
 
@@ -1465,6 +1475,25 @@ export function useHideHiddenItemsPreferenceQuery(): UseQueryResult<boolean> {
 		queryKey: ["drive", "hideHiddenItemsPreference"] as const,
 		queryFn: getHideHiddenItems
 	})
+}
+
+// Same convention: whether the root `.filen` is listed, set in Settings → Advanced. Every tree node and listing
+// observes it, and only its own setter changes it (refetching), so a mount never reads it again.
+export function useShowDotFilenPreferenceQuery(): UseQueryResult<boolean> {
+	return useQuery({
+		queryKey: ["drive", "showDotFilenPreference"] as const,
+		queryFn: getShowDotFilen,
+		staleTime: Infinity
+	})
+}
+
+// The drive root uuid while the root `.filen` is hidden, for lib/hiddenItems.ts's rootDotFilenFilter; null while it
+// is shown (or before the account is known, when nothing can be matched yet).
+export function useHiddenDotFilenRoot(): string | null {
+	const show = useShowDotFilenPreferenceQuery().data ?? DEFAULT_SHOW_DOT_FILEN
+	const rootUuid = useAccountQuery().data?.rootDirUuid ?? null
+
+	return show ? null : rootUuid
 }
 
 // Public-link panel primitive: tags the worker's per-type status read with which type it is —

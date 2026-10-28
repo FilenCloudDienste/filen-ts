@@ -8,6 +8,7 @@ import { LogsBlock } from "@/features/settings/components/advanced/logsBlock"
 import { AboutRows } from "@/features/settings/components/advanced/aboutRows"
 import { ThirdPartyNoticesRow } from "@/features/settings/components/advanced/thirdPartyNoticesRow"
 import { DocumentsRows } from "@/features/settings/components/advanced/documentsRows"
+import { DotFilenRow } from "@/features/settings/components/advanced/dotFilenRow"
 import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
@@ -48,6 +49,12 @@ function AdvancedPage() {
 				description={t("settingsAdvancedUploadsDescription")}
 			>
 				<UploadsRow />
+			</SettingsGroup>
+			<SettingsGroup
+				title={t("settingsAdvancedDriveTitle")}
+				description={t("settingsAdvancedDriveDescription")}
+			>
+				<DotFilenRow />
 			</SettingsGroup>
 			<SettingsGroup
 				title={t("settingsLogsTitle")}

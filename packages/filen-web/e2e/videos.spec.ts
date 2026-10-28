@@ -17,10 +17,10 @@ import { VIDEOS_MKV_BYTES, VIDEOS_MP4_BYTES } from "./helpers/videoFixtures"
 
 // The live proof of the Videos arc on a real account: a directory picked on the first run, its scan, a movie the
 // browser plays as it is (over the service worker's stream route), a Matroska movie it cannot (remuxed into
-// MediaSource by the remux worker), the watch position reaching `.filen/Videos/watch-state.v1.json` on the
+// MediaSource by the remux worker), the watch position reaching `.filen/videos/watch-state.v1.json` on the
 // server, and Resume after a reload.
 //
-// Videos keeps its library and watch state in `.filen/Videos` on the account, which every run and browser shares,
+// Videos keeps its library and watch state in `.filen/videos` on the account, which every run and browser shares,
 // so the test snapshots that directory first and puts it back at the end (src/e2e-hooks/videosSync.ts). That runs
 // from a freshly loaded page that never opened Videos: a page that did would save its own copy straight back.
 // The library directory is a scratch directory like every write-lane spec's, trashed at the end.
@@ -43,7 +43,7 @@ const PLAYBACK_TIMEOUT_MS = 45_000
 const RESTORE_TIMEOUT_MS = 2 * LIVE_WRITE_TIMEOUT_MS
 
 // The test's ceiling, from the waits pinned below, so a slow but healthy run unwinds through its own restore
-// instead of being killed (a kill orphans the drive-write lease and leaves `.filen/Videos` changed):
+// instead of being killed (a kill orphans the drive-write lease and leaves `.filen/videos` changed):
 //   scratch bracket   728 s  enterScratchDirectory 468 + trashScratchDirectory 260 (playwright.config.ts write lane)
 //   boot + upload     450 s  bootTo 90, uploadFiles 360 (two rows at 120, pending list 120)
 //   first run         325 s  SW 30, Videos link 30, first-run text 30, chooser actions 75, library save 120, cards 40
@@ -171,7 +171,7 @@ async function restoreVideosSync(page: Page, snapshot: VideosSyncSnapshot): Prom
 			page.evaluate(before => window.__filenE2E.videosSyncRestore(before), snapshot),
 			new Promise<never>((_resolve, reject) => {
 				timer = setTimeout(() => {
-					reject(new Error(`restoring .filen/Videos did not finish in ${String(RESTORE_TIMEOUT_MS / 1000)} s`))
+					reject(new Error(`restoring .filen/videos did not finish in ${String(RESTORE_TIMEOUT_MS / 1000)} s`))
 				}, RESTORE_TIMEOUT_MS)
 			})
 		])
@@ -254,7 +254,7 @@ test("videos: first-run directory, scan, direct and remuxed playback, watch stat
 		await expectPlayingPast(direct, RESUME_FROM_SEC + 1)
 		await leavePlayer(page)
 
-		// ---- the position reaches .filen/Videos on the server ----
+		// ---- the position reaches .filen/videos on the server ----
 		await expect
 			.poll(() => syncedPositionSec(page, DIRECT_DURATION_SEC - 1), { timeout: LIVE_WRITE_TIMEOUT_MS, intervals: [2_000, 5_000] })
 			.toBeGreaterThanOrEqual(RESUME_FROM_SEC)

@@ -37,6 +37,7 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	getRealDriveItemParent: vi.fn(() => null),
 	makeDriveItemPublicLink: vi.fn(),
 	unwrapParentUuid: vi.fn((parent: string | null) => parent ?? null),
+	trashedFromParentUuid: vi.fn(() => null),
 	normalParentUuidOf: vi.fn((item: { type: string; data: { parent?: string | null } }) =>
 		item.type === "file" || item.type === "directory" ? (item.data.parent ?? null) : null
 	)

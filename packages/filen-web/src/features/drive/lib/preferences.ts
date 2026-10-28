@@ -195,3 +195,13 @@ export const { get: getHideHiddenItems, set: setHideHiddenItems } = kvPreference
 	schema: hideHiddenItemsSchema,
 	fallback: DEFAULT_HIDE_HIDDEN_ITEMS
 })
+
+// The root `.filen` (Filen's own synced settings) is hidden unless Settings → Advanced shows it; the hidden-items
+// toggle above never reveals it (lib/hiddenItems.ts's rootDotFilenFilter).
+export const DEFAULT_SHOW_DOT_FILEN = false
+
+export const { get: getShowDotFilen, set: setShowDotFilen } = kvPreference({
+	key: "drive.showDotFilen.v1",
+	schema: hideHiddenItemsSchema,
+	fallback: DEFAULT_SHOW_DOT_FILEN
+})

@@ -274,6 +274,14 @@ export const settings = {
 	settingsConvertHeicToJpg: "Convert HEIC/HEIF to JPG",
 	settingsConvertHeicToJpgDescription: "Upload HEIC and HEIF photos as JPG, so they open on devices and apps without HEIC support",
 
+	// ── Advanced: drive ──────────────────────────────────────────────────────
+	settingsAdvancedDriveTitle: "Drive",
+	settingsAdvancedDriveDescription: "What your drive lists",
+	/** Switch — list the .filen directory at the drive root; off by default. ".filen" is a directory name, never translated */
+	settingsShowDotFilen: "Show .filen directory",
+	settingsShowDotFilenDescription:
+		"The .filen directory holds the settings Filen syncs between your devices. While this is off, it is left out of your drive, search and directory pickers",
+
 	// ── Advanced: diagnostic logs ─────────────────────────────────────────────
 	settingsLogsTitle: "Diagnostic logs",
 	/** {{count}} is the ring buffer's max size (500) */

@@ -35,7 +35,8 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 	getRealDriveItemParent: vi.fn(() => null),
 	makeDriveItemPublicLink: vi.fn(),
 	unwrapParentUuid: vi.fn(() => null),
-	normalParentUuidOf: vi.fn(() => null)
+	normalParentUuidOf: vi.fn(() => null),
+	trashedFromParentUuid: vi.fn(() => null)
 }))
 vi.mock("@/components/ui/fullScreenLoadingModal", () => ({ runWithLoading: vi.fn() }))
 vi.mock("@/features/drive/drive", () => ({ default: { getRootUuid: vi.fn() } }))

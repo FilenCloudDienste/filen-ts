@@ -80,7 +80,7 @@ async function sweepDriveSurface(page: Page, target: "root" | "trash"): Promise<
 	return total
 }
 
-// Playlists live in the app-created `.filen/Playlists` directory, which the listing sweeps never
+// Playlists live in the app-created `.filen/playlists` directory, which the listing sweeps never
 // descend into — audio.spec.ts deletes its own from a finally, but a context killed outright leaks one
 // permanently. Rows here are plain list items, not listbox options; the name is read off the title
 // attribute the row puts on its name span (playlistsSidebar.tsx) and matched by the same anchored
@@ -137,7 +137,7 @@ async function sweepPrefixes(kind: string, prefixes: readonly string[], sweep: (
 }
 
 // A Videos run killed before its own restore leaves its scratch directory as a library root in
-// `.filen/Videos/library.v1.json`, and the next run would snapshot and restore it as part of the account's state.
+// `.filen/videos/library.v1.json`, and the next run would snapshot and restore it as part of the account's state.
 // Runs after the drive sweeps above, which trash and delete the directories themselves: a root whose directory is
 // gone or trashed is removed whatever its age, a live scratch-named one only past the drive debris window.
 async function pruneVideoRoots(page: Page): Promise<void> {

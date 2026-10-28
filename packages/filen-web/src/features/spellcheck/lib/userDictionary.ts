@@ -20,7 +20,7 @@ import { onDotFilenSubdirForgotten } from "@/lib/dotFilen"
 import { OFFICE_DIR_NAME, officeDirectory } from "@/features/office/lib/officeDirectory"
 import { SYNCED_FILE_UPLOAD_DEADLINE_MS, SyncedDotFilenFile, type SyncedFileCodec, type SyncedFileSdk } from "@/lib/syncedDotFilenFile"
 
-// The user's spelling dictionary, synced end-to-end encrypted as `.filen/Office/user-dictionary.v1.json`
+// The user's spelling dictionary, synced end-to-end encrypted as `.filen/office/user-dictionary.v1.json`
 // (lib/syncedDotFilenFile.ts): read when spellchecking first needs it, an addition shown at once and merged
 // into the file as it stands before the upload.
 

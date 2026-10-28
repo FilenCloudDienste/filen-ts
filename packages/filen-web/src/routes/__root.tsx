@@ -20,6 +20,7 @@ import { ActivityDetailsDialog } from "@/lib/activity/activityDetailsDialog"
 import { DriveJobCancelDialog } from "@/features/transfers/components/driveJobCancelDialog"
 import { ExtractPasswordDialog } from "@/features/transfers/components/extractPasswordDialog"
 import { DownloadAsPasswordDialog } from "@/features/drive/components/downloadAsPasswordDialog"
+import { DotFilenGuardDialog } from "@/features/drive/components/dotFilenConfirmDialog"
 import { JobReportDialog } from "@/features/transfers/components/jobReportDialog"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { guardStrayDrops } from "@/lib/dropGuard"
@@ -145,6 +146,8 @@ function RootLayout() {
 						<ExtractPasswordDialog />
 						{/* Asked by a protected file's Download as, started from an item menu that has closed since. */}
 						<DownloadAsPasswordDialog />
+						{/* Asked by a move of the root `.filen`, from a drop or a pasted cut that has no dialog of its own. */}
+						<DotFilenGuardDialog />
 						<JobReportDialog />
 						{/* Opened from an activity's result toast. */}
 						<ActivityDetailsDialog />

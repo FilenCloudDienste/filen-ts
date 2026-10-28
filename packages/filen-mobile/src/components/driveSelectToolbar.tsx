@@ -23,6 +23,7 @@ import useDismissStack from "@/hooks/useDismissStack"
 import { useTranslation } from "react-i18next"
 import useIsOnline from "@/hooks/useIsOnline"
 import logger from "@/lib/logger"
+import { confirmDotFilenOperation } from "@/features/drive/dotFilenGuard"
 
 function emitRootSelection(id: string, parentDir: AnyNormalDir) {
 	events.emit("driveSelect", {
@@ -118,6 +119,13 @@ const DriveSelectToolbar = () => {
 				isSubmitting.current = true
 
 				const items = drivePath.selectOptions.items
+
+				// Moving the root `.filen` asks for its name first; a cancel keeps the picker open.
+				if (!(await confirmDotFilenOperation("move", items))) {
+					isSubmitting.current = false
+
+					return
+				}
 				// runWithLoading returns a Result and never throws, so the guard always resets.
 				const result = await runWithLoading(async () => {
 					await Promise.all(

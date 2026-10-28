@@ -1,17 +1,27 @@
 import { useState } from "react"
-import { useDirectoryListingQuery, useDirectoryNamesQuery } from "@/features/drive/queries/drive"
+import { filterHiddenItems } from "@filen/shared"
+import { useDirectoryListingQuery, useDirectoryNamesQuery, useHiddenDotFilenRoot } from "@/features/drive/queries/drive"
 import { sortDriveItems } from "@/features/drive/lib/sort"
+import { rootDotFilenFilter } from "@/features/drive/lib/hiddenItems"
 
 // Navigation state of the in-dialog drive pickers: a local uuid stack from root, never the "/drive/$"
 // route, so browsing a picker never touches app history. Always browses the "drive" variant. `items` is
 // the listing in name order (directories first), whatever sort the drive itself is set to. `initialPath`
-// (root first, the directory to open last) opens it there instead of at the root; read once, at mount.
+// (root first, the directory to open last) opens it there instead of at the root; read once, at mount. The root
+// `.filen` is left out while its setting hides it, so no picker lands in it.
 export function useDirectoryPicker(initialPath?: readonly string[]) {
 	const [pathStack, setPathStack] = useState<string[]>(() => (initialPath === undefined ? [] : [...initialPath]))
 	const targetUuid = pathStack.at(-1) ?? null
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)
-	const items = sortDriveItems(listingQuery.data ?? [], "nameAsc")
+	const dotFilenRoot = useHiddenDotFilenRoot()
+	// Only the root level can hold it.
+	const items = filterHiddenItems({
+		items: sortDriveItems(listingQuery.data ?? [], "nameAsc"),
+		hide: false,
+		rootDotFilen:
+			targetUuid === null ? rootDotFilenFilter({ rootUuid: dotFilenRoot, variant: "drive", searchAtDriveRoot: false }) : undefined
+	})
 
 	function descend(uuid: string): void {
 		setPathStack(prev => [...prev, uuid])

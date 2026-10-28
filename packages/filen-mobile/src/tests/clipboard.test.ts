@@ -9,6 +9,12 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
+// The root `.filen` guard reads the session cache and prompts natively; none of these items is the root `.filen`.
+vi.mock("@/features/drive/dotFilenGuard", () => ({
+	confirmDotFilenOperation: vi.fn(async () => true),
+	includesRootDotFilen: () => false,
+	isRootDotFilenItem: () => false
+}))
 vi.mock("@filen/sdk-rs", async () => await import("@/tests/mocks/sdkRs"))
 vi.mock("@/constants", () => ({ EXPO_IMAGE_SUPPORTED_EXTENSIONS: new Set(), EXPO_VIDEO_SUPPORTED_EXTENSIONS: new Set() }))
 vi.mock("@/lib/serializer", () => ({ serialize: (x: unknown) => JSON.stringify(x) }))

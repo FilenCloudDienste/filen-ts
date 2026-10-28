@@ -5,7 +5,7 @@ import { DOT_FILEN_DIR_NAME } from "@/lib/dotFilen"
 import { ensureLibraryConfig, setLibraryAccount, updateLibraryConfig } from "@/features/videos/lib/library"
 import { isScratchDebrisName } from "@/e2e-hooks/scratchDebris"
 
-// `.filen/Videos` (the synced library configuration and watch state) as a test found it, so the test can put
+// `.filen/videos` (the synced library configuration and watch state) as a test found it, so the test can put
 // the account back the way it was. The e2e account is shared by every run and browser: a Videos spec that leaves
 // its library directory or watch progress behind changes what the next one starts from. Every lookup here lists
 // the server afresh, never the app's memoized `.filen` directories, which a restore's deletes leave stale.
@@ -19,7 +19,7 @@ export interface VideosSyncFile {
 }
 
 export interface VideosSyncSnapshot {
-	// `.filen` and `.filen/Videos`, null for one that didn't exist.
+	// `.filen` and `.filen/videos`, null for one that didn't exist.
 	dotFilen: string | null
 	dir: string | null
 	files: VideosSyncFile[]
@@ -86,7 +86,7 @@ export async function videosSyncSnapshot(): Promise<VideosSyncSnapshot> {
 	return { dotFilen, dir, files: files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) }
 }
 
-// The current text of `.filen/Videos/<name>`, read fresh from the server; null when there is no such file.
+// The current text of `.filen/videos/<name>`, read fresh from the server; null when there is no such file.
 export async function videosSyncFileText(name: string): Promise<string | null> {
 	const dir = await findVideosDir()
 
@@ -113,7 +113,7 @@ async function removeFile(file: File): Promise<void> {
 	await sdkApi.deleteFilePermanently(await sdkApi.trashFile(file))
 }
 
-// Puts `.filen/Videos` back as `snapshot` found it: files the test added go, files it saved over get their earlier
+// Puts `.filen/videos` back as `snapshot` found it: files the test added go, files it saved over get their earlier
 // version back as the head and lose the versions written since, and directories the test created go entirely.
 // Run it from a page where Videos was not opened since the last load, so nothing saves its own copy back.
 export async function videosSyncRestore(snapshot: VideosSyncSnapshot): Promise<void> {
@@ -166,7 +166,7 @@ export async function videosSyncRestore(snapshot: VideosSyncSnapshot): Promise<v
 // Library roots a killed run left behind, removed through the app's own configuration edit (a tombstone, as the
 // Libraries dialog writes): roots whose directory is gone or trashed, and scratch-named ones older than
 // `minAgeMs`. Without this a later run snapshots the leftover root and restores it, and they pile up. Returns how
-// many were removed; nothing is read or written when `.filen/Videos` doesn't exist.
+// many were removed; nothing is read or written when `.filen/videos` doesn't exist.
 export async function pruneDeadVideoRoots(minAgeMs: number): Promise<number> {
 	if ((await findVideosDir()) === null) {
 		return 0

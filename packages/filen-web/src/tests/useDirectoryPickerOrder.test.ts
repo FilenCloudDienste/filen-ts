@@ -11,7 +11,8 @@ const { listing } = vi.hoisted(() => ({ listing: { data: [] as DriveItem[] } }))
 
 vi.mock("@/features/drive/queries/drive", () => ({
 	useDirectoryListingQuery: () => listing,
-	useDirectoryNamesQuery: () => ({ data: undefined })
+	useDirectoryNamesQuery: () => ({ data: undefined }),
+	useHiddenDotFilenRoot: () => null
 }))
 
 const { useDirectoryPicker } = await import("@/features/drive/hooks/useDirectoryPicker")

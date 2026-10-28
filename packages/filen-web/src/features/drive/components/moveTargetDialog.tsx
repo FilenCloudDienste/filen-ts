@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { FolderPlusIcon } from "lucide-react"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveActivity, performMove } from "@/features/drive/lib/dnd"
+import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { runBulkActivity } from "@/lib/activity/activity"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
@@ -105,11 +106,16 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 			return
 		}
 
+		// Moving the root `.filen` asks for its name first (lib/dotFilenGuard.ts); a cancel keeps the picker open.
+		if (includesRootDotFilen(items) && !(await confirmDotFilenOperation("move", items))) {
+			return
+		}
+
 		// The same hand-off as a bulk confirm (useDialogHost's runBulkDialogActivity): several items close
 		// the picker and run as an activity toast, one keeps its spinner and toasts only its result.
 		if (items.length > 1) {
 			onClose()
-			void performMove(items, destination)
+			void performMove(items, destination, true)
 
 			return
 		}

@@ -3,6 +3,7 @@ import { i18n } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { performMove } from "@/features/drive/lib/dnd"
+import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { useDriveClipboardStore, type DriveClipboardMode } from "@/features/drive/store/useDriveClipboardStore"
 import { asListed } from "@/features/drive/lib/clipboardRecheck"
@@ -41,13 +42,19 @@ export async function pasteClipboard(destination: CopyDestination): Promise<void
 		return
 	}
 
-	const paste = store.takeCut()
+	// Asked before the cut is taken, so a cancel leaves it on the clipboard. Anything else takes it at once.
+	if (includesRootDotFilen(entry.items) && !(await confirmDotFilenOperation("move", entry.items))) {
+		return
+	}
+
+	const paste = useDriveClipboardStore.getState().takeCut()
 
 	if (paste === null) {
 		return
 	}
 
-	const outcome = await performMove(paste.items, destination)
+	// The cut confirmed above, unless another took its place meanwhile.
+	const outcome = await performMove(paste.items, destination, paste.items === entry.items)
 
 	useDriveClipboardStore.getState().restoreCut(
 		paste,

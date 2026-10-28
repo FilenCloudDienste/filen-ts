@@ -8,6 +8,7 @@ import drive from "@/features/drive/drive"
 import alerts from "@/lib/alerts"
 import logger from "@/lib/logger"
 import { isFileItem } from "@/features/drive/driveSelectors"
+import { confirmDotFilenOperation, isRootDotFilenItem, type DotFilenOperation } from "@/features/drive/dotFilenGuard"
 
 // Shared shape for confirmed destructive drive actions (trash / delete / remove
 // offline / remove share / stop sharing / disable link): prompt → guard cancel →
@@ -21,7 +22,8 @@ export function confirmedDriveAction({
 	promptOkText,
 	promptDestructive = true,
 	action,
-	dismissOnSuccess
+	dismissOnSuccess,
+	dotFilenOperation
 }: {
 	item: DriveItem
 	promptTitle: string
@@ -36,7 +38,11 @@ export function confirmedDriveAction({
 	// file preview / detail route sitting on top). Call sites set this from their
 	// preview context — see `isPreview` in createMenuButtons.
 	dismissOnSuccess: boolean
+	// The root `.filen` is confirmed by typing its name instead (dotFilenGuard.ts).
+	dotFilenOperation?: DotFilenOperation
 }): () => Promise<void> {
+	const operation = dotFilenOperation !== undefined && isRootDotFilenItem(item) ? dotFilenOperation : undefined
+
 	return confirmedAction({
 		promptTitle,
 		promptMessage,
@@ -46,7 +52,8 @@ export function confirmedDriveAction({
 		// Only files are previewed (a directory tap navigates into it), so the dismiss
 		// targets any previewable file type — including the shared* variants opened from
 		// the sharedIn/sharedOut/links galleries (the old `type === "file"` check missed those).
-		dismiss: dismissOnSuccess ? () => isFileItem(item) : undefined
+		dismiss: dismissOnSuccess ? () => isFileItem(item) : undefined,
+		confirm: operation === undefined ? undefined : () => confirmDotFilenOperation(operation, [item])
 	})
 }
 
@@ -75,7 +82,8 @@ export function buildTrashButton({ item, t }: { item: DriveItem; t: TFunction })
 			// Trash is recoverable, so its confirm alert is the one not styled destructive.
 			promptDestructive: false,
 			action: () => drive.trash({ item }),
-			dismissOnSuccess: false
+			dismissOnSuccess: false,
+			dotFilenOperation: "trash"
 		})
 	}
 }
@@ -114,7 +122,8 @@ export function buildDeletePermanentlyButton({ item, t }: { item: DriveItem; t: 
 			promptMessage: t("confirm_delete_permanently"),
 			promptOkText: t("delete_permanently"),
 			action: () => drive.deletePermanently({ item }),
-			dismissOnSuccess: false
+			dismissOnSuccess: false,
+			dotFilenOperation: "delete"
 		})
 	}
 }

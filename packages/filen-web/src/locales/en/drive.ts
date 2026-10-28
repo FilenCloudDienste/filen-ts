@@ -388,6 +388,34 @@ export const drive = {
 	driveEmptyTrashConfirmBody: 'Type "{{phrase}}" below to permanently delete everything in the trash. This cannot be undone.',
 	/** Empty-trash confirm dialog — the phrase the user must type EXACTLY (character for character, including case) to confirm; translate as a short, natural phrase a user can type in your language — it is compared verbatim against what they type */
 	driveEmptyTrashTypedConfirmPhrase: "EMPTY TRASH",
+	/** Empty-trash confirm dialog — extra sentence appended to the body when the trash holds the .filen directory; {{name}} = ".filen", never translated */
+	driveEmptyTrashDotFilenNote: "{{name}} is in the trash; emptying it deletes your synced settings.",
+
+	// ── .filen confirm (typed) ───────────────────────────────────────────────
+	// ".filen" and {{name}} (always ".filen") name a directory and are never translated.
+	/** .filen confirm dialog — title before trashing the root .filen directory; {{name}} = ".filen" */
+	driveDotFilenTrashTitle: "Trash the {{name}} directory?",
+	/** .filen confirm dialog — title before permanently deleting the root .filen directory; {{name}} = ".filen" */
+	driveDotFilenDeleteTitle: "Delete the {{name}} directory permanently?",
+	/** .filen confirm dialog — title before moving the root .filen directory; {{name}} = ".filen" */
+	driveDotFilenMoveTitle: "Move the {{name}} directory?",
+	/** .filen confirm dialog — title before renaming the root .filen directory; {{name}} = ".filen" */
+	driveDotFilenRenameTitle: "Rename the {{name}} directory?",
+	/** .filen confirm dialog — body when .filen is the only item; {{name}} = ".filen" */
+	driveDotFilenBody: "{{name}} holds the settings Filen syncs between your devices (videos, playlists, office…).",
+	/** .filen confirm dialog — body when .filen is one of several selected items; {{name}} = ".filen" */
+	driveDotFilenBodySelection:
+		"Your selection includes {{name}}, which holds the settings Filen syncs between your devices (videos, playlists, office…). Proceeding includes it.",
+	/** .filen confirm dialog — label of the input the user types the directory name into; {{name}} = ".filen", which must be typed exactly */
+	driveDotFilenMatchLabel: "Type {{name}} to confirm:",
+	/** .filen confirm dialog — destructive button of the trash variant */
+	driveDotFilenTrashConfirm: "Trash anyway",
+	/** .filen confirm dialog — destructive button of the permanent-delete variant */
+	driveDotFilenDeleteConfirm: "Delete anyway",
+	/** .filen confirm dialog — destructive button of the move variant */
+	driveDotFilenMoveConfirm: "Move anyway",
+	/** .filen confirm dialog — destructive button of the rename variant */
+	driveDotFilenRenameConfirm: "Rename anyway",
 
 	// ── Bulk-restore confirm ─────────────────────────────────────────────────
 	/** Bulk-restore confirm dialog — title; the confirm button reuses driveActionRestore. A single restored item needs no confirm (mobile parity) — this dialog is bulk-selection only */

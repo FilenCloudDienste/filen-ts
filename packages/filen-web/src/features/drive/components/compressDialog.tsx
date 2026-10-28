@@ -68,6 +68,7 @@ import { Input } from "@/components/ui/input"
 import { SecretInput } from "@/components/ui/secretInput"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { confirmDotFilenOperation, disposalOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
@@ -299,9 +300,26 @@ function CompressDialogForm({ subject, heading, prefs, infos, budget, onClose, o
 			dispatch({ type: "requestSubmit", valid: checked.ok })
 		}
 
-		if (checked.ok && (confirmed || state.afterwards !== "deletePermanently")) {
-			start(checked.start)
+		if (!checked.ok || (!confirmed && state.afterwards === "deletePermanently")) {
+			return
 		}
+
+		// Removing the root `.filen` afterwards asks for its name first, as trashing or deleting it would.
+		const dispose = checked.start.dispose
+
+		if (dispose !== null && subject.kind === "drive" && includesRootDotFilen(subject.items)) {
+			submitting.current = true
+
+			const proceed = await confirmDotFilenOperation(disposalOperation(dispose), subject.items)
+
+			submitting.current = false
+
+			if (!proceed) {
+				return
+			}
+		}
+
+		start(checked.start)
 	}
 
 	function start(run: CompressStart): void {

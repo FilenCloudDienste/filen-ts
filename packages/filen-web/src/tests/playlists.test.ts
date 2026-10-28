@@ -80,7 +80,7 @@ function playlistJsonBytes(playlist: unknown): Uint8Array {
 	return new TextEncoder().encode(JSON.stringify(playlist))
 }
 
-// Every test that reaches the read/write path needs `.filen`/`Playlists` to resolve — wired once here
+// Every test that reaches the read/write path needs `.filen`/`playlists` to resolve — wired once here
 // so individual tests only configure the calls they actually care about. Both exist, so they are found.
 function mockDirectoryResolve(): void {
 	findDirectoryUuid.mockImplementation((parentUuid: string | null, name: string) => {
@@ -88,7 +88,7 @@ function mockDirectoryResolve(): void {
 			return Promise.resolve(DOT_FILEN_UUID)
 		}
 
-		if (name === "Playlists" && parentUuid === DOT_FILEN_UUID) {
+		if (name === "playlists" && parentUuid === DOT_FILEN_UUID) {
 			return Promise.resolve(PLAYLISTS_DIR_UUID)
 		}
 
@@ -121,7 +121,7 @@ describe("getPlaylistsDirectoryUuid", () => {
 
 		await expect(getPlaylistsDirectoryUuid()).resolves.toBe(PLAYLISTS_DIR_UUID)
 
-		expect(createDirectory).toHaveBeenCalledExactlyOnceWith(DOT_FILEN_UUID, "Playlists")
+		expect(createDirectory).toHaveBeenCalledExactlyOnceWith(DOT_FILEN_UUID, "playlists")
 	})
 
 	it("clears the memo on a rejection so the next call retries instead of failing forever", async () => {

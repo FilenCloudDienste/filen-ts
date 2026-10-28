@@ -1,4 +1,4 @@
-// The on-disk playlist contract stored at `.filen/Playlists/${playlistUuid}.json` — every app that
+// The on-disk playlist contract stored at `.filen/playlists/${playlistUuid}.json` — every app that
 // reads or writes these files must produce and accept byte-identical JSON. Validation is deliberately
 // hand-rolled (no schema library) so this stays a plain, dependency-free structural check: strict
 // about every KNOWN field's presence/type, but silent about any extra property a newer app build

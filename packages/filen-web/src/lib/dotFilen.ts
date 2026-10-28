@@ -1,4 +1,6 @@
 import type { Dir, DirMeta, SocketEvent } from "@filen/sdk-rs"
+import { type } from "arktype"
+import { dotFilenSubdirLookupNames, dotFilenSubdirRename, isDotFilenSubdirName, nameCollisionKey } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { accountQueryGet } from "@/queries/account"
 import { runOp } from "@/lib/actions/outcome"
@@ -6,8 +8,10 @@ import { registerSocketHandler } from "@/lib/sdk/socket"
 import { narrowItem } from "@/features/drive/lib/item"
 import { isPhotoCandidate } from "@/features/photos/lib/predicate"
 import { DOT_FILEN_DIR_NAME } from "@/lib/dotFilen.logic"
+import { log } from "@/lib/log"
+import { kvLoadOnce, kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 
-// The app's own directories under `.filen` at the drive root (Playlists, Chat Uploads, Videos), resolved once
+// The app's own directories under `.filen` at the drive root (DOT_FILEN_SUBDIRS in @filen/shared), resolved once
 // per session and shared by every feature. Each level is found by name hash, one request that lists, decrypts and
 // locks nothing. A read only finds; a write finds first and creates only a missing level. createDirectory is
 // find-or-create, idempotent and case-insensitive server-side, so concurrent creates elsewhere still end on one
@@ -143,8 +147,70 @@ async function findLevel(parent: string | null, name: string): Promise<string | 
 	return (await runOp(sdkApi.findDirectoryUuid(parent, name))) ?? null
 }
 
-async function createLevel(parent: string | null, name: string): Promise<string> {
-	return (await runOp(sdkApi.createDirectory(parent, name))).uuid
+// A subdirectory under each name it is looked up under (dotFilenSubdirLookupNames), the canonical one first.
+async function findSubdirLevel(parent: string, name: string): Promise<string | null> {
+	for (const candidate of dotFilenSubdirLookupNames(name)) {
+		const found = await findLevel(parent, candidate)
+
+		if (found !== null) {
+			return found
+		}
+	}
+
+	return null
+}
+
+async function createLevel(parent: string | null, name: string): Promise<Dir> {
+	return await runOp(sdkApi.createDirectory(parent, name))
+}
+
+// Subdirectories this device already found under their canonical name, by uuid (a uuid is never reused across
+// accounts), so a found one is fetched for its name once per device rather than once per session.
+const CANONICAL_KEY = "dotFilen.canonicalSubdirs.v1"
+const MAX_CANONICAL = 32
+const canonical = new Set<string>()
+const loadCanonical = kvLoadOnce(
+	CANONICAL_KEY,
+	type("string[]"),
+	uuids => {
+		for (const uuid of uuids) {
+			canonical.add(uuid)
+		}
+	},
+	"dotFilen",
+	"canonical subdirectories"
+)
+
+// A subdirectory found under another case or a legacy name is renamed to its canonical one, once and best-effort:
+// a failure is logged and the directory is used as it is. `held` is the Dir a create returned (it carries its name,
+// so nothing is fetched); a found one is fetched unless this device already saw it canonical.
+async function canonicalizeSubdir(name: string, uuid: string, held: Dir | null): Promise<void> {
+	try {
+		await loadCanonical()
+
+		if (canonical.has(uuid)) {
+			return
+		}
+
+		canonical.add(uuid)
+
+		const dir = held ?? (await sdkApi.getDirectory(uuid))
+
+		if (dir?.meta.type !== "decoded") {
+			return
+		}
+
+		const rename = dotFilenSubdirRename(dir.meta.data.name, name)
+
+		if (rename !== null) {
+			await runOp(sdkApi.renameDirectory(dir, rename))
+		}
+
+		void kvSetJsonQuiet(CANONICAL_KEY, [...canonical].slice(-MAX_CANONICAL), "dotFilen", "canonical subdirectories")
+	} catch (error) {
+		canonical.delete(uuid)
+		log.warn("dotFilen", `could not rename .filen/${name} to its canonical name`, error)
+	}
 }
 
 // Finds, then creates what's missing. After a find that came back empty, and under a `.filen` this session created,
@@ -153,19 +219,29 @@ function memoizeCreate(memo: Memo, name: string, underDotFilen: boolean): Promis
 	const resolve = async (find: boolean): Promise<string> => {
 		const generation = memo.generation
 		const parent = underDotFilen ? await dotFilenUuid() : null
-		const found = find && !memo.absent && !(underDotFilen && dotFilen.created) ? await findLevel(parent, name) : null
+		const shouldFind = find && !memo.absent && !(underDotFilen && dotFilen.created)
+		const found = shouldFind ? await (parent === null ? findLevel(null, name) : findSubdirLevel(parent, name)) : null
 
 		if (found !== null) {
+			if (underDotFilen) {
+				void canonicalizeSubdir(name, found, null)
+			}
+
 			return found
 		}
 
-		const uuid = await createLevel(parent, name)
+		const dir = await createLevel(parent, name)
 
 		if (generation === memo.generation) {
 			memo.created = true
 		}
 
-		return uuid
+		// createDirectory is find-or-create: it may hand back one made elsewhere under another case.
+		if (underDotFilen) {
+			void canonicalizeSubdir(name, dir.uuid, dir)
+		}
+
+		return dir.uuid
 	}
 
 	const finding = memo.promise === null ? memo.finding : null
@@ -192,8 +268,19 @@ export function findDotFilenSubdir(name: string): Promise<string | null> {
 	return memoizeFind(subdirMemo(name), async () => {
 		const parent = await memoizeFind(dotFilen, () => findLevel(null, DOT_FILEN_DIR_NAME))
 
-		return parent === null ? null : findLevel(parent, name)
+		const found = parent === null ? null : await findSubdirLevel(parent, name)
+
+		if (found !== null) {
+			void canonicalizeSubdir(name, found, null)
+		}
+
+		return found
 	})
+}
+
+// The root `.filen`'s uuid as resolved this session, or null when it isn't known (yet). Never looks it up.
+export function knownDotFilenUuid(): string | null {
+	return dotFilen.uuid
 }
 
 // The resolved uuid of `.filen/<name>`, or null when it isn't known (yet).
@@ -281,7 +368,13 @@ export function onDotFilenSubdirForgotten(name: string, listener: () => void): (
 }
 
 function keepsName(meta: DirMeta, name: string): boolean {
-	return meta.type === "decoded" && meta.data.name.toLowerCase() === name.toLowerCase()
+	return meta.type === "decoded" && nameCollisionKey(meta.data.name) === nameCollisionKey(name)
+}
+
+// A subdirectory's name check also accepts its legacy names, so a legacy directory being resolved or renamed to
+// its canonical name stays the one a memo names.
+function keepsSubdirName(meta: DirMeta, name: string): boolean {
+	return meta.type === "decoded" && isDotFilenSubdirName(meta.data.name, name)
 }
 
 // Mid-lookup, a directory renamed to one of the names being looked up is still ours if it was.
@@ -291,7 +384,7 @@ function keepsPendingName(meta: DirMeta): boolean {
 	}
 
 	for (const [name, memo] of subdirs) {
-		if (memo.pending > 0 && keepsName(meta, name)) {
+		if (memo.pending > 0 && keepsSubdirName(meta, name)) {
 			return true
 		}
 	}
@@ -327,7 +420,7 @@ function forgetDirectory({ uuid, parent, renamed }: { uuid: string; parent: stri
 	}
 
 	for (const [name, memo] of subdirs) {
-		const isIt = uuid === memo.uuid && (renamed === null || !keepsName(renamed, name))
+		const isIt = uuid === memo.uuid && (renamed === null || !keepsSubdirName(renamed, name))
 		const mayBeIt = memo.pending > 0 && uncertain && (parent === null || parent === dotFilen.uuid)
 
 		if (isIt || mayBeIt) {
@@ -357,7 +450,7 @@ function subdirNamesFor(dir: Dir): { name: string; memo: Memo }[] {
 	}
 
 	return [...new Set([...subdirs.keys(), ...forgetListeners.keys()])]
-		.filter(name => keepsName(dir.meta, name))
+		.filter(name => keepsSubdirName(dir.meta, name))
 		.map(name => ({ name, memo: subdirMemo(name) }))
 		.filter(({ memo }) => underDotFilen || memo.pending > 0)
 }

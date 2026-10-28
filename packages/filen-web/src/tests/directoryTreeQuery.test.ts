@@ -143,7 +143,13 @@ describe("useDirectoryTreeChildrenQuery shares the drive listing's cache entry",
 
 		expect(listDirectory).toHaveBeenCalledTimes(1)
 		expect(listDirectory).toHaveBeenCalledWith({ kind: "uuid", uuid })
-		expect(queryClient.getQueryCache().findAll({ queryKey: ["drive"] })).toHaveLength(1)
+		// The listing's entry alone, beside the `.filen` visibility preference every tree node reads.
+		expect(
+			queryClient
+				.getQueryCache()
+				.findAll({ queryKey: ["drive"] })
+				.map(query => query.queryKey[1])
+		).toEqual(["listing", "showDotFilenPreference"])
 	})
 
 	it("picks up a listing patch without a fetch", async () => {

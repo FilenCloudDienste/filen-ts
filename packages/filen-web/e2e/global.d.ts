@@ -62,7 +62,7 @@ interface E2eHooks {
 	pruneDeadVideoRoots: (minAgeMs: number) => Promise<number>
 }
 
-// `.filen/Videos` as a Videos spec found it (src/e2e-hooks/videosSync.ts): plain strings, so it crosses the
+// `.filen/videos` as a Videos spec found it (src/e2e-hooks/videosSync.ts): plain strings, so it crosses the
 // Playwright bridge as it is.
 export interface VideosSyncSnapshot {
 	dotFilen: string | null

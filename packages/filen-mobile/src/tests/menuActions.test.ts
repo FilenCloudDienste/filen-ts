@@ -22,6 +22,12 @@ vi.mock("@/lib/confirmedAction", () => ({
 }))
 
 vi.mock("@filen/shared", async () => await import("@/tests/mocks/filenShared"))
+// The root `.filen` guard reads the session cache and prompts natively; none of these items is the root `.filen`.
+vi.mock("@/features/drive/dotFilenGuard", () => ({
+	confirmDotFilenOperation: vi.fn(async () => true),
+	includesRootDotFilen: () => false,
+	isRootDotFilenItem: () => false
+}))
 
 vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 

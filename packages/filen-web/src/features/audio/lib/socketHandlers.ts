@@ -6,7 +6,7 @@ import { markPlaylistsUnsynced } from "@/features/audio/queries/playlists"
 // The realtime playlists handlers, registered on the generic socket bridge beside drive's own. They only
 // mark the playlists cache unsynced, never fetch: the next mount/focus/reconnect re-reads it, and an open
 // list doesn't re-download every playlist per event (this tab's own saves echo back as events too). An
-// event that takes `.filen` or `Playlists` itself away is lib/dotFilen.ts's, which tells playlists.ts.
+// event that takes `.filen` or `playlists` itself away is lib/dotFilen.ts's, which tells playlists.ts.
 
 type DriveSocketEvent = Extract<SocketEvent, { type: "drive" }>
 
