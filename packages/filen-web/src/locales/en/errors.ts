@@ -3,7 +3,7 @@ import type { MediaErrorKind } from "@/lib/media/mediaFailure"
 import type { DOWNLOAD_NEEDS_RELOAD } from "@/lib/sdk/errors"
 
 // English source catalog — "errors" namespace, keyed by the SDK's finite `SdkErrorKind` taxonomy
-// (@/lib/sdk/errorKinds.gen, generated from @filen/sdk-rs@0.4.29's ErrorKind enum) so a lookup is
+// (@/lib/sdk/errorKinds.gen, generated from @filen/sdk-rs's ErrorKind enum) so a lookup is
 // a plain namespaced `i18n.exists`/`t()` call keyed on the live `kind` string — no hand-maintained
 // mapping table that can drift from the SDK (see @/lib/i18n/errorLabel). `satisfies Partial<...>`
 // seeds only a few representative kinds while still catching a typo'd key at compile
