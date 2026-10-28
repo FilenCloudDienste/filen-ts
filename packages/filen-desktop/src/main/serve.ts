@@ -72,6 +72,30 @@ function withHeaders(response: Response, extra: Record<string, string>): Respons
 	return new Response(response.body, { status: response.status, headers })
 }
 
+// Development against filen-web's Vite server (scripts/dev.ts): the page keeps the app's origin, which IPC trust and
+// the storage partition are keyed on, while every request is answered by Vite with its own headers and SPA fallback.
+export function devServerUrl(requestUrl: string, devOrigin: string): string | null {
+	const { pathname, search } = new URL(requestUrl)
+
+	return pathname.startsWith(SW_PREFIX) ? null : new URL(pathname + search, devOrigin).toString()
+}
+
+export function registerDevProxy(scheme: string, devOrigin: string): void {
+	protocol.handle(scheme, request => {
+		const target = devServerUrl(request.url, devOrigin)
+
+		if (target === null) {
+			return Response.error()
+		}
+
+		const headers = new Headers(request.headers)
+
+		headers.delete("origin")
+
+		return net.fetch(target, { method: request.method, headers, bypassCustomProtocolHandlers: true })
+	})
+}
+
 export function registerAppProtocol(scheme: string, distDir: string, rules: readonly HeaderRule[]): void {
 	protocol.handle(scheme, async request => {
 		const { pathname } = new URL(request.url)

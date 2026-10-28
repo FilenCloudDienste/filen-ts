@@ -266,7 +266,12 @@ export default defineConfig(({ mode }) => ({
 			// see its own download route, and a worker may only claim a scope above its own script when
 			// the script's response says so.
 			"Service-Worker-Allowed": "/"
-		}
+		},
+		// The desktop shell's dev mode (filen-desktop scripts/dev.ts) loads the page from its own filen:// origin,
+		// which the HMR client would otherwise take as this server's host.
+		...(process.env["FILEN_DESKTOP_HMR_PORT"] === undefined
+			? {}
+			: { hmr: { protocol: "ws", host: "localhost", clientPort: Number(process.env["FILEN_DESKTOP_HMR_PORT"]) } })
 	},
 	// The preview headers are set by responseHeaders() (plugins above), not preview.headers.
 	// Each worker is one file too, for the same reason as the page's bundle.

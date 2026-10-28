@@ -64,7 +64,7 @@ import { anyDemand, createNativeSupervisor } from "./native/supervisor.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
-import { registerAppProtocol } from "./serve.ts"
+import { registerAppProtocol, registerDevProxy } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { createSessionVault, isSessionBlob, lazyCipher, vaultMode, type VaultCipher } from "./sessionVault.ts"
 import { registerSyncIpc } from "./sync/ipc.ts"
@@ -141,6 +141,8 @@ info(`Filen ${app.getVersion()} starting (Electron ${process.versions.electron},
 const webDist = app.isPackaged
 	? path.join(process.resourcesPath, "web")
 	: path.resolve(process.env["FILEN_DESKTOP_WEB_DIST"] ?? path.join(app.getAppPath(), "../filen-web/dist"))
+// `pnpm run dev` (scripts/dev.ts) serves the page from filen-web's Vite server instead, for hot reload.
+const webDevServer = app.isPackaged ? undefined : process.env["FILEN_DESKTOP_WEB_DEV_URL"]
 
 // Probed on first use, after app ready: safeStorage reports nothing useful before it.
 async function sessionCipher(): Promise<VaultCipher | null> {
@@ -1450,7 +1452,11 @@ if (!app.requestSingleInstanceLock()) {
 			powerMonitor.on("lock-screen", lockNow)
 
 			// Without its headers the web app cannot run (no cross-origin isolation, no CSP), so a missing file is fatal.
-			registerAppProtocol(SCHEME, webDist, parseHeaders(readFileSync(path.join(webDist, "_headers"), "utf8")))
+			if (webDevServer === undefined) {
+				registerAppProtocol(SCHEME, webDist, parseHeaders(readFileSync(path.join(webDist, "_headers"), "utf8")))
+			} else {
+				registerDevProxy(SCHEME, webDevServer)
+			}
 
 			// Before the first window, so the page boots with the imported session, PIN and prefs.
 			if ((await migration.start()).pinImported) {

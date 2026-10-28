@@ -15,7 +15,8 @@
 	"desktopName": "Filen.desktop",
 	"scripts": {
 		"build": "node scripts/build.ts",
-		"dev": "node scripts/stageNapi.ts --dev && node scripts/build.ts && electron .",
+		"dev": "node scripts/stageNapi.ts --dev && node scripts/build.ts && node scripts/dev.ts",
+		"dev:dist": "node scripts/stageNapi.ts --dev && node scripts/build.ts && electron .",
 		"dist": "node scripts/dist.ts",
 		"lint": "eslint . && prettier --check \"**/*.ts\"",
 		"format": "prettier --write \"**/*.ts\"",

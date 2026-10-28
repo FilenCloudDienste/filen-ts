@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveRequest } from "../main/serve.ts"
+import { devServerUrl, resolveRequest } from "../main/serve.ts"
 
 const navigation = { method: "GET", secFetchMode: "navigate", accept: "text/html" }
 const subresource = { method: "GET", secFetchMode: "no-cors", accept: "*/*" }
@@ -37,5 +37,16 @@ describe("resolveRequest", () => {
 
 	it("refuses methods other than GET and HEAD", () => {
 		expect(resolveRequest("/", { ...navigation, method: "POST" })).toEqual({ kind: "notFound" })
+	})
+})
+
+describe("devServerUrl", () => {
+	it("maps the app's path and query onto the dev server", () => {
+		expect(devServerUrl("filen://app/src/main.tsx?t=1", "http://localhost:5173")).toBe("http://localhost:5173/src/main.tsx?t=1")
+		expect(devServerUrl("filen://app/", "http://localhost:5173")).toBe("http://localhost:5173/")
+	})
+
+	it("fails a download the service worker never saw", () => {
+		expect(devServerUrl("filen://app/sw/download/abc", "http://localhost:5173")).toBeNull()
 	})
 })
