@@ -20,6 +20,8 @@ export type PptxPartKind =
 	| "chartStyle"
 	| "chartColors"
 	| "embeddedWorkbook"
+	// An embedded .xls (an OLE object, as a chart converted from a .ppt names its data).
+	| "oleObject"
 	| "diagramData"
 	| "diagramLayout"
 	| "diagramStyle"
@@ -40,11 +42,19 @@ export interface PartsApi {
 		kind: PptxPartKind,
 		content: PartBytes,
 		contentType: string,
-		// crc32: the CRC-32 `content` must have (a stored medium streams once, checked as it goes).
-		options?: { readonly crc32?: number }
+		// crc32: the CRC-32 `content` must have (a stored medium streams once, checked as it goes). from: a part this
+		// save added that the new part is related from instead of `owner` (a new chart's embedded workbook); id: the
+		// relationship id to use when it is free (the id the new part's markup names); shared: one part per key in a save,
+		// the same key again relating the part added for it (a transition sound on every slide is stored once).
+		options?: { readonly crc32?: number; readonly from?: string; readonly id?: string; readonly shared?: object }
 	): { readonly part: string; readonly rId: string }
 	// A relationship from `owner` to an existing part (or an external target), reused when one exists.
 	relate(target: string, type: string, external?: boolean): string
+	// A relationship from `from`, a part this save added, to `target` with the id `id` when it is free (a chart
+	// written into a new part keeps its source's relationship ids, which its markup names).
+	relateFrom?(from: string, target: string, type: string, options?: { readonly external?: boolean; readonly id?: string }): string
+	// Whether the package written has `part` (a base part not removed, or one this save added).
+	has?(part: string): boolean
 	// The part `rId` of `owner` names, undefined when none.
 	target(rId: string): string | undefined
 	// Removes a part with its relationships; references to it are the integrity graph's (edit/integrity.ts).
@@ -52,6 +62,14 @@ export interface PartsApi {
 	// Replaces an existing part's bytes whole (a part its family rebuilds, related as before: a diagram's data, layout,
 	// style, colours and drawing parts); false, changing nothing, when the package has no such part.
 	replacePart?(part: string, content: PartBytes): boolean
+	// Replaces the bytes of a part this save added as a copy of another (a duplicated slide's own chart, written as the
+	// chart its frame now holds); false, changing nothing, for any other part.
+	replaceCopy?(part: string, content: PartBytes): boolean
+	// The part relationship `rId` of `from`, a part this save added, names; undefined when none (or external).
+	targetFrom?(from: string, rId: string): string | undefined
+	// Drops the relationship `rId` of `owner` (a chart frame now names another part); its target goes with the parts
+	// only it kept when nothing else relates it once the save's edits are made.
+	unrelate?(rId: string): void
 	// The one editor of a touched part (opened on first use).
 	editor(part: string): XmlEditor
 }

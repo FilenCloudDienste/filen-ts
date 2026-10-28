@@ -7,6 +7,7 @@ import type { ShapeRef, SlideRef } from "@filen/office/core/presentation"
 import {
 	createShapeSelection,
 	createTextEditing,
+	paintEditorSlide,
 	paintSlide,
 	PresentationTextEditor,
 	selectedShapes,
@@ -44,10 +45,13 @@ import {
 import { LegacyPresentationBar, type LegacySaveCopy } from "@/features/presentation/components/legacyView"
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
 import { SmartArtPrompts, SmartArtTextPane } from "@/features/presentation/components/smartartTextPane"
+import { AnimationPane, AnimationPreview } from "@/features/presentation/components/animationPane"
 import { PresentationFileMenu } from "@/features/presentation/components/presentationFileMenu"
+import { DesignDialogsHost } from "@/features/presentation/components/design/designDialogsHost"
 import { usePresentationFind } from "@/features/presentation/components/presentationFind"
 import { PresentationMediaFrames } from "@/features/presentation/components/mediaFrame"
 import { PresentationShapeLayer } from "@/features/presentation/components/ribbon/arrange"
+import { ribbonSlide } from "@/features/presentation/lib/ribbonSlide"
 import { usePresentationPictureDrop } from "@/features/presentation/components/ribbon/insertObjects"
 import { PresentationTableRange, tableCellAt } from "@/features/presentation/components/ribbon/table"
 import { presentationTextLabels } from "@/features/presentation/components/ribbon/homeText.logic"
@@ -545,7 +549,9 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				downloads,
 				item,
 				...(info === undefined ? {} : { format: info.format }),
-				...(session === undefined ? {} : { session })
+				...(session === undefined ? {} : { session }),
+				...(saveCopy === undefined ? {} : { saveCopy }),
+				text
 			}}
 		/>
 	)
@@ -624,7 +630,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					editable={editor.editable}
 					info={info}
 					session={session}
-					render={ribbonRender}
+					render={ribbonSlide(render, ref, shapeState)}
 					kinds={kinds}
 					shapes={shapes}
 					command={editor.command}
@@ -688,7 +694,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 								<SlideView
 									render={render}
 									size={size}
-									painter={paintSlide}
+									painter={editor.editable ? paintEditorSlide : paintSlide}
 									{...(session === undefined ? {} : { session })}
 									label={t("previewPptxSlideLabel", { current: index + 1, total: count })}
 									actionLabel={(action, layer) => actionLabel(t, action, layer)}
@@ -763,6 +769,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 								/>
 							)}
 							{show.showing ? null : show.refusedNote("canvas")}
+							{show.showing || slideEditor === undefined ? null : <AnimationPreview editor={slideEditor} />}
 						</div>
 						{notesOpen && count > 0 ? (
 							<PresentationNotesPane
@@ -771,6 +778,13 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 							/>
 						) : null}
 					</div>
+					{show.showing ? null : (
+						<AnimationPane
+							editor={slideEditor}
+							editable={editor.editable}
+							phone={phone}
+						/>
+					)}
 				</div>
 				{show.layer}
 				<InputDialog
@@ -797,6 +811,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					}}
 				/>
 			</div>
+			<DesignDialogsHost />
 		</PresentationEditorContext>
 	)
 }

@@ -38,7 +38,7 @@ export {
 export { SlideRail, type SlideRailProps } from "./rail/SlideRail"
 export { NotesPanel, type NotesPanelProps } from "./notes/NotesPanel"
 export { StaticShow, type StaticShowProps } from "./show/static"
-export { paintSlide } from "./paint/slide"
+export { paintEditorSlide, paintSlide } from "./paint/slide"
 export {
 	boundsOf,
 	createShapeSelection,

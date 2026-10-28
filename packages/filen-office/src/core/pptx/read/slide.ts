@@ -29,12 +29,13 @@ import type { XmlDocument } from "../../xml/index"
 import { colorIn, fillOf, readListStyle, readTable, readTextBody, readXfrm, relPart, sourceRef, type ReadContext } from "./drawing"
 import { readMedia, type MediaFacts } from "./media"
 import { readTiming } from "./timing"
+import { readTransition } from "./transition"
 import { G, partReader, type PartReader } from "./xml"
 
 // A slide, layout, master, notes slide, notes master or handout master part (ECMA-376 Part 1 §19.3) into a
-// SlideNode: its own levels only (inheritance is resolved in core/presentation/inherit.ts). Geometry, fills, lines,
-// effects and transitions stay in the source, reached through `src`; anything unread is kept there. A slide's timing
-// is read whole (read/timing.ts) and written back by span where unedited.
+// SlideNode: its own levels only (inheritance is resolved in core/presentation/inherit.ts). Geometry, fills, lines and
+// effects stay in the source, reached through `src`; anything unread is kept there. A slide's timing (read/timing.ts)
+// and its transition (read/transition.ts) are read whole and written back by span where unedited.
 
 const ROOTS: Readonly<Record<string, SlideKind>> = {
 	sld: "slide",
@@ -577,6 +578,7 @@ export function readSlidePart(input: SlideReadInput): SlideRead {
 		kind === "slide"
 			? readTiming({ reader: r, part: input.part, epoch: input.epoch, budgets: input.tally.budgets.timing }, root)
 			: undefined
+	const transition = kind === "slide" ? readTransition(context, root) : undefined
 	const node: SlideNode = {
 		ref: input.ref,
 		kind,
@@ -597,6 +599,7 @@ export function readSlidePart(input: SlideReadInput): SlideRead {
 		...(hf === undefined ? {} : { hf }),
 		shapes,
 		...(timing === undefined ? {} : { timing }),
+		...(transition === undefined ? {} : { transition }),
 		comments: [],
 		revision: 0
 	}

@@ -1,0 +1,44 @@
+/* A presentation print: the slides exist only for the printer, one per sheet of the slide's own size. While a print
+   root is in the document, the printer gets it alone; while a deck is open without one (the browser's own print, from
+   its menu), the printer gets nothing of the app. */
+.fo-pptx-print-root {
+	display: none;
+}
+
+@media print {
+	html:has(> body > .fo-pptx-print-root),
+	body:has(> .fo-pptx-print-root) {
+		height: auto !important;
+		min-height: 0 !important;
+		overflow: visible !important;
+		background: #ffffff !important;
+	}
+
+	body:has(> .fo-pptx-print-root) > :not(.fo-pptx-print-root),
+	html[data-fo-pptx-open] body > * {
+		display: none !important;
+	}
+
+	html[data-fo-pptx-open] body > .fo-pptx-print-root {
+		display: block !important;
+	}
+
+	.fo-pptx-print-root {
+		display: block;
+		color: #000000;
+		background: #ffffff;
+	}
+
+	.fo-pptx-print-page {
+		position: relative;
+		overflow: hidden;
+		break-after: page;
+		break-inside: avoid;
+		print-color-adjust: exact;
+		-webkit-print-color-adjust: exact;
+	}
+
+	.fo-pptx-print-page:last-child {
+		break-after: auto;
+	}
+}

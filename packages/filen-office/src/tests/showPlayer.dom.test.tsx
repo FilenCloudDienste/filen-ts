@@ -14,7 +14,7 @@ import type { PresentationActionPolicy } from "../react/presentation/links"
 import type { ShowController, ShowEvent } from "../react/presentation/show/controller"
 import { layerTree } from "../react/presentation/show/layers"
 import { SlideShow } from "../react/presentation/show/player"
-import { buildStageSlide } from "../react/presentation/show/stage"
+import { buildStageSlide, type ShowMediaMount } from "../react/presentation/show/stage"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
 import { TimingBuilder } from "./animFixtures"
 
@@ -209,6 +209,7 @@ async function mount(
 		noSession?: true
 		overlay?: ReactNode
 		background?: readonly [number, number]
+		media?: ShowMediaMount
 	} = {}
 ): Promise<Mounted> {
 	const { api, plans } = session(specs, extra.background)
@@ -229,6 +230,7 @@ async function mount(
 				{...(extra.settings === undefined ? {} : { settings: extra.settings })}
 				{...(extra.policy === undefined ? {} : { policy: extra.policy })}
 				{...(extra.overlay === undefined ? {} : { overlay: extra.overlay })}
+				{...(extra.media === undefined ? {} : { media: extra.media })}
 				onSlide={onSlide}
 				onEnd={onEnd}
 				label="Slide show"
@@ -338,6 +340,59 @@ describe("SlideShow", () => {
 		await settle()
 		expect(show.onEnd).toHaveBeenCalledTimes(1)
 		expect(show.events.at(-1)).toEqual({ type: "ended" })
+	})
+
+	it("plays a slide's transition sound as it enters, looping until the next sound or a stop, and stops it at the end", async () => {
+		const chime: Transition = {
+			kind: "fade",
+			namespace: "p",
+			options: {},
+			durationMs: 500,
+			advance: { onClick: true },
+			sound: { kind: "embedded", part: "/ppt/media/audio1.wav", name: "chime.wav", loop: true }
+		}
+		const stop: Transition = { ...chime, sound: { kind: "stop" } }
+		const sounds: { part: string; loop: boolean; stopped: boolean }[] = []
+		const media: ShowMediaMount = {
+			mount: () => ({ command: () => undefined, click: () => undefined, release: () => undefined }),
+			sound: (_session, sound) => {
+				const entry = { ...sound, stopped: false }
+
+				sounds.push(entry)
+
+				return {
+					stop: () => {
+						entry.stopped = true
+					}
+				}
+			}
+		}
+		const show = await mount(
+			new Map([
+				[slides[1]!.ref, { transition: chime }],
+				[slides[3]!.ref, { transition: stop }]
+			]),
+			{ media }
+		)
+
+		expect(sounds).toEqual([])
+		show.key(" ")
+		await settle(100)
+		expect(sounds).toEqual([{ part: "/ppt/media/audio1.wav", loop: true, stopped: false }])
+		await settle(600)
+
+		// The next slide's "stop previous sound" ends it.
+		show.key("n")
+		await settle(1000)
+		expect(show.onSlide).toHaveBeenLastCalledWith(3)
+		expect(sounds.map(sound => sound.stopped)).toEqual([true])
+
+		// Back on the sounding slide by a jump, then the end of the show stops it.
+		act(() => show.controller.goto(1))
+		await settle(1000)
+		expect(sounds).toHaveLength(2)
+		act(() => show.controller.end())
+		expect(sounds.map(sound => sound.stopped)).toEqual([true, true])
 	})
 
 	it("asks for no frame while a slide waits, and wakes for an effect that begins later", async () => {

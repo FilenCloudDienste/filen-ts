@@ -43,8 +43,6 @@ export const previewPptxLegacy = {
 	previewPptxLossComment_one: "Comments on {{count}} slide, left out",
 	/** Save as .pptx — as previewPptxLossComment_one, for several */
 	previewPptxLossComment_other: "Comments on {{count}} slides, left out",
-	/** Save as .pptx — kept differently: the deck's macros (a VBA project), which a .pptx cannot hold */
-	previewPptxLossMacros: "Its macros (a VBA project), which a .pptx can't hold",
 	/** Save as .pptx — kept differently: click or hover actions the copy cannot carry */
 	previewPptxLossAction_one: "{{count}} click or hover action, left out",
 	/** Save as .pptx — as previewPptxLossAction_one, for several */

@@ -900,9 +900,10 @@ function layoutAt(
 	if (vertical === "mongolianVert") mirrorLines(out, frameHeight)
 
 	const laid = sideways ? splitUpright(out, texts, session) : out
-	const page = stacked
+	const assembled = stacked
 		? stackUpright(out, texts, session, frameWidth, frameHeight, vertical === "wordArtVert")
 		: assemblePage(laid, texts, session, frameWidth, frameHeight, pictureBullets(laid, session))
+	const page = prefixes.some(length => length > 0) ? { ...assembled, markers: prefixes.slice() } : assembled
 
 	runStarts[resolved.paragraphs.length] = runEnds.length
 

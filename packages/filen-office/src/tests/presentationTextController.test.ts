@@ -316,3 +316,23 @@ describe("presentation text controller typing steps", () => {
 		expect(controller.rtl).toBe(true)
 	})
 })
+
+describe("presentation text controller format", () => {
+	it("an empty body shows its placeholder's inherited font and size at the caret", () => {
+		// A body without paragraphs (an empty ODP placeholder) is seeded as the one empty paragraph the editor shows,
+		// resolved along the shape's chain.
+		const empty: TextBody = { bodyPr: {}, paragraphs: [] }
+		const defRPr = { sz: 4400, latin: { typeface: "Calibri" } }
+		const controller = new TextEditController(
+			slowSession().api,
+			{ ...seedOf(empty), resolved: [{ pPr: { algn: "ctr", defRPr }, runs: [] }] },
+			new MeasureCache(new FakeMeasurer()),
+			() => undefined
+		)
+		const format = controller.format()
+
+		expect(format.run.sz).toBe(4400)
+		expect(format.run.latin?.typeface).toBe("Calibri")
+		expect(format.paragraph.algn).toBe("ctr")
+	})
+})

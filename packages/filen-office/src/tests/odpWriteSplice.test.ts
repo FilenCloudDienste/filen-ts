@@ -173,15 +173,18 @@ describe("ODP splice writer", () => {
 		expect(pageOf(after, "End")).toContain('draw:name="Renamed"')
 	})
 
-	it("refuses a change another family writes (a table's cells) instead of dropping it", async () => {
+	it("refuses a page background an ODP source save cannot hold instead of dropping it", async () => {
 		const opened = await openOdpDeck(odpDeck())
 		const slide = touched(slideAt(opened, 0))
 
-		slide.transition = { kind: "fade", durationMs: 500, advance: { onClick: true } } as unknown as NonNullable<typeof slide.transition>
+		slide.background = {
+			kind: "fill",
+			fill: { kind: "gradient", stops: [], angle: 0 }
+		} as unknown as NonNullable<typeof slide.background>
 
 		const saved = await saveDeck(opened)
 
-		expect(saved.outcome).toMatchObject({ kind: "refused", reason: "notImplemented" })
+		expect(saved.outcome).toMatchObject({ kind: "refused", reason: "unsupported" })
 	})
 
 	it("refuses a view-only deck", async () => {

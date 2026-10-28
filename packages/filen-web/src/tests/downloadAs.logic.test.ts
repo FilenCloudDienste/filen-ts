@@ -70,7 +70,7 @@ describe("downloadAsSource", () => {
 	})
 
 	it("exports nothing else: other files, directories, undecryptable files", () => {
-		for (const name of ["photo.jpg", "notes.txt", "paper.pdf", "deck.pptx", "archive.zip", "book.xlsb", "data.numbers"]) {
+		for (const name of ["photo.jpg", "notes.txt", "paper.pdf", "deck.key", "archive.zip", "book.xlsb", "data.numbers"]) {
 			expect(downloadAsSource(file(name)), name).toBeNull()
 		}
 
@@ -123,7 +123,9 @@ describe("downloadAsTargets", () => {
 			docx: "docx",
 			odt: "odt",
 			xlsx: "xlsx",
-			ods: "ods"
+			ods: "ods",
+			pptx: "pptx",
+			odp: "odp"
 		})
 	})
 

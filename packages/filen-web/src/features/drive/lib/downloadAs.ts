@@ -1,14 +1,17 @@
 import { toast } from "sonner"
+import * as Comlink from "comlink"
 import { driveItemName, isAbortError } from "@filen/shared"
 import { isCompoundFile } from "@filen/office/core/cfb"
 import { bytesSource } from "@filen/office/core/opc"
 import type { SheetFileKind, SheetLockedFile, SheetOpened } from "@filen/office/core/sheet"
 import type { DocxConvertedDocument, DocxEncryptionRefusal, DocxLegacyRefusal, DocxUnlockedDocument } from "@filen/office/dom/docx"
 import type { DocxPdfProgress } from "@filen/office/dom/docx/pdfClient"
+import type { Format, PresentationRefusal } from "@filen/office/core/presentation"
+import { PresentationCallError, type SourceSpec } from "@filen/office/dom/presentation"
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
-import { extensionOf, itemTypeExtension } from "@/features/drive/lib/preview.logic"
+import { extensionOf, itemTypeExtension, unsniffedTemplate } from "@/features/drive/lib/preview.logic"
 import {
 	DOWNLOAD_AS_TARGETS,
 	downloadAsFormat,
@@ -29,7 +32,7 @@ import {
 } from "@/features/preview/components/docxViewer.logic"
 import { docxConvert, docxLegacy, docxProtection, docxRtf } from "@/features/preview/lib/docxEngine"
 import { docxPdfFailure, makeDocxPdf, reportDocxPdf, type DocxPdfSource } from "@/features/preview/lib/docxPdf"
-import { pdfProgressText } from "@/features/preview/lib/docxPdf.logic"
+import { pdfProgressText, pdfReportKey } from "@/features/preview/lib/docxPdf.logic"
 import type { EditedFile } from "@/features/preview/lib/docxLiveFile"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { joinPreviewBytes } from "@/features/preview/lib/previewCache"
@@ -47,7 +50,24 @@ import { downloadBlob } from "@/lib/downloadBlob"
 import { i18n, type DriveKey, type PreviewKey } from "@/lib/i18n"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { log } from "@/lib/log"
+import { rangePortReader } from "@/lib/media/rangePort"
 import { asErrorDTO } from "@/lib/sdk/errors"
+import {
+	PRESENTATION_SNIFF_BYTES,
+	presentationFileKind,
+	presentationVerdict,
+	sniffPresentationKind
+} from "@/features/presentation/lib/fileKind"
+import { presentationPool } from "@/features/presentation/lib/presentationEngine"
+import { makePresentationPdf, PresentationJobRefused, presentationPdfRequest } from "@/features/presentation/lib/presentationJobs"
+import {
+	conversionLossLines,
+	openConvertSession,
+	readFreshPackage,
+	type ConvertSession,
+	type FreshPackage,
+	type PresentationTarget
+} from "@/features/presentation/lib/presentationConvert"
 import { sdkApi } from "@/lib/sdk/client"
 
 // Download as from the item menus: each file exported from its saved bytes without opening its viewer, one after
@@ -74,13 +94,19 @@ interface LossyFeature {
 // The document editor's document as it holds it now (docxLiveFile.ts): in the file's own format, or already converted.
 export type LiveFile = (target: "docx" | "odt", signal: AbortSignal) => Promise<EditedFile>
 
+// A presentation converted from the session its editor holds open (unsaved edits included); a refusal rejects with the
+// worker's PresentationCallError.
+export type LivePresentation = (target: PresentationTarget, signal: AbortSignal) => Promise<FreshPackage>
+
 // Where the menu was opened: a public link's files are read as the viewer reads them there; an editor's open
-// workbook converts from its session (`live`), an editor's open document from what it holds (`liveFile`).
+// workbook converts from its session (`live`), an editor's open document from what it holds (`liveFile`), an editor's
+// open presentation from its session (`livePresentation`).
 export interface DownloadAsContext {
 	readonly accessMode: PreviewAccessMode
 	readonly cacheScope: string | null
 	readonly live?: LiveConversion
 	readonly liveFile?: LiveFile
+	readonly livePresentation?: LivePresentation
 }
 
 type Message =
@@ -99,6 +125,7 @@ type Phase =
 	| { readonly kind: "converting" }
 	| { readonly kind: "document"; readonly progress: DocxPdfProgress | null }
 	| { readonly kind: "sheet"; readonly done: number | null; readonly total: number }
+	| { readonly kind: "slides"; readonly done: number | null; readonly total: number }
 
 interface Run {
 	readonly signal: AbortSignal
@@ -571,6 +598,10 @@ function phaseText(phase: Phase): string {
 				? i18n.t("preview:previewDocxPdfProgress", { done: text.done, total: text.total })
 				: i18n.t("preview:previewDocxPdfPreparing")
 		}
+		case "slides":
+			return phase.done === null
+				? i18n.t("preview:previewPptxExportPreparing")
+				: i18n.t("preview:previewPptxExportPdfProgress", { done: phase.done, total: phase.total })
 		case "sheet":
 			return phase.done === null
 				? i18n.t("preview:previewSheetPdfPreparing")
@@ -587,6 +618,12 @@ async function exportOne(item: DriveItem, target: DownloadAsTarget, context: Dow
 	}
 
 	const name = driveItemName(item)
+
+	if (source === "presentation") {
+		return target === "pptx" || target === "odp" || target === "pdf"
+			? exportPresentation(item, target, context, run)
+			: convertFailed("driveDownloadAsConvertFailed")
+	}
 
 	if (source === "spreadsheet" && (target === "xlsx" || target === "ods") && context.live !== undefined) {
 		run.show({ kind: "converting" })
@@ -640,16 +677,27 @@ async function exportOne(item: DriveItem, target: DownloadAsTarget, context: Dow
 		return source === "document" ? exportDocument(item, bytes, owned, context, run) : exportSpreadsheet(item, bytes, owned, name, run)
 	}
 
-	return target === "docx" || target === "odt"
-		? convertDocument(item, bytes, owned, format, target, context, run)
-		: convertSpreadsheet(item, bytes, owned, name, target, run)
+	switch (target) {
+		case "docx":
+		case "odt":
+			return convertDocument(item, bytes, owned, format, target, context, run)
+		case "xlsx":
+		case "ods":
+			return convertSpreadsheet(item, bytes, owned, name, target, run)
+		// A presentation went to its own export above.
+		case "pptx":
+		case "odp":
+			return convertFailed("driveDownloadAsConvertFailed")
+	}
 }
 
 const CONVERTED_TYPES: Readonly<Record<Exclude<DownloadAsTarget, "pdf">, string>> = {
 	docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	odt: "application/vnd.oasis.opendocument.text",
 	xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-	ods: "application/vnd.oasis.opendocument.spreadsheet"
+	ods: "application/vnd.oasis.opendocument.spreadsheet",
+	pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+	odp: "application/vnd.oasis.opendocument.presentation"
 }
 
 function convertFailed(key: DriveKey): Exported {
@@ -962,6 +1010,243 @@ async function protectedXlsx(locked: SheetLockedFile, bytes: Uint8Array, name: s
 		return convertedFile(saved.bytes, "xlsx", [{ kind: "valuesOnly", count: 1 }])
 	} finally {
 		session.close()
+	}
+}
+
+// A presentation converted in a presentation worker, or its slides as a PDF made from it in a jobs worker (the
+// editor's File menu exports its own): from the editor's open session where it hands one, else on a session of its own
+// opened as the viewer opens the file (read in ranges from the SDK worker, never whole; a `.pot` told apart by its
+// first bytes), closed once done. A password-protected deck asks its password for a .pptx, whose copy the worker seals
+// under it, and for a PDF, protected with it; an OpenDocument copy could not be protected, so it is refused before
+// anything is asked.
+async function exportPresentation(
+	item: DriveItem,
+	target: PresentationTarget | "pdf",
+	context: DownloadAsContext,
+	run: Run
+): Promise<Exported> {
+	if (target !== "pdf" && context.livePresentation !== undefined) {
+		run.show({ kind: "converting" })
+
+		return presentationConverted(context.livePresentation(target, run.signal), target, run)
+	}
+
+	const name = driveItemName(item)
+	const file = narrowToAnyFile(item)
+	const token = crypto.randomUUID()
+	const cancel = (): void => {
+		void sdkApi.cancelPreviewDownload(token)
+	}
+	const openPort = async (): Promise<MessagePort> => {
+		const { port1, port2 } = new MessageChannel()
+		const transferred = Comlink.transfer(port1, [port1])
+
+		if (context.accessMode === "anon") await sdkApi.openLinkedRangePortAnon(transferred, file, token)
+		else await sdkApi.openRangePort(transferred, file, token)
+
+		return port2
+	}
+
+	let session: ConvertSession | null = null
+	// Cancel ends the reads served on the deck's ports and the session (its open, password check or conversion).
+	const end = (): void => {
+		session?.close()
+		cancel()
+	}
+
+	run.show({ kind: "converting" })
+	run.signal.addEventListener("abort", end, { once: true })
+
+	try {
+		let format: Format | null = presentationFileKind(extensionOf(name))?.format ?? null
+
+		if (unsniffedTemplate(item)) {
+			const sniffed = await sniffDeck(await abortable(openPort(), run.signal), Number(file.size), run.signal)
+			const verdict = presentationVerdict(sniffed ?? "text")
+
+			if (verdict !== undefined) {
+				recordContentVerdict({ uuid: item.data.uuid, name, mime: driveItemMime(item), size: item.data.size }, verdict, {
+					memoryOnly: context.accessMode === "anon"
+				})
+			}
+
+			if (sniffed === null) {
+				return failed("previewPptxConvertNotPresentation")
+			}
+
+			format = sniffed
+		}
+
+		if (format === null) {
+			return convertFailed("driveDownloadAsConvertFailed")
+		}
+
+		const source: SourceSpec = { kind: "range", port: await abortable(openPort(), run.signal), size: Number(file.size), checked: true }
+		const opened = openConvertSession(presentationPool, source, { format, fileName: name })
+
+		session = opened
+
+		const first = await abortable(opened.opened, run.signal)
+
+		switch (first.kind) {
+			case "refused":
+				return presentationRefused(first.reason, target)
+			case "opened":
+				return target === "pdf"
+					? await presentationPdf(opened.client, name, first.info.protection.encrypted, run)
+					: await presentationConverted(readFreshPackage(opened.client, target, run.signal), target, run)
+			case "password":
+				break
+		}
+
+		if (target === "odp") {
+			return convertFailed("driveDownloadAsConvertProtected")
+		}
+
+		const prompted = await promptFor<ConvertSession, PresentationRefusal>(
+			name,
+			run,
+			async (password, signal) => {
+				const answer = await abortable(opened.unlock(password), signal).catch(() => null)
+
+				if (answer === null) return { kind: "aborted" }
+
+				switch (answer.kind) {
+					case "opened":
+						return { kind: "opened", value: opened }
+					case "password":
+						return answer.wrong ? { kind: "wrong" } : { kind: "aborted" }
+					case "refused":
+						return { kind: "refused", refusal: answer.reason }
+				}
+			},
+			() => undefined,
+			() => undefined,
+			{ purpose: target === "pdf" ? "pdf" : "copy" }
+		)
+
+		switch (prompted.kind) {
+			case "accepted":
+				return target === "pdf"
+					? await presentationPdf(opened.client, name, true, run)
+					: await presentationConverted(readFreshPackage(opened.client, target, run.signal), target, run)
+			case "refused":
+				if (prompted.refusal !== "password") return presentationRefused(prompted.refusal, target)
+
+				return target === "pdf" ? failed("previewPptxExportPasswordUnsupported") : convertFailed("driveDownloadAsConvertFailed")
+			case "skipped":
+				return prompted
+		}
+	} finally {
+		run.signal.removeEventListener("abort", end)
+		end()
+	}
+}
+
+// A `.pot`'s first bytes, read through a port of their own: a 97–2003 or zip deck, or null for anything else.
+async function sniffDeck(port: MessagePort, size: number, signal: AbortSignal): Promise<Format | null> {
+	const reader = rangePortReader(port)
+
+	try {
+		return sniffPresentationKind(await reader.readRange(0, Math.min(PRESENTATION_SNIFF_BYTES, size), signal))
+	} finally {
+		reader.close()
+	}
+}
+
+// The fresh package a session streamed, as the download (its chunks as they came, never joined), with what the copy
+// holds differently as one warning.
+async function presentationConverted(converting: Promise<FreshPackage>, target: PresentationTarget, run: Run): Promise<Exported> {
+	let fresh: FreshPackage
+
+	try {
+		fresh = await abortable(converting, run.signal)
+	} catch (error) {
+		if (run.signal.aborted) {
+			throw new Aborted()
+		}
+
+		if (error instanceof PresentationCallError) {
+			return presentationRefused(error.reason, target)
+		}
+
+		log.error("drive", "download as presentation conversion failed", error)
+
+		return convertFailed("driveDownloadAsConvertFailed")
+	}
+
+	const lines = conversionLossLines(fresh.report, (key, count) => i18n.t(`preview:${key}`, { count }))
+
+	return {
+		kind: "file",
+		blob: new Blob([...fresh.chunks] as Uint8Array<ArrayBuffer>[], { type: CONVERTED_TYPES[target] }),
+		warnings: lines.length === 0 ? [] : [{ text: i18n.t("preview:previewPptxConvertDifferently", { list: lines.join("; ") }) }]
+	}
+}
+
+// A deck's slides as a PDF made in a jobs worker from its open session (protected with its password when it opened
+// with one), with what the PDF left out or simplified as one warning.
+async function presentationPdf(session: ConvertSession["client"], name: string, encrypted: boolean, run: Run): Promise<Exported> {
+	run.show({ kind: "slides", done: null, total: 0 })
+
+	try {
+		const made = await makePresentationPdf(
+			session,
+			presentationPdfRequest(name, encrypted, { layout: "slides", includeHidden: false }),
+			{
+				signal: run.signal,
+				onProgress: (done, total) => {
+					run.show({ kind: "slides", done: Math.min(done + 1, total), total })
+				}
+			}
+		)
+		const warning = made.report === undefined ? null : pdfReportKey(made.report)
+
+		return { kind: "file", blob: made.blob, warnings: warning === null ? [] : [{ key: `preview:${warning}`, values: {} }] }
+	} catch (error) {
+		if (run.signal.aborted) {
+			throw new Aborted()
+		}
+
+		if (error instanceof PresentationJobRefused) {
+			const refusal = error.outcome
+
+			if (refusal.reason === "unsupported" && refusal.detail?.startsWith("password") === true) {
+				return failed("previewPptxExportPasswordUnsupported")
+			}
+
+			return presentationRefused(refusal.reason, "pdf")
+		}
+
+		log.error("drive", "download as presentation PDF failed", error)
+
+		return failed("previewPptxExportFailed")
+	}
+}
+
+// Why a deck gave no copy, in the viewer's words where it refused to open it.
+function presentationRefused(reason: PresentationRefusal, target: PresentationTarget | "pdf"): Exported {
+	switch (reason) {
+		case "aborted":
+			throw new Aborted()
+		case "encrypted":
+			// An OpenDocument copy is never protected; a .pptx only where its cipher is not one Filen opens.
+			return target === "odp" ? convertFailed("driveDownloadAsConvertProtected") : failed("previewPptxUnsupportedEncryption")
+		case "malformed":
+			return failed("previewPptxMalformed")
+		case "unsupportedEncryption":
+			return failed("previewPptxUnsupportedEncryption")
+		case "damagedEncryption":
+			return failed("previewPptxDamagedEncryption")
+		case "rightsManaged":
+			return failed("previewPptxRightsManaged")
+		case "tooLarge":
+		case "tooDeep":
+			return convertFailed("driveDownloadAsConvertTooLarge")
+		default:
+			log.error("drive", "download as presentation refused", reason)
+
+			return convertFailed("driveDownloadAsConvertFailed")
 	}
 }
 

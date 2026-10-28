@@ -23,6 +23,7 @@ import {
 	type Action,
 	type Deck,
 	type DeckVariant,
+	type FrameRef,
 	type EncryptionInfoSummary,
 	type ObjectDefaults,
 	type OpaqueRef,
@@ -302,7 +303,11 @@ export interface RebasedPart {
 	readonly kind: "slide" | "notes"
 	readonly part: string
 	readonly document: XmlDocument | undefined
+	// The charts the part relates, by relationship id (a duplicated slide's own copies of its source's charts).
+	readonly charts?: ReadonlyMap<string, ChartFrameRef>
 }
+
+type ChartFrameRef = Extract<FrameRef, { kind: "chart" }>
 
 export interface RebasePlan {
 	// p:sldId/@id by slide part key, as the saved presentation lists them.
@@ -381,6 +386,16 @@ export class PptxParts {
 		this.documents.set(partKey(name), document)
 	}
 
+	// A theme the session made (a design op's gallery theme), held under its part name like one read from the
+	// package; holding the name again replaces it.
+	adoptTheme(name: string, document: XmlDocument): void {
+		const key = partKey(name)
+
+		this.documents.set(key, document)
+		this.themes.set(key, readTheme(name, document))
+		this.objectDefaults.delete(key)
+	}
+
 	forget(name: string): void {
 		this.documents.delete(partKey(name))
 	}
@@ -422,7 +437,15 @@ export class PptxParts {
 			const parsed = await opc.xml(node.part)
 
 			checkDepth(parsed, this.budgets.elementDepth)
-			added.push({ ref: node.ref, kind: node.kind as "slide" | "notes", part: node.part, document: parsed })
+			const charts = await relatedCharts(opc, node.part)
+
+			added.push({
+				ref: node.ref,
+				kind: node.kind as "slide" | "notes",
+				part: node.part,
+				document: parsed,
+				...(charts === undefined ? {} : { charts })
+			})
 		}
 
 		return { slideIds, added }
@@ -496,6 +519,9 @@ export class PptxParts {
 
 				return mapped === undefined ? src : { format: "pptx", part: part.part, node: mapped, epoch }
 			})
+
+			// A copy's chart frames still name its source's chart parts: they name the copies the save wrote for it.
+			if (part.charts !== undefined) ownCharts(node.shapes, part.part, to, part.charts)
 		}
 
 		this.package = opc
@@ -1075,5 +1101,59 @@ export class PptxParts {
 		if (this.hiddenAtOpen.size > 0) deck.hiddenSlides = this.hiddenAtOpen
 
 		return { kind: "opened", deck, parts: this }
+	}
+}
+
+// The chart parts `part` relates (pptx chart and chartEx), each with its embedded workbook, by relationship id.
+async function relatedCharts(opc: OpcPackage, part: string): Promise<ReadonlyMap<string, ChartFrameRef> | undefined> {
+	let charts: Map<string, ChartFrameRef> | undefined
+
+	for (const relationship of (await opc.relationships(part.slice(1))).all) {
+		const kind = relationshipKind(relationship.type)
+
+		if ((kind !== "chart" && kind !== "chartEx") || relationship.external || relationship.partName === undefined) continue
+		if (!opc.has(relationship.partName)) continue
+
+		const embedded = (await opc.relationships(relationship.partName)).all.find(
+			each =>
+				!each.external &&
+				each.partName !== undefined &&
+				(relationshipKind(each.type) === "package" || relationshipKind(each.type) === "oleObject")
+		)
+		const workbook =
+			embedded?.partName === undefined || !opc.has(embedded.partName)
+				? undefined
+				: {
+						part: `/${embedded.partName}`,
+						kind: relationshipKind(embedded.type) === "package" ? ("xlsx" as const) : ("xls" as const)
+					}
+
+		charts ??= new Map()
+		charts.set(relationship.id, { kind: "chart", part: `/${relationship.partName}`, ...(workbook === undefined ? {} : { workbook }) })
+	}
+
+	return charts
+}
+
+// The chart frames read from `part` (their refs moved into it) named again by the relationship their c:chart (or
+// cx:chart) names there. A frame naming a version the session holds is the chart family's.
+function ownCharts(shapes: readonly ShapeNode[], part: string, document: XmlDocument, charts: ReadonlyMap<string, ChartFrameRef>): void {
+	const r = partReader(document)
+
+	for (const shape of shapes) {
+		if (shape.children !== undefined) ownCharts(shape.children, part, document, charts)
+
+		const frame = shape.frame
+		const src = shape.src
+
+		if (frame?.kind !== "chart" || !frame.part.startsWith("/") || src?.format !== "pptx" || partKey(src.part) !== partKey(part))
+			continue
+
+		const data = r.child(r.child(src.node, G.A, "graphic"), G.A, "graphicData")
+		const chart = r.child(data, G.C, "chart") >= 0 ? r.child(data, G.C, "chart") : r.child(data, G.Cx, "chart")
+		const id = chart < 0 ? undefined : r.rel(chart, "id")
+		const own = id === undefined ? undefined : charts.get(id)
+
+		if (own !== undefined && partKey(own.part) !== partKey(frame.part)) shape.frame = own
 	}
 }

@@ -17,6 +17,7 @@ import {
 	type TextBody
 } from "../../../../core/presentation/model"
 import type { TextPage, TextSeed } from "../../../../core/presentation/output"
+import { editableParagraphs } from "../../../../core/presentation/text/editable"
 import { bodyToDoc, docToBody, presentationTextSchema } from "../../../../core/presentation/text/schema"
 import type { MeasureCache } from "../../../../core/text/index"
 import type { DeckOp } from "../../../../core/presentation/edit/ops"
@@ -80,14 +81,14 @@ export interface TextEditListener {
 	(): void
 }
 
-// Paragraph defaults by level from a seed's resolved paragraphs: per level, the resolved props of the paragraph at
-// that level that writes the fewest of its own (closest to the chain); levels no paragraph uses take the nearest
-// lower one's.
+// Paragraph defaults by level from a seed's resolved paragraphs (one per paragraph the editor shows, so a body
+// without paragraphs has its empty one's): per level, the resolved props of the paragraph at that level that writes
+// the fewest of its own (closest to the chain); levels no paragraph uses take the nearest lower one's.
 export function defaultsOf(seed: TextSeed): TextDefaults {
 	const byLevel: (ParaProps | undefined)[] = []
 	const owned: number[] = []
 
-	seed.body.paragraphs.forEach((paragraph, index) => {
+	editableParagraphs(seed.body).forEach((paragraph, index) => {
 		const resolved = seed.resolved[index]
 
 		if (resolved === undefined) return

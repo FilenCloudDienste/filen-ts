@@ -131,13 +131,55 @@ class TimingWriter {
 							? "keep"
 							: tree.builds.length === 0
 								? ""
-								: `<p:bldLst>${tree.builds.map(build => buildXml(build, this.charts)).join("")}</p:bldLst>`
+								: new Pieces()
+										.text("<p:bldLst>")
+										.append(this.builds(tree.builds, pristine?.builds ?? []))
+										.text("</p:bldLst>").out
 				}
 			],
 			out
 		)
 
 		return out.text("</p:timing>").out
+	}
+
+	// Each build entry on its own: one as it was read is its source span, one held by an inverse its held bytes, an
+	// edited or new one written from the model with what the model does not hold (uiExpand, advAuto, p:tmplLst…)
+	// copied from its source element.
+	private builds(builds: readonly Build[], pristine: readonly Build[]): readonly EmitPiece[] {
+		const context = this.context
+		const before = new Map<number, Build>()
+		const out = new Pieces()
+
+		for (const build of pristine) {
+			const node = sourceNode(context, build.src)
+
+			if (node >= 0) before.set(node, build)
+		}
+
+		for (const build of builds) {
+			const source = sourceNode(context, build.src)
+			const prior = source >= 0 ? before.get(source) : undefined
+
+			if (source >= 0 && (this.trusted || (prior !== undefined && sameModel(build, prior)))) {
+				out.hole(source)
+
+				continue
+			}
+
+			if (source < 0 && build.raw !== undefined && build.raw.length > 0) {
+				out.append([context.document === undefined ? build.raw : inScope(build.raw, rootScope(context.document))])
+
+				continue
+			}
+
+			const r = readerOf(context)
+			const base = source >= 0 && r !== undefined && r.group(source) === G.P && r.local(source) === build.kind ? source : -1
+
+			out.append(buildPieces(context, build, this.charts, base))
+		}
+
+		return out.out
 	}
 
 	private tnLst(tree: TimingTree, source: number): readonly EmitPiece[] {
@@ -544,22 +586,48 @@ export function targetXml(target: AnimTarget): string {
 	}
 }
 
-// A graphic build's sub-element follows the frame's kind: a:bldChart for a chart, a:bldDgm for a diagram.
-function buildXml(build: Build, charts: ReadonlySet<number>): string {
+const BUILD_MODELED: Readonly<Record<Build["kind"], ReadonlySet<string>>> = {
+	bldP: new Set(["spid", "grpId", "build", "bldLvl", "animBg", "rev", "autoUpdateAnimBg"]),
+	bldDgm: new Set(["spid", "grpId", "bld"]),
+	bldOleChart: new Set(["spid", "grpId", "bld", "animBg"]),
+	bldGraphic: new Set(["spid", "grpId"])
+}
+
+// A build entry from the model; `base` (its source element, or -1) gives the attributes and children the model does not
+// hold. A graphic build's sub-element follows the frame's kind: a:bldChart for a chart, a:bldDgm for a diagram.
+function buildPieces(context: EmitContext, build: Build, charts: ReadonlySet<number>, base: number): readonly EmitPiece[] {
 	const head = `${attr("spid", build.shape)}${attr("grpId", build.grpId)}`
+	const extra = base < 0 ? "" : unmodeledAttributes(context, base, BUILD_MODELED[build.kind])
+	let open: string
 
 	switch (build.kind) {
 		case "bldP":
-			return `<p:bldP${head}${attr("build", build.build)}${attr("bldLvl", build.bldLvl)}${attr("animBg", build.animBg)}${attr("rev", build.rev)}${attr("autoUpdateAnimBg", build.autoUpdateAnimBg)}/>`
+			open = `<p:bldP${head}${attr("build", build.build)}${attr("bldLvl", build.bldLvl)}${attr("animBg", build.animBg)}${attr("rev", build.rev)}${attr("autoUpdateAnimBg", build.autoUpdateAnimBg)}${extra}`
+			break
 		case "bldDgm":
-			return `<p:bldDgm${head}${attr("bld", build.bld)}/>`
+			open = `<p:bldDgm${head}${attr("bld", build.bld)}${extra}`
+			break
 		case "bldOleChart":
-			return `<p:bldOleChart${head}${attr("bld", build.bld)}${attr("animBg", build.animBg)}/>`
+			open = `<p:bldOleChart${head}${attr("bld", build.bld)}${attr("animBg", build.animBg)}${extra}`
+			break
 		case "bldGraphic":
-			return build.whole
-				? `<p:bldGraphic${head}><p:bldAsOne/></p:bldGraphic>`
-				: `<p:bldGraphic${head}><p:bldSub><a:${charts.has(build.shape) ? "bldChart" : "bldDgm"}${attr("bld", build.bld)}/></p:bldSub></p:bldGraphic>`
+			return [
+				build.whole
+					? `<p:bldGraphic${head}${extra}><p:bldAsOne/></p:bldGraphic>`
+					: `<p:bldGraphic${head}${extra}><p:bldSub><a:${charts.has(build.shape) ? "bldChart" : "bldDgm"}${attr("bld", build.bld)}/></p:bldSub></p:bldGraphic>`
+			]
 	}
+
+	const document = context.document
+
+	// p:tmplLst, p:extLst: the source's children, as they were.
+	if (base < 0 || document === undefined || document.firstChild(base) < 0) return [`${open}/>`]
+
+	const out = new Pieces().text(`${open}>`)
+
+	for (let child = document.firstChild(base); child >= 0; child = document.nextSibling(child)) out.hole(child)
+
+	return out.text(`</p:${build.kind}>`).out
 }
 
 // The slide's p:timing markup: the source span when nothing in it changed, no pieces when the slide lost its timing.

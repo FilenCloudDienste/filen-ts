@@ -298,7 +298,7 @@ export function deckFingerprints(deck: Deck, sourceBytes: SourceBytes): Fingerpr
 					return listed ? UNKNOWN_FINGERPRINT : ABSENT()
 				}
 
-				// The node itself: its parts and shapes have keys of their own.
+				// The node itself (a master's text styles with it): its parts and shapes have keys of their own.
 				if (parsed.dirt === "n") {
 					return {
 						digest: digestOf({
@@ -306,6 +306,7 @@ export function deckFingerprints(deck: Deck, sourceBytes: SourceBytes): Fingerpr
 							part: node.part,
 							parent: node.parent,
 							notes: node.notes !== undefined,
+							txStyles: node.txStyles,
 							source: sourceDigest(node.src, sourceBytes)
 						}),
 						exists: true,

@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react"
+import { useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { SlideRail, type PresentationDocument, type PresentationStore } from "@filen/office/react/presentation"
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
@@ -6,6 +6,9 @@ import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 // Thumbnail width (css px) of the vertical rail and of the phone's strip under the slide.
 export const RAIL_THUMB_WIDTH = 160
 export const STRIP_THUMB_WIDTH = 96
+// What a vertical rail item adds to its thumbnail (presentation.css .fo-slide-rail-item: 4px and 8px padding, the
+// 1.75em number at 12px, a 6px gap), and the rail's 1px border.
+const RAIL_ITEM_CHROME = 4 + 21 + 6 + 8 + 1
 
 // What the editor adds to the rail: the selection beside the current slide, extending it, dragging it elsewhere and
 // its own keys (SlideRail's props of the same names).
@@ -35,11 +38,20 @@ export function PresentationSlideRail({
 	const phone = usePhoneWidth()
 	const size = document.info?.size
 	const sections = document.info?.sections ?? []
+	// The vertical rail fits a whole item beside its scrollbar's gutter (kept, so a scrollbar never narrows the items),
+	// measured as it mounts, before the first paint: 0 where scrollbars overlay the content.
+	const [gutter, setGutter] = useState(0)
 
 	return (
 		<div
+			ref={node => {
+				const rail = node?.firstElementChild
+
+				if (!phone && rail instanceof HTMLElement) setGutter(rail.offsetWidth - rail.clientWidth)
+			}}
 			data-preview-surface
-			className={phone ? "h-24 w-full shrink-0 border-t border-border" : "h-full w-48 shrink-0 border-r border-border"}
+			className={phone ? "h-24 w-full shrink-0 border-t border-border" : "h-full shrink-0 border-r border-border"}
+			style={phone ? undefined : { width: RAIL_THUMB_WIDTH + RAIL_ITEM_CHROME + gutter }}
 		>
 			<SlideRail
 				slides={document.slides}
@@ -58,7 +70,7 @@ export function PresentationSlideRail({
 				}}
 				orientation={phone ? "horizontal" : "vertical"}
 				thumbWidth={phone ? STRIP_THUMB_WIDTH : RAIL_THUMB_WIDTH}
-				className="size-full"
+				className={phone ? "size-full" : "size-full [scrollbar-gutter:stable]"}
 				{...(sections.length === 0 ? {} : { sections })}
 				{...(edit ?? {})}
 			/>

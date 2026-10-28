@@ -7,6 +7,10 @@ import type { OdpSaveSource } from "../../../core/odp/write/splice"
 import { pptxSpliceWriter } from "../../../core/pptx/write/save"
 import type { PptxSpliceSource } from "../../../core/pptx/write/splice"
 import type { XmlDocument } from "../../../core/xml/index"
+import { bindWrittenTiming } from "../../../core/anim/prune"
+import type { TimingBudgets } from "../../../core/anim/model"
+import { readTiming } from "../../../core/pptx/read/timing"
+import { partReader } from "../../../core/pptx/read/xml"
 import { packageSealer, type PackageSealer } from "../../encryption/seal"
 import type { EngineSession, OpenedPackage, SaveCapability } from "../engine"
 import {
@@ -64,12 +68,37 @@ export async function rebasePptx(session: EngineSession, source: ByteSource, sav
 	const diagrams = await insertedDiagrams(session.deck, opc, rewritten, epoch)
 
 	rebindSources(session.deck, epoch, rewritten)
+	rebindTimings(session.deck, epoch, rewritten, parts.budgets.timing)
 
 	for (const bind of diagrams) bind()
 
 	parts.rebase(opc, contentTypes, epoch, documents, plan)
 
 	return { ...session.package, bytes: source.size, source, archive: opc.zip, opc }
+}
+
+// A rewritten slide's timing bound node for node onto the timing the save wrote from it (rebindSources binds by path,
+// which names another node once an effect moved).
+function rebindTimings(
+	deck: Deck,
+	epoch: number,
+	rewritten: ReadonlyMap<string, { readonly from: XmlDocument; readonly to: XmlDocument }>,
+	budgets: TimingBudgets
+): void {
+	for (const node of deck.nodes.values()) {
+		const src = node.src
+		const timing = node.timing
+
+		if (timing === undefined || src?.format !== "pptx") continue
+
+		const written = rewritten.get(partKey(src.part))
+
+		if (written === undefined) continue
+
+		const read = readTiming({ reader: partReader(written.to), part: src.part, epoch, budgets }, written.to.documentElement())
+
+		if (read !== undefined) bindWrittenTiming(timing, read)
+	}
 }
 
 // Diagrams an op inserted (their parts held by the edit session, the frame with no source) that the save wrote: each

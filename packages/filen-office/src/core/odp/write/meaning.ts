@@ -280,7 +280,11 @@ function shapeDiffers(expected: ShapeNode, read: ShapeNode, m: Affine, readM: Af
 	const mediaMeaning = (media: MediaRef | undefined): unknown =>
 		media === undefined || !inserted ? media : { kind: media.kind, linked: media.external !== undefined }
 	const frameMeaning = (frame: FrameRef | undefined): unknown =>
-		frame?.kind === "media" && inserted ? { kind: "media", media: mediaMeaning(frame.media) } : stripped(frame)
+		frame?.kind === "media" && inserted
+			? { kind: "media", media: mediaMeaning(frame.media) }
+			: frame?.kind === "chart"
+				? { kind: "chart" }
+				: stripped(frame)
 
 	if (expected.frame?.kind === "table" && read.frame?.kind === "table") {
 		const differs = tableDiffers(expected.frame.table, read.frame.table)

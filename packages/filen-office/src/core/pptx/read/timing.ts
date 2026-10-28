@@ -516,6 +516,7 @@ class TimingReader {
 			const shape = r.int(child, "spid") ?? 0
 			const grpId = r.int(child, "grpId") ?? 0
 			const bld = r.attr(child, "bld")
+			const src = this.src(child)
 
 			switch (r.local(child)) {
 				case "bldP": {
@@ -527,6 +528,7 @@ class TimingReader {
 
 					out.push({
 						kind: "bldP",
+						src,
 						shape,
 						grpId,
 						...(build === undefined ? {} : { build }),
@@ -539,13 +541,14 @@ class TimingReader {
 					break
 				}
 				case "bldDgm":
-					out.push({ kind: "bldDgm", shape, grpId, ...(bld === undefined ? {} : { bld }) })
+					out.push({ kind: "bldDgm", src, shape, grpId, ...(bld === undefined ? {} : { bld }) })
 					break
 				case "bldOleChart": {
 					const animBg = r.bool(child, "animBg")
 
 					out.push({
 						kind: "bldOleChart",
+						src,
 						shape,
 						grpId,
 						...(bld === undefined ? {} : { bld }),
@@ -559,7 +562,7 @@ class TimingReader {
 					const whole = r.is(sub, G.P, "bldAsOne")
 					const kind = r.attr(r.child(sub, G.P, "bldChart"), "bld") ?? r.attr(r.child(sub, G.P, "bldDgm"), "bld")
 
-					out.push({ kind: "bldGraphic", shape, grpId, whole, ...(kind === undefined ? {} : { bld: kind }) })
+					out.push({ kind: "bldGraphic", src, shape, grpId, whole, ...(kind === undefined ? {} : { bld: kind }) })
 
 					break
 				}

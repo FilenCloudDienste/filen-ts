@@ -16,7 +16,7 @@ import {
 import type { PaintedSlide, SlidePainter } from "../SlideView"
 import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowScreen, ShowStart } from "./controller"
 import { layerBoxes, layerIndices, layerPlanOf, layerTree } from "./layers"
-import { buildStageSlide, type ShowMediaHandle, type ShowMediaMount, type StageSlide } from "./stage"
+import { buildStageSlide, type ShowMediaHandle, type ShowMediaMount, type ShowSoundHandle, type StageSlide } from "./stage"
 import { advanceAt, ShowNavigator, type ShowOptions, type ShowPosition, type ShowSlide } from "./timeline"
 import { transitionDurationMs, transitionStyles } from "./transitions"
 
@@ -64,6 +64,8 @@ interface Prepared {
 	readonly source: TimegraphSource | undefined
 	readonly boxes: Float64Array
 	readonly transition: Transition | undefined
+	// The sound the slide's own transition plays as it enters (also when the player draws its fallback).
+	readonly sound: Transition["sound"]
 	readonly triggers: ReadonlySet<number>
 	// Whole-shape layer by shape id.
 	readonly layerOf: ReadonlyMap<number, number>
@@ -152,6 +154,8 @@ export class ShowPlayer implements ShowController {
 	private advance: ReturnType<typeof setTimeout> | undefined
 	private wakeAt = Number.NaN
 	private transitionEnd: ReturnType<typeof setTimeout> | undefined
+	// The transition sound playing (a looped one until the next sound or a stop).
+	private sounding: ShowSoundHandle | undefined
 	private restart: ReturnType<typeof setTimeout> | undefined
 	// Bumped by every navigation: an older navigation's preparation does not show its slide.
 	private generation = 0
@@ -511,6 +515,10 @@ export class ShowPlayer implements ShowController {
 
 		const transition = how.transition && from !== undefined ? prepared.transition : undefined
 
+		// The slide entered with its transition plays its sound: a new one ends the one playing, as "stop previous sound"
+		// does.
+		if (how.transition) this.playSound(prepared.sound)
+
 		if (instance !== undefined && how.atEnd === true) {
 			instance.fire({ kind: "slideBegin" }, 0)
 
@@ -561,6 +569,18 @@ export class ShowPlayer implements ShowController {
 
 		this.emit(slideEvent)
 		this.kick()
+	}
+
+	private playSound(sound: Transition["sound"]): void {
+		if (sound === undefined) return
+
+		this.sounding?.stop()
+		this.sounding = undefined
+
+		const session = this.props.session
+
+		if (sound.kind === "embedded" && session !== undefined)
+			this.sounding = this.props.media?.sound?.(session, { part: sound.part, loop: sound.loop })
 	}
 
 	// The slide's timeline begins (after its transition): its timed advance is armed, the next slide prepared.
@@ -708,6 +728,7 @@ export class ShowPlayer implements ShowController {
 			source: fallback ? undefined : source,
 			boxes: source === undefined ? new Float64Array(0) : layerBoxes(source),
 			transition: source?.transition,
+			sound: (source?.authored ?? source?.transition)?.sound,
 			triggers: new Set(graph?.interactive.map(trigger => trigger.trigger.id) ?? []),
 			layerOf,
 			domLayers: new Set(
@@ -1160,6 +1181,8 @@ export class ShowPlayer implements ShowController {
 		this.advance = undefined
 		this.restart = undefined
 		this.transitionEnd = undefined
+		this.sounding?.stop()
+		this.sounding = undefined
 
 		if (this.playing !== undefined) this.leave(this.playing)
 	}

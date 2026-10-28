@@ -221,6 +221,19 @@ describe("presentation Home text groups", () => {
 		expect(within(commands()).getByRole<HTMLButtonElement>("button", { name: "Bold" }).disabled).toBe(true)
 	})
 
+	it("leaves the font box empty with no text to read a font from, and says several only for an open body's mix", () => {
+		mount({})
+		expect(within(commands()).getByRole("combobox", { name: "Font" }).textContent).not.toContain("Several fonts")
+		cleanup()
+
+		mount({ selected: [2] })
+		expect(within(commands()).getByRole("combobox", { name: "Font" }).textContent).not.toContain("Several fonts")
+		cleanup()
+
+		mount({ body: { run: {} } })
+		expect(within(commands()).getByRole("combobox", { name: "Font" }).textContent).toContain("Several fonts")
+	})
+
 	it("collapses its groups into buttons on a narrow row", () => {
 		size.width = 200
 		mount({ body: { run: {} } })

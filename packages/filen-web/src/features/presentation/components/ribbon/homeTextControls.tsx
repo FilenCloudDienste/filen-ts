@@ -113,6 +113,7 @@ function useTextTarget(editor: TextRibbonEditor, editable: boolean): TextTarget 
 
 	return {
 		enabled: editable && (controller !== undefined || shapes.length > 0),
+		formatted: format !== undefined,
 		run: format?.run ?? {},
 		paragraph: format?.paragraph ?? {},
 		bodyPr: format?.bodyPr ?? {},
@@ -161,7 +162,7 @@ function FontPicker({ target }: { target: TextTarget }) {
 		...THEME_FONTS.map(font => ({ value: font.value, label: t(font.label) })),
 		...DOCX_COMMON_FONTS.map(name => ({ value: name, label: name })),
 		...(known ? [] : [{ value: current, label: current }]),
-		...(current === undefined ? [{ value: MIXED, label: t("previewPptxTextFontMixed") }] : [])
+		...(current === undefined ? [{ value: MIXED, label: target.formatted ? t("previewPptxTextFontMixed") : "" }] : [])
 	]
 
 	return (

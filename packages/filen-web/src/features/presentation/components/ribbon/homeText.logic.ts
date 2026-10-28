@@ -56,6 +56,8 @@ export function presentationTextLabels(t: TFunction<"preview">): TextEditorLabel
 // The command target: the open body, or the text-bearing shapes selected.
 export interface TextTarget {
 	readonly enabled: boolean
+	// `run` and `paragraph` are the open body's format; without one they are empty, which says nothing is mixed.
+	readonly formatted: boolean
 	readonly run: Partial<RunProps>
 	readonly paragraph: Partial<ParaProps>
 	readonly bodyPr: Partial<TextBodyProps>

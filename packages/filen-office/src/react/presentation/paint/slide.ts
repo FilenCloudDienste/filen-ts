@@ -257,7 +257,14 @@ function positioned(document: Document, className: string, matrix: readonly numb
 	return element
 }
 
-export const paintSlide: SlidePainter = (render, context) => {
+export const paintSlide: SlidePainter = (render, context) => paint(render, context, false)
+
+// The editor's compositor: paintSlide plus the empty placeholders' prompts (SlideLayer.prompt, in a .fo-slide-prompt
+// holder the text editor hides while the shape is edited). The show, the presenter and the viewer paint with
+// paintSlide, so they never draw a prompt even from the editor's renders.
+export const paintEditorSlide: SlidePainter = (render, context) => paint(render, context, true)
+
+function paint(render: Parameters<SlidePainter>[0], context: Parameters<SlidePainter>[1], prompts: boolean): ReturnType<SlidePainter> {
 	const { document, session, signal } = context
 	const id = ++painted
 	const root = document.createElement("div")
@@ -486,11 +493,24 @@ export const paintSlide: SlidePainter = (render, context) => {
 			element.append(drawing)
 		}
 
-		const text = layer.text
+		const prompt = prompts && layer.text === undefined ? layer.prompt : undefined
+		const text = layer.text ?? prompt
 
 		if (text !== undefined) {
 			const textMatrix = layer.textMatrix ?? layer.matrix
-			const holder = positioned(document, "fo-slide-text", inverse === undefined ? textMatrix : multiply(inverse, textMatrix))
+			const holder = positioned(
+				document,
+				prompt === undefined ? "fo-slide-text" : "fo-slide-prompt",
+				inverse === undefined ? textMatrix : multiply(inverse, textMatrix)
+			)
+
+			// A prompt is no content: screen readers, selection and find skip it.
+			if (prompt !== undefined) {
+				holder.setAttribute("aria-hidden", "true")
+				holder.dataset["foPrompt"] = ""
+				holder.style.userSelect = "none"
+			}
+
 			// The TextPage is both the page's tables and the DrawingML paint tables its styles index.
 			const page = paintPage(text.page, { document, tables: text, paints: text })
 

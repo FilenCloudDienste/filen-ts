@@ -67,6 +67,8 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["presentation.objects.selectAll", "notes.selectAll"],
 	["presentation.text.alignCenter", "editor.code"],
 	["presentation.text.alignLeft", "presentation.show.laser"],
+	// Print over an open deck; the running show takes Mod+P for its pen on its stage and stops it there.
+	["presentation.print", "presentation.show.pen"],
 	["presentation.show.arrow", "presentation.selectAllSlides"],
 	["presentation.show.arrow", "presentation.objects.selectAll"],
 	["presentation.show.arrow", "drive.selectAll"],

@@ -24,8 +24,11 @@ function sync(root: HTMLElement): void {
 	const current =
 		all.find(element => element.hasAttribute("data-ribbon-current") && enabled(element)) ?? all.find(element => enabled(element))
 
+	// Written only where it changes: a write of the same value is still a mutation the page restyles for.
 	for (const element of all) {
-		element.tabIndex = element === current ? 0 : -1
+		const stop = element === current ? 0 : -1
+
+		if (element.tabIndex !== stop || !element.hasAttribute("tabindex")) element.tabIndex = stop
 	}
 }
 

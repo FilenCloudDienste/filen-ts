@@ -1,4 +1,5 @@
 import { prepareOdpPictureOp } from "../../../core/odp/write/emit/picture"
+import { prepareChartOp } from "../../../core/presentation/edit/apply/chart"
 import { proveOdpSlide } from "../../../core/odp/write/proof"
 import { odpSourceReading } from "../../../core/odp/write/session"
 import { odpWriteSource } from "../../../core/odp/write/source"
@@ -14,6 +15,7 @@ import type { PictureReading } from "../../../core/presentation/edit/apply/pictu
 import { isRefused } from "../../../core/presentation/edit/apply/shape"
 import { deckDefinitionType, diagramPartsOf, type SmartArtSourceReading } from "../../../core/presentation/edit/apply/smartart"
 import type { SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
+import { designInfo, designLayouts, predictedSizeTouches, type DesignReading } from "../../../core/presentation/edit/apply/design"
 import { inheritedDeclarations } from "../../../core/presentation/edit/canonical"
 import { deckChanges, deckFingerprints, findShape, fingerprintTouches, orderKey } from "../../../core/presentation/edit/changes"
 import {
@@ -410,7 +412,13 @@ function ownedParts(facts: ReferenceFacts, part: string): string[] {
 	return out
 }
 
-const PART_PREFIXES = { slide: "ppt/slides/slide", notesSlide: "ppt/notesSlides/notesSlide" } as const
+const PART_PREFIXES = {
+	slide: "ppt/slides/slide",
+	notesSlide: "ppt/notesSlides/notesSlide",
+	theme: "ppt/theme/theme",
+	slideMaster: "ppt/slideMasters/slideMaster",
+	slideLayout: "ppt/slideLayouts/slideLayout"
+} as const
 
 function newPartName(state: EditState, deck: Deck, parts: PptxParts, kind: keyof typeof PART_PREFIXES): string {
 	const prefix = PART_PREFIXES[kind]
@@ -520,7 +528,10 @@ function rawDocumentOf(state: EditState, part: string): XmlDocument | undefined 
 
 // The engine's half of the apply context: allocators, source bytes, and reading held markup back. Synchronous: what
 // it reads was prepared (prepare()).
-function contextFor(session: EngineSession, state: EditState): SlideSourceReading & Partial<PictureReading & SmartArtSourceReading> {
+function contextFor(
+	session: EngineSession,
+	state: EditState
+): SlideSourceReading & Partial<PictureReading & SmartArtSourceReading & DesignReading> {
 	if (session.deck.format === "odp") {
 		const odp = odpParts(session.deck)
 
@@ -557,7 +568,7 @@ function contextFor(session: EngineSession, state: EditState): SlideSourceReadin
 		return node
 	}
 
-	const reading: SlideSourceReading & PictureReading & SmartArtSourceReading = {
+	const reading: SlideSourceReading & PictureReading & SmartArtSourceReading & DesignReading = {
 		sourceBytes: src => sourceBytes(session, state.raw, src),
 		newShapeId: slide => nextShapeId(deck.nodes.get(slide)?.shapes ?? []),
 		newSlideRef: () => slideRef(state.nextRef++),
@@ -714,7 +725,30 @@ function contextFor(session: EngineSession, state: EditState): SlideSourceReadin
 			state.raw.delete(name)
 			parts.forget(name)
 		},
-		partsOfType: type => diagramPartsOfType(parts, type)
+		partsOfType: type => diagramPartsOfType(parts, type),
+		// A design op's generated parts, held under their part names (the renderer and the writer resolve them).
+		holdDesign(part, ref) {
+			let document: XmlDocument
+
+			try {
+				document = parseXml(part.bytes)
+			} catch {
+				return refused("malformed", part.name)
+			}
+
+			if (part.kind === "theme") {
+				parts.adoptTheme(part.name, document)
+
+				return undefined
+			}
+
+			parts.adopt(part.name, document)
+
+			const relationships = part.rels === undefined ? new Relationships([]) : parseRelationships(part.rels, part.name.slice(1))
+
+			return readPart(parts, ref ?? slideRef(state.nextRef++), part.name, document, relationships)
+		},
+		newDesignPart: kind => newPartName(state, deck, parts, kind)
 	}
 
 	return reading
@@ -782,6 +816,33 @@ async function prove(session: EngineSession, state: EditState, node: SlideNode, 
 	notify(node.shapes)
 }
 
+// What of a page an op may change without writing its shapes again: its transition, its background, its own
+// attributes (hidden, name).
+const AROUND_SHAPES: ReadonlySet<string> = new Set(["transition", "background", "attributes"])
+
+// The pages an op changes only around their shapes (every touch of theirs one of AROUND_SHAPES): their shapes are
+// written as they are, so they need no proof yet. A theme or size change and the slide ops rewrite shapes: none.
+function aroundShapesOnly(op: DeckOp, touches: readonly Touch[]): Set<SlideRef> {
+	const out = new Set<SlideRef>()
+	const ops = op.family === "batch" ? op.ops : [op]
+
+	if (ops.some(each => each.family === "slide" || (each.family === "design" && each.kind !== "setBackground"))) return out
+
+	const rewritten = new Set<SlideRef>()
+
+	for (const touch of touches) {
+		if (touch.kind === "shape") rewritten.add(touch.slide)
+		else if (touch.kind === "slide") {
+			if (touch.dirt.kind === "slidePart" && AROUND_SHAPES.has(touch.dirt.part)) out.add(touch.slide)
+			else rewritten.add(touch.slide)
+		}
+	}
+
+	for (const ref of rewritten) out.delete(ref)
+
+	return out
+}
+
 // An ODP op's slides parsed and proved (core/odp/write/proof.ts); a delete also parses the pages that link to the
 // deleted ones by name, so their jumps are rewritten. ODF has no relationships: no reference graph to load.
 async function prepareOdp(
@@ -796,7 +857,12 @@ async function prepareOdp(
 
 	const deck = session.deck
 	const source = odpWriteSource(parts)
-	const slides = slidesOf(opTouches(op))
+	const touches = opTouches(op)
+	const slides = slidesOf(touches)
+	const unproved = aroundShapesOnly(op, touches)
+
+	// A theme or size change judges every slide (its master, its shapes): all parsed first.
+	if (op.family === "design" && (op.kind !== "setBackground" || op.slides === "all")) for (const ref of deck.slides) slides.add(ref)
 
 	if (op.family === "slide") {
 		if (op.kind === "delete" || op.kind === "hide" || op.kind === "move") for (const ref of op.slides) slides.add(ref)
@@ -809,7 +875,8 @@ async function prepareOdp(
 
 		const node = await parts.slide(ref, slicing)
 
-		if (state.proved.has(ref) || node.kind !== "slide") continue
+		// A page the op changes only around its shapes is proved when an op first rewrites them.
+		if (state.proved.has(ref) || node.kind !== "slide" || unproved.has(ref)) continue
 
 		const lockedBefore = new Set<ShapeNode>()
 		const collect = (shapes: readonly ShapeNode[]): void => {
@@ -836,6 +903,8 @@ async function prepareOdp(
 
 	// A crop of a source picture is written in lengths of its image's own size: read from the entry's header.
 	await prepareOdpPictureOp(deck, op, parts.opc, slicing)
+	// A chart op's chart object, its own table, a new workbook's cells (apply/chart.ts).
+	await prepareChartOp(deck, op, { opc: parts.opc, document: part => parts.document(part) }, slicing)
 }
 
 // Everything an op needs before it applies: its slides parsed and proved, their relationships, and for the
@@ -869,6 +938,9 @@ async function prepare(
 	}
 	const slides = slidesOf(opTouches(op))
 
+	// A theme or size change judges every slide (its master, its shapes): all parsed first.
+	if (op.family === "design" && (op.kind !== "setBackground" || op.slides === "all")) for (const ref of deck.slides) slides.add(ref)
+
 	if (op.family === "slide") {
 		if (op.kind === "delete" || op.kind === "hide" || op.kind === "move") for (const ref of op.slides) slides.add(ref)
 		if (op.kind === "duplicate" || op.kind === "setLayout" || op.kind === "reset") slides.add(op.slide)
@@ -881,7 +953,9 @@ async function prepare(
 
 		await relationshipsOf(state, parts, node.part)
 		await scopeOf(state, parts, node.part)
-		await prove(session, state, node, options)
+		// A transition op writes no shape (the slide's p:transition only, emit/transition.ts), so its slides need no
+		// shape proof; an op that writes shapes on them proves them when it comes.
+		if (op.family !== "transition") await prove(session, state, node, options)
 	}
 
 	// The diagram parts a smartart op reads (apply/smartart.ts), parsed beside the package's other documents; one past
@@ -894,6 +968,9 @@ async function prepare(
 
 		parts.adopt(part, await parts.opc.xml(part))
 	}
+
+	// A chart op's chart part, its embedded workbook, a new workbook's cells, an inserted chart's workbook.
+	await prepareChartOp(deck, op, { opc: parts.opc, document: part => parts.document(part) }, slicing)
 
 	if (op.family !== "slide" || !(op.kind === "delete" || op.kind === "restore" || op.kind === "duplicate")) return
 
@@ -995,6 +1072,8 @@ function predictedTouches(deck: Deck, op: DeckOp): Touch[] {
 			})
 		}
 	}
+
+	out.push(...predictedSizeTouches(deck, op))
 
 	if (op.family === "slide" && (op.kind === "reset" || op.kind === "setLayout")) {
 		for (const shape of deck.nodes.get(op.slide)?.shapes ?? []) {
@@ -1133,6 +1212,14 @@ function changed(session: EngineSession, state: EditState, touches: readonly Tou
 			(touch.kind === "slide" && touch.dirt.kind === "slidePart" && touch.dirt.part === "attributes")
 	)
 	const showChanged = touches.some(touch => touch.kind === "presentation" && touch.what === "show")
+	// A design op: the slide size, or masters and layouts added or dropped (node touches on nodes no slide list holds).
+	const designChanged = touches.some(
+		touch =>
+			(touch.kind === "presentation" && touch.what === "size") ||
+			(touch.kind === "slide" &&
+				touch.dirt.kind === "node" &&
+				(deck.masters.includes(touch.slide) || deck.layouts.includes(touch.slide) || !deck.nodes.has(touch.slide)))
+	)
 
 	session.emit({
 		type: "changed",
@@ -1142,7 +1229,7 @@ function changed(session: EngineSession, state: EditState, touches: readonly Tou
 		canUndo: state.history.canUndo,
 		canRedo: state.history.canRedo,
 		slides: [...slidesOf(touches)].filter(ref => deck.slides.includes(ref)),
-		...(listChanged || showChanged
+		...(listChanged || showChanged || designChanged
 			? {
 					info: {
 						...(listChanged
@@ -1154,7 +1241,14 @@ function changed(session: EngineSession, state: EditState, touches: readonly Tou
 									sections: deck.sections
 								}
 							: {}),
-						...(showChanged ? { show: deck.show } : {})
+						...(showChanged ? { show: deck.show } : {}),
+						...(designChanged
+							? {
+									size: { ...deck.size },
+									layouts: designLayouts(deck),
+									design: designInfo(deck, part => pptxParts(deck)?.theme(part))
+								}
+							: {})
 					}
 				}
 			: {})

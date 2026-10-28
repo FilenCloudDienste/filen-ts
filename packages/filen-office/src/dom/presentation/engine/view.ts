@@ -4,6 +4,7 @@ import { partKey, type Relationships, type Slicing, type ZipEntry } from "../../
 import { imageWithinBudget } from "../../../core/opc/mediaPolicy"
 import type { PresentationBudgets } from "../../../core/presentation/budget"
 import { insertedImage, insertedImageWritten } from "../../../core/presentation/edit/apply/picture"
+import { chartDocument, chartRelationshipOwner } from "../../../core/presentation/edit/apply/chart"
 import { diagramRelationshipOwner } from "../../../core/presentation/edit/apply/smartart"
 import { prepareSlideMedia } from "../media"
 import { cloneModel } from "../../../core/presentation/edit/changes"
@@ -18,7 +19,8 @@ import {
 } from "../../../core/presentation/model"
 import type { SlideRender } from "../../../core/presentation/output"
 import type { RenderServices, TextLayoutRequest, TextLayoutResult } from "../../../core/presentation/render/services"
-import { renderSlide } from "../../../core/presentation/render/slide"
+import type { PlaceholderPrompts } from "../../../core/presentation/render/prompts"
+import { renderSlide, type RenderOptions } from "../../../core/presentation/render/slide"
 import { fontRequests, layoutBody, type TextEnvironment } from "../../../core/presentation/text/body"
 import { resolveBody, shapeBodyContext, type BodyContext, type TextFonts } from "../../../core/presentation/text/resolve"
 import { effectiveClrMap, resolveColor, themeOf, themeTypeface, toRgba, type PresentationTheme } from "../../../core/presentation/theme"
@@ -131,10 +133,11 @@ function stateOf(session: EngineSession): ViewState {
 					}
 				})()
 	const services: RenderServices = {
-		xml: part => parts.document(part) ?? documents.get(partKey(part)) ?? undefined,
+		xml: part => chartDocument(session.deck, part) ?? parts.document(part) ?? documents.get(partKey(part)) ?? undefined,
 		relationship(part, id) {
-			// A held diagram edit's pictures are its package data part's relationships.
-			const relationship = relationships.get(partKey(diagramRelationshipOwner(session.deck, part) ?? part))?.byId(id)
+			// A held diagram edit's pictures are its package data part's relationships; a held chart's, its home part's.
+			const owner = diagramRelationshipOwner(session.deck, part) ?? chartRelationshipOwner(session.deck, part) ?? part
+			const relationship = relationships.get(partKey(owner))?.byId(id)
 
 			if (relationship === undefined) return undefined
 
@@ -361,6 +364,7 @@ function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequ
 	// master), so the slide shape's own body is the one captured; a table cell's body is captured for that cell only.
 	if (
 		capture !== undefined &&
+		request.prompt !== true &&
 		capture.shape.slide === request.owner.ref &&
 		capture.shape.id === request.shape.id &&
 		(wanted === undefined ? own : request.cell?.row === wanted.row && request.cell.column === wanted.col)
@@ -394,7 +398,7 @@ function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequ
 		}
 	}
 
-	const index = request.deck.slides.indexOf(request.slide.ref)
+	const index = slideIndexOf(request.deck, request.slide)
 	const result = layoutBody(resolved, { width: request.width, height: request.height }, text.environment, {
 		fields: { slideNumber: request.deck.firstSlideNumber + Math.max(0, index), now: new Date() },
 		hyperlinks: true,
@@ -448,7 +452,8 @@ function copyCellLayout(layout: TextLayoutResult): TextLayoutResult {
 			page: page as unknown as TextLayoutResult["page"]["page"],
 			paints: cloneModel(text.paints),
 			strokes: cloneModel(text.strokes),
-			textEffects: cloneModel(text.textEffects)
+			textEffects: cloneModel(text.textEffects),
+			...(text.markers === undefined ? {} : { markers: text.markers.slice() })
 		}
 	}
 }
@@ -476,6 +481,14 @@ function cellLayoutKey(request: TextLayoutRequest): string {
 
 function visibleText(body: TextLayoutRequest["body"]): boolean {
 	return body.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "br" && run.text !== ""))
+}
+
+function slideIndexOf(deck: EngineSession["deck"], node: TextLayoutRequest["slide"]): number {
+	const index = deck.slides.indexOf(node.ref)
+
+	if (index >= 0 || node.kind !== "notes") return index
+
+	return deck.slides.findIndex(ref => deck.nodes.get(ref)?.notes === node.ref)
 }
 
 // Loads the faces text asked for and sends the page the ones newly registered; whether any was missing.
@@ -508,15 +521,47 @@ async function prepareFaces(session: EngineSession, text: ViewText, requests: It
 	return true
 }
 
-// One slide rendered (the thumbnails and the jobs worker render through it too).
-export async function renderSlideFor(context: CallContext, ref: SlideRef): Promise<SlideRender> {
-	const state = stateOf(context.session)
-
+// One slide rendered (the thumbnails and the jobs worker render through it too, without options).
+export async function renderSlideFor(context: CallContext, ref: SlideRef, options?: RenderOptions): Promise<SlideRender> {
 	if (!context.session.deck.slides.includes(ref)) throw new PresentationError("notFound", "slide")
+
+	return renderNodeFor(context, ref, options)
+}
+
+// The open's prompt strings when the deck can be edited: the editor's view asks for them (render's `prompts`).
+function editorPrompts(session: EngineSession): PlaceholderPrompts | undefined {
+	const prompts = session.options.prompts
+
+	if (prompts === undefined || session.options.viewOnly === true || session.package.viewOnly === true) return undefined
+
+	return session.deck.gate.length === 0 ? prompts : undefined
+}
+
+export async function sessionFaces(session: EngineSession): Promise<DocxFontFace[]> {
+	const text = stateOf(session).text
+
+	if (text === undefined) return []
+
+	const faces: DocxFontFace[] = []
+
+	for (const registration of text.fonts.registrations()) {
+		const face = { family: registration.family, weight: registration.weight, italic: registration.italic }
+
+		if (registration.source === "asset")
+			faces.push({ kind: "bytes", face, bytes: await text.realm.text.fontAssets.read(registration.file) })
+		else if (registration.source === "local") faces.push({ kind: "local", face, name: registration.name })
+	}
+
+	return faces
+}
+
+export async function renderNodeFor(context: CallContext, ref: SlideRef, options?: RenderOptions): Promise<SlideRender> {
+	const state = stateOf(context.session)
 
 	await prepare(context, state, ref)
 
-	const render = await renderSlide(context.session.deck, ref, state.services, context.slicing)
+	const again = (): Promise<SlideRender> => renderSlide(context.session.deck, ref, state.services, context.slicing, undefined, options)
+	const render = await again()
 	const text = state.text
 
 	if (text === undefined) return render
@@ -525,7 +570,7 @@ export async function renderSlideFor(context: CallContext, ref: SlideRef): Promi
 		// Another render took the missing faces this one also asked for: wait for them as it does.
 		const pending = text.pending
 
-		return pending !== undefined && (await pending) ? renderSlide(context.session.deck, ref, state.services, context.slicing) : render
+		return pending !== undefined && (await pending) ? again() : render
 	}
 
 	const missing = [...text.missing.values()]
@@ -537,7 +582,7 @@ export async function renderSlideFor(context: CallContext, ref: SlideRef): Promi
 	text.pending = pending
 
 	try {
-		return (await pending) ? renderSlide(context.session.deck, ref, state.services, context.slicing) : render
+		return (await pending) ? again() : render
 	} finally {
 		if (text.pending === pending) text.pending = undefined
 	}
@@ -650,18 +695,20 @@ export async function readPart(session: EngineSession, part: string): Promise<Ui
 }
 
 export const viewCapability: ViewCapability = {
-	async render(context, refs) {
+	async render(context, refs, options) {
 		// A deck no reader of this capability opened is refused before its arguments are looked at.
 		stateOf(context.session)
 
 		if (refs.length > MAX_RENDER_REFS) throw new PresentationError("tooLarge", "render")
 
 		const out: SlideRender[] = []
+		const prompts = options?.prompts === true ? editorPrompts(context.session) : undefined
+		const renderOptions = prompts === undefined ? undefined : { prompts }
 
 		for (const ref of refs) {
 			if (context.signal.aborted) throw new PresentationError("aborted", "render")
 
-			out.push(await renderSlideFor(context, ref))
+			out.push(await renderSlideFor(context, ref, renderOptions))
 			// Its deflated media start preparing now, in the background lane.
 			prepareSlideMedia(context.session, ref)
 		}

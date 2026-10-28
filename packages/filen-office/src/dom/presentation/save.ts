@@ -709,7 +709,7 @@ export async function saveSession(
 
 		const written = writtenNames(snapshot)
 		const transfer = { downloaded: downloaded ?? downloadedBytes(pkg, outcome.report, written) }
-		const inserted = insertedWrites(deck, snapshot.changes.add)
+		const inserted = insertedWrites(deck, snapshot.changes.add, snapshot.changes.replace)
 
 		return land({ revision, zip, upload, written, report: outcome.report, package: pkg, inserted }, transfer.downloaded)
 	}

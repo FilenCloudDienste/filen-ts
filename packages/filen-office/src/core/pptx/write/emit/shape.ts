@@ -298,6 +298,9 @@ export function unmodeledAttributes(context: EmitContext, node: number, modeled:
 // unknown children stay where they were.
 export interface Slot {
 	readonly match: (local: string, group: number) => boolean
+	// The source child the slot takes, when its element is not told by its name alone (a transition inside an
+	// mc:AlternateContent); `match` is not asked then.
+	readonly takes?: (node: number) => boolean
 	// The slot's markup given its source child (-1 when the source has none); "keep" holes the child.
 	readonly write: (node: number) => "keep" | string | readonly EmitPiece[]
 }
@@ -339,7 +342,7 @@ export function mergeChildren(context: EmitContext, parent: number, slots: reado
 
 			const group = r.group(child)
 			const local = document.localName(child)
-			const index = slots.findIndex(slot => slot.match(local, group))
+			const index = slots.findIndex(slot => (slot.takes === undefined ? slot.match(local, group) : slot.takes(child)))
 
 			// Unknown children, and a second child for a slot already taken, stay as they were.
 			if (index < 0 || done[index] === true) {
@@ -612,13 +615,20 @@ function nvXml(context: EmitContext, shape: ShapeNode, source: number, pristine:
 	const cNv = r === undefined || nv < 0 ? -1 : r.child(nv, nvGroup, names.cNv)
 	const txBox = shape.kind === "sp" && shape.txBox === true
 
-	if (cNv >= 0 && document !== undefined && (shape.kind !== "sp" || r?.bool(cNv, "txBox") === txBox)) {
+	// An absent txBox is false (CT_NonVisualDrawingShapeProps).
+	if (cNv >= 0 && document !== undefined && (shape.kind !== "sp" || (r?.bool(cNv, "txBox") ?? false) === txBox)) {
 		out.hole(cNv)
 	} else if (cNv >= 0 && document !== undefined) {
 		// txBox changed: the locks stay.
-		out.text(`<p:cNvSpPr${txBox ? ' txBox="1"' : ""}${unmodeledAttributes(context, cNv, new Set(["txBox"]))}>`)
-		for (const child of childElements(document, cNv)) out.hole(child)
-		out.text("</p:cNvSpPr>")
+		const open = `<p:cNvSpPr${txBox ? ' txBox="1"' : ""}${unmodeledAttributes(context, cNv, new Set(["txBox"]))}`
+		const children = [...childElements(document, cNv)]
+
+		if (children.length === 0) out.text(`${open}/>`)
+		else {
+			out.text(`${open}>`)
+			for (const child of children) out.hole(child)
+			out.text("</p:cNvSpPr>")
+		}
 	} else {
 		out.text(`<${prefix}:${names.cNv}${txBox ? ' txBox="1"' : ""}/>`)
 	}
@@ -954,8 +964,10 @@ export function leadingSpace(context: EmitContext, node: number, out: Pieces): v
 	if (previous >= 0 && document.kinds[previous] === NodeKind.Text && document.text(previous).trim() === "") out.hole(previous)
 }
 
-// Two shapes alike in everything the writer models (frames and media are their sources', written as holes).
+// Two shapes alike in everything the writer models (frames and media are their sources', written as holes; a chart
+// frame naming another chart than its source's is the chart family's to write).
 export function sameShape(a: ShapeNode, b: ShapeNode): boolean {
+	if (a.frame?.kind === "chart" && (b.frame?.kind !== "chart" || a.frame.part !== b.frame.part)) return false
 	if (
 		!sameModel(
 			{ ...a, frame: undefined, media: undefined, lock: undefined, children: undefined },

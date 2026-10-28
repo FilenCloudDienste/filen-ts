@@ -120,6 +120,14 @@ function mediumEntry(context: OdpEmitContext, styles: Probing, id: number): stri
 	)
 }
 
+// The entry of inserted medium `id` for another family (a transition's sound): the same entry as the media family's,
+// once per save.
+export function insertedMediumEntry(context: OdpEmitContext, id: number): string | Refused {
+	const styles = context.styles
+
+	return probing(styles) ? mediumEntry(context, styles, id) : refused("failed", "the save's package entries")
+}
+
 // The poster's entry, likewise (an inserted image's registry id).
 function posterEntry(context: OdpEmitContext, styles: Probing, id: number): string | Refused {
 	const written = insertedImageWritten(context.deck, id)

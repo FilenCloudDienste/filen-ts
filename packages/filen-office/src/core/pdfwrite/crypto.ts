@@ -204,8 +204,16 @@ export interface SecurityHandler {
 // Every permission (bits 3-6 and 9-12), as a signed 32-bit value with the reserved high bits set (Table 22).
 const ALL_PERMISSIONS = -4
 
+// The standard security handler's state as plain data: the /Encrypt entries and the file key. Made where the password
+// is (standardSecurityKey) and turned into a handler where the PDF is written (securityOfKey), so a writer can seal a
+// document under a password it never holds. The file key opens this one PDF only.
+export interface PdfSecurityKey {
+	readonly dictionary: SecurityHandler["dictionary"]
+	readonly fileKey: Uint8Array
+}
+
 // Algorithms 8, 9 and 10 for one password used as both user and owner password.
-export async function standardSecurity(password: string, random: RandomBytes = platformRandom): Promise<SecurityHandler> {
+export async function standardSecurityKey(password: string, random: RandomBytes = platformRandom): Promise<PdfSecurityKey> {
 	const secret = preparePassword(password)
 	const fileKey = random(32)
 	const userValidation = random(8)
@@ -229,12 +237,25 @@ export async function standardSecurity(password: string, random: RandomBytes = p
 
 	secret.fill(0)
 
+	return { dictionary: { O, U, OE, UE, Perms, P: ALL_PERMISSIONS }, fileKey }
+}
+
+// The handler of a key made by standardSecurityKey: strings and streams get a fresh IV each (`random`).
+export function securityOfKey(key: PdfSecurityKey, random: RandomBytes = platformRandom): SecurityHandler {
+	const fileKey = key.fileKey.slice()
+
+	if (fileKey.length !== 32) throw new PdfWriteError("password", "The PDF security key is not an AES-256 key")
+
 	return {
-		dictionary: { O, U, OE, UE, Perms, P: ALL_PERMISSIONS },
+		dictionary: key.dictionary,
 		encrypt: async data => {
 			const iv = random(16)
 
 			return concat([iv, await aesCbc(fileKey, iv, data)])
 		}
 	}
+}
+
+export async function standardSecurity(password: string, random: RandomBytes = platformRandom): Promise<SecurityHandler> {
+	return securityOfKey(await standardSecurityKey(password, random), random)
 }

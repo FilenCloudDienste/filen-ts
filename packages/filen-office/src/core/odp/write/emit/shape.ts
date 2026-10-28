@@ -9,7 +9,8 @@ import {
 	type SlideNode,
 	type Xfrm
 } from "../../../presentation/model"
-import { NodeKind, decodeUtf8, escapeAttribute, escapeText } from "../../../xml/index"
+import { NodeKind, decodeUtf8, encodeUtf8, escapeAttribute, escapeText } from "../../../xml/index"
+import { inScope, rootScope } from "../../../anim/prune"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
 import { odpTargetId, odpTargetIds } from "../../../anim/odf"
@@ -23,9 +24,13 @@ import {
 	fillChanges,
 	isRefused,
 	lineChanges,
+	setProperty,
 	styleChanges,
 	type StyleChanges
 } from "../styles"
+import { resourceFillChanges, resourceLineChanges } from "../resources"
+import { changedLengths } from "./box"
+import { odpScaledTextChanges } from "./design"
 
 // A shape as ODF drawing markup (ODF 1.3 Part 3 §10.3 draw:frame, §10.6 draw:custom-shape, §10.4 shapes, §10.3.14
 // draw:g). A shape the source has is patched, never rewritten: its start tag keeps every attribute the edit did not
@@ -299,13 +304,19 @@ export class OdpShapeWriter {
 	private grouping = false
 	// Each shape's aspects that differ from its source (undefined: none).
 	private readonly aspectsOf: (shape: ShapeNode) => Aspects | undefined
+	private readonly idPrefix: string
+	// The shapes the slide's timing animates (walked once a writer).
+	private targets: ReadonlySet<number> | undefined = undefined
 
 	constructor(
 		context: OdpEmitContext,
 		fragment: Fragment | undefined,
 		slide: SlideNode,
-		aspectsOf: (shape: ShapeNode) => Aspects | undefined
+		aspectsOf: (shape: ShapeNode) => Aspects | undefined,
+		// What new target ids start with (core/anim/odf.ts OdpTimingContext.idPrefix).
+		idPrefix = ""
 	) {
+		this.idPrefix = idPrefix
 		this.context = context
 		this.styles = context.styles as OdpStyles
 		this.fragment = fragment
@@ -352,7 +363,21 @@ export class OdpShapeWriter {
 
 			if (isRefused(pieces)) return pieces
 
-			return pieces.map(piece => (typeof piece === "object" && "hole" in piece ? foreign.document.raw(piece.hole) : piece))
+			const out = pieces.map(piece => (typeof piece === "object" && "hole" in piece ? foreign.document.raw(piece.hole) : piece))
+			const first = out[0]
+
+			// Held markup carries the declarations in scope where it was on its start tag (to be read on its own): those in
+			// scope here again come off, so the element is written as it was.
+			if (first !== undefined && this.fragment !== undefined && typeof first !== "object") {
+				const scope = rootScope(this.fragment.document)
+				const kept = inScope(encodeUtf8(first), scope)
+
+				out[0] = decodeUtf8(kept)
+			} else if (first instanceof Uint8Array && this.fragment !== undefined) {
+				out[0] = inScope(first, rootScope(this.fragment.document))
+			}
+
+			return out
 		}
 
 		// Content a family of its own writes (a table's cells; a picture's image, crop and adjustments): that family writes
@@ -365,7 +390,7 @@ export class OdpShapeWriter {
 			}
 			const family = this.styles.env.familyOf(request)
 
-			if (family === "table" || family === "picture") {
+			if (family === "table" || family === "picture" || family === "chart") {
 				if (moved) return refused("unsupported", `a ${family} moved with its group`)
 
 				const markup = markupOf(this.styles.env.dispatch(family, request, this.context))
@@ -423,12 +448,18 @@ export class OdpShapeWriter {
 
 		if (this.grouping && drawId !== undefined && !ids.has("xml:id")) changes.push({ name: "xml:id", value: drawId })
 
+		// The id the save gives an animated shape without one (OdpEmitContext.targetIds) goes into its rewritten tag.
+		const target = this.context.targetIds?.get(shape.id)
+
+		if (target !== undefined && !ids.has("xml:id") && !ids.has("draw:id"))
+			changes.push({ name: "xml:id", value: target }, { name: "draw:id", value: target })
+
 		if (aspects.xfrm === true && name !== "draw:g") {
 			const box = this.boxChanges(shape, name, m, fragment.attributes(node))
 
 			if (isRefused(box)) return box
 
-			changes.push(...box)
+			changes.push(...changedLengths(box, fragment.attributes(node)))
 		}
 
 		const style = this.styleChange(shape, node, aspects)
@@ -762,12 +793,24 @@ export class OdpShapeWriter {
 			}
 		}
 
-		if (changes.attributes.size === 0 && changes.children.size === 0) return undefined
-
 		const fragment = this.fragment as Fragment
 		const attributes = fragment.attributes(node)
 		const presentation = attributes.get("presentation:style-name")
 		const graphic = attributes.get("draw:style-name")
+
+		// The style's own text sizes at the text scale the content took (a scaled slide size change, emit/design.ts).
+		if (aspects.text === true)
+			odpScaledTextChanges(
+				changes,
+				this.context.deck,
+				presentation !== undefined
+					? this.styles.style("presentation", presentation)
+					: graphic === undefined
+						? undefined
+						: this.styles.style("graphic", graphic)
+			)
+
+		if (changes.attributes.size === 0 && changes.children.size === 0) return undefined
 
 		if (presentation !== undefined)
 			return { name: "presentation:style-name", value: this.styles.derived("presentation", presentation, changes) }
@@ -971,8 +1014,13 @@ export class OdpShapeWriter {
 		if (isRefused(text)) return text
 
 		const placeholder = shape.ph === undefined ? undefined : CLASS_OF[shape.ph.type]
-		const isTextFrame =
+		const rectangle =
 			geometry === undefined || (geometry.kind === "preset" && geometry.preset === "rect" && geometry.guides.length === 0)
+		// A shape that fits its text (a:spAutoFit, §21.1.2.1.4) grows and shrinks to it: a text frame's height is its
+		// least in LibreOffice 7.5 (measured: a frame keeps svg:height, a custom shape takes its text's), so such a
+		// rectangle outside the placeholders is a custom shape.
+		const fits = (shape.props?.bodyPr?.autofit ?? shape.text?.bodyPr.autofit) === "shape"
+		const isTextFrame = rectangle && (placeholder !== undefined || !fits)
 
 		if (isTextFrame && !box.flipH && !box.flipV) {
 			const style = placeholder === undefined ? this.newStyle(shape) : this.newPresentationStyle(shape, placeholder)
@@ -988,9 +1036,12 @@ export class OdpShapeWriter {
 		}
 
 		if (placeholder !== undefined) return refused("unsupported", "a placeholder with an outline")
-		if (geometry === undefined) return refused("unsupported", "a new shape without an outline")
 
-		const type = presetType(geometry)
+		const type = rectangle
+			? "rectangle"
+			: geometry === undefined
+				? refused("unsupported", "a new shape without an outline")
+				: presetType(geometry)
 
 		if (isRefused(type)) return type
 
@@ -1032,8 +1083,10 @@ export class OdpShapeWriter {
 		if (shape.name !== "") out += ` draw:name="${escapeAttribute(shape.name)}"`
 
 		// A shape the slide's timing animates is named by its target id (core/anim/odf.ts odpTargetId).
-		if (odpTargetIds(this.slide.timing).has(shape.id)) {
-			const id = escapeAttribute(odpTargetId(shape))
+		this.targets ??= odpTargetIds(this.slide.timing)
+
+		if (this.targets.has(shape.id)) {
+			const id = escapeAttribute(odpTargetId(shape, undefined, this.idPrefix))
 
 			out += ` xml:id="${id}" draw:id="${id}"`
 		}
@@ -1081,16 +1134,29 @@ export class OdpShapeWriter {
 		const changes = styleChanges()
 		const props = shape.props
 
+		const resources = this.styles.resources
+
 		if (props?.fill !== undefined) {
-			const failed = fillChanges(changes, props.fill)
+			const written = resources !== undefined && props.fill !== "none" && resourceFillChanges(changes, props.fill, resources)
+			const failed = written ? undefined : fillChanges(changes, props.fill)
 
 			if (failed !== undefined) return failed
 		}
 
 		if (props?.ln !== undefined) {
-			const failed = lineChanges(changes, props.ln, undefined)
+			// Dashes and ends are drawing resources: written as such where the package's styles take new ones.
+			const ln = props.ln
+			const {
+				dash: _dash,
+				custDash: _custDash,
+				head: _head,
+				tail: _tail,
+				...plain
+			} = ln === "none" ? { dash: undefined, custDash: undefined, head: undefined, tail: undefined } : ln
+			const failed = lineChanges(changes, resources === undefined || ln === "none" ? ln : plain, undefined)
 
 			if (failed !== undefined) return failed
+			if (resources !== undefined && ln !== "none") resourceLineChanges(changes, ln, resources)
 		}
 
 		if (props?.effects !== undefined) {
@@ -1106,6 +1172,13 @@ export class OdpShapeWriter {
 
 			if (failed !== undefined) return failed
 		}
+
+		// LibreOffice 7.5 lays a shape's text out by its graphic style's line-spacing rule, not its paragraphs' (measured:
+		// paragraphs saying font-independent under a style that does not keep the face's line heights).
+		const paragraphs = shape.text?.paragraphs ?? []
+
+		if (paragraphs.length > 0 && paragraphs.every(paragraph => paragraph.pPr.fontIndependentLineSpacing === true))
+			setProperty(changes, "paragraph", "style:font-independent-line-spacing", "true")
 
 		return changes
 	}

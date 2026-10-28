@@ -42,6 +42,9 @@ export interface OdpStylesApi {
 	): string
 	// Whether the package written holds an entry at `path` (a source entry, or one this save added).
 	hasEntry?(path: string): boolean
+	// Replaces a source entry's bytes whole (a chart object's content.xml written again); false, changing nothing, when
+	// the package has no such entry.
+	replaceEntry?(path: string, content: PartBytes): boolean
 }
 
 export interface OdpEmitContext {
@@ -50,6 +53,11 @@ export interface OdpEmitContext {
 	readonly document: XmlDocument | undefined
 	readonly editor: XmlEditor | undefined
 	readonly styles: OdpStylesApi
+	// The page's animated shapes that had no xml:id/draw:id, with the document-unique id the save gives them.
+	readonly targetIds?: ReadonlyMap<number, string>
+	// The text:p elements a by-paragraph effect targets that had no xml:id, with the document-unique id the save gives
+	// them (by odpParagraphKey).
+	readonly paragraphIds?: ReadonlyMap<string, string>
 }
 
 export interface OdpEmitFamily {

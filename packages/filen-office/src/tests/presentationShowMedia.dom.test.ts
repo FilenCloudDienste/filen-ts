@@ -180,4 +180,37 @@ describe("show media", () => {
 		play.mockRestore()
 		pause.mockRestore()
 	})
+	it("plays a transition sound from its stream, looped when asked, and lets the stream go when stopped", async () => {
+		const released: string[] = []
+		const asked: unknown[] = []
+		const streams: ShowMediaStreams = {
+			url: (_session, media) => {
+				asked.push(media)
+
+				return Promise.resolve({ kind: "url", url: "blob:chime", release: () => released.push("blob:chime") })
+			}
+		}
+		const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+		const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined)
+		const mount = showMediaMount(streams, { labels: LABELS })
+		const sound = mount.sound?.(SESSION, { part: "/ppt/media/audio1.wav", loop: true })
+
+		await flush()
+
+		expect(asked).toEqual([{ kind: "audio", part: "/ppt/media/audio1.wav", contentType: "audio/wav" }])
+		expect(play).toHaveBeenCalledOnce()
+
+		const element = play.mock.contexts[0] as HTMLAudioElement
+
+		expect(element.loop).toBe(true)
+		expect(element.getAttribute("src")).toBe("blob:chime")
+
+		sound?.stop()
+
+		expect(pause).toHaveBeenCalled()
+		expect(released).toEqual(["blob:chime"])
+
+		play.mockRestore()
+		pause.mockRestore()
+	})
 })

@@ -36,6 +36,8 @@ export interface TextLayoutRequest {
 	readonly theme: DrawingTheme
 	// A table cell's text: its position, so the table style's text properties apply (tcTxStyle).
 	readonly cell?: { readonly row: number; readonly column: number; readonly style: TableTextStyle | undefined }
+	// The body is an empty placeholder's prompt (prompts.ts), not the shape's own.
+	readonly prompt?: true
 }
 
 // The text properties a table style gives a cell (a:tcTxStyle): bold, italic and the colour, as written.

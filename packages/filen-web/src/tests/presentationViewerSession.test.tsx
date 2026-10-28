@@ -65,6 +65,10 @@ vi.mock("@/features/presentation/lib/presentationEngine", () => ({
 }))
 
 const { PresentationViewer } = await import("@/features/presentation/components/presentationViewer")
+const { registerAllActions } = await import("@/lib/keymap/actions")
+
+// The viewer binds registered actions (Mod+P).
+registerAllActions()
 
 function render(ui: ReactElement) {
 	return renderUi(ui, { wrapper: queryClientWrapper(createTestQueryClient()) })

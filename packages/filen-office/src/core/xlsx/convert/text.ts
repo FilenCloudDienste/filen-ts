@@ -100,8 +100,37 @@ async function turn(clock: SliceClock | undefined, signal: SheetAbortSignal | un
 	if (clock?.due === true) await clock.pause()
 }
 
+// One cell as written: text (a shared string), or a number (its <v> text, its cellXfs index).
+type WrittenCell =
+	| { readonly kind: "text"; readonly text: string }
+	| { readonly kind: "number"; readonly value: number; readonly v: string; readonly style: number }
+
+// The cells a workbook is built from: rows of cells, null for an empty one.
+interface CellGrid {
+	readonly rows: number
+	width(row: number): number
+	cell(row: number, col: number): WrittenCell | null
+}
+
+// A text file's rows: a number where General shows it exactly as the text is, else the text.
+function textGrid(rows: readonly (readonly string[])[]): CellGrid {
+	return {
+		rows: rows.length,
+		width: row => rows[row]?.length ?? 0,
+		cell(row, col) {
+			const text = rows[row]?.[col] ?? ""
+
+			if (text === "") return null
+
+			const number = textCellNumber(text)
+
+			return number === null ? { kind: "text", text } : { kind: "number", value: number, v: text, style: 0 }
+		}
+	}
+}
+
 async function buildParts(
-	rows: readonly (readonly string[])[],
+	grid: CellGrid,
 	clock: SliceClock | undefined,
 	signal: SheetAbortSignal | undefined
 ): Promise<Built | SheetRefusal> {
@@ -116,21 +145,21 @@ async function buildParts(
 	let lastRow = -1
 	let lastCol = -1
 
-	for (let r = 0; r < rows.length; r++) {
-		const row = rows[r] ?? []
+	for (let r = 0; r < grid.rows; r++) {
+		const width = grid.width(r)
 		let rowMarkup = ""
 
-		for (let c = 0; c < row.length; c++) {
-			const text = row[c] ?? ""
+		for (let c = 0; c < width; c++) {
+			const cell = grid.cell(r, c)
 
-			if (text === "") continue
+			if (cell === null) continue
 			if (r >= SHEET_MAX_ROWS || c >= SHEET_MAX_COLS) return { reason: "tooLarge", detail: "grid" }
-			if (text.length > SHEET_MAX_CELL_TEXT) return { reason: "tooLarge", detail: "cellText" }
+			if (cell.kind === "text" && cell.text.length > SHEET_MAX_CELL_TEXT) return { reason: "tooLarge", detail: "cellText" }
 
 			const ref = `${columnName(c)}${String(r + 1)}`
-			const number = textCellNumber(text)
 
-			if (number === null) {
+			if (cell.kind === "text") {
+				const text = cell.text
 				let index = stringIndex.get(text)
 
 				if (index === undefined) {
@@ -145,7 +174,7 @@ async function buildParts(
 				references++
 				rowMarkup += `<c r="${ref}" t="s"><v>${String(index)}</v></c>`
 			} else {
-				rowMarkup += `<c r="${ref}"><v>${text}</v></c>`
+				rowMarkup += `<c r="${ref}"${cell.style === 0 ? "" : ` s="${String(cell.style)}"`}><v>${cell.v}</v></c>`
 			}
 
 			cells++
@@ -182,7 +211,24 @@ async function buildParts(
 	}
 }
 
-function fixedParts(sheetName: string): readonly (readonly [string, string])[] {
+// cellXfs beyond the default: one per number format code, numFmtId 164 on (custom formats, §18.8.30).
+function numberFormats(formats: readonly string[]): { readonly numFmts: string; readonly xfs: string } {
+	if (formats.length === 0) return { numFmts: "", xfs: "" }
+
+	return {
+		numFmts:
+			`<numFmts count="${String(formats.length)}">` +
+			formats.map((code, k) => `<numFmt numFmtId="${String(164 + k)}" formatCode="${escapeAttribute(code)}"/>`).join("") +
+			"</numFmts>",
+		xfs: formats
+			.map((_, k) => `<xf numFmtId="${String(164 + k)}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`)
+			.join("")
+	}
+}
+
+function fixedParts(sheetName: string, formats: readonly string[] = []): readonly (readonly [string, string])[] {
+	const custom = numberFormats(formats)
+
 	const main = TRANSITIONAL.main
 	const relationships = TRANSITIONAL.relationships
 
@@ -217,12 +263,12 @@ function fixedParts(sheetName: string): readonly (readonly [string, string])[] {
 		],
 		[
 			"xl/styles.xml",
-			`${DECLARATION}<styleSheet xmlns="${main}">` +
+			`${DECLARATION}<styleSheet xmlns="${main}">${custom.numFmts}` +
 				'<fonts count="1"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>' +
 				'<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
 				'<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
 				'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-				'<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+				`<cellXfs count="${String(1 + formats.length)}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>${custom.xfs}</cellXfs>` +
 				'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
 				'<dxfs count="0"/><tableStyles count="0"/></styleSheet>'
 		]
@@ -231,12 +277,7 @@ function fixedParts(sheetName: string): readonly (readonly [string, string])[] {
 
 // The independent re-read: the package opens as a workbook of one sheet holding exactly `rows`' cells, each a
 // number or the shared string it was written as.
-async function readsBack(
-	bytes: Uint8Array,
-	rows: readonly (readonly string[])[],
-	cells: number,
-	clock: SliceClock | undefined
-): Promise<string | null> {
+async function readsBack(bytes: Uint8Array, grid: CellGrid, cells: number, clock: SliceClock | undefined): Promise<string | null> {
 	const opened = await openXlsx(bytesSource(bytes), clock === undefined ? {} : { slicing: clock })
 
 	if (!opened.ok) return `the converted workbook does not open (${opened.reason}: ${opened.message})`
@@ -253,17 +294,18 @@ async function readsBack(
 	for (const block of store.blocks) {
 		for (let i = 0; i < block.rowCount; i++) {
 			const row = block.firstRow + (block.rows[i] ?? 0)
-			const texts = rows[row] ?? []
 
 			for (let k = block.rowStarts[i] ?? 0; k < (block.rowStarts[i + 1] ?? 0); k++) {
 				const col = block.cols[k] ?? 0
-				const text = texts[col] ?? ""
+				const cell = grid.cell(row, col)
 				const kind = block.kinds[k]
 				const value = block.values[k] ?? Number.NaN
 				const same =
 					kind === CellKind.NUMBER
-						? textCellNumber(text) === value
-						: kind === CellKind.SHARED_STRING && decodeXstring(workbook.sharedStrings.text(value)) === text
+						? cell?.kind === "number" && cell.value === value
+						: kind === CellKind.SHARED_STRING &&
+							cell?.kind === "text" &&
+							decodeXstring(workbook.sharedStrings.text(value)) === cell.text
 
 				if (!same) return `cell ${columnName(col)}${String(row + 1)} does not read back as written`
 			}
@@ -282,14 +324,70 @@ export async function textWorkbookXlsx(
 	name: string,
 	options: TextWorkbookOptions = {}
 ): Promise<TextWorkbookResult> {
+	return gridWorkbookXlsx(textGrid(rows), [], name, options)
+}
+
+// A cell of a workbook built from values: text, a number (General), a number with its format code, or empty.
+export type WorkbookCell = string | number | { readonly number: number; readonly format: string } | null
+
+// Cells as a new workbook of one sheet, each as it is given: a string a shared string (never read as a number), a
+// number its exact value (the shortest text that reads back as it, never a General rounding), a formatted number with
+// its format code as a custom number format. A number that is not finite is refused. Re-read before it is handed
+// out, as textWorkbookXlsx.
+export async function cellsWorkbookXlsx(
+	rows: readonly (readonly WorkbookCell[])[],
+	name: string,
+	options: TextWorkbookOptions = {}
+): Promise<TextWorkbookResult> {
+	const formats: string[] = []
+	const styleOf = new Map<string, number>()
+
+	for (const row of rows)
+		for (const cell of row) {
+			if (cell === null || typeof cell !== "object" || cell.format === "General" || styleOf.has(cell.format)) continue
+
+			formats.push(cell.format)
+			styleOf.set(cell.format, formats.length)
+		}
+
+	for (const row of rows)
+		for (const cell of row) {
+			const value = typeof cell === "number" ? cell : cell !== null && typeof cell === "object" ? cell.number : 0
+
+			if (!Number.isFinite(value)) return { ok: false, refusal: { reason: "unsupported", detail: "a number that is not finite" } }
+		}
+
+	const grid: CellGrid = {
+		rows: rows.length,
+		width: row => rows[row]?.length ?? 0,
+		cell(row, col) {
+			const cell = rows[row]?.[col] ?? null
+
+			if (cell === null || cell === "") return null
+			if (typeof cell === "string") return { kind: "text", text: cell }
+			if (typeof cell === "number") return { kind: "number", value: cell, v: String(cell), style: 0 }
+
+			return { kind: "number", value: cell.number, v: String(cell.number), style: styleOf.get(cell.format) ?? 0 }
+		}
+	}
+
+	return gridWorkbookXlsx(grid, formats, name, options)
+}
+
+async function gridWorkbookXlsx(
+	grid: CellGrid,
+	formats: readonly string[],
+	name: string,
+	options: TextWorkbookOptions
+): Promise<TextWorkbookResult> {
 	const clock = options.slicing === undefined ? undefined : sliceClock(options.slicing)
 
 	try {
-		const built = await buildParts(rows, clock, options.signal)
+		const built = await buildParts(grid, clock, options.signal)
 
 		if (!("sheet" in built)) return { ok: false, refusal: built }
 
-		const parts: [string, PartBytes][] = fixedParts(textSheetName(name)).map(([part, markup]) => [
+		const parts: [string, PartBytes][] = fixedParts(textSheetName(name), formats).map(([part, markup]) => [
 			part,
 			BytePieces.of([encodeUtf8(markup)])
 		])
@@ -310,7 +408,7 @@ export async function textWorkbookXlsx(
 		await turn(clock, options.signal)
 
 		const bytes = sink.bytes()
-		const problem = await readsBack(bytes, rows, built.cells, clock)
+		const problem = await readsBack(bytes, grid, built.cells, clock)
 
 		if (problem !== null) return { ok: false, refusal: { reason: "unsupported", detail: problem } }
 		if (options.signal?.aborted === true) return { ok: false, refusal: { reason: "unsupported", detail: "aborted" } }

@@ -4,12 +4,12 @@ import { bytesSource, type ByteSink } from "../core/opc/index"
 import { pptToPptx } from "../core/ppt/toPptx"
 import { openPptxPackage } from "../core/pptx/package"
 import { PresentationError } from "../core/presentation/model"
-import { pptSaveAs } from "../dom/presentation/engine/convert"
+import { pptAsPptx } from "./pptConvertFixtures"
 import { RICH_BUILD, RICH_TAG, RICH_TRANSITION, richDeck } from "./pptFixtures"
 import { cpuMs } from "./timing"
 
 // Damaged decks holding every reader past the slides (time tree, comment, transition sound, Office 97 build, linked
-// movie, embedded object storage, sound collection), through conversion, the pptx reader and Save as: each answers with
+// movie, embedded object storage, sound collection), through conversion, the pptx reader and Download as .pptx (convertPresentation): each answers with
 // a saved copy or a typed refusal, never an untyped error, and each round stays cheap.
 
 // A small deterministic generator (xorshift32), so a failure reproduces from its seed.
@@ -62,7 +62,9 @@ async function outcome(bytes: Uint8Array): Promise<string> {
 	await opened.parts.parseAll()
 
 	try {
-		await pptSaveAs(converted.pptx, undefined, nullSink())
+		const written = await pptAsPptx(converted, nullSink())
+
+		if ("reason" in written) return `save:${written.reason}`
 	} catch (error) {
 		if (error instanceof PresentationError) return `save:${error.reason}`
 
@@ -72,7 +74,7 @@ async function outcome(bytes: Uint8Array): Promise<string> {
 	return "saved"
 }
 
-describe("ppt Save as fuzz", () => {
+describe("ppt Download as .pptx fuzz", () => {
 	it("answers damaged rich decks with a saved copy or a typed refusal", { timeout: 300_000 }, async () => {
 		const base = (await richDeck()).bytes
 

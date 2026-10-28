@@ -99,6 +99,45 @@ class ObjectStyles {
 	}
 }
 
+// Labels shown on nothing (a point's own c:dLbl deleting its label).
+const NO_LABELS: ChartLabels = { value: false, category: false, series: false, percent: false, position: null }
+
+// The data labels a series' points state themselves (c:dLbls/c:dLbl, §21.2.2.47) by point index, null for a point
+// whose label is deleted (c:delete); a point whose c:dLbl only places or styles its label states what the series'
+// labels show.
+function ownLabels(reader: DrawingReader, series: number): Map<number, ChartLabels | null> {
+	const out = new Map<number, ChartLabels | null>()
+	const dLbls = reader.child(series, D.C, "dLbls")
+
+	for (const dLbl of reader.children(dLbls, D.C, "dLbl")) {
+		const idx = reader.number(reader.child(dLbl, D.C, "idx"), "val", -1)
+
+		if (idx < 0 || idx >= 1024) continue
+
+		const shown = (local: string): boolean => {
+			const child = reader.child(dLbl, D.C, local)
+
+			return child >= 0 ? reader.bool(child, "val", true) : reader.bool(reader.child(dLbls, D.C, local), "val", false)
+		}
+		const position = reader.attr(reader.child(dLbl, D.C, "dLblPos"), "val") ?? reader.attr(reader.child(dLbls, D.C, "dLblPos"), "val")
+
+		out.set(
+			idx,
+			reader.bool(reader.child(dLbl, D.C, "delete"), "val", reader.child(dLbl, D.C, "delete") >= 0)
+				? null
+				: {
+						value: shown("showVal"),
+						category: shown("showCatName"),
+						series: shown("showSerName"),
+						percent: shown("showPercent"),
+						position: position === undefined ? null : (position as ChartLabels["position"])
+					}
+		)
+	}
+
+	return out
+}
+
 function labelProperties(labels: ChartLabels | null): [string, string | undefined][] {
 	if (labels === null) return []
 
@@ -258,33 +297,59 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 				if (categories !== null) ranges.push(categories)
 			}
 
-			// Varied colours: each point its palette colour, or its own (c:dPt, §21.2.2.52).
-			if (vary && !lines) {
-				const count = pointCount(reader, xml)
+			// Points of their own: varied colours (each point its palette colour, or its own c:dPt, §21.2.2.52) and data
+			// labels a point states itself (c:dLbl, §21.2.2.47), one chart:data-point each (§11.15), a run of points
+			// with neither one chart:data-point repeated.
+			const pointLabels = ownLabels(reader, xml)
+
+			if ((vary && !lines) || pointLabels.size > 0) {
+				const count = Math.max(pointCount(reader, xml), ...[...pointLabels.keys()].map(k => k + 1))
 				const own = new Map<number, string>()
 
-				for (const point of reader.children(xml, D.C, "dPt")) {
-					const color = solid(reader, reader.child(point, D.C, "spPr"), theme, lose)
+				if (vary && !lines)
+					for (const point of reader.children(xml, D.C, "dPt")) {
+						const color = solid(reader, reader.child(point, D.C, "spPr"), theme, lose)
 
-					if (color !== undefined && color !== "other" && color !== "none")
-						own.set(reader.number(reader.child(point, D.C, "idx"), "val", -1), color)
+						if (color !== undefined && color !== "other" && color !== "none")
+							own.set(reader.number(reader.child(point, D.C, "idx"), "val", -1), color)
+					}
+
+				let plain = 0
+				const flush = (): void => {
+					if (plain > 0) children += `<chart:data-point${plain > 1 ? ` chart:repeated="${String(plain)}"` : ""}/>`
+
+					plain = 0
 				}
 
 				for (let k = 0; k < count; k++) {
+					const labels = pointLabels.get(k)
 					const color =
-						own.get(k) ??
-						`#${rgbaHex(seriesColor(theme, styleNumber, k, count))
-							.slice(0, 6)
-							.toLowerCase()}`
+						vary && !lines
+							? (own.get(k) ??
+								`#${rgbaHex(seriesColor(theme, styleNumber, k, count))
+									.slice(0, 6)
+									.toLowerCase()}`)
+							: undefined
 
+					if (labels === undefined && color === undefined) {
+						plain++
+
+						continue
+					}
+
+					flush()
 					children += `<chart:data-point chart:style-name="${styles.style(
-						[],
-						[
-							["draw:fill", "solid"],
-							["draw:fill-color", color]
-						]
+						labels === undefined ? [] : labelProperties(labels ?? NO_LABELS),
+						color === undefined
+							? []
+							: [
+									["draw:fill", "solid"],
+									["draw:fill-color", color]
+								]
 					)}"/>`
 				}
+
+				flush()
 			}
 
 			series.push(

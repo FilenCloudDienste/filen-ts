@@ -35,6 +35,8 @@ export interface InsertedMediaContent {
 	readonly contentType: string
 	// The file name it came with (the part takes its extension).
 	readonly name: string
+	// The container its bytes sniffed as (dom/presentation/media.ts sniffMedia), whatever the file declared.
+	readonly container?: string
 }
 
 interface MediaRegistry {

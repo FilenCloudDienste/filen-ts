@@ -590,7 +590,8 @@ function assistantModelNotice(manifest: AssistantModelManifest): Collected {
  * The third-party material @filen/office brings into the app, read from the records that package keeps:
  *
  * - The document fonts the app serves at /office/fonts/ (vite/office-fonts-plugin.ts), from
- *   assets/fonts/manifest.json, each family with its own licence file.
+ *   assets/fonts/manifest.json, each family with its own licence file and the record THIRD_PARTY_NOTICES.md
+ *   keeps of it (its per-file hash list left to the manifest, which the notice already names the files from).
  * - Code derived from other projects, from THIRD_PARTY_NOTICES.md. This table names its sections, how to
  *   read a version off each section's Source line, and the licence text that applies; everything else,
  *   the notice texts included, is read from that file. AGPL-3.0 is the repository's own LICENSE.
@@ -693,7 +694,50 @@ function asRecord(value: unknown, path: string): Record<string, unknown> {
 	return Object.fromEntries(Object.entries(value))
 }
 
-function officeFontNotices(): Collected[] {
+const OFFICE_FONTS_SECTION = "Bundled fonts (SIL Open Font License 1.1)"
+
+/**
+ * The fonts section of THIRD_PARTY_NOTICES.md: its preamble, and one record per family keyed by its
+ * `#### <name> <version>` heading. `take` hands a family's record out once; `rest` names any the
+ * manifest did not claim, so a family recorded there but not shipped (or the reverse) refuses the run.
+ */
+function officeFontRecords(): { preamble: string; take: (name: string, version: string) => string; rest: () => string[] } {
+	const { body } = noticeSection(noticeSections(), OFFICE_FONTS_SECTION)
+	const clean = (text: string) =>
+		text
+			.replace(/^### [\s\S]*$/m, "")
+			.replace(/^- Files\b[^\n]*\n(?: {2}[^\n]*(?:\n|$))*/m, "")
+			.replaceAll("`", "")
+			.replace(/\n{3,}/g, "\n\n")
+			.trim()
+	const [head = "", ...chunks] = body.split(/^#### /m)
+	const records = new Map(
+		chunks.map(chunk => {
+			const newline = chunk.indexOf("\n")
+
+			return [chunk.slice(0, newline).trim(), clean(chunk.slice(newline + 1))] as const
+		})
+	)
+
+	return {
+		preamble: `${OFFICE_REPO_DIR}/THIRD_PARTY_NOTICES.md records the fonts @filen/office bundles as:\n${clean(head)}`,
+		take: (name, version) => {
+			const heading = `${name} ${version}`
+			const record = records.get(heading)
+
+			if (record === undefined) {
+				throw new Error(`${OFFICE_NOTICES}: section "${OFFICE_FONTS_SECTION}" has no record "${heading}"`)
+			}
+
+			records.delete(heading)
+
+			return `${OFFICE_REPO_DIR}/THIRD_PARTY_NOTICES.md records ${heading} as:\n${record}`
+		},
+		rest: () => [...records.keys()]
+	}
+}
+
+function officeFontNotices(fonts: ReturnType<typeof officeFontRecords>): Collected[] {
 	const families = requireJson(OFFICE_FONTS_MANIFEST)["families"]
 
 	if (!Array.isArray(families) || families.length === 0) {
@@ -720,11 +764,12 @@ function officeFontNotices(): Collected[] {
 			})
 		)
 		const license = splitCopyright(readFileSync(`${OFFICE_FONTS}/${stringField(family, "licenseFile", OFFICE_FONTS_MANIFEST)}`, "utf8"))
+		const version = stringField(family, "version", OFFICE_FONTS_MANIFEST)
 
 		return vendoredNotice(
 			{
 				name,
-				version: stringField(family, "version", OFFICE_FONTS_MANIFEST),
+				version,
 				license: stringField(family, "license", OFFICE_FONTS_MANIFEST),
 				copyright: license.copyright,
 				repository: source,
@@ -735,6 +780,8 @@ function officeFontNotices(): Collected[] {
 						...conversions,
 						...pdfFaceTerms(family)
 					].join(" "),
+					fonts.take(name, version),
+					fonts.preamble,
 					license.terms
 				]
 			},
@@ -765,7 +812,7 @@ function pdfFaceTerms(family: Record<string, unknown>): string[] {
 }
 
 /** The Noto families PDF export falls back to for scripts the bundled families lack. */
-function officeFallbackFontNotices(): Collected[] {
+function officeFallbackFontNotices(fonts: ReturnType<typeof officeFontRecords>): Collected[] {
 	const fallbacks = requireJson(OFFICE_FONTS_MANIFEST)["fallbacks"]
 
 	if (!Array.isArray(fallbacks) || fallbacks.length === 0) {
@@ -785,11 +832,12 @@ function officeFallbackFontNotices(): Collected[] {
 		const records = faces.map(face => asRecord(face, OFFICE_FONTS_MANIFEST))
 		const conversions = new Set(records.map(face => stringField(face, "conversion", OFFICE_FONTS_MANIFEST)))
 		const license = splitCopyright(readFileSync(`${OFFICE_FONTS}/${stringField(family, "licenseFile", OFFICE_FONTS_MANIFEST)}`, "utf8"))
+		const version = stringField(family, "version", OFFICE_FONTS_MANIFEST)
 
 		return vendoredNotice(
 			{
 				name,
-				version: stringField(family, "version", OFFICE_FONTS_MANIFEST),
+				version,
 				license: stringField(family, "license", OFFICE_FONTS_MANIFEST),
 				copyright: license.copyright,
 				repository: source,
@@ -799,6 +847,8 @@ function officeFallbackFontNotices(): Collected[] {
 						`Bundled by @filen/office (${OFFICE_REPO_DIR}/assets/fonts in the filen-ts repository, ${FILEN_TS_REPOSITORY}) and served with the app as ${records.map(face => stringField(face, "file", OFFICE_FONTS_MANIFEST)).join(", ")}, fetched only when needed.`,
 						...conversions
 					].join(" "),
+					fonts.take(name, version),
+					fonts.preamble,
 					license.terms
 				]
 			},
@@ -994,7 +1044,12 @@ const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
 const engine = wllamaEngineNotices()
 const model = assistantModelNotice(QWEN35_4B)
-const office = [...officeFontNotices(), ...officeFallbackFontNotices(), ...officeDerivedNotices()]
+const fontRecords = officeFontRecords()
+const office = [...officeFontNotices(fontRecords), ...officeFallbackFontNotices(fontRecords), ...officeDerivedNotices()]
+
+if (fontRecords.rest().length > 0) {
+	throw new Error(`${OFFICE_NOTICES}: fonts recorded but not in ${OFFICE_FONTS_MANIFEST}: ${fontRecords.rest().join(", ")}`)
+}
 const spellcheckCrates = spellcheckCrateNotices(rust.entries)
 const dictionaries = spellcheckDictionaryNotices()
 const vendored = [...ffmpeg, ...engine, model, ...office, ...dictionaries]

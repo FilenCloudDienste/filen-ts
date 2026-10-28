@@ -1,4 +1,4 @@
-import { svgRootStart } from "@filen/shared/svgProlog"
+import { svgRootStart } from "./svgProlog"
 
 // Readies an untrusted SVG document for rasterising into a thumbnail. The security boundary is not
 // here: the markup is only ever loaded as an <img>, where the SVG spec's secure mode runs no script,
@@ -28,7 +28,7 @@ function startTagEnd(text: string, from: number): number {
 			if (char === quote) {
 				quote = null
 			}
-		} else if (char === '"' || char === "'") {
+		} else if (char === "\"" || char === "'") {
 			quote = char
 		} else if (char === ">") {
 			return index

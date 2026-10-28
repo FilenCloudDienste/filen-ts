@@ -6,8 +6,9 @@ import type { Format } from "@filen/office/core/presentation"
 import type { PresentationSessionApi } from "@filen/office/dom/presentation"
 import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import type { DriveItem } from "@/features/drive/lib/item"
+import type { LegacySaveCopy } from "@/features/presentation/components/legacyView"
 import { saveOfficeAutosave, useOfficeSettings } from "@/features/office/lib/officeSettings"
-import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
+import { usePresentationEditor, type PresentationTextFlush } from "@/features/presentation/hooks/usePresentationSession"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { KbdKeys } from "@/lib/keymap/kbd"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
@@ -24,6 +25,10 @@ export interface PresentationFileMenuContext {
 	readonly item?: DriveItem
 	readonly format?: Format
 	readonly session?: PresentationSessionApi
+	// Where a copy may be saved beside the file (a drive file the user may write beside), and where it opens.
+	readonly saveCopy?: LegacySaveCopy
+	// The body being typed in: sent to the deck before a conversion reads it (as Save sends it).
+	readonly text?: Pick<PresentationTextFlush, "flush">
 }
 
 export interface PresentationFileMenuEntryProps {

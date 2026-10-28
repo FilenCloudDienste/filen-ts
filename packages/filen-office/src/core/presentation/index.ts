@@ -231,6 +231,42 @@ export {
 	type TextCommand,
 	type TextDefaults
 } from "./edit/commands/text"
+export {
+	addEffectsOp,
+	EFFECT_PRESETS,
+	effectGroup,
+	effectPreset,
+	effectTimingOp,
+	moveEffectOp,
+	presetsOf,
+	removeEffectsOp,
+	replaceEffectOp,
+	slideEffects,
+	stepDurations,
+	type EffectChoice,
+	type EffectClass,
+	type EffectPreset,
+	type EffectRepeat,
+	type EffectRow,
+	type EffectStart,
+	type EffectTargetShape,
+	type PresetGroup,
+	type SlideEffects
+} from "./edit/commands/timing"
+export {
+	INSERT_CHART_TYPES,
+	chartBox,
+	chartEditOp,
+	chartLabelsEdit,
+	chartLegendEdit,
+	chartTitleEdit,
+	chartTypeEdit,
+	chartWorkbookOp,
+	insertChartOp,
+	sampleChartCells,
+	sampleScatterCells,
+	type ChartCell
+} from "./edit/commands/chart"
 export { findText, matcherOf, tableParagraph, type FindQuery, type Matcher } from "./edit/find"
 export {
 	RenderReport,
@@ -305,3 +341,22 @@ export {
 	type PresentationTheme,
 	type ResolvedColor
 } from "./theme"
+export {
+	BACKGROUND_PATTERNS,
+	EMU_PER_CM,
+	EMU_PER_INCH,
+	MAX_SLIDE_EMU,
+	MIN_SLIDE_EMU,
+	SLIDE_SIZES,
+	backgroundOp,
+	deckThemeOp,
+	galleryThemeOp,
+	masterOfLayout,
+	slideSizeName,
+	slideSizeOp,
+	variantOp,
+	type BackgroundFillKind,
+	type DesignThemeInfo,
+	type PresentationDesignInfo,
+	type SlideSizeName
+} from "./edit/commands/design"

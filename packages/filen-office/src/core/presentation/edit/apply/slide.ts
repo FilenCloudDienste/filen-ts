@@ -306,7 +306,7 @@ function sameRawParts(live: readonly RawPart[] | Refused, held: readonly RawPart
 }
 
 // A held node with the source refs of its re-read (shapes matched by matchShapes): every typed field from the held copy.
-function overlayNode(typed: SlideNode, read: SlideNode | undefined): SlideNode {
+export function overlayNode(typed: SlideNode, read: SlideNode | undefined): SlideNode {
 	if (read === undefined) return typed
 
 	const out: SlideNode = { ...typed }

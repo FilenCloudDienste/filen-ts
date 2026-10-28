@@ -26,6 +26,7 @@ export {
 	type PresentationCall,
 	type PresentationEvent,
 	type PresentationMethod,
+	type ChartData,
 	type PresentationLayoutInfo,
 	type PresentationNotice,
 	type PresentationOpenOptions,
@@ -126,3 +127,14 @@ export {
 } from "./services"
 export { paintSlideCanvas, rasterizeSlide, ThumbnailCache, type RasterizedSlide } from "./thumbs"
 export { TextMailbox, type TextMailboxTicket } from "./textMailbox"
+export {
+	jobSessionOver,
+	presentationJobsClient,
+	servePresentationJobsWorker,
+	type PresentationJobHandle,
+	type PresentationJobsWorkerLike,
+	type PresentationJobsWorkerOptions,
+	type PresentationJobsWorkerScope
+} from "./jobsWorker"
+export { DEFAULT_EXPORT_WIDTH, MAX_EXPORT_WIDTH, MIN_EXPORT_WIDTH, type JobsRealm } from "./raster"
+export type { ConversionLoss, ConversionLossKind } from "../../core/convert/presentation/report"

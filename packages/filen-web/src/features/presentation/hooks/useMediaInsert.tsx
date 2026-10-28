@@ -527,6 +527,9 @@ export function useShowMediaMount(actions: PresentationActionActivator | undefin
 
 	return {
 		mount: (box, layer, session, events) =>
-			showMediaMount(mediaStreams(actions, layer.shape, store), { labels, hoverControls: true }).mount(box, layer, session, events)
+			showMediaMount(mediaStreams(actions, layer.shape, store), { labels, hoverControls: true }).mount(box, layer, session, events),
+		// A slide's transition sound: its bytes by the same range path, no shape to open a link for.
+		sound: (session, sound) =>
+			showMediaMount(mediaStreams(actions, undefined, store), { labels }).sound?.(session, sound) ?? { stop: () => undefined }
 	}
 }

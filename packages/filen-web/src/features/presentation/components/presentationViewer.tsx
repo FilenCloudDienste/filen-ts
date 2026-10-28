@@ -1,10 +1,11 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
 import * as Comlink from "comlink"
 import { DownloadIcon, MaximizeIcon, PanelLeftIcon, PresentationIcon, StickyNoteIcon } from "lucide-react"
 import { driveItemName } from "@filen/shared"
 import type { Format, PresentationRefusal, SlideRef } from "@filen/office/core/presentation"
-import type { SourceSpec } from "@filen/office/dom/presentation"
+import type { PresentationOpenOptions, SourceSpec } from "@filen/office/dom/presentation"
 import {
 	createPresentationStore,
 	paintSlide,
@@ -18,6 +19,9 @@ import "@filen/office/css/docx.css"
 import "@filen/office/css/presentation.css"
 import "@/features/presentation/components/presentationTheme.css"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { PresentationDownloadAsMenu } from "@/features/presentation/components/fileMenu/downloadAs"
+import { PresentationExportItems } from "@/features/presentation/components/fileMenu/export"
+import { usePresentationPrintKey } from "@/features/presentation/print/usePresentationPrint"
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { driveItemMime, type DriveItem } from "@/features/drive/lib/item"
@@ -32,7 +36,7 @@ import { DocxPasswordGate, type PasswordVerdict } from "@/features/preview/compo
 import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
-import { usePreviewAccessMode, usePreviewByteSource, usePreviewDownload } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewByteSource, usePreviewDownload, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { DeckNotes } from "@/features/presentation/components/deckChrome"
 import { actionLabel, DEFAULT_SLIDE_SIZE, onPageKey } from "@/features/presentation/components/deckChrome.logic"
 import { useDeckPresentation } from "@/features/presentation/hooks/useDeckPresentation"
@@ -375,11 +379,20 @@ function DeckSession({
 			host: (spec, listener, options) => connectPresentation(presentationPool, spec, listener, options),
 			// A copy of an entry's bytes is what goes over (transferred): the preview cache keeps its buffer.
 			source: source.kind === "bytes" ? { kind: "bytes", bytes: source.bytes.slice() } : source,
-			// Editable only where the overlay can save the file as it mounts (the worker gates the deck's own reasons).
-			options: { format, fileName: alt, viewOnly: place?.editing?.writable !== true, window: { from: 0, count: OPEN_WINDOW } }
+			// Editable only where the overlay can save the file as it mounts (the worker gates the deck's own reasons); the
+			// editor's empty placeholders show their prompts.
+			options: {
+				format,
+				fileName: alt,
+				viewOnly: place?.editing?.writable !== true,
+				window: { from: 0, count: OPEN_WINDOW },
+				...(place?.editing?.writable === true ? { prompts: placeholderPrompts(t) } : {})
+			}
 		})
 	)
 	const document = usePresentationDocument(store)
+
+	usePresentationPrintKey(document.session, document.info)
 
 	if (document.status === "error") {
 		const reason = document.error?.reason ?? "failed"
@@ -444,8 +457,24 @@ function DeckSession({
 			document={document}
 			alt={alt}
 			saveCopy={saveCopy}
+			item={place?.item}
 		/>
 	)
+}
+
+// The editor's empty-placeholder prompts by placeholder kind, in the page's locale.
+function placeholderPrompts(t: TFunction<"preview">): NonNullable<PresentationOpenOptions["prompts"]> {
+	return {
+		title: t("previewPptxPromptTitle"),
+		subtitle: t("previewPptxPromptSubtitle"),
+		text: t("previewPptxPromptText"),
+		picture: t("previewPptxPromptPicture"),
+		chart: t("previewPptxPromptChart"),
+		table: t("previewPptxPromptTable"),
+		smartart: t("previewPptxPromptSmartArt"),
+		media: t("previewPptxPromptMedia"),
+		clipArt: t("previewPptxPromptClipArt")
+	}
 }
 
 // Answers the prompt once the store has heard back: opened, a wrong password, or the user's cancel.
@@ -481,16 +510,22 @@ function DeckSurface({
 	store,
 	document: deck,
 	alt,
-	saveCopy
+	saveCopy,
+	item
 }: {
 	store: PresentationStore
 	document: PresentationDocument
 	alt: string
 	saveCopy: LegacySaveCopy | undefined
+	// The drive file (a public link's too) the deck is: Download as converts its session. Absent: an archive's entry.
+	item: DriveItem | undefined
 }) {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
 	const download = usePreviewDownload()
+	// Download as converts the session: offered where the file may be downloaded, a public link's page too (which
+	// downloads the file itself through its own button, not the host's Download).
+	const downloadsAs = usePreviewDownloadable() && item !== undefined && deck.session !== undefined
 	const [current, setCurrent] = useState(0)
 	const [railOpen, setRailOpen] = useState(true)
 	const [notesOpen, setNotesOpen] = useState(true)
@@ -635,12 +670,26 @@ function DeckSurface({
 			<OfficeCommandBar
 				label={t("previewPptxCommandBar")}
 				file={
-					download === null ? null : (
+					download === null && !downloadsAs ? null : (
 						<CommandFileMenu>
-							<DropdownMenuItem onClick={download}>
-								<DownloadIcon />
-								{t("previewDownloadAction")}
-							</DropdownMenuItem>
+							{download === null ? null : (
+								<DropdownMenuItem onClick={download}>
+									<DownloadIcon />
+									{t("previewDownloadAction")}
+								</DropdownMenuItem>
+							)}
+							{item === undefined || deck.session === undefined ? null : (
+								<PresentationDownloadAsMenu
+									item={item}
+									session={deck.session}
+								/>
+							)}
+							<PresentationExportItems
+								document={deck}
+								current={ref}
+								fileName={alt}
+								downloads
+							/>
 						</CommandFileMenu>
 					)
 				}

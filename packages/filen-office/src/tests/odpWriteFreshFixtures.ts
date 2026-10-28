@@ -1,100 +1,14 @@
 import { bytesSource, memorySink } from "@filen/office/core/opc"
-import { openPptx, type PptxParts } from "../core/pptx/package"
-import { readBlipFill, readEffects, readFill, readLine, type ReadContext } from "../core/pptx/read/drawing"
-import { G, partReader } from "../core/pptx/read/xml"
-import { writeFreshOdp, type FreshOdpServices, type FreshReport } from "../core/odp/write/fresh"
-import { themeOf } from "../core/presentation/theme"
-import type { Deck, Geometry, Refused } from "../core/presentation/model"
+import { openPptx } from "../core/pptx/package"
+import { pptxServices } from "../core/convert/presentation/pptxServices"
+import { writeFreshOdp, type FreshReport } from "../core/odp/write/fresh"
+import type { Refused } from "../core/presentation/model"
+import { AVERAGE_MEASURER, relayoutDiagram } from "../dom/presentation/engine/smartart"
 
 // A pptx deck converted by the fresh ODP writer, with the services a pptx source gives it (its themes, its shapes'
 // DrawingML groups read as the model's types, its pictures' bytes).
 
-export function pptxServices(deck: Deck, parts: PptxParts): FreshOdpServices {
-	const contexts = new Map<string, ReadContext>()
-	const relationships = new Map<string, Awaited<ReturnType<PptxParts["opc"]["relationships"]>>>()
-	const contextOf = (part: string): ReadContext | undefined => {
-		const held = contexts.get(part)
-
-		if (held !== undefined) return held
-
-		const document = parts.document(part)
-		const rels = relationships.get(part)
-
-		if (document === undefined || rels === undefined) return undefined
-
-		const context: ReadContext = {
-			reader: partReader(document),
-			part,
-			epoch: parts.epoch,
-			relationships: rels,
-			tally: parts.tally,
-			action: () => undefined
-		}
-
-		contexts.set(part, context)
-
-		return context
-	}
-
-	return {
-		documents: { document: part => parts.document(part) },
-		theme: node => {
-			const theme = themeOf(deck.nodes, node)
-
-			return theme === undefined ? undefined : parts.theme(theme.part)
-		},
-		group(kind, src) {
-			if (src.format !== "pptx") return undefined
-
-			const context = contextOf(src.part)
-
-			if (context === undefined) return undefined
-
-			switch (kind) {
-				case "fill":
-					return readFill(context, src.node)
-				case "ln":
-					return readLine(context, src.node)
-				case "effects":
-					return readEffects(context, src.node)
-				case "geometry": {
-					const reader = context.reader
-
-					if (reader.local(src.node) !== "prstGeom") return undefined
-
-					const geometry: Geometry = { kind: "preset", preset: reader.attr(src.node, "prst") ?? "rect", guides: [] }
-
-					return geometry
-				}
-			}
-		},
-		pictureFill(shape) {
-			const src = shape.src
-
-			if (src?.format !== "pptx") return undefined
-
-			const context = contextOf(src.part)
-
-			if (context === undefined) return undefined
-
-			const fill = context.reader.child(src.node, G.P, "blipFill")
-
-			return fill < 0 ? undefined : readBlipFill(context, fill)
-		},
-		async picture(part) {
-			if (!parts.opc.has(part)) return undefined
-
-			return { bytes: await parts.opc.read(part), mediaType: parts.contentTypes.typeOf(part.slice(1)) ?? "" }
-		},
-		preload: async () => {
-			for (const node of deck.nodes.values()) {
-				if (node.part === "" || relationships.has(node.part) || !parts.opc.has(node.part)) continue
-
-				relationships.set(node.part, await parts.opc.relationships(node.part.slice(1)))
-			}
-		}
-	} as FreshOdpServices & { preload(): Promise<void> }
-}
+export { pptxServices }
 
 export async function freshFromPptx(bytes: Uint8Array): Promise<{ readonly bytes: Uint8Array; readonly report: FreshReport } | Refused> {
 	const opened = await openPptx(bytesSource(bytes))
@@ -109,7 +23,28 @@ export async function freshFromPptx(bytes: Uint8Array): Promise<{ readonly bytes
 		if (notes !== undefined) await opened.parts.slide(notes)
 	}
 
-	const services = pptxServices(opened.deck, opened.parts) as FreshOdpServices & { preload(): Promise<void> }
+	const opc = opened.parts.opc
+	// A diagram without a drawing cache is laid out by the SmartArt engine, text measured by average advances.
+	const services = pptxServices(opened.deck, opened.parts, {
+		relayout: async (frame, box) => {
+			if (!opc.has(frame.data) || !opc.has(frame.layout)) return undefined
+
+			const optional = async (part: string) => (part !== "" && opc.has(part) ? await opc.xml(part) : undefined)
+
+			try {
+				const sources = {
+					data: await opc.xml(frame.data),
+					layout: await opc.xml(frame.layout),
+					style: await optional(frame.style),
+					colors: await optional(frame.colors)
+				}
+
+				return relayoutDiagram(sources, box, () => AVERAGE_MEASURER).drawingXml
+			} catch {
+				return undefined
+			}
+		}
+	})
 
 	await services.preload()
 

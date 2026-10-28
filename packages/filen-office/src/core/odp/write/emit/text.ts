@@ -16,6 +16,7 @@ import { Namespaces, encodeUtf8, escapeAttribute, escapeText, parseXml } from ".
 import { embeddedListStyle, levelProps, paraPropsOf, runPropsOf } from "../../read/text"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitFamily } from "../emit"
+import { odpParagraphKey } from "../../../anim/odf"
 import {
 	OdpStyles,
 	cm,
@@ -50,11 +51,23 @@ export const emitOdpText: OdpEmitFamily = {
 
 		const deck = context.deck
 		const slide = request.slide
+		const shape = request.shape
+		// The ids a by-paragraph effect names paragraphs without one by (the save's, OdpEmitContext.paragraphIds).
+		let given: Map<Paragraph, string> | undefined
+
+		if (context.paragraphIds !== undefined && shape !== undefined)
+			body.paragraphs.forEach((paragraph, index) => {
+				const id = context.paragraphIds?.get(odpParagraphKey(shape.id, index))
+
+				if (id !== undefined) (given ??= new Map()).set(paragraph, id)
+			})
+
 		const scope: TextWriteScope = {
 			styles: context.styles,
 			fragment: context.document === undefined ? undefined : context.styles.env.fragmentOf(context.document),
 			outline: request.shape?.ph?.type === "body" && slide.kind !== "notes",
 			ids: new Set(),
+			...(given === undefined ? {} : { given }),
 			jump: target => {
 				const at = deck.slides.indexOf(slide.ref)
 
@@ -77,6 +90,8 @@ export interface TextWriteScope {
 	jump?(target: "next" | "previous" | "first" | "last"): SlideRef | undefined
 	// Paragraph IDs written so far (each is written once).
 	readonly ids: Set<string>
+	// The xml:id a paragraph without one of its source is given (a by-paragraph effect's target).
+	readonly given?: ReadonlyMap<Paragraph, string>
 }
 
 // Where a relative jump from slide `at` of `count` lands, or undefined past either end.
@@ -602,6 +617,17 @@ export function textMarkup(scope: TextWriteScope, body: TextBody): string | Refu
 // The IDs a source paragraph carries (§19.914 xml:id, text:id): animations and links name the paragraph by them, so
 // the paragraph written in its place keeps them (the first written from it, when an edit split it).
 function idsOf(scope: TextWriteScope, paragraph: Paragraph): string {
+	const own = sourceIds(scope, paragraph)
+	const given = scope.given?.get(paragraph)
+
+	if (given === undefined || own.includes(" xml:id=") || scope.ids.has(given)) return own
+
+	scope.ids.add(given)
+
+	return `${own} xml:id="${escapeAttribute(given)}"`
+}
+
+function sourceIds(scope: TextWriteScope, paragraph: Paragraph): string {
 	const src = paragraph.src
 	const fragment = scope.fragment
 

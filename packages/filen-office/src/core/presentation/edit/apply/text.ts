@@ -19,6 +19,7 @@ import { matcherOf, replaceInBody } from "../find"
 import type { DeckOp, OpOf, TextOp } from "../ops"
 import { isRefused, type SourceReading } from "./shape"
 import { applyTable, replaceInFrame } from "./table"
+import { remapParagraphs } from "./timing"
 
 // The text ops on the model, in place. setText puts a whole new body on one shape; its inverse is a setText of the
 // body it had, with the shape's source markup as bytes when that body came from the source (`raw`), so an undo after
@@ -364,9 +365,18 @@ function setText(deck: Deck, op: SetText, context: ApplyContext): ApplyResult<Se
 
 	if (isRefused(body)) return body
 
+	const before = found.shape.text
+
 	putBody(found.node, found.shape, body)
 
-	return { kind: "applied", inverse: inverseOf([back]), op }
+	// By-paragraph effects move with their paragraphs (apply/timing.ts); the inverse puts the timing back after the body.
+	const timing = remapParagraphs(deck.format, found.node, op.target.id, before, found.shape.text, context)
+
+	if (timing === undefined) return { kind: "applied", inverse: inverseOf([back]), op }
+
+	const inverse = inverseOf([back, ...timing.ops])
+
+	return { kind: "applied", inverse: { ops: inverse.ops, bytes: inverse.bytes + timing.bytes }, op }
 }
 
 function setAutofit(deck: Deck, op: SetAutofit, context: ApplyContext): ApplyResult<SetAutofit> {

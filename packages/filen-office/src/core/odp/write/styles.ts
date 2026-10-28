@@ -27,6 +27,7 @@ import type { Fragment, OdpContext } from "../read/context"
 import type { OdpParts } from "../read/document"
 import { EMU_PER_PT } from "../read/fills"
 import type { OdpEmitContext, OdpStylesApi } from "./emit"
+import type { DrawResourceSink } from "./resources"
 import type { DeckOpFamily } from "../../presentation/edit/ops"
 import type { EmitRequest, EmitResult } from "../../pptx/write/types"
 
@@ -263,6 +264,8 @@ export function bodyChanges(changes: StyleChanges, body: Partial<TextBodyProps>)
 
 	if (body.autofit !== undefined) {
 		setProperty(changes, "graphic", "draw:auto-grow-height", body.autofit === "shape" ? "true" : "false")
+		// Fitting its text, a shape has no least height of its own (§20.186 fo:min-height).
+		setProperty(changes, "graphic", "fo:min-height", body.autofit === "shape" ? "0cm" : null)
 		setProperty(changes, "graphic", "style:shrink-to-fit", body.autofit === "normal" ? "true" : "false")
 		setProperty(changes, "graphic", "draw:fit-to-size", "false")
 	}
@@ -317,7 +320,12 @@ export function runAttributes(rPr: RunProps): Map<string, string> | Refused {
 
 	for (const key of UNWRITTEN_RUN) if (rPr[key] !== undefined) return refused("unsupported", `run property ${key}`)
 
-	if (rPr.sz !== undefined) out.set("fo:font-size", pt(rPr.sz / 100))
+	// One size for every script (§21.1.2.3.9 sz); ODF sizes East Asian and complex text apart (§20.284, §20.285).
+	if (rPr.sz !== undefined) {
+		const size = pt(rPr.sz / 100)
+
+		out.set("fo:font-size", size).set("style:font-size-asian", size).set("style:font-size-complex", size)
+	}
 
 	if (rPr.b !== undefined) {
 		const weight = rPr.b ? "bold" : "normal"
@@ -492,8 +500,9 @@ function propertiesMarkup(kind: string, properties: OdfProperties, changes: Styl
 	return inner === "" ? `<${name}${attributeMarkup(attributes)}/>` : `<${name}${attributeMarkup(attributes)}>${inner}</${name}>`
 }
 
-// The order of style:*-properties elements in a style (§16.2: graphic, paragraph, text for graphic styles).
-const KIND_ORDER = ["graphic", "loext:graphic", "drawing-page", "paragraph", "text", "table-cell", "table", "table-column", "table-row"]
+// The order of style:*-properties elements in a style (§16.2: graphic, paragraph, text for graphic styles; table-cell,
+// paragraph, text for table-cell styles).
+const KIND_ORDER = ["graphic", "loext:graphic", "drawing-page", "table-cell", "paragraph", "text", "table", "table-column", "table-row"]
 
 function kindsOf(own: ReadonlyMap<string, OdfProperties>, changes: StyleChanges): string[] {
 	const kinds = new Set([...own.keys(), ...changes.attributes.keys(), ...changes.children.keys()])
@@ -537,9 +546,26 @@ export function referencedNames(bytes: Uint8Array, into: Set<string>): void {
 	for (const match of text.matchAll(/[\w-]*style-name="([^"]*)"/gu)) into.add(match[1] ?? "")
 }
 
+// The names of each reading's streams, read once: a reading's streams never change (a save's rebase opens a new
+// reading, whose content bytes are another array), so every page's proof and every save copies them instead of
+// scanning the whole content stream again.
+const takenCache = new WeakMap<Uint8Array, { readonly styles: object | undefined; readonly names: ReadonlySet<string> }>()
+
 // Every name a new automatic style of a save must not take: the styles both streams define and every style name
-// their markup refers to.
+// their markup refers to. A set of the caller's own (it adds to it).
 export function takenInStreams(parts: OdpParts): Set<string> {
+	const held = takenCache.get(parts.content.bytes)
+
+	if (held !== undefined && held.styles === parts.sheet.stylesDocument) return new Set(held.names)
+
+	const taken = scanTaken(parts)
+
+	takenCache.set(parts.content.bytes, { styles: parts.sheet.stylesDocument, names: taken })
+
+	return new Set(taken)
+}
+
+function scanTaken(parts: OdpParts): Set<string> {
 	const prologue = readContentPrologue(parts.content.bytes)
 	const stylesDocument = parts.sheet.stylesDocument
 	const taken = takenNames([
@@ -645,6 +671,10 @@ export class OdpStyles implements OdpStylesApi {
 	readonly env: OdpWriteEnv
 	private readonly registry: StyleRegistry
 	private readonly entries: OdpAddedEntry[] = []
+	private readonly replacedEntries: { readonly path: string; readonly content: PartBytes }[] = []
+	// Where a writer of new office:styles puts drawing resources (gradients, markers…, resources.ts); a save of a
+	// source has none, and refuses what needs one.
+	resources: DrawResourceSink | undefined = undefined
 
 	// The declarations every new style element carries (the prefixes the stream's root does not bind as written).
 	private readonly declarations: string
@@ -680,6 +710,23 @@ export class OdpStyles implements OdpStylesApi {
 	// Whether the package written holds an entry at `path`: the source's, or one this save added.
 	hasEntry(path: string): boolean {
 		return this.entries.some(entry => entry.path === path) || this.env.context.hasPart(path)
+	}
+
+	// A source entry's bytes replaced whole (a chart object's content.xml written again); false, changing nothing, when
+	// the package has no such entry.
+	replaceEntry(path: string, content: PartBytes): boolean {
+		if (!this.env.context.hasPart(path)) return false
+
+		const at = this.replacedEntries.findIndex(entry => entry.path === path)
+
+		if (at >= 0) this.replacedEntries[at] = { path, content }
+		else this.replacedEntries.push({ path, content })
+
+		return true
+	}
+
+	replaced(): readonly { readonly path: string; readonly content: PartBytes }[] {
+		return this.replacedEntries
 	}
 
 	// A new style of `family` whose own properties are `base`'s (an automatic style is copied whole with its parent; a

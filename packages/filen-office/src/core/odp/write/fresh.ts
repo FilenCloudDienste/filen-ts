@@ -37,15 +37,17 @@ import {
 import { builtinTableStyle } from "../../presentation/render/tableStyles"
 import { D } from "../../drawingml/reader"
 import { resolveColor, themeTypeface, type ColorContext, type PresentationTheme } from "../../presentation/theme"
-import { decodeUtf8, encodeUtf8, escapeAttribute } from "../../xml/index"
-import { odpTargetId, odpTargetIds, odpTimingMarkup } from "../../anim/odf"
+import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText } from "../../xml/index"
+import { odpParagraphId, odpParagraphKey, odpParagraphTargets, odpTargetId, odpTargetIds, odpTimingMarkup } from "../../anim/odf"
 import { withoutShapes } from "../../anim/prune"
 import { OdpContext } from "../read/context"
 import { openOdp } from "../read/document"
 import { IDENTITY, OdpShapeWriter, markupOf, compose, groupAffine, placed, type Affine } from "./emit/shape"
 import { pageNames } from "./integrity"
-import { OdpStyles, cm, fillChanges, isRefused, setProperty, styleChanges, type OdpWriteEnv } from "./styles"
+import { OdpStyles, cm, fillChanges, isRefused, setProperty, styleChanges, type OdpWriteEnv, type StyleChanges } from "./styles"
 import { emitOdp, type OdpEmitContext } from "./emit"
+import { odpTransitionPar, odpTransitionStyle, timingRootWith, withTransitionPar } from "./emit/transition"
+import { DrawResources, resourceFillChanges } from "./resources"
 import { newSettingsAttributes, odfShow, settingsAttributes } from "./emit/presentation"
 
 // The fresh writer (§1.5.7): a whole ODP package from the model, for conversions (a pptx deck to ODP), templates and
@@ -94,10 +96,17 @@ export interface FreshOdpServices {
 	group?(kind: "geometry" | "fill" | "ln" | "effects", src: SourceRef): Geometry | FillProps | LineProps | "none" | EffectList | undefined
 	// The fill and line a shape's p:style references give (theme matrix), resolved.
 	styleProps?(shape: ShapeNode, node: SlideNode): { readonly fill?: FillProps | "none"; readonly ln?: LineProps | "none" } | undefined
+	// A chart frame's object (its content.xml), when its source has the chart's part.
+	chart?(frame: ShapeNode, node: SlideNode): { readonly content: Uint8Array; readonly lost: boolean } | undefined
+	// A background a theme's style matrix gives (p:bgRef idx and colour), read as the model's type.
+	backgroundFill?(idx: number, color: ColorModel | undefined, node: SlideNode): FillProps | "none" | undefined
 	// A picture's own fill (p:pic's p:blipFill), read as the model's type.
 	pictureFill?(shape: ShapeNode): FillProps | undefined
 	// A picture part's bytes and media type, copied into the package.
 	picture(part: string): Promise<{ readonly bytes: Uint8Array; readonly mediaType: string } | undefined>
+	// A SmartArt frame's shapes as its source draws them (its drawing, in the frame's own space), when the frame holds
+	// none of its own; undefined when the source has none.
+	diagram?(frame: ShapeNode, node: SlideNode): readonly ShapeNode[] | undefined
 }
 
 export interface FreshReport {
@@ -155,7 +164,12 @@ class Flattener {
 		return this.services.group?.(kind, source.src)
 	}
 
-	fill(value: FillProps | "none" | undefined, colors: ColorContext): FillProps | "none" | undefined {
+	// The fills of the groups being written, innermost last: what a member's a:grpFill (§20.1.8.35) takes.
+	readonly groupFills: (FillProps | "none" | undefined)[] = []
+
+	// A fill as ODF holds it, colours as sRGB. `rich`: gradients, patterns and pictures kept (a shape's or a page's
+	// fill, written through drawing resources); else their nearest one colour (text, lines and table cells).
+	fill(value: FillProps | "none" | undefined, colors: ColorContext, rich = false): FillProps | "none" | undefined {
 		if (value === undefined || value === "none") return value
 
 		switch (value.kind) {
@@ -165,6 +179,16 @@ class Flattener {
 				return color === undefined ? undefined : { kind: "solid", color }
 			}
 			case "gradient": {
+				if (rich) {
+					const stops = value.stops.flatMap(stop => {
+						const color = srgb(stop.color, colors)
+
+						return color === undefined ? [] : [{ pos: stop.pos, color }]
+					})
+
+					return stops.length === 0 ? undefined : { ...value, stops }
+				}
+
 				const first = value.stops[0]
 				const color = first === undefined ? undefined : srgb(first.color, colors)
 
@@ -173,33 +197,74 @@ class Flattener {
 				return color === undefined ? undefined : { kind: "solid", color }
 			}
 			case "pattern": {
-				const color = srgb(value.fg, colors)
+				const fg = srgb(value.fg, colors)
+				const bg = srgb(value.bg, colors)
+
+				if (rich && fg !== undefined && bg !== undefined) return { ...value, fg, bg }
 
 				count(this.report.approximated, "pattern fill")
 
-				return color === undefined ? undefined : { kind: "solid", color }
+				return fg === undefined ? undefined : { kind: "solid", color: fg }
 			}
-			default:
-				count(this.report.omitted, `${value.kind} fill`)
+			case "group": {
+				const inherited = this.groupFills[this.groupFills.length - 1]
+
+				if (inherited !== undefined) return rich || inherited === "none" ? inherited : this.fill(inherited, colors)
+
+				count(this.report.omitted, "group fill")
+
+				return undefined
+			}
+			case "picture":
+				if (rich && value.part !== undefined) return value
+
+				count(this.report.omitted, "picture fill")
 
 				return undefined
 		}
 	}
 
-	line(value: LineProps | "none" | undefined, colors: ColorContext): LineProps | "none" | undefined {
+	// A line as ODF holds it: one colour, its compound as one line. `rich`: its dash and ends kept (a shape's, written
+	// through drawing resources); else solid and without ends (a table cell's border, §21.1.3.5).
+	line(value: LineProps | "none" | undefined, colors: ColorContext, rich = false): LineProps | "none" | undefined {
 		if (value === undefined || value === "none") return value
 
 		const fill = value.fill === undefined ? undefined : this.fill(value.fill, colors)
 
-		if (value.dash !== undefined && value.dash !== "solid") count(this.report.approximated, "dashed line")
-		if (value.head !== undefined || value.tail !== undefined) count(this.report.omitted, "line end")
+		if (value.compound !== undefined && value.compound !== "sng") count(this.report.approximated, `compound line ${value.compound}`)
+
+		if (!rich) {
+			if ((value.dash !== undefined && value.dash !== "solid") || value.custDash !== undefined)
+				count(this.report.approximated, "dashed line")
+
+			return {
+				...(value.w === undefined ? {} : { w: value.w }),
+				...(fill === undefined ? {} : { fill }),
+				...(value.cap === undefined ? {} : { cap: value.cap }),
+				...(value.join === undefined ? {} : { join: value.join })
+			}
+		}
 
 		return {
 			...(value.w === undefined ? {} : { w: value.w }),
 			...(fill === undefined ? {} : { fill }),
 			...(value.cap === undefined ? {} : { cap: value.cap }),
+			...(value.dash === undefined ? {} : { dash: value.dash }),
+			...(value.custDash === undefined ? {} : { custDash: value.custDash }),
+			...(value.head === undefined || value.head.type === "none" ? {} : { head: value.head }),
+			...(value.tail === undefined || value.tail.type === "none" ? {} : { tail: value.tail }),
 			...(value.join === undefined ? {} : { join: value.join })
 		}
+	}
+
+	// The shapes a group or a laid-out diagram holds: its own, else (a diagram) its source's drawing.
+	members(shape: ShapeNode, node: SlideNode): readonly ShapeNode[] | undefined {
+		if ((shape.children?.length ?? 0) > 0) return shape.children
+		if (shape.kind !== "frame" || shape.frame?.kind !== "smartart") return shape.children
+
+		const drawn = this.services.diagram?.(shape, node)
+
+		return drawn === undefined || drawn.length === 0 ? undefined : drawn
 	}
 
 	// A shape with everything it inherits on it, colours and fonts as values.
@@ -207,13 +272,36 @@ class Flattener {
 		if (shape.frame?.kind === "table" && shape.kind === "frame") return this.table(shape, shape.frame.table, node)
 
 		// A diagram laid out (its shapes as children, in the frame's own space) is the group of them.
-		if (shape.kind === "frame" && shape.frame?.kind === "smartart" && shape.xfrm !== undefined && (shape.children?.length ?? 0) > 0) {
+		const members = this.members(shape, node)
+
+		if (shape.kind === "frame" && shape.frame?.kind === "smartart" && shape.xfrm !== undefined && members !== undefined) {
 			const { frame: _frame, ...own } = shape
 
 			return this.shape(
-				{ ...own, kind: "grpSp", xfrm: { ...shape.xfrm, chX: 0, chY: 0, chCx: shape.xfrm.cx, chCy: shape.xfrm.cy } },
+				{
+					...own,
+					kind: "grpSp",
+					xfrm: { ...shape.xfrm, chX: 0, chY: 0, chCx: shape.xfrm.cx, chCy: shape.xfrm.cy },
+					children: [...members]
+				},
 				node
 			)
+		}
+
+		// An OLE object or a medium as its preview picture (ODF has no object of their kinds a converter can fill).
+		const preview =
+			shape.kind === "frame" && shape.frame?.kind === "ole"
+				? shape.frame.preview
+				: shape.kind === "frame" && shape.frame?.kind === "media"
+					? shape.frame.media.poster
+					: undefined
+
+		if (preview !== undefined && shape.xfrm !== undefined) {
+			count(this.report.approximated, `${shape.frame?.kind ?? "ole"} frame`)
+
+			const { frame: _frame, ...own } = shape
+
+			return this.shape({ ...own, kind: "pic", props: { ...own.props, fill: { kind: "picture", part: preview } } }, node)
 		}
 
 		if (shape.frame !== undefined && shape.kind === "frame") {
@@ -230,15 +318,24 @@ class Flattener {
 
 		const resolved = resolveShape(this.deck, node.ref, shape, this.services.documents)
 		const colors = this.colorContext(node)
-		const style = this.services.styleProps?.(shape, node)
-		const fill = this.fill((this.group("fill", resolved.fill) as FillProps | "none" | undefined) ?? style?.fill, colors)
-		const ln = this.line((this.group("ln", resolved.ln) as LineProps | "none" | undefined) ?? style?.ln, colors)
+		const style = this.services.styleProps?.(
+			resolved.style === undefined || resolved.style === shape.style ? shape : { ...shape, style: resolved.style },
+			node
+		)
+		const fill = this.fill((this.group("fill", resolved.fill) as FillProps | "none" | undefined) ?? style?.fill, colors, true)
+		const ln = this.line((this.group("ln", resolved.ln) as LineProps | "none" | undefined) ?? style?.ln, colors, true)
 		const geometry = this.geometry(this.group("geometry", resolved.geometry) as Geometry | undefined, shape)
 		const text = shape.text === undefined ? undefined : this.text(resolved, shape.text, colors, node)
-		const children = shape.children?.map(child => this.shape(child, node)).filter(child => child !== undefined)
 		// A shape outlined as a line is a line (draw:line).
 		const line = geometry?.kind === "preset" && geometry.preset === "line"
-		const body = resolved.bodyPr
+		// A placeholder is written as a plain shape: one fitting its text only through its layout or master (a:spAutoFit
+		// inherited) keeps the box PowerPoint stored for it, as LibreOffice's own conversion keeps the presentation
+		// object's, rather than growing to LibreOffice's own measure of its text.
+		const ownFit = shape.props?.bodyPr?.autofit ?? shape.text?.bodyPr.autofit
+		const body =
+			shape.ph !== undefined && resolved.bodyPr.autofit === "shape" && ownFit !== "shape"
+				? { ...resolved.bodyPr, autofit: "none" as const }
+				: resolved.bodyPr
 		const vertical = body.vertical === "horz" || body.vertical === "vert" || body.vertical === "vert270" ? body.vertical : "vert"
 
 		if (vertical !== body.vertical) count(this.report.approximated, `vertical ${body.vertical}`)
@@ -264,13 +361,15 @@ class Flattener {
 				bodyPr: { ...body, vertical }
 			},
 			...(text === undefined ? {} : { text }),
-			...(children === undefined ? {} : { children }),
 			...(shape.actions?.click === undefined || shape.actions.click.kind === "refused"
 				? {}
 				: { actions: { click: shape.actions.click } })
 		}
 
 		if (shape.kind === "pic") {
+			// A medium is shown as its poster (the picture PowerPoint shows before it plays).
+			if (shape.media !== undefined) count(this.report.approximated, "media frame")
+
 			const picture =
 				shape.props?.fill ??
 				this.services.pictureFill?.(shape) ??
@@ -434,14 +533,23 @@ class Flattener {
 			if (buSz !== pPr.buSz) count(this.report.approximated, "bullet size in points")
 
 			const { buFont: _buFont, buSz: _buSz, ...rest } = pPr
+			// A paragraph without a bullet inside a list is a list header, whose first line ODF indents as its level's
+			// (§5.3.3; read/text.ts): one with an indent of its own stands outside the list, its margins on it, as
+			// LibreOffice 7.5 writes it (measured: a buNone level-2 paragraph is a text:p with fo:text-indent).
+			const headed = bullet.kind === "none" && level.level > 0 && (rest.indent ?? 0) !== 0
+
+			if (headed) count(this.report.approximated, "outline level of a paragraph without a bullet")
 
 			return {
 				pPr: {
 					...rest,
+					// A DrawingML line is a share of the font size (§21.1.2.2.5), never of the face's own ascent and descent;
+					// ODF's default is the face's (§20.338 style:font-independent-line-spacing).
+					fontIndependentLineSpacing: rest.fontIndependentLineSpacing ?? true,
 					...(buSz === undefined ? {} : { buSz }),
 					...(spcBef === undefined ? {} : { spcBef }),
 					...(spcAft === undefined ? {} : { spcAft }),
-					lvl: level.level,
+					lvl: headed ? 0 : level.level,
 					bullet: this.bullet(bullet),
 					...(buClr === undefined ? {} : { buClr }),
 					...(buFont === undefined ? {} : { buFont })
@@ -497,6 +605,16 @@ class Flattener {
 			count(this.report.approximated, "picture bullet")
 
 			return { kind: "none" }
+		}
+
+		// ODF's bullet is one character (§19.778 text:bullet-char): a longer a:buChar (SmartArt drawings write "••") is
+		// written as its first.
+		const first = bullet.kind === "char" ? [...bullet.char][0] : undefined
+
+		if (bullet.kind === "char" && first !== undefined && first !== bullet.char) {
+			count(this.report.approximated, "bullet of more than one character")
+
+			return { ...bullet, char: first }
 		}
 
 		if (bullet.kind === "autoNum" && !NUMBERINGS.test(bullet.scheme)) {
@@ -684,6 +802,8 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 	const stylesStyles = new OdpStyles(env(), "styles", new Set(["PM1"]))
 	const pictures = new Map<string, string>()
 	const extra: PartChange[] = []
+	// Chart objects written, by directory.
+	const objects: string[] = []
 	const written: string[] = []
 	const masterPages = new Map<string, string>()
 	const masterMarkup: string[] = []
@@ -707,6 +827,108 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		return path
 	}
 
+	// Gradients, patterns, picture fills, dashes and line ends: drawing resources of styles.xml's office:styles.
+	const resources = new DrawResources(
+		part => pictures.get(part),
+		(path, bytes) => extra.push({ name: path, bytes, compress: false }),
+		what => count(report.approximated, what)
+	)
+
+	contentStyles.resources = resources
+	stylesStyles.resources = resources
+
+	// A page's background as ODF holds it: its own fill, or the theme's style matrix entry its p:bgRef names.
+	const backgroundFill = (
+		background: NonNullable<ReturnType<typeof resolveBackground>>,
+		slide: SlideNode
+	): FillProps | "none" | undefined => {
+		const colors = { theme: services.theme(slide), clrMap: background.clrMap }
+		const own = background.background
+		const fill = own.kind === "fill" ? own.fill : services.backgroundFill?.(own.idx, own.color, background.node)
+		const flat = fill === undefined ? undefined : flattener.fill(fill, colors, true)
+
+		if (flat === undefined) count(report.approximated, "background")
+
+		return flat
+	}
+
+	// A fill's picture copied before the fill is written (the writer is synchronous).
+	const fillPicture = async (fill: FillProps | "none" | undefined): Promise<void> => {
+		if (
+			fill !== undefined &&
+			fill !== "none" &&
+			fill.kind === "picture" &&
+			fill.part !== undefined &&
+			(await picture(fill.part)) === undefined
+		)
+			count(report.omitted, "picture fill")
+	}
+
+	// The shapes each page's timing animates (walked once a page).
+	const targets = new Map<SlideNode, ReadonlySet<number>>()
+	const targetsOf = (owner: SlideNode): ReadonlySet<number> => {
+		let held = targets.get(owner)
+
+		if (held === undefined) {
+			held = odpTargetIds(owner.timing)
+			targets.set(owner, held)
+		}
+
+		return held
+	}
+
+	// The ids the paragraphs a page's by-paragraph effects target are given (the timing names them alike).
+	const paragraphIdsOf = (owner: SlideNode): ReadonlyMap<string, string> => {
+		const out = new Map<string, string>()
+
+		for (const { shape: id, paragraph } of odpParagraphTargets(owner.timing)) {
+			const shape = findShape(owner.shapes, id)
+
+			if (shape !== undefined) out.set(odpParagraphKey(id, paragraph), odpParagraphId(shape, paragraph, undefined, idPrefix(owner)))
+		}
+
+		return out
+	}
+
+	// Each page's new ids start apart (xml:id is unique in the document; model ids only on their slide).
+	const prefixes = new Map<SlideNode, string>()
+	const idPrefix = (owner: SlideNode): string => {
+		let prefix = prefixes.get(owner)
+
+		if (prefix === undefined) {
+			prefix = `p${String(prefixes.size + 1)}-`
+			prefixes.set(owner, prefix)
+		}
+
+		return prefix
+	}
+
+	// A chart frame as draw:frame holding draw:object (ODF 1.3 Part 3 §10.4.6), its object a chart document of its own
+	// ("Object N/", Part 2 §4.3 manifest type application/vnd.oasis.opendocument.chart); undefined when the source
+	// has no object for it (the frame then left out and named).
+	const chartMarkup = (shape: ShapeNode, node: SlideNode, owner: SlideNode, m: Affine): string | undefined => {
+		const xfrm = resolveShape(deck, node.ref, shape, services.documents).xfrm
+		const object = xfrm === undefined ? undefined : services.chart?.({ ...shape, xfrm }, node)
+
+		if (object === undefined || xfrm === undefined) return undefined
+		if (object.lost) count(report.approximated, "chart")
+
+		const path = `Object ${String(objects.length + 1)}`
+
+		objects.push(path)
+		extra.push({ name: `${path}/content.xml`, bytes: object.content })
+
+		const box = placed(xfrm, m)
+		const turn = box.rot === 0 ? `svg:x="${cm(box.x)}" svg:y="${cm(box.y)}"` : transformAttributes(box)
+		const target = targetsOf(owner).has(shape.id) ? escapeAttribute(odpTargetId(shape, undefined, idPrefix(owner))) : undefined
+		const ids = target === undefined ? "" : ` xml:id="${target}" draw:id="${target}"`
+		const alt =
+			(shape.alt?.title === undefined || shape.alt.title === "" ? "" : `<svg:title>${escapeText(shape.alt.title)}</svg:title>`) +
+			(shape.alt?.descr === undefined || shape.alt.descr === "" ? "" : `<svg:desc>${escapeText(shape.alt.descr)}</svg:desc>`)
+
+		return `<draw:frame draw:name="${escapeAttribute(shape.name)}"${ids} ${turn} svg:width="${cm(box.cx)}" svg:height="${cm(box.cy)}"><draw:object xlink:href="./${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${alt}</draw:frame>`
+	}
+
 	// Shapes as markup, flattened; pictures written here (their family is not built for new elements).
 	const shapesMarkup = async (
 		shapes: readonly { readonly shape: ShapeNode; readonly node: SlideNode }[],
@@ -714,8 +936,8 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		owner: SlideNode,
 		m: Affine = IDENTITY
 	): Promise<string | Refused> => {
-		const emit: OdpEmitContext = { deck, document: undefined, editor: undefined, styles }
-		const writer = new OdpShapeWriter(emit, undefined, owner, () => undefined)
+		const emit: OdpEmitContext = { deck, document: undefined, editor: undefined, styles, paragraphIds: paragraphIdsOf(owner) }
+		const writer = new OdpShapeWriter(emit, undefined, owner, () => undefined, idPrefix(owner))
 		let out = ""
 
 		for (const { shape, node } of shapes) {
@@ -726,9 +948,20 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 				if (path !== undefined) flattener.pictures.set(part, path)
 			}
 
+			if (shape.kind === "frame" && shape.frame?.kind === "chart" && services.chart !== undefined) {
+				const chart = chartMarkup(shape, node, owner, m)
+
+				if (chart !== undefined) {
+					out += chart
+
+					continue
+				}
+			}
+
 			const flat = flattener.shape(shape, node)
 
 			if (flat === undefined) continue
+			if (flat.kind !== "pic") await fillPicture(flat.props?.fill)
 
 			if (flat.kind === "pic") {
 				const fill = flat.props?.fill
@@ -750,7 +983,11 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 				const style = styles.derived("graphic", undefined, changes)
 				const turn = box.rot === 0 ? `svg:x="${cm(box.x)}" svg:y="${cm(box.y)}"` : transformAttributes(box)
 
-				out += `<draw:frame draw:name="${escapeAttribute(flat.name)}" draw:style-name="${escapeAttribute(style)}" ${turn} svg:width="${cm(box.cx)}" svg:height="${cm(box.cy)}"><draw:image xlink:href="${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${flat.alt?.descr === undefined ? "" : `<svg:desc>${flat.alt.descr.replace(/&/gu, "&amp;").replace(/</gu, "&lt;")}</svg:desc>`}</draw:frame>`
+				// A picture the page's timing animates is named by its target id, as the shape writer names shapes.
+				const target = targetsOf(owner).has(flat.id) ? escapeAttribute(odpTargetId(flat, undefined, idPrefix(owner))) : undefined
+				const ids = target === undefined ? "" : ` xml:id="${target}" draw:id="${target}"`
+
+				out += `<draw:frame draw:name="${escapeAttribute(flat.name)}"${ids} draw:style-name="${escapeAttribute(style)}" ${turn} svg:width="${cm(box.cx)}" svg:height="${cm(box.cy)}"><draw:image xlink:href="${escapeAttribute(path)}" xlink:type="simple" xlink:show="embed" xlink:actuate="onLoad"/>${flat.alt?.descr === undefined ? "" : `<svg:desc>${flat.alt.descr.replace(/&/gu, "&amp;").replace(/</gu, "&lt;")}</svg:desc>`}</draw:frame>`
 
 				continue
 			}
@@ -764,16 +1001,22 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 					continue
 				}
 
+				flattener.groupFills.push(flat.props?.fill)
+
 				const inner = await shapesMarkup(
-					(shape.children ?? []).map(child => ({ shape: child, node })),
+					(flattener.members(shape, node) ?? []).map(child => ({ shape: child, node })),
 					styles,
 					owner,
 					compose(m, now)
 				)
 
+				flattener.groupFills.pop()
+
 				if (isRefused(inner)) return inner
 
-				out += `<draw:g${flat.name === "" ? "" : ` draw:name="${escapeAttribute(flat.name)}"`}>${inner}</draw:g>`
+				const target = targetsOf(owner).has(flat.id) ? escapeAttribute(odpTargetId(flat, undefined, idPrefix(owner))) : undefined
+
+				out += `<draw:g${flat.name === "" ? "" : ` draw:name="${escapeAttribute(flat.name)}"`}${target === undefined ? "" : ` xml:id="${target}" draw:id="${target}"`}>${inner}</draw:g>`
 
 				continue
 			}
@@ -819,12 +1062,11 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		const background = resolveBackground(deck, layout ?? slide)
 		const changes = styleChanges()
 
-		if (background?.background.kind === "fill") {
-			const fill = flattener.fill(background.background.fill, { theme: services.theme(slide), clrMap: background.clrMap })
+		if (background !== undefined) {
+			const fill = backgroundFill(background, slide)
 
-			for (const [attribute, value] of drawingPageFill(fill)) setProperty(changes, "drawing-page", attribute, value)
-		} else if (background !== undefined) {
-			count(report.approximated, "background")
+			await fillPicture(fill)
+			drawingPageFill(changes, fill, resources)
 		}
 
 		const style = changes.attributes.size === 0 ? undefined : stylesStyles.derived("drawing-page", undefined, changes)
@@ -859,12 +1101,20 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		const changes = styleChanges()
 		const own = slide.background === undefined ? undefined : resolveBackground(deck, slide)
 
-		if (own?.background.kind === "fill") {
-			const fill = flattener.fill(own.background.fill, { theme: services.theme(slide), clrMap: own.clrMap })
+		if (own !== undefined) {
+			const fill = backgroundFill(own, slide)
 
-			for (const [attribute, value] of drawingPageFill(fill)) setProperty(changes, "drawing-page", attribute, value)
+			await fillPicture(fill)
+			drawingPageFill(changes, fill, resources)
 		}
 
+		// The slide's transition: its page style's properties, and the par LibreOffice reads its exact duration from.
+		odpTransitionStyle(changes, slide.transition)
+
+		const pageId = `${idPrefix(slide)}page`
+		const transitionPar = odpTransitionPar(slide.transition, pageId)
+
+		if (slide.transition !== undefined && transitionPar === undefined) count(report.omitted, "transition")
 		if (slide.hidden) setProperty(changes, "drawing-page", "presentation:visibility", "hidden")
 		if (!slide.showMasterShapes) setProperty(changes, "drawing-page", "presentation:background-objects-visible", "false")
 
@@ -894,19 +1144,27 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 			for (const id of odpTargetIds(slide.timing)) {
 				const shape = findShape(slide.shapes, id)
 
-				if (shape === undefined || !shapes.includes(` xml:id="${escapeAttribute(odpTargetId(shape))}"`)) gone.add(id)
+				if (shape === undefined || !shapes.includes(` xml:id="${escapeAttribute(odpTargetId(shape, undefined, idPrefix(slide)))}"`))
+					gone.add(id)
 			}
 
 			const kept = withoutShapes(slide.timing, gone)
 
 			if (kept !== slide.timing) count(report.omitted, "animation of a shape not written")
 			if (kept !== undefined)
-				timing = odpTimingMarkup({ fragment: undefined, shapes: slide.shapes }, kept, undefined)
+				timing = odpTimingMarkup({ fragment: undefined, shapes: slide.shapes, idPrefix: idPrefix(slide) }, kept, undefined)
 					.map(piece => (typeof piece === "string" ? piece : piece instanceof Uint8Array ? decodeUtf8(piece) : ""))
 					.join("")
 		}
 
-		pages += `<draw:page draw:name="${escapeAttribute(names.get(ref) ?? "")}"${style === undefined ? "" : ` draw:style-name="${style}"`} draw:master-page-name="${master}">${shapes}${timing}${notes}</draw:page>`
+		if (transitionPar !== undefined)
+			timing = (withTransitionPar(timing === "" ? [] : [timing], undefined, -1, transitionPar) ?? [timingRootWith(transitionPar)])
+				.map(piece => (typeof piece === "string" ? piece : piece instanceof Uint8Array ? decodeUtf8(piece) : ""))
+				.join("")
+
+		const pageIds = transitionPar === undefined ? "" : ` xml:id="${pageId}" draw:id="${pageId}"`
+
+		pages += `<draw:page draw:name="${escapeAttribute(names.get(ref) ?? "")}"${style === undefined ? "" : ` draw:style-name="${style}"`} draw:master-page-name="${master}"${pageIds}>${shapes}${timing}${notes}</draw:page>`
 	}
 
 	if (deck.slides.length === 0) {
@@ -948,15 +1206,22 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 	const settings = shows === "" && attributes === "" ? "" : `<presentation:settings${attributes}>${shows}</presentation:settings>`
 	const content = `<?xml version="1.0" encoding="UTF-8"?><office:document-content ${NAMESPACES} office:version="1.3"><office:automatic-styles>${contentStyles.markup([pages])}</office:automatic-styles><office:body><office:presentation>${pages}${settings}</office:presentation></office:body></office:document-content>`
 	const pageLayout = `<style:page-layout style:name="PM1"><style:page-layout-properties fo:margin-top="0cm" fo:margin-bottom="0cm" fo:margin-left="0cm" fo:margin-right="0cm" fo:page-width="${cm(deck.size.cx)}" fo:page-height="${cm(deck.size.cy)}" style:print-orientation="${deck.size.cx >= deck.size.cy ? "landscape" : "portrait"}"/></style:page-layout>`
-	const styles = `<?xml version="1.0" encoding="UTF-8"?><office:document-styles ${NAMESPACES} office:version="1.3"><office:styles><style:default-style style:family="graphic"><style:graphic-properties draw:fill="none" draw:stroke="none" draw:shadow="hidden"/></style:default-style></office:styles><office:automatic-styles>${pageLayout}${stylesStyles.markup(masterMarkup)}</office:automatic-styles><office:master-styles>${masterMarkup.join("")}</office:master-styles></office:document-styles>`
+	const styles = `<?xml version="1.0" encoding="UTF-8"?><office:document-styles ${NAMESPACES} office:version="1.3"><office:styles>${resources.styles()}<style:default-style style:family="graphic"><style:graphic-properties draw:fill="none" draw:stroke="none" draw:shadow="hidden"/></style:default-style></office:styles><office:automatic-styles>${pageLayout}${stylesStyles.markup(masterMarkup)}</office:automatic-styles><office:master-styles>${masterMarkup.join("")}</office:master-styles></office:document-styles>`
+	// PowerPoint adds a paragraph's space after to the next one's space before (ECMA-376 §21.1.2.2.10, .2.19 name no
+	// collapsing); LibreOffice's default for a package that does not say so is the larger of the two.
+	const settingsPart = `<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="${OdfNs.office}" xmlns:config="${OdfNs.config}" xmlns:ooo="${OdfNs.ooo}" office:version="1.3"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="ParagraphSummation" config:type="boolean">true</config:config-item></config:config-item-set></office:settings></office:document-settings>`
 	const mediaType = deck.variant === "otp" || deck.variant === "potx" || deck.variant === "potm" ? TEMPLATE_MEDIA_TYPE : MEDIA_TYPE
 	const manifest = writeManifest("1.3", [
 		{ fullPath: "/", mediaType, version: "1.3" },
 		{ fullPath: "content.xml", mediaType: "text/xml" },
 		{ fullPath: "styles.xml", mediaType: "text/xml" },
+		{ fullPath: "settings.xml", mediaType: "text/xml" },
+		...objects.map(path => ({ fullPath: `${path}/`, mediaType: "application/vnd.oasis.opendocument.chart" })),
 		...extra.map(part => ({
 			fullPath: part.name,
-			mediaType: MEDIA_TYPES[/\.([a-z0-9]+)$/u.exec(part.name)?.[1] ?? ""] ?? "application/octet-stream"
+			mediaType: part.name.endsWith(".xml")
+				? "text/xml"
+				: (MEDIA_TYPES[/\.([a-z0-9]+)$/u.exec(part.name)?.[1] ?? ""] ?? "application/octet-stream")
 		}))
 	])
 
@@ -966,6 +1231,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		parts: [
 			{ name: "content.xml", bytes: encodeUtf8(content) },
 			{ name: "styles.xml", bytes: encodeUtf8(styles) },
+			{ name: "settings.xml", bytes: encodeUtf8(settingsPart) },
 			...extra,
 			{ name: "META-INF/manifest.xml", bytes: manifest }
 		]
@@ -973,16 +1239,15 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 }
 
 // A drawing page's fill (§20.137 on style:drawing-page-properties), as the shape style writes a fill.
-function drawingPageFill(fill: FillProps | "none" | undefined): [string, string][] {
-	const changes = styleChanges()
+function drawingPageFill(changes: StyleChanges, fill: FillProps | "none" | undefined, resources: DrawResources): void {
+	if (fill === undefined) return
+	if (fill !== "none" && resourceFillChanges(changes, fill, resources, "drawing-page")) return
 
-	if (fill === undefined) return []
+	const own = styleChanges()
 
-	const failed = fillChanges(changes, fill)
+	if (fillChanges(own, fill) !== undefined) return
 
-	if (failed !== undefined) return []
-
-	return [...(changes.attributes.get("graphic") ?? [])].filter((entry): entry is [string, string] => entry[1] !== null)
+	for (const [attribute, value] of own.attributes.get("graphic") ?? []) setProperty(changes, "drawing-page", attribute, value)
 }
 
 function transformAttributes(box: {

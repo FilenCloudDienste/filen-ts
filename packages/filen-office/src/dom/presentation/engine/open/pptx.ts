@@ -24,6 +24,12 @@ export function registerPptxParts(deck: Deck, opened: PptxParts): void {
 	parts.set(deck, opened)
 }
 
+const passwords = new WeakMap<Deck, string>()
+
+export function pptxPassword(deck: Deck): string | undefined {
+	return passwords.get(deck)
+}
+
 // The decrypted package of an encrypted deck (its key seals the next save), or undefined.
 export function pptxDecrypted(deck: Deck): DecryptedPackage | undefined {
 	return decrypted.get(deck)
@@ -96,7 +102,13 @@ export const openPptxCapability: OpenCapability = {
 
 				const unlocked = await sealed.locked.unlock(request.password)
 
-				if (unlocked.ok) return openSource(request, bytesSource(unlocked.document.bytes), unlocked.document)
+				if (unlocked.ok) {
+					const outcome = await openSource(request, bytesSource(unlocked.document.bytes), unlocked.document)
+
+					if (outcome.kind === "opened") passwords.set(outcome.deck, request.password)
+
+					return outcome
+				}
 				if (unlocked.reason === "wrongPassword") return { kind: "needsPassword" }
 				if (unlocked.reason === "aborted") return refused("aborted", "unlock")
 				if (unlocked.reason === "rightsManaged") return refused("rightsManaged", "A rights-managed (IRM) presentation")

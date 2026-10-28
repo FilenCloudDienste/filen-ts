@@ -47,3 +47,22 @@ export {
 	type TransitionFrame
 } from "./transitions"
 export { parseMotionPath, pointAt, type MotionPath } from "./motion"
+export {
+	durationOf,
+	ecmaFallback,
+	isEcmaTransition,
+	kindFromOdf,
+	odfPageTransition,
+	playableTransition,
+	presetTransition,
+	speedOf,
+	transitionOption,
+	transitionPreset,
+	TRANSITION_PRESETS,
+	writtenOptions,
+	type EcmaTransition,
+	type OdfPageTransition,
+	type TransitionGroup,
+	type TransitionOptionSpec,
+	type TransitionPreset
+} from "./presets/transitions/catalog"

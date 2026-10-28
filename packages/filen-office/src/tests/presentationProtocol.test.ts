@@ -156,6 +156,7 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 				nodes: [{ id: "a", level: 1, type: "node", text: "A" }],
 				deckDefinitions: []
 			}),
+		chartData: () => Promise.resolve({ info: null, data: false }),
 		timegraph: () => Promise.resolve(timegraph),
 		layers: (_context, _slide, widthPx, plan) =>
 			Promise.resolve(plan.shapes.map(id => ({ shape: id, bitmap: bitmap(widthPx, 10), x: 0, y: 0, width: widthPx, height: 10 }))),
@@ -203,7 +204,8 @@ describe("the presentation protocol", () => {
 				editable: true,
 				locks: 1,
 				packageBytes: deckBytes.length,
-				source: "bytes"
+				source: "bytes",
+				design: { themes: [{ master: slideRef(1), key: "/ppt/slideMasters/slideMaster1.xml", name: "Office Theme" }] }
 			}
 		})
 		stop()
@@ -299,6 +301,7 @@ describe("the presentation protocol", () => {
 			root: `doc${String(shape.id)}`,
 			nodes: [{ id: "a", text: "A" }]
 		})
+		expect(await session.call("chartData", shape).answer).toEqual({ info: null, data: false })
 		expect(await session.call("timegraph", slideRef(10)).answer).toEqual(timegraph)
 		expect(await session.call("layers", slideRef(10), 1280, { shapes: [2, 3], dpr: 2 }).answer).toMatchObject([
 			{ shape: 2, width: 1280 },
@@ -410,12 +413,13 @@ describe("the presentation protocol", () => {
 			image: () => session.call("image", "/ppt/media/image1.png").answer,
 			smartArtPreview: () => session.call("smartArtPreview", { uniqueId: "urn:x", source: "gallery" }, { widthPx: 96 }).answer,
 			smartArtInfo: () => session.call("smartArtInfo", shape).answer,
+			chartData: () => session.call("chartData", shape).answer,
 			jobsPort: () => session.call("jobsPort", ports()).answer,
 			freshParts: () => session.call("freshParts", "pptx", ports()).answer
 		}
 
 		// Built by their slices: edits (command, undo, redo), saving (save, commitSaved), find, the SmartArt text pane's
-		// info, and registerMedia (it answers a typed MediaRefusal value: this host serves no range sources).
+		// info, the jobs port, and registerMedia (it answers a typed MediaRefusal value: this host serves no range sources).
 		const built: ReadonlySet<PresentationMethod> = new Set([
 			"command",
 			"undo",
@@ -424,7 +428,11 @@ describe("the presentation protocol", () => {
 			"commitSaved",
 			"find",
 			"smartArtInfo",
-			"registerMedia"
+			"registerMedia",
+			"chartData",
+			"jobsPort",
+			"jobsPort",
+			"freshParts"
 		])
 
 		for (const method of PRESENTATION_METHODS.filter(method => !built.has(method))) {

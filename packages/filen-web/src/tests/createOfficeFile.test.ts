@@ -72,8 +72,27 @@ describe("officeFileBytes", () => {
 		expect(OFFICE_FILE_MIME).toEqual({
 			docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 			xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 			odt: "application/vnd.oasis.opendocument.text",
-			ods: "application/vnd.oasis.opendocument.spreadsheet"
+			ods: "application/vnd.oasis.opendocument.spreadsheet",
+			odp: "application/vnd.oasis.opendocument.presentation"
 		})
+	})
+
+	it("builds a blank 16:9 presentation on the plain Filen theme, its slide in the user's language", async () => {
+		const bytes = await officeFileBytes("pptx", { locale: "de-DE", sheetName: "Sheet1" })
+
+		expect(await part(bytes, "ppt/presentation.xml")).toContain('<p:sldSz cx="12192000" cy="6858000"/>')
+		expect(await part(bytes, "ppt/theme/theme1.xml")).toContain('<a:majorFont><a:latin typeface="Calibri Light"/>')
+		expect(await part(bytes, "ppt/slides/slide1.xml")).toContain('lang="de-DE"')
+	})
+
+	it("builds a blank OpenDocument presentation at 33.867 × 19.05 cm with Calibri declared", async () => {
+		const bytes = await officeFileBytes("odp", { locale: "en-US", sheetName: "Sheet1" })
+		const styles = await part(bytes, "styles.xml")
+
+		expect(await part(bytes, "mimetype")).toBe("application/vnd.oasis.opendocument.presentation")
+		expect(styles).toContain('fo:page-width="33.867cm" fo:page-height="19.05cm"')
+		expect(styles).toContain('<style:font-face style:name="Calibri"')
 	})
 })

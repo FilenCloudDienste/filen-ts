@@ -8,6 +8,7 @@ import type {
 	ColorModel,
 	CustomShow,
 	EdgeFractions,
+	FrameRef,
 	ShapeNode,
 	ShapePropsEdit,
 	ShapeRef,
@@ -323,6 +324,13 @@ export type ChartOp =
 			readonly workbook: Uint8Array
 			readonly contentType: string
 	  }
+	// The inverse of the ops above: the frame names `frame` again (a version the session holds).
+	| {
+			readonly family: "chart"
+			readonly kind: "restore"
+			readonly target: ShapeRef
+			readonly frame: Extract<FrameRef, { kind: "chart" }>
+	  }
 
 // A file the page handed the worker (a device File, structured-cloned without copying its bytes).
 export interface FileLike {
@@ -416,6 +424,8 @@ export interface EffectTiming {
 	readonly rewind?: boolean
 	readonly autoReverse?: boolean
 	readonly trigger?:
+		// Back to the main sequence (the click sequence).
+		| { readonly kind: "none" }
 		| { readonly kind: "shapeClick"; readonly shape: number }
 		| { readonly kind: "bookmark"; readonly shape: number; readonly bookmark: string }
 }
@@ -429,8 +439,16 @@ export type TimingOp =
 			readonly timing: TimingTree | undefined
 			readonly raw?: Uint8Array
 	  }
-	// One effect (a click/with/after group's par with its behaviours) placed at `at` in the main sequence.
-	| { readonly family: "timing"; readonly kind: "addEffect"; readonly slide: SlideRef; readonly effect: TimeNode; readonly at?: number }
+	// One effect (a click/with/after group's par with its behaviours) placed at `at` in the main sequence, or in the
+	// interactive sequence of `trigger` when it is given (at the end when `at` is absent).
+	| {
+			readonly family: "timing"
+			readonly kind: "addEffect"
+			readonly slide: SlideRef
+			readonly effect: TimeNode
+			readonly at?: number
+			readonly trigger?: Exclude<NonNullable<EffectTiming["trigger"]>, { readonly kind: "none" }>
+	  }
 	| { readonly family: "timing"; readonly kind: "removeEffect"; readonly slide: SlideRef; readonly node: number }
 	| { readonly family: "timing"; readonly kind: "moveEffect"; readonly slide: SlideRef; readonly node: number; readonly to: number }
 	| {
@@ -455,6 +473,8 @@ export type TransitionOp = {
 	readonly transition: Transition | undefined
 	// Per slide of `slides`, its p:transition (with its mc:AlternateContent) as it was.
 	readonly raws?: readonly (Uint8Array | undefined)[]
+	// The sound a transition's sound part "inserted:<id>" names, as registerMedia registered it (embedded when saved).
+	readonly media?: InsertedMedia
 }
 
 export type MotionPathOp = {
@@ -500,6 +520,8 @@ export type DesignOp =
 			readonly hideGraphics?: boolean
 			// Per slide of `slides` (a list), its p:bg as it was.
 			readonly raws?: readonly (Uint8Array | undefined)[]
+			// The picture a picture fill shows (its `inserted` id is assigned at apply).
+			readonly image?: InsertedImage
 	  }
 
 // A SmartArt layout, style or colours definition by its uniqueId: our gallery's, or the file's own embedded one.

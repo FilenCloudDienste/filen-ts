@@ -129,6 +129,16 @@ describe("presentation text editor layout map", () => {
 		expect(map.lineEdge(1, "end")).toBe(end)
 	})
 
+	it("puts the caret of an empty centred or right-aligned paragraph where its alignment puts text", () => {
+		const empty = (algn: "l" | "ctr" | "r"): number =>
+			mapOf({ bodyPr: {}, paragraphs: [{ pPr: { algn }, runs: [] }] }).caret(1)?.x ?? Number.NaN
+		const left = empty("l")
+		const right = empty("r")
+
+		expect(right - left).toBeGreaterThan(BOX.width / 2)
+		expect(empty("ctr")).toBeCloseTo((left + right) / 2, 3)
+	})
+
 	it("starts a wrapped line's caret at the wrap, not at the end of the line before", () => {
 		const long = "word ".repeat(40).trim()
 		const map = mapOf(plain(long))

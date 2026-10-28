@@ -109,6 +109,16 @@ export class XmlEditor {
 		this.range(from, to, toBytes(markup))
 	}
 
+	// Whether a replacement recorded so far covers the node (an edit inside it would conflict).
+	covered(node: number): boolean {
+		const start = this.document.start(node)
+		const end = this.document.end(node)
+
+		for (const splice of this.ranges.values()) if (splice.from <= start && end <= splice.to && splice.to > splice.from) return true
+
+		return false
+	}
+
 	// Change or add an attribute. An existing value is replaced in place; the rest of the tag is kept.
 	setAttribute(node: number, qualifiedName: string, value: string): void {
 		const edit = this.element(node)

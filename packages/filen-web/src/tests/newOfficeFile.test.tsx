@@ -106,10 +106,11 @@ async function openOpenDocument(): Promise<void> {
 	})
 }
 
-type Entry = "Document (.docx)" | "Spreadsheet (.xlsx)" | "Text (.odt)" | "Spreadsheet (.ods)"
+type Entry =
+	"Document (.docx)" | "Spreadsheet (.xlsx)" | "Presentation (.pptx)" | "Text (.odt)" | "Spreadsheet (.ods)" | "Presentation (.odp)"
 
 async function choose(entry: Entry): Promise<HTMLInputElement> {
-	if (entry.endsWith("(.odt)") || entry.endsWith("(.ods)")) await openOpenDocument()
+	if (entry.endsWith("(.odt)") || entry.endsWith("(.ods)") || entry.endsWith("(.odp)")) await openOpenDocument()
 	else await openOffice()
 	fireEvent.click(await screen.findByRole("menuitem", { name: entry }))
 
@@ -135,12 +136,13 @@ async function part(bytes: Uint8Array, name: string): Promise<string> {
 }
 
 describe("New ▸ Office", () => {
-	it("offers a Document and a Spreadsheet in the Office submenu", async () => {
+	it("offers a Document, a Spreadsheet and a Presentation in the Office submenu", async () => {
 		renderMenu()
 		await openOffice()
 
 		expect((await screen.findByRole("menuitem", { name: "Document (.docx)" })).textContent).toBe("Document (.docx)")
 		expect(screen.getByRole("menuitem", { name: "Spreadsheet (.xlsx)" }).textContent).toBe("Spreadsheet (.xlsx)")
+		expect(screen.getByRole("menuitem", { name: "Presentation (.pptx)" }).textContent).toBe("Presentation (.pptx)")
 	})
 
 	it("offers OpenDocument ▸ Text and Spreadsheet after the Office Open XML entries, a rule between", async () => {
@@ -153,7 +155,7 @@ describe("New ▸ Office", () => {
 			[...(office?.querySelectorAll("[role=menuitem], [role=separator]") ?? [])].map(entry =>
 				entry.getAttribute("role") === "separator" ? "─" : entry.textContent
 			)
-		).toEqual(["Document (.docx)", "Spreadsheet (.xlsx)", "─", "OpenDocument"])
+		).toEqual(["Document (.docx)", "Spreadsheet (.xlsx)", "Presentation (.pptx)", "─", "OpenDocument"])
 
 		await act(async () => {
 			fireEvent.click(screen.getByRole("menuitem", { name: "OpenDocument" }))
@@ -162,6 +164,7 @@ describe("New ▸ Office", () => {
 
 		expect((await screen.findByRole("menuitem", { name: "Text (.odt)" })).textContent).toBe("Text (.odt)")
 		expect(screen.getByRole("menuitem", { name: "Spreadsheet (.ods)" }).textContent).toBe("Spreadsheet (.ods)")
+		expect(screen.getByRole("menuitem", { name: "Presentation (.odp)" }).textContent).toBe("Presentation (.odp)")
 	})
 
 	it("is disabled offline where the menu stays open offline", () => {
@@ -291,6 +294,43 @@ describe("New ▸ Office", () => {
 
 		expect([name, mime]).toEqual(["Budget.ods", ODS_MIME])
 		expect(await part(bytes ?? new Uint8Array(), "content.xml")).toContain('table:name="Sheet1"')
+	})
+
+	it("uploads a blank presentation and opens it in the editor", async () => {
+		uploadFileBytes.mockResolvedValue(created("Pitch.pptx"))
+		const { openPreview } = renderMenu()
+		const field = await choose("Presentation (.pptx)")
+
+		expect(screen.getByRole("heading", { name: "New presentation" })).toBeTruthy()
+		expect(field.value).toBe("Untitled presentation.pptx")
+		submit(field, "Pitch")
+
+		await waitFor(() => {
+			expect(openPreview).toHaveBeenCalledOnce()
+		})
+
+		const [, bytes, name, mime] = uploadFileBytes.mock.calls[0] ?? []
+
+		expect([name, mime]).toEqual(["Pitch.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"])
+		expect(await part(bytes ?? new Uint8Array(), "ppt/slides/slide1.xml")).toContain('<p:ph type="ctrTitle"/>')
+	})
+
+	it("uploads a blank OpenDocument presentation under its type", async () => {
+		uploadFileBytes.mockResolvedValue(created("Pitch.odp"))
+		const { openPreview } = renderMenu()
+		const field = await choose("Presentation (.odp)")
+
+		expect(field.value).toBe("Untitled presentation.odp")
+		submit(field, "Pitch")
+
+		await waitFor(() => {
+			expect(openPreview).toHaveBeenCalledOnce()
+		})
+
+		const [, bytes, name, mime] = uploadFileBytes.mock.calls[0] ?? []
+
+		expect([name, mime]).toEqual(["Pitch.odp", "application/vnd.oasis.opendocument.presentation"])
+		expect(await part(bytes ?? new Uint8Array(), "content.xml")).toContain('presentation:class="title"')
 	})
 
 	it("says when the new file's name hides it from the listing", async () => {

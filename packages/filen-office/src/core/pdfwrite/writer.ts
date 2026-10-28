@@ -1,6 +1,6 @@
 import { sliceClock, type SliceClock, type Slicing } from "../slicing"
 import { ByteWriter, concat } from "./bytes"
-import { platformRandom, standardSecurity, type RandomBytes, type SecurityHandler } from "./crypto"
+import { platformRandom, securityOfKey, standardSecurity, type PdfSecurityKey, type RandomBytes, type SecurityHandler } from "./crypto"
 import { nativeZlibDeflate, type PdfDeflate } from "./deflate"
 import { PdfWriteError } from "./errors"
 import {
@@ -16,6 +16,7 @@ import {
 	sniffFormat,
 	splitAlpha,
 	type PdfBlobLike,
+	type PdfDecodedImage,
 	type PdfImageData,
 	type PdfImageDecoder,
 	type PdfImageFormat
@@ -51,6 +52,9 @@ export interface PdfWriterOptions {
 	readonly deterministic?: boolean
 	// Encrypts with the standard security handler, AES-256 (user and owner password).
 	readonly password?: string
+	// Encrypts as `password` does, with a key made where the password is (crypto.ts standardSecurityKey); `password`
+	// wins when both are given.
+	readonly securityKey?: PdfSecurityKey
 	readonly signal?: PdfAbortSignal
 	readonly slicing?: Slicing
 	// Overrides the platform's deflate; null writes streams uncompressed.
@@ -74,6 +78,12 @@ export interface PdfObjectSink {
 }
 
 export type PdfStreamData = Uint8Array | PdfBlobLike | readonly (Uint8Array | PdfBlobLike)[]
+
+export interface PdfPixelsSource extends PdfDecodedImage {
+	// Dedupe key: the same key is embedded once.
+	readonly key: string
+	readonly interpolate?: boolean
+}
 
 export interface PdfImageSource {
 	// Passed through as views or Blob slices: must stay unchanged until finish().
@@ -167,8 +177,13 @@ export class PdfWriter implements PdfObjectSink {
 
 	static async create(options: PdfWriterOptions = {}): Promise<PdfWriter> {
 		// Salts, keys and IVs always come from the platform's CSPRNG unless a test passes its own source.
+		const random = options.random ?? platformRandom
 		const security =
-			options.password === undefined ? undefined : await standardSecurity(options.password, options.random ?? platformRandom)
+			options.password !== undefined
+				? await standardSecurity(options.password, random)
+				: options.securityKey === undefined
+					? undefined
+					: securityOfKey(options.securityKey, random)
 
 		return new PdfWriter(options, security)
 	}
@@ -583,9 +598,37 @@ export class PdfWriter implements PdfObjectSink {
 		if (this.decoder === undefined) throw new PdfWriteError("imageUnsupported", `No decoder for this ${format} image`)
 
 		const decoded = await this.decoder.decode(source.data, format, this.maxImagePixels)
+
+		return this.writeRgba(ref, name, common, decoded, orientation)
+	}
+
+	// Straight RGBA pixels (a picture the caller decoded or drew itself, such as an SVG's raster) as an image, written
+	// once per key. The pixels are read before the promise settles and not kept.
+	pixels(source: PdfPixelsSource): Promise<PdfImage> {
+		let entry = this.imagesByKey.get(source.key)
+
+		if (entry === undefined) {
+			this.checkAbort()
+
+			const common: PdfDict = {
+				Type: pdfName("XObject"),
+				Subtype: pdfName("Image"),
+				Interpolate: source.interpolate === true ? true : undefined
+			}
+
+			entry = this.writeRgba(this.allocate(), this.name("Im"), common, source, 1)
+			this.imagesByKey.set(source.key, entry)
+		}
+
+		return entry
+	}
+
+	private async writeRgba(ref: PdfRef, name: string, common: PdfDict, decoded: PdfDecodedImage, orientation: number): Promise<PdfImage> {
 		const pixels = decoded.width * decoded.height
 
 		if (pixels > this.maxImagePixels) throw new PdfWriteError("imageTooLarge", `The image has ${pixels} pixels`)
+		if (!(decoded.width >= 1 && decoded.height >= 1) || decoded.rgba.length < pixels * 4)
+			throw new PdfWriteError("imageUnsupported", "The pixels do not fill the image")
 
 		const { rgb, alpha } = splitAlpha(decoded.rgba, pixels)
 		let mask: PdfRef | undefined

@@ -6,8 +6,8 @@ import { runCreateFile, type CreateFileOutcome } from "@/features/drive/lib/crea
 import {
 	OFFICE_FILE_MIME,
 	freeOfficeFileName,
-	isOfficeDocumentKind,
 	normalizeOfficeFileName,
+	officeFileClass,
 	officeFileBytes,
 	type NewOfficeKind
 } from "@/features/drive/lib/createOfficeFile"
@@ -35,6 +35,13 @@ export interface NewOfficeFile {
 	host: ReactNode
 }
 
+// The dialog's wording by what the kind makes.
+const WORDING = {
+	document: { title: "driveNewDocxTitle", body: "driveNewDocxBody", untitled: "driveNewDocxUntitled" },
+	spreadsheet: { title: "driveNewXlsxTitle", body: "driveNewXlsxBody", untitled: "driveNewXlsxUntitled" },
+	presentation: { title: "driveNewPptxTitle", body: "driveNewPptxBody", untitled: "driveNewPptxUntitled" }
+} as const
+
 // The names a listing the socket keeps current already holds (lowercased), so the dialog can start on a free one
 // without a request; empty when it is not current (the submit checks then).
 function currentNames(parentUuid: string | null): ReadonlySet<string> {
@@ -57,8 +64,9 @@ export function useNewOfficeFile({ parentUuid, openPreview, hiddenNotice }: UseN
 	const [takenName, setTakenName] = useState<string | null>(null)
 
 	// Read in the render that opens the dialog, which already points at the directory the action chose.
-	const document = isOfficeDocumentKind(shownKind)
-	const untitled = document ? t("driveNewDocxUntitled") : t("driveNewXlsxUntitled")
+	const fileClass = officeFileClass(shownKind)
+	const wording = WORDING[fileClass]
+	const untitled = t(wording.untitled)
 	const initialName = kind === null ? "" : freeOfficeFileName(untitled, kind, currentNames(parentUuid))
 
 	function normalized(name: string): string {
@@ -122,8 +130,8 @@ export function useNewOfficeFile({ parentUuid, openPreview, hiddenNotice }: UseN
 				open={kind !== null}
 				pending={pending}
 				// The kind shown stays while the dialog closes, so its title does not change mid-animation.
-				title={document ? t("driveNewDocxTitle") : t("driveNewXlsxTitle")}
-				body={document ? t("driveNewDocxBody") : t("driveNewXlsxBody")}
+				title={t(wording.title)}
+				body={t(wording.body)}
 				label={t("driveNewOfficeFileLabel")}
 				initialValue={initialName}
 				selectBaseName

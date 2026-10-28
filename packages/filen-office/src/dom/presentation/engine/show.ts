@@ -39,6 +39,9 @@ import { PresentationError, type ColorModel, type ShapeNode, type SlideNode, typ
 import type { RenderEffects, SlideLayer, SlideRender, TextPage } from "../../../core/presentation/output"
 import { drawingData } from "../../../core/presentation/render/slide"
 import { G, PartReader } from "../../../core/pptx/read/xml"
+import { fileFallback } from "../../../core/pptx/read/transition"
+import { playableTransition } from "../../../core/anim/presets/transitions/catalog"
+import { pptxParts } from "./open/pptx"
 import { effectiveClrMap, resolveColor, themeOf, toRgba } from "../../../core/presentation/theme"
 import { sliceClock } from "../../../core/slicing"
 import {
@@ -626,7 +629,7 @@ export function layerParents(layers: LayerIndex, shapes: readonly ShapeNode[]): 
 	return out
 }
 
-// --- Transitions of pptx slides (the model keeps p:transition as source until transitions are authored) ---
+// --- Transitions of pptx slides (the model reads them with the slide; this reads a part's element directly) ---
 
 // The 21 ECMA-376 Part 1 §19.7 transitions the stage draws; any other (p14, p15) plays the file's mc:Fallback.
 const ECMA_TRANSITIONS: ReadonlySet<string> = new Set([
@@ -652,6 +655,11 @@ const ECMA_TRANSITIONS: ReadonlySet<string> = new Set([
 	"wipe",
 	"zoom"
 ])
+// Whether the stage draws a transition kind itself (others play their fallback).
+function stageDraws(kind: string, namespace: Transition["namespace"]): boolean {
+	return namespace === "p" && ECMA_TRANSITIONS.has(kind)
+}
+
 // p:transition spd (PowerPoint's durations, as the ODP reader's presentation:transition-speed).
 const SPEED_MS: Readonly<Record<string, number>> = { slow: 1000, med: 750, fast: 500 }
 const OPTIONS = ["dir", "orient", "spokes", "thruBlk", "pattern", "invX", "invY"] as const
@@ -792,8 +800,12 @@ async function timegraph(context: CallContext, ref: SlideRef): Promise<CompiledT
 		if (resolved !== undefined) colors.set(key, toRgba(resolved))
 	}
 
-	const document = session.deck.format === "odp" ? undefined : parts.document(node.part)
-	const transition = node.transition ?? (document === undefined ? undefined : pptxTransition(document))
+	const authored = node.transition
+	const pptx = pptxParts(session.deck)
+	const document = pptx === undefined ? undefined : parts.document(node.part)
+	const fallback =
+		authored === undefined || document === undefined || pptx === undefined ? undefined : fileFallback(authored, document, pptx.epoch)
+	const transition = authored === undefined ? undefined : playableTransition(authored, stageDraws, fallback)
 	const source: TimegraphSource = {
 		timing,
 		layers,
@@ -801,7 +813,8 @@ async function timegraph(context: CallContext, ref: SlideRef): Promise<CompiledT
 		slideSize: { cx: session.deck.size.cx, cy: session.deck.size.cy },
 		geometry: shapeGeometry(render, new Set(layers.shapes)),
 		colors: [...colors],
-		...(transition === undefined ? {} : { transition })
+		...(transition === undefined ? {} : { transition }),
+		...(authored === undefined || authored === transition ? {} : { authored })
 	}
 	// Compiled here once so a hostile tree is refused before the page plays it.
 	const graph = compileSource(ref, source, parts.budgets.timing)

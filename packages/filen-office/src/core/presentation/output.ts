@@ -60,6 +60,7 @@ export interface TextPage {
 	// The pictures the page's picture-bullet objects (text/page.ts PICTURE_BULLET_OBJECT) show, by object id: part
 	// names (an inserted image's "inserted:<id>"); absent when it has none.
 	readonly images?: readonly string[]
+	readonly markers?: Int32Array
 }
 
 // A TextLayout (core/text/displayList.ts) with the StyleTable rows HitTester reads, as typed arrays the page
@@ -128,6 +129,9 @@ export interface SlideLayer {
 	readonly shape: ShapeRef
 	readonly drawing: DrawingData
 	readonly text?: TextPage
+	// An empty placeholder's prompt, laid out in its text box (`textMatrix`): only in the editor's renders (render's
+	// `prompts` option), and only the editor's painter draws it.
+	readonly prompt?: TextPage
 	// Slide px: a b c d e f, placing the layer's drawing on the slide.
 	readonly matrix: readonly number[]
 	// TextPage px → slide px: the text box (geometry text rectangle minus insets, turned for vert/vert270); absent =
@@ -178,6 +182,8 @@ export interface SlideRender {
 	readonly hidden: boolean
 	// The slide's layout (its parent), when it has one.
 	readonly layout?: SlideRef
+	// The slide hides its layout's and master's graphics (p:cSld/@showMasterSp="0"); absent when it shows them.
+	readonly hidesMasterShapes?: true
 	// Drawn over the deck's size (OpenInfo.size, EMU / 9525 px).
 	readonly background: DrawingData
 	readonly layers: readonly SlideLayer[]

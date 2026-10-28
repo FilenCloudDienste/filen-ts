@@ -30,6 +30,12 @@ export interface ShowMediaHandle {
 export interface ShowMediaMount {
 	// Once per media layer of a slide on stage, `box` an element over the layer (slide px, scaled by the stage).
 	mount(box: HTMLElement, layer: SlideLayer, session: PresentationSessionApi | undefined, events: ShowMediaEvents): ShowMediaHandle
+	// A slide's transition sound (an embedded WAV, `loop`: until the next sound), played as the slide enters.
+	sound?(session: PresentationSessionApi, sound: { readonly part: string; readonly loop: boolean }): ShowSoundHandle
+}
+
+export interface ShowSoundHandle {
+	stop(): void
 }
 
 // What the click targets do (the player wires them).

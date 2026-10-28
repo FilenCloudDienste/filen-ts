@@ -23,6 +23,18 @@ export const emitOdpTiming: OdpEmitFamily = {
 				? undefined
 				: readOdpTiming(fragment, page, slide.shapes, DEFAULT_PRESENTATION_BUDGETS.timing)
 
-		return { kind: "markup", pieces: odpTimingMarkup({ fragment, shapes: slide.shapes }, slide.timing, pristine) }
+		return {
+			kind: "markup",
+			pieces: odpTimingMarkup(
+				{
+					fragment,
+					shapes: slide.shapes,
+					...(context.targetIds === undefined ? {} : { ids: context.targetIds }),
+					...(context.paragraphIds === undefined ? {} : { paragraphIds: context.paragraphIds })
+				},
+				slide.timing,
+				pristine
+			)
+		}
 	}
 }

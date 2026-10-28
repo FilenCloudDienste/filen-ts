@@ -156,8 +156,9 @@ describe("placeholder inheritance", () => {
 		const box = resolveShape(deck, slide.ref, shape(slide, "Box"))
 		const boxParagraph = resolveParagraph(box, shape(slide, "Box").text?.paragraphs[0] ?? never())
 
+		// A text box takes defaultTextStyle (11 pt) before the master's otherStyle (18 pt).
 		expect(box.textClass).toBe("other")
-		expect(boxParagraph.pPr.defRPr).toMatchObject({ sz: 1800, kern: 1200 })
+		expect(boxParagraph.pPr.defRPr).toMatchObject({ sz: 1100, kern: 1200 })
 	})
 
 	it("starts titles from the master's title style", async () => {

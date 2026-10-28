@@ -559,10 +559,15 @@ describe("presentation viewer components", () => {
 		expect(host.querySelector("[role=group]")?.getAttribute("aria-label")).toBe("Slide 1 of 3")
 	})
 
-	it("releases the old paint when the render changes and shows a pending paper without one", () => {
+	it("keeps the paint across a render that paints alike, and releases it for a pending paper", () => {
 		const first = plainRender(slideRef(10))
 		const release = vi.fn()
-		const tracking: SlidePainter = (render, context) => ({ ...painter(render, context), release })
+		let painted = 0
+		const tracking: SlidePainter = (render, context) => {
+			painted++
+
+			return { ...painter(render, context), release }
+		}
 
 		act(() =>
 			root.render(
@@ -584,7 +589,8 @@ describe("presentation viewer components", () => {
 				/>
 			)
 		)
-		expect(release).toHaveBeenCalledTimes(1)
+		expect(release).toHaveBeenCalledTimes(0)
+		expect(painted).toBe(1)
 		act(() =>
 			root.render(
 				<SlideView
@@ -595,7 +601,7 @@ describe("presentation viewer components", () => {
 				/>
 			)
 		)
-		expect(release).toHaveBeenCalledTimes(2)
+		expect(release).toHaveBeenCalledTimes(1)
 		expect(host.querySelector(".fo-slide-frame")?.hasAttribute("data-fo-pending")).toBe(true)
 	})
 

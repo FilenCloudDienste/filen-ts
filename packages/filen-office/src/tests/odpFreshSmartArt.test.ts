@@ -32,7 +32,7 @@ function diagram(children?: ShapeNode[]): ShapeNode {
 	}
 }
 
-async function content(shape: ShapeNode) {
+async function content(shape: ShapeNode, diagram?: (frame: ShapeNode) => readonly ShapeNode[] | undefined) {
 	const deck = fixtureDeck(1)
 	const slide = deck.nodes.get(slideRef(FIXTURE_FIRST_SLIDE))
 
@@ -40,7 +40,11 @@ async function content(shape: ShapeNode) {
 
 	slide.shapes.push(shape)
 
-	const fresh = await freshOdp(deck, { theme: () => undefined, picture: () => Promise.resolve(undefined) })
+	const fresh = await freshOdp(deck, {
+		theme: () => undefined,
+		picture: () => Promise.resolve(undefined),
+		...(diagram === undefined ? {} : { diagram })
+	})
 
 	if ("kind" in fresh) throw new Error(`refused ${fresh.reason}`)
 
@@ -55,6 +59,17 @@ describe("fresh ODP of SmartArt", () => {
 		const group = /<draw:g\b[^>]*draw:name="Diagram 39"[\s\S]*?<\/draw:g>/u.exec(xml)?.[0] ?? ""
 
 		for (const text of ["Alpha", "Beta", "Gamma"]) expect(group).toContain(text)
+		expect(report.omitted["smartart frame"]).toBeUndefined()
+	})
+
+	it("writes a diagram its source lays out (its drawing's shapes) as one group of them", async () => {
+		const frame = diagram()
+		const { xml, report } = await content(frame, shape =>
+			shape === frame ? [node(41, "Alpha", 0), node(42, "Beta", 1_000_000)] : undefined
+		)
+		const group = /<draw:g\b[^>]*draw:name="Diagram 39"[\s\S]*?<\/draw:g>/u.exec(xml)?.[0] ?? ""
+
+		for (const text of ["Alpha", "Beta"]) expect(group).toContain(text)
 		expect(report.omitted["smartart frame"]).toBeUndefined()
 	})
 

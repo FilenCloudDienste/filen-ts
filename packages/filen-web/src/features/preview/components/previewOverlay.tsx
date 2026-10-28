@@ -51,7 +51,7 @@ import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { holdUnload } from "@/lib/unloadGuard"
-import { previewTitleSplitIndex } from "@/features/preview/lib/previewTitle"
+import { SplitTitle } from "@/features/preview/components/splitTitle"
 import { driveItemName } from "@filen/shared"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import type { FileVerdict } from "@filen/shared"
@@ -71,6 +71,7 @@ import { RemoteFileCompare } from "@/features/preview/components/remoteCompare"
 import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
 import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
+import { PreviewReplaceContext, type PreviewReplaceMake } from "@/features/preview/lib/previewReplace"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
@@ -275,6 +276,9 @@ export function PreviewOverlay({
 	const logoutRequest = usePreviewUnsavedGuardStore(state => state.logoutRequest)
 	const [saving, setSaving] = useState(false)
 	const [pendingIntent, setPendingIntent] = useState<PreviewDismissIntent | null>(null)
+	// What a "replace" intent runs once the edits are discarded; kept through the prompt's close (WebKit can report
+	// it before the confirm), cleared by the confirm and replaced by the next request.
+	const pendingReplaceRef = useRef<(() => void) | null>(null)
 	// Which secondary dialog the header's item menu (below) currently has open, if any — a single slot
 	// since only ever one item (the currently-viewed one) is ever being acted on from in here, unlike
 	// useDriveDialogHost's own activeDialog which also has to carry a whole bulk-selection items[].
@@ -1008,6 +1012,37 @@ export function PreviewOverlay({
 		run()
 	}
 
+	// Another file in this slot (File ▸ New presentation, made by `make` once allowed) drops the buffer: asked about
+	// first like close/prev/next, so nothing is made when the user keeps the edits; also asked while a save is in
+	// flight, whose own commit would put the saved file back in the slot.
+	function requestReplace(make: PreviewReplaceMake): void {
+		if (rawDriveItem === undefined) {
+			return
+		}
+
+		const frozenUuid = rawDriveItem.data.uuid
+		const run = (): void => {
+			make(item => {
+				commitSaved(frozenUuid, item)
+			})
+		}
+
+		if (!dirty && !saving) {
+			run()
+
+			return
+		}
+
+		pendingReplaceRef.current = run
+		setPendingIntent("replace")
+	}
+
+	// One identity for the editors' context, reading this render's state when called.
+	const requestReplaceRef = useLatestRef(requestReplace)
+	const [replaceInSlot] = useState(() => (make: PreviewReplaceMake) => {
+		requestReplaceRef.current(make)
+	})
+
 	function handleOpenChange(next: boolean, details: DialogPrimitive.Root.ChangeEventDetails): void {
 		// An Escape something inside took already, the editor's find panel closing say, is not a close:
 		// Base UI hears it at the document, after the editor.
@@ -1139,7 +1174,11 @@ export function PreviewOverlay({
 			onStep(-1)
 		} else if (actions.intent === "next") {
 			onStep(1)
+		} else if (actions.intent === "replace") {
+			pendingReplaceRef.current?.()
 		}
+
+		pendingReplaceRef.current = null
 	}
 
 	if (driveItem === undefined) {
@@ -1289,30 +1328,32 @@ export function PreviewOverlay({
 										<TransportStreamGate
 											item={driveItem}
 											render={() => (
-												<PreviewBody
-													item={driveItem}
-													variant={variant}
-													category={pin?.category}
-													documentKey={currentDocumentKey}
-													editable={editable}
-													renamedReadOnly={renamedReadOnly}
-													neverEditable={variant !== "drive"}
-													asText={asText}
-													locked={saving}
-													onDirtyChange={setPreviewDirty}
-													contentRef={contentRef}
-													spreadsheetRef={spreadsheetRef}
-													docxRef={docxRef}
-													presentationRef={presentationRef}
-													onSave={() => performSaveRef.current()}
-													onAutosave={() => performSaveRef.current(true)}
-													canSaveCopy={canSaveCopyBeside(driveItem, variant)}
-													onOpenFile={opened => {
-														if (rawDriveItem !== undefined) {
-															commitSaved(rawDriveItem.data.uuid, opened)
-														}
-													}}
-												/>
+												<PreviewReplaceContext value={replaceInSlot}>
+													<PreviewBody
+														item={driveItem}
+														variant={variant}
+														category={pin?.category}
+														documentKey={currentDocumentKey}
+														editable={editable}
+														renamedReadOnly={renamedReadOnly}
+														neverEditable={variant !== "drive"}
+														asText={asText}
+														locked={saving}
+														onDirtyChange={setPreviewDirty}
+														contentRef={contentRef}
+														spreadsheetRef={spreadsheetRef}
+														docxRef={docxRef}
+														presentationRef={presentationRef}
+														onSave={() => performSaveRef.current()}
+														onAutosave={() => performSaveRef.current(true)}
+														canSaveCopy={canSaveCopyBeside(driveItem, variant)}
+														onOpenFile={opened => {
+															if (rawDriveItem !== undefined) {
+																commitSaved(rawDriveItem.data.uuid, opened)
+															}
+														}}
+													/>
+												</PreviewReplaceContext>
 											)}
 										/>
 									</PreviewDownloadableProvider>
@@ -1394,19 +1435,12 @@ export function PreviewOverlay({
 // (typically the extension) always stays visible, rather than the browser's default end-truncation
 // swallowing it. Also carries the dialog's required accessible title.
 function PreviewName({ name }: { name: string }) {
-	const TAIL_LENGTH = 16
-	const splitAt = previewTitleSplitIndex(name, TAIL_LENGTH)
-
 	return (
 		<DialogPrimitive.Title className="flex min-w-0 flex-1 font-heading text-sm font-medium">
-			{splitAt > 0 ? (
-				<>
-					<span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{name.slice(0, splitAt)}</span>
-					<span className="shrink-0 whitespace-nowrap">{name.slice(splitAt)}</span>
-				</>
-			) : (
-				<span className="truncate">{name}</span>
-			)}
+			<SplitTitle
+				text={name}
+				tailLength={16}
+			/>
 		</DialogPrimitive.Title>
 	)
 }

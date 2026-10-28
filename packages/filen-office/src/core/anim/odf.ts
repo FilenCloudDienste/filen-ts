@@ -6,6 +6,7 @@ import { OdfNs, canonicalName } from "../odf/index"
 import { decodeCharacterData, decodeUtf8, encodeUtf8, escapeAttribute } from "../xml/index"
 import { attributeEntry, attributeFromOdf, attributeToOdf, isMediaBehavior } from "./attributes"
 import { heldMarkup, inScope } from "./prune"
+import { isPageTransitionPar } from "./presets/transitions/odf"
 import type {
 	AnimTarget,
 	Behavior,
@@ -576,18 +577,41 @@ export function odpTimingRoot(fragment: Fragment, page: number): number {
 	return -1
 }
 
-// A par holding only a transition filter with no target: the page transition, not an effect.
+// The page transition par (an untargeted transition filter, with only the transition's sound beside it), not an
+// effect.
 function isTransitionPar(fragment: Fragment, node: number): boolean {
-	const document = fragment.document
-	const first = document.firstChildElement(node)
+	return isPageTransitionPar(fragment, node)
+}
 
-	return (
-		fragment.name(node) === "anim:par" &&
-		first >= 0 &&
-		document.nextSiblingElement(first) < 0 &&
-		fragment.name(first) === "anim:transitionFilter" &&
-		!fragment.attributes(first).has("smil:targetElement")
-	)
+// The paragraphs a target may name: each text:p of a shape by its xml:id, else its text:id.
+function paragraphIds(
+	fragment: Fragment,
+	shapes: readonly ShapeNode[]
+): Map<string, { readonly shape: number; readonly paragraph: number }> {
+	const out = new Map<string, { readonly shape: number; readonly paragraph: number }>()
+	const visit = (list: readonly ShapeNode[]): void => {
+		for (const shape of list) {
+			for (const [index, paragraph] of (shape.text?.paragraphs ?? []).entries()) {
+				const src = paragraph.src
+
+				if (src?.format !== "odp" || src.fragment !== fragment.offset) continue
+
+				const attributes = fragment.attributes(src.node)
+
+				for (const name of ["xml:id", "text:id"]) {
+					const id = attributes.get(name)
+
+					if (id !== undefined && !out.has(id)) out.set(id, { shape: shape.id, paragraph: index })
+				}
+			}
+
+			if (shape.children !== undefined) visit(shape.children)
+		}
+	}
+
+	visit(shapes)
+
+	return out
 }
 
 // The id a shape is targeted by: its xml:id, else its draw:id.
@@ -618,6 +642,7 @@ class OdfTimingReader {
 	private readonly fragment: Fragment
 	private readonly budgets: TimingBudgets
 	private readonly shapes: Map<string, number>
+	private readonly paragraphs: Map<string, { readonly shape: number; readonly paragraph: number }>
 	// The smil:targetElement of the anim:iterate being read: its children animate what it iterates.
 	private iterated: string | undefined
 	// Anim node xml:ids to the ctn ids given in document order.
@@ -631,6 +656,7 @@ class OdfTimingReader {
 		this.fragment = fragment
 		this.budgets = budgets
 		this.shapes = shapeIds(fragment, shapes)
+		this.paragraphs = paragraphIds(fragment, shapes)
 	}
 
 	// First pass: ids for every anim element, so begin lists may name later nodes.
@@ -664,6 +690,11 @@ class OdfTimingReader {
 
 	private target(id: string | undefined, subItem: string | undefined): AnimTarget {
 		if (id === undefined) return { kind: "slide" }
+
+		const paragraph = this.paragraphs.get(id)
+
+		if (paragraph !== undefined)
+			return { kind: "text", shape: paragraph.shape, unit: "para", start: paragraph.paragraph, end: paragraph.paragraph }
 
 		const shape = this.shapes.get(id)
 
@@ -1255,10 +1286,17 @@ export interface OdpTimingContext {
 	readonly fragment: Fragment | undefined
 	// The page's shapes, for target ids.
 	readonly shapes: readonly ShapeNode[]
+	// Ids the writer gave shapes that had none (document-unique), by model id.
+	readonly ids?: ReadonlyMap<number, string>
+	// Ids the writer gave the paragraphs a by-paragraph effect targets that had none, by odpParagraphKey.
+	readonly paragraphIds?: ReadonlyMap<string, string>
+	// What the ids this page's timing makes start with: xml:id is unique in the whole document (ODF 1.3 Part 1
+	// §19.914), model shape and time node ids only on their slide, so a writer of several new pages names each apart.
+	readonly idPrefix?: string
 }
 
-// The id the writer names a target shape by: its source xml:id (else draw:id), or "id" + its model id.
-export function odpTargetId(shape: ShapeNode, fragment?: Fragment): string {
+// The id the writer names a target shape by: its source xml:id (else draw:id), or `prefix` + "id" + its model id.
+export function odpTargetId(shape: ShapeNode, fragment?: Fragment, prefix = ""): string {
 	if (fragment !== undefined && shape.src?.format === "odp" && shape.src.fragment === fragment.offset) {
 		const attributes = fragment.attributes(shape.src.node)
 		const id = attributes.get("xml:id") ?? attributes.get("draw:id")
@@ -1266,7 +1304,72 @@ export function odpTargetId(shape: ShapeNode, fragment?: Fragment): string {
 		if (id !== undefined) return id
 	}
 
-	return `id${String(shape.id)}`
+	return `${prefix}id${String(shape.id)}`
+}
+
+// A paragraph target (ECMA p:pRg) is named in ODF as LibreOffice names it: smil:targetElement is the text:p's own
+// xml:id (anim:sub-item="text" on the behaviours that animate the text). Keyed by shape id and paragraph index.
+export function odpParagraphKey(shape: number, paragraph: number): string {
+	return `${String(shape)}:${String(paragraph)}`
+}
+
+// The id the writer names paragraph `index` of `shape` by: its source xml:id (else text:id), or `prefix` + "id" + the
+// shape's model id + "p" + the index.
+export function odpParagraphId(shape: ShapeNode, index: number, fragment?: Fragment, prefix = ""): string {
+	const src = odpOwnParagraphSource(shape, index)
+
+	if (fragment !== undefined && src?.format === "odp" && src.fragment === fragment.offset) {
+		const attributes = fragment.attributes(src.node)
+		const id = attributes.get("xml:id") ?? attributes.get("text:id")
+
+		if (id !== undefined) return id
+	}
+
+	return `${prefix}id${String(shape.id)}p${String(index)}`
+}
+
+// A paragraph's source when it is the first of its body to name it (the text writer gives a source's ids to that one
+// only; a later paragraph naming the same source is written as new).
+export function odpOwnParagraphSource(shape: ShapeNode, index: number): SourceRef | undefined {
+	const paragraphs = shape.text?.paragraphs ?? []
+	const src = paragraphs[index]?.src
+
+	if (src === undefined) return undefined
+
+	for (let k = 0; k < index; k++) {
+		const other = paragraphs[k]?.src
+
+		if (
+			other !== undefined &&
+			other.format === src.format &&
+			other.part === src.part &&
+			other.node === src.node &&
+			other.epoch === src.epoch &&
+			(other.format !== "odp" || src.format !== "odp" || other.fragment === src.fragment)
+		)
+			return undefined
+	}
+
+	return src
+}
+
+// The paragraphs a slide's timing targets one by one (their written text:p elements need the ids odpParagraphId gives).
+export function odpParagraphTargets(tree: TimingTree | undefined): readonly { readonly shape: number; readonly paragraph: number }[] {
+	const out = new Map<string, { readonly shape: number; readonly paragraph: number }>()
+	const stack = tree === undefined ? [] : [tree.root]
+
+	for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+		if (node.kind === "behavior" && !isMediaBehavior(node.behavior)) {
+			const target = node.behavior.common.target
+
+			if (target.kind === "text" && target.unit === "para" && target.start === target.end)
+				out.set(odpParagraphKey(target.shape, target.start), { shape: target.shape, paragraph: target.start })
+		}
+
+		stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+	}
+
+	return [...out.values()]
 }
 
 // The shapes a slide's timing targets (their written elements need the ids odpTargetId gives).
@@ -1316,6 +1419,9 @@ class OdfTimingWriter {
 	private readonly fragment: Fragment | undefined
 	private readonly pristine: ReadonlyMap<number, TimeNode>
 	private readonly targetIds: ReadonlyMap<number, string>
+	private readonly shapeNodes = new Map<number, ShapeNode>()
+	private readonly paragraphIds: ReadonlyMap<string, string> | undefined
+	private readonly prefix: string
 	// ctn ids named by a node condition, and the xml:id each is written with.
 	private readonly referenced = new Map<number, string>()
 
@@ -1329,6 +1435,8 @@ class OdfTimingWriter {
 
 	constructor(context: OdpTimingContext, tree: TimingTree, pristine: TimingTree | undefined) {
 		this.fragment = context.fragment
+		this.prefix = context.idPrefix ?? ""
+		this.paragraphIds = context.paragraphIds
 
 		const root = this.fragment === undefined ? -1 : this.sourceOf(tree.root)
 
@@ -1352,7 +1460,8 @@ class OdfTimingWriter {
 		const ids = new Map<number, string>()
 		const visitShapes = (shapes: readonly ShapeNode[]): void => {
 			for (const shape of shapes) {
-				ids.set(shape.id, odpTargetId(shape, this.fragment))
+				ids.set(shape.id, context.ids?.get(shape.id) ?? odpTargetId(shape, this.fragment, this.prefix))
+				this.shapeNodes.set(shape.id, shape)
 
 				if (shape.children !== undefined) visitShapes(shape.children)
 			}
@@ -1390,7 +1499,7 @@ class OdfTimingWriter {
 						: heldId(node)
 					: this.fragment.attributes(source).get("xml:id")
 
-			this.referenced.set(id, own ?? `anim${String(id)}`)
+			this.referenced.set(id, own ?? `${this.prefix}anim${String(id)}`)
 		}
 	}
 
@@ -1486,9 +1595,17 @@ class OdfTimingWriter {
 	}
 
 	private targetName(target: AnimTarget): string | undefined {
-		return target.kind === "slide" || target.kind === "sound"
-			? undefined
-			: (this.targetIds.get(target.shape) ?? `id${String(target.shape)}`)
+		if (target.kind === "slide" || target.kind === "sound") return undefined
+
+		if (target.kind === "text" && target.unit === "para" && target.start === target.end) {
+			const shape = this.shapeNodes.get(target.shape)
+			const given = this.paragraphIds?.get(odpParagraphKey(target.shape, target.start))
+
+			if (given !== undefined) return given
+			if (shape !== undefined) return odpParagraphId(shape, target.start, this.fragment, this.prefix)
+		}
+
+		return this.targetIds.get(target.shape) ?? `${this.prefix}id${String(target.shape)}`
 	}
 
 	private conditionList(conditions: readonly TimeCondition[]): string | undefined {
@@ -1542,6 +1659,9 @@ class OdfTimingWriter {
 		const ctn = node.ctn
 		const preset = presetToOdf(ctn.presetClass, ctn.presetID, ctn.presetSubtype)
 		const xmlId = this.referenced.get(ctn.id)
+		// anim:command takes no timing of its own beyond its begin and end (ODF 1.3 Part 3 §15.6.1, its schema: no
+		// smil:dur, smil:fill, repeats, restart, acceleration or reverse).
+		const timed = !(node.kind === "behavior" && node.behavior.type === "cmd")
 
 		return (
 			attribute(
@@ -1549,6 +1669,23 @@ class OdfTimingWriter {
 				this.waiting.has(node) && node.kind !== "behavior" ? "indefinite" : this.conditionText(node, "smil:begin", ctn.stCondLst)
 			) +
 			attribute("smil:end", this.conditionText(node, "smil:end", ctn.endCondLst)) +
+			(timed ? this.timingAttributes(ctn) : "") +
+			attribute("presentation:node-type", ctn.nodeType === undefined ? undefined : NODE_TYPES_TO_ODF[ctn.nodeType]) +
+			attribute("presentation:preset-class", ctn.presetClass === undefined ? undefined : CLASS_TO_ODF[ctn.presetClass]) +
+			attribute("presentation:preset-id", preset.id ?? ctn.presetName) +
+			attribute("presentation:preset-sub-type", preset.subtype ?? ctn.presetSubtypeName) +
+			attribute("presentation:group-id", ctn.grpId === undefined ? undefined : String(ctn.grpId)) +
+			(xmlId === undefined || this.hasOwnXmlId(node) ? "" : attribute("xml:id", xmlId)) +
+			// ODF 1.3 allows it on containers (common-anim-attlist): a behaviour's goes on the par afterEffect() wraps it in.
+			attribute(
+				"presentation:master-element",
+				node.kind === "behavior" ? undefined : this.referenced.get(this.masters.get(node) ?? -1)
+			)
+		)
+	}
+
+	private timingAttributes(ctn: CommonTimeNode): string {
+		return (
 			attribute("smil:dur", ctn.dur === undefined ? undefined : formatClock(ctn.dur)) +
 			attribute(
 				"smil:repeatCount",
@@ -1563,18 +1700,7 @@ class OdfTimingWriter {
 			attribute("smil:restart", ctn.restart) +
 			attribute("smil:accelerate", ctn.accel === undefined ? undefined : decimal(ctn.accel / 100000)) +
 			attribute("smil:decelerate", ctn.decel === undefined ? undefined : decimal(ctn.decel / 100000)) +
-			attribute("smil:autoReverse", ctn.autoRev === undefined ? undefined : String(ctn.autoRev)) +
-			attribute("presentation:node-type", ctn.nodeType === undefined ? undefined : NODE_TYPES_TO_ODF[ctn.nodeType]) +
-			attribute("presentation:preset-class", ctn.presetClass === undefined ? undefined : CLASS_TO_ODF[ctn.presetClass]) +
-			attribute("presentation:preset-id", preset.id ?? ctn.presetName) +
-			attribute("presentation:preset-sub-type", preset.subtype ?? ctn.presetSubtypeName) +
-			attribute("presentation:group-id", ctn.grpId === undefined ? undefined : String(ctn.grpId)) +
-			(xmlId === undefined || this.hasOwnXmlId(node) ? "" : attribute("xml:id", xmlId)) +
-			// ODF 1.3 allows it on containers (common-anim-attlist): a behaviour's goes on the par afterEffect() wraps it in.
-			attribute(
-				"presentation:master-element",
-				node.kind === "behavior" ? undefined : this.referenced.get(this.masters.get(node) ?? -1)
-			)
+			attribute("smil:autoReverse", ctn.autoRev === undefined ? undefined : String(ctn.autoRev))
 		)
 	}
 

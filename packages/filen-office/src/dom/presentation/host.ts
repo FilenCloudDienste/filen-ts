@@ -3,11 +3,11 @@ import type { Format, PresentationRefusal } from "../../core/presentation/model"
 import { servePresentation, type EngineServices, type OpenCapability, type PresentationEndpoint, type ServeOptions } from "./engine"
 import { presentationTextServices } from "./engine/view"
 import { realmScheduler } from "./scheduler"
-import { installPresentationRealm, type PresentationRealm, type RasterImage } from "./services"
+import { clearTimer, isBitmap, offerSvgPort, setTimer, workerSvgRasterizer, type SvgPortMessage } from "./svgPort"
+import { installPresentationRealm, type PresentationRealm } from "./services"
 import {
 	PRESENTATION_METHODS,
 	transferablesOf,
-	type BitmapLike,
 	type FromPresentationWorker,
 	type PresentationArgs,
 	type PresentationEvent,
@@ -71,194 +71,6 @@ export function servePresentationWorker(scope: PresentationWorkerScope, options:
 	}
 }
 
-// --- SVG pictures, rasterised on the page for the worker ---
-
-// The port a page gives its worker for SVG rasters (posted outside the protocol: it carries no session).
-interface SvgPortMessage {
-	readonly t: "svgPort"
-	readonly port: unknown
-}
-
-interface RasterPort {
-	onmessage: ((event: { readonly data: unknown }) => void) | null
-	postMessage(message: unknown, transfer?: unknown[]): void
-	close?(): void
-}
-
-// The largest SVG a page decodes for the worker, and the longest side it draws.
-const MAX_SVG_BYTES = 16 * 1024 * 1024
-const MAX_SVG_SIDE = 4096
-// How long the worker waits for the page's raster.
-const SVG_TIMEOUT_MS = 10_000
-
-function isSvgPort(data: unknown): data is SvgPortMessage {
-	return (
-		typeof data === "object" && data !== null && (data as { t?: unknown }).t === "svgPort" && (data as { s?: unknown }).s === undefined
-	)
-}
-
-function isPort(value: unknown): value is RasterPort {
-	return typeof value === "object" && value !== null && typeof (value as { postMessage?: unknown }).postMessage === "function"
-}
-
-// The worker's end: asks the page over the port its pool posted, once it arrives; undefined without one.
-function workerSvgRasterizer(scope: PresentationWorkerScope): {
-	readonly rasterize: (bytes: Uint8Array, maxSide: number) => Promise<RasterImage | undefined>
-	stop(): void
-} {
-	let port: RasterPort | undefined
-	let next = 1
-	const waiting = new Map<number, (bitmap: RasterImage | undefined) => void>()
-	const listener = (event: { readonly data: unknown }): void => {
-		if (!isSvgPort(event.data) || !isPort(event.data.port)) return
-
-		port?.close?.()
-		port = event.data.port
-		port.onmessage = answer => {
-			const data = answer.data as { readonly id?: unknown; readonly bitmap?: unknown }
-			const resolve = typeof data.id === "number" ? waiting.get(data.id) : undefined
-
-			if (resolve === undefined) {
-				if (isBitmapLike(data.bitmap)) data.bitmap.close()
-
-				return
-			}
-
-			waiting.delete(data.id as number)
-			resolve(isBitmapLike(data.bitmap) ? data.bitmap : undefined)
-		}
-	}
-
-	scope.addEventListener("message", listener)
-
-	return {
-		rasterize(bytes, maxSide) {
-			const target = port
-
-			if (target === undefined || bytes.length > MAX_SVG_BYTES) return Promise.resolve(undefined)
-
-			const id = next++
-			const copy = bytes.slice()
-
-			return new Promise(resolve => {
-				const timer = setTimer(() => {
-					waiting.delete(id)
-					resolve(undefined)
-				}, SVG_TIMEOUT_MS)
-
-				waiting.set(id, bitmap => {
-					clearTimer(timer)
-					resolve(bitmap)
-				})
-				target.postMessage({ id, bytes: copy, maxSide: Math.min(MAX_SVG_SIDE, Math.max(1, Math.ceil(maxSide))) }, [copy.buffer])
-			})
-		},
-		stop() {
-			scope.removeEventListener("message", listener)
-			port?.close?.()
-
-			for (const resolve of waiting.values()) resolve(undefined)
-
-			waiting.clear()
-		}
-	}
-}
-
-function isBitmapLike(value: unknown): value is RasterImage {
-	return isBitmap(value)
-}
-
-// The width and height an SVG's root gives in user units (its viewBox), for an SVG without a size of its own.
-function viewBoxSize(bytes: Uint8Array): readonly [number, number] | undefined {
-	let head = ""
-
-	for (let k = 0; k < Math.min(bytes.length, 4096); k++) head += String.fromCharCode(bytes[k] ?? 0)
-
-	const box = /<svg\b[^>]*?\bviewBox\s*=\s*["']\s*[-\d.eE+]+[\s,]+[-\d.eE+]+[\s,]+([\d.eE+]+)[\s,]+([\d.eE+]+)/u.exec(head)
-	const width = Number(box?.[1])
-	const height = Number(box?.[2])
-
-	return width > 0 && height > 0 && Number.isFinite(width) && Number.isFinite(height) ? [width, height] : undefined
-}
-
-// The page's end: an SVG decoded by an <img> (no script runs in it) and drawn on a canvas at most `maxSide` on its
-// longer side (an SVG without a width and height of its own takes its viewBox's proportions). Undefined in a realm
-// without images (a worker, Node).
-export function pageSvgRasterizer(scope: unknown): ((bytes: Uint8Array, maxSide: number) => Promise<BitmapLike | undefined>) | undefined {
-	const Image: unknown = Reflect.get(scope as object, "Image")
-	const URL: unknown = Reflect.get(scope as object, "URL")
-	const Blob: unknown = Reflect.get(scope as object, "Blob")
-	const Offscreen: unknown = Reflect.get(scope as object, "OffscreenCanvas")
-
-	if (typeof Image !== "function" || typeof URL !== "function" || typeof Blob !== "function" || typeof Offscreen !== "function")
-		return undefined
-
-	const urls = URL as unknown as { createObjectURL(blob: unknown): string; revokeObjectURL(url: string): void }
-
-	return async (bytes, maxSide) => {
-		if (bytes.length > MAX_SVG_BYTES) return undefined
-
-		const url = urls.createObjectURL(
-			new (Blob as new (parts: unknown[], options: { type: string }) => unknown)([bytes], { type: "image/svg+xml" })
-		)
-
-		try {
-			const image = new (Image as new () => { src: string; naturalWidth: number; naturalHeight: number; decode(): Promise<void> })()
-
-			image.src = url
-			await image.decode()
-
-			const box = viewBoxSize(bytes)
-			const width = image.naturalWidth > 0 ? image.naturalWidth : (box?.[0] ?? 300)
-			const height = image.naturalHeight > 0 ? image.naturalHeight : (box?.[1] ?? 150)
-			const scale = Math.min(MAX_SVG_SIDE, Math.max(1, maxSide)) / Math.max(width, height)
-			const canvas = new (
-				Offscreen as new (
-					width: number,
-					height: number
-				) => {
-					getContext(kind: "2d"): { drawImage(image: unknown, x: number, y: number, w: number, h: number): void } | null
-					transferToImageBitmap(): BitmapLike
-				}
-			)(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)))
-			const context = canvas.getContext("2d")
-
-			if (context === null) return undefined
-
-			context.drawImage(image, 0, 0, Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)))
-
-			return canvas.transferToImageBitmap()
-		} catch {
-			return undefined
-		} finally {
-			urls.revokeObjectURL(url)
-		}
-	}
-}
-
-// Serves a worker's SVG rasters on the page: one channel per worker, its far end posted to the worker.
-function offerSvgPort(worker: PresentationWorkerLike): (() => void) | undefined {
-	const rasterize = pageSvgRasterizer(globalThis)
-	const Channel: unknown = Reflect.get(globalThis, "MessageChannel")
-
-	if (rasterize === undefined || typeof Channel !== "function") return undefined
-
-	const channel = new (Channel as new () => { readonly port1: RasterPort; readonly port2: RasterPort })()
-
-	channel.port1.onmessage = event => {
-		const request = event.data as { readonly id?: unknown; readonly bytes?: unknown; readonly maxSide?: unknown }
-
-		if (typeof request.id !== "number" || !(request.bytes instanceof Uint8Array) || typeof request.maxSide !== "number") return
-
-		void rasterize(request.bytes, request.maxSide).then(bitmap => {
-			channel.port1.postMessage({ id: request.id, bitmap: bitmap ?? null }, bitmap === undefined ? [] : [bitmap])
-		})
-	}
-	worker.postMessage({ t: "svgPort", port: channel.port2 }, [channel.port2])
-
-	return () => channel.port1.close?.()
-}
-
 // --- Page side ---
 
 // The page's handle on a Worker (adapt one; tests use inThreadPresentationWorker).
@@ -301,34 +113,12 @@ export interface PresentationWorkerPool {
 	dispose(): void
 }
 
-// Timers through globalThis: the module type-checks without DOM or Node typings.
-function setTimer(run: () => void, ms: number): unknown {
-	const set: unknown = Reflect.get(globalThis, "setTimeout")
-
-	return typeof set === "function" ? Reflect.apply(set, globalThis, [run, ms]) : undefined
-}
-
-function clearTimer(handle: unknown): void {
-	const clear: unknown = Reflect.get(globalThis, "clearTimeout")
-
-	if (typeof clear === "function") Reflect.apply(clear, globalThis, [handle])
-}
-
 function isFromWorker(data: unknown): data is FromPresentationWorker {
 	return (
 		typeof data === "object" &&
 		data !== null &&
 		typeof (data as { t?: unknown }).t === "string" &&
 		typeof (data as { s?: unknown }).s === "number"
-	)
-}
-
-function isBitmap(value: unknown): value is BitmapLike {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		typeof (value as { close?: unknown }).close === "function" &&
-		typeof (value as { width?: unknown }).width === "number"
 	)
 }
 

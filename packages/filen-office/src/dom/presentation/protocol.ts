@@ -1,4 +1,5 @@
 import type { CompiledTimegraph } from "../../core/anim/model"
+import type { PresentationDesignInfo } from "../../core/presentation/edit/commands/design"
 import type { DeckOp, FileLike, InsertedMedia, SmartArtDefRef } from "../../core/presentation/edit/ops"
 import type { SmartArtInfo } from "../../core/smartart/edit"
 import type {
@@ -14,8 +15,12 @@ import type {
 	TextBody
 } from "../../core/presentation/model"
 import type { SlideRender, TextPage, TextSeed, TransferableTextLayout } from "../../core/presentation/output"
+import type { PlaceholderPrompts } from "../../core/presentation/render/prompts"
 import type { DocxFontFace } from "../docx/protocol"
 import type { TextMailboxTicket } from "./textMailbox"
+import type { ChartData } from "../../core/presentation/edit/apply/chart"
+
+export type { ChartData } from "../../core/presentation/edit/apply/chart"
 
 export type {
 	ActionSummary,
@@ -78,6 +83,8 @@ export interface OpenInfo {
 	readonly source: "bytes" | "range"
 	// The deck's slide show settings (p:showPr, presentation:settings) as the file has them.
 	readonly show?: ShowSettings
+	// The deck's masters as the Design tab shows them (the file's own themes).
+	readonly design?: PresentationDesignInfo
 }
 
 // A layout as the editor offers it: its master, ST_SlideLayoutType ("title", "obj"…) and name, when the file has them.
@@ -234,7 +241,9 @@ export interface ConversionReport {
 }
 
 export interface PresentationSessionApi {
-	render(refs: readonly SlideRef[], options?: { readonly scale?: number }): Promise<readonly SlideRender[]>
+	// prompts: the editor's view of an editable deck: empty placeholders carry their prompt (SlideLayer.prompt) in the
+	// open's prompt strings. Nothing else asks for them.
+	render(refs: readonly SlideRef[], options?: { readonly scale?: number; readonly prompts?: boolean }): Promise<readonly SlideRender[]>
 	// Answers through "thumbs" events.
 	thumbnails(refs: readonly SlideRef[], widthPx: number): Promise<void>
 	textSeed(shape: ShapeRef): Promise<TextSeed>
@@ -271,6 +280,9 @@ export interface PresentationSessionApi {
 	): Promise<BitmapLike>
 	// A diagram's nodes as the text pane lists them, the definitions it names and those the deck embeds.
 	smartArtInfo(target: ShapeRef): Promise<SmartArtInfo>
+	// A chart frame's chart for the Chart tab (info null when the chart does not read) and, with `workbook`, its data
+	// as a workbook for Edit Data (kind "xls": an embedded .xls the first Edit Data turns into an .xlsx part).
+	chartData(target: ShapeRef, options?: { readonly workbook?: boolean }): Promise<ChartData>
 	timegraph(slide: SlideRef): Promise<CompiledTimegraph>
 	layers(slide: SlideRef, widthPx: number, plan: LayerPlan): Promise<readonly ShowLayer[]>
 	// Writes to the save port (pull protocol, ≤ 1 MiB chunks, ≤ 4 in flight).
@@ -306,6 +318,7 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"image",
 	"smartArtPreview",
 	"smartArtInfo",
+	"chartData",
 	"timegraph",
 	"layers",
 	"save",
@@ -324,6 +337,9 @@ export interface PresentationOpenOptions {
 	// Slides rendered first (the window around the slide the page shows), then the rest in order.
 	readonly window?: { readonly from: number; readonly count: number }
 	readonly viewOnly?: boolean
+	// The editor's empty-placeholder prompts in the page's locale: the open window streams with them, and render()
+	// adds them when asked (an editable deck only).
+	readonly prompts?: PlaceholderPrompts
 }
 
 export type PresentationCall = {
@@ -455,6 +471,8 @@ function renderTransferables(render: SlideRender, into: Set<unknown>): void {
 
 	for (const layer of render.layers) {
 		presentationTransferables(layer.drawing, into)
+
+		if (layer.prompt !== undefined) presentationTransferables(layer.prompt, into)
 
 		if (layer.text !== undefined) presentationTransferables(layer.text, into)
 	}

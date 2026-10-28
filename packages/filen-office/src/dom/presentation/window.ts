@@ -46,7 +46,8 @@ export function streamOpenWindow(
 				let renders: readonly SlideRender[] = []
 
 				try {
-					renders = await render({ session, signal, lane: "priority", slicing }, [ref])
+					// With the editor's prompts when the open carries them (an editable deck: view.ts editorPrompts).
+					renders = await render({ session, signal, lane: "priority", slicing }, [ref], { prompts: true })
 				} catch {
 					// A slide that cannot be rendered is left to the page's own request (which gets the typed refusal).
 				}

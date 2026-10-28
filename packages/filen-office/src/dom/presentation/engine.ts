@@ -26,6 +26,8 @@ import {
 	type SourceSpec,
 	type ToPresentationWorker
 } from "./protocol"
+import { designInfo, designLayouts } from "../../core/presentation/edit/apply/design"
+import { chartCapability } from "./engine/chart"
 import { convertCapability } from "./engine/convert"
 import { editCapability } from "./engine/edit"
 import { findCapability } from "./engine/find"
@@ -34,7 +36,7 @@ import { jobsCapability } from "./engine/jobs"
 import { mediaCapability } from "./engine/media"
 import { openOdpCapability } from "./engine/open/odp"
 import { openPptCapability } from "./engine/open/ppt"
-import { openPptxCapability } from "./engine/open/pptx"
+import { openPptxCapability, pptxParts } from "./engine/open/pptx"
 import { saveCapability } from "./engine/save"
 import { showCapability } from "./engine/show"
 import { smartartCapability } from "./engine/smartart"
@@ -87,6 +89,7 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	image: "background",
 	smartArtPreview: "background",
 	smartArtInfo: "priority",
+	chartData: "priority",
 	timegraph: "background",
 	layers: "background",
 	save: "background",
@@ -166,6 +169,7 @@ export type ShowCapability = Capability<"timegraph" | "layers">
 export type FindCapability = Capability<"find">
 export type JobsCapability = Capability<"jobsPort">
 export type ConvertCapability = Capability<"freshParts">
+export type ChartCapability = Capability<"chartData">
 
 // The faces the deck's text is measured and drawn with (bundled substitutes and decoded embedded fonts).
 export interface FontsCapability {
@@ -219,7 +223,8 @@ export const CAPABILITIES = {
 	show: showCapability,
 	find: findCapability,
 	jobs: jobsCapability,
-	convert: convertCapability
+	convert: convertCapability,
+	chart: chartCapability
 } as const
 
 export const SERVICES: EngineServices = { fonts: fontsCapability, smartart: smartartCapability }
@@ -243,6 +248,7 @@ export const METHOD_HANDLERS: Handlers = {
 	...CAPABILITIES.find,
 	...CAPABILITIES.jobs,
 	...CAPABILITIES.convert,
+	...CAPABILITIES.chart,
 	smartArtPreview: (context, ...args) => context.session.services.smartart.smartArtPreview(context, ...args),
 	smartArtInfo: (context, ...args) => context.session.services.smartart.smartArtInfo(context, ...args)
 }
@@ -265,20 +271,7 @@ export function openInfo(deck: Deck, opened: OpenedPackage, viewOnly = opened.vi
 		format: deck.format,
 		variant: deck.variant,
 		slides: deck.slides.map(ref => ({ ref, hidden: deck.nodes.get(ref)?.hidden ?? deck.hiddenSlides?.has(ref) ?? false })),
-		layouts: deck.layouts.flatMap(ref => {
-			const node = deck.nodes.get(ref)
-
-			return node === undefined || node.parent === undefined
-				? []
-				: [
-						{
-							ref,
-							master: node.parent,
-							...(node.layoutType === undefined ? {} : { type: node.layoutType }),
-							...(node.name === undefined ? {} : { name: node.name })
-						}
-					]
-		}),
+		layouts: designLayouts(deck),
 		size: { ...deck.size },
 		notesSize: { ...deck.notesSize },
 		sections: deck.sections,
@@ -289,7 +282,8 @@ export function openInfo(deck: Deck, opened: OpenedPackage, viewOnly = opened.vi
 		locks: opened.locks,
 		packageBytes: opened.bytes,
 		source: opened.sourceKind,
-		show: deck.show
+		show: deck.show,
+		design: designInfo(deck, part => pptxParts(deck)?.theme(part))
 	}
 }
 

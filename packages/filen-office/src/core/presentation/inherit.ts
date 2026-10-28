@@ -430,11 +430,16 @@ export function resolveShape(deck: Deck, slide: SlideRef, shape: ShapeNode, docs
 	// text boxes and date, footer, slide-number and header placeholders (the "other" class) go on to
 	// defaultTextStyle. Measured in LibreOffice 7.5 with a defaultTextStyle the txStyles leave unset; ECMA-376 and
 	// MS-OI29500 §2.1.1388(a) do not name defaultTextStyle in the placeholder chain.
+	// A shape that is no placeholder (a text box) takes defaultTextStyle before the master's otherStyle (PowerPoint's
+	// stored a:spAutoFit heights and LibreOffice 7.5, measured: a text box under an otherStyle of 18 pt and a
+	// defaultTextStyle of 24 pt is 24 pt).
 	const withDefaults = masterStyle === undefined || textClass === "other"
 	const masterListStyles = (masterStyle === undefined ? 0 : 1) + (withDefaults ? 1 : 0)
+	const defaultsFirst = withDefaults && shape.ph === undefined && levels.length === 1
 
+	if (defaultsFirst) listStyles.push(deck.defaultTextStyle)
 	if (masterStyle !== undefined) listStyles.push(masterStyle)
-	if (withDefaults) listStyles.push(deck.defaultTextStyle)
+	if (withDefaults && !defaultsFirst) listStyles.push(deck.defaultTextStyle)
 
 	const bodyLevels: Partial<TextBodyProps>[] = []
 

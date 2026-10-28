@@ -3,6 +3,7 @@ import type { Slicing } from "../../../core/opc/index"
 import { findShape } from "../../../core/presentation/edit/changes"
 import { PresentationError, type Refused, type RunProps, type ShapeRef, type TextBody } from "../../../core/presentation/model"
 import type { SlideLayer, TextPage, TextSeed, TransferableTextLayout } from "../../../core/presentation/output"
+import { editableParagraphs } from "../../../core/presentation/text/editable"
 import { fontRequests, layoutBody, type LayoutOptions, type TextEnvironment } from "../../../core/presentation/text/body"
 import { resolveBody, type BodyContext } from "../../../core/presentation/text/resolve"
 import { transferableLayout } from "../../../core/presentation/text/transfer"
@@ -96,7 +97,8 @@ export async function textSeedOf(context: CallContext, shape: ShapeRef): Promise
 	if (found.kind === "refused") throw new PresentationError(found.reason, found.detail ?? "textSeed")
 
 	const body: TextBody = cellModel?.text ?? model.text ?? { bodyPr: {}, paragraphs: [] }
-	const resolved = resolveBody(body, found.context)
+	// Laid out and resolved as the editor shows it: a body without paragraphs as one empty paragraph.
+	const resolved = resolveBody({ ...body, paragraphs: editableParagraphs(body) }, found.context)
 
 	await found.prepare(fontRequests(resolved))
 

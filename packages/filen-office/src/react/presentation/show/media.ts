@@ -1,7 +1,7 @@
 import type { LayerState } from "../../../core/anim/model"
 import type { SlideLayer, SlideMediaInfo } from "../../../core/presentation/output"
 import type { MediaRefusal, PresentationSessionApi } from "../../../dom/presentation/protocol"
-import type { ShowMediaEvents, ShowMediaHandle, ShowMediaMount } from "./stage"
+import type { ShowMediaEvents, ShowMediaHandle, ShowMediaMount, ShowSoundHandle } from "./stage"
 
 // A medium on a slide as a native <video>/<audio> over its layer, for the show and the editor's canvas alike. The
 // layer's bitmap beneath is the poster: the element is transparent until it has a frame, and nothing is fetched until
@@ -461,6 +461,51 @@ export function showMediaMount(streams: ShowMediaStreams, options: ShowMediaOpti
 			if (media === undefined) return new InertMedia()
 
 			return new MountedMedia(box, layer, media, session, events, streams, options)
-		}
+		},
+		sound: (session, sound) => transitionSound(streams, session, sound)
 	}
+}
+
+// A transition sound: an <audio> element off the page over the medium's stream (the same range path as a medium on a
+// slide), let go when it ends (unless looped) or is stopped. One that cannot be streamed stays silent.
+function transitionSound(
+	streams: ShowMediaStreams,
+	session: PresentationSessionApi,
+	sound: { readonly part: string; readonly loop: boolean }
+): ShowSoundHandle {
+	let stopped = false
+	let element: HTMLAudioElement | undefined
+	let stream: { release(): void } | undefined
+	const stop = (): void => {
+		stopped = true
+
+		if (element !== undefined) {
+			element.pause()
+			element.removeAttribute("src")
+		}
+
+		stream?.release()
+		stream = undefined
+		element = undefined
+	}
+
+	void streams.url(session, { kind: "audio", part: sound.part, contentType: "audio/wav" }).then(result => {
+		if (result.kind !== "url") return
+		if (stopped) {
+			result.release()
+
+			return
+		}
+
+		const audio = globalThis.document.createElement("audio")
+
+		stream = result
+		element = audio
+		audio.loop = sound.loop
+		audio.src = result.url
+		audio.addEventListener("ended", stop, { once: true })
+		void audio.play().catch(() => undefined)
+	})
+
+	return { stop }
 }

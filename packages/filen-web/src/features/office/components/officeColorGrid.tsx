@@ -37,7 +37,7 @@ export function SwatchButton({ rgb, label, chosen, onPick }: { rgb: string; labe
 }
 
 // Word's theme colours and their variations, its standard colours, and the option without one (Automatic or No
-// color). `chosen`: the key of the colour in effect.
+// color) when `none` is given. `chosen`: the key of the colour in effect.
 export function DocxColorGrid({
 	theme,
 	standard,
@@ -48,24 +48,26 @@ export function DocxColorGrid({
 	theme: readonly (readonly DocxSwatch[])[]
 	standard: readonly DocxSwatch[]
 	chosen: string | undefined
-	none: { label: string; key: string }
+	none?: { label: string; key: string } | undefined
 	onPick: (swatch: DocxSwatch | null) => void
 }) {
 	const { t } = useTranslation("preview")
 
 	return (
 		<div className="flex flex-col gap-2">
-			<Button
-				variant="ghost"
-				size="sm"
-				className={cn("justify-start", chosen === none.key && "bg-accent")}
-				onMouseDown={keepFocus}
-				onClick={() => {
-					onPick(null)
-				}}
-			>
-				{none.label}
-			</Button>
+			{none === undefined ? null : (
+				<Button
+					variant="ghost"
+					size="sm"
+					className={cn("justify-start", chosen === none.key && "bg-accent")}
+					onMouseDown={keepFocus}
+					onClick={() => {
+						onPick(null)
+					}}
+				>
+					{none.label}
+				</Button>
+			)}
 			{theme.length > 0 ? (
 				<div
 					role="group"

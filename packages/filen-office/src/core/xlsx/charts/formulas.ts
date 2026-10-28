@@ -72,8 +72,17 @@ export function numericCells(formula: string, cells: ChartCells): boolean {
 }
 
 export function chartFormulaHost(document: XlsxDocument, ownSheet: string): ChartFormulaHost {
-	const cells = documentCells(document)
-	const sheets = new Map(document.worksheets().map(entry => [entry.name.toUpperCase(), entry.name] as const))
+	return cellsFormulaHost(
+		documentCells(document),
+		document.worksheets().map(entry => entry.name),
+		ownSheet
+	)
+}
+
+// The same host over any workbook's cells and its worksheet names (an embedded chart workbook read without the sheet
+// engine).
+export function cellsFormulaHost(cells: ChartCells, sheetNames: readonly string[], ownSheet: string): ChartFormulaHost {
+	const sheets = new Map(sheetNames.map(name => [name.toUpperCase(), name] as const))
 
 	return {
 		reference(text) {

@@ -10,13 +10,13 @@ import { openPptx } from "../core/pptx/package"
 import { decryptionOf } from "../dom/encryption/legacyDecryption"
 import { openEncryptedPackage } from "../dom/encryption/index"
 import { isSealedOfficeFile } from "../dom/encryption/seal"
-import { pptSaveAs } from "../dom/presentation/engine/convert"
 import { CORPUS_DIR } from "./corpusDir"
+import { pptAsPptx } from "./pptConvertFixtures"
 import { msoffcryptoPython } from "./encryption/oracles/msoffcrypto"
 import { buildPpt, concat, container, record } from "./pptFixtures"
 import { budget } from "./timing"
 
-// Save as .pptx of a PowerPoint 97–2003 deck: the converted package written as a file, with the deck's transitions,
+// Download as .pptx of a PowerPoint 97–2003 deck: the converted package written as a file, with the deck's transitions,
 // animations, comments, movies, sounds and embedded objects in it; the same deck always gives the same bytes; an
 // encrypted deck's copy is sealed as Agile under its password.
 
@@ -126,8 +126,11 @@ async function saveAs(source: Uint8Array, password?: string): Promise<Uint8Array
 
 	const sink = memorySink()
 
-	await pptSaveAs(converted.pptx, password, sink)
+	const written = await pptAsPptx(converted, sink, password === undefined ? {} : { password })
+
 	converted.release()
+
+	if ("reason" in written) throw new Error(written.reason)
 
 	return sink.bytes()
 }
@@ -140,7 +143,7 @@ async function partText(file: Uint8Array, name: string): Promise<string> {
 	return new TextDecoder().decode(await opened.parts.opc.read(name))
 }
 
-describe("ppt Save as .pptx", () => {
+describe("ppt Download as .pptx", () => {
 	it("writes the deck with its transitions, animations, comments, media and embedded objects, nothing reported lost", async () => {
 		const source = (await deck()).bytes
 		const converted = await pptToPptx(bytesSource(source))
@@ -248,8 +251,8 @@ describe("ppt Save as .pptx", () => {
 				const first = memorySink()
 				const second = memorySink()
 
-				await pptSaveAs(converted.pptx, undefined, first)
-				await pptSaveAs(converted.pptx, undefined, second)
+				await pptAsPptx(converted, first)
+				await pptAsPptx(converted, second)
 
 				const opened = await openPptx(bytesSource(first.bytes()))
 

@@ -1,19 +1,33 @@
-import { blankDocx, blankOds, blankOdt, blankXlsx } from "@filen/office/core/templates"
+import { blankDocx, blankOdp, blankOds, blankOdt, blankPptx, blankXlsx } from "@filen/office/core/templates"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
 
 // The blank office files New ▸ Office creates.
-export type NewOfficeKind = "docx" | "xlsx" | "odt" | "ods"
+export type NewOfficeKind = "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp"
 
 export const OFFICE_FILE_MIME: Readonly<Record<NewOfficeKind, string>> = {
 	docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 	odt: "application/vnd.oasis.opendocument.text",
-	ods: "application/vnd.oasis.opendocument.spreadsheet"
+	ods: "application/vnd.oasis.opendocument.spreadsheet",
+	odp: "application/vnd.oasis.opendocument.presentation"
 }
 
-// A text document (docx, odt) rather than a spreadsheet: the dialog's wording.
-export function isOfficeDocumentKind(kind: NewOfficeKind): boolean {
-	return kind === "docx" || kind === "odt"
+// What the kind makes, for the dialog's wording.
+export type OfficeFileClass = "document" | "spreadsheet" | "presentation"
+
+export function officeFileClass(kind: NewOfficeKind): OfficeFileClass {
+	switch (kind) {
+		case "docx":
+		case "odt":
+			return "document"
+		case "xlsx":
+		case "ods":
+			return "spreadsheet"
+		case "pptx":
+		case "odp":
+			return "presentation"
+	}
 }
 
 // The kind's extension added unless the name already ends with it: a blank .docx named "notes.txt" would open as text.
@@ -50,5 +64,9 @@ export function officeFileBytes(kind: NewOfficeKind, { locale, sheetName }: Offi
 			return blankOdt({ locale })
 		case "ods":
 			return blankOds({ locale, sheetName })
+		case "pptx":
+			return blankPptx({ locale })
+		case "odp":
+			return blankOdp({ locale })
 	}
 }

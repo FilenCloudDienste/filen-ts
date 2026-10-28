@@ -1,6 +1,6 @@
 import type { ByteSource } from "../../opc/index"
 import { resolvePath, structuralPath, visitSources, type PathStep } from "../../pptx/sourcePath"
-import type { XmlDocument } from "../../xml/index"
+import { NodeKind, type XmlDocument } from "../../xml/index"
 import { refused, type Deck, type Refused, type ShapeNode, type SlideNode, type SourceRef } from "../../presentation/model"
 import { openOdp, type OdpOpenOptions, type OdpParts } from "../read/document"
 import { readOdpTiming } from "../../anim/odf"
@@ -14,6 +14,8 @@ import { odpWriteSource } from "./source"
 // from (or copied from, for a duplicate; or held by an undo) is found again there by its path (element names and
 // positions among same-named siblings), a copied page's refs keep their nodes. styles.xml is copied: its refs move to
 // the new epoch as they are.
+
+const RESOURCE_FILLS: ReadonlySet<string> = new Set(["gradient", "pattern", "picture"])
 
 // What the open takes for a rebase (OdpOpenOptions gains `adopt`).
 type RebaseOptions = OdpOpenOptions & { readonly adopt: Deck }
@@ -31,7 +33,10 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 
 	// Styles a save retired stay known to the session: held markup may still name them.
 	for (const [name, markup] of before.retired) after.retired.set(name, markup)
+	for (const [name, place] of before.retiredAfter) after.retiredAfter.set(name, place)
 	after.adoptHeld(before)
+	// The charts translated for pages parsed before the save, whose objects the saved file holds unchanged.
+	opened.parts.carryCharts(parts)
 	const epoch = opened.parts.epoch
 	const savedContent = opened.parts.content.bytes
 	const key = (src: { readonly part: string; readonly fragment: number }): string => `${src.part}\u0000${String(src.fragment)}`
@@ -60,6 +65,14 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 
 			adoptByOrder(node.shapes, written.slide.shapes, to)
 
+			// A background written through a drawing resource (gradient, pattern, picture) as the file now has it, so
+			// the next save finds the page as it reads and leaves it.
+			if (node.background?.kind === "fill" && RESOURCE_FILLS.has(node.background.fill.kind)) {
+				const read = opened.parts.pageFields(to, to.document.firstChildElement(to.document.documentElement())).background
+
+				if (read !== undefined) node.background = read
+			}
+
 			if (notes !== undefined && written.notes !== undefined) adoptByOrder(notes.shapes, written.notes.shapes, to)
 
 			// Its timing likewise, node for node (an undo may have put nodes back that a path would mistake).
@@ -77,8 +90,18 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 		if (notes !== undefined) rebind(notes, from, to)
 	}
 
-	// Every other ref (styles.xml: masters, notes masters) moves to the new epoch unchanged.
-	visitSources(deck, src => (src.format === "odp" && src.part === "styles.xml" ? { ...src, epoch } : src))
+	// Every other ref (styles.xml: masters, notes masters) moves to the new epoch: unchanged when styles.xml is, else (a
+	// save added drawing resources or master pages before it) onto the same element of the same master page, found by
+	// its name.
+	const moveStyles = stylesMover(parts.stylesFragment, opened.parts.stylesFragment)
+
+	visitSources(deck, src => {
+		if (src.format !== "odp" || src.part !== "styles.xml") return src
+
+		const node = moveStyles(src.node)
+
+		return node === undefined ? src : { ...src, node, epoch }
+	})
 
 	return opened.parts
 
@@ -246,4 +269,50 @@ function resolveBelow(document: XmlDocument, start: number, steps: readonly Path
 	}
 
 	return node
+}
+
+// Where a node of styles.xml is in the saved styles.xml: the same index when the bytes are the same; else, below a
+// master page, the element at its path under the master page of the same style:name; else the element at its path.
+function stylesMover(before: Fragment | undefined, after: Fragment | undefined): (node: number) => number | undefined {
+	if (before === undefined || after === undefined) return node => node
+
+	const a = before.document.bytes
+	const b = after.document.bytes
+
+	if (a.length === b.length && a.every((byte, k) => byte === b[k])) return node => node
+
+	let pages: Map<string, number> | undefined
+	const pagesAfter = (): Map<string, number> => {
+		if (pages !== undefined) return pages
+
+		pages = new Map()
+
+		for (let node = 1; node < after.document.count; node++) {
+			if (after.document.kind(node) !== NodeKind.Element || after.name(node) !== "style:master-page") continue
+
+			const name = after.attributes(node).get("style:name")
+
+			if (name !== undefined && !pages.has(name)) pages.set(name, node)
+		}
+
+		return pages
+	}
+
+	return node => {
+		const path = structuralPath(before.document, node)
+
+		if (path === undefined) return undefined
+
+		let depth = path.length - 1
+
+		for (let at = node; at > 0 && before.document.kind(at) === NodeKind.Element; at = before.document.parent(at), depth--) {
+			if (before.name(at) !== "style:master-page") continue
+
+			const page = pagesAfter().get(before.attributes(at).get("style:name") ?? "")
+
+			return page === undefined ? undefined : resolveBelow(after.document, page, path.slice(depth + 1))
+		}
+
+		return resolvePath(after.document, path)
+	}
 }

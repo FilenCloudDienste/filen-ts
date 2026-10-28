@@ -9,6 +9,7 @@ import {
 	FolderPlusIcon,
 	FolderUpIcon,
 	PlusIcon,
+	PresentationIcon,
 	UploadIcon
 } from "lucide-react"
 import { type PasteDirectory } from "@/features/drive/lib/directoryPaste"
@@ -103,6 +104,14 @@ export function DestinationEntries({ family, actions, paste, clear, offline: off
 						<FileSpreadsheetIcon aria-hidden="true" />
 						{t("driveNewOfficeXlsx")}
 					</Item>
+					<Item
+						onClick={() => {
+							actions.newOffice("pptx")
+						}}
+					>
+						<PresentationIcon aria-hidden="true" />
+						{t("driveNewOfficePptx")}
+					</Item>
 					<Separator />
 					<Sub>
 						<SubTrigger>
@@ -125,6 +134,14 @@ export function DestinationEntries({ family, actions, paste, clear, offline: off
 							>
 								<FileSpreadsheetIcon aria-hidden="true" />
 								{t("driveNewOfficeOds")}
+							</Item>
+							<Item
+								onClick={() => {
+									actions.newOffice("odp")
+								}}
+							>
+								<PresentationIcon aria-hidden="true" />
+								{t("driveNewOfficeOdp")}
 							</Item>
 						</SubContent>
 					</Sub>

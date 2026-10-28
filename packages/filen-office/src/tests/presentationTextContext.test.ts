@@ -152,6 +152,20 @@ describe("presentation text context", () => {
 		h.close()
 	})
 
+	it("seeds a body without paragraphs with the empty line the editor shows, so the caret has a line to sit on", async () => {
+		const h = await harness()
+
+		for (const id of [3, 7]) {
+			const seed = await textSeedOf(h.context, h.ref(id))
+
+			expect(seed.body.paragraphs, String(id)).toEqual([])
+			expect(seed.layout.lineCount, String(id)).toBe(1)
+			expect(seed.resolved, String(id)).toHaveLength(1)
+		}
+
+		h.close()
+	})
+
 	it("lays out typing in a body cleared by the commit before it", async () => {
 		const h = await harness()
 		const target = h.ref(5)

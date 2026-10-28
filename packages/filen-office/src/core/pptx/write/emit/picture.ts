@@ -32,15 +32,15 @@ function edges(name: string, value: EdgeFractions | undefined): string {
 	return value === undefined ? "" : `<a:${name}${attr("l", value.l)}${attr("t", value.t)}${attr("r", value.r)}${attr("b", value.b)}/>`
 }
 
-// The image's relationship id: an existing part related from the owner, an inserted image added as a part (once: a
-// save that wrote it makes it that part).
-function imageId(context: EmitContext, fill: PictureFill): string | Refused {
+// The image's relationship id: an existing part related from the owner, an inserted image added as a part (one part
+// per image in a save, however many shapes and backgrounds use it; a save that wrote it makes it that part).
+export function imageId(context: EmitContext, fill: Pick<PictureFill, "part" | "inserted">): string | Refused {
 	if (fill.part !== undefined) return context.parts.relate(fill.part, IMAGE_RELATIONSHIP)
 	if (fill.inserted === undefined) return refused("malformed", "A picture fill naming no image")
 
 	const image = insertedImage(context.deck, fill.inserted)
 
-	if (image !== undefined) return context.parts.addPart("image", image.bytes, image.contentType).rId
+	if (image !== undefined) return context.parts.addPart("image", image.bytes, image.contentType, { shared: image.bytes }).rId
 
 	// One a committed save wrote: the part it became, related again.
 	const written = insertedImageWritten(context.deck, fill.inserted)

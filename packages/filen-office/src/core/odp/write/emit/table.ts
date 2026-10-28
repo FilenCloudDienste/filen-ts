@@ -10,10 +10,9 @@ import {
 	type TableModel,
 	type Xfrm
 } from "../../../presentation/model"
-import { EMU_PER_PT } from "../../../drawingml/index"
-import { escapeAttribute, escapeText } from "../../../xml/index"
+import { decodeUtf8, escapeAttribute, escapeText } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
-import { OdpStyles, alphaOf, cm, declared, hexColor, isRefused, pt, setProperty, styleChanges, type StyleChanges } from "../styles"
+import { OdpStyles, alphaOf, cm, declared, hexColor, isRefused, setProperty, styleChanges, type StyleChanges } from "../styles"
 import { IDENTITY, OdpShapeWriter, markupOf } from "./shape"
 import { emitOdpText } from "./text"
 
@@ -55,7 +54,8 @@ function border(line: LineProps | "none"): string | Refused {
 
 	if (isRefused(color)) return color
 
-	return `${pt((line.w ?? 9525) / EMU_PER_PT)} solid ${color}`
+	// In cm, to the EMU (a width in pt to four places reads back off by one).
+	return `${cm(line.w ?? 9525)} solid ${color}`
 }
 
 // A cell's properties as table-cell style changes.
@@ -308,12 +308,18 @@ export const emitOdpTable: OdpEmitFamily = {
 		const out: EmitPiece[] = []
 		let replaced = false
 
+		// The shape writer nests this frame in the one it patches, which takes markup only: the frame's kept children (a
+		// replacement image, a title) are written as their source text.
 		for (const piece of pieces) {
-			if (typeof piece === "object" && !(piece instanceof Uint8Array) && piece.hole === tableNode) {
+			if (typeof piece === "string") {
+				out.push(piece)
+			} else if (piece instanceof Uint8Array) {
+				out.push(decodeUtf8(piece))
+			} else if (piece.hole === tableNode) {
 				out.push(declared(markup, fragment.namespaces.inScope(tableNode)))
 				replaced = true
 			} else {
-				out.push(piece)
+				out.push(decodeUtf8(document.raw(piece.hole)))
 			}
 		}
 

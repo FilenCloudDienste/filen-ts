@@ -186,7 +186,7 @@ describe("PowerPoint 97–2003 bar", () => {
 		).toEqual([
 			"2 embedded objects that can't be opened in the copy",
 			"Comments on 1 slide, left out",
-			"Its macros (a VBA project), which a .pptx can't hold"
+			"Its macros (a VBA project), which the copy can't hold"
 		])
 		expect(uploads).toEqual([{ bytes, extension: "pptx" }])
 		expect(toasts.success).toEqual([])

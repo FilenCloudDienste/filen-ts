@@ -9,7 +9,7 @@ import {
 	type PictureSize
 } from "../../../presentation/edit/apply/picture"
 import type { DeckOp, InsertedImage, PictureAdjust } from "../../../presentation/edit/ops"
-import { refused, type Deck, type Refused, type ShapeNode } from "../../../presentation/model"
+import { refused, type Deck, type FillProps, type Refused, type ShapeNode } from "../../../presentation/model"
 import { findShape } from "../../../presentation/edit/changes"
 import type { Slicing } from "../../../opc/index"
 import { decodeUtf8, escapeAttribute } from "../../../xml/index"
@@ -34,8 +34,14 @@ const EXTENSIONS: Readonly<Record<string, string>> = {
 	"image/svg+xml": "svg"
 }
 
-// Entries an image of this save already became, by registry id (one entry per image however many frames show it).
-const entries = new WeakMap<OdpStylesApi, Map<number, string>>()
+// Entries an image of this save already became, by registry id and by content (one entry per distinct image however
+// many frames or backgrounds show it, whatever ids the ops gave it).
+interface SavedImages {
+	readonly ids: Map<number, string>
+	readonly byCrc: Map<number, { readonly path: string; readonly bytes: Uint8Array }[]>
+}
+
+const entries = new WeakMap<OdpStylesApi, SavedImages>()
 
 function crc32(bytes: Uint8Array): number {
 	let crc = 0xffffffff
@@ -49,25 +55,53 @@ function crc32(bytes: Uint8Array): number {
 	return (crc ^ 0xffffffff) >>> 0
 }
 
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+	if (a === b) return true
+	if (a.length !== b.length) return false
+
+	for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
+
+	return true
+}
+
 // The package path of an inserted image: named by its content (a name no source entry has), added once per save.
 function insertedEntry(styles: OdpStylesApi, id: number, image: InsertedImage): string {
 	let held = entries.get(styles)
 
 	if (held === undefined) {
-		held = new Map()
+		held = { ids: new Map(), byCrc: new Map() }
 		entries.set(styles, held)
 	}
 
-	const known = held.get(id)
+	const known = held.ids.get(id)
 
 	if (known !== undefined) return known
 
-	const path = `Pictures/inserted-${crc32(image.bytes).toString(16).padStart(8, "0")}-${String(id)}.${EXTENSIONS[image.contentType] ?? "bin"}`
+	const crc = crc32(image.bytes)
+	const sameCrc = held.byCrc.get(crc) ?? []
+	const same = sameCrc.find(entry => sameBytes(entry.bytes, image.bytes))?.path
+
+	if (same !== undefined) {
+		held.ids.set(id, same)
+
+		return same
+	}
+
+	const path = `Pictures/inserted-${crc.toString(16).padStart(8, "0")}-${String(id)}.${EXTENSIONS[image.contentType] ?? "bin"}`
 
 	styles.addEntry(path, image.bytes, image.contentType)
-	held.set(id, path)
+	held.ids.set(id, path)
+	held.byCrc.set(crc, [...sameCrc, { path, bytes: image.bytes }])
 
 	return path
+}
+
+// The package entry (no leading slash) a picture fill shows: an inserted image added once per distinct content, one a
+// save wrote the entry it became, a source image its own entry.
+export function pictureFillEntry(context: OdpEmitContext, fill: Extract<FillProps, { kind: "picture" }>): string | Refused {
+	const image = imageOf(context, fill)
+
+	return isRefused(image) ? image : image.path
 }
 
 // The entry a fill's image is and the image's own size (for its crop): an inserted image still held is added, one a

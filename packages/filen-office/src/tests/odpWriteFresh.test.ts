@@ -37,10 +37,24 @@ describe.skipIf(FILES.length === 0)("fresh ODP writer", () => {
 		expect(content).toContain('office:version="1.3"')
 		expect([...entries.keys()].filter(name => name.startsWith("Pictures/")).length).toBeGreaterThan(10)
 		expect(texts.join(" ")).toContain("qualifications")
-		expect(fresh.report.omitted).toMatchObject({ "chart frame": 2, "smartart frame": 2 })
+		// Its two charts hold no series (nothing an object could show); its diagrams are written as groups of their shapes.
+		expect(fresh.report.omitted).toMatchObject({ "chart frame": 2 })
+		expect(fresh.report.omitted["smartart frame"]).toBeUndefined()
 		// Tables are written by the table family.
 		expect(fresh.report.omitted["table frame"]).toBeUndefined()
 		expect(content).toContain("<table:table")
+	})
+
+	it("writes a SmartArt diagram from its cached drawing as a group with every node's text", { timeout: budget(120_000) }, async () => {
+		const fresh = await freshFromPptx(new Uint8Array(readFileSync(join(DIRECTORY, "poi__customGeo.pptx"))))
+
+		if ("kind" in fresh) throw new Error(fresh.reason)
+
+		const content = text((await entriesOf(fresh.bytes)).get("content.xml"))
+
+		expect(fresh.report.omitted["smartart frame"]).toBeUndefined()
+		// A node of the deck's first diagram (ppt/diagrams/drawing1.xml), its text box's offset as the shape's insets.
+		expect(content).toMatch(/<draw:g\b[^>]*>(?:(?!<\/draw:g>)[\s\S])*Ohio’s New Learning Standards for English Language Arts/u)
 	})
 
 	it("converts every unencrypted pptx deck into a package that opens with its slide count", { timeout: budget(900_000) }, async () => {

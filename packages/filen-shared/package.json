@@ -21,6 +21,7 @@
 		"./videos": "./src/videos/index.ts",
 		"./videos/transportStreamHead": "./src/videos/transportStreamHead.ts",
 		"./svgProlog": "./src/svgProlog.ts",
+		"./svgThumb": "./src/svgThumb.ts",
 		"./linkPolicy": "./src/linkPolicy.ts",
 		"./desktop": "./src/desktop.ts",
 		"./desktopLock": "./src/desktopLock.ts",

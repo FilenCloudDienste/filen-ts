@@ -154,6 +154,10 @@ class Store implements PresentationStore {
 	private bytes = 0
 	private readonly renders = new Map<SlideRef, SlideRender>()
 	private readonly pendingRenders = new Set<SlideRef>()
+	// Renders a change made stale: shown until their next render arrives (an edit never blanks the slide), each with
+	// the change it waits out (a render asked for before it is still stale).
+	private readonly staleRenders = new Map<SlideRef, number>()
+	private changes = 0
 	// The open window's slides still to arrive by "slides" events.
 	private readonly streamed = new Set<SlideRef>()
 	// The run of render calls for the current window: a new window starts a new run, which ends the old one.
@@ -337,11 +341,13 @@ class Store implements PresentationStore {
 		this.fontsReady = Promise.all([this.fontsReady, ...loads]).catch(() => undefined)
 	}
 
-	private addRenders(renders: readonly SlideRender[]): void {
+	private addRenders(renders: readonly SlideRender[], asked?: { readonly ref: SlideRef; readonly change: number | undefined }): void {
 		let changed = false
 
 		for (const render of renders) {
 			this.pendingRenders.delete(render.ref)
+
+			if (asked?.ref === render.ref && this.staleRenders.get(render.ref) === asked.change) this.staleRenders.delete(render.ref)
 
 			const known = this.renders.get(render.ref)
 
@@ -364,7 +370,8 @@ class Store implements PresentationStore {
 			for (const index of distance === 0 ? [center] : [center + distance, center - distance]) {
 				const ref = slides[index]?.ref
 
-				if (ref !== undefined && !this.renders.has(ref) && !this.pendingRenders.has(ref)) out.push(ref)
+				if (ref !== undefined && (!this.renders.has(ref) || this.staleRenders.has(ref)) && !this.pendingRenders.has(ref))
+					out.push(ref)
 			}
 		}
 
@@ -387,7 +394,10 @@ class Store implements PresentationStore {
 
 			this.pendingRenders.add(ref)
 
-			const call = session.render([ref])
+			const change = this.staleRenders.get(ref)
+
+			// The editor's store (its open carries the prompts) asks for the empty placeholders' prompts.
+			const call = this.config.options.prompts === undefined ? session.render([ref]) : session.render([ref], { prompts: true })
 			const fonts = this.fontsReady
 
 			this.inFlight = { ref, call }
@@ -397,7 +407,7 @@ class Store implements PresentationStore {
 
 				await fonts
 
-				if (!this.disposed) this.addRenders(renders)
+				if (!this.disposed) this.addRenders(renders, { ref, change })
 			} catch {
 				// Aborted, closed or refused: a later window asks again.
 			} finally {
@@ -423,6 +433,7 @@ class Store implements PresentationStore {
 		for (const ref of this.renders.keys()) {
 			if (!this.inWindow(ref, center)) {
 				this.renders.delete(ref)
+				this.staleRenders.delete(ref)
 				dropped = true
 			}
 		}
@@ -446,7 +457,10 @@ class Store implements PresentationStore {
 		const present = new Set(slides.map(slide => slide.ref))
 		let thumbsChanged = false
 
-		for (const ref of event.slides) this.renders.delete(ref)
+		// A changed slide keeps its render until the new one arrives (asked for again below).
+		const change = ++this.changes
+
+		for (const ref of event.slides) if (this.renders.has(ref) || this.pendingRenders.has(ref)) this.staleRenders.set(ref, change)
 
 		for (const [ref, thumb] of this.thumbs) {
 			if (!present.has(ref)) {
@@ -459,6 +473,7 @@ class Store implements PresentationStore {
 		}
 
 		for (const ref of this.renders.keys()) if (!present.has(ref)) this.renders.delete(ref)
+		for (const ref of this.staleRenders.keys()) if (!present.has(ref)) this.staleRenders.delete(ref)
 
 		const center = Math.min(this.snapshot.window, Math.max(0, slides.length - 1))
 

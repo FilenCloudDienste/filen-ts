@@ -21,12 +21,14 @@ import {
 import { tooLarge } from "../../presentation/refusal"
 import { Namespaces, XmlError, decodeUtf8, encodeUtf8, parseXml, parseXmlSliced, type XmlDocument } from "../../xml/index"
 import { Fragment, OdpContext, type TableTemplate } from "./context"
-import { EMU_PER_PT, fillOf } from "./fills"
+import { EMU_PER_PT, fillOf, packagePart } from "./fills"
 import { pageFragment, scanPages, ScanError, type ContentPages, type PageSpan } from "./scan"
 import { CLASS_TYPES, readShapeElements, readShapes, type ShapeScope } from "./shapes"
 import { levelStyle, listStyleOf } from "./text"
 import { readOdpTiming } from "../../anim/odf"
 import { readTransition } from "./transitions"
+import { isPageTransitionPar, pageTransitionSound } from "../../anim/presets/transitions/odf"
+import type { Transition } from "../../anim/model"
 
 // Opening an OpenDocument presentation (.odp, .otp; ODF 1.3 Part 3 §3.2, §10) into the shared model, the reader
 // building the model directly (sources are page fragments, `src.format = "odp"`):
@@ -313,6 +315,26 @@ export class OdpParts {
 		return this.documents.get(partKey(part))
 	}
 
+	// A rebase's reading keeps the charts `from` translated whose object the saved file holds unchanged (same content.xml
+	// by CRC-32 and size): the pages the session parsed before the save are not read again, and their frames name them.
+	carryCharts(from: OdpParts): void {
+		for (const [key, document] of from.documents) {
+			if (this.documents.has(key) || !key.endsWith("/chart.xml")) continue
+
+			const content = `${key.slice(0, key.length - "/chart.xml".length)}/content.xml`
+			const before = from.entries.get(content)
+			const after = this.entries.get(content)
+
+			if (
+				before !== undefined &&
+				after !== undefined &&
+				before.crc32 === after.crc32 &&
+				before.uncompressedSize === after.uncompressedSize
+			)
+				this.documents.set(key, document)
+		}
+	}
+
 	theme(): undefined {
 		return undefined
 	}
@@ -395,20 +417,25 @@ export class OdpParts {
 		context: OdpContext = this.context
 	): { readonly background: SlideNode["background"]; readonly transition: SlideNode["transition"] } {
 		let filter: ReadonlyMap<string, string> | undefined
+		let sound: Transition["sound"]
 
 		for (let child = fragment.document.firstChildElement(page); child >= 0; child = fragment.document.nextSiblingElement(child)) {
-			if (fragment.name(child) === "anim:par") filter = transitionFilter(fragment, child)
+			if (fragment.name(child) === "anim:par") {
+				filter = transitionFilter(fragment, child)
+				sound = transitionSoundOf(fragment, child)
+			}
 		}
 
-		return this.fieldsOf(this.pageStyle(fragment.attributes(page).get("draw:style-name"), "content", context), filter)
+		return this.fieldsOf(this.pageStyle(fragment.attributes(page).get("draw:style-name"), "content", context), filter, sound)
 	}
 
 	private fieldsOf(
 		style: OdfProperties,
-		filter: ReadonlyMap<string, string> | undefined
+		filter: ReadonlyMap<string, string> | undefined,
+		sound: Transition["sound"]
 	): { readonly background: SlideNode["background"]; readonly transition: SlideNode["transition"] } {
 		const attributes = style.attributes
-		const transition = readTransition(attributes, filter)
+		const transition = readTransition(attributes, filter, sound)
 		// The page's own fill, else (when the page hides its master's background) white paper, else the master's.
 		const own = fillOf(style, this.sheet.drawResources)
 		const fill =
@@ -493,6 +520,7 @@ export class OdpParts {
 		let notes: SlideRef | undefined
 		const comments: CommentRef[] = []
 		let filter: ReadonlyMap<string, string> | undefined
+		let sound: Transition["sound"]
 
 		for (let child = page < 0 ? -1 : document.firstChildElement(page); child >= 0; child = document.nextSiblingElement(child)) {
 			const name = fragment.name(child)
@@ -500,10 +528,13 @@ export class OdpParts {
 			if (name === "presentation:notes") notes = this.readNotes(fragment, child, master)
 			else if (name === "officeooo:annotation" || name === "office:annotation")
 				comments.push({ id: `odf-${String(fragment.offset)}-${String(child)}`, part: "content.xml", kind: "odf" })
-			else if (name === "anim:par") filter = transitionFilter(fragment, child)
+			else if (name === "anim:par") {
+				filter = transitionFilter(fragment, child)
+				sound = transitionSoundOf(fragment, child)
+			}
 		}
 
-		const { background, transition } = this.fieldsOf(style, filter)
+		const { background, transition } = this.fieldsOf(style, filter, sound)
 		const timing = page < 0 ? undefined : readOdpTiming(fragment, page, shapes, this.budgets.timing)
 		const layout = this.layoutOf.get(`${head.master}\u0000${head.layout}`)
 		const node: SlideNode = {
@@ -1270,6 +1301,15 @@ export class OdpParts {
 
 		return { show, customShows }
 	}
+}
+
+// The sound of a page's transition par (the first child of its timing root that is one), else undefined.
+function transitionSoundOf(fragment: Fragment, root: number): Transition["sound"] {
+	for (let child = fragment.document.firstChildElement(root); child >= 0; child = fragment.document.nextSiblingElement(child)) {
+		if (isPageTransitionPar(fragment, child)) return pageTransitionSound(fragment, child, packagePart)
+	}
+
+	return undefined
 }
 
 // The transition filter of a page's timing root: the first anim:transitionFilter of the root's first par (§19.391).

@@ -322,6 +322,8 @@ export class ParagraphLayouter {
 	private segFrom = new Int32Array(8)
 	private segTo = new Int32Array(8)
 	private segFill = new Uint8Array(8)
+	// Where the last positioned segment's content starts after alignment: an empty line's position.
+	private segAligned = 0
 	private intervals = new Float64Array(16)
 	private intervalsAgain = new Float64Array(16)
 
@@ -1533,6 +1535,8 @@ export class ParagraphLayouter {
 		const shift = justified || free <= 0 ? 0 : alignment === Alignment.CENTER ? free / 2 : alignment === Alignment.END ? free : 0
 		let u = segStart + shift
 
+		this.segAligned = u
+
 		for (let k = from; k < to; k++) {
 			this.pU[k] = u
 			u += this.pW[k] ?? 0
@@ -1732,10 +1736,9 @@ export class ParagraphLayouter {
 			maxX = Math.max(maxX, (this.pU[k] ?? 0) + (this.pW[k] ?? 0))
 		}
 
+		// An empty line sits where its alignment puts content, as the caret does in Word, PowerPoint and LibreOffice.
 		if (minX === Infinity) {
-			const segStart = this.segStart[s] ?? 0
-
-			minX = g.rtl ? right - segStart : g.left + segStart
+			minX = g.rtl ? right - this.segAligned : g.left + this.segAligned
 			maxX = minX
 		}
 

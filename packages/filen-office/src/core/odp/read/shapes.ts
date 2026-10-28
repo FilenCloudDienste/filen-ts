@@ -365,6 +365,32 @@ function masterStyleOf(context: OdpContext, master: string | undefined, presenta
 	return candidates.find(name => context.hasPresentationStyle(name))
 }
 
+// The master whose style sheet a presentation object uses: the one whose class style ("<master>-title"…) its
+// presentation style derives from, else its page's. LibreOffice reads an object whose style derives from another
+// master's class style (a page moved onto another master without its objects restyled) with that style alone: the
+// page master's class style adds nothing under it.
+function objectMaster(
+	context: OdpContext,
+	presentation: string | undefined,
+	scope: Fragment["scope"],
+	presentationClass: string | undefined,
+	page: string | undefined
+): string | undefined {
+	const suffix = presentationClass === undefined ? undefined : CLASS_STYLES[presentationClass]
+
+	if (suffix === undefined || presentation === undefined) return page
+
+	for (const style of context.resolver.resolve("presentation", presentation, scope).chain) {
+		if (style.automatic || style.isDefault || !style.name.endsWith(`-${suffix}`)) continue
+
+		const master = style.name.slice(0, -suffix.length - 1)
+
+		if (master !== page && context.sheet.masterPages.has(master)) return master
+	}
+
+	return page
+}
+
 function styleOf(context: OdpContext, fragment: Fragment, attributes: ReadonlyMap<string, string>, base: string | undefined): ShapeStyle {
 	const graphic = attributes.get("draw:style-name")
 	const presentation = attributes.get("presentation:style-name")
@@ -889,7 +915,14 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 	const presentationClass = attributes.get("presentation:class")
 	const phType = presentationClass === undefined ? undefined : CLASS_TYPES[presentationClass]
 	const empty = attributes.get("presentation:placeholder") === "true"
-	const style = styleOf(context, fragment, attributes, masterStyleOf(context, scope.masterName, presentationClass))
+	const objectMasterName = objectMaster(
+		context,
+		attributes.get("presentation:style-name"),
+		fragment.scope,
+		presentationClass,
+		scope.masterName
+	)
+	const style = styleOf(context, fragment, attributes, masterStyleOf(context, objectMasterName, presentationClass))
 	const alt = altOf(fragment, node)
 	const action = eventAction(context, fragment, node) ?? link
 	const locks = protectionOf(style.graphic.attributes.get("style:protect"))
@@ -921,7 +954,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 			fragment,
 			attributes,
 			style,
-			outline ? masterStyleOf(context, scope.masterName, "outline") : undefined
+			outline ? masterStyleOf(context, objectMasterName, "outline") : undefined
 		)
 		const asianSize = asianSizeOf(style.text)
 		const body = readTextBody(
@@ -931,7 +964,14 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 			levels.lstStyle
 		)
 
-		return body === undefined ? undefined : { ...body, bodyPr: bodyPrOf(style.graphic, style.paragraph) }
+		// An empty presentation object (no paragraph yet) keeps its levels: what is typed into it, and the editor's prompt,
+		// take the frame's presentation style as its paragraphs would.
+		if (body === undefined)
+			return presentationClass === undefined
+				? undefined
+				: { bodyPr: bodyPrOf(style.graphic, style.paragraph), lstStyle: levels.lstStyle, paragraphs: [] }
+
+		return { ...body, bodyPr: bodyPrOf(style.graphic, style.paragraph) }
 	}
 
 	switch (name) {

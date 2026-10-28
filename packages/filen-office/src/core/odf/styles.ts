@@ -266,6 +266,8 @@ export class OdfStyleSheet {
 	private readonly common = scopeTables()
 	private readonly automaticOf: Readonly<Record<StyleScope, ScopeTables>> = { styles: scopeTables(), content: scopeTables() }
 	private defaultLayout: OdfPageLayout | undefined = undefined
+	// The sheet an overlay (withAutomatic) reads through for what it does not hold itself.
+	private base: OdfStyleSheet | undefined = undefined
 
 	constructor(styles: XmlDocument | undefined, content: ContentPrologue | undefined, deferred = false) {
 		this.stylesDocument = styles
@@ -285,6 +287,34 @@ export class OdfStyleSheet {
 		await runSliced(sheet.read(content), sliceClock(slicing))
 
 		return sheet
+	}
+
+	// This sheet with `content`'s automatic styles added to the content stream's (a written page's new styles read
+	// back): the stream is not read again; what the overlay does not define is this sheet's. The overlay holds its own
+	// copies of what reading a container may add to, so this sheet never changes.
+	withAutomatic(content: ContentPrologue): OdfStyleSheet {
+		const overlay = Object.create(this) as OdfStyleSheet
+		const own = overlay as unknown as {
+			base: OdfStyleSheet
+			automaticOf: Record<StyleScope, ScopeTables>
+			issues: OdfStyleIssue[]
+			defaults: Map<string, OdfStyle>
+			pageLayouts: Map<string, OdfPageLayout>
+			notesConfiguration: Map<string, ReadonlyMap<string, string>>
+		}
+
+		own.base = this
+		own.automaticOf = { styles: this.automaticOf.styles, content: scopeTables() }
+		own.issues = []
+		own.defaults = new Map(this.defaults)
+		own.pageLayouts = new Map(this.pageLayouts)
+		own.notesConfiguration = new Map(this.notesConfiguration)
+
+		const steps = overlay.readStream(content.document, content.namespaces, content.root, "content")
+
+		while (steps.next().done !== true) continue
+
+		return overlay
 	}
 
 	get defaultPageLayout(): OdfPageLayout | undefined {
@@ -321,7 +351,7 @@ export class OdfStyleSheet {
 
 		const pending = tables.pending.get(styleKey)
 
-		if (pending === undefined) return undefined
+		if (pending === undefined) return this.base?.automaticStyle(scope, styleKey)
 
 		const style = this.readStyle(readElement(pending.document, pending.namespaces, pending.node), true, pending.origin)
 
@@ -341,6 +371,8 @@ export class OdfStyleSheet {
 		for (const table of [tables.styles, tables.pending]) {
 			for (const styleKey of table.keys()) if (styleKey.startsWith(prefix)) yield styleKey.slice(prefix.length)
 		}
+
+		if (this.base !== undefined && tables !== this.base.automaticOf[scope]) yield* this.base.automaticNames(family, scope)
 	}
 
 	// Common styles only: what style:parent-style-name and style:next-style-name refer to (§19.510).
@@ -349,11 +381,11 @@ export class OdfStyleSheet {
 	}
 
 	listStyle(name: string, scope: StyleScope): OdfListStyle | undefined {
-		return this.automaticOf[scope].lists.get(name) ?? this.common.lists.get(name)
+		return this.automaticOf[scope].lists.get(name) ?? this.base?.listStyle(name, scope) ?? this.common.lists.get(name)
 	}
 
 	dataStyle(name: string, scope: StyleScope): OdfDataStyle | undefined {
-		return this.automaticOf[scope].data.get(name) ?? this.common.data.get(name)
+		return this.automaticOf[scope].data.get(name) ?? this.base?.dataStyle(name, scope) ?? this.common.data.get(name)
 	}
 
 	// Common styles of a family, in no particular order (style pickers).

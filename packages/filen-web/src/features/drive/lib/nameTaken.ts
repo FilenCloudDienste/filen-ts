@@ -15,3 +15,12 @@ export async function nameTakenInDirectory(parentUuid: string | null, name: stri
 
 	return items.some(item => nameCollisionKey(driveItemName(item)) === wanted)
 }
+
+// Every name the "drive" directory holds, as nameCollisionKey keys them, from the same listing (one read at most).
+export async function takenNamesInDirectory(parentUuid: string | null): Promise<ReadonlySet<string>> {
+	flushListingCreates()
+
+	const items = await queryClient.query(driveListingQueryOptions("drive", parentUuid))
+
+	return new Set(items.map(item => nameCollisionKey(driveItemName(item))))
+}

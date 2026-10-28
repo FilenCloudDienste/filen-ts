@@ -2,6 +2,10 @@ import type { ByteSink } from "../../../core/opc/index"
 import type { Refused, SlideRef } from "../../../core/presentation/model"
 import type { CallSignal } from "../engine"
 import type { ConversionReport, PortLike, PresentationSessionApi } from "../protocol"
+import type { PdfSecurityKey } from "../../../core/pdfwrite/crypto"
+import type { JobDeckInfo, NotesPageExport, SlideExport } from "../../../core/presentation/pages"
+import type { DocxFontFace } from "../../docx/protocol"
+import type { DocxPdfExportReport } from "../../docx/pdfClient"
 import { convertJob } from "./convert"
 import { pdfJob } from "./pdf"
 import { rasterJob } from "./raster"
@@ -21,6 +25,9 @@ export interface PdfJobRequest {
 	readonly includeHidden: boolean
 	// Encrypt with the source's password (asked of the session, never sent here).
 	readonly protect: boolean
+	readonly title?: string
+	readonly lang?: string
+	readonly deterministic?: boolean
 }
 
 export interface RasterJobRequest {
@@ -43,8 +50,17 @@ export interface JobRequests {
 	readonly convert: ConvertJobRequest
 }
 
+export interface JobSessionExports {
+	deckInfo?(): Promise<JobDeckInfo>
+	exportSlides?(refs: readonly SlideRef[]): Promise<readonly SlideExport[]>
+	notesPage?(slide: SlideRef): Promise<NotesPageExport>
+	image?(part: string): ReturnType<PresentationSessionApi["image"]>
+	faces?(): Promise<readonly DocxFontFace[]>
+	pdfSecurity?(): Promise<PdfSecurityKey | undefined>
+}
+
 // The session as a job reads it.
-export type JobSession = Pick<PresentationSessionApi, "render" | "media" | "freshParts">
+export type JobSession = Pick<PresentationSessionApi, "render" | "media" | "freshParts"> & JobSessionExports
 
 export interface JobContext {
 	readonly session: JobSession
@@ -54,7 +70,15 @@ export interface JobContext {
 }
 
 export type JobOutcome =
-	{ readonly kind: "done"; readonly bytes: number; readonly contentType: string; readonly report?: ConversionReport } | Refused
+	| {
+			readonly kind: "done"
+			readonly bytes: number
+			readonly contentType: string
+			readonly report?: ConversionReport
+			// A PDF's content drawn approximately or left out, as the Word document's PDF export reports it.
+			readonly pdf?: DocxPdfExportReport
+	  }
+	| Refused
 
 export interface JobDefinition<K extends JobKind> {
 	run(request: JobRequests[K], context: JobContext): Promise<JobOutcome>

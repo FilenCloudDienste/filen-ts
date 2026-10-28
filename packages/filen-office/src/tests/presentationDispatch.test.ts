@@ -61,6 +61,7 @@ const SAMPLE_OPS: { readonly [F in DeckOpFamily]: OpOf<F> } = {
 
 // What the slices have built so far: the loops below cover only what still refuses as notImplemented.
 const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set([
+	"design",
 	"slide",
 	"shape",
 	"text",
@@ -69,9 +70,13 @@ const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set([
 	"smartart",
 	"ink",
 	"media",
-	"presentation"
+	"presentation",
+	"transition",
+	"chart",
+	"timing"
 ])
 const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
+	"design",
 	"shape",
 	"slide",
 	"text",
@@ -80,9 +85,12 @@ const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"picture",
 	"smartart",
 	"ink",
-	"presentation"
+	"presentation",
+	"transition",
+	"chart"
 ])
 const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
+	"design",
 	"shape",
 	"slide",
 	"text",
@@ -91,9 +99,12 @@ const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"picture",
 	"smartart",
 	"ink",
-	"presentation"
+	"presentation",
+	"transition",
+	"chart"
 ])
 const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
+	"jobsPort",
 	"command",
 	"undo",
 	"redo",
@@ -101,7 +112,10 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"commitSaved",
 	"find",
 	"smartArtInfo",
-	"registerMedia"
+	"registerMedia",
+	"chartData",
+	"freshParts",
+	"jobsPort"
 ])
 
 const context: ApplyContext = {
@@ -134,7 +148,7 @@ describe("presentation dispatch seams", () => {
 			const before = structuredClone(deck)
 			const op = SAMPLE_OPS[family]
 
-			// A family built in part (timing: setTiming) names the kind it does not apply yet.
+			// A family built in part names the kind it does not apply yet.
 			expect(applyOp(deck, op, context), family).toMatchObject({ kind: "refused", reason: "notImplemented" })
 			expect((applyOp(deck, op, context) as { readonly detail?: string }).detail, family).toMatch(
 				new RegExp(`^apply ${family}( |$)`, "u")
@@ -279,7 +293,7 @@ describe("presentation dispatch seams", () => {
 		}
 	})
 
-	it("registers the pdf, raster and convert jobs, each refusing as notImplemented", async () => {
+	it("registers the pdf, raster and convert jobs; the exports refuse as notImplemented without a jobs realm", async () => {
 		expect(Object.keys(PRESENTATION_JOBS).sort()).toEqual(["convert", "pdf", "raster"])
 
 		const job: JobContext = {
@@ -296,17 +310,12 @@ describe("presentation dispatch seams", () => {
 		expect(await runPresentationJob("pdf", { layout: "slides", includeHidden: false, protect: false }, job)).toEqual({
 			kind: "refused",
 			reason: "notImplemented",
-			detail: "pdf job"
+			detail: "pdf job: no jobs realm"
 		})
 		expect(await runPresentationJob("raster", { format: "png", widthPx: 1920, zip: true }, job)).toEqual({
 			kind: "refused",
 			reason: "notImplemented",
-			detail: "raster job"
-		})
-		expect(await runPresentationJob("convert", { target: "odp" }, job)).toEqual({
-			kind: "refused",
-			reason: "notImplemented",
-			detail: "convert job"
+			detail: "raster job: no canvas"
 		})
 	})
 

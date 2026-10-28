@@ -1,4 +1,4 @@
-import { OdfStyleSheet, readContentPrologue } from "../../odf/index"
+import { readContentPrologue } from "../../odf/index"
 import { emitOdp } from "./emit"
 import { emitFamilyOf } from "../../pptx/write/emit"
 import { markupBytes, type ProofTally } from "../../presentation/edit/proof"
@@ -89,6 +89,54 @@ function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): 
 	}
 }
 
+interface DeckPages {
+	readonly slides: readonly SlideRef[]
+	readonly length: number
+	readonly revision: number
+	// Each page's name as the writer names it, the page a name reads back as, and each page's place.
+	readonly names: ReadonlyMap<SlideRef, string>
+	readonly pages: ReadonlyMap<string, SlideRef>
+	readonly index: ReadonlyMap<SlideRef, number>
+}
+
+// The deck's pages as every page's proof reads them, made once per deck state (an op proving every page reads them
+// a thousand times over).
+const deckPagesCache = new WeakMap<Deck, DeckPages>()
+
+function deckPages(deck: Deck, parts: OdpWriteSource["parts"]): DeckPages {
+	const held = deckPagesCache.get(deck)
+
+	if (held !== undefined && held.slides === deck.slides && held.length === deck.slides.length && held.revision === deck.revision)
+		return held
+
+	const names = pageNames(
+		deck,
+		ref => deck.nodes.get(ref)?.name ?? parts.pageName(ref),
+		ref => {
+			const own = parts.pageName(ref)
+
+			return own !== undefined && own === (deck.nodes.get(ref)?.name ?? own)
+		}
+	)
+	// A jump written to a page reads back as the session's ref for it.
+	const pages = new Map<string, SlideRef>()
+
+	for (const [ref, name] of names) if (!pages.has(name)) pages.set(name, ref)
+
+	const made: DeckPages = {
+		slides: deck.slides,
+		length: deck.slides.length,
+		revision: deck.revision,
+		names,
+		pages,
+		index: new Map(deck.slides.map((ref, at) => [ref, at]))
+	}
+
+	deckPagesCache.set(deck, made)
+
+	return made
+}
+
 // Proves every source shape of a slide once, locking the ones that fail (as proveSlide does for pptx).
 export function proveOdpSlide(input: OdpProofInput): ProofTally {
 	const { deck, slide, source } = input
@@ -104,15 +152,7 @@ export function proveOdpSlide(input: OdpProofInput): ProofTally {
 
 	if (fragment === undefined || src?.format !== "odp") return { shapes, locked, movable, failures }
 
-	const names = pageNames(
-		deck,
-		ref => deck.nodes.get(ref)?.name ?? parts.pageName(ref),
-		ref => {
-			const own = parts.pageName(ref)
-
-			return own !== undefined && own === (deck.nodes.get(ref)?.name ?? own)
-		}
-	)
+	const { names, pages, index } = deckPages(deck, parts)
 	const taken = takenInStreams(parts)
 	const fragments = new WeakMap([[fragment.document, fragment]])
 	const styles = new OdpStyles(
@@ -154,11 +194,6 @@ export function proveOdpSlide(input: OdpProofInput): ProofTally {
 	}
 
 	if (attempts.length > 0) {
-		// The pages as the writer names them: a jump written to a page reads back as the session's ref for it.
-		const pages = new Map<string, SlideRef>()
-
-		for (const [ref, name] of names) if (!pages.has(name)) pages.set(name, ref)
-
 		const read = readBack(
 			parts,
 			fragment,
@@ -166,15 +201,15 @@ export function proveOdpSlide(input: OdpProofInput): ProofTally {
 			attempts.map(attempt => attempt.bytes),
 			pages
 		)
-		const at = deck.slides.indexOf(slide.ref)
+		const at = index.get(slide.ref) ?? -1
 		const jumps =
 			at < 0
 				? undefined
 				: {
 						at,
 						count: deck.slides.length,
-						expected: (ref: SlideRef) => deck.slides.indexOf(ref),
-						read: (ref: SlideRef) => deck.slides.indexOf(ref)
+						expected: (ref: SlideRef) => index.get(ref) ?? -1,
+						read: (ref: SlideRef) => index.get(ref) ?? -1
 					}
 
 		attempts.forEach((attempt, index) => {
@@ -208,6 +243,22 @@ export function proveOdpSlide(input: OdpProofInput): ProofTally {
 	}
 }
 
+// The content root's start tag (its namespace declarations), read once per reading's stream.
+const rootOpens = new WeakMap<Uint8Array, Uint8Array>()
+
+function rootOpen(content: Uint8Array): Uint8Array {
+	let open = rootOpens.get(content)
+
+	if (open === undefined) {
+		const { document, root } = readContentPrologue(content)
+
+		open = document.bytes.slice(document.start(root), document.isSelfClosing(root) ? document.start(root) : document.contentStart(root))
+		rootOpens.set(content, open)
+	}
+
+	return open
+}
+
 // The written elements read by the reader, with the styles the writing made added to the content's automatic ones.
 function readBack(
 	parts: OdpWriteSource["parts"],
@@ -219,16 +270,20 @@ function readBack(
 	const added = styles.markup(elements.map(element => decodeUtf8(element, 0, element.length)))
 	let sheet = parts.sheet
 
+	// The new styles read over the reading's sheet: the content stream is never read again for a page.
 	if (!styles.empty) {
-		const content = parts.content.bytes
-		const prologue = readContentPrologue(content)
-		const head = content.subarray(0, prologue.bodyStart)
 		const marker = encodeUtf8(`<office:automatic-styles>${added}</office:automatic-styles>`)
 
-		sheet = new OdfStyleSheet(
-			parts.sheet.stylesDocument,
-			readContentPrologue(concat(head, marker, encodeUtf8("<office:body/>"), parts.content.rootClose))
-		)
+		// A stream of the new styles alone: nothing before office:body to cut out, so it is read as it is.
+		const document = parseXml(concat(rootOpen(parts.content.bytes), marker, encodeUtf8("<office:body/>"), parts.content.rootClose))
+
+		sheet = parts.sheet.withAutomatic({
+			document,
+			namespaces: new Namespaces(document),
+			root: document.documentElement(),
+			bodyStart: -1,
+			sliced: false
+		})
 	}
 
 	// A context of its own: the reading never counts against the deck's tallies.

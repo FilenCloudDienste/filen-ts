@@ -43,6 +43,7 @@ export const RELATIONSHIP_TYPES: { readonly [K in PptxPartKind]: string } = {
 	chartStyle: `${MS_RELATIONSHIPS_2011}chartStyle`,
 	chartColors: `${MS_RELATIONSHIPS_2011}chartColorStyle`,
 	embeddedWorkbook: `${RELATIONSHIPS}package`,
+	oleObject: `${RELATIONSHIPS}oleObject`,
 	diagramData: `${RELATIONSHIPS}diagramData`,
 	diagramLayout: `${RELATIONSHIPS}diagramLayout`,
 	diagramStyle: `${RELATIONSHIPS}diagramQuickStyle`,
@@ -88,6 +89,7 @@ const NAME_TEMPLATES: { readonly [K in PptxPartKind]: readonly [string, string, 
 	chartStyle: ["ppt/charts/", "style", ".xml"],
 	chartColors: ["ppt/charts/", "colors", ".xml"],
 	embeddedWorkbook: ["ppt/embeddings/", "Microsoft_Excel_Worksheet", ".xlsx"],
+	oleObject: ["ppt/embeddings/", "Microsoft_Excel_97-2003_Worksheet", ".xls"],
 	diagramData: ["ppt/diagrams/", "data", ".xml"],
 	diagramLayout: ["ppt/diagrams/", "layout", ".xml"],
 	diagramStyle: ["ppt/diagrams/", "quickStyle", ".xml"],
@@ -304,6 +306,12 @@ export class PackageWriter {
 	private readonly replaced = new Map<string, PartBytes>()
 	private readonly relationshipEdits = new Map<string, RelationshipsEdit>()
 	private readonly added = new Map<string, AddedPart>()
+	// Parts this save added as copies of another (copyPart).
+	private readonly copies = new Set<string>()
+	// Targets of relationships an emit dropped (unrelate), removed with their orphans when nothing relates them.
+	private readonly unrelated: string[] = []
+	// Parts added under an addPart `shared` key in this save.
+	private readonly sharedParts = new WeakMap<object, string>()
 	private readonly removed = new Set<string>()
 	private readonly overrides = new Map<string, string>()
 	// Every name taken: base parts (removed ones too: a removed name is never reused in the same save) and new ones.
@@ -498,6 +506,17 @@ export class PackageWriter {
 		return edit
 	}
 
+	// The zip name of a part this save added, its relationships edit made (a new part has none to load).
+	private addedSource(part: string): string {
+		const name = part.startsWith("/") ? part.slice(1) : part
+		const key = partKey(name)
+
+		if (!this.added.has(key)) throw new PresentationError("failed", `${name} is not a part this save added`)
+		if (!this.relationshipEdits.has(key)) this.relationshipEdits.set(key, new RelationshipsEdit(name, []))
+
+		return name
+	}
+
 	// A relationship from `source` to `target` of `type`, reused when one exists.
 	relate(source: string, target: string, type: string, external = false): string {
 		const edit = this.relationshipsOf(source)
@@ -523,14 +542,34 @@ export class PackageWriter {
 		return {
 			owner,
 			addPart: (kind, content, contentType, options) => {
+				const shared = options?.shared === undefined ? undefined : this.sharedParts.get(options.shared)
+
+				if (shared !== undefined) return { part: `/${shared}`, rId: this.relate(ownerName, shared, RELATIONSHIP_TYPES[kind]) }
+
 				const name = this.allocate(kind, contentType)
+
+				if (options?.shared !== undefined) this.sharedParts.set(options.shared, name)
 
 				this.add(name, contentType, content, options?.crc32 === undefined ? {} : { crc32: options.crc32 })
 
-				const rId = this.relate(ownerName, name, RELATIONSHIP_TYPES[kind])
+				const source = options?.from === undefined ? ownerName : this.addedSource(options.from)
+				const rId =
+					options?.id === undefined
+						? this.relate(source, name, RELATIONSHIP_TYPES[kind])
+						: this.relationshipsOf(source).add(RELATIONSHIP_TYPES[kind], name, false, options.id)
 
 				return { part: `/${name}`, rId }
 			},
+			relateFrom: (from, target, type, options) => {
+				const source = this.addedSource(from)
+				const external = options?.external === true
+				const to = external ? target : target.startsWith("/") ? target.slice(1) : target
+
+				return options?.id === undefined
+					? this.relate(source, to, type, external)
+					: this.relationshipsOf(source).add(type, to, external, options.id)
+			},
+			has: part => this.exists(part.startsWith("/") ? part.slice(1) : part),
 			relate: (target, type, external) =>
 				this.relate(
 					ownerName,
@@ -552,6 +591,30 @@ export class PackageWriter {
 				this.replace(name, content)
 
 				return true
+			},
+			replaceCopy: (part, content) => {
+				const name = part.startsWith("/") ? part.slice(1) : part
+
+				if (!this.copies.has(partKey(name))) return false
+
+				this.replace(name, content)
+
+				return true
+			},
+			unrelate: rId => {
+				const edit = this.relationshipsOf(ownerName)
+				const relationship = edit.byId(rId)
+
+				if (relationship === undefined) return
+
+				edit.remove(rId)
+
+				if (!relationship.external) this.unrelated.push(relationship.target)
+			},
+			targetFrom: (from, rId) => {
+				const relationship = this.relationshipEdits.get(partKey(from.startsWith("/") ? from.slice(1) : from))?.byId(rId)
+
+				return relationship === undefined || relationship.external ? undefined : `/${relationship.target}`
 			},
 			editor: part => this.editor(part.startsWith("/") ? part.slice(1) : part)
 		}
@@ -589,6 +652,7 @@ export class PackageWriter {
 			name !== undefined && !this.opc.has(name) && this.claim(name) ? name : this.allocate(undefined, contentType, like ?? source)
 
 		this.add(target, contentType, await this.opc.read(source), { compress: this.opc.entry(source)?.method !== 0 })
+		this.copies.add(partKey(target))
 		await this.copyRelationships(source, target, backFrom ?? source, backTo ?? target)
 
 		return target
@@ -759,6 +823,23 @@ export class PackageWriter {
 		}
 
 		return gone
+	}
+
+	// The base parts emits unrelated (PartsApi.unrelate) that nothing relates now, removed with what only they kept.
+	async removeUnrelated(dangling: (source: string, relationship: PendingRelationship) => Promise<void>): Promise<void> {
+		if (this.unrelated.length === 0) return
+
+		const live = this.liveRelationships(await this.everyRelationship())
+		const related = new Set<string>()
+
+		for (const { all } of live.values())
+			for (const relationship of all) if (!relationship.external) related.add(partKey(relationship.target))
+
+		const loose = [...new Set(this.unrelated.map(partKey))].filter(key => !related.has(key) && this.opc.entry(key) !== undefined)
+
+		this.unrelated.length = 0
+
+		if (loose.length > 0) await this.removeWithOrphans(loose, dangling)
 	}
 
 	patchAfter(name: string, patch: (document: XmlDocument, editor: XmlEditor) => void): void {

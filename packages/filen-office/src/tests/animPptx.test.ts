@@ -127,7 +127,7 @@ describe("pptx timing", () => {
 				common: { target: { kind: "text", shape: 3, unit: "para", start: 0, end: 0 } }
 			}
 		})
-		expect(tree.builds).toEqual([{ kind: "bldP", shape: 3, grpId: 0, build: "p" }])
+		expect(tree.builds).toEqual([{ kind: "bldP", src: expect.objectContaining({ format: "pptx" }), shape: 3, grpId: 0, build: "p" }])
 	})
 
 	it("writes untouched timing as its source span", () => {

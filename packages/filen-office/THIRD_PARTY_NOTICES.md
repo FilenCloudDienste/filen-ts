@@ -288,6 +288,304 @@ This file incorporates work covered by the following license notice:
   the License at http://www.apache.org/licenses/LICENSE-2.0 .
 ```
 
+## Bundled fonts (SIL Open Font License 1.1)
+
+- Source: the upstream repositories and commits below; every file, its upstream URL and both SHA-256 sums are recorded in `assets/fonts/manifest.json`.
+- Licence: SIL Open Font License, Version 1.1. Each family's licence text ships beside its files (`assets/fonts/<family>/OFL.txt`, Selawik `LICENSE.txt`) and must be served with them.
+- Use: Carlito, Caladea, Arimo, Tinos, Cousine, Gelasio and Selawik draw documents that name Calibri, Cambria, Arial, Times New Roman, Courier New, Georgia and Segoe UI (`src/core/fonts/substitutes.ts`); their `.ttf.gz` faces and the Noto families are fetched only for PDF export.
+
+### Substitutes
+
+#### Carlito 1.104
+
+- Source: https://github.com/googlefonts/carlito (`3a810cab78ebd6e2e4eed42af9e8453c4f9b850a`)
+- Copyright: Copyright 2013 The Carlito Project Authors (https://github.com/googlefonts/carlito), with Reserved Font Name "Carlito"
+- Licence: OFL-1.1 (`assets/fonts/carlito/OFL.txt`); Reserved Font Name "Carlito"
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/carlito/Carlito-Regular.woff2` `061d116e1dd01e0b61356a1717711ac681e839c968b800cb8ee3a5eb4e73c905`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Regular.ttf `f6418f708baede9789daef5d458c0f53d2a888af9820e8062934e504fedc6595`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/carlito/Carlito-Italic.woff2` `4f6241e74e08ddba83b5bc1ec4b8b2033375ed9ff6dc424511d5dd9c336f5cc3`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Italic.ttf `0b019225e58d702bfedcbd35c21696769f8ee115cb6343f84c2f240312450d1c`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/carlito/Carlito-Bold.woff2` `6cb112074d0b2da2223dd93beaec10660a9cf6fb02ea71dc36224ce2d18a7ed8`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Bold.ttf `bb5d20f79b82599ec72983597437373a80f2d2085fa91fc144fd74e876a594db`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/carlito/Carlito-BoldItalic.woff2` `09944164ea569abe2bc19db633fee60ab2d2eb67a12c3740aec2116d611c45db`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-BoldItalic.ttf `b32928186c119599e03ca6a1ffc680fdcb7fac95772f4b95d989cf6cd3861517`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/carlito/Carlito-Regular.ttf.gz` `95ef987010e277155c93d943f18314eb46aadefd4c91c7917ad070ab1523bdb4`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Regular.ttf `f6418f708baede9789daef5d458c0f53d2a888af9820e8062934e504fedc6595`; gzip-compressed, font data unchanged
+  - `assets/fonts/carlito/Carlito-Italic.ttf.gz` `37f25969e46a18d5b286b8e17409f79fa5b2414abef5bca4ec273d9926ac38b1`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Italic.ttf `0b019225e58d702bfedcbd35c21696769f8ee115cb6343f84c2f240312450d1c`; gzip-compressed, font data unchanged
+  - `assets/fonts/carlito/Carlito-Bold.ttf.gz` `525e941c926a01240059071b69d4b3808455c2972a4cb1d768d6f5137bbcd51a`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-Bold.ttf `bb5d20f79b82599ec72983597437373a80f2d2085fa91fc144fd74e876a594db`; gzip-compressed, font data unchanged
+  - `assets/fonts/carlito/Carlito-BoldItalic.ttf.gz` `cc74941c6279902b35247b864908051e71e98c314aab763214fd2121b51ec1e1`; upstream https://raw.githubusercontent.com/googlefonts/carlito/3a810cab78ebd6e2e4eed42af9e8453c4f9b850a/fonts/ttf/Carlito-BoldItalic.ttf `b32928186c119599e03ca6a1ffc680fdcb7fac95772f4b95d989cf6cd3861517`; gzip-compressed, font data unchanged
+
+#### Caladea 1.001
+
+- Source: https://github.com/googlefonts/caladea (`336a529cfad3d103d6527752686f8331d13e820a`)
+- Copyright: Copyright 2012 The Caladea Project Authors (https://github.com/huertatipografica/Caladea)
+- Licence: OFL-1.1 (`assets/fonts/caladea/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/caladea/Caladea-Regular.woff2` `ff87986b38cf673033b9f2e5767e186580ebbdac8a8631fdd6a159a380f6d568`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-Regular.ttf `f1e899278b7b4491aba5b6a8253c4b04c050cc59b21865be5c37559a775153cd`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/caladea/Caladea-Italic.woff2` `93288b02286710f775182c4f787fdd8da3142b9171b59d3d20eecfbac99ecfc5`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-Italic.ttf `4359a8e24f748b6447b1ff6d7a174febe70961d29f8bb8634b56dacd740a3deb`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/caladea/Caladea-Bold.woff2` `19c917451b974c27ff8dd95ec45b898064632f2dfe90c2823a06e71bd81d1571`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-Bold.ttf `ae3cb2dcbc925809dd29d2a44e9802211cab66be541bacbfc9c08c74b27c3742`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/caladea/Caladea-BoldItalic.woff2` `2907e7c21f11f1c6782e31329276d80d52e0dd2262126402bf4f032b1b897f02`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-BoldItalic.ttf `ccabaa7b7e2fdf253d2b1a5fa699dd8a3df8d835a9eb285ad82631a677eb76c0`; WOFF2-compressed, font data unchanged (not a Modified Version, OFL FAQ 2.2.1)
+  - `assets/fonts/caladea/Caladea-Regular.ttf.gz` `333db46545dbc56bcd21426b6faf38c28ab386a2feb52651adbf8a6d072ee5b2`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-Regular.ttf `f1e899278b7b4491aba5b6a8253c4b04c050cc59b21865be5c37559a775153cd`; gzip-compressed, font data unchanged
+  - `assets/fonts/caladea/Caladea-Italic.ttf.gz` `b662c0c5beef4f1a707292b6688040fda0e724aa764fb7c0c71fcb07b5c206da`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-Italic.ttf `4359a8e24f748b6447b1ff6d7a174febe70961d29f8bb8634b56dacd740a3deb`; gzip-compressed, font data unchanged
+  - `assets/fonts/caladea/Caladea-Bold.ttf.gz` `991d2c9449743cea02ad463ac8b10954a0ec6291a9aa344d1e085a70d6279942`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-Bold.ttf `ae3cb2dcbc925809dd29d2a44e9802211cab66be541bacbfc9c08c74b27c3742`; gzip-compressed, font data unchanged
+  - `assets/fonts/caladea/Caladea-BoldItalic.ttf.gz` `776eacaadc34b2fe17a27f830676477075933299ff5500f06120057d743efc1e`; upstream https://raw.githubusercontent.com/googlefonts/caladea/336a529cfad3d103d6527752686f8331d13e820a/fonts/ttf/Caladea-BoldItalic.ttf `ccabaa7b7e2fdf253d2b1a5fa699dd8a3df8d835a9eb285ad82631a677eb76c0`; gzip-compressed, font data unchanged
+
+#### Arimo 1.341
+
+- Source: https://github.com/googlefonts/arimo (`4a6255f269916ae7ad3fc2706b0935e7621396b8`)
+- Copyright: Copyright 2026 The Arimo Project Authors (https://github.com/googlefonts/Arimo)
+- Licence: OFL-1.1 (`assets/fonts/arimo/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/arimo/Arimo-VF.woff2` `0d2f65432c96632bd19360734af6c15d77a55c005e93356814ae7bc0461f2d5e`; upstream https://raw.githubusercontent.com/googlefonts/arimo/4a6255f269916ae7ad3fc2706b0935e7621396b8/fonts/webfonts/Arimo%5Bwght%5D.woff2 `0d2f65432c96632bd19360734af6c15d77a55c005e93356814ae7bc0461f2d5e`; unchanged
+  - `assets/fonts/arimo/Arimo-Italic-VF.woff2` `a9d5da4ebfbe0ba41c284b440ac15dec375be0ba08079e9748ff49ff6ac0066d`; upstream https://raw.githubusercontent.com/googlefonts/arimo/4a6255f269916ae7ad3fc2706b0935e7621396b8/fonts/webfonts/Arimo-Italic%5Bwght%5D.woff2 `a9d5da4ebfbe0ba41c284b440ac15dec375be0ba08079e9748ff49ff6ac0066d`; unchanged
+  - `assets/fonts/arimo/Arimo-Regular.ttf.gz` `2096961be1896d153ed20386276426976ed194c19bfdb6742cb046a8f97fe747`; upstream https://raw.githubusercontent.com/googlefonts/arimo/4a6255f269916ae7ad3fc2706b0935e7621396b8/fonts/variable/Arimo%5Bwght%5D.ttf `e43898b143ec826ac8cb4034816458a7047fbe0836558de2a1f8c6223ae3e0ca`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/arimo/Arimo-Italic.ttf.gz` `abbd4db007307131c7b0ea293aeb550a5416105b50c2c1ab0b87c77b2cd870a8`; upstream https://raw.githubusercontent.com/googlefonts/arimo/4a6255f269916ae7ad3fc2706b0935e7621396b8/fonts/variable/Arimo-Italic%5Bwght%5D.ttf `a80fc54fd0233c1dfe298577c4d00f5ae81d5bb83510975e473c47e699b7f4ed`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/arimo/Arimo-Bold.ttf.gz` `f3e5f39de381557a67a7feee797e2306d933453e8ff980b9843fda0817b5e971`; upstream https://raw.githubusercontent.com/googlefonts/arimo/4a6255f269916ae7ad3fc2706b0935e7621396b8/fonts/variable/Arimo%5Bwght%5D.ttf `e43898b143ec826ac8cb4034816458a7047fbe0836558de2a1f8c6223ae3e0ca`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/arimo/Arimo-BoldItalic.ttf.gz` `a9ce45bd389d0856c60cc3fb9db410c721f8a049c2b2402c0074543e9dd44d23`; upstream https://raw.githubusercontent.com/googlefonts/arimo/4a6255f269916ae7ad3fc2706b0935e7621396b8/fonts/variable/Arimo-Italic%5Bwght%5D.ttf `a80fc54fd0233c1dfe298577c4d00f5ae81d5bb83510975e473c47e699b7f4ed`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Tinos 1.340
+
+- Source: https://github.com/googlefonts/tinos (`3b4482a99b80ea5fc75f187b1be3120a3f5905b3`)
+- Copyright: Copyright 2026 The Tinos Project Authors (https://github.com/googlefonts/tinos)
+- Licence: OFL-1.1 (`assets/fonts/tinos/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/tinos/Tinos-Regular.woff2` `990493259cd9f78dd1d1e7f697700bb450488968138251bb2c2c046d56a91548`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/webfonts/Tinos-Regular.woff2 `990493259cd9f78dd1d1e7f697700bb450488968138251bb2c2c046d56a91548`; unchanged
+  - `assets/fonts/tinos/Tinos-Italic.woff2` `28d3159c92e590181a0436105a6a508f3ac334ff9586bf1e9bac761d259e8860`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/webfonts/Tinos-Italic.woff2 `28d3159c92e590181a0436105a6a508f3ac334ff9586bf1e9bac761d259e8860`; unchanged
+  - `assets/fonts/tinos/Tinos-Bold.woff2` `cf4ba0b63a839e462c9461e86fb7c01fef1e734405ee403ec0121b7767b3f172`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/webfonts/Tinos-Bold.woff2 `cf4ba0b63a839e462c9461e86fb7c01fef1e734405ee403ec0121b7767b3f172`; unchanged
+  - `assets/fonts/tinos/Tinos-BoldItalic.woff2` `fe7ac295c7672860594e97cb66cec26f65dc0a76164e88696ef357335e4a2ad2`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/webfonts/Tinos-BoldItalic.woff2 `fe7ac295c7672860594e97cb66cec26f65dc0a76164e88696ef357335e4a2ad2`; unchanged
+  - `assets/fonts/tinos/Tinos-Regular.ttf.gz` `f3e70b5d5eaa5b37e2282d639a58eed394e7a4b68f66b4f3bf6d512bbccf3f94`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/ttf/Tinos-Regular.ttf `60a0e8ef0c04dd5dd69ffe91025fa2ae5836cbd35600a82ba031977557e2cb61`; gzip-compressed, font data unchanged
+  - `assets/fonts/tinos/Tinos-Italic.ttf.gz` `9280880bd6471e75a6b5d6a0a30ebefffe3a9928565c66ec7989715d399dbaec`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/ttf/Tinos-Italic.ttf `5942266ed398b155d7dc23e36833e7ec6be988f2439bdbeb8ef1bede808eaa91`; gzip-compressed, font data unchanged
+  - `assets/fonts/tinos/Tinos-Bold.ttf.gz` `05b7117e4fba1ca3dd31143f6a87881d093d39a56e5213e5b3ba6d0dc0a43357`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/ttf/Tinos-Bold.ttf `393269dbab8899f938db19783eca5eac92eb431f7ae0ab45b8349ca895f1a06b`; gzip-compressed, font data unchanged
+  - `assets/fonts/tinos/Tinos-BoldItalic.ttf.gz` `ef263fa33d382fb935e68c2c3125e3ace1d4cdfe8f74202daf4028ebc6d719e3`; upstream https://raw.githubusercontent.com/googlefonts/tinos/3b4482a99b80ea5fc75f187b1be3120a3f5905b3/fonts/ttf/Tinos-BoldItalic.ttf `a5de79f0fe863ea0954757acb3d47b3ccd0a930ce3dd5b97230cd3866790a06e`; gzip-compressed, font data unchanged
+
+#### Cousine 1.241
+
+- Source: https://github.com/googlefonts/cousine (`c0fbdb438443968c884a5c13f5f9bee916a7f89b`)
+- Copyright: Copyright 2026 The Cousine Project Authors (https://github.com/googlefonts/cousine)
+- Licence: OFL-1.1 (`assets/fonts/cousine/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/cousine/Cousine-Regular.woff2` `3882c5c1912dc7e218762381d93b0b22f20e97bc6aeee4864436fd34da6d6cf4`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/webfonts/Cousine-Regular.woff2 `3882c5c1912dc7e218762381d93b0b22f20e97bc6aeee4864436fd34da6d6cf4`; unchanged
+  - `assets/fonts/cousine/Cousine-Italic.woff2` `5239caec66a180e1d9b8c9c74888660eb929b08027d1fb51ba207dae2b843188`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/webfonts/Cousine-Italic.woff2 `5239caec66a180e1d9b8c9c74888660eb929b08027d1fb51ba207dae2b843188`; unchanged
+  - `assets/fonts/cousine/Cousine-Bold.woff2` `6e371376b51ca2828f9d39ba153c366cc29ba1a206cc4b21205e391e09362419`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/webfonts/Cousine-Bold.woff2 `6e371376b51ca2828f9d39ba153c366cc29ba1a206cc4b21205e391e09362419`; unchanged
+  - `assets/fonts/cousine/Cousine-BoldItalic.woff2` `08accd82919cc9b3f2e73d100299084bb7af898472ef9c0293b92a207aec96d9`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/webfonts/Cousine-BoldItalic.woff2 `08accd82919cc9b3f2e73d100299084bb7af898472ef9c0293b92a207aec96d9`; unchanged
+  - `assets/fonts/cousine/Cousine-Regular.ttf.gz` `7f19da2d7a5ab31ae30921770a5d7c6ec409b90371d82459118f29b9c2baaac9`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/ttf/Cousine-Regular.ttf `5a57f0184000371cb22fe3fcea4c500354cab1a69efaf7beaf3e6eca6ecfefea`; gzip-compressed, font data unchanged
+  - `assets/fonts/cousine/Cousine-Italic.ttf.gz` `08c4c84f788dddacc368135821b21e69361efda1c1ad62e02b7c4a36190f15e7`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/ttf/Cousine-Italic.ttf `afb869eee8643d09915c3286edb61dad66278ceb1511c79b474ce21548421bcd`; gzip-compressed, font data unchanged
+  - `assets/fonts/cousine/Cousine-Bold.ttf.gz` `d06e65667d7324101e7754aa47ac975968d76f5fa5ff6dd59996a85366267086`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/ttf/Cousine-Bold.ttf `331215ec6445f41e98d8971251bb6237e722907f4101faae990583accfe79545`; gzip-compressed, font data unchanged
+  - `assets/fonts/cousine/Cousine-BoldItalic.ttf.gz` `6316d9b4d38e0e2581d7fee09e38941dda0b85a559bb2722aeef7710998cd84b`; upstream https://raw.githubusercontent.com/googlefonts/cousine/c0fbdb438443968c884a5c13f5f9bee916a7f89b/fonts/ttf/Cousine-BoldItalic.ttf `7f804549c941ceaac0a9635389ed09c4bbc86e4bfe37589191dacd1b5b0e26a5`; gzip-compressed, font data unchanged
+
+#### Gelasio 1.008
+
+- Source: https://github.com/SorkinType/Gelasio (`9228e69b160d79f33950e026293f6e13ba9780d0`)
+- Copyright: Copyright 2022 The Gelasio Project Authors (https://github.com/SorkinType/Gelasio)
+- Licence: OFL-1.1 (`assets/fonts/gelasio/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/gelasio/Gelasio-VF.woff2` `15a06d2088bbfcf250296c770704cb9bb3f229ff58289faf708fe0f3279094c3`; upstream https://raw.githubusercontent.com/SorkinType/Gelasio/9228e69b160d79f33950e026293f6e13ba9780d0/fonts/webfonts/Gelasio%5Bwght%5D.woff2 `15a06d2088bbfcf250296c770704cb9bb3f229ff58289faf708fe0f3279094c3`; unchanged
+  - `assets/fonts/gelasio/Gelasio-Italic-VF.woff2` `91164b31301c9e72922371df0ce81334d3c68e44172fc8ef597ad63c873e9215`; upstream https://raw.githubusercontent.com/SorkinType/Gelasio/9228e69b160d79f33950e026293f6e13ba9780d0/fonts/webfonts/Gelasio-Italic%5Bwght%5D.woff2 `91164b31301c9e72922371df0ce81334d3c68e44172fc8ef597ad63c873e9215`; unchanged
+  - `assets/fonts/gelasio/Gelasio-Regular.ttf.gz` `f0a3192cd1e77aebb931e4720c8362765d9b589d6107ff0cbba0dded8d62009e`; upstream https://raw.githubusercontent.com/SorkinType/Gelasio/9228e69b160d79f33950e026293f6e13ba9780d0/fonts/variable/Gelasio%5Bwght%5D.ttf `4daecea457258c9ebeb8bc99ed3fd24353618bfad3ea4b93fa0b5d0468fc04e4`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/gelasio/Gelasio-Italic.ttf.gz` `2a97f249932fad0b48e7f2fe7cf3dab8b105bd3fbab4d3718dbb3d21e5633b5c`; upstream https://raw.githubusercontent.com/SorkinType/Gelasio/9228e69b160d79f33950e026293f6e13ba9780d0/fonts/variable/Gelasio-Italic%5Bwght%5D.ttf `52559e845a4d33514e5f93bb9ae7dbeae1894a53f2c565a15f18af40cd337c09`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/gelasio/Gelasio-Bold.ttf.gz` `ca41d1c77ddd6a0e2e425ac119eb51f6d78e38d95aab3f16f87d5ba16127cf21`; upstream https://raw.githubusercontent.com/SorkinType/Gelasio/9228e69b160d79f33950e026293f6e13ba9780d0/fonts/variable/Gelasio%5Bwght%5D.ttf `4daecea457258c9ebeb8bc99ed3fd24353618bfad3ea4b93fa0b5d0468fc04e4`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/gelasio/Gelasio-BoldItalic.ttf.gz` `81ed8335eb2225d843802685c94b7de3acb78ad7912db9abb9f21ed23587a295`; upstream https://raw.githubusercontent.com/SorkinType/Gelasio/9228e69b160d79f33950e026293f6e13ba9780d0/fonts/variable/Gelasio-Italic%5Bwght%5D.ttf `52559e845a4d33514e5f93bb9ae7dbeae1894a53f2c565a15f18af40cd337c09`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Selawik 1.01
+
+- Source: https://github.com/microsoft/Selawik (`89362e84731d1f5777fa078fd4d5ebbd339e4378`); release archive https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip (SHA-256 `3f62c51e05e3b5a1e6241cf92a371f0be2ea1183aa87b30718bbd40832a8d423`)
+- Copyright: Copyright 2015, Microsoft Corporation (www.microsoft.com), with Reserved Font Name Selawik.  All Rights Reserved.  Selawik is a trademark of Microsoft Corporation in the United States and/or other countries.
+- Licence: OFL-1.1 (`assets/fonts/selawik/LICENSE.txt`); Reserved Font Name "Selawik"
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/selawik/selawkl.woff2` `0ed6f426d9e1bcd65c40c13f1f9a900279d36db104c3927a4cde03f1dd4bf687`; upstream ? `?`; unchanged
+  - `assets/fonts/selawik/selawksl.woff2` `3ddb97e4892003dfd87daf5ec9cb49f1a182289b706c813b3c50dfc18c51c07e`; upstream ? `?`; unchanged
+  - `assets/fonts/selawik/selawk.woff2` `0f11afe1e85c8fd5d35d33e0142bd140e460a48cf3b42317d0c34e40c2b7118b`; upstream ? `?`; unchanged
+  - `assets/fonts/selawik/selawksb.woff2` `83767c05ef6b99e054a20e85ed538223c3d3147fd3bea8c372ca9c46764d8c5b`; upstream ? `?`; unchanged
+  - `assets/fonts/selawik/selawkb.woff2` `e8e9896309b2b003e2eefca4c51f82d2d3fb693a440cb969dd0650f0d5070012`; upstream ? `?`; unchanged
+  - `assets/fonts/selawik/selawkl.ttf.gz` `cdfbb60970ab1bf39ecb852bca099b6a82321f177395f9e6747e46ef15f32f3e`; upstream https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip `8e19d073091a1e869b5b0d48b925e605c0a4c6ece7df7b22a364fb065314c4c5`; gzip-compressed, font data unchanged
+  - `assets/fonts/selawik/selawksl.ttf.gz` `c05b1a2b3439a96dd96987d8467ab08e0409d39ef6c7ad09259646befd6284c8`; upstream https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip `8620960344f12093482cded984a1aafa5a57d24cbf7e9299da125ccf0e9d4102`; gzip-compressed, font data unchanged
+  - `assets/fonts/selawik/selawk.ttf.gz` `5a9cb4b53dd9e1f52838f7925a3ebb81abbbfa0dcfdeae1e52e7dd48728f7dcb`; upstream https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip `e9d98518d8ac2817782a9a382430463a2e0793ea68350b695bb727d9a830ee1c`; gzip-compressed, font data unchanged
+  - `assets/fonts/selawik/selawksb.ttf.gz` `5a6aeabe18f871e532598f1a1269aacdf354600c2905556c1c1939c49dc07304`; upstream https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip `0a9e9d0549a10f24bef9b3a29e06fe6e0b5c21e7a784c503b048a307841a7783`; gzip-compressed, font data unchanged
+  - `assets/fonts/selawik/selawkb.ttf.gz` `85d4e31f3fd3ed1f05f0a9fc23e8ee552594055d8f6de8572a0811493f02d555`; upstream https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip `f0db5e174a90e0956ad7d2844bdca1d5e6da92ec65b2c04e57ba9b180668c904`; gzip-compressed, font data unchanged
+
+### PDF fallbacks (Noto)
+
+#### Noto Naskh Arabic 2.021
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notonaskharabic
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-naskh-arabic/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-naskh-arabic/NotoNaskhArabic-Regular.ttf.gz` `03d355878ba2f9cc58d047b7f6719a1c3211af7d4f58259aad321e0437a970c3`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf `67b5a525a661b607971fbd3f96a81b89d3a768e74534fca84f18ac97e6fab72f`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-naskh-arabic/NotoNaskhArabic-Bold.ttf.gz` `eaa7977efd77196d485592dba7583ab4744257249415d790c54f668f4b53047b`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf `67b5a525a661b607971fbd3f96a81b89d3a768e74534fca84f18ac97e6fab72f`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Hebrew 3.001
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanshebrew
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-hebrew/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-hebrew/NotoSansHebrew-Regular.ttf.gz` `4a45cfbe531d4f9c27eafc13621e7f936dbf2e029a49a07fd02bfd71e97951f3`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanshebrew/NotoSansHebrew%5Bwdth%2Cwght%5D.ttf `7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-hebrew/NotoSansHebrew-Bold.ttf.gz` `ad6a5421b92e85ad2ba46d4f7e2367c54e51b50b0f5e75881511bc6cbcf01067`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanshebrew/NotoSansHebrew%5Bwdth%2Cwght%5D.ttf `7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Armenian 2.008
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansarmenian
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/armenian)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-armenian/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-armenian/NotoSansArmenian-Regular.ttf.gz` `5fe08aa0091087ac36d2ed39add39b34d3122a38fa752d3aeb6eb021ae7ca895`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansarmenian/NotoSansArmenian%5Bwdth%2Cwght%5D.ttf `0870908d8318435a5daf1cd280ae15063f990cd9ad60f3e94c734ce9e1ffef71`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-armenian/NotoSansArmenian-Bold.ttf.gz` `225fb3d50663d783a3bf8a933ba8f2e8da95149e9766e0987354ba08045e64d8`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansarmenian/NotoSansArmenian%5Bwdth%2Cwght%5D.ttf `0870908d8318435a5daf1cd280ae15063f990cd9ad60f3e94c734ce9e1ffef71`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Georgian 2.005
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgeorgian
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/georgian)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-georgian/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-georgian/NotoSansGeorgian-Regular.ttf.gz` `2825804006f63df98b0b954a73a78097cb5b244ca8210824f708164624b8dbfd`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgeorgian/NotoSansGeorgian%5Bwdth%2Cwght%5D.ttf `dc591156f36842d38996c4a7a17fee9bb58e45da3e2cac7a31b7d33de700adb9`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-georgian/NotoSansGeorgian-Bold.ttf.gz` `4bc5fd76b5ca20be819ab7ca0a41753967486df96b265773959149f2dfd308cc`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgeorgian/NotoSansGeorgian%5Bwdth%2Cwght%5D.ttf `dc591156f36842d38996c4a7a17fee9bb58e45da3e2cac7a31b7d33de700adb9`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Ethiopic 2.102
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansethiopic
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/ethiopic)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-ethiopic/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-ethiopic/NotoSansEthiopic-Regular.ttf.gz` `0254b300d94ccfb3a791af571ba29f156ed59aa913686a343bd2ae8d031d8bab`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansethiopic/NotoSansEthiopic%5Bwdth%2Cwght%5D.ttf `0dbccc00b22d180ebd6a4bd8a733918a29e709fa6798023adc3e6cd40da65077`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-ethiopic/NotoSansEthiopic-Bold.ttf.gz` `688a874d0901cc133a791fc44d76f245e62cfd4313c3ee0a381ceb69a83b1342`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansethiopic/NotoSansEthiopic%5Bwdth%2Cwght%5D.ttf `0dbccc00b22d180ebd6a4bd8a733918a29e709fa6798023adc3e6cd40da65077`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Devanagari 2.007
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansdevanagari
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-devanagari/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-devanagari/NotoSansDevanagari-Regular.ttf.gz` `ca0c19c1f51401718aa2f83bea818ff6770ca5568872f0260903075a45613850`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth%2Cwght%5D.ttf `14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-devanagari/NotoSansDevanagari-Bold.ttf.gz` `f9686c8eacc95446589bbcf1c88cd5cd34ae85c42776f961ce3c1ce9ee2c9c41`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth%2Cwght%5D.ttf `14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Bengali 3.011
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansbengali
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/bengali)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-bengali/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-bengali/NotoSansBengali-Regular.ttf.gz` `535e25219937e4c12d3525753e0e9c50a99f8895f4a8d4d46c9444f8cbfd0664`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansbengali/NotoSansBengali%5Bwdth%2Cwght%5D.ttf `dcd42978094e584a849c84a51450eeac40c8826057d566ea6d4b9627a403a05a`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-bengali/NotoSansBengali-Bold.ttf.gz` `2021e487e610b2d06ae4f7910e4491cb7af31d54307cd888e1fa5b30f463640e`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansbengali/NotoSansBengali%5Bwdth%2Cwght%5D.ttf `dcd42978094e584a849c84a51450eeac40c8826057d566ea6d4b9627a403a05a`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Gurmukhi 2.004
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgurmukhi
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gurmukhi)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-gurmukhi/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-gurmukhi/NotoSansGurmukhi-Regular.ttf.gz` `ea3196b56f1413144539f70d10d2a8ccf93d4a15242d5acf7a804b604ade8d33`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgurmukhi/NotoSansGurmukhi%5Bwdth%2Cwght%5D.ttf `1e6f728fa620e566f842d81e220265813faa12771214765d289c98e035adc5f2`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-gurmukhi/NotoSansGurmukhi-Bold.ttf.gz` `2c612253c5d809a6c9262e77caca82d56c722fdc4424730f55e79fd9bb4c41db`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgurmukhi/NotoSansGurmukhi%5Bwdth%2Cwght%5D.ttf `1e6f728fa620e566f842d81e220265813faa12771214765d289c98e035adc5f2`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Gujarati 2.106
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgujarati
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gujarati)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-gujarati/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-gujarati/NotoSansGujarati-Regular.ttf.gz` `bf88e038e5179573de9e091419f445e52adaeb3594c1d1d2288b686a8fc80933`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgujarati/NotoSansGujarati%5Bwdth%2Cwght%5D.ttf `9901d8552f1dd5d2c50dbd4caa6f6e174e74e8264f06594ab259ae6e7b1ac428`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-gujarati/NotoSansGujarati-Bold.ttf.gz` `0da4fda4da7ed26df173618372a828531a3ac86eb3dafc3183cf9565049f4c82`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansgujarati/NotoSansGujarati%5Bwdth%2Cwght%5D.ttf `9901d8552f1dd5d2c50dbd4caa6f6e174e74e8264f06594ab259ae6e7b1ac428`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Oriya 2.007
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansoriya
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/oriya)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-oriya/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-oriya/NotoSansOriya-Regular.ttf.gz` `bb737c400ad5b7eb432e0ebb4b18ec953da3b0c17ca67ebe829afd16360a6779`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansoriya/NotoSansOriya%5Bwdth%2Cwght%5D.ttf `910342275d619081b896b4ed25fd9ad6ff320c25591b810de1fcc4beb153ba82`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-oriya/NotoSansOriya-Bold.ttf.gz` `f81c5a11b7ee3ffba86e8e00d4dd00a1821f9ea3c21ceda151a9e34b0a03a404`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansoriya/NotoSansOriya%5Bwdth%2Cwght%5D.ttf `910342275d619081b896b4ed25fd9ad6ff320c25591b810de1fcc4beb153ba82`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Tamil 2.004
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstamil
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tamil)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-tamil/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-tamil/NotoSansTamil-Regular.ttf.gz` `8f916206e38e06a7cab2732bd8b3ebd950be1549cc7abc67b52fe1f550b72490`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstamil/NotoSansTamil%5Bwdth%2Cwght%5D.ttf `aa3a9b321f4b0bb2c40203ffbde9af89713227866e0e13f76e5b9eeea727cf88`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-tamil/NotoSansTamil-Bold.ttf.gz` `6c98c9329b4892a9b18f90c4485f332960f01f67559f721e5762d83924d4d444`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstamil/NotoSansTamil%5Bwdth%2Cwght%5D.ttf `aa3a9b321f4b0bb2c40203ffbde9af89713227866e0e13f76e5b9eeea727cf88`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Telugu 2.005
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstelugu
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/telugu)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-telugu/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-telugu/NotoSansTelugu-Regular.ttf.gz` `f62b060a2a7a7d2b6210d62c5bd45a4b71593e8976e0fdbe5c3eb6596acd4341`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstelugu/NotoSansTelugu%5Bwdth%2Cwght%5D.ttf `e618af7bf999df192ed4f388eba2e563f2b5015034e9cbb317b5bd793bd7334d`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-telugu/NotoSansTelugu-Bold.ttf.gz` `a76fcd667e09aa0f1199c02c5306ce27221c5c845189afb795ed39645c8d47e1`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstelugu/NotoSansTelugu%5Bwdth%2Cwght%5D.ttf `e618af7bf999df192ed4f388eba2e563f2b5015034e9cbb317b5bd793bd7334d`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Kannada 2.006
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanskannada
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/kannada)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-kannada/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-kannada/NotoSansKannada-Regular.ttf.gz` `8126e85a5761c042315ffa22d26a7d562edf2d668283ea2e2d757b03fd097cff`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanskannada/NotoSansKannada%5Bwdth%2Cwght%5D.ttf `cca4f3b3a8cb12fb261f1b43baf5d2f7f59d90fe123d41f0065ed3a183997ec9`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-kannada/NotoSansKannada-Bold.ttf.gz` `1e2a9dda79beab91c2a06c1ed4baaf8e38d082093c01f686c4aab9da69d35156`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanskannada/NotoSansKannada%5Bwdth%2Cwght%5D.ttf `cca4f3b3a8cb12fb261f1b43baf5d2f7f59d90fe123d41f0065ed3a183997ec9`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Malayalam 2.104
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmalayalam
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/malayalam)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-malayalam/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-malayalam/NotoSansMalayalam-Regular.ttf.gz` `4cca6661cfd5aa4b23cbdae7a736fcbdf9331d1907ddcd95d8edccecc9eab9b3`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmalayalam/NotoSansMalayalam%5Bwdth%2Cwght%5D.ttf `312e0e7c3cc15fa09eb42a8f749eeb246b593ed420e3c81aafe8d910c3a6fb56`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-malayalam/NotoSansMalayalam-Bold.ttf.gz` `5862275c436a416893e3484693f55df295287f30ecf71ebd2195ee86a1130c91`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmalayalam/NotoSansMalayalam%5Bwdth%2Cwght%5D.ttf `312e0e7c3cc15fa09eb42a8f749eeb246b593ed420e3c81aafe8d910c3a6fb56`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Sinhala 2.006
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssinhala
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sinhala)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-sinhala/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-sinhala/NotoSansSinhala-Regular.ttf.gz` `4ceb4665b9e4073c51f3fd21ef8e6b2ae0593ff9956eb6c051e52031d7d6f509`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssinhala/NotoSansSinhala%5Bwdth%2Cwght%5D.ttf `9bd93e407a278075be403324063bc94a7e306c44de4df81214e932330c22eecf`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-sinhala/NotoSansSinhala-Bold.ttf.gz` `534d16bf84b51bd50b0ddccd42b8bf12a85ac615b7c5e5eeb5feef98d6e87c5f`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssinhala/NotoSansSinhala%5Bwdth%2Cwght%5D.ttf `9bd93e407a278075be403324063bc94a7e306c44de4df81214e932330c22eecf`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Thai 2.002
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansthai
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-thai/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-thai/NotoSansThai-Regular.ttf.gz` `ac2a2343b87089d96be610d2216f0dfbc063e2786bc0cfe90573d7675de3ef18`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansthai/NotoSansThai%5Bwdth%2Cwght%5D.ttf `5a1c559bb539583c8a1fd99d1c5b9491e5e14478c9cd2bd0970d5c3096cc9ef8`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-thai/NotoSansThai-Bold.ttf.gz` `592f15903d210f796aa2c049440852902ea24f02b914c533d3d314efa72f1747`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansthai/NotoSansThai%5Bwdth%2Cwght%5D.ttf `5a1c559bb539583c8a1fd99d1c5b9491e5e14478c9cd2bd0970d5c3096cc9ef8`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans Lao 2.003
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanslao
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/lao)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-lao/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-lao/NotoSansLao-Regular.ttf.gz` `2aaf97233cf3c3b9fc70c65ba3679fa682c34d6cb3646b2abe65268153653026`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanslao/NotoSansLao%5Bwdth%2Cwght%5D.ttf `9608b94603a82d09a8038946f9775242f99e3b3459b7f1e4d5b335b578cd7ab3`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+  - `assets/fonts/noto/noto-sans-lao/NotoSansLao-Bold.ttf.gz` `e507a13be88cc6efdea4d5068fd0fba4bd6e5295977dbbb3ef28095e3aa82032`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanslao/NotoSansLao%5Bwdth%2Cwght%5D.ttf `9608b94603a82d09a8038946f9775242f99e3b3459b7f1e4d5b335b578cd7ab3`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans SC 2.004
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssc
+- Copyright: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-sc/OFL.txt`); Reserved Font Name "Source"
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-sc/NotoSansSC-Regular.ttf.gz` `ade97f77004fc4364379272592a06a7d7a951748694195bf5684399a47f13c70`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans TC 2.004
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstc
+- Copyright: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-tc/OFL.txt`); Reserved Font Name "Source"
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-tc/NotoSansTC-Regular.ttf.gz` `d5c161308a78ca32ad090cee655af9dad60f5b8010dc14e9bd4229883207a0f8`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanstc/NotoSansTC%5Bwght%5D.ttf `864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans JP 2.004
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansjp
+- Copyright: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-jp/OFL.txt`); Reserved Font Name "Source"
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-jp/NotoSansJP-Regular.ttf.gz` `e27ae5d5956931e052884d2477774ba8a5e6d4a98ea0a0bffaedcd8477f6ad33`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf `c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
+#### Noto Sans KR 2.004
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanskr
+- Copyright: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-kr/OFL.txt`); Reserved Font Name "Source"
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-kr/NotoSansKR-Regular.ttf.gz` `80a1106a71f586b26deae45bdcd766db999c63f7d439ae876081528ba2e98d22`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf `194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
+
 ## Apache License 2.0
 
 ```

@@ -1,5 +1,5 @@
 import { attemptEncode } from "@/features/drive/lib/thumbGenerators.logic"
-import { prepareSvgThumb } from "@/features/drive/lib/svgThumb.logic"
+import { prepareSvgThumb } from "@filen/shared/svgThumb"
 import type { PictureCodecs, PictureSource } from "@/features/preview/lib/docxImages.logic"
 import { driveItemName } from "@filen/shared"
 import { narrowToAnyFile } from "@/features/drive/lib/download"

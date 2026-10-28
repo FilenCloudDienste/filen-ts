@@ -1,10 +1,13 @@
 import type { Transition } from "../../anim/model"
+import { kindFromOdf } from "../../anim/presets/transitions/catalog"
 
 // A drawing page's slide transition (ODF 1.3 Part 3 §17.25 style:drawing-page-properties: smil:type, smil:subtype,
 // smil:direction, smil:fadeColor, presentation:transition-speed, presentation:transition-type and presentation:duration;
 // §19.391 anim:transitionFilter in the page's timing root, which wins where both are written, as LibreOffice reads
 // them) as the model's transition: the SMIL type and subtype mapped to the ECMA-376 transition they draw
-// (§19.7.x p:transition children), with the SMIL names kept in `options` so nothing is lost.
+// (§19.7.x p:transition children), or to the p14/p15 kind LibreOffice writes them for (miscShapeWipe…), with the SMIL
+// names kept in `options` so nothing is lost; with the transition par's sound (anim:audio, or anim:command
+// "stop-audio", as LibreOffice writes it).
 
 const SPEEDS: Readonly<Record<string, number>> = { slow: 1000, medium: 750, fast: 500 }
 
@@ -21,6 +24,18 @@ function seconds(value: string | undefined): number | undefined {
 	return iso === null ? undefined : (Number(iso[1] ?? 0) * 3600 + Number(iso[2] ?? 0) * 60 + Number(iso[3] ?? 0)) * 1000
 }
 
+// The way a slide moves (ECMA-376 ST_Transition*DirectionType) entering from a SMIL edge or corner.
+const MOVES: Readonly<Record<string, string>> = {
+	fromRight: "l",
+	fromLeft: "r",
+	fromBottom: "u",
+	fromTop: "d",
+	fromBottomRight: "lu",
+	fromBottomLeft: "ru",
+	fromTopRight: "ld",
+	fromTopLeft: "rd"
+}
+
 function kindOf(type: string, subtype: string, direction: string): { kind: string; options: Record<string, string | boolean> } {
 	const reverse = direction === "reverse"
 
@@ -32,15 +47,12 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 		case "barWipe":
 			return { kind: "wipe", options: { dir: subtype === "topToBottom" ? (reverse ? "u" : "d") : reverse ? "l" : "r" } }
 		case "pushWipe":
-			return {
-				kind: subtype === "combHorizontal" || subtype === "combVertical" ? "comb" : "push",
-				options: { dir: subtype === "fromTop" ? "d" : subtype === "fromBottom" ? "u" : subtype === "fromRight" ? "l" : "r" }
-			}
+			return subtype === "combHorizontal" || subtype === "combVertical"
+				? { kind: "comb", options: { dir: subtype === "combVertical" ? "vert" : "horz" } }
+				: { kind: "push", options: { dir: MOVES[subtype] ?? "r" } }
 		case "slideWipe":
-			return {
-				kind: reverse ? "pull" : "cover",
-				options: { dir: subtype === "fromTop" ? "d" : subtype === "fromBottom" ? "u" : subtype === "fromRight" ? "l" : "r" }
-			}
+			// The eight directions of cover and pull (ST_TransitionEightDirectionType).
+			return { kind: reverse ? "pull" : "cover", options: { dir: MOVES[subtype] ?? "r" } }
 		case "irisWipe":
 		case "ellipseWipe":
 		case "starWipe":
@@ -83,7 +95,11 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 
 // The transition of a page: its style's properties, else (when written) its transition filter; undefined when the
 // page has none and advances on click.
-export function readTransition(page: ReadonlyMap<string, string>, filter: ReadonlyMap<string, string> | undefined): Transition | undefined {
+export function readTransition(
+	page: ReadonlyMap<string, string>,
+	filter: ReadonlyMap<string, string> | undefined,
+	sound?: Transition["sound"]
+): Transition | undefined {
 	const source = filter ?? page
 	const type = source.get("smil:type")
 	const subtype = source.get("smil:subtype") ?? ""
@@ -96,7 +112,8 @@ export function readTransition(page: ReadonlyMap<string, string>, filter: Readon
 
 	if (type === undefined && !automatic) return undefined
 
-	const mapped = type === undefined ? { kind: "cut", options: {} } : kindOf(type, subtype, direction)
+	const extended = type === undefined ? undefined : kindFromOdf(type, subtype, source.get("smil:fadeColor"))
+	const mapped = extended ?? (type === undefined ? { kind: "cut", options: {} } : kindOf(type, subtype, direction))
 	const options: Record<string, string | number | boolean> = { ...mapped.options }
 
 	if (type !== undefined) {
@@ -110,7 +127,7 @@ export function readTransition(page: ReadonlyMap<string, string>, filter: Readon
 
 	return {
 		kind: mapped.kind,
-		namespace: "p",
+		namespace: extended?.namespace ?? "p",
 		options,
 		...(duration === undefined ? {} : { durationMs: Math.round(duration) }),
 		...(speed === "slow"
@@ -120,6 +137,7 @@ export function readTransition(page: ReadonlyMap<string, string>, filter: Readon
 				: speed === "medium"
 					? { speed: "med" as const }
 					: {}),
-		advance: { onClick: advanceType !== "automatic", ...(automatic && after !== undefined ? { afterMs: Math.round(after) } : {}) }
+		advance: { onClick: advanceType !== "automatic", ...(automatic && after !== undefined ? { afterMs: Math.round(after) } : {}) },
+		...(sound === undefined ? {} : { sound })
 	}
 }

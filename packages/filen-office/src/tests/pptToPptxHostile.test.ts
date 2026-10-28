@@ -5,8 +5,8 @@ import { slideTiming, type PptAnimContext, type PptAnimShape } from "../core/ppt
 import { recordAt, RecordCounter } from "../core/ppt/records"
 import { pptToPptx, type PptConversion } from "../core/ppt/toPptx"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
-import { pptSaveAs } from "../dom/presentation/engine/convert"
 import { liveHeap, liveHeapNow } from "./liveHeap"
+import { pptAsPptx } from "./pptConvertFixtures"
 import { buildPpt, concat, container, FIXTURE_PNG, record, type FixtureOptions } from "./pptFixtures"
 import { cpuMs } from "./timing"
 
@@ -444,7 +444,8 @@ function noise(length: number): Uint8Array {
 }
 
 describe("ppt embedded object storage bombs", () => {
-	const SIZE = 128 * 1024 * 1024
+	// Under the 64 MiB an embedding may declare (core/opc/mediaPolicy.ts): the copy streams it.
+	const SIZE = 60 * 1024 * 1024
 	const objectOf = (body: Uint8Array, size: number): FixtureOptions => ({
 		png: FIXTURE_PNG,
 		slides: [{ shapes: [{ picture: true, oleShape: true, anchor: [100, 100, 1000, 800], clientData: [record(0x0bc1, u32(1))] }] }],
@@ -484,14 +485,28 @@ describe("ppt embedded object storage bombs", () => {
 			}
 		}
 
-		await pptSaveAs(converted.pptx, undefined, nullSink(), slicing)
+		const written = await pptAsPptx(converted, nullSink(), { slicing })
+
+		expect("losses" in written ? "written" : written).toBe("written")
 
 		expect(peak).toBeGreaterThan(0)
 		expect(peak).toBeLessThan(48 * 1024 * 1024)
 		expect(converted.losses).toEqual([])
 	})
 
-	it("pads a storage that ends early to its stated size and reports it once written", async () => {
+	it(
+		"refuses a deck whose storage declares more than an embedding may hold, typed, when the package opens",
+		{ timeout: 120_000 },
+		async () => {
+			const converted = await pptToPptx(bytesSource((await buildPpt(objectOf(zlib(128 * 1024 * 1024), 128 * 1024 * 1024))).bytes))
+
+			if (converted.kind !== "converted") throw new Error(converted.reason)
+
+			expect(await pptAsPptx(converted, nullSink())).toMatchObject({ kind: "refused", reason: "tooLarge" })
+		}
+	)
+
+	it("pads a storage that ends early to its stated size and reports it in the copy's losses", async () => {
 		const sink = memorySink()
 		const converted = await pptToPptx(bytesSource((await buildPpt(objectOf(zlib(noise(5000)).subarray(0, 400), 5000))).bytes))
 
@@ -499,9 +514,11 @@ describe("ppt embedded object storage bombs", () => {
 
 		expect(converted.losses).toEqual([])
 
-		await pptSaveAs(converted.pptx, undefined, sink)
+		const written = await pptAsPptx(converted, sink)
 
 		expect(converted.losses).toEqual([{ kind: "oleObject", count: 1, slides: [1] }])
+		// The report the copy is handed with says so too.
+		expect("losses" in written ? written.losses : written).toEqual([{ kind: "oleObject", count: 1, slides: [1] }])
 		expect(sink.bytes().length).toBeGreaterThan(0)
 
 		const bytes = await converted.pptx.read("ppt/embeddings/oleObject1.bin")

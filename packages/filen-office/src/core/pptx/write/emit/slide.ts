@@ -1,8 +1,5 @@
-import { colorXml } from "../../../presentation/render/markup"
 import { CLR_MAP_KEYS } from "../../../presentation/theme"
 import {
-	refused,
-	type Background,
 	type ClrMap,
 	type HeaderFooterFlags,
 	type ListStyle,
@@ -19,7 +16,6 @@ import {
 	attr,
 	childShapes,
 	endTag,
-	fillMarkup,
 	mergeChildren,
 	readerOf,
 	sameModel,
@@ -31,8 +27,10 @@ import {
 	type EmitContext,
 	type Slot
 } from "./shape"
+import { backgroundMarkup } from "./design"
 import { listStyleXml } from "./text"
 import { timingPieces } from "./timing"
+import { isTransitionElement, pptxTransitionPieces, sameTransition } from "./transition"
 
 // The slide family's PresentationML: the root of a slide, layout, master, notes slide, notes master or handout master
 // part (ECMA-376 Part 1 §19.3.1.38 p:sld, .39 p:sldLayout, .42 p:sldMaster, .26 p:notes, .27 p:notesMaster, .24
@@ -67,17 +65,6 @@ function clrMapOvrXml(override: ClrMap | "master"): string {
 
 function hfXml(hf: HeaderFooterFlags): string {
 	return `<p:hf${hf.sldNum ? "" : ' sldNum="0"'}${hf.hdr ? "" : ' hdr="0"'}${hf.ftr ? "" : ' ftr="0"'}${hf.dt ? "" : ' dt="0"'}/>`
-}
-
-function backgroundXml(context: EmitContext, background: Background): string | Refused {
-	if (background.kind === "ref")
-		return `<p:bg><p:bgRef${attr("idx", background.idx)}>${background.color === undefined ? "" : colorXml(background.color)}</p:bgRef></p:bg>`
-
-	const fill = fillMarkup(context, background.fill)
-
-	return typeof fill === "string"
-		? `<p:bg><p:bgPr${background.shadeToTitle === true ? ' shadeToTitle="1"' : ""}>${fill}<a:effectLst/></p:bgPr></p:bg>`
-		: fill
 }
 
 function renamedList(context: EmitContext, tag: string, list: ListStyle, source: number): readonly EmitPiece[] | Refused {
@@ -194,13 +181,12 @@ function cSldXml(context: EmitContext, node: SlideNode, source: number, pristine
 			match: (local, g) => g === G.P && local === "bg",
 			write: bg => {
 				if (bg >= 0 && (pristine === undefined || sameModel(node.background, pristine.background))) return "keep"
-				if (bg >= 0 && splicing(context)) {
-					failure = refused("notImplemented", "pptx emit design (background)")
 
-					return ""
-				}
+				// The design family writes a background (an inserted picture stored once, its source bytes when an undo
+				// restored them).
+				const markup = backgroundMarkup(context, node.background)
 
-				return node.background === undefined ? "" : take(backgroundXml(context, node.background))
+				return markup instanceof Uint8Array ? [markup] : take(markup)
 			}
 		},
 		{ match: (local, g) => g === G.P && local === "spTree", write: tree => take(spTreeXml(context, node, tree)) }
@@ -302,7 +288,14 @@ export function slideRoot(context: EmitContext, node: SlideNode, options: SlideR
 	if (node.kind === "master") slots.push(own("sldLayoutIdLst", () => options.layoutList ?? "keep"))
 
 	slots.push(
-		own("transition", () => "keep"),
+		{
+			match: () => false,
+			takes: child => context.document !== undefined && isTransitionElement(context.document, child),
+			write: child =>
+				child >= 0 && (pristine === undefined || sameTransition(node.transition, pristine.transition))
+					? "keep"
+					: take(pptxTransitionPieces(node.transition, context))
+		},
 		own("timing", child =>
 			child >= 0 && (pristine === undefined || sameModel(node.timing, pristine.timing))
 				? "keep"
@@ -356,6 +349,8 @@ function sameSlideContent(node: SlideNode, pristine: SlideNode): boolean {
 		txStyles: slide.txStyles,
 		timing: slide.timing
 	})
+
+	if (!sameTransition(node.transition, pristine.transition)) return false
 
 	return (
 		sameModel(fields(node), fields(pristine)) &&

@@ -43,8 +43,9 @@ export function isTextEditingTarget(target: EventTarget | null): boolean {
 
 // What close/prev/next resolve to once an unsaved-changes prompt is answered — the SAME confirm dialog
 // serves all three trigger points (Escape/backdrop/X, the two pager buttons, and the in-dialog arrow
-// keys), so this is the only state needed to remember which of them was actually requested.
-export type PreviewDismissIntent = "close" | "prev" | "next"
+// keys), so this is the only state needed to remember which of them was actually requested. "replace":
+// another file opens in the slot (File ▸ New presentation; the overlay keeps which one).
+export type PreviewDismissIntent = "close" | "prev" | "next" | "replace"
 
 // Only a navigation that leaves this route ever unmounts the overlay (and with it the dirty buffer):
 // a same-route param change — a deeper /drive/$ splat — re-renders the listing in place with the

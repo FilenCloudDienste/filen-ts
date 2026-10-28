@@ -31,9 +31,15 @@ import { previewPptxFind } from "@/locales/en/previewPptx/find"
 import { previewPptxObjects } from "@/locales/en/previewPptx/objects"
 import { previewPptxMedia } from "@/locales/en/previewPptx/media"
 import { previewPptxShow } from "@/locales/en/previewPptx/show"
+import { previewPptxExport } from "@/locales/en/previewPptx/export"
 import { previewPptxPresenter } from "@/locales/en/previewPptx/presenter"
 import { previewPptxInk } from "@/locales/en/previewPptx/ink"
 import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
+import { previewPptxTransitions } from "@/locales/en/previewPptx/transitions"
+import { previewPptxAnimations } from "@/locales/en/previewPptx/animations"
+import { previewPptxConvert } from "@/locales/en/previewPptx/convert"
+import { previewPptxDesign } from "@/locales/en/previewPptx/design"
+import { previewPptxCharts } from "@/locales/en/previewPptx/charts"
 import { previewSheetFormat } from "@/locales/en/previewSheet/format"
 import { previewSheetSave } from "@/locales/en/previewSheet/save"
 import { previewSheetStructure } from "@/locales/en/previewSheet/structure"
@@ -752,9 +758,15 @@ export const preview = {
 	...previewPptxObjects,
 	...previewPptxMedia,
 	...previewPptxShow,
+	...previewPptxExport,
 	...previewPptxPresenter,
 	...previewPptxInk,
 	...previewPptxSmartArt,
+	...previewPptxTransitions,
+	...previewPptxAnimations,
+	...previewPptxConvert,
+	...previewPptxDesign,
+	...previewPptxCharts,
 	...previewSheetSave,
 	...previewSheetFormat,
 	...previewSheetKeys,

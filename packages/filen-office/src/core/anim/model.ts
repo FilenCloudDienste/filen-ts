@@ -184,20 +184,29 @@ export type AnimTarget =
 	| { readonly kind: "ink"; readonly shape: number }
 	| { readonly kind: "slide" }
 
-export type Build =
-	| {
-			readonly kind: "bldP"
-			readonly shape: number
-			readonly grpId: number
-			readonly build?: "whole" | "p" | "cust" | "allAtOnce"
-			readonly bldLvl?: number
-			readonly animBg?: boolean
-			readonly rev?: boolean
-			readonly autoUpdateAnimBg?: boolean
-	  }
-	| { readonly kind: "bldDgm"; readonly shape: number; readonly grpId: number; readonly bld?: string }
-	| { readonly kind: "bldOleChart"; readonly shape: number; readonly grpId: number; readonly bld?: string; readonly animBg?: boolean }
-	| { readonly kind: "bldGraphic"; readonly shape: number; readonly grpId: number; readonly whole: boolean; readonly bld?: string }
+// A build entry's source element, and (held by an inverse after a save took that element out of the file) its bytes,
+// written as they were while it has no live source.
+export interface BuildSource {
+	readonly src?: SourceRef
+	readonly raw?: Uint8Array
+}
+
+export type Build = BuildSource &
+	(
+		| {
+				readonly kind: "bldP"
+				readonly shape: number
+				readonly grpId: number
+				readonly build?: "whole" | "p" | "cust" | "allAtOnce"
+				readonly bldLvl?: number
+				readonly animBg?: boolean
+				readonly rev?: boolean
+				readonly autoUpdateAnimBg?: boolean
+		  }
+		| { readonly kind: "bldDgm"; readonly shape: number; readonly grpId: number; readonly bld?: string }
+		| { readonly kind: "bldOleChart"; readonly shape: number; readonly grpId: number; readonly bld?: string; readonly animBg?: boolean }
+		| { readonly kind: "bldGraphic"; readonly shape: number; readonly grpId: number; readonly whole: boolean; readonly bld?: string }
+	)
 
 export interface Transition {
 	// An ECMA name (fade, push, wipe…), a p14 name (vortex, ripple…), a p15 prstTrans preset, or morph.
@@ -240,8 +249,10 @@ export interface TimegraphSource {
 	readonly geometry: Float64Array
 	// animClr/set colours resolved against the slide's theme and colour map: [JSON.stringify(ColorModel), Rgba].
 	readonly colors: readonly (readonly [string, Rgba])[]
-	// The transition the slide is entered with.
+	// The transition the slide is entered with (as the player draws it: a kind it does not draw is its fallback).
 	readonly transition?: Transition
+	// The slide's own transition when the player draws its fallback instead (a p14/p15 kind without a renderer).
+	readonly authored?: Transition
 }
 
 // One animated attribute of one layer over one behaviour's active interval.

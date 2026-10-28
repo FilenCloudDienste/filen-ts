@@ -2,6 +2,7 @@ import { crc32, partKey, type ByteChunks, type ByteSource, type PartChange, type
 import { deflateBound, InflateIndex } from "../../core/opc/inflateIndex"
 import { MEDIA_LIMITS, sniffMedia, type MediaContainer } from "../../core/opc/mediaPolicy"
 import { pictureSize } from "../../core/odp/read/document"
+import { chartWritesOf, commitChartWrites, type ChartWrites } from "../../core/presentation/edit/apply/chart"
 import { commitInsertedMedia, insertedMediaAdded, insertedMediaId, registerInsertedMedia } from "../../core/presentation/edit/apply/media"
 import { commitInsertedImages, insertedImagesAdded } from "../../core/presentation/edit/apply/picture"
 import type { FileLike, InsertedMedia } from "../../core/presentation/edit/ops"
@@ -543,7 +544,7 @@ export async function registerMedia(
 	const id = state.next++
 
 	state.inserted.set(id, { ...entry, contentType })
-	registerInsertedMedia(session.deck, id, { bytes: streamed(entry, crc), size: entry.size, crc32: crc, contentType, name })
+	registerInsertedMedia(session.deck, id, { bytes: streamed(entry, crc), size: entry.size, crc32: crc, contentType, name, container })
 
 	return { id, kind, contentType, size: entry.size, crc32: crc }
 }
@@ -552,21 +553,29 @@ export async function registerMedia(
 export interface InsertedWrites {
 	readonly media: ReadonlyMap<number, string>
 	readonly images: ReadonlyMap<number, string>
+	readonly charts?: ChartWrites
 }
 
 // The inserted media and images among a save's added entries: a writer adds an inserted asset with the registry's own
 // bytes object, so identity names the entry each was written to.
-export function insertedWrites(deck: Deck, added: readonly PartChange[] | undefined): InsertedWrites | undefined {
-	if (added === undefined || added.length === 0) return undefined
+export function insertedWrites(
+	deck: Deck,
+	added: readonly PartChange[] | undefined,
+	replaced: readonly PartChange[] = []
+): InsertedWrites | undefined {
+	if ((added === undefined || added.length === 0) && replaced.length === 0) return undefined
 
 	const names = new Map<object, string>()
 
-	for (const change of added) names.set(change.bytes, deck.format === "odp" ? change.name : `/${change.name}`)
+	for (const change of [...(added ?? []), ...replaced]) names.set(change.bytes, deck.format === "odp" ? change.name : `/${change.name}`)
 
 	const media = insertedMediaAdded(deck, names)
 	const images = insertedImagesAdded(deck, names)
+	const charts = chartWritesOf(deck, names)
 
-	return media.size === 0 && images.size === 0 ? undefined : { media, images }
+	return media.size === 0 && images.size === 0 && charts === undefined
+		? undefined
+		: { media, images, ...(charts === undefined ? {} : { charts }) }
 }
 
 // The saved file is the session's base: each asset the save wrote is the part it was written to from then on. An
@@ -575,6 +584,7 @@ export function insertedWrites(deck: Deck, added: readonly PartChange[] | undefi
 export function commitInsertedWrites(session: EngineSession, writes: InsertedWrites | undefined): void {
 	if (writes === undefined) return
 
+	commitChartWrites(session.deck, writes.charts)
 	commitInsertedImages(session.deck, writes.images, pictureSize)
 
 	const state = states.get(session)

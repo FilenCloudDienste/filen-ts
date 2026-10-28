@@ -343,6 +343,17 @@ export interface OdfTransition {
 	readonly reverse: boolean
 }
 
+const FROM: Readonly<Record<string, string>> = {
+	l: "fromRight",
+	r: "fromLeft",
+	u: "fromBottom",
+	d: "fromTop",
+	lu: "fromBottomRight",
+	ru: "fromBottomLeft",
+	ld: "fromTopRight",
+	rd: "fromTopLeft"
+}
+
 // The SMIL transition LibreOffice draws for an ECMA one (the inverse of core/odp/read/transitions.ts kindOf), or
 // undefined when ODF has none (p14/p15 kinds without a SMIL equivalent keep their mc:Fallback).
 export function transitionToOdf(kind: string, options: TransitionOptions): OdfTransition | undefined {
@@ -356,7 +367,8 @@ export function transitionToOdf(kind: string, options: TransitionOptions): OdfTr
 	}
 
 	const dir = (fallback: string): string => option(options, "dir", fallback)
-	const from = (d: string): string => (d === "d" ? "fromTop" : d === "u" ? "fromBottom" : d === "l" ? "fromRight" : "fromLeft")
+	// The edge (or corner) the incoming slide comes from: the opposite of the way it moves.
+	const from = (d: string): string => FROM[d] ?? "fromRight"
 
 	switch (kind) {
 		case "fade":

@@ -57,6 +57,8 @@ export const drive = {
 	driveNewOfficeDocx: "Document (.docx)",
 	/** New menu ▸ Office — entry opening the name dialog for a blank Excel workbook */
 	driveNewOfficeXlsx: "Spreadsheet (.xlsx)",
+	/** New menu ▸ Office — entry opening the name dialog for a blank PowerPoint presentation */
+	driveNewOfficePptx: "Presentation (.pptx)",
 
 	// ── Upload ───────────────────────────────────────────────────────────────
 	/** Drive toolbar — trigger button opening the standalone upload menu (Upload files, later Upload directory) */
@@ -194,6 +196,12 @@ export const drive = {
 	driveNewXlsxBody: "Enter a name for the new spreadsheet.",
 	/** New-office-file dialog — the name the field starts with for a blank Excel workbook; ".xlsx" is added */
 	driveNewXlsxUntitled: "Untitled spreadsheet",
+	/** New-office-file dialog — title for a blank presentation */
+	driveNewPptxTitle: "New presentation",
+	/** New-office-file dialog — body under the title for a blank presentation */
+	driveNewPptxBody: "Enter a name for the new presentation.",
+	/** New-office-file dialog — the name the field starts with for a blank presentation; ".pptx" or ".odp" is added */
+	driveNewPptxUntitled: "Untitled presentation",
 	/** The first sheet's name in a new blank workbook, as Excel names it in this language (at most 31 characters, none of \ / ? * [ ] :) */
 	driveNewXlsxSheetName: "Sheet1",
 	/** New-office-file dialog — name field label */

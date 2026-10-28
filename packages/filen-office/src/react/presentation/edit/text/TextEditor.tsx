@@ -208,29 +208,42 @@ export function PresentationTextEditor({
 		}
 	}, [session, shape, editing, measurerProp])
 
-	// The shape's painted text on the slide is hidden while its body is edited here (every new render paints it again).
-	// Its layers are the slide's own: a layout's or master's layer names its own node.
+	// The shape's painted text (or its empty placeholder's prompt) on the slide is hidden while its body is edited here
+	// (every new render paints it again). Its layers are the slide's own: a layout's or master's layer names its own node.
 	useLayoutEffect(() => {
 		const frame = rootRef.current?.closest(".fo-slide-frame")
 
 		if (frame === null || frame === undefined || render === undefined) return
 
-		const hidden: HTMLElement[] = []
+		const hidden = new Set<HTMLElement>()
+		let cancelled = false
+		const hide = (): void => {
+			render.layers.forEach((layer, index) => {
+				if (layer.shape.slide !== shape.slide || layer.shape.id !== shape.id) return
+				if (layer.text === undefined && layer.prompt === undefined) return
+				// A table cell's body hides that cell's text only.
+				if (shape.cell !== undefined && (layer.cell?.[0] !== shape.cell.row || layer.cell[1] !== shape.cell.col)) return
 
-		render.layers.forEach((layer, index) => {
-			if (layer.shape.slide !== shape.slide || layer.shape.id !== shape.id || layer.text === undefined) return
-			// A table cell's body hides that cell's text only.
-			if (shape.cell !== undefined && (layer.cell?.[0] !== shape.cell.row || layer.cell[1] !== shape.cell.col)) return
+				const at = `.fo-slide-content [data-fo-layer="${String(index)}"]`
+				const painted = frame.querySelector<HTMLElement>(`${at} > .fo-slide-text, ${at} > .fo-slide-prompt`)
 
-			const painted = frame.querySelector<HTMLElement>(`.fo-slide-content [data-fo-layer="${String(index)}"] > .fo-slide-text`)
+				if (painted === null) return
 
-			if (painted === null) return
+				painted.style.visibility = "hidden"
+				hidden.add(painted)
+			})
+		}
 
-			painted.style.visibility = "hidden"
-			hidden.push(painted)
+		hide()
+		// The slide view paints a new render in its own layout effect, after this one (a parent's runs after its
+		// child's): its layers are hidden once the commit is done, before the frame paints.
+		queueMicrotask(() => {
+			if (!cancelled) hide()
 		})
 
 		return () => {
+			cancelled = true
+
 			for (const painted of hidden) painted.style.visibility = ""
 		}
 	}, [render, shape])

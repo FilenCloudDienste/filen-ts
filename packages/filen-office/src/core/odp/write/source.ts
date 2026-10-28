@@ -1,7 +1,7 @@
 import { openOdp, type OdpParts } from "../read/document"
 import { readOdpTiming } from "../../anim/odf"
 import { Fragment, type OdpContext } from "../read/context"
-import { OdfStyleResolver, OdfStyleSheet, readContentPrologue } from "../../odf/index"
+import { OdfStyleResolver, OdfStyleSheet, readContentPrologue, type StyleScope } from "../../odf/index"
 import { pageFragment, type PageSpan } from "../read/scan"
 import { readShapeElements, type ShapeScope } from "../read/shapes"
 import {
@@ -13,7 +13,8 @@ import {
 	type SlideRef,
 	type SourceRef
 } from "../../presentation/model"
-import { Namespaces, encodeUtf8, escapeAttribute, type XmlDocument } from "../../xml/index"
+import { Namespaces, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
+import { heldStyles } from "../../presentation/edit/apply/design"
 import { inheritedDeclarations } from "../../presentation/edit/canonical"
 
 // The source an ODP save writes from: the package the deck was read from, its pages in content order with their byte
@@ -31,6 +32,10 @@ interface PageIndex {
 // Held markup names are unique in the worker: refs into one source's held markup stay distinct from another's.
 let heldNames = 0
 
+// A page's element in its fragment (pageFragment parses the root's start tag, then the page): node 2, after the
+// document and the root.
+export const PAGE_NODE = 2
+
 // Page fragments kept parsed at once (the touched pages of a save, the slides an inverse reads): the rest are parsed
 // again when asked for.
 const FRAGMENTS = 64
@@ -44,7 +49,9 @@ export class OdpWriteSource {
 	// markup: an undo can put back markup that names them, so the session keeps them across saves and a page written
 	// with such markup gets them back.
 	readonly retired = new Map<string, string>()
-	private heldContextCache: { readonly size: number; readonly context: OdpContext } | undefined
+	// Of each retired style, the style it followed in office:automatic-styles (null: the first), where it goes back.
+	readonly retiredAfter = new Map<string, string | null>()
+	private heldContextCache: { readonly size: number; readonly styles: Uint8Array | undefined; readonly context: OdpContext } | undefined
 	private shadow: Promise<{ readonly deck: Deck; readonly parts: OdpParts }> | undefined
 	private order: readonly SlideRef[] | undefined
 
@@ -132,19 +139,23 @@ export class OdpWriteSource {
 		return fragment
 	}
 
-	// The context held markup is read with: the deck's, its automatic styles grown by the retired ones.
+	// The context held markup is read with: the deck's, its automatic styles grown by the retired ones, and its
+	// styles.xml the one an undo put back (apply/design.ts heldStyles: what the save writes, and what a page held from
+	// that file means).
 	heldContext(): OdpContext {
 		const parts = this.parts
+		const styles = heldStyles(parts.deck)
 
-		if (this.retired.size === 0) return parts.context
-		if (this.heldContextCache?.size === this.retired.size) return this.heldContextCache.context
+		if (this.retired.size === 0 && styles === undefined) return parts.context
+		if (this.heldContextCache?.size === this.retired.size && this.heldContextCache.styles === styles)
+			return this.heldContextCache.context
 
 		const content = parts.content.bytes
 		const prologue = readContentPrologue(content)
 		const head = content.subarray(0, prologue.bodyStart)
 		const marker = encodeUtf8(`<office:automatic-styles>${[...this.retired.values()].join("")}</office:automatic-styles>`)
 		const sheet = new OdfStyleSheet(
-			parts.sheet.stylesDocument,
+			styles === undefined ? parts.sheet.stylesDocument : parseXml(styles),
 			readContentPrologue(concat(head, marker, encodeUtf8("<office:body/>"), parts.content.rootClose))
 		)
 		// The deck's context in all but its styles (pages, package facts, tallies).
@@ -153,15 +164,16 @@ export class OdpWriteSource {
 		Object.defineProperty(context, "sheet", { value: sheet })
 		Object.defineProperty(context, "resolver", { value: new OdfStyleResolver(sheet) })
 		Object.defineProperty(context, "owned", { value: new Map() })
-		this.heldContextCache = { size: this.retired.size, context }
+		this.heldContextCache = { size: this.retired.size, styles, context }
 
 		return context
 	}
 
 	// Held markup as a fragment of its own (refs into it name "raw:N"; it is never stale: the inverse holds its bytes).
-	hold(document: XmlDocument): Fragment {
+	// `scope`: the stream whose styles it names (a master page a design op made names styles.xml's).
+	hold(document: XmlDocument, scope: StyleScope = "content"): Fragment {
 		const name = `raw:${String(++heldNames)}`
-		const fragment = new Fragment(document, new Namespaces(document, { lenient: true }), name, -1, "content", this.parts.epoch)
+		const fragment = new Fragment(document, new Namespaces(document, { lenient: true }), name, -1, scope, this.parts.epoch)
 
 		this.held.set(name, fragment)
 
@@ -243,6 +255,7 @@ export class OdpWriteSource {
 		const { background, transition } = this.parts.pageFields(fragment, page, context)
 		const timing = readOdpTiming(fragment, page, held.slide.shapes, this.parts.budgets.timing)
 		const parent = this.layoutOf(
+			context.sheet.masterOrder,
 			attributes.get("draw:master-page-name") ?? "",
 			attributes.get("presentation:presentation-page-layout-name")
 		)
@@ -263,9 +276,8 @@ export class OdpWriteSource {
 
 	// The deck's layout for a page naming a master page and a presentation page layout (the reader lists masters in
 	// the order styles.xml holds their master pages).
-	private layoutOf(master: string, pageLayout: string | undefined): SlideRef | undefined {
+	private layoutOf(order: readonly string[], master: string, pageLayout: string | undefined): SlideRef | undefined {
 		const deck = this.parts.deck
-		const order = this.parts.sheet.masterOrder
 		const masterRef = deck.masters[Math.max(0, order.indexOf(master))]
 
 		return deck.layouts.find(ref => {
@@ -320,6 +332,23 @@ export class OdpWriteSource {
 		}
 
 		return out
+	}
+
+	// A page's markup as content.xml has it, without a parse: the bytes between the root's tags that pageFragment reads
+	// (with the declarations a scan injected), so held under the root they read with the same node indexes, and written
+	// back they are the file's own. Undefined for a ref that is not a page of this source.
+	pageMarkup(src: SourceRef): Uint8Array | undefined {
+		if (src.format !== "odp" || src.part !== "content.xml" || src.epoch !== this.parts.epoch || src.node !== PAGE_NODE) return undefined
+
+		const span = this.spanAt(src.fragment)
+
+		if (span === undefined) return undefined
+
+		const bytes = this.parts.content.bytes
+
+		return span.inject === undefined
+			? bytes.slice(span.start, span.end)
+			: concat(bytes.subarray(span.start, span.insertAt), span.inject, bytes.subarray(span.insertAt, span.end))
 	}
 
 	// The markup a source ref names, with the namespace declarations it needs to be read on its own (an inverse holds

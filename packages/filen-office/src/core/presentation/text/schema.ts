@@ -1,5 +1,6 @@
 import { Schema, type DOMOutputSpec, type Mark, type MarkType, type Node } from "prosemirror-model"
 import type { Paragraph, ParaProps, Run, RunProps, SourceRef, TextBody } from "../model"
+import { editableParagraphs } from "./editable"
 
 // The editing schema of one DrawingML text body (a shape's p:txBody, a notes body): the document is the body's
 // paragraphs; text carries one `run` mark holding its a:rPr; a:br, a:fld and content kept as source (a14:m math,
@@ -120,7 +121,7 @@ export function paragraphNode(paragraph: Paragraph, origin: number): Node {
 }
 
 export function bodyToDoc(body: TextBody): TextDocument {
-	const paragraphs = body.paragraphs.length === 0 ? [{ pPr: {}, runs: [] }] : body.paragraphs
+	const paragraphs = editableParagraphs(body)
 	const origins = paragraphs.map((paragraph, index) => paragraphNode(paragraph, body.paragraphs.length === 0 ? NO_ORIGIN : index))
 
 	return { doc: presentationTextSchema.nodes.doc.create(null, origins), origins }

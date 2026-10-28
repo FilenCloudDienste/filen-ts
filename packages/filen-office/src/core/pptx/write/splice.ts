@@ -22,8 +22,10 @@ import { G, P_MAIN, partReader, type PartReader } from "../read/xml"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { URIS, alternateUnit, childElements, sameModel, xfrmXml, type EmitContext, type Pristine } from "./emit/shape"
 import { slideRoot } from "./emit/slide"
+import { placeTransition } from "./emit/transition"
 import { builtinTableStyleIds, builtinTableStylesPart } from "./emit/table"
 import { showPrMarkup, spliceShowPr } from "./emit/presentation"
+import { spliceDesign } from "./emit/design"
 import { DEFAULT_SHOW } from "../read/props"
 import {
 	PART_CONTENT_TYPES,
@@ -551,6 +553,9 @@ class Splice {
 			if (result !== undefined) return result
 		}
 
+		// Chart parts a frame no longer names (its chart written into another part), with what only they kept.
+		await writer.removeUnrelated((source, relationship) => this.dangling(source, relationship))
+
 		// Removals last: what they take with them, and the jumps that pointed at them.
 		if (removedParts.length > 0) {
 			const gone = await writer.removeWithOrphans(removedParts, (source, relationship) => this.dangling(source, relationship))
@@ -575,6 +580,17 @@ class Splice {
 		}
 
 		if (styled.size > 0) await this.tableStyles(styled)
+
+		// The slide size and the masters a theme change added or dropped (emit/design.ts).
+		const designResult = await spliceDesign({
+			writer,
+			deck,
+			changes: this.input.changes,
+			mainPart: this.mainPart,
+			slidePart: ref => this.finalParts.get(ref)
+		})
+
+		if (designResult !== undefined) return designResult
 
 		const presentationResult = await this.presentation(presentation)
 
@@ -1035,7 +1051,9 @@ class Splice {
 		const slideDirt = change.slide
 		const surgical =
 			sameStructure(context, r, tree, node.shapes, this.index.epoch) &&
-			(slideDirt === undefined || (slideDirt.kind === "slidePart" && slideDirt.part !== "hf" && slideDirt.part !== "clrMapOvr"))
+			(slideDirt === undefined ||
+				(slideDirt.kind === "slidePart" && slideDirt.part !== "hf" && slideDirt.part !== "clrMapOvr") ||
+				(slideDirt.kind === "node" && node.kind === "slide" && onlyRelayout(node, pristine.slide)))
 
 		// Slide parts written by their own families (p:timing, p:transition, the background): asked for, never assumed.
 		if (
@@ -1050,8 +1068,10 @@ class Splice {
 
 			if (result.kind === "refused") return result
 
-			// A whole-root rewrite writes the timing in its slot; a surgical one puts it in place here.
+			// A whole-root rewrite writes the timing and the transition in their slots; a surgical one puts them in place here.
 			if (surgical && slideDirt.part === "timing" && result.kind === "markup") placeTiming(editor, document, r, root, result.pieces)
+			if (surgical && slideDirt.part === "transition" && result.kind === "markup")
+				placeTransition(editor, document, assemble(document, result.pieces))
 		}
 
 		if (node.kind === "slide" && node.parent !== undefined) {
@@ -1537,6 +1557,15 @@ class Splice {
 		editor.append(titles, newTitles.map(title => `<${lpstr}>${escapeText(title)}</${lpstr}>`).join(""))
 		editor.setAttribute(titles, "size", String(firstSlide + newTitles.length))
 	}
+}
+
+// A slide whose node differs from its source only in its layout (a theme change): spliced in place, only its layout
+// relationship retargeted.
+function onlyRelayout(node: SlideNode, pristine: SlideNode): boolean {
+	const { parent: _parent, revision: _revision, shapes: _shapes, ...own } = node
+	const { parent: _before, revision: _was, shapes: _sourceShapes, ...source } = pristine
+
+	return sameModel(own, source)
 }
 
 // The slide's own attributes (show, showMasterSp, the cSld name) as attribute edits.

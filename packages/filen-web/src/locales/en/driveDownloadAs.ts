@@ -7,6 +7,8 @@ export const driveDownloadAs = {
 	driveNewOfficeOdt: "Text (.odt)",
 	/** New menu ▸ Office ▸ OpenDocument — entry opening the name dialog for a blank OpenDocument spreadsheet */
 	driveNewOfficeOds: "Spreadsheet (.ods)",
+	/** New menu ▸ Office ▸ OpenDocument — entry opening the name dialog for a blank OpenDocument presentation */
+	driveNewOfficeOdp: "Presentation (.odp)",
 	/** Item menu and bulk menus — submenu of the formats a document or spreadsheet can be downloaded as (a local download made from the saved file; the file in the drive is unchanged) */
 	driveActionDownloadAs: "Download as",
 	/** Item menu → Download as — item downloading the document or spreadsheet as a PDF file */
@@ -19,6 +21,10 @@ export const driveDownloadAs = {
 	driveDownloadAsXlsx: "Excel workbook (.xlsx)",
 	/** Item menu → Download as — item downloading the spreadsheet converted to an OpenDocument spreadsheet */
 	driveDownloadAsOds: "OpenDocument spreadsheet (.ods)",
+	/** Item menu → Download as — item downloading the presentation converted to a PowerPoint presentation */
+	driveDownloadAsPptx: "PowerPoint presentation (.pptx)",
+	/** Item menu → Download as — item downloading the presentation converted to an OpenDocument presentation */
+	driveDownloadAsOdp: "OpenDocument presentation (.odp)",
 	/** Download as progress toast — the file is being downloaded before it is converted */
 	driveDownloadAsDownloading: "Downloading…",
 	/** Download as progress toast description — the file being exported, when several are exported one after another: {{index}} of {{count}} */

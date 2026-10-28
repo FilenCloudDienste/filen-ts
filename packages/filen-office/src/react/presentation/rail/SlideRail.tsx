@@ -70,8 +70,12 @@ function RailThumb(props: { readonly thumb: PresentationThumb | undefined; reado
 
 		if (context === null) return
 
-		canvas.width = thumb.bitmap.width
-		canvas.height = thumb.bitmap.height
+		// A size written again resets the canvas and its layout even when it is the same: only a new one is written.
+		if (canvas.width !== thumb.bitmap.width || canvas.height !== thumb.bitmap.height) {
+			canvas.width = thumb.bitmap.width
+			canvas.height = thumb.bitmap.height
+		} else context.clearRect(0, 0, canvas.width, canvas.height)
+
 		context.drawImage(thumb.bitmap as unknown as CanvasImageSource, 0, 0)
 	}, [thumb])
 

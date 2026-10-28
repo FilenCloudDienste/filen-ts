@@ -28,7 +28,7 @@ import {
 	encodeCanvasThumb,
 	isFormatMediaError
 } from "@/features/drive/lib/thumbGenerators.logic"
-import { prepareSvgThumb } from "@/features/drive/lib/svgThumb.logic"
+import { prepareSvgThumb } from "@filen/shared/svgThumb"
 import {
 	previewStreamIdOf,
 	previewStreamStatus,

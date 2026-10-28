@@ -51,6 +51,7 @@ import {
 } from "./resolve"
 import type { PlaceholderLevel, RenderServices, TableTextStyle, TextLayoutRequest } from "./services"
 import { finishPictures } from "./pictures"
+import { promptBody, type PlaceholderPrompts } from "./prompts"
 import { renderTableSteps, type TableRenderInput } from "./table"
 import { fitTextWarp, readTextWarp } from "./warp"
 import { ThemeCache, levels as chainOf } from "./theme"
@@ -539,6 +540,11 @@ function notesText(deck: Deck, node: SlideNode): string {
 		.join("\n")
 }
 
+export interface RenderOptions {
+	// The editor's view: a slide's empty placeholders carry their prompt (SlideLayer.prompt) in these strings.
+	readonly prompts?: PlaceholderPrompts
+}
+
 // Renders one slide (or a layout or master on its own). The deck's nodes for the slide, its layout, master and notes
 // are parsed (parse before touch). `report` collects what was approximated or not drawn.
 export async function renderSlide(
@@ -546,13 +552,14 @@ export async function renderSlide(
 	ref: SlideRef,
 	services: RenderServices,
 	slicing: Slicing,
-	report: RenderReport = new RenderReport()
+	report: RenderReport = new RenderReport(),
+	options: RenderOptions = {}
 ): Promise<SlideRender> {
 	const clock = sliceClock(slicing)
 
 	// An edit landing during a pause changes what was read: the render starts over on the new state.
 	for (let attempt = 0; attempt < MAX_RESTARTS; attempt++) {
-		const render = await renderOnce(deck, ref, services, clock, report)
+		const render = await renderOnce(deck, ref, services, clock, report, options)
 
 		if (render !== undefined) return render
 	}
@@ -567,7 +574,8 @@ async function renderOnce(
 	ref: SlideRef,
 	services: RenderServices,
 	clock: SliceClock,
-	report: RenderReport
+	report: RenderReport,
+	options: RenderOptions
 ): Promise<SlideRender | undefined> {
 	const node = deck.nodes.get(ref)
 
@@ -624,7 +632,21 @@ async function renderOnce(
 				matrix: entryMatrix(entry)
 			})
 		} else {
-			await renderEntry(deck, node, entry, scratch, scratch.trees[k] ?? -1, scratchReader, theme, services, clock, report, layers)
+			await renderEntry(
+				deck,
+				node,
+				entry,
+				scratch,
+				scratch.trees[k] ?? -1,
+				scratchReader,
+				theme,
+				services,
+				clock,
+				report,
+				layers,
+				// Prompts are a slide's own (never a layout's or master's on their own render).
+				node.kind === "slide" ? options.prompts : undefined
+			)
 		}
 
 		// The slide's own shapes carry their box for the editor (every layer the entry made, overlays included).
@@ -656,6 +678,7 @@ async function renderOnce(
 		revision: node.revision,
 		hidden: node.hidden,
 		...(node.parent === undefined ? {} : { layout: node.parent }),
+		...(node.showMasterShapes ? {} : { hidesMasterShapes: true as const }),
 		background: drawingData(background),
 		layers,
 		notesText: notesText(deck, node),
@@ -765,6 +788,25 @@ function layoutText(
 	return services.layoutText?.(textRequest(deck, slide, theme, target, box))?.page
 }
 
+// An empty slide placeholder's prompt laid out as its own body would be (its chain, box and bodyPr).
+function promptPage(
+	deck: Deck,
+	slide: SlideNode,
+	services: RenderServices,
+	theme: DrawingTheme,
+	target: TextTarget,
+	box: { readonly width: number; readonly height: number },
+	prompts: PlaceholderPrompts | undefined
+): TextPage | undefined {
+	if (prompts === undefined || target.owner !== slide || services.layoutText === undefined) return undefined
+
+	const body = promptBody(target.shape, target.chain, prompts)
+
+	if (body === undefined) return undefined
+
+	return services.layoutText({ ...textRequest(deck, slide, theme, { ...target, body }, box), prompt: true })?.page
+}
+
 function textRequest(
 	deck: Deck,
 	slide: SlideNode,
@@ -797,7 +839,8 @@ async function renderEntry(
 	services: RenderServices,
 	slicing: Slicing,
 	report: RenderReport,
-	layers: SlideLayer[]
+	layers: SlideLayer[],
+	prompts: PlaceholderPrompts | undefined
 ): Promise<void> {
 	const xfrm = entry.xfrm
 	const w = xfrm.cx / EMU_PER_PX
@@ -954,6 +997,7 @@ async function renderEntry(
 		services,
 		report,
 		layers,
+		prompts,
 		overlay: overlay => renderOverlay(deck, slide, entry, overlay, matrix, theme, services, images, slicing, report, layers)
 	})
 }
@@ -983,6 +1027,8 @@ async function layersOf(input: {
 	readonly services: RenderServices
 	readonly report: RenderReport
 	readonly layers: SlideLayer[]
+	// The slide's empty placeholders get their prompt laid out (the editor's view).
+	readonly prompts?: PlaceholderPrompts | undefined
 	readonly overlay?: (overlay: Overlay) => Promise<void>
 }): Promise<void> {
 	const { deck, slide, entry, list, matrix, base, effects, theme, services, report, layers } = input
@@ -1045,9 +1091,12 @@ async function layersOf(input: {
 			// The text adapter still hears of an empty body (the editor's text context is read from it); nothing paints.
 			if (target.empty === true) services.layoutText?.(textRequest(deck, slide, theme, target, box))
 
+			const prompt = target.empty === true ? promptPage(deck, slide, services, theme, target, box, input.prompts) : undefined
+
 			push({
 				...segment(cut.at, target.shape.id),
 				...(page === undefined ? {} : { text: page }),
+				...(prompt === undefined ? {} : { prompt }),
 				matrix,
 				textMatrix: warp === undefined ? multiply(matrix, box.matrix) : multiply(multiply(matrix, box.matrix), warp)
 			})

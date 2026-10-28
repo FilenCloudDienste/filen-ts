@@ -233,6 +233,7 @@ function Overflow({ groups }: { groups: readonly RibbonGroup[] }) {
 				align="end"
 				data-preview-surface
 				data-ribbon-popup
+				aria-label={t("previewOfficeRibbonMore")}
 				className="max-h-[min(32rem,var(--available-height))] w-auto max-w-[min(36rem,calc(100vw-2rem))] gap-2 overflow-y-auto rounded-2xl p-2"
 				finalFocus={popup.finalFocus}
 				onClick={popup.onClick}

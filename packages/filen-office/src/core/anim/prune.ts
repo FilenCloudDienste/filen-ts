@@ -1,4 +1,5 @@
 import { isMediaBehavior } from "./attributes"
+import type { SourceRef } from "../presentation/model"
 import type { AnimTarget, CommonTimeNode, TimeCondition, TimeNode, TimingTree } from "./model"
 import { decodeUtf8, encodeUtf8, type XmlDocument } from "../xml/index"
 
@@ -95,14 +96,24 @@ export function timingTargets(tree: TimingTree | undefined, gone: ReadonlySet<nu
 export function withoutShapes(tree: TimingTree, gone: ReadonlySet<number>, roots?: TimeNode[]): TimingTree | undefined {
 	if (!timingTargets(tree, gone)) return tree
 
+	const pruned = withoutTargets(tree, target => isGone(target, gone), roots)
+
+	return pruned === undefined ? undefined : { ...pruned, builds: tree.builds.filter(build => !gone.has(build.shape)) }
+}
+
+// `tree` without what animates, or is triggered by, a target `gone` answers true for (the build list as it was); the
+// input is never changed. undefined: nothing is left.
+export function withoutTargets(tree: TimingTree, gone: (target: AnimTarget) => boolean, roots?: TimeNode[]): TimingTree | undefined {
 	const removed = new Set<number>()
+	const triggered = (conditions: readonly TimeCondition[]): boolean =>
+		conditions.some(condition => condition.tgtEl !== undefined && gone(condition.tgtEl))
 	const keep = (node: TimeNode): TimeNode | undefined => {
 		const ctn = node.ctn
 
 		if (
-			triggeredBy(ctn.stCondLst, gone) ||
-			triggeredBy(ctn.endCondLst, gone) ||
-			(node.kind === "behavior" && isGone(isMediaBehavior(node.behavior) ? node.behavior.target : node.behavior.common.target, gone))
+			triggered(ctn.stCondLst) ||
+			triggered(ctn.endCondLst) ||
+			(node.kind === "behavior" && gone(isMediaBehavior(node.behavior) ? node.behavior.target : node.behavior.common.target))
 		) {
 			collect(node, removed)
 
@@ -132,10 +143,9 @@ export function withoutShapes(tree: TimingTree, gone: ReadonlySet<number>, roots
 
 	if (roots !== undefined) topmost(tree.root, removed, roots)
 	if (root === undefined) return undefined
+	if (removed.size === 0 && root === tree.root) return tree
 
-	const builds = tree.builds.filter(build => !gone.has(build.shape))
-
-	return { ...tree, root: removed.size === 0 ? root : withoutReferences(root, removed), builds }
+	return { ...tree, root: removed.size === 0 ? root : withoutReferences(root, removed) }
 }
 
 function topmost(node: TimeNode, removed: ReadonlySet<number>, out: TimeNode[]): void {
@@ -187,4 +197,50 @@ function withoutReferences(node: TimeNode, removed: ReadonlySet<number>): TimeNo
 			children
 		}
 	} as TimeNode
+}
+
+// The session's timing bound node for node onto the timing a save wrote from it and read back (the same tree, in the
+// same order): each node and build entry takes the source element the file now holds for it, so a moved node keeps
+// naming itself (a path from the part's root would name whatever took its place). False when the trees differ.
+export function bindWrittenTiming(mine: TimingTree, theirs: TimingTree): boolean {
+	const pairs: [TimeNode, TimeNode][] = []
+	const same = (a: TimeNode, b: TimeNode): boolean => {
+		const subs = a.ctn.subTnLst ?? []
+		const theirSubs = b.ctn.subTnLst ?? []
+
+		if (a.kind !== b.kind || a.ctn.children.length !== b.ctn.children.length || subs.length !== theirSubs.length) return false
+
+		pairs.push([a, b])
+
+		return (
+			a.ctn.children.every((child, k) => same(child, b.ctn.children[k] as TimeNode)) &&
+			subs.every((child, k) => same(child, theirSubs[k] as TimeNode))
+		)
+	}
+
+	if (!same(mine.root, theirs.root) || mine.builds.length !== theirs.builds.length) return false
+	if (mine.builds.some((build, k) => build.kind !== theirs.builds[k]?.kind || build.shape !== theirs.builds[k]?.shape)) return false
+
+	for (const [a, b] of pairs) {
+		if (b.ctn.src === undefined) delete a.ctn.src
+		else a.ctn.src = b.ctn.src
+
+		delete a.ctn.raw
+	}
+
+	// In place: an inverse holding the same entries sees them rebound too.
+	mine.builds.forEach((build, k) => {
+		const entry = build as { src?: SourceRef; raw?: Uint8Array }
+		const src = theirs.builds[k]?.src
+
+		if (src === undefined) delete entry.src
+		else entry.src = src
+
+		delete entry.raw
+	})
+
+	if (theirs.src === undefined) delete mine.src
+	else mine.src = theirs.src
+
+	return true
 }

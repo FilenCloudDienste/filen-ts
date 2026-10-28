@@ -14,15 +14,18 @@ import {
 	type SlideNode,
 	type SlideRef
 } from "../../presentation/model"
-import { Namespaces, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
+import { inScope } from "../../anim/prune"
+import { Namespaces, NodeKind, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import type { Fragment } from "../read/context"
 import type { OdpParts } from "../read/document"
 import type { PageSpan } from "../read/scan"
 import type { EmitPiece } from "../../pptx/write/types"
 import { emitOdp, type OdpEmitContext } from "./emit"
+import { odpDesignStyles } from "./emit/design"
 import { IDENTITY, OdpShapeWriter, hasAspects, type Aspects } from "./emit/shape"
 import { newPage, pageAspects, pageChanges, startTag, timingPieces } from "./emit/slide"
-import { odpTimingRoot } from "../../anim/odf"
+import { odpTransitionPar, odpTransitionSound, pageIdOf, placeTransitionPar, transitionParOf, withTransitionPar } from "./emit/transition"
+import { odpOwnParagraphSource, odpParagraphKey, odpParagraphTargets, odpTargetIds, odpTimingRoot } from "../../anim/odf"
 import { newSettingsMarkup, pageNames, renameIds, settingsMarkup } from "./integrity"
 import { settingsAttributes, type SettingsAttribute } from "./emit/presentation"
 import { OdpWriteSource, odpWriteSource } from "./source"
@@ -65,7 +68,7 @@ export interface OdpSplice {
 
 // Presentation-level changes the ODP writer writes (the slide list, the custom shows and the show settings); the rest
 // belong to the families that edit them.
-const WRITTEN_PRESENTATION: ReadonlySet<string> = new Set(["slideList", "customShows", "sections", "show"])
+const WRITTEN_PRESENTATION: ReadonlySet<string> = new Set(["slideList", "customShows", "sections", "show", "size"])
 
 function concat(chunks: readonly Uint8Array[]): Uint8Array {
 	let length = 0
@@ -142,7 +145,7 @@ export function shapeAspects(target: readonly ShapeNode[], pristine: readonly Sh
 			...(shape.name === was.name ? {} : { name: true }),
 			...(shape.hidden === was.hidden ? {} : { hidden: true }),
 			...(same(shape.actions, was.actions) ? {} : { actions: true }),
-			...(shape.frame?.kind === "table" && !same(shape.frame, was.frame) ? { frame: true } : {})
+			...((shape.frame?.kind === "table" || shape.frame?.kind === "chart") && !same(shape.frame, was.frame) ? { frame: true } : {})
 		}
 
 		out.set(shape, aspects)
@@ -173,7 +176,7 @@ function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNod
 		if (was === undefined) return
 		if (shape.kind !== was.kind) found = refused("unsupported", "a shape of another kind")
 		else if (
-			(shape.frame?.kind !== "table" && digestOf(shape.frame) !== digestOf(was.frame)) ||
+			(shape.frame?.kind !== "table" && shape.frame?.kind !== "chart" && digestOf(shape.frame) !== digestOf(was.frame)) ||
 			digestOf(shape.media) !== digestOf(was.media)
 		)
 			found = refused("notImplemented", `odp emit ${shape.frame?.kind ?? "media"}`)
@@ -333,6 +336,9 @@ class Splicer {
 	readonly written: string[] = []
 	private readonly fragments = new WeakMap<XmlDocument, Fragment>()
 	private ids: Set<string> | undefined
+	// The ids the page being written gives source elements (an animated shape's, a targeted paragraph's), by node of its
+	// fragment's document: a source span copied into rewritten markup carries them (bytes()).
+	private given: { readonly document: XmlDocument; readonly ids: Map<number, readonly (readonly [string, string])[]> } | undefined
 
 	constructor(deck: Deck, parts: OdpParts, source: OdpWriteSource, names: Map<SlideRef, string>) {
 		this.deck = deck
@@ -373,7 +379,15 @@ class Splicer {
 	bytes(pieces: readonly EmitPiece[], document: XmlDocument | undefined): Uint8Array {
 		for (const piece of pieces) if (typeof piece === "string") this.written.push(piece)
 
-		return markupBytes({ kind: "markup", pieces }, document)
+		const given = this.given
+		const out =
+			given === undefined || given.document !== document
+				? pieces
+				: pieces.map(piece =>
+						typeof piece === "object" && "hole" in piece ? withGivenIds(given.document, piece.hole, given.ids) : piece
+					)
+
+		return markupBytes({ kind: "markup", pieces: out }, document)
 	}
 
 	// A page written from its source: its start tag patched, its shapes and notes spliced against the pristine reading
@@ -391,22 +405,79 @@ class Splicer {
 		const page = document.firstChildElement(document.documentElement())
 
 		const name = this.names.get(node.ref) ?? node.name ?? ""
-		const context: OdpEmitContext = { ...this.context, document }
+		const targetIds = this.targetIds(fragment, node)
+		// Only a page whose timing is written names paragraphs anew.
+		const paragraphIds = pageAspects(node, pristine.slide, name).timing === true ? this.paragraphIds(fragment, node) : new Map()
+
+		if (isRefused(paragraphIds)) return paragraphIds
+
+		const context: OdpEmitContext = {
+			...this.context,
+			document,
+			...(targetIds.size === 0 ? {} : { targetIds }),
+			...(paragraphIds.size === 0 ? {} : { paragraphIds: new Map([...paragraphIds].map(([key, given]) => [key, given.name])) })
+		}
 		const aspects = pageAspects(node, pristine.slide, name)
 		const attributes = pageChanges(this.deck, node, aspects, fragment.attributes(page), context)
 
 		if (isRefused(attributes)) return attributes
+
+		// The ids this save gives source elements, set on them below, and carried by any copy of them a rewrite makes.
+		const given = new Map<number, (readonly [string, string])[]>()
+
+		if (aspects.timing === true) {
+			for (const [id, name] of targetIds) {
+				const src = findTarget(node.shapes, id)?.src
+
+				if (src?.format === "odp" && src.fragment === fragment.offset)
+					given.set(src.node, [
+						["xml:id", name],
+						["draw:id", name]
+					])
+			}
+
+			for (const entry of paragraphIds.values()) if (entry.node >= 0) given.set(entry.node, [["xml:id", entry.name]])
+		}
+
+		this.given = given.size === 0 ? undefined : { document, ids: given }
 
 		const editor = new XmlEditor(document)
 		const slideEdits = this.container(editor, fragment, page, node, node.shapes, pristine.slide.shapes, context)
 
 		if (isRefused(slideEdits)) return slideEdits
 
-		if (aspects.timing === true) {
-			const timing = this.timing(editor, fragment, page, node, context)
+		// The transition par begins by the page's id; a page without one is given one.
+		let par: string | undefined
 
-			if (timing !== undefined) return timing
+		if (aspects.transition === true && odpTransitionPar(node.transition, "") !== undefined) {
+			let id = pageIdOf(fragment.attributes(page))
+
+			if (id === undefined) {
+				id = this.freshId()
+				attributes.set("xml:id", id)
+				attributes.set("draw:id", id)
+			}
+
+			const sound = odpTransitionSound(node.transition, context)
+
+			if (isRefused(sound)) return sound
+
+			par = odpTransitionPar(node.transition, id, sound)
 		}
+
+		// An element still in place takes its ids here; one a rewrite covers has them in the new markup already (its copy
+		// through bytes(), a shape's rewritten tag in emit/shape.ts, a paragraph the text family wrote). A paragraph target is
+		// the text:p's own xml:id, as LibreOffice writes it.
+		for (const [at, ids] of given)
+			if (!editor.covered(at)) for (const [attribute, value] of ids) editor.setAttribute(at, attribute, value)
+
+		this.given = undefined
+
+		const placed =
+			aspects.timing === true ? this.timing(editor, fragment, page, node, context, aspects.transition === true, par) : false
+
+		if (isRefused(placed)) return placed
+		if (aspects.transition === true && !placed) placeTransitionPar(editor, fragment, page, par)
 
 		const notesNode = node.notes === undefined ? undefined : this.deck.nodes.get(node.notes)
 
@@ -450,12 +521,124 @@ class Splicer {
 		return bytes
 	}
 
-	// The page's timing root replaced by the timing family's element (removed when the slide lost its timing), or
-	// inserted after the shapes and before presentation:notes when the source has none.
-	private timing(editor: XmlEditor, fragment: Fragment, page: number, node: SlideNode, context: OdpEmitContext): Refused | undefined {
-		const pieces = timingPieces(node, context)
+	// Every shape the page's timing targets that has no id of its own gets one unique in the document.
+	private targetIds(fragment: Fragment, node: SlideNode): Map<number, string> {
+		const out = new Map<number, string>()
 
-		if (isRefused(pieces)) return pieces
+		this.ids ??= contentIds(this.parts.content.bytes)
+
+		for (const id of odpTargetIds(node.timing)) {
+			const shape = findTarget(node.shapes, id)
+
+			if (shape === undefined) continue
+
+			if (shape.src?.format === "odp" && shape.src.fragment === fragment.offset) {
+				const a = fragment.attributes(shape.src.node)
+
+				if (a.has("xml:id") || a.has("draw:id")) continue
+			}
+
+			let name = `id${String(id)}`
+
+			for (let n = 2; this.ids.has(name); n++) name = `id${String(id)}_${String(n)}`
+
+			this.ids.add(name)
+			out.set(id, name)
+		}
+
+		return out
+	}
+
+	// Every text:p the page's timing targets on its own that has no id gets one unique in the document: a source
+	// paragraph on its element (node), a paragraph the save writes new (of a shape inserted or a body edited since) by
+	// the text family as it writes it (node -1). A paragraph the shape does not have refuses.
+	private paragraphIds(fragment: Fragment, node: SlideNode): Map<string, { readonly node: number; readonly name: string }> | Refused {
+		const out = new Map<string, { readonly node: number; readonly name: string }>()
+
+		this.ids ??= contentIds(this.parts.content.bytes)
+
+		for (const { shape: id, paragraph } of odpParagraphTargets(node.timing)) {
+			const shape = findTarget(node.shapes, id)
+
+			// A shape written whole (put back by an undo from its held markup) carries its paragraphs' ids with it.
+			if (shape === undefined || (shape.src !== undefined && (shape.src.format !== "odp" || shape.src.fragment !== fragment.offset)))
+				continue
+
+			const own = shape.text?.paragraphs[paragraph]
+
+			if (own === undefined) return refused("malformed", `a paragraph target past the text of shape ${String(id)}`)
+
+			const src = odpOwnParagraphSource(shape, paragraph)
+			const sourced = src?.format === "odp" && src.fragment === fragment.offset && src.epoch === fragment.epoch
+
+			if (sourced) {
+				const a = fragment.attributes(src.node)
+
+				if (a.has("xml:id") || a.has("text:id")) continue
+			}
+
+			let name = `id${String(id)}p${String(paragraph)}`
+
+			for (let n = 2; this.ids.has(name); n++) name = `id${String(id)}p${String(paragraph)}_${String(n)}`
+
+			this.ids.add(name)
+			out.set(odpParagraphKey(id, paragraph), { node: sourced ? src.node : -1, name })
+		}
+
+		return out
+	}
+
+	// An id no element of the content holds.
+	newId(): string {
+		return this.freshId()
+	}
+
+	private freshId(): string {
+		const ids = (this.ids ??= contentIds(this.parts.content.bytes))
+
+		for (let n = ids.size + 1; ; n++) {
+			const id = `id${String(n)}`
+
+			if (!ids.has(id)) {
+				ids.add(id)
+
+				return id
+			}
+		}
+	}
+
+	// The page's timing root replaced by the timing family's element (removed when the slide lost its timing), or
+	// inserted after the shapes and before presentation:notes when the source has none. With `transition`, the root
+	// carries the page's transition par as it now is: true when it was placed so, false when the root stayed its
+	// source span (the par is placed in the source then).
+	private timing(
+		editor: XmlEditor,
+		fragment: Fragment,
+		page: number,
+		node: SlideNode,
+		context: OdpEmitContext,
+		transition = false,
+		par: string | undefined = undefined
+	): boolean | Refused {
+		const own = timingPieces(node, context)
+
+		if (isRefused(own)) return own
+
+		const sourcePar = transition ? -1 : transitionParOf(fragment, odpTimingRoot(fragment, page))
+		const holdsPar = own.some(piece => typeof piece === "object" && !(piece instanceof Uint8Array) && piece.hole === sourcePar)
+		// The page's own par (its transition unchanged) stays first in a root written anew from the model (an undo's).
+		const withPar = transition
+			? withTransitionPar(own, fragment, page, par)
+			: sourcePar >= 0 && own.length > 0 && !holdsPar
+				? (withTransitionPar(own, fragment, page, this.markupOf(fragment, sourcePar)) ?? own)
+				: own
+
+		if (withPar === undefined) return false
+
+		const kept = transition || withPar.length > 0 ? -1 : transitionParOf(fragment, odpTimingRoot(fragment, page))
+		// A page that lost its animations keeps its transition par in a root of its own.
+		const pieces: readonly EmitPiece[] =
+			kept < 0 ? withPar : ['<anim:par presentation:node-type="timing-root">', { hole: kept }, "</anim:par>"]
 
 		const document = fragment.document
 		const bytes = this.bytes(pieces, document)
@@ -465,22 +648,29 @@ class Splicer {
 			if (bytes.length === 0) editor.remove(root)
 			else editor.replace(root, bytes)
 
-			return undefined
+			return true
 		}
 
-		if (bytes.length === 0) return undefined
+		if (bytes.length === 0) return true
 
 		for (let child = document.firstChildElement(page); child >= 0; child = document.nextSiblingElement(child)) {
 			if (fragment.name(child) === "presentation:notes") {
 				editor.insertBefore(child, bytes)
 
-				return undefined
+				return true
 			}
 		}
 
 		editor.append(page, bytes)
 
-		return undefined
+		return true
+	}
+
+	// An element of a page's source as it is written there.
+	private markupOf(fragment: Fragment, node: number): string {
+		const document = fragment.document
+
+		return decodeUtf8(document.bytes, document.start(node), document.end(node))
 	}
 
 	// A copied page's xml:id and draw:id values made unique in the document.
@@ -646,6 +836,37 @@ function withInjection(bytes: Uint8Array, inject: Uint8Array): Uint8Array {
 	return concat([bytes.subarray(0, end), inject, bytes.subarray(end)])
 }
 
+// A source span with the ids this save gives elements in it added to their start tags (each lacks the attribute).
+function withGivenIds(document: XmlDocument, hole: number, ids: ReadonlyMap<number, readonly (readonly [string, string])[]>): EmitPiece {
+	const start = document.start(hole)
+	const end = document.end(hole)
+	const inserts: { readonly at: number; readonly text: string }[] = []
+
+	for (const [node, attributes] of ids) {
+		if (document.start(node) < start || document.end(node) > end) continue
+
+		const at = document.openEnd(node) - (document.isSelfClosing(node) ? 2 : 1)
+
+		inserts.push({ at, text: attributes.map(([name, value]) => ` ${name}="${escapeAttribute(value)}"`).join("") })
+	}
+
+	if (inserts.length === 0) return { hole }
+
+	inserts.sort((a, b) => a.at - b.at)
+
+	const chunks: Uint8Array[] = []
+	let from = start
+
+	for (const insert of inserts) {
+		chunks.push(document.bytes.subarray(from, insert.at), encodeUtf8(insert.text))
+		from = insert.at
+	}
+
+	chunks.push(document.bytes.subarray(from, end))
+
+	return concat(chunks)
+}
+
 function withoutInjection(bytes: Uint8Array, inject: Uint8Array): Uint8Array {
 	const end = startTagEnd(bytes)
 	const from = end - inject.length
@@ -734,7 +955,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 			if (node.src === undefined) {
 				const name = names.get(ref) ?? ""
-				const page = newPage(deck, node, name, splicer.context)
+				const page = newPage(deck, node, name, splicer.context, () => splicer.newId())
 
 				if (isRefused(page)) return page
 
@@ -757,10 +978,14 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 				if (isRefused(bytes)) return bytes
 
+				// The declarations it carried to be read on its own that the content's root makes come off again.
 				pages.push({
 					kind: "written",
 					ref,
-					bytes: bytes ?? held.document.raw(held.document.firstChildElement(held.document.documentElement())),
+					bytes: inScope(
+						bytes ?? held.document.raw(held.document.firstChildElement(held.document.documentElement())),
+						splicer.scope
+					),
 					name
 				})
 
@@ -815,15 +1040,34 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 	const settingsChanged = structural || changes.presentation.has("customShows") || show !== undefined
 	const rewritten = pages.some(page => page.kind === "written")
+	// styles.xml: a slide size change (page layouts, moved master shapes), the drawing resources the written pages
+	// name, and the gallery master pages (emit/design.ts).
+	const sized = odpDesignStyles(deck, parts.stylesFragment, splicer.styles, changes.presentation.has("size"))
 
-	if (!rewritten && !structural && !settingsChanged && splicer.styles.empty)
-		return { revision: input.revision, content: undefined, pages, names, replace: [], add: [] }
+	if (isRefused(sized)) return sized
+
+	const stylesReplaced = sized === undefined ? [] : [{ name: "styles.xml", bytes: sized }]
+
+	// Nothing of content.xml changed: unchanged, unless styles.xml did (written with content.xml as it is).
+	if (
+		!rewritten &&
+		!structural &&
+		!settingsChanged &&
+		splicer.styles.empty &&
+		splicer.styles.replaced().length === 0 &&
+		stylesReplaced.length === 0
+	)
+		return { revision: input.revision, content: undefined, pages, names, replace: stylesReplaced, add: [] }
 
 	const whole = assemble(parts, pages, splicer, structural, settingsChanged, show)
 
 	if (isRefused(whole)) return whole
 
-	const assembled = withRetired(withoutOrphans(parts.content.bytes, whole, source.retired), source.retired)
+	const assembled = withRetired(
+		withoutOrphans(parts.content.bytes, whole, source.retired, source.retiredAfter),
+		source.retired,
+		source.retiredAfter
+	)
 
 	// Entries the written pages added (an inserted picture), each with its manifest entry.
 	const added = splicer.styles.added()
@@ -851,7 +1095,9 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 		names,
 		replace: [
 			{ name: "content.xml", bytes: assembled },
-			...(manifestBytes === undefined ? [] : [{ name: "META-INF/manifest.xml", bytes: manifestBytes }])
+			...stylesReplaced,
+			...(manifestBytes === undefined ? [] : [{ name: "META-INF/manifest.xml", bytes: manifestBytes }]),
+			...splicer.styles.replaced().map(entry => ({ name: entry.path, bytes: entry.content }))
 		],
 		// Pictures (PNG, JPEG, GIF) and media are compressed already: stored, as LibreOffice stores them; a medium streams
 		// once, checked against its CRC-32.
@@ -901,8 +1147,13 @@ function referenced(text: string): Set<string> {
 
 // The automatic styles of content.xml an edit left without a reference (a deleted page's, a style a patched copy
 // replaced) taken out, until none is: the source's own unreferenced ones stay as they were. Each one taken out is
-// kept in `retired` (markup an undo puts back may name it).
-function withoutOrphans(source: Uint8Array, output: Uint8Array, retired: Map<string, string>): Uint8Array {
+// kept in `retired` (markup an undo puts back may name it), with the style it followed in `after` (null: the first).
+function withoutOrphans(
+	source: Uint8Array,
+	output: Uint8Array,
+	retired: Map<string, string>,
+	after: Map<string, string | null>
+): Uint8Array {
 	const before = referenced(decodeUtf8(source, 0, source.length))
 	let current = output
 
@@ -923,14 +1174,24 @@ function withoutOrphans(source: Uint8Array, output: Uint8Array, retired: Map<str
 			)
 				continue
 
+			let previous: string | null = null
+
 			for (let style = document.firstChildElement(section); style >= 0; style = document.nextSiblingElement(style)) {
 				const name = document.attributes(style).find(attribute => attribute.name.endsWith(":name"))?.value
 
 				if (name !== undefined && before.has(name) && !now.has(name)) {
-					ranges.push({ start: document.start(style), end: document.end(style) })
+					// The whitespace after a style goes with it (an undo puts both back where they were).
+					const end = afterSpace(document, current, style)
 
-					if (!retired.has(name)) retired.set(name, decodeUtf8(current, document.start(style), document.end(style)))
+					ranges.push({ start: document.start(style), end })
+
+					if (!retired.has(name)) {
+						retired.set(name, decodeUtf8(current, document.start(style), end))
+						after.set(name, previous)
+					}
 				}
+
+				if (name !== undefined) previous = name
 			}
 		}
 
@@ -952,8 +1213,10 @@ function withoutOrphans(source: Uint8Array, output: Uint8Array, retired: Map<str
 }
 
 // The retired automatic styles the written content names but no longer defines (markup an undo put back) added to
-// office:automatic-styles again, with the retired ones they name in turn.
-function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>): Uint8Array {
+// office:automatic-styles again, with the retired ones they name in turn: each after the style it followed when it
+// was retired (first, when it was the first), so content an undo returned to its source state is written as the
+// source had it; last when that style is gone.
+function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>, after: ReadonlyMap<string, string | null>): Uint8Array {
 	if (retired.size === 0) return output
 
 	const prologue = readContentPrologue(output)
@@ -962,7 +1225,7 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>): 
 
 	const document = prologue.document
 	let section = -1
-	const defined = new Set<string>()
+	const defined = new Map<string, number>()
 
 	for (let node = document.firstChildElement(prologue.root); node >= 0; node = document.nextSiblingElement(node)) {
 		if (
@@ -976,11 +1239,12 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>): 
 		for (let style = document.firstChildElement(node); style >= 0; style = document.nextSiblingElement(style)) {
 			const name = document.attributes(style).find(attribute => attribute.name.endsWith(":name"))?.value
 
-			if (name !== undefined) defined.add(name)
+			if (name !== undefined) defined.set(name, afterSpace(document, output, style))
 		}
 	}
 
 	const added: string[] = []
+	const adding = new Set<string>()
 	let wanted = [...referenced(decodeUtf8(output, 0, output.length))]
 
 	while (wanted.length > 0) {
@@ -989,10 +1253,10 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>): 
 		for (const name of wanted) {
 			const markup = retired.get(name)
 
-			if (markup === undefined || defined.has(name)) continue
+			if (markup === undefined || defined.has(name) || adding.has(name)) continue
 
-			defined.add(name)
-			added.push(markup)
+			adding.add(name)
+			added.push(name)
 			more.push(...referenced(markup))
 		}
 
@@ -1001,8 +1265,6 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>): 
 
 	if (added.length === 0) return output
 
-	const markup = encodeUtf8(added.join(""))
-
 	if (section < 0 || document.isSelfClosing(section)) {
 		const at = section < 0 ? prologue.bodyStart : document.start(section)
 		const end = section < 0 ? prologue.bodyStart : document.end(section)
@@ -1010,15 +1272,58 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>): 
 		return concat([
 			output.subarray(0, at),
 			encodeUtf8('<office:automatic-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">'),
-			markup,
+			encodeUtf8(added.map(name => retired.get(name) ?? "").join("")),
 			encodeUtf8("</office:automatic-styles>"),
 			output.subarray(end)
 		])
 	}
 
-	const at = document.contentEnd(section)
+	// Each one's place: after the style it followed (one being added goes before it in the same run), the section's
+	// start for the first, its end when that style is gone.
+	const opening = document.firstChild(section)
+	const first =
+		opening >= 0 &&
+		document.kind(opening) !== NodeKind.Element &&
+		isWhitespace(output.subarray(document.start(opening), document.end(opening)))
+			? document.end(opening)
+			: document.contentStart(section)
+	const last = document.contentEnd(section)
+	const placeOf = (name: string): { readonly at: number; readonly depth: number } => {
+		let depth = 0
+		let anchor = after.get(name)
 
-	return concat([output.subarray(0, at), markup, output.subarray(at)])
+		for (const seen = new Set([name]); anchor !== undefined && anchor !== null && adding.has(anchor) && !seen.has(anchor); depth++) {
+			seen.add(anchor)
+			anchor = after.get(anchor)
+		}
+
+		const at = anchor === null ? first : anchor === undefined ? last : (defined.get(anchor) ?? last)
+
+		return { at, depth }
+	}
+	const placed = added
+		.map((name, order) => ({ name, order, ...placeOf(name) }))
+		.sort((a, b) => a.at - b.at || a.depth - b.depth || a.order - b.order)
+	const chunks: Uint8Array[] = []
+	let at = 0
+
+	for (const each of placed) {
+		chunks.push(output.subarray(at, each.at), encodeUtf8(retired.get(each.name) ?? ""))
+		at = each.at
+	}
+
+	chunks.push(output.subarray(at))
+
+	return concat(chunks)
+}
+
+// The end of an element and the whitespace-only text right after it.
+function afterSpace(document: XmlDocument, bytes: Uint8Array, node: number): number {
+	const next = document.nextSibling(node)
+
+	return next >= 0 && document.kind(next) !== NodeKind.Element && isWhitespace(bytes.subarray(document.start(next), document.end(next)))
+		? document.end(next)
+		: document.end(node)
 }
 
 // content.xml from its parts: the prologue with the new automatic styles, the body's head, the pages, the tail with
@@ -1161,4 +1466,16 @@ function lastClose(bytes: Uint8Array): number {
 	const at = text.search(/<\/[\w.-]*:?presentation>\s*<\/[\w.-]*:?body>\s*<\/[\w.-]*:?document-content>\s*$/u)
 
 	return at < 0 ? -1 : Math.max(0, bytes.length - 4096) + encodeUtf8(text.slice(0, at)).length
+}
+
+function findTarget(shapes: readonly ShapeNode[], id: number): ShapeNode | undefined {
+	for (const shape of shapes) {
+		if (shape.id === id) return shape
+
+		const inner = shape.children === undefined ? undefined : findTarget(shape.children, id)
+
+		if (inner !== undefined) return inner
+	}
+
+	return undefined
 }

@@ -850,6 +850,23 @@ describe("measurement", () => {
 })
 
 describe("hit testing", () => {
+	it("puts the caret of an empty centred or end-aligned line at its alignment position", () => {
+		const h = harness()
+		const tester = new HitTester(h.styles)
+		const caret = (geometry: Partial<typeof GEOMETRY>): number => {
+			layOut(h, () => undefined, geometry)
+
+			return tester.xAtOffset(h.out, 0, "", 0)
+		}
+
+		expect(caret({ alignment: Alignment.START })).toBe(0)
+		expect(caret({ alignment: Alignment.CENTER })).toBe(50)
+		expect(caret({ alignment: Alignment.END })).toBe(100)
+		expect(caret({ alignment: Alignment.CENTER, startIndent: 20 })).toBe(60)
+		expect(caret({ alignment: Alignment.START, rtl: true })).toBe(100)
+		expect(caret({ alignment: Alignment.END, rtl: true })).toBe(0)
+	})
+
 	it("maps offsets to x and back on left-to-right and right-to-left lines", () => {
 		const h = harness()
 		const tester = new HitTester(h.styles)

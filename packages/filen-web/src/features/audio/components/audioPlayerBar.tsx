@@ -16,7 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { formatSecondsToMediaClock } from "@filen/shared"
-import { previewTitleSplitIndex } from "@/features/preview/lib/previewTitle"
+import { SplitTitle } from "@/features/preview/components/splitTitle"
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
 // which never mounts on public-link routes — so this surface is inherently authed-only). It renders
@@ -214,22 +214,15 @@ function PlayerBarTimeline() {
 // The title's head truncates to the width there is while its tail (the extension of an untagged file)
 // stays in view: one ellipsis, in the middle, as the preview overlay's header does it.
 function TrackTitle({ title }: { title: string }) {
-	const TAIL_LENGTH = 10
-	const splitAt = previewTitleSplitIndex(title, TAIL_LENGTH)
-
 	return (
 		<span
 			title={title}
 			className="flex min-w-0 text-sm font-medium"
 		>
-			{splitAt > 0 ? (
-				<>
-					<span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{title.slice(0, splitAt)}</span>
-					<span className="shrink-0 whitespace-nowrap">{title.slice(splitAt)}</span>
-				</>
-			) : (
-				<span className="truncate">{title}</span>
-			)}
+			<SplitTitle
+				text={title}
+				tailLength={10}
+			/>
 		</span>
 	)
 }

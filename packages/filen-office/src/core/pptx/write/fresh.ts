@@ -9,17 +9,21 @@ import {
 	type Relationships,
 	type ZipPlanItem
 } from "../../opc/index"
+import { MEDIA_LIMITS } from "../../opc/mediaPolicy"
+import type { ByteChunks } from "../../opc/pieces"
+import { DEFAULT_PRESENTATION_BUDGETS } from "../../presentation/budget"
 import { MIN_MASTER_LAYOUT_ID, MIN_SLIDE_ID } from "../../presentation/ids"
-import { PresentationError, refused, type Deck, type Refused, type SlideNode, type SlideRef } from "../../presentation/model"
+import { PresentationError, refused, slideRef, type Deck, type Refused, type SlideNode, type SlideRef } from "../../presentation/model"
 import { NodeKind, decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
 import { G, partReader, type PartReader } from "../read/xml"
-import { PREFIXES, URIS, attr, type EmitContext, type SourceCopier } from "./emit/shape"
+import { IMAGE_RELATIONSHIP, PREFIXES, URIS, attr, type EmitContext, type SourceCopier } from "./emit/shape"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { slideRoot } from "./emit/slide"
 import { spliceShowPr } from "./emit/presentation"
 import { listStyleXml } from "./emit/text"
+import { XLSX_CONTENT_TYPE } from "../../presentation/edit/apply/chart"
 import { PART_CONTENT_TYPES, PackageWriter, RELATIONSHIPS, modelName, zipName } from "./parts"
-import type { EmitPiece, FreshPptx, PptxSaveOptions, PptxSaveOutcome, PptxSource } from "./types"
+import type { EmitPiece, EmitRequest, EmitResult, FreshPptx, PptxSaveOptions, PptxSaveOutcome, PptxSource } from "./types"
 
 // The fresh writer: a whole PresentationML package from the model, in a fixed order (presentation, masters, layouts,
 // slides, notes masters and notes, handout master, themes, properties, then the media and other parts the content
@@ -106,6 +110,20 @@ function transitionalValue(value: string): string {
 	const measure = MEASURE.exec(value)
 
 	return measure === null ? value : String(Math.round(Number(measure[1]) * (EMU_PER[measure[2] ?? ""] ?? 1)))
+}
+
+// A copied XML part: a Strict part as Transitional, anything else as it is.
+function transitionalPart(bytes: Uint8Array): Uint8Array {
+	try {
+		const document = parseXml(bytes)
+		const root = partReader(document).namespaces.elementUri(document.documentElement()) ?? ""
+
+		if (/purl\.oclc\.org\/ooxml/u.test(root)) return encodeUtf8(XML_DECLARATION + new Copier(document, id => id).document_())
+	} catch {
+		// Not XML after all: copied as it is.
+	}
+
+	return bytes
 }
 
 // Copies elements of one source part into a fresh part: names under the writer's prefixes (Strict URIs become
@@ -298,8 +316,15 @@ const STRICT_URIS: Readonly<Record<string, string>> = {
 	pic: "http://purl.oclc.org/ooxml/drawingml/picture"
 }
 
+// Strict relationship names that differ from their Transitional ones (ECMA-376 Part 1, Strict and Transitional).
+const STRICT_NAMES: Readonly<Record<string, string>> = { extendedProperties: "extended-properties", customProperties: "custom-properties" }
+
 function transitionalType(type: string): string {
-	return type.startsWith(STRICT_RELATIONSHIPS) ? TRANSITIONAL_RELATIONSHIPS + type.slice(STRICT_RELATIONSHIPS.length) : type
+	if (!type.startsWith(STRICT_RELATIONSHIPS)) return type
+
+	const name = type.slice(STRICT_RELATIONSHIPS.length)
+
+	return TRANSITIONAL_RELATIONSHIPS + (STRICT_NAMES[name] ?? name)
 }
 
 function assemble(pieces: readonly EmitPiece[], copier: Copier | undefined): string {
@@ -337,25 +362,151 @@ const PRESENTATION_KINDS: ReadonlySet<string> = new Set([...NODE_KINDS, "presPro
 const PACKAGE_KINDS: ReadonlySet<string> = new Set([
 	"officeDocument",
 	"extended-properties",
+	"extendedProperties",
 	"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
 	"http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/origin"
 ])
 
 // --- The writer ---
 
+// Parts of a source that is no PresentationML package (an ODP deck's pictures and media), which the model names by
+// their path there: copied by bytes into ppt/media under a fresh name when markup relates to them.
+export interface FreshForeignParts {
+	has(name: string): boolean
+	contentType(name: string): string | undefined
+	read(name: string): Promise<Uint8Array>
+	// A part's content streamed from its zip entry (never held whole), with the CRC-32 the entry declares; undefined
+	// for a part made in memory.
+	stream?(name: string): StreamedPart | undefined
+	// The relationships of a part made for the copy (a chart's to its workbook), their targets foreign parts.
+	relationships?(name: string): readonly { readonly id: string; readonly type: string; readonly target: string }[]
+}
+
+export interface StreamedPart extends ByteChunks {
+	readonly crc32: number
+}
+
+export interface FreshExtras {
+	readonly foreign?: FreshForeignParts
+	// Each node as it is written (a conversion's nearer forms of what PresentationML cannot hold as the source has it).
+	readonly adapt?: (node: SlideNode) => SlideNode
+	// A shape's element written by the conversion (content the model names in the other format, as a chart object),
+	// else undefined for its family to write.
+	readonly element?: (request: EmitRequest, context: EmitContext) => EmitResult | undefined
+	// The slide size written in place of the deck's (one PresentationML cannot hold).
+	readonly size?: { readonly cx: number; readonly cy: number }
+	// The PNG an SVG picture among the foreign parts is shown by where SVG is not drawn: PowerPoint writes an SVG
+	// picture as a:blip of a PNG with the SVG in its asvg:svgBlip extension (MS-ODRAWXML §2.3.1.30).
+	readonly svgFallback?: (name: string) => Promise<Uint8Array>
+}
+
+// Media whose content is compressed already: stored, not deflated again.
+const STORED_MEDIA = /^(?:image\/(?:png|jpeg|gif|webp)|video\/|audio\/)/u
+// A copied part larger than this is stored as it streams: deflating it would hold its whole deflated content.
+const DEFLATE_HELD = 16 * 1024 * 1024
+const XML_TYPE = /xml$/iu
+const SVG_TYPE = "image/svg+xml"
+const SVG_BLIP_EXT = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
+const ASVG = "http://schemas.microsoft.com/office/drawing/2016/SVG/main"
+
+// Each a:blip naming `svg` made to name `png`, the SVG in its asvg:svgBlip extension (the extension list a:blip's last
+// child, CT_Blip §20.1.8.13).
+function withSvgBlip(markup: string, svg: string, png: string): string {
+	const start = `<a:blip r:embed="${svg}"`
+	const ext = `<a:ext uri="${SVG_BLIP_EXT}"><asvg:svgBlip xmlns:asvg="${ASVG}" r:embed="${svg}"/></a:ext>`
+	let out = ""
+	let from = 0
+
+	for (let at = markup.indexOf(start); at >= 0; at = markup.indexOf(start, from)) {
+		const close = markup.indexOf(">", at)
+
+		if (close < 0) break
+
+		const head = `<a:blip r:embed="${png}"${markup.slice(at + start.length, close)}`
+
+		out += markup.slice(from, at)
+
+		if (markup[close - 1] === "/") {
+			out += `${head.slice(0, -1)}><a:extLst>${ext}</a:extLst></a:blip>`
+			from = close + 1
+			continue
+		}
+
+		const end = markup.indexOf("</a:blip>", close)
+
+		if (end < 0) break
+
+		const inner = markup.slice(close + 1, end)
+		const list = inner.lastIndexOf("</a:extLst>")
+
+		out += `${head}>${list < 0 ? `${inner}<a:extLst>${ext}</a:extLst>` : `${inner.slice(0, list)}${ext}${inner.slice(list)}`}</a:blip>`
+		from = end + "</a:blip>".length
+	}
+
+	return out + markup.slice(from)
+}
+
+// What a copied part of `contentType` may declare (core/opc/mediaPolicy.ts classes: media streamed, images, the rest),
+// its XML parsed whole within the reader's per-part budget.
+function copyLimit(contentType: string): number {
+	if (/^(?:video|audio)\//u.test(contentType)) return MEDIA_LIMITS.mediaEntry
+	if (contentType.startsWith("image/")) return MEDIA_LIMITS.imageEntry
+	if (XML_TYPE.test(contentType)) return Math.min(MEDIA_LIMITS.otherEntry, DEFAULT_PRESENTATION_BUDGETS.xmlPartBytes)
+
+	return MEDIA_LIMITS.otherEntry
+}
+
+function checkCopy(name: string, contentType: string, size: number): void {
+	const limit = copyLimit(contentType)
+
+	if (size > limit) throw new PresentationError("tooLarge", `${name} declares ${String(size)} bytes, over ${String(limit)}`)
+}
 class Fresh {
 	private readonly deck: Deck
 	private readonly source: PptxSource | undefined
+	private readonly extras: FreshExtras
+	private readonly foreignPending: { from: string; to: string }[] = []
 	readonly writer: PackageWriter
 	// Source part key → fresh part name, for nodes (written from the model) and copied parts.
 	private readonly mapped = new Map<string, string>()
 	private readonly pending: { from: string; to: string }[] = []
 	private readonly nodeParts = new Map<SlideRef, string>()
+	// Fresh part → its image relationships naming a foreign SVG picture (id → the SVG's source name).
+	private readonly svgBlips = new Map<string, Map<string, string>>()
+	// Foreign SVG picture → the fresh name of its PNG.
+	private readonly svgPngs = new Map<string, string>()
 
-	constructor(deck: Deck, source: PptxSource | undefined, writer: PackageWriter) {
+	constructor(deck: Deck, source: PptxSource | undefined, writer: PackageWriter, extras: FreshExtras = {}) {
 		this.deck = deck
 		this.source = source
 		this.writer = writer
+		this.extras = extras
+	}
+
+	// The fresh name of a foreign source part, its copy queued.
+	private foreignTarget(sourceName: string): string {
+		const key = `foreign:${sourceName}`
+		const held = this.mapped.get(key)
+
+		if (held !== undefined) return held
+
+		const contentType = this.extras.foreign?.contentType(sourceName) ?? "application/octet-stream"
+		const name = this.writer.allocate(
+			contentType === PART_CONTENT_TYPES.chart
+				? "chart"
+				: contentType === XLSX_CONTENT_TYPE
+					? "embeddedWorkbook"
+					: contentType.startsWith("image/")
+						? "image"
+						: "media",
+			contentType
+		)
+
+		this.mapped.set(key, name)
+		this.writer.add(name, contentType, undefined, { compress: !STORED_MEDIA.test(contentType) })
+		this.foreignPending.push({ from: sourceName, to: name })
+
+		return name
 	}
 
 	private node(ref: SlideRef | undefined): SlideNode {
@@ -439,7 +590,8 @@ class Fresh {
 	}
 
 	// A node written from the model into `name`, its source copied where the model does not hold it.
-	private async emitNode(node: SlideNode, name: string, options: { layoutList?: string } = {}): Promise<void> {
+	private async emitNode(written: SlideNode, name: string, options: { layoutList?: string } = {}): Promise<void> {
+		const node = this.extras.adapt === undefined ? written : this.extras.adapt(written)
 		const sourcePart = node.src?.format === "pptx" ? node.src.part : undefined
 		const { document, copier, relationships } = await this.copier(name, sourcePart)
 		const api = this.writer.api(modelName(name))
@@ -451,15 +603,17 @@ class Fresh {
 			parts: {
 				...api,
 				relate: (target, type, external) =>
-					external === true || this.source?.package.has(zipName(target)) !== true
-						? api.relate(target, type, external)
-						: api.relate(modelName(this.target(zipName(target))), type)
+					external !== true && this.extras.foreign?.has(zipName(target)) === true
+						? this.relateForeign(name, api, zipName(target), type)
+						: external === true || this.source?.package.has(zipName(target)) !== true
+							? api.relate(target, type, external)
+							: api.relate(modelName(this.target(zipName(target))), type)
 			},
 			mode: "model",
 			...(copier === undefined ? {} : { copier }),
 			...(relationships === undefined ? {} : { relationships }),
 			slidePart: ref => this.nodeParts.get(ref),
-			dispatch: (request, inner) => emitPptx(emitFamilyOf(request), request, inner)
+			dispatch: (request, inner) => this.extras.element?.(request, inner) ?? emitPptx(emitFamilyOf(request), request, inner)
 		}
 		// The source document is the node's own part, not the fresh part being written.
 		const scoped: EmitContext = document === undefined || sourcePart === undefined ? context : { ...context, documentPart: sourcePart }
@@ -467,11 +621,55 @@ class Fresh {
 
 		if (result.kind === "refused") throw new PresentationError(result.reason, result.detail)
 
-		const markup = assemble(result.kind === "markup" ? result.pieces : [], copier)
+		const markup = await this.withSvgFallbacks(name, api, assemble(result.kind === "markup" ? result.pieces : [], copier))
 
 		this.writer.replace(name, encodeUtf8(XML_DECLARATION + withNamespaces(markup)))
 
 		if (document !== undefined && sourcePart !== undefined) await this.carryImplicit(zipName(sourcePart), name, document, NODE_KINDS)
+	}
+
+	// A foreign part related from the fresh part `owner`; an SVG picture's relationship noted for its PNG.
+	private relateForeign(owner: string, api: ReturnType<PackageWriter["api"]>, source: string, type: string): string {
+		const id = api.relate(modelName(this.foreignTarget(source)), type)
+
+		if (type === IMAGE_RELATIONSHIP && this.extras.svgFallback !== undefined && this.extras.foreign?.contentType(source) === SVG_TYPE) {
+			let blips = this.svgBlips.get(owner)
+
+			if (blips === undefined) {
+				blips = new Map()
+				this.svgBlips.set(owner, blips)
+			}
+
+			blips.set(id, source)
+		}
+
+		return id
+	}
+
+	// The markup of `owner` with each of its SVG pictures shown by a PNG, the SVG in the blip's extension.
+	private async withSvgFallbacks(owner: string, api: ReturnType<PackageWriter["api"]>, markup: string): Promise<string> {
+		const blips = this.svgBlips.get(owner)
+		const fallback = this.extras.svgFallback
+
+		if (blips === undefined || fallback === undefined) return markup
+
+		let out = markup
+
+		for (const [id, source] of blips) {
+			let png = this.svgPngs.get(source)
+
+			if (png === undefined) {
+				png = this.writer.allocate("image", "image/png")
+				this.writer.add(png, "image/png", await fallback(source), { compress: false })
+				this.svgPngs.set(source, png)
+			}
+
+			out = withSvgBlip(out, id, api.relate(modelName(png), IMAGE_RELATIONSHIP))
+		}
+
+		this.svgBlips.delete(owner)
+
+		return out
 	}
 
 	// The source part's relationships no markup names (comments, a legacy VML drawing, macros, custom XML): carried
@@ -513,30 +711,46 @@ class Fresh {
 
 	// Copies queued source parts (images, media, charts, diagrams, embeddings, fonts) with their relationships.
 	private async drain(): Promise<void> {
+		const foreign = this.extras.foreign
+
+		// A part's relationships may queue more (a chart's workbook).
+		for (let next = this.foreignPending.shift(); foreign !== undefined && next !== undefined; next = this.foreignPending.shift()) {
+			const { from, to } = next
+			const type = this.writer.typeOf(to) ?? ""
+			const streamed = XML_TYPE.test(type) ? undefined : foreign.stream?.(from)
+
+			if (streamed === undefined) this.writer.replace(to, await foreign.read(from))
+			else this.streamed(to, type, streamed)
+
+			const relationships = foreign.relationships?.(from) ?? []
+
+			if (relationships.length === 0) continue
+
+			const edit = await this.writer.loadRelationships(to)
+
+			for (const relationship of relationships)
+				if (foreign.has(relationship.target))
+					edit.add(relationship.type, this.foreignTarget(relationship.target), false, relationship.id)
+		}
+
 		const opc = this.source?.package
 
 		if (opc === undefined) return
 
 		while (this.pending.length > 0) {
 			const { from, to } = this.pending.shift() as { from: string; to: string }
-			let bytes = await opc.read(from)
+			const type = this.writer.typeOf(to) ?? ""
+			const entry = opc.entry(from)
+			const archive = this.source?.archive
 			const relationships = await opc.relationships(from)
 			const edit = await this.writer.loadRelationships(to)
 
-			// A Strict XML part is written as Transitional.
-			if (/xml$/iu.test(this.writer.typeOf(to) ?? "")) {
-				try {
-					const document = parseXml(bytes)
-					const root = partReader(document).namespaces.elementUri(document.documentElement()) ?? ""
+			if (entry !== undefined) checkCopy(from, type, entry.uncompressedSize)
 
-					if (/purl\.oclc\.org\/ooxml/u.test(root))
-						bytes = encodeUtf8(XML_DECLARATION + new Copier(document, id => id).document_())
-				} catch {
-					// Not XML after all: copied as it is.
-				}
-			}
-
-			this.writer.replace(to, bytes)
+			// Any part but XML streams from its entry; XML is read whole (a Strict part is written as Transitional).
+			if (!XML_TYPE.test(type) && entry !== undefined && archive !== undefined && archive.get(entry.name) === entry)
+				this.streamed(to, type, { length: entry.uncompressedSize, crc32: entry.crc32, chunks: () => archive.stream(entry) })
+			else this.writer.replace(to, XML_TYPE.test(type) ? transitionalPart(await opc.read(from)) : await opc.read(from))
 
 			for (const relationship of relationships.all) {
 				const target = relationship.external ? relationship.target : relationship.partName
@@ -554,7 +768,16 @@ class Fresh {
 		}
 	}
 
-	async run(): Promise<Uint8Array> {
+	// A copied part streamed into the package: stored when its type is stored media or it is too large to deflate held.
+	private streamed(name: string, contentType: string, part: StreamedPart): void {
+		checkCopy(name, contentType, part.length)
+		this.writer.add(name, contentType, part, {
+			compress: !STORED_MEDIA.test(contentType) && part.length <= DEFLATE_HELD,
+			crc32: part.crc32
+		})
+	}
+
+	async run(sink: ByteSink): Promise<number> {
 		const deck = this.deck
 		const writer = this.writer
 
@@ -584,10 +807,27 @@ class Fresh {
 						}
 					]
 		)
+		// Notes pages need a notes master (§19.3.1.26): one of no shapes when the deck has none (an ODF deck whose master
+		// pages bring no presentation:notes).
 		const notesMaster =
-			deck.notesMaster === undefined || notes.length === 0
+			notes.length === 0
 				? undefined
-				: { node: this.node(deck.notesMaster), name: "ppt/notesMasters/notesMaster1.xml" }
+				: {
+						node:
+							deck.notesMaster === undefined
+								? {
+										ref: slideRef(-1),
+										kind: "notesMaster" as const,
+										part: "",
+										showMasterShapes: true,
+										hidden: false,
+										shapes: [],
+										comments: [],
+										revision: 0
+									}
+								: this.node(deck.notesMaster),
+						name: "ppt/notesMasters/notesMaster1.xml"
+					}
 		const handoutMaster =
 			deck.handoutMaster === undefined
 				? undefined
@@ -798,10 +1038,12 @@ class Fresh {
 				kind: "data" as const,
 				name: change.name,
 				bytes: change.bytes instanceof Uint8Array ? BytePieces.of([change.bytes]) : change.bytes,
-				compress: change.compress ?? true
+				compress: change.compress ?? true,
+				...(change.crc32 === undefined ? {} : { crc32: change.crc32 })
 			}))
 		]
-		return writeZipToBytes(items)
+
+		return (await writeZip({ items }, null, sink)).size
 	}
 
 	private async mainOfSource(): Promise<string | undefined> {
@@ -844,7 +1086,8 @@ class Fresh {
 		rels: Awaited<ReturnType<PackageWriter["loadRelationships"]>>
 	): Promise<string> {
 		const deck = this.deck
-		const size = `<p:sldSz${attr("cx", deck.size.cx)}${attr("cy", deck.size.cy)}${attr("type", deck.size.type)}/>`
+		const sized = this.extras.size ?? deck.size
+		const size = `<p:sldSz${attr("cx", sized.cx)}${attr("cy", sized.cy)}${attr("type", this.extras.size === undefined ? deck.size.type : undefined)}/>`
 		const notesSize = `<p:notesSz${attr("cx", deck.notesSize.cx)}${attr("cy", deck.notesSize.cy)}/>`
 		const fonts = await this.embeddedFonts(rels)
 		const idOf = new Map(deck.slides.map((ref, index) => [ref, MIN_SLIDE_ID + index]))
@@ -953,50 +1196,27 @@ class Fresh {
 	}
 }
 
-async function writeZipToBytes(items: readonly ZipPlanItem[]): Promise<Uint8Array> {
-	const chunks: Uint8Array[] = []
-
-	await writeZip({ items }, null, {
-		write: chunk => {
-			chunks.push(chunk)
-
-			return Promise.resolve()
-		},
-		close: () => Promise.resolve()
-	})
-
-	const out = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
-	let offset = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, offset)
-		offset += chunk.length
-	}
-
-	return out
-}
-
 // The whole package of a deck written from its model (every node parsed), with media and other parts copied from
 // `source` when the deck has one.
-export const freshPptx: FreshPptx = async (
+export const freshPptx: FreshPptx = (deck, source, sink, options) => freshPptxWith(deck, source, sink, options)
+
+// freshPptx with what a conversion from another format adds: its foreign parts and nearer forms.
+export async function freshPptxWith(
 	deck: Deck,
 	source: PptxSource | undefined,
 	sink: ByteSink,
-	options: PptxSaveOptions
-): Promise<PptxSaveOutcome> => {
+	options: PptxSaveOptions,
+	extras: FreshExtras = {}
+): Promise<PptxSaveOutcome> {
 	void options
 
 	const empty: OpcPackageType = OpcPackage.fromParts(new Map([["[Content_Types].xml", encodeUtf8(CONTENT_TYPES)]]))
 	const writer = new PackageWriter(empty, await empty.contentTypes())
 
 	try {
-		const bytes = await new Fresh(deck, source, writer).run()
+		const size = await new Fresh(deck, source, writer, extras).run(sink)
 
-		for (let at = 0; at < bytes.length; at += 1024 * 1024)
-			await sink.write(bytes.subarray(at, Math.min(bytes.length, at + 1024 * 1024)))
-		await sink.close()
-
-		return { kind: "written", report: { size: bytes.length, entries: 0, crcs: new Map(), copies: new Map() }, revision: deck.revision }
+		return { kind: "written", report: { size, entries: 0, crcs: new Map(), copies: new Map() }, revision: deck.revision }
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
 
