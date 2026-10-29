@@ -48,18 +48,18 @@ function fakeDrive(initial?: string) {
 	if (initial !== undefined) put(initial)
 
 	const sdk = {
-		officeDir: vi.fn(() => {
-			requests.push("officeDir")
+		dir: vi.fn(() => {
+			requests.push("dir")
 			dir = OFFICE
 
 			return Promise.resolve(OFFICE)
 		}),
-		findOfficeDir: vi.fn(() => {
+		findDir: vi.fn(() => {
 			requests.push("find")
 
 			return Promise.resolve(dir)
 		}),
-		knownOfficeDir: () => dir,
+		knownDir: () => dir,
 		noteSystemFile: vi.fn(),
 		listDirectory: vi.fn(() => {
 			requests.push("list")
@@ -108,7 +108,7 @@ describe("UserDictionaryStore", () => {
 
 		await store.add("Filen")
 		expect(store.words()).toEqual(["Filen"])
-		expect(drive.requests).toEqual(["find", "officeDir", "upload"])
+		expect(drive.requests).toEqual(["find", "dir", "upload"])
 		expect(parseUserDictionary(drive.uploads[0] ?? "").words).toHaveProperty("Filen")
 	})
 

@@ -39,9 +39,9 @@ export function listDotFilenDirectory(dirUuid: string, notBefore = 0): Promise<S
 // Everything a synced file in `.filen/<name>` needs but its upload.
 export function dotFilenDirectory(name: string): Omit<SyncedFileSdk, "upload"> {
 	return {
-		officeDir: () => getDotFilenSubdir(name),
-		findOfficeDir: () => findDotFilenSubdir(name),
-		knownOfficeDir: () => dotFilenSubdirUuid(name),
+		dir: () => getDotFilenSubdir(name),
+		findDir: () => findDotFilenSubdir(name),
+		knownDir: () => dotFilenSubdirUuid(name),
 		noteSystemFile: noteDotFilenFile,
 		listDirectory: listDotFilenDirectory,
 		download: file => runOp(sdkApi.downloadFileBytes(file, crypto.randomUUID()))

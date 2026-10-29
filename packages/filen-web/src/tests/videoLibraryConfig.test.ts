@@ -21,7 +21,7 @@ const { sdkApi } = vi.hoisted(() => ({
 		downloadFileBytes: vi.fn<(file: File) => Promise<Uint8Array>>(),
 		uploadFileBytes: vi.fn<(parent: string, bytes: Uint8Array) => Promise<File>>(),
 		listFileVersionsOp: vi.fn<(file: File) => Promise<FileVersion[]>>(),
-		videoRootChain: vi.fn<(uuid: string) => Promise<{ uuid: string; name: string }[] | null>>()
+		directoryRootChain: vi.fn<(uuid: string) => Promise<{ uuid: string; name: string }[] | null>>()
 	}
 }))
 
@@ -288,7 +288,7 @@ describe("library config", () => {
 			]
 		}
 
-		sdkApi.videoRootChain.mockImplementation(uuid => Promise.resolve(chains[uuid] ?? null))
+		sdkApi.directoryRootChain.mockImplementation(uuid => Promise.resolve(chains[uuid] ?? null))
 		await ensureLibraryConfig(eventId)
 		await updateLibraryConfig((doc, stamp) => rooted(doc, "movies", stamp.t, stamp.d))
 
@@ -315,15 +315,15 @@ describe("library config", () => {
 			]
 		}
 
-		sdkApi.videoRootChain.mockClear()
-		sdkApi.videoRootChain.mockImplementation(uuid => Promise.resolve(chains[uuid] ?? null))
+		sdkApi.directoryRootChain.mockClear()
+		sdkApi.directoryRootChain.mockImplementation(uuid => Promise.resolve(chains[uuid] ?? null))
 		await ensureLibraryConfig(eventId)
 		await updateLibraryConfig((doc, stamp) => rooted(doc, "movies", stamp.t, stamp.d))
 
 		await checkLibraryRoot({ uuid: "media", ownDrive: true })
 		await checkLibraryRoot({ uuid: "media", ownDrive: true })
 
-		expect(sdkApi.videoRootChain).toHaveBeenCalledTimes(2)
+		expect(sdkApi.directoryRootChain).toHaveBeenCalledTimes(2)
 
 		// Media trashed: every chain through it is read again.
 		forgetDirectoryRootChains(
@@ -331,7 +331,7 @@ describe("library config", () => {
 		)
 		await checkLibraryRoot({ uuid: "media", ownDrive: true })
 
-		expect(sdkApi.videoRootChain).toHaveBeenCalledTimes(4)
+		expect(sdkApi.directoryRootChain).toHaveBeenCalledTimes(4)
 	})
 
 	it("a save that went over another session's save folds it in and saves again", async () => {

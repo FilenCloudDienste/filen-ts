@@ -9,7 +9,7 @@ import type { VideoLibraryRootView } from "@/features/videos/lib/libraryView.log
 // none for it, never while the index is still loading it.
 
 const { sdkApi } = vi.hoisted(() => ({
-	sdkApi: { videoRootChain: vi.fn<(uuid: string) => Promise<{ uuid: string; name: string }[] | null>>() }
+	sdkApi: { directoryRootChain: vi.fn<(uuid: string) => Promise<{ uuid: string; name: string }[] | null>>() }
 }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi }))
@@ -45,12 +45,12 @@ function root(uuid: string, patch: Partial<VideoLibraryRootView>): VideoLibraryR
 afterEach(() => {
 	cleanup()
 	queryClient.clear()
-	sdkApi.videoRootChain.mockReset()
+	sdkApi.directoryRootChain.mockReset()
 })
 
 describe("library directory names", () => {
 	it("resolves a chain only for a directory the index has no name for, never while it loads one", async () => {
-		sdkApi.videoRootChain.mockImplementation(uuid =>
+		sdkApi.directoryRootChain.mockImplementation(uuid =>
 			Promise.resolve([
 				{ uuid: "drive", name: "" },
 				{ uuid, name: `chain ${uuid}` }
@@ -72,6 +72,6 @@ describe("library directory names", () => {
 
 		expect(result.current.get("reported")).toBe("Films")
 		expect(result.current.get("unnamed")).toBe("chain unnamed")
-		expect(sdkApi.videoRootChain.mock.calls.map(([uuid]) => uuid).sort()).toEqual(["off", "unnamed"])
+		expect(sdkApi.directoryRootChain.mock.calls.map(([uuid]) => uuid).sort()).toEqual(["off", "unnamed"])
 	})
 })

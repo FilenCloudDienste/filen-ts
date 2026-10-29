@@ -25,7 +25,7 @@ export function directoryRootChainQueryOptions(uuid: string) {
 	return {
 		queryKey: [...DIRECTORY_ROOT_CHAIN_KEY_PREFIX, uuid] as const,
 		queryFn: async () => {
-			const chain = await runOp<DirectoryRootChain>(sdkApi.videoRootChain(uuid))
+			const chain = await runOp<DirectoryRootChain>(sdkApi.directoryRootChain(uuid))
 
 			resolvedThisSession.add(uuid)
 

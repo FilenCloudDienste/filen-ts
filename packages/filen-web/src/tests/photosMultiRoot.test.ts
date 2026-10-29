@@ -5,12 +5,12 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { onlineManager, type QueryClient, type QueryKey } from "@tanstack/react-query"
 import type { File, NormalDirsAndFiles, UuidStr } from "@filen/sdk-rs"
 
-const { listPhotosRecursive, videoRootChain } = vi.hoisted(() => ({
+const { listPhotosRecursive, directoryRootChain } = vi.hoisted(() => ({
 	listPhotosRecursive: vi.fn<(rootUuid: string) => Promise<NormalDirsAndFiles>>(),
-	videoRootChain: vi.fn<(uuid: string) => Promise<{ uuid: string; name: string }[] | null>>()
+	directoryRootChain: vi.fn<(uuid: string) => Promise<{ uuid: string; name: string }[] | null>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listPhotosRecursive, videoRootChain } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { listPhotosRecursive, directoryRootChain } }))
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 // Disk rows are out of reach here: the removal is recorded, and the memory half done for real.
 const { removedFromDisk } = vi.hoisted(() => ({ removedFromDisk: [] as unknown[] }))
@@ -90,8 +90,8 @@ beforeEach(() => {
 	removedFromDisk.length = 0
 	onlineManager.setOnline(true)
 	listPhotosRecursive.mockReset()
-	videoRootChain.mockReset()
-	videoRootChain.mockImplementation(uuid => Promise.resolve(CHAINS[uuid] ?? null))
+	directoryRootChain.mockReset()
+	directoryRootChain.mockImplementation(uuid => Promise.resolve(CHAINS[uuid] ?? null))
 })
 
 describe("merging photos listings", () => {
@@ -126,7 +126,7 @@ describe("the photos timeline over several directories", () => {
 			expect(view.result.current.timeline.status).toBe("success")
 		})
 		expect(listPhotosRecursive).toHaveBeenCalledTimes(1)
-		expect(videoRootChain).not.toHaveBeenCalled()
+		expect(directoryRootChain).not.toHaveBeenCalled()
 	})
 
 	it("merges disjoint directories into one timeline, newest first", async () => {
@@ -179,7 +179,7 @@ describe("the photos timeline over several directories", () => {
 			resolveChains = resolve
 		})
 
-		videoRootChain.mockImplementation(async uuid => {
+		directoryRootChain.mockImplementation(async uuid => {
 			await chainsReady
 
 			return CHAINS[uuid] ?? null
@@ -226,7 +226,7 @@ describe("the photos timeline over several directories", () => {
 
 		expect(timeline.status).toBe("success")
 		expect(timeline.status === "success" ? timeline.listing.photos.map(item => item.data.uuid) : []).toEqual([testUuid("held")])
-		expect(videoRootChain).not.toHaveBeenCalled()
+		expect(directoryRootChain).not.toHaveBeenCalled()
 	})
 
 	it("resolves a chain restored from disk again once per session, then reuses it", async () => {
@@ -238,7 +238,7 @@ describe("the photos timeline over several directories", () => {
 		await queryClient.query(directoryRootChainQueryOptions(restored))
 		await queryClient.query(directoryRootChainQueryOptions(restored))
 
-		expect(videoRootChain).toHaveBeenCalledTimes(1)
+		expect(directoryRootChain).toHaveBeenCalledTimes(1)
 	})
 
 	it("shows what listed when one directory fails, and errors only when all do", async () => {

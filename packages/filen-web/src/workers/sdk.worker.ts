@@ -2773,7 +2773,7 @@ const api = {
 	// A directory's chain from the drive root down to itself (both included), for root validation and paths; null
 	// when it doesn't resolve or sits in the trash. Costs one request per ancestor (getItemPath reads each), so the
 	// caller keeps the result.
-	async videoRootChain(uuid: string): Promise<{ uuid: string; name: string }[] | null> {
+	async directoryRootChain(uuid: string): Promise<{ uuid: string; name: string }[] | null> {
 		const c = requireClient()
 		const driveRoot = c.root()
 

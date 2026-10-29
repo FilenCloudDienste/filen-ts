@@ -21,10 +21,10 @@ const RETRY_MAX_MS = 5 * 60_000
 
 export interface SyncedFileSdk {
 	// The directory, created when missing.
-	officeDir: () => Promise<string>
+	dir: () => Promise<string>
 	// The directory when it exists; creates nothing.
-	findOfficeDir: () => Promise<string | null>
-	knownOfficeDir: () => string | null
+	findDir: () => Promise<string | null>
+	knownDir: () => string | null
 	noteSystemFile: (uuid: string) => void
 	// `notBefore` (performance.now()): a listing that started earlier may miss a change the caller heard of
 	// since; one started at or after it is as fresh as a new one (several files of one directory share it).
@@ -227,7 +227,7 @@ export class SyncedDotFilenFile<Doc> {
 		const codec = this.codec
 		const generation = this.generation
 		const epoch = this.staleEpoch
-		const dir = await this.sdk.findOfficeDir()
+		const dir = await this.sdk.findDir()
 		let remote = codec.empty()
 		let head: { uuid: string; parent: string; timestamp: number } | null = null
 		let readOnly = false
@@ -289,7 +289,7 @@ export class SyncedDotFilenFile<Doc> {
 		if (generation !== this.generation || this.readOnly || this.codec.same(this.doc, this.synced)) return
 
 		const doc = this.doc
-		const parent = this.head?.parent ?? (await this.sdk.officeDir())
+		const parent = this.head?.parent ?? (await this.sdk.dir())
 		const bytes = new TextEncoder().encode(this.codec.serialize(doc))
 		const file = await this.sdk.upload(parent, bytes)
 
@@ -314,7 +314,7 @@ export class SyncedDotFilenFile<Doc> {
 			case "fileMove":
 			case "fileArchiveRestored": {
 				const ours = inner.file.uuid === this.head?.uuid
-				const inDir = inner.file.parent === (this.head?.parent ?? this.sdk.knownOfficeDir())
+				const inDir = inner.file.parent === (this.head?.parent ?? this.sdk.knownDir())
 
 				if ((inDir && this.isFile(inner.file) && !this.ownUuids.has(inner.file.uuid)) || (ours && !inDir)) this.markStale()
 
