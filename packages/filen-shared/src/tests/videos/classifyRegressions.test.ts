@@ -385,8 +385,9 @@ describe("hostile names", () => {
 		const elapsed = performance.now() - started
 
 		console.info(`parsed ${names.length} hostile names in ${elapsed.toFixed(1)} ms`)
-		// Quadratic behaviour on any of these would take seconds; linear parsing takes a few milliseconds.
-		expect(elapsed).toBeLessThan(500)
+		// Linear parsing takes ~100 ms locally and ~550 ms on a loaded CI runner; quadratic behaviour on 64k
+		// characters would take tens of seconds, so the budget leaves CI headroom and still catches it.
+		expect(elapsed).toBeLessThan(2000)
 	})
 
 	it("classifies a library of hostile names quickly", () => {
