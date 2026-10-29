@@ -7,6 +7,7 @@ import Menu, { type MenuButton } from "@/components/ui/menu"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import Text from "@/components/ui/text"
 import { PressableScale } from "@/components/ui/pressables"
+import { useTranslation } from "react-i18next"
 
 export type HeaderItem =
 	| {
@@ -51,6 +52,14 @@ const CLEAR_SELECTION_ICON = {
 	name: "close-outline"
 } satisfies React.ComponentProps<typeof Ionicons>
 
+// Icon-only header buttons otherwise reach VoiceOver/TalkBack unnamed.
+const ICON_LABEL_KEYS = new Map<string, "go_back" | "close" | "deselect_all" | "more_actions">([
+	["chevron-back-outline", "go_back"],
+	["close", "close"],
+	["close-outline", "deselect_all"],
+	["ellipsis-horizontal", "more_actions"]
+])
+
 const HeaderItemButton = ({
 	icon,
 	iconColor,
@@ -62,8 +71,13 @@ const HeaderItemButton = ({
 	iconColor: ResolvedColor | undefined
 	text?: React.ComponentProps<typeof Text>
 }) => {
+	const { t } = useTranslation()
+	const labelKey = icon ? ICON_LABEL_KEYS.get(icon.name) : undefined
+
 	return (
 		<PressableScale
+			accessibilityRole="button"
+			accessibilityLabel={labelKey ? t(labelKey) : undefined}
 			{...props}
 			className={cn(
 				"size-9 items-center justify-center rounded-full",
@@ -199,9 +213,13 @@ export const Header = ({
 	search,
 	leftItems,
 	rightItems,
-	backgroundColor
+	backgroundColor,
+	accessibilityTitle
 }: {
 	title: string | React.ReactNode | ((props: { children: string; tintColor?: ColorValue | undefined }) => React.ReactNode)
+	// The screen's name when `title` is not a string: the native title VoiceOver reads and the next screen's back label.
+	// Unset, native-stack falls back to the raw route name (e.g. "chat/[uuid]").
+	accessibilityTitle?: string
 	backVisible?: boolean
 	shadowVisible?: boolean
 	transparent?: boolean
@@ -238,6 +256,7 @@ export const Header = ({
 		<Stack.Screen
 			options={{
 				headerTitle: typeof title === "function" ? props => title(props) : typeof title === "string" ? title : () => title,
+				title: typeof title === "string" ? title : (accessibilityTitle ?? ""),
 				headerShown: true,
 				headerShadowVisible: shadowVisible,
 				headerBackVisible: backVisible,

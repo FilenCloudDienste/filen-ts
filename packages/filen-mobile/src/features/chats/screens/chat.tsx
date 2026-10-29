@@ -74,6 +74,7 @@ const HeaderTitle = ({ chat }: { chat: TChat }) => {
 }
 
 const Header = ({ chat, unreadCount }: { chat: TChat; unreadCount: number }) => {
+	const { t } = useTranslation()
 	const stringigiedClient = useStringifiedClient()
 
 	const headerRightItems = (() => {
@@ -97,6 +98,7 @@ const Header = ({ chat, unreadCount }: { chat: TChat; unreadCount: number }) => 
 	return (
 		<StackHeader
 			title={<HeaderTitle chat={chat} />}
+			accessibilityTitle={stringigiedClient ? chatDisplayName(chat, stringigiedClient.userId, t("just_you")) : ""}
 			backVisible={true}
 			// TODO: enable transparent header on ios once its fixed upstream
 			// ref: https://github.com/facebook/react-native/issues/54181

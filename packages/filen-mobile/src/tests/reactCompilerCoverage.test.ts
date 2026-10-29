@@ -21,7 +21,7 @@ vi.mock("@/lib/decryption", () => ({ driveItemDisplayName: (item: { data: { uuid
 vi.mock("@expo/vector-icons/Ionicons", () => ({ default: {} }))
 vi.mock("@filen/sdk-rs", () => ({ PasswordState: {}, AnyLinkedDir: {} }))
 
-import { resolveDriveHeaderTitle } from "@/features/drive/utils"
+import { resolveDriveHeaderTitle, resolveDriveSearchScopeName } from "@/features/drive/utils"
 import { compileWithReactCompiler, compilerFailures, requireFromBabelPreset } from "@/tests/compileWithReactCompiler"
 
 function withDefault<T>(value: T): { __esModule: true; default: T } {
@@ -164,7 +164,7 @@ describe("the compiled drive Header", () => {
 				aggregateDriveSelectionFlags: () => ({}),
 				isPlainDrivePath: (drivePath: DrivePath) => drivePath.type === "drive" && !drivePath.selectOptions
 			},
-			"@/features/drive/utils": { resolveDriveHeaderTitle: resolveTitle },
+			"@/features/drive/utils": { resolveDriveHeaderTitle: resolveTitle, resolveDriveSearchScopeName },
 			"@/features/drive/hooks/useDriveUpload": { useDriveUpload: () => upload },
 			"@/features/drive/components/headerMenuBuilders": {
 				buildSortMenuButton: () => ({ id: "sort" }),

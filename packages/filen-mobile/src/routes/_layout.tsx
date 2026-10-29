@@ -3,6 +3,8 @@ import "react-native-reanimated"
 import StyleProvider from "@/providers/style.provider"
 import { useState, Fragment } from "react"
 import { Stack } from "expo-router"
+import { getFocusedRouteNameFromRoute } from "expo-router/react-navigation"
+import { tabLabelKey } from "@/components/shell/tabs"
 import { useResolveClassNames } from "@/hooks/useResolveClassNames"
 import View from "@/components/ui/view"
 import Text from "@/components/ui/text"
@@ -200,6 +202,15 @@ const RootLayout = () => {
 												}
 											}}
 										>
+											<Stack.Screen
+												name="tabs"
+												options={({ route }) => {
+													// Root-stack pushes (a chat, a note) take their back label from this title; unset, it is the raw route name.
+													const labelKey = tabLabelKey(getFocusedRouteNameFromRoute(route))
+
+													return labelKey ? { title: t(labelKey) } : {}
+												}}
+											/>
 											{MODAL_SCREEN_NAMES.map(name => (
 												<Stack.Screen
 													key={name}

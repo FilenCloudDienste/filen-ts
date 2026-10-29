@@ -8,39 +8,7 @@ import useChatsUnreadCount from "@/features/chats/hooks/useChatsUnreadCount"
 import useContactRequestsQuery from "@/features/contacts/queries/useContactRequests.query"
 import useAccountQuery from "@/queries/useAccount.query"
 import { useTranslation } from "react-i18next"
-
-const TABS = [
-	{
-		name: "drive",
-		labelKey: "tab_drive",
-		sf: "folder.fill",
-		md: "folder"
-	},
-	{
-		name: "photos",
-		labelKey: "tab_photos",
-		sf: "photo.fill",
-		md: "photo-library"
-	},
-	{
-		name: "notes",
-		labelKey: "tab_notes",
-		sf: "note.text",
-		md: "book"
-	},
-	{
-		name: "chats",
-		labelKey: "tab_chats",
-		sf: "message.fill",
-		md: "messenger"
-	},
-	{
-		name: "more",
-		labelKey: "tab_more",
-		sf: "ellipsis",
-		md: "more-horiz"
-	}
-] as const
+import { TABS } from "@/components/shell/tabs"
 
 type MaterialIconName = Parameters<typeof MaterialIcons.getImageSource>[0]
 

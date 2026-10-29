@@ -92,6 +92,7 @@ const Header = ({ note, history }: { note: TNote; history?: NoteHistory | null }
 							? () => <ReadOnlyTitle title={noteDisplayTitle(note)} />
 							: noteDisplayTitle(note)
 			}
+			accessibilityTitle={history ? simpleDate(Number(history.editedTimestamp)) : noteDisplayTitle(note)}
 			backVisible={true}
 			shadowVisible={false}
 			transparent={Platform.OS === "ios"}
