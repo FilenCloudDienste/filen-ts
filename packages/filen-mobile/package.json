@@ -131,7 +131,7 @@
 		"react": "19.3.0",
 		"react-dom": "19.3.0",
 		"react-i18next": "^17.1.0",
-		"react-native": "0.88.0",
+		"react-native": "0.88.1",
 		"react-native-blob-util": "^0.25.1",
 		"react-native-boost": "^2.0.3",
 		"react-native-document-scanner-plugin": "^2.0.4",
