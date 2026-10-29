@@ -7,7 +7,7 @@ import { socketCoveredRefetchOnMount } from "@/queries/socketSession"
 import type { DriveItem } from "@/types"
 import { useDriveSortPreference } from "@/features/drive/driveSortPreference"
 import { useHideHiddenItems, useShowDotFilen } from "@/features/drive/driveHiddenItems"
-import { rootDotFilenFilter } from "@/features/drive/dotFilenGuard"
+import { rootDotFilenFilter, rootDotFilenLeads } from "@/features/drive/dotFilenGuard"
 import VirtualList, { type ListRef, type ListRenderItemInfo } from "@/components/ui/virtualList"
 import ListEmpty, { NoResultsEmpty, LoadErrorEmpty } from "@/components/ui/listEmpty"
 import Button from "@/components/ui/button"
@@ -126,7 +126,11 @@ const Drive = () => {
 		// would show "the newest of the alphabetically-first 1000" and silently hide the true
 		// top-N. Keep the SDK's name-ascending order (the footer states it); below the cap the
 		// whole match set is loaded, so the user's sort is honoured.
-		keepOrder: isCacheSearch && isSearchWindowTruncated(totalCount, searchResults.length)
+		keepOrder: isCacheSearch && isSearchWindowTruncated(totalCount, searchResults.length),
+		leadsDirectories: rootDotFilenLeads({
+			show: showDotFilen,
+			drivePath
+		})
 	})
 
 	// Cache search results are already the matches; only the local listings filter by the query.

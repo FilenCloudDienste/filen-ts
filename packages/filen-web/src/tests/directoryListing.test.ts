@@ -281,6 +281,23 @@ describe("resolveListingDisplayItems", () => {
 			expect(shown.items).toEqual([dotFilen, docs])
 		})
 
+		it("leads the directories while shown, whatever the sort", () => {
+			const leads = (item: { data: { uuid: string } }) => item.data.uuid === dotFilen.data.uuid
+
+			for (const sortBy of ["nameAsc", "nameDesc", "sizeDesc", "uploadDateAsc"] as const) {
+				const result = resolveListingDisplayItems({
+					items: [docs, env, dotFilen],
+					sortBy,
+					directorySizes: NO_SIZES,
+					hide: false,
+					dotFilenRoot: null,
+					leadsDirectories: leads
+				})
+
+				expect(result.items[0]).toBe(dotFilen)
+			}
+		})
+
 		it("drops what sits inside .filen from recents and favorites, as the resolver knows it", () => {
 			const settings = narrowItem(mockFile({ uuid: testUuid("settings"), parent: testUuid("videosdir") }))
 			const mine = narrowItem(mockFile({ uuid: testUuid("mine") }))

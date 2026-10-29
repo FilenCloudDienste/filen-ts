@@ -9,12 +9,15 @@ export function useSortedDriveItems({
 	items,
 	drivePathType,
 	sort,
-	keepOrder
+	keepOrder,
+	leadsDirectories
 }: {
 	items: DriveItem[] | undefined
 	drivePathType: DrivePathType | null
 	sort: SortByType
 	keepOrder: boolean
+	// dotFilenGuard's rootDotFilenLeads: the root `.filen` leads the directories wherever it is shown.
+	leadsDirectories?: ((item: DriveItem) => boolean) | undefined
 }): DriveItem[] {
 	// Size sort needs the REAL directory sizes (items carry size: 0n for dirs — #49); the hook
 	// prefetches + reads them from the same query cache the rows display from, and returns
@@ -27,5 +30,5 @@ export function useSortedDriveItems({
 
 	const source = items ?? []
 
-	return keepOrder ? source : itemSorter.sortItems(source, sort, { directorySizes })
+	return keepOrder ? source : itemSorter.sortItems(source, sort, { directorySizes, leadsDirectories })
 }

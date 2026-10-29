@@ -99,13 +99,17 @@ const sortModes: Record<DriveSortBy, SortMode<DriveItem>> = {
 	lastModifiedDesc: { kind: "timestamp", isAsc: false, timestampKey: lastModifiedSortKey }
 }
 
-function makeAccessors(directorySizes?: ReadonlyMap<string, number>): SortEngineAccessors<DriveItem> {
+function makeAccessors(
+	directorySizes?: ReadonlyMap<string, number>,
+	leadsDirectories?: (item: DriveItem) => boolean
+): SortEngineAccessors<DriveItem> {
 	return {
 		getUuid: item => item.data.uuid,
 		getSize: item => item.data.size,
 		isDirectory: item => isDirectoryItem(item),
 		nameKey: nameSortKey,
-		...(directorySizes !== undefined ? { directorySizes } : {})
+		...(directorySizes !== undefined ? { directorySizes } : {}),
+		...(leadsDirectories !== undefined ? { leadsDirectories } : {})
 	}
 }
 
@@ -113,9 +117,15 @@ function makeAccessors(directorySizes?: ReadonlyMap<string, number>): SortEngine
 // design note above). `directorySizes` lets a caller feed in real directory byte counts (keyed by
 // uuid, e.g. from a size query cache) for the size modes; a directory absent from the map sorts by
 // its raw synthetic 0n size and falls into the deterministic name tiebreak. Wiring real sizes in by
-// default is a later enhancement — the 0n fallback is well-defined on its own.
-export function sortDriveItems(items: DriveItem[], sortBy: DriveSortBy, directorySizes?: ReadonlyMap<string, number>): DriveItem[] {
-	return sortItemsEngine(items, sortModes[sortBy], makeAccessors(directorySizes))
+// default is a later enhancement — the 0n fallback is well-defined on its own. `leadsDirectories` (the root `.filen`
+// where it is shown, lib/dotFilenGuard.ts's isRootDotFilenItem) leads the directories whatever the sort.
+export function sortDriveItems(
+	items: DriveItem[],
+	sortBy: DriveSortBy,
+	directorySizes?: ReadonlyMap<string, number>,
+	leadsDirectories?: (item: DriveItem) => boolean
+): DriveItem[] {
+	return sortItemsEngine(items, sortModes[sortBy], makeAccessors(directorySizes, leadsDirectories))
 }
 
 // The same order for rows that carry a DriveItem (a public link's browse entries), read through

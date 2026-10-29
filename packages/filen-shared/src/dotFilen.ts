@@ -41,8 +41,9 @@ export function dotFilenSubdirRename(actual: string, name: string): string | nul
 	return actual !== name && isDotFilenSubdirName(actual, name) ? name : null
 }
 
+// The length check first: a listing asks this of every directory, and most names never need folding.
 export function isDotFilenName(name: string): boolean {
-	return nameCollisionKey(name) === DOT_FILEN_DIR_NAME
+	return name.length === DOT_FILEN_DIR_NAME.length && nameCollisionKey(name) === DOT_FILEN_DIR_NAME
 }
 
 // The `.filen` directly under the drive root; never one nested elsewhere, nor anything inside it. `parentUuid` is

@@ -141,15 +141,21 @@ export type SortItemsOptions = {
 	// (#49). Directories missing from the map sort as their raw `data.size` (0n) and fall into the
 	// deterministic name tiebreak.
 	directorySizes?: ReadonlyMap<string, number>
+	// The directory that leads the directories whatever the sort (the root `.filen` where it is shown).
+	leadsDirectories?: (item: DriveItem) => boolean
 }
 
-function makeSortAccessors<T extends DriveItem>(directorySizes?: ReadonlyMap<string, number>): SortEngineAccessors<T> {
+function makeSortAccessors<T extends DriveItem>(options?: SortItemsOptions): SortEngineAccessors<T> {
+	const directorySizes = options?.directorySizes
+	const leadsDirectories = options?.leadsDirectories
+
 	return {
 		getUuid: item => item.data.uuid,
 		getSize: item => item.data.size,
 		isDirectory: isDirectoryItem,
 		nameKey: nameSortKey,
-		...(directorySizes !== undefined ? { directorySizes } : {})
+		...(directorySizes !== undefined ? { directorySizes } : {}),
+		...(leadsDirectories !== undefined ? { leadsDirectories } : {})
 	}
 }
 
@@ -157,7 +163,7 @@ function sortItems<T extends DriveItem>(items: T[], type: SortByType, options?: 
 	// A corrupt or stale persisted preference sorts by name.
 	const mode: SortMode<T> = Object.hasOwn(sortModes, type) ? sortModes[type] : sortModes.nameAsc
 
-	return sortItemsEngine(items, mode, makeSortAccessors<T>(options?.directorySizes))
+	return sortItemsEngine(items, mode, makeSortAccessors<T>(options))
 }
 
 export const itemSorter = { sortItems }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { sortPartition, sortItems, type SortMode, type SortEngineAccessors } from "@filen/shared"
+import { sortPartition, sortItems, isRootDotFilen, type SortMode, type SortEngineAccessors } from "@filen/shared"
 
 // Minimal structural fixture — deliberately NOT a DriveItem: the engine is generic over any
 // shape, and these tests pin the engine's own mechanics (mode branches, tiebreak chains,
@@ -469,5 +469,54 @@ describe("sortItems", () => {
 			expect(reversed, `mode ${mode.kind}/${mode.isAsc} (reversed input)`).toEqual(forward)
 			expect(rotated, `mode ${mode.kind}/${mode.isAsc} (rotated input)`).toEqual(forward)
 		}
+	})
+})
+
+describe("sortItems leadsDirectories", () => {
+	const ROOT = "root"
+	const parents = new Map<string, string>()
+
+	function dir(uuid: string, name: string, parent: string, extra?: Partial<FakeItem>): FakeItem {
+		parents.set(uuid, parent)
+
+		return makeItem({ uuid, name, isDir: true, ...extra })
+	}
+
+	const leadsRootDotFilen = (item: FakeItem): boolean =>
+		isRootDotFilen({ name: item.name, parentUuid: parents.get(item.uuid) ?? null, rootUuid: ROOT })
+
+	const pinned = { ...accessors, leadsDirectories: leadsRootDotFilen }
+
+	const build = (): FakeItem[] => [
+		dir("aaaa-1", "123", ROOT, { size: 5n, ts: 1 }),
+		dir("bbbb-2", ".filen", ROOT, { size: 1n, ts: 2, category: "z" }),
+		dir("cccc-3", "zeta", ROOT, { size: 9n, ts: 3 }),
+		dir("dddd-4", ".config", ROOT, { size: 2n, ts: 4 }),
+		makeItem({ uuid: "eeee-5", name: "a.txt", size: 100n, ts: 5 })
+	]
+
+	it("puts the root .filen first among the directories in every mode", () => {
+		for (const mode of ALL_MODES) {
+			const result = sortItems(build(), mode, pinned)
+
+			expect(result[0]?.name, `mode ${mode.kind}/${mode.isAsc}`).toBe(".filen")
+			expect(result.at(-1)?.name).toBe("a.txt")
+			// The rest keep the order they sort to without the pin.
+			expect(names(result.slice(1))).toEqual(names(sortItems(build(), mode, accessors).filter(item => item.name !== ".filen")))
+		}
+	})
+
+	it("leaves a nested .filen and other dot-names to the sort", () => {
+		const items = [dir("ffff-6", "b", ROOT), dir("gggg-7", ".filen", "other"), dir("hhhh-8", ".a", ROOT)]
+
+		expect(names(sortItems(items, nameDesc, pinned))).toEqual(names(sortItems(items, nameDesc, accessors)))
+	})
+
+	it("leads even when it is the only directory, and stops asking after the first match", () => {
+		const leads = vi.fn(leadsRootDotFilen)
+		const items = [makeItem({ uuid: "iiii-9", name: "f.txt" }), dir("jjjj-10", ".filen", ROOT), dir("kkkk-11", "x", ROOT)]
+
+		expect(names(sortItems(items, nameAsc, { ...accessors, leadsDirectories: leads }))).toEqual([".filen", "x", "f.txt"])
+		expect(leads).toHaveBeenCalledTimes(1)
 	})
 })

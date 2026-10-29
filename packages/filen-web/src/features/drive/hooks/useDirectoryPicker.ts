@@ -3,6 +3,7 @@ import { filterHiddenItems } from "@filen/shared"
 import { useDirectoryListingQuery, useDirectoryNamesQuery, useHiddenDotFilenRoot } from "@/features/drive/queries/drive"
 import { sortDriveItems } from "@/features/drive/lib/sort"
 import { rootDotFilenFilter } from "@/features/drive/lib/hiddenItems"
+import { isRootDotFilenItem } from "@/features/drive/lib/dotFilenGuard"
 
 // Navigation state of the in-dialog drive pickers: a local uuid stack from root, never the "/drive/$"
 // route, so browsing a picker never touches app history. Always browses the "drive" variant. `items` is
@@ -17,7 +18,13 @@ export function useDirectoryPicker(initialPath?: readonly string[]) {
 	const dotFilenRoot = useHiddenDotFilenRoot()
 	// Only the root level can hold it.
 	const items = filterHiddenItems({
-		items: sortDriveItems(listingQuery.data ?? [], "nameAsc"),
+		// The root `.filen`, where shown, leads the directories as in the listing.
+		items: sortDriveItems(
+			listingQuery.data ?? [],
+			"nameAsc",
+			undefined,
+			targetUuid === null && dotFilenRoot === null ? isRootDotFilenItem : undefined
+		),
 		hide: false,
 		rootDotFilen:
 			targetUuid === null ? rootDotFilenFilter({ rootUuid: dotFilenRoot, variant: "drive", searchAtDriveRoot: false }) : undefined

@@ -25,6 +25,7 @@ import {
 } from "@/features/drive/lib/preferences"
 import { dotFilenFilterAppliesTo, hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
 import { isDotFilenSystemDir } from "@/lib/dotFilen"
+import { isRootDotFilenItem } from "@/features/drive/lib/dotFilenGuard"
 import { DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
@@ -300,6 +301,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				atDriveRoot: variant === "drive" && uuid === null,
 				variant,
 				isDotFilenSystemDir,
+				// At the drive root `dotFilenRoot` is null only while the setting shows `.filen`.
+				leadsDirectories: variant === "drive" && uuid === null && dotFilenRoot === null ? isRootDotFilenItem : undefined,
 				...(search.active ? { search: { total: search.total, parentPaths: search.parentPaths } } : {})
 			}),
 		[

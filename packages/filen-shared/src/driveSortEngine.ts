@@ -32,6 +32,9 @@ export interface SortEngineAccessors<T> {
 	// cache). Directories missing from the map sort by their raw (synthetic) size and fall into the
 	// deterministic name tiebreak.
 	directorySizes?: ReadonlyMap<string, number>
+	// The one directory that leads the directories whatever the mode (the root `.filen`). Asked of each
+	// directory while partitioning, until the first match; omit it wherever nothing can match.
+	leadsDirectories?: (item: T) => boolean
 }
 
 export interface SortMode<T> {
@@ -220,14 +223,21 @@ export function sortPartition<T>(partition: T[], mode: SortMode<T>, accessors: S
 }
 
 // Directories sort before files, always (dirs-first is a partition, not a sort key — see the
-// design note above).
+// design note above). `leadsDirectories` pulls its match out during the same partition pass.
 export function sortItems<T>(items: T[], mode: SortMode<T>, accessors: SortEngineAccessors<T>): T[] {
 	const dirs: T[] = []
 	const files: T[] = []
+	let leads = accessors.leadsDirectories
+	let leader: T | undefined = undefined
 
 	for (const item of items) {
 		if (accessors.isDirectory(item)) {
-			dirs.push(item)
+			if (leads !== undefined && leads(item)) {
+				leader = item
+				leads = undefined
+			} else {
+				dirs.push(item)
+			}
 		} else {
 			files.push(item)
 		}
@@ -235,6 +245,10 @@ export function sortItems<T>(items: T[], mode: SortMode<T>, accessors: SortEngin
 
 	sortPartition(dirs, mode, accessors)
 	sortPartition(files, mode, accessors)
+
+	if (leader !== undefined) {
+		dirs.unshift(leader)
+	}
 
 	if (dirs.length === 0) {
 		return files

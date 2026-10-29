@@ -55,9 +55,10 @@ export function resolveSearchDisplayItems(
 	results: DriveItem[],
 	total: bigint,
 	sortBy: DriveSortBy,
-	directorySizes?: ReadonlyMap<string, number>
+	directorySizes?: ReadonlyMap<string, number>,
+	leadsDirectories?: (item: DriveItem) => boolean
 ): DriveItem[] {
-	return total <= BigInt(results.length) ? sortDriveItems(results, sortBy, directorySizes) : results
+	return total <= BigInt(results.length) ? sortDriveItems(results, sortBy, directorySizes, leadsDirectories) : results
 }
 
 export interface ListingDisplayResult {
@@ -102,12 +103,14 @@ export function resolveListingDisplayItems(input: {
 	atDriveRoot?: boolean
 	variant?: DriveVariant
 	isDotFilenSystemDir?: (uuid: string) => boolean
+	// The root `.filen` where it is shown: it leads the directories whatever the sort.
+	leadsDirectories?: ((item: DriveItem) => boolean) | undefined
 	search?: { total: bigint; parentPaths: ReadonlyMap<string, string> }
 }): ListingDisplayResult {
 	const resolved =
 		input.search === undefined
-			? sortDriveItems(input.items, input.sortBy, input.directorySizes)
-			: resolveSearchDisplayItems(input.items, input.search.total, input.sortBy, input.directorySizes)
+			? sortDriveItems(input.items, input.sortBy, input.directorySizes, input.leadsDirectories)
+			: resolveSearchDisplayItems(input.items, input.search.total, input.sortBy, input.directorySizes, input.leadsDirectories)
 	const searchParentPaths = input.search?.parentPaths
 	// The root `.filen` first, on its own, so it never counts as a hidden item.
 	const listed = filterHiddenItems({
