@@ -1,4 +1,3 @@
-import { useWindowDimensions } from "react-native"
 import { type SharedValue } from "react-native-reanimated"
 import PreviewImage from "@/components/drivePreview/previewImage"
 import PreviewRawImage from "@/components/drivePreview/previewRawImage"
@@ -19,6 +18,7 @@ import { type ListRenderItemInfo } from "@shopify/flash-list"
 import { type GalleryItemTagged, galleryItemKey } from "@/components/drivePreview/gallery"
 import { galleryItemPreviewType, galleryItemFileSource, galleryItemNeedsSniff } from "@/components/drivePreview/galleryRenderName"
 import TransportStreamGate from "@/components/drivePreview/transportStreamGate"
+import useGalleryDimensions from "@/components/drivePreview/useGalleryDimensions"
 import ListEmpty from "@/components/ui/listEmpty"
 import { verdictFileOf } from "@/lib/previewType"
 import { useTranslation } from "react-i18next"
@@ -39,7 +39,7 @@ const GalleryItem = ({
 	onPinchActiveChange?: (active: boolean) => void
 }) => {
 	const { t } = useTranslation()
-	const dimensions = useWindowDimensions()
+	const dimensions = useGalleryDimensions()
 	const isActive = useDrivePreviewStore(useShallow(state => state.currentIndex === info.index))
 
 	// By the name and verdict the page opened with: a rename elsewhere keeps the renderer, and an editor's

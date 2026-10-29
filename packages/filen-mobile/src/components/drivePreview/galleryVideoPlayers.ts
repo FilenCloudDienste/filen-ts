@@ -1,4 +1,5 @@
 import { createVideoPlayer, type VideoPlayer } from "expo-video"
+import { AppState, Platform } from "react-native"
 import usePipStore from "@/stores/usePip.store"
 import events from "@/lib/events"
 import { recordPlayerVerdict } from "@/lib/playerVerdict"
@@ -153,5 +154,16 @@ const galleryVideoPlayers = new GalleryVideoPlayers()
 events.subscribe("logout", () => {
 	galleryVideoPlayers.releaseAll()
 })
+
+// Android PiP runs with the activity paused, so a resume means the session is over. expo-video reports
+// PiP-stop only to VideoViews still mounted; a presenting view unmounted mid-session would otherwise
+// leave the key set for good (gallery pinned, lock and provider teardown suppressed).
+if (Platform.OS === "android") {
+	AppState.addEventListener("change", nextAppState => {
+		if (nextAppState === "active" && usePipStore.getState().activeKey !== null) {
+			usePipStore.getState().setActiveKey(null)
+		}
+	})
+}
 
 export default galleryVideoPlayers

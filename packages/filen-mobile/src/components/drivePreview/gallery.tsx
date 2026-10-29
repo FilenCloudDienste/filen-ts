@@ -8,7 +8,7 @@ import { router } from "@/lib/router"
 import { type DriveItemFileExtracted } from "@/types"
 import { type ContentVerdict } from "@filen/shared"
 import { isImagePreviewType } from "@/lib/previewType"
-import { useWindowDimensions, Platform, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
+import { Platform, type NativeSyntheticEvent, type NativeScrollEvent, type LayoutChangeEvent } from "react-native"
 import { SystemBars } from "react-native-edge-to-edge"
 import { GestureDetector, GestureStateManager, type PanGestureConfig, usePanGesture } from "react-native-gesture-handler"
 import { useSharedValue, useAnimatedStyle, type SharedValue, withSpring, interpolate, Extrapolation } from "react-native-reanimated"
@@ -26,6 +26,7 @@ import Button from "@/components/ui/button"
 import { type External } from "@/routes/drivePreview"
 import { FlashList, type FlashListRef } from "@shopify/flash-list"
 import galleryVideoPlayers from "@/components/drivePreview/galleryVideoPlayers"
+import useGalleryDimensions from "@/components/drivePreview/useGalleryDimensions"
 import { endPreviewNotices } from "@/components/drivePreview/remoteFileState"
 import logger from "@/lib/logger"
 import { isFileItem } from "@/features/drive/driveSelectors"
@@ -312,7 +313,7 @@ function navigateBack({ didNavigateBack, isDismissing }: { didNavigateBack: Shar
 const Gallery = () => {
 	const { t } = useTranslation()
 	const navigation = useNavigation()
-	const dimensions = useWindowDimensions()
+	const dimensions = useGalleryDimensions()
 	const [scrollEnabled, setScrollEnabled] = useState<boolean>(true)
 	const headerOpacity = useSharedValue<number>(1)
 	const zoomScale = useSharedValue<number>(1)
@@ -422,7 +423,9 @@ const Gallery = () => {
 		const measuredWidth = e.nativeEvent.layout.width
 		const itemCount = useDrivePreviewStore.getState().items.length
 
-		if (measuredWidth <= 0 || itemCount <= 1) {
+		// Pages sit a cell width apart. A container width the cells don't share (Android PiP keeps the
+		// cells at their pre-PiP width while the container tracks the PiP window) would land between pages.
+		if (measuredWidth <= 0 || itemCount <= 1 || Math.abs(measuredWidth - width) >= 0.5) {
 			return
 		}
 

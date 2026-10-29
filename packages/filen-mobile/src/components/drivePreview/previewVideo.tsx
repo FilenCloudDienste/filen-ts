@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useId } from "react"
-import { useWindowDimensions, Platform, AppState, type ViewStyle } from "react-native"
+import { Platform, AppState, type ViewStyle } from "react-native"
 import { VideoView } from "expo-video"
 import { useEvent } from "expo"
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake"
@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import View from "@/components/ui/view"
 import PreviewLoadingOverlay from "@/components/drivePreview/previewLoadingOverlay"
 import galleryVideoPlayers from "@/components/drivePreview/galleryVideoPlayers"
+import useGalleryDimensions from "@/components/drivePreview/useGalleryDimensions"
 import usePipStore from "@/stores/usePip.store"
 import { useSecureStore } from "@/lib/secureStore"
 import { PIP_ENABLED_SECURE_STORE_KEY, DEFAULT_PIP_ENABLED } from "@/constants"
@@ -17,7 +18,7 @@ import logger from "@/lib/logger"
 import { type VerdictFile } from "@/lib/previewType"
 
 const PreviewVideo = ({ cacheKey, fileUrl, file }: { cacheKey: string; fileUrl: string; file?: VerdictFile }) => {
-	const dimensions = useWindowDimensions()
+	const dimensions = useGalleryDimensions()
 	const headerHeight = useDrivePreviewStore(useShallow(state => state.headerHeight))
 	const insets = useSafeAreaInsets()
 	const [pipEnabled] = useSecureStore<boolean>(PIP_ENABLED_SECURE_STORE_KEY, DEFAULT_PIP_ENABLED)
