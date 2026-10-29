@@ -401,6 +401,12 @@ export const drive = {
 	driveDotFilenMoveTitle: "Move the {{name}} directory?",
 	/** .filen confirm dialog — title before renaming the root .filen directory; {{name}} = ".filen" */
 	driveDotFilenRenameTitle: "Rename the {{name}} directory?",
+	/** .filen confirm dialog — title before trashing several selected items, .filen among them (the body says so) */
+	driveDotFilenTrashTitleSelection: "Trash these items?",
+	/** .filen confirm dialog — title before permanently deleting several selected items, .filen among them (the body says so) */
+	driveDotFilenDeleteTitleSelection: "Delete these items permanently?",
+	/** .filen confirm dialog — title before moving several selected items, .filen among them (the body says so) */
+	driveDotFilenMoveTitleSelection: "Move these items?",
 	/** .filen confirm dialog — body when .filen is the only item; {{name}} = ".filen" */
 	driveDotFilenBody: "{{name}} holds the settings Filen syncs between your devices (videos, playlists, office…).",
 	/** .filen confirm dialog — body when .filen is one of several selected items; {{name}} = ".filen" */

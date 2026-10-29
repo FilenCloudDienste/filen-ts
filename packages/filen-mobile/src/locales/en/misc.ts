@@ -58,8 +58,6 @@ export const misc = {
 	insert_link: "Insert link",
 	/** Dialog message for the link editor, asking the user to enter a web address */
 	enter_url: "Enter a URL",
-	/** Placeholder example URL shown in the link input field */
-	url_placeholder: "https://example.com",
 	/** Confirm button for the insert-link dialog */
 	insert: "Insert",
 

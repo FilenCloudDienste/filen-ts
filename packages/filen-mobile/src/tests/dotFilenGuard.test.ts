@@ -24,7 +24,14 @@ vi.mock("@/lib/sdkUnwrap", () => ({
 		typeof parent === "object" && parent !== null && "trashedFrom" in parent ? String(parent.trashedFrom) : null
 }))
 
-import { confirmDotFilenOperation, emptyTrashMessage, includesRootDotFilen, isRootDotFilenItem, rootDotFilenFilter } from "@/features/drive/dotFilenGuard"
+import {
+	confirmDotFilenOperation,
+	emptyTrashMessage,
+	includesRootDotFilen,
+	isRootDotFilenItem,
+	rootDotFilenFilter,
+	rootDotFilenLeads
+} from "@/features/drive/dotFilenGuard"
 import { type DriveItem } from "@/types"
 import { type DrivePath, type DrivePathType } from "@/hooks/useDrivePath"
 
@@ -82,9 +89,21 @@ describe("confirmDotFilenOperation", () => {
 	it("goes on once .filen is typed, worded for the operation", async () => {
 		inputPrompt.mockResolvedValueOnce(".filen")
 
-		await expect(confirmDotFilenOperation("move", [dotFilen, docs])).resolves.toBe(true)
+		await expect(confirmDotFilenOperation("move", [dotFilen])).resolves.toBe(true)
 		expect(inputPrompt.mock.calls[0]?.[0]).toMatchObject({
 			title: "dot_filen_move_title",
+			message: "dot_filen_message",
+			okText: "dot_filen_move_confirm",
+			destructive: true
+		})
+	})
+
+	it("titles a selection that includes .filen for its several items", async () => {
+		inputPrompt.mockResolvedValueOnce(".filen")
+
+		await expect(confirmDotFilenOperation("move", [dotFilen, docs])).resolves.toBe(true)
+		expect(inputPrompt.mock.calls[0]?.[0]).toMatchObject({
+			title: "dot_filen_move_title_selection",
 			message: "dot_filen_message_selection",
 			okText: "dot_filen_move_confirm",
 			destructive: true
@@ -103,6 +122,19 @@ describe("confirmDotFilenOperation", () => {
 
 		await expect(confirmDotFilenOperation("delete", [dotFilen])).resolves.toBe(false)
 		expect(error).not.toHaveBeenCalled()
+	})
+})
+
+describe("rootDotFilenLeads", () => {
+	it("leads with the root .filen at the drive root while it is shown", () => {
+		expect(rootDotFilenLeads({ show: true, drivePath: path("drive", null) })).toBe(isRootDotFilenItem)
+		expect(rootDotFilenLeads({ show: true, drivePath: path("drive", "root") })).toBe(isRootDotFilenItem)
+	})
+
+	it("asks nothing while hidden or anywhere else", () => {
+		expect(rootDotFilenLeads({ show: false, drivePath: path("drive", null) })).toBeUndefined()
+		expect(rootDotFilenLeads({ show: true, drivePath: path("drive", "docs") })).toBeUndefined()
+		expect(rootDotFilenLeads({ show: true, drivePath: path("recents", null) })).toBeUndefined()
 	})
 })
 

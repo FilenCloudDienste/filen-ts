@@ -288,7 +288,6 @@ function PublicLink() {
 																				message: t("enter_the_password"),
 																				cancelText: t("cancel"),
 																				okText: t("save"),
-																				placeholder: t("password"),
 																				inputType: "secure-text"
 																			},
 																			{ tag: "publicLink", message: "password prompt failed" }

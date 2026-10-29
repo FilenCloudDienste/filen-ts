@@ -92,8 +92,7 @@ async function testInputPrompt(): Promise<void> {
 	const result = await run(async () => {
 		return await prompts.input({
 			title: "Text input prompt",
-			message: "Type something and confirm.",
-			placeholder: "Anything…"
+			message: "Type something and confirm."
 		})
 	})
 

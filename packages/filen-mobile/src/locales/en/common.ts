@@ -58,8 +58,6 @@ export const common = {
 	sign_in: "Login",
 	/** Generic logout action */
 	logout: "Logout",
-	/** Generic placeholder hint for an email input, shown as faded example text */
-	email_placeholder_hint: "you@example.com",
 	/** Generic validation error shown when an entered email address is not valid */
 	please_enter_valid_email: "Please enter a valid email address.",
 	/** Generic label for a name field / a displayed item's name */

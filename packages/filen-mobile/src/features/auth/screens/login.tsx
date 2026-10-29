@@ -86,7 +86,6 @@ const Login = () => {
 				title: t("two_factor_authentication"),
 				message: wrongCode ? t("incorrect_two_factor_code_try_again") : t("enter_two_factor_code_or_recovery_key"),
 				inputType: "plain-text",
-				placeholder: t("code_or_recovery_key"),
 				cancelText: t("cancel"),
 				okText: t("sign_in")
 			},

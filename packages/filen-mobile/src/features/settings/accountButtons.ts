@@ -335,8 +335,7 @@ export function buildProfileButtons({
 						title: t("change_nickname"),
 						message: t("enter_nickname"),
 						cancelText: t("cancel"),
-						okText: t("save"),
-						placeholder: accountQuery.data.nickName
+						okText: t("save")
 					},
 					{ tag: "settings", message: "change nickname prompt failed" },
 					{ trim: true }

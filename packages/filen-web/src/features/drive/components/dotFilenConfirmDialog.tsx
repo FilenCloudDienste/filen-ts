@@ -11,6 +11,14 @@ const TITLE_KEYS = {
 	rename: "driveDotFilenRenameTitle"
 } as const
 
+// Several items, `.filen` among them: the body says it is included. A rename only ever names one item.
+const SELECTION_TITLE_KEYS = {
+	trash: "driveDotFilenTrashTitleSelection",
+	delete: "driveDotFilenDeleteTitleSelection",
+	move: "driveDotFilenMoveTitleSelection",
+	rename: "driveDotFilenRenameTitle"
+} as const
+
 const CONFIRM_KEYS = {
 	trash: "driveDotFilenTrashConfirm",
 	delete: "driveDotFilenDeleteConfirm",
@@ -38,7 +46,7 @@ export function DotFilenConfirmDialog({ open, pending, operation, multiple, onOp
 		<TypedConfirmDialog
 			open={open}
 			pending={pending}
-			title={t(TITLE_KEYS[operation], values)}
+			title={multiple ? t(SELECTION_TITLE_KEYS[operation], values) : t(TITLE_KEYS[operation], values)}
 			body={multiple ? t("driveDotFilenBodySelection", values) : t("driveDotFilenBody", values)}
 			matchLabel={t("driveDotFilenMatchLabel", values)}
 			matchValue={DOT_FILEN_DIR_NAME}

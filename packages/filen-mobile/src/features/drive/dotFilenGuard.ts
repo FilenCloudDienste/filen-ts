@@ -21,6 +21,14 @@ const TITLE_KEYS = {
 	rename: "dot_filen_rename_title"
 } as const
 
+// Several items, `.filen` among them: the message says it is included. A rename only ever names one item.
+const SELECTION_TITLE_KEYS = {
+	trash: "dot_filen_trash_title_selection",
+	delete: "dot_filen_delete_title_selection",
+	move: "dot_filen_move_title_selection",
+	rename: "dot_filen_rename_title"
+} as const
+
 const CONFIRM_KEYS = {
 	trash: "dot_filen_trash_confirm",
 	delete: "dot_filen_delete_confirm",
@@ -91,6 +99,12 @@ export function rootDotFilenFilter({ show, drivePath }: { show: boolean; drivePa
 	}
 }
 
+// The sort's leadsDirectories at the drive root (a search rooted there included; the pickers too) while the setting
+// shows the root `.filen`; undefined elsewhere, so no other listing pays for the check.
+export function rootDotFilenLeads({ show, drivePath }: { show: boolean; drivePath: DrivePath }): ((item: DriveItem) => boolean) | undefined {
+	return show && drivePath.type === "drive" && (drivePath.uuid === null || drivePath.uuid === cache.rootUuid) ? isRootDotFilenItem : undefined
+}
+
 // The empty-trash confirmation's message, saying so when the trash holds the root `.filen`.
 export function emptyTrashMessage(trashItems: readonly DriveItem[]): string {
 	const message = t("are_you_sure_empty_trash")
@@ -105,11 +119,11 @@ export async function confirmDotFilenOperation(operation: DotFilenOperation, ite
 	}
 
 	const values = { name: DOT_FILEN_DIR_NAME }
+	const selection = items.length > 1
 	const typed = await inputPrompt(
 		{
-			title: t(TITLE_KEYS[operation], values),
-			message: items.length > 1 ? t("dot_filen_message_selection", values) : t("dot_filen_message", values),
-			placeholder: DOT_FILEN_DIR_NAME,
+			title: selection ? t(SELECTION_TITLE_KEYS[operation], values) : t(TITLE_KEYS[operation], values),
+			message: selection ? t("dot_filen_message_selection", values) : t("dot_filen_message", values),
 			cancelText: t("cancel"),
 			okText: t(CONFIRM_KEYS[operation]),
 			destructive: true,

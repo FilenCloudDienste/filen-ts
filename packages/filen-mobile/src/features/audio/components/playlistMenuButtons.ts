@@ -348,7 +348,6 @@ export function renamePlaylistButton({ t, playlist, title }: { t: TFunction; pla
 				{
 					title: t("rename_playlist"),
 					message: t("enter_playlist_name"),
-					placeholder: t("playlist_name_placeholder"),
 					cancelText: t("cancel"),
 					okText: t("rename"),
 					defaultValue: playlist.name

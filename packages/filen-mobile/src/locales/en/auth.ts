@@ -1,5 +1,5 @@
 // Authentication feature vocabulary (src/routes/auth/login.tsx and src/routes/register/index.tsx).
-// Shared keys (cancel, email, password, sign_in, please_enter_valid_email, email_placeholder_hint)
+// Shared keys (cancel, email, password, sign_in, please_enter_valid_email)
 // live in common.ts and must not be redefined here.
 //
 // Split-sentence link strings (dont_have_an_account, already_have_an_account) embed the styled
@@ -18,8 +18,6 @@ export const auth = {
 	// two_factor_authentication lives in security.ts.
 	/** Two-factor prompt — dialog message asking for the 2FA code or a recovery key */
 	enter_two_factor_code_or_recovery_key: "Enter your two-factor code or recovery key",
-	/** Two-factor prompt — input placeholder for the 2FA code or recovery key field */
-	code_or_recovery_key: "Code or recovery key",
 	/** Two-factor prompt — dialog message shown after a rejected code, prompting a re-entry */
 	incorrect_two_factor_code_try_again: "Incorrect code. Please try again.",
 	/** Password-reset prompt — dialog title for requesting a reset email */

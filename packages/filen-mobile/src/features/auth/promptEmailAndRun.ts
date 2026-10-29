@@ -29,7 +29,6 @@ export async function promptEmailAndRun({
 		{
 			title,
 			message,
-			placeholder: t("email_placeholder_hint"),
 			cancelText: t("cancel"),
 			okText,
 			defaultValue,

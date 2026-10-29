@@ -55,7 +55,7 @@ describe("DotFilenConfirmDialog", () => {
 			/>
 		)
 
-		expect(screen.getByText("Move the .filen directory?")).toBeTruthy()
+		expect(screen.getByText("Move these items?")).toBeTruthy()
 		expect(screen.getByText(/Your selection includes \.filen.*Proceeding includes it\./)).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Move anyway" })).toBeTruthy()
 	})

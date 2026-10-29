@@ -417,8 +417,7 @@ export function useDriveUpload({
 				title: t("create_text_file"),
 				message: t("enter_text_file_name"),
 				cancelText: t("cancel"),
-				okText: t("create"),
-				placeholder: t("text_file_name")
+				okText: t("create")
 			},
 			{ tag: "drive-upload", message: "create text file prompt failed" },
 			{ trim: true }

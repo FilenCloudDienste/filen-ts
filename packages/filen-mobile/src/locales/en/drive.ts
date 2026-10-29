@@ -164,14 +164,10 @@ export const drive = {
 	create_directory: "Create directory",
 	/** Create-directory dialog message */
 	enter_directory_name: "Enter a name for the new directory",
-	/** Create-directory dialog input placeholder */
-	directory_name: "Directory name",
 
 	// ── Create text file prompt ────────────────────────────────────────────────
 	/** Create-text-file dialog message */
 	enter_text_file_name: "Enter a name for the new text file",
-	/** Create-text-file dialog input placeholder */
-	text_file_name: "File name",
 
 	// ── Scanned document filename base (drive/index.tsx) ─────────────────────
 	// The component appends an ISO-8601 timestamp and ".jpg" to form the final filename.
@@ -367,6 +363,12 @@ export const drive = {
 	dot_filen_move_title: "Move the {{name}} directory?",
 	/** Typed-confirmation title before renaming the root .filen directory; {{name}} = ".filen" */
 	dot_filen_rename_title: "Rename the {{name}} directory?",
+	/** Typed-confirmation title before trashing several selected items, .filen among them (the body says so) */
+	dot_filen_trash_title_selection: "Trash these items?",
+	/** Typed-confirmation title before permanently deleting several selected items, .filen among them (the body says so) */
+	dot_filen_delete_title_selection: "Delete these items permanently?",
+	/** Typed-confirmation title before moving several selected items, .filen among them (the body says so) */
+	dot_filen_move_title_selection: "Move these items?",
 	/** Typed-confirmation body when .filen is the only item; ends with the instruction to type its name into the field below; {{name}} = ".filen" */
 	dot_filen_message: "{{name}} holds the settings Filen syncs between your devices (videos, playlists, office…).\n\nType {{name}} to confirm:",
 	/** Typed-confirmation body when .filen is one of several selected items; {{name}} = ".filen" */

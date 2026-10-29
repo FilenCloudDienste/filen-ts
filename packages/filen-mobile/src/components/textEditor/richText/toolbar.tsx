@@ -132,7 +132,6 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 								.input({
 									title: t("edit_link"),
 									message: t("enter_url"),
-									placeholder: t("url_placeholder"),
 									defaultValue: active as string,
 									okText: t("save"),
 									cancelText: t("cancel")
@@ -241,7 +240,6 @@ const Button = ({ type, dispatch }: { type: keyof QuillFormats; dispatch: (event
 			.input({
 				title: t("insert_link"),
 				message: t("enter_url"),
-				placeholder: t("url_placeholder"),
 				okText: t("insert"),
 				cancelText: t("cancel")
 			})

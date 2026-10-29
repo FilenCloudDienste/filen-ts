@@ -92,7 +92,6 @@ export function Playlists() {
 			{
 				title: t("new_playlist"),
 				message: t("enter_playlist_name"),
-				placeholder: t("playlist_name_placeholder"),
 				cancelText: t("cancel"),
 				okText: t("create")
 			},

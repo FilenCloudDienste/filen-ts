@@ -67,7 +67,6 @@ export type InputPromptOptions = {
 	cancellable?: boolean
 	okText?: string
 	cancelText?: string
-	placeholder?: string
 	destructive?: boolean
 	/**
 	 * Field semantics for the keyboard. A plain-text prompt otherwise capitalizes the first letter,

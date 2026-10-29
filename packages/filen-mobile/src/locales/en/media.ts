@@ -148,8 +148,6 @@ export const media = {
 	rename_playlist: "Rename playlist",
 	/** Playlists — rename / create dialog: text above the input field */
 	enter_playlist_name: "Enter a name for the playlist.",
-	/** Playlists — rename / create dialog: input placeholder */
-	playlist_name_placeholder: "Playlist name",
 	/** Playlists — header menu item: create a new playlist */
 	create_playlist: "Create playlist",
 	/** Playlists — create dialog: title */

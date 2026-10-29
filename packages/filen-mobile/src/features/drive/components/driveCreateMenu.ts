@@ -65,8 +65,7 @@ export async function promptAndCreateDirectory({ parent, t }: { parent: AnyNorma
 			title: t("create_directory"),
 			message: t("enter_directory_name"),
 			cancelText: t("cancel"),
-			okText: t("create"),
-			placeholder: t("directory_name")
+			okText: t("create")
 		},
 		{ tag: "drive", message: "create directory prompt failed" },
 		{ trim: true }
