@@ -498,6 +498,31 @@ function useNavigateAction(id: string, to: "/settings/account" | "/transfers" | 
 	)
 }
 
+// Whether the element's content is taller than its box. The box is sized to its content until it is capped, so
+// a resize catches every flip but one: an entry added while the content exactly fills the cap, which
+// `contentCount` covers.
+function useOverflowsY(element: HTMLElement | null, contentCount: number): boolean {
+	const [overflows, setOverflows] = useState(false)
+
+	useEffect(() => {
+		if (!element) {
+			return
+		}
+
+		const observer = new ResizeObserver(() => {
+			setOverflows(element.scrollHeight > element.clientHeight)
+		})
+
+		observer.observe(element)
+
+		return () => {
+			observer.disconnect()
+		}
+	}, [element, contentCount])
+
+	return overflows
+}
+
 export function IconRail() {
 	const { t } = useTranslation()
 	const pathname = useRouterState({ select: state => state.location.pathname })
@@ -506,6 +531,8 @@ export function IconRail() {
 	const { slotProps } = useRailReorder(order, next => {
 		saveRailOrder(mergeRailOrder(fullOrder, next))
 	})
+	const [entryList, setEntryList] = useState<HTMLDivElement | null>(null)
+	const entriesScroll = useOverflowsY(entryList, order.length)
 
 	useNavigateAction("app.openSettings", "/settings/account")
 	useNavigateAction("app.openTransfers", "/transfers")
@@ -518,9 +545,9 @@ export function IconRail() {
 			aria-label={t("appName")}
 			// Drag region (Electron plumbing): a plain browser ignores -webkit-app-region entirely, so
 			// this is inert weight everywhere else. Every interactive descendant below opts back out
-			// with app-region-no-drag so it stays clickable. overflow-y-auto: the entry list is fixed-height
-			// and can outgrow a short viewport (landscape phone); tooltips portal out, so a scroll container
-			// here cannot clip them.
+			// with app-region-no-drag so it stays clickable. On a short viewport the entry list below scrolls,
+			// not the rail; overflow-y-auto here is only the browser fallback for a viewport too short for the
+			// rail's fixed parts (landscape phone), which the desktop window's minimum height rules out.
 			// macOS desktop: the native traffic lights sit at the top of the rail (see the shell's window
 			// options), so the rail widens to hold them and the brand moves below them.
 			className={cn(
@@ -542,8 +569,18 @@ export function IconRail() {
 			<SidebarDrawerTrigger className={railItemClass(false)} />
 
 			{/* The section links, in the user's order. Drag one to move it (or Alt+Arrow on a focused one):
-			    it lifts and follows the pointer while the others slide to open its landing slot. */}
-			<div className="flex flex-col items-center gap-1.5">
+			    it lifts and follows the pointer while the others slide to open its landing slot.
+			    The list shrinks first on a short viewport and scrolls only then, so a lifted entry is never clipped
+			    otherwise. While it scrolls it is a pane: Chromium never clips a drag region to a scroll container,
+			    so an entry scrolled out of view would keep its no-drag box over the drag strip above the rail.
+			    The padding gives the edge entries' focus rings room inside the scroll box; the margin cancels it. */}
+			<div
+				ref={setEntryList}
+				className={cn(
+					"-my-1.5 flex min-h-0 w-full flex-col items-center gap-1.5 py-1.5",
+					entriesScroll && "overflow-y-auto app-region-pane"
+				)}
+			>
 				{order.map((id, index) => {
 					const Entry = RAIL_ENTRIES[id]
 					const { dragging, reordering, style, ...handlers } = slotProps(index)
