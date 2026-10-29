@@ -8,7 +8,8 @@ const withGradleMemory: ConfigPlugin = config => {
 		config.modResults.push({
 			type: "property",
 			key: "org.gradle.jvmargs",
-			value: "-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError"
+			// UTF-8 pinned: a non-UTF-8 shell locale makes the JVM default to ASCII, and boost's tarball then fails to expand.
+			value: "-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8"
 		})
 
 		return config
