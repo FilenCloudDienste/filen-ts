@@ -207,7 +207,10 @@ export function Group({ buttons, className }: { buttons: Button[]; className?: s
 									)}
 									{rightItem?.type === "switch" && (
 										<View className="items-center flex-row bg-transparent">
+											{/* Unlabelled, the switch reads as a bare value and accessibility trees drop it. */}
 											<Switch
+												accessibilityLabel={title}
+												accessibilityHint={subTitle}
 												value={rightItem.value}
 												onValueChange={rightItem.onValueChange}
 												disabled={disabled}
