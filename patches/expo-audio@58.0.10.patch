@@ -35,7 +35,7 @@ index fb2d0b57fb8718df04e5c073b70837b2658f2c16..7b69599f4d6ec750f3a6aada80928802
      get() = ref.isCurrentMediaItemLive
  
 diff --git a/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt b/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
-index 255baad7cac7aaf28efd5d6a17b3b57537d4b8d8..59c01dc574f6f9c05d704c29a13f60ea1b0a5bd5 100644
+index 53c36f7e3c0a0bcb8b4de1f5e6d2d3e214d3fbf2..b744bcf6db700300bf07edf5f5282de1e2b9090c 100644
 --- a/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
 +++ b/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
 @@ -24,6 +24,7 @@ import androidx.media3.session.MediaSessionService
@@ -64,7 +64,7 @@ index 255baad7cac7aaf28efd5d6a17b3b57537d4b8d8..59c01dc574f6f9c05d704c29a13f60ea
          builder.addAction(
            NotificationCompat.Action(
              androidx.media3.session.R.drawable.media3_icon_next,
-@@ -273,9 +274,7 @@ class AudioControlsService : MediaSessionService() {
+@@ -289,9 +290,7 @@ class AudioControlsService : MediaSessionService() {
      val session = mediaSession ?: return
      val mediaButtons = mutableListOf<CommandButton>()
  
@@ -75,7 +75,7 @@ index 255baad7cac7aaf28efd5d6a17b3b57537d4b8d8..59c01dc574f6f9c05d704c29a13f60ea
        mediaButtons.add(
          CommandButton.Builder(CommandButton.ICON_PREVIOUS)
            .setDisplayName("Previous Track")
-@@ -316,7 +315,7 @@ class AudioControlsService : MediaSessionService() {
+@@ -333,7 +332,7 @@ class AudioControlsService : MediaSessionService() {
          .build()
      )
  
@@ -84,7 +84,7 @@ index 255baad7cac7aaf28efd5d6a17b3b57537d4b8d8..59c01dc574f6f9c05d704c29a13f60ea
        mediaButtons.add(
          CommandButton.Builder(CommandButton.ICON_NEXT)
            .setDisplayName("Next Track")
-@@ -558,6 +557,28 @@ class AudioControlsService : MediaSessionService() {
+@@ -591,6 +590,28 @@ class AudioControlsService : MediaSessionService() {
      return currentPlayable?.supportsPreviousTrack == true
    }
  
@@ -202,10 +202,10 @@ index 0f68a52003416eb0e7be03d44dba1be76cd38116..505505c91fbe2d4bb01e28ea39a2d9b9
      // currentDate() blocks until the item has loaded, and a still-loading item looks live too.
      guard let item = ref.currentItem, item.status == .readyToPlay, item.duration.isIndefinite,
 diff --git a/ios/MediaController.swift b/ios/MediaController.swift
-index 1f7ca7ea4ec041e4111ab96ffa15b939f6e4d896..708dab98845ee77c7d373580fd47beb6ad09fe14 100644
+index 9b66e45411fab8e869144994c35c54c947626cf2..31fd95fbf74767fc8ecf6731e3ecc4412ad59e03 100644
 --- a/ios/MediaController.swift
 +++ b/ios/MediaController.swift
-@@ -387,8 +387,12 @@ class MediaController {
+@@ -403,8 +403,12 @@ class MediaController {
      remoteCommandCenter.changePlaybackPositionCommand.isEnabled = !isLiveStream
      let supportsNextTrack = activePlayable?.supportsNextTrack ?? false
      let supportsPreviousTrack = activePlayable?.supportsPreviousTrack ?? false
