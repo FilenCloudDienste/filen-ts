@@ -1,8 +1,32 @@
 diff --git a/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt b/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
-index 1792ff268567a5b3553be0aa667cf8ddfa798afd..226687e4d77afa6df00b54a26293b13a3bc50101 100644
+index 1792ff268567a5b3553be0aa667cf8ddfa798afd..65ac92d890286445be518860874f27feb1d8fdcc 100644
 --- a/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
 +++ b/android/src/main/java/expo/modules/video/managers/PictureInPictureManager.kt
-@@ -286,7 +286,13 @@ class PictureInPictureManager(appContext: AppContext) : PictureInPictureFragment
+@@ -8,6 +8,8 @@ import android.view.ViewGroup
+ import android.widget.FrameLayout
+ import androidx.annotation.OptIn
+ import androidx.fragment.app.FragmentActivity
++import androidx.lifecycle.Lifecycle
++import androidx.lifecycle.LifecycleOwner
+ import androidx.media3.common.util.UnstableApi
+ import expo.modules.kotlin.AppContext
+ import expo.modules.video.PictureInPictureHelperFragment
+@@ -141,6 +143,14 @@ class PictureInPictureManager(appContext: AppContext) : PictureInPictureFragment
+     currentPiPViewCandidate.get()?.let {
+       layoutForPiPExit(it)
+     }
++
++    // Patched (filen): the window's close button stops the activity before the PiP mode change lands;
++    // expanding back leaves it started. Pause on dismiss so playback doesn't continue with no window.
++    val dismissed = (mainActivity.get() as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.STARTED) == false
++    if (dismissed) {
++      currentPiPViewCandidate.get()?.videoPlayer?.player?.pause()
++    }
++
+     strongVideoViews.forEach {
+       it.onStopPictureInPicture(currentPiPViewCandidate.get())
+     }
+@@ -286,7 +296,13 @@ class PictureInPictureManager(appContext: AppContext) : PictureInPictureFragment
      val decorView = mainActivity.window.decorView
      val rootView = decorView.findViewById<ViewGroup>(android.R.id.content)
  

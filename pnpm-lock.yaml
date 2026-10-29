@@ -186,7 +186,7 @@ patchedDependencies:
   expo-image-manipulator@58.0.16: e0229c035f8a22190f37c0f7ce0fef0fed223431f8f2eb4deb629bc2f5f1f78a
   expo-image@58.0.18: 631ff0c5f33f18a7f8c4a2fc79c52ed2002a81dfca8ccf7bd812b4707b286bd5
   expo-sharing@58.0.21: ed98c4c07321148b6fbb5ba427beb871cb1f1a281be1a6dcabdca0d34fabd168
-  expo-video@58.0.13: 119f783c144337b03a556a73bb8cd88cd1783650f1776e5aed97b846d41bf8f8
+  expo-video@58.0.13: 6fb16ecb6426e070bb4b38279c307b8071dfffbb28255fafba66c69a9476b7fe
   file-type@22.2.0: a25744dce2cc85b7b7df582aa7b56fd1bedf8ce9e2e2317655e87be4a4e3b24e
   hucre@1.2.0: 5f5ada98495cb608ef0d4f0d1097036950756915c8210d92cc290756afe3feec
   mediabunny@1.62.1: 50db84306781df1849862e95e649ff1391986d14794336f0d8876e8cf85bf854
@@ -488,7 +488,7 @@ importers:
         version: 58.0.12(expo@58.0.21)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))
       expo-video:
         specifier: 58.0.13
-        version: 58.0.13(patch_hash=119f783c144337b03a556a73bb8cd88cd1783650f1776e5aed97b846d41bf8f8)(expo@58.0.21)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
+        version: 58.0.13(patch_hash=6fb16ecb6426e070bb4b38279c307b8071dfffbb28255fafba66c69a9476b7fe)(expo@58.0.21)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
       expo-video-thumbnails:
         specifier: ~58.0.2
         version: 58.0.2(expo@58.0.21)
@@ -17344,7 +17344,7 @@ snapshots:
     dependencies:
       expo: 58.0.21(fa4b9af787f4117b8f789ebb4716f547)
 
-  expo-video@58.0.13(patch_hash=119f783c144337b03a556a73bb8cd88cd1783650f1776e5aed97b846d41bf8f8)(expo@58.0.21)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0):
+  expo-video@58.0.13(patch_hash=6fb16ecb6426e070bb4b38279c307b8071dfffbb28255fafba66c69a9476b7fe)(expo@58.0.21)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0):
     dependencies:
       expo: 58.0.21(fa4b9af787f4117b8f789ebb4716f547)
       react: 19.3.0
