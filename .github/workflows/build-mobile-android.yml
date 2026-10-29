@@ -127,7 +127,7 @@ jobs:
         run: pnpm run prebuild:ci:android
 
       - name: Build Android release APK & AAB
-        run: set -o pipefail && cd android && chmod +x ./gradlew && ./gradlew app:bundleRelease app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log" && cd ..
+        run: set -o pipefail && cd android && chmod +x ./gradlew && ./gradlew -I ../gradle/hermes-unzip.init.gradle.kts app:bundleRelease app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log" && cd ..
 
       - name: Build diagnostics
         if: failure()

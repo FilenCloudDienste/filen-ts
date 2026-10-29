@@ -113,7 +113,7 @@ jobs:
           set -o pipefail
           cd android
           chmod +x ./gradlew
-          ./gradlew app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+          ./gradlew -I ../gradle/hermes-unzip.init.gradle.kts app:assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"
           cd ..
 
       - name: Build diagnostics
