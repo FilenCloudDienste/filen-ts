@@ -50,6 +50,7 @@ vi.mock("@filen/sdk-rs", () => ({
 import {
 	getDriveEmptyState,
 	resolveDriveHeaderTitle,
+	resolveDriveSearchScopeName,
 	rawUploadTimestamp,
 	pickDisplayTimestamp,
 	directorySizeTypeForDrivePath,
@@ -139,6 +140,57 @@ describe("getDriveEmptyState", () => {
 // ---------------------------------------------------------------------------
 // #28 — resolveDriveHeaderTitle — all branching paths
 // ---------------------------------------------------------------------------
+
+describe("resolveDriveSearchScopeName", () => {
+	beforeEach(() => {
+		mockUuidToAnyDriveItem.clear()
+	})
+
+	it("names the directory a subdirectory search is scoped to", () => {
+		mockUuidToAnyDriveItem.set("dir-abc", decryptableItem("dir-abc", "My Folder"))
+
+		expect(
+			resolveDriveSearchScopeName({
+				drivePath: drivePath("drive", { uuid: "dir-abc" }),
+				stringifiedClientRootUuid: "root-uuid",
+				listingFetchStatus: "idle",
+				t: t
+			})
+		).toBe("My Folder")
+	})
+
+	it("is null at the account root, whether reached by uuid or without one", () => {
+		for (const uuid of ["root-uuid", null]) {
+			expect(
+				resolveDriveSearchScopeName({
+					drivePath: drivePath("drive", { uuid }),
+					stringifiedClientRootUuid: "root-uuid",
+					listingFetchStatus: "idle",
+					t: t
+				})
+			).toBeNull()
+		}
+	})
+
+	it("is null outside the plain drive browser", () => {
+		expect(
+			resolveDriveSearchScopeName({
+				drivePath: drivePath("favorites", { uuid: "dir-abc" }),
+				stringifiedClientRootUuid: "root-uuid",
+				listingFetchStatus: "idle",
+				t: t
+			})
+		).toBeNull()
+		expect(
+			resolveDriveSearchScopeName({
+				drivePath: drivePath("drive", { uuid: "dir-abc", selectOptions: selectOptions({ intention: "move" }) }),
+				stringifiedClientRootUuid: "root-uuid",
+				listingFetchStatus: "idle",
+				t: t
+			})
+		).toBeNull()
+	})
+})
 
 describe("resolveDriveHeaderTitle", () => {
 	beforeEach(() => {

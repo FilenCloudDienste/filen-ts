@@ -30,7 +30,7 @@ import { useSortedDriveItems } from "@/features/drive/hooks/useSortedDriveItems"
 import { useDriveHighlight } from "@/features/drive/hooks/useDriveHighlight"
 import useBlockedUsers from "@/features/contacts/hooks/useBlockedUsers"
 import { isSharerBlocked } from "@/features/drive/driveSharer"
-import { getDriveEmptyState, filterDriveItemsBySearchQuery } from "@/features/drive/utils"
+import { getDriveEmptyState, filterDriveItemsBySearchQuery, resolveDriveSearchScopeName } from "@/features/drive/utils"
 import offlineSync from "@/features/offline/offlineSync"
 import SyncErrorsHeaderRow from "@/features/offline/components/syncErrorsHeaderRow"
 import { LazyWrapper } from "@/components/lazyWrapper"
@@ -44,6 +44,7 @@ import { PressableScale } from "@/components/ui/pressables"
 import Text from "@/components/ui/text"
 import Ionicons from "@expo/vector-icons/Ionicons"
 import logger from "@/lib/logger"
+import { useStringifiedClient } from "@/lib/auth"
 import { useResolveClassNames } from "@/hooks/useResolveClassNames"
 
 // Subscribes to the clipboard itself so a copy or cut re-renders this button, not the whole listing.
@@ -96,6 +97,7 @@ const Drive = () => {
 	const [showDotFilen] = useShowDotFilen()
 	const blocked = useBlockedUsers()
 	const textForegroundColor = useResolveClassNames("text-foreground").color as string
+	const stringifiedClient = useStringifiedClient()
 
 	const driveItemsQuery = useDriveItemsQuery(
 		{
@@ -198,6 +200,15 @@ const Drive = () => {
 	// and "More"/"Appearance" independently of the real keys, and they drift apart per locale.
 	const hiddenSetting = t("hide_hidden_items")
 	const hiddenSettingPath = `${t("more")} › ${t("appearance")}`
+	// A cache search covers only the current directory's subtree; name it so an empty result isn't read as "not in my drive".
+	const searchScopeName = isCacheSearch
+		? resolveDriveSearchScopeName({
+				drivePath,
+				stringifiedClientRootUuid: stringifiedClient?.rootUuid ?? null,
+				listingFetchStatus: driveItemsQuery.fetchStatus,
+				t
+			})
+		: null
 
 	// Reveal target of an "open containing directory" navigation: scrolls this listing to the item
 	// the search hit pointed at and tints its row once. No-op on every other entry to the screen.
@@ -463,6 +474,16 @@ const Drive = () => {
 														color={textForegroundColor}
 													/>
 												}
+											/>
+										)
+									}
+
+									if (searchScopeName) {
+										return (
+											<ListEmpty
+												icon="search-outline"
+												title={t("no_results")}
+												description={t("search_no_results_in_directory", { name: searchScopeName })}
 											/>
 										)
 									}

@@ -196,6 +196,34 @@ export function resolveDriveHeaderTitle({
 	}
 }
 
+/**
+ * The directory a plain-drive cache search is scoped to (it covers only `drivePath.uuid`'s subtree), or
+ * `null` at the account root, where the scope is the whole drive and needs no naming.
+ */
+export function resolveDriveSearchScopeName({
+	drivePath,
+	stringifiedClientRootUuid,
+	listingFetchStatus,
+	t
+}: {
+	drivePath: DrivePath
+	stringifiedClientRootUuid: string | null
+	listingFetchStatus: FetchStatus
+	t: TFunction
+}): string | null {
+	if (drivePath.type !== "drive" || drivePath.selectOptions || !drivePath.uuid || drivePath.uuid === stringifiedClientRootUuid) {
+		return null
+	}
+
+	return resolveDriveHeaderTitle({
+		drivePath,
+		selectedCount: 0,
+		stringifiedClientRootUuid,
+		listingFetchStatus,
+		t
+	})
+}
+
 // The raw "uploaded" timestamp, normalized across the DriveItem shapes used by the
 // item-info rows: shared (non-root + root) directories carry it under `data.inner`,
 // every other shape carries it directly under `data`. Returned as a number for

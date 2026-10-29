@@ -21,7 +21,7 @@ import { useStringifiedClient } from "@/lib/auth"
 import offlineSync from "@/features/offline/offlineSync"
 import useOfflineStore from "@/features/offline/store/useOffline.store"
 import { aggregateDriveSelectionFlags, isPlainDrivePath } from "@/features/drive/driveSelectors"
-import { resolveDriveHeaderTitle } from "@/features/drive/utils"
+import { resolveDriveHeaderTitle, resolveDriveSearchScopeName } from "@/features/drive/utils"
 import { useDriveUpload } from "@/features/drive/hooks/useDriveUpload"
 import { buildSortMenuButton, buildBulkActionMenu, buildViewModeMenuButton } from "@/features/drive/components/headerMenuBuilders"
 import { getDriveParent, canShowDriveCreateMenu, buildDriveCreateMenuButtons } from "@/features/drive/components/driveCreateMenu"
@@ -335,6 +335,13 @@ const Header = ({
 		t
 	})
 
+	const searchScopeName = resolveDriveSearchScopeName({
+		drivePath,
+		stringifiedClientRootUuid: stringifiedClient?.rootUuid ?? null,
+		listingFetchStatus,
+		t
+	})
+
 	return (
 		<StackHeader
 			title={headerTitle}
@@ -352,7 +359,7 @@ const Header = ({
 			leftItems={leftItems}
 			rightItems={rightItems}
 			search={{
-				placeholder: t("search_drive"),
+				placeholder: searchScopeName ? t("search_in_directory", { name: searchScopeName }) : t("search_drive"),
 				onChangeText: setSearchQuery
 			}}
 		/>

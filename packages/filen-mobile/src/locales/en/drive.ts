@@ -94,6 +94,10 @@ export const drive = {
 	// ── Header search bar ─────────────────────────────────────────────────────
 	/** Search bar placeholder in the drive header */
 	search_drive: "Search",
+	/** Search bar placeholder inside a directory: the search covers only it and its subdirectories. {{name}} = the directory name */
+	search_in_directory: "Search in {{name}}",
+	/** Empty-state subtitle under no_results for a search scoped to a directory. {{name}} = the directory name */
+	search_no_results_in_directory: "Nothing in {{name}} or its subdirectories matches. Search from Drive to look everywhere.",
 	/** Empty-state title when the cache-backed search can't run (worker wedged / cache unavailable / root removed) */
 	search_unavailable: "Search unavailable",
 	/** Empty-state subtitle under search_unavailable */
