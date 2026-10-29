@@ -75,3 +75,27 @@ describe("router dedupe window (stateful makeGuardedMethod)", () => {
 		expect(mockPush).toHaveBeenCalledTimes(2)
 	})
 })
+
+describe("router after expo-router rebinds its methods", () => {
+	afterEach(() => {
+		vi.resetModules()
+	})
+
+	it("calls the live method, not the one bound at first use", async () => {
+		vi.resetModules()
+		const expo = await import("expo-router")
+		const { router } = await import("@/lib/router")
+		const firstMount = vi.fn()
+		const secondMount = vi.fn()
+
+		// expo-router's root bridge Object.assigns fresh methods on every mount.
+		Object.assign(expo.router, { push: firstMount })
+		router.push("/a")
+
+		Object.assign(expo.router, { push: secondMount })
+		router.push("/b")
+
+		expect(firstMount).toHaveBeenCalledTimes(1)
+		expect(secondMount).toHaveBeenCalledExactlyOnceWith("/b")
+	})
+})

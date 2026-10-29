@@ -14,7 +14,7 @@ function nowMs(): number {
 	return performance.now()
 }
 
-function makeGuardedMethod(method: string, original: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
+function makeGuardedMethod(method: string): (...args: unknown[]) => unknown {
 	return (...args: unknown[]): unknown => {
 		const key = navigationKey(args)
 		const now = nowMs()
@@ -37,7 +37,9 @@ function makeGuardedMethod(method: string, original: (...args: unknown[]) => unk
 			return undefined
 		}
 
-		return original(...args)
+		// Read the method at call time: expo-router rebinds its router on every root mount (an Android
+		// back-exit and relaunch remounts it), so a copy captured earlier would enqueue into the dead root.
+		return (Reflect.get(expoRouter, method) as (...args: unknown[]) => unknown).apply(expoRouter, args)
 	}
 }
 
@@ -57,7 +59,7 @@ export const router: typeof expoRouter = new Proxy(expoRouter, {
 		let guarded = guardedMethodCache.get(prop)
 
 		if (!guarded) {
-			guarded = makeGuardedMethod(prop, (value as (...args: unknown[]) => unknown).bind(target))
+			guarded = makeGuardedMethod(prop)
 
 			guardedMethodCache.set(prop, guarded)
 		}
