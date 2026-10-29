@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Client, CacheSearchSnapshot, CacheStatusMessage, Dir, File, UuidStr } from "@filen/sdk-rs"
 import { createSearchEngine, SearchSupersededError, CEILING, type SearchPush } from "@/workers/searchEngine"
 import { testUuid } from "@/tests/support/uuid"
@@ -35,6 +35,7 @@ function makeFakeSearch(
 		close: vi.fn(() => Promise.resolve(undefined)),
 		free: vi.fn(),
 		setConfig: vi.fn(() => Promise.resolve(undefined)),
+		total: vi.fn(() => Promise.resolve(0n)),
 		getRange: vi.fn(getRangeImpl)
 	}
 }
@@ -538,12 +539,12 @@ describe("createSearchEngine — status listener routing", () => {
 		expect(pushes).toEqual([])
 	})
 
-	it("pushes resync:false on finished regardless of which root it names (finished carries none)", async () => {
+	it("ignores a finished resync it never saw start for the active root (warm cache)", async () => {
 		const { listener, pushes } = await openAndCaptureStatus(rootA)
 
 		listener([{ type: "resyncProgress", progress: { type: "finished", converged: true } }])
 
-		expect(pushes).toEqual([{ type: "resync", resyncing: false }])
+		expect(pushes).toEqual([])
 	})
 
 	it("pushes a heartbeat on a listing tick regardless of which root it names", async () => {
@@ -692,5 +693,110 @@ describe("createSearchEngine — close", () => {
 
 		expect(search.close).not.toHaveBeenCalled()
 		expect(search.free).not.toHaveBeenCalled()
+	})
+})
+
+// The SDK commits a resync's last batch before `finished`, then re-reads the window only after its own
+// debounce + the query, and fires the window only on a change. `engineTotal` is what a refilter re-read
+// reports; `push` delivers the late post-finished snapshot.
+describe("createSearchEngine — resync finalize (post-finished ordering)", () => {
+	const root = testUuid("root-cold")
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	async function openCold(engineTotal: bigint) {
+		let windowListener: SnapshotListener | undefined
+		const search = fakeSearchResolving(makeFakeWindow(snapshot()), l => {
+			windowListener = l
+		})
+
+		search.total.mockImplementation(() => Promise.resolve(engineTotal))
+
+		const { client, statusListener } = makeFakeClient(
+			vi.fn(() => Promise.resolve(search)),
+			root
+		)
+		const engine = createSearchEngine()
+		const { push, pushes } = collectPushes()
+
+		await engine.open(client, { rootUuid: root, name: "avif" }, push)
+
+		const status = (progress: Extract<CacheStatusMessage, { type: "resyncProgress" }>["progress"]) => {
+			statusListener()?.([{ type: "resyncProgress", progress }])
+		}
+
+		return {
+			engine,
+			search,
+			pushes,
+			resyncPushes: () => pushes.filter(p => p.type === "resync"),
+			started: () => {
+				status({ type: "started", roots: [root] })
+			},
+			finished: () => {
+				status({ type: "finished", converged: true })
+			},
+			deliver: (total: bigint) => windowListener?.(snapshot({ total }))
+		}
+	}
+
+	it.each([300, 900])("holds resyncing after finished until the results snapshot lands %ims later", async delay => {
+		vi.useFakeTimers()
+
+		const s = await openCold(4n)
+
+		s.started()
+		s.finished()
+		await vi.advanceTimersByTimeAsync(delay)
+
+		expect(s.resyncPushes()).toEqual([{ type: "resync", resyncing: true }])
+
+		s.deliver(4n)
+
+		expect(s.resyncPushes()).toEqual([
+			{ type: "resync", resyncing: true },
+			{ type: "resync", resyncing: false }
+		])
+		expect(s.pushes.findIndex(p => p.type === "snapshot")).toBeLessThan(s.pushes.findLastIndex(p => p.type === "resync"))
+	})
+
+	it("settles a genuine empty once a same-config refilter re-read agrees on 0", async () => {
+		const s = await openCold(0n)
+
+		s.started()
+		s.finished()
+		await vi.waitFor(() => {
+			expect(s.resyncPushes()).toEqual([
+				{ type: "resync", resyncing: true },
+				{ type: "resync", resyncing: false }
+			])
+		})
+
+		expect(s.search.setConfig).toHaveBeenCalledWith({ name: "avif", itemType: "all", recursive: true, caseSensitive: false })
+	})
+
+	it("re-reads with the latest name setName gave the engine", async () => {
+		const s = await openCold(0n)
+
+		await s.engine.setName("IMG_1900")
+		s.search.setConfig.mockClear()
+		s.started()
+		s.finished()
+		await vi.waitFor(() => {
+			expect(s.search.setConfig).toHaveBeenCalledWith({ name: "IMG_1900", itemType: "all", recursive: true, caseSensitive: false })
+		})
+	})
+
+	it("close drops an in-flight finalize", async () => {
+		const s = await openCold(4n)
+
+		s.started()
+		s.finished()
+		await s.engine.close()
+		s.deliver(4n)
+
+		expect(s.resyncPushes()).toEqual([{ type: "resync", resyncing: true }])
 	})
 })

@@ -13,7 +13,7 @@ import {
 	ErrorKind,
 	FilenSdkError
 } from "@filen/sdk-rs"
-import { trimmedOrUndefined } from "@filen/shared"
+import { SearchResyncGate, trimmedOrUndefined } from "@filen/shared"
 import auth from "@/lib/auth"
 import { normalizeFilePathForSdk } from "@/lib/paths"
 import { SDK_CACHE_DIRECTORY, SDK_CACHE_PARENT_DIRECTORY, SDK_CACHE_DB_FILE, SDK_CACHE_VERSION } from "@/lib/storageRoots"
@@ -78,6 +78,12 @@ export class DriveSearch {
 	private currentOpenToken: OpenToken | null = null
 	private inflightOpen: Promise<void> | null = null
 	private inflightRoot: string | null = null
+	// The filter the engine holds, re-issued as-is to re-read after a resync.
+	private activeName = ""
+	// Drives the store's `resyncing`: true from a root-covering Started until the results are final.
+	private readonly resyncGate = new SearchResyncGate(converging => {
+		useDriveSearchStore.getState().setResyncing(converging)
+	})
 
 	/**
 	 * Root uuid of the currently-open (or opening) search, or `null`. Read by the
@@ -98,12 +104,14 @@ export class DriveSearch {
 							// Worker-global resync — only flag "still searching" when it covers the
 							// active search root (an unrelated root's resync must not flip our UI).
 							if (this.activeRootUuid !== null && progress.inner.roots.includes(this.activeRootUuid)) {
-								store.setResyncing(true)
+								this.resyncGate.started()
+								store.bumpResyncProgress()
 							}
 						} else if (progress.tag === ResyncProgressMessage_Tags.Finished) {
-							// `Finished` carries no roots; one worker-global resync at a time, so clearing
-							// is correct. Delivery is best-effort — the hook's stall ceiling is the backstop.
-							store.setResyncing(false)
+							// `Finished` carries no roots; one worker-global resync at a time. The gate keeps
+							// `resyncing` until the results are final. Delivery is best-effort — the hook's
+							// stall ceiling is the backstop.
+							this.resyncGate.finished(this.rereadActive())
 						} else if (this.activeRootUuid !== null) {
 							// Listing (~every 200ms during the network phase) / Applying — a LIVENESS
 							// heartbeat. One worker-global resync at a time, so any progress while we have
@@ -237,11 +245,14 @@ export class DriveSearch {
 		}
 
 		this.activeRootUuid = resolvedRoot
+		this.activeName = name
 
 		const listener: CacheSearchWindowListener = {
 			onSnapshot: snapshot => {
 				if (!token.cancelled) {
 					onSnapshot(snapshot)
+					// After the delivery, so a settle never lands ahead of the results it settles.
+					this.resyncGate.snapshot(snapshot.total)
 				}
 			}
 		}
@@ -303,6 +314,24 @@ export class DriveSearch {
 		}
 
 		onSnapshot(window.snapshot)
+		this.resyncGate.snapshot(window.snapshot.total)
+	}
+
+	// A same-config refilter re-reads at once instead of after the window's debounce.
+	private rereadActive(): (() => Promise<bigint>) | null {
+		const search = this.active?.search
+
+		if (!search) {
+			return null
+		}
+
+		const config = searchConfig(this.activeName)
+
+		return async () => {
+			await search.setConfig(config)
+
+			return search.total()
+		}
 	}
 
 	/**
@@ -317,6 +346,8 @@ export class DriveSearch {
 		if (!search) {
 			return false
 		}
+
+		this.activeName = name
 
 		try {
 			await search.setConfig(searchConfig(name))
@@ -346,6 +377,7 @@ export class DriveSearch {
 		this.activeRootUuid = null
 		this.inflightOpen = null
 		this.inflightRoot = null
+		this.resyncGate.reset()
 
 		if (current) {
 			await this.safeClose(current.search, current.windowHandle)

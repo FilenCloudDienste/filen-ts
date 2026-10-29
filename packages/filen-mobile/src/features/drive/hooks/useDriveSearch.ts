@@ -219,13 +219,12 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		setWatchdogFired(false)
 	}
 
-	// Re-arm the GRACE on every resync sign-of-life (a `Started`/`Finished` edge or a `Listing`
-	// heartbeat), mirroring the watchdog/stall-ceiling. So `graceElapsed` means "GRACE_MS of QUIET
-	// since open or the last resync activity", not "GRACE_MS since open" — an empty result can't
-	// then flash "no results" during a transient `!resyncing` gap while the convergence resync is
-	// still streaming results in (e.g. `Finished` landing a beat before the final snapshot).
-	const graceRearmKey = `${resyncProgress}:${String(resyncing)}`
-	const [prevGraceRearmKey, setPrevGraceRearmKey] = useState<string>(graceRearmKey)
+	// Re-arm the GRACE on every resync sign-of-life (`Started`, `Listing`, `Applying`), mirroring the
+	// watchdog/stall-ceiling: `graceElapsed` means "GRACE_MS of QUIET since open or the last resync
+	// activity". Not on `resyncing` falling: the singleton clears it only once the results are final
+	// (see SearchResyncGate), so a genuine empty shows at once.
+	const graceRearmKey = resyncProgress
+	const [prevGraceRearmKey, setPrevGraceRearmKey] = useState<number>(graceRearmKey)
 
 	if (graceRearmKey !== prevGraceRearmKey) {
 		setPrevGraceRearmKey(graceRearmKey)
@@ -437,8 +436,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 	}, [searchEngaged, searchLive, drivePath.uuid, reopenNonce])
 
 	// Grace timer — re-armed (cleared + restarted) on every resync sign-of-life via its
-	// `resyncProgress`/`resyncing` deps (the render-phase block above resets the latch on the same
-	// edges). So `graceElapsed` fires only after GRACE_MS of true quiet, never mid-stream. Unlike
+	// `resyncProgress` dep (the render-phase block above resets the latch on the same edges). So `graceElapsed` fires only after GRACE_MS of true quiet, never mid-stream. Unlike
 	// the watchdog there's NO `hasSnapshot` guard: an EMPTY first snapshot must still be graced
 	// before it can surface as "no results".
 	useEffect(() => {
@@ -457,7 +455,7 @@ export function useDriveSearch({ drivePath }: { drivePath: DrivePath }): UseDriv
 		return () => {
 			clearTimeout(grace)
 		}
-	}, [isCacheSearch, searchLive, drivePath.uuid, reopenNonce, resyncProgress, resyncing])
+	}, [isCacheSearch, searchLive, drivePath.uuid, reopenNonce, resyncProgress])
 
 	// Watchdog — terminal "no sign of life". Re-arms on open AND on every resync-progress
 	// heartbeat (`resyncProgress`), so it measures SILENCE, not total elapsed time: a slow

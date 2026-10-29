@@ -1,4 +1,4 @@
-import { run, trimmedOrUndefined } from "@filen/shared"
+import { run, SearchResyncGate, trimmedOrUndefined } from "@filen/shared"
 import type {
 	Client,
 	CacheSearch,
@@ -198,6 +198,12 @@ export function createSearchEngine() {
 	let currentToken: OpenToken | null = null
 	let activeRootUuid: string | null = null
 	let activePush: ((p: SearchPush) => void) | null = null
+	// The filter the user's handle holds, re-issued as-is to re-read after a resync.
+	let activeName = ""
+	// The user's `resyncing`: from a root-covering start until the results are final.
+	const resyncGate = new SearchResyncGate(resyncing => {
+		activePush?.({ type: "resync", resyncing })
+	})
 	// Queries share one handle beside the user's, kept registered between them: closing it releases the
 	// root's registration, and the next createSearch would validate it remotely and resync the whole
 	// listing again. Each query refilters it (setConfig, engine-local) behind a window of its own.
@@ -248,12 +254,12 @@ export function createSearchEngine() {
 					if (progress.type === "started") {
 						// Root-scoped: an unrelated root's resync must not flip our caller's UI.
 						if (activeRootUuid !== null && includesRoot(progress.roots, activeRootUuid)) {
-							activePush?.({ type: "resync", resyncing: true })
+							resyncGate.started()
 						}
 					} else if (progress.type === "finished") {
-						// Carries no roots — one worker-global resync at a time, so clearing is
-						// unconditional (gated only on having an active session to tell at all).
-						activePush?.({ type: "resync", resyncing: false })
+						// Carries no roots — one worker-global resync at a time. The gate holds `resyncing`
+						// until the results are final; it ignores a finish it saw no covering start for.
+						resyncGate.finished(rereadActive())
 					} else if (activeRootUuid !== null) {
 						// listing/applying — a liveness heartbeat, deliberately NOT root-matched: it
 						// keeps the caller's watchdog alive through the whole resync (our root may be
@@ -279,6 +285,22 @@ export function createSearchEngine() {
 					break
 				}
 			}
+		}
+	}
+
+	// A same-config refilter re-reads at once instead of after the window's debounce.
+	function rereadActive(): (() => Promise<bigint>) | null {
+		if (active === null) {
+			return null
+		}
+
+		const { search } = active
+		const config = buildConfig(activeName)
+
+		return async () => {
+			await search.setConfig(config)
+
+			return search.total()
 		}
 	}
 
@@ -395,6 +417,7 @@ export function createSearchEngine() {
 
 		activeRootUuid = null
 		activePush = null
+		resyncGate.reset()
 
 		const stale = active
 		active = null
@@ -488,11 +511,12 @@ export function createSearchEngine() {
 			if (resolveFirst !== null) {
 				firstSnapshotResolve = null
 				resolveFirst(dto)
-
-				return
+			} else {
+				push({ type: "snapshot", ...dto })
 			}
 
-			push({ type: "snapshot", ...dto })
+			// After the delivery, so a settle never reaches the page ahead of the results it settles.
+			resyncGate.snapshot(snapshot.total)
 		}
 
 		const rangeResult = await run<CacheSearchWindow>(() => search.getRange(0n, CEILING, listener))
@@ -519,6 +543,7 @@ export function createSearchEngine() {
 		const previous = active
 
 		active = { search, searchWindow, token }
+		activeName = name
 
 		if (previous) {
 			void safeClose(previous.search, previous.searchWindow)
@@ -529,14 +554,19 @@ export function createSearchEngine() {
 		}
 
 		// A resync the queries' handle started covers this root too, but its start message went by before
-		// this search existed; the finish message clears it.
-		if (resyncRunning(WATCHDOG_MS)) {
+		// this search existed; the finish message clears it. The caller reset its state for this open, so
+		// a resync still finalizing is re-announced too.
+		if (resyncGate.converging) {
 			push({ type: "resync", resyncing: true })
+		} else if (resyncRunning(WATCHDOG_MS)) {
+			resyncGate.started()
 		}
 
 		const eager = searchWindow.initialSnapshot()
 
 		if (eager !== undefined) {
+			resyncGate.snapshot(eager.total)
+
 			return toSnapshotDTO(eager)
 		}
 
@@ -897,6 +927,8 @@ export function createSearchEngine() {
 			return false
 		}
 
+		activeName = name
+
 		try {
 			await active.search.setConfig(buildConfig(name))
 
@@ -923,6 +955,7 @@ export function createSearchEngine() {
 		active = null
 		activeRootUuid = null
 		activePush = null
+		resyncGate.reset()
 
 		if (shared?.releasing === true) {
 			closeShared()

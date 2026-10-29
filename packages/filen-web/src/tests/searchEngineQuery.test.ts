@@ -496,6 +496,8 @@ describe("createSearchEngine — query", () => {
 
 		expect(pushes).toEqual([{ type: "resync", resyncing: true }])
 		resync({ type: "finished", converged: true })
+		// Cleared once the post-finish re-read agrees with what the window delivered.
+		await vi.advanceTimersByTimeAsync(0)
 		expect(pushes.at(-1)).toEqual({ type: "resync", resyncing: false })
 	})
 

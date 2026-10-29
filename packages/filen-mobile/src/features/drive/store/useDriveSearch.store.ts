@@ -2,8 +2,9 @@ import { create } from "zustand"
 
 // Reactive status for the cache-backed drive search. Written by the silent
 // `driveSearch` singleton's cache status listener; read by `useDriveSearch` to
-// drive the indicator state machine. `resyncing` is root-scoped (set only when a
-// `ResyncProgress.Started` covers the active search root); `rootDeleted` flips when
+// drive the indicator state machine. `resyncing` is root-scoped (set when a
+// `ResyncProgress.Started` covers the active search root) and holds until the results are
+// final, past `Finished` (see SearchResyncGate); `rootDeleted` flips when
 // the active root is deleted server-side; `cacheUnavailable` flips if
 // `configureCache` failed at init (search degrades to "unavailable").
 //

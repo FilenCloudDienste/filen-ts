@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
 
 const mocks = vi.hoisted(() => {
@@ -54,7 +54,7 @@ function makeFakeSearch() {
 	const snapshot = { results: [], total: 0n, live: true }
 	const close = vi.fn(async () => {})
 	const setConfig = vi.fn(async () => {})
-	const getRange = vi.fn(async () => ({ snapshot, handle: { uniffiDestroy } }))
+	const getRange = vi.fn(async (_start: bigint, _end: bigint, _listener: unknown) => ({ snapshot, handle: { uniffiDestroy } }))
 
 	return {
 		search: { close, setConfig, getRange, isLive: vi.fn(async () => true), rootUuid: () => "x", total: vi.fn(async () => 0n) },
@@ -237,5 +237,128 @@ describe("driveSearch lifecycle", () => {
 		expect(fake.getRange).not.toHaveBeenCalled()
 		expect(onSnapshot).not.toHaveBeenCalled()
 		expect(fake.close).toHaveBeenCalledTimes(1)
+	})
+})
+
+// The SDK commits a resync's last batch before `Finished`, then re-reads the window only after its
+// own debounce + the query, and fires the window only on a change. `engineTotal` is what a refilter
+// re-read reports; `pushAfter` delivers the late post-Finished snapshot.
+describe("driveSearch resync finalize (post-Finished ordering)", () => {
+	type Listener = { onSnapshot: (s: { results: unknown[]; total: bigint; live: boolean }) => void }
+
+	async function openCold(engineTotal: bigint) {
+		const fake = makeFakeSearch()
+		let listener: Listener | null = null
+
+		fake.getRange.mockImplementation(async (_s: bigint, _e: bigint, l: unknown) => {
+			listener = l as Listener
+
+			return { snapshot: fake.snapshot, handle: { uniffiDestroy: fake.uniffiDestroy } }
+		})
+		fake.search.total.mockImplementation(async () => engineTotal)
+		mocks.createSearch.mockResolvedValueOnce(fake.search)
+
+		const ds = new DriveSearch()
+
+		await ds.open({ rootUuid: "dir", name: "avif", onSnapshot: vi.fn(), signal: signal() })
+
+		const status = mocks.configureCache.mock.calls[0]?.[1] as { onMessages: (m: unknown[]) => void }
+		const progress = (inner: unknown) => {
+			status.onMessages([{ tag: "ResyncProgress", inner: { progress: inner } }])
+		}
+
+		return {
+			ds,
+			fake,
+			started: () => progress({ tag: "Started", inner: { roots: ["dir"] } }),
+			finished: () => progress({ tag: "Finished", inner: { converged: true } }),
+			progress,
+			push: (total: bigint) => {
+				listener?.onSnapshot({ results: [], total, live: true })
+			}
+		}
+	}
+
+	const resyncing = () => useDriveSearchStore.getState().resyncing
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("warm cache: an unrelated Finished neither refilters nor flips resyncing", async () => {
+		const s = await openCold(0n)
+
+		s.finished()
+		await Promise.resolve()
+
+		expect(resyncing()).toBe(false)
+		expect(s.fake.setConfig).not.toHaveBeenCalled()
+	})
+
+	it.each([300, 900])("keeps resyncing after Finished until the results snapshot lands %ims later", async delay => {
+		vi.useFakeTimers()
+
+		const s = await openCold(4n)
+
+		s.started()
+		expect(resyncing()).toBe(true)
+
+		s.finished()
+		await vi.advanceTimersByTimeAsync(delay - 1)
+
+		// Engine total (4) disagrees with the delivered window (0): not final yet.
+		expect(resyncing()).toBe(true)
+
+		await vi.advanceTimersByTimeAsync(1)
+		s.push(4n)
+
+		expect(resyncing()).toBe(false)
+	})
+
+	it("genuine empty: a same-config refilter re-read agreeing on 0 settles at once", async () => {
+		const s = await openCold(0n)
+
+		s.started()
+		s.finished()
+		await vi.waitFor(() => {
+			expect(resyncing()).toBe(false)
+		})
+
+		expect(s.fake.setConfig).toHaveBeenCalledWith({ name: "avif", itemType: 0, recursive: true, caseSensitive: false })
+	})
+
+	it("refilters with the latest name the engine was given", async () => {
+		const s = await openCold(0n)
+
+		await s.ds.setName("IMG_1900")
+		s.fake.setConfig.mockClear()
+		s.started()
+		s.finished()
+		await vi.waitFor(() => {
+			expect(resyncing()).toBe(false)
+		})
+
+		expect(s.fake.setConfig).toHaveBeenCalledWith({ name: "IMG_1900", itemType: 0, recursive: true, caseSensitive: false })
+	})
+
+	it("settles an unconverged (offline) resync through the engine-local re-read", async () => {
+		const s = await openCold(0n)
+
+		s.started()
+		s.progress({ tag: "Finished", inner: { converged: false } })
+		await vi.waitFor(() => {
+			expect(resyncing()).toBe(false)
+		})
+	})
+
+	it("closeActive drops an in-flight finalize", async () => {
+		const s = await openCold(4n)
+
+		s.started()
+		s.finished()
+		await s.ds.closeActive()
+		s.push(4n)
+
+		expect(resyncing()).toBe(false)
 	})
 })

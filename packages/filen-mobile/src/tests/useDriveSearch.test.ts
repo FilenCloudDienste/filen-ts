@@ -558,14 +558,13 @@ describe("useDriveSearch — state machine (warming / settled / background)", ()
 		expect(result.current.status).toBe("searching-empty")
 	})
 
-	it("stays warming when a resync finishes empty just before the results snapshot lands", async () => {
+	it("stays searching-empty while a finished resync's results are not final yet (late snapshot)", async () => {
 		const { result } = render()
 
 		act(() => {
 			result.current.setSearchQuery("x")
 		})
 
-		// Resync covering the root is in flight; an empty window snapshot lands while indexing.
 		act(() => {
 			useDriveSearchStore.getState().setResyncing(true)
 		})
@@ -574,21 +573,42 @@ describe("useDriveSearch — state machine (warming / settled / background)", ()
 
 		await advance(GRACE_MS)
 
-		// Empty past grace while still resyncing → "no results yet, still searching".
 		expect(result.current.status).toBe("searching-empty")
 
-		// Resync FINISHES (resyncing -> false) a beat before the converged results snapshot is
-		// delivered on the (decoupled) window channel — must NOT flash settled/"no results".
+		// `Finished` arrived but the singleton keeps `resyncing` until the post-Finished snapshot: the
+		// final snapshot lands 900ms later, well past the grace window — never a "no results" flash.
+		await advance(900)
+
+		expect(result.current.status).toBe("searching-empty")
+
+		deliver(snapshot({ results: [fileResult("f1")], total: 1n, live: true }))
+
 		act(() => {
 			useDriveSearchStore.getState().setResyncing(false)
 		})
 
-		await advance(GRACE_MS / 2)
+		expect(result.current.status).toBe("settled")
+		expect(result.current.searchResults.map(i => i.data.uuid)).toEqual(["f1"])
+	})
 
-		expect(result.current.status).toBe("warming")
+	it("shows a genuine empty as settled the moment the resync is final (no extra grace)", async () => {
+		const { result } = render()
 
-		// ...and it still settles once the resync has been quiet for a full grace window (no deadlock).
+		act(() => {
+			result.current.setSearchQuery("x")
+		})
+
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(true)
+		})
+
+		deliver(snapshot({ results: [], total: 0n, live: true }))
+
 		await advance(GRACE_MS)
+
+		act(() => {
+			useDriveSearchStore.getState().setResyncing(false)
+		})
 
 		expect(result.current.status).toBe("settled")
 	})

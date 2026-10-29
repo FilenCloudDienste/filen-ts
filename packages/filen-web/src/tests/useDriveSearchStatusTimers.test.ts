@@ -241,3 +241,66 @@ describe("useDriveSearch — teardown", () => {
 		expect(result.current.status).toBe("idle")
 	})
 })
+
+// The worker holds `resyncing` past the SDK's `finished` until the results are final (SearchResyncGate),
+// so the hook must never read a late post-finish snapshot as "no results".
+describe("useDriveSearch — post-resync finalize", () => {
+	async function coldEmpty() {
+		const rendered = renderHook(() => useDriveSearch(null, true))
+
+		await typeQuery(rendered.result.current.setInput)
+
+		const push = pushFn()
+
+		act(() => {
+			push({ type: "resync", resyncing: true })
+		})
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(GRACE_MS)
+		})
+
+		return { result: rendered.result, push }
+	}
+
+	it.each([300, 900])("stays searching-empty until the results snapshot %ims after finished, then settles with them", async delay => {
+		const { result, push } = await coldEmpty()
+
+		expect(result.current.status).toBe("searching-empty")
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(delay)
+		})
+
+		expect(result.current.status).toBe("searching-empty")
+
+		act(() => {
+			push({ type: "snapshot", hits: [hit("a")], total: 1n, live: true })
+			push({ type: "resync", resyncing: false })
+		})
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.results.length).toBe(1)
+	})
+
+	it("shows a genuine empty as settled the moment the worker reports the resync final", async () => {
+		const { result, push } = await coldEmpty()
+
+		act(() => {
+			push({ type: "resync", resyncing: false })
+		})
+
+		expect(result.current.status).toBe("settled")
+		expect(result.current.results.length).toBe(0)
+	})
+
+	it("falls back to settled at the ceiling when the finalize never confirms", async () => {
+		const { result } = await coldEmpty()
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(WATCHDOG_MS)
+		})
+
+		expect(result.current.status).toBe("settled")
+	})
+})
