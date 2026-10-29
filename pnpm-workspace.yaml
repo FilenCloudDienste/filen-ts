@@ -119,4 +119,3 @@ patchedDependencies:
   react-native-reorderable-list@0.18.2: patches/react-native-reorderable-list@0.18.2.patch
   react-native-screens@4.30.0: patches/react-native-screens@4.30.0.patch
   react-native-svg@15.16.0: patches/react-native-svg@15.16.0.patch
-  xcode@3.0.1: patches/xcode@3.0.1.patch

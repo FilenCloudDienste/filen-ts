@@ -213,25 +213,14 @@ const withFileProviderXcodeTarget: ConfigPlugin<FileProviderPluginProps> = (conf
 			)
 		}
 
-		// Add the resource files
-		try {
-			// PrivacyInfo.xcprivacy
-			pbxProject.addResourceFile(
-				path.join(extensionDir, "PrivacyInfo.xcprivacy"),
-				{
-					target: target.uuid
-				},
-				pbxGroupKey
-			)
-		} catch (e) {
-			if (e instanceof Error && e.message.includes("reading 'path'")) {
-				console.error(e)
-
-				throw new Error("[expo-file-provider] Could not add resource files to the FileProvider; the xcode patch under patches/ did not apply")
-			}
-
-			throw e
-		}
+		// Add the resource files. xcode 4 guards the group lookup this call used to crash in, which a patch did before.
+		pbxProject.addResourceFile(
+			path.join(extensionDir, "PrivacyInfo.xcprivacy"),
+			{
+				target: target.uuid
+			},
+			pbxGroupKey
+		)
 
 		const configurations = pbxProject.pbxXCBuildConfigurationSection()
 
