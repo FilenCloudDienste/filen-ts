@@ -664,7 +664,8 @@ describe("React Compiler coverage of the PDF viewer", () => {
 		["src/features/preview/components/commandBarControls.tsx", "ZoomControls"],
 		["src/features/preview/components/commandBarControls.tsx", "CommandFileMenu"],
 		["src/features/preview/components/commandBarControls.tsx", "FullScreenButton"],
-		["src/features/office/components/ribbon/officeRibbon.tsx", "OfficeCommandBar"]
+		["src/features/office/components/ribbon/officeRibbon.tsx", "OfficeCommandBar"],
+		["src/features/shell/components/sessionUnreadableScreen.tsx", "SessionUnreadableScreen"]
 	])("compiles %s's %s", (file, fnName) => {
 		const events = compile(file)
 

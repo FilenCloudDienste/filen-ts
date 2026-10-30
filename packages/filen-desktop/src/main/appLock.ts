@@ -3,7 +3,7 @@ import { type } from "arktype"
 import type { DesktopLockAttempt, DesktopLockStatus } from "@filen/shared/desktop"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
 import { serialQueue } from "../shared/serial.ts"
-import type { VaultCipher } from "./sessionVault.ts"
+import { removeIfUndecryptable, type VaultCipher } from "./sessionVault.ts"
 
 // scrypt cost for new PINs: 32 MiB and roughly 50-100 ms per check on current hardware, off the main thread (libuv's
 // pool). Stored with each hash, so raising them later only affects PINs set afterwards.
@@ -156,6 +156,8 @@ export interface AppLock {
 	lock(): boolean
 	// Forgets the PIN and its backoff; the caller has already removed the session it guarded.
 	reset(): Promise<void>
+	// Removes the PIN file only when `cipher` cannot decrypt it (its key is gone with the session's), like reset.
+	discardUndecryptable(cipher: VaultCipher): Promise<boolean>
 }
 
 // The record is encrypted with the session vault's cipher (safeStorage). Where the vault keeps the session in memory
@@ -349,6 +351,18 @@ export async function loadAppLock(
 				record = null
 				fault = null
 				locked = false
+			}),
+		discardUndecryptable: active =>
+			serial(async () => {
+				if (!(await removeIfUndecryptable(file, active))) {
+					return false
+				}
+
+				record = null
+				fault = null
+				locked = false
+
+				return true
 			})
 	}
 }

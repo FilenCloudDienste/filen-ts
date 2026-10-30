@@ -4,6 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { type SignOptions, signAsync } from "@electron/osx-sign"
 import { Arch, type AfterPackContext, MacPackager } from "electron-builder"
+import { APPEX_NAME } from "../src/main/fileProvider/addon.ts"
 import { nativeArchOf } from "./nativeArch.ts"
 
 // The File Provider extension (filen-ios-file-provider's FilenFileProviderMac target, a universal unsigned build) in
@@ -11,7 +12,6 @@ import { nativeArchOf } from "./nativeArch.ts"
 // scripts/buildFileProvider.ts when unset and the submodules are checked out; a macOS package without it fails, since
 // the app would offer Filen in Finder with no extension behind it.
 
-export const APPEX_NAME = "FilenFileProvider.appex"
 // CFBundleExecutable of the extension.
 export const APPEX_EXECUTABLE = "FilenFileProvider"
 const LIPO_ARCH: Record<string, string> = { x64: "x86_64", arm64: "arm64" }

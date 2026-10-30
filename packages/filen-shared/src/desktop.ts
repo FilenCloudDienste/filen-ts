@@ -20,14 +20,20 @@ export interface WindowState {
 	drawsBorder: boolean
 }
 
+// The stored session. "unreadable": one is stored but cannot be read now (locked keychain, changed desktop
+// environment, a key that is gone); that is not a sign-out, so the caller must not clear anything.
+export type DesktopSessionRead = { status: "absent" } | { status: "present"; blob: string } | { status: "unreadable" }
+
 // The SDK session kept by the shell in the OS keychain-backed vault instead of web storage. `blob` is the session as
 // the web's envelope JSON (bigint-safe); the shell checks its shape and never reads the keys.
 export interface DesktopSessionVault {
-	// null only when no session is stored. Rejects when one is stored but cannot be read (locked keychain, changed
-	// desktop environment): that is not a sign-out, so the caller must not clear anything.
-	get(): Promise<string | null>
+	get(): Promise<DesktopSessionRead>
 	set(blob: string): Promise<void>
 	clear(): Promise<void>
+	// The user gave up on an unreadable session. Main reads it again first and keeps one that decrypts now. Otherwise
+	// it removes it and every other file its key encrypted that no longer decrypts (the PIN, the migration stash, mount
+	// credentials), then answers "absent". Nothing is signed out on the server.
+	discardUnreadable(): Promise<DesktopSessionRead>
 	// The stored session just passed its first authed request of this page. The shell uses it once, to retire what
 	// the old desktop client left behind after its account was migrated.
 	markVerified(): void

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StringifiedClient } from "@filen/sdk-rs"
-import type { DesktopBridge, DesktopMounts, DesktopSessionVault, DesktopSync } from "@filen/shared/desktop"
+import type { DesktopBridge, DesktopMounts, DesktopSessionRead, DesktopSessionVault, DesktopSync } from "@filen/shared/desktop"
 
 // The real sdk client module imports a Vite `?worker`, unresolvable under node vitest — mock it down
 // to the one method the session store calls. `injectClient` is a spy so the resume path is observable.
@@ -42,7 +42,15 @@ const desktop = vi.hoisted(() => ({ bridge: undefined as DesktopBridge | undefin
 
 vi.mock("@/lib/desktop", () => ({ desktopBridge: () => desktop.bridge }))
 
-import { persistSession, resumeSession, clearSession, clearSessionOutsideKv, hasPersistedSession } from "@/lib/sdk/session"
+import {
+	persistSession,
+	resumeSession,
+	clearSession,
+	clearSessionOutsideKv,
+	discardUnreadableSession,
+	hasPersistedSession,
+	SessionUnreadableError
+} from "@/lib/sdk/session"
 import { log } from "@/lib/log"
 import { stringifyEnvelope } from "@filen/shared/session"
 
@@ -237,10 +245,16 @@ const unusedMounts: DesktopMounts = {
 
 describe("desktop vault", () => {
 	function installVault(stored: string | null = null) {
-		const state = { stored }
+		const state = { stored, unreadable: false }
+		const read = (): DesktopSessionRead =>
+			state.unreadable
+				? { status: "unreadable" }
+				: state.stored === null
+					? { status: "absent" }
+					: { status: "present", blob: state.stored }
 		const vault = {
 			state,
-			get: vi.fn<DesktopSessionVault["get"]>(() => Promise.resolve(state.stored)),
+			get: vi.fn<DesktopSessionVault["get"]>(() => Promise.resolve(read())),
 			set: vi.fn<DesktopSessionVault["set"]>(blob => {
 				state.stored = blob
 
@@ -250,6 +264,14 @@ describe("desktop vault", () => {
 				state.stored = null
 
 				return Promise.resolve()
+			}),
+			discardUnreadable: vi.fn<DesktopSessionVault["discardUnreadable"]>(() => {
+				if (state.unreadable) {
+					state.unreadable = false
+					state.stored = null
+				}
+
+				return Promise.resolve(read())
 			}),
 			markVerified: vi.fn<DesktopSessionVault["markVerified"]>(),
 			onRevoked: () => () => undefined
@@ -304,15 +326,28 @@ describe("desktop vault", () => {
 		expect(writeSignedInHint.mock.calls).toEqual([[true], [true]])
 	})
 
-	it("an unreadable vault rejects the resume and clears nothing", async () => {
+	it("an unreadable vault rejects the resume with its own error and clears nothing", async () => {
 		const vault = installVault(stringifyEnvelope(sampleBlob()))
 
-		vault.get.mockRejectedValueOnce(new Error("locked"))
+		vault.state.unreadable = true
 
-		await expect(resumeSession()).rejects.toThrow("locked")
+		await expect(resumeSession()).rejects.toBeInstanceOf(SessionUnreadableError)
+		await expect(hasPersistedSession()).rejects.toBeInstanceOf(SessionUnreadableError)
 		expect(vault.clear).not.toHaveBeenCalled()
 		expect(vault.state.stored).not.toBeNull()
 		expect(injectClient).not.toHaveBeenCalled()
+		expect(writeSignedInHint).not.toHaveBeenCalled()
+	})
+
+	it("a discarded unreadable session resumes as none", async () => {
+		const vault = installVault(stringifyEnvelope(sampleBlob()))
+
+		vault.state.unreadable = true
+
+		await discardUnreadableSession()
+		expect(vault.discardUnreadable).toHaveBeenCalledTimes(1)
+		await expect(resumeSession()).resolves.toBe(false)
+		expect(writeSignedInHint.mock.calls).toEqual([[false]])
 	})
 
 	it("a session the SDK rejects is cleared from the vault", async () => {

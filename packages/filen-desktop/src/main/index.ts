@@ -71,7 +71,8 @@ import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
 import { redact } from "./redact.ts"
-import { createSessionVault, isSessionBlob, lazyCipher, vaultMode, type VaultCipher } from "./sessionVault.ts"
+import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
+import { createSessionVault, isSessionBlob, lazyCipher, removeIfUndecryptable, vaultMode, type VaultCipher } from "./sessionVault.ts"
 import { registerSyncIpc } from "./sync/ipc.ts"
 import { createRootTokens } from "./sync/localRoot.ts"
 import { createSyncService } from "./sync/service.ts"
@@ -184,7 +185,8 @@ let appLock: AppLock | null = null
 
 const userDataPath = app.getPath("userData")
 // What the migration kept for the later phases (sync pairs, mounts), encrypted like the vault.
-const migrationStash = createStashStore(atomicFile(path.join(userDataPath, "migration.stash")), vaultCipher, warn)
+const migrationStashFile = atomicFile(path.join(userDataPath, "migration.stash"))
+const migrationStash = createStashStore(migrationStashFile, vaultCipher, warn)
 
 const migrationMarker = atomicFile(path.join(userDataPath, "migration.json"))
 
@@ -322,6 +324,42 @@ function credentialStoreFor(userId: string): CredentialStore {
 
 	return store
 }
+
+// Every other file the vault's cipher encrypted, for when the session's key is gone.
+async function vaultDependents(): Promise<VaultDependent[]> {
+	const users = await readdir(mountsRoot, { withFileTypes: true }).catch((error: unknown) => {
+		if (errorCode(error) !== "ENOENT") {
+			warn(`session recovery: mounts not listed: ${errorCode(error)}`)
+		}
+
+		return []
+	})
+
+	return [
+		{
+			label: "app lock",
+			discard: async cipher => {
+				const removed = await (await appLockLoading).discardUndecryptable(cipher)
+
+				if (removed) {
+					lockChanged()
+				}
+
+				return removed
+			}
+		},
+		{ label: "migration stash", discard: cipher => removeIfUndecryptable(migrationStashFile, cipher) },
+		...users
+			.filter(entry => entry.isDirectory())
+			.map(entry => ({
+				label: "mount credentials",
+				discard: (cipher: VaultCipher) =>
+					removeIfUndecryptable(atomicFile(path.join(mountsRoot, entry.name, "credentials.bin")), cipher)
+			}))
+	]
+}
+
+const discardUnreadableSession = sessionDiscarder({ vault: sessionVault, cipher: vaultCipher, dependents: vaultDependents, info, warn })
 
 // The bundled rclone (on Linux with the digest the build baked in) and the FUSE installer shipped beside it.
 const rclone = rclonePaths({
@@ -529,6 +567,7 @@ const fileProviderContext: FileProviderAddonContext = {
 	platform: process.platform,
 	arch: process.arch,
 	release: os.release(),
+	execPath: process.execPath,
 	exists: existsSync,
 	load: file => createRequire(import.meta.url)(file)
 }
@@ -1471,6 +1510,7 @@ if (!app.requestSingleInstanceLock()) {
 	registerSyncIpc(ipcMain, syncService, url => isTrustedSender(url, APP_ORIGIN))
 	registerMountsIpc(ipcMain, mountsService, url => isTrustedSender(url, APP_ORIGIN))
 	registerFileProviderIpc(ipcMain, fileProvider, url => isTrustedSender(url, APP_ORIGIN))
+	registerSessionRecoveryIpc(ipcMain, discardUnreadableSession, url => isTrustedSender(url, APP_ORIGIN))
 
 	handle(CHANNELS.logsExport, async payload => {
 		const webLog = webLogSchema(payload)

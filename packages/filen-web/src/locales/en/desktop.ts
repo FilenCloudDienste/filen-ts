@@ -32,6 +32,25 @@ export const desktop = {
 	/** Lock screen — the forgotten-PIN sign-out failed before anything was removed */
 	lockSignOutFailed: "Couldn't sign out. Try again.",
 
+	// ── Unreadable saved sign-in ────────────────────────────────────────
+	/** Saved sign-in screen — heading; the stored session cannot be decrypted (locked or reset system keychain) */
+	sessionUnreadableTitle: "Couldn't read your saved sign-in",
+	/** Saved sign-in screen — under the heading */
+	sessionUnreadableBody: "The saved sign-in could not be read. Unlock your system keychain and try again, or sign in again.",
+	/** Saved sign-in screen — read the saved sign-in again */
+	sessionUnreadableTryAgain: "Try again",
+	/** Saved sign-in screen — the saved sign-in still could not be read after trying again */
+	sessionUnreadableStill: "Still couldn't read it. Check that your system keychain is unlocked.",
+	/** Saved sign-in screen — button, and the confirm button of its dialog: remove the saved sign-in and go to sign-in */
+	sessionUnreadableSignIn: "Sign in again",
+	/** Saved sign-in screen — confirm dialog title */
+	sessionDiscardTitle: "Sign in again?",
+	/** Saved sign-in screen — confirm dialog body; "servers" are the Mounts section's protocol servers */
+	sessionDiscardBody:
+		"The saved sign-in will be removed from this device. Files in your account are not affected. Credentials saved for your servers may need to be entered again.",
+	/** Saved sign-in screen — removing the saved sign-in failed */
+	sessionDiscardFailed: "Couldn't remove the saved sign-in. Try again.",
+
 	// ── Settings > Desktop: app lock ────────────────────────────────────
 	/** Settings > Desktop — app lock group title */
 	settingsLockTitle: "App lock",

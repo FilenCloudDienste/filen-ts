@@ -1,7 +1,7 @@
 import type { JsClientConfig, StringifiedClient } from "@filen/sdk-rs"
 import { sdkApi, threadCount } from "@/lib/sdk/client"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
-import { clearSessionOutsideKv, persistSession, resumeSession } from "@/lib/sdk/session"
+import { clearSessionOutsideKv, discardUnreadableSession, persistSession, resumeSession, SessionUnreadableError } from "@/lib/sdk/session"
 import { parseEnvelope } from "@filen/shared/session"
 import { takeSeededSession } from "@/e2e-hooks/sessionSeed"
 import { kvClear, storage } from "@/lib/storage/adapter"
@@ -74,11 +74,71 @@ function readClientConfig<P>(
 	})
 }
 
+// Resumes the persisted session into the worker and marks boot ready. Guards observe readiness via whenBootReady() and
+// then read hasClient(), so the client must already be injected. Self-heals an invalid blob; a missing one just leaves
+// the tab unauthed. Runs before the query-cache restore, which is gated on whether this boot is authed. False when
+// the desktop vault cannot read its session: BootGate shows the recovery screen instead of the routes until a retry
+// gets through.
+async function resumeAndOpen(): Promise<boolean> {
+	let resumed: boolean
+
+	try {
+		resumed = await resumeSession()
+	} catch (e) {
+		if (!(e instanceof SessionUnreadableError)) {
+			throw e
+		}
+
+		log.warn("boot", "the saved session is unreadable; waiting on recovery")
+		useBootStore.getState().setSessionUnreadable()
+
+		return false
+	}
+
+	if (resumed) {
+		// Warm the query cache from disk once per boot, before the first render that reads it
+		// (best-effort — never rejects; a failed restore just means an empty cache).
+		await restorePersistedQueries(queryClient)
+	} else {
+		// An unauthed boot must not resurrect a leftover `<PERSIST_PREFIX>-*` row (e.g. a cross-tab
+		// logout/persister-write race) into the cache, where it would flash under whatever
+		// account signs in next — wipe instead of restoring.
+		await purgePersistedQueries()
+	}
+
+	advanceBootSplash("session")
+	useBootStore.getState().setReady()
+
+	return true
+}
+
+// The recovery screen's two ways out of an unreadable desktop session: read it again (an unlocked keychain), or
+// discard it first. False while the session is still unreadable; true once the screen is gone, and the caller then
+// routes afresh, since the guards already ran as signed out. Rejects only when the discard fails, leaving the screen.
+export async function retrySessionResume(discard: boolean): Promise<boolean> {
+	if (discard) {
+		await discardUnreadableSession()
+	}
+
+	try {
+		if (!(await resumeAndOpen())) {
+			return false
+		}
+
+		log.info("boot", "ready after session recovery")
+	} catch (e) {
+		useBootStore.getState().setError("async-runtime", asErrorDTO(e))
+		log.error("boot", "session resume threw", e)
+	}
+
+	return true
+}
+
 // Drives the worker boot, reflecting each phase into the boot store. There is no separate network
 // probe: the first real SDK call (session resume, login) exercises the async runtime, and a runtime
 // failure in the steps below lands in the catch as an "async-runtime" boot error.
 export async function bootSdk(): Promise<void> {
-	const { setBooting, setReady, setError } = useBootStore.getState()
+	const { setBooting, setError } = useBootStore.getState()
 	setBooting()
 	try {
 		const result = await sdkApi.boot({ threads: threadCount() })
@@ -152,31 +212,15 @@ export async function bootSdk(): Promise<void> {
 				await persistSession(parseEnvelope(seeded) as StringifiedClient)
 			}
 		}
-		// Resume a persisted session into the worker BEFORE the gate flips to ready: guards observe
-		// readiness via whenBootReady() and then read hasClient(), so the client must already be
-		// injected. Self-heals an invalid blob; a missing one just leaves the tab unauthed.
-		// Runs BEFORE the query-cache restore below — resumeSession only touches kv + the already-
-		// booted worker, nothing about the query cache — so the restore can be gated on whether this
-		// boot is actually authed.
-		const resumed = await resumeSession()
-		if (resumed) {
-			// Warm the query cache from disk once per boot, before the first render that reads it
-			// (best-effort — never rejects; a failed restore just means an empty cache).
-			await restorePersistedQueries(queryClient)
-		} else {
-			// An unauthed boot must not resurrect a leftover `<PERSIST_PREFIX>-*` row (e.g. a cross-tab
-			// logout/persister-write race) into the cache, where it would flash under whatever
-			// account signs in next — wipe instead of restoring.
-			await purgePersistedQueries()
+		if (await resumeAndOpen()) {
+			log.info("boot", `ready (${String(result.threads)} threads)`)
 		}
-		advanceBootSplash("session")
-		setReady()
-		log.info("boot", `ready (${String(result.threads)} threads)`)
 	} catch (e) {
 		setError("async-runtime", asErrorDTO(e))
 		log.error("boot", "boot/probe threw", e)
 	} finally {
-		// Every exit path settles the gate: ready, boot-not-ok, or a thrown boot — guards never hang.
+		// Every exit path settles the gate: ready, boot-not-ok, a thrown boot or an unreadable desktop session (whose
+		// guards then see no client) — guards never hang.
 		signalBootReady()
 	}
 }

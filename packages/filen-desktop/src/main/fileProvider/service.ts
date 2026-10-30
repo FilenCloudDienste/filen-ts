@@ -3,7 +3,7 @@ import type { DesktopFileProviderErrorCode, DesktopFileProviderResult, DesktopFi
 import type { SessionRead } from "../../shared/channels.ts"
 import { type AtomicFile, codedError, errorCode } from "../atomicFile.ts"
 import { serialQueue } from "../../shared/serial.ts"
-import { ADDON_ERROR_DOMAIN, type FileProviderAddon } from "./addon.ts"
+import { ADDON_ERROR_DOMAIN, type FileProviderAddon, type FileProviderDomain } from "./addon.ts"
 import { domainIdentifier, type FileProviderAuth, fileProviderAuth } from "./authFile.ts"
 import type { FileProviderStore } from "./store.ts"
 
@@ -56,6 +56,10 @@ function describe(error: unknown): string {
 }
 
 const FILE_PROVIDER_ERROR_DOMAIN = "NSFileProviderErrorDomain"
+
+function isSystemError(error: unknown): boolean {
+	return error instanceof Error && "domain" in error && error.domain === FILE_PROVIDER_ERROR_DOMAIN
+}
 
 // NSFileProviderError.h: providerNotFound, providerTranslocated and applicationExtensionNotFound.
 const PROVIDER_NOT_FOUND = -2001
@@ -231,9 +235,26 @@ export function createFileProviderService(deps: FileProviderDeps): FileProviderS
 		}
 
 		const identifier = domainIdentifier(auth.userId)
-		const domain = (await addon().listDomains()).find(entry => entry.identifier === identifier)
+		let domains: FileProviderDomain[]
 
-		return { ...state, enabled: true, userEnabled: domain?.userEnabled ?? null }
+		try {
+			domains = await addon().listDomains()
+		} catch (error) {
+			if (!isSystemError(error)) {
+				throw error
+			}
+
+			// macOS answers for no domain of this app (no extension, a translocated copy): on, but not registered.
+			warn(`file provider: domains not listed: ${describe(error)}`)
+
+			if (fileProviderErrorCode(error) === "translocated") {
+				translocatedSeen = true
+			}
+
+			return { ...state, enabled: true, translocated: state.translocated || translocatedSeen }
+		}
+
+		return { ...state, enabled: true, userEnabled: domains.find(entry => entry.identifier === identifier)?.userEnabled ?? null }
 	}
 
 	// A page's request: a failure is logged and answered as its code.

@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process"
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { APPEX_EXECUTABLE, APPEX_NAME } from "./fileProviderAppex.ts"
+import { APPEX_NAME } from "../src/main/fileProvider/addon.ts"
+import { APPEX_EXECUTABLE } from "./fileProviderAppex.ts"
 
 // Builds the File Provider extension from the filen-ios-file-provider and filen-rs submodules: the universal macOS
 // xcframework (build-rust.sh --macos), then the FilenFileProviderMac target, universal and unsigned, to

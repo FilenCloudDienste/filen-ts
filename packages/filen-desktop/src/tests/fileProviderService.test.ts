@@ -57,7 +57,11 @@ function fakeAddon() {
 			await maybeFail("removeDomain")
 			domains.delete(identifier)
 		},
-		listDomains: () => Promise.resolve([...domains.values()]),
+		listDomains: async () => {
+			await maybeFail("listDomains")
+
+			return [...domains.values()]
+		},
 		signalWorkingSet: () => Promise.resolve(),
 		pushAuth: async ({ identifier, json }) => {
 			calls.push(`push ${identifier}`)
@@ -87,6 +91,7 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 		return file
 	}
 	const state = {
+		supported: options.supported ?? true,
 		session: options.session ?? ({ status: "present", blob: blob(7n) } as SessionRead),
 		pin: options.pin ?? false,
 		loads: 0,
@@ -99,7 +104,7 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 	const warnings: string[] = []
 	const infos: string[] = []
 	const deps: FileProviderDeps = {
-		supported: () => options.supported ?? true,
+		supported: () => state.supported,
 		addon: () => {
 			state.loads++
 
@@ -356,6 +361,48 @@ describe("file provider service", () => {
 			userEnabled: null,
 			translocated: false
 		})
+	})
+
+	it("answers a state macOS cannot list the domains for as on but not registered", async () => {
+		const { service, fail, failure, warnings } = setup()
+
+		await service.enable()
+		fail.add("listDomains")
+		Object.assign(failure, { domain: "NSFileProviderErrorDomain", code: -2001 })
+
+		await expect(service.state()).resolves.toEqual({
+			supported: true,
+			enabled: true,
+			lockBlocked: false,
+			userEnabled: null,
+			translocated: false
+		})
+		expect(warnings).toContain("file provider: domains not listed: NSFileProviderErrorDomain -2001")
+
+		failure.code = -2002
+		await expect(service.state()).resolves.toMatchObject({ enabled: true, userEnabled: null, translocated: true })
+		await expect(service.enable()).resolves.toEqual({ ok: false, error: { code: "translocated" } })
+
+		Object.assign(failure, { domain: "FilenFileProvider", code: 5 })
+		await expect(service.state()).rejects.toThrow("failed")
+	})
+
+	it("leaves a stored switch alone in a build without the extension", async () => {
+		const { service, calls, state, files } = setup()
+
+		await service.enable()
+		calls.length = 0
+		state.loads = 0
+		state.supported = false
+
+		await service.launch()
+		await service.sessionChanged(blob(7n))
+		await expect(service.state()).resolves.toMatchObject({ supported: false, enabled: false })
+		await expect(service.enable()).resolves.toEqual({ ok: false, error: { code: "unsupported" } })
+
+		expect(calls).toEqual([])
+		expect(state.loads).toBe(0)
+		expect(files("7").data?.toString()).toBe(JSON.stringify({ version: 1, enabled: true }))
 	})
 
 	it("opens the user's directory in Finder", async () => {

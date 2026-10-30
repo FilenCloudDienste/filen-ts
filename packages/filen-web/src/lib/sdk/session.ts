@@ -1,5 +1,6 @@
 import type { StringifiedClient } from "@filen/sdk-rs"
 import { type } from "arktype"
+import type { DesktopSessionVault } from "@filen/shared/desktop"
 import { parseEnvelope, sessionSchema, stringifyEnvelope } from "@filen/shared/session"
 import { sdkApi } from "@/lib/sdk/client"
 import { kvGet, kvSetJson, kvDelete, kvHas } from "@/lib/storage/adapter"
@@ -42,10 +43,35 @@ export function clearSessionOutsideKv(): Promise<void> {
 	return desktopBridge()?.session.clear() ?? Promise.resolve()
 }
 
+// The desktop vault holds a session it cannot read right now: a locked keychain, or a key that is gone for good.
+export class SessionUnreadableError extends Error {
+	constructor() {
+		super("The saved sign-in could not be read")
+		this.name = "SessionUnreadableError"
+	}
+}
+
+// The desktop vault's session, null when none is stored.
+async function readVault(vault: DesktopSessionVault): Promise<string | null> {
+	const read = await vault.get()
+
+	if (read.status === "unreadable") {
+		throw new SessionUnreadableError()
+	}
+
+	return read.status === "present" ? read.blob : null
+}
+
 export async function hasPersistedSession(): Promise<boolean> {
 	const vault = desktopBridge()?.session
 
-	return vault === undefined ? kvHas(SESSION_KV_KEY) : (await vault.get()) !== null
+	return vault === undefined ? kvHas(SESSION_KV_KEY) : (await readVault(vault)) !== null
+}
+
+// The user gave up on an unreadable desktop session: main keeps one that decrypts by now, and otherwise removes it
+// with what its key encrypted. A resume afterwards either finds that session or none.
+export async function discardUnreadableSession(): Promise<void> {
+	await desktopBridge()?.session.discardUnreadable()
 }
 
 // An unparseable or invalid blob reads as no session (and is logged), like every other kv value.
@@ -74,11 +100,11 @@ function decodeSession(raw: string): StringifiedClient | null {
 
 // Read the persisted blob, validate it, and inject it into the worker. Returns false when there is
 // no session, an unreadable one (decodeSession dropped it), or one the SDK rejects. Reconciles the
-// signed-in hint either way, so a stale one corrects itself on the next boot. Rejects when the desktop vault
-// holds a session it cannot read right now (locked keychain): boot shows its error screen and nothing is cleared.
+// signed-in hint either way, so a stale one corrects itself on the next boot. Rejects with SessionUnreadableError when
+// the desktop vault holds a session it cannot read right now: boot shows the recovery screen and nothing is cleared.
 export async function resumeSession(): Promise<boolean> {
 	const vault = desktopBridge()?.session
-	const raw = await (vault === undefined ? kvGet(SESSION_KV_KEY) : vault.get())
+	const raw = await (vault === undefined ? kvGet(SESSION_KV_KEY) : readVault(vault))
 	const blob = raw === null ? null : decodeSession(raw)
 
 	if (blob === null) {

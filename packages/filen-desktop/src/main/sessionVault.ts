@@ -55,10 +55,32 @@ export function lazyCipher(probe: () => Promise<VaultCipher | null>): () => Prom
 	}
 }
 
+// Removes `file` only when it exists and `cipher` cannot decrypt it; a failed read or removal rejects.
+export async function removeIfUndecryptable(file: AtomicFile, cipher: VaultCipher): Promise<boolean> {
+	const data = await file.read()
+
+	if (data === null) {
+		return false
+	}
+
+	const undecryptable = await cipher.decrypt(data).then(
+		() => false,
+		() => true
+	)
+
+	if (undecryptable) {
+		await file.remove()
+	}
+
+	return undecryptable
+}
+
 export interface SessionVault {
 	get(): Promise<SessionRead>
 	set(blob: string): Promise<void>
 	clear(): Promise<void>
+	// Like get, but a session that still cannot be decrypted is removed and reads as absent. A failed file read keeps it.
+	discardUnreadable(): Promise<SessionRead>
 }
 
 // `cipher` resolves once, lazily (safeStorage only works after app ready); null keeps the session in memory only.
@@ -74,7 +96,7 @@ export function createSessionVault(
 	let cached: string | null | undefined
 	const serial = serialQueue()
 
-	async function load(active: VaultCipher): Promise<SessionRead> {
+	async function load(active: VaultCipher, discard: boolean): Promise<SessionRead> {
 		let data: Buffer | null
 
 		try {
@@ -99,7 +121,15 @@ export function createSessionVault(
 			// Locked keychain, changed desktop environment or a damaged file: the file stays for a later retry.
 			warn(`session vault could not be decrypted: ${errorCode(error)}`)
 
-			return { status: "unreadable" }
+			if (!discard) {
+				return { status: "unreadable" }
+			}
+
+			await file.remove()
+			cached = null
+			warn("session vault: removed the undecryptable session")
+
+			return { status: "absent" }
 		}
 
 		// Decrypted but not a session: no retry can fix it, so it counts as absent. The next sign-in overwrites it.
@@ -123,31 +153,35 @@ export function createSessionVault(
 		return { status: "present", blob: decrypted.result }
 	}
 
+	function read(discard: boolean): Promise<SessionRead> {
+		return serial(async (): Promise<SessionRead> => {
+			if (cached !== undefined) {
+				return cached === null ? { status: "absent" } : { status: "present", blob: cached }
+			}
+
+			let active: VaultCipher | null
+
+			try {
+				active = await currentCipher()
+			} catch (error) {
+				warn(`session vault encryption unavailable: ${errorCode(error)}`)
+
+				return { status: "unreadable" }
+			}
+
+			if (active === null) {
+				cached = null
+
+				return { status: "absent" }
+			}
+
+			return load(active, discard)
+		})
+	}
+
 	return {
-		get: () =>
-			serial(async (): Promise<SessionRead> => {
-				if (cached !== undefined) {
-					return cached === null ? { status: "absent" } : { status: "present", blob: cached }
-				}
-
-				let active: VaultCipher | null
-
-				try {
-					active = await currentCipher()
-				} catch (error) {
-					warn(`session vault encryption unavailable: ${errorCode(error)}`)
-
-					return { status: "unreadable" }
-				}
-
-				if (active === null) {
-					cached = null
-
-					return { status: "absent" }
-				}
-
-				return load(active)
-			}),
+		get: () => read(false),
+		discardUnreadable: () => read(true),
 		set: blob =>
 			serial(async () => {
 				const active = await currentCipher()

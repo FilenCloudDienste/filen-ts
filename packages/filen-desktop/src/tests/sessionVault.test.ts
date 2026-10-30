@@ -2,7 +2,14 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createSessionVault, isSessionBlob, sessionUserId, vaultMode, type VaultCipher } from "../main/sessionVault.ts"
+import {
+	createSessionVault,
+	isSessionBlob,
+	removeIfUndecryptable,
+	sessionUserId,
+	vaultMode,
+	type VaultCipher
+} from "../main/sessionVault.ts"
 import { atomicFile, type AtomicFile } from "../main/atomicFile.ts"
 import { SESSION_BLOB_MAX_LENGTH } from "../shared/channels.ts"
 
@@ -203,6 +210,59 @@ describe("createSessionVault", () => {
 		await Promise.all([set, clear])
 		expect(file.data).toBeNull()
 		await expect(vault.get()).resolves.toEqual({ status: "absent" })
+	})
+
+	describe("discardUnreadable", () => {
+		it("keeps and answers a session that decrypts now", async () => {
+			const file = memoryFile(Buffer.from(`enc:${BLOB}`))
+			const vault = createSessionVault(() => Promise.resolve(fakeCipher()), file, warn)
+
+			await expect(vault.discardUnreadable()).resolves.toEqual({ status: "present", blob: BLOB })
+			expect(file.data?.toString()).toBe(`enc:${BLOB}`)
+		})
+
+		it("removes a session that still cannot be decrypted and reads absent from then on", async () => {
+			const cipher = fakeCipher()
+			const file = memoryFile(Buffer.from(`enc:${BLOB}`))
+			const vault = createSessionVault(() => Promise.resolve(cipher), file, warn)
+
+			cipher.failDecrypt = true
+			await expect(vault.get()).resolves.toEqual({ status: "unreadable" })
+			await expect(vault.discardUnreadable()).resolves.toEqual({ status: "absent" })
+			expect(file.data).toBeNull()
+			await expect(vault.get()).resolves.toEqual({ status: "absent" })
+			expect(warn.mock.calls.flat().join(" ")).not.toContain("private-key")
+		})
+
+		it("keeps a file it cannot read and an unavailable cipher's session", async () => {
+			const file = memoryFile(Buffer.from(`enc:${BLOB}`))
+			const read = file.read
+
+			file.read = () => Promise.reject(Object.assign(new Error("denied"), { code: "EACCES" }))
+			await expect(createSessionVault(() => Promise.resolve(fakeCipher()), file, warn).discardUnreadable()).resolves.toEqual({
+				status: "unreadable"
+			})
+
+			file.read = read
+			await expect(createSessionVault(() => Promise.reject(new Error("probe")), file, warn).discardUnreadable()).resolves.toEqual({
+				status: "unreadable"
+			})
+			expect(file.data?.toString()).toBe(`enc:${BLOB}`)
+		})
+	})
+
+	describe("removeIfUndecryptable", () => {
+		it("removes only an existing file the cipher cannot decrypt", async () => {
+			const cipher = fakeCipher()
+			const readable = memoryFile(Buffer.from("enc:x"))
+			const broken = memoryFile(Buffer.from("plain"))
+
+			await expect(removeIfUndecryptable(memoryFile(), cipher)).resolves.toBe(false)
+			await expect(removeIfUndecryptable(readable, cipher)).resolves.toBe(false)
+			expect(readable.data).not.toBeNull()
+			await expect(removeIfUndecryptable(broken, cipher)).resolves.toBe(true)
+			expect(broken.data).toBeNull()
+		})
 	})
 
 	describe("memory only", () => {

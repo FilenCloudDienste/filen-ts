@@ -14,6 +14,7 @@ import { useBootStore } from "@/stores/boot"
 import { BootScreen } from "@/features/shell/components/bootScreen"
 import { useBootSplashShown } from "@/lib/bootSplash"
 import { BootErrorScreen } from "@/features/shell/components/bootErrorScreen"
+import { SessionUnreadableScreen } from "@/features/shell/components/sessionUnreadableScreen"
 import { OfflineIndicator } from "@/features/shell/components/offlineIndicator"
 import { TransfersUnloadGuard } from "@/features/shell/components/transfersUnloadGuard"
 import { ActivityDetailsDialog } from "@/lib/activity/activityDetailsDialog"
@@ -103,6 +104,9 @@ function BootGate() {
 	}
 	if (phase === "ready") {
 		return <Outlet />
+	}
+	if (phase === "sessionUnreadable") {
+		return <SessionUnreadableScreen />
 	}
 	if (phase === "error" && reason !== "coi" && reason !== "opfs") {
 		return (

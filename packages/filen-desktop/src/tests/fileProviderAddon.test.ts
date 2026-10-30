@@ -1,6 +1,11 @@
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { createFileProviderAddon, fileProviderAddonPath, type FileProviderAddonContext } from "../main/fileProvider/addon.ts"
+import {
+	bundledAppexPath,
+	createFileProviderAddon,
+	fileProviderAddonPath,
+	type FileProviderAddonContext
+} from "../main/fileProvider/addon.ts"
 
 function context(overrides: Partial<FileProviderAddonContext> = {}): FileProviderAddonContext {
 	return {
@@ -10,6 +15,7 @@ function context(overrides: Partial<FileProviderAddonContext> = {}): FileProvide
 		platform: "darwin",
 		arch: "arm64",
 		release: "23.0.0",
+		execPath: "/Applications/Filen.app/Contents/MacOS/Filen",
 		exists: () => true,
 		load: () => ({}),
 		...overrides
@@ -24,6 +30,16 @@ describe("fileProviderAddonPath", () => {
 		)
 		expect(fileProviderAddonPath(context({ exists: () => false }))).toBeNull()
 		expect(fileProviderAddonPath(context({ packaged: true, exists: () => false }))).toBeNull()
+	})
+
+	it("is null when the running bundle has no extension, as in an unpackaged run", () => {
+		const appex = "/Applications/Filen.app/Contents/PlugIns/FilenFileProvider.appex"
+		const dev = "/repo/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+
+		expect(bundledAppexPath("/Applications/Filen.app/Contents/MacOS/Filen")).toBe(appex)
+		expect(fileProviderAddonPath(context({ exists: file => file !== appex, packaged: true }))).toBeNull()
+		expect(fileProviderAddonPath(context({ execPath: dev, exists: file => !file.endsWith(".appex") }))).toBeNull()
+		expect(fileProviderAddonPath(context({ execPath: dev, exists: file => file !== bundledAppexPath(dev) }))).toBeNull()
 	})
 
 	it("is null below macOS 14 and off macOS", () => {
@@ -47,10 +63,11 @@ describe("createFileProviderAddon", () => {
 		expect(load).toHaveBeenCalledWith(path.join("/repo/packages/filen-desktop", "build", "native", "mac-arm64", "filen-fp.node"))
 	})
 
-	it("never loads where File Provider is unsupported", () => {
+	it("never loads where File Provider is unsupported or the extension is missing", () => {
 		const load = vi.fn()
 		const get = createFileProviderAddon(context({ release: "22.6.0", load }))
 
+		expect(createFileProviderAddon(context({ load, exists: file => !file.endsWith(".appex") }))()).toBeNull()
 		expect(get()).toBeNull()
 		expect(get()).toBeNull()
 		expect(load).not.toHaveBeenCalled()

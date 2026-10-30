@@ -278,4 +278,19 @@ describe("loadAppLock", () => {
 		await invalid.reset()
 		expect(invalid.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
 	})
+
+	it("discards the record only when its key is gone", async () => {
+		const cipher = fakeCipher()
+		const { file } = await lockWithPin("1234", memoryFile(), cipher)
+		const lock = await loadAppLock(file, () => Promise.resolve(cipher), warn)
+
+		await expect(lock.discardUndecryptable(cipher)).resolves.toBe(false)
+		expect(file.data).not.toBeNull()
+		expect(lock.status()).toMatchObject({ enabled: true, locked: true })
+
+		cipher.failDecrypt = true
+		await expect(lock.discardUndecryptable(cipher)).resolves.toBe(true)
+		expect(file.data).toBeNull()
+		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+	})
 })

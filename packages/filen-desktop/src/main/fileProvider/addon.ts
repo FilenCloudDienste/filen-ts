@@ -1,3 +1,4 @@
+import path from "node:path"
 import { nativeFilePath, type AddonPathContext } from "../native/addonPath.ts"
 
 // The File Provider addon (native/fileProvider, built by scripts/buildFpAddon.ts). Every call settles off the JS thread.
@@ -33,6 +34,8 @@ export const ADDON_ERROR_DOMAIN = "FilenFileProvider"
 export interface FileProviderAddonContext extends Omit<AddonPathContext, "env"> {
 	// os.release(): the Darwin version.
 	release: string
+	// The running executable, <bundle>.app/Contents/MacOS/<name>.
+	execPath: string
 	// Throws when the file is not a loadable addon for this process.
 	load(file: string): unknown
 }
@@ -40,10 +43,19 @@ export interface FileProviderAddonContext extends Omit<AddonPathContext, "env"> 
 // macOS 14 is Darwin 23; File Provider is not used below it.
 const MIN_DARWIN_MAJOR = 23
 
+// The extension in the app bundle's Contents/PlugIns, put there when packaging.
+export const APPEX_NAME = "FilenFileProvider.appex"
+
+// The extension inside the running bundle. An unpackaged run (Electron's own bundle) or a build without it has none.
+export function bundledAppexPath(execPath: string): string {
+	return path.join(path.dirname(path.dirname(execPath)), "PlugIns", APPEX_NAME)
+}
+
+// Null unless this Mac runs File Provider, the running bundle carries the extension and the addon is there.
 export function fileProviderAddonPath(ctx: FileProviderAddonContext): string | null {
 	const darwinMajor = Number.parseInt(ctx.release, 10)
 
-	if (ctx.platform !== "darwin" || !(darwinMajor >= MIN_DARWIN_MAJOR)) {
+	if (ctx.platform !== "darwin" || !(darwinMajor >= MIN_DARWIN_MAJOR) || !ctx.exists(bundledAppexPath(ctx.execPath))) {
 		return null
 	}
 

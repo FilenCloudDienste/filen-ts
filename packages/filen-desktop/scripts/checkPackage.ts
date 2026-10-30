@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 import { isFeedPlatform } from "./feed.ts"
-import { APPEX_NAME } from "./fileProviderAppex.ts"
+import { APPEX_NAME } from "../src/main/fileProvider/addon.ts"
 import { nativeArchOf } from "./nativeArch.ts"
 import { MAC_TEAM } from "./signRclone.ts"
 

@@ -185,21 +185,14 @@ function fileProviderInvoke(call: FileProviderCall): Promise<never> {
 const bridge: DesktopBridge = {
 	platform: process.platform,
 	session: {
-		get: async () => {
-			const read = (await ipcRenderer.invoke(CHANNELS.sessionGet)) as SessionRead
-
-			if (read.status === "unreadable") {
-				throw new Error("The saved sign-in could not be read. Unlock the system keychain, then reload.")
-			}
-
-			return read.status === "present" ? read.blob : null
-		},
+		get: () => ipcRenderer.invoke(CHANNELS.sessionGet) as Promise<SessionRead>,
 		set: async blob => {
 			await ipcRenderer.invoke(CHANNELS.sessionSet, blob)
 		},
 		clear: async () => {
 			await ipcRenderer.invoke(CHANNELS.sessionClear)
 		},
+		discardUnreadable: () => ipcRenderer.invoke(CHANNELS.sessionDiscardUnreadable) as Promise<SessionRead>,
 		markVerified: () => {
 			ipcRenderer.send(CHANNELS.sessionVerified)
 		},
