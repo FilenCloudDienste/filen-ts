@@ -282,6 +282,9 @@ importers:
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
+      node-api-headers:
+        specifier: 1.9.0
+        version: 1.9.0
       prettier:
         specifier: ^3.9.10
         version: 3.9.10

@@ -1,0 +1,4 @@
+module NodeAPI {
+	header "NodeAPI.h"
+	export *
+}

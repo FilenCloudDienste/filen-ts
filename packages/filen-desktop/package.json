@@ -15,8 +15,8 @@
 	"desktopName": "Filen.desktop",
 	"scripts": {
 		"build": "node scripts/build.ts",
-		"dev": "node scripts/stageNapi.ts --dev && node scripts/build.ts && node scripts/dev.ts",
-		"dev:dist": "node scripts/stageNapi.ts --dev && node scripts/build.ts && electron .",
+		"dev": "node scripts/stageNapi.ts --dev && node scripts/buildFpAddon.ts --dev && node scripts/build.ts && node scripts/dev.ts",
+		"dev:dist": "node scripts/stageNapi.ts --dev && node scripts/buildFpAddon.ts --dev && node scripts/build.ts && electron .",
 		"dist": "node scripts/dist.ts",
 		"lint": "eslint . && prettier --check \"**/*.ts\"",
 		"format": "prettier --write \"**/*.ts\"",
@@ -41,6 +41,7 @@
 		"eslint": "^10.13.0",
 		"eslint-config-prettier": "^10.1.8",
 		"fflate": "^0.8.3",
+		"node-api-headers": "1.9.0",
 		"prettier": "^3.9.10",
 		"reflect-metadata": "^0.2.2",
 		"typescript": "6.0.3",
