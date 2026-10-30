@@ -2,9 +2,9 @@
 
 Filen mobile app for iOS and Android. Lives inside the `filen-ts` monorepo at `packages/filen-mobile/`.
 
-Built on Expo 55 / React Native 0.83 / React 19 / Hermes. All server communication, encryption and auth go through `@filen/sdk-rs` (Rust SDK consumed as a React Native turbo module).
+Built on Expo 58 / React Native 0.88 (built from source) / React 19.3 / Hermes. All server communication, encryption and auth go through `@filen/sdk-rs` (Rust SDK consumed as a React Native turbo module).
 
-The iOS File Provider Extension and the Android Documents Provider are wired in via three vendored git submodules under this package (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and two custom Expo config plugins (`plugins/withFileProvider.ts`, `plugins/withAndroidRustBuild.ts`). Those plugins compile a separate Rust crate (`filen-mobile-native-cache`) and inject it into the iOS extension target and the Android `jniLibs/`.
+The iOS File Provider Extension and the Android Documents Provider are wired in via three vendored git submodules under this package (`filen-rs/`, `filen-ios-file-provider/`, `filen-android-documents-provider/`) and custom Expo config plugins in `plugins/` (registered in `app.config.ts`). `withFileProvider.ts` and `withAndroidRustBuild.ts` compile a separate Rust crate (`filen-mobile-native-cache`) and inject it into the iOS extension target and the Android `jniLibs/`.
 
 ---
 
@@ -14,7 +14,7 @@ The iOS File Provider Extension and the Android Documents Provider are wired in 
 
 - **Node.js 24+** (older versions may work, but the old app required 24+; not relaxed in the rewrite).
 - **Rust** — install via [rustup](https://www.rust-lang.org/tools/install).
-- **cargo-ndk** for Android Rust cross-compilation — must be **4.x** (the native build reads cargo-ndk 4.x's `ANDROID_ABI` as of filen-rs `d454f4d`; the old 3.5.4 sets `CARGO_NDK_ANDROID_TARGET` and no longer propagates the heif-decoder ABI):
+- **cargo-ndk** for Android Rust cross-compilation — must be **4.x** (filen-rs's `heif-decoder` build reads cargo-ndk 4.x's `ANDROID_ABI`; CI pins 4.1.2):
     ```bash
     cargo install --version 4.1.2 cargo-ndk
     ```
@@ -22,8 +22,9 @@ The iOS File Provider Extension and the Android Documents Provider are wired in 
     ```bash
     brew install meson ninja nasm
     ```
-- **Rust targets** for the file/documents provider native build:
+- **Rust targets** for the file/documents provider native build. filen-rs pins a nightly in its `rust-toolchain.toml`, so add them from inside `filen-rs/` (an error like "can't find crate for `core`" means a target is missing on that toolchain):
     ```bash
+    cd packages/filen-mobile/filen-rs
     rustup target add aarch64-apple-ios
     rustup target add aarch64-apple-ios-sim
     rustup target add aarch64-linux-android
@@ -44,7 +45,8 @@ The iOS File Provider Extension and the Android Documents Provider are wired in 
     java -version && javac -version && echo "$JAVA_HOME"
     ```
 - The rest of the standard Android SDK + emulator setup — see [Expo Android setup](https://docs.expo.dev/get-started/set-up-your-environment/?platform=android&device=simulated&mode=development-build&buildEnv=local).
-- Min SDK 33, target SDK 36.
+- Min SDK, target SDK and compile SDK are constants at the top of `app.config.ts`.
+- The React Native build compiles Hermes from source. Until react-native ships facebook/react-native#59589, its tarball needs `gradle/hermes-unzip.init.gradle.kts`: CI passes it with `-I`; locally, copy or symlink it into `~/.gradle/init.d/`.
 
 ---
 
@@ -100,7 +102,10 @@ What `prebuild:clean` does end to end:
 1. Runs `clean.ts` — removes stale `ios/`, `android/`, and `.expo/` outputs.
 2. Runs `expo prebuild --clean` — applies every plugin in `app.config.ts` in order.
 3. For iOS: `plugins/withFileProvider.ts` runs cargo + `uniffi-bindgen-swift` to produce `filen-rs/target/ios/libfilen_mobile_native_cache.xcframework`, then adds the `FilenFileProvider` extension target to the Xcode project with the right entitlements, Info.plist (NSExtension config), and `PrivacyInfo.xcprivacy`.
-4. For Android: `plugins/withAndroidRustBuild.ts` runs `cargo ndk` to produce `lib*.so` files for each target ABI, generates the Kotlin uniffi bindings, copies `FilenDocumentsProvider.kt` into the app's java package, and injects the `<provider>` element into `AndroidManifest.xml`.
+   The extension's custom actions (`NSExtensionFileProviderActions`, `NSExtensionFileProviderAllowsUserControlledEviction`) are copied from the provider's own `FilenFileProviderExtension/Info.plist`, which stays the single source. `plugins/withBlake3SymbolRename.ts` renames the BLAKE3 C reference symbol in the `FileHash` and `QuickCrypto` pods so it does not collide with the Rust `blake3` in `@filen/sdk-rs` at link time.
+4. For Android: `plugins/withAndroidRustBuild.ts` runs `cargo ndk` to produce `lib*.so` files for each target ABI, generates the Kotlin uniffi bindings, copies `FilenDocumentsProvider.kt` and `AuthKeystore.kt` into the app's java package, and injects the `<provider>` element into `AndroidManifest.xml`. `plugins/withGradleMemory.ts` sets the Gradle JVM heap and pins `-Dfile.encoding=UTF-8` (a non-UTF-8 shell locale otherwise breaks the boost tarball extraction).
+
+If the shell locale carries a region modifier (`LANG=en_US@rg=…`), CocoaPods' Ruby fails during the `pod install` step. Prefix the command: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pnpm run prebuild:clean` (the same for `pnpm run ios`). After a locale change, `./gradlew --stop` so Gradle daemons pick up the new encoding.
 
 ---
 
@@ -118,6 +123,8 @@ What `prebuild:clean` does end to end:
 | Run Android emulator (release variant)        | `pnpm run android:release`        |
 | Run Android physical device (release variant) | `pnpm run android:device:release` |
 
+Never start Metro with `CI=1` (or any `CI` set): Expo then disables file watching, and edits never reach the app.
+
 ---
 
 ## Quality checks
@@ -125,11 +132,11 @@ What `prebuild:clean` does end to end:
 ```bash
 pnpm run verify   # lint + typecheck + tests, in that order
 pnpm run lint     # eslint, max-warnings 0
-pnpm run typecheck  # tsc --noEmit (driven by typecheck.mjs)
+pnpm run typecheck  # incremental tsc --noEmit, node_modules diagnostics dropped (typecheck.mjs)
 pnpm run test     # vitest run
 ```
 
-Tests live in `src/tests/*.test.ts` and run under Node with mocks for React Native / expo-file-system / expo-media-library / `@filen/sdk-rs`. The three vendored submodules are excluded from lint, typecheck and tests.
+Tests live in `src/tests/` and run under Node with `vi.mock` per file; shared mock modules are in `src/tests/mocks/`. The three vendored submodules are excluded from lint, typecheck and tests.
 
 ---
 

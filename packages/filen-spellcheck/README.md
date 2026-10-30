@@ -1,6 +1,6 @@
 # @filen/spellcheck
 
-On-device spellchecking for the Filen apps: [spellbook](https://github.com/helix-editor/spellbook) (Rust, MPL-2.0, a port of Hunspell's algorithms) compiled to WebAssembly, Hunspell dictionaries for 13 language families, and the worker and page code that run them. Nothing leaves the device.
+On-device spellchecking for the Filen apps: [spellbook](https://github.com/helix-editor/spellbook) (Rust, MPL-2.0, a port of Hunspell's algorithms) compiled to WebAssembly, Hunspell dictionaries (18, covering 12 languages), and the worker and page code that run them. Nothing leaves the device.
 
 ## Layout
 
@@ -17,7 +17,7 @@ On-device spellchecking for the Filen apps: [spellbook](https://github.com/helix
 | `src/languages.ts` | Language tag (OOXML `w:lang`, BCP 47) to dictionary. |
 | `src/userDictionary.ts` | The synced user dictionary's format and merge (last-writer-wins per word). |
 
-Document spelling (which words, which language, the marks, replace / ignore all / add to dictionary) lives in `@filen/office/core/docx/spelling` and talks to a `SpellingChecker`; on web, `packages/filen-web/src/features/spellcheck` implements it with this package and stores the user dictionary at `.filen/Office/user-dictionary.v1.json`.
+Document spelling (which words, which language, the marks, replace / ignore all / add to dictionary) lives in `@filen/office/core/docx/spelling` and talks to a `SpellingChecker`; on web, `packages/filen-web/src/features/spellcheck` implements it with this package and stores the user dictionary at `.filen/office/user-dictionary.v1.json`.
 
 ## Building
 

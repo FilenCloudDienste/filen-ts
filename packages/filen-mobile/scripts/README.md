@@ -1,8 +1,8 @@
 # i18n translation pipeline
 
-`translate-i18n.ts` fills the eight target-language catalogs
-(`src/locales/<lang>.json`) from the English source catalog
-(`src/locales/en/*.ts`) using the Anthropic Messages API (`claude-opus-5`).
+`translate-i18n.ts` fills the target-language catalogs (`src/locales/<lang>.json`, one per
+non-English entry of `SUPPORTED_LANGUAGES`) from the English source catalog
+(`src/locales/en/*.ts`) using the Anthropic Messages API (model: `MODEL` in the script).
 
 English is the single source of truth. Every other language is machine-translated
 and **always needs human review** before it ships.
@@ -16,14 +16,14 @@ src/locales/en/*.ts ──(merged barrel: src/locales/en)──▶ key → Engli
         ▼                                                        ▼
    cached system prompt  ──────────────▶  Anthropic Messages API  ──────────────▶  { key: translated }
    (instructions + glossary + full                 per language                            │
-    English source, reused across all 8)                                                   ▼
+    English source, reused across all languages)                                                   ▼
                                                                           merge into src/locales/<lang>.json
                                                                           (sorted keys + trailing newline)
 ```
 
 - The **stable system prefix** (translator instructions, do-not-translate glossary, and the
   full English source files) is sent with `cache_control: { type: "ephemeral" }`, so the first
-  language writes the prompt cache and the remaining seven read it.
+  language writes the prompt cache and the remaining ones read it.
 - The **varying part** (the subset of keys to translate + the target language name) is the
   per-language user message.
 - Output is forced to a flat `{ key: translated }` map via
@@ -40,7 +40,7 @@ keys as separate entries.
 
 | Command | Mode | What it translates |
 | --- | --- | --- |
-| `pnpm run translate-i18n` | **DELTA** (default) | Keys added/changed in `src/locales/en` since the previous commit (`git diff HEAD~1`), plus any English key missing from a target catalog (covers fresh/empty stubs). Removed keys are deleted from every catalog. |
+| `pnpm run translate-i18n` | **DELTA** (default) | Keys added/changed in `src/locales/en` since the last translation (diffed against the committed `src/locales/.en-snapshot.json`, which a successful run rewrites), plus any English key missing from a target catalog (covers fresh/empty stubs). Removed keys are deleted from every catalog. |
 | `pnpm run translate-i18n --full` | **FULL** | Every English key for every target language. |
 | `pnpm run translate-i18n de,fr` | (either) | Restrict to specific languages (comma-separated or repeated args). |
 
@@ -52,8 +52,8 @@ DRY_RUN=1 pnpm run translate-i18n --full
 
 Skips the Anthropic API entirely and stubs each translation as `"<lang>:<english>"`
 (e.g. `"de:Cancel"`). Use it to exercise the catalog-read / delta / file-write logic without
-spending tokens. **Revert the stub output afterwards** (`git checkout src/locales/*.json`) so you
-don't commit dry-run placeholders.
+spending tokens. **Revert the stub output afterwards** (`git checkout src/locales/*.json src/locales/.en-snapshot.json`,
+since a run also advances the snapshot) so you don't commit dry-run placeholders.
 
 ## One-time setup
 
@@ -61,17 +61,15 @@ Add an `ANTHROPIC_API_KEY` repository secret
 (GitHub → Settings → Secrets and variables → Actions → New repository secret).
 The key is read from `process.env.ANTHROPIC_API_KEY` — never hardcoded, never logged.
 
-## Running the initial FULL translation
-
-The catalogs ship as empty `{}` stubs. To populate all eight languages the first time:
+## Running a FULL translation
 
 - **Via CI (recommended):** GitHub → Actions → **i18n translate** → *Run workflow* →
   set `mode = full`. It opens a PR (`i18n: update translations`) for review.
 - **Locally:** `DRY_RUN=1 pnpm run translate-i18n --full` to preview the file structure, then
   `ANTHROPIC_API_KEY=… pnpm run translate-i18n --full` to actually translate.
 
-After the first full run, the workflow runs automatically (DELTA mode) on every push to `main`
-that changes `packages/filen-mobile/src/locales/en/**`.
+The workflow also runs automatically (DELTA mode) on every push to `main` that changes
+`packages/filen-mobile/src/locales/en/**`.
 
 > The PR is opened by the workflow's `GITHUB_TOKEN`, so it does **not** trigger downstream CI
 > (lint / typecheck / tests). Merging it by hand runs the full CI on `main`.

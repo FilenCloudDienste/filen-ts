@@ -13,16 +13,18 @@ The Filen web app — a from-scratch rewrite of Filen's end-to-end encrypted Clo
 
 Install once at the repo root (`pnpm install`); these run from this directory.
 
-| Command              | Description                                              |
-| -------------------- | -------------------------------------------------------- |
-| `pnpm run dev`       | Start the Vite dev server                                |
-| `pnpm run build`     | Type-check, build the app, then build the service worker |
-| `pnpm run preview`   | Serve the production build locally                       |
-| `pnpm run test`      | Run the unit tests (Vitest)                              |
-| `pnpm run test:e2e`  | Run the end-to-end tests (Playwright)                    |
-| `pnpm run lint`      | ESLint plus a Prettier format check                      |
-| `pnpm run typecheck` | Type-check without emitting                              |
-| `pnpm run format`    | Format the source with Prettier                          |
+| Command                    | Description                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| `pnpm run dev`             | Start the Vite dev server                                                                     |
+| `pnpm run build`           | Type-check, build the app, then build the service worker                                      |
+| `pnpm run preview`         | Serve the production build locally                                                            |
+| `pnpm run test`            | Run the unit tests (Vitest)                                                                   |
+| `pnpm run test:e2e`        | Run the end-to-end tests (Playwright)                                                         |
+| `pnpm run lint`            | ESLint plus a Prettier format check                                                           |
+| `pnpm run typecheck`       | Type-check without emitting                                                                   |
+| `pnpm run format`          | Format the source with Prettier                                                               |
+| `pnpm run gen:error-kinds` | Regenerate the SDK `ErrorKind` list after an sdk-rs bump changes it (CI fails on a stale one) |
+| `pnpm run translate-i18n`  | Translate the English catalog (`src/locales/en`); run by `.github/workflows/i18n-web.yml`     |
 
 Unit tests are Vitest in `src/**/*.test.{ts,tsx}`, node by default (DOM tests opt in per file with `// @vitest-environment jsdom`). E2E is Playwright against a live account (`FILEN_WEB_E2E_TEST_EMAIL` / `FILEN_WEB_E2E_TEST_PASSWORD` from `.env` or the environment); set `E2E_PREMIUM=1` for a premium account, which runs the premium-only flows (public links) and checks the paid state where a free account checks the upgrade prompt. Without credentials only the SDK-free specs run. CI uses one account per browser when the repository variable `E2E_ACCOUNT_PER_BROWSER` is `true` (secrets `FILEN_WEB_E2E_TEST_{EMAIL,PASSWORD}_{CHROMIUM,FIREFOX,WEBKIT}`, tier from the variable `E2E_PREMIUM`), else the shared free account.
 
@@ -34,15 +36,15 @@ Unit tests are Vitest in `src/**/*.test.{ts,tsx}`, node by default (DOM tests op
 
 Send these on **every** response, `304 Not Modified` included: Safari judges a revalidated worker script by the 304's own headers, so a bare 304 blocks the SDK worker on reload.
 
-| Header                         | Value                                      |
-| ------------------------------ | ------------------------------------------ |
-| `Cross-Origin-Opener-Policy`   | `same-origin`                              |
-| `Cross-Origin-Embedder-Policy` | `require-corp`                             |
-| `Cross-Origin-Resource-Policy` | `same-origin`                              |
-| `X-Content-Type-Options`       | `nosniff`                                  |
-| `Referrer-Policy`              | `no-referrer`                              |
-| `Permissions-Policy`           | `camera=(), microphone=(), geolocation=()` |
-| `Content-Security-Policy`      | the `CSP` const in `vite.config.ts`        |
+| Header                         | Value                                       |
+| ------------------------------ | ------------------------------------------- |
+| `Cross-Origin-Opener-Policy`   | `same-origin`                               |
+| `Cross-Origin-Embedder-Policy` | `require-corp`                              |
+| `Cross-Origin-Resource-Policy` | `same-origin`                               |
+| `X-Content-Type-Options`       | `nosniff`                                   |
+| `Referrer-Policy`              | `no-referrer`                               |
+| `Permissions-Policy`           | `camera=(), microphone=(), geolocation=()`  |
+| `Content-Security-Policy`      | `contentSecurityPolicy` in `vite.config.ts` |
 
 The three cross-origin headers are what make `self.crossOriginIsolated` true; without it the SDK's threaded wasm worker cannot start and the app redirects to `/no-coi`. The CSP is deliberately referenced rather than copied: `vite.config.ts` is the edit-first source and carries the rationale for each directive, and a second literal copy would drift.
 
