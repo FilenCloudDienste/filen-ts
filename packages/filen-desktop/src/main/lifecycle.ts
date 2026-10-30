@@ -33,3 +33,11 @@ export function keepsRendererAlive({ unloadHolds, audioPlaying, notifications }:
 export function startsHidden(argv: readonly string[], startMinimized: boolean, openedAtLogin: boolean): boolean {
 	return startMinimized || openedAtLogin || argv.includes(HIDDEN_ARG)
 }
+
+// The packaged name and userData directory are the old client's, kept for the migration and the keychain. The name
+// keys the safeStorage entry ("<name> Safe Storage" in the macOS keychain and the Linux keyring), so unpackaged runs
+// get their own name and directory: an ad-hoc signed build owning the signed app's entry makes that app prompt for the
+// password, and development never touches a real installation.
+export function appIdentity(packaged: boolean): { name: string; userData: string } {
+	return packaged ? { name: "Filen", userData: "@filen/desktop" } : { name: "Filen Dev", userData: "@filen/desktop-dev" }
+}

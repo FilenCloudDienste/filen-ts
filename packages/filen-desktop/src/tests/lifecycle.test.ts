@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { closeAction, keepsRendererAlive, startsHidden } from "../main/lifecycle.ts"
+import { appIdentity, closeAction, keepsRendererAlive, startsHidden } from "../main/lifecycle.ts"
 
 describe("closeAction", () => {
 	it.each([
@@ -39,5 +39,15 @@ describe("startsHidden", () => {
 		expect(startsHidden(["/app/Filen", "--hidden"], false, false)).toBe(true)
 		expect(startsHidden(["/app/Filen"], false, true)).toBe(true)
 		expect(startsHidden(["/app/Filen"], true, false)).toBe(true)
+	})
+})
+
+describe("appIdentity", () => {
+	it("keeps the packaged app's name and directory", () => {
+		expect(appIdentity(true)).toEqual({ name: "Filen", userData: "@filen/desktop" })
+	})
+
+	it("gives unpackaged runs their own, so their safeStorage entry is separate", () => {
+		expect(appIdentity(false)).toEqual({ name: "Filen Dev", userData: "@filen/desktop-dev" })
 	})
 })

@@ -49,7 +49,7 @@ import { createFileProviderAddon, type FileProviderAddonContext, fileProviderAdd
 import { registerFileProviderIpc } from "./fileProvider/ipc.ts"
 import { createFileProviderService } from "./fileProvider/service.ts"
 import { createFileProviderStore } from "./fileProvider/store.ts"
-import { closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
+import { appIdentity, closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
@@ -101,10 +101,11 @@ const SCHEME = "filen"
 const APP_ORIGIN = `${SCHEME}://app`
 const PLATFORM = process.platform as DesktopPlatform
 
-// The old client's userData lives under the package name; pinning it keeps it for the migration and the keychain.
-// Unpackaged runs get their own directory so development never touches a real installation.
-app.setPath("userData", path.join(app.getPath("appData"), app.isPackaged ? "@filen/desktop" : "@filen/desktop-dev"))
-app.setName("Filen")
+// Set before ready, when safeStorage reads the name.
+const identity = appIdentity(app.isPackaged)
+
+app.setPath("userData", path.join(app.getPath("appData"), identity.userData))
+app.setName(identity.name)
 // Windows shows notifications and groups the taskbar button under the installer shortcut's id, electron-builder's appId.
 if (process.platform === "win32") {
 	app.setAppUserModelId("io.filen.desktop")
