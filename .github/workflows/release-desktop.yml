@@ -426,6 +426,8 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          # No pnpm in this job; the root packageManager field would otherwise turn on a pnpm cache.
+          package-manager-cache: false
       - name: Download artifacts
         uses: actions/download-artifact@v7
         with:
