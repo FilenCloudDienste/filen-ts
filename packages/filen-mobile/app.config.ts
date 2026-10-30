@@ -346,6 +346,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				iosAppGroupIdentifier: IOS_APP_GROUP_IDENTIFIER
 			}
 		],
+		"./plugins/withBlake3SymbolRename",
 		[
 			"./plugins/withAndroidRustBuild",
 			{
