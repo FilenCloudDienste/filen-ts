@@ -223,13 +223,51 @@ export interface Migration {
 	sessionConfirmed(sessionBlob: string | null): Promise<void>
 }
 
+// Where a migration failure happened; logged with the cause as "<step>: <cause>".
+type MigrationStep =
+	| "marker read"
+	| "marker write"
+	| "profile probe"
+	| "vault status"
+	| "legacy read"
+	| "legacy parse"
+	| "session import"
+	| "stash"
+	| "pin import"
+	| "prefs import"
+	| "rclone config"
+	| "legacy wipe"
+
+function stepError(step: MigrationStep, cause: string): Error {
+	return codedError(`${step}: ${cause}`)
+}
+
+// Runs one step; a failure is rethrown as the step and the original's code or name, never its message (which may
+// carry data). safeStorage rejects with a plain Error whose message is the reason: those log as `uncoded` instead.
+async function step<T>(name: MigrationStep, run: () => T | Promise<T>, uncoded?: string): Promise<T> {
+	try {
+		return await run()
+	} catch (error) {
+		const code = errorCode(error)
+
+		throw stepError(name, code === "Error" && uncoded !== undefined ? uncoded : code)
+	}
+}
+
+// The cause of a step that encrypts with safeStorage and fails without a code.
+const SAFE_STORAGE = "safeStorage"
+
 export function createMigration(deps: MigrationDeps): Migration {
 	let marker: MigrationMarker | null = null
 	const serial = serialQueue()
 
 	async function save(next: MigrationMarker): Promise<void> {
-		await deps.marker.write(Buffer.from(serializeMarker(next)))
+		await step("marker write", () => deps.marker.write(Buffer.from(serializeMarker(next))))
 		marker = next
+	}
+
+	async function vaultStatus(): Promise<SessionRead["status"]> {
+		return (await step("vault status", () => deps.vault.get())).status
 	}
 
 	function fresh(stage: MigrationStage): MigrationMarker {
@@ -243,7 +281,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 		})
 	}
 
-	// Errors are logged by their code only: none of this may ever log a value.
+	// Errors are logged by their step and code only: none of this may ever log a value.
 	async function attempt(previous: MigrationMarker | null, stashOnly: boolean): Promise<MigrationResult> {
 		await save({
 			...(previous ?? fresh("started")),
@@ -253,10 +291,10 @@ export function createMigration(deps: MigrationDeps): Migration {
 			stashOnly
 		})
 
-		const read = parseReadResult(await deps.readLegacy())
+		const read = parseReadResult(await step("legacy read", () => deps.readLegacy()))
 
 		if (read === null) {
-			throw codedError("unexpected read result")
+			throw stepError("legacy parse", "unexpected read result")
 		}
 
 		deps.info(`migration: read keys=${String(read.count)}`)
@@ -264,11 +302,11 @@ export function createMigration(deps: MigrationDeps): Migration {
 		// The old web app wrote its defaults on first start, so a profile that has run holds keys: none means the read
 		// missed the origin. Tried again next launch; nothing is cleared.
 		if (read.count === 0) {
-			throw codedError("no keys")
+			throw stepError("legacy parse", "no keys")
 		}
 
 		const { snapshot } = read
-		const session = legacySession(snapshot)
+		const session = await step("legacy parse", () => legacySession(snapshot))
 
 		if (stashOnly) {
 			deps.info("migration: signed in here already; importing the stash only")
@@ -277,12 +315,19 @@ export function createMigration(deps: MigrationDeps): Migration {
 		}
 
 		const userId = session.ok ? session.userId : null
-		const stash = legacyStash(snapshot, userId)
 
-		if (stash !== null) {
-			await deps.writeStash(JSON.stringify(stash))
-			deps.info("migration: sync and mount settings stashed")
-		}
+		await step(
+			"stash",
+			async () => {
+				const stash = legacyStash(snapshot, userId)
+
+				if (stash !== null) {
+					await deps.writeStash(JSON.stringify(stash))
+					deps.info("migration: sync and mount settings stashed")
+				}
+			},
+			SAFE_STORAGE
+		)
 
 		const pinImported = stashOnly ? false : await importSettings(snapshot, session.ok)
 
@@ -293,18 +338,18 @@ export function createMigration(deps: MigrationDeps): Migration {
 	}
 
 	async function importSession(session: LegacySession): Promise<void> {
-		const stored = await deps.vault.get()
+		const stored = await vaultStatus()
 
-		if (stored.status === "unreadable") {
-			throw codedError("vault unreadable")
+		if (stored === "unreadable") {
+			throw stepError("vault status", "unreadable")
 		}
 
 		if (!session.ok) {
 			deps.info(`migration: no session imported (${session.reason})`)
-		} else if (stored.status === "present") {
+		} else if (stored === "present") {
 			deps.info("migration: a session is stored already; keeping it")
 		} else {
-			await deps.vault.set(session.blob)
+			await step("session import", () => deps.vault.set(session.blob), SAFE_STORAGE)
 			deps.info("migration: session imported")
 		}
 	}
@@ -315,17 +360,21 @@ export function createMigration(deps: MigrationDeps): Migration {
 		const pin = signedIn ? legacyPin(snapshot) : null
 
 		if (pin !== null && !deps.lock.enabled()) {
-			pinImported = await deps.lock.set(pin)
+			pinImported = await step("pin import", () => deps.lock.set(pin), SAFE_STORAGE)
 			deps.info(pinImported ? "migration: app lock PIN imported" : "migration: app lock PIN not imported")
 		}
 
-		const prefs = legacyPrefs(snapshot, await deps.readOptions())
-		const launchAtLogin = deps.launchesAtLogin()
+		const launchAtLogin = await step("prefs import", async () => {
+			const prefs = legacyPrefs(snapshot, await deps.readOptions())
+			const launches = deps.launchesAtLogin()
 
-		if (Object.keys(prefs).length > 0 || launchAtLogin) {
-			await deps.prefs.set(launchAtLogin ? { ...prefs, launchAtLogin } : prefs)
-			deps.info("migration: preferences imported")
-		}
+			if (Object.keys(prefs).length > 0 || launches) {
+				await deps.prefs.set(launches ? { ...prefs, launchAtLogin: launches } : prefs)
+				deps.info("migration: preferences imported")
+			}
+
+			return launches
+		})
 
 		// Registered again in this app's form; the setting is kept even if that fails.
 		if (launchAtLogin) {
@@ -344,7 +393,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 	// sign-out stopped before clearing anything, which the page then shows as still signed in). So the purge waits for
 	// a launch with a session in the vault; a vault kept in memory only never has one, and keeps the stores.
 	async function purge(current: MigrationMarker): Promise<void> {
-		if ((await deps.vault.get()).status !== "present") {
+		if ((await vaultStatus()) !== "present") {
 			deps.info("migration: deleting the old stores waits for a launch with a stored session")
 
 			return
@@ -377,8 +426,8 @@ export function createMigration(deps: MigrationDeps): Migration {
 			return
 		}
 
-		await deps.removeRcloneConfig()
-		await deps.wipeLegacy()
+		await step("rclone config", () => deps.removeRcloneConfig())
+		await step("legacy wipe", () => deps.wipeLegacy())
 		await save({ ...marker, wiped: true })
 		deps.info("migration: the old client's secrets were wiped")
 	}
@@ -394,7 +443,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 			let result: MigrationResult = { pinImported: false }
 
 			try {
-				marker = parseMarker((await deps.marker.read())?.toString("utf8") ?? null)
+				marker = parseMarker((await step("marker read", () => deps.marker.read()))?.toString("utf8") ?? null)
 
 				if (marker?.wiped === true) {
 					if (!marker.purged) {
@@ -410,8 +459,8 @@ export function createMigration(deps: MigrationDeps): Migration {
 				}
 
 				if (marker === null || marker.stage === "started") {
-					const legacyProfile = marker !== null || (await deps.legacyProfile())
-					const vault = legacyProfile ? (await deps.vault.get()).status : "absent"
+					const legacyProfile = marker !== null || (await step("profile probe", () => deps.legacyProfile()))
+					const vault = legacyProfile ? await vaultStatus() : "absent"
 					const decision = startupDecision(marker, legacyProfile, vault)
 
 					if (decision === "defer") {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { AtomicFile } from "../main/atomicFile.ts"
+import { type AtomicFile, codedError } from "../main/atomicFile.ts"
 import { LEGACY_KEYS, type LegacyStash } from "../main/legacyData.ts"
 import {
 	createMigration,
@@ -233,6 +233,8 @@ function setup(
 
 	return { deps, state, markerFile, migration: createMigration(deps), stored: () => parseMarker(markerFile.text()) }
 }
+
+type Deps = ReturnType<typeof setup>["deps"]
 
 // The wipe runs in the background after start; this lets it finish.
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -480,12 +482,82 @@ describe("createMigration", () => {
 })
 
 describe("failure logging", () => {
+	// safeStorage's rejection: a plain Error whose message must never reach the log.
+	const safeStorageError = () => new Error("Error while encrypting the text provided to safeStorage.encryptStringAsync.")
+	const fsError = (code: string) => Object.assign(new Error(`${code}: /home/user/secret path`), { code })
+
 	it("names the reason of a failed read", async () => {
 		const { deps, migration } = setup({ read: { count: 0, values: {} } })
 
 		await migration.start()
 
-		expect(deps.warn).toHaveBeenCalledWith("migration: failed: no keys")
+		expect(deps.warn).toHaveBeenCalledWith("migration: failed: legacy parse: no keys")
+	})
+
+	it.each([
+		["marker read", (deps: Deps) => vi.spyOn(deps.marker, "read").mockRejectedValueOnce(fsError("EACCES")), "EACCES"],
+		["marker write", (deps: Deps) => vi.spyOn(deps.marker, "write").mockRejectedValueOnce(fsError("ENOSPC")), "ENOSPC"],
+		["profile probe", (deps: Deps) => deps.legacyProfile.mockRejectedValueOnce(fsError("EPERM")), "EPERM"],
+		["vault status", (deps: Deps) => deps.vault.get.mockRejectedValueOnce(new TypeError("value")), "TypeError"],
+		["legacy read", (deps: Deps) => deps.readLegacy.mockRejectedValueOnce(new Error("page said user@example.com")), "Error"],
+		["legacy parse", (deps: Deps) => deps.readLegacy.mockResolvedValueOnce("not a read result"), "unexpected read result"],
+		["session import", (deps: Deps) => deps.vault.set.mockRejectedValueOnce(safeStorageError()), "safeStorage"],
+		["session import", (deps: Deps) => deps.vault.set.mockRejectedValueOnce(fsError("ENOSPC")), "ENOSPC"],
+		["stash", (deps: Deps) => deps.writeStash.mockRejectedValueOnce(safeStorageError()), "safeStorage"],
+		["pin import", (deps: Deps) => deps.lock.set.mockRejectedValueOnce(safeStorageError()), "safeStorage"],
+		["prefs import", (deps: Deps) => deps.readOptions.mockRejectedValueOnce(fsError("EISDIR")), "EISDIR"],
+		["prefs import", (deps: Deps) => deps.prefs.set.mockRejectedValueOnce(new RangeError("value")), "RangeError"]
+	] as const)("names the failed step: %s (%s)", async (step, fail, cause) => {
+		const { deps, migration } = setup()
+
+		fail(deps)
+		await migration.start()
+
+		expect(deps.warn).toHaveBeenCalledTimes(1)
+		expect(deps.warn).toHaveBeenCalledWith(`migration: failed: ${step}: ${cause}`)
+	})
+
+	it("names the vault status step when the vault turns unreadable before the import", async () => {
+		const { deps, migration } = setup({ marker: marker({ stage: "started", stashOnly: false }) })
+
+		deps.vault.get.mockResolvedValueOnce({ status: "absent" }).mockResolvedValueOnce({ status: "unreadable" })
+		await migration.start()
+
+		expect(deps.warn).toHaveBeenCalledWith("migration: failed: vault status: unreadable")
+	})
+
+	it.each([
+		["rclone config", (deps: Deps) => deps.removeRcloneConfig.mockRejectedValueOnce(fsError("EBUSY")), "EBUSY"],
+		["legacy wipe", (deps: Deps) => deps.wipeLegacy.mockRejectedValueOnce(codedError("timeout")), "timeout"],
+		["marker write", (deps: Deps) => vi.spyOn(deps.marker, "write").mockRejectedValueOnce(fsError("EROFS")), "EROFS"]
+	] as const)("names the failed wipe step: %s", async (step, fail, cause) => {
+		const { deps, migration } = setup({ marker: marker({ stage: "verified" }) })
+
+		fail(deps)
+		await migration.start()
+		await settle()
+
+		expect(deps.warn).toHaveBeenCalledWith(`migration: wipe failed: ${step}: ${cause}`)
+	})
+
+	it("names the step of an unrecorded verification", async () => {
+		const { deps, migration } = setup({ marker: marker() })
+
+		await migration.start()
+		await settle()
+		vi.spyOn(deps.marker, "write").mockRejectedValueOnce(fsError("ENOSPC"))
+		await migration.sessionConfirmed(SESSION_OF("123456"))
+
+		expect(deps.warn).toHaveBeenCalledWith("migration: verification not recorded: marker write: ENOSPC")
+	})
+
+	it("never logs an error's message", async () => {
+		const { deps, migration } = setup()
+
+		deps.readLegacy.mockRejectedValueOnce(new Error("page said user@example.com"))
+		await migration.start()
+
+		expect(deps.warn.mock.calls.flat().join("\n")).not.toContain("example.com")
 	})
 })
 
