@@ -83,6 +83,7 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 	}
 	const clearOwed = memoryFile()
 	const warnings: string[] = []
+	const infos: string[] = []
 	const deps: FileProviderDeps = {
 		supported: () => options.supported ?? true,
 		addon: () => {
@@ -94,10 +95,10 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 		store: createFileProviderStore(fileFor, message => warnings.push(message)),
 		clearOwed,
 		pinSet: () => state.pin,
-		log: { info: () => undefined, warn: message => warnings.push(message) }
+		log: { info: message => infos.push(message), warn: message => warnings.push(message) }
 	}
 
-	return { ...fake, service: createFileProviderService(deps), state, files: fileFor, clearOwed, warnings }
+	return { ...fake, service: createFileProviderService(deps), state, files: fileFor, clearOwed, warnings, infos }
 }
 
 describe("fileProviderAuth", () => {
@@ -153,26 +154,29 @@ describe("file provider service", () => {
 	})
 
 	it("clears the session before removing the domain on disable", async () => {
-		const { service, calls, files } = setup()
+		const { service, calls, files, infos } = setup()
 
 		await service.enable()
 		calls.length = 0
+		infos.length = 0
 
 		const state = await service.disable()
 
 		expect(calls).toEqual([`clear ${domain}`, `remove ${domain}`])
+		expect(infos.slice(0, 2)).toEqual(["file provider: session cleared", "file provider: domain removed"])
 		expect(state.enabled).toBe(false)
 		expect(files("7").data).toBeNull()
 	})
 
 	it("removes the domain when the clear fails, and clears on the next registration", async () => {
-		const { service, calls, fail, clearOwed } = setup()
+		const { service, calls, fail, clearOwed, infos } = setup()
 
 		await service.enable()
 		fail.add("clearAuth")
 		await service.signedOut("7")
 
 		expect(calls.slice(-2)).toEqual([`clear ${domain}`, `remove ${domain}`])
+		expect(infos).not.toContain("file provider: session cleared")
 		expect(clearOwed.data).not.toBeNull()
 
 		fail.delete("clearAuth")

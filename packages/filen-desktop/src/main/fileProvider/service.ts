@@ -101,6 +101,7 @@ export function createFileProviderService(deps: FileProviderDeps): FileProviderS
 
 		try {
 			await fp.clearAuth({ identifier })
+			info("file provider: session cleared")
 		} catch (error) {
 			warn(`file provider: session clear failed (${describe(error)}); owed to the next registration`)
 			await deps.clearOwed.write(Buffer.alloc(0)).catch((markError: unknown) => {
