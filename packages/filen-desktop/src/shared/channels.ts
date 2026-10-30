@@ -101,7 +101,13 @@ export function mountsChannel(call: MountsCall): string {
 }
 
 // The File Provider bridge's requests, each answered on its own channel (fileProviderChannel).
-export const FILE_PROVIDER_CALLS = ["state", "enable", "disable"] as const satisfies readonly (keyof DesktopFileProvider)[]
+export const FILE_PROVIDER_CALLS = [
+	"state",
+	"enable",
+	"disable",
+	"reveal",
+	"openSettings"
+] as const satisfies readonly (keyof DesktopFileProvider)[]
 
 export type FileProviderCall = (typeof FILE_PROVIDER_CALLS)[number]
 
@@ -117,6 +123,9 @@ export interface MountsSubscription {
 
 // The preload reads the app version from this argument, so the page gets it without a round trip.
 export const VERSION_ARG_PREFIX = "--filen-app-version="
+
+// Present when Filen in Finder is supported, so the page knows it without a round trip.
+export const FILE_PROVIDER_ARG = "--filen-file-provider"
 
 // What `session:get` answers. An error thrown by an IPC handler reaches the preload only as a wrapped message, so
 // the unreadable case travels as data and the preload turns it into the rejection the bridge documents.

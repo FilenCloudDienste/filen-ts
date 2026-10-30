@@ -1,5 +1,5 @@
-// English source catalog — "mounts" namespace: the desktop app's network drive and the servers that expose the
-// drive over a protocol (the Mounts section). Same typed-catalog rules as every other namespace: flat `as const`
+// English source catalog — "mounts" namespace: the desktop app's Filen in Finder (macOS), network drive and the
+// servers that expose the drive over a protocol (the Mounts section). Same typed-catalog rules as every other namespace: flat `as const`
 // object, camelCase keys, no literal '.' or ':'. "directory" never "folder".
 export const mounts = {
 	// ── Sidebar ─────────────────────────────────────────────────────────
@@ -11,6 +11,42 @@ export const mounts = {
 	mountsServersHeading: "Servers",
 	/** Sidebar — the row opening the overview of the drive and every server */
 	mountsOverview: "Overview",
+	/** Sidebar — the Filen in Finder row (macOS File Provider: the drive in Finder's sidebar under Locations) */
+	mountsFinder: "Filen in Finder",
+
+	// ── Filen in Finder (macOS) ─────────────────────────────────────────
+	/** Filen in Finder — accessible name of the on/off switch */
+	finderEnable: "Show Filen in Finder",
+	/** Filen in Finder — what it does, under its title */
+	finderDescription: "Your Filen drive appears in Finder under Locations. Files download when you open them.",
+	/** Filen in Finder — state: on and shown in Finder */
+	finderStateOn: "On",
+	/** Filen in Finder — state: on here, but switched off in System Settings */
+	finderStateNeedsEnabling: "Needs switching on",
+	/** Filen in Finder — open row */
+	finderOpen: "Open in Finder",
+	/** Filen in Finder — open row, description */
+	finderOpenDescription: "Browse your Filen drive in Finder.",
+	/** Filen in Finder — open button */
+	finderOpenAction: "Open",
+	/** Callout — macOS has the extension switched off; System Settings and its pane names stay as macOS names them */
+	finderNeedsEnabling: "Switch on Filen in System Settings, under General > Login Items & Extensions, to see it in Finder.",
+	/** Callout — button opening System Settings */
+	finderOpenSettings: "Open System Settings",
+	/** Callout — an app lock PIN keeps Filen in Finder off */
+	finderLockBlocked: "Filen in Finder is off while an app lock PIN is set, so your files can't be opened without it.",
+	/** Callout — the app runs from a disk image or a quarantined copy, where macOS refuses Filen in Finder */
+	finderTranslocated: "Move Filen to Applications first, then open it from there to use Filen in Finder.",
+	/** Callout — on, but macOS doesn't know the domain (adding it failed) */
+	finderNotRegistered: "Filen couldn't add itself to Finder. Turn Filen in Finder off and on again.",
+	/** Error — Filen in Finder needs macOS 14 or later */
+	finderErrorUnsupported: "Filen in Finder needs macOS 14 or later.",
+	/** Error — no readable session */
+	finderErrorNoSession: "Filen couldn't read your session. Sign in again, then try again.",
+	/** Error — the Finder location isn't there (off, or macOS hasn't made it yet) */
+	finderErrorNotFound: "Filen isn't showing in Finder yet. Try again in a moment.",
+	/** Network drive page — note on Macs that offer Filen in Finder */
+	finderRecommended: "Filen in Finder is recommended on this Mac; the network drive stays available for apps that need a mounted drive.",
 
 	/** Rail — accessible name of the Mounts entry when a mount or server needs attention */
 	railAttention: "Mounts, needs attention",

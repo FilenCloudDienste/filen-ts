@@ -211,7 +211,7 @@ describe("role status", () => {
 
 	it("gives the drive and every protocol its own icon", () => {
 		expect(Object.keys(PROTOCOL_ICON).sort()).toEqual([...SERVE_PROTOCOLS].sort())
-		expect(new Set(Object.values(ROLE_ICON)).size).toBe(SERVE_PROTOCOLS.length + 1)
+		expect(new Set(Object.values(ROLE_ICON)).size).toBe(SERVE_PROTOCOLS.length + 2)
 	})
 
 	it("writes where a server listens without its scheme, bracketing IPv6", () => {

@@ -1,7 +1,7 @@
 import type { BrowserWindowConstructorOptions } from "electron"
 import { type } from "arktype"
 import type { DesktopPlatform, TitleBarColors } from "@filen/shared/desktop"
-import { VERSION_ARG_PREFIX } from "../shared/channels.ts"
+import { FILE_PROVIDER_ARG, VERSION_ARG_PREFIX } from "../shared/channels.ts"
 
 // filen-web's --canvas, --muted-foreground and --shell-border (blended over the canvas) in rgb, so the window paints
 // the right colours before the page does; the page then keeps them in sync with its theme (syncTitleBarColors).
@@ -34,7 +34,8 @@ export function windowOptions(
 	colors: TitleBarColors,
 	preload: string,
 	devTools: boolean,
-	version: string
+	version: string,
+	fileProvider: boolean
 ): BrowserWindowConstructorOptions {
 	return {
 		width: 1280,
@@ -57,7 +58,7 @@ export function windowOptions(
 			webSecurity: true,
 			spellcheck: false,
 			devTools,
-			additionalArguments: [`${VERSION_ARG_PREFIX}${version}`]
+			additionalArguments: [`${VERSION_ARG_PREFIX}${version}`, ...(fileProvider ? [FILE_PROVIDER_ARG] : [])]
 		}
 	}
 }

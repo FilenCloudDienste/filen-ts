@@ -49,8 +49,8 @@ export function roleStateKey(role: DesktopMountsRole, state: DesktopMountsRoleSt
 	return role === "drive" && state === "running" ? "stateMounted" : ROLE_STATE_KEY[state]
 }
 
-// A role's state as the status dot beside it draws it.
-export type RoleTone = "off" | "busy" | "on" | "error"
+// A role's state as the status dot beside it draws it. `warning`: up to the user to act on, not a failure.
+export type RoleTone = "off" | "busy" | "on" | "warning" | "error"
 
 export const ROLE_STATE_TONE: Record<DesktopMountsRoleState, RoleTone> = {
 	off: "off",

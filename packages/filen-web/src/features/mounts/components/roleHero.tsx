@@ -1,30 +1,30 @@
 import type { ReactNode } from "react"
-import type { DesktopMountsRoleState } from "@filen/shared/desktop"
 import { cn } from "@filen/shared"
 import { SettingsPanel } from "@/features/settings/components/settingsLayout"
 import { ROLE_ICON } from "@/features/mounts/lib/mountsIcons"
-import { ROLE_STATE_TONE, type RoleTone } from "@/features/mounts/lib/mountsStatus.logic"
+import type { RoleTone } from "@/features/mounts/lib/mountsStatus.logic"
 import type { MountsRole } from "@/features/mounts/lib/mountsRoles"
 
 const TONE_CHIP_CLASS: Record<RoleTone, string> = {
 	off: "bg-muted text-muted-foreground",
 	busy: "bg-primary/10 text-primary",
 	on: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
+	warning: "bg-warning/12 text-warning-foreground",
 	error: "bg-destructive/10 text-destructive"
 }
 
-// The top card of a Mounts page and the drive's card in the overview, in the Settings account card's shape: the
-// role's icon tinted by its state, a title over a status line, its switch, then its most used rows.
+// The top card of a Mounts page and the drive's and Filen in Finder's cards in the overview, in the Settings account
+// card's shape: the role's icon tinted by its state's tone, a title over a status line, its switch, then its most used rows.
 export function RoleHero({
 	role,
-	state,
+	tone,
 	title,
 	status,
 	control,
 	children
 }: {
 	role: MountsRole
-	state: DesktopMountsRoleState
+	tone: RoleTone
 	title: ReactNode
 	status: ReactNode
 	control: ReactNode
@@ -39,10 +39,7 @@ export function RoleHero({
 				className="flex items-center gap-4 p-5"
 			>
 				<span
-					className={cn(
-						"flex size-12 shrink-0 items-center justify-center rounded-2xl transition-colors",
-						TONE_CHIP_CLASS[ROLE_STATE_TONE[state]]
-					)}
+					className={cn("flex size-12 shrink-0 items-center justify-center rounded-2xl transition-colors", TONE_CHIP_CLASS[tone])}
 				>
 					<Icon
 						aria-hidden="true"

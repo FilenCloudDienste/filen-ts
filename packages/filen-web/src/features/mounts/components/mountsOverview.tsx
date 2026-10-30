@@ -3,16 +3,19 @@ import { LayoutGridIcon } from "lucide-react"
 import { desktopPlatform } from "@/lib/desktop"
 import { LoadingState } from "@/components/loadingState"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
-import { offeredProtocols } from "@/features/mounts/lib/mountsRoles"
+import { FINDER_ROLE, offeredProtocols, primaryRoles } from "@/features/mounts/lib/mountsRoles"
+import { MOUNTS_OFFER } from "@/features/mounts/lib/mountsOffer"
 import { useDriveControls } from "@/features/mounts/hooks/useDriveControls"
 import { FuseCallout } from "@/features/mounts/components/fuseCallout"
 import { DriveHero } from "@/features/mounts/components/driveHero"
+import { FinderCallouts, FinderHero } from "@/features/mounts/components/finderHero"
 import { ServeTile } from "@/features/mounts/components/serveHero"
 
 // The platform never changes mid-session.
 const PROTOCOLS = offeredProtocols(desktopPlatform())
+const PRIMARY_ROLES = primaryRoles(MOUNTS_OFFER.finder)
 
-// The bare /mounts: the network drive's card over a grid with one tile per server, each switchable in place through
+// The bare /mounts: Filen in Finder's card where offered, the network drive's card, then a grid with one tile per server, each switchable in place through
 // the same path as its own page. Everything is the overview the page already follows.
 export function MountsOverview() {
 	const { t } = useTranslation(["mounts", "common"])
@@ -32,14 +35,29 @@ export function MountsOverview() {
 			) : (
 				<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-6 pb-12 sm:px-6">
 					<div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-						<div className="flex flex-col gap-3">
-							<DriveHero
-								controls={controls}
-								overview
-							/>
-							{controls.available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
-							<FuseCallout />
-						</div>
+						{PRIMARY_ROLES.map(role =>
+							role === FINDER_ROLE ? (
+								<div
+									key={role}
+									className="flex flex-col gap-3"
+								>
+									<FinderHero overview />
+									<FinderCallouts />
+								</div>
+							) : (
+								<div
+									key={role}
+									className="flex flex-col gap-3"
+								>
+									<DriveHero
+										controls={controls}
+										overview
+									/>
+									{controls.available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
+									<FuseCallout />
+								</div>
+							)
+						)}
 						<section className="flex flex-col gap-2">
 							<h2 className="px-5 text-xs font-medium tracking-wider text-muted-foreground uppercase">
 								{t("mountsServersHeading")}

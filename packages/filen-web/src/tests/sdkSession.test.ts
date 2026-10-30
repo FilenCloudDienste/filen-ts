@@ -281,7 +281,7 @@ describe("desktop vault", () => {
 			logs: { export: () => Promise.reject(new Error("unused")) },
 			sync: unusedSync,
 			mounts: unusedMounts,
-			fileProvider: { state: unused, enable: unused, disable: unused },
+			fileProvider: { supported: false, state: unused, enable: unused, disable: unused, reveal: unused, openSettings: unused },
 			setTitleBarColors: () => undefined,
 			onWindowState: () => () => undefined,
 			showWindow: () => undefined

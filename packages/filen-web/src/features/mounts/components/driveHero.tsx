@@ -8,7 +8,7 @@ import { SettingsRow } from "@/features/settings/components/settingsLayout"
 import { ActionRow } from "@/features/desktop/components/actionRow"
 import { mountsApi, useMountsStore } from "@/features/mounts/lib/mountsStore"
 import { runMountsAction } from "@/features/mounts/lib/mountsActions"
-import { FUSE_PROVIDER_KEY, roleStateKey } from "@/features/mounts/lib/mountsStatus.logic"
+import { FUSE_PROVIDER_KEY, ROLE_STATE_TONE, roleStateKey } from "@/features/mounts/lib/mountsStatus.logic"
 import type { DriveControls } from "@/features/mounts/hooks/useDriveControls"
 import { RoleHero } from "@/features/mounts/components/roleHero"
 import { RoleStatusDot } from "@/features/mounts/components/roleStatus"
@@ -50,7 +50,7 @@ export function DriveHero({ controls, overview }: { controls: DriveControls; ove
 	return (
 		<RoleHero
 			role="drive"
-			state={drive.state}
+			tone={ROLE_STATE_TONE[drive.state]}
 			title={
 				overview ? (
 					<Link
@@ -67,7 +67,7 @@ export function DriveHero({ controls, overview }: { controls: DriveControls; ove
 			status={
 				overview ? (
 					<>
-						<RoleStatusDot state={drive.state} />
+						<RoleStatusDot tone={ROLE_STATE_TONE[drive.state]} />
 						<span className="truncate">{provider === null ? stateLabel : t("driveOpenDescription", { provider })}</span>
 					</>
 				) : (

@@ -4,7 +4,13 @@ import { fileProviderChannel, type SessionRead } from "../shared/channels.ts"
 import type { FileProviderAddon, FileProviderDomain } from "../main/fileProvider/addon.ts"
 import { domainIdentifier, fileProviderAuth, THUMBNAIL_MEM_BUDGET_BYTES } from "../main/fileProvider/authFile.ts"
 import { registerFileProviderIpc } from "../main/fileProvider/ipc.ts"
-import { createFileProviderService, type FileProviderDeps } from "../main/fileProvider/service.ts"
+import {
+	createFileProviderService,
+	fileProviderDirectory,
+	fileProviderErrorCode,
+	type FileProviderDeps,
+	runsTranslocated
+} from "../main/fileProvider/service.ts"
 import { createFileProviderStore } from "../main/fileProvider/store.ts"
 import type { IpcEvent, IpcMain } from "../main/pages.ts"
 import { memoryFile } from "./fileFakes.ts"
@@ -27,10 +33,14 @@ function fakeAddon() {
 	const domains = new Map<string, FileProviderDomain>()
 	const fail = new Set<keyof FileProviderAddon>()
 	const pushed: string[] = []
+	// What addDomain rejects with when it fails; the addon's "no auth service" by default.
+	const failure = { domain: "FilenFileProvider", code: 3 }
+	// What macOS reports for a newly added domain's switch.
+	const added = { userEnabled: true }
 
 	function maybeFail(method: keyof FileProviderAddon): Promise<void> {
 		if (fail.has(method)) {
-			return Promise.reject(Object.assign(new Error("failed"), { domain: "FilenFileProvider", code: 3 }))
+			return Promise.reject(Object.assign(new Error("failed"), failure))
 		}
 
 		return Promise.resolve()
@@ -40,7 +50,7 @@ function fakeAddon() {
 		addDomain: async ({ identifier, displayName }) => {
 			calls.push(`add ${identifier}`)
 			await maybeFail("addDomain")
-			domains.set(identifier, { identifier, displayName, userEnabled: true })
+			domains.set(identifier, { identifier, displayName, userEnabled: added.userEnabled })
 		},
 		removeDomain: async ({ identifier }) => {
 			calls.push(`remove ${identifier}`)
@@ -60,10 +70,10 @@ function fakeAddon() {
 		}
 	}
 
-	return { addon, calls, domains, fail, pushed }
+	return { addon, calls, domains, fail, failure, added, pushed }
 }
 
-function setup(options: { session?: SessionRead; supported?: boolean; pin?: boolean } = {}) {
+function setup(options: { session?: SessionRead; supported?: boolean; pin?: boolean; translocated?: boolean } = {}) {
 	const fake = fakeAddon()
 	const files = new Map<string, ReturnType<typeof memoryFile>>()
 	const fileFor = (userId: string) => {
@@ -79,7 +89,11 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 	const state = {
 		session: options.session ?? ({ status: "present", blob: blob(7n) } as SessionRead),
 		pin: options.pin ?? false,
-		loads: 0
+		loads: 0,
+		cloudStorage: ["Filen-user@example.com", "iCloud Drive"],
+		openFailure: "",
+		opened: [] as string[],
+		settingsOpened: 0
 	}
 	const clearOwed = memoryFile()
 	const warnings: string[] = []
@@ -95,6 +109,18 @@ function setup(options: { session?: SessionRead; supported?: boolean; pin?: bool
 		store: createFileProviderStore(fileFor, message => warnings.push(message)),
 		clearOwed,
 		pinSet: () => state.pin,
+		translocated: () => options.translocated ?? false,
+		cloudStorage: { root: "/Users/a/Library/CloudStorage", list: () => Promise.resolve(state.cloudStorage) },
+		openPath: target => {
+			state.opened.push(target)
+
+			return Promise.resolve(state.openFailure)
+		},
+		openSettings: () => {
+			state.settingsOpened++
+
+			return Promise.resolve()
+		},
 		log: { info: message => infos.push(message), warn: message => warnings.push(message) }
 	}
 
@@ -139,18 +165,55 @@ describe("file provider service", () => {
 
 	it("adds the domain and pushes the session on enable, and persists the switch", async () => {
 		const { service, calls, pushed, files } = setup()
-		const state = await service.enable()
 
-		expect(state).toEqual({ supported: true, enabled: true, lockBlocked: false, userEnabled: true })
+		await expect(service.enable()).resolves.toEqual({
+			ok: true,
+			value: { supported: true, enabled: true, lockBlocked: false, userEnabled: true, translocated: false }
+		})
 		expect(calls).toEqual([`add ${domain}`, `push ${domain}`])
 		expect(pushed).toHaveLength(1)
 		expect(files("7").data?.toString()).toBe(JSON.stringify({ version: 1, enabled: true }))
 	})
 
-	it("refuses to enable while a PIN is set, where unsupported, and without a session", async () => {
-		await expect(setup({ pin: true }).service.enable()).rejects.toThrow("app lock set")
-		await expect(setup({ supported: false }).service.enable()).rejects.toThrow("unsupported")
-		await expect(setup({ session: { status: "unreadable" } }).service.enable()).rejects.toThrow("no session")
+	it("refuses to enable while a PIN is set, where unsupported, when translocated, and without a session", async () => {
+		await expect(setup({ pin: true }).service.enable()).resolves.toEqual({ ok: false, error: { code: "appLocked" } })
+		await expect(setup({ supported: false }).service.enable()).resolves.toEqual({ ok: false, error: { code: "unsupported" } })
+		await expect(setup({ session: { status: "unreadable" } }).service.enable()).resolves.toEqual({
+			ok: false,
+			error: { code: "noSession" }
+		})
+
+		const translocated = setup({ translocated: true })
+
+		await expect(translocated.service.enable()).resolves.toEqual({ ok: false, error: { code: "translocated" } })
+		expect(translocated.state.loads).toBe(0)
+		await expect(translocated.service.state()).resolves.toMatchObject({ enabled: false, translocated: true })
+	})
+
+	it("keeps it off for the run when macOS refuses the domain as translocated", async () => {
+		const { service, fail, failure, files } = setup()
+
+		fail.add("addDomain")
+		failure.domain = "NSFileProviderErrorDomain"
+		failure.code = -2002
+
+		await expect(service.enable()).resolves.toEqual({ ok: false, error: { code: "translocated" } })
+		expect(files("7").data).toBeNull()
+		await expect(service.state()).resolves.toMatchObject({ enabled: false, translocated: true })
+
+		fail.delete("addDomain")
+		await expect(service.enable()).resolves.toEqual({ ok: false, error: { code: "translocated" } })
+	})
+
+	it("answers a domain macOS added switched off, and the switch once the user turned it on", async () => {
+		const { service, added, domains } = setup()
+
+		added.userEnabled = false
+
+		await expect(service.enable()).resolves.toMatchObject({ ok: true, value: { enabled: true, userEnabled: false } })
+
+		domains.set(domain, { identifier: domain, displayName: "user@example.com", userEnabled: true })
+		await expect(service.state()).resolves.toMatchObject({ enabled: true, userEnabled: true })
 	})
 
 	it("clears the session before removing the domain on disable", async () => {
@@ -164,7 +227,7 @@ describe("file provider service", () => {
 
 		expect(calls).toEqual([`clear ${domain}`, `remove ${domain}`])
 		expect(infos.slice(0, 2)).toEqual(["file provider: session cleared", "file provider: domain removed"])
-		expect(state.enabled).toBe(false)
+		expect(state).toMatchObject({ ok: true, value: { enabled: false } })
 		expect(files("7").data).toBeNull()
 	})
 
@@ -269,7 +332,7 @@ describe("file provider service", () => {
 		await service.enable()
 		fail.add("removeDomain")
 
-		await expect(service.disable()).rejects.toThrow("failed")
+		await expect(service.disable()).resolves.toEqual({ ok: false, error: { code: "unknown", message: "FilenFileProvider 3" } })
 		expect(files("7").data).toBeNull()
 	})
 
@@ -279,13 +342,117 @@ describe("file provider service", () => {
 		await service.enable()
 		domains.set(domain, { identifier: domain, displayName: "user@example.com", userEnabled: false })
 
-		await expect(service.state()).resolves.toEqual({ supported: true, enabled: true, lockBlocked: false, userEnabled: false })
-		await expect(setup({ supported: false }).service.state()).resolves.toEqual({
+		await expect(service.state()).resolves.toEqual({
+			supported: true,
+			enabled: true,
+			lockBlocked: false,
+			userEnabled: false,
+			translocated: false
+		})
+		await expect(setup({ supported: false, translocated: true }).service.state()).resolves.toEqual({
 			supported: false,
 			enabled: false,
 			lockBlocked: false,
-			userEnabled: null
+			userEnabled: null,
+			translocated: false
 		})
+	})
+
+	it("opens the user's directory in Finder", async () => {
+		const { service, state } = setup()
+
+		await service.enable()
+
+		await expect(service.reveal()).resolves.toEqual({ ok: true, value: null })
+		expect(state.opened).toEqual(["/Users/a/Library/CloudStorage/Filen-user@example.com"])
+	})
+
+	it("answers notFound while off, before macOS made the directory, and when Finder cannot open it", async () => {
+		const { service, state } = setup()
+
+		await expect(service.reveal()).resolves.toEqual({ ok: false, error: { code: "notFound" } })
+		expect(state.loads).toBe(0)
+
+		await service.enable()
+		state.cloudStorage = ["iCloud Drive"]
+		await expect(service.reveal()).resolves.toEqual({ ok: false, error: { code: "notFound" } })
+
+		state.cloudStorage = ["Filen-user@example.com"]
+		state.openFailure = "Failed to open path"
+		await expect(service.reveal()).resolves.toEqual({ ok: false, error: { code: "notFound" } })
+		expect(state.opened).toHaveLength(1)
+	})
+
+	it("opens System Settings only where supported", async () => {
+		const supported = setup()
+		const unsupported = setup({ supported: false })
+
+		await supported.service.openSettings()
+		await unsupported.service.openSettings()
+
+		expect(supported.state.settingsOpened).toBe(1)
+		expect(unsupported.state.settingsOpened).toBe(0)
+	})
+})
+
+describe("fileProviderErrorCode", () => {
+	function nsError(domain: string, code: number): Error {
+		return Object.assign(new Error("failed"), { domain, code })
+	}
+
+	it("maps the system's errors by domain and code", () => {
+		expect(fileProviderErrorCode(nsError("NSFileProviderErrorDomain", -2002))).toBe("translocated")
+		expect(fileProviderErrorCode(nsError("NSFileProviderErrorDomain", -2001))).toBe("extensionMissing")
+		expect(fileProviderErrorCode(nsError("NSFileProviderErrorDomain", -2014))).toBe("extensionMissing")
+		expect(fileProviderErrorCode(nsError("NSFileProviderErrorDomain", -1000))).toBe("unknown")
+		expect(fileProviderErrorCode(nsError("FilenFileProvider", 4))).toBe("timeout")
+		expect(fileProviderErrorCode(nsError("FilenFileProvider", 3))).toBe("unknown")
+		expect(fileProviderErrorCode(nsError("NSCocoaErrorDomain", -2002))).toBe("unknown")
+	})
+
+	it("maps main's own refusals, and anything else to unknown", () => {
+		expect(fileProviderErrorCode(Object.assign(new Error("app lock set"), { code: "app lock set" }))).toBe("appLocked")
+		expect(fileProviderErrorCode(Object.assign(new Error("x"), { code: "EACCES" }))).toBe("unknown")
+		expect(fileProviderErrorCode("thrown string")).toBe("unknown")
+	})
+})
+
+describe("fileProviderDirectory", () => {
+	it("finds the release build's directory first, then any Filen build's", () => {
+		expect(fileProviderDirectory(["Filen Dev-a@b.c", "Filen-a@b.c"], "a@b.c")).toBe("Filen-a@b.c")
+		expect(fileProviderDirectory(["iCloud Drive", "Filen Dev-a@b.c"], "a@b.c")).toBe("Filen Dev-a@b.c")
+	})
+
+	it("never takes another account's directory or another provider's", () => {
+		expect(fileProviderDirectory(["Filen-other@b.c", "Dropbox-a@b.c"], "a@b.c")).toBeNull()
+		expect(fileProviderDirectory([], "a@b.c")).toBeNull()
+	})
+
+	it("compares names in NFC", () => {
+		expect(fileProviderDirectory(["Filen-jose\u0301@b.c"], "jos\u00e9@b.c")).toBe("Filen-jose\u0301@b.c")
+	})
+})
+
+describe("runsTranslocated", () => {
+	it("is true for a packaged app run from a translocated copy or a disk image", () => {
+		const app = "/Contents/Resources/app.asar"
+
+		expect(
+			runsTranslocated({
+				packaged: true,
+				inApplications: false,
+				appPath: `/private/var/folders/x/AppTranslocation/y/d/Filen.app${app}`
+			})
+		).toBe(true)
+		expect(runsTranslocated({ packaged: true, inApplications: false, appPath: `/Volumes/Filen/Filen.app${app}` })).toBe(true)
+	})
+
+	it("is false in Applications, elsewhere on disk, and for development runs", () => {
+		const app = "/Contents/Resources/app.asar"
+
+		expect(runsTranslocated({ packaged: true, inApplications: true, appPath: `/Applications/Filen.app${app}` })).toBe(false)
+		expect(runsTranslocated({ packaged: true, inApplications: false, appPath: `/Users/a/Desktop/Filen.app${app}` })).toBe(false)
+		expect(runsTranslocated({ packaged: false, inApplications: false, appPath: "/Volumes/Code/filen-desktop" })).toBe(false)
 	})
 })
 
@@ -318,5 +485,21 @@ describe("file provider ipc", () => {
 		await expect(Promise.resolve(state?.(event("filen://app/")))).resolves.toMatchObject({ supported: true })
 		expect(() => state?.(event("https://example.com/"))).toThrow("untrusted sender")
 		expect(() => state?.(event("filen://app/"), "extra")).toThrow("invalid file provider payload")
+	})
+
+	it("registers reveal and openSettings with the same checks", async () => {
+		const { main, handlers } = ipc()
+		const { service, state } = setup()
+
+		registerFileProviderIpc(main, service, url => url === "filen://app/")
+
+		const reveal = handlers.get(fileProviderChannel("reveal"))
+		const openSettings = handlers.get(fileProviderChannel("openSettings"))
+
+		await expect(Promise.resolve(reveal?.(event("filen://app/")))).resolves.toEqual({ ok: false, error: { code: "notFound" } })
+		await Promise.resolve(openSettings?.(event("filen://app/")))
+		expect(state.settingsOpened).toBe(1)
+		expect(() => openSettings?.(event("https://example.com/"))).toThrow("untrusted sender")
+		expect(() => reveal?.(event("filen://app/"), "/etc")).toThrow("invalid file provider payload")
 	})
 })

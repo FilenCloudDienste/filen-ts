@@ -44,7 +44,7 @@ export function ServeHero({ controls, credentials }: { controls: ServeControls; 
 	return (
 		<RoleHero
 			role={serve.protocol}
-			state={serve.state}
+			tone={ROLE_STATE_TONE[serve.state]}
 			title={t(roleStateKey(serve.protocol, serve.state))}
 			status={<span className="line-clamp-2">{t(CONNECT_HINT_KEY[serve.protocol])}</span>}
 			control={<ServeSwitch controls={controls} />}
@@ -111,7 +111,7 @@ export function ServeTile({ protocol }: { protocol: DesktopServeProtocol }) {
 				<ServeSwitch controls={controls} />
 			</div>
 			<div className="flex min-h-8 items-center gap-2 text-sm">
-				<RoleStatusDot state={serve.state} />
+				<RoleStatusDot tone={ROLE_STATE_TONE[serve.state]} />
 				{running && url !== null ? (
 					<>
 						<span

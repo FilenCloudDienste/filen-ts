@@ -1,6 +1,7 @@
 import {
 	AppWindowIcon,
 	ArchiveIcon,
+	CloudIcon,
 	DatabaseIcon,
 	GlobeIcon,
 	HardDriveIcon,
@@ -24,4 +25,5 @@ export const PROTOCOL_ICON: Record<ServeProtocol, LucideIcon> = {
 	nfs: NetworkIcon
 }
 
-export const ROLE_ICON: Record<MountsRole, LucideIcon> = { drive: HardDriveIcon, ...PROTOCOL_ICON }
+// Filen in Finder is the cloud showing in Finder; the network drive a disk.
+export const ROLE_ICON: Record<MountsRole, LucideIcon> = { finder: CloudIcon, drive: HardDriveIcon, ...PROTOCOL_ICON }

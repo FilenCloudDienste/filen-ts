@@ -8,7 +8,9 @@ const call = checkedCalls<FileProviderService>("file provider")
 const CALLS: Record<FileProviderCall, CheckedCall<FileProviderService>> = {
 	state: call(type([]), service => service.state()),
 	enable: call(type([]), service => service.enable()),
-	disable: call(type([]), service => service.disable())
+	disable: call(type([]), service => service.disable()),
+	reveal: call(type([]), service => service.reveal()),
+	openSettings: call(type([]), service => service.openSettings())
 }
 
 // Every request answers the app's own top-level document only and takes no arguments.

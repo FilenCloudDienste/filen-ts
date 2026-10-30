@@ -47,7 +47,7 @@ import { parseHeaders } from "./headers.ts"
 import { createFileLog } from "./fileLog.ts"
 import { createFileProviderAddon, type FileProviderAddonContext, fileProviderAddonPath } from "./fileProvider/addon.ts"
 import { registerFileProviderIpc } from "./fileProvider/ipc.ts"
-import { createFileProviderService } from "./fileProvider/service.ts"
+import { createFileProviderService, runsTranslocated } from "./fileProvider/service.ts"
 import { createFileProviderStore } from "./fileProvider/store.ts"
 import { appIdentity, closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
@@ -517,6 +517,10 @@ const mountsService = createMountsService({
 	log: { info, warn }
 })
 
+// System Settings where extensions (File Providers among them) are switched on.
+const FILE_PROVIDER_SETTINGS_URL = "x-apple.systempreferences:com.apple.ExtensionsPreferences"
+const CLOUD_STORAGE = path.join(os.homedir(), "Library", "CloudStorage")
+
 // Filen in Finder (macOS 14 and later): the addon loads only for a user who has it on, or to switch it off.
 const fileProviderContext: FileProviderAddonContext = {
 	packaged: app.isPackaged,
@@ -528,10 +532,14 @@ const fileProviderContext: FileProviderAddonContext = {
 	exists: existsSync,
 	load: file => createRequire(import.meta.url)(file)
 }
-let fileProviderSupported: boolean | undefined
+let fileProviderSupport: boolean | undefined
+
+function fileProviderSupported(): boolean {
+	return (fileProviderSupport ??= fileProviderAddonPath(fileProviderContext) !== null)
+}
 
 const fileProvider = createFileProviderService({
-	supported: () => (fileProviderSupported ??= fileProviderAddonPath(fileProviderContext) !== null),
+	supported: fileProviderSupported,
 	addon: createFileProviderAddon(fileProviderContext),
 	vault: sessionVault,
 	store: createFileProviderStore(userId => {
@@ -547,6 +555,26 @@ const fileProvider = createFileProviderService({
 	}, warn),
 	clearOwed: atomicFile(path.join(userDataPath, "fileProvider.clearOwed")),
 	pinSet: () => appLock?.status().enabled ?? true,
+	translocated: () =>
+		runsTranslocated({ packaged: app.isPackaged, inApplications: app.isInApplicationsFolder(), appPath: app.getAppPath() }),
+	cloudStorage: {
+		root: CLOUD_STORAGE,
+		list: async () => {
+			try {
+				const entries = await readdir(CLOUD_STORAGE, { withFileTypes: true })
+
+				return entries.filter(entry => entry.isDirectory()).map(entry => entry.name)
+			} catch (error) {
+				if (errorCode(error) === "ENOENT") {
+					return []
+				}
+
+				throw error
+			}
+		}
+	},
+	openPath: target => shell.openPath(target),
+	openSettings: () => shell.openExternal(FILE_PROVIDER_SETTINGS_URL),
 	log: { info, warn }
 })
 
@@ -803,7 +831,8 @@ function createWindow(): void {
 			initialColors(nativeTheme.shouldUseDarkColors),
 			path.join(import.meta.dirname, "preload.cjs"),
 			!app.isPackaged,
-			app.getVersion()
+			app.getVersion(),
+			fileProviderSupported()
 		)
 	)
 

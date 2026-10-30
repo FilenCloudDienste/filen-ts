@@ -139,20 +139,25 @@ describe("syncIndexRedirectTarget", () => {
 })
 
 describe("mountsIndexRedirectTarget", () => {
+	const MAC = { platform: "darwin", finder: true } as const
+	const MAC_13 = { platform: "darwin", finder: false } as const
+
 	it("waits for the stored value", () => {
-		expect(mountsIndexRedirectTarget(undefined, "darwin")).toBeUndefined()
+		expect(mountsIndexRedirectTarget(undefined, MAC)).toBeUndefined()
 	})
 
 	it("stays on the overview with nothing stored or the overview stored", () => {
-		expect(mountsIndexRedirectTarget(null, "darwin")).toBeNull()
-		expect(mountsIndexRedirectTarget(MOUNTS_OVERVIEW, "darwin")).toBeNull()
+		expect(mountsIndexRedirectTarget(null, MAC)).toBeNull()
+		expect(mountsIndexRedirectTarget(MOUNTS_OVERVIEW, MAC)).toBeNull()
 	})
 
-	it("reopens a role the platform offers, and nothing else", () => {
-		expect(mountsIndexRedirectTarget("drive", "darwin")).toBe("drive")
-		expect(mountsIndexRedirectTarget("webdav", "win32")).toBe("webdav")
-		expect(mountsIndexRedirectTarget("nfs", "linux")).toBe("nfs")
-		expect(mountsIndexRedirectTarget("nfs", "win32")).toBeNull()
-		expect(mountsIndexRedirectTarget("gopher", "darwin")).toBeNull()
+	it("reopens a role the app offers, and nothing else", () => {
+		expect(mountsIndexRedirectTarget("drive", MAC)).toBe("drive")
+		expect(mountsIndexRedirectTarget("finder", MAC)).toBe("finder")
+		expect(mountsIndexRedirectTarget("finder", MAC_13)).toBeNull()
+		expect(mountsIndexRedirectTarget("webdav", { platform: "win32", finder: false })).toBe("webdav")
+		expect(mountsIndexRedirectTarget("nfs", { platform: "linux", finder: false })).toBe("nfs")
+		expect(mountsIndexRedirectTarget("nfs", { platform: "win32", finder: false })).toBeNull()
+		expect(mountsIndexRedirectTarget("gopher", MAC)).toBeNull()
 	})
 })

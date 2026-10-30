@@ -14,6 +14,7 @@ import type {
 } from "@filen/shared/desktop"
 import {
 	CHANNELS,
+	FILE_PROVIDER_ARG,
 	type FileProviderCall,
 	fileProviderChannel,
 	type MountsCall,
@@ -393,9 +394,12 @@ const bridge: DesktopBridge = {
 		}
 	},
 	fileProvider: {
+		supported: process.argv.includes(FILE_PROVIDER_ARG),
 		state: () => fileProviderInvoke("state"),
 		enable: () => fileProviderInvoke("enable"),
-		disable: () => fileProviderInvoke("disable")
+		disable: () => fileProviderInvoke("disable"),
+		reveal: () => fileProviderInvoke("reveal"),
+		openSettings: () => fileProviderInvoke("openSettings")
 	},
 	setTitleBarColors: colors => {
 		ipcRenderer.send(CHANNELS.setTitleBarColors, colors)

@@ -18,6 +18,7 @@ import { mountsApi, useMountsStats, useMountsStore } from "@/features/mounts/lib
 import { callMounts, runMountsAction } from "@/features/mounts/lib/mountsActions"
 import { MOUNT_POINT_PROBLEM_KEY } from "@/features/mounts/lib/mountsErrors.logic"
 import { driveReadOnlyLocked } from "@/features/mounts/lib/mountsStatus.logic"
+import { MOUNTS_OFFER } from "@/features/mounts/lib/mountsOffer"
 import { useDriveControls } from "@/features/mounts/hooks/useDriveControls"
 import { HeroSection, MountsNoticeBanner, MountsPage, RoleErrorCallout } from "@/features/mounts/components/mountsPage"
 import { DriveHero } from "@/features/mounts/components/driveHero"
@@ -249,7 +250,8 @@ function TransfersGroup({ mounted }: { mounted: boolean }) {
 }
 
 // The network drive: a hero with its switch, where it mounts with Open and its cache, then where and how it mounts,
-// what it is uploading, and the cache's own settings.
+// what it is uploading, and the cache's own settings. Where Filen in Finder is offered, a note says that is the
+// recommended way and the drive the advanced one.
 export function DrivePage() {
 	const { t } = useTranslation("mounts")
 	const controls = useDriveControls()
@@ -270,6 +272,7 @@ export function DrivePage() {
 					controls={controls}
 					overview={false}
 				/>
+				{MOUNTS_OFFER.finder ? <DesktopCallout tone="info">{t("finderRecommended")}</DesktopCallout> : null}
 				{available ? null : <DesktopCallout tone="error">{t("unavailable")}</DesktopCallout>}
 				<FuseCallout />
 				<MountsNoticeBanner scope="drive" />

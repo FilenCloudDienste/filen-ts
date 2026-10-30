@@ -654,7 +654,7 @@ export interface DesktopMounts {
 }
 
 // Filen in Finder: the macOS File Provider extension (macOS 14 and later), one domain for the signed-in user. Off a
-// supported Mac `supported` is false and enabling rejects.
+// supported Mac `supported` is false and enabling is refused.
 export interface DesktopFileProviderState {
 	supported: boolean
 	// Switched on for the signed-in user.
@@ -663,12 +663,39 @@ export interface DesktopFileProviderState {
 	lockBlocked: boolean
 	// macOS's own switch for the domain (System Settings); null while no domain of the user is registered.
 	userEnabled: boolean | null
+	// The app runs from a translocated copy or a disk image, where macOS refuses the extension; enabling is refused.
+	translocated: boolean
 }
 
+export type DesktopFileProviderErrorCode =
+	| "unsupported"
+	| "appLocked"
+	| "noSession"
+	| "translocated"
+	| "extensionMissing"
+	| "notFound"
+	| "timeout"
+	| "unknown"
+
+// `message`: the system's error domain and code, for the log only.
+export interface DesktopFileProviderError {
+	code: DesktopFileProviderErrorCode
+	message?: string
+}
+
+export type DesktopFileProviderResult<T> = { ok: true; value: T } | { ok: false; error: DesktopFileProviderError }
+
 export interface DesktopFileProvider {
+	// Fixed for the app's run, so a page knows without asking.
+	readonly supported: boolean
 	state(): Promise<DesktopFileProviderState>
-	// Rejects where unsupported, while a PIN is set, without a readable session, or when macOS refuses the domain.
-	enable(): Promise<DesktopFileProviderState>
+	// Refused where unsupported, while a PIN is set, when translocated, without a readable session, or when macOS
+	// refuses the domain.
+	enable(): Promise<DesktopFileProviderResult<DesktopFileProviderState>>
 	// The extension forgets the session and the domain is removed with every file it replicated.
-	disable(): Promise<DesktopFileProviderState>
+	disable(): Promise<DesktopFileProviderResult<DesktopFileProviderState>>
+	// Opens the domain's directory in Finder; `notFound` while it is off or macOS has not made it yet.
+	reveal(): Promise<DesktopFileProviderResult<null>>
+	// Opens System Settings where extensions are switched on.
+	openSettings(): Promise<void>
 }

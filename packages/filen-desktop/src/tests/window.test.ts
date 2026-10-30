@@ -6,7 +6,7 @@ const colors = initialColors(true)
 
 describe("windowOptions", () => {
 	it("keeps native traffic lights on macOS and draws no overlay", () => {
-		const options = windowOptions("darwin", colors, "/p.cjs", false, "4.0.0")
+		const options = windowOptions("darwin", colors, "/p.cjs", false, "4.0.0", false)
 
 		expect(options.titleBarStyle).toBe("hidden")
 		expect(options.trafficLightPosition).toEqual({ x: 10, y: 8 })
@@ -14,14 +14,14 @@ describe("windowOptions", () => {
 	})
 
 	it.each(["win32", "linux"] as const)("uses the themed controls overlay on %s", platform => {
-		const options = windowOptions(platform, colors, "/p.cjs", false, "4.0.0")
+		const options = windowOptions(platform, colors, "/p.cjs", false, "4.0.0", false)
 
 		expect(options.titleBarOverlay).toEqual({ color: colors.color, symbolColor: colors.symbolColor, height: TITLE_BAR_OVERLAY_HEIGHT })
 		expect(options.trafficLightPosition).toBeUndefined()
 	})
 
 	it("always sandboxes the renderer", () => {
-		expect(windowOptions("linux", colors, "/p.cjs", true, "4.0.0").webPreferences).toMatchObject({
+		expect(windowOptions("linux", colors, "/p.cjs", true, "4.0.0", false).webPreferences).toMatchObject({
 			sandbox: true,
 			contextIsolation: true,
 			nodeIntegration: false
@@ -31,8 +31,15 @@ describe("windowOptions", () => {
 
 describe("windowOptions version", () => {
 	it("hands the app version to the preload", () => {
-		expect(windowOptions("darwin", colors, "/p.cjs", false, "4.0.0").webPreferences?.additionalArguments).toEqual([
+		expect(windowOptions("darwin", colors, "/p.cjs", false, "4.0.0", false).webPreferences?.additionalArguments).toEqual([
 			"--filen-app-version=4.0.0"
+		])
+	})
+
+	it("tells the preload when Filen in Finder is supported", () => {
+		expect(windowOptions("darwin", colors, "/p.cjs", false, "4.0.0", true).webPreferences?.additionalArguments).toEqual([
+			"--filen-app-version=4.0.0",
+			"--filen-file-provider"
 		])
 	})
 })
@@ -51,8 +58,8 @@ describe("drawsOwnBorder", () => {
 
 describe("windowOptions accent colour", () => {
 	it("tints the Windows 11 border only on Windows", () => {
-		expect(windowOptions("win32", colors, "/p.cjs", false, "4.0.0").accentColor).toBe(colors.border)
-		expect(windowOptions("linux", colors, "/p.cjs", false, "4.0.0").accentColor).toBeUndefined()
+		expect(windowOptions("win32", colors, "/p.cjs", false, "4.0.0", false).accentColor).toBe(colors.border)
+		expect(windowOptions("linux", colors, "/p.cjs", false, "4.0.0", false).accentColor).toBeUndefined()
 	})
 })
 
