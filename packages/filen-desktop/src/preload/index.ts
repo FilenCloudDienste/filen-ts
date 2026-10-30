@@ -14,6 +14,8 @@ import type {
 } from "@filen/shared/desktop"
 import {
 	CHANNELS,
+	type FileProviderCall,
+	fileProviderChannel,
 	type MountsCall,
 	mountsChannel,
 	type MountsSubscription,
@@ -173,6 +175,10 @@ ipcRenderer.on(CHANNELS.mountsStats, (_event, stats: DesktopMountsStats) => {
 
 function mountsInvoke(call: MountsCall, ...args: unknown[]): Promise<never> {
 	return ipcRenderer.invoke(mountsChannel(call), ...args) as Promise<never>
+}
+
+function fileProviderInvoke(call: FileProviderCall): Promise<never> {
+	return ipcRenderer.invoke(fileProviderChannel(call)) as Promise<never>
 }
 
 const bridge: DesktopBridge = {
@@ -385,6 +391,11 @@ const bridge: DesktopBridge = {
 		retryHost: () => {
 			void mountsInvoke("retryHost")
 		}
+	},
+	fileProvider: {
+		state: () => fileProviderInvoke("state"),
+		enable: () => fileProviderInvoke("enable"),
+		disable: () => fileProviderInvoke("disable")
 	},
 	setTitleBarColors: colors => {
 		ipcRenderer.send(CHANNELS.setTitleBarColors, colors)

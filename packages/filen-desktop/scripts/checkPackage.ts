@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 import { isFeedPlatform } from "./feed.ts"
+import { APPEX_NAME } from "./fileProviderAppex.ts"
 import { nativeArchOf } from "./nativeArch.ts"
 import { MAC_TEAM } from "./signRclone.ts"
 
@@ -13,7 +14,9 @@ import { MAC_TEAM } from "./signRclone.ts"
 // carries. With --signed, the Windows one must also pin the publisher, which is what makes the updater verify an
 // update's signature, and rclone.exe must carry the publisher's valid Authenticode signature; on macOS the addon and
 // rclone must carry the team's valid signature (the hardened runtime loads nothing else), rclone with the hardened
-// runtime, a secure timestamp and exactly build/entitlements.rclone.plist.
+// runtime, a secure timestamp and exactly build/entitlements.rclone.plist. A macOS app also carries the File Provider
+// addon and extension (Contents/PlugIns) built for its arch; with --signed the app and the extension carry the hardened
+// runtime, a secure timestamp and exactly their entitlements (build/entitlements.mac.plist, .fileprovider.plist).
 // DESKTOP_FEED_URL, when set, must equal the builder config's feed, so a workflow cannot upload somewhere else.
 //
 //   node scripts/checkPackage.ts <mac|win|linux> <x64|arm64>... [--signed]
@@ -44,8 +47,30 @@ if (workflowFeed !== undefined && normalise(workflowFeed) !== normalise(feedUrl)
 	failures.push(`DESKTOP_FEED_URL ${workflowFeed} differs from the builder config's ${feedUrl}`)
 }
 
-// Problems with a Mach-O's Developer ID signature; `entitlements`, when given, is the plist it must carry exactly,
-// along with the hardened runtime and a secure timestamp.
+// A plist as canonical JSON (keys sorted at every level), so two plists compare by value.
+function plistValue(xml: string): string {
+	const converted = spawnSync("plutil", ["-convert", "json", "-o", "-", "-"], { input: xml, encoding: "utf8" })
+
+	if (converted.status !== 0) {
+		return `unparsable: ${converted.stderr.trim()}`
+	}
+
+	const sorted = (value: unknown): unknown =>
+		Array.isArray(value)
+			? value.map(sorted)
+			: typeof value === "object" && value !== null
+				? Object.fromEntries(
+						Object.entries(value)
+							.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+							.map(([key, inner]) => [key, sorted(inner)])
+					)
+				: value
+
+	return JSON.stringify(sorted(JSON.parse(converted.stdout)))
+}
+
+// Problems with a Mach-O's (or a bundle's) Developer ID signature; `entitlements`, when given, is the plist it must
+// carry exactly (keys and values), along with the hardened runtime and a secure timestamp.
 function macSignatureProblems(file: string, entitlements?: string): string[] {
 	const problems: string[] = []
 	const verify = spawnSync("codesign", ["--verify", "--strict", file], { encoding: "utf8" })
@@ -71,15 +96,11 @@ function macSignatureProblems(file: string, entitlements?: string): string[] {
 		problems.push(`${file}: no secure timestamp`)
 	}
 
-	const keys = (plist: string) =>
-		[...plist.matchAll(/<key>([^<]+)<\/key>/g)]
-			.map(match => match[1])
-			.sort()
-			.join(",")
-	const carried = spawnSync("codesign", ["-d", "--entitlements", "-", "--xml", file], { encoding: "utf8" })
+	const carried = plistValue(spawnSync("codesign", ["-d", "--entitlements", "-", "--xml", file], { encoding: "utf8" }).stdout)
+	const expected = plistValue(readFileSync(entitlements, "utf8"))
 
-	if (keys(carried.stdout) !== keys(readFileSync(entitlements, "utf8"))) {
-		problems.push(`${file}: entitlements [${keys(carried.stdout)}] differ from ${entitlements}`)
+	if (carried !== expected) {
+		problems.push(`${file}: entitlements ${carried} differ from ${entitlements} (${expected})`)
 	}
 
 	return problems
@@ -197,6 +218,43 @@ for (const arch of archs) {
 		}
 	} else {
 		failures.push(`${app}: ${rclone} is missing`)
+	}
+
+	if (platform === "mac") {
+		const fpAddon = path.join(resources, "native", "filen-fp.node")
+		const appex = path.join(app, "Contents", "PlugIns", APPEX_NAME)
+		const appexExecutable = path.join(appex, "Contents", "MacOS", "FilenFileProvider")
+
+		for (const file of [fpAddon, appexExecutable]) {
+			if (!existsSync(file)) {
+				failures.push(`${app}: ${file} is missing`)
+
+				continue
+			}
+
+			const found = nativeArchOf(file)
+
+			if (found !== arch) {
+				failures.push(`${file}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
+			}
+		}
+
+		if (values.signed) {
+			failures.push(...macSignatureProblems(app, path.join("build", "entitlements.mac.plist")))
+			failures.push(...macSignatureProblems(fpAddon))
+
+			if (existsSync(appex)) {
+				failures.push(...macSignatureProblems(appex, path.join("build", "entitlements.fileprovider.plist")))
+
+				if (
+					!/^Identifier=io\.filen\.desktop\.FileProvider$/m.test(
+						spawnSync("codesign", ["-dv", appex], { encoding: "utf8" }).stderr
+					)
+				) {
+					failures.push(`${appex}: not signed as io.filen.desktop.FileProvider`)
+				}
+			}
+		}
 	}
 
 	if (platform === "win" && !existsSync(path.join(resources, "deps", "winfsp.msi"))) {

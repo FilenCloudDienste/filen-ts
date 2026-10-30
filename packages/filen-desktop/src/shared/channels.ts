@@ -1,4 +1,4 @@
-import type { DesktopMounts, DesktopSync } from "@filen/shared/desktop"
+import type { DesktopFileProvider, DesktopMounts, DesktopSync } from "@filen/shared/desktop"
 
 // IPC channel names shared by main and the preload; the renderer never sees them.
 export const CHANNELS = {
@@ -98,6 +98,15 @@ export type MountsCall = (typeof MOUNTS_CALLS)[number]
 
 export function mountsChannel(call: MountsCall): string {
 	return `mounts:call:${call}`
+}
+
+// The File Provider bridge's requests, each answered on its own channel (fileProviderChannel).
+export const FILE_PROVIDER_CALLS = ["state", "enable", "disable"] as const satisfies readonly (keyof DesktopFileProvider)[]
+
+export type FileProviderCall = (typeof FILE_PROVIDER_CALLS)[number]
+
+export function fileProviderChannel(call: FileProviderCall): string {
+	return `fileProvider:${call}`
 }
 
 // What a page listens to: the overview, the stats, or both.

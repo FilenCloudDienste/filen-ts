@@ -24,6 +24,7 @@ import {
 import { existsSync, readFileSync } from "node:fs"
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { lookup } from "node:dns/promises"
+import { createRequire } from "node:module"
 import os from "node:os"
 import { type } from "arktype"
 import path from "node:path"
@@ -44,6 +45,10 @@ import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
 import { parseHeaders } from "./headers.ts"
 import { createFileLog } from "./fileLog.ts"
+import { createFileProviderAddon, type FileProviderAddonContext, fileProviderAddonPath } from "./fileProvider/addon.ts"
+import { registerFileProviderIpc } from "./fileProvider/ipc.ts"
+import { createFileProviderService } from "./fileProvider/service.ts"
+import { createFileProviderStore } from "./fileProvider/store.ts"
 import { closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
@@ -391,6 +396,7 @@ const nativeSupervisor = createNativeSupervisor({
 	},
 	onRevoked: () => {
 		info("session revoked by the server; signed out")
+		void fileProvider.signedOut(null)
 		syncService.signedOut()
 		mountsService.signedOut()
 		mainWindow?.webContents.send(CHANNELS.sessionRevoked)
@@ -510,6 +516,39 @@ const mountsService = createMountsService({
 	log: { info, warn }
 })
 
+// Filen in Finder (macOS 14 and later): the addon loads only for a user who has it on, or to switch it off.
+const fileProviderContext: FileProviderAddonContext = {
+	packaged: app.isPackaged,
+	resourcesPath: process.resourcesPath,
+	appPath: app.getAppPath(),
+	platform: process.platform,
+	arch: process.arch,
+	release: os.release(),
+	exists: existsSync,
+	load: file => createRequire(import.meta.url)(file)
+}
+let fileProviderSupported: boolean | undefined
+
+const fileProvider = createFileProviderService({
+	supported: () => (fileProviderSupported ??= fileProviderAddonPath(fileProviderContext) !== null),
+	addon: createFileProviderAddon(fileProviderContext),
+	vault: sessionVault,
+	store: createFileProviderStore(userId => {
+		const file = atomicFile(path.join(mountsRoot, userId, "fileProvider.json"))
+
+		return {
+			...file,
+			write: async data => {
+				await mountsDir(userId)
+				await file.write(data)
+			}
+		}
+	}, warn),
+	clearOwed: atomicFile(path.join(userDataPath, "fileProvider.clearOwed")),
+	pinSet: () => appLock?.status().enabled ?? true,
+	log: { info, warn }
+})
+
 // The engine's own work keeps going; only its data and its process go with the session.
 function syncSignedOut(): void {
 	nativeSupervisor.signedOut()
@@ -520,6 +559,8 @@ function syncSignedOut(): void {
 // A sign-out the user asked for: before the host goes, rclone stops and the user's drive cache is deleted when no
 // upload is left in it.
 async function signOut(userId: string | null): Promise<void> {
+	await fileProvider.signedOut(userId)
+
 	if (userId !== null) {
 		await mountsService.signOut(userId)
 	}
@@ -1194,6 +1235,7 @@ if (!app.requestSingleInstanceLock()) {
 
 		await sessionVault.set(blob)
 		nativeSupervisor.sessionChanged(blob)
+		void fileProvider.sessionChanged(blob)
 		void migration.sessionConfirmed(blob)
 	})
 	handle(CHANNELS.sessionClear, async () => {
@@ -1358,6 +1400,10 @@ if (!app.requestSingleInstanceLock()) {
 
 		const result = await (await appLockLoading).set(valid[0], valid[1])
 
+		if (result.ok) {
+			await fileProvider.pinChanged()
+		}
+
 		lockChanged()
 
 		return result
@@ -1394,6 +1440,7 @@ if (!app.requestSingleInstanceLock()) {
 
 	registerSyncIpc(ipcMain, syncService, url => isTrustedSender(url, APP_ORIGIN))
 	registerMountsIpc(ipcMain, mountsService, url => isTrustedSender(url, APP_ORIGIN))
+	registerFileProviderIpc(ipcMain, fileProvider, url => isTrustedSender(url, APP_ORIGIN))
 
 	handle(CHANNELS.logsExport, async payload => {
 		const webLog = webLogSchema(payload)
@@ -1465,6 +1512,7 @@ if (!app.requestSingleInstanceLock()) {
 
 			started = true
 			nativeSupervisor.ensure("launch")
+			void fileProvider.launch()
 
 			const openedAtLogin = PLATFORM === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin
 

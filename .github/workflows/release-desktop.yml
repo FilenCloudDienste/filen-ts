@@ -168,7 +168,8 @@ jobs:
         with:
           name: web-dist
           path: packages/filen-web/dist
-      # Signing secrets reach only the steps that sign or notarize.
+      # Signing secrets reach only the steps that sign or notarize. TODO: build the File Provider extension
+      # (filen-ios-file-provider, target FilenFileProviderMac) and set FILEN_DESKTOP_FP_APPEX; the build fails without it.
       - name: Build, sign and notarize
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -209,12 +210,17 @@ jobs:
             xcrun stapler validate "${app}" || { echo "::error::Filen_mac_${arch}.zip: no stapled notarization ticket"; exit 1; }
             actual_arch="$(lipo -archs "${app}/Contents/MacOS/Filen")"
             [ "${actual_arch}" = "${lipo_arch}" ] || { echo "::error::Filen_mac_${arch}.zip: binary is ${actual_arch}, expected ${lipo_arch}"; exit 1; }
+            appex="${app}/Contents/PlugIns/FilenFileProvider.appex"
+            codesign --verify --strict "${appex}" || { echo "::error::Filen_mac_${arch}.zip: File Provider extension signature fails"; exit 1; }
+            appex_arch="$(lipo -archs "${appex}/Contents/MacOS/FilenFileProvider")"
+            [ "${appex_arch}" = "${lipo_arch}" ] || { echo "::error::Filen_mac_${arch}.zip: File Provider extension is ${appex_arch}, expected ${lipo_arch}"; exit 1; }
             bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app}/Contents/Info.plist")"
             [ "${bundle_version}" = "${VERSION}" ] || { echo "::error::Filen_mac_${arch}.zip: bundle version ${bundle_version}, expected ${VERSION}"; exit 1; }
           done
       - name: Check feed contract
         run: node scripts/checkFeed.ts mac
-      # --signed: the addon and rclone carry the team's Developer ID signature, rclone with its own entitlements.
+      # --signed: the addons and rclone carry the team's Developer ID signature, rclone, the app and the File Provider
+      # extension with exactly their own entitlements.
       - name: Check packaged apps
         run: node scripts/checkPackage.ts mac x64 arm64 --signed
       - name: Upload artifacts

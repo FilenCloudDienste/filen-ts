@@ -126,6 +126,7 @@ export interface DesktopBridge {
 	readonly logs: DesktopLogs
 	readonly sync: DesktopSync
 	readonly mounts: DesktopMounts
+	readonly fileProvider: DesktopFileProvider
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
 	onWindowState(callback: (state: WindowState) => void): () => void
@@ -650,4 +651,24 @@ export interface DesktopMounts {
 	dismissNotice(notice: DesktopMountsNotice): Promise<void>
 	// Starts the native host again after it failed.
 	retryHost(): void
+}
+
+// Filen in Finder: the macOS File Provider extension (macOS 14 and later), one domain for the signed-in user. Off a
+// supported Mac `supported` is false and enabling rejects.
+export interface DesktopFileProviderState {
+	supported: boolean
+	// Switched on for the signed-in user.
+	enabled: boolean
+	// A PIN app lock is set, which keeps the extension off.
+	lockBlocked: boolean
+	// macOS's own switch for the domain (System Settings); null while no domain of the user is registered.
+	userEnabled: boolean | null
+}
+
+export interface DesktopFileProvider {
+	state(): Promise<DesktopFileProviderState>
+	// Rejects where unsupported, while a PIN is set, without a readable session, or when macOS refuses the domain.
+	enable(): Promise<DesktopFileProviderState>
+	// The extension forgets the session and the domain is removed with every file it replicated.
+	disable(): Promise<DesktopFileProviderState>
 }

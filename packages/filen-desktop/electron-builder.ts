@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { Arch, type Configuration, type WindowsConfiguration } from "electron-builder"
+import { appexSource, installAppex, signMac } from "./scripts/fileProviderAppex.ts"
 import { signRclone } from "./scripts/signRclone.ts"
 
 // Everything here that installed 3.x clients can observe (appId, productName, artifact names, feed URL, install
@@ -62,7 +63,8 @@ const config: Configuration = {
 		{ from: "build/rclone/${os}-${arch}", to: "rclone" }
 	],
 	// A missing extraResources source is skipped silently; an app without its addon cannot sync, one without rclone
-	// cannot mount or serve, and a Windows one without WinFsp's installer cannot mount.
+	// cannot mount or serve, a Windows one without WinFsp's installer cannot mount, and a macOS one without the File
+	// Provider addon and extension cannot offer Filen in Finder.
 	beforePack: context => {
 		const os = context.packager.platform.buildConfigurationKey
 		const staged = `${os}-${Arch[context.arch]}`
@@ -78,13 +80,21 @@ const config: Configuration = {
 			required.push({ file: path.join(packageDir, "build", "deps", "win", "winfsp.msi"), stage: "scripts/stageRclone.ts" })
 		}
 
+		if (os === "mac") {
+			required.push({ file: path.join(packageDir, "build", "native", staged, "filen-fp.node"), stage: "scripts/buildFpAddon.ts" })
+			appexSource()
+		}
+
 		for (const { file, stage } of required) {
 			if (!existsSync(file)) {
 				throw new Error(`No ${file}; run ${stage}`)
 			}
 		}
 	},
-	afterPack: signRclone,
+	afterPack: async context => {
+		installAppex(context)
+		await signRclone(context)
+	},
 	asar: true,
 	npmRebuild: false,
 	nodeGypRebuild: false,
@@ -119,10 +129,13 @@ const config: Configuration = {
 		minimumSystemVersion: macMinimum.macos,
 		hardenedRuntime: true,
 		gatekeeperAssess: false,
+		// The app group is the main executable's only; the helpers and addons get the inherited set.
 		entitlements: "build/entitlements.mac.plist",
-		entitlementsInherit: "build/entitlements.mac.plist",
+		entitlementsInherit: "build/entitlements.mac.inherit.plist",
 		// scripts/signRclone.ts signs rclone with its own entitlements before this signing runs.
 		signIgnore: ["/Contents/Resources/rclone/rclone$"],
+		// Signs the File Provider extension, then the app (scripts/fileProviderAppex.ts).
+		sign: signMac,
 		// Signing identity comes from CSC_LINK / CSC_KEY_PASSWORD (Developer ID, Team 7YTW5D2K7P, which the
 		// installed apps' designated requirement pins); notarization from APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
 		// APPLE_TEAM_ID or an App Store Connect API key, and is skipped without them.

@@ -2,8 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- V8 (JS + wasm) needs MAP_JIT under the hardened runtime; nothing else is granted. -->
+	<!-- V8 (JS + wasm) needs MAP_JIT under the hardened runtime. -->
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
+	<!-- The File Provider extension's document group; the main executable only, never the helpers. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>7YTW5D2K7P.io.filen.desktop</string>
+	</array>
 </dict>
 </plist>
