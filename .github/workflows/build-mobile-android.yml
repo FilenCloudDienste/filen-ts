@@ -39,8 +39,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
+
+      # Only the mobile submodules: the desktop's copies would only add clone time here.
+      - name: Check out the mobile submodules
+        working-directory: .
+        run: git submodule update --init --recursive -- packages/filen-mobile/filen-ios-file-provider packages/filen-mobile/filen-rs packages/filen-mobile/filen-android-documents-provider
 
       # Tag-triggered runs only: the built version comes from app.config.ts, so refuse to publish
       # if the pushed tag disagrees with it (prevents `filen-mobile@4.0.9` shipping a stale 4.0.8).

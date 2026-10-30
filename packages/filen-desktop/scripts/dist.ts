@@ -3,9 +3,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import path from "node:path"
 
-// The sync addon and rclone staged per arch (on macOS with the File Provider addon built beside them), the production
-// bundle (which bakes in the Linux rclone digests), then electron-builder for the host (extra CLI args such as
-// `--mac dir` are passed through).
+// The sync addon and rclone staged per arch (on macOS with the File Provider addon built beside them, and the extension
+// built from the submodules unless FILEN_DESKTOP_FP_APPEX is set), the production bundle (which bakes in the Linux
+// rclone digests), then electron-builder for the host (extra CLI args such as `--mac dir` are passed through).
 // Uploading is the release workflow's job, so nothing is published from here.
 process.env["NODE_ENV"] = "production"
 
@@ -16,6 +16,16 @@ const { buildFpAddon } = await import("./buildFpAddon.ts")
 
 stageNapi({ dev: false })
 buildFpAddon({ dev: false })
+
+// Without either, electron-builder's beforePack names both ways to provide the extension.
+if (process.platform === "darwin" && (process.env["FILEN_DESKTOP_FP_APPEX"] ?? "") === "") {
+	const { buildFileProvider, fileProviderSubmodulesPresent } = await import("./buildFileProvider.ts")
+
+	if (fileProviderSubmodulesPresent()) {
+		process.env["FILEN_DESKTOP_FP_APPEX"] = buildFileProvider()
+	}
+}
+
 await (await import("./stageRclone.ts")).stageRclone()
 await import("./build.ts")
 

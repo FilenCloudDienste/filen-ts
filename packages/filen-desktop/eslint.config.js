@@ -4,7 +4,7 @@ import { defineConfig, globalIgnores } from "eslint/config"
 import eslintConfigPrettier from "eslint-config-prettier/flat"
 
 export default defineConfig(
-	globalIgnores(["dist", "release", "docs"]),
+	globalIgnores(["dist", "release", "docs", "filen-ios-file-provider", "filen-rs"]),
 	js.configs.recommended,
 	...tseslint.configs.recommended,
 	{

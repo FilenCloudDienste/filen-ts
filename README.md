@@ -37,6 +37,16 @@ Already cloned flat:
 git submodule update --init --recursive
 ```
 
+`filen-desktop` has two of its own, `filen-ios-file-provider/` and `filen-rs/`, the sources of its macOS
+File Provider extension. On macOS, `pnpm run dist` builds the extension from them (Xcode, plus the Rust
+toolchain filen-rs pins with the `aarch64-apple-darwin` and `x86_64-apple-darwin` targets); set
+`FILEN_DESKTOP_FP_APPEX` to a built `FilenFileProvider.appex` to skip that. Without either, the macOS
+package fails. Only those two:
+
+```bash
+git submodule update --init -- packages/filen-desktop/filen-ios-file-provider packages/filen-desktop/filen-rs
+```
+
 ## Installing
 
 This is a pnpm workspace. One install at the root covers all four packages:

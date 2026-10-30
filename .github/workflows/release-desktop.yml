@@ -149,11 +149,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      # The File Provider extension's sources: only the desktop's two submodules, not the mobile ones.
+      - name: Check out the File Provider submodules
+        id: submodules
+        working-directory: .
+        run: |
+          git submodule update --init --depth 1 -- packages/filen-desktop/filen-ios-file-provider packages/filen-desktop/filen-rs
+          echo "filen-rs=$(git rev-parse HEAD:packages/filen-desktop/filen-rs)" >> "${GITHUB_OUTPUT}"
       # The app icon is an Icon Composer bundle, which only Xcode 26's actool compiles.
       - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: '26.5'
+      # The toolchain filen-rs pins in rust-toolchain.toml, plus both macOS targets of the universal extension.
+      - name: Set up Rust
+        working-directory: packages/filen-desktop/filen-rs
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          # Third-party crates only: filen-rs's own crates rebuild anyway (a fresh checkout is newer than their
+          # fingerprints), and target/macos is regenerated on every build.
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-desktop/filen-rs/target
+            !packages/filen-desktop/filen-rs/target/macos
+            !packages/filen-desktop/filen-rs/target/**/libfilen_*
+          key: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-${{ steps.submodules.outputs.filen-rs }}
+          restore-keys: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node
@@ -168,8 +195,12 @@ jobs:
         with:
           name: web-dist
           path: packages/filen-web/dist
-      # Signing secrets reach only the steps that sign or notarize. TODO: build the File Provider extension
-      # (filen-ios-file-provider, target FilenFileProviderMac) and set FILEN_DESKTOP_FP_APPEX; the build fails without it.
+      # Universal and unsigned; sets FILEN_DESKTOP_FP_APPEX for the packaging step, which thins and signs it per arch.
+      - name: Build the File Provider extension
+        env:
+          CARGO_INCREMENTAL: 0
+        run: node scripts/buildFileProvider.ts
+      # Signing secrets reach only the steps that sign or notarize.
       - name: Build, sign and notarize
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}

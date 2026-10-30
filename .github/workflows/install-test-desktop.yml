@@ -158,11 +158,42 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      # The File Provider extension's sources: only the desktop's two submodules, not the mobile ones.
+      - name: Check out the File Provider submodules
+        if: matrix.os == 'mac'
+        id: submodules
+        working-directory: .
+        run: |
+          git submodule update --init --depth 1 -- packages/filen-desktop/filen-ios-file-provider packages/filen-desktop/filen-rs
+          echo "filen-rs=$(git rev-parse HEAD:packages/filen-desktop/filen-rs)" >> "${GITHUB_OUTPUT}"
       - name: Set up Xcode
         if: matrix.os == 'mac'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: '26.5'
+      # The toolchain filen-rs pins in rust-toolchain.toml, plus both macOS targets of the universal extension.
+      - name: Set up Rust
+        if: matrix.os == 'mac'
+        working-directory: packages/filen-desktop/filen-rs
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      # Same key as the release's mac job, so a release's install test reuses its build.
+      - name: Cache Cargo
+        if: matrix.os == 'mac'
+        uses: actions/cache@v4
+        with:
+          # Third-party crates only: filen-rs's own crates rebuild anyway (a fresh checkout is newer than their
+          # fingerprints), and target/macos is regenerated on every build.
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-desktop/filen-rs/target
+            !packages/filen-desktop/filen-rs/target/macos
+            !packages/filen-desktop/filen-rs/target/**/libfilen_*
+          key: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-${{ steps.submodules.outputs.filen-rs }}
+          restore-keys: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-
       - name: Install rpm
         if: matrix.os == 'linux'
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends rpm
@@ -180,6 +211,12 @@ jobs:
         with:
           name: web-dist
           path: packages/filen-web/dist
+      # Once for both N and N-1: sets FILEN_DESKTOP_FP_APPEX, which every dist below packages.
+      - name: Build the File Provider extension
+        if: matrix.os == 'mac'
+        env:
+          CARGO_INCREMENTAL: 0
+        run: node scripts/buildFileProvider.ts
       - name: Verify signing secrets are set
         if: inputs.signed
         env:

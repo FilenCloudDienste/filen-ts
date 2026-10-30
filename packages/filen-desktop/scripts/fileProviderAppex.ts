@@ -7,12 +7,13 @@ import { Arch, type AfterPackContext, MacPackager } from "electron-builder"
 import { nativeArchOf } from "./nativeArch.ts"
 
 // The File Provider extension (filen-ios-file-provider's FilenFileProviderMac target, a universal unsigned build) in
-// Contents/PlugIns. Its path comes from FILEN_DESKTOP_FP_APPEX; a macOS package without it fails, since the app would
-// offer Filen in Finder with no extension behind it.
+// Contents/PlugIns. Its path comes from FILEN_DESKTOP_FP_APPEX, which scripts/dist.ts sets from
+// scripts/buildFileProvider.ts when unset and the submodules are checked out; a macOS package without it fails, since
+// the app would offer Filen in Finder with no extension behind it.
 
 export const APPEX_NAME = "FilenFileProvider.appex"
 // CFBundleExecutable of the extension.
-const APPEX_EXECUTABLE = "FilenFileProvider"
+export const APPEX_EXECUTABLE = "FilenFileProvider"
 const LIPO_ARCH: Record<string, string> = { x64: "x86_64", arm64: "arm64" }
 
 const entitlements = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), "build", "entitlements.fileprovider.plist")
@@ -22,7 +23,7 @@ export function appexSource(): string {
 
 	if (source === undefined || source.length === 0) {
 		throw new Error(
-			`FILEN_DESKTOP_FP_APPEX is not set; build ${APPEX_NAME} (filen-ios-file-provider, target FilenFileProviderMac) and point it there`
+			`FILEN_DESKTOP_FP_APPEX is not set; check out the filen-ios-file-provider and filen-rs submodules (pnpm run dist builds ${APPEX_NAME} from them) or point it at a FilenFileProviderMac build`
 		)
 	}
 

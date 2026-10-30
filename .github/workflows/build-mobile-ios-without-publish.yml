@@ -36,8 +36,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
+
+      # Only the mobile submodules: the desktop's copies would only add clone time here.
+      - name: Check out the mobile submodules
+        working-directory: .
+        run: git submodule update --init --recursive -- packages/filen-mobile/filen-ios-file-provider packages/filen-mobile/filen-rs packages/filen-mobile/filen-android-documents-provider
 
       - name: Write fallback encryption key to .env
         run: |

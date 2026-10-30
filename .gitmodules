@@ -7,3 +7,11 @@
 [submodule "packages/filen-mobile/filen-rs"]
 	path = packages/filen-mobile/filen-rs
 	url = https://github.com/FilenCloudDienste/filen-rs.git
+[submodule "packages/filen-desktop/filen-ios-file-provider"]
+	path = packages/filen-desktop/filen-ios-file-provider
+	url = https://github.com/FilenCloudDienste/filen-ios-file-provider.git
+	shallow = true
+[submodule "packages/filen-desktop/filen-rs"]
+	path = packages/filen-desktop/filen-rs
+	url = https://github.com/FilenCloudDienste/filen-rs.git
+	shallow = true

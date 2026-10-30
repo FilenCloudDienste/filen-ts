@@ -2,3 +2,5 @@ node_modules/
 docs/
 dist/
 release/
+filen-ios-file-provider/
+filen-rs/
