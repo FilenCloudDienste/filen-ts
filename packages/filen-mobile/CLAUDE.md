@@ -155,18 +155,4 @@ const getFileUrl = useHttpStore(s => s.getFileUrl) // nullable until the HTTP pr
 
 ## Patches
 
-`patchedDependencies` in the root `pnpm-workspace.yaml`, files in the root `patches/`; edit with `pnpm patch <name>@<version>` + `pnpm patch-commit`. A stale patch fails `pnpm install`. JS-level hunks (dom-webview, expo-file-system) must patch `build/*.js`: Metro never resolves the packages' `src/`. Why the notable ones exist:
-
-- expo-video 58: Android PiP-exit reparent crash; PiP close button pauses the player (the activity is below STARTED when the mode change lands); `videoChangeFrameRateStrategy` set on the ExoPlayer Builder (upstream applies it after `build()` on the JS thread and throws "Player is accessed on the wrong thread").
-- @blazejkustra/react-native-alert 1.1.1: Android non-login prompts excluded from autofill (their password-variation input type made Google Password Manager pop and disabled IME composition, breaking CJK/transliteration); the non-secure branch carries `CAP_SENTENCES`. Upstreamable.
-- @react-native-menu/menu 2.0.0: Android MenuView's TouchDelegate on its parent outlived the view, so taps in the old rect opened a detached menu at the window origin; detach clears it and `prepareMenu` bails on a detached anchor. Upstreamable.
-- expo-sharing 58: Android stale `pendingPromise` rejected every later share with ERR_SHARING_IN_PROGRESS; settle-and-clear at `shareAsync` entry (paired with the JS watchdog in `src/lib/share.ts`). Upstreamable.
-- expo-image-manipulator 58: Android `isActive` guard against double continuation resume from re-fired Glide callbacks. Upstreamable.
-- @shopify/flash-list 2.3.3 (above the Expo pin 2.3.2): `applyInitialScrollAdjustment` recomputed only `[0..initialScrollIndex]`, breaking layout sortedness on horizontal lists (the drive-preview pager opened past the tapped item); recompute the whole table. Drop once Shopify/flash-list#2307 ships.
-- expo-background-task 58: iOS `onTasksExpired` never fired (guarded on a `userInfo["url"]` its only poster never sets), so a BGProcessingTask expiry never reached JS. Upstreamable.
-- pressto 0.7.0: RNGH 3 dropped pressto's v2 button callbacks (no press feedback or haptics); patched onto `LegacyBaseButton` (pressto#37).
-- react-native-screens 4.30.0: iOS 26 back-swipe and edge-pan recognizers used `delaysTouchesBegan = YES`, delaying RNGH touch-down on pushed screens; set NO. Upstreamable.
-- react-native-ios-utilities 5.2.0: RN 0.88 compiles legacy bridge classes out under `RCT_REMOVE_LEGACY_ARCH`; guarded. Drop when 5.2.1 ships.
-- file-type 22.2.0 (via music-metadata): regex `v` flags and a Node-only dynamic `import()` that Hermes rejects at compile time.
-- @filen/sdk-rs: ships the `proguard-rules.pro` its build.gradle declares (AGP 9 release builds fail without it); belongs upstream in filen-rs.
-- The rest are listed in `pnpm-workspace.yaml`; their reason is in the patch diff.
+`patchedDependencies` in the root `pnpm-workspace.yaml`, files in the root `patches/`; edit with `pnpm patch <name>@<version>` + `pnpm patch-commit`. A stale patch fails `pnpm install`. JS-level hunks (dom-webview, expo-file-system) must patch `build/*.js`: Metro never resolves the packages' `src/`. Why each patch exists, and when it can be dropped, is the comment above its entry in `patchedDependencies`.

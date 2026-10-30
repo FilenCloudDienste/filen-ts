@@ -1,9 +1,23 @@
 {
 	"_meta": {
 		"created": "2026-03-02",
-		"updated": "2026-09-24",
-		"note": "Covers all packages: filen-mobile, filen-web, filen-desktop, filen-shared. Edit only to fix a rule the code contradicts.",
-		"configSources": [".prettierrc", ".editorconfig", "packages/*/eslint.config.mjs", "packages/filen-web/eslint.config.js"]
+		"updated": "2026-10-30",
+		"note": "Covers all packages: filen-mobile, filen-web, filen-desktop, filen-shared, filen-office, filen-spellcheck, filen-assistant-eval. Every rule is read from the configs below or observed in the code. Edit only to fix a rule the code contradicts.",
+		"configSources": [
+			".prettierrc",
+			"packages/filen-web/.prettierrc",
+			"packages/filen-desktop/.prettierrc",
+			"packages/filen-web/.prettierignore",
+			"packages/filen-desktop/.prettierignore",
+			".editorconfig",
+			"packages/filen-mobile/eslint.config.mjs",
+			"packages/filen-shared/eslint.config.mjs",
+			"packages/filen-office/eslint.config.mjs",
+			"packages/filen-spellcheck/eslint.config.mjs",
+			"packages/filen-assistant-eval/eslint.config.mjs",
+			"packages/filen-web/eslint.config.js",
+			"packages/filen-desktop/eslint.config.js"
+		]
 	},
 	"indentation": {
 		"style": "tabs",
@@ -35,10 +49,27 @@
 	"singleAttributePerLine": true,
 	"printWidth": 140,
 	"endOfLine": "lf",
+	"prettier": {
+		"configs": {
+			".prettierrc": "Root config; applies to filen-mobile, filen-shared, filen-office, filen-spellcheck and filen-assistant-eval (none has its own)",
+			"packages/filen-web/.prettierrc": "Root options plus prettier-plugin-tailwindcss (sorts classes in className and in cn()/cva() calls; stylesheet src/index.css)",
+			"packages/filen-desktop/.prettierrc": "Root options minus the JSX-only ones (singleAttributePerLine, bracketSameLine, jsxSingleQuote); same output for .ts, and desktop has no .tsx"
+		},
+		"checkedByLint": {
+			"filen-web": "**/*.{ts,tsx}",
+			"filen-desktop": "**/*.ts",
+			"filen-office": "src/**/*.{ts,tsx,css}",
+			"filen-spellcheck": "{src,scripts}/**/*.{ts,mjs}",
+			"filen-assistant-eval": "src/**/*.ts and models.json",
+			"filen-mobile": "not checked by lint; format with the root .prettierrc",
+			"filen-shared": "not checked by lint; format with the root .prettierrc"
+		},
+		"eslintConfigPrettier": "filen-web and filen-desktop end their ESLint config with eslint-config-prettier, so prettier alone owns formatting there"
+	},
 	"packageManager": "pnpm",
 	"typescript": {
 		"typeImports": "type-keyword-inline",
-		"notes": "Mobile/shared: 'import { type Foo }' is the documented form (whole-statement 'import type' also appears). filen-web: whole-statement 'import type { Foo }' when a module is imported for types only (verbatimModuleSyntax keeps an all-inline-type import as a side-effect import); inline 'import { x, type T }' when mixed"
+		"notes": "Mobile: 'import { type Foo }' is the documented form (whole-statement 'import type' also appears). Every other package compiles with verbatimModuleSyntax: whole-statement 'import type { Foo }' when a module is imported for types only (an all-inline-type import would stay as a side-effect import); inline 'import { x, type T }' when mixed"
 	},
 	"imports": {
 		"style": "named-preferred",
@@ -47,15 +78,16 @@
 		"groupOrder": "none enforced",
 		"groupSeparator": "none",
 		"notes": [
-			"filen-mobile and filen-web: relative imports (./foo) are FORBIDDEN by ESLint — always use @/ aliases",
-			"filen-desktop and filen-shared: relative imports are allowed",
+			"filen-mobile and filen-web: relative imports (./foo) are FORBIDDEN by ESLint; always use @/ aliases",
+			"filen-desktop, filen-office, filen-spellcheck and filen-assistant-eval: relative imports, no alias; filen-shared: './' siblings only",
+			"Import specifiers carry no file extension",
 			"No blank line between external and @/ imports (web lists externals first; mobile interleaves). Match the file being edited",
 			"Type-only import form: see typescript.notes"
 		]
 	},
 	"exports": {
-		"style": "named-and-default",
-		"notes": "Most files export named items + a default export at the bottom. Store files export both named store and default."
+		"style": "per-package",
+		"notes": "filen-mobile: most files export named items + a default export at the bottom; store files export both the named store and default. Every other package exports named items only (filen-web has a single default export in src, the rest none)."
 	},
 	"emptyLines": {
 		"betweenFunctions": 1,
@@ -82,7 +114,9 @@
 		"eqeqeq": true,
 		"noDuplicateImports": true,
 		"unusedVarsIgnorePrefix": "_",
-		"reactCompiler": "enabled in filen-mobile and filen-web"
+		"quotesRule": "filen-mobile, filen-shared and filen-assistant-eval: quotes double; filen-office and filen-spellcheck: double with avoidEscape; filen-web and filen-desktop: left to prettier",
+		"presets": "filen-web: typescript-eslint strictTypeChecked + stylisticTypeChecked (type-aware). Every other package: @eslint/js recommended + typescript-eslint recommended (filen-mobile also expo, react, react-hooks, @tanstack/query)",
+		"reactCompiler": "enabled in filen-mobile (app.config.ts experiments.reactCompiler) and filen-web (babel-plugin-react-compiler in vite.config.ts); react-hooks compiler rules are on in both"
 	},
 	"perPackage": {
 		"filen-mobile": {
@@ -90,24 +124,82 @@
 			"relativeImports": "forbidden",
 			"framework": "React Native + Expo",
 			"storePattern": "useCameraUpload.store.ts — named export + default export, Zustand create()",
-			"queryPattern": "useX.query.ts — named fetchData + named useXQuery + named xQueryUpdate + default export"
+			"queryPattern": "useX.query.ts — named fetchData + named useXQuery + named xQueryUpdate + default export",
+			"lint": "eslint --max-warnings 0 --report-unused-disable-directives; src/tests is ignored by ESLint",
+			"restrictions": [
+				"Relative imports forbidden (pattern '.*'); use @/ (src/) or @/modules/* (modules/)",
+				"Import router from @/lib/router, never router/useRouter from expo-router (src/lib/router.ts is the exception)",
+				"Import pickDocuments from @/lib/documentPicker, never expo-document-picker (src/lib/documentPicker.ts is the exception)",
+				"Zustand store hooks always take a selector: useXStore(s => s.foo), never a bare useXStore()",
+				"No crypto.randomUUID (Hermes lacks it); use randomUUID from expo-crypto",
+				"No 'export * from' barrels inside src/features/",
+				"src/routes/ files (except _layout.tsx and +native-intent.ts) must not import @/features/*/store or @/features/*/queries"
+			],
+			"testFiles": "src/tests/*.test.{ts,tsx} (vitest, node environment)"
 		},
 		"filen-web": {
 			"pathAliases": "@/ → src/",
-			"relativeImports": "forbidden",
+			"relativeImports": "forbidden inside src/ (vite.config.ts, scripts/ and vite/ outside src may use them)",
 			"framework": "React + Vite",
 			"nonNull": "no-non-null-assertion AND non-nullable-type-assertion-style are both on, so neither '!' nor a bare null-stripping 'x as T' passes. Narrow with a guard (if (x === undefined) throw/return/continue); for hot bounds-checked indexing use a local throwing at<T>(arr, i) helper, as in packages/filen-shared/src/driveSortEngine.ts",
 			"tsconfig": "verbatimModuleSyntax, exactOptionalPropertyTypes, noUncheckedIndexedAccess on",
-			"lint": "typescript-eslint strictTypeChecked + stylisticTypeChecked; prettier --check is part of pnpm run lint"
+			"lint": "typescript-eslint strictTypeChecked + stylisticTypeChecked; prettier --check is part of pnpm run lint",
+			"restrictions": [
+				"No dynamic import() in app code (only '@/e2e-hooks'); no React.lazy, lazy routes or import.meta.glob: one bundle",
+				"mediabunny only in src/workers/remux.worker.ts and src/workers/remux/** (and tests)",
+				"src/features/assistant/** and src/workers/assistant.worker.ts may not import destructive, sharing, session or raw-SDK modules (see ASSISTANT_RESTRICTED_PATHS)"
+			],
+			"testFiles": "src/**/*.test.{ts,tsx} (vitest; files needing a DOM declare // @vitest-environment jsdom)"
 		},
 		"filen-desktop": {
-			"relativeImports": "allowed",
-			"framework": "Electron"
+			"relativeImports": "allowed (no path alias)",
+			"framework": "Electron",
+			"tsconfig": "verbatimModuleSyntax, exactOptionalPropertyTypes, noUncheckedIndexedAccess on",
+			"lint": "typescript-eslint recommended + eslint-config-prettier; prettier --check is part of pnpm run lint",
+			"restrictions": [
+				"@filen/sdk-rs: type imports only; runtime values come from the loaded addon",
+				"src/preload/** may not import node:* or ../main/* (sandboxed preload)",
+				"src/native/** may not import ../main/*; share code through src/shared"
+			],
+			"testFiles": "src/tests/*.test.ts (vitest, node environment)"
 		},
 		"filen-shared": {
-			"relativeImports": "allowed",
+			"relativeImports": "siblings only ('./'); parent-escaping '../' imports are forbidden",
+			"restrictions": [
+				"Platform-free: no node:*, react, react-dom, react-native, expo, expo-* or @expo/* imports (src/tooling/** is Node-only build tooling and exempt)",
+				"Never import the package's own barrel (@filen/shared) from inside src; tests are the exception"
+			],
+			"tsconfig": "verbatimModuleSyntax, exactOptionalPropertyTypes, noUncheckedIndexedAccess on",
 			"testFramework": "vitest",
-			"testFiles": "src/tests/*.test.ts"
+			"testFiles": "src/tests/**/*.test.ts"
+		},
+		"filen-office": {
+			"relativeImports": "allowed",
+			"framework": "Platform-free core (src/core) plus a React layer (src/react)",
+			"tsconfig": "verbatimModuleSyntax, exactOptionalPropertyTypes, noUncheckedIndexedAccess on",
+			"restrictions": [
+				"src/core/** is platform-free: no Node, React, React Native or Expo imports and no imports of the React layer",
+				"src/core/** reaches builtins Hermes lacks (TextDecoder, structuredClone, Intl.Segmenter, toSorted, ...) only through globalThis with a fallback, inside try, or behind typeof; no RegExp v flag",
+				"Nothing may import @filen/web, @filen/mobile or @filen/desktop"
+			],
+			"testFiles": "src/tests/**/*.test.{ts,tsx} (vitest, node environment)"
+		},
+		"filen-spellcheck": {
+			"relativeImports": "allowed",
+			"framework": "TypeScript host over a Rust/wasm engine (crate/)",
+			"tsconfig": "verbatimModuleSyntax, exactOptionalPropertyTypes, noUncheckedIndexedAccess on",
+			"restrictions": [
+				"src/** (except src/tests) is platform-free: no Node, React, React Native or Expo imports",
+				"Nothing may import @filen/web, @filen/mobile or @filen/desktop"
+			],
+			"rust": "cargo fmt + clippy -D warnings (pnpm run lint:rust)",
+			"testFiles": "src/tests/*.test.ts (vitest, node environment)"
+		},
+		"filen-assistant-eval": {
+			"relativeImports": "allowed",
+			"framework": "Node CLI (tsx)",
+			"tsconfig": "verbatimModuleSyntax, exactOptionalPropertyTypes, noUncheckedIndexedAccess on",
+			"testFiles": "src/tests/*.test.ts (vitest, node environment)"
 		}
 	},
 	"callSiteStyle": {

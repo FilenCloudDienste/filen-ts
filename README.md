@@ -21,7 +21,7 @@ desktop. None of that is reimplemented in TypeScript, and new code here shouldn'
 | [`filen-spellcheck`](packages/filen-spellcheck)         | On-device spellchecking: a Rust crate compiled to wasm plus Hunspell dictionaries.                                                                                                      |
 | [`filen-assistant-eval`](packages/filen-assistant-eval) | Evaluation harness for the assistant's local models and prompt-injection defences. Not shipped.                                                                                         |
 
-Most packages have a README covering the setup they actually need. The mobile one is not
+Every package has a README covering the setup it actually needs. The mobile one is not
 optional reading: that build wants a Rust toolchain, cargo-ndk, meson/ninja/nasm and the usual
 Xcode and Android SDK setup on top of Node.
 

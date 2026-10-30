@@ -109,12 +109,7 @@ export default [
 			],
 			"no-restricted-imports": ["error", BASE_RESTRICTED_IMPORTS],
 			"no-restricted-syntax": ["error", ...BASE_SYNTAX_RULES],
-			"react-hooks/exhaustive-deps": [
-				"error",
-				{
-					additionalHooks: "(useMemoDeep|useCallbackDeep)"
-				}
-			]
+			"react-hooks/exhaustive-deps": "error"
 		},
 		settings: {
 			"import/resolver": {

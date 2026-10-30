@@ -96,26 +96,76 @@ allowBuilds:
   # Keyed by the exact git resolution; update it together with sdk-rs's uniffi-bindgen-react-native ref.
   "uniffi-bindgen-react-native@https://codeload.github.com/Enduriel/uniffi-bindgen-react-native/tar.gz/e0282ad3eb972eaea74225dcc06247b7a67204dd": true
 patchedDependencies:
+  # Android prompts: non-login inputs opt out of autofill (Google Password Manager popped up and broke IME
+  # composition) and capitalise sentences. Drop once upstream does both.
   '@blazejkustra/react-native-alert@1.1.1': patches/@blazejkustra__react-native-alert@1.1.1.patch
+  # DOM component WebViews: file access and off-origin main-frame navigation off, Android selection toolbar kept
+  # below the header, pinch-zoom controls for docx, a mount-race injectJavaScript rejection swallowed. JS hunks
+  # patch build/, which Metro loads. Re-author on every bump; the lockdown stays unless upstream adopts it.
   '@expo/dom-webview@58.0.2': patches/@expo__dom-webview@58.0.2.patch
+  # Ships the consumer proguard-rules.pro its build.gradle declares; AGP 9 fails without it. Drop once filen-rs
+  # publishes the file.
   '@filen/sdk-rs@0.5.11': patches/@filen__sdk-rs@0.5.11.patch
+  # Android: a detached MenuView's TouchDelegate opened the menu at the window origin; cleared on detach.
+  # Drop once upstream fixes it.
   '@react-native-menu/menu@2.0.0': patches/@react-native-menu__menu@2.0.0.patch
+  # applyInitialScrollAdjustment recomputed only part of the layout table, so a horizontal list with
+  # initialScrollIndex (the drive preview pager) opened on the wrong item. Held above the Expo pin (2.3.2).
+  # Drop once Shopify/flash-list#2307 is fixed.
   '@shopify/flash-list@2.3.3': patches/@shopify__flash-list@2.3.3.patch
+  # Passes cache_ram_mib and the context-checkpoint params to the self-built wasm (filen-web
+  # scripts/wllama), capping a prompt cache that outgrew the heap. Drop once a wllama release exposes them.
   '@wllama/wllama@3.8.1': patches/@wllama__wllama@3.8.1.patch
+  # A single AudioPlayer shows previous/next on the lock screen and notification and hands the presses to JS
+  # (remoteNextTrack/remotePreviousTrack) for the app's own queue. Drop once expo-audio supports that.
   expo-audio@58.0.10: patches/expo-audio@58.0.10.patch
+  # iOS: onTasksExpired was guarded on a userInfo key its only poster never sets, so expiry never reached
+  # JS. Drop once upstream fixes it.
   expo-background-task@58.0.11: patches/expo-background-task@58.0.11.patch
+  # Android: post-pick resolve and copy moved off the main thread (ANR on large or many files); a failed
+  # launch no longer leaves pendingPromise set. Drop once upstream does both.
   expo-document-picker@58.0.4: patches/expo-document-picker@58.0.4.patch
+  # Percent-encodes the characters java.net.URI and NSURL reject raw ([]^|, control characters) in file
+  # paths; patches build/, which Metro loads. Drop once upstream encodes them.
   expo-file-system@58.0.13: patches/expo-file-system@58.0.13.patch
+  # Android: Glide re-fires callbacks after the continuation resumed, and the second resume crashed;
+  # guarded with isActive. Drop once upstream fixes it.
   expo-image-manipulator@58.0.16: patches/expo-image-manipulator@58.0.16.patch
+  # iOS: drops the bundled libavif/dav1d coder, which aborts on some AVIF files in release builds, so ImageIO
+  # decodes AVIF. Re-author on every bump; drop once the bundled coder is fixed.
   expo-image@58.0.18: patches/expo-image@58.0.18.patch
+  # Android: a stale pendingPromise no longer rejects every later share, and an incoming text/plain share
+  # carrying a file in EXTRA_STREAM is kept. Drop once upstream fixes both.
   expo-sharing@58.0.21: patches/expo-sharing@58.0.21.patch
+  # Android: PiP-exit reparent crash, pause when the PiP window is closed, frame-rate strategy set on the
+  # ExoPlayer builder ("Player is accessed on the wrong thread"). Drop once upstream fixes all three.
   expo-video@58.0.13: patches/expo-video@58.0.13.patch
+  # Reached through music-metadata on mobile: removes a regex v flag and a Node-only dynamic import(), which
+  # Hermes rejects at compile time. Drop once file-type compiles on Hermes.
   file-type@22.2.0: patches/file-type@22.2.0.patch
+  # Spreadsheet reader/writer keep what common workbooks carry (print areas, dxf fills, conditional formats,
+  # validation and name flags, note rich text, row formats) so an unedited save round-trips, which filen-web
+  # requires before a sheet becomes editable. Drop each hunk once a hucre release preserves it.
   hucre@1.2.0: patches/hucre@1.2.0.patch
+  # Matroska demuxer reads attachments (often megabytes of fonts) lazily, so reading tracks never
+  # downloads them. Drop once upstream does.
   mediabunny@1.62.1: patches/mediabunny@1.62.1.patch
+  # RNGH 3 dropped the v2 button callbacks pressto's feedback and haptics run on; moved onto LegacyBaseButton.
+  # Drop once pressto supports RNGH 3 (enzomanuelmangano/pressto#37).
   pressto@0.7.0: patches/pressto@0.7.0.patch
+  # RN 0.88 compiles the legacy bridge classes out (RCT_REMOVE_LEGACY_ARCH), which broke the iOS
+  # build; guarded or resolved at runtime. Drop once a release supports RN 0.88.
   react-native-ios-utilities@5.2.0: patches/react-native-ios-utilities@5.2.0.patch
+  # Android foreground service: an ongoing notification is refreshed instead of restarting the service,
+  # and service state clears in onDestroy (ForegroundServiceStartNotAllowed / DidNotStartInTime crashes).
+  # Drop once upstream fixes both.
   react-native-notify-kit@10.9.0: patches/react-native-notify-kit@10.9.0.patch
+  # The drop animation's completion fires twice, the second time with indices reset to -1, which
+  # crashed keyExtractor; the reorder callback is bounds-checked. Drop once upstream fixes it.
   react-native-reorderable-list@0.18.2: patches/react-native-reorderable-list@0.18.2.patch
+  # iOS 26 back-swipe and edge-pan recognizers delayed touch-down on pushed screens (a long press
+  # became a tap); delaysTouchesBegan set to NO. Drop once upstream fixes it.
   react-native-screens@4.30.0: patches/react-native-screens@4.30.0.patch
+  # Android: a <marker orient> other than "auto" (auto-start-reverse, 45deg) threw in onDraw and crashed
+  # the app; parsed per the SVG grammar. Drop once upstream fixes it.
   react-native-svg@15.16.0: patches/react-native-svg@15.16.0.patch
