@@ -4,7 +4,7 @@ import { execSync } from "child_process"
 import fs from "node:fs"
 import path from "node:path"
 
-type FileProviderPluginProps = {
+export type FileProviderPluginProps = {
 	libName: string
 	crateName: string
 	targets: string[]
@@ -15,7 +15,41 @@ type FileProviderPluginProps = {
 
 const EXTENSION_NAME = "FilenFileProvider"
 
-const getFileProviderInfoContent = (appName: string, props: FileProviderPluginProps) => {
+/** The provider's own Info.plist keys the generated extension plist copies, rather than restates. */
+const PROVIDER_ACTION_KEYS = ["NSExtensionFileProviderActions", "NSExtensionFileProviderAllowsUserControlledEviction"] as const
+
+export type FileProviderActionKeys = Record<(typeof PROVIDER_ACTION_KEYS)[number], unknown>
+
+/**
+ * The custom actions ("Keep Downloaded", "Don't Keep Downloaded", "Remove Download") and the switch
+ * that hides the system's own "Remove Download", which they replace. The provider's Info.plist is
+ * their one source: the extension's code matches on the action identifiers. Throws when a key is
+ * missing, which means the provider checkout and this plugin are out of step.
+ */
+export function fileProviderActionKeys(providerInfoPlist: string): FileProviderActionKeys {
+	const parsed: unknown = plist.parse(providerInfoPlist)
+	const extension: unknown =
+		typeof parsed === "object" && parsed !== null && "NSExtension" in parsed ? (parsed as { NSExtension: unknown }).NSExtension : undefined
+
+	if (typeof extension !== "object" || extension === null) {
+		throw new Error("[expo-file-provider] The provider's Info.plist has no NSExtension dictionary.")
+	}
+
+	const entries = extension as Record<string, unknown>
+	const actions = entries["NSExtensionFileProviderActions"]
+	const allowsUserControlledEviction = entries["NSExtensionFileProviderAllowsUserControlledEviction"]
+
+	if (!Array.isArray(actions) || actions.length === 0 || typeof allowsUserControlledEviction !== "boolean") {
+		throw new Error(`[expo-file-provider] The provider's Info.plist must declare ${PROVIDER_ACTION_KEYS.join(" and ")}.`)
+	}
+
+	return {
+		NSExtensionFileProviderActions: actions,
+		NSExtensionFileProviderAllowsUserControlledEviction: allowsUserControlledEviction
+	}
+}
+
+export const getFileProviderInfoContent = (appName: string, props: FileProviderPluginProps, actionKeys: FileProviderActionKeys) => {
 	return plist.build({
 		AppGroup: props.iosAppGroupIdentifier,
 		CFBundleName: "$(PRODUCT_NAME)",
@@ -44,7 +78,8 @@ const getFileProviderInfoContent = (appName: string, props: FileProviderPluginPr
 			// greyed out in other apps' folder pickers (e.g. Cryptomator vault location)
 			NSExtensionFileProviderSupportsPickingFolders: true,
 			NSExtensionPointIdentifier: "com.apple.fileprovider-nonui",
-			NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).FileProviderExtension"
+			NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).FileProviderExtension",
+			...actionKeys
 		}
 	})
 }
@@ -60,7 +95,11 @@ const writeFileProviderFiles = async (
 		recursive: true
 	})
 
-	await fs.promises.writeFile(path.join(extensionDir, `${EXTENSION_NAME}-Info.plist`), getFileProviderInfoContent(appName, props))
+	const actionKeys = fileProviderActionKeys(
+		await fs.promises.readFile(path.join(projectRoot, "filen-ios-file-provider", "FilenFileProviderExtension", "Info.plist"), "utf8")
+	)
+
+	await fs.promises.writeFile(path.join(extensionDir, `${EXTENSION_NAME}-Info.plist`), getFileProviderInfoContent(appName, props, actionKeys))
 
 	await fs.promises.writeFile(
 		path.join(extensionDir, `${EXTENSION_NAME}.entitlements`),
