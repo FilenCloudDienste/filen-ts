@@ -8,6 +8,7 @@ import { fixtureTree, seededBytes, treeSnapshot, writeTree } from "../../scripts
 import { xwdToPng } from "../../scripts/ci/e2e/linux.ts"
 import { openRemote, remoteOf, sealRemote, secretsOf } from "../../scripts/ci/e2e/session.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
+import { isChromiumChild } from "../../scripts/ci/targets.ts"
 
 const dirs: string[] = []
 
@@ -132,5 +133,17 @@ describe("e2e screen dumps", () => {
 		expect(png.readUInt32BE(16)).toBe(2)
 		expect(png.readUInt32BE(20)).toBe(1)
 		expect([...inflateSync(png.subarray(idat + 4, idat + 4 + png.readUInt32BE(idat - 4)))]).toEqual([0, 1, 2, 3, 10, 20, 30])
+	})
+})
+
+describe("e2e main process detection", () => {
+	it("tells a retitled Chromium child from the main process", () => {
+		// The main process: its own NUL-separated arguments.
+		expect(isChromiumChild("/opt/Filen/Filen\0--remote-debugging-port=40063\0")).toBe(false)
+		// A child that kept its arguments.
+		expect(isChromiumChild("/opt/Filen/Filen\0--type=zygote\0--no-zygote-sandbox\0")).toBe(true)
+		// A child after setproctitle: one space-joined title, padded with NULs.
+		expect(isChromiumChild("/opt/Filen/Filen --type=gpu-process --enable-crash-reporter\0\0\0")).toBe(true)
+		expect(isChromiumChild("/opt/Filen/Filen --type=utility --utility-sub-type=node.mojom.NodeService\0")).toBe(true)
 	})
 })

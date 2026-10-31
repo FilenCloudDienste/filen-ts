@@ -80,16 +80,22 @@ function linuxParent(pid: number): number {
 	}
 }
 
-// Linux: every process that is not a Chromium child (--type=...) and that `identify` attributes to the install, with
-// the path `identify` reports for it.
+// Whether /proc/<pid>/cmdline belongs to a Chromium child (--type=...). A child retitles itself (setproctitle), so its
+// whole command line usually arrives as one space-joined argument; the main process keeps its own arguments.
+export function isChromiumChild(cmdline: string): boolean {
+	return cmdline.split(/[\0 ]/).some(arg => arg.startsWith("--type="))
+}
+
+// Linux: every process that is not a Chromium child and that `identify` attributes to the install, with the path
+// `identify` reports for it.
 function linuxProcesses(identify: (pid: number, exe: string) => string | null): AppProcess[] {
 	const found: AppProcess[] = []
 
 	for (const pid of linuxPids()) {
 		try {
 			const exe = linuxExe(pid)
-			const cmdline = readFileSync(`/proc/${String(pid)}/cmdline`, "utf8").split("\0")
-			const reported = exe === null || cmdline.some(arg => arg.startsWith("--type=")) ? null : identify(pid, exe)
+			const cmdline = readFileSync(`/proc/${String(pid)}/cmdline`, "utf8")
+			const reported = exe === null || isChromiumChild(cmdline) ? null : identify(pid, exe)
 
 			if (reported !== null) {
 				found.push({ pid, path: reported })

@@ -848,6 +848,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 	const beforeReset = async (): Promise<void> => {
 		findings.attach("previous-main.log", tail(userData("logs", "main.log"), 1000))
+		findings.attach("previous-output.log", tail(appOutput, 3000))
 		await screenDump(path.join(artifacts, "previous-last-screen.png"))
 		await state.renderer?.browser.close().catch(() => undefined)
 	}
