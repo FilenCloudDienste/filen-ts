@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFi
 import path from "node:path"
 import type { DesktopLockStatus, DesktopMountsResult, DesktopPrefs, DesktopServeCredentials, DesktopSyncPair } from "@filen/shared/desktop"
 import { LEGACY_VERSION } from "../../legacy.ts"
-import { fail, freePort, waitFor } from "../../support.ts"
+import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
 import { desktop, sessionStatus, signOut, unlockThroughScreen } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { LEGACY_DELTAS, LEGACY_EDITS, LEGACY_PAIRS, legacySideTree, type LegacyPairFixture, treeSnapshot, writeTree } from "../fixtures.ts"
@@ -174,47 +174,65 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		await findings.must(`${LEGACY_VERSION} converged: every pair quiet twice, both sides as expected`, async () => {
 			const pairs = state.pairs ?? fail("no pairs")
 
+			// What still differs, per pair and side; logged on every poll and kept for the evidence.
+			let mismatch = "nothing compared yet"
+
 			try {
 				await waitFor(
 					"the old app's pairs to converge",
 					CONVERGE_TIMEOUT_MS,
 					async () => {
 						const { quiet: cycles } = await legacySyncCounts(legacyPage())
-
-						if (!pairs.every(pair => (cycles[pair.uuid] ?? 0) >= 2)) {
-							return null
-						}
+						const busy = pairs.filter(pair => (cycles[pair.uuid] ?? 0) < 2).map(pair => pair.name)
+						const differences: string[] = []
 
 						for (const pair of LEGACY_PAIRS) {
-							if (
-								diffSnapshots(treeSnapshot(legacySideTree(pair, "local")), await snapshotOf(pair.name), { identity: false })
-									.length > 0
-							) {
-								return null
-							}
+							differences.push(
+								...diffSnapshots(treeSnapshot(legacySideTree(pair, "local")), await snapshotOf(pair.name), {
+									identity: false
+								}).map(line => `${pair.name} local: ${line}`)
+							)
 
 							const remoteSide = await cloudSnapshot(cloud, `${cloudDir}/${pair.name}`, work)
 
-							if (
-								remoteSide === null ||
-								diffSnapshots(treeSnapshot(legacySideTree(pair, "cloud")), remoteSide, { identity: false }).length > 0
-							) {
-								return null
-							}
+							differences.push(
+								...(remoteSide === null
+									? [`${pair.name} cloud: no directory`]
+									: diffSnapshots(treeSnapshot(legacySideTree(pair, "cloud")), remoteSide, { identity: false }).map(
+											line => `${pair.name} cloud: ${line}`
+										))
+							)
 						}
 
-						return true
+						mismatch = [...busy.map(name => `${name}: not quiet twice yet`), ...differences].join("\n") || "none"
+						console.log(`3.x convergence: ${mismatch.split("\n").slice(0, 8).join("; ")}`)
+
+						return busy.length === 0 && differences.length === 0 ? true : null
 					},
-					15_000
+					20_000
 				)
 			} catch (error) {
-				findings.attach("legacy-sync-messages.json", json(await legacySyncCounts(legacyPage())))
+				const counts = await legacySyncCounts(legacyPage())
+				const names = new Map(pairs.map(pair => [pair.uuid, pair.name]))
 
-				for (const pair of LEGACY_PAIRS) {
-					findings.attach(`legacy-converge-${pair.name}-local.jsonl`, snapshotText(await snapshotOf(pair.name)))
-				}
+				findings.attach("legacy-converge-mismatch.txt", mismatch)
+				findings.attach(
+					"legacy-sync-messages.json",
+					json({
+						...counts,
+						details: Object.fromEntries(
+							Object.entries(counts.details).map(([key, value]) => {
+								const [uuid = "", type = ""] = key.split(" ")
 
-				throw error
+								return [`${names.get(uuid) ?? uuid} ${type}`, value]
+							})
+						)
+					})
+				)
+
+				throw new Error(`${errorMessage(error)}; still differing: ${mismatch.split("\n").slice(0, 6).join("; ")}`, {
+					cause: error
+				})
 			}
 
 			return json((await legacySyncCounts(legacyPage())).types)
@@ -801,6 +819,11 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		try {
 			await setUp()
 		} finally {
+			// The old app's own logs (its logger writes beside userData, not in it).
+			for (const name of ["desktop.log", "desktop-worker.log"]) {
+				findings.attach(`legacy-3x-${name}`, tail(path.join(path.dirname(target.userData), "logs", name), 1500))
+			}
+
 			if (state.legacy !== undefined) {
 				await state.legacy.renderer.browser.close().catch(() => undefined)
 				await quitLegacy(state.legacy.launched, EXIT_TIMEOUT_MS).catch(() => undefined)

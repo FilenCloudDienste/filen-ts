@@ -67,26 +67,38 @@ export async function legacySignIn(
 }
 
 // Counts the old engine's per-pair messages as main posts them to the page (cycleNoChanges: a pass found nothing to
-// do), keyed by the pair's uuid, and every message type for diagnostics.
+// do), keyed by the pair's uuid, and every message type; keeps each pair's last non-empty error and ignore lists
+// (localTreeErrors, taskErrors, localTreeIgnored, remoteTreeIgnored: paths and reasons) for the evidence.
 export async function watchLegacySync(page: Page): Promise<void> {
 	await page.evaluate(`(() => {
 		if (globalThis.__e2eSync) return
-		const state = (globalThis.__e2eSync = { quiet: {}, types: {} })
+		const state = (globalThis.__e2eSync = { quiet: {}, types: {}, details: {} })
+		const kept = ["localTreeErrors", "taskErrors", "localTreeIgnored", "remoteTreeIgnored"]
 		window.desktopAPI.onMainToWindowMessage(message => {
 			if (!message || message.type !== "sync" || !message.message) return
 			const type = String(message.message.type)
 			state.types[type] = (state.types[type] ?? 0) + 1
 			const uuid = message.message.syncPair && message.message.syncPair.uuid
-			if (type === "cycleNoChanges" && typeof uuid === "string") state.quiet[uuid] = (state.quiet[uuid] ?? 0) + 1
+			if (typeof uuid !== "string") return
+			if (type === "cycleNoChanges") state.quiet[uuid] = (state.quiet[uuid] ?? 0) + 1
+			const data = message.message.data
+			const list = data && (data.errors ?? data.ignored)
+			if (kept.includes(type) && Array.isArray(list) && list.length > 0) {
+				state.details[uuid + " " + type] = JSON.stringify(list).slice(0, 4000)
+			}
 		})
 	})()`)
 }
 
-export async function legacySyncCounts(page: Page): Promise<{ quiet: Record<string, number>; types: Record<string, number> }> {
-	return (await page.evaluate("globalThis.__e2eSync ?? { quiet: {}, types: {} }")) as {
-		quiet: Record<string, number>
-		types: Record<string, number>
-	}
+export interface LegacySyncCounts {
+	quiet: Record<string, number>
+	types: Record<string, number>
+	// "<pair uuid> <message type>" -> the last non-empty list, as JSON.
+	details: Record<string, string>
+}
+
+export async function legacySyncCounts(page: Page): Promise<LegacySyncCounts> {
+	return (await page.evaluate("globalThis.__e2eSync ?? { quiet: {}, types: {}, details: {} }")) as LegacySyncCounts
 }
 
 // What the old settings dialogs write: prefs (tray, start minimized), the PIN and its lock timeout, the network drive,
