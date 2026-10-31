@@ -163,7 +163,9 @@ describe("sync copy", () => {
 			"remoteUndecodable",
 			"remoteInvalidName",
 			"remoteBrokenParent",
-			"localAlias"
+			"localAlias",
+			"localNameCollision",
+			"remoteNameCollision"
 		])
 	})
 

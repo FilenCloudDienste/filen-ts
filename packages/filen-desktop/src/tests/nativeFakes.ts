@@ -221,6 +221,8 @@ export function report(overrides: Partial<SyncPassReport> = {}): SyncPassReport 
 		quarantinedTotal: 0n,
 		paused: false,
 		interrupted: 0n,
+		scanGaps: [],
+		scanGapsTotal: 0n,
 		...overrides
 	}
 }

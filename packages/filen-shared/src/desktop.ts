@@ -292,7 +292,14 @@ export interface DesktopSyncConflict {
 }
 
 export type DesktopSyncUnsyncableReason =
-	"invalidName" | "repeatedFailure" | "remoteUndecodable" | "remoteInvalidName" | "remoteBrokenParent" | "localAlias"
+	| "invalidName"
+	| "repeatedFailure"
+	| "remoteUndecodable"
+	| "remoteInvalidName"
+	| "remoteBrokenParent"
+	| "localAlias"
+	| "localNameCollision"
+	| "remoteNameCollision"
 
 export interface DesktopSyncUnsyncable {
 	relPath: string

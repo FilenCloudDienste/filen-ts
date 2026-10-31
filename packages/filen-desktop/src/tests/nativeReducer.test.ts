@@ -198,4 +198,16 @@ describe("reduceEvents", () => {
 		expect(quiet.activity).toEqual([])
 		expect(state.get("1")?.lastSyncedAt).toBe(1000)
 	})
+
+	it("a local walk and a wait for the remote change nothing", () => {
+		const state = new Map([["1", createPairRuntime()]])
+		const progress = { entries: 10n, filesToHash: 4n, bytesToHash: 400n, filesHashed: 1n, bytesHashed: 100n }
+		const reduced = reduceEvents(fakeSdk, state, [
+			passEvent({ tag: "AwaitingRemote" }),
+			passEvent({ tag: "Scanning", inner: { progress } })
+		])
+
+		expect(reduced).toEqual({ changed: false, activity: [], authFailed: false })
+		expect(state.get("1")).toEqual(createPairRuntime())
+	})
 })

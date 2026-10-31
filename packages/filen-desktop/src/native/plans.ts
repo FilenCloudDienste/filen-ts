@@ -118,7 +118,9 @@ const UNSYNCABLE_REASONS: Record<UnsyncablePath["reason"]["tag"], DesktopSyncUns
 	RemoteUndecodable: "remoteUndecodable",
 	RemoteInvalidName: "remoteInvalidName",
 	RemoteBrokenParent: "remoteBrokenParent",
-	LocalAlias: "localAlias"
+	LocalAlias: "localAlias",
+	LocalNameCollision: "localNameCollision",
+	RemoteNameCollision: "remoteNameCollision"
 }
 
 function nodeKind(sdk: NativeSdk, node: PlannedNodeKind): DesktopSyncNodeKind {

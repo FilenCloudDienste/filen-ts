@@ -115,8 +115,17 @@ function started(runtime: PairRuntime, transfer: DesktopSyncTransfer): void {
 export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, events: readonly SyncPassEvent[]): Reduced {
 	const activity: NativeActivity[] = []
 	let authFailed = false
+	let changed = false
 
 	for (const { pairId: id, emittedAtMs, event } of events) {
+		// A local walk's progress and a wait for the remote listing come before the pass's PassStarted and change
+		// nothing the host shows, so they never cost an overview push.
+		if (event.tag === "Scanning" || event.tag === "AwaitingRemote") {
+			continue
+		}
+
+		changed = true
+
 		const pairId = id.toString()
 		const at = Number(emittedAtMs)
 		let runtime = state.get(pairId)
@@ -243,7 +252,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 		}
 	}
 
-	return { changed: events.length > 0, activity, authFailed }
+	return { changed, activity, authFailed }
 }
 
 // A watch's status, published after every pass and when it starts or ends.

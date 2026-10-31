@@ -105,7 +105,7 @@ patchedDependencies:
   '@expo/dom-webview@58.0.2': patches/@expo__dom-webview@58.0.2.patch
   # Ships the consumer proguard-rules.pro its build.gradle declares; AGP 9 fails without it. Drop once filen-rs
   # publishes the file.
-  '@filen/sdk-rs@0.5.11': patches/@filen__sdk-rs@0.5.11.patch
+  '@filen/sdk-rs@0.5.13': patches/@filen__sdk-rs@0.5.13.patch
   # Android: a detached MenuView's TouchDelegate opened the menu at the window origin; cleared on detach.
   # Drop once upstream fixes it.
   '@react-native-menu/menu@2.0.0': patches/@react-native-menu__menu@2.0.0.patch

@@ -258,6 +258,11 @@ export const sync = {
 	unsyncableRemoteBrokenParent: "The cloud directory it's in can't be read.",
 	/** Unsyncable — two local names refer to the same file */
 	unsyncableLocalAlias: "Another name on this device refers to the same file.",
+	/** Unsyncable — another local item in its directory has the same name ignoring case or Unicode form */
+	unsyncableLocalNameCollision:
+		"Another item in its directory on this device has the same name when case is ignored. Rename one of them.",
+	/** Unsyncable — another cloud item in its directory has the same name ignoring case */
+	unsyncableRemoteNameCollision: "Another item in its cloud directory has the same name when case is ignored. Rename one of them.",
 	/** Paged lists — load the next page */
 	listLoadMore: "Load more",
 	/** Paged lists — load failure */

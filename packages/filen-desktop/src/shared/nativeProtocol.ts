@@ -213,7 +213,7 @@ const conflictSchema = pinned<DesktopSyncConflict>()(
 const unsyncableSchema = pinned<DesktopSyncUnsyncable>()(
 	type({
 		relPath: relPathSchema,
-		reason: "'invalidName' | 'repeatedFailure' | 'remoteUndecodable' | 'remoteInvalidName' | 'remoteBrokenParent' | 'localAlias'",
+		reason: "'invalidName' | 'repeatedFailure' | 'remoteUndecodable' | 'remoteInvalidName' | 'remoteBrokenParent' | 'localAlias' | 'localNameCollision' | 'remoteNameCollision'",
 		detail: textSchema.or("null"),
 		"+": "reject"
 	})

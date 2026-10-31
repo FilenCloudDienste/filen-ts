@@ -53,7 +53,9 @@ export const UNSYNCABLE_REASON_KEY: Record<DesktopSyncUnsyncableReason, SyncKey>
 	remoteUndecodable: "unsyncableRemoteUndecodable",
 	remoteInvalidName: "unsyncableRemoteInvalidName",
 	remoteBrokenParent: "unsyncableRemoteBrokenParent",
-	localAlias: "unsyncableLocalAlias"
+	localAlias: "unsyncableLocalAlias",
+	localNameCollision: "unsyncableLocalNameCollision",
+	remoteNameCollision: "unsyncableRemoteNameCollision"
 }
 
 export function syncErrorKey(error: DesktopSyncError): SyncKey {
