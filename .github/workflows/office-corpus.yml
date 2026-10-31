@@ -191,7 +191,11 @@ jobs:
     env:
       FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
       FILEN_OFFICE_FUZZ_SAVES: ${{ github.workspace }}/office-saves
-      FILEN_OFFICE_SOFFICE: /usr/bin/soffice
+      # The LibreOffice src/tests/interop/accepted.ts is checked against (its lo-26 entries), from The Document
+      # Foundation's archive, which keeps every release; the distribution's LibreOffice is an older line.
+      LIBREOFFICE_VERSION: 26.8.2.2
+      LIBREOFFICE_SHA256: 8290c8f46cb33d6df8f681cb796e0697461ea070f86ec55b63c94d7eb9d9a476
+      FILEN_OFFICE_SOFFICE: /opt/libreoffice26.8/program/soffice
       FILEN_OFFICE_INTEROP_WORK: ${{ github.workspace }}/office-interop
       # Slower runners, as in test-office-corpus.
       FILEN_PERF_BUDGET_SCALE: '3'
@@ -208,9 +212,43 @@ jobs:
       - name: Install dependencies
         working-directory: packages/filen-office
         run: pnpm install --frozen-lockfile --filter @filen/office...
-      # Math is only a recommendation of Writer; without it Writer drops every OMML equation on import.
+      # Restored and saved apart, so a failing test run still keeps the download.
+      - name: Restore LibreOffice
+        id: libreoffice-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/libreoffice.tar.gz
+          key: libreoffice-deb-${{ env.LIBREOFFICE_VERSION }}
+      - name: Download LibreOffice
+        if: steps.libreoffice-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/libreoffice.tar.gz" \
+            "https://downloadarchive.documentfoundation.org/libreoffice/old/${LIBREOFFICE_VERSION}/deb/x86_64/LibreOffice_${LIBREOFFICE_VERSION}_Linux_x86-64_deb.tar.gz"
+          echo "${LIBREOFFICE_SHA256}  $RUNNER_TEMP/libreoffice.tar.gz" | sha256sum -c -
+      - name: Save LibreOffice
+        if: steps.libreoffice-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/libreoffice.tar.gz
+          key: libreoffice-deb-${{ env.LIBREOFFICE_VERSION }}
+      # Writer and Math (without Math, Writer drops every OMML equation on import) with what they need. The
+      # packages declare no system dependencies: the apt line holds the libraries their ELF files link.
       - name: Install LibreOffice
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer-nogui libreoffice-math-nogui
+        run: |
+          tarball="$RUNNER_TEMP/libreoffice.tar.gz"
+          echo "${LIBREOFFICE_SHA256}  ${tarball}" | sha256sum -c -
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libx11-6 libx11-xcb1 libxext6 libxinerama1 libcairo2 \
+            libcups2t64 libdbus-1-3 libfontconfig1 libfreetype6 libglib2.0-0t64 libnss3 libavahi-client3 libgssapi-krb5-2
+          mkdir "$RUNNER_TEMP/libreoffice"
+          tar -xzf "$tarball" -C "$RUNNER_TEMP/libreoffice" --strip-components=2 --wildcards '*/DEBS/*.deb'
+          cd "$RUNNER_TEMP/libreoffice"
+          sudo dpkg -i libreoffice26.8-ure_*.deb libobasis26.8-ooofonts_*.deb libobasis26.8-core_*.deb \
+            libobasis26.8-images_*.deb libreoffice26.8_*.deb libobasis26.8-en-us_*.deb libreoffice26.8-en-us_*.deb \
+            libobasis26.8-writer_*.deb libreoffice26.8-writer_*.deb libobasis26.8-math_*.deb libreoffice26.8-math_*.deb
+          version=$("$FILEN_OFFICE_SOFFICE" --version)
+          echo "$version"
+          case "$version" in "LibreOffice ${LIBREOFFICE_VERSION} "*) ;; *) echo "::error::expected LibreOffice ${LIBREOFFICE_VERSION}"; exit 1 ;; esac
       - name: Restore the corpus
         uses: actions/cache/restore@v4
         with:

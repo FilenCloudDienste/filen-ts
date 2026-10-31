@@ -31,6 +31,11 @@ export const ACCEPTED: readonly Accepted[] = [
 		reason: "LibreOffice 7.5 hangs or aborts laying out a document once a note starts with a table, and then writes no ODT or DOCX to read back (a copy of govuk__LPC202603_Open_Call_2_year_ITT_Document_ with one footnote that starts with a table hangs, and converts with a paragraph before that table; an edited govuk__DfE_Model_PFI_School_Agreement__Faith_Schools_ hangs past 300 s and converts in 4 s once an empty paragraph precedes its note's table; 26.8 converts all). A note may start with a table: CT_FtnEdn holds block-level content (ECMA-376 Part 1 §17.11.10, §17.11.2)"
 	},
 	{
+		failure: /^L1 pdf: timed out$/,
+		source: /govuk__20260501_Final_Customs_Tariff_Quotas_Reference_Document__v4\.5\./,
+		reason: "LibreOffice loops laying out this document once a picture or an equation is placed in its empty last paragraph, which follows a floating table (w:tblpPr, ECMA-376 Part 1 §17.4.57): the PDF export of the edited save runs past 300 s at full CPU in 25.8 (and past the 60 s limit in 24.2), as does a save with either edit alone, while the original converts in about 1 s, the save without the w:tblpPr converts, and a taller paragraph of text alone does not loop"
+	},
+	{
 		failure: /^L2 original: /,
 		office: /^lo-26\./,
 		witness: "formattedChangeRuns",
