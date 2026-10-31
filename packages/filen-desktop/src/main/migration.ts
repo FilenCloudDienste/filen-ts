@@ -31,7 +31,7 @@ import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 //             the old secrets are wiped, `wiped` says whether that finished; LevelDB keeps deleted values on disk
 //             until a compaction that may never come, so a later launch deletes the old origin's stores before
 //             anything opens them, and `purged` records that
-//   skipped   nothing to import (a fresh install)
+//   skipped   nothing to import: the old client's web app never ran here (a fresh install)
 // The old client's rclone config (the account's keys, merely obscured) is deleted once the import is done or given up.
 export type MigrationStage = "started" | "imported" | "abandoned" | "verified" | "skipped"
 
@@ -141,25 +141,26 @@ export type StartupDecision =
 	| "abandon"
 	| "none"
 
-// Whether this launch imports. Only a launch with no marker can see a session the user stored in 4.x itself, so that
-// is where a stored session limits it to the stash (a newer sign-in, its PIN and prefs are never overwritten); the
-// marker keeps that for reruns. A rerun after a crash imports again but leaves a session the earlier attempt already
-// stored alone.
+// Whether this launch imports. Without the old profile there is nothing to import, also for an attempt an earlier
+// build started on a fresh install (its read found no keys). Only a launch with no marker can see a session the user
+// stored in 4.x itself, so that is where a stored session limits it to the stash (a newer sign-in, its PIN and prefs
+// are never overwritten); the marker keeps that for reruns. A rerun after a crash imports again but leaves a session
+// the earlier attempt already stored alone.
 export function startupDecision(marker: MigrationMarker | null, legacyProfile: boolean, vault: SessionRead["status"]): StartupDecision {
-	if (marker === null) {
-		if (!legacyProfile) {
-			return "skip-fresh"
-		}
+	if (marker !== null && marker.stage !== "started") {
+		return "none"
+	}
 
+	if (!legacyProfile) {
+		return "skip-fresh"
+	}
+
+	if (marker === null) {
 		if (vault === "present") {
 			return "stash"
 		}
 
 		return vault === "unreadable" ? "defer" : "run"
-	}
-
-	if (marker.stage !== "started") {
-		return "none"
 	}
 
 	// A read that worked resets the count, so only failed reads in a row give up.
@@ -197,7 +198,7 @@ export function verifiedBy(marker: MigrationMarker, sessionBlob: string | null):
 
 export interface MigrationDeps {
 	marker: AtomicFile
-	// The old profile's localStorage exists (a cheap check of its directory).
+	// The old client's web app ran in this profile (a cheap check of its IndexedDB directory, legacyProfileExists).
 	legacyProfile(): Promise<boolean>
 	// READ_SCRIPT's result from the old origin; rejects on a timeout or a failed load.
 	readLegacy(): Promise<unknown>
@@ -322,8 +323,9 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 		deps.info(`migration: read keys=${String(read.count)}`)
 
-		// The old web app wrote its defaults on first start, so a profile that has run holds keys: none means the read
-		// missed the origin. Tried again next launch; nothing is cleared.
+		// The old web app opened the IndexedDB the probe found as it loaded and wrote its defaults to localStorage right
+		// after, so the profile holds keys: none means the read missed the origin. Tried again next launch; nothing is
+		// cleared.
 		if (read.count === 0) {
 			throw stepError("legacy parse", "no keys")
 		}
@@ -498,7 +500,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 				}
 
 				if (marker === null || marker.stage === "started") {
-					const legacyProfile = marker !== null || (await step("profile probe", () => deps.legacyProfile()))
+					const legacyProfile = await step("profile probe", () => deps.legacyProfile())
 					const vault = legacyProfile ? await vaultStatus() : "absent"
 					const decision = startupDecision(marker, legacyProfile, vault)
 

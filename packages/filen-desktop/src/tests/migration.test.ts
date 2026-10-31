@@ -1,6 +1,10 @@
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { type AtomicFile, codedError } from "../main/atomicFile.ts"
 import { LEGACY_KEYS, type LegacyStash } from "../main/legacyData.ts"
+import { LEGACY_INDEXEDDB_PREFIX, legacyProfileExists } from "../main/legacyOrigin.ts"
 import {
 	createMigration,
 	createStashStore,
@@ -106,6 +110,14 @@ describe("startupDecision", () => {
 		expect(startupDecision({ ...started, failedStarts: MAX_FAILED_STARTS }, true, "absent")).toBe("abandon")
 	})
 
+	it("skips a started attempt without the old profile, however often it failed", () => {
+		const started = marker({ stage: "started", failedStarts: 1, userId: null, importedAt: null })
+
+		expect(startupDecision(started, false, "absent")).toBe("skip-fresh")
+		expect(startupDecision({ ...started, stashOnly: true }, false, "absent")).toBe("skip-fresh")
+		expect(startupDecision({ ...started, failedStarts: MAX_FAILED_STARTS }, false, "absent")).toBe("skip-fresh")
+	})
+
 	it("keeps a stash-only attempt stash-only on a rerun, whatever the vault holds now", () => {
 		const started = marker({ stage: "started", stashOnly: true })
 
@@ -117,6 +129,7 @@ describe("startupDecision", () => {
 	it("never imports again once imported, abandoned or skipped", () => {
 		for (const stage of ["imported", "abandoned", "verified", "skipped"] as const) {
 			expect(startupDecision(marker({ stage }), true, "absent")).toBe("none")
+			expect(startupDecision(marker({ stage }), false, "absent")).toBe("none")
 		}
 	})
 })
@@ -368,7 +381,7 @@ describe("createMigration", () => {
 		expect(second.stored()).toMatchObject({ wiped: true })
 	})
 
-	it("treats a read with no keys as failed: nothing imported, retried, then given up", async () => {
+	it("treats a read with no keys from the old profile as missed: nothing imported, retried, then given up", async () => {
 		let current: MigrationMarker | undefined
 
 		for (let attempt = 1; attempt <= MAX_FAILED_STARTS; attempt++) {
@@ -446,6 +459,7 @@ describe("createMigration", () => {
 		const first = setup({ legacyProfile: false })
 
 		await first.migration.start()
+		expect(first.deps.readLegacy).not.toHaveBeenCalled()
 		expect(first.deps.vault.get).not.toHaveBeenCalled()
 		expect(first.deps.removeRcloneConfig).not.toHaveBeenCalled()
 		expect(first.stored()).toMatchObject({ stage: "skipped" })
@@ -455,6 +469,62 @@ describe("createMigration", () => {
 		await second.migration.start()
 		expect(second.deps.legacyProfile).not.toHaveBeenCalled()
 		expect(second.deps.vault.get).not.toHaveBeenCalled()
+	})
+
+	it("probes the old web app's IndexedDB, not the Local Storage store every profile has", async () => {
+		const userData = await realpath(await mkdtemp(path.join(tmpdir(), "filen-migration-")))
+
+		try {
+			await mkdir(path.join(userData, "Local Storage", "leveldb"), { recursive: true })
+
+			const fresh = setup()
+
+			fresh.deps.legacyProfile.mockImplementation(() => legacyProfileExists(userData))
+			await fresh.migration.start()
+			expect(fresh.deps.readLegacy).not.toHaveBeenCalled()
+			expect(fresh.stored()).toMatchObject({ stage: "skipped", failedStarts: 0 })
+
+			await mkdir(path.join(userData, "IndexedDB", `${LEGACY_INDEXEDDB_PREFIX}indexeddb.leveldb`), { recursive: true })
+
+			const old = setup()
+
+			old.deps.legacyProfile.mockImplementation(() => legacyProfileExists(userData))
+			await old.migration.start()
+			expect(old.deps.readLegacy).toHaveBeenCalledTimes(1)
+			expect(old.stored()).toMatchObject({ stage: "imported", userId: 123456 })
+		} finally {
+			await rm(userData, { recursive: true, force: true })
+		}
+	})
+
+	it("ends an attempt an earlier build started on a fresh install as skipped, reading and wiping nothing", async () => {
+		const { deps, migration, stored } = setup({
+			marker: marker({ stage: "started", failedStarts: 2, userId: null, importedAt: null }),
+			legacyProfile: false
+		})
+
+		await migration.start()
+		await settle()
+
+		expect(deps.legacyProfile).toHaveBeenCalledTimes(1)
+		expect(deps.readLegacy).not.toHaveBeenCalled()
+		expect(deps.vault.get).not.toHaveBeenCalled()
+		expect(deps.removeRcloneConfig).not.toHaveBeenCalled()
+		expect(deps.wipeLegacy).not.toHaveBeenCalled()
+		expect(stored()).toMatchObject({ stage: "skipped", failedStarts: 0 })
+	})
+
+	it("probes again on a rerun and keeps retrying while the old profile is there", async () => {
+		const { deps, migration, stored } = setup({
+			marker: marker({ stage: "started", failedStarts: 1, userId: null, importedAt: null }),
+			read: { count: 0, values: {} }
+		})
+
+		await migration.start()
+
+		expect(deps.legacyProfile).toHaveBeenCalledTimes(1)
+		expect(deps.readLegacy).toHaveBeenCalledTimes(1)
+		expect(stored()).toMatchObject({ stage: "started", failedStarts: 2 })
 	})
 
 	it("defers without writing anything while the vault cannot be read", async () => {

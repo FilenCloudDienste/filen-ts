@@ -1,5 +1,7 @@
+import { stat } from "node:fs/promises"
+import path from "node:path"
 import { BrowserWindow, protocol, session } from "electron"
-import { codedError } from "./atomicFile.ts"
+import { codedError, errorCode } from "./atomicFile.ts"
 
 // The old client served its web app on filendesktop://bundle, so its localStorage belongs to that origin of the
 // default session. The scheme is registered with the old privileges (standard and secure decide the origin and
@@ -11,6 +13,28 @@ const LEGACY_URL = `${LEGACY_SCHEME}://bundle/`
 export const LEGACY_TIMEOUT_MS = 15 * 1000
 
 const PAGE = "<!doctype html><title>Filen</title>"
+
+// The old origin's entries in userData/IndexedDB (Chromium names them after its scheme, host and port).
+export const LEGACY_INDEXEDDB_PREFIX = `${LEGACY_SCHEME}_bundle_0.`
+
+// Whether the old client's web app ever ran in this profile. It opened its IndexedDB stores as its bundle loaded, before
+// any sign-in and before it wrote anything to localStorage, so every profile with something to import has them; nothing
+// of this app opens IndexedDB in that origin before the migration's marker exists. Chromium creates the Local Storage
+// store for any profile, a fresh one included, so that proves nothing. One stat; an error other than a missing entry
+// rejects, so that launch decides nothing.
+export async function legacyProfileExists(userData: string): Promise<boolean> {
+	try {
+		return (await stat(path.join(userData, "IndexedDB", `${LEGACY_INDEXEDDB_PREFIX}indexeddb.leveldb`))).isDirectory()
+	} catch (error) {
+		const code = errorCode(error)
+
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			return false
+		}
+
+		throw error
+	}
+}
 
 // The empty page at the root of the old origin, a 404 anywhere else.
 export function legacyPageResponse(url: string): Response {

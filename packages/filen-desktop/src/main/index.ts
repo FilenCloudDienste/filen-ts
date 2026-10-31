@@ -22,7 +22,7 @@ import {
 	type WebFrameMain
 } from "electron"
 import { existsSync, readFileSync } from "node:fs"
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises"
 import { lookup } from "node:dns/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
@@ -51,7 +51,7 @@ import { createFileProviderService, runsTranslocated } from "./fileProvider/serv
 import { createFileProviderStore } from "./fileProvider/store.ts"
 import { appIdentity, closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
-import { LEGACY_SCHEME, runInLegacyOrigin } from "./legacyOrigin.ts"
+import { LEGACY_INDEXEDDB_PREFIX, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
 import { createMigration, createStashStore, legacyOwner, parseMarker } from "./migration.ts"
 import { addonPath } from "./native/addonPath.ts"
@@ -195,13 +195,7 @@ const migrationMarker = atomicFile(path.join(userDataPath, "migration.json"))
 // The one-time import from the old client. Runs after ready and before the first window; see migration.ts.
 const migration = createMigration({
 	marker: migrationMarker,
-	legacyProfile: async () => {
-		try {
-			return (await stat(path.join(userDataPath, "Local Storage", "leveldb"))).isDirectory()
-		} catch {
-			return false
-		}
-	},
+	legacyProfile: () => legacyProfileExists(userDataPath),
 	readLegacy: () => runInLegacyOrigin(READ_SCRIPT),
 	readOptions: async () => (await atomicFile(path.join(userDataPath, "options.v1.json")).read())?.toString("utf8") ?? null,
 	wipeLegacy: async () => {
@@ -213,7 +207,7 @@ const migration = createMigration({
 	removeRcloneConfig: () => rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true }),
 	purgeLegacyStores: async () => {
 		const indexedDb = path.join(userDataPath, "IndexedDB")
-		const oldOrigin = (await readdir(indexedDb).catch(() => [])).filter(name => name.startsWith("filendesktop_bundle_0."))
+		const oldOrigin = (await readdir(indexedDb).catch(() => [])).filter(name => name.startsWith(LEGACY_INDEXEDDB_PREFIX))
 
 		await Promise.all(oldOrigin.map(name => rm(path.join(indexedDb, name), { recursive: true, force: true })))
 		await rm(path.join(userDataPath, "Local Storage"), { recursive: true, force: true })
