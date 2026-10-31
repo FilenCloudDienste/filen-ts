@@ -461,8 +461,10 @@ jobs:
           bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
           e2e --scenario legacy ${{ env.TEST_ARGS }}
       # The account's credentials reach spike s7 only, and only this step.
+      # Bounded so a hang never holds a runner for the job's whole budget.
       - name: Spike ${{ matrix.spike }}
         if: matrix.spike
+        timeout-minutes: 20
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ matrix.spike == 's7' && secrets.FILEN_DESKTOP_E2E_TEST_EMAIL || '' }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ matrix.spike == 's7' && secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD || '' }}

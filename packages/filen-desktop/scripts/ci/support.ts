@@ -88,6 +88,56 @@ export async function waitFor<T>(
 	}
 }
 
+export interface BoundedResult extends RunResult {
+	timedOut: boolean
+}
+
+/**
+ * A command that must never hold up the harness (system tools that can block on a daemon or a prompt): after
+ * `timeoutMs` its whole process group is killed, and the result says it timed out instead of the run hanging.
+ */
+export async function runBounded(command: string, args: readonly string[], timeoutMs: number): Promise<BoundedResult> {
+	console.log(`$ ${command} ${args.join(" ")}`)
+
+	const group = process.platform !== "win32"
+	const child = spawn(command, args, { detached: group, stdio: ["ignore", "pipe", "pipe"] })
+	let stdout = ""
+	let stderr = ""
+	let timedOut = false
+
+	child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+		stdout += chunk
+	})
+	child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+		stderr += chunk
+	})
+
+	const timer = setTimeout(() => {
+		timedOut = true
+
+		try {
+			if (group && child.pid !== undefined) {
+				process.kill(-child.pid, "SIGKILL")
+			} else {
+				child.kill("SIGKILL")
+			}
+		} catch {
+			// Already gone.
+		}
+	}, timeoutMs)
+	const status = await new Promise<number | null>(resolve => {
+		child.once("error", error => {
+			stderr += error.message
+			resolve(null)
+		})
+		child.once("close", code => resolve(code))
+	})
+
+	clearTimeout(timer)
+
+	return { status, stdout, stderr, timedOut }
+}
+
 // Liveness over a window: the probe must hold on every check for the whole duration.
 export async function holds(what: string, durationMs: number, probe: () => boolean): Promise<void> {
 	const until = Date.now() + durationMs
