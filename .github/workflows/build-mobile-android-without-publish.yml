@@ -142,13 +142,20 @@ jobs:
           # directly on a phone. GitHub artifact downloads are always zipped; release assets are not.
           APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
           cp "$APK" "${RUNNER_TEMP}/Filen-android.apk"
-          gh release delete android-test-latest --cleanup-tag --yes || true
-          gh release create android-test-latest \
-            "${RUNNER_TEMP}/Filen-android.apk" \
-            --prerelease \
-            --target "${GITHUB_SHA}" \
-            --title "Android test build (latest)" \
-            --notes "Rolling latest signed release APK for on-device testing. Build #${{ github.run_number }} · commit ${GITHUB_SHA}. On your phone, tap **Filen-android.apk** below to install (allow 'install unknown apps' if prompted)."
+          # The tag is created once at the default branch head and never moved: GITHUB_TOKEN has no
+          # workflows permission, so GitHub refuses (403) a tag at a commit whose .github/workflows
+          # differ from main's, which is the case whenever main moved on during the build.
+          NOTES="Rolling latest signed release APK for on-device testing. Build #${{ github.run_number }} · commit ${GITHUB_SHA}. On your phone, tap **Filen-android.apk** below to install (allow 'install unknown apps' if prompted)."
+          if gh release view android-test-latest >/dev/null 2>&1; then
+            gh release upload android-test-latest "${RUNNER_TEMP}/Filen-android.apk" --clobber
+            gh release edit android-test-latest --notes "$NOTES"
+          else
+            gh release create android-test-latest \
+              "${RUNNER_TEMP}/Filen-android.apk" \
+              --prerelease \
+              --title "Android test build (latest)" \
+              --notes "$NOTES"
+          fi
           {
             echo "## Android test build published"
             echo ""
