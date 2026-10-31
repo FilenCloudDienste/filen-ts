@@ -681,7 +681,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				const problems: string[] = []
 
 				for (const pair of pairs) {
-					const activity = await desktop<DesktopSyncActivity[]>(page(), `window.desktop.sync.activity(${json(pair.id)}, 500)`)
+					const activity = await desktop<DesktopSyncActivity[]>(page(), `window.desktop.sync.activity(${json(pair.id)}, 200)`)
 					const moved = activity.filter(item => TRANSFER_KINDS.has(item.kind))
 
 					problems.push(...moved.map(item => `${pair.name}: ${item.kind} ${item.relPath ?? ""}`))
