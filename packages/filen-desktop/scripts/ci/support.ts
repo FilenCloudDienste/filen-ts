@@ -96,11 +96,25 @@ export interface BoundedResult extends RunResult {
  * A command that must never hold up the harness (system tools that can block on a daemon or a prompt): after
  * `timeoutMs` its whole process group is killed, and the result says it timed out instead of the run hanging.
  */
-export async function runBounded(command: string, args: readonly string[], timeoutMs: number): Promise<BoundedResult> {
+export async function runBounded(
+	command: string,
+	args: readonly string[],
+	timeoutMs: number,
+	options: { env?: NodeJS.ProcessEnv; input?: string; cwd?: string } = {}
+): Promise<BoundedResult> {
 	console.log(`$ ${command} ${args.join(" ")}`)
 
 	const group = process.platform !== "win32"
-	const child = spawn(command, args, { detached: group, stdio: ["ignore", "pipe", "pipe"] })
+	const child = spawn(command, args, {
+		detached: group,
+		stdio: "pipe",
+		env: options.env ?? process.env,
+		cwd: options.cwd ?? process.cwd()
+	})
+
+	// Never logged: the input may be a secret (rclone obscure reads one). Without one, stdin is at its end at once.
+	child.stdin.end(options.input)
+
 	let stdout = ""
 	let stderr = ""
 	let timedOut = false

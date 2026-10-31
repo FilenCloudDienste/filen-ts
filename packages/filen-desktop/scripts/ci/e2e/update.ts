@@ -46,6 +46,17 @@ export interface UpdateOptions {
 	prevVersion: string | null
 	signed: boolean
 	work: string
+	// The deep chains' own steps around the update.
+	hooks?: UpdateHooks
+}
+
+export interface UpdateHooks {
+	// Once the installed app is ready, before its update launch; the app must not be running when it returns.
+	beforeUpdate(): Promise<void>
+	// Once the update is verified, with N running as the updater relaunched it, before the machine is reset.
+	afterUpdate(): Promise<void>
+	// Whatever happened, before the machine is reset (evidence that lives in userData).
+	beforeReset(): Promise<void>
 }
 
 // rpm/deb/AppImage versions turn a prerelease's "-" into "~" or "_"; the comparison is over the same characters.
@@ -202,7 +213,8 @@ export async function runUpdate({
 	prevDir,
 	prevVersion,
 	signed,
-	work
+	work,
+	hooks
 }: UpdateOptions): Promise<void> {
 	const legacy = scenario === "legacy"
 	const fromVersion = legacy ? LEGACY_VERSION : (prevVersion ?? fail("--prev-version is required"))
@@ -247,6 +259,9 @@ export async function runUpdate({
 		installFrom(target, installer, fromVersion, legacy ? platform !== "linux" : signed)
 
 		const token = writeMarker(target)
+
+		await hooks?.beforeUpdate()
+
 		const served = await feedFor(target, nextDir, nextVersion)
 
 		feed = served.server
@@ -379,6 +394,8 @@ export async function runUpdate({
 			console.log(`migration marker: ${existsSync(migration) ? readFileSync(migration, "utf8") : "absent"}`)
 		}
 
+		await hooks?.afterUpdate()
+
 		console.log(`\n${scenario}: ${fromVersion} -> ${nextVersion} on ${platform} ${arch} ${format} PASSED`)
 	} catch (error) {
 		section("diagnostics")
@@ -416,6 +433,8 @@ export async function runUpdate({
 
 		throw error
 	} finally {
+		await hooks?.beforeReset().catch((error: unknown) => console.log(`before reset: ${errorMessage(error)}`))
+
 		try {
 			target.reset()
 		} catch (error) {

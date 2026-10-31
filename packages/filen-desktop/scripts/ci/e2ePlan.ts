@@ -9,13 +9,19 @@ import { appendFileSync, readFileSync } from "node:fs"
 //   SIGNED      true | false: sign every build (release and custom); nightly signs macOS only, never notarized
 //   SCENARIOS   comma-separated subset of previous,legacy (default both); LEGACY=false drops legacy too
 //   FORMATS     custom only: entries such as win-x64-nsis,linux-x64-deb (default all)
-//   SPIKE       none | s1 | s7: a dispatch-only spike instead of the update scenarios
+//   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep makes every main format deep
+//   SPIKE       none | s1 | s7 | cloud: a dispatch-only spike instead of the update scenarios (cloud: the harness's cloud
+//               self-test, no app)
+//
+// Deep entries sign in: `session` tells the workflow to make the run's one harness sign-in, and each deep entry gets a
+// `stagger` (seconds) that spaces the UI sign-ins of parallel jobs.
 //
 //   node scripts/ci/e2ePlan.ts
 
 export type Os = "windows" | "mac" | "linux"
 export type Profile = "release" | "nightly" | "custom"
-export type Spike = "s1" | "s7"
+export type Spike = "s1" | "s7" | "cloud"
+export type Depth = "auto" | "install" | "deep"
 
 interface Entry {
 	os: Os
@@ -29,6 +35,9 @@ export interface TestEntry extends Entry {
 	signed: boolean
 	previous: boolean
 	legacy: boolean
+	// The N-1 -> N chain signs in and drives the apps (chain P).
+	deep: boolean
+	stagger: number
 	spike: Spike | ""
 }
 
@@ -46,12 +55,15 @@ export interface PlanInput {
 	scenarios: string
 	legacy: boolean
 	formats: string
+	depth: string
 	spike: string
 }
 
 export interface Plan {
 	profile: Profile
 	spike: Spike | ""
+	// The run's one harness sign-in is needed.
+	session: boolean
 	builds: BuildEntry[]
 	tests: TestEntry[]
 	notices: string[]
@@ -99,11 +111,25 @@ const entries: Entry[] = [
 	)
 ]
 
-// One entry per OS, on the format each spike asks about.
+// One entry per OS, on the format each spike asks about (cloud runs no app).
 const spikeEntries: Record<Spike, readonly string[]> = {
 	s1: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"],
-	s7: ["mac-arm64-dmg"]
+	s7: ["mac-arm64-dmg"],
+	cloud: []
 }
+
+// Deep depth per profile: release on every OS and architecture's main format, nightly on one per OS, by hand the
+// nightly set unless DEPTH says otherwise. Other formats stay at install depth: deep flows do not depend on them.
+const MAIN_FORMATS = ["win-x64-nsis", "win-arm64-nsis", "mac-arm64-dmg", "linux-x64-deb", "linux-arm64-deb"]
+const deepEntries: Record<Profile, readonly string[]> = {
+	release: MAIN_FORMATS,
+	nightly: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"],
+	custom: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
+}
+// Where the deep chain is built so far; the rest of a deep request runs at install depth, with a notice.
+const DEEP_READY = new Set(["linux-x64-deb", "linux-arm64-deb"])
+// Seconds between the UI sign-ins of parallel deep jobs.
+const STAGGER_SECONDS = 20
 
 const builders: Record<Os, string> = { windows: "windows-latest", mac: "macos-26", linux: "ubuntu-latest" }
 
@@ -138,10 +164,20 @@ export function plan(input: PlanInput): Plan {
 	}
 
 	const spikeName = input.spike === "none" ? "" : input.spike
-	const spike = (["", "s1", "s7"] as const).find(candidate => candidate === spikeName)
+	const spike = (["", "s1", "s7", "cloud"] as const).find(candidate => candidate === spikeName)
 
 	if (spike === undefined) {
-		invalid(`SPIKE must be none, s1 or s7 (got "${input.spike}")`)
+		invalid(`SPIKE must be none, s1, s7 or cloud (got "${input.spike}")`)
+	}
+
+	const depth = (["auto", "install", "deep"] as const).find(candidate => candidate === (input.depth === "" ? "auto" : input.depth))
+
+	if (depth === undefined) {
+		invalid(`DEPTH must be auto, install or deep (got "${input.depth}")`)
+	}
+
+	if (spike === "cloud") {
+		return { profile, spike, session: true, builds: [], tests: [], notices: [] }
 	}
 
 	const scenarios = input.scenarios.trim() === "" ? ["previous", "legacy"] : list(input.scenarios)
@@ -201,18 +237,25 @@ export function plan(input: PlanInput): Plan {
 		invalid("nothing to test")
 	}
 
-	const tests = chosen.map((entry): TestEntry => ({
-		...entry,
-		signed: sign[entry.os],
-		previous,
-		legacy,
-		spike
-	}))
+	const wantsDeep = (id: string) =>
+		spike === "" && previous && depth !== "install" && (depth === "deep" ? MAIN_FORMATS : deepEntries[profile]).includes(id)
+	const notReady = chosen.map(idOf).filter(id => wantsDeep(id) && !DEEP_READY.has(id))
+
+	if (notReady.length > 0) {
+		notices.push(`Deep depth is not built yet for ${notReady.join(", ")}; they run at install depth.`)
+	}
+
+	let deepCount = 0
+	const tests = chosen.map((entry): TestEntry => {
+		const deep = wantsDeep(idOf(entry)) && DEEP_READY.has(idOf(entry))
+
+		return { ...entry, signed: sign[entry.os], previous, legacy, deep, stagger: deep ? STAGGER_SECONDS * deepCount++ : 0, spike }
+	})
 	const builds = (Object.keys(builders) as Os[])
 		.filter(os => tests.some(entry => entry.os === os))
 		.map((os): BuildEntry => ({ os, runner: builders[os], sign: sign[os] }))
 
-	return { profile, spike, builds, tests, notices }
+	return { profile, spike, session: deepCount > 0, builds, tests, notices }
 }
 
 if (import.meta.main) {
@@ -228,6 +271,7 @@ if (import.meta.main) {
 			scenarios: env("SCENARIOS"),
 			legacy: env("LEGACY") !== "false",
 			formats: env("FORMATS"),
+			depth: env("DEPTH"),
 			spike: env("SPIKE")
 		})
 
@@ -238,6 +282,7 @@ if (import.meta.main) {
 		const outputs = {
 			profile: result.profile,
 			spike: result.spike,
+			session: String(result.session),
 			"next-version": version,
 			"prev-version": previousVersion(version),
 			"build-matrix": JSON.stringify({ include: result.builds }),

@@ -10,6 +10,7 @@ const dispatch: PlanInput = {
 	scenarios: "previous,legacy",
 	legacy: true,
 	formats: "",
+	depth: "",
 	spike: "none"
 }
 
@@ -31,7 +32,7 @@ describe("e2ePlan", () => {
 		expect(result.builds.every(entry => !entry.sign)).toBe(true)
 		expect(result.tests).toHaveLength(8)
 		expect(result.tests.every(entry => entry.previous && entry.legacy && !entry.signed && entry.spike === "")).toBe(true)
-		expect(result.notices).toHaveLength(1)
+		expect(result.notices.filter(notice => notice.startsWith("macOS is not tested unsigned"))).toHaveLength(1)
 	})
 
 	it("tests every entry signed at release", () => {
@@ -74,6 +75,42 @@ describe("e2ePlan", () => {
 		expect(() => plan({ ...dispatch, spike: "s7" })).toThrow()
 		expect(ids({ ...dispatch, profile: "nightly", spike: "s7" })).toEqual(["mac-arm64-dmg"])
 		expect(plan({ ...dispatch, signed: true, spike: "s7" }).builds).toEqual([{ os: "mac", runner: "macos-26", sign: true }])
+	})
+})
+
+describe("e2ePlan depth", () => {
+	const deep = (input: PlanInput) =>
+		plan(input)
+			.tests.filter(entry => entry.deep)
+			.map(entry => `${entry.platform}-${entry.arch}-${entry.format}@${String(entry.stagger)}`)
+
+	it("makes the built deep entries deep, staggers them and asks for the harness sign-in", () => {
+		const nightly = plan({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })
+
+		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
+		expect(nightly.session).toBe(true)
+		expect(nightly.notices.some(notice => notice.includes("win-x64-nsis, mac-arm64-dmg"))).toBe(true)
+		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual(["linux-x64-deb@0", "linux-arm64-deb@20"])
+	})
+
+	it("keeps install depth when asked, for legacy-only runs and for spikes", () => {
+		expect(plan({ ...dispatch, depth: "install" }).session).toBe(false)
+		expect(deep({ ...dispatch, depth: "install" })).toEqual([])
+		expect(deep({ ...dispatch, scenarios: "legacy" })).toEqual([])
+		expect(deep({ ...dispatch, spike: "s1" })).toEqual([])
+		expect(deep({ ...dispatch, depth: "deep", formats: "linux-arm64-deb,linux-x64-rpm" })).toEqual(["linux-arm64-deb@0"])
+		expect(() => plan({ ...dispatch, depth: "deepest" })).toThrow()
+	})
+
+	it("plans the cloud self-test with no build, no app and the harness sign-in", () => {
+		expect(plan({ ...dispatch, spike: "cloud" })).toEqual({
+			profile: "custom",
+			spike: "cloud",
+			session: true,
+			builds: [],
+			tests: [],
+			notices: []
+		})
 	})
 })
 

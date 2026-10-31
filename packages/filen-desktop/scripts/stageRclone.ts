@@ -127,6 +127,23 @@ async function download(url: string, sha256: string): Promise<Uint8Array> {
 	return data
 }
 
+// The pinned rclone of this OS for `arch`, verified against versions.json.
+export async function pinnedRclone(arch: NativeArch, versions = readVersions()): Promise<Uint8Array> {
+	const os = OS[process.platform]
+
+	if (os === undefined) {
+		throw new Error(`No rclone for ${process.platform}`)
+	}
+
+	const name = `rclone-v${versions.rclone}-${os.rclone}-${RCLONE_ARCH[arch]}`
+	const zip = await download(
+		`https://downloads.rclone.org/v${versions.rclone}/${name}.zip`,
+		versions.rcloneSha256[`${os.builder}-${arch}`]
+	)
+
+	return rcloneFromZip(zip, `${name}/${os.builder === "win" ? "rclone.exe" : "rclone"}`, arch)
+}
+
 export async function stageRclone(): Promise<void> {
 	const os = OS[process.platform]
 
@@ -139,12 +156,7 @@ export async function stageRclone(): Promise<void> {
 	const digests: Partial<Record<NativeArch, string>> = {}
 
 	for (const arch of ARCHS) {
-		const name = `rclone-v${versions.rclone}-${os.rclone}-${RCLONE_ARCH[arch]}`
-		const zip = await download(
-			`https://downloads.rclone.org/v${versions.rclone}/${name}.zip`,
-			versions.rcloneSha256[`${os.builder}-${arch}`]
-		)
-		const binary = rcloneFromZip(zip, `${name}/${executable}`, arch)
+		const binary = await pinnedRclone(arch, versions)
 		const target = path.join(packageDir, "build", "rclone", `${os.builder}-${arch}`)
 
 		// A stale copy must not outlive the release it came from.

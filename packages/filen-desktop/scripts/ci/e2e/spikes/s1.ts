@@ -6,7 +6,7 @@ import { connectCdp, listTargets, type Cdp } from "../cdp/inspector.ts"
 import { connectRenderer } from "../cdp/renderer.ts"
 import { exitWithin, launchDebuggable, type Launched } from "../launch.ts"
 import { installFrom, legacyInstaller, legacyLogOf, START_TIMEOUT_MS, tail } from "../update.ts"
-import { createFindings, type Findings, type SpikeOptions } from "./findings.ts"
+import { createFindings, type Findings, type SpikeOptions } from "../findings.ts"
 
 // Spike S1: can the packaged apps be driven from outside? Both run with devTools disabled, so the question is whether
 // their pages are still listed and evaluable over --remote-debugging-port and playwright-core attaches; for 3.0.53 also

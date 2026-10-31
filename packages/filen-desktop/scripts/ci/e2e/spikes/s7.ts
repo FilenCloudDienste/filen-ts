@@ -3,11 +3,13 @@ import os from "node:os"
 import path from "node:path"
 import type { Page } from "playwright-core"
 import { errorMessage, fail, runBounded, waitFor, type BoundedResult } from "../../support.ts"
+import { desktop, pageText, sessionStatus, signIn, signOut } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { launchDebuggable } from "../launch.ts"
 import { redactor } from "../redact.ts"
 import { installFrom, START_TIMEOUT_MS, tail } from "../update.ts"
-import { createFindings, type Findings, type SpikeOptions } from "./findings.ts"
+import { createFindings, type SpikeOptions } from "../findings.ts"
+import { takeCredentials } from "../session.ts"
 
 // Spike S7: can Filen in Finder be switched on with nobody at the Mac? macOS may register the File Provider domain with
 // userEnabled false, which a person flips in System Settings. On a signed, unnotarized N: sign in through the real form
@@ -18,11 +20,7 @@ import { createFindings, type Findings, type SpikeOptions } from "./findings.ts"
 // signs out through the app's own account menu, closing whatever covers the shell first. Evidence: findings, main.log and
 // the subsystem log (fileproviderctl is left out: it hangs on hosted runners). Every system tool runs bounded.
 
-const EMAIL_ENV = "FILEN_DESKTOP_E2E_TEST_EMAIL"
-const PASSWORD_ENV = "FILEN_DESKTOP_E2E_TEST_PASSWORD"
 const APPEX_ID = "io.filen.desktop.FileProvider"
-const SIGN_IN_TIMEOUT_MS = 2 * 60 * 1000
-const SIGN_OUT_TIMEOUT_MS = 2 * 60 * 1000
 const DOMAIN_TIMEOUT_MS = 60_000
 const LISTING_TIMEOUT_MS = 2 * 60 * 1000
 const TOOL_TIMEOUT_MS = 60_000
@@ -35,27 +33,18 @@ interface FileProviderState {
 	translocated: boolean
 }
 
-// Every read crosses CDP as a derived, non-secret value.
-async function evaluate(page: Page, expression: string): Promise<string> {
-	return String(await page.evaluate(`(async () => JSON.stringify(await ${expression}))()`))
-}
-
-async function sessionStatus(page: Page): Promise<unknown> {
-	return JSON.parse(await evaluate(page, "window.desktop.session.get().then(read => read.status)"))
-}
-
 async function state(page: Page): Promise<FileProviderState> {
-	return JSON.parse(await evaluate(page, "window.desktop.fileProvider.state()")) as FileProviderState
+	return desktop<FileProviderState>(page, "window.desktop.fileProvider.state()")
 }
 
 async function toggle(page: Page, action: "enable" | "disable"): Promise<string> {
-	const result = await evaluate(page, `window.desktop.fileProvider.${action}()`)
+	const result = await desktop<{ ok?: unknown }>(page, `window.desktop.fileProvider.${action}()`)
 
-	if ((JSON.parse(result) as { ok?: unknown }).ok !== true) {
-		fail(`${action}() refused: ${result}`)
+	if (result.ok !== true) {
+		fail(`${action}() refused: ${JSON.stringify(result)}`)
 	}
 
-	return result
+	return JSON.stringify(result)
 }
 
 // userEnabled once macOS reports one for the user's domain.
@@ -73,76 +62,6 @@ function tool(command: string, args: string[], timeoutMs = TOOL_TIMEOUT_MS): Pro
 	return runBounded(command, args, timeoutMs)
 }
 
-// Names of buttons that close what may cover the shell after a sign-in (startup reminders, notices, callouts) without
-// acting on it. Anything else is closed with Escape.
-const DISMISS = /^(Remind me later|OK|Not now|Later|Skip|Close|Dismiss|Got it|Cancel)$/i
-const DIALOGS = '[role="dialog"], [role="alertdialog"]'
-
-// Closes every open dialog, recording each distinct one's text (redacted by the findings) as information.
-async function clearDialogs(page: Page, findings: Findings, seen: Set<string>): Promise<void> {
-	for (let round = 0; round < 6; round++) {
-		const dialog = page.locator(DIALOGS).filter({ visible: true }).last()
-
-		if ((await dialog.count()) === 0) {
-			return
-		}
-
-		const text = (await dialog.innerText().catch(errorMessage)).replace(/\s+/g, " ").slice(0, 300)
-
-		if (!seen.has(text)) {
-			seen.add(text)
-			findings.info("dialog over the shell", text)
-		}
-
-		const dismiss = dialog.getByRole("button", { name: DISMISS }).first()
-
-		if ((await dismiss.count()) > 0) {
-			await dismiss.click({ timeout: 10_000 }).catch(() => page.keyboard.press("Escape"))
-		} else {
-			await page.keyboard.press("Escape")
-		}
-
-		await page.waitForTimeout(500)
-	}
-}
-
-// The app's own sign-out: account menu, then the confirm dialog, once whatever covers the shell is closed. Done when
-// the vault reports no session and the sign-in form is back. On failure: a screenshot with the email masked, and the
-// page's text, both as artifacts.
-async function signOut(page: Page, findings: Findings, email: string, artifacts: string): Promise<string> {
-	try {
-		const account = page.getByRole("button", { name: "Account", exact: true })
-		const seen = new Set<string>()
-
-		await waitFor(
-			"the account button (closing dialogs over the shell)",
-			SIGN_OUT_TIMEOUT_MS,
-			async () => {
-				await clearDialogs(page, findings, seen)
-
-				return (await account.isVisible()) ? true : null
-			},
-			2000
-		)
-		await account.click({ timeout: 30_000 })
-		await page.getByRole("menu").getByRole("menuitem", { name: "Sign out", exact: true }).click({ timeout: 30_000 })
-		await page.getByRole("alertdialog").getByRole("button", { name: "Sign out", exact: true }).click({ timeout: 30_000 })
-		await page.getByText("Sign in to Filen").waitFor({ state: "visible", timeout: SIGN_OUT_TIMEOUT_MS })
-		await waitFor("the vault to hold no session", SIGN_OUT_TIMEOUT_MS, async () =>
-			(await sessionStatus(page)) === "absent" ? true : null
-		)
-
-		return "signed out through the account menu; session.get() status: absent"
-	} catch (error) {
-		await page
-			.screenshot({ path: path.join(artifacts, "s7-sign-out-failure.png"), mask: [page.getByText(email)] })
-			.catch((shot: unknown) => console.log(`screenshot: ${errorMessage(shot)}`))
-		findings.attach("s7-sign-out-page.txt", String(await page.evaluate("document.body.innerText").catch(errorMessage)).slice(0, 8000))
-
-		throw error
-	}
-}
-
 export async function runS7({ target, nextDir, nextVersion, signed, artifacts }: SpikeOptions): Promise<void> {
 	if (target.platform !== "mac") {
 		fail("S7 runs on macOS only")
@@ -152,16 +71,8 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 		fail("S7 needs a Developer-ID-signed build (dispatch with signed: true or profile: nightly)")
 	}
 
-	const email = process.env[EMAIL_ENV] ?? ""
-	const password = process.env[PASSWORD_ENV] ?? ""
-
-	if (email === "" || password === "") {
-		fail(`${EMAIL_ENV} and ${PASSWORD_ENV} must be set`)
-	}
-
 	// Nothing started from here (the app, pluginkit, log) inherits them.
-	delete process.env[EMAIL_ENV]
-	delete process.env[PASSWORD_ENV]
+	const { email, password } = takeCredentials()
 
 	const findings = createFindings("s7", artifacts, redactor([email, password]))
 	const app = path.resolve(target.executable, "..", "..", "..")
@@ -190,21 +101,11 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 		const { page } = reached.renderer
 		const signedIn = await findings.check("sign in through the 4.x form (one attempt)", async () => {
 			try {
-				await page.getByText("Sign in to Filen").waitFor({ state: "visible", timeout: START_TIMEOUT_MS })
-				await page.getByLabel("Email", { exact: true }).fill(email)
-				await page.getByLabel("Password", { exact: true }).fill(password)
 				reached.submitted = true
-				await page.getByRole("button", { name: "Sign in", exact: true }).click()
-				await waitFor("the session to be stored", SIGN_IN_TIMEOUT_MS, async () =>
-					(await sessionStatus(page)) === "present" ? true : null
-				)
 
-				return "session.get() status: present"
+				return await signIn(page, email, password, START_TIMEOUT_MS)
 			} catch (error) {
-				findings.attach(
-					"s7-sign-in-page.txt",
-					String(await page.evaluate("document.body.innerText").catch(errorMessage)).slice(0, 4000)
-				)
+				findings.attach("s7-sign-in-page.txt", await pageText(page, 4000))
 
 				throw error
 			}
@@ -296,7 +197,7 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 			const status = submitted === true ? await sessionStatus(renderer.page).catch(errorMessage) : "not submitted"
 
 			if (status === "present") {
-				await findings.check("sign out through the app", () => signOut(renderer.page, findings, email, artifacts))
+				await findings.check("sign out through the app", () => signOut(renderer.page, findings, email, artifacts, "s7"))
 			} else {
 				findings.info("sign out through the app", `nothing to sign out (session: ${String(status)})`)
 			}

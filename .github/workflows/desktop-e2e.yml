@@ -19,15 +19,28 @@
 # is set (unsigned is the default by hand); nightly signs macOS with the Developer ID and leaves Windows unsigned (an
 # update whose app-update.yml names no publisherName is not signature-checked). Nothing here is notarized.
 #
+# Depth (input `depth`, scripts/ci/e2ePlan.ts): install is the above. Deep also signs in and drives the apps around
+# the N-1 -> N update (scripts/ci/e2e/chains/previous.ts: first run on a clean machine through N-1's page and the
+# native folder chooser, three pairs, the drive, WebDAV, preferences and a PIN; after the update every one must hold
+# with nothing transferred or rewritten; then sign-out and uninstall). Deep is built on Linux deb so far; the profile's
+# other deep entries run at install depth with a notice. Logins are rate-limited per account, so a run signs the
+# harness in once (job `session`, through @filen/sdk-rs) and hands that session, sealed, to every job that reaches
+# the cloud; the only other logins are the UI sign-ins under test, one per deep entry, spaced by the plan's stagger,
+# each signed out at the end. Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any
+# older than a day, even after a failure.
+#
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
 # their findings go to the job summary and an artifact:
 #   s1   are the packaged 3.0.53 and N drivable over --remote-debugging-port (3.0.53 also over --inspect), and does
 #        SIGTERM quit N gracefully
 #   s7   Filen in Finder on signed macOS: sign-in, enable, off/on round trip, domain registration (userEnabled stays
 #        false without a person; reported as information). Signs in once with the e2e account and signs out after
+#   cloud  the harness's cloud side alone (no app, no build): the session hand-off, then a run directory created,
+#        listed, given a new file version, diffed and deleted (scripts/ci/e2eCloud.ts)
 #
 # Secrets: CSC_LINK, CSC_KEY_PASSWORD (Developer ID); AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (Windows
-# signing); FILEN_DESKTOP_E2E_TEST_EMAIL, FILEN_DESKTOP_E2E_TEST_PASSWORD (a dedicated account without 2FA; s7 only).
+# signing); FILEN_DESKTOP_E2E_TEST_EMAIL, FILEN_DESKTOP_E2E_TEST_PASSWORD (a dedicated account without 2FA; deep
+# entries, s7 and cloud, in the steps that sign in or reach the cloud only).
 name: Desktop E2E
 
 on:
@@ -61,6 +74,10 @@ on:
         description: Custom profile only, e.g. win-x64-nsis,linux-x64-deb (all when empty)
         type: string
         default: ''
+      depth:
+        description: auto (the profile's deep entries), install or deep
+        type: string
+        default: auto
   workflow_dispatch:
     inputs:
       signed:
@@ -91,6 +108,14 @@ on:
         description: Custom profile only, e.g. win-x64-nsis,linux-x64-deb (all when empty)
         type: string
         default: ''
+      depth:
+        description: auto takes the profile's deep entries; install signs nothing in
+        type: choice
+        options:
+          - auto
+          - install
+          - deep
+        default: auto
       spike:
         description: Run a spike instead of the update scenarios
         type: choice
@@ -98,6 +123,7 @@ on:
           - none
           - s1
           - s7
+          - cloud
         default: none
   # Every night on main: every entry the release tests, on builds made here.
   schedule:
@@ -105,6 +131,12 @@ on:
 
 permissions:
   contents: read
+
+# Routine runs (nightly, by hand) never overlap: they share the account and its login budget. A release (called from
+# another workflow, whose name github.workflow then is) has its own group, so it never waits behind a routine run.
+concurrency:
+  group: desktop-e2e-${{ github.workflow == 'Desktop E2E' && 'routine' || 'release' }}
+  cancel-in-progress: false
 
 jobs:
   plan:
@@ -115,6 +147,7 @@ jobs:
         working-directory: packages/filen-desktop
     outputs:
       spike: ${{ steps.plan.outputs.spike }}
+      session: ${{ steps.plan.outputs.session }}
       next-version: ${{ steps.plan.outputs.next-version }}
       prev-version: ${{ steps.plan.outputs.prev-version }}
       build-matrix: ${{ steps.plan.outputs.build-matrix }}
@@ -140,13 +173,89 @@ jobs:
           SCENARIOS: ${{ inputs.scenarios }}
           LEGACY: ${{ inputs.legacy }}
           FORMATS: ${{ inputs.formats }}
+          DEPTH: ${{ inputs.depth }}
           SPIKE: ${{ inputs.spike }}
         run: node scripts/ci/e2ePlan.ts
+
+  # The run's one harness sign-in (sdk-rs). Its output is the session sealed under a key from the account password: a
+  # job output holding a masked value would be dropped, and only jobs that hold the password can open it. Never
+  # retried (logins are rate-limited); a failure fails the deep jobs and the sweep is skipped.
+  session:
+    needs: plan
+    if: needs.plan.outputs.session == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/filen-desktop
+    outputs:
+      session: ${{ steps.login.outputs.session }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install the harness dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+      - name: Sign the harness in
+        id: login
+        timeout-minutes: 5
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+        run: node scripts/ci/e2eCloud.ts session
+
+  # Spike cloud: the harness's cloud side on its own.
+  cloud:
+    name: cloud self-test
+    needs: [plan, session]
+    if: ${{ !cancelled() && needs.plan.outputs.spike == 'cloud' && needs.session.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/filen-desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install the harness dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+      - name: Cloud self-test
+        timeout-minutes: 15
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+        run: node scripts/ci/e2eCloud.ts selftest --artifacts e2e-artifacts
+      - name: Upload the self-test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-e2e-cloud-${{ github.run_attempt }}
+          path: packages/filen-desktop/e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 14
 
   # Only when N is built here; the release hands over its own web build.
   web:
     needs: plan
-    if: ${{ !inputs.candidate-from-run }}
+    if: ${{ !inputs.candidate-from-run && needs.plan.outputs.spike != 'cloud' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -198,7 +307,7 @@ jobs:
   # does. Whether an OS's builds are signed comes from the plan.
   build:
     needs: [plan, web]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.web.result == 'success' || needs.web.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.spike != 'cloud' && (needs.web.result == 'success' || needs.web.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.build-matrix) }}
@@ -365,14 +474,14 @@ jobs:
           compression-level: 0
 
   test:
-    name: ${{ matrix.spike && format('{0} ', matrix.spike) || '' }}${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.format }}
-    needs: [plan, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    name: ${{ matrix.spike && format('{0} ', matrix.spike) || '' }}${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.format }}${{ matrix.deep && ' deep' || '' }}
+    needs: [plan, build, session]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.session.result == 'success' || needs.session.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.test-matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.deep && 150 || 90 }}
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -384,21 +493,22 @@ jobs:
         ${{ matrix.signed && '--signed' || '' }}
       FEDORA_IMAGE: registry.fedoraproject.org/fedora:42
     steps:
-      # The update scenarios need Node built-ins only; a spike also installs the package's dependencies (playwright-core).
+      # The update scenarios at install depth need Node built-ins only; deep entries and spikes also install the
+      # package's dependencies (playwright-core, the sdk-rs addon, rclone's pinned download).
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          sparse-checkout: ${{ !matrix.spike && 'packages/filen-desktop' || '' }}
+          sparse-checkout: ${{ !matrix.spike && !matrix.deep && 'packages/filen-desktop' || '' }}
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
           package-manager-cache: false
       - name: Set up pnpm
-        if: matrix.spike
+        if: matrix.spike || matrix.deep
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Install the harness dependencies
-        if: matrix.spike
+        if: matrix.spike || matrix.deep
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
@@ -415,9 +525,14 @@ jobs:
           path: packages/filen-desktop/release-prev
       - name: Prepare the Linux desktop
         if: matrix.os == 'linux' && matrix.format != 'rpm'
+        env:
+          # Deep: a secret service for the session vault, the X tools that drive and record the folder chooser, FUSE
+          # for the drive.
+          DEEP_PACKAGES: ${{ matrix.deep && 'gnome-keyring libsecret-tools dbus-daemon xdotool x11-apps fuse3' || '' }}
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends xvfb
+          # shellcheck disable=SC2086
+          sudo apt-get install --yes --no-install-recommends xvfb ${DEEP_PACKAGES}
           # electron-updater asks for root through the first of these it finds, and none can prompt without a desktop
           # session. Hidden, it falls back to sudo (passwordless here) and still takes its non-root install path.
           for prompt in gksudo kdesudo pkexec beesu; do
@@ -440,8 +555,28 @@ jobs:
         if: matrix.format == 'rpm'
         run: docker pull "${FEDORA_IMAGE}"
       - name: N-1 -> N
-        if: matrix.previous && matrix.format != 'rpm'
+        if: matrix.previous && !matrix.deep && matrix.format != 'rpm'
         run: node scripts/ci/e2e.ts --scenario previous ${{ env.TEST_ARGS }}
+      # The whole chain runs on one D-Bus session whose gnome-keyring is unlocked (created on first use), so N-1, the
+      # updater's relaunch and every N launch keep the session in the same secret service, as on a GNOME desktop.
+      - name: N-1 -> N, signed in
+        if: matrix.previous && matrix.deep
+        timeout-minutes: 100
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+          E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
+        run: |
+          KEYRING_PASSWORD="$(openssl rand -hex 16)"
+          export KEYRING_PASSWORD
+          # shellcheck disable=SC2016
+          dbus-run-session -- bash -ec '
+            printf %s "${KEYRING_PASSWORD}" | gnome-keyring-daemon --daemonize --unlock --components=secrets > /dev/null
+            unset KEYRING_PASSWORD
+            export XDG_CURRENT_DESKTOP=GNOME
+            exec node scripts/ci/e2e.ts "$@"
+          ' e2e --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)
         if: matrix.previous && matrix.format == 'rpm'
         run: >-
@@ -461,7 +596,7 @@ jobs:
           -w /work/packages/filen-desktop "${FEDORA_IMAGE}"
           bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
           e2e --scenario legacy ${{ env.TEST_ARGS }}
-      # The account's credentials reach spike s7 only, and only this step.
+      # The account's credentials reach spike s7 only, and only this step (deep entries: the step above).
       # Bounded so a hang never holds a runner for the job's whole budget.
       - name: Spike ${{ matrix.spike }}
         if: matrix.spike
@@ -470,12 +605,43 @@ jobs:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ matrix.spike == 's7' && secrets.FILEN_DESKTOP_E2E_TEST_EMAIL || '' }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ matrix.spike == 's7' && secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD || '' }}
         run: node scripts/ci/e2e.ts --scenario spike-${{ matrix.spike }} ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
-      # The harness redacts the account's credentials from everything it writes there.
-      - name: Upload spike evidence
-        if: ${{ always() && matrix.spike }}
+      # The harness redacts the account's credentials and every secret it holds from everything it writes there.
+      - name: Upload evidence
+        if: ${{ always() && (matrix.spike || matrix.deep) }}
         uses: actions/upload-artifact@v6
         with:
-          name: desktop-e2e-spike-${{ matrix.spike }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          name: desktop-e2e-${{ matrix.spike && format('spike-{0}', matrix.spike) || 'deep' }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.format }}-${{ github.run_attempt }}
           path: packages/filen-desktop/e2e-artifacts
           if-no-files-found: warn
           retention-days: 14
+
+  # Whatever happened: this run's cloud directories (every attempt) and any older than a day, then the trash.
+  sweep:
+    needs: [plan, session, cloud, test]
+    if: ${{ always() && needs.session.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/filen-desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install the harness dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+      - name: Sweep the run's cloud directories
+        timeout-minutes: 8
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+        run: node scripts/ci/e2eCloud.ts sweep

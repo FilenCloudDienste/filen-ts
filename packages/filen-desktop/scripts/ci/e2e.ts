@@ -2,7 +2,7 @@ import os from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
 import { runUpdate } from "./e2e/update.ts"
-import { errorMessage, TestFailure } from "./support.ts"
+import { errorMessage, fail, TestFailure } from "./support.ts"
 import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 
 // Desktop e2e on a runner of one platform and architecture, for one install format (see
@@ -13,12 +13,14 @@ import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 //   spike-s1   can the packaged 3.0.53 and N be driven over their debugging ports (scripts/ci/e2e/spikes/s1.ts)
 //   spike-s7   can Filen in Finder be switched on with nobody at the Mac (scripts/ci/e2e/spikes/s7.ts)
 //
+// At --depth deep, previous also signs in and drives the apps around the update (scripts/ci/e2e/chains/previous.ts).
+//
 //   node scripts/ci/e2e.ts --scenario <previous|legacy|spike-s1|spike-s7> --platform <win|mac|linux> --arch <x64|arm64>
 //       --format <nsis|dmg|deb|rpm|AppImage> --next <dir> --next-version <v> [--prev <dir> --prev-version <v>] [--signed]
-//       [--artifacts <dir>]
+//       [--depth <install|deep>] [--artifacts <dir>]
 //
-// The update scenarios need Node built-ins only; the spikes load playwright-core, so they need the package's
-// dependencies installed.
+// The update scenarios at install depth need Node built-ins only; deep chains and spikes load playwright-core (and deep
+// chains rclone's pinned release), so they need the package's dependencies installed.
 
 const { values } = parseArgs({
 	options: {
@@ -31,6 +33,7 @@ const { values } = parseArgs({
 		prev: { type: "string" },
 		"prev-version": { type: "string" },
 		signed: { type: "boolean", default: false },
+		depth: { type: "string", default: "install" },
 		work: { type: "string", default: path.join(os.tmpdir(), "filen-e2e") },
 		artifacts: { type: "string", default: "e2e-artifacts" }
 	}
@@ -60,6 +63,7 @@ const scenario = oneOf("scenario", values.scenario, ["previous", "legacy", "spik
 const platform = oneOf<Platform>("platform", values.platform, ["win", "mac", "linux"])
 const arch = oneOf<Arch>("arch", values.arch, ["x64", "arm64"])
 const format = oneOf<Format>("format", values.format, ["nsis", "dmg", "deb", "rpm", "AppImage"])
+const depth = oneOf("depth", values.depth, ["install", "deep"] as const)
 const nextDir = path.resolve(required("next", values.next))
 const nextVersion = required("next-version", values["next-version"])
 const signed = values.signed
@@ -76,7 +80,7 @@ async function main(): Promise<void> {
 	switch (scenario) {
 		case "previous":
 		case "legacy": {
-			await runUpdate({
+			const options = {
 				scenario,
 				target,
 				platform,
@@ -88,7 +92,17 @@ async function main(): Promise<void> {
 				prevVersion: scenario === "previous" ? required("prev-version", values["prev-version"]) : null,
 				signed,
 				work
-			})
+			}
+
+			if (depth === "install") {
+				await runUpdate(options)
+			} else if (scenario === "previous") {
+				const { runPreviousDeep } = await import("./e2e/chains/previous.ts")
+
+				await runPreviousDeep(options, path.resolve(values.artifacts))
+			} else {
+				fail("the 3.0.53 -> N chain has no deep depth yet")
+			}
 
 			return
 		}

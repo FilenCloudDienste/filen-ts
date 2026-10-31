@@ -53,6 +53,25 @@ function readStamp(file: string): unknown {
 	}
 }
 
+// napi-rs's target triple, which names the platform package and its addon file.
+function tripleOf(arch: NativeArch): string {
+	return `${process.platform}-${arch}${ABI[process.platform] ?? ""}`
+}
+
+// The addon @filen/sdk-rs's platform package installed for this OS and `arch`, or null. The platform packages are its
+// optional dependencies, so they resolve from its own (real) directory; its exports map hides package.json, so the
+// directory is found on disk.
+export function installedAddon(arch: NativeArch): string | null {
+	const fromSdk = createRequire(path.join(realpathSync(path.join(packageDir, "node_modules", "@filen", "sdk-rs")), "package.json"))
+	const triple = tripleOf(arch)
+
+	try {
+		return realpathSync(fromSdk.resolve(`@filen/sdk-rs-${triple}/sdk-rs.${triple}.node`))
+	} catch {
+		return null
+	}
+}
+
 export function stageNapi(options: { dev: boolean }): void {
 	const builderOs = BUILDER_OS[process.platform]
 
@@ -61,25 +80,15 @@ export function stageNapi(options: { dev: boolean }): void {
 	}
 
 	const overrideDir = process.env["FILEN_DESKTOP_NAPI_DIR"]
-	// The platform packages are @filen/sdk-rs's optional dependencies, so they resolve from its own (real) directory. Its
-	// exports map hides package.json, so the directory is found on disk.
-	const fromSdk = createRequire(path.join(realpathSync(path.join(packageDir, "node_modules", "@filen", "sdk-rs")), "package.json"))
 
 	function addonFor(arch: NativeArch): string | null {
-		const triple = `${process.platform}-${arch}${ABI[process.platform] ?? ""}`
-		const file = `sdk-rs.${triple}.node`
-
 		if (overrideDir !== undefined && overrideDir.length > 0) {
-			const candidate = path.resolve(overrideDir, file)
+			const candidate = path.resolve(overrideDir, `sdk-rs.${tripleOf(arch)}.node`)
 
 			return existsSync(candidate) ? realpathSync(candidate) : null
 		}
 
-		try {
-			return realpathSync(fromSdk.resolve(`@filen/sdk-rs-${triple}/${file}`))
-		} catch {
-			return null
-		}
+		return installedAddon(arch)
 	}
 
 	const archs = options.dev ? ARCHS.filter(arch => arch === process.arch) : ARCHS
