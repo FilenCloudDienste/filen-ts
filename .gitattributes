@@ -1,0 +1,2 @@
+# pnpm parses patch headers byte for byte; a CRLF checkout on Windows breaks them.
+*.patch text eol=lf
