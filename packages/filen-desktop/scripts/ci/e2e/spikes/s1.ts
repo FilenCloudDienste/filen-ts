@@ -106,15 +106,19 @@ async function probeApp(findings: Findings, target: Target, app: App, artifacts:
 			return facts
 		})
 
+		// 3.x's own graceful quit (tray Quit, Cmd+Q) is app.quit(): before-quit lets the window close, will-quit flushes
+		// rclone and ends in app.exit(0). The quit is scheduled and the session closed first, because Node holds a process
+		// at exit while a debugger session is attached ("Waiting for the debugger to disconnect").
 		await findings.check(`${app.label}: app.quit() through the inspector quits it`, async () => {
 			const cdp = inspector.cdp ?? fail("no inspector connection")
 
-			// The answer may never come: the process can be gone first.
-			void cdp.send("Runtime.evaluate", { expression: 'process.mainModule.require("electron").app.quit()' }).catch(() => undefined)
+			try {
+				await cdp.evaluate('setTimeout(() => process.mainModule.require("electron").app.quit(), 500), "scheduled"')
+			} finally {
+				cdp.close()
+			}
 
 			const exit = await exitWithin(launched, EXIT_TIMEOUT_MS)
-
-			cdp.close()
 
 			if (exit === null) {
 				fail(`still running ${String(EXIT_TIMEOUT_MS / 1000)} s after app.quit()`)

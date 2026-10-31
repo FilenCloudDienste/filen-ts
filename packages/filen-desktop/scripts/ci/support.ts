@@ -29,6 +29,8 @@ export interface RunOptions {
 	cwd?: string
 	// Windows only: the arguments reach the program exactly as given (cmd.exe /s /c "..." command lines).
 	verbatim?: boolean
+	// Logged instead of the command line (an encoded script, say).
+	display?: string
 }
 
 export interface RunResult {
@@ -38,7 +40,7 @@ export interface RunResult {
 }
 
 export function run(command: string, args: readonly string[], options: RunOptions = {}): RunResult {
-	console.log(`$ ${command} ${args.join(" ")}`)
+	console.log(`$ ${options.display ?? `${command} ${args.join(" ")}`}`)
 
 	const result = spawnSync(command, args, {
 		encoding: "utf8",
@@ -242,6 +244,21 @@ export async function downloadPinned(url: string, destination: string, sha512: s
 	if (actual?.sha512 !== sha512) {
 		fail(`${url}: sha512 does not match the pinned release value`)
 	}
+}
+
+/**
+ * Windows PowerShell with the script passed as -EncodedCommand (base64 UTF-16LE), which no quoting layer between Node
+ * and powershell.exe can alter. It ends in `exit 0`: with -Command the exit code is the status ($?) of the script's last
+ * statement, so a probe of a key that does not exist (-ErrorAction SilentlyContinue) failed the call. A terminating
+ * error still stops the script before that and exits 1.
+ */
+export function powershell(script: string, options: Pick<RunOptions, "allowFailure"> = {}): RunResult {
+	const encoded = Buffer.from(`$ProgressPreference = 'SilentlyContinue'\n${script}\nexit 0\n`, "utf16le").toString("base64")
+
+	return run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], {
+		...options,
+		display: `powershell.exe ${script}`
+	})
 }
 
 // A virtual X display for the Electron window on a headless Linux runner; it outlives the app's relaunch.

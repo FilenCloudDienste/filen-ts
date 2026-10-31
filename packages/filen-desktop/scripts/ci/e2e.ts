@@ -111,6 +111,10 @@ async function main(): Promise<void> {
 	}
 }
 
+// Every wait is bounded, but the apps are unref'd children: this keeps the event loop alive until main() settles, so a
+// scenario can only end by finishing or failing, never by Node finding nothing left to run (exit 13).
+const keepAlive = setInterval(() => undefined, 60_000)
+
 try {
 	await main()
 } catch (error) {
@@ -118,4 +122,6 @@ try {
 		`::error::${scenario} ${platform} ${arch} ${format}: ${error instanceof TestFailure ? error.message : errorMessage(error)}`
 	)
 	process.exit(1)
+} finally {
+	clearInterval(keepAlive)
 }

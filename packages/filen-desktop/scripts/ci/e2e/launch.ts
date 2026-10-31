@@ -34,7 +34,19 @@ export async function launchDebuggable(target: Target, inspect = false): Promise
 	return { child, debugPort, inspectPort, exited }
 }
 
-// The exit, or null if the process is still running after `timeoutMs`.
-export function exitWithin(launched: Launched, timeoutMs: number): Promise<Exit | null> {
-	return Promise.race([launched.exited, new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs).unref())])
+// The exit, or null if the process is still running after `timeoutMs`. The timer is what keeps the event loop alive
+// meanwhile (the child is unref'd), so it is never unref'd itself.
+export async function exitWithin(launched: Launched, timeoutMs: number): Promise<Exit | null> {
+	let timer: NodeJS.Timeout | undefined
+
+	try {
+		return await Promise.race([
+			launched.exited,
+			new Promise<null>(resolve => {
+				timer = setTimeout(() => resolve(null), timeoutMs)
+			})
+		])
+	} finally {
+		clearTimeout(timer)
+	}
 }

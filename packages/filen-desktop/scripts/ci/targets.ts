@@ -3,7 +3,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSyn
 import os from "node:os"
 import path from "node:path"
 import { assertDisposableMachine } from "./e2e/context.ts"
-import { asarVersion, fail, run } from "./support.ts"
+import { asarVersion, fail, powershell, run } from "./support.ts"
 
 // One install format on the runner it is tested on: how a user installs it, where its files and userData land, how
 // it is launched and how its running main process is found. Names and locations are the frozen 3.x ones (PLAN D5),
@@ -56,32 +56,93 @@ function remove(...paths: string[]): void {
 	}
 }
 
-// Linux: every process whose executable is `exe` and that is not a Chromium child (--type=...).
-function linuxProcesses(match: (pid: number, exe: string) => boolean): AppProcess[] {
+const DELETED = " (deleted)"
+
+function linuxPids(): number[] {
+	return readdirSync("/proc")
+		.map(Number)
+		.filter(pid => Number.isSafeInteger(pid))
+}
+
+function linuxExe(pid: number): string | null {
+	try {
+		return readlinkSync(`/proc/${String(pid)}/exe`)
+	} catch {
+		return null
+	}
+}
+
+function linuxParent(pid: number): number {
+	try {
+		return Number(/^PPid:\s*(\d+)/m.exec(readFileSync(`/proc/${String(pid)}/status`, "utf8"))?.[1] ?? 0)
+	} catch {
+		return 0
+	}
+}
+
+// Linux: every process that is not a Chromium child (--type=...) and that `identify` attributes to the install, with
+// the path `identify` reports for it.
+function linuxProcesses(identify: (pid: number, exe: string) => string | null): AppProcess[] {
 	const found: AppProcess[] = []
 
-	for (const entry of readdirSync("/proc")) {
-		const pid = Number(entry)
-
-		if (!Number.isSafeInteger(pid)) {
-			continue
-		}
-
+	for (const pid of linuxPids()) {
 		try {
-			const exe = readlinkSync(`/proc/${entry}/exe`)
-			const cmdline = readFileSync(`/proc/${entry}/cmdline`, "utf8").split("\0")
+			const exe = linuxExe(pid)
+			const cmdline = readFileSync(`/proc/${String(pid)}/cmdline`, "utf8").split("\0")
+			const reported = exe === null || cmdline.some(arg => arg.startsWith("--type=")) ? null : identify(pid, exe)
 
-			if (cmdline.some(arg => arg.startsWith("--type=")) || !match(pid, exe)) {
-				continue
+			if (reported !== null) {
+				found.push({ pid, path: reported })
 			}
-
-			found.push({ pid, path: exe })
 		} catch {
 			// Gone, or another user's process.
 		}
 	}
 
 	return found
+}
+
+// Diagnostics: every Filen or AppImage process with its parent chain and what its environ says about APPIMAGE.
+export function linuxProcessReport(): string {
+	const lines = linuxPids().flatMap(pid => {
+		const exe = linuxExe(pid)
+
+		if (exe === null || (path.basename(exe) !== "Filen" && !exe.includes(".AppImage"))) {
+			return []
+		}
+
+		const chain: string[] = []
+
+		for (let current = linuxParent(pid), depth = 0; current > 1 && depth < 4; current = linuxParent(current), depth++) {
+			chain.push(`${String(current)}:${linuxExe(current) ?? "?"}`)
+		}
+
+		let appImage: string
+
+		try {
+			appImage =
+				readFileSync(`/proc/${String(pid)}/environ`, "utf8")
+					.split("\0")
+					.find(entry => entry.startsWith("APPIMAGE=")) ?? "no APPIMAGE"
+		} catch (error) {
+			appImage = `environ unreadable (${error instanceof Error ? error.message : String(error)})`
+		}
+
+		let args: string
+
+		try {
+			args = readFileSync(`/proc/${String(pid)}/cmdline`, "utf8")
+				.split("\0")
+				.slice(0, 3)
+				.join(" ")
+		} catch {
+			args = "?"
+		}
+
+		return [`${String(pid)} ${exe} [${args}] ${appImage} parents ${chain.join(" <- ") || "none"}`]
+	})
+
+	return lines.join("\n") || "(no Filen or AppImage processes)"
 }
 
 function killAll(processes: AppProcess[]): void {
@@ -105,8 +166,8 @@ function detached(executable: string, args: readonly string[], env: NodeJS.Proce
 	return child
 }
 
-function powershell(script: string): string {
-	return run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]).stdout.trim()
+function powershellText(script: string): string {
+	return powershell(script).stdout.trim()
 }
 
 function windows(): Target {
@@ -116,14 +177,14 @@ function windows(): Target {
 	const localAppData = process.env["LOCALAPPDATA"] ?? path.join(home, "AppData", "Local")
 	// The per-machine uninstall entry; a per-user one would mean the installer ignored perMachine.
 	const uninstallEntry = (root: "HKLM" | "HKCU") =>
-		powershell(
+		powershellText(
 			`$roots = @('${root}:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '${root}:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'); ` +
 				`foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath; ` +
 				`if ($p.DisplayName -eq 'Filen' -or $p.DisplayName -like 'Filen [0-9]*') { "$($p.DisplayVersion)|$($p.InstallLocation)" } } }`
 		)
 	// WinFsp registers under the 32-bit view only; its DLL for this CPU must be there too.
 	const winFspDll = (): string | null => {
-		const installDir = powershell(
+		const installDir = powershellText(
 			"(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\WOW6432Node\\WinFsp' -Name InstallDir -ErrorAction SilentlyContinue).InstallDir"
 		)
 		const dll =
@@ -132,7 +193,7 @@ function windows(): Target {
 		return dll !== null && existsSync(dll) ? dll : null
 	}
 	const mainProcesses = (): AppProcess[] =>
-		powershell(
+		powershellText(
 			'Get-CimInstance Win32_Process -Filter "Name=\'Filen.exe\'" | ForEach-Object { "$($_.ProcessId)`t$($_.ExecutablePath)`t$($_.CommandLine)" }'
 		)
 			.split(/\r?\n/)
@@ -166,7 +227,7 @@ function windows(): Target {
 			}
 
 			// WinFsp outlives the app's uninstaller; removed so that every install has to bring it.
-			const winFsp = powershell(
+			const winFsp = powershellText(
 				"$roots = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'); " +
 					"foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath; " +
 					"if ($p.DisplayName -like 'WinFsp*' -and $_.PSChildName -match '^\\{[0-9A-Fa-f-]+\\}$') { $_.PSChildName } } }"
@@ -220,7 +281,7 @@ function windows(): Target {
 			}
 
 			if (signed) {
-				const status = powershell(`(Get-AuthenticodeSignature -FilePath '${executable}').Status`)
+				const status = powershellText(`(Get-AuthenticodeSignature -FilePath '${executable}').Status`)
 
 				if (status !== "Valid") {
 					fail(`${executable}: Authenticode status ${status}`)
@@ -323,16 +384,25 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 	if (format === "AppImage") {
 		const file = `Filen_linux_${arch === "x64" ? "x86_64" : "arm64"}.AppImage`
 		const executable = path.join(home, "Applications", file)
-		// The AppImage runtime exports APPIMAGE to the app it starts; that is how its main process is told apart.
+		// A Filen main process belongs to this AppImage when the runtime that started it is this file. The runtime is the
+		// AppImage file itself running (its exe reads "<file> (deleted)" once an update replaced the file) and starts the
+		// app (extracted, or from its FUSE mount) as its child. Its APPIMAGE export cannot be read back from the app:
+		// Chromium reuses the main process's environ area for its process title. Reported at the AppImage's path.
 		const mainProcesses = () =>
 			linuxProcesses((pid, exe) => {
-				if (path.basename(exe) !== "Filen") {
-					return false
+				if (path.basename(exe) !== "Filen" || exe === "/opt/Filen/Filen") {
+					return null
 				}
 
-				return readFileSync(`/proc/${String(pid)}/environ`, "utf8")
-					.split("\0")
-					.includes(`APPIMAGE=${executable}`)
+				for (let current = linuxParent(pid), depth = 0; current > 1 && depth < 4; current = linuxParent(current), depth++) {
+					const runtime = linuxExe(current)
+
+					if (runtime === executable || runtime === `${executable}${DELETED}`) {
+						return runtime
+					}
+				}
+
+				return null
 			})
 
 		return {
@@ -396,7 +466,7 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 		root ? run(command, args, { allowFailure }) : run("sudo", ["--non-interactive", command, ...args], { allowFailure })
 	const deb = format === "deb"
 	const file = deb ? `Filen_linux_${arch === "x64" ? "amd64" : "arm64"}.deb` : `Filen_linux_${arch === "x64" ? "x86_64" : "aarch64"}.rpm`
-	const mainProcesses = () => linuxProcesses((_pid, exe) => exe === executable)
+	const mainProcesses = () => linuxProcesses((_pid, exe) => (exe === executable ? exe : null))
 	// Package names are matched case-insensitively: dpkg lowercases what the rpm keeps as "Filen".
 	const packageVersion = (): string | null => {
 		const listing = deb

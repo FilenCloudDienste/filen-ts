@@ -6,7 +6,7 @@ import { hashFile, parseFeed } from "../../feed.ts"
 import { nativeArchOf } from "../../nativeArch.ts"
 import { LEGACY_E2E_BANNER, LEGACY_RELEASE_URL, LEGACY_SHA512, LEGACY_VERSION } from "../legacy.ts"
 import { downloadPinned, errorMessage, fail, holds, run, section, serveFeed, startXvfb, waitFor, type FeedServer } from "../support.ts"
-import type { AppProcess, Arch, Format, Platform, Target } from "../targets.ts"
+import { linuxProcessReport, type AppProcess, type Arch, type Format, type Platform, type Target } from "../targets.ts"
 
 // The update scenarios: an app is installed the way a user installs it, launched, and updated by its own updater from a
 // feed on the loopback interface that serves the candidate build N; the test then holds the relaunched app to N's
@@ -407,6 +407,11 @@ export async function runUpdate({
 			)
 		} catch (listing) {
 			console.log(errorMessage(listing))
+		}
+
+		if (platform === "linux") {
+			console.log("--- Filen and AppImage processes")
+			console.log(linuxProcessReport())
 		}
 
 		throw error
