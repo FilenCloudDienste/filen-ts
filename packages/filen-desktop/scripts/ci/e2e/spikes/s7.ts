@@ -7,13 +7,15 @@ import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { launchDebuggable } from "../launch.ts"
 import { redactor } from "../redact.ts"
 import { installFrom, START_TIMEOUT_MS, tail } from "../update.ts"
-import { createFindings, type SpikeOptions } from "./findings.ts"
+import { createFindings, type Findings, type SpikeOptions } from "./findings.ts"
 
 // Spike S7: can Filen in Finder be switched on with nobody at the Mac? macOS may register the File Provider domain with
 // userEnabled false, which a person flips in System Settings. On a signed, unnotarized N: sign in through the real form
 // (once; never retried, logins are rate-limited per account), enable through the window.desktop contract, read
-// userEnabled, try pluginkit, then an off/on round trip, and if the domain ends up enabled, list it. Every run that
-// submitted the sign-in signs out through the app's own account menu. Evidence: findings, main.log, the subsystem log,
+// userEnabled, try pluginkit, then an off/on round trip, and if the domain ends up enabled, list it. On hosted runners
+// userEnabled stays false (a person switches it on in System Settings), which is reported as information; the checks
+// are the sign-in, state(), enable(), the round trip and the domain's registration. Every run that stored a session
+// signs out through the app's own account menu, closing whatever covers the shell first. Evidence: findings, main.log, the subsystem log,
 // `fileproviderctl dump` and its usage text. Every system tool runs bounded (TOOL_TIMEOUT_MS, process group killed).
 
 const EMAIL_ENV = "FILEN_DESKTOP_E2E_TEST_EMAIL"
@@ -71,31 +73,74 @@ function tool(command: string, args: string[], timeoutMs = TOOL_TIMEOUT_MS): Pro
 	return runBounded(command, args, timeoutMs)
 }
 
-// The app's own sign-out: account menu, then the confirm dialog (startup reminders dismissed first; they cover the
-// shell until answered). Done when the vault reports no session and the sign-in form is back.
-async function signOut(page: Page): Promise<string> {
-	await page.getByRole("navigation", { name: "Filen" }).waitFor({ state: "visible", timeout: SIGN_OUT_TIMEOUT_MS })
+// Names of buttons that close what may cover the shell after a sign-in (startup reminders, notices, callouts) without
+// acting on it. Anything else is closed with Escape.
+const DISMISS = /^(Remind me later|OK|Not now|Later|Skip|Close|Dismiss|Got it|Cancel)$/i
+const DIALOGS = '[role="dialog"], [role="alertdialog"]'
 
-	for (let attempt = 0; attempt < 2; attempt++) {
-		const reminder = page
-			.getByRole("alertdialog")
-			.getByRole("button", { name: /^(Remind me later|OK)$/ })
-			.first()
+// Closes every open dialog, recording each distinct one's text (redacted by the findings) as information.
+async function clearDialogs(page: Page, findings: Findings, seen: Set<string>): Promise<void> {
+	for (let round = 0; round < 6; round++) {
+		const dialog = page.locator(DIALOGS).filter({ visible: true }).last()
 
-		if ((await reminder.count()) === 0) {
-			break
+		if ((await dialog.count()) === 0) {
+			return
 		}
 
-		await reminder.click({ timeout: 15_000 })
+		const text = (await dialog.innerText().catch(errorMessage)).replace(/\s+/g, " ").slice(0, 300)
+
+		if (!seen.has(text)) {
+			seen.add(text)
+			findings.info("dialog over the shell", text)
+		}
+
+		const dismiss = dialog.getByRole("button", { name: DISMISS }).first()
+
+		if ((await dismiss.count()) > 0) {
+			await dismiss.click({ timeout: 10_000 }).catch(() => page.keyboard.press("Escape"))
+		} else {
+			await page.keyboard.press("Escape")
+		}
+
+		await page.waitForTimeout(500)
 	}
+}
 
-	await page.getByRole("button", { name: "Account", exact: true }).click({ timeout: SIGN_OUT_TIMEOUT_MS })
-	await page.getByRole("menu").getByRole("menuitem", { name: "Sign out", exact: true }).click({ timeout: SIGN_OUT_TIMEOUT_MS })
-	await page.getByRole("alertdialog").getByRole("button", { name: "Sign out", exact: true }).click({ timeout: SIGN_OUT_TIMEOUT_MS })
-	await page.getByText("Sign in to Filen").waitFor({ state: "visible", timeout: SIGN_OUT_TIMEOUT_MS })
-	await waitFor("the vault to hold no session", SIGN_OUT_TIMEOUT_MS, async () => ((await sessionStatus(page)) === "absent" ? true : null))
+// The app's own sign-out: account menu, then the confirm dialog, once whatever covers the shell is closed. Done when
+// the vault reports no session and the sign-in form is back. On failure: a screenshot with the email masked, and the
+// page's text, both as artifacts.
+async function signOut(page: Page, findings: Findings, email: string, artifacts: string): Promise<string> {
+	try {
+		const account = page.getByRole("button", { name: "Account", exact: true })
+		const seen = new Set<string>()
 
-	return "signed out through the account menu; session.get() status: absent"
+		await waitFor(
+			"the account button (closing dialogs over the shell)",
+			SIGN_OUT_TIMEOUT_MS,
+			async () => {
+				await clearDialogs(page, findings, seen)
+
+				return (await account.isVisible()) ? true : null
+			},
+			2000
+		)
+		await account.click({ timeout: 30_000 })
+		await page.getByRole("menu").getByRole("menuitem", { name: "Sign out", exact: true }).click({ timeout: 30_000 })
+		await page.getByRole("alertdialog").getByRole("button", { name: "Sign out", exact: true }).click({ timeout: 30_000 })
+		await page.getByText("Sign in to Filen").waitFor({ state: "visible", timeout: SIGN_OUT_TIMEOUT_MS })
+		await waitFor("the vault to hold no session", SIGN_OUT_TIMEOUT_MS, async () =>
+			(await sessionStatus(page)) === "absent" ? true : null
+		)
+
+		return "signed out through the account menu; session.get() status: absent"
+	} catch (error) {
+		await page
+			.screenshot({ path: path.join(artifacts, "s7-sign-out-failure.png"), mask: [page.getByText(email)] })
+			.catch((shot: unknown) => console.log(`screenshot: ${errorMessage(shot)}`))
+		findings.attach("s7-sign-out-page.txt", String(await page.evaluate("document.body.innerText").catch(errorMessage)).slice(0, 8000))
+
+		throw error
+	}
 }
 
 export async function runS7({ target, nextDir, nextVersion, signed, artifacts }: SpikeOptions): Promise<void> {
@@ -204,13 +249,20 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 
 		const last = await userEnabled(page).catch((error: unknown) => errorMessage(error))
 
-		await findings.check("userEnabled is true with nobody at the Mac", () => {
-			if (last !== true) {
-				fail(`userEnabled is ${String(last)}`)
+		// The answer S7 found: macOS registers the domain with userEnabled false and nothing headless (pluginkit, re-adding
+		// the domain) turns it on, so listing, download and upload through Finder stay a manual release check. Reported,
+		// not failed; registration itself must hold.
+		await findings.check("the domain is registered (macOS reports userEnabled)", () => {
+			if (typeof last !== "boolean") {
+				fail(last)
 			}
 
-			return "true"
+			return `userEnabled ${String(last)}`
 		})
+		findings.info(
+			"userEnabled with nobody at the Mac",
+			last === true ? "true: the domain is usable headless" : `${String(last)}: switching it on needs a person (System Settings)`
+		)
 
 		if (last === true) {
 			await findings.check("the domain directory lists the account", async () => {
@@ -244,7 +296,7 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 			const status = submitted === true ? await sessionStatus(renderer.page).catch(errorMessage) : "not submitted"
 
 			if (status === "present") {
-				await findings.check("sign out through the app", () => signOut(renderer.page))
+				await findings.check("sign out through the app", () => signOut(renderer.page, findings, email, artifacts))
 			} else {
 				findings.info("sign out through the app", `nothing to sign out (session: ${String(status)})`)
 			}

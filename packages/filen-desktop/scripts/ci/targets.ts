@@ -179,7 +179,7 @@ function windows(): Target {
 	const uninstallEntry = (root: "HKLM" | "HKCU") =>
 		powershellText(
 			`$roots = @('${root}:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '${root}:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'); ` +
-				`foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath; ` +
+				`foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue; ` +
 				`if ($p.DisplayName -eq 'Filen' -or $p.DisplayName -like 'Filen [0-9]*') { "$($p.DisplayVersion)|$($p.InstallLocation)" } } }`
 		)
 	// WinFsp registers under the 32-bit view only; its DLL for this CPU must be there too.
@@ -229,7 +229,7 @@ function windows(): Target {
 			// WinFsp outlives the app's uninstaller; removed so that every install has to bring it.
 			const winFsp = powershellText(
 				"$roots = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'); " +
-					"foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath; " +
+					"foreach ($r in $roots) { Get-ChildItem $r -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue; " +
 					"if ($p.DisplayName -like 'WinFsp*' -and $_.PSChildName -match '^\\{[0-9A-Fa-f-]+\\}$') { $_.PSChildName } } }"
 			)
 

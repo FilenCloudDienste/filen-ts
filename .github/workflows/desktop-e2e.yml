@@ -23,7 +23,8 @@
 # their findings go to the job summary and an artifact:
 #   s1   are the packaged 3.0.53 and N drivable over --remote-debugging-port (3.0.53 also over --inspect), and does
 #        SIGTERM quit N gracefully
-#   s7   can Filen in Finder be switched on with nobody at the Mac (signed macOS; signs in with the e2e account)
+#   s7   Filen in Finder on signed macOS: sign-in, enable, off/on round trip, domain registration (userEnabled stays
+#        false without a person; reported as information). Signs in once with the e2e account and signs out after
 #
 # Secrets: CSC_LINK, CSC_KEY_PASSWORD (Developer ID); AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (Windows
 # signing); FILEN_DESKTOP_E2E_TEST_EMAIL, FILEN_DESKTOP_E2E_TEST_PASSWORD (a dedicated account without 2FA; s7 only).

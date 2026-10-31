@@ -297,18 +297,35 @@ export async function downloadPinned(url: string, destination: string, sha512: s
 }
 
 /**
- * Windows PowerShell with the script passed as -EncodedCommand (base64 UTF-16LE), which no quoting layer between Node
- * and powershell.exe can alter. It ends in `exit 0`: with -Command the exit code is the status ($?) of the script's last
- * statement, so a probe of a key that does not exist (-ErrorAction SilentlyContinue) failed the call. A terminating
- * error still stops the script before that and exits 1.
+ * Windows PowerShell (5.1) with the script passed as -EncodedCommand (base64 UTF-16LE), which no quoting layer between
+ * Node and powershell.exe can alter.
+ *
+ * - Every error stops the script and exits 1 ($ErrorActionPreference Stop); a probe that may miss passes
+ *   -ErrorAction SilentlyContinue itself. Otherwise it ends in `exit 0`: with -Command the exit code is the status ($?)
+ *   of the last statement, which a missed probe made 1.
+ * - PSModulePath is dropped: the CI steps run in PowerShell 7, whose module path makes 5.1 fail to load its own
+ *   Microsoft.PowerShell.Security (Get-AuthenticodeSignature), an error that otherwise leaves stdout empty.
  */
-export function powershell(script: string, options: Pick<RunOptions, "allowFailure"> = {}): RunResult {
-	const encoded = Buffer.from(`$ProgressPreference = 'SilentlyContinue'\n${script}\nexit 0\n`, "utf16le").toString("base64")
+export function encodePowerShell(script: string): string {
+	return Buffer.from(
+		`$ErrorActionPreference = 'Stop'\n$ProgressPreference = 'SilentlyContinue'\n${script}\nexit 0\n`,
+		"utf16le"
+	).toString("base64")
+}
 
-	return run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], {
-		...options,
-		display: `powershell.exe ${script}`
-	})
+export function powershell(script: string, options: Pick<RunOptions, "allowFailure"> = {}): RunResult {
+	const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"))
+	const result = run(
+		"powershell.exe",
+		["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)],
+		{ ...options, env, display: `powershell.exe ${script}` }
+	)
+
+	if (result.stderr.trim() !== "") {
+		console.log(`powershell.exe stderr: ${result.stderr.trim().slice(-2000)}`)
+	}
+
+	return result
 }
 
 // A virtual X display for the Electron window on a headless Linux runner; it outlives the app's relaunch.
