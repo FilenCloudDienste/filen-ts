@@ -151,6 +151,13 @@ export async function configureLegacy(page: Page, settings: LegacySettings): Pro
 	return keys as string[]
 }
 
+// The two prefs as the old page holds them (its settings switches' values).
+export async function legacyPrefs(page: Page): Promise<{ minimizeToTray: boolean; startMinimized: boolean }> {
+	return (await page.evaluate(
+		`({ minimizeToTray: localStorage.getItem(${JSON.stringify(LEGACY_KEYS.minimizeToTray)}) === "true", startMinimized: localStorage.getItem(${JSON.stringify(LEGACY_KEYS.startMinimized)}) === "true" })`
+	)) as { minimizeToTray: boolean; startMinimized: boolean }
+}
+
 async function inspector(port: number): Promise<Cdp> {
 	const targets = await waitFor(`the old main process's inspector on port ${String(port)}`, INSPECTOR_TIMEOUT_MS, async () => {
 		const list = await listTargets(port)

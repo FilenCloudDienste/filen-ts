@@ -21,6 +21,7 @@ import { launchDebuggable, type Launched } from "../launch.ts"
 import {
 	configureLegacy,
 	LEGACY_ORIGIN,
+	legacyPrefs,
 	legacySignIn,
 	legacySyncCounts,
 	legacySyncHold,
@@ -110,6 +111,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		cloud?: Snapshot
 		// Each pair's old local trash directory as 3.x left it (null where it has none).
 		trash?: Map<string, string | null>
+		// The prefs 3.x's options.v1.json held; the rest reach 4.x from localStorage only.
+		mirrored?: string[]
 		afterCloud?: Snapshot
 	} = {}
 
@@ -281,13 +284,27 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `${type} at ${mountPoint}; PROPFIND 207`
 		})
 
-		await findings.must(`${LEGACY_VERSION} quits through app.quit(), rclone with it`, async () => {
-			const options = readJson(userData("options.v1.json")) as { minimizeToTray?: unknown; startMinimized?: unknown } | null
+		// The prefs live in the page's localStorage; options.v1.json is main's mirror, which 3.0.53 writes from two
+		// concurrent read-merge-write calls (setMinimizeToTray, setStartMinimized), so it may keep only one key. 4.x reads
+		// the file and falls back to localStorage per key (legacyPrefs), which L4 checks.
+		await findings.must(
+			`${LEGACY_VERSION} keeps the prefs on (localStorage; its options.v1.json mirror never says otherwise)`,
+			async () => {
+				const stored = await legacyPrefs(legacyPage())
+				const options = readJson(userData("options.v1.json")) as Record<string, unknown> | null
+				const mirrored = (["minimizeToTray", "startMinimized"] as const).filter(key => options?.[key] !== undefined)
 
-			if (options?.minimizeToTray !== true || options.startMinimized !== true) {
-				fail(`options.v1.json: ${json(options)}`)
+				if (!stored.minimizeToTray || !stored.startMinimized || mirrored.some(key => options?.[key] !== true)) {
+					fail(`localStorage ${json(stored)}; options.v1.json ${json(options)}`)
+				}
+
+				state.mirrored = mirrored
+
+				return `localStorage both on; options.v1.json mirrors ${mirrored.join(", ") || "neither"}`
 			}
+		)
 
+		await findings.must(`${LEGACY_VERSION} quits through app.quit(), rclone with it`, async () => {
 			await state.legacy?.renderer.browser.close().catch(() => undefined)
 
 			const exit = await quitLegacy(state.legacy?.launched ?? fail("not launched"), EXIT_TIMEOUT_MS)
@@ -604,7 +621,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					fail(json(prefs))
 				}
 
-				return json(prefs)
+				const fromStorage = ["minimizeToTray", "startMinimized"].filter(key => !(state.mirrored ?? []).includes(key))
+
+				return `${json(prefs)}; from localStorage alone: ${fromStorage.join(", ") || "none"}`
 			})
 
 			await findings.check("L5 the network drive runs at the 3.x mount point and reads the cloud edit", async () => {
