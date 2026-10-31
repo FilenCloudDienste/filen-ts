@@ -314,7 +314,7 @@ jobs:
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
-          pnpm run dist -- --win nsis --x64 --arm64 -c.nsis.buildUniversalInstaller=false -c.directories.output=release-per-arch
+          pnpm run dist -- --win nsis --x64 --arm64 -c.nsis.buildUniversalInstaller=false "-c.nsis.artifactName=Filen_win_\${arch}.\${ext}" -c.directories.output=release-per-arch
           for arch in x64 arm64; do
             cp "release-per-arch/Filen_win_${arch}.exe" "release-per-arch/Filen_win_${arch}.exe.blockmap" release/
           done

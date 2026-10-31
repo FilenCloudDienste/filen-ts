@@ -171,7 +171,11 @@ const config: Configuration = {
 		createDesktopShortcut: true,
 		createStartMenuShortcut: true,
 		deleteAppDataOnUninstall: true,
-		include: "build/installer.nsh"
+		include: "build/installer.nsh",
+		// One universal installer, the file latest.yml names: with ${arch} in the name, electron-builder also writes a
+		// per-architecture installer in the same pass and lists it in latest.yml, where electron-updater prefers it.
+		// The release's second pass names its per-architecture installers itself.
+		artifactName: "Filen_win.${ext}"
 	},
 	linux: {
 		target: [
