@@ -1249,16 +1249,28 @@ if (!app.requestSingleInstanceLock()) {
 } else {
 	app.on("second-instance", showWindow)
 	app.on("before-quit", () => {
+		if (!quitting) {
+			info("quit: closing windows")
+		}
+
 		quitting = true
 	})
 	// After the windows closed (and the page's unload guard agreed): the native host closes its engine first.
 	app.on("will-quit", event => {
 		if (nativeSupervisor.active()) {
 			event.preventDefault()
+			info("quit: stopping the native host")
 			void nativeSupervisor.stop().finally(() => {
+				info("quit: native host stopped")
 				app.quit()
 			})
+
+			return
 		}
+
+		// Electron tears down next; a batched line would never reach the disk.
+		info("quit: shutting down")
+		fileLog.flushSync()
 	})
 	app.on("browser-window-focus", () => {
 		nativeSupervisor.ensure("focus")

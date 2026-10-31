@@ -1,3 +1,4 @@
+import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs"
 import { appendFile, mkdir, readFile, rename, stat } from "node:fs/promises"
 import path from "node:path"
 import { errorCode } from "./atomicFile.ts"
@@ -15,6 +16,8 @@ export interface FileLog {
 	write(level: LogLevel, message: string): void
 	// Both files, oldest line first, once everything written so far is on disk.
 	read(): Promise<string>
+	// Writes what is pending now, blocking: for the last lines before the process ends, which a batch would lose.
+	flushSync(): void
 }
 
 export function formatLogLine(at: Date, level: LogLevel, message: string): string {
@@ -33,7 +36,8 @@ export function createFileLog(directory: string, now: () => Date = () => new Dat
 	let tail: Promise<void> = Promise.resolve()
 	let scheduled = false
 
-	async function flush(): Promise<void> {
+	// The pending lines as one batch, cut to the byte budget; null when there are none.
+	function take(): Buffer | null {
 		scheduled = false
 
 		let data = Buffer.from(pending)
@@ -41,7 +45,7 @@ export function createFileLog(directory: string, now: () => Date = () => new Dat
 		pending = ""
 
 		if (data.length === 0) {
-			return
+			return null
 		}
 
 		// A burst larger than a file keeps its newest whole lines.
@@ -50,7 +54,21 @@ export function createFileLog(directory: string, now: () => Date = () => new Dat
 			data = data.subarray(data.indexOf(0x0a) + 1)
 		}
 
-		const bytes = data.length
+		return data
+	}
+
+	function failed(error: unknown): void {
+		// The size is unknown after a failed write; the next batch re-reads it.
+		size = null
+		console.warn(`log write failed: ${errorCode(error)}`)
+	}
+
+	async function flush(): Promise<void> {
+		const data = take()
+
+		if (data === null) {
+			return
+		}
 
 		try {
 			if (size === null) {
@@ -61,17 +79,40 @@ export function createFileLog(directory: string, now: () => Date = () => new Dat
 				)
 			}
 
-			if (size > 0 && size + bytes > LOG_FILE_MAX_BYTES) {
+			if (size > 0 && size + data.length > LOG_FILE_MAX_BYTES) {
 				await rename(current, previous)
 				size = 0
 			}
 
 			await appendFile(current, data, { mode: 0o600 })
-			size += bytes
+			size += data.length
 		} catch (error) {
-			// The size is unknown after a failed write; the next batch re-reads it.
-			size = null
-			console.warn(`log write failed: ${errorCode(error)}`)
+			failed(error)
+		}
+	}
+
+	function flushSync(): void {
+		const data = take()
+
+		if (data === null) {
+			return
+		}
+
+		try {
+			if (size === null) {
+				mkdirSync(directory, { recursive: true, mode: 0o700 })
+				size = statSync(current, { throwIfNoEntry: false })?.size ?? 0
+			}
+
+			if (size > 0 && size + data.length > LOG_FILE_MAX_BYTES) {
+				renameSync(current, previous)
+				size = 0
+			}
+
+			appendFileSync(current, data, { mode: 0o600 })
+			size += data.length
+		} catch (error) {
+			failed(error)
 		}
 	}
 
@@ -113,6 +154,7 @@ export function createFileLog(directory: string, now: () => Date = () => new Dat
 			await enqueue()
 
 			return (await readOptional(previous)) + (await readOptional(current))
-		}
+		},
+		flushSync
 	}
 }

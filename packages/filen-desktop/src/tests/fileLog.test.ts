@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from "node:fs"
 import { mkdtemp, readdir, rm, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -32,6 +33,30 @@ describe("createFileLog", () => {
 
 		expect(await log.read()).toBe("[2026-10-26T12:00:00.000Z] INFO one\n[2026-10-26T12:00:00.000Z] WARN two\n")
 		expect((await stat(path.join(directory, "logs", "main.log"))).mode & 0o777).toBe(0o600)
+	})
+
+	it("writes pending lines at once on flushSync, in order after what was flushed before", async () => {
+		const log = createFileLog(path.join(directory, "logs"), () => AT)
+		const file = path.join(directory, "logs", "main.log")
+
+		log.write("info", "one")
+		await log.read()
+		log.write("info", "two")
+		log.flushSync()
+
+		expect(readFileSync(file, "utf8")).toBe("[2026-10-26T12:00:00.000Z] INFO one\n[2026-10-26T12:00:00.000Z] INFO two\n")
+		expect(await log.read()).toBe(readFileSync(file, "utf8"))
+	})
+
+	it("creates the directory owner-only on a flushSync before any batch", () => {
+		const log = createFileLog(path.join(directory, "logs"), () => AT)
+
+		log.write("warn", "first")
+		log.flushSync()
+
+		expect(readFileSync(path.join(directory, "logs", "main.log"), "utf8")).toBe("[2026-10-26T12:00:00.000Z] WARN first\n")
+		expect(statSync(path.join(directory, "logs", "main.log")).mode & 0o777).toBe(0o600)
+		expect(statSync(path.join(directory, "logs")).mode & 0o777).toBe(0o700)
 	})
 
 	it("rotates into at most two files, each within the size bound, keeping the newest lines", async () => {

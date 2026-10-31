@@ -453,6 +453,19 @@ describe("createNativeSupervisor", () => {
 		expect(last().killed).toBe(true)
 	})
 
+	it("logs the exit of a host it stopped, never as a crash", async () => {
+		const { supervisor, deps, last } = harness()
+
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+		await supervisor.stop()
+		await settle()
+
+		expect(deps.log.info).toHaveBeenCalledWith("native: exited (0)")
+		expect(deps.log.warn).not.toHaveBeenCalled()
+	})
+
 	it("quit kills a host that never stops", async () => {
 		const { supervisor, forks, last } = harness()
 

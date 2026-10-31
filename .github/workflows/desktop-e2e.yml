@@ -527,8 +527,8 @@ jobs:
         if: matrix.os == 'linux' && matrix.format != 'rpm'
         env:
           # Deep: a secret service for the session vault, the X tools that drive and record the folder chooser, FUSE
-          # for the drive.
-          DEEP_PACKAGES: ${{ matrix.deep && 'gnome-keyring libsecret-tools dbus-daemon xdotool x11-apps fuse3' || '' }}
+          # for the drive, gdb for a crash's core dump.
+          DEEP_PACKAGES: ${{ matrix.deep && 'gnome-keyring libsecret-tools dbus-daemon xdotool x11-apps fuse3 gdb' || '' }}
         run: |
           sudo apt-get update
           # shellcheck disable=SC2086
@@ -568,6 +568,10 @@ jobs:
           FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
         run: |
+          # A crashing app leaves a core dump the chain reads with gdb (scripts/ci/e2e/linux.ts CORE_DIR).
+          sudo install -d -m 1777 /tmp/filen-e2e-cores
+          sudo sysctl -w kernel.core_pattern=/tmp/filen-e2e-cores/core.%p.%e.%s
+          ulimit -c unlimited || ulimit -c "$(ulimit -H -c)"
           KEYRING_PASSWORD="$(openssl rand -hex 16)"
           export KEYRING_PASSWORD
           # shellcheck disable=SC2016

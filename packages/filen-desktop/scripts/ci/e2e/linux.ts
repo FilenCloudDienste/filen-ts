@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { crc32, deflateSync } from "node:zlib"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
@@ -203,4 +203,39 @@ export function processStartMs(pid: number): number {
 	}
 
 	return boot * 1000 + ticks * 10
+}
+
+// Where the deep workflow step's kernel.core_pattern writes core dumps: core.<pid>.<crashing thread's name>.<signal>.
+export const CORE_DIR = "/tmp/filen-e2e-cores"
+const GDB_TIMEOUT_MS = 5 * 60 * 1000
+
+// The crashing thread's stack, every thread's and the mappings (to symbolise the stripped frames offline against the
+// release's debug symbols) from process `pid`'s core dump; null when it left none.
+export async function coreReport(executable: string, pid: number): Promise<string | null> {
+	const core = (existsSync(CORE_DIR) ? readdirSync(CORE_DIR) : []).find(name => name.startsWith(`core.${String(pid)}.`))
+
+	if (core === undefined) {
+		return null
+	}
+
+	const result = await runBounded(
+		"gdb",
+		[
+			"--batch",
+			"--nx",
+			"-ex",
+			"set pagination off",
+			"-ex",
+			"bt 64",
+			"-ex",
+			"thread apply all bt 32",
+			"-ex",
+			"info proc mappings",
+			executable,
+			path.join(CORE_DIR, core)
+		],
+		GDB_TIMEOUT_MS
+	)
+
+	return `${core}\n${result.timedOut ? "gdb timed out\n" : ""}${result.stdout}\n${result.stderr}`
 }

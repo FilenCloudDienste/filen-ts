@@ -24,7 +24,16 @@ import { openCloud, runDir } from "../cloud.ts"
 import { createFindings } from "../findings.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { exitWithin, launchDebuggable, type Launched } from "../launch.ts"
-import { chooseDirectory, keyringItems, mountedType, processStartMs, screenDump, sha256Through, uninstallDeb } from "../linux.ts"
+import {
+	chooseDirectory,
+	coreReport,
+	keyringItems,
+	mountedType,
+	processStartMs,
+	screenDump,
+	sha256Through,
+	uninstallDeb
+} from "../linux.ts"
 import { redactor } from "../redact.ts"
 import { harnessRemote, mask, secretsOf, takeCredentials } from "../session.ts"
 import { cloudSnapshot, diffSnapshots, localSnapshot, snapshotText, type Snapshot } from "../snapshot.ts"
@@ -214,9 +223,32 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 	const syncOverview = () => desktop<DesktopSyncOverview>(page(), "window.desktop.sync.overview()")
 	const mountsOverview = () => desktop<DesktopMountsOverview>(page(), "window.desktop.mounts.overview()")
 
+	// The stdout and stderr of every launch, with Chromium's logging on (the updater's relaunch inherits it).
+	const appOutput = path.join(work, "app-output.log")
+
 	const connect = async (): Promise<void> => {
-		state.launched = await launchDebuggable(target)
+		mkdirSync(work, { recursive: true })
+		state.launched = await launchDebuggable(target, false, appOutput)
 		state.renderer = await connectRenderer(state.launched.debugPort, APP_ORIGIN, START_TIMEOUT_MS)
+	}
+
+	// Why a quit went wrong: the app's output and any core dump its main processes left (the updater's relaunch, which
+	// is no child of the harness, reports its crash this way only).
+	const quitEvidence = async (what: string, pids: readonly number[]): Promise<string[]> => {
+		const cores: string[] = []
+
+		for (const pid of pids) {
+			const report = await coreReport(target.executable, pid)
+
+			if (report !== null) {
+				cores.push(report.slice(0, report.indexOf("\n")))
+				findings.attach(`previous-${what}-core-${String(pid)}.txt`, report)
+			}
+		}
+
+		findings.attach(`previous-${what}-output.log`, tail(appOutput, 3000))
+
+		return cores
 	}
 
 	// SIGTERM quits the app gracefully on Linux (its own launch, or the one the updater relaunched).
@@ -238,12 +270,20 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			const exit = await exitWithin(state.launched, EXIT_TIMEOUT_MS)
 
 			if (exit === null || exit.code !== 0 || exit.signal !== null) {
-				fail(`${what} did not quit gracefully on SIGTERM: ${json(exit)}`)
+				const cores = await quitEvidence(what, pids)
+
+				fail(`${what} did not quit gracefully on SIGTERM: ${json(exit)}${cores.length > 0 ? ` (${cores.join(", ")})` : ""}`)
 			}
 		}
 
 		await waitFor(`${what} to exit`, EXIT_TIMEOUT_MS, () => (target.mainProcesses().length === 0 ? true : null), 1000)
 		delete state.launched
+
+		const cores = await quitEvidence(what, pids)
+
+		if (cores.length > 0) {
+			fail(`${what} crashed on SIGTERM: ${cores.join(", ")}`)
+		}
 	}
 
 	// A step that leaves a session behind on failure signs out through the page first (never left signed in).

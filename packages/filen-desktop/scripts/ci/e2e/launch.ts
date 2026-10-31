@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process"
+import { closeSync, openSync } from "node:fs"
 import { freePort } from "../support.ts"
 import type { Target } from "../targets.ts"
 
@@ -15,8 +16,9 @@ export interface Launched {
 }
 
 // Starts the installed app with its renderer's debugging port on the loopback interface (and, with `inspect`, the main
-// process's Node inspector, which only 3.x honours).
-export async function launchDebuggable(target: Target, inspect = false): Promise<Launched> {
+// process's Node inspector, which only 3.x honours). With `output`, Chromium's logging is on and the app's stdout and
+// stderr are appended to that file: where a CHECK, a V8 fatal error or a Node fatal error says why the app died.
+export async function launchDebuggable(target: Target, inspect = false, output?: string): Promise<Launched> {
 	const debugPort = await freePort()
 	const inspectPort = inspect ? await freePort() : null
 	const args = [
@@ -26,7 +28,18 @@ export async function launchDebuggable(target: Target, inspect = false): Promise
 
 	console.log(`launch ${target.executable} ${args.join(" ")}`)
 
-	const child = target.launch({ ...process.env }, args)
+	const fd = output === undefined ? undefined : openSync(output, "a", 0o600)
+	let child: ChildProcess
+
+	try {
+		child = target.launch(fd === undefined ? { ...process.env } : { ...process.env, ELECTRON_ENABLE_LOGGING: "1" }, args, fd)
+	} finally {
+		// The child holds its own copy.
+		if (fd !== undefined) {
+			closeSync(fd)
+		}
+	}
+
 	const exited = new Promise<Exit>(resolve => {
 		child.once("exit", (code, signal) => resolve({ code, signal }))
 	})

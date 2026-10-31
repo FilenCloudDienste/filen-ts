@@ -485,6 +485,12 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		child.finish()
 		child.rpc.failAll()
 
+		const asked = child.expected || quitting
+
+		if (asked) {
+			deps.log.info(`native: exited (${String(code)})`)
+		}
+
 		if (child !== current) {
 			return
 		}
@@ -492,7 +498,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		current = null
 		clearIdle()
 
-		if (child.expected || quitting) {
+		if (asked) {
 			return
 		}
 

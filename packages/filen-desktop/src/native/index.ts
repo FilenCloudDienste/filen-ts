@@ -285,6 +285,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		}
 
 		phase = "stopping"
+		console.log("shutting down")
 		abort.abort()
 		feed?.stop()
 		plans.releaseAll()
@@ -318,6 +319,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 			clearTimeout(timer)
 		}
 
+		console.log("stopped")
 		post({ t: "stopped" })
 		setImmediate(() => {
 			exit(0)

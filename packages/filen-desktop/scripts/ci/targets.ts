@@ -33,8 +33,8 @@ export interface Target {
 	// The machine without the app, its data or its updater caches; safe when nothing is installed.
 	reset(): void
 	// `args` reach the app after any the format itself needs; the child is the started process (the app's main process,
-	// or the AppImage runtime that starts it).
-	launch(env: NodeJS.ProcessEnv, args?: readonly string[]): ChildProcess
+	// or the AppImage runtime that starts it). `output`: a file descriptor for its stdout and stderr (else discarded).
+	launch(env: NodeJS.ProcessEnv, args?: readonly string[], output?: number): ChildProcess
 	// Main (browser) processes of the installed app; helpers and renderers are not listed.
 	mainProcesses(): AppProcess[]
 	// The version packed into the installed app.
@@ -155,8 +155,12 @@ function killAll(processes: AppProcess[]): void {
 	}
 }
 
-function detached(executable: string, args: readonly string[], env: NodeJS.ProcessEnv): ChildProcess {
-	const child = spawn(executable, args, { detached: true, stdio: "ignore", env })
+function detached(executable: string, args: readonly string[], env: NodeJS.ProcessEnv, output?: number): ChildProcess {
+	const child = spawn(executable, args, {
+		detached: true,
+		stdio: output === undefined ? "ignore" : ["ignore", output, output],
+		env
+	})
 
 	child.on("error", error => {
 		console.error(`${executable}: ${error.message}`)
@@ -245,8 +249,8 @@ function windows(): Target {
 				path.join(localAppData, "@filen", "desktop-updater")
 			)
 		},
-		launch(env, args = []) {
-			return detached(executable, args, env)
+		launch(env, args = [], output) {
+			return detached(executable, args, env, output)
 		},
 		mainProcesses,
 		installedVersion: () => asarVersion(path.join(installDir, "resources", "app.asar")),
@@ -333,8 +337,8 @@ function mac(arch: Arch): Target {
 				}
 			}
 		},
-		launch(env, args = []) {
-			return detached(executable, args, env)
+		launch(env, args = [], output) {
+			return detached(executable, args, env, output)
 		},
 		mainProcesses: () =>
 			run("ps", ["-axo", "pid=,comm="])
@@ -424,9 +428,9 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 				remove(executable)
 				clean()
 			},
-			launch(env, args = []) {
+			launch(env, args = [], output) {
 				// No FUSE on the runners: the runtime extracts itself instead, and still sets APPIMAGE for the updater.
-				return detached(executable, args, { ...env, APPIMAGE_EXTRACT_AND_RUN: "1" })
+				return detached(executable, args, { ...env, APPIMAGE_EXTRACT_AND_RUN: "1" }, output)
 			},
 			mainProcesses,
 			installedVersion() {
@@ -505,9 +509,9 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 
 			clean()
 		},
-		launch(env, args = []) {
+		launch(env, args = [], output) {
 			// Chromium refuses to run as root with its sandbox; only the rpm container runs as root.
-			return detached(executable, root ? ["--no-sandbox", ...args] : args, env)
+			return detached(executable, root ? ["--no-sandbox", ...args] : args, env, output)
 		},
 		mainProcesses,
 		installedVersion: () => asarVersion("/opt/Filen/resources/app.asar"),
