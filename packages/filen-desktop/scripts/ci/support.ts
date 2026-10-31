@@ -112,28 +112,42 @@ export async function runBounded(command: string, args: readonly string[], timeo
 		stderr += chunk
 	})
 
-	const timer = setTimeout(() => {
-		timedOut = true
-
-		try {
-			if (group && child.pid !== undefined) {
-				process.kill(-child.pid, "SIGKILL")
-			} else {
-				child.kill("SIGKILL")
-			}
-		} catch {
-			// Already gone.
-		}
-	}, timeoutMs)
+	let grace: NodeJS.Timeout | undefined
 	const status = await new Promise<number | null>(resolve => {
+		const timer = setTimeout(() => {
+			timedOut = true
+
+			try {
+				if (group && child.pid !== undefined) {
+					process.kill(-child.pid, "SIGKILL")
+				} else {
+					child.kill("SIGKILL")
+				}
+			} catch {
+				// Already gone.
+			}
+
+			// A process outside the group can keep the pipes open after the kill (fileproviderctl hands its work to a
+			// daemon), so the wait ends shortly after the timeout whether or not they close.
+			grace = setTimeout(() => {
+				child.stdout.destroy()
+				child.stderr.destroy()
+				resolve(null)
+			}, 2000)
+		}, timeoutMs)
+
 		child.once("error", error => {
+			clearTimeout(timer)
 			stderr += error.message
 			resolve(null)
 		})
-		child.once("close", code => resolve(code))
+		child.once("close", code => {
+			clearTimeout(timer)
+			resolve(code)
+		})
 	})
 
-	clearTimeout(timer)
+	clearTimeout(grace)
 
 	return { status, stdout, stderr, timedOut }
 }

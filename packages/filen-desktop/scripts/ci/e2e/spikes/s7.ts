@@ -15,8 +15,8 @@ import { createFindings, type Findings, type SpikeOptions } from "./findings.ts"
 // userEnabled, try pluginkit, then an off/on round trip, and if the domain ends up enabled, list it. On hosted runners
 // userEnabled stays false (a person switches it on in System Settings), which is reported as information; the checks
 // are the sign-in, state(), enable(), the round trip and the domain's registration. Every run that stored a session
-// signs out through the app's own account menu, closing whatever covers the shell first. Evidence: findings, main.log, the subsystem log,
-// `fileproviderctl dump` and its usage text. Every system tool runs bounded (TOOL_TIMEOUT_MS, process group killed).
+// signs out through the app's own account menu, closing whatever covers the shell first. Evidence: findings, main.log and
+// the subsystem log (fileproviderctl is left out: it hangs on hosted runners). Every system tool runs bounded.
 
 const EMAIL_ENV = "FILEN_DESKTOP_E2E_TEST_EMAIL"
 const PASSWORD_ENV = "FILEN_DESKTOP_E2E_TEST_PASSWORD"
@@ -310,9 +310,7 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 				"s7-filen-subsystem.log",
 				"log",
 				["show", "--style", "compact", "--last", "15m", "--predicate", 'subsystem BEGINSWITH "io.filen"']
-			],
-			["s7-fileproviderctl-dump.txt", "fileproviderctl", ["dump"]],
-			["s7-fileproviderctl-usage.txt", "fileproviderctl", []]
+			]
 		] as const) {
 			findings.attach(name, output(await tool(command, [...args])))
 		}
