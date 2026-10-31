@@ -138,6 +138,19 @@ export function legacySideTree(pair: LegacyPairFixture, side: "local" | "cloud")
 	return fixtureTree(`legacy/${pair.name}`, pair.seed === side || !pair.excludeDotFiles)
 }
 
+// The old client's local trash directory in a pair root.
+export const LEGACY_LOCAL_TRASH = ".filen.trash.local"
+
+// What a pair's local root holds once the old client converged: its side's tree, and in a pair the old client filled
+// by downloads its local trash directory, empty. filen-sync 0.3.7 writes every download to
+// <root>/.filen.trash.local/<uuid> and moves it into place, whatever localTrashDisabled says; deletions would add to it
+// with local trash on, and the fixtures make none.
+export function legacyLocalTree(pair: LegacyPairFixture): Tree {
+	const tree = legacySideTree(pair, "local")
+
+	return pair.seed === "cloud" ? { files: tree.files, emptyDirs: [...tree.emptyDirs, LEGACY_LOCAL_TRASH] } : tree
+}
+
 // The edits made while the old client is closed: one on disk, one in the cloud. N's first passes carry exactly these.
 export const LEGACY_EDITS = {
 	local: { pair: "e2e-twoway", path: "docs/notes.txt", bytes: seededBytes("legacy/edit-local", 3000) },

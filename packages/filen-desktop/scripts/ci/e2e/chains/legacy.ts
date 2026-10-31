@@ -1,12 +1,22 @@
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import type { DesktopLockStatus, DesktopMountsResult, DesktopPrefs, DesktopServeCredentials, DesktopSyncPair } from "@filen/shared/desktop"
 import { LEGACY_VERSION } from "../../legacy.ts"
 import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
 import { desktop, sessionStatus, signOut, unlockThroughScreen } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
-import { LEGACY_DELTAS, LEGACY_EDITS, LEGACY_PAIRS, legacySideTree, type LegacyPairFixture, treeSnapshot, writeTree } from "../fixtures.ts"
+import {
+	LEGACY_DELTAS,
+	LEGACY_EDITS,
+	LEGACY_LOCAL_TRASH,
+	legacyLocalTree,
+	LEGACY_PAIRS,
+	legacySideTree,
+	type LegacyPairFixture,
+	treeSnapshot,
+	writeTree
+} from "../fixtures.ts"
 import { launchDebuggable, type Launched } from "../launch.ts"
 import {
 	configureLegacy,
@@ -46,7 +56,8 @@ import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openCha
 //                                 trash was off; no import note, no mount notice, no dialog over the page
 //   L10  only the two edits       disk and cloud over N's first passes: identities unchanged except the expected deltas
 //                                 (LEGACY_DELTAS); N's activity and plans carry nothing else
-//   L12  no bin traffic           the engine's bin empty or absent; no old local trash
+//   L12  no bin traffic           the engine's bin holds only what the cloud edit replaced; 3.x's local trash
+//                                 untouched (inode, mtime, content) and never in the cloud
 //   L13  the page as served       crossOriginIsolated
 //   L14  sync works afterwards    a new local file uploads
 //   L15  sign-out and uninstall   session and drive gone; the user's directories intact
@@ -97,10 +108,27 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		syncDir?: Snapshot
 		local?: Map<string, Snapshot>
 		cloud?: Snapshot
+		// Each pair's old local trash directory as 3.x left it (null where it has none).
+		trash?: Map<string, string | null>
+		afterCloud?: Snapshot
 	} = {}
 
 	chain.secret(pin)
 	chain.secret(webdav.password)
+
+	// The old local trash directory of a pair: its own inode and mtime, then everything in it with identities; null
+	// when there is none. 4.x never syncs, moves or deletes it (the engine reserves the name; it holds user data).
+	const trashState = async (pair: string): Promise<string | null> => {
+		const dir = path.join(rootOf(pair), LEGACY_LOCAL_TRASH)
+
+		if (!existsSync(dir)) {
+			return null
+		}
+
+		const stat = statSync(dir, { bigint: true })
+
+		return `${String(stat.ino)}@${String(stat.mtimeNs)}\n${snapshotText(await localSnapshot(dir))}`
+	}
 
 	const legacyPage = () => state.legacy?.renderer.page ?? fail("the old app's page is not connected")
 
@@ -188,7 +216,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 						for (const pair of LEGACY_PAIRS) {
 							differences.push(
-								...diffSnapshots(treeSnapshot(legacySideTree(pair, "local")), await snapshotOf(pair.name), {
+								...diffSnapshots(treeSnapshot(legacyLocalTree(pair)), await snapshotOf(pair.name), {
 									identity: false
 								}).map(line => `${pair.name} local: ${line}`)
 							)
@@ -289,8 +317,11 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			// Baseline B: what N starts from.
 			state.local = new Map()
 
+			state.trash = new Map()
+
 			for (const pair of LEGACY_PAIRS) {
 				state.local.set(pair.name, await snapshotOf(pair.name))
+				state.trash.set(pair.name, await trashState(pair.name))
 			}
 
 			state.cloud = (await cloudSnapshot(cloud, cloudDir, work)) ?? fail(`${cloudDir} is gone`)
@@ -433,6 +464,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			}
 
 			const now = (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map()
+
+			state.afterCloud = now
+
 			const allowed = LEGACY_DELTAS.filter(delta => delta.side === "cloud").map(delta => `${delta.pair}/${delta.path}`)
 
 			problems.push(
@@ -449,8 +483,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		})
 
 		// The engine keeps a local file it replaces in its bin: the cloud edit's download leaves the old bytes there, and
-		// nothing else may be in any bin.
-		await findings.check("L12 the engine's bin holds only what the cloud edit replaced; no old local trash", async () => {
+		// nothing else may be in any bin. The old local trash stays exactly as 3.x left it and never reaches the cloud.
+		await findings.check("L12 the engine's bin holds only what the cloud edit replaced; the old local trash untouched", async () => {
 			const replaced = treeSnapshot(legacySideTree(pairFixture(edits.cloud.pair), "cloud")).get(edits.cloud.path)?.sha256
 			const problems: string[] = []
 
@@ -464,16 +498,26 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					}
 				}
 
-				if (existsSync(path.join(rootOf(pair.name), ".filen.trash.local"))) {
-					problems.push(`${pair.name}/.filen.trash.local`)
+				if ((await trashState(pair.name)) !== (state.trash?.get(pair.name) ?? null)) {
+					problems.push(`${pair.name}/${LEGACY_LOCAL_TRASH} changed`)
 				}
 			}
+
+			const cloudSide = state.afterCloud ?? (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map()
+
+			problems.push(
+				...[...cloudSide.keys()]
+					.filter(relPath => relPath.split("/").includes(LEGACY_LOCAL_TRASH))
+					.map(relPath => `cloud ${relPath}`)
+			)
 
 			if (problems.length > 0) {
 				fail(problems.join(", "))
 			}
 
-			return "nothing in a bin but the replaced bytes of the cloud edit"
+			return `bins hold only the replaced bytes; ${LEGACY_LOCAL_TRASH} as 3.x left it (${String(
+				[...(state.trash?.values() ?? [])].filter(value => value !== null).length
+			)} pairs), none in the cloud`
 		})
 
 		await findings.check("L7 userData/sync renamed to sync.migrated-<date>, its content kept", async () => {

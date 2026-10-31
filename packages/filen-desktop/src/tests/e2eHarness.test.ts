@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
 	fixtureTree,
 	LEGACY_DELTAS,
+	LEGACY_LOCAL_TRASH,
+	legacyLocalTree,
 	LEGACY_PAIRS,
 	legacySideTree,
 	seededBytes,
@@ -176,6 +178,13 @@ describe("chain L fixtures", () => {
 		expect(twoWay && legacySideTree(twoWay, "local").files.has(".hidden.txt")).toBe(true)
 		expect(twoWay && legacySideTree(twoWay, "cloud").files.has(".hidden.txt")).toBe(false)
 		expect(l2c && legacySideTree(l2c, "cloud").files.has(".hidden.txt")).toBe(true)
+	})
+
+	it("expects 3.x's local trash directory, empty, in the pairs it filled by downloads, whatever their trash switch", () => {
+		const withTrash = LEGACY_PAIRS.filter(pair => legacyLocalTree(pair).emptyDirs.includes(LEGACY_LOCAL_TRASH)).map(pair => pair.name)
+
+		expect(withTrash).toEqual(["e2e-c2l", "e2e-cbak"])
+		expect(LEGACY_PAIRS.filter(pair => withTrash.includes(pair.name)).map(pair => pair.localTrashDisabled)).toEqual([true, false])
 	})
 
 	it("allows a rule file where dot files were excluded (uploaded only by a pair that pushes) and the two edits", () => {
