@@ -62,6 +62,8 @@ export interface SyncServiceDeps {
 		pending(userId: string): Promise<unknown>
 		consume(userId: string): Promise<void>
 		ignorer(uuid: string): Promise<string | null>
+		// Renames the old client's sync state once its pairs are imported (see legacyState.ts); throws to be tried again.
+		retire(): Promise<void>
 	}
 	// The user's drive root directory, from the stored session; null when unknown.
 	driveRoot(userId: string): Promise<string | null>
@@ -436,6 +438,14 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 						legacyIgnorer: deps.legacySync.ignorer,
 						stash: { pending: () => deps.legacySync.pending(userId), consume: () => deps.legacySync.consume(userId) }
 					})
+			],
+			[
+				"keeping the previous app's sync state aside",
+				async () => {
+					if (store.get().legacyApplied) {
+						await deps.legacySync.retire()
+					}
+				}
 			]
 		]
 

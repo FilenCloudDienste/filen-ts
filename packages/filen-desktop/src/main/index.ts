@@ -22,7 +22,7 @@ import {
 	type WebFrameMain
 } from "electron"
 import { existsSync, readFileSync } from "node:fs"
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { lookup } from "node:dns/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
@@ -77,6 +77,7 @@ import { createSessionVault, isSessionBlob, lazyCipher, removeIfUndecryptable, v
 import { registerSyncIpc } from "./sync/ipc.ts"
 import { createRootTokens } from "./sync/localRoot.ts"
 import { createSyncService } from "./sync/service.ts"
+import { readLegacyIgnorer, retireLegacySyncState } from "./sync/legacyState.ts"
 import { heldRemotes, loadSyncStore, type SyncStore } from "./sync/store.ts"
 import {
 	attentionPair,
@@ -231,22 +232,6 @@ const migration = createMigration({
 	info,
 	warn
 })
-
-// The old client's ignore file of one of its pairs (its engine state beside it is never read); null when there is
-// none or it is no UTF-8 text.
-async function legacyIgnorer(uuid: string): Promise<string | null> {
-	try {
-		const bytes = await readFile(path.join(userDataPath, "sync", "ignorer", "v1", uuid, "filenIgnore"))
-
-		return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
-	} catch (error) {
-		if (errorCode(error) !== "ENOENT") {
-			warn(`sync: a pair's old ignore file was not read: ${errorCode(error)}`)
-		}
-
-		return null
-	}
-}
 
 // Sync: one engine directory per user, never under the old client's userData/sync.
 const syncEngineRoot = path.join(userDataPath, "sync-engine")
@@ -497,7 +482,14 @@ const syncService = createSyncService({
 	legacySync: {
 		pending: userId => migrationStash.pending(userId, "sync"),
 		consume: userId => migrationStash.consume(userId, "sync"),
-		ignorer: uuid => legacyIgnorer(uuid)
+		ignorer: uuid => readLegacyIgnorer(userDataPath, uuid, warn),
+		retire: async () => {
+			const retired = await retireLegacySyncState(userDataPath, Date.now())
+
+			if (retired !== "absent") {
+				info(`sync: the previous app's sync state was kept as ${retired.renamedTo}`)
+			}
+		}
 	},
 	driveRoot: async userId => {
 		const read = await sessionVault.get()

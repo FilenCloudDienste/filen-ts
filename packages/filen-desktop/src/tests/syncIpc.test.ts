@@ -39,6 +39,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 	let clock = 1_000
 	let added = 6
 	const onHeld = vi.fn()
+	const retire = vi.fn(() => Promise.resolve())
 	const store = memoryStore(options.pairs)
 	const host: DesktopSyncHostState = { state: "running" }
 	const answers: Answers = {
@@ -86,7 +87,8 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		legacySync: {
 			pending: () => Promise.resolve(undefined),
 			consume: () => Promise.resolve(),
-			ignorer: () => Promise.resolve(null)
+			ignorer: () => Promise.resolve(null),
+			retire
 		},
 		driveRoot: () => Promise.resolve(options.driveRoot ?? null),
 		onHeld,
@@ -122,6 +124,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		store,
 		tokens,
 		onHeld,
+		retire,
 		call,
 		supervisor,
 		sent,
@@ -490,6 +493,21 @@ describe("registerSyncIpc", () => {
 
 		expect(ops()).toEqual(["setMigratedGuard", "resume", "resume"])
 		expect(store.get().pairs[0]).toMatchObject({ state: "active", paused: false, review: null })
+	})
+
+	it("keeps the previous app's sync state aside once its pairs are imported, trying again on the next start", async () => {
+		const fresh = setup()
+
+		await fresh.service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		expect(fresh.retire).not.toHaveBeenCalled()
+
+		const imported = setup()
+
+		await imported.store.update(state => ({ ...state, legacyApplied: true }))
+		imported.retire.mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
+		await imported.service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		await imported.service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		expect(imported.retire).toHaveBeenCalledTimes(2)
 	})
 
 	it("dismisses an info notice and the import note for good", async () => {
