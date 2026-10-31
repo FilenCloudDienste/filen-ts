@@ -7,7 +7,8 @@ import { savesConfig, writeManifest } from "./saves"
 // through Gates 1 and 2 and read back by the independent reader: a save Gate 2 lets through must open,
 // keep untouched entries byte for byte, add nothing Word refuses, and hold exactly the editor's paragraphs
 // among the source's. Refusals by the gates are intended and only counted.
-// FILEN_OFFICE_FUZZ=<sequences per file> turns it on; the first sequence of a file saves unedited.
+// FILEN_OFFICE_FUZZ=<sequences per file> turns it on; the first sequence of a file saves unedited, and a file
+// none of the others changed draws up to 16 more (config.ts `editExpected`).
 // FILEN_OFFICE_FUZZ_SEED, FILEN_OFFICE_FUZZ_FILTER, FILEN_OFFICE_FUZZ_STEPS (most ops per session, 16),
 // FILEN_OFFICE_FUZZ_MODES (stories; also undo, blockmove, undoall, xsd, selftest), FILEN_OFFICE_FUZZ_OPS,
 // FILEN_OFFICE_FUZZ_FAMILIES, FILEN_OFFICE_FUZZ_JOBS and FILEN_OFFICE_FUZZ_OUT tune it; FILEN_OFFICE_FUZZ_SAVES keeps

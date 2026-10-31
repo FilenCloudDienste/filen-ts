@@ -6,7 +6,8 @@ import { savesConfig, writeManifest } from "./saves"
 // Random edit sequences through the paged editor over every corpus document: after each settled step the
 // pages the editor shows (laid out incrementally) must equal a fresh layout of the file it saves.
 // FILEN_OFFICE_FUZZ=<seeds per file and mode> turns it on; FILEN_OFFICE_FUZZ_SEED (first seed),
-// FILEN_OFFICE_FUZZ_FILTER, FILEN_OFFICE_FUZZ_STEPS (20), FILEN_OFFICE_FUZZ_MODES (sync,race; also proof),
+// FILEN_OFFICE_FUZZ_FILTER, FILEN_OFFICE_FUZZ_STEPS (20; a run that changed nothing takes up to 80 more),
+// FILEN_OFFICE_FUZZ_MODES (sync,race; also proof),
 // FILEN_OFFICE_FUZZ_OPS, FILEN_OFFICE_FUZZ_FAMILIES, FILEN_OFFICE_FUZZ_VIEW (one view) or FILEN_OFFICE_FUZZ_VIEWS
 // (each run in each), FILEN_OFFICE_FUZZ_JOBS and FILEN_OFFICE_FUZZ_OUT tune it. The final save of each run is also
 // read back by the independent reader (a "bypass" is what it finds that Gate 2 let through), and kept under

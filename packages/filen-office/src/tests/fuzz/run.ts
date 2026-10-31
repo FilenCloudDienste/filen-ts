@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { basename } from "node:path"
 import type { Transaction } from "prosemirror-state"
 import { protectionOf } from "../../core/docx/edit/protection"
-import { CORPUS, fuzzConfig, nameHash, rng, type FuzzConfig, type Rand } from "./config"
+import { CORPUS, editExpected, fuzzConfig, nameHash, rng, type FuzzConfig, type Rand } from "./config"
 import { firstDifference, viewerDigest } from "./digest"
 import {
 	bodySession,
@@ -74,6 +74,10 @@ const REPLAY = process.env["FILEN_OFFICE_FUZZ_REPLAY"] ? Number(process.env["FIL
 // FILEN_OFFICE_FUZZ_KEEP=<file>: the last save a replayed sequence made, to look at.
 const KEEP = process.env["FILEN_OFFICE_FUZZ_KEEP"] || undefined
 const MODES = ["sync", "race", "proof"]
+// The most a run that has applied no edit draws past its length (config.ts `editExpected`): paged steps, damage
+// sequences.
+const EXTRA_STEPS = 80
+const EXTRA_SEQUENCES = 16
 const VIEW_NAMES = ["final", "markup", "original"]
 
 // The op family a run's saves are filed under.
@@ -166,8 +170,11 @@ async function paged(config: FuzzConfig, file: string, seed: number, mode: Paged
 	}
 
 	let applied = 0
+	let step = 0
+	// A run that has changed nothing draws more steps (config.ts `editExpected`).
+	const extend = editExpected(config, protectionOf(editor.body.session.context).mode)
 
-	for (let step = 0; step < steps; step++) {
+	for (; step < steps || (extend && applied === 0 && step < steps + EXTRA_STEPS); step++) {
 		const { op, rand: stream } = picker.next(rand)
 		const before = documents(editor)
 
@@ -258,7 +265,7 @@ async function paged(config: FuzzConfig, file: string, seed: number, mode: Paged
 
 	result({
 		ok: true,
-		steps,
+		steps: step,
 		applied,
 		refusals,
 		pages: editor.pageCount,
@@ -770,8 +777,12 @@ async function damage(config: FuzzConfig, file: string): Promise<void> {
 	const was = { tracking: review.tracking, persist: review.persist, author: identity.author, initials: identity.initials }
 	// The body's top-level blocks (blockmove mode has nothing to move with fewer than two).
 	let blocks = 0
+	// A file none of its edited sequences changed draws more sequences (config.ts `editExpected`).
+	const extend = config.runs > 1 && editExpected(config, protectionOf(editable.context).mode)
+	const more = (q: number): boolean =>
+		extend && q < config.runs + EXTRA_SEQUENCES && stats["applied"] === undefined && !(modes.has("blockmove") && blocks < 2)
 
-	for (let q = 0; q < config.runs; q++) {
+	for (let q = 0; q < config.runs || more(q); q++) {
 		const seed = (base + q) >>> 0
 
 		// FILEN_OFFICE_FUZZ_REPLAY=<seed>: that sequence only (each sequence draws from its own seed).

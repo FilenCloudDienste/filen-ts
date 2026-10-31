@@ -138,6 +138,14 @@ export function limitedProtection(mode: unknown): boolean {
 	return mode === "forms" || mode === "comments"
 }
 
+// Whether a run over a document must apply some edit (the fuzz tests fail one that applies none): not under a
+// protection that may leave nothing to change, nor with the ops narrowed to some the document may have no use for.
+// Where few ops apply (read-only protection with small open ranges, a document of a block or two), a run that has
+// applied none keeps drawing past its length, up to a limit, so it fails only when nothing applies.
+export function editExpected(config: FuzzConfig, protection: unknown): boolean {
+	return config.ops === undefined && config.families === undefined && !limitedProtection(protection)
+}
+
 // Prints a run's summary, and adds it to the GitHub Actions job summary when there is one.
 export function summarize(line: string): void {
 	console.log(line)
