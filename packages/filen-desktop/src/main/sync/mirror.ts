@@ -9,7 +9,7 @@ export function shellPairId(pair: ShellPair): string {
 }
 
 // Case is folded since the remote directory already keeps two pairs apart.
-function rootKey(localRoot: string, remoteRoot: string): string {
+export function rootKey(localRoot: string, remoteRoot: string): string {
 	return `${stripVerbatim(localRoot).toLowerCase()}\0${remoteRoot.toLowerCase()}`
 }
 
@@ -75,8 +75,12 @@ export function reconcileMirror(
 			state: "active",
 			review: null,
 			legacyUuid: null,
-			legacyDotFiles: null,
+			legacyRules: null,
 			notices: [],
+			rootProblem: null,
+			holds: [],
+			wholeDriveConfirmed: false,
+			info: [],
 			createdAt: options.now
 		})
 	}

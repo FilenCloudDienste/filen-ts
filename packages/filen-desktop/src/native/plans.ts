@@ -6,6 +6,7 @@ import type {
 	PlannedNodeKind,
 	SyncGuardReason,
 	SyncPlanSummary,
+	SyncScanGap,
 	UnsyncablePath
 } from "@filen/sdk-rs"
 import type {
@@ -18,6 +19,7 @@ import type {
 	DesktopSyncPlanList,
 	DesktopSyncPlanPage,
 	DesktopSyncRefusal,
+	DesktopSyncScanGap,
 	DesktopSyncUnsyncable,
 	DesktopSyncUnsyncableReason
 } from "@filen/shared/desktop"
@@ -166,6 +168,18 @@ export function toUnsyncable(path: UnsyncablePath): DesktopSyncUnsyncable {
 	const detail = unsyncableDetail(path.reason)
 
 	return { relPath: clip(path.relPath), reason: UNSYNCABLE_REASONS[path.reason.tag], detail: detail === null ? null : clip(detail) }
+}
+
+const GAP_CAUSES: Record<SyncScanGap["cause"]["tag"], DesktopSyncScanGap["cause"]> = {
+	Unreadable: "unreadable",
+	ChangedDuringScan: "changedDuringScan",
+	NonUtf8Name: "nonUtf8Name"
+}
+
+export function toScanGap(gap: SyncScanGap): DesktopSyncScanGap {
+	const { cause } = gap
+
+	return { relPath: clip(gap.relPath), cause: GAP_CAUSES[cause.tag], kind: cause.tag === "Unreadable" ? clip(cause.inner.kind) : null }
 }
 
 export function toIgnored(path: IgnoredPath): DesktopSyncIgnored {

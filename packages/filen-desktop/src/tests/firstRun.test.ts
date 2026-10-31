@@ -1,30 +1,35 @@
-import { mkdtemp, readdir, realpath, rm } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, stat, symlink, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import type { DesktopSyncPlanSummary, DesktopSyncReviewFinding } from "@filen/shared/desktop"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { DesktopSyncMode, DesktopSyncPlanSummary, DesktopSyncReviewFinding } from "@filen/shared/desktop"
 import {
 	attachUnheld,
+	BIN_DIR,
+	ensureRules,
 	type FirstRunPlan,
 	firstRunVerdict,
 	holdReviewed,
+	MAX_MIGRATED_CONFLICTS,
 	MAX_OVERWRITE_BYTES,
 	MAX_OVERWRITE_FILES,
-	overwriteVerdict,
+	migratedVerdict,
 	runFirstRun,
+	SLOW_LISTING_ROUNDS,
 	startPreparing
 } from "../main/sync/firstRun.ts"
 import type { ShellPair } from "../main/sync/store.ts"
-import { CLEAN_SUMMARY, fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
+import { CLEAN_SUMMARY, fakeNative, memoryStore, Refusal, ROOT_CONTEXT, shellPair as baseShellPair } from "./syncFakes.ts"
 
 const REMOTE = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
 const LEGACY = "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b"
 const MIB = 1_048_576
+const RULES = [".*", "!/.filenignore"]
 
 const { passToken: _passToken, ...SUMMARY } = CLEAN_SUMMARY
 
 function plan(summary: Partial<DesktopSyncPlanSummary> = {}, rest: Partial<Omit<FirstRunPlan, "summary">> = {}): FirstRunPlan {
-	return { summary: { ...SUMMARY, ...summary }, uploads: 0, downloads: 0, ...rest }
+	return { summary: { ...SUMMARY, ...summary }, uploads: 0, downloads: 0, overwrites: { files: 0, bytes: 0 }, ...rest }
 }
 
 let directory: string
@@ -34,25 +39,16 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+	await chmod(directory, 0o700)
 	await rm(directory, { recursive: true, force: true })
 })
 
 function shellPair(overrides: Partial<ShellPair> = {}): ShellPair {
-	return {
-		pairId: null,
-		name: "Work",
-		localRoot: directory,
-		remoteRoot: REMOTE,
-		mode: "twoWay",
-		paused: false,
-		state: "active",
-		review: null,
-		legacyUuid: null,
-		legacyDotFiles: null,
-		notices: [],
-		createdAt: 1,
-		...overrides
-	}
+	return baseShellPair({ name: "Work", localRoot: directory, remoteRoot: REMOTE, createdAt: 1, ...overrides })
+}
+
+function evaluation(summary: Partial<DesktopSyncPlanSummary>, overwrites = { files: 0, bytes: 0 }) {
+	return { status: "ok", planId: "p", summary: { ...CLEAN_SUMMARY, ...summary }, check: { uploads: 0, downloads: 0, overwrites } }
 }
 
 describe("firstRunVerdict", () => {
@@ -73,17 +69,89 @@ describe("firstRunVerdict", () => {
 	})
 })
 
-describe("overwriteVerdict", () => {
-	const held = { start: false, findings: ["overwrites"] }
+describe("migratedVerdict", () => {
+	const rows: [string, FirstRunPlan, DesktopSyncMode, DesktopSyncReviewFinding[]][] = [
+		["ordinary transfers", plan({ actions: 90_000, uploadBytes: 50 * MIB }, { uploads: 90_000 }), "twoWay", []],
+		["conflicts up to the limit", plan({ conflicts: MAX_MIGRATED_CONFLICTS }), "twoWay", []],
+		["conflicts over it", plan({ conflicts: MAX_MIGRATED_CONFLICTS + 1 }), "twoWay", ["conflicts"]],
+		["held deletions", plan({ heldDeletions: 1 }), "localToRemote", ["heldDeletions"]],
+		["refused", plan({ refused: "remoteCollision" }), "twoWay", ["refused"]],
+		[
+			"one-way overwrites at both limits",
+			plan({}, { overwrites: { files: MAX_OVERWRITE_FILES, bytes: MAX_OVERWRITE_BYTES } }),
+			"remoteToLocal",
+			[]
+		],
+		[
+			"one-way overwrites over the files",
+			plan({}, { overwrites: { files: MAX_OVERWRITE_FILES + 1, bytes: 0 } }),
+			"localBackup",
+			["overwrites"]
+		],
+		[
+			"one-way overwrites over the bytes",
+			plan({}, { overwrites: { files: 1, bytes: MAX_OVERWRITE_BYTES + 1 } }),
+			"remoteBackup",
+			["overwrites"]
+		],
+		["two-way replaces as it syncs", plan({}, { overwrites: { files: MAX_OVERWRITE_FILES + 1, bytes: 0 } }), "twoWay", []]
+	]
 
-	it.each([
-		["nothing", { files: 0, bytes: 0 }, { start: true }],
-		["at both limits", { files: MAX_OVERWRITE_FILES, bytes: MAX_OVERWRITE_BYTES }, { start: true }],
-		["over the file limit", { files: MAX_OVERWRITE_FILES + 1, bytes: 0 }, held],
-		["over the byte limit", { files: 1, bytes: MAX_OVERWRITE_BYTES + 1 }, held],
-		["not known", null, held]
-	])("%s", (_name, overwrites, verdict) => {
-		expect(overwriteVerdict(overwrites)).toEqual(verdict)
+	it.each(rows)("%s", (_name, input, mode, findings) => {
+		expect(migratedVerdict(input, mode)).toEqual(findings.length === 0 ? { start: true } : { start: false, findings })
+	})
+})
+
+describe("ensureRules", () => {
+	const file = () => path.join(directory, ".filenignore")
+
+	it("writes the rules, keeping the user's lines and a BOM, and leaves no temporary file", async () => {
+		await writeFile(file(), "\uFEFFbuild/")
+
+		await expect(ensureRules(directory, RULES)).resolves.toBeNull()
+		expect(await readFile(file(), "utf8")).toBe("\uFEFFbuild/\n.*\n!/.filenignore\n")
+		expect(await readdir(path.join(directory, BIN_DIR))).toEqual([])
+
+		// Nothing to add the second time.
+		await expect(ensureRules(directory, RULES)).resolves.toBeNull()
+	})
+
+	it("never rewrites a file that is no UTF-8 text", async () => {
+		const bytes = Buffer.from([0x62, 0xff, 0x0a])
+
+		await writeFile(file(), bytes)
+
+		await expect(ensureRules(directory, RULES)).resolves.toBe("ruleFileUndecodable")
+		expect(await readFile(file())).toEqual(bytes)
+	})
+
+	it("keeps the file's mode", async () => {
+		await writeFile(file(), "build/")
+		await chmod(file(), 0o640)
+
+		await expect(ensureRules(directory, RULES)).resolves.toBeNull()
+		expect((await stat(file())).mode & 0o777).toBe(0o640)
+	})
+
+	it("never replaces a link or anything but a file", async () => {
+		const target = path.join(directory, "elsewhere")
+
+		await writeFile(target, "")
+		await symlink(target, file())
+
+		await expect(ensureRules(directory, RULES)).resolves.toBe("ruleFileUnwritable")
+		expect(await readFile(target, "utf8")).toBe("")
+		expect((await lstat(file())).isSymbolicLink()).toBe(true)
+
+		await rm(file())
+		await mkdir(file())
+		await expect(ensureRules(directory, RULES)).resolves.toBe("ruleFileUnwritable")
+	})
+
+	it("says so when the directory cannot be written", async () => {
+		await chmod(directory, 0o500)
+
+		await expect(ensureRules(directory, RULES)).resolves.toBe("ruleFileUnwritable")
 	})
 })
 
@@ -97,7 +165,7 @@ describe("runFirstRun", () => {
 		await runFirstRun(deps, "1", options)
 
 		expect(ops()).toEqual(["evaluatePlan", "releasePlan", "resume"])
-		expect(argsOf("evaluatePlan")).toEqual([{ pairId: "1", check: { overwrites: false } }])
+		expect(argsOf("evaluatePlan")).toEqual([{ pairId: "1", check: true }])
 		expect(store.get().pairs[0]).toMatchObject({ paused: false, state: "active", review: null })
 	})
 
@@ -118,7 +186,7 @@ describe("runFirstRun", () => {
 				status: "ok",
 				planId: "p",
 				summary: { ...CLEAN_SUMMARY, uploadBytes: 2 * MIB, heldDeletions: 3, passToken: "secret" },
-				check: { uploads: 4, downloads: 0, overwrites: null }
+				check: { uploads: 4, downloads: 0, overwrites: { files: 0, bytes: 0 } }
 			})
 		})
 
@@ -185,30 +253,93 @@ describe("attachUnheld", () => {
 	it("adds a migrated pair paused in the engine and preparing, keeping what the user had", async () => {
 		const store = memoryStore([
 			shellPair({ legacyUuid: LEGACY, state: "waitingForRoot" }),
-			shellPair({ legacyUuid: REMOTE, remoteRoot: LEGACY, paused: true, state: "preparing" })
+			shellPair({
+				localRoot: path.join(directory, "missing"),
+				legacyUuid: REMOTE,
+				remoteRoot: LEGACY,
+				paused: true,
+				state: "preparing"
+			})
 		])
 		const { deps, ops } = fakeNative(store)
 
 		await attachUnheld(deps)
 
-		expect(ops()).toEqual(["addPair", "pause", "addPair", "pause"])
+		expect(ops()).toEqual(["addPair", "pause"])
 		expect(store.get().pairs.map(pair => [pair.pairId, pair.state, pair.paused, pair.review])).toEqual([
 			["1", "preparing", false, null],
-			["2", "preparing", true, null]
+			[null, "waitingForRoot", true, null]
 		])
 	})
 
-	it("treats a migrated pair a baseline reset lost like any other", async () => {
-		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "review" })])
-		const { deps, ops } = fakeNative(store)
+	it("writes a migrated pair's rules before the engine gets it", async () => {
+		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "waitingForRoot", legacyRules: ["build/", ...RULES] })])
+		const { deps, call } = fakeNative(store)
+		let written: string | null = null
+
+		call.mockImplementationOnce(async () => {
+			written = await readFile(path.join(directory, ".filenignore"), "utf8")
+
+			return { ok: true, value: { pairId: "1" } }
+		})
 
 		await attachUnheld(deps)
 
-		expect(ops()).toEqual(["addPair", "pause", "evaluatePlan", "releasePlan", "resume"])
-		expect(store.get().pairs[0]?.state).toBe("active")
+		expect(written).toBe("build/\n.*\n!/.filenignore\n")
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "preparing", holds: [] })
 	})
 
-	it("keeps a pair the engine refuses for good, unsynced with the reason, and one a passing failure hit for the next start", async () => {
+	it("holds a migrated pair whose rules cannot be written, unknown to the engine, and adds it once they are", async () => {
+		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "waitingForRoot", legacyRules: RULES })])
+		const { deps, ops } = fakeNative(store)
+
+		// A directory where the rule file goes.
+		await mkdir(path.join(directory, ".filenignore"))
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual([])
+		expect(store.get().pairs[0]).toMatchObject({ pairId: null, state: "preparing", holds: ["ruleFileUnwritable"] })
+
+		await rm(path.join(directory, ".filenignore"), { recursive: true })
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual(["addPair", "pause"])
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "preparing", holds: [] })
+	})
+
+	it("refuses a migrated pair whose directory could not be a pair's root", async () => {
+		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "waitingForRoot" })])
+		const { deps, ops } = fakeNative(store)
+
+		deps.rootContext = () => Promise.resolve({ ...ROOT_CONTEXT, home: directory })
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual([])
+		expect(store.get().pairs[0]).toMatchObject({
+			state: "unsupported",
+			notices: ["refusedLocalRoot"],
+			rootProblem: "homeDirectory"
+		})
+	})
+
+	it("keeps a pair of the whole drive from the engine until the user starts it", async () => {
+		const store = memoryStore([shellPair({ legacyUuid: LEGACY, state: "waitingForRoot" })])
+		const { deps, ops } = fakeNative(store)
+
+		deps.driveRoot = REMOTE.toUpperCase()
+		await attachUnheld(deps)
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual([])
+		expect(store.get().pairs[0]).toMatchObject({ pairId: null, state: "preparing", holds: ["driveRoot"] })
+
+		await store.update(state => ({ ...state, pairs: state.pairs.map(pair => ({ ...pair, holds: [], wholeDriveConfirmed: true })) }))
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual(["addPair", "pause"])
+	})
+
+	it("keeps a pair the engine refuses for good, unsynced with the reason, and one a passing failure hit for later", async () => {
 		const store = memoryStore([shellPair()])
 		const refused = fakeNative(store, { addPair: () => new Refusal("remoteRootNested") })
 
@@ -218,6 +349,11 @@ describe("attachUnheld", () => {
 		// Never offered to the engine again.
 		await attachUnheld(refused.deps)
 		expect(refused.ops()).toEqual(["addPair"])
+
+		const conflicting = memoryStore([shellPair()])
+
+		await attachUnheld(fakeNative(conflicting, { addPair: () => new Refusal("modeConflict") }).deps)
+		expect(conflicting.get().pairs[0]?.notices).toEqual(["refusedModeConflict"])
 
 		const kept = memoryStore([
 			shellPair({ state: "review" }),
@@ -244,112 +380,119 @@ describe("attachUnheld", () => {
 })
 
 describe("startPreparing", () => {
-	const busy = {
-		status: "ok",
-		planId: "p",
-		summary: { ...CLEAN_SUMMARY, actions: 9000, uploadBytes: 50 * MIB, conflicts: 12, heldDeletions: 4 },
-		check: { uploads: 9000, downloads: 0, overwrites: null }
-	}
-
 	function preparing(overrides: Partial<ShellPair> = {}): ShellPair {
 		return shellPair({ pairId: "1", legacyUuid: LEGACY, state: "preparing", ...overrides })
 	}
 
-	it("starts a two-way pair once its cloud directory is read, whatever its first run does", async () => {
-		const store = memoryStore([preparing()])
-		const { deps, ops } = fakeNative(store, { evaluatePlan: () => busy })
+	it("dry-runs and starts one pair, on the guard, and leaves the next for later", async () => {
+		const store = memoryStore([preparing({ legacyRules: RULES, holds: ["ruleFileUnwritable"] }), preparing({ pairId: "2" })])
+		const { deps, ops, argsOf } = fakeNative(store, {
+			evaluatePlan: () => evaluation({ actions: 9000, uploadBytes: 50 * MIB, conflicts: MAX_MIGRATED_CONFLICTS })
+		})
 
-		await expect(startPreparing(deps)).resolves.toBe(false)
+		await expect(startPreparing(deps)).resolves.toEqual({ started: "1", waiting: true })
 
-		expect(ops()).toEqual(["awaitConverged", "resume"])
-		expect(store.get().pairs[0]).toMatchObject({ paused: false, state: "active", review: null })
+		expect(ops()).toEqual(["awaitConverged", "evaluatePlan", "releasePlan", "setMigratedGuard", "resume"])
+		expect(argsOf("evaluatePlan")).toEqual([{ pairId: "1", check: true }])
+		expect(store.get().pairs.map(pair => [pair.state, pair.paused, pair.legacyRules, pair.holds])).toEqual([
+			["active", false, null, []],
+			["preparing", false, null, []]
+		])
+		expect(await readFile(path.join(directory, ".filenignore"), "utf8")).toBe(".*\n!/.filenignore\n")
 	})
 
-	it("keeps a pair the user had paused paused", async () => {
-		const store = memoryStore([preparing({ paused: true })])
+	it("says which pair starts before starting it, and takes that back when it did not start", async () => {
+		const store = memoryStore([preparing()])
+		const started = fakeNative(store)
+		let before: string[] = []
+
+		vi.mocked(started.deps.starting).mockImplementation(() => {
+			before = started.ops()
+		})
+		await startPreparing(started.deps)
+		expect(before).not.toContain("resume")
+		expect(started.ops().at(-1)).toBe("resume")
+
+		const failing = fakeNative(memoryStore([preparing()]), { resume: () => new Refusal("hostUnavailable") })
+
+		await startPreparing(failing.deps)
+		expect(vi.mocked(failing.deps.starting).mock.calls).toEqual([["1"], [null]])
+	})
+
+	it("settles a pair the user had paused without starting it, and moves on", async () => {
+		const store = memoryStore([preparing({ paused: true }), preparing({ pairId: "2" })])
 		const { deps, ops } = fakeNative(store)
 
-		await expect(startPreparing(deps)).resolves.toBe(false)
+		await expect(startPreparing(deps)).resolves.toEqual({ started: "2", waiting: true })
 
-		expect(ops()).toEqual(["awaitConverged"])
+		expect(ops().filter(op => op === "resume")).toHaveLength(1)
 		expect(store.get().pairs[0]).toMatchObject({ paused: true, state: "active", review: null })
 	})
 
-	it("waits, unplanned and paused, while the cloud directory is not read", async () => {
-		const store = memoryStore([preparing({ mode: "localToRemote" }), preparing({ pairId: "2" })])
-		const { deps, ops } = fakeNative(store, { awaitConverged: () => false })
+	it("says so once the cloud directory was not read in many rounds, and stops saying it once it is", async () => {
+		const store = memoryStore([preparing()])
+		let read = false
+		const { deps } = fakeNative(store, { awaitConverged: () => read })
 
-		await expect(startPreparing(deps)).resolves.toBe(true)
+		for (let round = 1; round < SLOW_LISTING_ROUNDS; round++) {
+			await expect(startPreparing(deps)).resolves.toEqual({ started: null, waiting: true })
+		}
 
-		expect(ops()).toEqual(["awaitConverged", "awaitConverged"])
-		expect(store.get().pairs.map(pair => pair.state)).toEqual(["preparing", "preparing"])
+		expect(store.get().pairs[0]?.holds).toEqual([])
+
+		await startPreparing(deps)
+		expect(store.get().pairs[0]).toMatchObject({ state: "preparing", holds: ["cloudListingSlow"] })
+
+		read = true
+		await expect(startPreparing(deps)).resolves.toEqual({ started: "1", waiting: true })
+		expect(store.get().pairs[0]).toMatchObject({ state: "active", holds: [] })
 	})
 
 	it.each([
 		["a failed convergence check", { awaitConverged: () => new Refusal("hostUnavailable") }],
+		["a plan of an unread cloud directory", { evaluatePlan: () => ({ status: "unconverged" }) }],
+		["a guard not set", { setMigratedGuard: () => new Refusal("hostUnavailable") }],
 		["a failed start", { resume: () => new Refusal("hostUnavailable") }]
 	])("waits after %s", async (_name, answers) => {
 		const store = memoryStore([preparing()])
 		const { deps } = fakeNative(store, answers)
 
-		await expect(startPreparing(deps)).resolves.toBe(true)
+		await expect(startPreparing(deps)).resolves.toEqual({ started: null, waiting: true })
 		expect(store.get().pairs[0]?.state).toBe("preparing")
 	})
 
-	it.each(["localToRemote", "localBackup", "remoteToLocal", "remoteBackup"] as const)(
-		"starts a %s pair whose first run overwrites up to the limits",
-		async mode => {
-			const store = memoryStore([preparing({ mode })])
-			const { deps, ops, argsOf } = fakeNative(store, {
-				evaluatePlan: () => ({
-					...busy,
-					check: { uploads: 9000, downloads: 9000, overwrites: { files: MAX_OVERWRITE_FILES, bytes: MAX_OVERWRITE_BYTES } }
-				})
-			})
+	it.each([
+		["held deletions", "localToRemote", evaluation({ heldDeletions: 4 }), ["heldDeletions"]],
+		["many conflicts", "twoWay", evaluation({ conflicts: MAX_MIGRATED_CONFLICTS + 1 }), ["conflicts"]],
+		["overwrites", "remoteBackup", evaluation({}, { files: MAX_OVERWRITE_FILES + 1, bytes: 0 }), ["overwrites"]]
+	] as const)("holds a pair whose first run has %s in review", async (_name, mode, evaluated, findings) => {
+		const store = memoryStore([preparing({ mode })])
+		const { deps, ops } = fakeNative(store, { evaluatePlan: () => evaluated })
 
-			await expect(startPreparing(deps)).resolves.toBe(false)
+		await expect(startPreparing(deps)).resolves.toEqual({ started: null, waiting: false })
 
-			expect(ops()).toEqual(["awaitConverged", "evaluatePlan", "releasePlan", "resume"])
-			expect(argsOf("evaluatePlan")).toEqual([{ pairId: "1", check: { overwrites: true } }])
-			expect(store.get().pairs[0]).toMatchObject({ paused: false, state: "active", review: null })
-		}
-	)
+		const { passToken: _token, ...summary } = evaluated.summary
 
-	it.each(["localToRemote", "localBackup", "remoteToLocal", "remoteBackup"] as const)(
-		"holds a %s pair whose first run overwrites more in review",
-		async mode => {
-			const store = memoryStore([preparing({ mode })])
-			const { deps, ops } = fakeNative(store, {
-				evaluatePlan: () => ({
-					...busy,
-					check: { uploads: 0, downloads: 0, overwrites: { files: MAX_OVERWRITE_FILES + 1, bytes: 0 } }
-				})
-			})
-
-			await expect(startPreparing(deps)).resolves.toBe(false)
-
-			const { passToken: _token, ...summary } = busy.summary
-
-			expect(ops()).toEqual(["awaitConverged", "evaluatePlan", "releasePlan"])
-			expect(store.get().pairs[0]).toMatchObject({
-				paused: true,
-				state: "review",
-				review: { reason: "migrated", findings: ["overwrites"], summary }
-			})
-		}
-	)
-
-	it("waits for a one-way pair whose plan found the cloud directory unread", async () => {
-		const store = memoryStore([preparing({ mode: "remoteToLocal" })])
-		const { deps, ops } = fakeNative(store, { evaluatePlan: () => ({ status: "unconverged" }) })
-
-		await expect(startPreparing(deps)).resolves.toBe(true)
-
-		expect(ops()).toEqual(["awaitConverged", "evaluatePlan"])
-		expect(store.get().pairs[0]?.state).toBe("preparing")
+		expect(ops()).toEqual(["awaitConverged", "evaluatePlan", "releasePlan"])
+		expect(store.get().pairs[0]).toMatchObject({ paused: true, state: "review", review: { reason: "migrated", findings, summary } })
 	})
 
-	it("leaves a pair settled or removed meanwhile alone", async () => {
+	it("decides again when the user paused the pair during its dry run", async () => {
+		const store = memoryStore([preparing()])
+		const { deps, ops } = fakeNative(store, {
+			evaluatePlan: () => {
+				void store.update(state => ({ ...state, pairs: state.pairs.map(pair => ({ ...pair, paused: true })) }))
+
+				return evaluation({})
+			}
+		})
+
+		await expect(startPreparing(deps)).resolves.toEqual({ started: null, waiting: true })
+		expect(ops()).not.toContain("resume")
+		expect(store.get().pairs[0]).toMatchObject({ state: "preparing", paused: true })
+	})
+
+	it("leaves a pair removed meanwhile alone", async () => {
 		const store = memoryStore([preparing()])
 		const { deps, ops } = fakeNative(store, {
 			awaitConverged: () => {
@@ -359,7 +502,7 @@ describe("startPreparing", () => {
 			}
 		})
 
-		await expect(startPreparing(deps)).resolves.toBe(false)
+		await expect(startPreparing(deps)).resolves.toEqual({ started: null, waiting: false })
 		expect(ops()).toEqual(["awaitConverged"])
 	})
 })

@@ -4,7 +4,16 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { effectiveConfig, type LegacyStash } from "../main/legacyData.ts"
 import { attachUnheld, startPreparing } from "../main/sync/firstRun.ts"
-import { DOT_FILE_RULES, legacyRecords, legacySyncImport, legacyUserIgnore, type LegacyPair, withRules } from "../main/sync/legacyPairs.ts"
+import {
+	DOT_FILE_RULES,
+	LEGACY_BUILTIN_RULES,
+	legacyPairRules,
+	legacyRecords,
+	legacySyncImport,
+	legacyUserIgnore,
+	type LegacyPair,
+	withRules
+} from "../main/sync/legacyPairs.ts"
 import { fakeNative, memoryStore } from "./syncFakes.ts"
 
 const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
@@ -64,21 +73,44 @@ describe("legacySyncImport", () => {
 		const imported = legacySyncImport({
 			enabled: true,
 			dbPath: "/old",
-			syncPairs: modes.map((mode, index) => oldPair({ mode, uuid: `${String(index)}${UUID_A.slice(1)}` }))
+			syncPairs: modes.map((mode, index) =>
+				oldPair({ mode, uuid: `${String(index)}${UUID_A.slice(1)}`, remoteParentUUID: `${String(index)}${REMOTE.slice(1)}` })
+			)
 		})
 
 		expect(imported?.pairs.map(pair => pair.mode)).toEqual(["twoWay", "localToRemote", "remoteToLocal", "localBackup", "remoteBackup"])
 	})
 
-	it("drops entries that are no pair, and a pair listed twice", () => {
+	it("drops entries that are no pair, and merges a pair listed twice or another on the same directories", () => {
 		const imported = legacySyncImport({
 			enabled: false,
-			syncPairs: [oldPair(), oldPair({ mode: "mirror" }), oldPair({ localPath: "" }), oldPair(), 7]
+			syncPairs: [
+				oldPair(),
+				oldPair({ mode: "mirror" }),
+				oldPair({ localPath: "" }),
+				oldPair(),
+				oldPair({ uuid: UUID_B, mode: "localBackup", localPath: "/USERS/u/Docs", remoteParentUUID: REMOTE.toUpperCase() }),
+				7
+			]
 		})
 
-		expect(imported).toEqual({ enabled: false, pairs: [legacyPair()], dropped: 4 })
+		expect(imported).toEqual({ enabled: false, pairs: [legacyPair()], dropped: 3, merged: 2 })
 		expect(legacySyncImport({ syncPairs: [] })).toBeNull()
 		expect(legacySyncImport(undefined)).toBeNull()
+	})
+
+	it("reads switches early builds did not store as off, and any other value as the old client did", () => {
+		const { excludeDotFiles: _dot, paused: _paused, localTrashDisabled: _trash, name: _name, ...bare } = oldPair()
+		const imported = legacySyncImport({
+			enabled: true,
+			syncPairs: [bare, oldPair({ uuid: UUID_B, remoteParentUUID: REMOTE_B, paused: 1, excludeDotFiles: "yes" })]
+		})
+
+		expect(imported?.pairs).toEqual([
+			legacyPair({ name: "" }),
+			legacyPair({ uuid: UUID_B, remoteRoot: REMOTE_B, paused: true, excludeDotFiles: true })
+		])
+		expect(imported?.dropped).toBe(0)
 	})
 
 	it("effective config fallback only for the stashed user", () => {
@@ -105,7 +137,7 @@ describe("legacyRecords", () => {
 
 		expect(imported).not.toBeNull()
 
-		const records = legacyRecords(imported ?? { enabled: true, pairs: [], dropped: 0 }, 5)
+		const records = legacyRecords(imported ?? { enabled: true, pairs: [], dropped: 0, merged: 0 }, new Map(), 5)
 
 		expect(records).toEqual([
 			{
@@ -118,8 +150,12 @@ describe("legacyRecords", () => {
 				state: "waitingForRoot",
 				review: null,
 				legacyUuid: UUID_A,
-				legacyDotFiles: null,
+				legacyRules: null,
 				notices: [],
+				rootProblem: null,
+				holds: [],
+				wholeDriveConfirmed: false,
+				info: [],
 				createdAt: 5
 			}
 		])
@@ -130,11 +166,11 @@ describe("legacyRecords", () => {
 		await attachUnheld(deps)
 		expect(argsOf("addPair")).toEqual([{ localRoot: directory, remoteRoot: ACCOUNT_ROOT.toUpperCase(), mode: "twoWay" }])
 		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "preparing", paused: false })
-		await expect(startPreparing(deps)).resolves.toBe(false)
+		await expect(startPreparing(deps)).resolves.toEqual({ started: "1", waiting: true })
 		expect(store.get().pairs[0]).toMatchObject({ pairId: "1", state: "active", paused: false, notices: [] })
 	})
 
-	it("keeps an old pair paused when it or the old sync switch was off, and names it", () => {
+	it("keeps an old pair paused when it or the old sync switch was off, names it, and tells about the bin", () => {
 		const records = legacyRecords(
 			{
 				enabled: false,
@@ -142,95 +178,89 @@ describe("legacyRecords", () => {
 					legacyPair({ name: "  ", localPath: "C:\\Users\\u\\Photos", localTrashDisabled: true }),
 					legacyPair({ uuid: UUID_B, paused: true })
 				],
-				dropped: 0
+				dropped: 0,
+				merged: 0
 			},
+			new Map(),
 			0
 		)
 
-		expect(records.map(pair => [pair.name, pair.paused, pair.state, pair.notices])).toEqual([
-			["Photos", true, "waitingForRoot", []],
-			["Docs", true, "waitingForRoot", []]
+		expect(records.map(pair => [pair.name, pair.paused, pair.state, pair.notices, pair.info])).toEqual([
+			["Photos", true, "waitingForRoot", [], ["localTrashNowOn"]],
+			["Docs", true, "waitingForRoot", [], []]
 		])
 	})
 })
 
-describe("dot files and the old trash", () => {
-	it("uniform excludeDotFiles goes device-wide", async () => {
-		const pairs = [
-			legacyPair({ excludeDotFiles: true, localPath: directory }),
-			legacyPair({ uuid: UUID_B, excludeDotFiles: true, remoteRoot: REMOTE_B })
-		]
+describe("rules carried over", () => {
+	it("every pair that hid dot files gets them in its own rule file, in every mode; nothing goes device-wide", async () => {
+		const modes = ["twoWay", "localToRemote", "remoteToLocal", "localBackup", "remoteBackup"] as const
+		const roots = await Promise.all(
+			modes.map(async mode => {
+				const root = path.join(directory, mode)
 
-		expect(lines(legacyUserIgnore(pairs, ""))).toEqual([...DOT_FILE_RULES])
+				await mkdir(root)
 
-		const records = legacyRecords({ enabled: true, pairs, dropped: 0 }, 0)
+				return root
+			})
+		)
 
-		expect(records.map(pair => pair.legacyDotFiles)).toEqual(["device", "device"])
+		await writeFile(path.join(roots[0] ?? "", ".filenignore"), "build/")
 
-		// No rule file is written into the pair, which starts.
-		const store = memoryStore(records.slice(0, 1))
+		const pairs = modes.map((mode, index) =>
+			legacyPair({
+				uuid: `${String(index)}${UUID_A.slice(1)}`,
+				mode,
+				excludeDotFiles: true,
+				localPath: roots[index] ?? "",
+				remoteRoot: `${String(index)}${REMOTE.slice(1)}`
+			})
+		)
+
+		expect(legacyUserIgnore(pairs, "")).not.toContain(".*")
+
+		const store = memoryStore(legacyRecords({ enabled: true, pairs, dropped: 0, merged: 0 }, new Map(), 0))
 		const { deps } = fakeNative(store)
 
 		await attachUnheld(deps)
-		await startPreparing(deps)
-		expect(store.get().pairs[0]).toMatchObject({ state: "active", paused: false })
+
+		// Before any first run; the user's lines kept.
+		expect(await readFile(path.join(roots[0] ?? "", ".filenignore"), "utf8")).toBe("build/\n.*\n!/.filenignore\n")
+
+		for (const root of roots.slice(1)) {
+			expect(await readFile(path.join(root, ".filenignore"), "utf8")).toBe(".*\n!/.filenignore\n")
+		}
+
+		expect(store.get().pairs.map(pair => pair.state)).toEqual(modes.map(() => "preparing"))
+	})
+
+	it("a pair that showed dot files gets no rule file", async () => {
+		const store = memoryStore(
+			legacyRecords({ enabled: true, pairs: [legacyPair({ localPath: directory })], dropped: 0, merged: 0 }, new Map(), 0)
+		)
+		const { deps } = fakeNative(store)
+
+		await attachUnheld(deps)
 		await expect(readFile(path.join(directory, ".filenignore"), "utf8")).rejects.toThrow()
 	})
 
-	it("mixed excludeDotFiles writes the pair's own rule file, and both pairs start", async () => {
-		const hidden = path.join(directory, "hidden")
-		const shown = path.join(directory, "shown")
-
-		await mkdir(hidden)
-		await mkdir(shown)
-		await writeFile(path.join(hidden, ".filenignore"), "build/")
-
-		const pairs = [
-			legacyPair({ excludeDotFiles: true, localPath: hidden }),
-			legacyPair({ uuid: UUID_B, excludeDotFiles: false, localPath: shown, remoteRoot: REMOTE_B })
-		]
-
-		// Nothing goes device-wide.
-		expect(legacyUserIgnore(pairs, "")).toBe("")
-
-		const store = memoryStore(legacyRecords({ enabled: true, pairs, dropped: 0 }, 0))
-		const { deps } = fakeNative(store)
-
-		await attachUnheld(deps)
-
-		// The pair that hid dot files gets its own rule file (the user's lines kept) before it first runs.
-		expect(await readFile(path.join(hidden, ".filenignore"), "utf8")).toBe("build/\n.*\n!/.filenignore\n")
-		expect(await readFile(path.join(shown, ".filenignore"), "utf8").catch(() => null)).toBeNull()
-
-		await startPreparing(deps)
-		expect(store.get().pairs.map(pair => [pair.state, pair.paused, pair.review])).toEqual([
-			["active", false, null],
-			["active", false, null]
+	it("appends the old per-pair ignore file before the dot-file rules", () => {
+		expect(legacyPairRules(legacyPair({ excludeDotFiles: true }), "node_modules/\r\n\r\n  *.log  \n")).toEqual([
+			"node_modules/",
+			"*.log",
+			...DOT_FILE_RULES
 		])
+		expect(legacyPairRules(legacyPair(), "")).toBeNull()
+		expect(legacyPairRules(legacyPair(), null)).toBeNull()
 	})
 
-	it("adds no rule for the old trash, which the engine reserves", () => {
-		expect(legacyUserIgnore([legacyPair()], "")).toBe("")
-		expect(legacyUserIgnore([], "")).toBe("")
-	})
+	it("adds the old client's built-in ignores device-wide, once, keeping the user's lines", () => {
+		const existing = "# mine\r\nnode_modules/\n*.tmp"
+		const once = legacyUserIgnore([legacyPair()], existing)
 
-	it("no other old patterns added", () => {
-		const text = legacyUserIgnore([legacyPair({ excludeDotFiles: true })], "")
-
-		for (const pattern of ["*.tmp", "*.temp", "*.ffs_tmp", "*.temporary", "*.~cr", "*.thumbdata", "*.crswap", "ntuser.dat"]) {
-			expect(text).not.toContain(pattern)
-		}
-	})
-
-	it("keeps the user's lines and adds nothing twice", () => {
-		const existing = "# mine\r\nnode_modules/\n.filen.trash.local/"
-
-		expect(legacyUserIgnore([legacyPair()], existing)).toBe(existing)
-
-		const once = legacyUserIgnore([legacyPair({ excludeDotFiles: true })], existing)
-
-		expect(once).toBe(`${existing}\n.*\n!/.filenignore\n`)
-		expect(legacyUserIgnore([legacyPair({ excludeDotFiles: true })], once)).toBe(once)
+		expect(lines(once)).toEqual(["# mine\r", "node_modules/", ...LEGACY_BUILTIN_RULES])
+		expect(legacyUserIgnore([legacyPair()], once)).toBe(once)
+		expect(legacyUserIgnore([], existing)).toBe(existing)
 	})
 
 	it("re-adds a negation after the rule it negates", () => {

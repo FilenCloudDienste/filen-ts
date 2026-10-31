@@ -59,13 +59,15 @@ class FakeThrown extends Error {
 }
 
 export const fakeSdk = {
-	ErrorKind: { Server: 0, Unauthenticated: 1, Io: 6, InvalidState: 8, FolderNotFound: 20 },
+	ErrorKind: { Server: 0, Unauthenticated: 1, Reqwest: 2, Io: 6, InvalidState: 8, FolderNotFound: 20, StaleState: 28 },
 	SyncMode: { LocalToRemote: 0, RemoteToLocal: 1, TwoWay: 2, LocalBackup: 3, RemoteBackup: 4 },
 	Backlog: { Propagate: 0, AdoptDestination: 1 },
 	ConflictResolution: { KeepLocal: 0, KeepRemote: 1, KeepBoth: 2 },
 	LogLevel: { Off: 0, Error: 1, Warn: 2, Info: 3, Debug: 4, Trace: 5 },
 	PauseMode: { Suspend: 0, Cancel: 1 },
 	PlannedNodeKind: { Dir: 0, File: 1 },
+	PlannedTransfer: { Create: 0, Replace: 1 },
+	HaltReason: { LocalStorageFull: 0, RemoteStorageFull: 1, RemoteUnavailable: 2, Unauthenticated: 3 },
 	RefuseReason: { RemoteCollision: 0, LocalCollision: 1 },
 	TransferDirection: { Upload: 0, Download: 1 },
 	WatchState: { Running: 0, Paused: 1, Stopped: 2, PairRemoved: 3 },
@@ -186,6 +188,7 @@ export function pairInfo(overrides: Partial<SyncPairInfo> = {}): SyncPairInfo {
 		mode: fakeSdk.SyncMode.TwoWay,
 		deleteGuard: { tag: "Unlimited" },
 		paused: false,
+		firstPassCompleted: true,
 		activity: 0,
 		...overrides
 	} as SyncPairInfo
@@ -280,9 +283,17 @@ export function fakeEngine(pairs: SyncPairInfo[] = [pairInfo()]) {
 		planPair: vi.fn(() => Promise.resolve(fakePlan([]).handle)),
 		listConflicts: vi.fn(() => Promise.resolve({ conflicts: [], total: 0n })),
 		resolveConflict: vi.fn(() => Promise.resolve(undefined)),
-		lastReport: vi.fn(() => Promise.resolve(undefined)),
+		lastReport: vi.fn((_pairId: bigint): Promise<SyncPassReport | undefined> => Promise.resolve(undefined)),
 		approveDeletions: vi.fn(() => Promise.resolve()),
 		retryPath: vi.fn(() => Promise.resolve()),
+		retryAll: vi.fn(() => Promise.resolve()),
+		setDeleteGuard: vi.fn((id: bigint, floor: bigint, ratio: number) => {
+			state.pairs = state.pairs.map(pair =>
+				pair.id === id ? { ...pair, deleteGuard: { tag: "Limited", inner: { floor, ratio } } } : pair
+			)
+
+			return Promise.resolve()
+		}),
 		userIgnore: vi.fn(() => Promise.resolve("")),
 		setUserIgnore: vi.fn(() => Promise.resolve()),
 		close: vi.fn(() => Promise.resolve())

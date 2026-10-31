@@ -13,7 +13,7 @@ import { issueTotal } from "@/features/sync/lib/syncStatus.logic"
 import type { SyncTab } from "@/features/sync/lib/syncTabs"
 import { PairHero } from "@/features/sync/components/pairHero"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
-import { NoticeBanner } from "@/features/sync/components/noticeBanner"
+import { HoldBanner, InfoNotices, NoticeBanner } from "@/features/sync/components/noticeBanner"
 import { ReviewCard } from "@/features/sync/components/reviewCard"
 import { RemovePairDialog } from "@/features/sync/components/removePairDialog"
 import { ActivityTab } from "@/features/sync/components/activityTab"
@@ -191,7 +191,7 @@ function PairTabs({ pairId, tab, issues }: { pairId: string; tab: SyncTab; issue
 }
 
 // One pair: a title bar with pause and sync now, its overview (directories, mode, live state), what the shell wants it
-// to say (review, notices, missing directory, degraded watchers), and the four tabs. Each tab takes only the pair id
+// to say (holds, review, notices, missing directory, degraded watchers), and the four tabs. Each tab takes only the pair id
 // and selects what it shows, so a progress push re-renders the overview and none of the tab bodies.
 export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: SyncTab }) {
 	const { t } = useTranslation("sync")
@@ -239,6 +239,10 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<div className="flex flex-col gap-3 px-4 pt-4 pb-5 sm:px-6">
 					<PairHero pair={pair} />
+					<HoldBanner
+						pairId={pair.id}
+						holds={pair.holds}
+					/>
 					{pair.review === null ? null : (
 						<ReviewPanel
 							key={pair.id}
@@ -252,6 +256,11 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 					<NoticeBanner
 						pairId={pair.id}
 						notices={pair.notices}
+						rootProblem={pair.rootProblem}
+					/>
+					<InfoNotices
+						pairId={pair.id}
+						notices={pair.info}
 					/>
 				</div>
 				<PairTabs

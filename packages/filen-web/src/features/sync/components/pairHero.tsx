@@ -2,6 +2,7 @@ import type { ComponentType, ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowLeftIcon, ArrowLeftRightIcon, ArrowRightIcon, CloudIcon, MonitorIcon } from "lucide-react"
 import type { DesktopSyncPair } from "@filen/shared/desktop"
+import { formatBytes } from "@filen/shared"
 import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { Spinner } from "@/components/ui/spinner"
@@ -117,10 +118,26 @@ export function PairHero({ pair }: { pair: DesktopSyncPair }) {
 	const now = useNowMinute()
 	const issues = issueTotal(pair.issues)
 	const DirectionIcon = DIRECTION_ICON[MODE_DIRECTION[pair.mode]]
-	const progress = pair.phase === "syncing" && pair.progress !== null && pair.progress.total > 0 ? pair.progress : null
+	const indexing = pair.phase === "indexing" && pair.stage?.kind === "indexing" ? pair.stage : null
+	const progress =
+		pair.phase === "syncing" && pair.progress !== null && pair.progress.total > 0
+			? pair.progress
+			: indexing !== null && indexing.bytesToHash > 0
+				? { done: indexing.bytesHashed, total: indexing.bytesToHash }
+				: null
 	const status: string[] = [t(PHASE_KEY[pair.phase])]
 
-	if (progress !== null) {
+	if (indexing !== null) {
+		status.push(
+			indexing.filesToHash > 0
+				? t("detailIndexing", {
+						hashed: indexing.filesHashed,
+						toHash: indexing.filesToHash,
+						size: formatBytes(indexing.bytesHashed)
+					})
+				: t("detailIndexingListed", { count: indexing.entries })
+		)
+	} else if (progress !== null) {
 		status.push(t("detailProgress", { done: progress.done, total: progress.total }))
 	} else if (pair.lastSyncedAt !== null) {
 		status.push(t("detailLastSynced", { time: formatRelativeTime(pair.lastSyncedAt, tCommon, now) }))
@@ -169,7 +186,7 @@ export function PairHero({ pair }: { pair: DesktopSyncPair }) {
 						aria-valuemin={0}
 						aria-valuemax={progress.total}
 						aria-valuenow={progress.done}
-						aria-label={t("phaseSyncing")}
+						aria-label={t(indexing === null ? "phaseSyncing" : "phaseIndexing")}
 						className="h-1 overflow-hidden rounded-full bg-muted"
 					>
 						<div

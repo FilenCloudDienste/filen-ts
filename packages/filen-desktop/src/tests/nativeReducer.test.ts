@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { type FromNative, SYNC_TRANSFERS_KEPT } from "../shared/nativeProtocol.ts"
-import { createPairRuntime, createRuntimeFeed, FEED_INTERVAL_MS, reduceEvents, type PairRuntime } from "../native/reducer.ts"
+import {
+	createPairRuntime,
+	createRuntimeFeed,
+	FEED_INTERVAL_MS,
+	reduceEvents,
+	reduceWatchStatus,
+	type PairRuntime
+} from "../native/reducer.ts"
 import { fakeSdk, pairInfo, passEvent, report } from "./nativeFakes.ts"
 
 beforeEach(() => {
@@ -14,9 +21,16 @@ afterEach(() => {
 function feed() {
 	const posted: FromNative[] = []
 	const onAuthFailed = vi.fn()
-	const runtime = createRuntimeFeed(fakeSdk, { post: message => posted.push(message), onAuthFailed })
+	const onPassEnded = vi.fn()
+	const runtime = createRuntimeFeed(fakeSdk, { post: message => posted.push(message), onAuthFailed, onPassEnded })
 
-	return { runtime, posted, onAuthFailed, of: <T extends FromNative["t"]>(t: T) => posted.filter(message => message.t === t) }
+	return {
+		runtime,
+		posted,
+		onAuthFailed,
+		onPassEnded,
+		of: <T extends FromNative["t"]>(t: T) => posted.filter(message => message.t === t)
+	}
 }
 
 describe("reduceEvents", () => {
@@ -199,15 +213,188 @@ describe("reduceEvents", () => {
 		expect(state.get("1")?.lastSyncedAt).toBe(1000)
 	})
 
-	it("a local walk and a wait for the remote change nothing", () => {
+	it("shows a wait for the cloud listing and the local read until the pass starts", () => {
 		const state = new Map([["1", createPairRuntime()]])
 		const progress = { entries: 10n, filesToHash: 4n, bytesToHash: 400n, filesHashed: 1n, bytesHashed: 100n }
+
+		expect(reduceEvents(fakeSdk, state, [passEvent({ tag: "AwaitingRemote" })]).changed).toBe(true)
+		expect(state.get("1")?.stage).toEqual({ kind: "waitingForCloud" })
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "Scanning", inner: { progress } })])
+		expect(state.get("1")).toMatchObject({
+			syncing: false,
+			stage: { kind: "indexing", entries: 10, filesToHash: 4, bytesToHash: 400, filesHashed: 1, bytesHashed: 100 }
+		})
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassStarted", inner: { mode: fakeSdk.SyncMode.TwoWay } })])
+		expect(state.get("1")).toMatchObject({ syncing: true, stage: null })
+	})
+
+	it("reads a listing that took too long as not ready, not as an error", () => {
+		const state = new Map([["1", createPairRuntime()]])
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "AwaitingRemote" })])
+
 		const reduced = reduceEvents(fakeSdk, state, [
-			passEvent({ tag: "AwaitingRemote" }),
-			passEvent({ tag: "Scanning", inner: { progress } })
+			passEvent({ tag: "PassFailed", inner: { error: "stale", kind: fakeSdk.ErrorKind.StaleState } })
 		])
 
-		expect(reduced).toEqual({ changed: false, activity: [], authFailed: false })
-		expect(state.get("1")).toEqual(createPairRuntime())
+		expect(reduced.activity).toEqual([])
+		expect(reduced.ended).toEqual([{ pairId: 1n, report: null }])
+		expect(state.get("1")).toMatchObject({ lastError: null, syncing: false, stage: { kind: "waitingForCloud" } })
+
+		// The watch's status after it, and the engine's next tries, keep it waiting.
+		const runtime = state.get("1") ?? createPairRuntime()
+
+		reduceWatchStatus(fakeSdk, runtime, {
+			consecutiveFailures: 3,
+			lastError: "stale",
+			lastErrorKind: fakeSdk.ErrorKind.StaleState,
+			state: 0
+		})
+		reduceEvents(fakeSdk, state, [
+			passEvent({ tag: "AwaitingRemote" }),
+			passEvent({ tag: "PassFailed", inner: { error: "stale", kind: fakeSdk.ErrorKind.StaleState } })
+		])
+		expect(state.get("1")).toMatchObject({ lastError: null, stage: { kind: "waitingForCloud" } })
+
+		// Only a pass that ran, another end or a stopped watch ends the wait.
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassStarted", inner: { mode: fakeSdk.SyncMode.TwoWay } })])
+		expect(state.get("1")?.stage).toBeNull()
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassFailed", inner: { error: "stale", kind: fakeSdk.ErrorKind.StaleState } })])
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassFailed", inner: { error: "denied", kind: fakeSdk.ErrorKind.Io } })])
+		expect(state.get("1")).toMatchObject({ stage: null, lastError: "denied" })
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassFailed", inner: { error: "stale", kind: fakeSdk.ErrorKind.StaleState } })])
+		reduceWatchStatus(fakeSdk, runtime, { consecutiveFailures: 0, state: fakeSdk.WatchState.Stopped })
+		expect(runtime.stage).toBeNull()
+	})
+
+	it("waiting for the cloud listing is neither attention nor syncing", async () => {
+		const { runtime, of } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([
+			passEvent({ tag: "AwaitingRemote" }),
+			passEvent({ tag: "PassFailed", inner: { error: "stale", kind: fakeSdk.ErrorKind.StaleState } })
+		])
+		runtime.watchStatus(1n, { consecutiveFailures: 1, lastError: "stale", lastErrorKind: fakeSdk.ErrorKind.StaleState, state: 0 })
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ stage: { kind: "waitingForCloud" }, lastError: null, syncing: false }] })
+		expect(of("aggregate")).toEqual([])
+	})
+
+	it("shows why a pass held its work back, an unreachable server without asking for attention", async () => {
+		const { runtime, of, onAuthFailed, onPassEnded } = feed()
+		const completed = (halted: number | undefined) =>
+			passEvent({
+				tag: "PassCompleted",
+				inner: { report: report({ halted, passError: halted === undefined ? undefined : "halted" }) }
+			})
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([completed(fakeSdk.HaltReason.RemoteUnavailable)])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "offline" }] })
+		expect(of("aggregate")).toEqual([])
+		expect(of("passEnded")).toEqual([{ t: "passEnded", pairId: "1" }])
+		expect(onPassEnded).toHaveBeenCalledWith(1n, expect.objectContaining({ halted: fakeSdk.HaltReason.RemoteUnavailable }))
+
+		runtime.events([passEvent({ tag: "PassFailed", inner: { error: "connect", kind: fakeSdk.ErrorKind.Reqwest } })])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "offline", lastError: "connect" }] })
+		expect(of("aggregate")).toEqual([])
+
+		runtime.events([completed(fakeSdk.HaltReason.LocalStorageFull)])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "localStorageFull" }] })
+		expect(of("aggregate")).toEqual([{ t: "aggregate", state: "attention" }])
+
+		runtime.events([completed(fakeSdk.HaltReason.Unauthenticated)])
+		expect(onAuthFailed).toHaveBeenCalledOnce()
+	})
+
+	it("asks for attention for a refusal and for paths that failed or cannot be synced", async () => {
+		for (const fields of [{ refused: fakeSdk.RefuseReason.LocalCollision }, { unsyncableTotal: 1n }, { errorsTotal: 1n }]) {
+			const { runtime, of } = feed()
+
+			runtime.setPairs([pairInfo()])
+			runtime.subscribe(true)
+			runtime.events([passEvent({ tag: "PassCompleted", inner: { report: report(fields) } })])
+			await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+
+			expect(of("aggregate")).toEqual([{ t: "aggregate", state: "attention" }])
+		}
+
+		const { runtime, of } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([passEvent({ tag: "PassCompleted", inner: { report: report({ refused: fakeSdk.RefuseReason.RemoteCollision }) } })])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ refused: "remoteCollision" }] })
+	})
+
+	it("an offline pass, halted or failing to lock, raises no attention for the failures it reports", async () => {
+		for (const fields of [
+			{ halted: fakeSdk.HaltReason.RemoteUnavailable, passError: "offline", errorsTotal: 2n },
+			{ passError: "lock", passErrorKind: fakeSdk.ErrorKind.Reqwest, errorsTotal: 1n }
+		]) {
+			const { runtime, of } = feed()
+
+			runtime.setPairs([pairInfo()])
+			runtime.subscribe(true)
+			runtime.events([passEvent({ tag: "PassCompleted", inner: { report: report(fields) } })])
+			await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+
+			expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "offline", issues: { failed: Number(fields.errorsTotal) } }] })
+			expect(of("aggregate")).toEqual([])
+		}
+	})
+
+	it("the pass that tries the server again is no longer offline", () => {
+		const state = new Map([["1", createPairRuntime()]])
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassFailed", inner: { error: "connect", kind: fakeSdk.ErrorKind.Reqwest } })])
+		expect(state.get("1")).toMatchObject({ halted: "offline", lastError: "connect" })
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassStarted", inner: { mode: fakeSdk.SyncMode.TwoWay } })])
+		expect(state.get("1")).toMatchObject({ syncing: true, halted: null, lastError: null })
+	})
+
+	it("a watch reporting an unfinished cloud listing is no error, an unreachable server is offline", () => {
+		const runtime = createPairRuntime()
+		const status = { consecutiveFailures: 1, lastError: "stale", lastErrorKind: fakeSdk.ErrorKind.StaleState, state: 0 }
+
+		reduceWatchStatus(fakeSdk, runtime, status)
+		expect(runtime).toMatchObject({ lastError: null, halted: null })
+
+		reduceWatchStatus(fakeSdk, runtime, { ...status, lastError: "connect", lastErrorKind: fakeSdk.ErrorKind.Reqwest })
+		expect(runtime).toMatchObject({ lastError: "connect", halted: "offline" })
+
+		expect(
+			createPairRuntime(pairInfo({ lastPassError: "stale", lastPassErrorKind: fakeSdk.ErrorKind.StaleState }), fakeSdk).lastError
+		).toBeNull()
+	})
+
+	it("a pass halted by an expired session shows no halt, and signs out", () => {
+		const state = new Map([["1", createPairRuntime()]])
+		const reduced = reduceEvents(fakeSdk, state, [
+			passEvent({ tag: "PassCompleted", inner: { report: report({ halted: fakeSdk.HaltReason.Unauthenticated }) } })
+		])
+
+		expect(reduced.authFailed).toBe(true)
+		expect(state.get("1")?.halted).toBeNull()
+	})
+
+	it("a pair last failing offline at open shows as offline", () => {
+		expect(createPairRuntime(pairInfo({ lastPassError: "x", lastPassErrorKind: fakeSdk.ErrorKind.Reqwest }), fakeSdk).halted).toBe(
+			"offline"
+		)
 	})
 })

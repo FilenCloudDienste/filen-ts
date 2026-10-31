@@ -317,11 +317,16 @@ const bridge: DesktopBridge = {
 		heldDeletions: pairId => syncInvoke("heldDeletions", pairId),
 		approveDeletions: (pairId, passToken) => syncInvoke("approveDeletions", pairId, passToken),
 		retryPath: (pairId, relPath) => syncInvoke("retryPath", pairId, relPath),
+		retryAll: pairId => syncInvoke("retryAll", pairId),
+		unsyncablePaths: (pairId, offset, limit) => syncInvoke("unsyncablePaths", pairId, offset, limit),
 		ignoredPaths: (pairId, offset, limit) => syncInvoke("ignoredPaths", pairId, offset, limit),
 		userIgnore: () => syncInvoke("userIgnore"),
 		setUserIgnore: text => syncInvoke("setUserIgnore", text),
 		reveal: (pairId, target) => syncInvoke("reveal", pairId, target),
 		dismissNotice: (pairId, notice) => syncInvoke("dismissNotice", pairId, notice),
+		holdAction: (pairId, action) => syncInvoke("holdAction", pairId, action),
+		dismissInfo: (pairId, notice) => syncInvoke("dismissInfo", pairId, notice),
+		dismissImportNote: () => syncInvoke("dismissImportNote"),
 		retryHost: () => {
 			void syncInvoke("retryHost")
 		},

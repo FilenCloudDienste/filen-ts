@@ -1,5 +1,14 @@
 import { type } from "arktype"
-import type { DesktopSyncMode, DesktopSyncNotice, DesktopSyncReview, DesktopSyncReviewFinding } from "@filen/shared/desktop"
+import type {
+	DesktopSyncHold,
+	DesktopSyncImportNote,
+	DesktopSyncInfoNotice,
+	DesktopSyncMode,
+	DesktopSyncNotice,
+	DesktopSyncReview,
+	DesktopSyncReviewFinding,
+	DesktopSyncRootProblem
+} from "@filen/shared/desktop"
 import { localPathSchema, pairIdSchema, pinned, planSummarySchema, syncModeSchema } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, errorCode } from "../atomicFile.ts"
 import { serialQueue } from "../../shared/serial.ts"
@@ -12,8 +21,6 @@ import { serialQueue } from "../../shared/serial.ts"
 // had, not the engine's.
 export type ShellPairState = "active" | "preparing" | "review" | "waitingForRoot" | "unsupported"
 
-export type LegacyDotFiles = "device" | "pair"
-
 export interface ShellPair {
 	// null while the engine does not hold the pair.
 	pairId: string | null
@@ -25,9 +32,16 @@ export interface ShellPair {
 	state: ShellPairState
 	review: DesktopSyncReview | null
 	legacyUuid: string | null
-	// The old client hid this pair's dot files, now through the device-wide ignore or the pair's own root .filenignore.
-	legacyDotFiles: LegacyDotFiles | null
+	// The rules the pair's root .filenignore must hold before its first pass (the old client's dot-file switch and its
+	// per-pair ignore file); null once written, and for pairs not moved from it.
+	legacyRules: string[] | null
 	notices: DesktopSyncNotice[]
+	// Why the engine may not have the local directory (with the refusedLocalRoot notice).
+	rootProblem: DesktopSyncRootProblem | null
+	holds: DesktopSyncHold[]
+	// The user started this pair of the whole drive anyway.
+	wholeDriveConfirmed: boolean
+	info: DesktopSyncInfoNotice[]
 	// Epoch ms.
 	createdAt: number
 }
@@ -37,9 +51,11 @@ export interface ShellSyncState {
 	pairs: ShellPair[]
 	// The old client's sync config was applied for this user.
 	legacyApplied: boolean
+	// What the import could not carry over, until dismissed.
+	importNote: DesktopSyncImportNote | null
 }
 
-const EMPTY: ShellSyncState = { version: 1, pairs: [], legacyApplied: false }
+const EMPTY: ShellSyncState = { version: 1, pairs: [], legacyApplied: false, importNote: null }
 
 const findingSchema = pinned<DesktopSyncReviewFinding>()(
 	type.enumerated("uploads", "downloads", "conflicts", "heldDeletions", "refused", "unconverged", "overwrites")
@@ -47,7 +63,28 @@ const findingSchema = pinned<DesktopSyncReviewFinding>()(
 
 // Each one stands for an engine refusal: such a pair is never added, and dismissing the notice removes it.
 export const noticeSchema = pinned<DesktopSyncNotice>()(
-	type.enumerated("refusedLocalRoot", "refusedRemoteMissing", "refusedLocalOverlap", "refusedRemoteOverlap")
+	type.enumerated("refusedLocalRoot", "refusedRemoteMissing", "refusedLocalOverlap", "refusedRemoteOverlap", "refusedModeConflict")
+)
+
+export const holdSchema = pinned<DesktopSyncHold>()(
+	type.enumerated("ruleFileUnwritable", "ruleFileUndecodable", "driveRoot", "cloudListingSlow")
+)
+
+export const infoNoticeSchema = pinned<DesktopSyncInfoNotice>()(type.enumerated("localTrashNowOn"))
+
+const rootProblemSchema = pinned<DesktopSyncRootProblem>()(
+	type.enumerated(
+		"notDirectory",
+		"notWritable",
+		"filesystemRoot",
+		"homeDirectory",
+		"appData",
+		"temporary",
+		"insidePair",
+		"containsPair",
+		"insideMount",
+		"containsMount"
+	)
 )
 
 const shellPairSchema = pinned<ShellPair>()(
@@ -66,44 +103,24 @@ const shellPairSchema = pinned<ShellPair>()(
 			"+": "delete"
 		}).or("null"),
 		legacyUuid: type("string.uuid").or("null"),
-		legacyDotFiles: type("'device' | 'pair' | null"),
+		legacyRules: type("string[]").or("null"),
 		notices: noticeSchema.array(),
+		rootProblem: rootProblemSchema.or("null"),
+		holds: holdSchema.array(),
+		wholeDriveConfirmed: "boolean",
+		info: infoNoticeSchema.array(),
 		createdAt: "number.integer >= 0",
 		"+": "delete"
 	})
 )
 
-const earlierSchema = type({ state: "unknown", notices: "string[]", review: type({ findings: "string[]" }).or("null") })
-
-// What earlier builds wrote and this one no longer does: the old trash notice (under either of its names), review
-// findings no longer given, and an account-root pair the engine could not sync then, which now waits for its directory
-// like any other.
-const DROPPED_NOTICES: ReadonlySet<string> = new Set(["localTrashMoved", "localTrashDropped", "accountRootUnsupported"])
-const DROPPED_FINDINGS: ReadonlySet<string> = new Set(["newlySynced", "dotFilesPerPair"])
-
-function withCurrentFields(entry: unknown): unknown {
-	const pair = earlierSchema(entry)
-
-	if (
-		pair instanceof type.errors ||
-		(!pair.notices.some(notice => DROPPED_NOTICES.has(notice)) &&
-			!(pair.review?.findings.some(finding => DROPPED_FINDINGS.has(finding)) ?? false))
-	) {
-		return entry
-	}
-
-	return {
-		...pair,
-		state: pair.state === "unsupported" && pair.notices.includes("accountRootUnsupported") ? "waitingForRoot" : pair.state,
-		notices: pair.notices.filter(notice => !DROPPED_NOTICES.has(notice)),
-		review:
-			pair.review === null
-				? null
-				: { ...pair.review, findings: pair.review.findings.filter(finding => !DROPPED_FINDINGS.has(finding)) }
-	}
-}
-
-const fileSchema = type({ version: "1", pairs: "unknown[]", legacyApplied: "boolean", "+": "delete" })
+const fileSchema = type({
+	version: "1",
+	pairs: "unknown[]",
+	legacyApplied: "boolean",
+	importNote: type({ dropped: "number.integer >= 0", merged: "number.integer >= 0", "+": "delete" }).or("null"),
+	"+": "delete"
+})
 
 // A missing or unreadable file is empty; a pair that does not validate is dropped alone, so one bad entry never costs
 // the others their names.
@@ -133,7 +150,7 @@ export function parseSyncState(data: string | null, warn: (message: string) => v
 	const pairs: ShellPair[] = []
 
 	for (const entry of file.pairs) {
-		const pair = shellPairSchema(withCurrentFields(entry))
+		const pair = shellPairSchema(entry)
 
 		if (pair instanceof type.errors) {
 			warn("dropping an invalid sync pair record")
@@ -142,7 +159,13 @@ export function parseSyncState(data: string | null, warn: (message: string) => v
 		}
 	}
 
-	return { version: 1, pairs, legacyApplied: file.legacyApplied }
+	return { version: 1, pairs, legacyApplied: file.legacyApplied, importNote: file.importNote }
+}
+
+// The remote roots of the pairs that must not run when the host starts: in review or preparing, the engine's id known
+// or not (a crash between adding a pair to the engine, which adds it unpaused, and pausing it leaves no id here).
+export function heldRemotes(state: ShellSyncState): string[] {
+	return state.pairs.filter(pair => pair.state === "preparing" || pair.state === "review").map(pair => pair.remoteRoot)
 }
 
 export interface SyncStore {

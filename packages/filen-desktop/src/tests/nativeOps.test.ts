@@ -1,6 +1,3 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CacheStatusMessage, PlannedAction } from "@filen/sdk-rs"
 import { createConvergence } from "../native/convergence.ts"
@@ -8,7 +5,8 @@ import { classify } from "../native/errors.ts"
 import { createHostEngine } from "../native/ops.ts"
 import { createPlanRegistry } from "../native/plans.ts"
 import { createRuntimeFeed } from "../native/reducer.ts"
-import { action, fakeEngine, fakePlan, fakeSdk, pairInfo, REMOTE_ROOT, sdkError } from "./nativeFakes.ts"
+import type { FromNative } from "../shared/nativeProtocol.ts"
+import { action, fakeEngine, fakePlan, fakeSdk, pairInfo, REMOTE_ROOT, report, sdkError } from "./nativeFakes.ts"
 
 beforeEach(() => {
 	vi.useFakeTimers()
@@ -23,7 +21,14 @@ function setup(pairs = [pairInfo()]) {
 	const log = { info: vi.fn(), warn: vi.fn() }
 	const convergence = createConvergence()
 	const plans = createPlanRegistry()
-	const feed = createRuntimeFeed(fakeSdk, { post: () => undefined, onAuthFailed: () => undefined })
+	const posted: FromNative[] = []
+	const feed = createRuntimeFeed(fakeSdk, {
+		post: message => {
+			posted.push(message)
+		},
+		onAuthFailed: () => undefined,
+		onPassEnded: () => undefined
+	})
 	const host = createHostEngine({
 		sdk: fakeSdk,
 		engine: fake.handle,
@@ -35,7 +40,7 @@ function setup(pairs = [pairInfo()]) {
 		log
 	})
 
-	return { ...fake, convergence, plans, host, log }
+	return { ...fake, convergence, plans, host, log, feed, posted }
 }
 
 function sized(planned: PlannedAction, size: bigint): PlannedAction {
@@ -61,7 +66,7 @@ describe("native ops", () => {
 	it("resume watches a pair paused at open", async () => {
 		const { engine, host } = setup([pairInfo({ id: 1n, paused: true }), pairInfo({ id: 2n, localRoot: "/b" })])
 
-		await host.watchAll(() => undefined)
+		await host.watchAll([], () => undefined)
 		expect(engine.watchPair).toHaveBeenCalledOnce()
 		expect(engine.watchPair).toHaveBeenCalledWith(2n, undefined)
 
@@ -129,49 +134,154 @@ describe("native ops", () => {
 		await expect(read).resolves.toBe(true)
 	})
 
-	it("evaluatePlan counts the transfers, and a one-way pair's overwrites when asked", async () => {
-		const local = await realpath(await mkdtemp(path.join(tmpdir(), "filen-plan-check-")))
+	it("evaluatePlan counts the transfers, and those that replace a file, when asked", async () => {
+		const replaced = (planned: PlannedAction): PlannedAction => ({ ...planned, transfer: fakeSdk.PlannedTransfer.Replace })
+		const actions = [
+			sized(replaced(action("UploadFile", "up.txt")), 7n),
+			sized(replaced(action("DownloadFile", "d/kept.txt")), 5n),
+			sized({ ...action("DownloadFile", "new.txt"), transfer: fakeSdk.PlannedTransfer.Create }, 11n),
+			action("AdoptBaseline", "c.txt"),
+			...Array.from({ length: 2500 }, (_, i) => action("AdoptBaseline", `bulk/${String(i)}`))
+		]
+		const { plan, handle } = fakePlan(actions)
+		const { engine, convergence, host } = setup()
 
-		try {
-			await mkdir(path.join(local, "d"))
-			await writeFile(path.join(local, "d", "kept.txt"), "old")
+		engine.planPair.mockResolvedValue(handle)
+		await host.refreshPairs()
+		convergence.onMessages(resync([REMOTE_ROOT], true))
 
-			const actions = [
-				sized(action("UploadFile", "up.txt"), 7n),
-				sized(action("DownloadFile", "d/kept.txt"), 5n),
-				sized(action("DownloadFile", "new.txt"), 11n),
-				action("AdoptBaseline", "c.txt"),
-				...Array.from({ length: 2500 }, (_, i) => action("AdoptBaseline", `bulk/${String(i)}`))
-			]
-			const { plan, handle } = fakePlan(actions)
-			const modes = [
-				[fakeSdk.SyncMode.TwoWay, null],
-				[fakeSdk.SyncMode.LocalToRemote, { files: 1, bytes: 7 }],
-				[fakeSdk.SyncMode.LocalBackup, { files: 1, bytes: 7 }],
-				[fakeSdk.SyncMode.RemoteToLocal, { files: 1, bytes: 5 }],
-				[fakeSdk.SyncMode.RemoteBackup, { files: 1, bytes: 5 }]
-			] as const
+		await expect(host.ops.evaluatePlan({ pairId: "1", check: true })).resolves.toMatchObject({
+			check: { uploads: 1, downloads: 2, overwrites: { files: 2, bytes: 12 } }
+		})
+		// Paged at the engine's limit.
+		expect(plan.actions).toHaveBeenCalledTimes(3)
+	})
 
-			for (const [mode, overwrites] of modes) {
-				const { engine, convergence, host } = setup([pairInfo({ mode, localRoot: local })])
+	it("evaluatePlan reads a listing that started over as not ready", async () => {
+		const { engine, convergence, host } = setup()
 
-				engine.planPair.mockResolvedValue(handle)
-				await host.refreshPairs()
-				convergence.onMessages(resync([REMOTE_ROOT], true))
+		engine.planPair.mockRejectedValue(sdkError(fakeSdk.ErrorKind.StaleState))
+		await host.refreshPairs()
+		convergence.onMessages(resync([REMOTE_ROOT], true))
 
-				await expect(host.ops.evaluatePlan({ pairId: "1", check: { overwrites: true } })).resolves.toMatchObject({
-					check: { uploads: 1, downloads: 2, overwrites }
-				})
-				await expect(host.ops.evaluatePlan({ pairId: "1", check: { overwrites: false } })).resolves.toMatchObject({
-					check: { uploads: 1, downloads: 2, overwrites: null }
-				})
-			}
+		await expect(host.ops.evaluatePlan({ pairId: "1" })).resolves.toEqual({ status: "unconverged" })
+	})
 
-			// Paged at the engine's limit.
-			expect(plan.actions).toHaveBeenCalledTimes(30)
-		} finally {
-			await rm(local, { recursive: true, force: true })
-		}
+	it("a root listed again, or its pair removed, is not converged until listed anew", async () => {
+		const { convergence, host } = setup()
+
+		await host.refreshPairs()
+		convergence.onMessages(resync([REMOTE_ROOT], true))
+		convergence.onMessages([{ tag: "ResyncProgress", inner: { progress: { tag: "Started", inner: { roots: [REMOTE_ROOT] } } } }])
+		expect(convergence.isConverged(REMOTE_ROOT)).toBe(false)
+
+		convergence.onMessages([{ tag: "ResyncProgress", inner: { progress: { tag: "Finished", inner: { converged: true } } } }])
+		expect(convergence.isConverged(REMOTE_ROOT)).toBe(true)
+
+		await host.ops.removePair({ pairId: "1" })
+		expect(convergence.isConverged(REMOTE_ROOT)).toBe(false)
+	})
+
+	it("pauses the pairs main holds back before any watch starts", async () => {
+		const held = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+		const { engine, host } = setup([pairInfo({ id: 1n }), pairInfo({ id: 2n, localRoot: "/b", remoteRoot: held })])
+
+		await host.watchAll([held.toUpperCase()], () => undefined)
+
+		expect(engine.pausePair).toHaveBeenCalledExactlyOnceWith(2n, undefined)
+		expect(engine.watchPair).toHaveBeenCalledExactlyOnceWith(1n, undefined)
+	})
+
+	it("asks for no pass of a paused pair, and retries every failed path of a running one with a pass", async () => {
+		const { engine, host } = setup([pairInfo({ id: 1n }), pairInfo({ id: 2n, localRoot: "/b", paused: true })])
+
+		await host.watchAll([], () => undefined)
+		await expect(host.ops.requestPass({ pairId: "2" })).resolves.toBeNull()
+		expect(engine.requestPass).not.toHaveBeenCalled()
+
+		await host.ops.retryAll({ pairId: "1" })
+		await host.ops.retryAll({ pairId: "2" })
+		expect(engine.retryAll.mock.calls).toEqual([[1n], [2n]])
+		expect(engine.requestPass.mock.calls).toEqual([[1n]])
+	})
+
+	it("lists unsyncable paths and scan gaps from the last report", async () => {
+		const { engine, host } = setup()
+
+		await host.refreshPairs()
+		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 0, limit: 10 })).resolves.toBeNull()
+
+		engine.lastReport.mockResolvedValue(
+			report({
+				unsyncable: [
+					{ relPath: "a", reason: { tag: "LocalNameCollision" } },
+					{ relPath: "b", reason: { tag: "RemoteNameCollision" } }
+				],
+				unsyncableTotal: 2n,
+				scanGaps: [
+					{ relPath: "locked", cause: { tag: "Unreadable", inner: { kind: "PermissionDenied" } } },
+					{ relPath: "busy", cause: { tag: "ChangedDuringScan" } }
+				],
+				scanGapsTotal: 140n
+			})
+		)
+
+		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 1, limit: 10 })).resolves.toEqual({
+			total: 2,
+			entries: [{ relPath: "b", reason: "remoteNameCollision", detail: null }]
+		})
+		await expect(host.ops.heldDeletions({ pairId: "1" })).resolves.toMatchObject({
+			gaps: [
+				{ relPath: "locked", cause: "unreadable", kind: "PermissionDenied" },
+				{ relPath: "busy", cause: "changedDuringScan", kind: null }
+			],
+			gapsTotal: 140
+		})
+	})
+
+	it("counts a pair's held conflicts once, before any pass of it", async () => {
+		const { engine, host, feed, posted } = setup()
+
+		engine.listConflicts.mockResolvedValue({ conflicts: [], total: 3n })
+		await host.refreshPairs()
+		await host.refreshPairs()
+		expect(engine.listConflicts).toHaveBeenCalledExactlyOnceWith(1n, 0n, 0n)
+
+		feed.subscribe(true)
+		await vi.advanceTimersByTimeAsync(300)
+		expect(posted).toContainEqual(expect.objectContaining({ t: "aggregate", state: "attention" }))
+		expect(posted.findLast(message => message.t === "overview")).toMatchObject({ pairs: [{ issues: { conflicts: 3 } }] })
+	})
+
+	it("holds every deletion of a migrated pair until a clean pass held none", async () => {
+		const { engine, host, state } = setup([pairInfo({ firstPassCompleted: false })])
+
+		await host.refreshPairs()
+		await host.ops.setMigratedGuard({ pairId: "1" })
+		expect(engine.setDeleteGuard).toHaveBeenCalledExactlyOnceWith(1n, 0n, 0)
+
+		// The first clean pass held deletions: the next one must hold them too.
+		state.pairs = state.pairs.map(pair => ({ ...pair, firstPassCompleted: true }))
+		await host.passEnded(1n, report({ heldDeletions: 3n }))
+		await host.passEnded(1n, null)
+		await host.passEnded(1n, report({ passError: "x" }))
+		expect(engine.setDeleteGuard).toHaveBeenCalledOnce()
+
+		await host.passEnded(1n, report())
+		expect(engine.setDeleteGuard).toHaveBeenLastCalledWith(1n, 10n, 0.5)
+
+		// Lifted once.
+		await host.passEnded(1n, report())
+		expect(engine.setDeleteGuard).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps the guard of a migrated pair whose passes never completed cleanly", async () => {
+		const { engine, host } = setup([pairInfo({ firstPassCompleted: false })])
+
+		await host.refreshPairs()
+		await host.ops.setMigratedGuard({ pairId: "1" })
+		await host.passEnded(1n, report())
+		expect(engine.setDeleteGuard).toHaveBeenCalledOnce()
 	})
 
 	it("plans expire and release", async () => {

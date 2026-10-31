@@ -1,25 +1,29 @@
 import path from "node:path"
 import type { OpenDialogOptions, OpenDialogReturnValue } from "electron"
-import type {
-	DesktopSyncActivity,
-	DesktopSyncBacklog,
-	DesktopSyncConflict,
-	DesktopSyncEntries,
-	DesktopSyncErrorCode,
-	DesktopSyncHeldDeletions,
-	DesktopSyncHostState,
-	DesktopSyncIgnored,
-	DesktopSyncLocalRootChoice,
-	DesktopSyncMode,
-	DesktopSyncNewPair,
-	DesktopSyncNotice,
-	DesktopSyncOverview,
-	DesktopSyncPlan,
-	DesktopSyncPlanList,
-	DesktopSyncPlanPage,
-	DesktopSyncResolution,
-	DesktopSyncResult,
-	DesktopSyncUserIgnore
+import {
+	type DesktopSyncActivity,
+	type DesktopSyncBacklog,
+	type DesktopSyncConflict,
+	type DesktopSyncEntries,
+	type DesktopSyncErrorCode,
+	type DesktopSyncHeldDeletions,
+	type DesktopSyncHoldAction,
+	type DesktopSyncHostState,
+	type DesktopSyncIgnored,
+	type DesktopSyncInfoNotice,
+	type DesktopSyncLocalRootChoice,
+	type DesktopSyncMode,
+	type DesktopSyncNewPair,
+	type DesktopSyncNotice,
+	type DesktopSyncOverview,
+	type DesktopSyncPlan,
+	type DesktopSyncPlanList,
+	type DesktopSyncPlanPage,
+	type DesktopSyncResolution,
+	type DesktopSyncResult,
+	type DesktopSyncUnsyncable,
+	type DesktopSyncUserIgnore,
+	SYNC_ATTENTION_HOLDS
 } from "@filen/shared/desktop"
 import { CHANNELS } from "../../shared/channels.ts"
 import type { NativeOpArgs, NativePairRuntime, SyncOp } from "../../shared/nativeProtocol.ts"
@@ -30,7 +34,7 @@ import { errorCode } from "../atomicFile.ts"
 import { type Page, pushThrottle } from "../pages.ts"
 import { serialQueue } from "../../shared/serial.ts"
 import { createActivityLog } from "./activity.ts"
-import { attachUnheld, type FirstRunDeps, holdReviewed, startPreparing } from "./firstRun.ts"
+import { attachable, attachUnheld, BIN_DIR, type FirstRunDeps, holdReviewed, startPreparing } from "./firstRun.ts"
 import { applyLegacySync } from "./legacyPairs.ts"
 import { chooseLocalDirectory, inspectLocalRoot, type LocalRootContext, type RootTokens } from "./localRoot.ts"
 import { reconcileMirror, shellPairId } from "./mirror.ts"
@@ -39,9 +43,6 @@ import type { ShellPair, SyncStore } from "./store.ts"
 
 // Overview pushes to a page at most this often.
 export const OVERVIEW_PUSH_INTERVAL_MS = 250
-
-// The pair's bin: where the engine moves local files it replaced or deleted, filed by day and deleted after 30 days.
-const BIN_DIR = ".filen-sync-trash"
 
 export interface SyncServiceDeps {
 	supervisor: Pick<NativeSupervisor, "call" | "subscribe" | "ensure" | "retry" | "user" | "state">
@@ -56,11 +57,16 @@ export interface SyncServiceDeps {
 		mountPoints(userId: string): Promise<readonly string[]>
 	}
 	shell: { openPath(target: string): Promise<string> }
-	// The old client's sync config the migration stashed for a user.
+	// The old client's sync config the migration stashed for a user, and its per-pair ignore files.
 	legacySync: {
 		pending(userId: string): Promise<unknown>
 		consume(userId: string): Promise<void>
+		ignorer(uuid: string): Promise<string | null>
 	}
+	// The user's drive root directory, from the stored session; null when unknown.
+	driveRoot(userId: string): Promise<string | null>
+	// Whether some pair waits for the user (a hold), for the tray.
+	onHeld(held: boolean): void
 	now(): number
 	log: { info(message: string): void; warn(message: string): void }
 }
@@ -93,11 +99,16 @@ export interface SyncService {
 	heldDeletions(pairId: string): Promise<Result<DesktopSyncHeldDeletions>>
 	approveDeletions(pairId: string, passToken: string): Promise<Result<null>>
 	retryPath(pairId: string, relPath: string): Promise<Result<null>>
+	retryAll(pairId: string): Promise<Result<null>>
+	unsyncablePaths(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncUnsyncable> | null>>
 	ignoredPaths(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncIgnored>>>
 	userIgnore(): Promise<Result<DesktopSyncUserIgnore>>
 	setUserIgnore(text: string): Promise<Result<null>>
 	reveal(pairId: string, target: "root" | "bin"): Promise<Result<null>>
 	dismissNotice(pairId: string, notice: DesktopSyncNotice): Promise<void>
+	holdAction(pairId: string, action: DesktopSyncHoldAction): Promise<Result<null>>
+	dismissInfo(pairId: string, notice: DesktopSyncInfoNotice): Promise<void>
+	dismissImportNote(): Promise<void>
 	retryHost(): void
 }
 
@@ -123,22 +134,40 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 	let runtime: readonly NativePairRuntime[] = []
 	// The user the runtime and activity belong to.
 	let hostUser: string | null = null
-	// What each `ready` does to the pairs runs one at a time.
+	// What each `ready` does to the pairs, and every later round of it, runs one at a time.
 	const readyWork = serialQueue()
-	// The next try at starting the preparing pairs, and how many came before it since the last `ready`.
-	let preparingRetry: ReturnType<typeof setTimeout> | undefined
-	let preparingTries = 0
+	// The next round of adding and starting pairs, and how many came before it since the last `ready`.
+	let roundTimer: ReturnType<typeof setTimeout> | undefined
+	let roundTries = 0
+	// Bumped whenever the host stops or becomes ready: a round scheduled before acts on nothing.
+	let epoch = 0
+	// The migrated pair (engine id) whose first pass runs: no other starts before it ends. Set before the pair is
+	// resumed, so a pass that ends at once is still seen.
+	let firstPass: string | null = null
+	// The pairs whose pass ended while the pair now starting was being started.
+	const endedWhileStarting = new Set<string>()
+	const listingRounds = new Map<string, number>()
+	let held = false
 
 	async function overview(): Promise<DesktopSyncOverview> {
 		const user = await supervisor.user()
 
 		if (user === null) {
-			return { host, pairs: [] }
+			return { host, pairs: [], importNote: null }
 		}
 
-		const store = await deps.storeFor(user.userId)
+		const state = (await deps.storeFor(user.userId)).get()
 
-		return mergeOverview(host, user.userId === hostUser ? runtime : [], store.get().pairs)
+		return mergeOverview(host, user.userId === hostUser ? runtime : [], state.pairs, state.importNote)
+	}
+
+	function noteHeld(store: SyncStore): void {
+		const next = store.get().pairs.some(pair => pair.holds.some(hold => SYNC_ATTENTION_HOLDS.has(hold)))
+
+		if (next !== held) {
+			held = next
+			deps.onHeld(next)
+		}
 	}
 
 	const schedulePush = pushThrottle(
@@ -162,6 +191,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
 	async function updatePairs(store: SyncStore, change: (pairs: ShellPair[]) => ShellPair[]): Promise<void> {
 		await store.update(state => ({ ...state, pairs: change(state.pairs) }))
+		noteHeld(store)
 		schedulePush()
 	}
 
@@ -229,23 +259,32 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			return fail("pairNotFound")
 		}
 
+		// A migrated pair started from its review gets the guard it would have started on.
+		if (found.pair.review?.reason === "migrated") {
+			const guarded = await supervisor.call("setMigratedGuard", { pairId: found.engineId })
+
+			if (!guarded.ok) {
+				return guarded
+			}
+		}
+
 		const resumed = await supervisor.call("resume", { pairId: found.engineId })
 
 		if (!resumed.ok) {
 			return resumed
 		}
 
-		await patchPair(found.store, pairId, { paused: false, state: "active", review: null })
+		await patchPair(found.store, pairId, { paused: false, state: "active", review: null, legacyRules: null })
 
 		return DONE
 	}
 
-	function stopPreparingRetry(): void {
-		clearTimeout(preparingRetry)
-		preparingRetry = undefined
+	function stopRounds(): void {
+		clearTimeout(roundTimer)
+		roundTimer = undefined
 	}
 
-	async function firstRunDeps(userId: string, store: SyncStore): Promise<FirstRunDeps | null> {
+	async function firstRunDeps(userId: string, store: SyncStore, scheduledEpoch = epoch): Promise<FirstRunDeps | null> {
 		const user = await supervisor.user()
 
 		if (user?.userId !== userId) {
@@ -259,55 +298,133 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				update: async change => {
 					const next = await store.update(change)
 
+					noteHeld(store)
 					schedulePush()
 
 					return next
 				}
 			},
 			now: deps.now,
+			rootContext: async () => ({
+				...deps.dialogs.rootContext(),
+				mountPoints: await deps.dialogs.mountPoints(userId)
+			}),
+			driveRoot: await deps.driveRoot(userId),
+			listingRounds,
+			starting: pairId => {
+				if (scheduledEpoch === epoch) {
+					firstPass = pairId
+					endedWhileStarting.clear()
+				}
+			},
 			log: deps.log
 		}
 	}
 
-	// True when some pair still waits, or the step failed.
-	async function startPreparingLogged(run: FirstRunDeps): Promise<boolean> {
-		try {
-			return await startPreparing(run)
-		} catch (error) {
-			deps.log.warn(`sync: starting migrated pairs failed: ${errorCode(error)}`)
+	// One round: every pair the engine does not hold is added, then (unless a migrated pair's first pass still runs)
+	// the preparing pairs move on. Rounds repeat, backing off, while something waits, until the host stops or a
+	// `ready` starts over.
+	async function round(userId: string, store: SyncStore, scheduled: number): Promise<void> {
+		if (scheduled !== epoch) {
+			return
+		}
 
-			return true
+		const run = await firstRunDeps(userId, store, scheduled)
+
+		if (run === null) {
+			return
+		}
+
+		try {
+			await attachUnheld(run)
+		} catch (error) {
+			deps.log.warn(`sync: adding pairs failed: ${errorCode(error)}`)
+		}
+
+		let waiting = false
+
+		if (firstPass === null) {
+			try {
+				const moved = await startPreparing(run)
+
+				waiting = moved.waiting && moved.started === null
+
+				// Its pass ended before the start returned: the next pair need not wait.
+				if (moved.started !== null && scheduled === epoch && endedWhileStarting.has(moved.started)) {
+					firstPass = null
+					waiting = true
+					roundTries = 0
+				}
+			} catch (error) {
+				deps.log.warn(`sync: starting migrated pairs failed: ${errorCode(error)}`)
+				waiting = true
+			}
+		}
+
+		endedWhileStarting.clear()
+
+		if (scheduled === epoch && (waiting || store.get().pairs.some(attachable))) {
+			scheduleRound(userId, store, backoffDelay(roundTries++))
 		}
 	}
 
-	// Migrated pairs whose cloud directory was not read yet are tried again in the background, backing off, until a
-	// `ready` starts over or the host stops.
-	function retryPreparing(userId: string, store: SyncStore): void {
-		stopPreparingRetry()
-		preparingRetry = setTimeout(() => {
-			preparingRetry = undefined
-			void readyWork(async () => {
-				const run = await firstRunDeps(userId, store)
+	function scheduleRound(userId: string, store: SyncStore, delay: number): void {
+		stopRounds()
 
-				if (run !== null && (await startPreparingLogged(run))) {
-					retryPreparing(userId, store)
-				}
-			})
-		}, backoffDelay(preparingTries++))
+		const scheduled = epoch
+
+		roundTimer = setTimeout(() => {
+			roundTimer = undefined
+			void readyWork(() => round(userId, store, scheduled))
+		}, delay)
+	}
+
+	// Now, and backing off from scratch.
+	function roundNow(userId: string, store: SyncStore): void {
+		roundTries = 0
+		scheduleRound(userId, store, 0)
+	}
+
+	// The user paused or removed the pair whose first pass the others wait for.
+	async function releaseFirstPass(engineId: string | null): Promise<void> {
+		if (engineId === null || engineId !== firstPass) {
+			return
+		}
+
+		firstPass = null
+
+		const user = await supervisor.user()
+
+		if (user !== null && user.userId === hostUser) {
+			roundNow(user.userId, await deps.storeFor(user.userId))
+		}
 	}
 
 	// After the engine's pairs replaced the mirror's: pairs in review stay paused, the old client's pairs are imported
-	// once, every pair the engine does not hold is added through the first-run guard, and migrated pairs start once
-	// their cloud directory is read. Each step is retried on the next `ready` when it fails.
-	async function afterReady(userId: string, store: SyncStore): Promise<void> {
-		stopPreparingRetry()
-		preparingTries = 0
+	// once, then the first round runs. Each step is retried on the next `ready` when it fails.
+	async function afterReady(userId: string, store: SyncStore, firstPassDone: ReadonlySet<string>): Promise<void> {
+		stopRounds()
+		roundTries = 0
+		listingRounds.clear()
 
 		const run = await firstRunDeps(userId, store)
 
 		if (run === null) {
 			return
 		}
+
+		// A migrated pair that started before and has not completed a pass cleanly runs its pass first.
+		firstPass =
+			store
+				.get()
+				.pairs.find(
+					pair =>
+						pair.legacyUuid !== null &&
+						pair.state === "active" &&
+						!pair.paused &&
+						pair.pairId !== null &&
+						!firstPassDone.has(pair.pairId)
+				)?.pairId ?? null
 
 		const steps: [string, () => Promise<void>][] = [
 			["holding pairs in review", () => holdReviewed(run)],
@@ -316,10 +433,10 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				() =>
 					applyLegacySync({
 						...run,
+						legacyIgnorer: deps.legacySync.ignorer,
 						stash: { pending: () => deps.legacySync.pending(userId), consume: () => deps.legacySync.consume(userId) }
 					})
-			],
-			["adding pairs", () => attachUnheld(run)]
+			]
 		]
 
 		for (const [what, step] of steps) {
@@ -330,9 +447,8 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			}
 		}
 
-		if (await startPreparingLogged(run)) {
-			retryPreparing(userId, store)
-		}
+		noteHeld(store)
+		await round(userId, store, epoch)
 	}
 
 	function release(planId: string): void {
@@ -371,8 +487,18 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 							deps.log.info(`sync: re-adding ${String(lost)} pairs the engine lost`)
 						}
 
-						await afterReady(userId, store)
+						epoch++
+						await afterReady(userId, store, new Set(message.pairs.filter(pair => pair.firstPassCompleted).map(pair => pair.id)))
 					})
+				case "passEnded":
+					if (message.pairId === firstPass) {
+						firstPass = null
+						roundNow(userId, await deps.storeFor(userId))
+					} else {
+						endedWhileStarting.add(message.pairId)
+					}
+
+					return
 				case "overview":
 					runtime = message.pairs
 					schedulePush()
@@ -395,15 +521,19 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			host = state
 
 			if (state.state !== "running") {
+				epoch++
 				runtime = []
 				plans.clear()
-				stopPreparingRetry()
+				firstPass = null
+				stopRounds()
 			}
 
 			schedulePush()
 		},
 		signedOut: () => {
-			stopPreparingRetry()
+			epoch++
+			firstPass = null
+			stopRounds()
 			hostUser = null
 			runtime = []
 			plans.clear()
@@ -496,8 +626,12 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 					state: "active",
 					review: null,
 					legacyUuid: null,
-					legacyDotFiles: null,
+					legacyRules: null,
 					notices: [],
+					rootProblem: null,
+					holds: [],
+					wholeDriveConfirmed: false,
+					info: [],
 					createdAt: deps.now()
 				}
 			])
@@ -524,6 +658,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			await updatePairs(found.store, pairs => pairs.filter(pair => shellPairId(pair) !== pairId))
 			activityLog.drop(pairId)
 			supervisor.ensure("pair removed")
+			await releaseFirstPass(found.pair.pairId)
 
 			return DONE
 		},
@@ -541,6 +676,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			}
 
 			await patchPair(found.store, pairId, { paused: true })
+			await releaseFirstPass(found.engineId)
 
 			return DONE
 		},
@@ -603,6 +739,8 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		heldDeletions: pairId => engineCall(pairId, "heldDeletions", id => ({ pairId: id })),
 		approveDeletions: (pairId, passToken) => engineCall(pairId, "approveDeletions", id => ({ pairId: id, passToken })),
 		retryPath: (pairId, relPath) => engineCall(pairId, "retryPath", id => ({ pairId: id, relPath })),
+		retryAll: pairId => engineCall(pairId, "retryAll", id => ({ pairId: id })),
+		unsyncablePaths: (pairId, offset, limit) => engineCall(pairId, "unsyncablePaths", id => ({ pairId: id, offset, limit })),
 		ignoredPaths: (pairId, offset, limit) => engineCall(pairId, "ignoredPaths", id => ({ pairId: id, offset, limit })),
 		userIgnore: async () => {
 			const [text, defaults] = await Promise.all([supervisor.call("userIgnore", {}), supervisor.call("defaultIgnore", {})])
@@ -637,6 +775,48 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 			await updatePairs(found.store, pairs => pairs.filter(pair => shellPairId(pair) !== pairId))
 			activityLog.drop(pairId)
 			supervisor.ensure("pair removed")
+		},
+		holdAction: async (pairId, action) => {
+			const found = await find(pairId)
+			const user = await supervisor.user()
+
+			if (found === null || user === null) {
+				return fail("pairNotFound")
+			}
+
+			if (action === "startAnyway") {
+				if (!found.pair.holds.includes("driveRoot")) {
+					return fail("pairNotFound")
+				}
+
+				await patchPair(found.store, pairId, {
+					holds: found.pair.holds.filter(hold => hold !== "driveRoot"),
+					wholeDriveConfirmed: true
+				})
+			}
+
+			if (user.userId === hostUser && host.state === "running") {
+				roundNow(user.userId, found.store)
+			} else {
+				supervisor.ensure("pair held")
+			}
+
+			return DONE
+		},
+		dismissInfo: async (pairId, notice) => {
+			const found = await find(pairId)
+
+			if (found?.pair.info.includes(notice) === true) {
+				await patchPair(found.store, pairId, { info: found.pair.info.filter(entry => entry !== notice) })
+			}
+		},
+		dismissImportNote: async () => {
+			const store = await currentStore()
+
+			if (store !== null && store.get().importNote !== null) {
+				await store.update(state => ({ ...state, importNote: null }))
+				schedulePush()
+			}
 		},
 		retryHost: () => {
 			supervisor.retry()

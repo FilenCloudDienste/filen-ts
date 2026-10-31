@@ -3,18 +3,32 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useShallow } from "zustand/shallow"
 import { CircleCheckIcon } from "lucide-react"
-import type { DesktopSyncConflict, DesktopSyncHeldDeletions, DesktopSyncResolution, DesktopSyncUnsyncable } from "@filen/shared/desktop"
+import type {
+	DesktopSyncConflict,
+	DesktopSyncHalt,
+	DesktopSyncHeldDeletions,
+	DesktopSyncRefusal,
+	DesktopSyncResolution,
+	DesktopSyncUnsyncable
+} from "@filen/shared/desktop"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyMessage } from "@/components/emptyMessage"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { log } from "@/lib/log"
 import { SettingsBlock, SettingsGroup } from "@/features/settings/components/settingsLayout"
-import { usePagedEntries } from "@/features/sync/hooks/usePagedEntries"
+import { type PagedEntries, usePagedEntries } from "@/features/sync/hooks/usePagedEntries"
 import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { runSyncAction, syncErrorLabel } from "@/features/sync/lib/syncActions"
-import { conflictDetailKey, HELD_REASON_KEY } from "@/features/sync/lib/syncStatus.logic"
+import {
+	conflictDetailKey,
+	HALT_KEY,
+	HELD_REASON_KEY,
+	isRootRuleFile,
+	REFUSAL_KEY,
+	SCAN_GAP_KEY
+} from "@/features/sync/lib/syncStatus.logic"
 import { EntryRow } from "@/features/desktop/components/entryRow"
 import { ActionEntry, PagedFooter, UnsyncableEntry } from "@/features/sync/components/syncEntryRows"
 
@@ -61,7 +75,11 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 					<EntryRow
 						key={conflict.relPath}
 						path={conflict.relPath}
-						detail={t(conflictDetailKey(conflict))}
+						detail={
+							isRootRuleFile(conflict)
+								? `${t(conflictDetailKey(conflict))}. ${t("conflictRuleFileHint")}`
+								: t(conflictDetailKey(conflict))
+						}
 					>
 						{RESOLUTIONS.map(resolution => (
 							<Button
@@ -83,6 +101,32 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 	)
 }
 
+// The paths whose read did not finish: every deletion of the pass waits for them.
+function ScanGaps({ held }: { held: DesktopSyncHeldDeletions }) {
+	const { t } = useTranslation("sync")
+	const more = held.gapsTotal - held.gaps.length
+
+	if (held.gapsTotal === 0) {
+		return null
+	}
+
+	return (
+		<>
+			<SettingsBlock className="text-sm font-medium">{t("scanGapsTitle")}</SettingsBlock>
+			{held.gaps.map(gap => (
+				<EntryRow
+					key={gap.relPath}
+					path={gap.relPath}
+					detail={gap.cause === "unreadable" ? t("scanGapUnreadable", { kind: gap.kind ?? "" }) : t(SCAN_GAP_KEY[gap.cause])}
+				/>
+			))}
+			{more > 0 ? (
+				<SettingsBlock className="text-sm text-muted-foreground">{t("scanGapsMore", { count: more })}</SettingsBlock>
+			) : null}
+		</>
+	)
+}
+
 function HeldList({ held }: { held: DesktopSyncHeldDeletions }) {
 	const { t } = useTranslation("sync")
 	const more = held.total - held.entries.length
@@ -99,6 +143,7 @@ function HeldList({ held }: { held: DesktopSyncHeldDeletions }) {
 				/>
 			))}
 			{more > 0 ? <SettingsBlock className="text-sm text-muted-foreground">{t("heldMore", { count: more })}</SettingsBlock> : null}
+			<ScanGaps held={held} />
 		</>
 	)
 }
@@ -177,11 +222,73 @@ function HeldSection({ pairId, count }: { pairId: string; count: number }) {
 	)
 }
 
-// Unsyncable items are only listed in a dry run, so the section plans the pair once while it shows (and releases
-// the plan again); Retry clears an item's failure record so the next pass tries it again.
-function UnsyncableSection({ pairId, count }: { pairId: string; count: number }) {
+// Clears every path's failure record; the shell asks for a pass, which tries them all again.
+function RetryAllButton({ pairId }: { pairId: string }) {
 	const { t } = useTranslation("sync")
-	const planRead = useSyncRead(`${pairId}:${String(count)}`, () => syncApi().plan(pairId))
+	const [pending, setPending] = useState(false)
+
+	return (
+		<Button
+			variant="outline"
+			size="sm"
+			disabled={pending}
+			onClick={() => {
+				setPending(true)
+				void runSyncAction(() => syncApi().retryAll(pairId)).finally(() => {
+					setPending(false)
+				})
+			}}
+		>
+			{pending ? <Spinner data-icon="inline-start" /> : null}
+			{t("issuesRetryAll")}
+		</Button>
+	)
+}
+
+// One page after another of unsyncable items; Retry clears an item's failure record so the next pass tries it again.
+function UnsyncableRows({ pairId, paged }: { pairId: string; paged: PagedEntries<DesktopSyncUnsyncable> }) {
+	const { t } = useTranslation("sync")
+	const [retried, setRetried] = useState<ReadonlySet<string>>(() => new Set())
+
+	async function retry(relPath: string): Promise<void> {
+		if ((await runSyncAction(() => syncApi().retryPath(pairId, relPath))) !== null) {
+			setRetried(previous => new Set(previous).add(relPath))
+		}
+	}
+
+	return (
+		<>
+			{paged.entries
+				.filter(entry => !retried.has(entry.relPath))
+				.map(entry => (
+					<UnsyncableEntry
+						key={entry.relPath}
+						entry={entry}
+					>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => {
+								void retry(entry.relPath)
+							}}
+						>
+							{t("unsyncableRetry")}
+						</Button>
+					</UnsyncableEntry>
+				))}
+			<PagedFooter paged={paged} />
+			<SettingsBlock className="flex justify-end">
+				<RetryAllButton pairId={pairId} />
+			</SettingsBlock>
+		</>
+	)
+}
+
+// Before this run saw a pass of the pair, only a dry run lists them: planned once while the section shows, and
+// released again.
+function PlannedUnsyncable({ pairId, readKey }: { pairId: string; readKey: string }) {
+	const { t } = useTranslation("sync")
+	const planRead = useSyncRead(readKey, () => syncApi().plan(pairId))
 	const planId = planRead.data?.planId ?? null
 	const paged = usePagedEntries<DesktopSyncUnsyncable>(planId, async (offset, limit) => {
 		const result = await syncApi().planPage(planId ?? "", "unsyncable", offset, limit)
@@ -192,7 +299,6 @@ function UnsyncableSection({ pairId, count }: { pairId: string; count: number })
 
 		return { ok: true, value: { total: result.value.total, entries: result.value.list === "unsyncable" ? result.value.entries : [] } }
 	})
-	const [retried, setRetried] = useState<ReadonlySet<string>>(() => new Set())
 
 	useEffect(() => {
 		if (planId === null) {
@@ -208,58 +314,117 @@ function UnsyncableSection({ pairId, count }: { pairId: string; count: number })
 		}
 	}, [planId])
 
-	async function retry(relPath: string): Promise<void> {
-		if ((await runSyncAction(() => syncApi().retryPath(pairId, relPath))) !== null) {
-			setRetried(previous => new Set(previous).add(relPath))
-		}
+	if (planRead.error !== null) {
+		return (
+			<SettingsBlock>
+				<p
+					role="alert"
+					className="text-sm text-destructive"
+				>
+					{syncErrorLabel(planRead.error)}
+				</p>
+			</SettingsBlock>
+		)
+	}
+
+	if (planRead.data === null) {
+		// The cloud side has not caught up, so there is no dry run to list them from yet.
+		return <SettingsBlock className="text-sm text-muted-foreground">{t("reviewUnconverged")}</SettingsBlock>
+	}
+
+	if (planRead.data === undefined) {
+		return (
+			<SettingsBlock className="flex justify-center">
+				<Spinner className="size-5 text-muted-foreground" />
+			</SettingsBlock>
+		)
 	}
 
 	return (
+		<UnsyncableRows
+			pairId={pairId}
+			paged={paged}
+		/>
+	)
+}
+
+// Unsyncable items as the last pass this run saw reported them; without one, from a dry run.
+function UnsyncableSection({ pairId, count }: { pairId: string; count: number }) {
+	const { t } = useTranslation("sync")
+	const key = `${pairId}:${String(count)}`
+	// The key a report was missing for.
+	const [unreported, setUnreported] = useState<string | null>(null)
+	const paged = usePagedEntries<DesktopSyncUnsyncable>(unreported === key ? null : key, async (offset, limit) => {
+		const result = await syncApi().unsyncablePaths(pairId, offset, limit)
+
+		if (!result.ok) {
+			return result
+		}
+
+		if (result.value === null) {
+			setUnreported(key)
+
+			return { ok: true, value: { total: 0, entries: [] } }
+		}
+
+		return { ok: true, value: result.value }
+	})
+
+	return (
 		<SettingsGroup title={t("unsyncableTitle")}>
-			{planRead.error !== null ? (
-				<SettingsBlock>
-					<p
-						role="alert"
-						className="text-sm text-destructive"
-					>
-						{syncErrorLabel(planRead.error)}
-					</p>
-				</SettingsBlock>
-			) : planRead.data === null ? (
-				// The cloud side has not caught up, so there is no dry run to list them from yet.
-				<SettingsBlock className="text-sm text-muted-foreground">{t("reviewUnconverged")}</SettingsBlock>
-			) : planRead.data === undefined ? (
-				<SettingsBlock className="flex justify-center">
-					<Spinner className="size-5 text-muted-foreground" />
-				</SettingsBlock>
+			{unreported === key ? (
+				<PlannedUnsyncable
+					pairId={pairId}
+					readKey={key}
+				/>
 			) : (
-				<>
-					{paged.entries
-						.filter(entry => !retried.has(entry.relPath))
-						.map(entry => (
-							<UnsyncableEntry
-								key={entry.relPath}
-								entry={entry}
-							>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => {
-										void retry(entry.relPath)
-									}}
-								>
-									{t("unsyncableRetry")}
-								</Button>
-							</UnsyncableEntry>
-						))}
-					<PagedFooter paged={paged} />
-				</>
+				<UnsyncableRows
+					pairId={pairId}
+					paged={paged}
+				/>
 			)}
 		</SettingsGroup>
 	)
 }
 
-// What the pair needs the user for: the last error, conflicts, held deletions, unsyncable items. Each section
+function LastError({
+	lastError,
+	failed,
+	halted,
+	refused,
+	pairId
+}: {
+	lastError: string | null
+	failed: number
+	halted: DesktopSyncHalt | null
+	refused: DesktopSyncRefusal | null
+	pairId: string
+}) {
+	const { t } = useTranslation("sync")
+
+	return (
+		<SettingsGroup title={t("issuesLastError")}>
+			{halted === null ? null : <SettingsBlock className="text-sm">{t(HALT_KEY[halted])}</SettingsBlock>}
+			{refused === null ? null : (
+				<SettingsBlock className="text-sm">
+					{t("issuesRefused")} {t(REFUSAL_KEY[refused])}
+				</SettingsBlock>
+			)}
+			{lastError === null ? null : (
+				<SettingsBlock className="font-mono text-xs break-words whitespace-pre-wrap">{lastError}</SettingsBlock>
+			)}
+			{failed === 0 ? null : (
+				<SettingsBlock className="flex flex-col gap-2 text-sm text-muted-foreground @md:flex-row @md:items-center">
+					<span className="flex-1">{t("issuesFailed", { count: failed })}</span>
+					<RetryAllButton pairId={pairId} />
+				</SettingsBlock>
+			)}
+		</SettingsGroup>
+	)
+}
+
+// What the pair needs the user for: the last error (and why a pass held back or was refused), conflicts, held
+// deletions with what held them, unsyncable items. Each section
 // reads its list only while its count says there is something to list.
 export function IssuesTab({ pairId }: { pairId: string }) {
 	const { t } = useTranslation("sync")
@@ -272,12 +437,19 @@ export function IssuesTab({ pairId }: { pairId: string }) {
 				heldDeletions: pair?.issues.heldDeletions ?? 0,
 				unsyncable: pair?.issues.unsyncable ?? 0,
 				failed: pair?.issues.failed ?? 0,
-				lastError: pair?.lastError ?? null
+				lastError: pair?.lastError ?? null,
+				halted: pair?.halted ?? null,
+				refused: pair?.refused ?? null
 			}
 		})
 	)
 
-	if (issues.conflicts + issues.heldDeletions + issues.unsyncable + issues.failed === 0 && issues.lastError === null) {
+	if (
+		issues.conflicts + issues.heldDeletions + issues.unsyncable + issues.failed === 0 &&
+		issues.lastError === null &&
+		issues.halted === null &&
+		issues.refused === null
+	) {
 		return (
 			<EmptyMessage
 				icon={CircleCheckIcon}
@@ -289,17 +461,14 @@ export function IssuesTab({ pairId }: { pairId: string }) {
 
 	return (
 		<div className="flex flex-col gap-8">
-			{issues.lastError === null && issues.failed === 0 ? null : (
-				<SettingsGroup title={t("issuesLastError")}>
-					{issues.lastError === null ? null : (
-						<SettingsBlock className="font-mono text-xs break-words whitespace-pre-wrap">{issues.lastError}</SettingsBlock>
-					)}
-					{issues.failed === 0 ? null : (
-						<SettingsBlock className="text-sm text-muted-foreground">
-							{t("issuesFailed", { count: issues.failed })}
-						</SettingsBlock>
-					)}
-				</SettingsGroup>
+			{issues.lastError === null && issues.failed === 0 && issues.halted === null && issues.refused === null ? null : (
+				<LastError
+					pairId={pairId}
+					lastError={issues.lastError}
+					failed={issues.failed}
+					halted={issues.halted}
+					refused={issues.refused}
+				/>
 			)}
 			{issues.conflicts > 0 ? (
 				<ConflictsSection

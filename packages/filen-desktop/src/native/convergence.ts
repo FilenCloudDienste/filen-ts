@@ -2,6 +2,8 @@ import type { CacheStatusListener, CacheStatusMessage } from "@filen/sdk-rs"
 
 export interface Convergence extends CacheStatusListener {
 	isConverged(root: string): boolean
+	// The root's pair was removed: a later pair on it waits for a listing of its own.
+	forget(root: string): void
 	// true once the cache converged on `root`; false on timeout, abort, or the root deleted on the server.
 	awaitConverged(root: string, timeoutMs: number, signal: AbortSignal): Promise<boolean>
 }
@@ -43,6 +45,11 @@ export function createConvergence(): Convergence {
 
 		if (progress.tag === "Started") {
 			resyncing = progress.inner.roots
+
+			// A root listed again is not converged until that listing finishes.
+			for (const root of resyncing) {
+				converged.delete(root)
+			}
 		} else if (progress.tag === "Finished") {
 			for (const root of resyncing) {
 				if (progress.inner.converged) {
@@ -64,6 +71,9 @@ export function createConvergence(): Convergence {
 			}
 		},
 		isConverged: root => converged.has(root),
+		forget: root => {
+			converged.delete(root)
+		},
 		awaitConverged: (root, timeoutMs, signal) => {
 			if (converged.has(root)) {
 				return Promise.resolve(true)

@@ -1,17 +1,22 @@
-import type {
-	DesktopSyncHeldReason,
-	DesktopSyncIssueCounts,
-	DesktopSyncMode,
-	DesktopSyncNotice,
-	DesktopSyncOverview,
-	DesktopSyncPair,
-	DesktopSyncPhase,
-	DesktopSyncPlanList,
-	DesktopSyncPlanSummary,
-	DesktopSyncRefusal,
-	DesktopSyncReviewFinding,
-	DesktopSyncActionKind,
-	DesktopSyncConflict
+import {
+	type DesktopSyncConflict,
+	type DesktopSyncHalt,
+	type DesktopSyncHold,
+	type DesktopSyncHeldReason,
+	type DesktopSyncInfoNotice,
+	type DesktopSyncScanGap,
+	SYNC_ATTENTION_HOLDS,
+	type DesktopSyncIssueCounts,
+	type DesktopSyncMode,
+	type DesktopSyncNotice,
+	type DesktopSyncOverview,
+	type DesktopSyncPair,
+	type DesktopSyncPhase,
+	type DesktopSyncPlanList,
+	type DesktopSyncPlanSummary,
+	type DesktopSyncRefusal,
+	type DesktopSyncReviewFinding,
+	type DesktopSyncActionKind
 } from "@filen/shared/desktop"
 import type { SyncKey } from "@/lib/i18n"
 
@@ -24,8 +29,16 @@ export function issueTotal(issues: DesktopSyncIssueCounts): number {
 	return issues.conflicts + issues.heldDeletions + issues.unsyncable + issues.failed
 }
 
-export function pairNeedsAttention(pair: Pick<DesktopSyncPair, "phase" | "issues">): boolean {
-	return ATTENTION_PHASES.has(pair.phase) || issueTotal(pair.issues) > 0
+// Being offline never is: the pair syncs again once the server is back, and what failed in that pass is the outage's.
+export function pairNeedsAttention(pair: Pick<DesktopSyncPair, "phase" | "issues" | "refused" | "holds" | "halted">): boolean {
+	const issues = pair.halted === "offline" ? { ...pair.issues, failed: 0 } : pair.issues
+
+	return (
+		ATTENTION_PHASES.has(pair.phase) ||
+		issueTotal(issues) > 0 ||
+		pair.refused !== null ||
+		pair.holds.some(hold => SYNC_ATTENTION_HOLDS.has(hold))
+	)
 }
 
 // null before the first overview (and always in a browser).
@@ -61,7 +74,10 @@ export const PHASE_KEY: Record<DesktopSyncPhase, SyncKey> = {
 	review: "phaseReview",
 	waitingForRoot: "phaseWaitingForRoot",
 	unsupported: "phaseUnsupported",
-	error: "phaseError"
+	error: "phaseError",
+	waitingForCloud: "phaseWaitingForCloud",
+	indexing: "phaseIndexing",
+	offline: "phaseOffline"
 }
 
 export const MODES: readonly DesktopSyncMode[] = ["twoWay", "localToRemote", "remoteToLocal", "localBackup", "remoteBackup"]
@@ -115,7 +131,31 @@ export const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
 	refusedLocalRoot: "noticeRefusedLocalRoot",
 	refusedRemoteMissing: "noticeRefusedRemoteMissing",
 	refusedLocalOverlap: "noticeRefusedLocalOverlap",
-	refusedRemoteOverlap: "noticeRefusedRemoteOverlap"
+	refusedRemoteOverlap: "noticeRefusedRemoteOverlap",
+	refusedModeConflict: "noticeRefusedModeConflict"
+}
+
+export const HOLD_KEY: Record<DesktopSyncHold, SyncKey> = {
+	ruleFileUnwritable: "holdRuleFileUnwritable",
+	ruleFileUndecodable: "holdRuleFileUndecodable",
+	driveRoot: "holdDriveRoot",
+	cloudListingSlow: "holdCloudListingSlow"
+}
+
+export const INFO_NOTICE_KEY: Record<DesktopSyncInfoNotice, SyncKey> = {
+	localTrashNowOn: "infoLocalTrashNowOn"
+}
+
+export const HALT_KEY: Record<DesktopSyncHalt, SyncKey> = {
+	localStorageFull: "haltLocalStorageFull",
+	remoteStorageFull: "haltRemoteStorageFull",
+	offline: "haltOffline"
+}
+
+export const SCAN_GAP_KEY: Record<DesktopSyncScanGap["cause"], SyncKey> = {
+	unreadable: "scanGapUnreadable",
+	changedDuringScan: "scanGapChangedDuringScan",
+	nonUtf8Name: "scanGapNonUtf8Name"
 }
 
 export const FINDING_KEY: Record<DesktopSyncReviewFinding, SyncKey> = {
@@ -209,6 +249,12 @@ export function pathParent(path: string): string {
 	}
 
 	return index === 0 || trimmed[index - 1] === ":" ? trimmed.slice(0, index + 1) : trimmed.slice(0, index)
+}
+
+// The pair's own rule file, which a pair that only downloaded kept to this device: switched to a mode that uploads,
+// it meets the cloud's copy.
+export function isRootRuleFile(conflict: Pick<DesktopSyncConflict, "relPath">): boolean {
+	return conflict.relPath === ".filenignore"
 }
 
 // How a conflict came about: a side is null where that side deleted the path.

@@ -91,6 +91,7 @@ function harness(read: SessionRead = { status: "present", blob: SESSION_OF("1") 
 		vault,
 		addonPath: () => "/app/native/sdk-rs.node",
 		dirFor: (userId: string) => Promise.resolve(`/data/sync-engine/${userId}`),
+		holdRemotes: () => Promise.resolve(["7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"]),
 		demand: vi.fn<NativeSupervisorDeps["demand"]>(() => Promise.resolve(true)),
 		log: { info: vi.fn(), warn: vi.fn() },
 		onMessage: vi.fn<NativeSupervisorDeps["onMessage"]>(),
@@ -161,7 +162,8 @@ describe("createNativeSupervisor", () => {
 			addonPath: "/app/native/sdk-rs.node",
 			dir: "/data/sync-engine/1",
 			session: SESSION_OF("1"),
-			logLevel: "Info"
+			logLevel: "Info",
+			holdRemotes: ["7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"]
 		})
 		expect(supervisor.state()).toEqual({ state: "starting" })
 

@@ -40,7 +40,10 @@ export interface SyncUser {
 }
 
 // What the host reports that the supervisor passes on.
-export type NativeEvent = Extract<FromNative, { t: "ready" | "overview" | "aggregate" | "activity" | "mounts" | "mountsStats" }>
+export type NativeEvent = Extract<
+	FromNative,
+	{ t: "ready" | "overview" | "aggregate" | "activity" | "passEnded" | "mounts" | "mountsStats" }
+>
 
 // What a page listens to: the sync runtime, or the mounts stats.
 export type NativeTopic = "overview" | "mounts"
@@ -52,6 +55,8 @@ export interface NativeSupervisorDeps {
 	addonPath(): string | null
 	// The user's engine directory, created owner-only.
 	dirFor(userId: string): Promise<string>
+	// The remote roots of the user's pairs main holds back, paused before the host starts any watch.
+	holdRemotes(userId: string): Promise<string[]>
 	// The user has work for the host: sync pairs or mounts, or old ones waiting to be imported.
 	demand(userId: string): Promise<boolean>
 	log: { info(message: string): void; warn(message: string): void }
@@ -305,11 +310,13 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		}
 
 		let dir: string
+		let holdRemotes: string[]
 
 		try {
 			dir = await deps.dirFor(user.userId)
+			holdRemotes = await deps.holdRemotes(user.userId)
 		} catch (error) {
-			deps.log.warn(`native: engine directory unavailable: ${errorCode(error)}`)
+			deps.log.warn(`native: engine directory or pair store unavailable: ${errorCode(error)}`)
 			crashed(null)
 
 			return
@@ -351,7 +358,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		proc.on("exit", code => {
 			onExit(child, code)
 		})
-		send(child, { t: "init", addonPath, dir, session: blob, logLevel: "Info" })
+		send(child, { t: "init", addonPath, dir, session: blob, logLevel: "Info", holdRemotes })
 	}
 
 	function pipeLines(stream: NodeJS.ReadableStream | null, write: (message: string) => void): void {

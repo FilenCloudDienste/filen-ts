@@ -11,7 +11,7 @@ import {
 } from "../../shared/nativeProtocol.ts"
 import { type CheckedCall, checkedCalls, type IpcMain, pageOf, registerCalls } from "../pages.ts"
 import type { SyncService } from "./service.ts"
-import { noticeSchema } from "./store.ts"
+import { infoNoticeSchema, noticeSchema } from "./store.ts"
 
 // DesktopSyncPair.id: the engine's id, or the stand-in of a pair the engine does not hold (mirror.ts shellPairId).
 const pairIdSchema = type(/^(?:0|[1-9]\d{0,19}|(?:legacy|remote):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i)
@@ -56,11 +56,16 @@ const CALLS: Record<SyncCall, CheckedCall<SyncService>> = {
 	heldDeletions: call(one, (service, _page, [pairId]) => service.heldDeletions(pairId)),
 	approveDeletions: call(type([pairIdSchema, passTokenSchema]), (service, _page, args) => service.approveDeletions(...args)),
 	retryPath: call(type([pairIdSchema, relPathArgSchema]), (service, _page, args) => service.retryPath(...args)),
+	retryAll: call(one, (service, _page, [pairId]) => service.retryAll(pairId)),
+	unsyncablePaths: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.unsyncablePaths(...args)),
 	ignoredPaths: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.ignoredPaths(...args)),
 	userIgnore: call(type([]), service => service.userIgnore()),
 	setUserIgnore: call(type([ignoreTextSchema]), (service, _page, [text]) => service.setUserIgnore(text)),
 	reveal: call(type([pairIdSchema, type("'root' | 'bin'")]), (service, _page, args) => service.reveal(...args)),
 	dismissNotice: call(type([pairIdSchema, noticeSchema]), (service, _page, args) => service.dismissNotice(...args)),
+	holdAction: call(type([pairIdSchema, type("'retry' | 'startAnyway'")]), (service, _page, args) => service.holdAction(...args)),
+	dismissInfo: call(type([pairIdSchema, infoNoticeSchema]), (service, _page, args) => service.dismissInfo(...args)),
+	dismissImportNote: call(type([]), service => service.dismissImportNote()),
 	retryHost: call(type([]), service => {
 		service.retryHost()
 	})

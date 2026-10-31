@@ -6,8 +6,9 @@ import type { DesktopSyncHostState } from "@filen/shared/desktop"
 import { atomicFile, type AtomicFile } from "../main/atomicFile.ts"
 import { reconcileMirror, shellPairId } from "../main/sync/mirror.ts"
 import { mergeOverview } from "../main/sync/overview.ts"
-import { loadSyncStore, parseSyncState, type ShellPair } from "../main/sync/store.ts"
+import { heldRemotes, loadSyncStore, parseSyncState, type ShellPair } from "../main/sync/store.ts"
 import type { NativePair, NativePairRuntime } from "../shared/nativeProtocol.ts"
+import { shellPair as baseShellPair } from "./syncFakes.ts"
 
 const REMOTE_A = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
 const REMOTE_B = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
@@ -15,25 +16,19 @@ const REMOTE_C = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 const LEGACY = "11111111-2222-4333-8444-555555555555"
 
 function shellPair(overrides: Partial<ShellPair> = {}): ShellPair {
+	return baseShellPair({ pairId: "1", name: "Work", localRoot: "/Users/u/Work", remoteRoot: REMOTE_A, createdAt: 1, ...overrides })
+}
+
+function enginePair(overrides: Partial<NativePair> = {}): NativePair {
 	return {
-		pairId: "1",
-		name: "Work",
+		id: "1",
 		localRoot: "/Users/u/Work",
 		remoteRoot: REMOTE_A,
 		mode: "twoWay",
 		paused: false,
-		state: "active",
-		review: null,
-		legacyUuid: null,
-		legacyDotFiles: null,
-		notices: [],
-		createdAt: 1,
+		firstPassCompleted: true,
 		...overrides
 	}
-}
-
-function enginePair(overrides: Partial<NativePair> = {}): NativePair {
-	return { id: "1", localRoot: "/Users/u/Work", remoteRoot: REMOTE_A, mode: "twoWay", paused: false, ...overrides }
 }
 
 function runtimeOf(pair: NativePair, overrides: Partial<NativePairRuntime> = {}): NativePairRuntime {
@@ -46,6 +41,9 @@ function runtimeOf(pair: NativePair, overrides: Partial<NativePairRuntime> = {})
 		lastError: null,
 		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
 		degraded: { local: false, remote: false },
+		stage: null,
+		halted: null,
+		refused: null,
 		...overrides
 	}
 }
@@ -147,10 +145,18 @@ describe("mergeOverview", () => {
 
 	it("phase precedence review > error > syncing > paused > idle", () => {
 		const phase = (pair: ShellPair, live: Partial<NativePairRuntime> | null) =>
-			mergeOverview(host, live === null ? [] : [runtimeOf(enginePair(), live)], [pair]).pairs[0]?.phase
+			mergeOverview(host, live === null ? [] : [runtimeOf(enginePair(), live)], [pair], null).pairs[0]?.phase
 
 		expect(phase(shellPair({ state: "review" }), { lastError: "boom", syncing: true, paused: true })).toBe("review")
 		expect(phase(shellPair(), { lastError: "boom", syncing: true, paused: true })).toBe("error")
+		// An unreachable server is no error; paused, the pause is what shows.
+		expect(phase(shellPair(), { lastError: "connect", halted: "offline" })).toBe("offline")
+		expect(phase(shellPair(), { lastError: "connect", halted: "offline", paused: true })).toBe("paused")
+		expect(phase(shellPair(), { lastError: "connect", halted: "offline", syncing: true })).toBe("syncing")
+		expect(phase(shellPair(), { stage: { kind: "waitingForCloud" } })).toBe("waitingForCloud")
+		expect(
+			phase(shellPair(), { stage: { kind: "indexing", entries: 1, filesToHash: 1, bytesToHash: 1, filesHashed: 0, bytesHashed: 0 } })
+		).toBe("indexing")
 		expect(phase(shellPair(), { syncing: true, paused: true })).toBe("syncing")
 		expect(phase(shellPair(), { paused: true })).toBe("paused")
 		expect(phase(shellPair(), {})).toBe("idle")
@@ -168,10 +174,14 @@ describe("mergeOverview", () => {
 			issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
 			degraded: { local: true, remote: false }
 		})
-		const overview = mergeOverview(host, [live], [shellPair({ paused: true, notices: ["refusedLocalOverlap"] })])
+		const overview = mergeOverview(host, [live], [shellPair({ paused: true, notices: ["refusedLocalOverlap"] })], {
+			dropped: 1,
+			merged: 0
+		})
 
 		expect(overview).toEqual({
 			host,
+			importNote: { dropped: 1, merged: 0 },
 			pairs: [
 				{
 					id: "1",
@@ -187,11 +197,36 @@ describe("mergeOverview", () => {
 					lastError: null,
 					issues: { conflicts: 1, heldDeletions: 0, unsyncable: 2, failed: 0 },
 					degraded: { local: true, remote: false },
+					stage: null,
+					halted: null,
+					refused: null,
 					review: null,
-					notices: ["refusedLocalOverlap"]
+					notices: ["refusedLocalOverlap"],
+					rootProblem: null,
+					holds: [],
+					info: []
 				}
 			]
 		})
+	})
+})
+
+describe("a crash between adding a pair to the engine and pausing it", () => {
+	it("holds the pair back at the next start and gives it its engine id", () => {
+		// What attach stored before addPair: the engine adds pairs unpaused.
+		const stored = shellPair({ pairId: null, legacyUuid: LEGACY, state: "preparing" })
+		const state = {
+			version: 1,
+			pairs: [stored, shellPair({ pairId: "2", remoteRoot: REMOTE_B })],
+			legacyApplied: true,
+			importNote: null
+		} as const
+
+		expect(heldRemotes({ ...state, pairs: [...state.pairs] })).toEqual([REMOTE_A])
+
+		const { pairs } = reconcileMirror([stored], [enginePair({ id: "5", paused: false })], { reset: false, now: 0 })
+
+		expect(pairs).toEqual([{ ...stored, pairId: "5" }])
 	})
 })
 
@@ -211,47 +246,18 @@ describe("sync store", () => {
 	it("drops an invalid pair alone and starts empty on a damaged file", () => {
 		const warn = vi.fn()
 		const state = parseSyncState(
-			JSON.stringify({ version: 1, pairs: [shellPair(), { ...shellPair(), pairId: 5 }], legacyApplied: true }),
+			JSON.stringify({ version: 1, pairs: [shellPair(), { ...shellPair(), pairId: 5 }], legacyApplied: true, importNote: null }),
 			warn
 		)
 
-		expect(state).toEqual({ version: 1, pairs: [shellPair()], legacyApplied: true })
+		expect(state).toEqual({ version: 1, pairs: [shellPair()], legacyApplied: true, importNote: null })
 		expect(warn).toHaveBeenCalledTimes(1)
-		expect(parseSyncState("{", warn)).toEqual({ version: 1, pairs: [], legacyApplied: false })
-		expect(parseSyncState(JSON.stringify({ version: 2, pairs: [] }), warn)).toEqual({ version: 1, pairs: [], legacyApplied: false })
-		expect(parseSyncState(null, warn)).toEqual({ version: 1, pairs: [], legacyApplied: false })
-	})
 
-	it("reads what earlier builds wrote: the old trash notice and findings go, an account-root pair waits for its directory again", () => {
-		const warn = vi.fn()
-		const accountRoot = {
-			...shellPair({ pairId: null, legacyUuid: LEGACY }),
-			state: "unsupported",
-			notices: ["localTrashDropped", "accountRootUnsupported"]
-		}
-		const trash = { ...shellPair({ pairId: "2", legacyUuid: REMOTE_C }), notices: ["localTrashMoved", "refusedLocalOverlap"] }
-		const reviewed = {
-			...shellPair({ pairId: "3", legacyUuid: REMOTE_A, state: "review" }),
-			review: { reason: "migrated", findings: ["conflicts", "newlySynced", "dotFilesPerPair"], summary: null }
-		}
-		const refused = shellPair({ pairId: null, legacyUuid: REMOTE_B, state: "unsupported", notices: ["refusedRemoteMissing"] })
-		const state = parseSyncState(
-			JSON.stringify({ version: 1, pairs: [accountRoot, trash, reviewed, refused], legacyApplied: true }),
-			warn
-		)
+		const empty = { version: 1, pairs: [], legacyApplied: false, importNote: null }
 
-		expect(state.pairs).toEqual([
-			shellPair({ pairId: null, legacyUuid: LEGACY, state: "waitingForRoot" }),
-			shellPair({ pairId: "2", legacyUuid: REMOTE_C, notices: ["refusedLocalOverlap"] }),
-			shellPair({
-				pairId: "3",
-				legacyUuid: REMOTE_A,
-				state: "review",
-				review: { reason: "migrated", findings: ["conflicts"], summary: null }
-			}),
-			refused
-		])
-		expect(warn).not.toHaveBeenCalled()
+		expect(parseSyncState("{", warn)).toEqual(empty)
+		expect(parseSyncState(JSON.stringify({ version: 2, pairs: [] }), warn)).toEqual(empty)
+		expect(parseSyncState(null, warn)).toEqual(empty)
 	})
 
 	it("writes updates in order and reads them back", async () => {
@@ -273,7 +279,10 @@ describe("sync store", () => {
 	})
 
 	it("keeps the state when a write fails", async () => {
-		await writeFile(path.join(dir, "shell.json"), JSON.stringify({ version: 1, pairs: [shellPair()], legacyApplied: false }))
+		await writeFile(
+			path.join(dir, "shell.json"),
+			JSON.stringify({ version: 1, pairs: [shellPair()], legacyApplied: false, importNote: null })
+		)
 
 		const store = await loadSyncStore(file, vi.fn())
 		const failing: AtomicFile = { ...file, write: () => Promise.reject(new Error("EIO")) }

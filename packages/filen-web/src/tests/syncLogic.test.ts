@@ -9,7 +9,11 @@ import {
 	aggregateSyncState,
 	conflictDetailKey,
 	FINDING_KEY,
+	HALT_KEY,
 	HELD_REASON_KEY,
+	HOLD_KEY,
+	INFO_NOTICE_KEY,
+	isRootRuleFile,
 	isLargePlan,
 	MODE_DESCRIPTION_KEY,
 	MODE_DIRECTION,
@@ -23,7 +27,8 @@ import {
 	PHASE_KEY,
 	PLAN_LIST_KEY,
 	planListsWithEntries,
-	REFUSAL_KEY
+	REFUSAL_KEY,
+	SCAN_GAP_KEY
 } from "@/features/sync/lib/syncStatus.logic"
 
 const CATALOG: Record<string, string> = sync
@@ -51,7 +56,13 @@ const PAIR: DesktopSyncPair = {
 	issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
 	degraded: { local: false, remote: false },
 	review: null,
-	notices: []
+	notices: [],
+	stage: null,
+	halted: null,
+	refused: null,
+	rootProblem: null,
+	holds: [],
+	info: []
 }
 
 const SUMMARY: DesktopSyncPlanSummary = {
@@ -67,7 +78,7 @@ const SUMMARY: DesktopSyncPlanSummary = {
 }
 
 function overview(pairs: DesktopSyncPair[], host: DesktopSyncOverview["host"] = { state: "running" }): DesktopSyncOverview {
-	return { host, pairs }
+	return { host, pairs, importNote: null }
 }
 
 describe("sync copy", () => {
@@ -131,11 +142,33 @@ describe("sync copy", () => {
 	})
 
 	it("maps every phase, mode, notice, finding, held reason, refusal, list, action and unsyncable reason", () => {
-		expectAllKeysExist(PHASE_KEY, ["idle", "syncing", "paused", "preparing", "review", "waitingForRoot", "unsupported", "error"])
+		expectAllKeysExist(PHASE_KEY, [
+			"idle",
+			"syncing",
+			"paused",
+			"preparing",
+			"review",
+			"waitingForRoot",
+			"unsupported",
+			"error",
+			"waitingForCloud",
+			"indexing",
+			"offline"
+		])
 		expectAllKeysExist(MODE_KEY, [...MODES])
 		expectAllKeysExist(MODE_DESCRIPTION_KEY, [...MODES])
 		expectAllKeysExist(MODE_SHORT_KEY, [...MODES])
-		expectAllKeysExist(NOTICE_KEY, ["refusedLocalRoot", "refusedRemoteMissing", "refusedLocalOverlap", "refusedRemoteOverlap"])
+		expectAllKeysExist(NOTICE_KEY, [
+			"refusedLocalRoot",
+			"refusedRemoteMissing",
+			"refusedLocalOverlap",
+			"refusedRemoteOverlap",
+			"refusedModeConflict"
+		])
+		expectAllKeysExist(HOLD_KEY, ["ruleFileUnwritable", "ruleFileUndecodable", "driveRoot", "cloudListingSlow"])
+		expectAllKeysExist(INFO_NOTICE_KEY, ["localTrashNowOn"])
+		expectAllKeysExist(HALT_KEY, ["localStorageFull", "remoteStorageFull", "offline"])
+		expectAllKeysExist(SCAN_GAP_KEY, ["unreadable", "changedDuringScan", "nonUtf8Name"])
 		expectAllKeysExist(FINDING_KEY, ["uploads", "downloads", "conflicts", "heldDeletions", "refused", "unconverged", "overwrites"])
 		expectAllKeysExist(HELD_REASON_KEY, [
 			"scanIncomplete",
@@ -221,12 +254,27 @@ describe("aggregateSyncState", () => {
 		expect(aggregateSyncState(overview([PAIR], { state: "failed", reason: "keychainLocked" }))).toBe("attention")
 	})
 
-	it("is idle for paused and up-to-date pairs", () => {
+	it("is idle for paused, up-to-date and offline pairs", () => {
 		expect(aggregateSyncState(overview([PAIR, { ...PAIR, id: "2", phase: "paused" }]))).toBe("idle")
+		expect(aggregateSyncState(overview([{ ...PAIR, phase: "offline", halted: "offline", lastError: "connect" }]))).toBe("idle")
+		expect(aggregateSyncState(overview([{ ...PAIR, phase: "preparing", holds: ["cloudListingSlow"] }]))).toBe("idle")
+	})
+
+	it("asks for attention for a refusal and a hold that waits for the user", () => {
+		expect(aggregateSyncState(overview([{ ...PAIR, refused: "localCollision" }]))).toBe("attention")
+
+		for (const hold of ["driveRoot", "ruleFileUnwritable", "ruleFileUndecodable"] as const) {
+			expect(aggregateSyncState(overview([{ ...PAIR, phase: "preparing", holds: [hold] }]))).toBe("attention")
+		}
 	})
 })
 
 describe("sync status helpers", () => {
+	it("tells the pair's own rule file from other conflicts", () => {
+		expect(isRootRuleFile({ relPath: ".filenignore" })).toBe(true)
+		expect(isRootRuleFile({ relPath: "docs/.filenignore" })).toBe(false)
+	})
+
 	it("asks for the backlog only when leaving a backup mode", () => {
 		expect(modeChangeNeedsBacklog("localBackup", "twoWay")).toBe(true)
 		expect(modeChangeNeedsBacklog("remoteBackup", "localBackup")).toBe(true)

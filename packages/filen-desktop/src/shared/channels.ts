@@ -59,11 +59,16 @@ export const SYNC_CALLS = [
 	"heldDeletions",
 	"approveDeletions",
 	"retryPath",
+	"retryAll",
+	"unsyncablePaths",
 	"ignoredPaths",
 	"userIgnore",
 	"setUserIgnore",
 	"reveal",
 	"dismissNotice",
+	"holdAction",
+	"dismissInfo",
+	"dismissImportNote",
 	"retryHost"
 ] as const satisfies readonly (keyof DesktopSync)[]
 

@@ -1,10 +1,10 @@
-import type { SyncPairInfo } from "@filen/sdk-rs"
+import type { DeleteGuardState, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
 import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
 import type { Convergence } from "./convergence.ts"
 import { classify, clip, HostError, invalidIgnore } from "./errors.ts"
-import { checkPlan, type OverwriteTarget } from "./planCheck.ts"
-import { heldReason, planPage, type PlanRegistry, toAction, toConflict, toIgnored, toSummary } from "./plans.ts"
+import { checkPlan } from "./planCheck.ts"
+import { heldReason, planPage, type PlanRegistry, toAction, toConflict, toIgnored, toScanGap, toSummary, toUnsyncable } from "./plans.ts"
 import type { RuntimeFeed } from "./reducer.ts"
 
 // How long a dry run (or awaitConverged) waits for the cache to converge on the pair's remote root: well inside main's
@@ -29,10 +29,33 @@ export interface HostEngine {
 	ops: OpHandlers
 	// Reads the pairs back from the engine; every change to them goes through here.
 	refreshPairs(): Promise<SyncPairInfo[]>
-	// Starts a watch for every listed pair that runs and has none, a failure reported per pair; resolves with the pairs.
-	watchAll(onError: (error: unknown) => void): Promise<SyncPairInfo[]>
+	// Pauses the pairs main holds back (by remote root, which no two pairs share), then starts a watch for every listed pair that runs and has none, a
+	// failure reported per pair; resolves with the pairs.
+	watchAll(holdRemotes: readonly string[], onError: (error: unknown) => void): Promise<SyncPairInfo[]>
 	// A watch ended (stopped, or its pair removed).
 	watchEnded(pairId: bigint): void
+	// A pass ended, with its report (none for a pass that failed): lifts the migrated guard once it is no longer needed.
+	passEnded(pairId: bigint, report: SyncPassReport | null): Promise<void>
+}
+
+// The guard a migrated pair runs on (setMigratedGuard): every deletion held.
+const MIGRATED_GUARD = { floor: 0n, ratio: 0 }
+// The engine's guard for a new pair, which a migrated one gets back.
+const DEFAULT_GUARD = { floor: 10n, ratio: 0.5 }
+
+function isMigratedGuard(guard: DeleteGuardState | undefined): boolean {
+	return guard?.tag === "Limited" && guard.inner.floor === MIGRATED_GUARD.floor && guard.inner.ratio === MIGRATED_GUARD.ratio
+}
+
+// Whether a pass left nothing behind: it ran whole and held no deletion.
+function settled(report: SyncPassReport): boolean {
+	return (
+		report.heldDeletions === 0n &&
+		report.passError === undefined &&
+		report.refused === undefined &&
+		!report.paused &&
+		report.interrupted === 0n
+	)
 }
 
 export function toNativePair(sdk: NativeSdk, info: SyncPairInfo): NativePair {
@@ -41,11 +64,12 @@ export function toNativePair(sdk: NativeSdk, info: SyncPairInfo): NativePair {
 		localRoot: info.localRoot,
 		remoteRoot: info.remoteRoot,
 		mode: modeName(sdk, info.mode),
-		paused: info.paused
+		paused: info.paused,
+		firstPassCompleted: info.firstPassCompleted
 	}
 }
 
-const NO_HELD = { passToken: null, reason: null, total: 0, entries: [] }
+const NO_HELD = { passToken: null, reason: null, total: 0, entries: [], gaps: [], gapsTotal: 0 }
 
 // One handler per protocol op. Pair ids arrive as validated decimal strings and become the engine's bigints here; a
 // pair the engine does not list is `pairNotFound` before any engine call.
@@ -53,6 +77,8 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 	const { sdk, engine, feed, plans } = ctx
 	// The pairs with a watch this process started; the engine owns the watches themselves.
 	const watched = new Set<string>()
+	// The pairs whose held conflicts were counted once (a pass this process saw counts them afterwards).
+	const seeded = new Set<string>()
 	let defaults: string[] | null = null
 
 	async function refreshPairs(): Promise<SyncPairInfo[]> {
@@ -60,7 +86,30 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 		feed.setPairs(infos)
 
+		const fresh = infos.filter(info => !seeded.has(info.id.toString()))
+
+		for (const info of fresh) {
+			seeded.add(info.id.toString())
+		}
+
+		// The count only; read from the baseline, no network.
+		await Promise.all(
+			fresh.map(async info => {
+				try {
+					feed.seedConflicts(info.id.toString(), Number((await engine.listConflicts(info.id, 0n, 0n)).total))
+				} catch (error) {
+					const failure = classify(sdk, error)
+
+					ctx.log.warn(`sync: conflicts not counted: ${failure === "unauthenticated" ? failure : failure.code}`)
+				}
+			})
+		)
+
 		return infos
+	}
+
+	function isStale(error: unknown): boolean {
+		return sdk.FilenSdkError.hasInner(error) && sdk.FilenSdkError.getInner(error).kind() === sdk.ErrorKind.StaleState
 	}
 
 	function held(pairId: string): { id: bigint; info: SyncPairInfo } {
@@ -80,20 +129,6 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 	function converged(info: SyncPairInfo): Promise<boolean> {
 		return ctx.convergence.awaitConverged(info.remoteRoot, ctx.convergenceTimeoutMs ?? CONVERGENCE_TIMEOUT_MS, ctx.signal)
-	}
-
-	// Where a one-way pair's transfers land; null for a two-way one.
-	function overwriteTarget(info: SyncPairInfo): OverwriteTarget | null {
-		switch (modeName(sdk, info.mode)) {
-			case "localToRemote":
-			case "localBackup":
-				return { side: "remote" }
-			case "remoteToLocal":
-			case "remoteBackup":
-				return { side: "local", localRoot: info.localRoot }
-			case "twoWay":
-				return null
-		}
 	}
 
 	async function changed(): Promise<null> {
@@ -127,8 +162,12 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			return { pairId: id.toString() }
 		},
 		removePair: async ({ pairId }) => {
-			await engine.removePair(held(pairId).id)
+			const { id, info } = held(pairId)
+
+			await engine.removePair(id)
 			watched.delete(pairId)
+			seeded.delete(pairId)
+			ctx.convergence.forget(info.remoteRoot)
 
 			return changed()
 		},
@@ -158,13 +197,17 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			return changed()
 		},
-		// A paused pair without a watch gets its pass when it resumes.
+		// A paused pair gets its pass when it resumes.
 		requestPass: async ({ pairId }) => {
 			const { id, info } = held(pairId)
 
+			if (info.paused) {
+				return null
+			}
+
 			if (watched.has(pairId)) {
 				await engine.requestPass(id)
-			} else if (!info.paused) {
+			} else {
 				await watch(id)
 			}
 
@@ -178,14 +221,26 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 				return { status: "unconverged" }
 			}
 
-			const plan = await engine.planPair(id)
+			let plan
+
+			try {
+				plan = await engine.planPair(id)
+			} catch (error) {
+				// The listing started over since: not ready yet.
+				if (isStale(error)) {
+					return { status: "unconverged" }
+				}
+
+				throw error
+			}
+
 			const planId = plans.put(plan)
 
 			return {
 				status: "ok",
 				planId,
 				summary: toSummary(sdk, plan.summary()),
-				check: check === undefined ? null : await checkPlan(plan, check.overwrites ? overwriteTarget(info) : null)
+				check: check === true ? checkPlan(sdk, plan) : null
 			}
 		},
 		planPage: async ({ planId, list, offset, limit }) => {
@@ -230,7 +285,9 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 						passToken: report.deletionToken ?? null,
 						reason: heldReason(report.guard),
 						total: Number(report.heldTotal),
-						entries: report.held.map(action => toAction(sdk, action))
+						entries: report.held.map(action => toAction(sdk, action)),
+						gaps: report.scanGaps.map(toScanGap),
+						gapsTotal: Number(report.scanGapsTotal)
 					}
 		},
 		// The approval only covers the next pass, so one runs now.
@@ -249,6 +306,29 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			await engine.retryPath(held(pairId).id, relPath)
 
 			return null
+		},
+		retryAll: async ({ pairId }) => {
+			const { id, info } = held(pairId)
+
+			await engine.retryAll(id)
+
+			if (watched.has(pairId) && !info.paused) {
+				await engine.requestPass(id)
+			}
+
+			return null
+		},
+		unsyncablePaths: async ({ pairId, offset, limit }) => {
+			const report = await engine.lastReport(held(pairId).id)
+
+			return report === undefined
+				? null
+				: { total: Number(report.unsyncableTotal), entries: report.unsyncable.slice(offset, offset + limit).map(toUnsyncable) }
+		},
+		setMigratedGuard: async ({ pairId }) => {
+			await engine.setDeleteGuard(held(pairId).id, MIGRATED_GUARD.floor, MIGRATED_GUARD.ratio)
+
+			return changed()
 		},
 		// From the last pass's report, which keeps the first 1000.
 		ignoredPaths: async ({ pairId, offset, limit }) => {
@@ -280,8 +360,16 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 	return {
 		ops,
 		refreshPairs,
-		watchAll: async onError => {
-			const infos = await refreshPairs()
+		watchAll: async (holdRemotes, onError) => {
+			const hold = new Set(holdRemotes.map(root => root.toLowerCase()))
+			let infos = await refreshPairs()
+			const unpaused = infos.filter(info => !info.paused && hold.has(info.remoteRoot.toLowerCase()))
+
+			// A crash between adding such a pair and pausing it left it running; its first pass waits for main.
+			if (unpaused.length > 0) {
+				await Promise.all(unpaused.map(info => engine.pausePair(info.id, undefined)))
+				infos = await refreshPairs()
+			}
 
 			await Promise.all(
 				infos.filter(info => !info.paused && !watched.has(info.id.toString())).map(info => watch(info.id).catch(onError))
@@ -291,6 +379,21 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		},
 		watchEnded: pairId => {
 			watched.delete(pairId.toString())
+		},
+		passEnded: async (pairId, report) => {
+			const key = pairId.toString()
+
+			if (report === null || !settled(report) || !isMigratedGuard(feed.pair(key)?.deleteGuard)) {
+				return
+			}
+
+			const info = (await refreshPairs()).find(entry => entry.id === pairId)
+
+			if (info?.firstPassCompleted === true && isMigratedGuard(info.deleteGuard)) {
+				await engine.setDeleteGuard(pairId, DEFAULT_GUARD.floor, DEFAULT_GUARD.ratio)
+				await refreshPairs()
+				ctx.log.info(`sync: pair ${key} synced cleanly; its deletions are guarded as usual again`)
+			}
 		}
 	}
 }

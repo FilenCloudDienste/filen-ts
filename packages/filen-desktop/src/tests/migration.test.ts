@@ -17,7 +17,7 @@ import {
 	withoutFeature
 } from "../main/migration.ts"
 import type { VaultCipher } from "../main/sessionVault.ts"
-import { applyLegacySync, type LegacySyncDeps } from "../main/sync/legacyPairs.ts"
+import { applyLegacySync, LEGACY_BUILTIN_RULES, type LegacySyncDeps } from "../main/sync/legacyPairs.ts"
 import type { SessionRead } from "../shared/channels.ts"
 import { fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
 
@@ -29,6 +29,7 @@ function marker(overrides: Partial<MigrationMarker> = {}): MigrationMarker {
 		failedStarts: 1,
 		startedAt: 0,
 		stashOnly: false,
+		volatileStash: false,
 		userId: 123456,
 		importedAt: 0,
 		wiped: false,
@@ -225,7 +226,7 @@ function setup(
 		prefs: { set: vi.fn(() => Promise.resolve()) },
 		launchesAtLogin: vi.fn(() => false),
 		applyLaunchAtLogin: vi.fn(() => Promise.resolve()),
-		writeStash: vi.fn((_text: string) => Promise.resolve()),
+		writeStash: vi.fn((_text: string) => Promise.resolve(true)),
 		now: () => state.now,
 		info: vi.fn(),
 		warn: vi.fn()
@@ -240,6 +241,35 @@ type Deps = ReturnType<typeof setup>["deps"]
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
 describe("createMigration", () => {
+	it("without secure storage, reads the stash again on every launch, never giving up, until the wait ran out", async () => {
+		const first = setup()
+
+		first.deps.writeStash.mockResolvedValue(false)
+		await first.migration.start()
+
+		expect(first.stored()).toMatchObject({ stage: "started", failedStarts: 0, stashOnly: true, volatileStash: true, userId: 123456 })
+		// Its pairs and mounts are applied for the account it read.
+		expect(legacyOwner(first.stored())).toBe("123456")
+
+		for (let launch = 0; launch < MAX_FAILED_STARTS + 1; launch++) {
+			const next = setup({ marker: first.stored() ?? undefined, now: 1000 + launch })
+
+			next.deps.writeStash.mockResolvedValue(false)
+			await next.migration.start()
+
+			// The stash only: the session, PIN and prefs were imported the first time.
+			expect(next.deps.writeStash).toHaveBeenCalledTimes(1)
+			expect(next.deps.prefs.set).not.toHaveBeenCalled()
+			expect(next.stored()).toMatchObject({ stage: "started", failedStarts: 0 })
+		}
+
+		const late = setup({ marker: first.stored() ?? undefined, now: 1000 + WIPE_AFTER_MS })
+
+		late.deps.writeStash.mockResolvedValue(false)
+		await late.migration.start()
+		expect(late.stored()).toMatchObject({ stage: "imported", volatileStash: false })
+	})
+
 	it("imports the session, stash, PIN and prefs, then waits for verification", async () => {
 		const { deps, migration, stored } = setup()
 
@@ -258,6 +288,7 @@ describe("createMigration", () => {
 			failedStarts: 1,
 			startedAt: 1000,
 			stashOnly: false,
+			volatileStash: false,
 			userId: 123456,
 			importedAt: 1000,
 			wiped: false,
@@ -643,9 +674,10 @@ function legacySetup(options: { pairs?: Parameters<typeof memoryStore>[0]; legac
 			return Promise.resolve()
 		})
 	}
-	const deps: LegacySyncDeps = { ...native.deps, stash }
+	const ignorers = new Map<string, string>()
+	const deps: LegacySyncDeps = { ...native.deps, legacyIgnorer: uuid => Promise.resolve(ignorers.get(uuid) ?? null), stash }
 
-	return { store, native, stash, deps }
+	return { store, native, stash, deps, ignorers }
 }
 
 describe("applyLegacySync", () => {
@@ -666,10 +698,27 @@ describe("applyLegacySync", () => {
 
 		expect(stash.consume).toHaveBeenCalledOnce()
 		expect(native.ops()).toEqual(["userIgnore", "setUserIgnore"])
-		expect(native.argsOf("setUserIgnore")).toEqual([{ text: ".*\n!/.filenignore\n" }])
+		expect(native.argsOf("setUserIgnore")).toEqual([{ text: `${LEGACY_BUILTIN_RULES.join("\n")}\n` }])
 	})
 
-	it("logs the pairs that used the old local trash instead of telling the user", async () => {
+	it("carries each pair's old ignore file and dot-file switch into its rules, and notes what it could not carry", async () => {
+		const { store, stash, deps, ignorers } = legacySetup()
+
+		ignorers.set("11111111-2222-4333-8444-555555555555", "*.bak\n")
+		const first = oldPair("11111111-2222-4333-8444-555555555555", "/nonexistent/a")
+
+		// One that is no pair, and one listed twice.
+		stash.pending.mockResolvedValue({ ...OLD_SYNC, syncPairs: [...OLD_SYNC.syncPairs, { ...first, uuid: "x" }, first] })
+		await applyLegacySync(deps)
+
+		expect(store.get().pairs.map(pair => pair.legacyRules)).toEqual([
+			["*.bak", ".*", "!/.filenignore"],
+			[".*", "!/.filenignore"]
+		])
+		expect(store.get().importNote).toEqual({ dropped: 1, merged: 1 })
+	})
+
+	it("tells the pairs that had the old local trash off about their bin", async () => {
 		const { store, stash, deps } = legacySetup()
 
 		stash.pending.mockResolvedValue({
@@ -681,8 +730,11 @@ describe("applyLegacySync", () => {
 		})
 		await applyLegacySync(deps)
 
-		expect(deps.log.info).toHaveBeenCalledWith("sync: 1 of them used the previous app's local trash")
-		expect(store.get().pairs.map(pair => pair.notices)).toEqual([[], []])
+		expect(store.get().pairs.map(pair => [pair.notices, pair.info])).toEqual([
+			[[], []],
+			[[], ["localTrashNowOn"]]
+		])
+		expect(store.get().importNote).toBeNull()
 	})
 
 	it("keeps the stash and records nothing while the device-wide ignore cannot be set", async () => {
@@ -739,6 +791,21 @@ const STASH: LegacyStash = {
 }
 
 describe("stash store", () => {
+	it("says whether the stash was stored, keeping it for this run without secure storage", async () => {
+		const stored = memoryFile()
+		const kept = memoryFile()
+
+		await expect(createStashStore(stored, () => Promise.resolve(fakeCipher()), vi.fn()).write(JSON.stringify(STASH))).resolves.toBe(
+			true
+		)
+
+		const volatile = createStashStore(kept, () => Promise.resolve(null), vi.fn())
+
+		await expect(volatile.write(JSON.stringify(STASH))).resolves.toBe(false)
+		expect(kept.text()).toBeNull()
+		expect(await volatile.pending("1001", "sync")).toEqual(OLD_SYNC)
+	})
+
 	it("consumes one user's part of a feature and deletes the stash once empty", async () => {
 		const file = memoryFile(`enc:${JSON.stringify(STASH)}`)
 		const store = createStashStore(file, () => Promise.resolve(fakeCipher()), vi.fn())

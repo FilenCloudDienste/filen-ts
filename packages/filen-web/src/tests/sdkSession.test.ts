@@ -211,11 +211,16 @@ const unusedSync: DesktopSync = {
 	heldDeletions: unused,
 	approveDeletions: unused,
 	retryPath: unused,
+	retryAll: unused,
+	unsyncablePaths: unused,
 	ignoredPaths: unused,
 	userIgnore: unused,
 	setUserIgnore: unused,
 	reveal: unused,
 	dismissNotice: unused,
+	holdAction: unused,
+	dismissInfo: unused,
+	dismissImportNote: unused,
 	retryHost: () => undefined,
 	onOpenPair: () => () => undefined
 }

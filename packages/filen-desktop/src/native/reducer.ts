@@ -1,5 +1,11 @@
-import type { SyncPairInfo, SyncPassEvent, SyncPassReport, WatchStatus } from "@filen/sdk-rs"
-import type { DesktopSyncIssueCounts, DesktopSyncTransfer } from "@filen/shared/desktop"
+import type { ErrorKind, HaltReason, SyncPairInfo, SyncPassEvent, SyncPassReport, WatchStatus } from "@filen/sdk-rs"
+import type {
+	DesktopSyncHalt,
+	DesktopSyncIssueCounts,
+	DesktopSyncRefusal,
+	DesktopSyncStage,
+	DesktopSyncTransfer
+} from "@filen/shared/desktop"
 import {
 	type FromNative,
 	type NativeActivity,
@@ -9,6 +15,7 @@ import {
 } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk } from "./addon.ts"
 import { clip } from "./errors.ts"
+import { refusal } from "./plans.ts"
 
 // How often at most the host reports what changed: overview pushes stay at 4 Hz however fast the engine emits.
 export const FEED_INTERVAL_MS = 250
@@ -29,9 +36,15 @@ export interface PairRuntime {
 	degraded: { local: boolean; remote: boolean }
 	// The action in flight: reported once the next one begins or the pass completes, or as failed on its ActionFailed.
 	pending: NativeActivity | null
+	// Before a pass starts: waiting for the cloud listing, or reading the local directory.
+	stage: DesktopSyncStage | null
+	halted: DesktopSyncHalt | null
+	refused: DesktopSyncRefusal | null
+	// A pass completed in this process, so `issues` are its counts.
+	reported: boolean
 }
 
-export function createPairRuntime(info?: SyncPairInfo): PairRuntime {
+export function createPairRuntime(info?: SyncPairInfo, sdk?: NativeSdk): PairRuntime {
 	const status = info?.watchStatus
 
 	return {
@@ -40,10 +53,18 @@ export function createPairRuntime(info?: SyncPairInfo): PairRuntime {
 		done: 0,
 		transfers: [],
 		lastSyncedAt: info?.lastPassCompletedAtMs === undefined ? null : Number(info.lastPassCompletedAtMs),
-		lastError: info?.lastPassError === undefined ? null : clip(info.lastPassError),
+		// A pass that only found the cloud listing unfinished is not ready yet, no error.
+		lastError:
+			info?.lastPassError === undefined || (sdk !== undefined && info.lastPassErrorKind === sdk.ErrorKind.StaleState)
+				? null
+				: clip(info.lastPassError),
 		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
 		degraded: { local: status?.localEventsDegraded !== undefined, remote: status?.remoteEventsDegraded !== undefined },
-		pending: null
+		pending: null,
+		stage: null,
+		halted: sdk !== undefined && info?.lastPassErrorKind === sdk.ErrorKind.Reqwest ? "offline" : null,
+		refused: null,
+		reported: false
 	}
 }
 
@@ -52,6 +73,33 @@ export interface Reduced {
 	activity: NativeActivity[]
 	// A pass failed because the server no longer takes the session.
 	authFailed: boolean
+	// The passes that ended, with the report of each that completed.
+	ended: { pairId: bigint; report: SyncPassReport | null }[]
+}
+
+// Unauthenticated is the sign-out flow's, not a state the pair shows.
+function halt(sdk: NativeSdk, reason: HaltReason | undefined): DesktopSyncHalt | null {
+	if (reason === undefined) {
+		return null
+	}
+
+	switch (reason) {
+		case sdk.HaltReason.LocalStorageFull:
+			return "localStorageFull"
+		case sdk.HaltReason.RemoteStorageFull:
+			return "remoteStorageFull"
+		case sdk.HaltReason.RemoteUnavailable:
+			return "offline"
+		case sdk.HaltReason.Unauthenticated:
+			return null
+		default:
+			return reason satisfies never
+	}
+}
+
+// A pass that failed because the server could not be reached (a lock request among them) is offline, whatever halted.
+function offlineKind(sdk: NativeSdk, kind: ErrorKind | undefined): DesktopSyncHalt | null {
+	return kind === sdk.ErrorKind.Reqwest ? "offline" : null
 }
 
 const BEGIN_KINDS = {
@@ -98,6 +146,7 @@ function endPass(runtime: PairRuntime): void {
 	runtime.done = 0
 	runtime.transfers = []
 	runtime.pending = null
+	runtime.stage = null
 }
 
 // Adds a transfer in front, replacing an older entry for the same file.
@@ -114,18 +163,10 @@ function started(runtime: PairRuntime, transfer: DesktopSyncTransfer): void {
 // becomes activity, and what reaches main is the coalesced state.
 export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, events: readonly SyncPassEvent[]): Reduced {
 	const activity: NativeActivity[] = []
+	const ended: Reduced["ended"] = []
 	let authFailed = false
-	let changed = false
 
 	for (const { pairId: id, emittedAtMs, event } of events) {
-		// A local walk's progress and a wait for the remote listing come before the pass's PassStarted and change
-		// nothing the host shows, so they never cost an overview push.
-		if (event.tag === "Scanning" || event.tag === "AwaitingRemote") {
-			continue
-		}
-
-		changed = true
-
 		const pairId = id.toString()
 		const at = Number(emittedAtMs)
 		let runtime = state.get(pairId)
@@ -136,9 +177,32 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 		}
 
 		switch (event.tag) {
+			case "AwaitingRemote":
+				runtime.stage = { kind: "waitingForCloud" }
+				break
+			case "Scanning": {
+				const { progress } = event.inner
+
+				runtime.stage = {
+					kind: "indexing",
+					entries: Number(progress.entries),
+					filesToHash: Number(progress.filesToHash),
+					bytesToHash: Number(progress.bytesToHash),
+					filesHashed: Number(progress.filesHashed),
+					bytesHashed: Number(progress.bytesHashed)
+				}
+				break
+			}
 			case "PassStarted":
 				endPass(runtime)
 				runtime.syncing = true
+
+				// The pass that tries the server again: its own end says how it went.
+				if (runtime.halted === "offline") {
+					runtime.halted = null
+					runtime.lastError = null
+				}
+
 				break
 			case "Planned":
 				runtime.planned = Number(event.inner.actions)
@@ -220,6 +284,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				runtime.transfers = []
 				break
 			case "Refused":
+				// Its reason is the report's `refused`.
 				break
 			case "PassCompleted": {
 				const { report } = event.inner
@@ -228,13 +293,17 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				endPass(runtime)
 				runtime.lastSyncedAt = at
 				runtime.lastError = report.passError === undefined ? null : clip(report.passError)
+				runtime.halted = halt(sdk, report.halted) ?? offlineKind(sdk, report.passErrorKind)
+				runtime.refused = refusal(sdk, report.refused)
+				runtime.reported = true
 				runtime.issues = {
 					conflicts: Number(report.conflictsTotal),
 					heldDeletions: Number(report.heldDeletions),
 					unsyncable: Number(report.unsyncableTotal),
 					failed: Number(report.errorsTotal)
 				}
-				authFailed ||= report.passErrorKind === sdk.ErrorKind.Unauthenticated
+				authFailed ||= report.passErrorKind === sdk.ErrorKind.Unauthenticated || report.halted === sdk.HaltReason.Unauthenticated
+				ended.push({ pairId: id, report })
 
 				// A safety-net pass that found nothing to do is no news.
 				if (applied(report) || report.passError !== undefined) {
@@ -245,22 +314,37 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 			}
 			case "PassFailed":
 				endPass(runtime)
+				ended.push({ pairId: id, report: null })
+
+				// The cloud listing did not finish in time: not ready yet. The engine tries again on its own, and the pair
+				// keeps waiting for the cloud until a pass starts.
+				if (event.inner.kind === sdk.ErrorKind.StaleState) {
+					runtime.stage = { kind: "waitingForCloud" }
+					break
+				}
+
 				runtime.lastError = clip(event.inner.error)
+				runtime.halted = offlineKind(sdk, event.inner.kind)
 				authFailed ||= event.inner.kind === sdk.ErrorKind.Unauthenticated
 				activity.push({ pairId, at, kind: "passFailed", detail: runtime.lastError })
 				break
 		}
 	}
 
-	return { changed, activity, authFailed }
+	return { changed: events.length > 0, activity, authFailed, ended }
 }
 
 // A watch's status, published after every pass and when it starts or ends.
 export function reduceWatchStatus(sdk: NativeSdk, runtime: PairRuntime, status: WatchStatus): { authFailed: boolean } {
 	runtime.degraded = { local: status.localEventsDegraded !== undefined, remote: status.remoteEventsDegraded !== undefined }
 
-	if (status.lastError !== undefined) {
+	// A cloud listing that did not finish in time is not ready yet, no error.
+	if (status.lastError !== undefined && status.lastErrorKind !== sdk.ErrorKind.StaleState) {
 		runtime.lastError = clip(status.lastError)
+
+		if (status.lastErrorKind === sdk.ErrorKind.Reqwest) {
+			runtime.halted = "offline"
+		}
 	}
 
 	if (status.state === sdk.WatchState.Stopped || status.state === sdk.WatchState.PairRemoved) {
@@ -284,18 +368,32 @@ export function runtimeOf(sdk: NativeSdk, info: SyncPairInfo, runtime: PairRunti
 		lastSyncedAt: runtime.lastSyncedAt,
 		lastError: runtime.lastError,
 		issues: runtime.issues,
-		degraded: runtime.degraded
+		degraded: runtime.degraded,
+		stage: runtime.stage,
+		halted: runtime.halted,
+		refused: runtime.refused
 	}
 }
 
+// Being offline is no attention: the engine backs off and syncs once the server is back. The failures such a pass
+// reports are the outage's (the error and the work it held back), so they are none either.
 function needsAttention(runtime: PairRuntime): boolean {
-	return runtime.lastError !== null || runtime.issues.conflicts > 0 || runtime.issues.heldDeletions > 0
+	const { issues } = runtime
+	const offline = runtime.halted === "offline"
+
+	return (
+		(runtime.lastError !== null && !offline) ||
+		runtime.refused !== null ||
+		issues.conflicts + issues.heldDeletions + issues.unsyncable + (offline ? 0 : issues.failed) > 0
+	)
 }
 
 export interface RuntimeFeed {
 	// The engine's pairs as listPairs reads them; a pair's runtime lives while it is listed.
 	setPairs(infos: readonly SyncPairInfo[]): void
 	pair(pairId: string): SyncPairInfo | undefined
+	// The pair's held conflicts, counted before this process saw a pass of it.
+	seedConflicts(pairId: string, conflicts: number): void
 	events(events: readonly SyncPassEvent[]): void
 	watchStatus(pairId: bigint, status: WatchStatus): void
 	subscribe(on: boolean): void
@@ -306,7 +404,11 @@ export interface RuntimeFeed {
 // last one (always), the aggregate when it changed, and the overview while main is subscribed.
 export function createRuntimeFeed(
 	sdk: NativeSdk,
-	deps: { post(message: FromNative): void; onAuthFailed(): void },
+	deps: {
+		post(message: FromNative): void
+		onAuthFailed(): void
+		onPassEnded(pairId: bigint, report: SyncPassReport | null): void
+	},
 	intervalMs = FEED_INTERVAL_MS
 ): RuntimeFeed {
 	const infos = new Map<string, SyncPairInfo>()
@@ -328,7 +430,7 @@ export function createRuntimeFeed(
 		let runtime = state.get(pairId)
 
 		if (runtime === undefined) {
-			runtime = createPairRuntime(infos.get(pairId))
+			runtime = createPairRuntime(infos.get(pairId), sdk)
 			state.set(pairId, runtime)
 		}
 
@@ -390,6 +492,15 @@ export function createRuntimeFeed(
 			schedule()
 		},
 		pair: pairId => infos.get(pairId),
+		seedConflicts: (pairId, conflicts) => {
+			const runtime = state.get(pairId)
+
+			if (runtime !== undefined && !runtime.reported && runtime.issues.conflicts !== conflicts) {
+				runtime.issues = { ...runtime.issues, conflicts }
+				dirty = true
+				schedule()
+			}
+		},
 		events: events => {
 			const reduced = reduceEvents(sdk, state, events)
 
@@ -403,6 +514,11 @@ export function createRuntimeFeed(
 
 			if (reduced.authFailed) {
 				deps.onAuthFailed()
+			}
+
+			for (const { pairId, report } of reduced.ended) {
+				deps.post({ t: "passEnded", pairId: pairId.toString() })
+				deps.onPassEnded(pairId, report)
 			}
 
 			if (reduced.changed) {

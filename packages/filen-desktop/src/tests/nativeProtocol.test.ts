@@ -33,7 +33,10 @@ const runtime = {
 	lastSyncedAt: null,
 	lastError: null,
 	issues: { conflicts: 0, heldDeletions: 2, unsyncable: 0, failed: 0 },
-	degraded: { local: false, remote: false }
+	degraded: { local: false, remote: false },
+	stage: null,
+	halted: null,
+	refused: null
 }
 
 const TUNING: DesktopVfsTuning = { cacheMaxGiB: 32, cacheMinFreeGiB: 16, cacheMaxAgeHours: 720, dirCacheSeconds: 15 }
@@ -97,7 +100,7 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	setMode: { pairId: "1", mode: "twoWay", backlog: "adoptDestination" },
 	requestPass: { pairId: "1" },
 	awaitConverged: { pairId: "1" },
-	evaluatePlan: { pairId: "1", check: { overwrites: true } },
+	evaluatePlan: { pairId: "1", check: true },
 	planPage: { planId: "p1", list: "held", offset: 0, limit: 1000 },
 	releasePlan: { planId: "p1" },
 	conflicts: { pairId: "1", offset: 0, limit: 200 },
@@ -105,6 +108,9 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	heldDeletions: { pairId: "1" },
 	approveDeletions: { pairId: "1", passToken: "token" },
 	retryPath: { pairId: "1", relPath: "d/a.txt" },
+	retryAll: { pairId: "1" },
+	unsyncablePaths: { pairId: "1", offset: 0, limit: 1000 },
+	setMigratedGuard: { pairId: "1" },
 	ignoredPaths: { pairId: "1", offset: 0, limit: 1 },
 	userIgnore: {},
 	setUserIgnore: { text: ".*\n!/.filenignore\n" },
@@ -122,7 +128,8 @@ describe("toNativeSchema", () => {
 				addonPath: "/app/native/sdk-rs.node",
 				dir: "/data/sync-engine/1",
 				session: "{}",
-				logLevel: "Info"
+				logLevel: "Info",
+				holdRemotes: [UUID]
 			})
 		).toBe(true)
 		expect(accepts(toNativeSchema, { t: "subscribe", overview: true, mounts: false })).toBe(true)
@@ -138,7 +145,7 @@ describe("toNativeSchema", () => {
 		expect(accepts(toNativeSchema, call("deleteEverything", {}))).toBe(false)
 		expect(accepts(toNativeSchema, { ...call("pause", { pairId: "1" }), extra: 1 })).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: "1", extra: 1 }))).toBe(false)
-		expect(accepts(toNativeSchema, call("evaluatePlan", { pairId: "1", check: { overwrites: true, more: 1 } }))).toBe(false)
+		expect(accepts(toNativeSchema, call("evaluatePlan", { pairId: "1", check: { overwrites: true } }))).toBe(false)
 		expect(accepts(toNativeSchema, { t: "shutdown", now: true })).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: 1 }))).toBe(false)
 		expect(accepts(toNativeSchema, call("pause", { pairId: "1n" }))).toBe(false)
@@ -148,7 +155,12 @@ describe("toNativeSchema", () => {
 		expect(accepts(toNativeSchema, call("addPair", { localRoot: "/x", remoteRoot: UUID, mode: "mirror" }))).toBe(false)
 		expect(accepts(toNativeSchema, call("planPage", { planId: "p1", list: "held", offset: 0, limit: 1001 }))).toBe(false)
 		expect(accepts(toNativeSchema, { ...call("pause", { pairId: "1" }), id: 1.5 })).toBe(false)
-		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "", logLevel: "Info" })).toBe(false)
+		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "", logLevel: "Info", holdRemotes: [] })).toBe(
+			false
+		)
+		expect(
+			accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "{}", logLevel: "Info", holdRemotes: ["/x"] })
+		).toBe(false)
 		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "{}", logLevel: "Trace" })).toBe(false)
 	})
 
@@ -169,14 +181,27 @@ describe("fromNativeSchema", () => {
 		const messages = [
 			{
 				t: "ready",
-				pairs: [{ id: "1", localRoot: "/Users/u/Documents", remoteRoot: UUID, mode: "twoWay", paused: true }],
+				pairs: [
+					{ id: "1", localRoot: "/Users/u/Documents", remoteRoot: UUID, mode: "twoWay", paused: true, firstPassCompleted: false }
+				],
 				reset: false
 			},
 			{ t: "reply", id: 1, ok: true, value: null },
 			{ t: "reply", id: 1, ok: false, error: { code: "invalidIgnore", line: 3 } },
 			{ t: "reply", id: 1, ok: false, error: { code: "localRootNested", pairId: "2", message: "nested" } },
 			{ t: "overview", pairs: [runtime] },
+			{ t: "overview", pairs: [{ ...runtime, stage: { kind: "waitingForCloud" }, halted: "offline", refused: "localCollision" }] },
+			{
+				t: "overview",
+				pairs: [
+					{
+						...runtime,
+						stage: { kind: "indexing", entries: 9, filesToHash: 3, bytesToHash: 30, filesHashed: 1, bytesHashed: 10 }
+					}
+				]
+			},
 			{ t: "aggregate", state: "attention" },
+			{ t: "passEnded", pairId: "1" },
 			{
 				t: "activity",
 				entries: [

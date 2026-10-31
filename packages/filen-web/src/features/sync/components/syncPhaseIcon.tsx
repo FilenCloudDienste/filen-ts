@@ -3,6 +3,9 @@ import {
 	CircleAlertIcon,
 	CircleCheckIcon,
 	CirclePauseIcon,
+	CloudOffIcon,
+	CloudDownloadIcon,
+	FolderSearchIcon,
 	FolderXIcon,
 	HourglassIcon,
 	ListChecksIcon,
@@ -20,7 +23,10 @@ const PHASE_ICON: Record<DesktopSyncPhase, { icon: typeof BanIcon; className: st
 	review: { icon: ListChecksIcon, className: "text-warning-foreground" },
 	waitingForRoot: { icon: FolderXIcon, className: "text-warning-foreground" },
 	unsupported: { icon: BanIcon, className: "text-muted-foreground" },
-	error: { icon: CircleAlertIcon, className: "text-destructive" }
+	error: { icon: CircleAlertIcon, className: "text-destructive" },
+	waitingForCloud: { icon: CloudDownloadIcon, className: "text-muted-foreground" },
+	indexing: { icon: FolderSearchIcon, className: "text-primary" },
+	offline: { icon: CloudOffIcon, className: "text-muted-foreground" }
 }
 
 // A pair's phase at a glance. An idle pair with open issues shows the warning instead of the check: it is up to

@@ -24,7 +24,13 @@ function pair(id: string, name: string, transfers: DesktopSyncPair["transfers"])
 		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
 		degraded: { local: false, remote: false },
 		review: null,
-		notices: []
+		notices: [],
+		stage: null,
+		halted: null,
+		refused: null,
+		rootProblem: null,
+		holds: [],
+		info: []
 	}
 }
 

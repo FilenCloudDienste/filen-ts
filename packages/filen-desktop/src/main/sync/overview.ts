@@ -1,4 +1,10 @@
-import type { DesktopSyncHostState, DesktopSyncOverview, DesktopSyncPair, DesktopSyncPhase } from "@filen/shared/desktop"
+import type {
+	DesktopSyncHostState,
+	DesktopSyncImportNote,
+	DesktopSyncOverview,
+	DesktopSyncPair,
+	DesktopSyncPhase
+} from "@filen/shared/desktop"
 import type { NativePairRuntime } from "../../shared/nativeProtocol.ts"
 import { shellPairId } from "./mirror.ts"
 import type { ShellPair } from "./store.ts"
@@ -6,18 +12,31 @@ import type { ShellPair } from "./store.ts"
 const NO_ISSUES = { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 }
 const NOT_DEGRADED = { local: false, remote: false }
 
-// What needs the user first wins: review, then a failing pair, then activity.
+// What needs the user first wins: review, then an unreachable server, a failing pair, then activity.
 function phaseOf(pair: ShellPair, live: NativePairRuntime | undefined, paused: boolean): DesktopSyncPhase {
 	if (pair.state !== "active") {
 		return pair.state
 	}
 
-	if (live !== undefined && live.lastError !== null) {
+	if (live === undefined) {
+		return paused ? "paused" : "idle"
+	}
+
+	// A pass that tries the server again shows as syncing.
+	if (live.halted === "offline") {
+		return live.syncing ? "syncing" : paused ? "paused" : "offline"
+	}
+
+	if (live.lastError !== null) {
 		return "error"
 	}
 
-	if (live?.syncing === true) {
+	if (live.syncing) {
 		return "syncing"
+	}
+
+	if (live.stage !== null && !paused) {
+		return live.stage.kind
 	}
 
 	return paused ? "paused" : "idle"
@@ -28,12 +47,14 @@ function phaseOf(pair: ShellPair, live: NativePairRuntime | undefined, paused: b
 export function mergeOverview(
 	host: DesktopSyncHostState,
 	runtime: readonly NativePairRuntime[],
-	pairs: readonly ShellPair[]
+	pairs: readonly ShellPair[],
+	importNote: DesktopSyncImportNote | null
 ): DesktopSyncOverview {
 	const live = new Map(runtime.map(entry => [entry.id, entry]))
 
 	return {
 		host,
+		importNote,
 		pairs: pairs.map((pair): DesktopSyncPair => {
 			const entry = pair.pairId === null ? undefined : live.get(pair.pairId)
 			const paused = entry?.paused ?? pair.paused
@@ -52,8 +73,14 @@ export function mergeOverview(
 				lastError: entry?.lastError ?? null,
 				issues: entry?.issues ?? NO_ISSUES,
 				degraded: entry?.degraded ?? NOT_DEGRADED,
+				stage: entry?.stage ?? null,
+				halted: entry?.halted ?? null,
+				refused: entry?.refused ?? null,
 				review: pair.review,
-				notices: pair.notices
+				notices: pair.notices,
+				rootProblem: pair.rootProblem,
+				holds: pair.holds,
+				info: pair.info
 			}
 		})
 	}

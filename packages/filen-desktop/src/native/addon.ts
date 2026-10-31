@@ -15,6 +15,8 @@ export type NativeSdk = Pick<
 	| "LogLevel"
 	| "PauseMode"
 	| "PlannedNodeKind"
+	| "PlannedTransfer"
+	| "HaltReason"
 	| "RefuseReason"
 	| "TransferDirection"
 	| "SyncEventMessage_Tags"

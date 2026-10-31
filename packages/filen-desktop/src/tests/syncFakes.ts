@@ -5,7 +5,7 @@ import type { FirstRunDeps } from "../main/sync/firstRun.ts"
 import type { ShellPair, ShellSyncState, SyncStore } from "../main/sync/store.ts"
 
 export function memoryStore(pairs: ShellPair[] = [], legacyApplied = false): SyncStore {
-	let state: ShellSyncState = { version: 1, pairs, legacyApplied }
+	let state: ShellSyncState = { version: 1, pairs, legacyApplied, importNote: null }
 
 	return {
 		get: () => state,
@@ -31,6 +31,39 @@ export const CLEAN_SUMMARY: NativePlanSummary = {
 	passToken: null
 }
 
+// Reserved directories no test root is near.
+export const ROOT_CONTEXT = {
+	platform: process.platform,
+	home: "/nonexistent-home",
+	appData: [],
+	temporary: [],
+	mountPoints: [],
+	oneDrive: []
+}
+
+// The shell's record of a pair, with what a test changes.
+export function shellPair(overrides: Partial<ShellPair> = {}): ShellPair {
+	return {
+		pairId: null,
+		name: "Sync",
+		localRoot: "/Users/me/Sync",
+		remoteRoot: "6b1f0d2e-3c4a-4b5d-8e9f-0a1b2c3d4e5f",
+		mode: "twoWay",
+		paused: false,
+		state: "active",
+		review: null,
+		legacyUuid: null,
+		legacyRules: null,
+		notices: [],
+		rootProblem: null,
+		holds: [],
+		wholeDriveConfirmed: false,
+		info: [],
+		createdAt: 0,
+		...overrides
+	}
+}
+
 // An answer that fails the call with `code`.
 export class Refusal {
 	readonly code: DesktopSyncErrorCode
@@ -54,6 +87,7 @@ export function fakeNative(store: SyncStore, answers: Answers = {}) {
 		removePair: () => null,
 		releasePlan: () => null,
 		awaitConverged: () => true,
+		setMigratedGuard: () => null,
 		evaluatePlan: () => ({
 			status: "ok",
 			planId: "plan",
@@ -72,6 +106,10 @@ export function fakeNative(store: SyncStore, answers: Answers = {}) {
 		call: call as unknown as FirstRunDeps["call"],
 		store,
 		now: () => 5,
+		rootContext: () => Promise.resolve(ROOT_CONTEXT),
+		driveRoot: null,
+		listingRounds: new Map(),
+		starting: vi.fn(),
 		log: { info: vi.fn(), warn: vi.fn() }
 	}
 

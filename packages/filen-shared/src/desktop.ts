@@ -154,18 +154,66 @@ export type DesktopSyncHostState =
 	| { state: "failed"; reason: "crashLoop" | "addonMissing" | "baselineInUse" | "keychainLocked" }
 
 // `preparing`: a pair moved from the previous app, waiting for the cloud directory to be read before it starts.
-export type DesktopSyncPhase = "idle" | "syncing" | "paused" | "preparing" | "review" | "waitingForRoot" | "unsupported" | "error"
+// `waitingForCloud`: a pass waits for the cloud directory's listing; `indexing`: a pass reads the local directory;
+// `offline`: the last pass could not reach the server.
+export type DesktopSyncPhase =
+	| "idle"
+	| "syncing"
+	| "paused"
+	| "preparing"
+	| "review"
+	| "waitingForRoot"
+	| "unsupported"
+	| "error"
+	| "waitingForCloud"
+	| "indexing"
+	| "offline"
 
 // Why the engine refused for good a pair it had to add (a migrated one, or one a baseline reset lost): the local
 // directory cannot be a root, the cloud directory is gone, or the pair overlaps another one on this device or in the
-// cloud. The pair is kept (not synced) until the notice is dismissed, which removes it.
-export type DesktopSyncNotice = "refusedLocalRoot" | "refusedRemoteMissing" | "refusedLocalOverlap" | "refusedRemoteOverlap"
+// cloud, or another pair has the same directories. The pair is kept (not synced) until the notice is dismissed, which
+// removes it. With `refusedLocalRoot`, the pair's `rootProblem` says why.
+export type DesktopSyncNotice =
+	| "refusedLocalRoot"
+	| "refusedRemoteMissing"
+	| "refusedLocalOverlap"
+	| "refusedRemoteOverlap"
+	| "refusedModeConflict"
+
+// Why a pair moved from the previous app waits (preparing) for the user: its root .filenignore cannot be written or
+// read as text, it syncs the whole drive (started only on request), or the cloud directory's listing is slow.
+export type DesktopSyncHold = "ruleFileUnwritable" | "ruleFileUndecodable" | "driveRoot" | "cloudListingSlow"
+
+// The holds that wait for the user; a slow cloud listing clears by itself.
+export const SYNC_ATTENTION_HOLDS: ReadonlySet<DesktopSyncHold> = new Set(["ruleFileUnwritable", "ruleFileUndecodable", "driveRoot"])
+
+// What a hold offers: `retry` tries again now, `startAnyway` starts a drive-root pair.
+export type DesktopSyncHoldAction = "retry" | "startAnyway"
+
+// Told once, dismissed for good: the pair now keeps replaced and deleted local files in its bin.
+export type DesktopSyncInfoNotice = "localTrashNowOn"
+
+// Why a pass held back part of its work: a side out of room, or the server out of reach.
+export type DesktopSyncHalt = "localStorageFull" | "remoteStorageFull" | "offline"
+
+// What a pass does before it starts: waits for the cloud listing, or reads the local directory. The "to hash" figures
+// grow as the read goes.
+export type DesktopSyncStage =
+	| { kind: "waitingForCloud" }
+	| { kind: "indexing"; entries: number; filesToHash: number; bytesToHash: number; filesHashed: number; bytesHashed: number }
+
+// Pairs of the previous app that could not be read, and duplicates merged into one.
+export interface DesktopSyncImportNote {
+	dropped: number
+	merged: number
+}
 
 // Why deletions were held back for approval.
 export type DesktopSyncHeldReason =
 	"scanIncomplete" | "firstSyncWithDeletions" | "remoteUnconverged" | "remoteEmptied" | "exceededThreshold"
 
-// Why a pass applies nothing: two items on one side resolve to the same path.
+// Why a pass applies nothing: two items on one side resolve to the same path (only a mode switch adopting the
+// destination across such a pair refuses).
 export type DesktopSyncRefusal = "remoteCollision" | "localCollision"
 
 // What a dry run would do.
@@ -224,13 +272,20 @@ export interface DesktopSyncPair {
 	issues: DesktopSyncIssueCounts
 	// A watcher fell back to periodic full passes.
 	degraded: { local: boolean; remote: boolean }
+	stage: DesktopSyncStage | null
+	halted: DesktopSyncHalt | null
+	refused: DesktopSyncRefusal | null
 	review: DesktopSyncReview | null
 	notices: DesktopSyncNotice[]
+	rootProblem: DesktopSyncRootProblem | null
+	holds: DesktopSyncHold[]
+	info: DesktopSyncInfoNotice[]
 }
 
 export interface DesktopSyncOverview {
 	host: DesktopSyncHostState
 	pairs: DesktopSyncPair[]
+	importNote: DesktopSyncImportNote | null
 }
 
 export type DesktopSyncActivityKind =
@@ -323,12 +378,23 @@ export type DesktopSyncPlanPage =
 	| { list: "unsyncable"; total: number; entries: DesktopSyncUnsyncable[] }
 	| { list: "ignored"; total: number; entries: DesktopSyncIgnored[] }
 
-// The deletions the last pass held back, and the token that approves exactly them.
+// A path the local read could not vouch for, which holds every deletion of the pass. `kind` is the I/O error kind
+// (such as "PermissionDenied") of an unreadable one.
+export interface DesktopSyncScanGap {
+	relPath: string
+	cause: "unreadable" | "changedDuringScan" | "nonUtf8Name"
+	kind: string | null
+}
+
+// The deletions the last pass held back, the token that approves exactly them, and the paths that left its read
+// incomplete (the first 100 of `gapsTotal`).
 export interface DesktopSyncHeldDeletions {
 	passToken: string | null
 	reason: DesktopSyncHeldReason | null
 	total: number
 	entries: DesktopSyncPlanAction[]
+	gaps: DesktopSyncScanGap[]
+	gapsTotal: number
 }
 
 export type DesktopSyncErrorCode =
@@ -445,6 +511,14 @@ export interface DesktopSync {
 	heldDeletions(pairId: string): Promise<DesktopSyncResult<DesktopSyncHeldDeletions>>
 	approveDeletions(pairId: string, passToken: string): Promise<DesktopSyncResult<null>>
 	retryPath(pairId: string, relPath: string): Promise<DesktopSyncResult<null>>
+	// Every path that kept failing is tried again on a pass that starts now.
+	retryAll(pairId: string): Promise<DesktopSyncResult<null>>
+	// From the last pass this run saw; null before one, when only a dry run (plan) lists them.
+	unsyncablePaths(
+		pairId: string,
+		offset: number,
+		limit: number
+	): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncUnsyncable> | null>>
 	ignoredPaths(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncIgnored>>>
 	userIgnore(): Promise<DesktopSyncResult<DesktopSyncUserIgnore>>
 	// Rejected as `invalidIgnore` with the first bad line.
@@ -452,6 +526,9 @@ export interface DesktopSync {
 	// Opens the pair's directory, or its bin: where the engine moves replaced and deleted local files.
 	reveal(pairId: string, target: "root" | "bin"): Promise<DesktopSyncResult<null>>
 	dismissNotice(pairId: string, notice: DesktopSyncNotice): Promise<void>
+	holdAction(pairId: string, action: DesktopSyncHoldAction): Promise<DesktopSyncResult<null>>
+	dismissInfo(pairId: string, notice: DesktopSyncInfoNotice): Promise<void>
+	dismissImportNote(): Promise<void>
 	// Starts the native host again after it failed.
 	retryHost(): void
 	// A pair to show, from a clicked notification. Calls back with what was asked before subscribing.

@@ -20,6 +20,8 @@ import type {
 	DesktopSyncPlanList,
 	DesktopSyncPlanPage,
 	DesktopSyncPlanSummary,
+	DesktopSyncScanGap,
+	DesktopSyncStage,
 	DesktopSyncTransfer,
 	DesktopSyncUnsyncable,
 	DesktopVfsTuning
@@ -123,8 +125,8 @@ const pairFields = {
 	paused: "boolean"
 } as const
 
-// A pair as the engine holds it.
-const nativePairSchema = type({ ...pairFields, "+": "reject" })
+// A pair as the engine holds it. `firstPassCompleted`: a pass of it completed cleanly (persisted by the engine).
+const nativePairSchema = type({ ...pairFields, firstPassCompleted: "boolean", "+": "reject" })
 
 export type NativePair = typeof nativePairSchema.infer
 
@@ -140,6 +142,20 @@ const issueCountsSchema = pinned<DesktopSyncIssueCounts>()(
 	type({ conflicts: countSchema, heldDeletions: countSchema, unsyncable: countSchema, failed: countSchema, "+": "reject" })
 )
 
+const stageSchema = pinned<DesktopSyncStage>()(
+	type({ kind: "'waitingForCloud'", "+": "reject" }).or({
+		kind: "'indexing'",
+		entries: countSchema,
+		filesToHash: countSchema,
+		bytesToHash: countSchema,
+		filesHashed: countSchema,
+		bytesHashed: countSchema,
+		"+": "reject"
+	})
+)
+
+const refusalSchema = type("'remoteCollision' | 'localCollision'")
+
 // A pair plus what the host knows live about it.
 const nativePairRuntimeSchema = type({
 	...pairFields,
@@ -150,6 +166,9 @@ const nativePairRuntimeSchema = type({
 	lastError: textSchema.or("null"),
 	issues: issueCountsSchema,
 	degraded: type({ local: "boolean", remote: "boolean", "+": "reject" }),
+	stage: stageSchema.or("null"),
+	halted: type("'localStorageFull' | 'remoteStorageFull' | 'offline' | null"),
+	refused: refusalSchema.or("null"),
 	"+": "reject"
 })
 
@@ -179,7 +198,7 @@ const planSummaryFields = {
 	conflicts: countSchema,
 	unsyncable: countSchema,
 	ignored: countSchema,
-	refused: type("'remoteCollision' | 'localCollision' | null")
+	refused: refusalSchema.or("null")
 } as const
 
 // The summary plus the token that approves the deletions the plan holds.
@@ -237,12 +256,23 @@ const planPageSchema = pinned<DesktopSyncPlanPage>()(
 		.or({ list: "'ignored'", total: countSchema, entries: ignoredSchema.array(), "+": "reject" })
 )
 
+const scanGapSchema = pinned<DesktopSyncScanGap>()(
+	type({
+		relPath: relPathSchema,
+		cause: "'unreadable' | 'changedDuringScan' | 'nonUtf8Name'",
+		kind: textSchema.or("null"),
+		"+": "reject"
+	})
+)
+
 const heldDeletionsSchema = pinned<DesktopSyncHeldDeletions>()(
 	type({
 		passToken: passTokenSchema.or("null"),
 		reason: heldReasonSchema.or("null"),
 		total: countSchema,
 		entries: planActionSchema.array(),
+		gaps: scanGapSchema.array().atMostLength(100),
+		gapsTotal: countSchema,
 		"+": "reject"
 	})
 )
@@ -261,8 +291,8 @@ const pageArgs = type({ pairId: pairIdSchema, offset: countSchema, limit: pageLi
 const done = type("null")
 
 // What evaluatePlan found. `check` (only when asked for): the first-run guard's scan of the plan's actions. The summary's
-// action count includes the adoptions that transfer nothing, so the scan counts the uploads and downloads. With
-// `overwrites`, a one-way pair's transfers onto paths its destination may already hold (null for a two-way pair).
+// action count includes the adoptions that transfer nothing, so the scan counts the uploads and downloads, and
+// `overwrites` the transfers that replace a file their destination holds.
 const evaluationSchema = type({ status: "'unconverged'", "+": "reject" }).or({
 	status: "'ok'",
 	planId: planIdSchema,
@@ -270,7 +300,7 @@ const evaluationSchema = type({ status: "'unconverged'", "+": "reject" }).or({
 	check: type({
 		uploads: countSchema,
 		downloads: countSchema,
-		overwrites: type({ files: countSchema, bytes: countSchema, "+": "reject" }).or("null"),
+		overwrites: type({ files: countSchema, bytes: countSchema, "+": "reject" }),
 		"+": "reject"
 	}).or("null"),
 	"+": "reject"
@@ -295,7 +325,7 @@ export const SYNC_OPS = {
 	// Whether the cache has read the pair's cloud directory, waiting a while for it.
 	awaitConverged: { args: pairArgs, result: type("boolean") },
 	evaluatePlan: {
-		args: type({ pairId: pairIdSchema, "check?": type({ overwrites: "boolean", "+": "reject" }), "+": "reject" }),
+		args: type({ pairId: pairIdSchema, "check?": "boolean", "+": "reject" }),
 		result: evaluationSchema
 	},
 	planPage: {
@@ -317,6 +347,15 @@ export const SYNC_OPS = {
 	heldDeletions: { args: pairArgs, result: heldDeletionsSchema },
 	approveDeletions: { args: type({ pairId: pairIdSchema, passToken: passTokenSchema, "+": "reject" }), result: done },
 	retryPath: { args: type({ pairId: pairIdSchema, relPath: relPathArgSchema, "+": "reject" }), result: done },
+	// Clears every failure streak, then asks for a pass.
+	retryAll: { args: pairArgs, result: done },
+	// From the last pass's report (the first 1000); null before this host saw one.
+	unsyncablePaths: {
+		args: pageArgs,
+		result: type({ total: countSchema, entries: unsyncableSchema.array(), "+": "reject" }).or("null")
+	},
+	// Holds every deletion until a clean pass of the pair applied or held none; then the engine's default comes back.
+	setMigratedGuard: { args: pairArgs, result: done },
 	ignoredPaths: { args: pageArgs, result: type({ total: countSchema, entries: ignoredSchema.array(), "+": "reject" }) },
 	userIgnore: { args: noArgs, result: ignoreTextSchema },
 	setUserIgnore: { args: type({ text: ignoreTextSchema, "+": "reject" }), result: done },
@@ -538,6 +577,8 @@ export interface NativeInit {
 	// The vault's session blob; it never travels in the environment or argv.
 	session: string
 	logLevel: "Info" | "Debug"
+	// The remote roots of the pairs main holds back (preparing or in review): paused before any watch starts.
+	holdRemotes: string[]
 }
 
 export type NativeCall = { [K in NativeOp]: { t: "call"; id: number; op: K; args: NativeOpArgs<K> } }[NativeOp]
@@ -552,6 +593,7 @@ const initSchema = pinned<NativeInit>()(
 		dir: localPathSchema,
 		session: type("string > 0").atMostLength(SESSION_BLOB_MAX_LENGTH),
 		logLevel: "'Info' | 'Debug'",
+		holdRemotes: type("string.uuid").array(),
 		"+": "reject"
 	})
 )
@@ -581,6 +623,7 @@ export type FromNative =
 	| { t: "overview"; pairs: NativePairRuntime[] }
 	| { t: "aggregate"; state: NativeAggregate }
 	| { t: "activity"; entries: NativeActivity[] }
+	| { t: "passEnded"; pairId: string }
 	| { t: "mounts"; status: NativeMountsStatus }
 	| { t: "mountsStats"; stats: DesktopMountsStats }
 	| { t: "authRevoked" }
@@ -594,6 +637,7 @@ export const fromNativeSchema = pinned<FromNative>()(
 		.or({ t: "'overview'", pairs: nativePairRuntimeSchema.array(), "+": "reject" })
 		.or({ t: "'aggregate'", state: "'idle' | 'syncing' | 'attention'", "+": "reject" })
 		.or({ t: "'activity'", entries: nativeActivitySchema.array(), "+": "reject" })
+		.or({ t: "'passEnded'", pairId: pairIdSchema, "+": "reject" })
 		.or({ t: "'mounts'", status: nativeMountsStatusSchema, "+": "reject" })
 		.or({ t: "'mountsStats'", stats: mountsStatsSchema, "+": "reject" })
 		.or({ t: "'authRevoked'", "+": "reject" })

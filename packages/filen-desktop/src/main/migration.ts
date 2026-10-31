@@ -21,7 +21,9 @@ import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 
 // The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where
 // it got to:
-//   started   a read began; `failedStarts` counts the attempts that never reached `imported`
+//   started   a read began; `failedStarts` counts the attempts that never reached `imported`. Without secure storage
+//             (`volatileStash`) a read that worked stays here: its stash lives in memory only, so every launch reads
+//             the stash again, until the wait for the wipe ran out
 //   imported  session, PIN, prefs and the stash are stored (only the stash when `stashOnly`); the old origin still
 //             holds its plaintext secrets
 //   abandoned the read failed too often; nothing is imported, the old secrets are still wiped once the wait ran out
@@ -38,9 +40,11 @@ export interface MigrationMarker {
 	failedStarts: number
 	// When the first attempt began (null: before it, or a marker older than the field).
 	startedAt: number | null
-	// The vault held a session before the first attempt (signed in to this app already): the session, PIN and prefs
-	// the user has here are left alone and only the stash is imported.
+	// The vault held a session before the first attempt (signed in to this app already), or an earlier attempt imported
+	// them already: the session, PIN and prefs the user has here are left alone and only the stash is imported.
 	stashOnly: boolean
+	// The stash could not be stored (no secure storage): it is read again on every launch.
+	volatileStash: boolean
 	// The old signed-in account, once imported (null: it had none).
 	userId: number | null
 	importedAt: number | null
@@ -61,6 +65,7 @@ const markerSchema = type({
 	failedStarts: "0 <= number.integer < 1000",
 	"startedAt?": type("number.integer >= 0").or("null"),
 	"stashOnly?": "boolean",
+	"volatileStash?": "boolean",
 	userId: type("1 < number.integer <= 9007199254740991").or("null"),
 	importedAt: type("number.integer >= 0").or("null"),
 	wiped: "boolean",
@@ -92,6 +97,7 @@ export function parseMarker(data: string | null): MigrationMarker | null {
 		failedStarts: marker.failedStarts,
 		startedAt: marker.startedAt ?? null,
 		stashOnly: marker.stashOnly ?? false,
+		volatileStash: marker.volatileStash ?? false,
 		userId: marker.userId,
 		importedAt: marker.importedAt,
 		wiped: marker.wiped,
@@ -107,6 +113,12 @@ export function serializeMarker(marker: MigrationMarker): string {
 // imported), undefined while the import has not got that far.
 export function legacyOwner(marker: MigrationMarker | null): string | null | undefined {
 	switch (marker?.stage) {
+		case "started":
+			if (!marker.volatileStash) {
+				return undefined
+			}
+
+			return marker.userId === null ? null : String(marker.userId)
 		case "imported":
 		case "verified":
 			return marker.userId === null ? null : String(marker.userId)
@@ -150,6 +162,7 @@ export function startupDecision(marker: MigrationMarker | null, legacyProfile: b
 		return "none"
 	}
 
+	// A read that worked resets the count, so only failed reads in a row give up.
 	if (marker.failedStarts >= MAX_FAILED_STARTS) {
 		return "abandon"
 	}
@@ -204,8 +217,8 @@ export interface MigrationDeps {
 	// The OS login item the old client registered.
 	launchesAtLogin(): boolean
 	applyLaunchAtLogin(enabled: boolean): Promise<void>
-	// Encrypted like the vault; where the vault keeps the session in memory only, so is this (not written).
-	writeStash(text: string): Promise<void>
+	// Encrypted like the vault; where the vault keeps the session in memory only, so is this (not written): false then.
+	writeStash(text: string): Promise<boolean>
 	now(): number
 	info(message: string): void
 	warn(message: string): void
@@ -271,7 +284,17 @@ export function createMigration(deps: MigrationDeps): Migration {
 	}
 
 	function fresh(stage: MigrationStage): MigrationMarker {
-		return { stage, failedStarts: 0, startedAt: null, stashOnly: false, userId: null, importedAt: null, wiped: false, purged: false }
+		return {
+			stage,
+			failedStarts: 0,
+			startedAt: null,
+			stashOnly: false,
+			volatileStash: false,
+			userId: null,
+			importedAt: null,
+			wiped: false,
+			purged: false
+		}
 	}
 
 	// Once the import is done or given up; a failure is tried again by the wipe.
@@ -315,16 +338,20 @@ export function createMigration(deps: MigrationDeps): Migration {
 		}
 
 		const userId = session.ok ? session.userId : null
-
-		await step(
+		const persisted = await step(
 			"stash",
 			async () => {
 				const stash = legacyStash(snapshot, userId)
 
-				if (stash !== null) {
-					await deps.writeStash(JSON.stringify(stash))
-					deps.info("migration: sync and mount settings stashed")
+				if (stash === null) {
+					return true
 				}
+
+				const stored = await deps.writeStash(JSON.stringify(stash))
+
+				deps.info("migration: sync and mount settings stashed")
+
+				return stored
 			},
 			SAFE_STORAGE
 		)
@@ -332,7 +359,19 @@ export function createMigration(deps: MigrationDeps): Migration {
 		const pinImported = stashOnly ? false : await importSettings(snapshot, session.ok)
 
 		await removeRcloneConfig()
-		await save({ ...(marker ?? fresh("started")), stage: "imported", userId, importedAt: deps.now() })
+
+		const current = marker ?? fresh("started")
+		const startedAt = current.startedAt ?? deps.now()
+
+		// The stash lives in this run only: read again next launch (the rest is imported), until the wait ran out.
+		if (!persisted && deps.now() - startedAt < WIPE_AFTER_MS) {
+			await save({ ...current, failedStarts: 0, stashOnly: true, volatileStash: true, userId })
+			deps.info("migration: no secure storage; the stash is read again next launch")
+
+			return { pinImported }
+		}
+
+		await save({ ...current, stage: "imported", volatileStash: false, userId, importedAt: deps.now() })
 
 		return { pinImported }
 	}
@@ -530,8 +569,8 @@ export function withoutFeature(stash: LegacyStash, userId: string, feature: Lega
 }
 
 export interface StashStore {
-	// Stores what the migration stashed; with no cipher it is kept for this run only.
-	write(text: string): Promise<void>
+	// Stores what the migration stashed; with no cipher it is kept for this run only (false).
+	write(text: string): Promise<boolean>
 	// The feature's old config for the user (PLAN §6 step 5), undefined when none is waiting.
 	pending(userId: string, feature: LegacyFeature): Promise<unknown>
 	// The user's part of the feature was applied: rewritten without it, deleted once empty.
@@ -570,18 +609,23 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 		return stash
 	}
 
-	async function store(stash: LegacyStash | null): Promise<void> {
+	// False when the stash is kept for this run only.
+	async function store(stash: LegacyStash | null): Promise<boolean> {
 		const active = await cipher()
+		let persisted = true
 
 		if (stash === null) {
 			await file.remove()
 		} else if (active === null) {
 			warn("migration: no secure storage; the stash is kept for this run only")
+			persisted = false
 		} else {
 			await file.write(await active.encrypt(JSON.stringify(stash)))
 		}
 
 		cached = stash
+
+		return persisted
 	}
 
 	return {
@@ -589,9 +633,7 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 			serial(async () => {
 				const stash = parseStash(text)
 
-				if (stash !== null) {
-					await store(stash)
-				}
+				return stash === null || (await store(stash))
 			}),
 		pending: (userId, feature) =>
 			serial(async () => {

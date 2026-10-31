@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { useShallow } from "zustand/shallow"
 import { replaceEqualDeep } from "@tanstack/react-query"
-import type { DesktopSync, DesktopSyncHostState, DesktopSyncOverview, DesktopSyncPair } from "@filen/shared/desktop"
+import type { DesktopSync, DesktopSyncHostState, DesktopSyncImportNote, DesktopSyncOverview, DesktopSyncPair } from "@filen/shared/desktop"
 import { desktopBridge } from "@/lib/desktop"
 import { log } from "@/lib/log"
 import { aggregateSyncState, type SyncAggregate } from "@/features/sync/lib/syncStatus.logic"
@@ -68,6 +68,10 @@ export function closeAddPair(): void {
 
 export function useSyncHost(): DesktopSyncHostState | null {
 	return useSyncStore(state => state.overview?.host ?? null)
+}
+
+export function useSyncImportNote(): DesktopSyncImportNote | null {
+	return useSyncStore(state => state.overview?.importNote ?? null)
 }
 
 // null while the first overview is in flight.

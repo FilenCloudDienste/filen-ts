@@ -54,6 +54,12 @@ export const sync = {
 	phaseUnsupported: "Can't be synced",
 	/** Pair phase — the last pass failed */
 	phaseError: "Error",
+	/** Pair phase — a pass waits for the cloud directory to be read */
+	phaseWaitingForCloud: "Waiting for the cloud",
+	/** Pair phase — a pass reads the local directory before syncing */
+	phaseIndexing: "Indexing",
+	/** Pair phase — the last pass couldn't reach the server */
+	phaseOffline: "Offline",
 
 	// ── Modes ───────────────────────────────────────────────────────────
 	/** Sync mode — two-way */
@@ -107,6 +113,12 @@ export const sync = {
 	tabSettings: "Settings",
 	/** Detail — progress of the running pass */
 	detailProgress: "{{done}} of {{total}}",
+	/** Detail — the local read before a pass; {{hashed}} of {{toHash}} files whose content is read, {{size}} read so far */
+	detailIndexing: "{{hashed}} of {{toHash}} files read ({{size}})",
+	/** Detail — the local read before a pass, before it found any file to read; {{count}} items listed */
+	detailIndexingListed_one: "{{count}} item found",
+	/** Detail — the local read before a pass, before it found any file to read; {{count}} items listed */
+	detailIndexingListed_other: "{{count}} items found",
 	/** Detail — when the last pass finished; {{time}} is relative ("5 minutes ago") */
 	detailLastSynced: "Last synced {{time}}",
 	/** Detail — the local watcher fell back to periodic passes */
@@ -146,8 +158,40 @@ export const sync = {
 		"Filen can't sync this pair: its directory on this device is, contains or is inside another pair's directory.",
 	/** Notice — the cloud directory overlaps another pair's */
 	noticeRefusedRemoteOverlap: "Filen can't sync this pair: its cloud directory is, contains or is inside another pair's cloud directory.",
+	/** Notice — the previous app had two pairs of the same directories in different modes */
+	noticeRefusedModeConflict: "Filen can't sync this pair: another pair syncs the same directories in another mode.",
 	/** Notice — remove the pair a refusal notice is about */
 	noticeRemove: "Remove pair",
+	/** Notice — the pair's bin is new to the user: the previous app kept no local trash for it */
+	infoLocalTrashNowOn:
+		"Files this pair replaces or deletes on this device now go to its bin first, where they stay for 30 days. The previous app deleted them right away.",
+	/** Notice — hide an informational notice for good */
+	syncNoticeDismiss: "Dismiss",
+	/** Notice — pairs of the previous app that couldn't be read */
+	importNoteDropped_one: "{{count}} pair from the previous version couldn't be read.",
+	/** Notice — pairs of the previous app that couldn't be read */
+	importNoteDropped_other: "{{count}} pairs from the previous version couldn't be read.",
+	/** Notice — pairs of the previous app with the same directories, merged into one */
+	importNoteMerged_one: "{{count}} duplicate pair from the previous version was merged.",
+	/** Notice — pairs of the previous app with the same directories, merged into one */
+	importNoteMerged_other: "{{count}} duplicate pairs from the previous version were merged.",
+
+	// ── Holds ───────────────────────────────────────────────────────────
+	/** Hold — the pair's root .filenignore can't be written */
+	holdRuleFileUnwritable:
+		"Filen can't write the ignore rules this pair had in the previous app to its .filenignore, so the pair waits. Make the directory writable, then try again.",
+	/** Hold — the pair's root .filenignore isn't text Filen can read */
+	holdRuleFileUndecodable:
+		"This pair's .filenignore isn't UTF-8 text, so Filen can't add the ignore rules the pair had in the previous app. Save it as UTF-8, then try again.",
+	/** Hold — the pair syncs the whole drive */
+	holdDriveRoot: "This pair syncs your whole drive, which can take a long time and a lot of memory. It starts when you start it.",
+	/** Hold — the cloud directory takes long to read; informational, Filen keeps going on its own */
+	holdCloudListingSlow:
+		"Still reading this directory in the cloud. Large directories can take a while; syncing starts on its own once it's read.",
+	/** Hold — try again now */
+	holdRetry: "Try again",
+	/** Hold — start a whole-drive pair */
+	holdStartAnyway: "Start anyway",
 
 	// ── Activity ────────────────────────────────────────────────────────
 	/** Activity — a file was uploaded */
@@ -202,6 +246,10 @@ export const sync = {
 	issuesFailed_other: "{{count}} items failed in the last sync. Filen tries them again in the next one.",
 	/** Issues — conflicts section */
 	issuesConflictsTitle: "Conflicts",
+	/** Issues — retry every item that failed */
+	issuesRetryAll: "Retry all",
+	/** Issues — the last pass was refused; the reason follows */
+	issuesRefused: "The last sync was refused.",
 	/** Issues — conflicts section description */
 	issuesConflictsDescription: "These changed on both sides. Choose which version to keep.",
 	/** Conflict — changed on both sides */
@@ -218,6 +266,9 @@ export const sync = {
 	conflictKeepBoth: "Keep both",
 	/** Toast — keep both renamed the local copy */
 	conflictKeptBoth: "Kept both. This device's copy is now {{path}}.",
+	/** Conflict — the pair's own .filenignore, after it stopped only downloading */
+	conflictRuleFileHint:
+		"This is the pair's .filenignore. Its copy on this device was never uploaded while the pair only downloaded; keep both to merge the rules by hand.",
 	/** Issues — held deletions section */
 	heldTitle: "Held deletions",
 	/** Issues — approve the held deletions */
@@ -242,6 +293,22 @@ export const sync = {
 	heldRemoteEmptied: "Filen held these deletions because the cloud directory was emptied.",
 	/** Held reason — too many at once */
 	heldExceededThreshold: "Filen held these deletions because there are unusually many at once.",
+	/** Held deletions — the paths the scan couldn't read, which held the deletions */
+	scanGapsTitle: "Not read in the last scan",
+	/** Held deletions — paths past the listed ones */
+	scanGapsMore: "and {{count}} more",
+	/** Scan gap — unreadable; {{kind}} is the system's error name */
+	scanGapUnreadable: "Couldn't be read ({{kind}}).",
+	/** Scan gap — changed while it was read */
+	scanGapChangedDuringScan: "Changed while Filen read it.",
+	/** Scan gap — a name that isn't valid UTF-8 */
+	scanGapNonUtf8Name: "Its name isn't valid text.",
+	/** Halt — the device ran out of room */
+	haltLocalStorageFull: "This device is out of space, so Filen held back what it would write.",
+	/** Halt — the account ran out of storage */
+	haltRemoteStorageFull: "Your Filen storage is full, so Filen held back what it would upload.",
+	/** Halt — the server couldn't be reached */
+	haltOffline: "Filen can't reach the server right now. It syncs again once it can.",
 	/** Issues — unsyncable section */
 	unsyncableTitle: "Can't be synced",
 	/** Unsyncable — retry one item */
@@ -260,9 +327,10 @@ export const sync = {
 	unsyncableLocalAlias: "Another name on this device refers to the same file.",
 	/** Unsyncable — another local item in its directory has the same name ignoring case or Unicode form */
 	unsyncableLocalNameCollision:
-		"Another item in its directory on this device has the same name when case is ignored. Rename one of them.",
+		"Another item in its directory on this device has the same name when case is ignored. Rename one of them; until then neither syncs or moves.",
 	/** Unsyncable — another cloud item in its directory has the same name ignoring case */
-	unsyncableRemoteNameCollision: "Another item in its cloud directory has the same name when case is ignored. Rename one of them.",
+	unsyncableRemoteNameCollision:
+		"Another item in its cloud directory has the same name when case is ignored. Rename one of them; until then neither syncs or moves.",
 	/** Paged lists — load the next page */
 	listLoadMore: "Load more",
 	/** Paged lists — load failure */

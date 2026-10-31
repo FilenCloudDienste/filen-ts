@@ -22,7 +22,13 @@ const PAIR: DesktopSyncPair = {
 	issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
 	degraded: { local: false, remote: false },
 	review: null,
-	notices: []
+	notices: [],
+	stage: null,
+	halted: null,
+	refused: null,
+	rootProblem: null,
+	holds: [],
+	info: []
 }
 
 describe("sync store", () => {
@@ -34,17 +40,18 @@ describe("sync store", () => {
 
 			return () => undefined
 		})
-		sync.overview.mockResolvedValue({ host: { state: "running" }, pairs: [] })
+		sync.overview.mockResolvedValue({ host: { state: "running" }, importNote: null, pairs: [] })
 
 		loadSync()
 		loadSync()
 		expect(sync.onOverview).toHaveBeenCalledTimes(1)
 
-		push({ host: { state: "running" }, pairs: [PAIR, { ...PAIR, id: "2", phase: "idle", progress: null }] })
+		push({ host: { state: "running" }, importNote: null, pairs: [PAIR, { ...PAIR, id: "2", phase: "idle", progress: null }] })
 		const first = useSyncStore.getState().overview
 
 		push({
 			host: { state: "running" },
+			importNote: null,
 			pairs: [
 				{ ...PAIR, progress: { done: 2, total: 4 } },
 				{ ...PAIR, id: "2", phase: "idle", progress: null }

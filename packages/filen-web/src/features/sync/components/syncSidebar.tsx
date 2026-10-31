@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
 import { SidebarNotice } from "@/components/sidebarNotice"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
-import { openAddPair, syncApi, useSyncHost, useSyncPairIds } from "@/features/sync/lib/syncStore"
+import { log } from "@/lib/log"
+import { openAddPair, syncApi, useSyncHost, useSyncImportNote, useSyncPairIds } from "@/features/sync/lib/syncStore"
 import { hostBanner } from "@/features/desktop/lib/hostBanner.logic"
 import { SyncPairRow } from "@/features/sync/components/syncPairRow"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
@@ -45,6 +46,41 @@ function HostBanner() {
 	)
 }
 
+// What the previous version's pairs lost on the way, told until dismissed for good.
+function ImportNote() {
+	const { t } = useTranslation("sync")
+	const note = useSyncImportNote()
+
+	if (note === null) {
+		return null
+	}
+
+	return (
+		<DesktopCallout
+			tone="info"
+			className="app-region-no-drag"
+			action={
+				<Button
+					variant="outline"
+					size="xs"
+					onClick={() => {
+						syncApi()
+							.dismissImportNote()
+							.catch((error: unknown) => {
+								log.warn("sync", "import note could not be dismissed", error)
+							})
+					}}
+				>
+					{t("syncNoticeDismiss")}
+				</Button>
+			}
+		>
+			{note.dropped > 0 ? <p>{t("importNoteDropped", { count: note.dropped })}</p> : null}
+			{note.merged > 0 ? <p>{t("importNoteMerged", { count: note.merged })}</p> : null}
+		</DesktopCallout>
+	)
+}
+
 // The Sync section's contextual sidebar: the host's state over the list of pairs, and the add-pair entry point.
 export function SyncSidebar() {
 	const { t } = useTranslation(["sync", "common"])
@@ -71,6 +107,7 @@ export function SyncSidebar() {
 					</Button>
 				</div>
 				<HostBanner />
+				<ImportNote />
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane">
 				{pairIds === null ? (

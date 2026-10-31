@@ -22,7 +22,7 @@ import {
 	type WebFrameMain
 } from "electron"
 import { existsSync, readFileSync } from "node:fs"
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { lookup } from "node:dns/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
@@ -72,11 +72,12 @@ import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./p
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
+import { parseSessionBlob } from "@filen/shared/session"
 import { createSessionVault, isSessionBlob, lazyCipher, removeIfUndecryptable, vaultMode, type VaultCipher } from "./sessionVault.ts"
 import { registerSyncIpc } from "./sync/ipc.ts"
 import { createRootTokens } from "./sync/localRoot.ts"
 import { createSyncService } from "./sync/service.ts"
-import { loadSyncStore, type SyncStore } from "./sync/store.ts"
+import { heldRemotes, loadSyncStore, type SyncStore } from "./sync/store.ts"
 import {
 	attentionPair,
 	attentionTransitions,
@@ -230,6 +231,22 @@ const migration = createMigration({
 	info,
 	warn
 })
+
+// The old client's ignore file of one of its pairs (its engine state beside it is never read); null when there is
+// none or it is no UTF-8 text.
+async function legacyIgnorer(uuid: string): Promise<string | null> {
+	try {
+		const bytes = await readFile(path.join(userDataPath, "sync", "ignorer", "v1", uuid, "filenIgnore"))
+
+		return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+	} catch (error) {
+		if (errorCode(error) !== "ENOENT") {
+			warn(`sync: a pair's old ignore file was not read: ${errorCode(error)}`)
+		}
+
+		return null
+	}
+}
 
 // Sync: one engine directory per user, never under the old client's userData/sync.
 const syncEngineRoot = path.join(userDataPath, "sync-engine")
@@ -396,6 +413,7 @@ const nativeSupervisor = createNativeSupervisor({
 			exists: existsSync
 		}),
 	dirFor: engineDir,
+	holdRemotes: async userId => heldRemotes((await syncStoreFor(userId)).get()),
 	demand: userId =>
 		anyDemand([
 			async () => (await syncStoreFor(userId)).hasPairs(),
@@ -478,7 +496,18 @@ const syncService = createSyncService({
 	shell: { openPath: target => shell.openPath(target) },
 	legacySync: {
 		pending: userId => migrationStash.pending(userId, "sync"),
-		consume: userId => migrationStash.consume(userId, "sync")
+		consume: userId => migrationStash.consume(userId, "sync"),
+		ignorer: uuid => legacyIgnorer(uuid)
+	},
+	driveRoot: async userId => {
+		const read = await sessionVault.get()
+		const session = read.status === "present" ? parseSessionBlob(read.blob) : null
+
+		return session !== null && String(session.userId) === userId ? session.rootUuid : null
+	},
+	onHeld: held => {
+		syncHeld = held
+		applyTray()
 	},
 	now: Date.now,
 	log: { info, warn }
@@ -1045,8 +1074,10 @@ function applyMenu(): void {
 let tray: Tray | null = null
 const trayDirectory = app.isPackaged ? path.join(process.resourcesPath, "tray") : path.join(app.getAppPath(), "build", "tray")
 
-// What the tray shows: sync's last aggregate while the host runs, and what the mounts report.
+// What the tray shows: sync's last aggregate while the host runs (or attention while a pair waits for the user), and
+// what the mounts report.
 let syncAggregate: NativeAggregate = "idle"
+let syncHeld = false
 // Sync's own state, for its notification; the icon shows the more urgent of sync and mounts.
 let syncTray: TrayState = "idle"
 let trayIcon: TrayState = "idle"
@@ -1107,9 +1138,10 @@ function notifyMountsFailed(roles: readonly DesktopMountsRole[]): void {
 function applyTray(): void {
 	const host = nativeSupervisor.state()
 	const mounts = mountsService.trayView()
-	const nextSync = trayState(syncAggregate, "idle", host)
-	const nextIcon = trayState(syncAggregate, mounts.aggregate, host)
-	const lines = trayStatusLines(syncAggregate, mounts.aggregate, host, mounts.mountPoint)
+	const sync = syncHeld ? "attention" : syncAggregate
+	const nextSync = trayState(sync, "idle", host)
+	const nextIcon = trayState(sync, mounts.aggregate, host)
+	const lines = trayStatusLines(sync, mounts.aggregate, host, mounts.mountPoint)
 	const previousSync = syncTray
 
 	syncTray = nextSync

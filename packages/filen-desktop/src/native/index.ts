@@ -149,7 +149,15 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		})
 		mounts.subscribe(mountsSubscribed)
 
-		const runtime = createRuntimeFeed(addon, { post, onAuthFailed: authRevoked })
+		const runtime = createRuntimeFeed(addon, {
+			post,
+			onAuthFailed: authRevoked,
+			onPassEnded: (pairId, report) => {
+				host?.passEnded(pairId, report).catch((error: unknown) => {
+					console.error(`the delete guard was not restored: ${describe(classify(addon, error))}`)
+				})
+			}
+		})
 		const convergence = createConvergence()
 
 		feed = runtime
@@ -197,7 +205,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 			host = current
 
-			const pairs = await current.watchAll(error => {
+			const pairs = await current.watchAll(message.holdRemotes, error => {
 				const failure = classify(addon, error)
 
 				if (failure === "unauthenticated") {

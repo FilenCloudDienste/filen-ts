@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -11,7 +11,7 @@ import { registerSyncIpc } from "../main/sync/ipc.ts"
 import { createRootTokens, ROOT_TOKEN_TTL_MS } from "../main/sync/localRoot.ts"
 import { createSyncService, OVERVIEW_PUSH_INTERVAL_MS, type SyncServiceDeps } from "../main/sync/service.ts"
 import type { ShellPair } from "../main/sync/store.ts"
-import { memoryStore } from "./syncFakes.ts"
+import { memoryStore, shellPair as baseShellPair } from "./syncFakes.ts"
 
 const ACCOUNT_ROOT = "3f2b8c1e-6a4d-4e2f-9b7a-1c5d8e9f0a2b"
 const REMOTE = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
@@ -30,31 +30,21 @@ const SUMMARY: DesktopSyncPlanSummary = {
 }
 
 function shellPair(overrides: Partial<ShellPair> = {}): ShellPair {
-	return {
-		pairId: "7",
-		name: "Work",
-		localRoot: "/Users/u/Work",
-		remoteRoot: REMOTE,
-		mode: "twoWay",
-		paused: false,
-		state: "active",
-		review: null,
-		legacyUuid: null,
-		legacyDotFiles: null,
-		notices: [],
-		createdAt: 1,
-		...overrides
-	}
+	return baseShellPair({ pairId: "7", name: "Work", localRoot: "/Users/u/Work", remoteRoot: REMOTE, createdAt: 1, ...overrides })
 }
 
 type Answers = { [K in NativeOp]?: ((args: NativeOpArgs<K>) => unknown) | undefined }
 
-function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: string } = {}) {
+function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: string; driveRoot?: string } = {}) {
 	let clock = 1_000
+	let added = 6
+	const onHeld = vi.fn()
 	const store = memoryStore(options.pairs)
 	const host: DesktopSyncHostState = { state: "running" }
 	const answers: Answers = {
-		addPair: () => ({ pairId: "7" }),
+		addPair: () => ({ pairId: String(++added) }),
+		awaitConverged: () => true,
+		setMigratedGuard: () => null,
 		pause: () => null,
 		resume: () => null,
 		removePair: () => null,
@@ -95,8 +85,11 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		shell: { openPath: vi.fn(() => Promise.resolve("")) },
 		legacySync: {
 			pending: () => Promise.resolve(undefined),
-			consume: () => Promise.resolve()
+			consume: () => Promise.resolve(),
+			ignorer: () => Promise.resolve(null)
 		},
+		driveRoot: () => Promise.resolve(options.driveRoot ?? null),
+		onHeld,
 		now: () => clock,
 		log: { info: vi.fn(), warn: vi.fn() }
 	})
@@ -128,6 +121,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 		service,
 		store,
 		tokens,
+		onHeld,
 		call,
 		supervisor,
 		sent,
@@ -150,6 +144,13 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 }
 
 let directory: string
+
+// A round started by a timer reads the disk, which fake timers do not wait for.
+async function until(check: () => boolean): Promise<void> {
+	for (let turn = 0; turn < 10_000 && !check(); turn++) {
+		await new Promise(resolve => setImmediate(resolve))
+	}
+}
 
 beforeEach(async () => {
 	// Real, as stored pair roots are (macOS tmpdir is under the /var link).
@@ -336,12 +337,204 @@ describe("registerSyncIpc", () => {
 
 		read = true
 		await vi.advanceTimersByTimeAsync(2000)
-		expect(ops()).toEqual(["addPair", "pause", "awaitConverged", "awaitConverged", "awaitConverged", "resume"])
+		expect(ops().slice(4)).toEqual(["awaitConverged", "evaluatePlan", "releasePlan", "setMigratedGuard", "resume"])
 		expect(store.get().pairs[0]).toMatchObject({ pairId: "7", state: "active", paused: false })
 
 		// Nothing waits any more.
 		await vi.advanceTimersByTimeAsync(600_000)
-		expect(ops()).toHaveLength(6)
+		expect(ops()).toHaveLength(9)
+	})
+
+	it("starts migrated pairs one at a time, the next once the first one's first pass ended", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		const second = `${directory}-b`
+
+		await mkdir(second)
+
+		try {
+			const { service, store, argsOf } = setup({
+				pairs: [
+					shellPair({
+						pairId: null,
+						legacyUuid: "11111111-2222-4333-8444-555555555555",
+						localRoot: directory,
+						state: "waitingForRoot"
+					}),
+					shellPair({
+						pairId: null,
+						legacyUuid: "22222222-3333-4444-8555-666666666666",
+						localRoot: second,
+						remoteRoot: ACCOUNT_ROOT,
+						state: "waitingForRoot"
+					})
+				]
+			})
+
+			await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+			expect(argsOf("resume")).toEqual([{ pairId: "7" }])
+			expect(store.get().pairs.map(pair => pair.state)).toEqual(["active", "preparing"])
+
+			await vi.advanceTimersByTimeAsync(600_000)
+			expect(argsOf("resume")).toHaveLength(1)
+
+			// Another pair's pass changes nothing.
+			await service.nativeEvent({ t: "passEnded", pairId: "9" }, "1")
+			await service.nativeEvent({ t: "passEnded", pairId: "7" }, "1")
+			await vi.advanceTimersByTimeAsync(0)
+			await until(() => argsOf("resume").length === 2)
+			expect(argsOf("resume")).toEqual([{ pairId: "7" }, { pairId: "8" }])
+		} finally {
+			await rm(second, { recursive: true, force: true })
+		}
+	})
+
+	it("starts the next pair when the first one's pass ends before its start returned", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		const second = `${directory}-b`
+
+		await mkdir(second)
+
+		try {
+			let service: ReturnType<typeof setup>["service"] | null = null
+			const setupResult = setup({
+				pairs: [
+					shellPair({
+						pairId: null,
+						legacyUuid: "11111111-2222-4333-8444-555555555555",
+						localRoot: directory,
+						state: "waitingForRoot"
+					}),
+					shellPair({
+						pairId: null,
+						legacyUuid: "22222222-3333-4444-8555-666666666666",
+						localRoot: second,
+						remoteRoot: ACCOUNT_ROOT,
+						state: "waitingForRoot"
+					})
+				],
+				answers: {
+					resume: ({ pairId }) => {
+						// An empty pair: its whole pass is over before the start is recorded.
+						void service?.nativeEvent({ t: "passEnded", pairId }, "1")
+
+						return null
+					}
+				}
+			})
+
+			service = setupResult.service
+			await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+			await vi.advanceTimersByTimeAsync(0)
+			await until(() => setupResult.argsOf("resume").length === 2)
+			expect(setupResult.argsOf("resume")).toEqual([{ pairId: "7" }, { pairId: "8" }])
+			expect(setupResult.store.get().pairs.map(pair => pair.state)).toEqual(["active", "active"])
+		} finally {
+			await rm(second, { recursive: true, force: true })
+		}
+	})
+
+	it("adds a pair whose directory appears later without a restart", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		const late = path.join(directory, "drive")
+		const { service, store } = setup({
+			pairs: [
+				shellPair({ pairId: null, legacyUuid: "11111111-2222-4333-8444-555555555555", localRoot: late, state: "waitingForRoot" })
+			]
+		})
+
+		await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		expect(store.get().pairs[0]?.state).toBe("waitingForRoot")
+
+		await mkdir(late)
+		await vi.advanceTimersByTimeAsync(2000)
+		await until(() => store.get().pairs[0]?.state === "active")
+		expect(store.get().pairs[0]).toMatchObject({ pairId: "7", state: "active" })
+	})
+
+	it("holds a pair of the whole drive until the user starts it anyway, telling the tray", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		const legacy = "11111111-2222-4333-8444-555555555555"
+		const { service, store, invoke, ops, onHeld } = setup({
+			pairs: [shellPair({ pairId: null, legacyUuid: legacy, localRoot: directory, state: "waitingForRoot" })],
+			driveRoot: REMOTE
+		})
+
+		await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		await vi.advanceTimersByTimeAsync(600_000)
+		expect(ops()).toEqual([])
+		expect(store.get().pairs[0]).toMatchObject({ state: "preparing", holds: ["driveRoot"] })
+		expect(onHeld).toHaveBeenLastCalledWith(true)
+
+		expect(await invoke("holdAction", `legacy:${legacy}`, "startAnyway")).toEqual({ ok: true, value: null })
+		await vi.advanceTimersByTimeAsync(0)
+		await until(() => ops().includes("resume"))
+		expect(ops()).toContain("resume")
+		expect(store.get().pairs[0]).toMatchObject({ state: "active", holds: [], wholeDriveConfirmed: true })
+		expect(onHeld).toHaveBeenLastCalledWith(false)
+	})
+
+	it("starts a migrated pair from its review on the guard it would have started on", async () => {
+		const { invoke, ops, store } = setup({
+			pairs: [
+				shellPair({ paused: true, state: "review", review: { reason: "migrated", findings: ["heldDeletions"], summary: null } }),
+				shellPair({ pairId: "8", remoteRoot: ACCOUNT_ROOT, paused: true })
+			]
+		})
+
+		await invoke("startPair", "7")
+		await invoke("resumePair", "8")
+
+		expect(ops()).toEqual(["setMigratedGuard", "resume", "resume"])
+		expect(store.get().pairs[0]).toMatchObject({ state: "active", paused: false, review: null })
+	})
+
+	it("dismisses an info notice and the import note for good", async () => {
+		const { invoke, store } = setup({ pairs: [shellPair({ info: ["localTrashNowOn"] })] })
+
+		await store.update(state => ({ ...state, importNote: { dropped: 1, merged: 2 } }))
+		expect(await invoke("overview")).toMatchObject({ importNote: { dropped: 1, merged: 2 }, pairs: [{ info: ["localTrashNowOn"] }] })
+
+		await invoke("dismissInfo", "7", "localTrashNowOn")
+		await invoke("dismissImportNote")
+		expect(store.get()).toMatchObject({ importNote: null, pairs: [{ info: [] }] })
+	})
+
+	it("retries every failed path of a pair, and lists its unsyncable paths from the last pass", async () => {
+		const { invoke, argsOf } = setup({
+			pairs: [shellPair()],
+			answers: { retryAll: () => null, unsyncablePaths: () => null }
+		})
+
+		expect(await invoke("retryAll", "7")).toEqual({ ok: true, value: null })
+		expect(await invoke("unsyncablePaths", "7", 0, 50)).toEqual({ ok: true, value: null })
+		expect(argsOf("unsyncablePaths")).toEqual([{ pairId: "7", offset: 0, limit: 50 }])
+	})
+
+	it("keeps waiting for a slow cloud listing, at most five minutes apart, never giving up", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		const legacy = "11111111-2222-4333-8444-555555555555"
+		const { service, store, ops } = setup({
+			pairs: [shellPair({ pairId: null, legacyUuid: legacy, localRoot: directory, state: "waitingForRoot" })],
+			answers: { awaitConverged: () => false }
+		})
+		const reads = () => ops().filter(op => op === "awaitConverged").length
+
+		await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000)
+
+		// A day: the first minutes back off, then one round every five minutes.
+		expect(reads()).toBeGreaterThan(280)
+		expect(store.get().pairs[0]).toMatchObject({ state: "preparing", holds: ["cloudListingSlow"] })
+
+		const before = reads()
+
+		await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+		expect(reads()).toBe(before + 1)
 	})
 
 	it("stops trying migrated pairs again when the host stops", async () => {
