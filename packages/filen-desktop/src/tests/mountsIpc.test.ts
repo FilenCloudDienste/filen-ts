@@ -39,7 +39,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	vi.useRealTimers()
-	await rm(directory, { recursive: true, force: true })
+	// The service may still be creating a user's state and cache directories from its last apply; rm retries the
+	// ENOTEMPTY that race gives instead of failing the next test's teardown.
+	await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
 })
 
 async function setup(
