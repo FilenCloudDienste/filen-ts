@@ -20,13 +20,16 @@
 # update whose app-update.yml names no publisherName is not signature-checked). Nothing here is notarized.
 #
 # Depth (input `depth`, scripts/ci/e2ePlan.ts): install is the above. Deep also signs in and drives the apps around
-# the N-1 -> N update (scripts/ci/e2e/chains/previous.ts: first run on a clean machine through N-1's page and the
+# both updates. N-1 -> N (scripts/ci/e2e/chains/previous.ts): first run on a clean machine through N-1's page and the
 # native folder chooser, three pairs, the drive, WebDAV, preferences and a PIN; after the update every one must hold
-# with nothing transferred or rewritten; then sign-out and uninstall). Deep is built on Linux deb so far; the profile's
-# other deep entries run at install depth with a notice. Logins are rate-limited per account, so a run signs the
-# harness in once (job `session`, through @filen/sdk-rs) and hands that session, sealed, to every job that reaches
-# the cloud; the only other logins are the UI sign-ins under test, one per deep entry, spaced by the plan's stagger,
-# each signed out at the end. Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any
+# with nothing transferred or rewritten. 3.0.53 -> N (scripts/ci/e2e/chains/legacy.ts): 3.0.53 signed in through its
+# own page, given prefs, a PIN, the drive, WebDAV and five pairs (one per mode), settled, edited once on disk and once
+# in the cloud while closed, then updated by its own updater; N must migrate it all with the two edits as the only
+# transfers. Both end with sign-out and uninstall. Deep is built on Linux deb so far; the profile's other deep entries
+# run at install depth with a notice. Logins are rate-limited per account, so a run signs the harness in once (job
+# `session`, through @filen/sdk-rs) and hands that session, sealed, to every job that reaches the cloud; the only
+# other logins are the UI sign-ins under test, one per deep chain (4.x in N-1 -> N, 3.0.53 in 3.0.53 -> N), spaced by
+# the plan's stagger, each signed out at the end. Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any
 # older than a day, even after a failure.
 #
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
@@ -481,7 +484,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.test-matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.deep && 150 || 90 }}
+    timeout-minutes: ${{ matrix.deep && 240 || 90 }}
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -507,11 +510,12 @@ jobs:
       - name: Set up pnpm
         if: matrix.spike || matrix.deep
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      # With its workspace dependencies' own: chain L reads the old client's storage keys from the app's sources.
       - name: Install the harness dependencies
         if: matrix.spike || matrix.deep
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+        run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Download N
         uses: actions/download-artifact@v7
         with:
@@ -567,20 +571,7 @@ jobs:
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
           FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
-        run: |
-          # A crashing app leaves a core dump the chain reads with gdb (scripts/ci/e2e/linux.ts CORE_DIR).
-          sudo install -d -m 1777 /tmp/filen-e2e-cores
-          sudo sysctl -w kernel.core_pattern=/tmp/filen-e2e-cores/core.%p.%e.%s
-          ulimit -c unlimited || ulimit -c "$(ulimit -H -c)"
-          KEYRING_PASSWORD="$(openssl rand -hex 16)"
-          export KEYRING_PASSWORD
-          # shellcheck disable=SC2016
-          dbus-run-session -- bash -ec '
-            printf %s "${KEYRING_PASSWORD}" | gnome-keyring-daemon --daemonize --unlock --components=secrets > /dev/null
-            unset KEYRING_PASSWORD
-            export XDG_CURRENT_DESKTOP=GNOME
-            exec node scripts/ci/e2e.ts "$@"
-          ' e2e --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
+        run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)
         if: matrix.previous && matrix.format == 'rpm'
         run: >-
@@ -590,8 +581,17 @@ jobs:
           bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
           e2e --scenario previous ${{ env.TEST_ARGS }}
       - name: 3.0.53 -> N
-        if: ${{ !cancelled() && matrix.legacy && matrix.format != 'rpm' }}
+        if: ${{ !cancelled() && matrix.legacy && !matrix.deep && matrix.format != 'rpm' }}
         run: node scripts/ci/e2e.ts --scenario legacy ${{ env.TEST_ARGS }}
+      - name: 3.0.53 -> N, signed in
+        if: ${{ !cancelled() && matrix.legacy && matrix.deep }}
+        timeout-minutes: 120
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+          E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
+        run: bash scripts/ci/deepSession.sh --scenario legacy --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: 3.0.53 -> N (Fedora container)
         if: ${{ !cancelled() && matrix.legacy && matrix.format == 'rpm' }}
         run: >-

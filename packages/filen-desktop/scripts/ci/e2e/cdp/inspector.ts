@@ -13,6 +13,8 @@ export interface Cdp {
 	send(method: string, params?: Record<string, unknown>): Promise<unknown>
 	// Runtime.evaluate by value, promises awaited; an exception in the target rejects with its description.
 	evaluate(expression: string): Promise<unknown>
+	// Resolves with the params of the next `method` event (Debugger.paused, say), or rejects after `timeoutMs`.
+	nextEvent(method: string, timeoutMs: number): Promise<unknown>
 	close(): void
 }
 
@@ -32,6 +34,7 @@ const CALL_TIMEOUT_MS = 30_000
 export async function connectCdp(url: string): Promise<Cdp> {
 	const socket = new WebSocket(url)
 	const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>()
+	const waiting = new Map<string, ((params: unknown) => void)[]>()
 	let next = 0
 
 	await new Promise<void>((resolve, reject) => {
@@ -40,7 +43,26 @@ export async function connectCdp(url: string): Promise<Cdp> {
 	})
 
 	socket.addEventListener("message", event => {
-		const message = JSON.parse(String(event.data)) as { id?: number; result?: unknown; error?: { message?: string } }
+		const message = JSON.parse(String(event.data)) as {
+			id?: number
+			method?: string
+			params?: unknown
+			result?: unknown
+			error?: { message?: string }
+		}
+
+		if (message.method !== undefined) {
+			const listeners = waiting.get(message.method) ?? []
+
+			waiting.delete(message.method)
+
+			for (const listener of listeners) {
+				listener(message.params)
+			}
+
+			return
+		}
+
 		const call = message.id === undefined ? undefined : pending.get(message.id)
 
 		if (call === undefined || message.id === undefined) {
@@ -97,6 +119,19 @@ export async function connectCdp(url: string): Promise<Cdp> {
 			}
 
 			return result.result?.value
+		},
+		nextEvent(method, timeoutMs) {
+			return new Promise((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error(`no ${method} in ${String(timeoutMs / 1000)} s`)), timeoutMs)
+
+				waiting.set(method, [
+					...(waiting.get(method) ?? []),
+					params => {
+						clearTimeout(timer)
+						resolve(params)
+					}
+				])
+			})
 		},
 		close() {
 			socket.close()

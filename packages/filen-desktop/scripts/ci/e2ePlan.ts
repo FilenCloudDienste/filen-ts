@@ -35,7 +35,7 @@ export interface TestEntry extends Entry {
 	signed: boolean
 	previous: boolean
 	legacy: boolean
-	// The N-1 -> N chain signs in and drives the apps (chain P).
+	// The chains this entry runs (previous, legacy) sign in and drive the apps.
 	deep: boolean
 	stagger: number
 	spike: Spike | ""
@@ -238,7 +238,7 @@ export function plan(input: PlanInput): Plan {
 	}
 
 	const wantsDeep = (id: string) =>
-		spike === "" && previous && depth !== "install" && (depth === "deep" ? MAIN_FORMATS : deepEntries[profile]).includes(id)
+		spike === "" && (previous || legacy) && depth !== "install" && (depth === "deep" ? MAIN_FORMATS : deepEntries[profile]).includes(id)
 	const notReady = chosen.map(idOf).filter(id => wantsDeep(id) && !DEEP_READY.has(id))
 
 	if (notReady.length > 0) {

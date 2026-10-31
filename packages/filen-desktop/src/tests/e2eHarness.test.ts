@@ -4,7 +4,15 @@ import os from "node:os"
 import { inflateSync } from "node:zlib"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { fixtureTree, seededBytes, treeSnapshot, writeTree } from "../../scripts/ci/e2e/fixtures.ts"
+import {
+	fixtureTree,
+	LEGACY_DELTAS,
+	LEGACY_PAIRS,
+	legacySideTree,
+	seededBytes,
+	treeSnapshot,
+	writeTree
+} from "../../scripts/ci/e2e/fixtures.ts"
 import { xwdToPng } from "../../scripts/ci/e2e/linux.ts"
 import { openRemote, remoteOf, sealRemote, secretsOf } from "../../scripts/ci/e2e/session.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
@@ -145,5 +153,39 @@ describe("e2e main process detection", () => {
 		// A child after setproctitle: one space-joined title, padded with NULs.
 		expect(isChromiumChild("/opt/Filen/Filen --type=gpu-process --enable-crash-reporter\0\0\0")).toBe(true)
 		expect(isChromiumChild("/opt/Filen/Filen --type=utility --utility-sub-type=node.mojom.NodeService\0")).toBe(true)
+	})
+})
+
+describe("chain L fixtures", () => {
+	it("covers every old mode once, with both switches mixed", () => {
+		expect(LEGACY_PAIRS.map(pair => pair.legacyMode).sort()).toEqual([
+			"cloudBackup",
+			"cloudToLocal",
+			"localBackup",
+			"localToCloud",
+			"twoWay"
+		])
+		expect(new Set(LEGACY_PAIRS.map(pair => pair.excludeDotFiles)).size).toBe(2)
+		expect(new Set(LEGACY_PAIRS.map(pair => pair.localTrashDisabled)).size).toBe(2)
+	})
+
+	it("keeps dot entries on the seeded side only when they are excluded", () => {
+		const twoWay = LEGACY_PAIRS.find(pair => pair.name === "e2e-twoway")
+		const l2c = LEGACY_PAIRS.find(pair => pair.name === "e2e-l2c")
+
+		expect(twoWay && legacySideTree(twoWay, "local").files.has(".hidden.txt")).toBe(true)
+		expect(twoWay && legacySideTree(twoWay, "cloud").files.has(".hidden.txt")).toBe(false)
+		expect(l2c && legacySideTree(l2c, "cloud").files.has(".hidden.txt")).toBe(true)
+	})
+
+	it("allows a rule file where dot files were excluded (uploaded only by a pair that pushes) and the two edits", () => {
+		expect(LEGACY_DELTAS.map(delta => `${delta.side} ${delta.pair}/${delta.path}`).sort()).toEqual([
+			"cloud e2e-twoway/.filenignore",
+			"cloud e2e-twoway/docs/notes.txt",
+			"local e2e-c2l/.filenignore",
+			"local e2e-c2l/media/blob.bin",
+			"local e2e-cbak/.filenignore",
+			"local e2e-twoway/.filenignore"
+		])
 	})
 })

@@ -1,43 +1,24 @@
 import { randomInt } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import os from "node:os"
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { setTimeout as sleep } from "node:timers/promises"
 import type {
 	DesktopLockAttempt,
 	DesktopLockStatus,
-	DesktopMountsOverview,
 	DesktopMountsResult,
 	DesktopPrefs,
 	DesktopServeCredentials,
-	DesktopSyncActivity,
 	DesktopSyncLocalRootChoice,
-	DesktopSyncOverview,
 	DesktopSyncPlan,
 	DesktopSyncResult
 } from "@filen/shared/desktop"
-import type { Page } from "playwright-core"
-import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
-import { APP_ORIGIN, desktop, desktopCall, pageText, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
-import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
-import { openCloud, runDir } from "../cloud.ts"
-import { createFindings } from "../findings.ts"
+import { fail, freePort, waitFor } from "../../support.ts"
+import { desktop, desktopCall, pageText, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
+import { runDir } from "../cloud.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
-import { exitWithin, launchDebuggable, type Launched } from "../launch.ts"
-import {
-	chooseDirectory,
-	coreReport,
-	keyringItems,
-	mountedType,
-	processStartMs,
-	screenDump,
-	sha256Through,
-	uninstallDeb
-} from "../linux.ts"
-import { redactor } from "../redact.ts"
-import { harnessRemote, mask, secretsOf, takeCredentials } from "../session.ts"
-import { cloudSnapshot, diffSnapshots, localSnapshot, snapshotText, type Snapshot } from "../snapshot.ts"
-import { runUpdate, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
+import { chooseDirectory, keyringItems, mountedType, processStartMs, sha256Through, uninstallDeb } from "../linux.ts"
+import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
+import { START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
+import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QUIET_MAX_MS, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
 
 // Chain P at deep depth: N-1 on a clean machine is set up through its own page (the real sign-in form, the native
 // folder chooser), syncs three pairs, and is updated to N by its own updater. N must then hold everything: no
@@ -60,30 +41,8 @@ import { runUpdate, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update
 // gnome-keyring the workflow unlocks on the chain's own D-Bus session.
 
 const CHOOSER_TITLE = "Choose a directory to sync"
-const SETUP_TIMEOUT_MS = 2 * 60 * 1000
 const CONVERGE_TIMEOUT_MS = 8 * 60 * 1000
-const QUIET_MS = 30_000
-const QUIET_MAX_MS = 3 * 60 * 1000
-const LIVE_TIMEOUT_MS = 2 * 60 * 1000
-const EXIT_TIMEOUT_MS = 60_000
-const STAGGER_MAX_S = 300
 const PREFS: DesktopPrefs = { minimizeToTray: false, startMinimized: false, launchAtLogin: false, notifications: false }
-// Activity that means the engine moved, created or removed something.
-const TRANSFER_KINDS = new Set<DesktopSyncActivity["kind"]>([
-	"uploaded",
-	"downloaded",
-	"createdRemoteDirectory",
-	"createdLocalDirectory",
-	"trashedRemote",
-	"deletedLocal",
-	"movedRemote",
-	"movedLocal",
-	"binned",
-	"failed",
-	"conflict",
-	"deletionsHeld",
-	"passFailed"
-])
 
 interface PairState {
 	name: string
@@ -93,124 +52,13 @@ interface PairState {
 	remoteRoot: string
 }
 
-function readJson(file: string): unknown {
-	try {
-		return JSON.parse(readFileSync(file, "utf8"))
-	} catch {
-		return null
-	}
-}
-
-function json(value: unknown): string {
-	return JSON.stringify(value)
-}
-
-// Paths, sizes and mtimes below `dirs`: changes whenever anything is written.
-function fingerprint(dirs: readonly string[]): string {
-	const lines: string[] = []
-	const walk = (dir: string) => {
-		for (const entry of existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []) {
-			const full = path.join(dir, entry.name)
-
-			if (entry.isDirectory()) {
-				walk(full)
-			} else {
-				const stat = statSync(full, { throwIfNoEntry: false })
-
-				lines.push(`${full} ${String(stat?.size)} ${String(stat?.mtimeMs)}`)
-			}
-		}
-	}
-
-	for (const dir of dirs) {
-		walk(dir)
-	}
-
-	return lines.join("\n")
-}
-
-// The newest modification time of any file below `dir` (0 when there is none).
-function newestWrite(dir: string): number {
-	let newest = 0
-
-	for (const entry of existsSync(dir) ? readdirSync(dir, { withFileTypes: true, recursive: true }) : []) {
-		if (entry.isFile()) {
-			newest = Math.max(newest, statSync(path.join(entry.parentPath, entry.name), { throwIfNoEntry: false })?.mtimeMs ?? 0)
-		}
-	}
-
-	return newest
-}
-
-// Until nothing under `dirs` changed for QUIET_MS, at most QUIET_MAX_MS.
-async function quiet(dirs: readonly string[]): Promise<void> {
-	const deadline = Date.now() + QUIET_MAX_MS
-	let last = fingerprint(dirs)
-	let since = Date.now()
-
-	while (Date.now() - since < QUIET_MS) {
-		if (Date.now() > deadline) {
-			fail(`still writing after ${String(QUIET_MAX_MS / 1000)} s`)
-		}
-
-		await sleep(5000)
-
-		const now = fingerprint(dirs)
-
-		if (now !== last) {
-			last = now
-			since = Date.now()
-		}
-	}
-}
-
-// A contract result's value; anything but { ok: true, value } fails, named, with what came back.
-function ok<T>(what: string, result: DesktopSyncResult<T> | DesktopMountsResult<T>): T {
-	const shaped: unknown = result
-
-	if (typeof shaped !== "object" || shaped === null || !("ok" in shaped) || typeof shaped.ok !== "boolean") {
-		fail(`${what}: not a result: ${json(shaped)}`)
-	}
-
-	if (!result.ok) {
-		fail(`${what}: ${json(result.error)}`)
-	}
-
-	if (!("value" in result)) {
-		fail(`${what}: ok without a value`)
-	}
-
-	return result.value
-}
-
 export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<void> {
-	const { target, work } = options
-
-	if (target.platform !== "linux" || target.format !== "deb") {
-		fail("the deep N-1 -> N chain runs on Linux deb only so far")
-	}
-
-	const credentials = takeCredentials()
-	const remote = harnessRemote(credentials)
+	const chain = await openChain("previous", options, artifacts)
+	const { findings, cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf, connect, quit } = chain
+	const { syncOverview, mountsOverview, signedOutOnFailure } = chain
 	const pin = String(randomInt(100_000, 1_000_000))
-	const secrets = [credentials.email, credentials.password, pin, ...secretsOf(remote)]
-
-	mask([pin])
-
-	const findings = createFindings("previous", artifacts, text => redactor(secrets)(text))
-	const cloud = await openCloud(remote, work)
-	const entry = `${target.platform}-${options.arch}-${target.format}`
-	const cloudDir = `${runDir()}/${entry}/previous`
-	const localDir = path.join(os.homedir(), "FilenE2E", path.posix.basename(runDir()), "previous")
 	const trees = new Map(PREVIOUS_PAIRS.map(pair => [pair.name, fixtureTree(`previous/${pair.name}`, false)]))
-	const rootOf = (name: string) => path.join(localDir, name)
-	// The engine's own bin is not the user's tree.
-	const snapshotOf = (name: string) => localSnapshot(rootOf(name), { skip: relPath => relPath === ".filen-sync-trash" })
-	const userData = (...parts: string[]) => path.join(target.userData, ...parts)
 	const state: {
-		launched?: Launched
-		renderer?: Renderer
-		signedIn?: boolean
 		pairs?: PairState[]
 		local?: Map<string, Snapshot>
 		cloud?: Snapshot
@@ -219,87 +67,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 		vaultSize?: number
 	} = {}
 
-	const page = (): Page => state.renderer?.page ?? fail("no page connected")
-	const syncOverview = () => desktop<DesktopSyncOverview>(page(), "window.desktop.sync.overview()")
-	const mountsOverview = () => desktop<DesktopMountsOverview>(page(), "window.desktop.mounts.overview()")
-
-	// The stdout and stderr of every launch, with Chromium's logging on (the updater's relaunch inherits it).
-	const appOutput = path.join(work, "app-output.log")
-
-	const connect = async (): Promise<void> => {
-		mkdirSync(work, { recursive: true })
-		state.launched = await launchDebuggable(target, false, appOutput)
-		state.renderer = await connectRenderer(state.launched.debugPort, APP_ORIGIN, START_TIMEOUT_MS)
-	}
-
-	// Why a quit went wrong: the app's output and any core dump its main processes left (the updater's relaunch, which
-	// is no child of the harness, reports its crash this way only).
-	const quitEvidence = async (what: string, pids: readonly number[]): Promise<string[]> => {
-		const cores: string[] = []
-
-		for (const pid of pids) {
-			const report = await coreReport(target.executable, pid)
-
-			if (report !== null) {
-				cores.push(report.slice(0, report.indexOf("\n")))
-				findings.attach(`previous-${what}-core-${String(pid)}.txt`, report)
-			}
-		}
-
-		findings.attach(`previous-${what}-output.log`, tail(appOutput, 3000))
-
-		return cores
-	}
-
-	// SIGTERM quits the app gracefully on Linux (its own launch, or the one the updater relaunched).
-	const quit = async (what: string): Promise<void> => {
-		await state.renderer?.browser.close().catch(() => undefined)
-		delete state.renderer
-
-		const pids = target.mainProcesses().map(entry => entry.pid)
-
-		for (const pid of pids) {
-			try {
-				process.kill(pid, "SIGTERM")
-			} catch {
-				// Already gone.
-			}
-		}
-
-		if (state.launched !== undefined && pids.includes(state.launched.child.pid ?? -1)) {
-			const exit = await exitWithin(state.launched, EXIT_TIMEOUT_MS)
-
-			if (exit === null || exit.code !== 0 || exit.signal !== null) {
-				const cores = await quitEvidence(what, pids)
-
-				fail(`${what} did not quit gracefully on SIGTERM: ${json(exit)}${cores.length > 0 ? ` (${cores.join(", ")})` : ""}`)
-			}
-		}
-
-		await waitFor(`${what} to exit`, EXIT_TIMEOUT_MS, () => (target.mainProcesses().length === 0 ? true : null), 1000)
-		delete state.launched
-
-		const cores = await quitEvidence(what, pids)
-
-		if (cores.length > 0) {
-			fail(`${what} crashed on SIGTERM: ${cores.join(", ")}`)
-		}
-	}
-
-	// A step that leaves a session behind on failure signs out through the page first (never left signed in).
-	const signedOutOnFailure = async (step: () => Promise<void>): Promise<void> => {
-		try {
-			await step()
-		} catch (error) {
-			if (state.signedIn === true && state.renderer !== undefined) {
-				await findings.check("sign out after the failure", () =>
-					signOut(page(), findings, credentials.email, artifacts, "previous")
-				)
-			}
-
-			throw error
-		}
-	}
+	chain.secret(pin)
 
 	const setUp = async (): Promise<void> => {
 		await connect()
@@ -320,17 +88,11 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			return `session ${status}, migration ${stage}`
 		})
 
-		// Deep jobs sign in some seconds apart (the plan's per-entry offset); logins are rate-limited per account.
-		const stagger = Math.min(Number(process.env["E2E_STAGGER_SECONDS"] ?? "0") || 0, STAGGER_MAX_S)
-
-		if (stagger > 0) {
-			console.log(`waiting ${String(stagger)} s before the sign-in (stagger)`)
-			await sleep(stagger * 1000)
-		}
+		await chain.stagger()
 
 		await findings.must("sign in through the 4.x form (one attempt)", async () => {
 			try {
-				state.signedIn = true
+				chain.signedIn = true
 
 				return await signIn(page(), credentials.email, credentials.password, START_TIMEOUT_MS)
 			} catch (error) {
@@ -424,8 +186,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 					fail(`webdav credentials are ${credentialsRead.kind}`)
 				}
 
-				secrets.push(credentialsRead.password)
-				mask([credentialsRead.password])
+				chain.secret(credentialsRead.password)
 				state.webdav = { url: serve.url ?? "", credentials: credentialsRead }
 
 				return `running at ${serve.url ?? ""}`
@@ -616,7 +377,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 				return "present"
 			})
-			state.signedIn = true
+			chain.signedIn = true
 
 			await findings.must("P3 N starts locked; a wrong PIN is refused once; the PIN unlocks through the lock screen", async () => {
 				const locked = await waitFor("the lock status", START_TIMEOUT_MS, async () => {
@@ -677,37 +438,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				return `${String(pairs.length)} pairs as before the update`
 			})
 
-			await findings.check("P4 no transfer in N's activity and an empty plan", async () => {
-				const problems: string[] = []
-
-				for (const pair of pairs) {
-					const activity = await desktop<DesktopSyncActivity[]>(page(), `window.desktop.sync.activity(${json(pair.id)}, 200)`)
-					const moved = activity.filter(item => TRANSFER_KINDS.has(item.kind))
-
-					problems.push(...moved.map(item => `${pair.name}: ${item.kind} ${item.relPath ?? ""}`))
-
-					const plan = ok(
-						"plan",
-						await desktop<DesktopSyncResult<DesktopSyncPlan | null>>(page(), `window.desktop.sync.plan(${json(pair.id)})`)
-					)
-
-					if (plan !== null) {
-						await desktopCall(page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
-
-						const { actions, heldDeletions, conflicts, refused } = plan.summary
-
-						if (actions !== 0 || heldDeletions !== 0 || conflicts !== 0 || refused !== null) {
-							problems.push(`${pair.name}: plan ${json(plan.summary)}`)
-						}
-					}
-				}
-
-				if (problems.length > 0) {
-					fail(problems.join("; "))
-				}
-
-				return "no transfer activity; every plan empty"
-			})
+			await findings.check("P4 no transfer in N's activity and an empty plan", () => chain.quietActivity(pairs, new Set()))
 
 			await findings.check("P4 a live edit on N uploads", async () => {
 				const name = `live-${path.posix.basename(runDir())}.txt`
@@ -789,7 +520,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			await findings.must("P8 sign out through the account menu", async () => {
 				const result = await signOut(page(), findings, credentials.email, artifacts, "previous")
 
-				state.signedIn = false
+				chain.signedIn = false
 
 				return result
 			})
@@ -846,41 +577,5 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 		findings.attach("previous-userdata-after-uninstall.txt", inventory(path.dirname(target.userData)))
 	}
 
-	const beforeReset = async (): Promise<void> => {
-		findings.attach("previous-main.log", tail(userData("logs", "main.log"), 1000))
-		findings.attach("previous-output.log", tail(appOutput, 3000))
-		await screenDump(path.join(artifacts, "previous-last-screen.png"))
-		await state.renderer?.browser.close().catch(() => undefined)
-	}
-
-	try {
-		await runUpdate({ ...options, hooks: { beforeUpdate: setUp, afterUpdate: verify, beforeReset } })
-	} catch (error) {
-		await findings.check("the chain ran to the end", () => fail(errorMessage(error)))
-	} finally {
-		await cloud.purge(cloudDir).catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
-	}
-
-	findings.finish()
-}
-
-// Every path below `root` with its size, sorted; for the owner's review of what stays behind.
-function inventory(root: string): string {
-	const lines: string[] = []
-	const walk = (dir: string) => {
-		for (const entry of existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []) {
-			const full = path.join(dir, entry.name)
-
-			if (entry.isDirectory()) {
-				lines.push(`${path.relative(root, full)}/`)
-				walk(full)
-			} else {
-				lines.push(`${path.relative(root, full)} ${String(statSync(full, { throwIfNoEntry: false })?.size ?? 0)}`)
-			}
-		}
-	}
-
-	walk(root)
-
-	return lines.sort().join("\n") || "(empty)"
+	await chain.run(options, { beforeUpdate: setUp, afterUpdate: verify })
 }

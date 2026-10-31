@@ -2,7 +2,7 @@ import os from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
 import { runUpdate } from "./e2e/update.ts"
-import { errorMessage, fail, TestFailure } from "./support.ts"
+import { errorMessage, TestFailure } from "./support.ts"
 import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 
 // Desktop e2e on a runner of one platform and architecture, for one install format (see
@@ -13,7 +13,8 @@ import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 //   spike-s1   can the packaged 3.0.53 and N be driven over their debugging ports (scripts/ci/e2e/spikes/s1.ts)
 //   spike-s7   can Filen in Finder be switched on with nobody at the Mac (scripts/ci/e2e/spikes/s7.ts)
 //
-// At --depth deep, previous also signs in and drives the apps around the update (scripts/ci/e2e/chains/previous.ts).
+// At --depth deep, both also sign in and drive the apps around the update (scripts/ci/e2e/chains/previous.ts and
+// legacy.ts).
 //
 //   node scripts/ci/e2e.ts --scenario <previous|legacy|spike-s1|spike-s7> --platform <win|mac|linux> --arch <x64|arm64>
 //       --format <nsis|dmg|deb|rpm|AppImage> --next <dir> --next-version <v> [--prev <dir> --prev-version <v>] [--signed]
@@ -101,7 +102,9 @@ async function main(): Promise<void> {
 
 				await runPreviousDeep(options, path.resolve(values.artifacts))
 			} else {
-				fail("the 3.0.53 -> N chain has no deep depth yet")
+				const { runLegacyDeep } = await import("./e2e/chains/legacy.ts")
+
+				await runLegacyDeep(options, path.resolve(values.artifacts))
 			}
 
 			return

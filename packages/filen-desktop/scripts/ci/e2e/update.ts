@@ -57,6 +57,8 @@ export interface UpdateHooks {
 	afterUpdate(): Promise<void>
 	// Whatever happened, before the machine is reset (evidence that lives in userData).
 	beforeReset(): Promise<void>
+	// Extra arguments for the update launch, and what to do once it is started (before the update is waited for).
+	updateLaunch?(): Promise<{ args: string[]; started(): Promise<void> }>
 }
 
 // rpm/deb/AppImage versions turn a prerelease's "-" into "~" or "_"; the comparison is over the same characters.
@@ -279,7 +281,10 @@ export async function runUpdate({
 			})
 		}
 
-		target.launch(env)
+		const updateLaunch = await hooks?.updateLaunch?.()
+
+		target.launch(env, updateLaunch?.args ?? [])
+		await updateLaunch?.started()
 
 		// The override must be provably in effect early; otherwise the app polls the real feed for the whole timeout.
 		if (legacy) {

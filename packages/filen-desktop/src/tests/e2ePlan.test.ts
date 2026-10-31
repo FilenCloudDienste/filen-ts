@@ -93,10 +93,11 @@ describe("e2ePlan depth", () => {
 		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual(["linux-x64-deb@0", "linux-arm64-deb@20"])
 	})
 
-	it("keeps install depth when asked, for legacy-only runs and for spikes", () => {
+	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {
 		expect(plan({ ...dispatch, depth: "install" }).session).toBe(false)
 		expect(deep({ ...dispatch, depth: "install" })).toEqual([])
-		expect(deep({ ...dispatch, scenarios: "legacy" })).toEqual([])
+		expect(deep({ ...dispatch, scenarios: "legacy" })).toEqual(["linux-x64-deb@0"])
+		expect(plan({ ...dispatch, scenarios: "legacy" }).tests.find(entry => entry.deep)?.previous).toBe(false)
 		expect(deep({ ...dispatch, spike: "s1" })).toEqual([])
 		expect(deep({ ...dispatch, depth: "deep", formats: "linux-arm64-deb,linux-x64-rpm" })).toEqual(["linux-arm64-deb@0"])
 		expect(() => plan({ ...dispatch, depth: "deepest" })).toThrow()
