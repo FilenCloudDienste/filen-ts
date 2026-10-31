@@ -387,12 +387,12 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 					const choice = desktop<DesktopSyncLocalRootChoice>(page(), "window.desktop.sync.chooseLocalDirectory()")
 
 					void choice.catch(() => undefined)
-					await chooseDirectory(CHOOSER_TITLE, rootOf(pair.name), path.join(artifacts, `previous-chooser-${pair.name}.xwd`))
+					await chooseDirectory(CHOOSER_TITLE, rootOf(pair.name), path.join(artifacts, `previous-chooser-${pair.name}`))
 
 					const chosen = await choice
 
 					if (chosen.status !== "ok") {
-						fail(`chooseLocalDirectory: ${json(chosen)}`)
+						fail(`chooseLocalDirectory: ${json(chosen)} (the chooser's steps: previous-chooser-${pair.name}-*.png)`)
 					}
 
 					const remoteRoot = remoteRoots.get(pair.name) ?? fail(`no remote root for ${pair.name}`)
@@ -797,7 +797,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 	const beforeReset = async (): Promise<void> => {
 		findings.attach("previous-main.log", tail(userData("logs", "main.log"), 1000))
-		await screenDump(path.join(artifacts, "previous-last-screen.xwd"))
+		await screenDump(path.join(artifacts, "previous-last-screen.png"))
 		await state.renderer?.browser.close().catch(() => undefined)
 	}
 

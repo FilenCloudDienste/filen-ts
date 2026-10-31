@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, rmSync } from "node:fs"
 import path from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { fail, run, runBounded, waitFor } from "../support.ts"
 
 // Linux desktop session pieces of the deep chains: the GTK folder chooser driven with xdotool under Xvfb (no window
@@ -25,13 +26,31 @@ async function windowsNamed(title: string): Promise<string[]> {
 	return result.status === 0 ? result.stdout.split("\n").filter(line => line.trim() !== "") : []
 }
 
-// The whole Xvfb screen as an X window dump, for the artifacts.
+// The whole Xvfb screen as a PNG for the artifacts (an X window dump converted by ImageMagick, which the runner image
+// ships; the dump itself is kept when the conversion fails).
 export async function screenDump(file: string): Promise<void> {
-	await runBounded("xwd", ["-root", "-silent", "-out", file], TOOL_TIMEOUT_MS)
+	const dump = file.replace(/\.png$/, ".xwd")
+
+	await runBounded("xwd", ["-root", "-silent", "-out", dump], TOOL_TIMEOUT_MS)
+
+	if ((await runBounded("convert", [`xwd:${dump}`, file], TOOL_TIMEOUT_MS)).status === 0) {
+		rmSync(dump, { force: true })
+	}
 }
 
-// Answers the app's open-directory dialog titled `title` with `dir`: the location field (Ctrl+L) takes the path, Enter
-// selects it in a folder chooser. Done when the dialog is gone.
+async function closedWithin(title: string, timeoutMs: number): Promise<boolean> {
+	return waitFor("the dialog to close", timeoutMs, async () => ((await windowsNamed(title)).length === 0 ? true : null), 500).catch(
+		() => false
+	)
+}
+
+// Answers the app's open-directory dialog titled `title` (Chromium's GTK folder chooser) with `dir`, leaving PNGs of
+// every step as `<evidence>-<step>.png`. Done when the dialog is gone; what the app made of it is the caller's check.
+//
+// The location field (Ctrl+L) takes the path; GTK completes a folder with a selected "/", and in a folder chooser a
+// folder in that field is the answer. The answer is given with the accept button's mnemonic (Alt+O, "_Open"), not
+// Enter: an Enter left the dialog open on the first run and closed it as canceled on the second, and Chromium treats
+// Return and Space presses specially around its file dialogs. Enter stays as the last resort.
 export async function chooseDirectory(title: string, dir: string, evidence: string): Promise<void> {
 	const [window] = await waitFor(`the "${title}" dialog`, DIALOG_TIMEOUT_MS, async () => {
 		const found = await windowsNamed(title)
@@ -46,25 +65,27 @@ export async function chooseDirectory(title: string, dir: string, evidence: stri
 	await xdotool(["windowfocus", "--sync", window])
 	await xdotool(["key", "--clearmodifiers", "ctrl+l"])
 	await xdotool(["type", "--delay", "20", "--clearmodifiers", dir])
-	await screenDump(evidence)
+	// The completion reads the parent folder asynchronously.
+	await sleep(1500)
+	await screenDump(`${evidence}-1-typed.png`)
 
-	// Enter once for the path; a chooser that only navigated into the directory takes a second Enter to select it.
-	for (let attempt = 0; attempt < 2; attempt++) {
-		await xdotool(["key", "--clearmodifiers", "Return"])
+	for (const [step, key] of [
+		["2-open", "alt+o"],
+		["3-return", "Return"]
+	] as const) {
+		await xdotool(["windowfocus", "--sync", window])
+		await xdotool(["key", "--clearmodifiers", key])
 
-		const closed = await waitFor(
-			"the dialog to close",
-			10_000,
-			async () => ((await windowsNamed(title)).length === 0 ? true : null),
-			500
-		).catch(() => false)
+		const closed = await closedWithin(title, 10_000)
 
 		if (closed) {
 			return
 		}
+
+		await screenDump(`${evidence}-${step}.png`)
 	}
 
-	fail(`the "${title}" dialog stayed open after the path was entered (see ${path.basename(evidence)})`)
+	fail(`the "${title}" dialog stayed open after the path and its answer (see ${path.basename(evidence)}-*.png)`)
 }
 
 // The file system type mounted at `point`, or null.

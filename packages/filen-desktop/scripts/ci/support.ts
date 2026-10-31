@@ -363,7 +363,7 @@ export async function startXvfb(): Promise<ChildProcess | null> {
 	}
 
 	const display = ":99"
-	const xvfb = spawn("Xvfb", [display, "-screen", "0", "1280x800x24", "-nolisten", "tcp"], { stdio: "ignore" })
+	const xvfb = spawn("Xvfb", [display, "-screen", "0", "1920x1200x24", "-nolisten", "tcp"], { stdio: "ignore" })
 
 	xvfb.on("error", error => {
 		console.error(`Xvfb: ${error.message}`)
