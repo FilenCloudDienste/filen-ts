@@ -208,8 +208,9 @@ jobs:
       - name: Install dependencies
         working-directory: packages/filen-office
         run: pnpm install --frozen-lockfile --filter @filen/office...
+      # Math is only a recommendation of Writer; without it Writer drops every OMML equation on import.
       - name: Install LibreOffice
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer-nogui
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer-nogui libreoffice-math-nogui
       - name: Restore the corpus
         uses: actions/cache/restore@v4
         with:
