@@ -82,7 +82,7 @@ and a run whose tag disagrees with it fails before building anything.
 
 The web app deploys to staging on every push to `main` that touches it, and to production from a
 `filen-web@<version>` tag. Desktop packaging is smoke-tested on every change to it, and a
-`filen-desktop@<version>` tag builds, signs and install-tests every platform before publishing to the
+`filen-desktop@<version>` tag builds, signs and end-to-end tests every platform before publishing to the
 update feed.
 
 Both apps' translations are generated in CI from their English source catalogs. Edit the English

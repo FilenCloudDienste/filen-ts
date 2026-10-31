@@ -1,37 +1,19 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { parseArgs } from "node:util"
-import { hashFile, parseFeed } from "../feed.ts"
-import { nativeArchOf } from "../nativeArch.ts"
-import { LEGACY_E2E_BANNER, LEGACY_RELEASE_URL, LEGACY_SHA512, LEGACY_VERSION } from "./legacy.ts"
-import {
-	downloadPinned,
-	errorMessage,
-	fail,
-	holds,
-	run,
-	section,
-	serveFeed,
-	startXvfb,
-	TestFailure,
-	waitFor,
-	type FeedServer
-} from "./support.ts"
-import { targetFor, type AppProcess, type Arch, type Format, type Platform, type Target } from "./targets.ts"
+import { hashFile, parseFeed } from "../../feed.ts"
+import { nativeArchOf } from "../../nativeArch.ts"
+import { LEGACY_E2E_BANNER, LEGACY_RELEASE_URL, LEGACY_SHA512, LEGACY_VERSION } from "../legacy.ts"
+import { downloadPinned, errorMessage, fail, holds, run, section, serveFeed, startXvfb, waitFor, type FeedServer } from "../support.ts"
+import type { AppProcess, Arch, Format, Platform, Target } from "../targets.ts"
 
-// Real-install test of one format on a runner of its platform and architecture (see
-// .github/workflows/install-test-desktop.yml). An app is installed the way a user installs it, launched, and updated by
-// its own updater from a feed on the loopback interface that serves the candidate build N; the test then holds the
-// relaunched app to N's version, at the same install location, with the same userData and a marker file in it intact.
+// The update scenarios: an app is installed the way a user installs it, launched, and updated by its own updater from a
+// feed on the loopback interface that serves the candidate build N; the test then holds the relaunched app to N's
+// version, at the same install location, with the same userData and a marker file in it intact.
 //
 //   previous   the installed app is N-1, a build of the same commit with a lower version
 //   legacy     the installed app is the real 3.0.53 release, the version the whole fleet updates from
-//
-//   node scripts/ci/installTest.ts --scenario <previous|legacy> --platform <win|mac|linux> --arch <x64|arm64>
-//       --format <nsis|dmg|deb|rpm|AppImage> --next <dir> --next-version <v> [--prev <dir> --prev-version <v>] [--signed]
 //
 // The new app's side of the contract (src/main): FILEN_DESKTOP_TEST_UPDATE_FEED, honoured only as plain http on
 // 127.0.0.1, replaces the feed and installs a downloaded update at once, through the same path as the page's restart
@@ -43,76 +25,38 @@ import { targetFor, type AppProcess, type Arch, type Format, type Platform, type
 
 const TEST_FEED_ENV = "FILEN_DESKTOP_TEST_UPDATE_FEED"
 const TEST_FEED_LOG = "updater: test feed"
-const MARKER = "install-test.marker"
+const MARKER = "e2e.marker"
 
-const START_TIMEOUT_MS = 3 * 60 * 1000
+export const START_TIMEOUT_MS = 3 * 60 * 1000
 // Download, Squirrel staging or the installer, the swap and the relaunch; the 3.x NSIS update also runs WinFSP's MSI.
 const UPDATE_TIMEOUT_MS = 25 * 60 * 1000
 const EXIT_TIMEOUT_MS = 2 * 60 * 1000
 const ALIVE_MS = 20 * 1000
 
-const { values } = parseArgs({
-	options: {
-		scenario: { type: "string" },
-		platform: { type: "string" },
-		arch: { type: "string" },
-		format: { type: "string" },
-		next: { type: "string" },
-		"next-version": { type: "string" },
-		prev: { type: "string" },
-		"prev-version": { type: "string" },
-		signed: { type: "boolean", default: false },
-		work: { type: "string", default: path.join(os.tmpdir(), "filen-install-test") }
-	}
-})
-
-function oneOf<T extends string>(name: string, value: string | undefined, allowed: readonly T[]): T {
-	const match = allowed.find(candidate => candidate === value)
-
-	if (match === undefined) {
-		console.error(`--${name} must be one of ${allowed.join(", ")}`)
-		process.exit(2)
-	}
-
-	return match
-}
-
-function required(name: string, value: string | undefined): string {
-	if (value === undefined || value === "") {
-		console.error(`--${name} is required`)
-		process.exit(2)
-	}
-
-	return value
-}
-
-const scenario = oneOf("scenario", values.scenario, ["previous", "legacy"] as const)
-const platform = oneOf<Platform>("platform", values.platform, ["win", "mac", "linux"])
-const arch = oneOf<Arch>("arch", values.arch, ["x64", "arm64"])
-const format = oneOf<Format>("format", values.format, ["nsis", "dmg", "deb", "rpm", "AppImage"])
-const nextDir = path.resolve(required("next", values.next))
-const nextVersion = required("next-version", values["next-version"])
-const signed = values.signed
-const work = path.resolve(values.work)
-
-if (process.platform !== { win: "win32", mac: "darwin", linux: "linux" }[platform]) {
-	console.error(`--platform ${platform} does not match this runner (${process.platform})`)
-	process.exit(2)
+export interface UpdateOptions {
+	scenario: "previous" | "legacy"
+	target: Target
+	platform: Platform
+	arch: Arch
+	format: Format
+	nextDir: string
+	nextVersion: string
+	// Both set for "previous".
+	prevDir: string | null
+	prevVersion: string | null
+	signed: boolean
+	work: string
 }
 
 // rpm/deb/AppImage versions turn a prerelease's "-" into "~" or "_"; the comparison is over the same characters.
-function sameVersion(a: string, b: string): boolean {
+export function sameVersion(a: string, b: string): boolean {
 	const normalise = (version: string) => version.trim().replace(/[~_-]/g, ".")
 
 	return normalise(a) === normalise(b)
 }
 
-function samePath(a: string, b: string): boolean {
-	return platform === "win" ? a.toLowerCase() === b.toLowerCase() : a === b
-}
-
 // The versions every launch logged, oldest first (the shell's log rotates into main.1.log).
-function startedVersions(target: Target): string[] {
+export function startedVersions(target: Target): string[] {
 	const directory = path.join(target.userData, "logs")
 	const text = ["main.1.log", "main.log"]
 		.map(name => path.join(directory, name))
@@ -127,11 +71,20 @@ function logHas(file: string, needle: string): boolean {
 	return existsSync(file) && readFileSync(file, "utf8").includes(needle)
 }
 
-function tail(file: string, lines = 60): string {
+export function tail(file: string, lines = 60): string {
 	return existsSync(file) ? readFileSync(file, "utf8").split("\n").slice(-lines).join("\n") : `(${file} does not exist)`
 }
 
-async function feedFor(target: Target): Promise<{ server: FeedServer; size: number; sha512: string }> {
+// 3.x logs to <appData>/@filen/logs, next to its userData.
+export function legacyLogOf(target: Target): string {
+	return path.join(path.dirname(target.userData), "logs", "desktop.log")
+}
+
+async function feedFor(
+	target: Target,
+	nextDir: string,
+	nextVersion: string
+): Promise<{ server: FeedServer; size: number; sha512: string }> {
 	const manifestPath = path.join(nextDir, target.manifest)
 
 	if (!existsSync(manifestPath)) {
@@ -160,15 +113,17 @@ async function feedFor(target: Target): Promise<{ server: FeedServer; size: numb
 }
 
 // The installed app's rclone: built for the runner's CPU and the pinned release.
-function verifyRclone(target: Target): void {
-	const versions: unknown = JSON.parse(readFileSync(fileURLToPath(new URL("../../build/rclone/versions.json", import.meta.url)), "utf8"))
+function verifyRclone(target: Target, arch: Arch): void {
+	const versions: unknown = JSON.parse(
+		readFileSync(fileURLToPath(new URL("../../../build/rclone/versions.json", import.meta.url)), "utf8")
+	)
 	const pinned = typeof versions === "object" && versions !== null && "rclone" in versions ? versions.rclone : undefined
 
 	if (typeof pinned !== "string") {
 		fail("build/rclone/versions.json names no rclone version")
 	}
 
-	target.resource(path.join("rclone", platform === "win" ? "rclone.exe" : "rclone"), file => {
+	target.resource(path.join("rclone", target.platform === "win" ? "rclone.exe" : "rclone"), file => {
 		if (!existsSync(file)) {
 			fail(`${file} is missing`)
 		}
@@ -197,10 +152,12 @@ function writeMarker(target: Target): string {
 }
 
 function processesAt(target: Target): AppProcess[] {
+	const samePath = (a: string, b: string) => (target.platform === "win" ? a.toLowerCase() === b.toLowerCase() : a === b)
+
 	return target.mainProcesses().filter(entry => samePath(entry.path, target.executable))
 }
 
-function installFrom(target: Target, artifact: string, version: string, payloadSigned: boolean): void {
+export function installFrom(target: Target, artifact: string, version: string, payloadSigned: boolean): void {
 	section(`install ${path.basename(artifact)} (${version})`)
 	target.reset()
 	target.install(artifact)
@@ -219,10 +176,36 @@ function installFrom(target: Target, artifact: string, version: string, payloadS
 	}
 }
 
-async function main(): Promise<void> {
-	const target = targetFor(platform, arch, format)
+// The pinned 3.0.53 installer for this target, downloaded into `work` and checked against its release hash.
+export async function legacyInstaller(target: Target, work: string): Promise<string> {
+	const pinned = LEGACY_SHA512[target.installer]
+
+	if (pinned === undefined) {
+		fail(`no pinned 3.0.53 hash for ${target.installer}`)
+	}
+
+	const installer = path.join(work, "legacy", target.installer)
+
+	await downloadPinned(`${LEGACY_RELEASE_URL}${target.installer}`, installer, pinned)
+
+	return installer
+}
+
+export async function runUpdate({
+	scenario,
+	target,
+	platform,
+	arch,
+	format,
+	nextDir,
+	nextVersion,
+	prevDir,
+	prevVersion,
+	signed,
+	work
+}: UpdateOptions): Promise<void> {
 	const legacy = scenario === "legacy"
-	const fromVersion = legacy ? LEGACY_VERSION : required("prev-version", values["prev-version"])
+	const fromVersion = legacy ? LEGACY_VERSION : (prevVersion ?? fail("--prev-version is required"))
 
 	if (legacy && platform === "mac" && !signed) {
 		// Squirrel.Mac installs an update only if it satisfies the running app's designated requirement, which 3.0.53
@@ -250,26 +233,12 @@ async function main(): Promise<void> {
 			const found = (process.env["PATH"] ?? "").split(path.delimiter).some(dir => existsSync(path.join(dir, prompt)))
 
 			if (found) {
-				fail(`${prompt} is on PATH: hide it so the updater falls back to sudo (see install-test-desktop.yml)`)
+				fail(`${prompt} is on PATH: hide it so the updater falls back to sudo (see desktop-e2e.yml)`)
 			}
 		}
 	}
 
-	let installer: string
-
-	if (legacy) {
-		const pinned = LEGACY_SHA512[target.installer]
-
-		if (pinned === undefined) {
-			fail(`no pinned 3.0.53 hash for ${target.installer}`)
-		}
-
-		installer = path.join(work, "legacy", target.installer)
-		await downloadPinned(`${LEGACY_RELEASE_URL}${target.installer}`, installer, pinned)
-	} else {
-		installer = path.join(path.resolve(required("prev", values.prev)), target.installer)
-	}
-
+	const installer = legacy ? await legacyInstaller(target, work) : path.join(prevDir ?? fail("--prev is required"), target.installer)
 	const xvfb = platform === "linux" ? await startXvfb() : null
 	let feed: FeedServer | null = null
 
@@ -278,7 +247,7 @@ async function main(): Promise<void> {
 		installFrom(target, installer, fromVersion, legacy ? platform !== "linux" : signed)
 
 		const token = writeMarker(target)
-		const served = await feedFor(target)
+		const served = await feedFor(target, nextDir, nextVersion)
 
 		feed = served.server
 
@@ -299,7 +268,7 @@ async function main(): Promise<void> {
 
 		// The override must be provably in effect early; otherwise the app polls the real feed for the whole timeout.
 		if (legacy) {
-			const legacyLog = path.join(path.dirname(target.userData), "logs", "desktop.log")
+			const legacyLog = legacyLogOf(target)
 
 			await waitFor("3.0.53 to log its E2E updater banner", START_TIMEOUT_MS, () =>
 				logHas(legacyLog, LEGACY_E2E_BANNER) ? true : null
@@ -348,7 +317,7 @@ async function main(): Promise<void> {
 
 		section("verify")
 		target.verifyInstall(signed)
-		verifyRclone(target)
+		verifyRclone(target, arch)
 
 		const installed = target.installedVersion()
 
@@ -417,7 +386,7 @@ async function main(): Promise<void> {
 		console.log(tail(path.join(target.userData, "logs", "main.log")))
 
 		if (legacy) {
-			const legacyLog = path.join(path.dirname(target.userData), "logs", "desktop.log")
+			const legacyLog = legacyLogOf(target)
 
 			console.log(`--- ${legacyLog}`)
 			console.log(tail(legacyLog))
@@ -451,13 +420,4 @@ async function main(): Promise<void> {
 		await feed?.close()
 		xvfb?.kill()
 	}
-}
-
-try {
-	await main()
-} catch (error) {
-	console.error(
-		`::error::${scenario} ${platform} ${arch} ${format}: ${error instanceof TestFailure ? error.message : errorMessage(error)}`
-	)
-	process.exit(1)
 }

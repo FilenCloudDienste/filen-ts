@@ -1,7 +1,8 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { assertDisposableMachine } from "./e2e/context.ts"
 import { asarVersion, fail, run } from "./support.ts"
 
 // One install format on the runner it is tested on: how a user installs it, where its files and userData land, how
@@ -31,7 +32,9 @@ export interface Target {
 	install(artifact: string): void
 	// The machine without the app, its data or its updater caches; safe when nothing is installed.
 	reset(): void
-	launch(env: NodeJS.ProcessEnv): void
+	// `args` reach the app after any the format itself needs; the child is the started process (the app's main process,
+	// or the AppImage runtime that starts it).
+	launch(env: NodeJS.ProcessEnv, args?: readonly string[]): ChildProcess
 	// Main (browser) processes of the installed app; helpers and renderers are not listed.
 	mainProcesses(): AppProcess[]
 	// The version packed into the installed app.
@@ -91,13 +94,15 @@ function killAll(processes: AppProcess[]): void {
 	}
 }
 
-function detached(executable: string, args: readonly string[], env: NodeJS.ProcessEnv): void {
+function detached(executable: string, args: readonly string[], env: NodeJS.ProcessEnv): ChildProcess {
 	const child = spawn(executable, args, { detached: true, stdio: "ignore", env })
 
 	child.on("error", error => {
 		console.error(`${executable}: ${error.message}`)
 	})
 	child.unref()
+
+	return child
 }
 
 function powershell(script: string): string {
@@ -179,8 +184,8 @@ function windows(): Target {
 				path.join(localAppData, "@filen", "desktop-updater")
 			)
 		},
-		launch(env) {
-			detached(executable, [], env)
+		launch(env, args = []) {
+			return detached(executable, args, env)
 		},
 		mainProcesses,
 		installedVersion: () => asarVersion(path.join(installDir, "resources", "app.asar")),
@@ -267,8 +272,8 @@ function mac(arch: Arch): Target {
 				}
 			}
 		},
-		launch(env) {
-			detached(executable, [], env)
+		launch(env, args = []) {
+			return detached(executable, args, env)
 		},
 		mainProcesses: () =>
 			run("ps", ["-axo", "pid=,comm="])
@@ -349,9 +354,9 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 				remove(executable)
 				clean()
 			},
-			launch(env) {
+			launch(env, args = []) {
 				// No FUSE on the runners: the runtime extracts itself instead, and still sets APPIMAGE for the updater.
-				detached(executable, [], { ...env, APPIMAGE_EXTRACT_AND_RUN: "1" })
+				return detached(executable, args, { ...env, APPIMAGE_EXTRACT_AND_RUN: "1" })
 			},
 			mainProcesses,
 			installedVersion() {
@@ -430,9 +435,9 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 
 			clean()
 		},
-		launch(env) {
+		launch(env, args = []) {
 			// Chromium refuses to run as root with its sandbox; only the rpm container runs as root.
-			detached(executable, root ? ["--no-sandbox"] : [], env)
+			return detached(executable, root ? ["--no-sandbox", ...args] : args, env)
 		},
 		mainProcesses,
 		installedVersion: () => asarVersion("/opt/Filen/resources/app.asar"),
@@ -462,7 +467,7 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 	}
 }
 
-export function targetFor(platform: Platform, arch: Arch, format: Format): Target {
+function create(platform: Platform, arch: Arch, format: Format): Target {
 	if (platform === "win" && format === "nsis") {
 		return windows()
 	}
@@ -476,4 +481,13 @@ export function targetFor(platform: Platform, arch: Arch, format: Format): Targe
 	}
 
 	return fail(`no ${format} target on ${platform}`)
+}
+
+// Every target passes the disposable-machine guard before anything can reset or install it.
+export function targetFor(platform: Platform, arch: Arch, format: Format): Target {
+	const target = create(platform, arch, format)
+
+	assertDisposableMachine(target)
+
+	return target
 }

@@ -29,7 +29,7 @@ export interface Updater {
 	install(): boolean
 }
 
-// The install tests (scripts/ci) serve a feed on loopback and point a packaged build at it through
+// The e2e tests (scripts/ci) serve a feed on loopback and point a packaged build at it through
 // FILEN_DESKTOP_TEST_UPDATE_FEED. Only an explicit-port http URL on 127.0.0.1 with nothing else in it is taken, so the
 // override can never reach a remote feed; signature checks apply to what it serves as to the real feed.
 export function testUpdateFeed(value: string | undefined): string | null {

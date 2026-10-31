@@ -1,10 +1,10 @@
-# Real-install tests of filen-desktop (PLAN §9, blocking for 4.0.0). On a runner of every platform and architecture
-# that ships, each install format is installed the way a user installs it, launched, and updated by the app's own
-# updater from a feed on the loopback interface that serves the candidate build N. The test then requires the app to
-# relaunch at N from the same install location, with the same userData and a marker file in it intact
-# (packages/filen-desktop/scripts/ci/installTest.ts). N must ship the pinned rclone for the runner's CPU, runnable from
-# the install, and on Windows every install (and the update) must leave WinFsp installed; the test removes WinFsp
-# between installs so that each installer has to bring it.
+# End-to-end tests of filen-desktop (PLAN §9, blocking for 4.0.0). On a runner of every platform and architecture that
+# ships, each install format is installed the way a user installs it, launched, and updated by the app's own updater
+# from a feed on the loopback interface that serves the candidate build N. The test then requires the app to relaunch
+# at N from the same install location, with the same userData and a marker file in it intact
+# (packages/filen-desktop/scripts/ci/e2e.ts). N must ship the pinned rclone for the runner's CPU, runnable from the
+# install, and on Windows every install (and the update) must leave WinFsp installed; the test removes WinFsp between
+# installs so that each installer has to bring it.
 #
 #   N-1 -> N      N-1 is the same commit built with a lower version, so the new updater, installer and uninstaller
 #                 run against each other.
@@ -13,10 +13,21 @@
 #                 NSIS uninstaller (run with --updated, which is what keeps %APPDATA%\@filen\desktop) that do the work.
 #
 # Called by release-desktop.yml before anything is published, on the signed artifacts it built (candidate-from-run).
-# Run by hand, it builds N itself; unsigned is the default there, and macOS is then left out: Squirrel.Mac installs an
-# update only if it satisfies the running app's designated requirement (Developer ID, Team 7YTW5D2K7P), which ad-hoc
-# signed builds never do.
-name: Install test desktop
+# Nightly (schedule) and by hand it builds N itself. Squirrel.Mac installs an update only if it satisfies the running
+# app's designated requirement (Developer ID, Team 7YTW5D2K7P), which ad-hoc signed builds never do, so macOS is left
+# out of unsigned runs. Signing per profile (scripts/ci/e2ePlan.ts): release and custom sign every build when `signed`
+# is set (unsigned is the default by hand); nightly signs macOS with the Developer ID and leaves Windows unsigned (an
+# update whose app-update.yml names no publisherName is not signature-checked). Nothing here is notarized.
+#
+# Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
+# their findings go to the job summary and an artifact:
+#   s1   are the packaged 3.0.53 and N drivable over --remote-debugging-port (3.0.53 also over --inspect), and does
+#        SIGTERM quit N gracefully
+#   s7   can Filen in Finder be switched on with nobody at the Mac (signed macOS; signs in with the e2e account)
+#
+# Secrets: CSC_LINK, CSC_KEY_PASSWORD (Developer ID); AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (Windows
+# signing); FILEN_DESKTOP_E2E_TEST_EMAIL, FILEN_DESKTOP_E2E_TEST_PASSWORD (a dedicated account without 2FA; s7 only).
+name: Desktop E2E
 
 on:
   workflow_call:
@@ -37,6 +48,18 @@ on:
         description: Also test the update from 3.0.53
         type: boolean
         default: true
+      profile:
+        description: release, nightly or custom (scripts/ci/e2ePlan.ts)
+        type: string
+        default: release
+      scenarios:
+        description: Comma-separated subset of previous,legacy
+        type: string
+        default: previous,legacy
+      formats:
+        description: Custom profile only, e.g. win-x64-nsis,linux-x64-deb (all when empty)
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       signed:
@@ -51,6 +74,33 @@ on:
         description: Also test the update from 3.0.53
         type: boolean
         default: true
+      profile:
+        description: custom and release follow `signed`; nightly signs macOS only, as the scheduled run does
+        type: choice
+        options:
+          - custom
+          - nightly
+          - release
+        default: custom
+      scenarios:
+        description: Comma-separated subset of previous,legacy
+        type: string
+        default: previous,legacy
+      formats:
+        description: Custom profile only, e.g. win-x64-nsis,linux-x64-deb (all when empty)
+        type: string
+        default: ''
+      spike:
+        description: Run a spike instead of the update scenarios
+        type: choice
+        options:
+          - none
+          - s1
+          - s7
+        default: none
+  # Every night on main: every entry the release tests, on builds made here.
+  schedule:
+    - cron: '23 1 * * *'
 
 permissions:
   contents: read
@@ -63,6 +113,7 @@ jobs:
       run:
         working-directory: packages/filen-desktop
     outputs:
+      spike: ${{ steps.plan.outputs.spike }}
       next-version: ${{ steps.plan.outputs.next-version }}
       prev-version: ${{ steps.plan.outputs.prev-version }}
       build-matrix: ${{ steps.plan.outputs.build-matrix }}
@@ -78,12 +129,18 @@ jobs:
           node-version: 24
           # No pnpm in this job; the root packageManager field would otherwise turn on a pnpm cache.
           package-manager-cache: false
+      # Inputs reach the planner through the environment only; it validates every value. A scheduled run has none.
       - name: Plan
         id: plan
         env:
           PLATFORMS: ${{ inputs.platforms }}
           SIGNED: ${{ inputs.signed }}
-        run: node scripts/ci/installTestPlan.ts
+          PROFILE: ${{ inputs.profile }}
+          SCENARIOS: ${{ inputs.scenarios }}
+          LEGACY: ${{ inputs.legacy }}
+          FORMATS: ${{ inputs.formats }}
+          SPIKE: ${{ inputs.spike }}
+        run: node scripts/ci/e2ePlan.ts
 
   # Only when N is built here; the release hands over its own web build.
   web:
@@ -136,7 +193,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # N-1 always; N too unless the caller built it. One job per OS builds both architectures, as the release does.
+  # N-1 (not for spikes); N too unless the caller built it. One job per OS builds both architectures, as the release
+  # does. Whether an OS's builds are signed comes from the plan.
   build:
     needs: [plan, web]
     if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.web.result == 'success' || needs.web.result == 'skipped') }}
@@ -151,12 +209,12 @@ jobs:
         working-directory: packages/filen-desktop
     env:
       PREV_VERSION: ${{ needs.plan.outputs.prev-version }}
-      # Unsigned runs must not pick up any identity a runner might hold.
-      CSC_IDENTITY_AUTO_DISCOVERY: ${{ inputs.signed && 'true' || 'false' }}
+      # Unsigned builds must not pick up any identity a runner might hold.
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.sign && 'true' || 'false' }}
       # The builder config signs on Windows only with all three account values (not secrets).
-      AZURE_SIGNING_ENDPOINT: ${{ inputs.signed && 'https://weu.codesigning.azure.net' || '' }}
-      AZURE_SIGNING_ACCOUNT: ${{ inputs.signed && 'filen-signing' || '' }}
-      AZURE_SIGNING_PROFILE: ${{ inputs.signed && 'filen-signing' || '' }}
+      AZURE_SIGNING_ENDPOINT: ${{ matrix.sign && 'https://weu.codesigning.azure.net' || '' }}
+      AZURE_SIGNING_ACCOUNT: ${{ matrix.sign && 'filen-signing' || '' }}
+      AZURE_SIGNING_PROFILE: ${{ matrix.sign && 'filen-signing' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -180,7 +238,7 @@ jobs:
         run: |
           rustup toolchain install
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      # Same key as the release's mac job, so a release's install test reuses its build.
+      # Same key as the release's mac job, so a release's e2e run reuses its build.
       - name: Cache Cargo
         if: matrix.os == 'mac'
         uses: actions/cache@v4
@@ -220,7 +278,7 @@ jobs:
           CARGO_INCREMENTAL: 0
         run: node scripts/buildFileProvider.ts
       - name: Verify signing secrets are set
-        if: inputs.signed
+        if: matrix.sign
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -236,38 +294,39 @@ jobs:
           missing=0
           for name in ${names}; do
             if [ -z "${!name:-}" ]; then
-              echo "::error::Secret ${name} is not set; a signed install test cannot run without it."
+              echo "::error::Secret ${name} is not set; a signed e2e run cannot run without it."
               missing=1
             fi
           done
           exit "${missing}"
-      # The formats a user installs (and, for N, the update payloads the feed serves). Notarization is skipped (no
-      # Apple ID here): nothing in these tests is quarantined, and the release job checks notarization itself.
+      # The formats a user installs (and, for N, the update payloads the feed serves). Notarization is off explicitly:
+      # nothing in these tests is quarantined, and the release job notarizes and checks its own builds.
       - name: Choose targets
         run: |
           case "${{ matrix.os }}" in
-            mac) echo "PREV_TARGETS=--mac dmg --x64 --arm64" >> "${GITHUB_ENV}"; echo "NEXT_TARGETS=--mac dmg zip --x64 --arm64" >> "${GITHUB_ENV}" ;;
+            mac) echo "PREV_TARGETS=--mac dmg --x64 --arm64 -c.mac.notarize=false" >> "${GITHUB_ENV}"; echo "NEXT_TARGETS=--mac dmg zip --x64 --arm64 -c.mac.notarize=false" >> "${GITHUB_ENV}" ;;
             windows) echo "PREV_TARGETS=--win nsis --x64 --arm64" >> "${GITHUB_ENV}"; echo "NEXT_TARGETS=--win nsis --x64 --arm64" >> "${GITHUB_ENV}" ;;
             linux) echo "PREV_TARGETS=--linux deb rpm AppImage --x64 --arm64" >> "${GITHUB_ENV}"; echo "NEXT_TARGETS=--linux deb rpm AppImage --x64 --arm64" >> "${GITHUB_ENV}" ;;
           esac
       - name: Build N
         if: ${{ !inputs.candidate-from-run }}
         env:
-          CSC_LINK: ${{ inputs.signed && secrets.CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ inputs.signed && secrets.CSC_KEY_PASSWORD || '' }}
-          AZURE_TENANT_ID: ${{ inputs.signed && secrets.AZURE_TENANT_ID || '' }}
-          AZURE_CLIENT_ID: ${{ inputs.signed && secrets.AZURE_CLIENT_ID || '' }}
-          AZURE_CLIENT_SECRET: ${{ inputs.signed && secrets.AZURE_CLIENT_SECRET || '' }}
+          CSC_LINK: ${{ matrix.sign && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.sign && secrets.CSC_KEY_PASSWORD || '' }}
+          AZURE_TENANT_ID: ${{ matrix.sign && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ matrix.sign && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ matrix.sign && secrets.AZURE_CLIENT_SECRET || '' }}
         run: |
           read -ra targets <<< "${NEXT_TARGETS}"
           pnpm run dist -- "${targets[@]}"
       - name: Build N-1
+        if: needs.plan.outputs.spike == ''
         env:
-          CSC_LINK: ${{ inputs.signed && secrets.CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ inputs.signed && secrets.CSC_KEY_PASSWORD || '' }}
-          AZURE_TENANT_ID: ${{ inputs.signed && secrets.AZURE_TENANT_ID || '' }}
-          AZURE_CLIENT_ID: ${{ inputs.signed && secrets.AZURE_CLIENT_ID || '' }}
-          AZURE_CLIENT_SECRET: ${{ inputs.signed && secrets.AZURE_CLIENT_SECRET || '' }}
+          CSC_LINK: ${{ matrix.sign && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.sign && secrets.CSC_KEY_PASSWORD || '' }}
+          AZURE_TENANT_ID: ${{ matrix.sign && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ matrix.sign && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ matrix.sign && secrets.AZURE_CLIENT_SECRET || '' }}
         # Same commit, lower version: package.json's version in the app (and so app.getVersion(), the installer and
         # the bundle versions) comes from extraMetadata.
         run: |
@@ -290,9 +349,10 @@ jobs:
           retention-days: 3
           compression-level: 0
       - name: Upload N-1
+        if: needs.plan.outputs.spike == ''
         uses: actions/upload-artifact@v6
         with:
-          name: installtest-prev-${{ matrix.os }}
+          name: e2e-prev-${{ matrix.os }}
           path: |
             packages/filen-desktop/release-prev/*.exe
             packages/filen-desktop/release-prev/*.dmg
@@ -304,7 +364,7 @@ jobs:
           compression-level: 0
 
   test:
-    name: ${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.format }}
+    name: ${{ matrix.spike && format('{0} ', matrix.spike) || '' }}${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.format }}
     needs: [plan, build]
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     strategy:
@@ -320,27 +380,37 @@ jobs:
         --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --format ${{ matrix.format }}
         --next release --next-version ${{ needs.plan.outputs.next-version }}
         --prev release-prev --prev-version ${{ needs.plan.outputs.prev-version }}
-        ${{ inputs.signed && '--signed' || '' }}
+        ${{ matrix.signed && '--signed' || '' }}
       FEDORA_IMAGE: registry.fedoraproject.org/fedora:42
     steps:
+      # The update scenarios need Node built-ins only; a spike also installs the package's dependencies (playwright-core).
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          sparse-checkout: packages/filen-desktop
+          sparse-checkout: ${{ !matrix.spike && 'packages/filen-desktop' || '' }}
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
           package-manager-cache: false
+      - name: Set up pnpm
+        if: matrix.spike
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Install the harness dependencies
+        if: matrix.spike
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
       - name: Download N
         uses: actions/download-artifact@v7
         with:
           name: desktop-${{ matrix.os }}
           path: packages/filen-desktop/release
       - name: Download N-1
+        if: ${{ !matrix.spike }}
         uses: actions/download-artifact@v7
         with:
-          name: installtest-prev-${{ matrix.os }}
+          name: e2e-prev-${{ matrix.os }}
           path: packages/filen-desktop/release-prev
       - name: Prepare the Linux desktop
         if: matrix.os == 'linux' && matrix.format != 'rpm'
@@ -351,7 +421,7 @@ jobs:
           # session. Hidden, it falls back to sudo (passwordless here) and still takes its non-root install path.
           for prompt in gksudo kdesudo pkexec beesu; do
             while found="$(command -v "${prompt}")"; do
-              sudo mv "${found}" "${found}.install-test-hidden"
+              sudo mv "${found}" "${found}.e2e-hidden"
               hash -r
             done
           done
@@ -364,29 +434,45 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       # No RPM-based runners exist: the rpm runs as root in a Fedora container of the runner's architecture, with the
-      # runner's Node mounted in.
+      # runner's Node mounted in. GITHUB_ACTIONS goes in too, for the scripts' disposable-machine guard.
       - name: Pull Fedora
         if: matrix.format == 'rpm'
         run: docker pull "${FEDORA_IMAGE}"
       - name: N-1 -> N
-        if: matrix.format != 'rpm'
-        run: node scripts/ci/installTest.ts --scenario previous ${{ env.TEST_ARGS }}
+        if: matrix.previous && matrix.format != 'rpm'
+        run: node scripts/ci/e2e.ts --scenario previous ${{ env.TEST_ARGS }}
       - name: N-1 -> N (Fedora container)
-        if: matrix.format == 'rpm'
+        if: matrix.previous && matrix.format == 'rpm'
         run: >-
-          docker run --rm --shm-size=2g
+          docker run --rm --shm-size=2g -e GITHUB_ACTIONS
           -v "${GITHUB_WORKSPACE}:/work" -v "$(dirname "$(command -v node)"):/opt/host-node:ro"
           -w /work/packages/filen-desktop "${FEDORA_IMAGE}"
-          bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/installTest.ts "$@"'
-          install-test --scenario previous ${{ env.TEST_ARGS }}
+          bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
+          e2e --scenario previous ${{ env.TEST_ARGS }}
       - name: 3.0.53 -> N
-        if: ${{ !cancelled() && inputs.legacy && matrix.format != 'rpm' }}
-        run: node scripts/ci/installTest.ts --scenario legacy ${{ env.TEST_ARGS }}
+        if: ${{ !cancelled() && matrix.legacy && matrix.format != 'rpm' }}
+        run: node scripts/ci/e2e.ts --scenario legacy ${{ env.TEST_ARGS }}
       - name: 3.0.53 -> N (Fedora container)
-        if: ${{ !cancelled() && inputs.legacy && matrix.format == 'rpm' }}
+        if: ${{ !cancelled() && matrix.legacy && matrix.format == 'rpm' }}
         run: >-
-          docker run --rm --shm-size=2g
+          docker run --rm --shm-size=2g -e GITHUB_ACTIONS
           -v "${GITHUB_WORKSPACE}:/work" -v "$(dirname "$(command -v node)"):/opt/host-node:ro"
           -w /work/packages/filen-desktop "${FEDORA_IMAGE}"
-          bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/installTest.ts "$@"'
-          install-test --scenario legacy ${{ env.TEST_ARGS }}
+          bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
+          e2e --scenario legacy ${{ env.TEST_ARGS }}
+      # The account's credentials reach spike s7 only, and only this step.
+      - name: Spike ${{ matrix.spike }}
+        if: matrix.spike
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ matrix.spike == 's7' && secrets.FILEN_DESKTOP_E2E_TEST_EMAIL || '' }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ matrix.spike == 's7' && secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD || '' }}
+        run: node scripts/ci/e2e.ts --scenario spike-${{ matrix.spike }} ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
+      # The harness redacts the account's credentials from everything it writes there.
+      - name: Upload spike evidence
+        if: ${{ always() && matrix.spike }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-e2e-spike-${{ matrix.spike }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: packages/filen-desktop/e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 14

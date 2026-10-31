@@ -10,8 +10,8 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web"
 import { setTimeout as sleep } from "node:timers/promises"
 import { hashFile } from "../feed.ts"
 
-// Shared plumbing for the real-install tests (scripts/ci/installTest.ts): commands, bounded waits, the loopback feed
-// and reading versions out of installed apps. Node built-ins only, so a bare runner (or container) needs nothing else.
+// Shared plumbing for the desktop e2e scripts (scripts/ci/e2e.ts): commands, bounded waits, the loopback feed and
+// reading versions out of installed apps. Node built-ins only, so a bare runner (or container) needs nothing else.
 
 export class TestFailure extends Error {}
 
@@ -261,6 +261,22 @@ export async function startXvfb(): Promise<ChildProcess | null> {
 	await waitFor("the Xvfb display", 30_000, () => (existsSync("/tmp/.X11-unix/X99") ? true : null), 500)
 
 	return xvfb
+}
+
+// A TCP port free on the loopback interface right now, for a debugging switch of an app about to start.
+export async function freePort(): Promise<number> {
+	const server = createServer()
+
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject)
+		server.listen(0, "127.0.0.1", resolve)
+	})
+
+	const { port } = server.address() as AddressInfo
+
+	await new Promise<void>(resolve => server.close(() => resolve()))
+
+	return port
 }
 
 export function errorMessage(error: unknown): string {

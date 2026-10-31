@@ -45,7 +45,7 @@ Set `FILEN_DESKTOP_FP_APPEX` to an already built `FilenFileProvider.appex` to sk
 
 ## Release
 
-A `filen-desktop@<version>` tag matching `package.json`'s version runs [`release-desktop.yml`](../../.github/workflows/release-desktop.yml): signed builds for every platform, install tests, then the update feed. [`build-desktop.yml`](../../.github/workflows/build-desktop.yml) packs an unsigned Linux build on every change.
+A `filen-desktop@<version>` tag matching `package.json`'s version runs [`release-desktop.yml`](../../.github/workflows/release-desktop.yml): signed builds for every platform, end-to-end install and update tests ([`desktop-e2e.yml`](../../.github/workflows/desktop-e2e.yml), also nightly), then the update feed. [`build-desktop.yml`](../../.github/workflows/build-desktop.yml) packs an unsigned Linux build on every change.
 
 ## Layout
 
@@ -56,7 +56,7 @@ A `filen-desktop@<version>` tag matching `package.json`'s version runs [`release
 | `src/preload/`         | The preload exposing `window.desktop`; its contract is `@filen/shared/desktop`                                                   |
 | `src/shared/`          | IPC channel names and the main ↔ native-host protocol                                                                            |
 | `native/fileProvider/` | Swift Node-API addon for the File Provider                                                                                       |
-| `scripts/`             | Build, dev, staging, packaging and update-feed scripts; `scripts/ci/` holds the install tests                                    |
+| `scripts/`             | Build, dev, staging, packaging and update-feed scripts; `scripts/ci/` holds the e2e tests                                        |
 | `electron-builder.ts`  | Packaging config                                                                                                                 |
 
 The renderer is filen-web itself; desktop-only UI lives there behind `window.desktop`.
