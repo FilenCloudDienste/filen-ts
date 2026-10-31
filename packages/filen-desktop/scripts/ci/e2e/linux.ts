@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { crc32, deflateSync } from "node:zlib"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
-import { fail, run, runBounded, waitFor } from "../support.ts"
+import { errorMessage, fail, run, runBounded, waitFor } from "../support.ts"
 
 // Linux desktop session pieces of the deep chains: the GTK folder chooser driven with xdotool under Xvfb (no window
 // manager, so focus is set on the window itself), mounts, the keyring and the package manager. Every tool runs
@@ -26,15 +27,77 @@ async function windowsNamed(title: string): Promise<string[]> {
 	return result.status === 0 ? result.stdout.split("\n").filter(line => line.trim() !== "") : []
 }
 
-// The whole Xvfb screen as a PNG for the artifacts (an X window dump converted by ImageMagick, which the runner image
-// ships; the dump itself is kept when the conversion fails).
+// An X window dump of a 24-bit TrueColor screen (Xvfb's: 32 bits per pixel, ZPixmap) as a PNG.
+export function xwdToPng(xwd: Buffer): Buffer {
+	const field = (index: number) => xwd.readUInt32BE(index * 4)
+	const [headerSize, width, height, byteOrder, bitsPerPixel, bytesPerLine, colors] = [
+		field(0),
+		field(4),
+		field(5),
+		field(7),
+		field(11),
+		field(12),
+		field(19)
+	]
+
+	if (bitsPerPixel !== 32) {
+		fail(`an X window dump with ${String(bitsPerPixel)} bits per pixel`)
+	}
+
+	const pixels = headerSize + colors * 12
+	const raw = Buffer.alloc(height * (1 + width * 3))
+
+	for (let y = 0; y < height; y++) {
+		const row = y * (1 + width * 3)
+
+		for (let x = 0; x < width; x++) {
+			const at = pixels + y * bytesPerLine + x * 4
+			const target = row + 1 + x * 3
+
+			// LSBFirst stores B, G, R, pad; MSBFirst pad, R, G, B.
+			raw[target] = xwd[byteOrder === 0 ? at + 2 : at + 1] ?? 0
+			raw[target + 1] = xwd[byteOrder === 0 ? at + 1 : at + 2] ?? 0
+			raw[target + 2] = xwd[byteOrder === 0 ? at : at + 3] ?? 0
+		}
+	}
+
+	const chunk = (type: string, data: Buffer) => {
+		const length = Buffer.alloc(4)
+		const crc = Buffer.alloc(4)
+		const body = Buffer.concat([Buffer.from(type, "latin1"), data])
+
+		length.writeUInt32BE(data.length)
+		crc.writeUInt32BE(crc32(body))
+
+		return Buffer.concat([length, body, crc])
+	}
+	const header = Buffer.alloc(13)
+
+	header.writeUInt32BE(width, 0)
+	header.writeUInt32BE(height, 4)
+	header.set([8, 2, 0, 0, 0], 8)
+
+	return Buffer.concat([
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		chunk("IHDR", header),
+		chunk("IDAT", deflateSync(raw)),
+		chunk("IEND", Buffer.alloc(0))
+	])
+}
+
+// The whole Xvfb screen as a PNG for the artifacts; the raw dump is kept when it cannot be converted.
 export async function screenDump(file: string): Promise<void> {
 	const dump = file.replace(/\.png$/, ".xwd")
 
-	await runBounded("xwd", ["-root", "-silent", "-out", dump], TOOL_TIMEOUT_MS)
+	if ((await runBounded("xwd", ["-root", "-silent", "-out", dump], TOOL_TIMEOUT_MS)).status !== 0) {
+		return
+	}
 
-	if ((await runBounded("convert", [`xwd:${dump}`, file], TOOL_TIMEOUT_MS)).status === 0) {
+	try {
+		writeFileSync(file, xwdToPng(readFileSync(dump)))
 		rmSync(dump, { force: true })
+	} catch (error) {
+		console.log(`screen dump ${path.basename(dump)} kept unconverted: ${errorMessage(error)}`)
 	}
 }
 

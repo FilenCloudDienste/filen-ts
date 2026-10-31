@@ -1,6 +1,6 @@
 import path from "node:path"
 import type { Page } from "playwright-core"
-import { errorMessage, waitFor } from "../support.ts"
+import { errorMessage, fail, waitFor } from "../support.ts"
 import type { Findings } from "./findings.ts"
 
 // The 4.x page, driven over CDP: the real sign-in and sign-out forms, the lock screen, and reads of the window.desktop
@@ -10,9 +10,28 @@ export const APP_ORIGIN = "filen://app"
 export const SIGN_IN_TIMEOUT_MS = 2 * 60 * 1000
 const SIGN_OUT_TIMEOUT_MS = 2 * 60 * 1000
 
-// `expression` (a promise or value in the page) as JSON-parsed data.
+// `expression` (a promise or value in the page) as JSON-parsed data. The value crosses CDP wrapped, so a call that
+// resolves to nothing fails by name instead of handing JSON.parse the text "undefined"; calls that return nothing by
+// contract go through desktopCall.
 export async function desktop<T>(page: Page, expression: string): Promise<T> {
-	return JSON.parse(String(await page.evaluate(`(async () => JSON.stringify(await ${expression}))()`))) as T
+	const text: unknown = await page.evaluate(`(async () => JSON.stringify({ value: await ${expression} }))()`)
+
+	if (typeof text !== "string") {
+		fail(`${expression}: the page answered ${typeof text}`)
+	}
+
+	const { value } = JSON.parse(text) as { value?: T }
+
+	if (value === undefined) {
+		fail(`${expression} resolved to nothing`)
+	}
+
+	return value
+}
+
+// A contract call that resolves to nothing (releasePlan, dismissNotice, ...): awaited in the page, nothing returned.
+export async function desktopCall(page: Page, expression: string): Promise<void> {
+	await page.evaluate(`(async () => { await ${expression} })()`)
 }
 
 export function sessionStatus(page: Page): Promise<string> {

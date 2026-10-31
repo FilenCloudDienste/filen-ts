@@ -1,9 +1,11 @@
 import { generateKeyPairSync } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
+import { inflateSync } from "node:zlib"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { fixtureTree, seededBytes, treeSnapshot, writeTree } from "../../scripts/ci/e2e/fixtures.ts"
+import { xwdToPng } from "../../scripts/ci/e2e/linux.ts"
 import { openRemote, remoteOf, sealRemote, secretsOf } from "../../scripts/ci/e2e/session.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 
@@ -110,5 +112,25 @@ describe("e2e harness session", () => {
 		expect(openRemote(sealed, "password", "123")).toEqual(remote)
 		expect(() => openRemote(sealed, "password", "124")).toThrow()
 		expect(() => openRemote(sealed, "wrong", "123")).toThrow()
+	})
+})
+
+describe("e2e screen dumps", () => {
+	it("turns a 32-bit X window dump into an RGB PNG", () => {
+		// A 2x1 LSBFirst dump: header fields as big-endian words, no colormap, pixels B, G, R, pad.
+		const header = Buffer.alloc(100)
+		const fields: Record<number, number> = { 0: 100, 4: 2, 5: 1, 7: 0, 11: 32, 12: 8, 19: 0 }
+
+		for (const [index, value] of Object.entries(fields)) {
+			header.writeUInt32BE(value, Number(index) * 4)
+		}
+
+		const png = xwdToPng(Buffer.concat([header, Buffer.from([3, 2, 1, 0, 30, 20, 10, 0])]))
+		const idat = png.indexOf("IDAT")
+
+		expect(png.subarray(1, 4).toString("latin1")).toBe("PNG")
+		expect(png.readUInt32BE(16)).toBe(2)
+		expect(png.readUInt32BE(20)).toBe(1)
+		expect([...inflateSync(png.subarray(idat + 4, idat + 4 + png.readUInt32BE(idat - 4)))]).toEqual([0, 1, 2, 3, 10, 20, 30])
 	})
 })

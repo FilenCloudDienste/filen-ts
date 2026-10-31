@@ -18,7 +18,7 @@ import type {
 } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
-import { APP_ORIGIN, desktop, pageText, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
+import { APP_ORIGIN, desktop, desktopCall, pageText, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { openCloud, runDir } from "../cloud.ts"
 import { createFindings } from "../findings.ts"
@@ -155,9 +155,20 @@ async function quiet(dirs: readonly string[]): Promise<void> {
 	}
 }
 
+// A contract result's value; anything but { ok: true, value } fails, named, with what came back.
 function ok<T>(what: string, result: DesktopSyncResult<T> | DesktopMountsResult<T>): T {
+	const shaped: unknown = result
+
+	if (typeof shaped !== "object" || shaped === null || !("ok" in shaped) || typeof shaped.ok !== "boolean") {
+		fail(`${what}: not a result: ${json(shaped)}`)
+	}
+
 	if (!result.ok) {
 		fail(`${what}: ${json(result.error)}`)
+	}
+
+	if (!("value" in result)) {
+		fail(`${what}: ok without a value`)
 	}
 
 	return result.value
@@ -406,7 +417,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 					// The page shows the dry run, then the user starts the pair.
 					if (added.plan !== null) {
-						await desktop(page(), `window.desktop.sync.releasePlan(${json(added.plan.planId)})`)
+						await desktopCall(page(), `window.desktop.sync.releasePlan(${json(added.plan.planId)})`)
 					}
 
 					ok("startPair", await desktop<DesktopSyncResult<null>>(page(), `window.desktop.sync.startPair(${json(added.pairId)})`))
@@ -641,7 +652,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 					)
 
 					if (plan !== null) {
-						await desktop(page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
+						await desktopCall(page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
 
 						const { actions, heldDeletions, conflicts, refused } = plan.summary
 
