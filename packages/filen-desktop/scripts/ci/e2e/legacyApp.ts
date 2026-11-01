@@ -230,10 +230,8 @@ export async function legacySyncHold(): Promise<SyncHold> {
 			const cdp = await inspector(port)
 
 			try {
-				if ((await cdp.evaluate(HOLD_SYNC)) !== "hooked") {
-					fail("the sync hold did not install")
-				}
-
+				// Under --inspect-brk the process runs nothing, an evaluation included, until it is let go; it then breaks
+				// before its first statement, which is where the hook goes in, before any of its modules load.
 				const paused = cdp.nextEvent("Debugger.paused", INSPECTOR_TIMEOUT_MS)
 
 				// Awaited below; this only keeps a rejection before then from going unhandled.
@@ -241,6 +239,11 @@ export async function legacySyncHold(): Promise<SyncHold> {
 				await cdp.send("Debugger.enable")
 				await cdp.send("Runtime.runIfWaitingForDebugger")
 				await paused
+
+				if ((await cdp.evaluate(HOLD_SYNC)) !== "hooked") {
+					fail("the sync hold did not install")
+				}
+
 				await cdp.send("Debugger.resume")
 
 				return await waitFor("the old sync worker to be held", INSPECTOR_TIMEOUT_MS, async () => {

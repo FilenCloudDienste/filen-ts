@@ -111,7 +111,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		cloud?: Snapshot
 		// Each pair's old local trash directory as 3.x left it (null where it has none).
 		trash?: Map<string, string | null>
-		// The prefs 3.x's options.v1.json held; the rest reach 4.x from localStorage only.
+		// The prefs 3.x's options.v1.json held (the rest are in its localStorage only).
 		mirrored?: string[]
 		afterCloud?: Snapshot
 	} = {}
@@ -285,8 +285,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		})
 
 		// The prefs live in the page's localStorage; options.v1.json is main's mirror, which 3.0.53 writes from two
-		// concurrent read-merge-write calls (setMinimizeToTray, setStartMinimized), so it may keep only one key. 4.x reads
-		// the file and falls back to localStorage per key (legacyPrefs), which L4 checks.
+		// concurrent read-merge-write calls (setMinimizeToTray, setStartMinimized), so it may keep only one key. 4.x takes
+		// minimizeToTray from localStorage first and startMinimized from the file first, each filled in from the other
+		// (legacyPrefs); L4 checks the outcome.
 		await findings.must(
 			`${LEGACY_VERSION} keeps the prefs on (localStorage; its options.v1.json mirror never says otherwise)`,
 			async () => {
@@ -621,9 +622,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					fail(json(prefs))
 				}
 
-				const fromStorage = ["minimizeToTray", "startMinimized"].filter(key => !(state.mirrored ?? []).includes(key))
-
-				return `${json(prefs)}; from localStorage alone: ${fromStorage.join(", ") || "none"}`
+				return `${json(prefs)}; 3.x's options.v1.json held ${(state.mirrored ?? []).join(", ") || "neither"}`
 			})
 
 			await findings.check("L5 the network drive runs at the 3.x mount point and reads the cloud edit", async () => {
