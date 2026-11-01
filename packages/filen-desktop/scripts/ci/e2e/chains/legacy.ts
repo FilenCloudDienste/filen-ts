@@ -931,8 +931,10 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 			await findings.check("L6 the old origin's stores purged and no secret left on disk", () => {
 				const read = marker()
+				// The store is deleted before ready and the new page creates it again for its own origin, so only the old
+				// origin's entries count (Chromium writes the origin into each of its keys).
 				const left = [
-					...(existsSync(userData("Local Storage")) ? ["Local Storage/"] : []),
+					...filesHolding(userData("Local Storage"), [LEGACY_ORIGIN]).map(file => `Local Storage/${file}`),
 					...(existsSync(userData("IndexedDB"))
 						? readdirSync(userData("IndexedDB")).filter(name => name.startsWith("filendesktop_bundle_0."))
 						: [])

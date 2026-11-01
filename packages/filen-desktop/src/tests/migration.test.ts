@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { type AtomicFile, codedError } from "../main/atomicFile.ts"
 import { LEGACY_KEYS, type LegacyStash } from "../main/legacyData.ts"
-import { LEGACY_INDEXEDDB_PREFIX, legacyProfileExists } from "../main/legacyOrigin.ts"
+import { deleteLegacyStores, LEGACY_INDEXEDDB_PREFIX, legacyProfileExists } from "../main/legacyOrigin.ts"
 import {
 	createMigration,
 	createStashStore,
@@ -13,6 +14,9 @@ import {
 	type MigrationDeps,
 	type MigrationMarker,
 	parseMarker,
+	type PurgeDeps,
+	type PurgeOutcome,
+	purgeBeforeReady,
 	serializeMarker,
 	startupDecision,
 	verifiedBy,
@@ -219,7 +223,7 @@ function setup(
 		readOptions: vi.fn(() => Promise.resolve<string | null>(JSON.stringify({ startMinimized: true }))),
 		wipeLegacy: vi.fn(() => Promise.resolve()),
 		removeRcloneConfig: vi.fn(() => Promise.resolve()),
-		purgeLegacyStores: vi.fn(() => Promise.resolve()),
+		earlyPurge: vi.fn((): PurgeOutcome => ({ result: "not-due" })),
 		vault: {
 			get: vi.fn(() => Promise.resolve(state.vault)),
 			set: vi.fn((blob: string) => {
@@ -663,51 +667,128 @@ describe("failure logging", () => {
 })
 
 describe("purging the old stores", () => {
-	const SIGNED_IN_VAULT: SessionRead = { status: "present", blob: SESSION_OF("123456") }
+	const WIPED = marker({ stage: "verified", wiped: true })
 
-	it("deletes them on the launch after the wipe, once", async () => {
-		const first = setup({ marker: marker({ stage: "verified", wiped: true }), vault: SIGNED_IN_VAULT })
+	function purgeDeps(text: string | null, overrides: Partial<PurgeDeps> = {}) {
+		return {
+			readMarker: vi.fn(() => text),
+			sessionStored: vi.fn(() => true),
+			deleteStores: vi.fn(() => undefined),
+			...overrides
+		} satisfies PurgeDeps
+	}
 
-		await first.migration.start()
+	// One launch: the purge before ready, then the migration after it, as main runs them.
+	async function launch(stored: MigrationMarker | null, overrides: Partial<PurgeDeps> = {}) {
+		const deps = purgeDeps(stored === null ? null : serializeMarker(stored), overrides)
+		const outcome = purgeBeforeReady(deps)
+		const run = setup({ marker: stored ?? undefined, vault: { status: "present", blob: SESSION_OF("123456") } })
 
-		expect(first.deps.purgeLegacyStores).toHaveBeenCalledTimes(1)
-		expect(first.stored()).toMatchObject({ wiped: true, purged: true })
-
-		const second = setup({ marker: first.stored() ?? undefined, vault: SIGNED_IN_VAULT })
-
-		await second.migration.start()
-
-		expect(second.deps.purgeLegacyStores).not.toHaveBeenCalled()
-	})
-
-	it("never deletes them before the secrets were wiped", async () => {
-		const run = setup({ marker: marker({ stage: "verified", wiped: false }) })
-
-		await run.migration.start()
-
-		expect(run.deps.purgeLegacyStores).not.toHaveBeenCalled()
-	})
-
-	it("waits for a launch with a stored session, so a sign-out cut short keeps the page's flag", async () => {
-		for (const vault of [{ status: "absent" }, { status: "unreadable" }] as const) {
-			const run = setup({ marker: marker({ stage: "verified", wiped: true }), vault })
-
-			await run.migration.start()
-
-			expect(run.deps.purgeLegacyStores).not.toHaveBeenCalled()
-			expect(run.stored()).toMatchObject({ purged: false })
-		}
-	})
-
-	it("tries again next launch when deleting fails, logging it once", async () => {
-		const run = setup({ marker: marker({ stage: "verified", wiped: true }), vault: SIGNED_IN_VAULT })
-
-		run.deps.purgeLegacyStores.mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
+		run.deps.earlyPurge.mockReturnValue(outcome)
 		await expect(run.migration.start()).resolves.toEqual({ pinImported: false })
 
-		expect(run.deps.warn).toHaveBeenCalledTimes(1)
-		expect(run.deps.warn).toHaveBeenCalledWith("migration: deleting the old stores failed, tried again next launch: EBUSY")
+		return { ...run, outcome, deleteStores: deps.deleteStores }
+	}
+
+	it("deletes them before ready on the launch after the wipe, then records it, once", async () => {
+		const first = await launch(WIPED)
+
+		expect(first.outcome).toEqual({ result: "deleted" })
+		expect(first.deleteStores).toHaveBeenCalledTimes(1)
+		expect(first.stored()).toMatchObject({ wiped: true, purged: true })
+		expect(first.deps.info).toHaveBeenCalledWith("migration: the old client's stores were deleted from disk")
+
+		const second = await launch(first.stored())
+
+		expect(second.outcome).toEqual({ result: "not-due" })
+		expect(second.deleteStores).not.toHaveBeenCalled()
+		expect(second.markerFile.text()).toBe(first.markerFile.text())
+	})
+
+	it("never deletes them before the secrets were wiped, nor without a readable marker", async () => {
+		for (const stored of [null, marker({ stage: "verified", wiped: false }), marker({ stage: "imported" })]) {
+			const run = await launch(stored)
+
+			expect(run.deleteStores).not.toHaveBeenCalled()
+		}
+
+		const unreadable = purgeDeps(null, {
+			readMarker: () => {
+				throw Object.assign(new Error("denied"), { code: "EACCES" })
+			}
+		})
+
+		expect(purgeBeforeReady(unreadable)).toEqual({ result: "not-due" })
+		expect(purgeBeforeReady(purgeDeps("{not json"))).toEqual({ result: "not-due" })
+		expect(unreadable.deleteStores).not.toHaveBeenCalled()
+	})
+
+	it("waits for a launch with the vault file present, so a sign-out cut short keeps the page's flag", async () => {
+		const run = await launch(WIPED, { sessionStored: () => false })
+
+		expect(run.outcome).toEqual({ result: "not-due" })
+		expect(run.deleteStores).not.toHaveBeenCalled()
 		expect(run.stored()).toMatchObject({ purged: false })
+		expect(run.deps.info).toHaveBeenCalledWith("migration: deleting the old stores waits for a launch with a stored session")
+	})
+
+	it("leaves the marker unpurged on a Windows-like EBUSY, logs the code once and deletes them on the next launch", async () => {
+		const busy = await launch(WIPED, {
+			deleteStores: vi.fn(() => {
+				throw Object.assign(new Error("resource busy or locked"), { code: "EBUSY" })
+			})
+		})
+
+		expect(busy.outcome).toEqual({ result: "failed", code: "EBUSY" })
+		expect(busy.deps.warn).toHaveBeenCalledTimes(1)
+		expect(busy.deps.warn).toHaveBeenCalledWith("migration: deleting the old stores failed, tried again next launch: EBUSY")
+		expect(busy.stored()).toMatchObject({ wiped: true, purged: false })
+
+		const next = await launch(busy.stored())
+
+		expect(next.deleteStores).toHaveBeenCalledTimes(1)
+		expect(next.stored()).toMatchObject({ purged: true })
+	})
+
+	it("does not record the purge when the marker cannot be written, so the next launch deletes them again", async () => {
+		const deps = purgeDeps(serializeMarker(WIPED))
+		const run = setup({ marker: WIPED })
+
+		run.deps.earlyPurge.mockReturnValue(purgeBeforeReady(deps))
+		vi.spyOn(run.deps.marker, "write").mockRejectedValueOnce(Object.assign(new Error("full"), { code: "ENOSPC" }))
+		await run.migration.start()
+
+		expect(run.stored()).toMatchObject({ purged: false })
+		expect(run.deps.info).not.toHaveBeenCalledWith("migration: the old client's stores were deleted from disk")
+	})
+
+	it("deletes the old origin's IndexedDB and the Local Storage store, keeping the other origins' IndexedDB", async () => {
+		const userData = await mkdtemp(path.join(tmpdir(), "filen-purge-"))
+
+		try {
+			const oldDb = path.join(userData, "IndexedDB", `${LEGACY_INDEXEDDB_PREFIX}indexeddb.leveldb`)
+			const oldBlobs = path.join(userData, "IndexedDB", `${LEGACY_INDEXEDDB_PREFIX}indexeddb.blob`)
+			const newDb = path.join(userData, "IndexedDB", "filen_app_0.indexeddb.leveldb")
+			const localStorage = path.join(userData, "Local Storage", "leveldb")
+
+			for (const dir of [oldDb, oldBlobs, newDb, localStorage]) {
+				await mkdir(dir, { recursive: true })
+				await writeFile(path.join(dir, "000003.log"), "value")
+			}
+
+			deleteLegacyStores(userData)
+
+			expect([oldDb, oldBlobs, path.join(userData, "Local Storage")].filter(dir => existsSync(dir))).toEqual([])
+			expect(existsSync(path.join(newDb, "000003.log"))).toBe(true)
+
+			// Nothing left to delete, and no IndexedDB directory at all: still done.
+			await rm(path.join(userData, "IndexedDB"), { recursive: true })
+			expect(() => {
+				deleteLegacyStores(userData)
+			}).not.toThrow()
+		} finally {
+			await rm(userData, { recursive: true, force: true })
+		}
 	})
 })
 

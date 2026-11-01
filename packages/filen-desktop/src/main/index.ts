@@ -51,9 +51,9 @@ import { createFileProviderService, runsTranslocated } from "./fileProvider/serv
 import { createFileProviderStore } from "./fileProvider/store.ts"
 import { appIdentity, closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
-import { LEGACY_INDEXEDDB_PREFIX, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
+import { deleteLegacyStores, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
-import { createMigration, createStashStore, legacyOwner, parseMarker } from "./migration.ts"
+import { createMigration, createStashStore, legacyOwner, parseMarker, type PurgeOutcome, purgeBeforeReady } from "./migration.ts"
 import { addonPath } from "./native/addonPath.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
 import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
@@ -175,7 +175,8 @@ const vaultCipher = lazyCipher(async () => {
 
 	return sessionCipher()
 })
-const sessionVault = createSessionVault(vaultCipher, atomicFile(path.join(app.getPath("userData"), "session.vault")), warn)
+const sessionVaultPath = path.join(app.getPath("userData"), "session.vault")
+const sessionVault = createSessionVault(vaultCipher, atomicFile(sessionVaultPath), warn)
 
 // Read before ready; the window and every pref-dependent decision come after ready, once this has settled.
 const prefsLoading = loadPrefs(atomicFile(path.join(app.getPath("userData"), "prefs.json")), warn)
@@ -190,7 +191,10 @@ const userDataPath = app.getPath("userData")
 const migrationStashFile = atomicFile(path.join(userDataPath, "migration.stash"))
 const migrationStash = createStashStore(migrationStashFile, vaultCipher, warn)
 
-const migrationMarker = atomicFile(path.join(userDataPath, "migration.json"))
+const migrationMarkerPath = path.join(userDataPath, "migration.json")
+const migrationMarker = atomicFile(migrationMarkerPath)
+// Set before ready, once this instance holds the single-instance lock; see purgeBeforeReady.
+let earlyPurge: PurgeOutcome = { result: "not-due" }
 
 // The one-time import from the old client. Runs after ready and before the first window; see migration.ts.
 const migration = createMigration({
@@ -205,13 +209,7 @@ const migration = createMigration({
 	},
 	// The old client's generated rclone remote: the account's keys, merely obscured.
 	removeRcloneConfig: () => rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true }),
-	purgeLegacyStores: async () => {
-		const indexedDb = path.join(userDataPath, "IndexedDB")
-		const oldOrigin = (await readdir(indexedDb).catch(() => [])).filter(name => name.startsWith(LEGACY_INDEXEDDB_PREFIX))
-
-		await Promise.all(oldOrigin.map(name => rm(path.join(indexedDb, name), { recursive: true, force: true })))
-		await rm(path.join(userDataPath, "Local Storage"), { recursive: true, force: true })
-	},
+	earlyPurge: () => earlyPurge,
 	vault: sessionVault,
 	lock: {
 		enabled: () => appLock?.status().enabled ?? true,
@@ -1247,6 +1245,25 @@ function isTrusted(senderFrame: WebFrameMain | null): boolean {
 if (!app.requestSingleInstanceLock()) {
 	app.quit()
 } else {
+	// The main module runs to its end before Electron creates the default session and emits ready, so nothing holds the
+	// profile's storage open yet. Synchronous, so it is done before that.
+	earlyPurge = purgeBeforeReady({
+		readMarker: () => {
+			try {
+				return readFileSync(migrationMarkerPath, "utf8")
+			} catch (error) {
+				if (errorCode(error) === "ENOENT") {
+					return null
+				}
+
+				throw error
+			}
+		},
+		sessionStored: () => existsSync(sessionVaultPath),
+		deleteStores: () => {
+			deleteLegacyStores(userDataPath)
+		}
+	})
 	app.on("second-instance", showWindow)
 	app.on("before-quit", () => {
 		if (!quitting) {

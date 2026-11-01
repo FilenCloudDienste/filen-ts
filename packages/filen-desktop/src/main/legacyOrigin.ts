@@ -1,3 +1,4 @@
+import { existsSync, readdirSync, rmSync } from "node:fs"
 import { stat } from "node:fs/promises"
 import path from "node:path"
 import { BrowserWindow, protocol, session } from "electron"
@@ -34,6 +35,21 @@ export async function legacyProfileExists(userData: string): Promise<boolean> {
 
 		throw error
 	}
+}
+
+// Deletes the old origin's IndexedDB stores and the whole Local Storage store (every origin's; this app's own few
+// values go with it once). Synchronous, for the moment before ready when Chromium holds none of them open: Windows
+// refuses to delete a file that is open (EBUSY). Throws on the first entry that cannot be deleted.
+export function deleteLegacyStores(userData: string): void {
+	const indexedDb = path.join(userData, "IndexedDB")
+
+	for (const name of existsSync(indexedDb) ? readdirSync(indexedDb) : []) {
+		if (name.startsWith(LEGACY_INDEXEDDB_PREFIX)) {
+			rmSync(path.join(indexedDb, name), { recursive: true, force: true })
+		}
+	}
+
+	rmSync(path.join(userData, "Local Storage"), { recursive: true, force: true })
 }
 
 // The empty page at the root of the old origin, a 404 anywhere else.

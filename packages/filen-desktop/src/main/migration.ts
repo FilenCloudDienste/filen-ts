@@ -196,6 +196,49 @@ export function verifiedBy(marker: MigrationMarker, sessionBlob: string | null):
 	)
 }
 
+export type PurgeOutcome = { result: "not-due" } | { result: "deleted" } | { result: "failed"; code: string }
+
+export interface PurgeDeps {
+	// The marker file's text, null when it is absent.
+	readMarker(): string | null
+	// The session vault file exists.
+	sessionStored(): boolean
+	// Deletes the old origin's IndexedDB and the Local Storage store; throws when an entry stays.
+	deleteStores(): void
+}
+
+// LevelDB keeps deleted values until a compaction, so the old origin's stores are deleted from disk once its secrets
+// are wiped. Chromium opens the profile's Local Storage store once the default session exists, and Windows refuses to
+// delete open files (EBUSY), so this runs synchronously before ready, after the single-instance lock; `start` records
+// the outcome. The new page loses its few localStorage values (theme choice, splash hint) once.
+// Deleting the Local Storage store also deletes the page's own flag that finishes a sign-out cut short (filen-web
+// signOutPending.ts), whose loss would leave the signed-out account's local data behind. That flag can outlive the
+// session only: sign-out clears the vault first among its wipes, removing its file (in memory-only mode too), and an
+// existing file means a stored session (or a sign-out that stopped before clearing anything, which the page then shows
+// as still signed in). So the purge waits for a launch with the vault file present.
+export function purgeBeforeReady(deps: PurgeDeps): PurgeOutcome {
+	let current: MigrationMarker | null
+
+	try {
+		current = parseMarker(deps.readMarker())
+	} catch {
+		// `start` reads the marker again and logs the failure.
+		return { result: "not-due" }
+	}
+
+	if (current?.wiped !== true || current.purged || !deps.sessionStored()) {
+		return { result: "not-due" }
+	}
+
+	try {
+		deps.deleteStores()
+	} catch (error) {
+		return { result: "failed", code: errorCode(error) }
+	}
+
+	return { result: "deleted" }
+}
+
 export interface MigrationDeps {
 	marker: AtomicFile
 	// The old client's web app ran in this profile (a cheap check of its IndexedDB directory, legacyProfileExists).
@@ -208,10 +251,8 @@ export interface MigrationDeps {
 	wipeLegacy(): Promise<void>
 	// Deletes the old client's rclone config; nothing when it is gone already.
 	removeRcloneConfig(): Promise<void>
-	// Deletes the old origin's IndexedDB and the Local Storage store on disk. Only called before any window or storage
-	// use in this launch, and only with a session in the vault (see `purge`); the new page loses its few localStorage
-	// values (theme choice, splash hint) once.
-	purgeLegacyStores(): Promise<void>
+	// What purgeBeforeReady did in this launch.
+	earlyPurge(): PurgeOutcome
 	vault: { get(): Promise<SessionRead>; set(blob: string): Promise<void> }
 	lock: { enabled(): boolean; set(pin: string): Promise<boolean> }
 	prefs: { set(patch: LegacyPrefs & { launchAtLogin?: boolean }): Promise<unknown> }
@@ -427,24 +468,19 @@ export function createMigration(deps: MigrationDeps): Migration {
 		return pinImported
 	}
 
-	// LevelDB keeps deleted values until a compaction, so the stores go once the secrets are wiped. Deleting the Local
-	// Storage store also deletes the page's own flag that finishes a sign-out cut short (filen-web signOutPending.ts),
-	// whose loss would leave the signed-out account's local data behind. That flag can outlive the session only:
-	// sign-out clears the vault first among its wipes, and a stored session means the user is signed in (or the
-	// sign-out stopped before clearing anything, which the page then shows as still signed in). So the purge waits for
-	// a launch with a session in the vault; a vault kept in memory only never has one, and keeps the stores.
-	async function purge(current: MigrationMarker): Promise<void> {
-		if ((await vaultStatus()) !== "present") {
-			deps.info("migration: deleting the old stores waits for a launch with a stored session")
+	// Records what purgeBeforeReady did; `purged` is set only once the stores are gone.
+	async function recordPurge(current: MigrationMarker): Promise<void> {
+		const outcome = deps.earlyPurge()
+
+		if (outcome.result === "failed") {
+			// Windows: a file held open (EBUSY, EPERM) by a scanner or indexer.
+			deps.warn(`migration: deleting the old stores failed, tried again next launch: ${outcome.code}`)
 
 			return
 		}
 
-		try {
-			await deps.purgeLegacyStores()
-		} catch (error) {
-			// Windows: a file held open (EBUSY, EPERM) by a scanner or indexer.
-			deps.warn(`migration: deleting the old stores failed, tried again next launch: ${errorCode(error)}`)
+		if (outcome.result === "not-due") {
+			deps.info("migration: deleting the old stores waits for a launch with a stored session")
 
 			return
 		}
@@ -488,7 +524,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 				if (marker?.wiped === true) {
 					if (!marker.purged) {
-						await purge(marker)
+						await recordPurge(marker)
 					}
 
 					return result
