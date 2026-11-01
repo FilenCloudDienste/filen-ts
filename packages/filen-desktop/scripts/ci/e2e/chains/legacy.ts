@@ -105,8 +105,8 @@ interface ShellState {
 }
 
 export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<void> {
-	if (!["linux deb", "win nsis"].includes(`${options.target.platform} ${options.target.format}`)) {
-		fail("the deep 3.0.53 -> N chain runs on Linux deb and Windows NSIS only so far")
+	if (!["linux deb", "win nsis", "mac dmg"].includes(`${options.target.platform} ${options.target.format}`)) {
+		fail("the deep 3.0.53 -> N chain runs on Linux deb, Windows NSIS and macOS dmg only so far")
 	}
 
 	const chain = await openChain("legacy", options, artifacts)
@@ -283,7 +283,11 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		})
 
 		await findings.must(`${LEGACY_VERSION}: the network drive is mounted and WebDAV answers`, async () => {
-			const type = await waitFor("the old network drive to mount", SETUP_TIMEOUT_MS, async () => chain.os.driveMounted(drive.root))
+			// Where 3.0.53 cannot mount (FUSE-T on macOS needs an administrator's install), its drive stays configured and
+			// enabled, which is what migrates; 4.x then mounts it its own way (L5).
+			const type = chain.os.legacyDriveLive
+				? await waitFor("the old network drive to mount", SETUP_TIMEOUT_MS, async () => chain.os.driveMounted(drive.root))
+				: `configured only (3.0.53 cannot mount on this runner; ${(await chain.os.driveMounted(drive.root)) ?? "nothing"} mounted)`
 			const response = await fetch(`http://127.0.0.1:${String(webdav.port)}/`, {
 				method: "PROPFIND",
 				headers: { Depth: "1", Authorization: `Basic ${Buffer.from(`${webdav.username}:${webdav.password}`).toString("base64")}` },

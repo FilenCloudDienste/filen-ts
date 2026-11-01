@@ -70,8 +70,7 @@ function deniedAccess(text: string): boolean {
 }
 
 export const macOs: DesktopOs = {
-	// No kernel extension loads on hosted runners: the drive mounts only if rclone's NFS mount works there.
-	liveDrive: false,
+	legacyDriveLive: false,
 	// Whether System Events answers this process at all, logged for the run (a refusal names itself later too).
 	async prepare() {
 		const probe = await runBounded(

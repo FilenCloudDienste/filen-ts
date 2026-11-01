@@ -63,8 +63,6 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 		local?: Map<string, Snapshot>
 		cloud?: Snapshot
 		drive?: string
-		// The drive ran (always where DesktopOs.liveDrive; on a runner that cannot mount, only if it came up anyway).
-		driveLive?: boolean
 		webdav?: { url: string; credentials: DesktopServeCredentials }
 		vaultSize?: number
 	} = {}
@@ -156,20 +154,16 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				const drive = await waitFor("the drive to run", SETUP_TIMEOUT_MS, async () => {
 					const { drive } = await mountsOverview()
 
-					if (drive.state === "error" && chain.os.liveDrive) {
+					if (drive.state === "error") {
 						fail(`drive error: ${json(drive.error)}`)
 					}
 
-					return drive.state === "running" || drive.state === "error" ? drive : null
+					return drive.state === "running" ? drive : null
 				})
 
-				state.drive = chain.os.driveRoot(drive) ?? fail(`the drive reports no location: ${json(drive)}`)
-				state.driveLive = drive.state === "running"
+				state.drive = chain.os.driveRoot(drive) ?? fail(`the running drive reports no location: ${json(drive)}`)
 
-				// Where the runner cannot mount (macOS without macFUSE), the drive's own named state is the evidence.
-				return state.driveLive
-					? `running at ${state.drive}`
-					: `enabled at ${state.drive}; not mountable on this runner: ${json(drive.error)}`
+				return `running at ${state.drive}`
 			})
 
 			await findings.must("WebDAV serves on loopback with credentials", async () => {
@@ -481,15 +475,6 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 				const root = chain.os.driveRoot(drive)
 
-				// A runner that cannot mount: the drive is still on, at the same place, in the same state as before.
-				if (state.driveLive !== true) {
-					if (!drive.enabled || root !== state.drive || drive.state !== "error") {
-						fail(json(drive))
-					}
-
-					return `enabled at ${root}, not mountable on this runner as before the update: ${json(drive.error)}`
-				}
-
 				if (!drive.enabled || drive.state !== "running" || root === null || root !== state.drive) {
 					fail(json(drive))
 				}
@@ -567,7 +552,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 			await waitFor("session.vault to be removed", SETUP_TIMEOUT_MS, () => (existsSync(vault) ? null : true))
 			await waitFor("the drive to unmount", SETUP_TIMEOUT_MS, async () =>
-				state.driveLive !== true || (await chain.os.driveMounted(state.drive ?? fail("no drive"))) === null ? true : null
+				(await chain.os.driveMounted(state.drive ?? fail("no drive"))) === null ? true : null
 			)
 
 			return "session.vault gone; nothing mounted"

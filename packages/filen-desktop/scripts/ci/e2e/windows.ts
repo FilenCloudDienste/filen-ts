@@ -156,7 +156,7 @@ throw 'the dialog was not answered; cancelled'
 }
 
 export const windowsOs: DesktopOs = {
-	liveDrive: true,
+	legacyDriveLive: true,
 	async prepare() {
 		// WER writes a full dump of a crashing Filen.exe here (<exe>.<pid>.dmp), at most ten.
 		await ps(

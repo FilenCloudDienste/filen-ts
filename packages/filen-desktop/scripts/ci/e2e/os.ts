@@ -30,9 +30,9 @@ export interface DriveLocation {
 }
 
 export interface DesktopOs {
-	// Whether a configured drive must actually run here (false where the runner cannot mount one, macOS without
-	// macFUSE: the drive's settings and its named state are checked instead, a mount only if it comes up anyway).
-	readonly liveDrive: boolean
+	// Whether the old client (3.0.53) can mount its drive here: it mounts with FUSE-T on macOS, which needs an installer
+	// run as an administrator and is not on hosted runners. Where it cannot, its drive settings are migrated all the same.
+	readonly legacyDriveLive: boolean
 	// Once per chain, before anything launches (crash dump registration, say).
 	prepare(): Promise<void>
 	// Answers the app's open-directory dialog titled `title` with `dir`; evidence files start with `evidence`.
@@ -62,7 +62,7 @@ export interface DesktopOs {
 }
 
 const linuxOs: DesktopOs = {
-	liveDrive: true,
+	legacyDriveLive: true,
 	// Core dumps are set up by the workflow (scripts/ci/deepSession.sh), for the whole D-Bus session.
 	prepare: async () => undefined,
 	chooseDirectory,

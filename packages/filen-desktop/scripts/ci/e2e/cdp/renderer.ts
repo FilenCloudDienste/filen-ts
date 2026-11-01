@@ -30,7 +30,8 @@ export async function connectRenderer(port: number, origin: string, timeoutMs: n
 			browser
 				.contexts()
 				.flatMap(context => context.pages())
-				.find(candidate => candidate.url().startsWith(origin)) ?? null,
+				// 3.x on macOS also lists its launcher page, which goes away once the app's page is up.
+				.find(candidate => candidate.url().startsWith(origin) && !candidate.url().includes("launcher")) ?? null,
 		1000
 	)
 
