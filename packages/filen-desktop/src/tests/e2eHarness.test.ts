@@ -6,6 +6,7 @@ import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import {
 	fixtureTree,
+	LEGACY_CONFLICTS,
 	LEGACY_DELTAS,
 	LEGACY_LOCAL_TRASH,
 	legacyLocalTree,
@@ -77,6 +78,11 @@ describe("e2e fixtures and snapshots", () => {
 		])
 		expect(diffSnapshots(before, after, { identity: true })).toContain("space name.txt: rewritten (identity changed)")
 		expect(diffSnapshots(before, after, { identity: false, allowed: ["docs/notes.txt", "empty-dir", "extra.txt"] })).toEqual([])
+		expect(diffSnapshots(before, new Map(), { identity: false, allowed: ["docs", "media", "nested"] }).sort()).toEqual([
+			"missing empty-dir",
+			"missing space name.txt",
+			"missing Ünïcødé ✓ name.txt".normalize("NFC")
+		])
 	})
 
 	it("skips what the caller leaves out", async () => {
@@ -187,14 +193,16 @@ describe("chain L fixtures", () => {
 		expect(LEGACY_PAIRS.filter(pair => withTrash.includes(pair.name)).map(pair => pair.localTrashDisabled)).toEqual([true, false])
 	})
 
-	it("allows a rule file where dot files were excluded (uploaded only by a pair that pushes) and the two edits", () => {
-		expect(LEGACY_DELTAS.map(delta => `${delta.side} ${delta.pair}/${delta.path}`).sort()).toEqual([
-			"cloud e2e-twoway/.filenignore",
-			"cloud e2e-twoway/docs/notes.txt",
-			"local e2e-c2l/.filenignore",
-			"local e2e-c2l/media/blob.bin",
-			"local e2e-cbak/.filenignore",
-			"local e2e-twoway/.filenignore"
+	it("allows a rule file where dot files were excluded (uploaded only by a pair that pushes), the cloud edit, the old trash moved to the bin, and one held conflict", () => {
+		expect(LEGACY_DELTAS.map(delta => `${delta.side} ${delta.pair}/${delta.path} ${delta.change}`).sort()).toEqual([
+			"cloud e2e-twoway/.filenignore rules",
+			"local e2e-c2l/.filen.trash.local binned",
+			"local e2e-c2l/.filenignore rules",
+			"local e2e-c2l/media/blob.bin edit",
+			"local e2e-cbak/.filen.trash.local binned",
+			"local e2e-cbak/.filenignore rules",
+			"local e2e-twoway/.filenignore rules"
 		])
+		expect(LEGACY_CONFLICTS).toEqual({ "e2e-twoway": ["docs/notes.txt"] })
 	})
 })

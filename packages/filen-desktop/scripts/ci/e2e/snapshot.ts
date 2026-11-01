@@ -96,13 +96,14 @@ export async function cloudSnapshot(cloud: Cloud, dir: string, work: string): Pr
 export interface DiffOptions {
 	// Also compare identities (rewritten, re-uploaded).
 	identity: boolean
-	// Paths allowed to differ in any way (the expected deltas).
+	// Paths allowed to differ in any way, with everything below them (the expected deltas).
 	allowed?: readonly string[]
 }
 
 // Every difference of `actual` from `expected`, one line each; empty when they match.
 export function diffSnapshots(expected: Snapshot, actual: Snapshot, options: DiffOptions): string[] {
-	const allowed = new Set(options.allowed ?? [])
+	const allowedPaths = options.allowed ?? []
+	const allowed = { has: (relPath: string) => allowedPaths.some(path => relPath === path || relPath.startsWith(`${path}/`)) }
 	const differences: string[] = []
 
 	for (const [relPath, want] of expected) {

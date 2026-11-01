@@ -1,12 +1,22 @@
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import type { DesktopLockStatus, DesktopMountsResult, DesktopPrefs, DesktopServeCredentials, DesktopSyncPair } from "@filen/shared/desktop"
+import type {
+	DesktopLockStatus,
+	DesktopMountsResult,
+	DesktopPrefs,
+	DesktopServeCredentials,
+	DesktopSyncConflict,
+	DesktopSyncEntries,
+	DesktopSyncPair,
+	DesktopSyncResult
+} from "@filen/shared/desktop"
 import { LEGACY_VERSION } from "../../legacy.ts"
 import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
 import { desktop, sessionStatus, signOut, unlockThroughScreen } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import {
+	LEGACY_CONFLICTS,
 	LEGACY_DELTAS,
 	LEGACY_EDITS,
 	LEGACY_LOCAL_TRASH,
@@ -39,7 +49,8 @@ import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openCha
 // mixed), syncs until it settles, and quits. One file changes on disk and one in the cloud while it is closed. Its own
 // updater then installs N from the loopback feed (its sync held for that launch, so the edits wait for N), and N must
 // migrate everything invisibly: the account without a sign-in, the PIN, prefs and mounts, every pair with its mode,
-// transferring nothing but the two edits. Then the user signs out and uninstalls.
+// downloading the cloud edit and holding the disk edit as a conflict (N imports none of the old sync history, so a
+// two-way path changed on one side is a conflict), moving nothing else. Then the user signs out and uninstalls.
 //
 // The assertion table (each one a finding):
 //   L1   update path              the update scenario's own checks (scripts/ci/e2e/update.ts)
@@ -54,11 +65,12 @@ import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openCha
 //   L7   userData/sync kept       renamed to sync.migrated-<date>, its content unchanged
 //   L8   every pair, same mode    five pairs by name: the mapped mode, the same local root and remote directory, running
 //   L9   invisible                no review, hold, notice, root problem or issue; info only localTrashNowOn where local
-//                                 trash was off; no import note, no mount notice, no dialog over the page
-//   L10  only the two edits       disk and cloud over N's first passes: identities unchanged except the expected deltas
-//                                 (LEGACY_DELTAS); N's activity and plans carry nothing else
-//   L12  no bin traffic           the engine's bin holds only what the cloud edit replaced; 3.x's local trash
-//                                 untouched (inode, mtime, content) and never in the cloud
+//                                 trash was off; conflicts only as LEGACY_CONFLICTS; no import note, no mount notice, no
+//                                 dialog over the page but the master-key reminder (put off)
+//   L10  only the edits           disk and cloud over N's first passes: identities unchanged except the expected deltas
+//                                 (LEGACY_DELTAS); exactly LEGACY_CONFLICTS held; N's activity and plans carry nothing else
+//   L12  the bins                 each pair's bin holds exactly 3.x's local trash (moved there, content intact) and what
+//                                 the cloud edit replaced, under the day's bucket; neither ever in the cloud
 //   L13  the page as served       crossOriginIsolated
 //   L14  sync works afterwards    a new local file uploads
 //   L15  sign-out and uninstall   session and drive gone; the user's directories intact
@@ -71,9 +83,11 @@ const IMPORT_TIMEOUT_MS = 90_000
 // Seconds of inactivity before the old app locks: long enough that it never does during the run.
 const LOCK_TIMEOUT_S = 3600
 const DOT_FILE_RULES = [".*", "!/.filenignore"]
+// The title of the startup reminder a fresh session shows (filen-web), the one dialog a migration may leave visible.
+const MASTER_KEYS_REMINDER = "Back up your master keys"
 
-function pairFixture(name: string): LegacyPairFixture {
-	return LEGACY_PAIRS.find(pair => pair.name === name) ?? fail(`no pair ${name}`)
+function expectedConflicts(pair: string): number {
+	return LEGACY_CONFLICTS[pair]?.length ?? 0
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -109,8 +123,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		syncDir?: Snapshot
 		local?: Map<string, Snapshot>
 		cloud?: Snapshot
-		// Each pair's old local trash directory as 3.x left it (null where it has none).
-		trash?: Map<string, string | null>
+		// What each pair's old local trash directory held as 3.x left it (null where it had none).
+		trash?: Map<string, Snapshot | null>
 		// The prefs 3.x's options.v1.json held (the rest are in its localStorage only).
 		mirrored?: string[]
 		afterCloud?: Snapshot
@@ -119,18 +133,12 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 	chain.secret(pin)
 	chain.secret(webdav.password)
 
-	// The old local trash directory of a pair: its own inode and mtime, then everything in it with identities; null
-	// when there is none. 4.x never syncs, moves or deletes it (the engine reserves the name; it holds user data).
-	const trashState = async (pair: string): Promise<string | null> => {
+	// What the old local trash directory of a pair holds (relative paths, content hashes); null when there is none. The
+	// engine's first pass moves it into the pair's bin, so only its content is compared afterwards.
+	const trashContents = async (pair: string): Promise<Snapshot | null> => {
 		const dir = path.join(rootOf(pair), LEGACY_LOCAL_TRASH)
 
-		if (!existsSync(dir)) {
-			return null
-		}
-
-		const stat = statSync(dir, { bigint: true })
-
-		return `${String(stat.ino)}@${String(stat.mtimeNs)}\n${snapshotText(await localSnapshot(dir))}`
+		return existsSync(dir) ? localSnapshot(dir) : null
 	}
 
 	const legacyPage = () => state.legacy?.renderer.page ?? fail("the old app's page is not connected")
@@ -339,7 +347,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 			for (const pair of LEGACY_PAIRS) {
 				state.local.set(pair.name, await snapshotOf(pair.name))
-				state.trash.set(pair.name, await trashState(pair.name))
+				state.trash.set(pair.name, await trashContents(pair.name))
 			}
 
 			state.cloud = (await cloudSnapshot(cloud, cloudDir, work)) ?? fail(`${cloudDir} is gone`)
@@ -374,7 +382,11 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			const node = now.get(pair === null ? `${delta.pair}/${delta.path}` : delta.path)
 			const edit = edits.local.pair === delta.pair && edits.local.path === delta.path ? edits.local : edits.cloud
 
-			if (node?.kind !== "file") {
+			if (delta.change === "binned") {
+				if (node !== undefined) {
+					problems.push(`${side} ${delta.pair}/${delta.path}: still in the root`)
+				}
+			} else if (node?.kind !== "file") {
 				problems.push(`${side} ${delta.pair}/${delta.path}: missing`)
 			} else if (delta.change === "edit" && node.sha256 !== edit.sha256) {
 				problems.push(`${side} ${delta.pair}/${delta.path}: not the edit`)
@@ -445,98 +457,125 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `stage ${String(read.stage)} ${String(Math.round((Date.now() - relaunchedAt) / 1000))} s after N started`
 		})
 
-		await findings.check("L10 N's first passes carry the two edits and nothing else (disk and cloud)", async () => {
-			const shell = await waitFor(
-				"every migrated pair to start",
-				MIGRATE_TIMEOUT_MS,
-				() => {
-					const read = readJson(path.join(engine(), "shell.json")) as ShellState | null
-					const review = read?.pairs?.find(pair => pair.state === "review")
+		await findings.check(
+			"L10 N's first passes carry the cloud edit, hold the disk edit, move nothing else (disk and cloud)",
+			async () => {
+				const shell = await waitFor(
+					"every migrated pair to start",
+					MIGRATE_TIMEOUT_MS,
+					() => {
+						const read = readJson(path.join(engine(), "shell.json")) as ShellState | null
+						const review = read?.pairs?.find(pair => pair.state === "review")
 
-					if (review !== undefined) {
-						fail(`${review.name} waits in review: ${json(review.review)}`)
-					}
+						if (review !== undefined) {
+							fail(`${review.name} waits in review: ${json(review.review)}`)
+						}
 
-					return read?.pairs?.length === LEGACY_PAIRS.length &&
-						read.pairs.every(pair => pair.state === "active" && pair.pairId !== null)
-						? read
-						: null
-				},
-				5000
-			)
+						return read?.pairs?.length === LEGACY_PAIRS.length &&
+							read.pairs.every(pair => pair.state === "active" && pair.pairId !== null)
+							? read
+							: null
+					},
+					5000
+				)
 
-			await quiet([...LEGACY_PAIRS.map(pair => rootOf(pair.name)), engine()])
+				await quiet([...LEGACY_PAIRS.map(pair => rootOf(pair.name)), engine()])
 
-			const problems: string[] = []
+				const problems: string[] = []
 
-			for (const pair of LEGACY_PAIRS) {
-				const allowed = LEGACY_DELTAS.filter(delta => delta.pair === pair.name && delta.side === "local").map(delta => delta.path)
-				const now = await snapshotOf(pair.name)
+				for (const pair of LEGACY_PAIRS) {
+					const allowed = LEGACY_DELTAS.filter(delta => delta.pair === pair.name && delta.side === "local").map(
+						delta => delta.path
+					)
+					const now = await snapshotOf(pair.name)
+
+					problems.push(
+						...diffSnapshots(state.local?.get(pair.name) ?? new Map(), now, { identity: true, allowed }).map(
+							line => `local ${pair.name}/${line}`
+						),
+						...checkDeltas("local", now, pair.name)
+					)
+				}
+
+				const now = (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map()
+
+				state.afterCloud = now
+
+				const allowed = LEGACY_DELTAS.filter(delta => delta.side === "cloud").map(delta => `${delta.pair}/${delta.path}`)
 
 				problems.push(
-					...diffSnapshots(state.local?.get(pair.name) ?? new Map(), now, { identity: true, allowed }).map(
-						line => `local ${pair.name}/${line}`
-					),
-					...checkDeltas("local", now, pair.name)
+					...diffSnapshots(state.cloud ?? new Map(), now, { identity: true, allowed }).map(line => `cloud ${line}`),
+					...checkDeltas("cloud", now, null)
 				)
+
+				if (problems.length > 0) {
+					findings.attach("legacy-after-cloud.jsonl", snapshotText(now))
+					fail(problems.join("; "))
+				}
+
+				return `${String(shell.pairs?.length)} pairs active; only the two edits and the rule files moved`
 			}
+		)
 
-			const now = (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map()
+		// Each pair's bin (<root>/.filen-sync-trash, filed by UTC day, its `.filed-by-day` marker beside the buckets) holds
+		// exactly what the engine moved there: the old local trash with its content, and the local bytes the cloud edit's
+		// download replaced, each at its tree position under the day's bucket. Neither ever reaches the cloud.
+		await findings.check(
+			"L12 the bins hold exactly the old local trash and what the cloud edit replaced; nothing in the cloud",
+			async () => {
+				const days = new Set([new Date(relaunchedAt).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10)])
+				const problems: string[] = []
 
-			state.afterCloud = now
+				for (const pair of LEGACY_PAIRS) {
+					const bin = path.join(rootOf(pair.name), BIN_DIR)
+					const held = existsSync(bin) ? await localSnapshot(bin) : new Map<string, SnapshotNode>()
+					const day = [...held.keys()].find(relPath => days.has(relPath)) ?? [...days][0] ?? ""
+					const expected: Snapshot = new Map()
+					const addDir = (relPath: string) => expected.set(relPath, { kind: "dir", size: 0, sha256: null, identity: null })
+					const trash = state.trash?.get(pair.name) ?? null
 
-			const allowed = LEGACY_DELTAS.filter(delta => delta.side === "cloud").map(delta => `${delta.pair}/${delta.path}`)
+					if (trash !== null) {
+						addDir(`${day}/${LEGACY_LOCAL_TRASH}`)
 
-			problems.push(
-				...diffSnapshots(state.cloud ?? new Map(), now, { identity: true, allowed }).map(line => `cloud ${line}`),
-				...checkDeltas("cloud", now, null)
-			)
-
-			if (problems.length > 0) {
-				findings.attach("legacy-after-cloud.jsonl", snapshotText(now))
-				fail(problems.join("; "))
-			}
-
-			return `${String(shell.pairs?.length)} pairs active; only the two edits and the rule files moved`
-		})
-
-		// The engine keeps a local file it replaces in its bin: the cloud edit's download leaves the old bytes there, and
-		// nothing else may be in any bin. The old local trash stays exactly as 3.x left it and never reaches the cloud.
-		await findings.check("L12 the engine's bin holds only what the cloud edit replaced; the old local trash untouched", async () => {
-			const replaced = treeSnapshot(legacySideTree(pairFixture(edits.cloud.pair), "cloud")).get(edits.cloud.path)?.sha256
-			const problems: string[] = []
-
-			for (const pair of LEGACY_PAIRS) {
-				const bin = path.join(rootOf(pair.name), BIN_DIR)
-				const held = existsSync(bin) ? await localSnapshot(bin) : new Map<string, SnapshotNode>()
-
-				for (const [relPath, node] of held) {
-					if (node.kind === "file" && !(pair.name === edits.cloud.pair && node.sha256 === replaced)) {
-						problems.push(`${pair.name}/${BIN_DIR}/${relPath}`)
+						for (const [relPath, node] of trash) {
+							expected.set(`${day}/${LEGACY_LOCAL_TRASH}/${relPath}`, { ...node, identity: null })
+						}
 					}
+
+					if (pair.name === edits.cloud.pair) {
+						const replaced = treeSnapshot(legacySideTree(pair, "cloud")).get(edits.cloud.path) ?? fail("no replaced file")
+						const parts = edits.cloud.path.split("/")
+
+						for (let depth = 1; depth < parts.length; depth++) {
+							addDir(`${day}/${parts.slice(0, depth).join("/")}`)
+						}
+
+						expected.set(`${day}/${edits.cloud.path}`, replaced)
+					}
+
+					if (expected.size > 0) {
+						addDir(day)
+						addDir(".filed-by-day")
+					}
+
+					problems.push(...diffSnapshots(expected, held, { identity: false }).map(line => `${pair.name}/${BIN_DIR}: ${line}`))
 				}
 
-				if ((await trashState(pair.name)) !== (state.trash?.get(pair.name) ?? null)) {
-					problems.push(`${pair.name}/${LEGACY_LOCAL_TRASH} changed`)
+				const cloudSide = state.afterCloud ?? (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map()
+
+				problems.push(
+					...[...cloudSide.keys()]
+						.filter(relPath => relPath.split("/").some((part: string) => part === LEGACY_LOCAL_TRASH || part === BIN_DIR))
+						.map(relPath => `cloud ${relPath}`)
+				)
+
+				if (problems.length > 0) {
+					fail(problems.join("; "))
 				}
+
+				return `the old local trash of ${String([...(state.trash?.values() ?? [])].filter(value => value !== null).length)} pairs and the replaced bytes of the cloud edit in today's bucket; none in the cloud`
 			}
-
-			const cloudSide = state.afterCloud ?? (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map()
-
-			problems.push(
-				...[...cloudSide.keys()]
-					.filter(relPath => relPath.split("/").includes(LEGACY_LOCAL_TRASH))
-					.map(relPath => `cloud ${relPath}`)
-			)
-
-			if (problems.length > 0) {
-				fail(problems.join(", "))
-			}
-
-			return `bins hold only the replaced bytes; ${LEGACY_LOCAL_TRASH} as 3.x left it (${String(
-				[...(state.trash?.values() ?? [])].filter(value => value !== null).length
-			)} pairs), none in the cloud`
-		})
+		)
 
 		await findings.check("L7 userData/sync renamed to sync.migrated-<date>, its content kept", async () => {
 			const retired = readdirSync(target.userData).filter(name => name.startsWith("sync.migrated-"))
@@ -732,7 +771,14 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 								...(found.notices.length === 0 ? [] : [`${fixture.name}: notices ${json(found.notices)}`]),
 								...(found.rootProblem === null ? [] : [`${fixture.name}: root ${json(found.rootProblem)}`]),
 								...(json(found.info) === json(expectedInfo(fixture)) ? [] : [`${fixture.name}: info ${json(found.info)}`]),
-								...(Object.values(found.issues).every(count => count === 0)
+								...(json(found.issues) ===
+								json({
+									...found.issues,
+									conflicts: expectedConflicts(fixture.name),
+									heldDeletions: 0,
+									unsyncable: 0,
+									failed: 0
+								})
 									? []
 									: [`${fixture.name}: issues ${json(found.issues)}`]),
 								...(found.phase === "idle" ? [] : [`${fixture.name}: ${found.phase}`])
@@ -749,28 +795,77 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					problems.push(`mount notices ${json(mounts.notices)}`)
 				}
 
-				problems.push(...dialogs.map(text => `dialog: ${text.replace(/\s+/g, " ").slice(0, 200)}`))
+				// The one dialog a migrated session may show: the startup reminder to back up the master keys (owner decision),
+				// put off with its own "Remind me later" so it covers nothing the later steps use.
+				const reminder = dialogs.filter(text => text.trim().startsWith(MASTER_KEYS_REMINDER))
+
+				problems.push(
+					...dialogs
+						.filter(text => !text.trim().startsWith(MASTER_KEYS_REMINDER))
+						.map(text => `dialog: ${text.replace(/\s+/g, " ").slice(0, 200)}`)
+				)
+
+				if (reminder.length > 0) {
+					await page()
+						.locator('[role="dialog"], [role="alertdialog"]')
+						.filter({ hasText: MASTER_KEYS_REMINDER })
+						.getByRole("button", { name: "Remind me later", exact: true })
+						.click({ timeout: 30_000 })
+				}
 
 				if (problems.length > 0) {
 					fail(problems.join("; "))
 				}
 
-				return "nothing over the page; localTrashNowOn only where local trash was off"
+				return `nothing over the page${reminder.length > 0 ? " but the master-key reminder (put off)" : ""}; localTrashNowOn only where local trash was off; conflicts only as expected`
 			})
 
 			const pairIds = findPairs(overview).flatMap(({ fixture, found }) =>
 				found === undefined ? [] : [{ name: fixture.name, id: found.id }]
 			)
+			const conflictActivity = Object.entries(LEGACY_CONFLICTS).flatMap(([pair, paths]) =>
+				paths.map(relPath => `${pair}:conflict:${relPath}`)
+			)
+			const conflictCounts = Object.fromEntries(LEGACY_PAIRS.map(pair => [pair.name, expectedConflicts(pair.name)]))
 			const allowed = new Set([
-				`${edits.local.pair}:uploaded:${edits.local.path}`,
 				`${edits.cloud.pair}:downloaded:${edits.cloud.path}`,
 				`${edits.cloud.pair}:binned:${edits.cloud.path}`,
+				...conflictActivity,
+				...LEGACY_DELTAS.filter(delta => delta.change === "binned").map(delta => `${delta.pair}:binned:${delta.path}`),
 				...LEGACY_DELTAS.filter(delta => delta.side === "cloud" && delta.change === "rules").map(
 					delta => `${delta.pair}:uploaded:.filenignore`
 				)
 			])
 
-			await findings.check("L10 N's activity and plans carry nothing but the edits", () => chain.quietActivity(pairIds, allowed))
+			await findings.check("L10 N's activity and plans carry nothing but the edits and the expected conflicts", () =>
+				chain.quietActivity(pairIds, allowed, conflictCounts)
+			)
+
+			await findings.check("L10 exactly the expected conflicts are held, both sides kept", async () => {
+				const problems: string[] = []
+
+				for (const { name, id } of pairIds) {
+					const held = ok(
+						"conflicts",
+						await desktop<DesktopSyncResult<DesktopSyncEntries<DesktopSyncConflict>>>(
+							page(),
+							`window.desktop.sync.conflicts(${json(id)}, 0, 50)`
+						)
+					)
+					const want = LEGACY_CONFLICTS[name] ?? []
+					const got = held.entries.map(entry => `${entry.relPath} (${String(entry.local)}/${String(entry.remote)})`)
+
+					if (json(got) !== json(want.map(relPath => `${relPath} (file/file)`)) || held.total !== want.length) {
+						problems.push(`${name}: ${json(got)} of ${String(held.total)}, expected ${json(want)}`)
+					}
+				}
+
+				if (problems.length > 0) {
+					fail(problems.join("; "))
+				}
+
+				return `held: ${conflictActivity.join(", ")}; the disk keeps the edit, the cloud the old bytes`
+			})
 
 			await findings.must("N quits on SIGTERM and starts a third time", async () => {
 				await chain.quit("N")
@@ -811,7 +906,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				return "purged; no secret in userData or the logs"
 			})
 
-			await findings.check("steady state: the third launch transfers nothing", () => chain.quietActivity(pairIds, new Set()))
+			await findings.check("steady state: the third launch transfers nothing; the conflicts still held", () =>
+				chain.quietActivity(pairIds, new Set(conflictActivity), conflictCounts)
+			)
 
 			await findings.check("L14 a live edit uploads", async () => {
 				const name = `live-${randomBytes(4).toString("hex")}.txt`

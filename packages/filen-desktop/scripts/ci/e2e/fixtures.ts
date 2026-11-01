@@ -162,8 +162,9 @@ export interface LegacyDelta {
 	side: "local" | "cloud"
 	path: string
 	// `rules`: the root .filenignore the migration writes for an excludeDotFiles pair (holding the dot-file rules), and
-	// for a pair that pushes, its upload. `edit`: a closed-app edit arriving on the other side.
-	change: "rules" | "edit"
+	// for a pair that pushes, its upload. `edit`: a closed-app edit arriving on the other side. `binned`: the old local
+	// trash, which the engine's first pass moves into the pair's bin (gone from the root, with everything in it).
+	change: "rules" | "edit" | "binned"
 }
 
 // Everything N may change against the old client's converged state plus the two edits; anything else differing fails.
@@ -179,6 +180,18 @@ export const LEGACY_DELTAS: readonly LegacyDelta[] = [
 	...LEGACY_PAIRS.filter(
 		pair => pair.excludeDotFiles && (pair.mode === "twoWay" || pair.mode === "localToRemote" || pair.mode === "localBackup")
 	).map((pair): LegacyDelta => ({ pair: pair.name, side: "cloud", path: ".filenignore", change: "rules" })),
-	{ pair: LEGACY_EDITS.local.pair, side: "cloud", path: LEGACY_EDITS.local.path, change: "edit" },
-	{ pair: LEGACY_EDITS.cloud.pair, side: "local", path: LEGACY_EDITS.cloud.path, change: "edit" }
+	{ pair: LEGACY_EDITS.cloud.pair, side: "local", path: LEGACY_EDITS.cloud.path, change: "edit" },
+	...LEGACY_PAIRS.filter(pair => legacyLocalTree(pair).emptyDirs.includes(LEGACY_LOCAL_TRASH)).map((pair): LegacyDelta => ({
+		pair: pair.name,
+		side: "local",
+		path: LEGACY_LOCAL_TRASH,
+		change: "binned"
+	}))
 ]
+
+// The closed-app edit in the two-way pair is a conflict for N, which imports none of the old client's sync history:
+// both sides hold the path and they differ. The engine holds it for the user (no copy is made until it is resolved),
+// so the disk keeps the edit and the cloud the old bytes. Exactly these conflicts, per pair, and no other.
+export const LEGACY_CONFLICTS: Readonly<Record<string, readonly string[]>> = {
+	[LEGACY_EDITS.local.pair]: [LEGACY_EDITS.local.path]
+}

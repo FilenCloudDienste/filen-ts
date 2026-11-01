@@ -204,8 +204,13 @@ export interface Chain {
 	// The local snapshot of a pair root, the engine's bin left out.
 	snapshotOf(name: string): Promise<Snapshot>
 	rootOf(name: string): string
-	// No transfer in any pair's activity but the `allowed` ("<pair>:<kind>:<relPath>"), and every plan empty.
-	quietActivity(pairs: readonly { name: string; id: string }[], allowed: ReadonlySet<string>): Promise<string>
+	// No transfer in any pair's activity but the `allowed` ("<pair>:<kind>:<relPath>"), and every plan empty but for
+	// exactly the held `conflicts` per pair name.
+	quietActivity(
+		pairs: readonly { name: string; id: string }[],
+		allowed: ReadonlySet<string>,
+		conflicts?: Readonly<Record<string, number>>
+	): Promise<string>
 	// The update scenario with the chain's hooks, then evidence, cleanup and the findings.
 	run(options: Omit<UpdateOptions, "hooks">, hooks: Omit<UpdateHooks, "beforeReset">): Promise<void>
 }
@@ -351,7 +356,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			}
 		},
 
-		async quietActivity(pairs, allowed) {
+		async quietActivity(pairs, allowed, conflicts = {}) {
 			const problems: string[] = []
 
 			for (const pair of pairs) {
@@ -371,9 +376,14 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 				if (plan !== null) {
 					await desktopCall(chain.page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
 
-					const { actions, heldDeletions, conflicts, refused } = plan.summary
+					const { actions, heldDeletions, refused } = plan.summary
 
-					if (actions !== 0 || heldDeletions !== 0 || conflicts !== 0 || refused !== null) {
+					if (
+						actions !== 0 ||
+						heldDeletions !== 0 ||
+						plan.summary.conflicts !== (conflicts[pair.name] ?? 0) ||
+						refused !== null
+					) {
 						problems.push(`${pair.name}: plan ${json(plan.summary)}`)
 					}
 				}
