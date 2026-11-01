@@ -101,11 +101,11 @@ describe("e2ePlan depth", () => {
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
-		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, false])
+		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, true])
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
-		expect(nightly.notices).toContain("Deep depth is not built yet for mac-arm64-dmg legacy; they run at install depth.")
-		// Session, Windows 4.x, Windows 3.0.53, Linux 4.x, Linux 3.0.53 and macOS 4.x.
-		expect(logins(nightly)).toBe(6)
+		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
+		// The session, then 4.x and 3.0.53 on each of Windows, macOS and Linux.
+		expect(logins(nightly)).toBe(7)
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
@@ -134,20 +134,7 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
-		expect(DEEP_TRIAL).toEqual({ "mac-arm64-dmg": ["legacy"] })
-
-		// The real tables: macOS chain L is deep only in a signed custom deep run that names it; its chain P always.
-		const named3x = plan({ ...dispatch, platforms: "mac", signed: true, depth: "deep", formats: "mac-arm64-dmg", scenarios: "legacy" })
-		const unnamed = plan({ ...dispatch, platforms: "mac", signed: true, depth: "deep" })
-
-		expect(named3x.tests.map(entry => [entry.platform, entry.deepPrevious, entry.deepLegacy, entry.signed])).toEqual([
-			["mac", false, true, true]
-		])
-		expect(logins(named3x)).toBe(2)
-		expect(unnamed.tests.map(entry => [entry.arch, entry.deepPrevious, entry.deepLegacy])).toEqual([
-			["arm64", true, false],
-			["x64", false, false]
-		])
+		expect(DEEP_TRIAL).toEqual({})
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {

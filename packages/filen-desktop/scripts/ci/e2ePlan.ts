@@ -140,15 +140,13 @@ export interface DeepReadiness {
 
 export const DEEP_READY: DeepScenarios = {
 	"win-x64-nsis": ["previous", "legacy"],
-	"mac-arm64-dmg": ["previous"],
+	"mac-arm64-dmg": ["previous", "legacy"],
 	"linux-x64-deb": ["previous", "legacy"],
 	"linux-arm64-deb": ["previous", "legacy"]
 }
 // Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
 // release runs stay on what is proven.
-export const DEEP_TRIAL: DeepScenarios = {
-	"mac-arm64-dmg": ["legacy"]
-}
+export const DEEP_TRIAL: DeepScenarios = {}
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
 
