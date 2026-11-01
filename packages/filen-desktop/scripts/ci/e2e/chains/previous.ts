@@ -46,7 +46,8 @@ import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QU
 //   P5  mounts come back             drive running at the same point, a fixture read through it; WebDAV answers
 //   P6  prefs kept                   prefs.get() as set on N-1
 //   P7  the page boots as served     crossOriginIsolated
-//   P8  sign-out wipes               session absent, session.vault gone, the drive unmounted
+//   P8  sign-out wipes               session absent, session.vault gone, the drive unmounted; the user's sync and drive
+//                                    data, lock.vault and signOut.pending gone
 //   P9  uninstall                    the package gone, the user's pair directories intact
 //   P10 Filen in Finder (macOS)      on N-1 before the PIN: supported, the domain registered (userEnabled reported:
 //                                    a person switches it on), an off/on round trip; left off
@@ -591,7 +592,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			})
 		})
 
-		await findings.check("P8 the sign-out wiped the session and unmounted the drive", async () => {
+		await findings.check("P8 the sign-out wiped the session, the user's data and the PIN, and unmounted the drive", async () => {
 			const vault = userData("session.vault")
 
 			await waitFor("session.vault to be removed", SETUP_TIMEOUT_MS, () => (existsSync(vault) ? null : true))
@@ -599,7 +600,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				(await chain.os.driveMounted(state.drive ?? fail("no drive"))) === null ? true : null
 			)
 
-			return "session.vault gone; nothing mounted"
+			return `session.vault gone; nothing mounted; ${await chain.signOutWiped()}`
 		})
 		findings.info(
 			"secret store items of Filen after the sign-out",

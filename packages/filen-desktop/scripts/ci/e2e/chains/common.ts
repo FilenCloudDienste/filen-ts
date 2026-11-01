@@ -35,6 +35,9 @@ export const QUIET_MAX_MS = 3 * 60 * 1000
 export const LIVE_TIMEOUT_MS = 2 * 60 * 1000
 export const EXIT_TIMEOUT_MS = 60_000
 const STAGGER_MAX_S = 300
+// What a sign-out deletes and logs (src/main/signOut.ts), the drive idle and the native host running.
+const SIGN_OUT_FILES = ["lock.vault", "signOut.pending"]
+const SIGN_OUT_LOG = ["sign-out: sync data deleted", "sign-out: network drive data deleted", "sign-out: app lock removed"]
 // How long a launch may show no page before it counts as started hidden (startMinimized) and a second instance shows it.
 const HIDDEN_PROBE_MS = 30_000
 
@@ -220,6 +223,9 @@ export interface Chain {
 	quit(what: string): Promise<void>
 	// A step that leaves a session behind on failure signs out through the page first.
 	signedOutOnFailure(step: () => Promise<void>): Promise<void>
+	// After a sign-out with the drive idle and the host running: the user's sync and drive data, the PIN record and the
+	// wipe marker gone (src/main/signOut.ts), each step logged.
+	signOutWiped(): Promise<string>
 	// Deep jobs sign in some seconds apart (the plan's per-entry offset); logins are rate-limited per account.
 	stagger(): Promise<void>
 	// The local snapshot of a pair root, the engine's bin left out.
@@ -362,6 +368,33 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 
 				throw error
 			}
+		},
+
+		async signOutWiped() {
+			const userDirs = (root: string) =>
+				existsSync(userData(root))
+					? readdirSync(userData(root), { withFileTypes: true })
+							.filter(entry => entry.isDirectory())
+							.map(entry => `${root}/${entry.name}`)
+					: []
+			const left = () => [
+				...userDirs("sync-engine"),
+				...userDirs("mounts"),
+				...SIGN_OUT_FILES.filter(file => existsSync(userData(file)))
+			]
+
+			await waitFor("the sign-out to delete the user's data", SETUP_TIMEOUT_MS, () => (left().length === 0 ? true : null)).catch(
+				(error: unknown) => fail(`${errorMessage(error)}; left: ${left().join(", ")}`)
+			)
+
+			const log = tail(userData("logs", "main.log"), 4000)
+			const missing = SIGN_OUT_LOG.filter(line => !log.includes(line))
+
+			if (missing.length > 0) {
+				fail(`main.log lacks: ${missing.join("; ")}`)
+			}
+
+			return "sync-engine and mounts hold no user directory; lock.vault and signOut.pending gone"
 		},
 
 		async stagger() {

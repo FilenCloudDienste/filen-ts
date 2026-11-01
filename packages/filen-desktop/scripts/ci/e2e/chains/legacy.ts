@@ -40,7 +40,7 @@ import {
 	watchLegacySync
 } from "../legacyApp.ts"
 import { cloudSnapshot, diffSnapshots, filesHolding, localSnapshot, snapshotText, type Snapshot, type SnapshotNode } from "../snapshot.ts"
-import { START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
+import { legacyLogOf, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openChain, quiet, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
 
 // Chain L at deep depth: the real 3.0.53 is signed in through its own page and given what a user sets up (prefs, a PIN
@@ -59,8 +59,9 @@ import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openCha
 //   L4   prefs migrated           N starts hidden; prefs.get() minimizeToTray and startMinimized on
 //   L5   mounts migrated          the drive at the 3.x mount point, running, a fixture read through it; WebDAV on the same
 //                                 port with the 3.x credentials, answering them
-//   L6   3.x secrets wiped        marker verified and wiped; rclone.conf gone; then purged: Local Storage and the old
-//                                 IndexedDB gone, and no file under userData or the logs holds a secret the harness knows
+//   L6   3.x secrets wiped        marker verified and wiped; rclone.conf gone; the old logs (<appData>/@filen/logs)
+//                                 deleted (logsDeleted); then purged: Local Storage and the old IndexedDB gone, and no
+//                                 file under userData (or the logs, should they come back) holds a secret the harness knows
 //   L7   userData/sync kept       renamed to sync.migrated-<date>, its content unchanged
 //   L8   every pair, same mode    five pairs by name: the mapped mode, the same local root and remote directory, running
 //   L9   invisible                no review, hold, notice, root problem or issue; info only localTrashNowOn where local
@@ -72,7 +73,8 @@ import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openCha
 //                                 the cloud edit replaced, under the day's bucket; neither ever in the cloud
 //   L13  the page as served       crossOriginIsolated
 //   L14  sync works afterwards    a new local file uploads
-//   L15  sign-out and uninstall   session and drive gone; the user's directories intact
+//   L15  sign-out and uninstall   session and drive gone; the user's sync and drive data, lock.vault and signOut.pending
+//                                 gone; the user's directories intact
 //
 // The old app's tray and notifications are not observed. Linux deb and Windows NSIS so far; what differs per OS is behind
 // scripts/ci/e2e/os.ts.
@@ -97,6 +99,7 @@ interface MigrationMarker {
 	stage?: string
 	volatileStash?: boolean
 	wiped?: boolean
+	logsDeleted?: boolean
 	purged?: boolean
 }
 
@@ -120,6 +123,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		cloud: { ...LEGACY_EDITS.cloud, sha256: sha256(LEGACY_EDITS.cloud.bytes) }
 	}
 	const marker = () => readJson(userData("migration.json")) as MigrationMarker | null
+	// The old client's logs, beside userData.
+	const legacyLogs = path.dirname(legacyLogOf(target))
 	const state: {
 		legacy?: { launched: Launched; renderer: Renderer }
 		apiKey?: string
@@ -714,18 +719,30 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				return "the shell, no sign-in form"
 			})
 
-			await findings.check("L6 the migration verified the account and wiped the 3.x secrets", async () => {
-				const read = await waitFor("the migration to verify and wipe", SETUP_TIMEOUT_MS, () => {
+			await findings.check("L6 the migration verified the account, wiped the 3.x secrets and deleted its logs", async () => {
+				const read = await waitFor("the migration to verify, wipe and delete the old logs", SETUP_TIMEOUT_MS, () => {
 					const current = marker()
 
-					return current?.stage === "verified" && current.wiped === true ? current : null
+					return current?.stage === "verified" && current.wiped === true && current.logsDeleted === true ? current : null
 				})
 
 				if (existsSync(userData("rclone", "rclone.conf"))) {
 					fail("userData/rclone/rclone.conf is still there")
 				}
 
-				return `stage ${String(read.stage)}, wiped; rclone.conf gone`
+				if (existsSync(legacyLogs)) {
+					fail(`${legacyLogs} is still there`)
+				}
+
+				if (!tail(userData("logs", "main.log"), 4000).includes("migration: the old client's logs were deleted")) {
+					fail("main.log does not log the old logs' deletion")
+				}
+
+				if (!readdirSync(target.userData).some(name => name.startsWith("sync.migrated-"))) {
+					fail("no sync.migrated-* in userData")
+				}
+
+				return `stage ${String(read.stage)}, wiped, logsDeleted; rclone.conf and @filen/logs gone; sync.migrated-* kept`
 			})
 
 			await findings.check("L4 prefs migrated", async () => {
@@ -969,7 +986,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					webdav.password,
 					JSON.stringify(pin)
 				]
-				const hits = [target.userData, path.join(path.dirname(target.userData), "logs")].flatMap(root =>
+				const hits = [target.userData, legacyLogs].flatMap(root =>
 					filesHolding(root, secrets).map(file => `${path.basename(root)}/${file}`)
 				)
 
@@ -977,7 +994,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					fail(`secrets in ${hits.join(", ")}`)
 				}
 
-				return "purged; no secret in userData or the logs"
+				return "purged; no secret in userData (the old logs are gone)"
 			})
 
 			await findings.check("steady state: the third launch transfers nothing; the conflicts still held", () =>
@@ -1004,13 +1021,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			})
 		})
 
-		await findings.check("L15 the sign-out wiped the session and unmounted the drive", async () => {
+		await findings.check("L15 the sign-out wiped the session, the user's data and the PIN, and unmounted the drive", async () => {
 			await waitFor("session.vault to be removed", SETUP_TIMEOUT_MS, () => (existsSync(userData("session.vault")) ? null : true))
 			await waitFor("the drive to unmount", SETUP_TIMEOUT_MS, async () =>
 				(await chain.os.driveMounted(drive.root)) === null ? true : null
 			)
 
-			return "session.vault gone; nothing mounted"
+			return `session.vault gone; nothing mounted; ${await chain.signOutWiped()}`
 		})
 		findings.info(
 			"secret store items of Filen after the sign-out",
@@ -1057,9 +1074,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		try {
 			await setUp()
 		} finally {
-			// The old app's own logs (its logger writes beside userData, not in it).
+			// The old app's own logs (its logger writes beside userData, not in it); N deletes them once it verified.
 			for (const name of ["desktop.log", "desktop-worker.log"]) {
-				findings.attach(`legacy-3x-${name}`, tail(path.join(path.dirname(target.userData), "logs", name), 1500))
+				findings.attach(`legacy-3x-${name}`, tail(path.join(legacyLogs, name), 1500))
 			}
 
 			if (state.legacy !== undefined) {

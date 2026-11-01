@@ -96,8 +96,9 @@ describe("e2ePlan depth", () => {
 
 		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual([
 			"win-x64-nsis@0",
-			"mac-arm64-dmg@20",
-			"linux-x64-deb@40"
+			"win-arm64-nsis@20",
+			"mac-arm64-dmg@40",
+			"linux-x64-deb@60"
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
@@ -105,10 +106,10 @@ describe("e2ePlan depth", () => {
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
 		// No rotation: every main format every night once ready; trials run at install depth until promoted.
 		expect(nightly.notices).toContain(
-			"Deep depth is not built yet for win-arm64-nsis previous, win-arm64-nsis legacy, mac-arm64-dmg previous, linux-arm64-deb previous, linux-arm64-deb legacy; they run at install depth."
+			"Deep depth is not built yet for mac-arm64-dmg previous, linux-arm64-deb previous, linux-arm64-deb legacy; they run at install depth."
 		)
-		// The session, 4.x and 3.0.53 on Windows x64 and Linux x64, 3.0.53 on macOS arm64.
-		expect(logins(nightly)).toBe(6)
+		// The session, 4.x and 3.0.53 on Windows x64, Windows arm64 and Linux x64, 3.0.53 on macOS arm64.
+		expect(logins(nightly)).toBe(8)
 		// Once every trial is promoted: both chains on five entries.
 		expect(
 			logins(
@@ -129,7 +130,12 @@ describe("e2ePlan depth", () => {
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
-		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual(["win-x64-nsis@0", "mac-arm64-dmg@20", "linux-x64-deb@40"])
+		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual([
+			"win-x64-nsis@0",
+			"win-arm64-nsis@20",
+			"mac-arm64-dmg@40",
+			"linux-x64-deb@60"
+		])
 	})
 
 	it("runs a trial entry deep only when a custom deep run names it", () => {
@@ -150,12 +156,11 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
 		expect(DEEP_TRIAL).toEqual({
-			"win-arm64-nsis": ["previous", "legacy"],
 			"mac-arm64-dmg": ["previous"],
 			"linux-arm64-deb": ["previous", "legacy"]
 		})
 
-		// The real tables: Windows arm64 is deep (both chains) only in a custom deep run that names it, on its own runner.
+		// The real tables: a custom deep run naming Windows arm64 runs both chains on its own runner.
 		const arm = plan({ ...dispatch, platforms: "windows", depth: "deep", formats: "win-arm64-nsis" })
 
 		expect(arm.tests.map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])).toEqual([["windows-11-arm", true, true]])
