@@ -353,7 +353,7 @@ export function powershell(script: string, options: Pick<RunOptions, "allowFailu
 	const result = run("powershell.exe", powershellArgs(script), { ...options, env: powershellEnv(), display: `powershell.exe ${script}` })
 
 	if (result.stderr.trim() !== "") {
-		console.log(`powershell.exe stderr: ${result.stderr.trim().slice(-2000)}`)
+		console.log(`powershell.exe stderr: ${powershellErrorText(result.stderr).slice(-2000)}`)
 	}
 
 	return result
@@ -398,12 +398,34 @@ export function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error)
 }
 
-// powershell(), bounded (runBounded): for scripts that wait on the desktop (a dialog, a window) or a slow device.
-export function powershellBounded(script: string, timeoutMs: number): Promise<BoundedResult> {
-	return runBounded("powershell.exe", powershellArgs(script), timeoutMs, {
+// powershell(), bounded (runBounded): for scripts that wait on the desktop (a dialog, a window) or a slow device. Its
+// stderr comes back as readable text (powershellErrorText).
+export async function powershellBounded(script: string, timeoutMs: number): Promise<BoundedResult> {
+	const result = await runBounded("powershell.exe", powershellArgs(script), timeoutMs, {
 		env: powershellEnv(),
 		display: `powershell.exe ${script.trim().split("\n")[0] ?? ""} …`
 	})
+
+	return { ...result, stderr: powershellErrorText(result.stderr) }
+}
+
+// PowerShell writes its error stream to a redirected stderr as CLIXML ("#< CLIXML" and <S S="Error"> records, line
+// breaks as _x000D__x000A_); the text of those records, or the stderr as it is when it is no CLIXML.
+export function powershellErrorText(stderr: string): string {
+	if (!stderr.trimStart().startsWith("#< CLIXML")) {
+		return stderr.trim()
+	}
+
+	const entities: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" }
+
+	return [...stderr.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g)]
+		.map(match =>
+			(match[1] ?? "")
+				.replace(/_x([0-9A-Fa-f]{4})_/g, (_all, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+				.replace(/&(lt|gt|amp|quot|apos);/g, (_all, name: string) => entities[name] ?? "")
+		)
+		.join("")
+		.trim()
 }
 
 // A PowerShell single-quoted literal of `value`.

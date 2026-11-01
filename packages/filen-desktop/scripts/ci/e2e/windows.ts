@@ -24,35 +24,63 @@ async function ps(what: string, script: string, timeoutMs = TOOL_TIMEOUT_MS): Pr
 	return output(await powershellBounded(script, timeoutMs), what)
 }
 
-// The dialog is a top-level window named by its title. Its "Folder:" box is the file-name edit (AutomationId 1152)
-// and "Select Folder" the dialog's OK button (AutomationId 1): the full path in the box, then the button, selects
-// that folder. Setting the value through the ValuePattern and invoking through the InvokePattern needs no focus.
+// The dialog is an owned window, which UI Automation lists under its owner (the app's window), not at the desktop's
+// top: it is searched among all descendants as a Window named by its title. Its "Folder:" box is the dialog's
+// file-name edit (AutomationId 1152 on every Windows to date; else the edit named "Folder:", else its last edit) and
+// "Select Folder" its OK button (AutomationId 1, else the button of that name): the full path in the box, then the
+// button, selects that folder. Value and Invoke patterns need no focus; where a pattern is refused, the keyboard does
+// the same (the box has focus when the dialog opens). Each step says what it found, for the log.
 function chooserScript(title: string, dir: string): string {
 	return `
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
 $A = [System.Windows.Automation.AutomationElement]
+$C = [System.Windows.Automation.ControlType]
 $scope = [System.Windows.Automation.TreeScope]
-$byName = New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, ${psQuote(title)})
+function Prop($property, $value) { New-Object System.Windows.Automation.PropertyCondition($property, $value) }
+function Keys($text) { [System.Windows.Forms.SendKeys]::SendWait(($text -replace '([+^%~(){}\\[\\]])', '{$1}')) }
 $deadline = (Get-Date).AddSeconds(60)
+$byTitle = New-Object System.Windows.Automation.AndCondition((Prop $A::ControlTypeProperty $C::Window), (Prop $A::NameProperty ${psQuote(title)}))
 $dialog = $null
 while ($null -eq $dialog -and (Get-Date) -lt $deadline) {
-	$dialog = $A::RootElement.FindFirst($scope::Children, $byName)
+	$dialog = $A::RootElement.FindFirst($scope::Descendants, $byTitle)
 	if ($null -eq $dialog) { Start-Sleep -Milliseconds 500 }
 }
-if ($null -eq $dialog) { throw 'no dialog titled ${title.replaceAll("'", "''")}' }
+if ($null -eq $dialog) { throw ${psQuote(`no window titled "${title}" within 60 s`)} }
+"dialog: pid $($dialog.Current.ProcessId), class $($dialog.Current.ClassName)"
 $edit = $null
 while ($null -eq $edit -and (Get-Date) -lt $deadline) {
-	$edit = $dialog.FindFirst($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::AutomationIdProperty, '1152')))
+	$edits = @($dialog.FindAll($scope::Descendants, (Prop $A::ControlTypeProperty $C::Edit)))
+	$edit = @($edits | Where-Object { $_.Current.AutomationId -eq '1152' })[0]
+	if ($null -eq $edit) { $edit = @($edits | Where-Object { $_.Current.Name -like 'Folder*' })[0] }
+	if ($null -eq $edit -and $edits.Count -gt 0) { $edit = $edits[-1] }
 	if ($null -eq $edit) { Start-Sleep -Milliseconds 500 }
 }
 if ($null -eq $edit) { throw 'the dialog has no Folder box' }
-$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(${psQuote(dir)})
-$button = $dialog.FindFirst($scope::Descendants, (New-Object System.Windows.Automation.AndCondition(
-	(New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)),
-	(New-Object System.Windows.Automation.PropertyCondition($A::AutomationIdProperty, '1')))))
-if ($null -eq $button) { throw 'the dialog has no Select Folder button' }
-$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-"answered: $($button.Current.Name)"
+"folder box: id '$($edit.Current.AutomationId)', name '$($edit.Current.Name)'"
+$typed = $false
+try {
+	$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(${psQuote(dir)})
+	"folder set through ValuePattern"
+} catch {
+	$dialog.SetFocus()
+	$edit.SetFocus()
+	Keys ${psQuote(dir)}
+	$typed = $true
+	"folder typed with the keyboard: $($_.Exception.Message)"
+}
+$buttons = @($dialog.FindAll($scope::Descendants, (Prop $A::ControlTypeProperty $C::Button)))
+$button = @($buttons | Where-Object { $_.Current.AutomationId -eq '1' })[0]
+if ($null -eq $button) { $button = @($buttons | Where-Object { $_.Current.Name -eq 'Select Folder' })[0] }
+if ($null -ne $button -and -not $typed) {
+	try {
+		$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+		"answered with '$($button.Current.Name)'"
+		return
+	} catch { "the button refused Invoke: $($_.Exception.Message)" }
+}
+$edit.SetFocus()
+[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+"answered with Enter"
 `
 }
 
@@ -74,6 +102,8 @@ Set-ItemProperty -Path $key -Name DumpCount -Value 10 -Type DWord
 
 	async chooseDirectory(title, dir, evidence) {
 		const result = await powershellBounded(chooserScript(title, dir), CHOOSER_TIMEOUT_MS)
+
+		console.log(result.stdout.trim())
 
 		if (result.status !== 0) {
 			await windowsOs.screenDump(`${evidence}-failed.png`)
