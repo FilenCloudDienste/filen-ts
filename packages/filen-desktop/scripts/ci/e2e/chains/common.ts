@@ -401,11 +401,35 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 				await chain.renderer?.browser.close().catch(() => undefined)
 			}
 
+			// The chain's whole budget (E2E_CHAIN_BUDGET_MINUTES, below the workflow step's timeout): once it is spent, the
+			// evidence so far is written and the run fails by name, instead of the step being cut off with nothing kept.
+			const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
+			const watchdog =
+				budgetMinutes > 0
+					? setTimeout(() => {
+							void (async () => {
+								console.error(`::error::${name}: the chain's ${String(budgetMinutes)}-minute budget ran out`)
+								await beforeReset().catch(() => undefined)
+								await findings.check(`the chain finished within its ${String(budgetMinutes)}-minute budget`, () =>
+									fail("it did not")
+								)
+								await cloud.purge(chain.cloudDir).catch(() => undefined)
+
+								try {
+									findings.finish()
+								} finally {
+									process.exit(1)
+								}
+							})()
+						}, budgetMinutes * 60_000)
+					: undefined
+
 			try {
 				await runUpdate({ ...updateOptions, hooks: { ...hooks, beforeReset } })
 			} catch (error) {
 				await findings.check("the chain ran to the end", () => fail(errorMessage(error)))
 			} finally {
+				clearTimeout(watchdog)
 				await cloud.purge(chain.cloudDir).catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
 			}
 

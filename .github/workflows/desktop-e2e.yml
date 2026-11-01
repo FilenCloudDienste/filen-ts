@@ -25,8 +25,8 @@
 # with nothing transferred or rewritten. 3.0.53 -> N (scripts/ci/e2e/chains/legacy.ts): 3.0.53 signed in through its
 # own page, given prefs, a PIN, the drive, WebDAV and five pairs (one per mode), settled, edited once on disk and once
 # in the cloud while closed, then updated by its own updater; N must migrate it all with the two edits as the only
-# changes. Both end with sign-out and uninstall. Deep is built on Linux deb (both chains) and Windows x64 NSIS (N-1 ->
-# N) so far; the rest of the profile's deep entries run at install depth with a notice. Logins are rate-limited per
+# changes. Both end with sign-out and uninstall. Deep is built on Linux deb (both chains); Windows x64 NSIS (N-1 -> N)
+# runs deep only when a custom deep dispatch names it in `formats`; the rest run at install depth with a notice. Logins are rate-limited per
 # account, so a run signs the harness in once (job `session`, through @filen/sdk-rs) and hands that session, sealed,
 # to every job that reaches the cloud; the only other logins are the UI sign-ins under test, one per deep chain (4.x
 # in N-1 -> N, 3.0.53 in 3.0.53 -> N), spaced by the plan's stagger, each signed out at the end. Each run attempt and
@@ -572,6 +572,8 @@ jobs:
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
           FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
+          # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
+          E2E_CHAIN_BUDGET_MINUTES: 85
         run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)
         if: matrix.previous && matrix.format == 'rpm'
@@ -593,6 +595,7 @@ jobs:
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
           FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
+          E2E_CHAIN_BUDGET_MINUTES: 105
         run: bash scripts/ci/deepSession.sh --scenario legacy --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: 3.0.53 -> N (Fedora container)
         if: ${{ !cancelled() && matrix.legacy && matrix.format == 'rpm' }}

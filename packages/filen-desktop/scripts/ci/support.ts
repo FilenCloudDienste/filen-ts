@@ -134,7 +134,11 @@ export async function runBounded(
 			try {
 				if (group && child.pid !== undefined) {
 					process.kill(-child.pid, "SIGKILL")
-				} else {
+				} else if (child.pid !== undefined) {
+					// Windows has no process groups: the whole tree goes (PowerShell's own children, a dialog it waits on).
+					const killed = spawnSync("taskkill.exe", ["/T", "/F", "/PID", String(child.pid)], { encoding: "utf8", timeout: 30_000 })
+
+					console.log(`taskkill /T /F /PID ${String(child.pid)}: ${killed.error?.message ?? `exit ${String(killed.status)}`}`)
 					child.kill("SIGKILL")
 				}
 			} catch {

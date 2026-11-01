@@ -10,11 +10,34 @@ export const APP_ORIGIN = "filen://app"
 export const SIGN_IN_TIMEOUT_MS = 2 * 60 * 1000
 const SIGN_OUT_TIMEOUT_MS = 2 * 60 * 1000
 
-// `expression` (a promise or value in the page) as JSON-parsed data. The value crosses CDP wrapped, so a call that
-// resolves to nothing fails by name instead of handing JSON.parse the text "undefined"; calls that return nothing by
-// contract go through desktopCall.
-export async function desktop<T>(page: Page, expression: string): Promise<T> {
-	const text: unknown = await page.evaluate(`(async () => JSON.stringify({ value: await ${expression} }))()`)
+// How long a contract call may take unless the caller says otherwise: every one answers in seconds, a plan included.
+export const CONTRACT_TIMEOUT_MS = 2 * 60 * 1000
+
+// `run` within `timeoutMs`, else a failure naming `what`. The page keeps the call; the harness stops waiting for it.
+async function within<T>(what: string, timeoutMs: number, run: Promise<T>): Promise<T> {
+	let timer: NodeJS.Timeout | undefined
+
+	try {
+		return await Promise.race([
+			run,
+			new Promise<never>((_resolve, reject) => {
+				timer = setTimeout(() => reject(new Error(`${what}: no answer in ${String(Math.round(timeoutMs / 1000))} s`)), timeoutMs)
+			})
+		])
+	} finally {
+		clearTimeout(timer)
+	}
+}
+
+// `expression` (a promise or value in the page) as JSON-parsed data, within `timeoutMs`. The value crosses CDP
+// wrapped, so a call that resolves to nothing fails by name instead of handing JSON.parse the text "undefined"; calls
+// that return nothing by contract go through desktopCall.
+export async function desktop<T>(page: Page, expression: string, timeoutMs = CONTRACT_TIMEOUT_MS): Promise<T> {
+	const text: unknown = await within(
+		expression,
+		timeoutMs,
+		page.evaluate(`(async () => JSON.stringify({ value: await ${expression} }))()`)
+	)
 
 	if (typeof text !== "string") {
 		fail(`${expression}: the page answered ${typeof text}`)
@@ -30,8 +53,8 @@ export async function desktop<T>(page: Page, expression: string): Promise<T> {
 }
 
 // A contract call that resolves to nothing (releasePlan, dismissNotice, ...): awaited in the page, nothing returned.
-export async function desktopCall(page: Page, expression: string): Promise<void> {
-	await page.evaluate(`(async () => { await ${expression} })()`)
+export async function desktopCall(page: Page, expression: string, timeoutMs = CONTRACT_TIMEOUT_MS): Promise<void> {
+	await within(expression, timeoutMs, page.evaluate(`(async () => { await ${expression} })()`))
 }
 
 export function sessionStatus(page: Page): Promise<string> {

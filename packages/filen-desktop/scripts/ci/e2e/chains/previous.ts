@@ -15,6 +15,7 @@ import { fail, freePort, waitFor } from "../../support.ts"
 import { desktop, desktopCall, pageText, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
 import { runDir } from "../cloud.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
+import { CHOOSER_BUDGET_MS } from "../os.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
 import { START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QUIET_MAX_MS, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
@@ -195,12 +196,22 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 			for (const pair of PREVIOUS_PAIRS) {
 				await findings.must(`add pair ${pair.name} (${pair.mode}) through the native folder chooser`, async () => {
-					const choice = desktop<DesktopSyncLocalRootChoice>(page(), "window.desktop.sync.chooseLocalDirectory()")
+					const evidence = path.join(artifacts, `previous-chooser-${pair.name}`)
+					// The app's call returns once the dialog is answered or cancelled; the driver's own bound plus a margin.
+					const choice = desktop<DesktopSyncLocalRootChoice>(
+						page(),
+						"window.desktop.sync.chooseLocalDirectory()",
+						CHOOSER_BUDGET_MS
+					)
 
 					void choice.catch(() => undefined)
-					await chain.os.chooseDirectory(CHOOSER_TITLE, rootOf(pair.name), path.join(artifacts, `previous-chooser-${pair.name}`))
+					await chain.os.chooseDirectory(CHOOSER_TITLE, rootOf(pair.name), evidence)
 
-					const chosen = await choice
+					const chosen = await choice.catch(async (error: unknown) => {
+						await chain.os.screenDump(`${evidence}-no-answer.png`)
+
+						throw error
+					})
 
 					if (chosen.status !== "ok") {
 						fail(`chooseLocalDirectory: ${json(chosen)} (the chooser's steps: previous-chooser-${pair.name}-*.png)`)

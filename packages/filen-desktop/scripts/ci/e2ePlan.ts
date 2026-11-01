@@ -131,7 +131,11 @@ const deepEntries: Record<Profile, readonly string[]> = {
 // Which deep chains are built so far, per entry; the rest of a deep request runs at install depth, with a notice.
 const DEEP_READY: Readonly<Record<string, readonly ("previous" | "legacy")[]>> = {
 	"linux-x64-deb": ["previous", "legacy"],
-	"linux-arm64-deb": ["previous", "legacy"],
+	"linux-arm64-deb": ["previous", "legacy"]
+}
+// Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
+// release runs stay on what is proven.
+const DEEP_TRIAL: Readonly<Record<string, readonly ("previous" | "legacy")[]>> = {
 	"win-x64-nsis": ["previous"]
 }
 // Seconds between the UI sign-ins of parallel deep jobs.
@@ -245,7 +249,9 @@ export function plan(input: PlanInput): Plan {
 
 	const wantsDeep = (id: string) =>
 		spike === "" && (previous || legacy) && depth !== "install" && (depth === "deep" ? MAIN_FORMATS : deepEntries[profile]).includes(id)
-	const ready = (id: string, scenario: "previous" | "legacy") => DEEP_READY[id]?.includes(scenario) === true
+	const trial = profile === "custom" && depth === "deep"
+	const ready = (id: string, scenario: "previous" | "legacy") =>
+		DEEP_READY[id]?.includes(scenario) === true || (trial && formats.includes(id) && DEEP_TRIAL[id]?.includes(scenario) === true)
 	const notReady = chosen
 		.map(idOf)
 		.flatMap(id =>
