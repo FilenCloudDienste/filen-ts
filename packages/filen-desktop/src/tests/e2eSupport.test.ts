@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { encodePowerShell } from "../../scripts/ci/support.ts"
+import { encodePowerShell, psQuote } from "../../scripts/ci/support.ts"
 
 describe("encodePowerShell", () => {
 	it("round-trips the script as UTF-16LE base64, stopping on errors and exiting 0 after it", () => {
@@ -12,5 +12,11 @@ describe("encodePowerShell", () => {
 		expect(lines.indexOf(script)).toBeLessThan(lines.indexOf("exit 0"))
 		expect(decoded.endsWith("exit 0\n")).toBe(true)
 		expect(encodePowerShell(script)).toMatch(/^[A-Za-z0-9+/]+=*$/)
+	})
+})
+
+describe("psQuote", () => {
+	it("makes a single-quoted literal that keeps quotes, dollars and backticks as they are", () => {
+		expect(psQuote("C:\\Users\\runner\\it's $HOME `n")).toBe("'C:\\Users\\runner\\it''s $HOME `n'")
 	})
 })

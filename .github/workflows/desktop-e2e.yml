@@ -25,12 +25,12 @@
 # with nothing transferred or rewritten. 3.0.53 -> N (scripts/ci/e2e/chains/legacy.ts): 3.0.53 signed in through its
 # own page, given prefs, a PIN, the drive, WebDAV and five pairs (one per mode), settled, edited once on disk and once
 # in the cloud while closed, then updated by its own updater; N must migrate it all with the two edits as the only
-# transfers. Both end with sign-out and uninstall. Deep is built on Linux deb so far; the profile's other deep entries
-# run at install depth with a notice. Logins are rate-limited per account, so a run signs the harness in once (job
-# `session`, through @filen/sdk-rs) and hands that session, sealed, to every job that reaches the cloud; the only
-# other logins are the UI sign-ins under test, one per deep chain (4.x in N-1 -> N, 3.0.53 in 3.0.53 -> N), spaced by
-# the plan's stagger, each signed out at the end. Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any
-# older than a day, even after a failure.
+# changes. Both end with sign-out and uninstall. Deep is built on Linux deb (both chains) and Windows x64 NSIS (N-1 ->
+# N) so far; the rest of the profile's deep entries run at install depth with a notice. Logins are rate-limited per
+# account, so a run signs the harness in once (job `session`, through @filen/sdk-rs) and hands that session, sealed,
+# to every job that reaches the cloud; the only other logins are the UI sign-ins under test, one per deep chain (4.x
+# in N-1 -> N, 3.0.53 in 3.0.53 -> N), spaced by the plan's stagger, each signed out at the end. Each run attempt and
+# entry owns a cloud directory; `sweep` removes the run's and any older than a day, even after a failure.
 #
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
 # their findings go to the job summary and an artifact:
@@ -559,12 +559,13 @@ jobs:
         if: matrix.format == 'rpm'
         run: docker pull "${FEDORA_IMAGE}"
       - name: N-1 -> N
-        if: matrix.previous && !matrix.deep && matrix.format != 'rpm'
+        if: matrix.previous && !matrix.deepPrevious && matrix.format != 'rpm'
         run: node scripts/ci/e2e.ts --scenario previous ${{ env.TEST_ARGS }}
-      # The whole chain runs on one D-Bus session whose gnome-keyring is unlocked (created on first use), so N-1, the
-      # updater's relaunch and every N launch keep the session in the same secret service, as on a GNOME desktop.
+      # In the desktop session the chain needs (scripts/ci/deepSession.sh: on Linux one D-Bus session with an unlocked
+      # gnome-keyring for every launch of the chain); bash is Git Bash on Windows.
       - name: N-1 -> N, signed in
-        if: matrix.previous && matrix.deep
+        if: matrix.deepPrevious
+        shell: bash
         timeout-minutes: 100
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
@@ -581,10 +582,11 @@ jobs:
           bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
           e2e --scenario previous ${{ env.TEST_ARGS }}
       - name: 3.0.53 -> N
-        if: ${{ !cancelled() && matrix.legacy && !matrix.deep && matrix.format != 'rpm' }}
+        if: ${{ !cancelled() && matrix.legacy && !matrix.deepLegacy && matrix.format != 'rpm' }}
         run: node scripts/ci/e2e.ts --scenario legacy ${{ env.TEST_ARGS }}
       - name: 3.0.53 -> N, signed in
-        if: ${{ !cancelled() && matrix.legacy && matrix.deep }}
+        if: ${{ !cancelled() && matrix.deepLegacy }}
+        shell: bash
         timeout-minutes: 120
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}

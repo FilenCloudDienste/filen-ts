@@ -35,8 +35,10 @@ export interface TestEntry extends Entry {
 	signed: boolean
 	previous: boolean
 	legacy: boolean
-	// The chains this entry runs (previous, legacy) sign in and drive the apps.
+	// The entry runs a chain deep (it needs the harness and its dependencies); which ones: deepPrevious, deepLegacy.
 	deep: boolean
+	deepPrevious: boolean
+	deepLegacy: boolean
 	stagger: number
 	spike: Spike | ""
 }
@@ -126,8 +128,12 @@ const deepEntries: Record<Profile, readonly string[]> = {
 	nightly: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"],
 	custom: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
 }
-// Where the deep chain is built so far; the rest of a deep request runs at install depth, with a notice.
-const DEEP_READY = new Set(["linux-x64-deb", "linux-arm64-deb"])
+// Which deep chains are built so far, per entry; the rest of a deep request runs at install depth, with a notice.
+const DEEP_READY: Readonly<Record<string, readonly ("previous" | "legacy")[]>> = {
+	"linux-x64-deb": ["previous", "legacy"],
+	"linux-arm64-deb": ["previous", "legacy"],
+	"win-x64-nsis": ["previous"]
+}
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
 
@@ -239,7 +245,17 @@ export function plan(input: PlanInput): Plan {
 
 	const wantsDeep = (id: string) =>
 		spike === "" && (previous || legacy) && depth !== "install" && (depth === "deep" ? MAIN_FORMATS : deepEntries[profile]).includes(id)
-	const notReady = chosen.map(idOf).filter(id => wantsDeep(id) && !DEEP_READY.has(id))
+	const ready = (id: string, scenario: "previous" | "legacy") => DEEP_READY[id]?.includes(scenario) === true
+	const notReady = chosen
+		.map(idOf)
+		.flatMap(id =>
+			wantsDeep(id)
+				? [
+						...(previous && !ready(id, "previous") ? [`${id} previous`] : []),
+						...(legacy && !ready(id, "legacy") ? [`${id} legacy`] : [])
+					]
+				: []
+		)
 
 	if (notReady.length > 0) {
 		notices.push(`Deep depth is not built yet for ${notReady.join(", ")}; they run at install depth.`)
@@ -247,9 +263,22 @@ export function plan(input: PlanInput): Plan {
 
 	let deepCount = 0
 	const tests = chosen.map((entry): TestEntry => {
-		const deep = wantsDeep(idOf(entry)) && DEEP_READY.has(idOf(entry))
+		const id = idOf(entry)
+		const deepPrevious = previous && wantsDeep(id) && ready(id, "previous")
+		const deepLegacy = legacy && wantsDeep(id) && ready(id, "legacy")
+		const deep = deepPrevious || deepLegacy
 
-		return { ...entry, signed: sign[entry.os], previous, legacy, deep, stagger: deep ? STAGGER_SECONDS * deepCount++ : 0, spike }
+		return {
+			...entry,
+			signed: sign[entry.os],
+			previous,
+			legacy,
+			deep,
+			deepPrevious,
+			deepLegacy,
+			stagger: deep ? STAGGER_SECONDS * deepCount++ : 0,
+			spike
+		}
 	})
 	const builds = (Object.keys(builders) as Os[])
 		.filter(os => tests.some(entry => entry.os === os))

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
-import os from "node:os"
+import { homedir } from "node:os"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import type {
@@ -19,7 +19,7 @@ import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { openCloud, runDir, type Cloud } from "../cloud.ts"
 import { createFindings, type Findings } from "../findings.ts"
 import { exitWithin, launchDebuggable, type Launched } from "../launch.ts"
-import { coreReport, screenDump } from "../linux.ts"
+import { type DesktopOs, osFor } from "../os.ts"
 import { redactor } from "../redact.ts"
 import { type Credentials, harnessRemote, type HarnessRemote, mask, secretsOf, takeCredentials } from "../session.ts"
 import { localSnapshot, type Snapshot } from "../snapshot.ts"
@@ -178,6 +178,7 @@ export interface Chain {
 	readonly remote: HarnessRemote
 	readonly findings: Findings
 	readonly cloud: Cloud
+	readonly os: DesktopOs
 	// This chain's directories: in the cloud (relative to the drive root) and on disk.
 	readonly cloudDir: string
 	readonly localDir: string
@@ -195,7 +196,7 @@ export interface Chain {
 	// Launches 4.x with its debugging port and connects to its page; a launch that shows no page (startMinimized) gets a
 	// second instance, which shows the window. Returns whether it started hidden.
 	connect(): Promise<boolean>
-	// SIGTERM to 4.x's main processes (Linux), failing on an unclean exit or a core dump.
+	// Asks 4.x's main processes to quit gracefully (DesktopOs.requestQuit), failing on an unclean exit or a crash report.
 	quit(what: string): Promise<void>
 	// A step that leaves a session behind on failure signs out through the page first.
 	signedOutOnFailure(step: () => Promise<void>): Promise<void>
@@ -218,17 +219,18 @@ export interface Chain {
 export async function openChain(name: string, options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<Chain> {
 	const { target, work } = options
 
-	if (target.platform !== "linux" || target.format !== "deb") {
-		fail(`the deep ${name} chain runs on Linux deb only so far`)
-	}
+	const os = osFor(target)
 
 	const credentials = takeCredentials()
 	const remote = harnessRemote(credentials)
 	const secrets = [credentials.email, credentials.password, ...secretsOf(remote)]
 	const findings = createFindings(name, artifacts, text => redactor(secrets)(text))
 	const cloud = await openCloud(remote, work)
+
+	await os.prepare()
+
 	const entry = `${target.platform}-${options.arch}-${target.format}`
-	const localDir = path.join(os.homedir(), "FilenE2E", path.posix.basename(runDir()), name)
+	const localDir = path.join(homedir(), "FilenE2E", path.posix.basename(runDir()), name)
 	const userData = (...parts: string[]) => path.join(target.userData, ...parts)
 	const appOutput = path.join(work, `${name}-app-output.log`)
 
@@ -241,6 +243,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 		remote,
 		findings,
 		cloud,
+		os,
 		cloudDir: `${runDir()}/${entry}/${name}`,
 		localDir,
 		appOutput,
@@ -288,19 +291,13 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 
 			const pids = target.mainProcesses().map(item => item.pid)
 
-			for (const pid of pids) {
-				try {
-					process.kill(pid, "SIGTERM")
-				} catch {
-					// Already gone.
-				}
-			}
+			await os.requestQuit(pids)
 
 			const evidence = async (): Promise<string[]> => {
 				const cores: string[] = []
 
 				for (const pid of pids) {
-					const report = await coreReport(target.executable, pid)
+					const report = await os.crashReport(target.executable, pid)
 
 					if (report !== null) {
 						cores.push(report.slice(0, report.indexOf("\n")))
@@ -319,7 +316,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 				if (exit === null || exit.code !== 0 || exit.signal !== null) {
 					const cores = await evidence()
 
-					fail(`${what} did not quit gracefully on SIGTERM: ${json(exit)}${cores.length > 0 ? ` (${cores.join(", ")})` : ""}`)
+					fail(`${what} did not quit gracefully: ${json(exit)}${cores.length > 0 ? ` (${cores.join(", ")})` : ""}`)
 				}
 			}
 
@@ -329,7 +326,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			const cores = await evidence()
 
 			if (cores.length > 0) {
-				fail(`${what} crashed on SIGTERM: ${cores.join(", ")}`)
+				fail(`${what} crashed while quitting: ${cores.join(", ")}`)
 			}
 		},
 
@@ -400,7 +397,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			const beforeReset = async (): Promise<void> => {
 				findings.attach(`${name}-main.log`, tail(userData("logs", "main.log"), 1000))
 				findings.attach(`${name}-output.log`, tail(appOutput, 3000))
-				await screenDump(path.join(artifacts, `${name}-last-screen.png`))
+				await os.screenDump(path.join(artifacts, `${name}-last-screen.png`))
 				await chain.renderer?.browser.close().catch(() => undefined)
 			}
 

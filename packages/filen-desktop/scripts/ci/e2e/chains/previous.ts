@@ -15,7 +15,6 @@ import { fail, freePort, waitFor } from "../../support.ts"
 import { desktop, desktopCall, pageText, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
 import { runDir } from "../cloud.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
-import { chooseDirectory, keyringItems, mountedType, processStartMs, sha256Through, uninstallDeb } from "../linux.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
 import { START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QUIET_MAX_MS, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
@@ -37,8 +36,8 @@ import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QU
 //   P8  sign-out wipes               session absent, session.vault gone, the drive unmounted
 //   P9  uninstall                    the package gone, the user's pair directories intact
 //
-// Linux deb only so far: the folder chooser is driven with xdotool under Xvfb, and the session's secure storage is a
-// gnome-keyring the workflow unlocks on the chain's own D-Bus session.
+// Linux deb and Windows NSIS so far; what differs per OS (the native folder chooser, the drive as the OS sees it,
+// quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
 
 const CHOOSER_TITLE = "Choose a directory to sync"
 const CONVERGE_TIMEOUT_MS = 8 * 60 * 1000
@@ -152,7 +151,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 					return drive.state === "running" ? drive : null
 				})
 
-				state.drive = drive.mountPoint ?? fail("the running drive reports no mount point")
+				state.drive = chain.os.driveRoot(drive) ?? fail(`the running drive reports no location: ${json(drive)}`)
 
 				return `running at ${state.drive}`
 			})
@@ -199,7 +198,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 					const choice = desktop<DesktopSyncLocalRootChoice>(page(), "window.desktop.sync.chooseLocalDirectory()")
 
 					void choice.catch(() => undefined)
-					await chooseDirectory(CHOOSER_TITLE, rootOf(pair.name), path.join(artifacts, `previous-chooser-${pair.name}`))
+					await chain.os.chooseDirectory(CHOOSER_TITLE, rootOf(pair.name), path.join(artifacts, `previous-chooser-${pair.name}`))
 
 					const chosen = await choice
 
@@ -289,7 +288,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				return "set"
 			})
 
-			await findings.must("N-1 quits on SIGTERM", async () => {
+			await findings.must("N-1 quits gracefully", async () => {
 				await quit("N-1")
 
 				return "exit code 0"
@@ -298,7 +297,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 	}
 
 	const verify = async (): Promise<void> => {
-		const relaunchedAt = Math.min(...target.mainProcesses().map(entry => processStartMs(entry.pid)))
+		const relaunchedAt = Math.min(...(await Promise.all(target.mainProcesses().map(entry => chain.os.processStartMs(entry.pid)))))
 		const pairs = state.pairs ?? fail("no pairs were set up")
 
 		// N as the updater relaunched it, without a debugging port: observed from outside only.
@@ -352,7 +351,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			return `session.vault ${String(state.vaultSize)} bytes, unchanged`
 		})
 
-		await findings.must("N quits on SIGTERM and starts again with its debugging port", async () => {
+		await findings.must("N quits gracefully and starts again with its debugging port", async () => {
 			await quit("N")
 			await connect()
 
@@ -454,25 +453,27 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			await findings.check("P5 the drive runs at the same mount point and reads a fixture", async () => {
 				const { drive } = await mountsOverview()
 
-				if (!drive.enabled || drive.state !== "running" || drive.mountPoint !== state.drive) {
+				const root = chain.os.driveRoot(drive)
+
+				if (!drive.enabled || drive.state !== "running" || root === null || root !== state.drive) {
 					fail(json(drive))
 				}
 
-				const type = await mountedType(drive.mountPoint)
+				const type = await chain.os.driveMounted(root)
 
-				if (type === null || !type.startsWith("fuse")) {
-					fail(`findmnt: ${type ?? "not mounted"}`)
+				if (type === null) {
+					fail(`nothing mounted at ${root}`)
 				}
 
-				const file = path.join(drive.mountPoint, ...`${cloudDir}/e2e-r2l/media/blob.bin`.split("/"))
+				const file = path.join(root, ...`${cloudDir}/e2e-r2l/media/blob.bin`.split("/"))
 				const expected = treeSnapshot(trees.get("e2e-r2l") ?? fail("no tree")).get("media/blob.bin")?.sha256
-				const read = await sha256Through(file, LIVE_TIMEOUT_MS)
+				const read = await chain.os.sha256Through(file, LIVE_TIMEOUT_MS)
 
 				if (read !== expected) {
 					fail(`media/blob.bin read through the drive hashes ${read}`)
 				}
 
-				return `${type} at ${drive.mountPoint}; a fixture reads back byte for byte`
+				return `${type} at ${root}; a fixture reads back byte for byte`
 			})
 
 			await findings.check("P5 WebDAV answers with the unchanged credentials", async () => {
@@ -531,12 +532,15 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 			await waitFor("session.vault to be removed", SETUP_TIMEOUT_MS, () => (existsSync(vault) ? null : true))
 			await waitFor("the drive to unmount", SETUP_TIMEOUT_MS, async () =>
-				(await mountedType(state.drive ?? fail("no drive"))) === null ? true : null
+				(await chain.os.driveMounted(state.drive ?? fail("no drive"))) === null ? true : null
 			)
 
 			return "session.vault gone; nothing mounted"
 		})
-		findings.info("keyring items of Filen after the sign-out", (await keyringItems("Filen")).join("; ") || "none")
+		findings.info(
+			"secret store items of Filen after the sign-out",
+			(await chain.os.secretStoreItems(target.userData)).join("; ") || "none"
+		)
 		findings.attach("previous-userdata-after-sign-out.txt", inventory(target.userData))
 
 		const kept = new Map<string, Snapshot>()
@@ -545,18 +549,14 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			kept.set(pair.name, await snapshotOf(pair.name))
 		}
 
-		await findings.must("N quits on SIGTERM", async () => {
+		await findings.must("N quits gracefully", async () => {
 			await quit("N")
 
 			return "exit code 0"
 		})
 
-		await findings.check("P9 apt-get remove and purge take the app and leave the user's directories", async () => {
-			uninstallDeb()
-
-			if (existsSync("/etc/apparmor.d/Filen")) {
-				fail("/etc/apparmor.d/Filen is still there")
-			}
+		await findings.check("P9 the app uninstalled as a user does, the user's directories left", async () => {
+			const removed = await chain.os.uninstall(target)
 
 			const changed: string[] = []
 
@@ -572,7 +572,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				fail(changed.join("; "))
 			}
 
-			return "/opt/Filen and its AppArmor profile gone; every pair directory intact"
+			return `${removed}; every pair directory intact`
 		})
 		findings.attach("previous-userdata-after-uninstall.txt", inventory(path.dirname(target.userData)))
 	}

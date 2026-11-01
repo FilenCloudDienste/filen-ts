@@ -100,9 +100,9 @@ export async function runBounded(
 	command: string,
 	args: readonly string[],
 	timeoutMs: number,
-	options: { env?: NodeJS.ProcessEnv; input?: string; cwd?: string } = {}
+	options: { env?: NodeJS.ProcessEnv; input?: string; cwd?: string; display?: string } = {}
 ): Promise<BoundedResult> {
-	console.log(`$ ${command} ${args.join(" ")}`)
+	console.log(`$ ${options.display ?? `${command} ${args.join(" ")}`}`)
 
 	const group = process.platform !== "win32"
 	const child = spawn(command, args, {
@@ -341,13 +341,16 @@ export function encodePowerShell(script: string): string {
 	).toString("base64")
 }
 
+function powershellArgs(script: string): string[] {
+	return ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)]
+}
+
+function powershellEnv(): NodeJS.ProcessEnv {
+	return Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"))
+}
+
 export function powershell(script: string, options: Pick<RunOptions, "allowFailure"> = {}): RunResult {
-	const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"))
-	const result = run(
-		"powershell.exe",
-		["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)],
-		{ ...options, env, display: `powershell.exe ${script}` }
-	)
+	const result = run("powershell.exe", powershellArgs(script), { ...options, env: powershellEnv(), display: `powershell.exe ${script}` })
 
 	if (result.stderr.trim() !== "") {
 		console.log(`powershell.exe stderr: ${result.stderr.trim().slice(-2000)}`)
@@ -393,4 +396,17 @@ export async function freePort(): Promise<number> {
 
 export function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error)
+}
+
+// powershell(), bounded (runBounded): for scripts that wait on the desktop (a dialog, a window) or a slow device.
+export function powershellBounded(script: string, timeoutMs: number): Promise<BoundedResult> {
+	return runBounded("powershell.exe", powershellArgs(script), timeoutMs, {
+		env: powershellEnv(),
+		display: `powershell.exe ${script.trim().split("\n")[0] ?? ""} …`
+	})
+}
+
+// A PowerShell single-quoted literal of `value`.
+export function psQuote(value: string): string {
+	return `'${value.replaceAll("'", "''")}'`
 }

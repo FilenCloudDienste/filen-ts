@@ -107,6 +107,10 @@ interface ShellState {
 }
 
 export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<void> {
+	if (options.target.platform !== "linux" || options.target.format !== "deb") {
+		fail("the deep 3.0.53 -> N chain runs on Linux deb only so far")
+	}
+
 	const chain = await openChain("legacy", options, artifacts)
 	const { findings, cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf } = chain
 	const pin = String(randomInt(100_000, 1_000_000))

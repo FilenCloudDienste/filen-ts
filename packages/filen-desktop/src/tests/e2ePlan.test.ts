@@ -87,16 +87,31 @@ describe("e2ePlan depth", () => {
 	it("makes the built deep entries deep, staggers them and asks for the harness sign-in", () => {
 		const nightly = plan({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })
 
-		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
+		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual([
+			"win-x64-nsis@0",
+			"linux-x64-deb@20"
+		])
 		expect(nightly.session).toBe(true)
-		expect(nightly.notices.some(notice => notice.includes("win-x64-nsis, mac-arm64-dmg"))).toBe(true)
-		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual(["linux-x64-deb@0", "linux-arm64-deb@20"])
+		expect(nightly.notices.some(notice => notice.includes("win-x64-nsis legacy, mac-arm64-dmg previous, mac-arm64-dmg legacy"))).toBe(
+			true
+		)
+		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual([
+			"win-x64-nsis@0",
+			"linux-x64-deb@20",
+			"linux-arm64-deb@40"
+		])
+
+		const windows = nightly.tests.find(entry => entry.platform === "win" && entry.arch === "x64")
+
+		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, false])
+		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {
 		expect(plan({ ...dispatch, depth: "install" }).session).toBe(false)
 		expect(deep({ ...dispatch, depth: "install" })).toEqual([])
 		expect(deep({ ...dispatch, scenarios: "legacy" })).toEqual(["linux-x64-deb@0"])
+		expect(deep({ ...dispatch, scenarios: "previous" })).toEqual(["win-x64-nsis@0", "linux-x64-deb@20"])
 		expect(plan({ ...dispatch, scenarios: "legacy" }).tests.find(entry => entry.deep)?.previous).toBe(false)
 		expect(deep({ ...dispatch, spike: "s1" })).toEqual([])
 		expect(deep({ ...dispatch, depth: "deep", formats: "linux-arm64-deb,linux-x64-rpm" })).toEqual(["linux-arm64-deb@0"])
