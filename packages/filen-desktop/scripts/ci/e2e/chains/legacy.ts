@@ -85,6 +85,7 @@ const LOCK_TIMEOUT_S = 3600
 const DOT_FILE_RULES = [".*", "!/.filenignore"]
 // The title of the startup reminder a fresh session shows (filen-web), the one dialog a migration may leave visible.
 const MASTER_KEYS_REMINDER = "Back up your master keys"
+const BIN_MARKER = ".filed-by-day"
 
 function expectedConflicts(pair: string): number {
 	return LEGACY_CONFLICTS[pair]?.length ?? 0
@@ -555,8 +556,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 					if (expected.size > 0) {
 						addDir(day)
-						addDir(".filed-by-day")
 					}
+
+					// The engine's mark that a bin is filed by day: written when a move creates the bin, and by its prune into
+					// any bin that exists unmarked (filen-rs sync_engine/bin/mod.rs quarantine_local, prune_bin). Whether a
+					// prune ran yet is the engine's business, so it is allowed in any bin, alone or beside the buckets; nothing
+					// else extra is.
+					held.delete(BIN_MARKER)
 
 					problems.push(...diffSnapshots(expected, held, { identity: false }).map(line => `${pair.name}/${BIN_DIR}: ${line}`))
 				}
