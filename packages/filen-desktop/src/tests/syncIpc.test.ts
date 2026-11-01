@@ -580,6 +580,30 @@ describe("registerSyncIpc", () => {
 		await expect(invoke("reveal", "7", "empty")).rejects.toThrow("invalid sync payload")
 	})
 
+	it("shows engine text with verbatim paths as Windows spells them (activity, unsyncable details)", async () => {
+		const { service, invoke, sent, subscribe } = setup({
+			pairs: [shellPair()],
+			answers: {
+				unsyncablePaths: () => ({
+					total: 1,
+					entries: [{ relPath: "a", reason: "repeatedFailure", detail: "denied: \\\\?\\UNC\\server\\share\\a" }]
+				})
+			}
+		})
+
+		subscribe(true)
+		await service.nativeEvent(
+			{ t: "activity", entries: [{ pairId: "7", at: 1, kind: "failed", relPath: "a", detail: "denied: \\\\?\\C:\\x\\a" }] },
+			"1"
+		)
+
+		expect(JSON.stringify(sent)).toContain("denied: C:\\\\x\\\\a")
+		expect(await invoke("unsyncablePaths", "7", 0, 10)).toEqual({
+			ok: true,
+			value: { total: 1, entries: [{ relPath: "a", reason: "repeatedFailure", detail: "denied: \\\\server\\share\\a" }] }
+		})
+	})
+
 	it("reveals a root the engine spells verbatim as a plain path", async () => {
 		const { invoke, openPath } = setup({ pairs: [shellPair({ localRoot: "\\\\?\\C:\\Users\\u\\Work" })] })
 

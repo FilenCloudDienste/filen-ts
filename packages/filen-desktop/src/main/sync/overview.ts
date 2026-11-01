@@ -8,6 +8,7 @@ import type {
 import type { NativePairRuntime } from "../../shared/nativeProtocol.ts"
 import { shellPairId } from "./mirror.ts"
 import type { ShellPair } from "./store.ts"
+import { stripVerbatim, stripVerbatimIn } from "./localRoot.ts"
 
 const NO_ISSUES = { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 }
 const NOT_DEGRADED = { local: false, remote: false }
@@ -62,7 +63,8 @@ export function mergeOverview(
 			return {
 				id: shellPairId(pair),
 				name: pair.name,
-				localRoot: pair.localRoot,
+				// Displayed as Windows spells it; matching keeps the engine's (verbatim) spelling.
+				localRoot: stripVerbatim(pair.localRoot),
 				remoteRoot: pair.remoteRoot,
 				mode: entry?.mode ?? pair.mode,
 				paused,
@@ -70,7 +72,7 @@ export function mergeOverview(
 				progress: entry?.progress ?? null,
 				transfers: entry?.transfers ?? [],
 				lastSyncedAt: entry?.lastSyncedAt ?? null,
-				lastError: entry?.lastError ?? null,
+				lastError: entry?.lastError === undefined || entry.lastError === null ? null : stripVerbatimIn(entry.lastError),
 				issues: entry?.issues ?? NO_ISSUES,
 				degraded: entry?.degraded ?? NOT_DEGRADED,
 				stage: entry?.stage ?? null,

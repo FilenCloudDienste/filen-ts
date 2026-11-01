@@ -211,6 +211,38 @@ describe("mergeOverview", () => {
 	})
 })
 
+describe("mergeOverview display of verbatim Windows roots", () => {
+	const host: DesktopSyncHostState = { state: "running" }
+	const shown = (localRoot: string, lastError: string | null = null) =>
+		mergeOverview(host, [runtimeOf(enginePair(), { lastError })], [shellPair({ localRoot })], null).pairs[0]
+
+	it("shows a root as Windows spells it", () => {
+		expect(shown("\\\\?\\UNC\\server\\share\\x")?.localRoot).toBe("\\\\server\\share\\x")
+		expect(shown("\\\\?\\C:\\x")?.localRoot).toBe("C:\\x")
+		expect(shown("/Users/u/Work")?.localRoot).toBe("/Users/u/Work")
+	})
+
+	it("shows the paths in an engine error the same way", () => {
+		expect(shown("\\\\?\\C:\\x", "cannot read \\\\?\\C:\\x\\a and \\\\?\\UNC\\server\\share\\b")?.lastError).toBe(
+			"cannot read C:\\x\\a and \\\\server\\share\\b"
+		)
+	})
+
+	it("keeps the engine's spelling for matching", () => {
+		const { pairs } = reconcileMirror(
+			[shellPair({ localRoot: "\\\\server\\share\\x" })],
+			[enginePair({ id: "4", localRoot: "\\\\?\\UNC\\server\\share\\x" })],
+			{
+				reset: false,
+				now: 0
+			}
+		)
+
+		expect(pairs[0]?.pairId).toBe("4")
+		expect(pairs[0]?.localRoot).toBe("\\\\?\\UNC\\server\\share\\x")
+	})
+})
+
 describe("a crash between adding a pair to the engine and pausing it", () => {
 	it("holds the pair back at the next start and gives it its engine id", () => {
 		// What attach stored before addPair: the engine adds pairs unpaused.

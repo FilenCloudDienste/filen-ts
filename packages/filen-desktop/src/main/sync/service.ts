@@ -36,7 +36,14 @@ import { serialQueue } from "../../shared/serial.ts"
 import { createActivityLog } from "./activity.ts"
 import { attachable, attachUnheld, BIN_DIR, type FirstRunDeps, holdReviewed, startPreparing } from "./firstRun.ts"
 import { applyLegacySync } from "./legacyPairs.ts"
-import { chooseLocalDirectory, inspectLocalRoot, type LocalRootContext, type RootTokens, stripVerbatim } from "./localRoot.ts"
+import {
+	chooseLocalDirectory,
+	inspectLocalRoot,
+	type LocalRootContext,
+	type RootTokens,
+	stripVerbatim,
+	stripVerbatimIn
+} from "./localRoot.ts"
 import { reconcileMirror, shellPairId } from "./mirror.ts"
 import { mergeOverview } from "./overview.ts"
 import type { ShellPair, SyncStore } from "./store.ts"
@@ -112,6 +119,11 @@ export interface SyncService {
 	dismissInfo(pairId: string, notice: DesktopSyncInfoNotice): Promise<void>
 	dismissImportNote(): Promise<void>
 	retryHost(): void
+}
+
+// An unsyncable path's detail as the page shows it (engine text may name absolute, verbatim paths).
+function plainUnsyncable(entry: DesktopSyncUnsyncable): DesktopSyncUnsyncable {
+	return entry.detail === null ? entry : { ...entry, detail: stripVerbatimIn(entry.detail) }
 }
 
 function fail(code: DesktopSyncErrorCode, message?: string): { ok: false; error: { code: DesktopSyncErrorCode; message?: string } } {
@@ -515,7 +527,11 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
 					return
 				case "activity": {
-					const entries = activityLog.append(message.entries)
+					const entries = activityLog.append(
+						message.entries.map(entry =>
+							entry.detail === undefined ? entry : { ...entry, detail: stripVerbatimIn(entry.detail) }
+						)
+					)
 
 					for (const page of pages.values()) {
 						page.send(CHANNELS.syncActivity, entries)
@@ -737,7 +753,13 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 
 			return found === null ? fail("pairNotFound") : evaluate(page, found.engineId)
 		},
-		planPage: (planId, list, offset, limit) => supervisor.call("planPage", { planId, list, offset, limit }),
+		planPage: async (planId, list, offset, limit) => {
+			const page = await supervisor.call("planPage", { planId, list, offset, limit })
+
+			return page.ok && page.value.list === "unsyncable"
+				? { ok: true, value: { ...page.value, entries: page.value.entries.map(plainUnsyncable) } }
+				: page
+		},
 		releasePlan: async planId => {
 			if (plans.has(planId)) {
 				release(planId)
@@ -750,7 +772,13 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		approveDeletions: (pairId, passToken) => engineCall(pairId, "approveDeletions", id => ({ pairId: id, passToken })),
 		retryPath: (pairId, relPath) => engineCall(pairId, "retryPath", id => ({ pairId: id, relPath })),
 		retryAll: pairId => engineCall(pairId, "retryAll", id => ({ pairId: id })),
-		unsyncablePaths: (pairId, offset, limit) => engineCall(pairId, "unsyncablePaths", id => ({ pairId: id, offset, limit })),
+		unsyncablePaths: async (pairId, offset, limit) => {
+			const found = await engineCall(pairId, "unsyncablePaths", id => ({ pairId: id, offset, limit }))
+
+			return found.ok && found.value !== null
+				? { ok: true, value: { ...found.value, entries: found.value.entries.map(plainUnsyncable) } }
+				: found
+		},
 		ignoredPaths: (pairId, offset, limit) => engineCall(pairId, "ignoredPaths", id => ({ pairId: id, offset, limit })),
 		userIgnore: async () => {
 			const [text, defaults] = await Promise.all([supervisor.call("userIgnore", {}), supervisor.call("defaultIgnore", {})])

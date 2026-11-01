@@ -33,6 +33,12 @@ export function stripVerbatim(localRoot: string): string {
 	return localRoot.startsWith("\\\\?\\") ? localRoot.slice(4) : localRoot
 }
 
+// Text from the engine (an error, a detail) with every verbatim path in it spelled as Windows shows it. For display
+// only: matching and the engine keep the engine's spelling.
+export function stripVerbatimIn(text: string): string {
+	return text.replaceAll("\\\\?\\UNC\\", "\\\\").replaceAll("\\\\?\\", "")
+}
+
 function pathsOf(platform: NodeJS.Platform): path.PlatformPath {
 	return platform === "win32" ? path.win32 : path.posix
 }
