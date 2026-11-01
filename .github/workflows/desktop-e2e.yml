@@ -25,8 +25,9 @@
 # with nothing transferred or rewritten. 3.0.53 -> N (scripts/ci/e2e/chains/legacy.ts): 3.0.53 signed in through its
 # own page, given prefs, a PIN, the drive, WebDAV and five pairs (one per mode), settled, edited once on disk and once
 # in the cloud while closed, then updated by its own updater; N must migrate it all with the two edits as the only
-# changes. Both end with sign-out and uninstall. Deep is built on Linux deb (both chains); Windows x64 NSIS (N-1 -> N)
-# runs deep only when a custom deep dispatch names it in `formats`; the rest run at install depth with a notice. Logins are rate-limited per
+# changes. Both end with sign-out and uninstall. Deep is built on Linux deb (both chains) and Windows x64 NSIS (N-1 ->
+# N); an entry being brought up (scripts/ci/e2ePlan.ts DEEP_TRIAL) runs deep only when a custom deep dispatch names it
+# in `formats`; the rest run at install depth with a notice. Logins are rate-limited per
 # account, so a run signs the harness in once (job `session`, through @filen/sdk-rs) and hands that session, sealed,
 # to every job that reaches the cloud; the only other logins are the UI sign-ins under test, one per deep chain (4.x
 # in N-1 -> N, 3.0.53 in 3.0.53 -> N), spaced by the plan's stagger, each signed out at the end. Each run attempt and

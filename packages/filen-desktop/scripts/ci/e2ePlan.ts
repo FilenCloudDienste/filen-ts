@@ -129,15 +129,23 @@ const deepEntries: Record<Profile, readonly string[]> = {
 	custom: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
 }
 // Which deep chains are built so far, per entry; the rest of a deep request runs at install depth, with a notice.
-const DEEP_READY: Readonly<Record<string, readonly ("previous" | "legacy")[]>> = {
+export type DeepScenarios = Readonly<Record<string, readonly ("previous" | "legacy")[]>>
+
+export interface DeepReadiness {
+	// Deep in every profile that asks for it.
+	ready: DeepScenarios
+	// Deep only when a custom deep run names the entry in FORMATS.
+	trial: DeepScenarios
+}
+
+export const DEEP_READY: DeepScenarios = {
+	"win-x64-nsis": ["previous"],
 	"linux-x64-deb": ["previous", "legacy"],
 	"linux-arm64-deb": ["previous", "legacy"]
 }
 // Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
 // release runs stay on what is proven.
-const DEEP_TRIAL: Readonly<Record<string, readonly ("previous" | "legacy")[]>> = {
-	"win-x64-nsis": ["previous"]
-}
+export const DEEP_TRIAL: DeepScenarios = {}
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
 
@@ -158,7 +166,7 @@ function invalid(message: string): never {
 	throw new Error(message)
 }
 
-export function plan(input: PlanInput): Plan {
+export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_READY, trial: DEEP_TRIAL }): Plan {
 	const requested = input.platforms.trim() === "" ? (Object.keys(builders) as Os[]) : list(input.platforms)
 	const unknown = requested.filter(item => !Object.hasOwn(builders, item))
 
@@ -251,7 +259,8 @@ export function plan(input: PlanInput): Plan {
 		spike === "" && (previous || legacy) && depth !== "install" && (depth === "deep" ? MAIN_FORMATS : deepEntries[profile]).includes(id)
 	const trial = profile === "custom" && depth === "deep"
 	const ready = (id: string, scenario: "previous" | "legacy") =>
-		DEEP_READY[id]?.includes(scenario) === true || (trial && formats.includes(id) && DEEP_TRIAL[id]?.includes(scenario) === true)
+		readiness.ready[id]?.includes(scenario) === true ||
+		(trial && formats.includes(id) && readiness.trial[id]?.includes(scenario) === true)
 	const notReady = chosen
 		.map(idOf)
 		.flatMap(id =>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { refusal } from "../../scripts/ci/e2e/context.ts"
-import { plan, previousVersion, type PlanInput } from "../../scripts/ci/e2ePlan.ts"
+import { DEEP_TRIAL, plan, type Plan, type PlanInput, previousVersion } from "../../scripts/ci/e2ePlan.ts"
 
 const dispatch: PlanInput = {
 	platforms: "windows,mac,linux",
@@ -84,34 +84,60 @@ describe("e2ePlan depth", () => {
 			.tests.filter(entry => entry.deep)
 			.map(entry => `${entry.platform}-${entry.arch}-${entry.format}@${String(entry.stagger)}`)
 
+	// The run's logins: the harness sign-in, then one UI sign-in per deep chain.
+	const logins = (result: Plan) =>
+		(result.session ? 1 : 0) + result.tests.reduce((sum, entry) => sum + Number(entry.deepPrevious) + Number(entry.deepLegacy), 0)
+
 	it("makes the built deep entries deep, staggers them and asks for the harness sign-in", () => {
 		const nightly = plan({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })
+		const windows = nightly.tests.find(entry => entry.platform === "win" && entry.arch === "x64")
 
-		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
+		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual([
+			"win-x64-nsis@0",
+			"linux-x64-deb@20"
+		])
 		expect(nightly.session).toBe(true)
-		expect(nightly.notices.some(notice => notice.includes("win-x64-nsis previous, win-x64-nsis legacy, mac-arm64-dmg previous"))).toBe(
+		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, false])
+		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
+		expect(nightly.notices.some(notice => notice.includes("win-x64-nsis legacy, mac-arm64-dmg previous, mac-arm64-dmg legacy"))).toBe(
 			true
 		)
-		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual(["linux-x64-deb@0", "linux-arm64-deb@20"])
-		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
+		// Session, Windows 4.x, Linux 4.x and Linux 3.0.53.
+		expect(logins(nightly)).toBe(4)
+		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual([
+			"win-x64-nsis@0",
+			"linux-x64-deb@20",
+			"linux-arm64-deb@40"
+		])
 	})
 
-	it("runs an entry being brought up deep only when a custom deep run names it", () => {
-		const named = plan({ ...dispatch, depth: "deep", formats: "win-x64-nsis,linux-x64-deb" })
+	it("runs a trial entry deep only when a custom deep run names it", () => {
+		const readiness = { ready: { "linux-x64-deb": ["previous", "legacy"] as const }, trial: { "win-x64-nsis": ["previous"] as const } }
+		const deepWith = (input: PlanInput) =>
+			plan(input, readiness)
+				.tests.filter(entry => entry.deep)
+				.map(entry => `${entry.platform}-${entry.arch}-${entry.format}@${String(entry.stagger)}`)
+		const named = plan({ ...dispatch, depth: "deep", formats: "win-x64-nsis,linux-x64-deb" }, readiness)
 		const windows = named.tests.find(entry => entry.platform === "win")
 
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, false])
-		expect(deep({ ...dispatch, depth: "deep", formats: "win-x64-nsis,linux-x64-deb" })).toEqual(["win-x64-nsis@0", "linux-x64-deb@20"])
-		expect(deep({ ...dispatch, depth: "deep" })).not.toContain("win-x64-nsis@0")
-		expect(deep({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
+		expect(deepWith({ ...dispatch, depth: "deep", formats: "win-x64-nsis,linux-x64-deb" })).toEqual([
+			"win-x64-nsis@0",
+			"linux-x64-deb@20"
+		])
+		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
+		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
+		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
+		expect(DEEP_TRIAL).toEqual({})
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {
 		expect(plan({ ...dispatch, depth: "install" }).session).toBe(false)
 		expect(deep({ ...dispatch, depth: "install" })).toEqual([])
 		expect(deep({ ...dispatch, scenarios: "legacy" })).toEqual(["linux-x64-deb@0"])
-		expect(deep({ ...dispatch, scenarios: "previous" })).toEqual(["linux-x64-deb@0"])
+		expect(deep({ ...dispatch, scenarios: "previous" })).toEqual(["win-x64-nsis@0", "linux-x64-deb@20"])
 		expect(plan({ ...dispatch, scenarios: "legacy" }).tests.find(entry => entry.deep)?.previous).toBe(false)
+		expect(logins(plan({ ...dispatch, scenarios: "legacy" }))).toBe(2)
 		expect(deep({ ...dispatch, spike: "s1" })).toEqual([])
 		expect(deep({ ...dispatch, depth: "deep", formats: "linux-arm64-deb,linux-x64-rpm" })).toEqual(["linux-arm64-deb@0"])
 		expect(() => plan({ ...dispatch, depth: "deepest" })).toThrow()
