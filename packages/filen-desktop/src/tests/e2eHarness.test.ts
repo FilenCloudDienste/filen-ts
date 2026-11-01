@@ -17,7 +17,7 @@ import {
 	writeTree
 } from "../../scripts/ci/e2e/fixtures.ts"
 import { xwdToPng } from "../../scripts/ci/e2e/linux.ts"
-import { openRemote, remoteOf, sealRemote, secretsOf } from "../../scripts/ci/e2e/session.ts"
+import { openRemote, readSealed, remoteOf, sealRemote, secretsOf, SESSION_FILE_ENV, writeSealed } from "../../scripts/ci/e2e/session.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 import { isChromiumChild } from "../../scripts/ci/targets.ts"
 
@@ -119,6 +119,29 @@ describe("e2e harness session", () => {
 		expect(remote.publicKey).toBe(publicKey.export({ type: "pkcs1", format: "der" }).toString("base64"))
 		expect(remote.rootUuid).toBe(client.rootUuid)
 		expect(secretsOf(remote)).toEqual(["api-key", "key-one", "key-two", remote.privateKey, remote.publicKey])
+	})
+
+	it("hands the sealed session over as a file, never through the environment", () => {
+		const file = path.join(tempDir(), "session", "session.sealed")
+		const before = process.env[SESSION_FILE_ENV]
+
+		process.env[SESSION_FILE_ENV] = file
+
+		try {
+			const sealed = sealRemote(remoteOf(client), "password", "123")
+
+			expect(writeSealed(sealed)).toBe(file)
+			expect(readSealed()).toBe(sealed)
+			expect(Object.values(process.env)).not.toContain(sealed)
+			process.env[SESSION_FILE_ENV] = path.join(tempDir(), "missing")
+			expect(() => readSealed()).toThrow(/names no sealed session/)
+		} finally {
+			if (before === undefined) {
+				delete process.env[SESSION_FILE_ENV]
+			} else {
+				process.env[SESSION_FILE_ENV] = before
+			}
+		}
 	})
 
 	it("seals the session for one run and password only", () => {

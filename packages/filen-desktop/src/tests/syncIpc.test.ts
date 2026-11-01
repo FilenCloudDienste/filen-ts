@@ -39,6 +39,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 	let clock = 1_000
 	let added = 6
 	const onHeld = vi.fn()
+	const openPath = vi.fn((_directory: string) => Promise.resolve(""))
 	const retire = vi.fn(() => Promise.resolve())
 	const store = memoryStore(options.pairs)
 	const host: DesktopSyncHostState = { state: "running" }
@@ -83,7 +84,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 			rootContext: () => ({ platform: process.platform, home: "/nonexistent-home", appData: [], temporary: [], oneDrive: [] }),
 			mountPoints: () => Promise.resolve([])
 		},
-		shell: { openPath: vi.fn(() => Promise.resolve("")) },
+		shell: { openPath },
 		legacySync: {
 			pending: () => Promise.resolve(undefined),
 			consume: () => Promise.resolve(),
@@ -121,6 +122,7 @@ function setup(options: { pairs?: ShellPair[]; answers?: Answers; senderUrl?: st
 
 	return {
 		service,
+		openPath,
 		store,
 		tokens,
 		onHeld,
@@ -576,6 +578,16 @@ describe("registerSyncIpc", () => {
 		expect(await invoke("reveal", "7", "bin")).toEqual({ ok: true, value: null })
 		expect(await service.reveal("8", "root")).toEqual({ ok: false, error: { code: "pairNotFound" } })
 		await expect(invoke("reveal", "7", "empty")).rejects.toThrow("invalid sync payload")
+	})
+
+	it("reveals a root the engine spells verbatim as a plain path", async () => {
+		const { invoke, openPath } = setup({ pairs: [shellPair({ localRoot: "\\\\?\\C:\\Users\\u\\Work" })] })
+
+		expect(await invoke("reveal", "7", "root")).toEqual({ ok: true, value: null })
+		expect(await invoke("reveal", "7", "bin")).toEqual({ ok: true, value: null })
+		expect(openPath.mock.calls[0]?.[0]).toBe("C:\\Users\\u\\Work")
+		expect(openPath.mock.calls[1]?.[0]?.startsWith("C:\\Users\\u\\Work")).toBe(true)
+		expect(openPath.mock.calls.some(([directory]) => directory.startsWith("\\\\?\\"))).toBe(false)
 	})
 
 	it("pushes the overview to subscribed pages at most four times a second", async () => {

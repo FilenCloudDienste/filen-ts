@@ -1,13 +1,17 @@
 import { createCipheriv, createDecipheriv, createPrivateKey, createPublicKey, randomBytes, scryptSync } from "node:crypto"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
+import path from "node:path"
 import type * as Sdk from "@filen/sdk-rs"
 import { installedAddon } from "../../stageNapi.ts"
 import { fail } from "../support.ts"
 
 // The harness's own access to the e2e account: one sign-in per workflow run, through @filen/sdk-rs's Node-API addon,
-// handed to every other job. GitHub drops a job output that contains a masked value, so the hand-off is the session
-// encrypted (AES-256-GCM) under a key derived from the account password, which every receiving job holds anyway; the
-// ciphertext is not a secret. Each receiving job masks every value it decrypts before anything can print it.
+// handed to every other job. The hand-off is the session encrypted (AES-256-GCM) under a key derived from the account
+// password, which every receiving job holds anyway, in a file: the session job writes it, the workflow carries it as a
+// short-lived artifact and each receiving job hands the harness its path (SESSION_FILE_ENV). It never travels in an
+// environment variable or a job output, which GitHub prints with a step's settings. Each receiving job masks the sealed
+// text and every value it decrypts before anything can print them.
 //
 // What is handed over is what rclone's filen backend takes (scripts/ci/e2e/cloud.ts): the account's keys as sdk-rs's
 // Client::to_sdk_config gives them to its own rclone remote. The addon exposes no listing, upload or deletion, so the
@@ -15,7 +19,8 @@ import { fail } from "../support.ts"
 
 export const EMAIL_ENV = "FILEN_DESKTOP_E2E_TEST_EMAIL"
 export const PASSWORD_ENV = "FILEN_DESKTOP_E2E_TEST_PASSWORD"
-export const SESSION_ENV = "FILEN_DESKTOP_E2E_SESSION"
+// The path of the sealed session (not a secret itself).
+export const SESSION_FILE_ENV = "FILEN_DESKTOP_E2E_SESSION_FILE"
 
 const LOGIN_TIMEOUT_MS = 90_000
 
@@ -122,17 +127,33 @@ export function runId(): string {
 	return id
 }
 
-// The handed session, decrypted with the account password from `credentials`.
-export function harnessRemote(credentials: Credentials): HarnessRemote {
-	const sealed = process.env[SESSION_ENV] ?? ""
+// The sealed session in the file SESSION_FILE_ENV names.
+export function readSealed(): string {
+	const file = process.env[SESSION_FILE_ENV] ?? ""
+	const sealed = file === "" || !existsSync(file) ? "" : readFileSync(file, "utf8").trim()
 
 	if (sealed === "") {
-		fail(`${SESSION_ENV} is not set: the session job did not run or failed`)
+		fail(`${SESSION_FILE_ENV} names no sealed session (${file || "unset"}): the session job did not run or failed`)
 	}
 
-	delete process.env[SESSION_ENV]
+	mask([sealed])
 
-	return openRemote(sealed, credentials.password, runId())
+	return sealed
+}
+
+// Writes the run's sealed session to the file SESSION_FILE_ENV names, readable by this user only.
+export function writeSealed(sealed: string): string {
+	const file = process.env[SESSION_FILE_ENV] ?? fail(`${SESSION_FILE_ENV} is not set`)
+
+	mkdirSync(path.dirname(file), { recursive: true })
+	writeFileSync(file, sealed, { mode: 0o600 })
+
+	return file
+}
+
+// The handed session, decrypted with the account password from `credentials`.
+export function harnessRemote(credentials: Credentials): HarnessRemote {
+	return openRemote(readSealed(), credentials.password, runId())
 }
 
 // The run's one harness sign-in. Never retried: logins are rate-limited per account.

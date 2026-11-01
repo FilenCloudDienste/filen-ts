@@ -1,23 +1,24 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { CLOUD_ROOT, openCloud, runDir, type Cloud } from "./e2e/cloud.ts"
 import { createFindings } from "./e2e/findings.ts"
 import { fixtureTree, seededBytes, treeSnapshot, writeTree } from "./e2e/fixtures.ts"
 import { redactor } from "./e2e/redact.ts"
-import { harnessRemote, runId, sealRemote, secretsOf, signInHarness, takeCredentials } from "./e2e/session.ts"
+import { harnessRemote, mask, runId, sealRemote, secretsOf, signInHarness, takeCredentials, writeSealed } from "./e2e/session.ts"
 import { cloudSnapshot, diffSnapshots } from "./e2e/snapshot.ts"
 import { errorMessage, fail, section } from "./support.ts"
 
 // The desktop e2e's cloud side (see .github/workflows/desktop-e2e.yml), on any runner:
 //
-//   session    the run's one harness sign-in (sdk-rs), written sealed to $GITHUB_OUTPUT as `session`
+//   session    the run's one harness sign-in (sdk-rs), written sealed to the file FILEN_DESKTOP_E2E_SESSION_FILE names
 //   selftest   with the handed session: create, list, upload a new version, diff and delete a run directory
 //   sweep      with the handed session: delete this run's directories and any older than a day, then empty the trash
 //
 //   node scripts/ci/e2eCloud.ts <session|selftest|sweep> [--artifacts <dir>]
 //
-// Credentials come from FILEN_DESKTOP_E2E_TEST_EMAIL / _PASSWORD, the handed session from FILEN_DESKTOP_E2E_SESSION.
+// Credentials come from FILEN_DESKTOP_E2E_TEST_EMAIL / _PASSWORD, the handed session from the file
+// FILEN_DESKTOP_E2E_SESSION_FILE names.
 
 const SWEEP_AGE_MS = 24 * 60 * 60 * 1000
 const SWEEP_BUDGET_MS = 3 * 60 * 1000
@@ -25,10 +26,11 @@ const SWEEP_BUDGET_MS = 3 * 60 * 1000
 async function session(): Promise<void> {
 	const credentials = takeCredentials()
 	const remote = await signInHarness(credentials)
-	const output = process.env["GITHUB_OUTPUT"] ?? fail("GITHUB_OUTPUT is not set")
+	const sealed = sealRemote(remote, credentials.password, runId())
 
-	appendFileSync(output, `session=${sealRemote(remote, credentials.password, runId())}\n`)
-	console.log("signed in once; the sealed session is the job's output")
+	mask([sealed])
+	writeSealed(sealed)
+	console.log("signed in once; the sealed session is in its file, for the artifact")
 }
 
 async function selftest(cloud: Cloud, work: string, artifacts: string, redact: (text: string) => string): Promise<void> {

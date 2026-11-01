@@ -402,6 +402,10 @@ jobs:
   # apps' own updaters, before any of it is published.
   e2e:
     needs: [mac, windows, linux]
+    # The e2e sweep deletes the run's sealed-session artifact.
+    permissions:
+      contents: read
+      actions: write
     uses: ./.github/workflows/desktop-e2e.yml
     with:
       candidate-from-run: true

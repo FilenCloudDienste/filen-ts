@@ -36,7 +36,7 @@ import { serialQueue } from "../../shared/serial.ts"
 import { createActivityLog } from "./activity.ts"
 import { attachable, attachUnheld, BIN_DIR, type FirstRunDeps, holdReviewed, startPreparing } from "./firstRun.ts"
 import { applyLegacySync } from "./legacyPairs.ts"
-import { chooseLocalDirectory, inspectLocalRoot, type LocalRootContext, type RootTokens } from "./localRoot.ts"
+import { chooseLocalDirectory, inspectLocalRoot, type LocalRootContext, type RootTokens, stripVerbatim } from "./localRoot.ts"
 import { reconcileMirror, shellPairId } from "./mirror.ts"
 import { mergeOverview } from "./overview.ts"
 import type { ShellPair, SyncStore } from "./store.ts"
@@ -769,7 +769,9 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				return fail("pairNotFound")
 			}
 
-			const directory = target === "root" ? found.pair.localRoot : path.join(found.pair.localRoot, BIN_DIR)
+			// The engine may spell a Windows root verbatim (\\?\C:\…), which Explorer does not open as a plain folder.
+			const root = stripVerbatim(found.pair.localRoot)
+			const directory = target === "root" ? root : path.join(root, BIN_DIR)
 
 			// openPath answers with an error message, "" on success.
 			return (await deps.shell.openPath(directory)) === "" ? DONE : fail("localRootMissing")

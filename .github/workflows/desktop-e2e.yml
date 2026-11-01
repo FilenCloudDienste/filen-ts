@@ -180,9 +180,10 @@ jobs:
           SPIKE: ${{ inputs.spike }}
         run: node scripts/ci/e2ePlan.ts
 
-  # The run's one harness sign-in (sdk-rs). Its output is the session sealed under a key from the account password: a
-  # job output holding a masked value would be dropped, and only jobs that hold the password can open it. Never
-  # retried (logins are rate-limited); a failure fails the deep jobs and the sweep is skipped.
+  # The run's one harness sign-in (sdk-rs). It hands the session on sealed under a key from the account password, as a
+  # file in a one-day artifact that the sweep deletes: never as a job output or an environment variable, which GitHub
+  # prints with a step's settings. Never retried (logins are rate-limited); a failure fails the deep jobs and the sweep
+  # is skipped.
   session:
     needs: plan
     if: needs.plan.outputs.session == 'true'
@@ -191,8 +192,6 @@ jobs:
     defaults:
       run:
         working-directory: packages/filen-desktop
-    outputs:
-      session: ${{ steps.login.outputs.session }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -208,12 +207,20 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
       - name: Sign the harness in
-        id: login
         timeout-minutes: 5
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION_FILE: ${{ runner.temp }}/e2e-session/session.sealed
         run: node scripts/ci/e2eCloud.ts session
+      - name: Hand the sealed session on
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-e2e-session
+          path: ${{ runner.temp }}/e2e-session/session.sealed
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
 
   # Spike cloud: the harness's cloud side on its own.
   cloud:
@@ -239,12 +246,19 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+      # The sealed session as a file (never an environment variable or a job output, which are printed with a step's
+      # settings); the harness masks it on reading.
+      - name: Download the sealed session
+        uses: actions/download-artifact@v7
+        with:
+          name: desktop-e2e-session
+          path: ${{ runner.temp }}/e2e-session
       - name: Cloud self-test
         timeout-minutes: 15
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
-          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+          FILEN_DESKTOP_E2E_SESSION_FILE: ${{ runner.temp }}/e2e-session/session.sealed
         run: node scripts/ci/e2eCloud.ts selftest --artifacts e2e-artifacts
       - name: Upload the self-test evidence
         if: always()
@@ -516,6 +530,12 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
+      - name: Download the sealed session
+        if: matrix.deep
+        uses: actions/download-artifact@v7
+        with:
+          name: desktop-e2e-session
+          path: ${{ runner.temp }}/e2e-session
       - name: Download N
         uses: actions/download-artifact@v7
         with:
@@ -570,7 +590,7 @@ jobs:
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
-          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+          FILEN_DESKTOP_E2E_SESSION_FILE: ${{ runner.temp }}/e2e-session/session.sealed
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
           E2E_CHAIN_BUDGET_MINUTES: 85
@@ -593,7 +613,7 @@ jobs:
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
-          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+          FILEN_DESKTOP_E2E_SESSION_FILE: ${{ runner.temp }}/e2e-session/session.sealed
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           E2E_CHAIN_BUDGET_MINUTES: 105
         run: bash scripts/ci/deepSession.sh --scenario legacy --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
@@ -629,6 +649,10 @@ jobs:
     needs: [plan, session, cloud, test]
     if: ${{ always() && needs.session.result == 'success' }}
     runs-on: ubuntu-latest
+    # Deleting the sealed session's artifact.
+    permissions:
+      contents: read
+      actions: write
     timeout-minutes: 15
     defaults:
       run:
@@ -647,10 +671,25 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+      - name: Download the sealed session
+        uses: actions/download-artifact@v7
+        with:
+          name: desktop-e2e-session
+          path: ${{ runner.temp }}/e2e-session
       - name: Sweep the run's cloud directories
         timeout-minutes: 8
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
-          FILEN_DESKTOP_E2E_SESSION: ${{ needs.session.outputs.session }}
+          FILEN_DESKTOP_E2E_SESSION_FILE: ${{ runner.temp }}/e2e-session/session.sealed
         run: node scripts/ci/e2eCloud.ts sweep
+      # The sealed session is not kept past the run.
+      - name: Delete the sealed session
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --paginate --jq '.artifacts[] | select(.name == "desktop-e2e-session") | .id')"
+          for id in ${ids}; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
+          done
