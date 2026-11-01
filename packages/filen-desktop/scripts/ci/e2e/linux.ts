@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs"
 import { crc32, deflateSync } from "node:zlib"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
@@ -259,31 +259,4 @@ export function processesUnder(prefix: string): string[] {
 	}
 
 	return found
-}
-
-// Every file below `root` (at most `maxBytes` each) holding any of `values`, as UTF-8 or UTF-16LE (Chromium's
-// localStorage keeps strings either way); file names only, never what matched.
-export function filesHolding(root: string, values: readonly string[], maxBytes = 64 * 1024 * 1024): string[] {
-	const needles = values.filter(value => value.length >= 4).flatMap(value => [Buffer.from(value, "utf8"), Buffer.from(value, "utf16le")])
-	const hits: string[] = []
-
-	for (const entry of existsSync(root) ? readdirSync(root, { withFileTypes: true, recursive: true }) : []) {
-		const file = path.join(entry.parentPath, entry.name)
-
-		try {
-			if (!entry.isFile() || statSync(file).size > maxBytes) {
-				continue
-			}
-
-			const bytes = readFileSync(file)
-
-			if (needles.some(needle => bytes.includes(needle))) {
-				hits.push(path.relative(root, file))
-			}
-		} catch {
-			// Removed while scanned.
-		}
-	}
-
-	return hits
 }

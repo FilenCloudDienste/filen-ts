@@ -275,5 +275,24 @@ $bitmap.Save(${psQuote(file)}, [System.Drawing.Imaging.ImageFormat]::Png)
 		}
 
 		return "the NSIS uninstaller removed the app, its uninstall entry and its app data"
-	}
+	},
+
+	async appProcesses(target) {
+		const installDir = path.dirname(target.executable)
+		const found = await ps(
+			"list the install's processes",
+			`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith(${psQuote(path.join(installDir, path.sep))}, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $($_.ExecutablePath)" }`
+		)
+
+		return found.split(/\r?\n/).filter(line => line.trim() !== "")
+	},
+
+	async forceKill(pids) {
+		for (const pid of pids) {
+			await powershellBounded(`taskkill.exe /F /T /PID ${String(pid)} | Out-Null`, TOOL_TIMEOUT_MS)
+		}
+	},
+
+	// The old client mounted on a drive letter (its default X:); 4.x imports the letter.
+	legacyDrive: () => ({ setting: "X:", root: "X:\\" })
 }

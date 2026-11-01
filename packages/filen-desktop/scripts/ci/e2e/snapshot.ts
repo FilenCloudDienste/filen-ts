@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { createReadStream, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
+import { createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
 import { pipeline } from "node:stream/promises"
 import type { Cloud } from "./cloud.ts"
@@ -139,4 +139,31 @@ export function snapshotText(snapshot: Snapshot): string {
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
 		.map(([relPath, node]) => JSON.stringify({ path: relPath, ...node }))
 		.join("\n")
+}
+
+// Every file below `root` (at most `maxBytes` each) holding any of `values`, as UTF-8 or UTF-16LE (Chromium's
+// localStorage keeps strings either way); file names only, never what matched.
+export function filesHolding(root: string, values: readonly string[], maxBytes = 64 * 1024 * 1024): string[] {
+	const needles = values.filter(value => value.length >= 4).flatMap(value => [Buffer.from(value, "utf8"), Buffer.from(value, "utf16le")])
+	const hits: string[] = []
+
+	for (const entry of existsSync(root) ? readdirSync(root, { withFileTypes: true, recursive: true }) : []) {
+		const file = path.join(entry.parentPath, entry.name)
+
+		try {
+			if (!entry.isFile() || statSync(file).size > maxBytes) {
+				continue
+			}
+
+			const bytes = readFileSync(file)
+
+			if (needles.some(needle => bytes.includes(needle))) {
+				hits.push(path.relative(root, file))
+			}
+		} catch {
+			// Removed while scanned.
+		}
+	}
+
+	return hits
 }

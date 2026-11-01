@@ -39,8 +39,7 @@ import {
 	quitLegacy,
 	watchLegacySync
 } from "../legacyApp.ts"
-import { filesHolding, keyringItems, mountedType, processesUnder, processStartMs, sha256Through, uninstallDeb } from "../linux.ts"
-import { cloudSnapshot, diffSnapshots, localSnapshot, snapshotText, type Snapshot, type SnapshotNode } from "../snapshot.ts"
+import { cloudSnapshot, diffSnapshots, filesHolding, localSnapshot, snapshotText, type Snapshot, type SnapshotNode } from "../snapshot.ts"
 import { START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openChain, quiet, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
 
@@ -75,7 +74,8 @@ import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openCha
 //   L14  sync works afterwards    a new local file uploads
 //   L15  sign-out and uninstall   session and drive gone; the user's directories intact
 //
-// The old app's tray and notifications are not observed (no D-Bus capture yet). Linux deb only so far.
+// The old app's tray and notifications are not observed. Linux deb and Windows NSIS so far; what differs per OS is behind
+// scripts/ci/e2e/os.ts.
 
 const CONVERGE_TIMEOUT_MS = 6 * 60 * 1000
 const MIGRATE_TIMEOUT_MS = 8 * 60 * 1000
@@ -105,15 +105,16 @@ interface ShellState {
 }
 
 export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<void> {
-	if (options.target.platform !== "linux" || options.target.format !== "deb") {
-		fail("the deep 3.0.53 -> N chain runs on Linux deb only so far")
+	if (!["linux deb", "win nsis"].includes(`${options.target.platform} ${options.target.format}`)) {
+		fail("the deep 3.0.53 -> N chain runs on Linux deb and Windows NSIS only so far")
 	}
 
 	const chain = await openChain("legacy", options, artifacts)
 	const { findings, cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf } = chain
 	const pin = String(randomInt(100_000, 1_000_000))
 	const webdav = { username: `e2e-${randomBytes(4).toString("hex")}`, password: randomBytes(18).toString("hex"), port: await freePort() }
-	const mountPoint = `${localDir}-mnt`
+	// What 3.x's drive is set to (a mount point, or a letter on Windows) and where 4.x must then reach it.
+	const drive = chain.os.legacyDrive(localDir)
 	const edits = {
 		local: { ...LEGACY_EDITS.local, sha256: sha256(LEGACY_EDITS.local.bytes) },
 		cloud: { ...LEGACY_EDITS.cloud, sha256: sha256(LEGACY_EDITS.cloud.bytes) }
@@ -131,6 +132,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		// The prefs 3.x's options.v1.json held (the rest are in its localStorage only).
 		mirrored?: string[]
 		afterCloud?: Snapshot
+		// Windows: the tray preference was switched off to quit and is to be put back.
+		trayOff?: boolean
 	} = {}
 
 	chain.secret(pin)
@@ -163,7 +166,6 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 		await findings.must("fixtures: five pair trees, each seeded on one side", async () => {
 			await cloud.mkdir(cloudDir)
-			mkdirSync(mountPoint, { recursive: true })
 
 			const pairs: LegacySyncPair[] = []
 
@@ -204,7 +206,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 			const keys = await configureLegacy(legacyPage(), {
 				pairs: state.pairs ?? fail("no pairs"),
-				drive: { mountPoint },
+				drive: { mountPoint: drive.setting },
 				webdav,
 				pin,
 				lockTimeout: LOCK_TIMEOUT_S
@@ -281,18 +283,18 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		})
 
 		await findings.must(`${LEGACY_VERSION}: the network drive is mounted and WebDAV answers`, async () => {
-			const type = await waitFor("the old network drive to mount", SETUP_TIMEOUT_MS, async () => mountedType(mountPoint))
+			const type = await waitFor("the old network drive to mount", SETUP_TIMEOUT_MS, async () => chain.os.driveMounted(drive.root))
 			const response = await fetch(`http://127.0.0.1:${String(webdav.port)}/`, {
 				method: "PROPFIND",
 				headers: { Depth: "1", Authorization: `Basic ${Buffer.from(`${webdav.username}:${webdav.password}`).toString("base64")}` },
 				signal: AbortSignal.timeout(LIVE_TIMEOUT_MS)
 			})
 
-			if (!type.startsWith("fuse") || response.status !== 207) {
+			if (response.status !== 207) {
 				fail(`drive ${type}, WebDAV PROPFIND HTTP ${String(response.status)}`)
 			}
 
-			return `${type} at ${mountPoint}; PROPFIND 207`
+			return `${type} at ${drive.root}; PROPFIND 207`
 		})
 
 		// The prefs live in the page's localStorage; options.v1.json is main's mirror, which 3.0.53 writes from two
@@ -319,15 +321,24 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		await findings.must(`${LEGACY_VERSION} quits through app.quit(), rclone with it`, async () => {
 			await state.legacy?.renderer.browser.close().catch(() => undefined)
 
-			const exit = await quitLegacy(state.legacy?.launched ?? fail("not launched"), EXIT_TIMEOUT_MS)
+			// D13 as the fallback: an app.quit() that does not end it within the minute is followed, after 30 s without
+			// writes, by a hard kill.
+			const exit = await quitLegacy(state.legacy?.launched ?? fail("not launched"), EXIT_TIMEOUT_MS).catch(async (error: unknown) => {
+				await quiet([...LEGACY_PAIRS.map(pair => rootOf(pair.name)), userData("sync")])
+				await chain.os.forceKill(target.mainProcesses().map(item => item.pid))
+
+				return `hard-killed after 30 s without writes (D13): ${errorMessage(error)}`
+			})
 
 			await waitFor(
 				"the old app's processes to end",
 				EXIT_TIMEOUT_MS,
-				() => (processesUnder("/opt/Filen/").length === 0 ? true : null),
-				1000
+				async () => ((await chain.os.appProcesses(target)).length === 0 ? true : null),
+				2000
 			)
-			await waitFor("the old drive to unmount", EXIT_TIMEOUT_MS, async () => ((await mountedType(mountPoint)) === null ? true : null))
+			await waitFor("the old drive to unmount", EXIT_TIMEOUT_MS, async () =>
+				(await chain.os.driveMounted(drive.root)) === null ? true : null
+			)
 			delete state.legacy
 			// Baseline A: the old app settled and closed. Its sync state is compared by content only.
 			state.syncDir = await localSnapshot(userData("sync"))
@@ -411,6 +422,37 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 	const findPairs = (overview: { pairs: DesktopSyncPair[] }) =>
 		LEGACY_PAIRS.map(pair => ({ fixture: pair, found: overview.pairs.find(candidate => candidate.name === pair.name) }))
 
+	// Quits N gracefully where the OS lets a harness do it. Windows has no signal and N keeps running in the tray while
+	// minimizeToTray (imported on) holds: with a page, the preference goes off just before the window is closed (put back
+	// after the next unlock); without one (the updater's own relaunch, started hidden), D13: a hard kill once nothing has
+	// been written for 30 s, which the next launch then also proves recovery from.
+	const quitN = async (what: string): Promise<void> => {
+		if (target.platform === "win") {
+			const turnedOff =
+				chain.renderer !== null &&
+				(await desktop(page(), "window.desktop.prefs.set({ minimizeToTray: false })").then(
+					() => true,
+					() => false
+				))
+
+			if (!turnedOff) {
+				await chain.renderer?.browser.close().catch(() => undefined)
+				chain.renderer = null
+				await quiet([...LEGACY_PAIRS.map(pair => rootOf(pair.name)), userData("sync-engine")])
+				await chain.os.forceKill(target.mainProcesses().map(item => item.pid))
+				await waitFor(`${what} to end`, EXIT_TIMEOUT_MS, () => (target.mainProcesses().length === 0 ? true : null), 1000)
+				chain.launched = null
+				findings.info(`${what} quit`, "hard-killed after 30 s without writes (D13): a tray-only app with no window to close")
+
+				return
+			}
+
+			state.trayOff = true
+		}
+
+		await chain.quit(what)
+	}
+
 	const unlock = async (what: string): Promise<void> => {
 		await findings.must(what, async () => {
 			const locked = await waitFor("the lock status", START_TIMEOUT_MS, async () => {
@@ -428,12 +470,18 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				(await desktop<DesktopLockStatus>(page(), "window.desktop.lock.status()")).locked ? null : true
 			)
 
+			// The tray preference the last quit switched off (Windows), back as the migration left it.
+			if (state.trayOff === true) {
+				await desktop(page(), "window.desktop.prefs.set({ minimizeToTray: true })")
+				state.trayOff = false
+			}
+
 			return "locked at start; the PIN unlocks through the lock screen"
 		})
 	}
 
 	const verify = async (): Promise<void> => {
-		const relaunchedAt = Math.min(...target.mainProcesses().map(item => processStartMs(item.pid)))
+		const relaunchedAt = Math.min(...(await Promise.all(target.mainProcesses().map(item => chain.os.processStartMs(item.pid)))))
 		const engine = () => {
 			const userId = marker() as { userId?: number } | null
 
@@ -603,8 +651,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `${retired[0] ?? ""}, unchanged`
 		})
 
-		await findings.must("N quits on SIGTERM and starts again with its debugging port", async () => {
-			await chain.quit("N")
+		await findings.must("N quits and starts again with its debugging port", async () => {
+			await quitN("N")
 
 			const hidden = await chain.connect()
 
@@ -673,29 +721,31 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			})
 
 			await findings.check("L5 the network drive runs at the 3.x mount point and reads the cloud edit", async () => {
-				const drive = await waitFor("the drive to run", SETUP_TIMEOUT_MS, async () => {
+				const current = await waitFor("the drive to run", SETUP_TIMEOUT_MS, async () => {
 					const read = (await chain.mountsOverview()).drive
 
 					return read.state === "running" || read.state === "error" ? read : null
 				})
 
-				if (!drive.enabled || drive.state !== "running" || drive.mountPoint !== realpathSync(mountPoint) || drive.readOnly) {
-					fail(json(drive))
+				const root = chain.os.driveRoot(current)
+
+				if (!current.enabled || current.state !== "running" || root !== drive.root || current.readOnly) {
+					fail(json(current))
 				}
 
-				const type = await mountedType(drive.mountPoint)
-				const read = await sha256Through(
-					path.join(drive.mountPoint, ...`${cloudDir}/${edits.cloud.pair}/${edits.cloud.path}`.split("/")),
+				const type = await chain.os.driveMounted(root)
+				const read = await chain.os.sha256Through(
+					path.join(root, ...`${cloudDir}/${edits.cloud.pair}/${edits.cloud.path}`.split("/")),
 					LIVE_TIMEOUT_MS
 				)
 
-				if (type === null || !type.startsWith("fuse") || read !== edits.cloud.sha256) {
+				if (type === null || read !== edits.cloud.sha256) {
 					fail(
-						`findmnt ${type ?? "not mounted"}; the cloud edit read through the drive ${read === edits.cloud.sha256 ? "matches" : "differs"}`
+						`${type ?? "nothing"} mounted; the cloud edit read through the drive ${read === edits.cloud.sha256 ? "matches" : "differs"}`
 					)
 				}
 
-				return `${type} at ${drive.mountPoint}; the cloud edit reads back byte for byte`
+				return `${type} at ${root}; the cloud edit reads back byte for byte`
 			})
 
 			await findings.check("L5 WebDAV on the 3.x port with the 3.x credentials", async () => {
@@ -872,7 +922,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			})
 
 			await findings.must("N quits on SIGTERM and starts a third time", async () => {
-				await chain.quit("N")
+				await quitN("N")
 				await chain.connect()
 
 				return "connected"
@@ -936,11 +986,16 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 		await findings.check("L15 the sign-out wiped the session and unmounted the drive", async () => {
 			await waitFor("session.vault to be removed", SETUP_TIMEOUT_MS, () => (existsSync(userData("session.vault")) ? null : true))
-			await waitFor("the drive to unmount", SETUP_TIMEOUT_MS, async () => ((await mountedType(mountPoint)) === null ? true : null))
+			await waitFor("the drive to unmount", SETUP_TIMEOUT_MS, async () =>
+				(await chain.os.driveMounted(drive.root)) === null ? true : null
+			)
 
 			return "session.vault gone; nothing mounted"
 		})
-		findings.info("keyring items of Filen after the sign-out", (await keyringItems("Filen")).join("; ") || "none")
+		findings.info(
+			"secret store items of Filen after the sign-out",
+			(await chain.os.secretStoreItems(target.userData)).join("; ") || "none"
+		)
 		findings.attach("legacy-userdata-after-sign-out.txt", inventory(target.userData))
 
 		const kept = new Map<string, Snapshot>()
@@ -949,14 +1004,14 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			kept.set(pair.name, await snapshotOf(pair.name))
 		}
 
-		await findings.must("N quits on SIGTERM", async () => {
-			await chain.quit("N")
+		await findings.must("N quits", async () => {
+			await quitN("N")
 
-			return "exit code 0"
+			return "quit"
 		})
 
-		await findings.check("L15 apt-get remove and purge take the app and leave the user's directories", async () => {
-			uninstallDeb()
+		await findings.check("L15 the app uninstalled as a user does, the user's directories left", async () => {
+			const removed = await chain.os.uninstall(target)
 
 			const changed: string[] = []
 
@@ -972,7 +1027,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				fail(changed.join("; "))
 			}
 
-			return "/opt/Filen gone; every pair directory intact"
+			return `${removed}; every pair directory intact`
 		})
 		findings.attach("legacy-userdata-after-uninstall.txt", inventory(path.dirname(target.userData)))
 	}

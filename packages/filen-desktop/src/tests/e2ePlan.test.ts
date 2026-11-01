@@ -128,7 +128,13 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
-		expect(DEEP_TRIAL).toEqual({})
+		expect(DEEP_TRIAL).toEqual({ "win-x64-nsis": ["legacy"] })
+
+		// The real tables: Windows' 3.0.53 chain is deep only when named, its N-1 -> N chain always.
+		const windowsNamed = plan({ ...dispatch, depth: "deep", formats: "win-x64-nsis" }).tests.find(entry => entry.platform === "win")
+
+		expect([windowsNamed?.deepPrevious, windowsNamed?.deepLegacy]).toEqual([true, true])
+		expect(logins(plan({ ...dispatch, depth: "deep", formats: "win-x64-nsis", scenarios: "legacy" }))).toBe(2)
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {

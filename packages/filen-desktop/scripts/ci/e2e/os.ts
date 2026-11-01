@@ -1,7 +1,18 @@
-import { existsSync } from "node:fs"
+import { existsSync, mkdirSync, realpathSync } from "node:fs"
+import path from "node:path"
 import { fail } from "../support.ts"
 import type { Target } from "../targets.ts"
-import { chooseDirectory, coreReport, keyringItems, mountedType, processStartMs, screenDump, sha256Through, uninstallDeb } from "./linux.ts"
+import {
+	chooseDirectory,
+	coreReport,
+	keyringItems,
+	mountedType,
+	processesUnder,
+	processStartMs,
+	screenDump,
+	sha256Through,
+	uninstallDeb
+} from "./linux.ts"
 import { windowsOs } from "./windows.ts"
 
 // What the deep chains need from the desktop they run on, behind one interface per OS (linux.ts, windows.ts): the
@@ -38,6 +49,12 @@ export interface DesktopOs {
 	requestQuit(pids: readonly number[]): Promise<void>
 	// Removes the app the way a user does; what the removal itself must have taken is checked, and described.
 	uninstall(target: Target): Promise<string>
+	// Every process running from the app's install (helpers and rclone included), as "pid path".
+	appProcesses(target: Target): Promise<string[]>
+	// Ends processes at once (D13: for a tray-only app with neither a window nor a signal to quit it).
+	forceKill(pids: readonly number[]): Promise<void>
+	// The old client's drive setting under `base` (prepared), and where it is then reached.
+	legacyDrive(base: string): { setting: string; root: string }
 }
 
 const linuxOs: DesktopOs = {
@@ -72,6 +89,24 @@ const linuxOs: DesktopOs = {
 		}
 
 		return "apt-get remove and purge: /opt/Filen and its AppArmor profile gone"
+	},
+	appProcesses: async target => processesUnder(`${path.dirname(target.executable)}/`),
+	async forceKill(pids) {
+		for (const pid of pids) {
+			try {
+				process.kill(pid, "SIGKILL")
+			} catch {
+				// Already gone.
+			}
+		}
+	},
+	// An empty directory beside the chain's own, which 3.x mounts on and 4.x reaches by its real path.
+	legacyDrive(base) {
+		const dir = `${base}-mnt`
+
+		mkdirSync(dir, { recursive: true })
+
+		return { setting: dir, root: realpathSync(dir) }
 	}
 }
 
