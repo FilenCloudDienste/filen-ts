@@ -24,81 +24,107 @@ async function ps(what: string, script: string, timeoutMs = TOOL_TIMEOUT_MS): Pr
 	return output(await powershellBounded(script, timeoutMs), what)
 }
 
-// The dialog is an owned window, which UI Automation lists under its owner (the app's window), not at the desktop's
-// top: it is searched among all descendants as a Window named by its title. Its "Folder:" box is the dialog's
-// file-name edit (AutomationId 1152, or the edit named "Folder:"; never another edit: the search box takes a path and
-// leaves the dialog open) and "Select Folder" its OK button (AutomationId 1, or the button of that name). The full
-// path in the box, then the button, selects that folder; where the box or a pattern is not there in time, the keyboard
-// does the same (the box has focus when the dialog opens). The answer counts only once the dialog is gone; a dialog
-// still open is cancelled, so the app's call returns. Each step says what it found, for the log.
+// The dialog, driven through Win32 messages, which need neither focus nor the foreground (UI Automation's view of this
+// dialog proved incomplete, then unfocusable): it is the visible top-level #32770 window with the title. Its "Folder:"
+// box is the edit with control id 1152 among its descendants, else the Edit inside its ComboBoxEx32 (id 1148). The
+// path goes in with WM_SETTEXT and is read back; then WM_COMMAND IDOK to the dialog is "Select Folder". The answer
+// counts only once the window is gone; a window still there is cancelled (WM_COMMAND IDCANCEL), so the app's call
+// returns. Each step says what it found, for the log.
+const WIN32 = `
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class FilenE2eDialog {
+	delegate bool EnumProc(IntPtr hwnd, IntPtr param);
+	[DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr param);
+	[DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc proc, IntPtr param);
+	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
+	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
+	[DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+	[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hwnd);
+	[DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr hwnd);
+	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, string lParam);
+	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam);
+	[DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+	const uint WM_SETTEXT = 0x000C, WM_GETTEXT = 0x000D, WM_COMMAND = 0x0111;
+	static string Class(IntPtr hwnd) { var name = new StringBuilder(256); GetClassName(hwnd, name, 256); return name.ToString(); }
+	public static IntPtr Dialog(string title) {
+		IntPtr found = IntPtr.Zero;
+		EnumWindows((hwnd, param) => {
+			if (Class(hwnd) != "#32770" || !IsWindowVisible(hwnd)) return true;
+			var text = new StringBuilder(512);
+			GetWindowText(hwnd, text, 512);
+			if (text.ToString() != title) return true;
+			found = hwnd;
+			return false;
+		}, IntPtr.Zero);
+		return found;
+	}
+	public static IntPtr FolderBox(IntPtr dialog) {
+		IntPtr byId = IntPtr.Zero, comboEx = IntPtr.Zero;
+		EnumChildWindows(dialog, (hwnd, param) => {
+			string cls = Class(hwnd);
+			int id = GetDlgCtrlID(hwnd);
+			if (cls == "Edit" && id == 1152 && byId == IntPtr.Zero) byId = hwnd;
+			if (cls == "ComboBoxEx32" && id == 1148 && comboEx == IntPtr.Zero) comboEx = hwnd;
+			return true;
+		}, IntPtr.Zero);
+		if (byId != IntPtr.Zero) return byId;
+		if (comboEx == IntPtr.Zero) return IntPtr.Zero;
+		IntPtr combo = FindWindowEx(comboEx, IntPtr.Zero, "ComboBox", null);
+		return combo == IntPtr.Zero ? IntPtr.Zero : FindWindowEx(combo, IntPtr.Zero, "Edit", null);
+	}
+	public static string SetText(IntPtr edit, string value) {
+		SendMessage(edit, WM_SETTEXT, IntPtr.Zero, value);
+		var text = new StringBuilder(32768);
+		SendMessage(edit, WM_GETTEXT, (IntPtr)32768, text);
+		return text.ToString();
+	}
+	public static bool Command(IntPtr dialog, int id) { return PostMessage(dialog, WM_COMMAND, (IntPtr)id, IntPtr.Zero); }
+	public static string Describe(IntPtr hwnd) { return Class(hwnd) + " id " + GetDlgCtrlID(hwnd); }
+}
+`
+
 function chooserScript(title: string, dir: string): string {
 	return `
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
-$A = [System.Windows.Automation.AutomationElement]
-$C = [System.Windows.Automation.ControlType]
-$scope = [System.Windows.Automation.TreeScope]
-function Prop($property, $value) { New-Object System.Windows.Automation.PropertyCondition($property, $value) }
-function Keys($text) { [System.Windows.Forms.SendKeys]::SendWait(($text -replace '([+^%~(){}\\[\\]])', '{$1}')) }
-function Find($root, $type, $id, $name, $seconds) {
-	$until = (Get-Date).AddSeconds($seconds)
-	do {
-		$found = @($root.FindAll($scope::Descendants, (Prop $A::ControlTypeProperty $type)) | Where-Object { $_.Current.AutomationId -eq $id -or $_.Current.Name -eq $name })[0]
-		if ($null -ne $found) { return $found }
-		Start-Sleep -Milliseconds 500
-	} while ((Get-Date) -lt $until)
-	return $null
-}
-$byTitle = New-Object System.Windows.Automation.AndCondition((Prop $A::ControlTypeProperty $C::Window), (Prop $A::NameProperty ${psQuote(title)}))
+Add-Type -TypeDefinition @'
+${WIN32}
+'@
 $deadline = (Get-Date).AddSeconds(60)
-$dialog = $null
-while ($null -eq $dialog -and (Get-Date) -lt $deadline) {
-	$dialog = $A::RootElement.FindFirst($scope::Descendants, $byTitle)
-	if ($null -eq $dialog) { Start-Sleep -Milliseconds 500 }
+$dialog = [IntPtr]::Zero
+while ($dialog -eq [IntPtr]::Zero -and (Get-Date) -lt $deadline) {
+	$dialog = [FilenE2eDialog]::Dialog(${psQuote(title)})
+	if ($dialog -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 }
 }
-if ($null -eq $dialog) { throw ${psQuote(`no window titled "${title}" within 60 s`)} }
-"dialog: pid $($dialog.Current.ProcessId), class $($dialog.Current.ClassName)"
-$edit = Find $dialog ($C::Edit) '1152' 'Folder:' 20
-$typed = $false
-if ($null -eq $edit) {
-	$dialog.SetFocus()
-	Keys ${psQuote(dir)}
-	$typed = $true
-	"no Folder box found; the path typed into the dialog's focus"
+if ($dialog -eq [IntPtr]::Zero) { throw ${psQuote(`no #32770 window titled "${title}" within 60 s`)} }
+"dialog: hwnd $dialog"
+$edit = [IntPtr]::Zero
+while ($edit -eq [IntPtr]::Zero -and (Get-Date) -lt $deadline) {
+	$edit = [FilenE2eDialog]::FolderBox($dialog)
+	if ($edit -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 }
+}
+$answered = $false
+if ($edit -eq [IntPtr]::Zero) {
+	"no Folder box (Edit 1152, or the Edit in ComboBoxEx32 1148) found"
 } else {
-	"folder box: id '$($edit.Current.AutomationId)', name '$($edit.Current.Name)'"
-	try {
-		$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue(${psQuote(dir)})
-		"folder set through ValuePattern"
-	} catch {
-		$edit.SetFocus()
-		Keys ${psQuote(dir)}
-		$typed = $true
-		"folder typed with the keyboard: $($_.Exception.Message)"
+	"folder box: $([FilenE2eDialog]::Describe($edit))"
+	$read = [FilenE2eDialog]::SetText($edit, ${psQuote(dir)})
+	if ($read -ne ${psQuote(dir)}) {
+		"the folder box reads back '$read'"
+	} else {
+		"folder set with WM_SETTEXT"
+		$answered = [FilenE2eDialog]::Command($dialog, 1)
+		"Select Folder (WM_COMMAND IDOK) posted: $answered"
 	}
 }
-$button = Find $dialog ($C::Button) '1' 'Select Folder' 10
-$answered = $false
-if ($null -ne $button -and -not $typed) {
-	try {
-		$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-		"answered with '$($button.Current.Name)'"
-		$answered = $true
-	} catch { "the button refused Invoke: $($_.Exception.Message)" }
-}
-if (-not $answered) {
-	if ($null -ne $edit) { $edit.SetFocus() }
-	[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-	"answered with Enter"
-}
 $until = (Get-Date).AddSeconds(15)
-while ((Get-Date) -lt $until) {
-	if ($null -eq $A::RootElement.FindFirst($scope::Descendants, $byTitle)) { "the dialog closed"; exit 0 }
+while ($answered -and (Get-Date) -lt $until) {
+	if (-not [FilenE2eDialog]::IsWindow($dialog)) { "the dialog closed"; exit 0 }
 	Start-Sleep -Milliseconds 500
 }
-$cancel = Find $dialog ($C::Button) '2' 'Cancel' 5
-if ($null -ne $cancel) { try { $cancel.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() } catch { } }
-else { $dialog.SetFocus(); [System.Windows.Forms.SendKeys]::SendWait('{ESC}') }
-throw 'the dialog stayed open after the answer; cancelled'
+[void][FilenE2eDialog]::Command($dialog, 2)
+throw 'the dialog was not answered; cancelled'
 `
 }
 
