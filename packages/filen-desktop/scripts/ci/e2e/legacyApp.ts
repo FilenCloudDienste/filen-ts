@@ -230,20 +230,31 @@ export async function legacySyncHold(): Promise<SyncHold> {
 			const cdp = await inspector(port)
 
 			try {
-				// Under --inspect-brk the process runs nothing, an evaluation included, until it is let go; it then breaks
-				// before its first statement, which is where the hook goes in, before any of its modules load.
+				// Under --inspect-brk the process runs nothing until it is let go, then breaks before its first statement
+				// (before any app module loads). At that break the main thread serves the debugger only: the hook runs on the
+				// paused frame (Debugger.evaluateOnCallFrame); a plain Runtime.evaluate is never answered there.
 				const paused = cdp.nextEvent("Debugger.paused", INSPECTOR_TIMEOUT_MS)
 
 				// Awaited below; this only keeps a rejection before then from going unhandled.
 				paused.catch(() => undefined)
 				await cdp.send("Debugger.enable")
 				await cdp.send("Runtime.runIfWaitingForDebugger")
-				await paused
 
-				if ((await cdp.evaluate(HOLD_SYNC)) !== "hooked") {
-					fail("the sync hold did not install")
+				const frame = ((await paused) as { callFrames?: { callFrameId?: string; url?: string }[] }).callFrames?.[0]
+				const hooked = (await cdp.send("Debugger.evaluateOnCallFrame", {
+					callFrameId: frame?.callFrameId ?? fail("the first break has no call frame"),
+					expression: HOLD_SYNC,
+					returnByValue: true
+				})) as { result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string } } }
+
+				if (hooked.result?.value !== "hooked") {
+					fail(
+						`the sync hold did not install at ${frame?.url ?? "an unknown frame"}: ${hooked.exceptionDetails?.exception?.description ?? JSON.stringify(hooked.result)}`
+					)
 				}
 
+				// No later break (an entry-script one, say) may hold the app once it is let go.
+				await cdp.send("Debugger.setSkipAllPauses", { skip: true })
 				await cdp.send("Debugger.resume")
 
 				return await waitFor("the old sync worker to be held", INSPECTOR_TIMEOUT_MS, async () => {
