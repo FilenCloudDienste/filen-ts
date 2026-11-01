@@ -325,21 +325,35 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		await findings.must(`${LEGACY_VERSION} quits through app.quit(), rclone with it`, async () => {
 			await state.legacy?.renderer.browser.close().catch(() => undefined)
 
-			// D13 as the fallback: an app.quit() that does not end it within the minute is followed, after 30 s without
-			// writes, by a hard kill.
+			// D13 as the fallback, on every OS: whatever of the old app still runs a minute after app.quit() (its main
+			// process, or a helper or watchdog it left) is hard-killed once nothing has been written for 30 s, and named.
+			const settled = [...LEGACY_PAIRS.map(pair => rootOf(pair.name)), userData("sync")]
+			const hardKill = async (left: readonly string[], why: string): Promise<void> => {
+				await quiet(settled)
+				await chain.os.forceKill(left.map(line => Number.parseInt(line, 10)).filter(pid => Number.isSafeInteger(pid)))
+				findings.info(
+					`${LEGACY_VERSION}'s processes left after app.quit()`,
+					`${left.join("; ")}: hard-killed after 30 s without writes (D13); ${why}`
+				)
+			}
 			const exit = await quitLegacy(state.legacy?.launched ?? fail("not launched"), EXIT_TIMEOUT_MS).catch(async (error: unknown) => {
-				await quiet([...LEGACY_PAIRS.map(pair => rootOf(pair.name)), userData("sync")])
-				await chain.os.forceKill(target.mainProcesses().map(item => item.pid))
+				await hardKill(await chain.os.appProcesses(target), errorMessage(error))
 
-				return `hard-killed after 30 s without writes (D13): ${errorMessage(error)}`
+				return "hard-killed (D13)"
 			})
-
-			await waitFor(
-				"the old app's processes to end",
-				EXIT_TIMEOUT_MS,
-				async () => ((await chain.os.appProcesses(target)).length === 0 ? true : null),
-				2000
+			const gone = async () => ((await chain.os.appProcesses(target)).length === 0 ? true : null)
+			const lingering = await waitFor("the old app's processes to end", EXIT_TIMEOUT_MS, gone, 2000).then(
+				() => [],
+				async () => chain.os.appProcesses(target)
 			)
+
+			if (lingering.length > 0) {
+				await hardKill(lingering, "still running a minute after the main process ended")
+				await waitFor("the old app's processes to end after the hard kill", EXIT_TIMEOUT_MS, gone, 2000).catch(
+					async (error: unknown) => fail(`${errorMessage(error)}: ${(await chain.os.appProcesses(target)).join("; ")}`)
+				)
+			}
+
 			await waitFor("the old drive to unmount", EXIT_TIMEOUT_MS, async () =>
 				(await chain.os.driveMounted(drive.root)) === null ? true : null
 			)
