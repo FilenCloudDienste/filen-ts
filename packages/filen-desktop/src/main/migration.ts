@@ -1,3 +1,4 @@
+import path from "node:path"
 import { type } from "arktype"
 import type { SessionRead } from "../shared/channels.ts"
 import { type AtomicFile, codedError, errorCode } from "./atomicFile.ts"
@@ -30,7 +31,8 @@ import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 //   verified  the migrated account proved itself (an authed request, a sign-in as the same user) or the wait ran out;
 //             the old secrets are wiped, `wiped` says whether that finished; LevelDB keeps deleted values on disk
 //             until a compaction that may never come, so a later launch deletes the old origin's stores before
-//             anything opens them, and `purged` records that
+//             anything opens them, and `purged` records that; the old client's logs directory goes after the wipe,
+//             and `logsDeleted` records that
 //   skipped   nothing to import: the old client's web app never ran here (a fresh install)
 // The old client's rclone config (the account's keys, merely obscured) is deleted once the import is done or given up.
 export type MigrationStage = "started" | "imported" | "abandoned" | "verified" | "skipped"
@@ -50,6 +52,7 @@ export interface MigrationMarker {
 	importedAt: number | null
 	wiped: boolean
 	purged: boolean
+	logsDeleted: boolean
 }
 
 // A read that crashed or came back empty this many times is not tried again.
@@ -69,7 +72,8 @@ const markerSchema = type({
 	userId: type("1 < number.integer <= 9007199254740991").or("null"),
 	importedAt: type("number.integer >= 0").or("null"),
 	wiped: "boolean",
-	"purged?": "boolean"
+	"purged?": "boolean",
+	"logsDeleted?": "boolean"
 })
 
 // null: no marker, or one that cannot be used (it is then decided afresh, which never overwrites a stored session).
@@ -101,7 +105,8 @@ export function parseMarker(data: string | null): MigrationMarker | null {
 		userId: marker.userId,
 		importedAt: marker.importedAt,
 		wiped: marker.wiped,
-		purged: marker.purged ?? false
+		purged: marker.purged ?? false,
+		logsDeleted: marker.logsDeleted ?? false
 	}
 }
 
@@ -196,6 +201,12 @@ export function verifiedBy(marker: MigrationMarker, sessionBlob: string | null):
 	)
 }
 
+// The old client's logs directory (desktop.log, desktop-worker.log, rclone-*.log, sync.log): `<appData>/@filen/logs`,
+// beside its userData, which this app shares.
+export function legacyLogsDir(userData: string): string {
+	return path.join(path.dirname(userData), "logs")
+}
+
 export type PurgeOutcome = { result: "not-due" } | { result: "deleted" } | { result: "failed"; code: string }
 
 export interface PurgeDeps {
@@ -251,6 +262,8 @@ export interface MigrationDeps {
 	wipeLegacy(): Promise<void>
 	// Deletes the old client's rclone config; nothing when it is gone already.
 	removeRcloneConfig(): Promise<void>
+	// Deletes the old client's logs directory (`<appData>/@filen/logs`, beside userData); nothing when it is gone.
+	removeLegacyLogs(): Promise<void>
 	// What purgeBeforeReady did in this launch.
 	earlyPurge(): PurgeOutcome
 	vault: { get(): Promise<SessionRead>; set(blob: string): Promise<void> }
@@ -335,7 +348,8 @@ export function createMigration(deps: MigrationDeps): Migration {
 			userId: null,
 			importedAt: null,
 			wiped: false,
-			purged: false
+			purged: false,
+			logsDeleted: false
 		}
 	}
 
@@ -489,6 +503,25 @@ export function createMigration(deps: MigrationDeps): Migration {
 		deps.info("migration: the old client's stores were deleted from disk")
 	}
 
+	// After the wipe, until it worked once; a failure retries on the next launch. The logs name the old client's files,
+	// paths and account.
+	async function removeLegacyLogs(): Promise<void> {
+		if (marker === null || !marker.wiped || marker.logsDeleted) {
+			return
+		}
+
+		try {
+			await deps.removeLegacyLogs()
+		} catch (error) {
+			deps.warn(`migration: deleting the old logs failed, tried again next launch: ${errorCode(error)}`)
+
+			return
+		}
+
+		await save({ ...marker, logsDeleted: true })
+		deps.info("migration: the old client's logs were deleted")
+	}
+
 	// From `verified` until the wipe worked once; a failure retries on the next confirmation or launch.
 	async function wipeIfDue(): Promise<void> {
 		if (marker === null) {
@@ -507,6 +540,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 		await step("legacy wipe", () => deps.wipeLegacy())
 		await save({ ...marker, wiped: true })
 		deps.info("migration: the old client's secrets were wiped")
+		await removeLegacyLogs()
 	}
 
 	function wipeInBackground(): void {
@@ -525,6 +559,12 @@ export function createMigration(deps: MigrationDeps): Migration {
 				if (marker?.wiped === true) {
 					if (!marker.purged) {
 						await recordPurge(marker)
+					}
+
+					if (!marker.logsDeleted) {
+						void serial(removeLegacyLogs).catch((error: unknown) => {
+							deps.warn(`migration: deleting the old logs failed: ${errorCode(error)}`)
+						})
 					}
 
 					return result

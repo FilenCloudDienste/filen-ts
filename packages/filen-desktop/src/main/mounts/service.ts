@@ -105,8 +105,9 @@ export interface MountsTrayView {
 export interface MountsService {
 	nativeEvent(message: NativeEvent, userId: string): void
 	hostChanged(state: DesktopSyncHostState): void
-	// Before the session goes: stops rclone and deletes the user's cache when no upload is left in it.
-	signOut(userId: string): Promise<void>
+	// Before the host goes: stops rclone and deletes the user's cache when no upload is left in it. True when nothing
+	// in the cache is left to upload (none, or rclone deleted it), so the user's mounts directory may go.
+	signOut(userId: string): Promise<boolean>
 	// The session is gone (signed out, revoked).
 	signedOut(): void
 	subscribe(page: Page, subscription: MountsSubscription): void
@@ -457,8 +458,22 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 		},
 		signOut: userId =>
 			queue(async () => {
+				const { state, cache } = dirs(userId)
+				const cached = () =>
+					stat(cache).then(
+						() => true,
+						() => false
+					)
+
+				// No host ran for the user in this run, so nothing can tell what the cache holds.
 				if (hostUser !== userId) {
-					return
+					if (await cached()) {
+						deps.log.info("mounts: signed out without a host; the cache is kept")
+
+						return false
+					}
+
+					return true
 				}
 
 				const pending = await uploads(userId)
@@ -468,29 +483,26 @@ export function createMountsService(deps: MountsServiceDeps): MountsService {
 					await send(userId, nothing(desired), SIGN_OUT_STEP_TIMEOUT_MS)
 				}
 
-				const { state, cache } = dirs(userId)
-
 				if ((pending?.pending ?? 0) + (pending?.errored ?? 0) > 0) {
 					deps.log.info("mounts: signed out with uploads pending; the cache is kept")
 
-					return
+					return false
 				}
 
-				const exists = await stat(cache).then(
-					() => true,
-					() => false
-				)
-
-				if (!exists) {
-					return
+				if (!(await cached())) {
+					return true
 				}
 
 				// rclone refuses while its metadata still marks items to upload.
 				const cleared = await supervisor.callMounts("clearCache", { stateDir: state, dir: cache }, userId, SIGN_OUT_STEP_TIMEOUT_MS)
 
 				deps.log.info(cleared.ok ? "mounts: cache deleted on sign-out" : `mounts: cache kept on sign-out: ${cleared.error.code}`)
+
+				return cleared.ok
 			}).catch((error: unknown) => {
 				deps.log.warn(`mounts: sign-out cleanup failed: ${errorCode(error)}`)
+
+				return false
 			}),
 		signedOut: () => {
 			const had = run.status

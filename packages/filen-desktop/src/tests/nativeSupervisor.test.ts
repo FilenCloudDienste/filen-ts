@@ -204,7 +204,8 @@ describe("createNativeSupervisor", () => {
 		expect(last().sent.at(-1)).toEqual({ t: "shutdown" })
 		expect(last().killed).toBe(true)
 		expect(vault.clear).toHaveBeenCalledOnce()
-		expect(deps.onRevoked).toHaveBeenCalledOnce()
+		// With the user whose local data the sign-out deletes.
+		expect(deps.onRevoked).toHaveBeenCalledExactlyOnceWith("1")
 		expect(supervisor.state()).toEqual({ state: "off" })
 
 		supervisor.ensure("focus")
@@ -427,6 +428,28 @@ describe("createNativeSupervisor", () => {
 		expect(last().sent.at(-1)).toEqual({ t: "shutdown" })
 		expect(last().killed).toBe(true)
 		expect(supervisor.state()).toEqual({ state: "off" })
+	})
+
+	it("signed out settles only once the host exited, so its files can be deleted then", async () => {
+		const { supervisor, last } = harness()
+
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+		last().cooperative = false
+
+		let settled = false
+
+		void supervisor.signedOut().then(() => {
+			settled = true
+		})
+		await settle(SHUTDOWN_TIMEOUT_MS - 1)
+		expect(settled).toBe(false)
+		expect(last().killed).toBe(false)
+
+		await settle(1)
+		expect(last().killed).toBe(true)
+		expect(settled).toBe(true)
 	})
 
 	it("quit waits for stopped then kills", async () => {

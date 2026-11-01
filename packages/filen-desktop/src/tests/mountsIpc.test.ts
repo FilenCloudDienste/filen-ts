@@ -512,7 +512,8 @@ describe("signing out", () => {
 		const context = await setup({ answers: { mountsStatus: () => ({ ...DRIVE_RUNNING, uploads: { pending: 1, errored: 0 } }) } })
 
 		await withDriveMounted(context)
-		await context.service.signOut("1")
+		// The user's mounts directory stays with it.
+		expect(await context.service.signOut("1")).toBe(false)
 
 		expect(context.ops()).not.toContain("clearCache")
 		expect((context.argsOf("mountsApply") as NativeOpArgs<"mountsApply">[]).at(-1)?.desired).toMatchObject({ drive: null, serves: [] })
@@ -522,7 +523,7 @@ describe("signing out", () => {
 		const context = await setup({ answers: { mountsStatus: () => ({ ...DRIVE_RUNNING, uploads: { pending: 0, errored: 1 } }) } })
 
 		await withDriveMounted(context)
-		await context.service.signOut("1")
+		expect(await context.service.signOut("1")).toBe(false)
 		expect(context.ops()).not.toContain("clearCache")
 	})
 
@@ -530,7 +531,7 @@ describe("signing out", () => {
 		const context = await setup()
 
 		await withDriveMounted(context)
-		await context.service.signOut("1")
+		expect(await context.service.signOut("1")).toBe(true)
 
 		const ops = context.ops()
 
@@ -583,7 +584,25 @@ describe("signing out", () => {
 	it("a user without a cache has nothing to delete", async () => {
 		const context = await setup()
 
-		await context.service.signOut("1")
+		expect(await context.service.signOut("1")).toBe(true)
+		expect(context.ops()).toEqual([])
+	})
+
+	it("keeps the directory when rclone refuses to clear the cache", async () => {
+		const context = await setup({ answers: { clearCache: () => new Refusal("unknown", "The cache is in use.") } })
+
+		await withDriveMounted(context)
+		expect(await context.service.signOut("1")).toBe(false)
+		expect(context.ops()).toContain("clearCache")
+	})
+
+	it("keeps a cache no host could check, and lets a user without one go", async () => {
+		const context = await setup()
+
+		// The host ran for user 1 only; the fake's directory is the same for every user.
+		expect(await context.service.signOut("2")).toBe(true)
+		await mkdir(path.join(context.mountsDir, "cache"), { recursive: true })
+		expect(await context.service.signOut("2")).toBe(false)
 		expect(context.ops()).toEqual([])
 	})
 })

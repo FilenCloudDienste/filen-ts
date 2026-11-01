@@ -62,8 +62,8 @@ export interface NativeSupervisorDeps {
 	log: { info(message: string): void; warn(message: string): void }
 	onMessage(message: NativeEvent, userId: string): void
 	onState(state: DesktopSyncHostState): void
-	// The server rejected the session; the vault is cleared already.
-	onRevoked(): void
+	// The server rejected the session of `userId`; the vault is cleared already and the host has exited.
+	onRevoked(userId: string): void
 }
 
 export interface NativeSupervisor {
@@ -71,8 +71,8 @@ export interface NativeSupervisor {
 	ensure(reason: string): void
 	// The vault holds `blob` now: another user or changed credentials restart the host with it.
 	sessionChanged(blob: string): void
-	// Stops the host; the user's engine data stays.
-	signedOut(): void
+	// Stops the host; settles once it exited (the sign-out deletes the user's engine data then).
+	signedOut(): Promise<void>
 	// Starts the host when needed and waits for it to be ready. With `userId`, only that user's host answers (work
 	// begun for one user never reaches the next one's engine).
 	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>, userId?: string): Promise<NativeResult<K>>
@@ -415,7 +415,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 			}
 
 			setState({ state: "off" })
-			deps.onRevoked()
+			deps.onRevoked(child.userId)
 		})
 	}
 
@@ -572,7 +572,8 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		signedOut: () => {
 			clearTimeout(sessionTimer)
 			sessionTimer = undefined
-			void serial(async () => {
+
+			return serial(async () => {
 				clearTimeout(retryTimer)
 				retryTimer = undefined
 

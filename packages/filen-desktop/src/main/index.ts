@@ -53,7 +53,15 @@ import { appIdentity, closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRende
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { deleteLegacyStores, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
-import { createMigration, createStashStore, legacyOwner, parseMarker, type PurgeOutcome, purgeBeforeReady } from "./migration.ts"
+import {
+	createMigration,
+	createStashStore,
+	legacyLogsDir,
+	legacyOwner,
+	parseMarker,
+	type PurgeOutcome,
+	purgeBeforeReady
+} from "./migration.ts"
 import { addonPath } from "./native/addonPath.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
 import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
@@ -72,8 +80,17 @@ import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./p
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
+import { createSignOut, removeTree } from "./signOut.ts"
 import { parseSessionBlob } from "@filen/shared/session"
-import { createSessionVault, isSessionBlob, lazyCipher, removeIfUndecryptable, vaultMode, type VaultCipher } from "./sessionVault.ts"
+import {
+	createSessionVault,
+	isSessionBlob,
+	lazyCipher,
+	removeIfUndecryptable,
+	sessionUserId,
+	vaultMode,
+	type VaultCipher
+} from "./sessionVault.ts"
 import { registerSyncIpc } from "./sync/ipc.ts"
 import { createRootTokens } from "./sync/localRoot.ts"
 import { createSyncService } from "./sync/service.ts"
@@ -182,11 +199,55 @@ const sessionVault = createSessionVault(vaultCipher, atomicFile(sessionVaultPath
 const prefsLoading = loadPrefs(atomicFile(path.join(app.getPath("userData"), "prefs.json")), warn)
 let prefs: PrefsStore | null = null
 
-// Read from before ready like the prefs (decrypting waits for ready); no window is created before it has settled.
-const appLockLoading = loadAppLock(atomicFile(path.join(app.getPath("userData"), "lock.vault")), vaultCipher, warn)
+const userDataPath = app.getPath("userData")
+// Sync: one engine directory per user, never under the old client's userData/sync.
+const syncEngineRoot = path.join(userDataPath, "sync-engine")
+// Mounts: config, credentials and certificates per user, beside the user's rclone cache.
+const mountsRoot = path.join(userDataPath, "mounts")
+const lockFilePath = path.join(userDataPath, "lock.vault")
+
+// What a sign-out deletes (signOut.ts). Its steps run only once startup has finished.
+const signOutFlow = createSignOut({
+	steps: {
+		fileProvider: userId => fileProvider.signedOut(userId),
+		mounts: userId => mountsService.signOut(userId),
+		stopHost: async () => {
+			const stopped = nativeSupervisor.signedOut()
+
+			syncService.signedOut()
+			mountsService.signedOut()
+			await stopped
+		},
+		forget: (userId, parts) => {
+			if (parts.includes("sync")) {
+				syncStores.delete(userId)
+			}
+
+			if (parts.includes("mounts")) {
+				mountsStores.delete(userId)
+				credentialStores.delete(userId)
+			}
+		},
+		resetLock: async () => {
+			await (await appLockLoading).reset()
+			lockChanged()
+		}
+	},
+	syncRoot: syncEngineRoot,
+	mountsRoot,
+	lockFile: lockFilePath,
+	marker: atomicFile(path.join(userDataPath, "signOut.pending")),
+	remove: removeTree,
+	log: { info, warn }
+})
+
+// What a sign-out left is deleted once this instance holds the single-instance lock, before ready.
+const signOutResumed = Promise.withResolvers<void>()
+// Read from before ready like the prefs (decrypting waits for ready), once what a sign-out left is gone; no window is
+// created before it has settled, and neither the sync nor the mounts stores are read before.
+const appLockLoading = signOutResumed.promise.then(() => loadAppLock(atomicFile(lockFilePath), vaultCipher, warn))
 let appLock: AppLock | null = null
 
-const userDataPath = app.getPath("userData")
 // What the migration kept for the later phases (sync pairs, mounts), encrypted like the vault.
 const migrationStashFile = atomicFile(path.join(userDataPath, "migration.stash"))
 const migrationStash = createStashStore(migrationStashFile, vaultCipher, warn)
@@ -209,6 +270,8 @@ const migration = createMigration({
 	},
 	// The old client's generated rclone remote: the account's keys, merely obscured.
 	removeRcloneConfig: () => rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true }),
+	// Development has its own userData beside a real installation's, so only a packaged app deletes the old logs.
+	removeLegacyLogs: () => (app.isPackaged ? removeTree(legacyLogsDir(userDataPath)) : Promise.resolve()),
 	earlyPurge: () => earlyPurge,
 	vault: sessionVault,
 	lock: {
@@ -225,8 +288,6 @@ const migration = createMigration({
 	warn
 })
 
-// Sync: one engine directory per user, never under the old client's userData/sync.
-const syncEngineRoot = path.join(userDataPath, "sync-engine")
 const syncStores = new Map<string, Promise<SyncStore>>()
 
 async function engineDir(userId: string): Promise<string> {
@@ -260,8 +321,6 @@ function syncStoreFor(userId: string): Promise<SyncStore> {
 	return store
 }
 
-// Mounts: config, credentials and certificates per user, beside the user's rclone cache.
-const mountsRoot = path.join(userDataPath, "mounts")
 const mountsStores = new Map<string, Promise<MountsStore>>()
 const credentialStores = new Map<string, CredentialStore>()
 
@@ -428,11 +487,9 @@ const nativeSupervisor = createNativeSupervisor({
 		mountsService.hostChanged(state)
 		applyTray()
 	},
-	onRevoked: () => {
+	onRevoked: userId => {
 		info("session revoked by the server; signed out")
-		void fileProvider.signedOut(null)
-		syncService.signedOut()
-		mountsService.signedOut()
+		void signOutFlow.signOut(userId)
 		mainWindow?.webContents.send(CHANNELS.sessionRevoked)
 	}
 })
@@ -630,23 +687,9 @@ const fileProvider = createFileProviderService({
 	log: { info, warn }
 })
 
-// The engine's own work keeps going; only its data and its process go with the session.
-function syncSignedOut(): void {
-	nativeSupervisor.signedOut()
-	syncService.signedOut()
-	mountsService.signedOut()
-}
-
-// A sign-out the user asked for: before the host goes, rclone stops and the user's drive cache is deleted when no
-// upload is left in it.
-async function signOut(userId: string | null): Promise<void> {
-	await fileProvider.signedOut(userId)
-
-	if (userId !== null) {
-		await mountsService.signOut(userId)
-	}
-
-	syncSignedOut()
+// The session left the vault: rclone stops, then the host, then the user's local data goes (signOut.ts).
+function signOut(userId: string | null): Promise<void> {
+	return signOutFlow.signOut(userId)
 }
 
 function isLocked(): boolean {
@@ -1264,6 +1307,7 @@ if (!app.requestSingleInstanceLock()) {
 			deleteLegacyStores(userDataPath)
 		}
 	})
+	void signOutFlow.resume().then(signOutResumed.resolve)
 	app.on("second-instance", showWindow)
 	app.on("before-quit", () => {
 		if (!quitting) {
@@ -1347,6 +1391,12 @@ if (!app.requestSingleInstanceLock()) {
 	handle(CHANNELS.sessionSet, async blob => {
 		if (!isSessionBlob(blob)) {
 			throw new Error("invalid session")
+		}
+
+		const userId = sessionUserId(blob)
+
+		if (userId !== null) {
+			await signOutFlow.signedIn(userId)
 		}
 
 		await sessionVault.set(blob)

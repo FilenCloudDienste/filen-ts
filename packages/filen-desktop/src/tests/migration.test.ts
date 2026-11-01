@@ -9,6 +9,7 @@ import { deleteLegacyStores, LEGACY_INDEXEDDB_PREFIX, legacyProfileExists } from
 import {
 	createMigration,
 	createStashStore,
+	legacyLogsDir,
 	legacyOwner,
 	MAX_FAILED_STARTS,
 	type MigrationDeps,
@@ -25,6 +26,7 @@ import {
 	withoutFeature
 } from "../main/migration.ts"
 import type { VaultCipher } from "../main/sessionVault.ts"
+import { removeTree } from "../main/signOut.ts"
 import { applyLegacySync, LEGACY_BUILTIN_RULES, type LegacySyncDeps } from "../main/sync/legacyPairs.ts"
 import type { SessionRead } from "../shared/channels.ts"
 import { fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
@@ -42,6 +44,7 @@ function marker(overrides: Partial<MigrationMarker> = {}): MigrationMarker {
 		importedAt: 0,
 		wiped: false,
 		purged: false,
+		logsDeleted: false,
 		...overrides
 	}
 }
@@ -76,6 +79,12 @@ describe("parseMarker", () => {
 		const { purged: _purged, ...older } = marker({ stage: "verified", wiped: true })
 
 		expect(parseMarker(JSON.stringify({ version: 1, ...older }))?.purged).toBe(false)
+	})
+
+	it("reads a marker written before deleting the old logs existed as not deleted", () => {
+		const { logsDeleted: _logsDeleted, ...older } = marker({ stage: "verified", wiped: true, purged: true })
+
+		expect(parseMarker(JSON.stringify({ version: 1, ...older }))?.logsDeleted).toBe(false)
 	})
 
 	it("reads a marker written before the first attempt's time and the stash-only mode existed", () => {
@@ -223,6 +232,7 @@ function setup(
 		readOptions: vi.fn(() => Promise.resolve<string | null>(JSON.stringify({ startMinimized: true }))),
 		wipeLegacy: vi.fn(() => Promise.resolve()),
 		removeRcloneConfig: vi.fn(() => Promise.resolve()),
+		removeLegacyLogs: vi.fn(() => Promise.resolve()),
 		earlyPurge: vi.fn((): PurgeOutcome => ({ result: "not-due" })),
 		vault: {
 			get: vi.fn(() => Promise.resolve(state.vault)),
@@ -309,7 +319,8 @@ describe("createMigration", () => {
 			userId: 123456,
 			importedAt: 1000,
 			wiped: false,
-			purged: false
+			purged: false,
+			logsDeleted: false
 		})
 	})
 
@@ -383,6 +394,67 @@ describe("createMigration", () => {
 		expect(second.deps.removeRcloneConfig).toHaveBeenCalledTimes(1)
 		expect(second.deps.wipeLegacy).toHaveBeenCalledTimes(1)
 		expect(second.stored()).toMatchObject({ wiped: true })
+	})
+
+	it("deletes the old logs only once the secrets are wiped, and records it", async () => {
+		const { deps, migration, stored } = setup()
+
+		await migration.start()
+		await settle()
+		expect(deps.removeLegacyLogs).not.toHaveBeenCalled()
+		expect(stored()).toMatchObject({ stage: "imported", logsDeleted: false })
+
+		await migration.sessionConfirmed(SESSION_OF("123456"))
+		await settle()
+		expect(deps.removeLegacyLogs).toHaveBeenCalledTimes(1)
+		expect(deps.wipeLegacy.mock.invocationCallOrder[0]).toBeLessThan(deps.removeLegacyLogs.mock.invocationCallOrder[0] ?? 0)
+		expect(stored()).toMatchObject({ stage: "verified", wiped: true, logsDeleted: true })
+		expect(deps.info).toHaveBeenCalledWith("migration: the old client's logs were deleted")
+
+		const next = setup({ marker: stored() ?? undefined })
+
+		await next.migration.start()
+		await settle()
+		expect(next.deps.removeLegacyLogs).not.toHaveBeenCalled()
+	})
+
+	it("never deletes the old logs when the wipe failed", async () => {
+		const { deps, migration, stored } = setup({ marker: marker({ stage: "verified" }) })
+
+		deps.wipeLegacy.mockRejectedValueOnce(new Error("timeout"))
+		await migration.start()
+		await settle()
+		expect(deps.removeLegacyLogs).not.toHaveBeenCalled()
+		expect(stored()).toMatchObject({ wiped: false, logsDeleted: false })
+	})
+
+	it("keeps the wipe when the old logs cannot be deleted, logs the code and deletes them on the next launch", async () => {
+		const first = setup({ marker: marker({ stage: "verified" }) })
+
+		first.deps.removeLegacyLogs.mockRejectedValueOnce(Object.assign(new Error("resource busy or locked"), { code: "EBUSY" }))
+		await first.migration.start()
+		await settle()
+		expect(first.stored()).toMatchObject({ wiped: true, logsDeleted: false })
+		expect(first.deps.warn).toHaveBeenCalledWith("migration: deleting the old logs failed, tried again next launch: EBUSY")
+
+		const second = setup({ marker: first.stored() ?? undefined })
+
+		await second.migration.start()
+		await settle()
+		expect(second.deps.wipeLegacy).not.toHaveBeenCalled()
+		expect(second.deps.removeLegacyLogs).toHaveBeenCalledTimes(1)
+		expect(second.stored()).toMatchObject({ wiped: true, logsDeleted: true })
+	})
+
+	it("deletes the old logs of a migration wiped before that step existed", async () => {
+		const { logsDeleted: _logsDeleted, ...older } = marker({ stage: "verified", wiped: true, purged: true })
+		const run = setup()
+
+		await run.markerFile.write(Buffer.from(JSON.stringify({ version: 1, ...older })))
+		await run.migration.start()
+		await settle()
+		expect(run.deps.removeLegacyLogs).toHaveBeenCalledTimes(1)
+		expect(run.stored()).toMatchObject({ logsDeleted: true })
 	})
 
 	it("treats a read with no keys from the old profile as missed: nothing imported, retried, then given up", async () => {
@@ -990,5 +1062,35 @@ describe("stash store", () => {
 
 	it("withoutFeature keeps other users' and other features' parts", () => {
 		expect(withoutFeature(STASH, "1002", "sync")).toEqual({ ...STASH, users: { ...STASH.users, sync: {} } })
+	})
+})
+
+describe("the old client's logs directory", () => {
+	it("is beside userData, and deleting it keeps userData and its retired sync state", async () => {
+		const appData = await realpath(await mkdtemp(path.join(tmpdir(), "filen-legacy-logs-")))
+
+		try {
+			const userData = path.join(appData, "@filen", "desktop")
+			const logs = legacyLogsDir(userData)
+			const retired = path.join(userData, "sync.migrated-2026-10-01")
+
+			expect(logs).toBe(path.join(appData, "@filen", "logs"))
+
+			await mkdir(logs, { recursive: true })
+			await mkdir(retired, { recursive: true })
+
+			for (const name of ["desktop.log", "desktop-worker.log", "rclone-1.log", "sync.log"]) {
+				await writeFile(path.join(logs, name), "line\n")
+			}
+
+			await writeFile(path.join(retired, "state.json"), "{}")
+			await removeTree(logs)
+			await removeTree(logs)
+
+			expect(existsSync(logs)).toBe(false)
+			expect(existsSync(path.join(retired, "state.json"))).toBe(true)
+		} finally {
+			await rm(appData, { recursive: true, force: true })
+		}
 	})
 })
