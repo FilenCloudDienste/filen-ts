@@ -70,19 +70,24 @@ export function json(value: unknown): string {
 	return JSON.stringify(value)
 }
 
-// Paths, sizes and mtimes below `dirs`: changes whenever anything is written.
-function fingerprint(dirs: readonly string[]): string {
-	const lines: string[] = []
+// The engine's remote cache (sdk-rs cache/state: every drive event of the account, whichever client caused it, is
+// stored, applied and its watermark advanced there), so it is written whenever anything changes anywhere on the
+// account, other jobs of the same run included. What the engine keeps of its pairs is the baseline.
+const ACCOUNT_CACHE = /[\\/]sync-engine[\\/][^\\/]+[\\/]cache\.db(-wal|-shm|-journal)?$/
+
+// Size and mtime per file below `dirs` (the account cache aside): changes whenever anything is written.
+function fingerprint(dirs: readonly string[]): Map<string, string> {
+	const files = new Map<string, string>()
 	const walk = (dir: string) => {
 		for (const entry of existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []) {
 			const full = path.join(dir, entry.name)
 
 			if (entry.isDirectory()) {
 				walk(full)
-			} else {
+			} else if (!ACCOUNT_CACHE.test(full)) {
 				const stat = statSync(full, { throwIfNoEntry: false })
 
-				lines.push(`${full} ${String(stat?.size)} ${String(stat?.mtimeMs)}`)
+				files.set(full, `${String(stat?.size)} ${String(stat?.mtimeMs)}`)
 			}
 		}
 	}
@@ -91,7 +96,12 @@ function fingerprint(dirs: readonly string[]): string {
 		walk(dir)
 	}
 
-	return lines.join("\n")
+	return files
+}
+
+// The files added, removed or rewritten between two fingerprints.
+function changedFiles(before: Map<string, string>, after: Map<string, string>): string[] {
+	return [...new Set([...before.keys(), ...after.keys()])].filter(file => before.get(file) !== after.get(file))
 }
 
 // The newest modification time of any file below `dir` (0 when there is none).
@@ -107,22 +117,32 @@ export function newestWrite(dir: string): number {
 	return newest
 }
 
-// Until nothing under `dirs` changed for QUIET_MS, at most QUIET_MAX_MS.
+// Until nothing under `dirs` changed for QUIET_MS, at most QUIET_MAX_MS; a failure names what kept changing.
 export async function quiet(dirs: readonly string[]): Promise<void> {
 	const deadline = Date.now() + QUIET_MAX_MS
+	const writes = new Map<string, number>()
 	let last = fingerprint(dirs)
 	let since = Date.now()
 
 	while (Date.now() - since < QUIET_MS) {
 		if (Date.now() > deadline) {
-			fail(`still writing after ${String(QUIET_MAX_MS / 1000)} s`)
+			const named = [...writes].sort((a, b) => b[1] - a[1]).map(([file, polls]) => `${file} (${String(polls)})`)
+
+			fail(
+				`still writing after ${String(QUIET_MAX_MS / 1000)} s; changed in how many 5 s polls: ${named.slice(0, 20).join(", ")}${named.length > 20 ? ` and ${String(named.length - 20)} more` : ""}`
+			)
 		}
 
 		await sleep(5000)
 
 		const now = fingerprint(dirs)
+		const changed = changedFiles(last, now)
 
-		if (now !== last) {
+		if (changed.length > 0) {
+			for (const file of changed) {
+				writes.set(file, (writes.get(file) ?? 0) + 1)
+			}
+
 			last = now
 			since = Date.now()
 		}

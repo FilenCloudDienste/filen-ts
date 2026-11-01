@@ -97,37 +97,39 @@ describe("e2ePlan depth", () => {
 		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual([
 			"win-x64-nsis@0",
 			"mac-arm64-dmg@20",
-			"linux-x64-deb@40",
-			"linux-arm64-deb@60"
+			"linux-x64-deb@40"
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
-		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, true])
+		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([false, true])
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
-		// No rotation: arm64 every night; Windows arm64 runs at install depth until its trial is green.
+		// No rotation: every main format every night once ready; trials run at install depth until promoted.
 		expect(nightly.notices).toContain(
-			"Deep depth is not built yet for win-arm64-nsis previous, win-arm64-nsis legacy; they run at install depth."
+			"Deep depth is not built yet for win-arm64-nsis previous, win-arm64-nsis legacy, mac-arm64-dmg previous, linux-arm64-deb previous, linux-arm64-deb legacy; they run at install depth."
 		)
-		// The session, then 4.x and 3.0.53 on Windows x64, macOS arm64, Linux x64 and Linux arm64.
-		expect(logins(nightly)).toBe(9)
-		// Once Windows arm64 is promoted: two more.
+		// The session, 4.x and 3.0.53 on Windows x64 and Linux x64, 3.0.53 on macOS arm64.
+		expect(logins(nightly)).toBe(6)
+		// Once every trial is promoted: both chains on five entries.
 		expect(
 			logins(
 				plan(
 					{ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" },
-					{ ready: { ...DEEP_READY, ...DEEP_TRIAL }, trial: {} }
+					{
+						ready: Object.fromEntries(
+							[...new Set([...Object.keys(DEEP_READY), ...Object.keys(DEEP_TRIAL)])].map(id => [
+								id,
+								[...(DEEP_READY[id] ?? []), ...(DEEP_TRIAL[id] ?? [])]
+							])
+						),
+						trial: {}
+					}
 				)
 			)
 		).toBe(11)
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
-		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual([
-			"win-x64-nsis@0",
-			"mac-arm64-dmg@20",
-			"linux-x64-deb@40",
-			"linux-arm64-deb@60"
-		])
+		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual(["win-x64-nsis@0", "mac-arm64-dmg@20", "linux-x64-deb@40"])
 	})
 
 	it("runs a trial entry deep only when a custom deep run names it", () => {
@@ -147,13 +149,23 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
-		expect(DEEP_TRIAL).toEqual({ "win-arm64-nsis": ["previous", "legacy"] })
+		expect(DEEP_TRIAL).toEqual({
+			"win-arm64-nsis": ["previous", "legacy"],
+			"mac-arm64-dmg": ["previous"],
+			"linux-arm64-deb": ["previous", "legacy"]
+		})
 
 		// The real tables: Windows arm64 is deep (both chains) only in a custom deep run that names it, on its own runner.
 		const arm = plan({ ...dispatch, platforms: "windows", depth: "deep", formats: "win-arm64-nsis" })
 
 		expect(arm.tests.map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])).toEqual([["windows-11-arm", true, true]])
 		expect(logins(arm)).toBe(3)
+
+		// macOS chain P alone, named: 2 logins.
+		const mac = plan({ ...dispatch, platforms: "mac", signed: true, scenarios: "previous", depth: "deep", formats: "mac-arm64-dmg" })
+
+		expect(mac.tests.map(entry => [entry.format, entry.deepPrevious, entry.deepLegacy])).toEqual([["dmg", true, false]])
+		expect(logins(mac)).toBe(2)
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {
