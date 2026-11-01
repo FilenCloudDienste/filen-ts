@@ -120,12 +120,13 @@ const spikeEntries: Record<Spike, readonly string[]> = {
 	cloud: []
 }
 
-// Deep depth per profile: release on every OS and architecture's main format, nightly on one per OS, by hand the
-// nightly set unless DEPTH says otherwise. Other formats stay at install depth: deep flows do not depend on them.
+// Deep depth per profile: release and nightly on every OS and architecture's main format (no rotation: arm64 every
+// night too), by hand one per OS unless DEPTH says otherwise. Other formats stay at install depth: deep flows do not
+// depend on them.
 const MAIN_FORMATS = ["win-x64-nsis", "win-arm64-nsis", "mac-arm64-dmg", "linux-x64-deb", "linux-arm64-deb"]
 const deepEntries: Record<Profile, readonly string[]> = {
 	release: MAIN_FORMATS,
-	nightly: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"],
+	nightly: MAIN_FORMATS,
 	custom: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
 }
 // Which deep chains are built so far, per entry; the rest of a deep request runs at install depth, with a notice.
@@ -146,7 +147,9 @@ export const DEEP_READY: DeepScenarios = {
 }
 // Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
 // release runs stay on what is proven.
-export const DEEP_TRIAL: DeepScenarios = {}
+export const DEEP_TRIAL: DeepScenarios = {
+	"win-arm64-nsis": ["previous", "legacy"]
+}
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
 

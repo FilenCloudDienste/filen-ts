@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync 
 import os from "node:os"
 import path from "node:path"
 import { fail, runBounded } from "../support.ts"
+import type { Target } from "../targets.ts"
 import type { DesktopOs } from "./os.ts"
 
 // macOS pieces of the deep chains, every tool bounded: the folder chooser (NSOpenPanel, as a sheet on the app's window)
@@ -67,6 +68,22 @@ end run
 // An error that means the runner gave this process no Accessibility (or AppleEvents to System Events).
 function deniedAccess(text: string): boolean {
 	return /-1719|-25211|-1743|assistive access|not allowed to send keystrokes|Not authorized to send Apple events/i.test(text)
+}
+
+// The quarantine attribute on the installed app, or null without one.
+export async function quarantineOf(target: Target): Promise<string | null> {
+	const app = path.resolve(target.executable, "..", "..", "..")
+	const result = await runBounded("xattr", ["-p", "com.apple.quarantine", app], TOOL_TIMEOUT_MS)
+
+	if (result.status === 0) {
+		return result.stdout.trim()
+	}
+
+	if (/No such xattr/i.test(result.stderr)) {
+		return null
+	}
+
+	fail(`xattr: ${result.timedOut ? "timed out" : result.stderr.trim()}`)
 }
 
 export const macOs: DesktopOs = {
@@ -182,6 +199,8 @@ export const macOs: DesktopOs = {
 
 		return `${app} removed (macOS keeps app data, caches and the keychain item; see the inventory)`
 	},
+
+	quarantine: quarantineOf,
 
 	async appProcesses(target) {
 		const app = path.resolve(target.executable, "..", "..", "..")

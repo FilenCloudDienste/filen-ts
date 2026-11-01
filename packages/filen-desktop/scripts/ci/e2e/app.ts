@@ -1,4 +1,5 @@
 import path from "node:path"
+import type { DesktopFileProviderResult, DesktopFileProviderState } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../support.ts"
 import type { Findings } from "./findings.ts"
@@ -164,6 +165,26 @@ export async function signOut(page: Page, findings: Findings, email: string, art
 
 		throw error
 	}
+}
+
+// Filen in Finder (macOS): its state, and switching it on or off, which must be accepted.
+export function fileProviderState(page: Page): Promise<DesktopFileProviderState> {
+	return desktop<DesktopFileProviderState>(page, "window.desktop.fileProvider.state()")
+}
+
+export async function fileProviderToggle(page: Page, action: "enable" | "disable"): Promise<string> {
+	const result = await desktop<DesktopFileProviderResult<DesktopFileProviderState>>(page, `window.desktop.fileProvider.${action}()`)
+
+	if (!result.ok) {
+		fail(`${action}() refused: ${JSON.stringify(result.error)}`)
+	}
+
+	return JSON.stringify(result.value)
+}
+
+// userEnabled once macOS reports one for the user's domain (it registers the domain asynchronously).
+export function fileProviderUserEnabled(page: Page, timeoutMs: number): Promise<boolean> {
+	return waitFor("macOS to report userEnabled for the domain", timeoutMs, async () => (await fileProviderState(page)).userEnabled, 2000)
 }
 
 // The lock screen's PIN field (filen-web desktopLock.tsx), then its Unlock button.

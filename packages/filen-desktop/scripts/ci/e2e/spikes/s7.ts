@@ -1,9 +1,9 @@
 import { existsSync, readdirSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import type { Page } from "playwright-core"
 import { errorMessage, fail, runBounded, waitFor, type BoundedResult } from "../../support.ts"
-import { desktop, pageText, sessionStatus, signIn, signOut } from "../app.ts"
+import { fileProviderState, fileProviderToggle, fileProviderUserEnabled, pageText, sessionStatus, signIn, signOut } from "../app.ts"
+import { quarantineOf } from "../mac.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { launchDebuggable } from "../launch.ts"
 import { redactor } from "../redact.ts"
@@ -24,33 +24,6 @@ const APPEX_ID = "io.filen.desktop.FileProvider"
 const DOMAIN_TIMEOUT_MS = 60_000
 const LISTING_TIMEOUT_MS = 2 * 60 * 1000
 const TOOL_TIMEOUT_MS = 60_000
-
-interface FileProviderState {
-	supported: boolean
-	enabled: boolean
-	lockBlocked: boolean
-	userEnabled: boolean | null
-	translocated: boolean
-}
-
-async function state(page: Page): Promise<FileProviderState> {
-	return desktop<FileProviderState>(page, "window.desktop.fileProvider.state()")
-}
-
-async function toggle(page: Page, action: "enable" | "disable"): Promise<string> {
-	const result = await desktop<{ ok?: unknown }>(page, `window.desktop.fileProvider.${action}()`)
-
-	if (result.ok !== true) {
-		fail(`${action}() refused: ${JSON.stringify(result)}`)
-	}
-
-	return JSON.stringify(result)
-}
-
-// userEnabled once macOS reports one for the user's domain.
-function userEnabled(page: Page): Promise<boolean> {
-	return waitFor("macOS to report userEnabled for the domain", DOMAIN_TIMEOUT_MS, async () => (await state(page)).userEnabled, 2000)
-}
 
 function output(result: BoundedResult): string {
 	const status = result.timedOut ? "timed out (process group killed)" : `exit ${String(result.status)}`
@@ -84,10 +57,10 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 		findings.info("macOS", (await tool("sw_vers", ["-productVersion"])).stdout.trim())
 
 		await findings.check("the installed app carries no quarantine", async () => {
-			const xattr = await tool("xattr", ["-p", "com.apple.quarantine", app])
+			const attribute = await quarantineOf(target)
 
-			if (xattr.status === 0) {
-				fail(`quarantined: ${xattr.stdout.trim()}`)
+			if (attribute !== null) {
+				fail(`quarantined: ${attribute}`)
 			}
 
 			return "no com.apple.quarantine attribute"
@@ -116,7 +89,7 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 		}
 
 		await findings.check("fileProvider.state(): supported, not translocated, no PIN", async () => {
-			const before = await state(page)
+			const before = await fileProviderState(page)
 
 			if (!before.supported || before.translocated || before.lockBlocked) {
 				fail(JSON.stringify(before))
@@ -125,13 +98,13 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 			return JSON.stringify(before)
 		})
 
-		const enabled = await findings.check("fileProvider.enable()", () => toggle(page, "enable"))
+		const enabled = await findings.check("fileProvider.enable()", () => fileProviderToggle(page, "enable"))
 
 		if (!enabled) {
 			return
 		}
 
-		const first = await userEnabled(page).catch((error: unknown) => errorMessage(error))
+		const first = await fileProviderUserEnabled(page, DOMAIN_TIMEOUT_MS).catch((error: unknown) => errorMessage(error))
 
 		findings.info("userEnabled right after the first add", String(first))
 		findings.info("pluginkit election", output(await tool("pluginkit", ["-m", "-v", "-i", APPEX_ID])))
@@ -139,16 +112,16 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 		if (first !== true) {
 			findings.info("pluginkit -e use", output(await tool("pluginkit", ["-e", "use", "-i", APPEX_ID])))
 			findings.info("pluginkit election after -e use", output(await tool("pluginkit", ["-m", "-v", "-i", APPEX_ID])))
-			findings.info("userEnabled after pluginkit -e use", String((await state(page)).userEnabled))
+			findings.info("userEnabled after pluginkit -e use", String((await fileProviderState(page)).userEnabled))
 		}
 
 		// Removing and adding the domain again: the extension and its XPC answer, and macOS decides userEnabled anew.
 		await findings.check(
 			"disable() then enable() round trip",
-			async () => `${await toggle(page, "disable")} / ${await toggle(page, "enable")}`
+			async () => `${await fileProviderToggle(page, "disable")} / ${await fileProviderToggle(page, "enable")}`
 		)
 
-		const last = await userEnabled(page).catch((error: unknown) => errorMessage(error))
+		const last = await fileProviderUserEnabled(page, DOMAIN_TIMEOUT_MS).catch((error: unknown) => errorMessage(error))
 
 		// The answer S7 found: macOS registers the domain with userEnabled false and nothing headless (pluginkit, re-adding
 		// the domain) turns it on, so listing, download and upload through Finder stay a manual release check. Reported,
@@ -192,7 +165,7 @@ export async function runS7({ target, nextDir, nextVersion, signed, artifacts }:
 
 		if (renderer) {
 			// The domain goes with every file it replicated, then the session: never left signed in.
-			await toggle(renderer.page, "disable").catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
+			await fileProviderToggle(renderer.page, "disable").catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
 
 			const status = submitted === true ? await sessionStatus(renderer.page).catch(errorMessage) : "not submitted"
 

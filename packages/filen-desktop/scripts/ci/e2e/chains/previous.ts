@@ -12,7 +12,19 @@ import type {
 	DesktopSyncResult
 } from "@filen/shared/desktop"
 import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
-import { desktop, desktopCall, pageText, putOffKeysReminder, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
+import {
+	desktop,
+	desktopCall,
+	fileProviderState,
+	fileProviderToggle,
+	fileProviderUserEnabled,
+	pageText,
+	putOffKeysReminder,
+	sessionStatus,
+	signIn,
+	signOut,
+	unlockThroughScreen
+} from "../app.ts"
 import { runDir } from "../cloud.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
@@ -36,12 +48,15 @@ import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QU
 //   P7  the page boots as served     crossOriginIsolated
 //   P8  sign-out wipes               session absent, session.vault gone, the drive unmounted
 //   P9  uninstall                    the package gone, the user's pair directories intact
+//   P10 Filen in Finder (macOS)      on N-1 before the PIN: supported, the domain registered (userEnabled reported:
+//                                    a person switches it on), an off/on round trip; left off
 //
-// Linux deb and Windows NSIS so far; what differs per OS (the native folder chooser, the drive as the OS sees it,
+// Linux deb, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the OS sees it,
 // quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
 
 const CHOOSER_TITLE = "Choose a directory to sync"
 const CONVERGE_TIMEOUT_MS = 8 * 60 * 1000
+const DOMAIN_TIMEOUT_MS = 60_000
 const PREFS: DesktopPrefs = { minimizeToTray: false, startMinimized: false, launchAtLogin: false, notifications: false }
 
 interface PairState {
@@ -286,6 +301,35 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 				return "converged"
 			})
+
+			// Off again before the PIN, which keeps it off; it replicates nothing the baseline holds.
+			if (target.platform === "mac") {
+				await findings.check("P10 Filen in Finder registers its domain and survives an off/on round trip", async () => {
+					try {
+						const before = await fileProviderState(page())
+
+						if (!before.supported || before.translocated || before.lockBlocked || before.enabled) {
+							fail(`state() ${json(before)}`)
+						}
+
+						await fileProviderToggle(page(), "enable")
+
+						const first = await fileProviderUserEnabled(page(), DOMAIN_TIMEOUT_MS)
+
+						await fileProviderToggle(page(), "disable")
+						await fileProviderToggle(page(), "enable")
+
+						const last = await fileProviderUserEnabled(page(), DOMAIN_TIMEOUT_MS)
+
+						return `registered; userEnabled ${String(first)}, after the round trip ${String(last)}`
+					} finally {
+						findings.info(
+							"Filen in Finder switched off before the PIN",
+							await fileProviderToggle(page(), "disable").catch((error: unknown) => errorMessage(error))
+						)
+					}
+				})
+			}
 
 			// Baseline: what N must hold untouched.
 			state.local = new Map()

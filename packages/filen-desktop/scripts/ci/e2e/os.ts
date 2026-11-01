@@ -59,6 +59,8 @@ export interface DesktopOs {
 	forceKill(pids: readonly number[]): Promise<void>
 	// The old client's drive setting under `base` (prepared), and where it is then reached.
 	legacyDrive(base: string): { setting: string; root: string }
+	// The quarantine attribute on the installed app, or null without one; absent where the OS has no such thing.
+	quarantine?(target: Target): Promise<string | null>
 }
 
 const linuxOs: DesktopOs = {

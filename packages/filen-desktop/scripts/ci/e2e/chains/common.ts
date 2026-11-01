@@ -401,6 +401,23 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 				await chain.renderer?.browser.close().catch(() => undefined)
 			}
 
+			// A quarantined app would meet Gatekeeper's first-launch prompt, which no user of an installed app sees.
+			const unquarantined = async (when: string): Promise<void> => {
+				const quarantine = os.quarantine
+
+				if (quarantine !== undefined) {
+					await findings.check(`the app carries no quarantine (${when})`, async () => {
+						const attribute = await quarantine(target)
+
+						if (attribute !== null) {
+							fail(`quarantined: ${attribute}`)
+						}
+
+						return "no com.apple.quarantine attribute"
+					})
+				}
+			}
+
 			// The chain's whole budget (E2E_CHAIN_BUDGET_MINUTES, below the workflow step's timeout): once it is spent, the
 			// evidence so far is written and the run fails by name, instead of the step being cut off with nothing kept.
 			const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
@@ -425,7 +442,21 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 					: undefined
 
 			try {
-				await runUpdate({ ...updateOptions, hooks: { ...hooks, beforeReset } })
+				await runUpdate({
+					...updateOptions,
+					hooks: {
+						...hooks,
+						beforeReset,
+						beforeUpdate: async () => {
+							await unquarantined("installed, before its first launch")
+							await hooks.beforeUpdate()
+						},
+						afterUpdate: async () => {
+							await unquarantined("after the update")
+							await hooks.afterUpdate()
+						}
+					}
+				})
 			} catch (error) {
 				await findings.check("the chain ran to the end", () => fail(errorMessage(error)))
 			} finally {

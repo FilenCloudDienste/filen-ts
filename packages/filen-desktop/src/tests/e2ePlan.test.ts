@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { refusal } from "../../scripts/ci/e2e/context.ts"
-import { DEEP_TRIAL, plan, type Plan, type PlanInput, previousVersion } from "../../scripts/ci/e2ePlan.ts"
+import { DEEP_READY, DEEP_TRIAL, plan, type Plan, type PlanInput, previousVersion } from "../../scripts/ci/e2ePlan.ts"
 
 const dispatch: PlanInput = {
 	platforms: "windows,mac,linux",
@@ -97,15 +97,28 @@ describe("e2ePlan depth", () => {
 		expect(deep({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual([
 			"win-x64-nsis@0",
 			"mac-arm64-dmg@20",
-			"linux-x64-deb@40"
+			"linux-x64-deb@40",
+			"linux-arm64-deb@60"
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
 		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, true])
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
-		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
-		// The session, then 4.x and 3.0.53 on each of Windows, macOS and Linux.
-		expect(logins(nightly)).toBe(7)
+		// No rotation: arm64 every night; Windows arm64 runs at install depth until its trial is green.
+		expect(nightly.notices).toContain(
+			"Deep depth is not built yet for win-arm64-nsis previous, win-arm64-nsis legacy; they run at install depth."
+		)
+		// The session, then 4.x and 3.0.53 on Windows x64, macOS arm64, Linux x64 and Linux arm64.
+		expect(logins(nightly)).toBe(9)
+		// Once Windows arm64 is promoted: two more.
+		expect(
+			logins(
+				plan(
+					{ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" },
+					{ ready: { ...DEEP_READY, ...DEEP_TRIAL }, trial: {} }
+				)
+			)
+		).toBe(11)
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
@@ -134,7 +147,13 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
-		expect(DEEP_TRIAL).toEqual({})
+		expect(DEEP_TRIAL).toEqual({ "win-arm64-nsis": ["previous", "legacy"] })
+
+		// The real tables: Windows arm64 is deep (both chains) only in a custom deep run that names it, on its own runner.
+		const arm = plan({ ...dispatch, platforms: "windows", depth: "deep", formats: "win-arm64-nsis" })
+
+		expect(arm.tests.map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])).toEqual([["windows-11-arm", true, true]])
+		expect(logins(arm)).toBe(3)
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {
