@@ -102,14 +102,14 @@ describe("e2ePlan depth", () => {
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
-		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([false, true])
+		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, true])
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
 		// No rotation: every main format every night once ready; trials run at install depth until promoted.
 		expect(nightly.notices).toContain(
-			"Deep depth is not built yet for mac-arm64-dmg previous, linux-arm64-deb previous, linux-arm64-deb legacy; they run at install depth."
+			"Deep depth is not built yet for linux-arm64-deb previous, linux-arm64-deb legacy; they run at install depth."
 		)
-		// The session, 4.x and 3.0.53 on Windows x64, Windows arm64 and Linux x64, 3.0.53 on macOS arm64.
-		expect(logins(nightly)).toBe(8)
+		// The session, then 4.x and 3.0.53 on Windows x64, Windows arm64, macOS arm64 and Linux x64.
+		expect(logins(nightly)).toBe(9)
 		// Once every trial is promoted: both chains on five entries.
 		expect(
 			logins(
@@ -156,7 +156,6 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
 		expect(DEEP_TRIAL).toEqual({
-			"mac-arm64-dmg": ["previous"],
 			"linux-arm64-deb": ["previous", "legacy"]
 		})
 
