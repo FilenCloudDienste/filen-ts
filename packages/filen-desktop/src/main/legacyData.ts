@@ -185,8 +185,10 @@ export interface LegacyPrefs {
 	startMinimized?: boolean
 }
 
-// The old main read these from options.v1.json; the old web's localStorage booleans are the fallback when the file
-// lacks one (it wrote minimizeToTray only once it was first toggled).
+// Each setting comes from where the old client acted on it. The old web's localStorage set minimizeToTray in main on
+// every start, so it wins and options.v1.json only fills in; main read startMinimized from options.v1.json at launch,
+// so the file wins there and localStorage fills in. The file was written by two concurrent read-merge-writes and can
+// lack a key or hold a stale one.
 export function legacyPrefs(snapshot: LegacySnapshot, optionsFile: string | null): LegacyPrefs {
 	const parsed = legacyOptionsSchema(optionsFile === null ? undefined : parseJson(optionsFile))
 	const options = parsed instanceof type.errors ? {} : parsed
@@ -196,7 +198,7 @@ export function legacyPrefs(snapshot: LegacySnapshot, optionsFile: string | null
 		return typeof value === "boolean" ? value : undefined
 	}
 	const prefs: LegacyPrefs = {}
-	const minimizeToTray = options.minimizeToTray ?? stored(LEGACY_KEYS.minimizeToTray)
+	const minimizeToTray = stored(LEGACY_KEYS.minimizeToTray) ?? options.minimizeToTray
 	const startMinimized = options.startMinimized ?? stored(LEGACY_KEYS.startMinimized)
 
 	if (minimizeToTray !== undefined) {

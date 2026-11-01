@@ -225,14 +225,19 @@ describe("legacyPin", () => {
 })
 
 describe("legacyPrefs", () => {
-	it("prefers options.v1.json and falls back to the old web's booleans", () => {
+	it("takes each setting from where the old client acted on it, the other source filling in", () => {
 		const stored = snapshot({ [LEGACY_KEYS.minimizeToTray]: true, [LEGACY_KEYS.startMinimized]: true })
 
-		expect(legacyPrefs(stored, JSON.stringify({ startMinimized: false, extra: 1 }))).toEqual({
+		// A stale minimizeToTray in the file loses to localStorage; the file's startMinimized wins.
+		expect(legacyPrefs(stored, JSON.stringify({ minimizeToTray: false, startMinimized: false, extra: 1 }))).toEqual({
 			minimizeToTray: true,
 			startMinimized: false
 		})
 		expect(legacyPrefs(stored, null)).toEqual({ minimizeToTray: true, startMinimized: true })
+		expect(legacyPrefs(snapshot(), JSON.stringify({ minimizeToTray: false, startMinimized: true }))).toEqual({
+			minimizeToTray: false,
+			startMinimized: true
+		})
 		expect(legacyPrefs(snapshot(), "{")).toEqual({})
 		expect(legacyPrefs(snapshot(), JSON.stringify({ minimizeToTray: "yes" }))).toEqual({})
 	})
