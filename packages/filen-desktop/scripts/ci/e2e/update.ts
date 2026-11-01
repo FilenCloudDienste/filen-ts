@@ -300,14 +300,29 @@ export async function runUpdate({
 			await waitFor(`${fromVersion} to take the test feed`, START_TIMEOUT_MS, () => (logHas(mainLog, TEST_FEED_LOG) ? true : null))
 		}
 
+		// The old app running, or already gone because its updater fetched the whole update and quit to install it (a
+		// fast start, as when nothing but the updater runs, can get there before the first look). Each look is kept for
+		// the failure.
+		const fetched = () =>
+			served.server.requests.some(
+				request => request.path === target.updateFile && request.status === 200 && request.bytes === served.size
+			)
+		let seen = "nothing looked at yet"
 		const before = await waitFor(`${fromVersion}'s main process`, START_TIMEOUT_MS, () => {
+			const all = target.mainProcesses()
 			const found = processesAt(target)
 
-			return found.length > 0 ? found : null
-		})
+			seen = all.map(entry => `${String(entry.pid)} ${entry.path}`).join(", ") || "no main process"
+
+			return found.length > 0 ? found : fetched() ? [] : null
+		}).catch((error: unknown) => fail(`${errorMessage(error)}; last seen: ${seen}`))
 		const userDataBefore = readdirSync(target.userData).sort()
 
-		console.log(`running ${fromVersion}: pid ${before.map(entry => String(entry.pid)).join(", ")} at ${target.executable}`)
+		console.log(
+			before.length > 0
+				? `running ${fromVersion}: pid ${before.map(entry => String(entry.pid)).join(", ")} at ${target.executable}`
+				: `${fromVersion} already quit to install the update it fetched`
+		)
 
 		section(`update ${fromVersion} -> ${nextVersion}`)
 		await waitFor(
@@ -324,10 +339,13 @@ export async function runUpdate({
 		)
 
 		const after = await waitFor(`${nextVersion}'s main process at ${target.executable}`, EXIT_TIMEOUT_MS, () => {
+			const all = target.mainProcesses()
 			const found = processesAt(target).filter(entry => !oldPids.has(entry.pid))
 
+			seen = all.map(entry => `${String(entry.pid)} ${entry.path}`).join(", ") || "no main process"
+
 			return found.length > 0 ? found : null
-		})
+		}).catch((error: unknown) => fail(`${errorMessage(error)}; last seen: ${seen}`))
 		const pids = new Set(after.map(entry => entry.pid))
 
 		console.log(`relaunched: pid ${[...pids].join(", ")}`)
