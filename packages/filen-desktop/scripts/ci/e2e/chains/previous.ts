@@ -11,8 +11,8 @@ import type {
 	DesktopSyncPlan,
 	DesktopSyncResult
 } from "@filen/shared/desktop"
-import { fail, freePort, waitFor } from "../../support.ts"
-import { desktop, desktopCall, pageText, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
+import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
+import { desktop, desktopCall, pageText, putOffKeysReminder, sessionStatus, signIn, signOut, unlockThroughScreen } from "../app.ts"
 import { runDir } from "../cloud.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
@@ -101,6 +101,15 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				throw error
 			}
 		})
+
+		// The startup reminder is modal over the shell; put off before anything else, so it covers nothing that follows.
+		findings.info(
+			"the master-key reminder after sign-in",
+			await putOffKeysReminder(page(), 20_000).then(
+				shown => (shown ? "shown; put off (Remind me later)" : "not shown within 20 s"),
+				(error: unknown) => `shown, not put off: ${errorMessage(error)}`
+			)
+		)
 
 		await signedOutOnFailure(async () => {
 			const remoteRoots = new Map<string, string>()

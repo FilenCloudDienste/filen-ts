@@ -27,9 +27,10 @@ async function ps(what: string, script: string, timeoutMs = TOOL_TIMEOUT_MS): Pr
 // The dialog, driven through Win32 messages, which need neither focus nor the foreground (UI Automation's view of this
 // dialog proved incomplete, then unfocusable): it is the visible top-level #32770 window with the title. Its "Folder:"
 // box is the edit with control id 1152 among its descendants, else the Edit inside its ComboBoxEx32 (id 1148). The
-// path goes in with WM_SETTEXT and is read back; then WM_COMMAND IDOK to the dialog is "Select Folder". The answer
-// counts only once the window is gone; a window still there is cancelled (WM_COMMAND IDCANCEL), so the app's call
-// returns. Each step says what it found, for the log.
+// path is typed in (WM_CHAR, so the dialog's model of the name follows; WM_SETTEXT alone left it empty) and read back;
+// then Select Folder (BM_CLICK on control 1), else Enter in the box, else WM_COMMAND IDOK, each given 5 s to close the
+// window. The answer counts only once the window is gone; a window still there is cancelled (WM_COMMAND IDCANCEL), so
+// the app's call returns. Each step says what it found, for the log.
 const WIN32 = `
 using System;
 using System.Runtime.InteropServices;
@@ -46,8 +47,11 @@ public static class FilenE2eDialog {
 	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
 	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, string lParam);
 	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam);
+	[DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+	[DllImport("user32.dll")] static extern IntPtr GetDlgItem(IntPtr dialog, int id);
 	[DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
-	const uint WM_SETTEXT = 0x000C, WM_GETTEXT = 0x000D, WM_COMMAND = 0x0111;
+	const uint WM_SETTEXT = 0x000C, WM_GETTEXT = 0x000D, WM_COMMAND = 0x0111, WM_CHAR = 0x0102, WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, BM_CLICK = 0x00F5;
+	const int VK_RETURN = 0x0D;
 	static string Class(IntPtr hwnd) { var name = new StringBuilder(256); GetClassName(hwnd, name, 256); return name.ToString(); }
 	public static IntPtr Dialog(string title) {
 		IntPtr found = IntPtr.Zero;
@@ -75,12 +79,20 @@ public static class FilenE2eDialog {
 		IntPtr combo = FindWindowEx(comboEx, IntPtr.Zero, "ComboBox", null);
 		return combo == IntPtr.Zero ? IntPtr.Zero : FindWindowEx(combo, IntPtr.Zero, "Edit", null);
 	}
-	public static string SetText(IntPtr edit, string value) {
-		SendMessage(edit, WM_SETTEXT, IntPtr.Zero, value);
+	// Typed, not set: WM_CHAR per character makes the edit notify its owners as a keyboard does, so the dialog's own
+	// model of the name follows (WM_SETTEXT changes only the text). Cleared first; returns what the box then holds.
+	public static string TypeText(IntPtr edit, string value) {
+		SendMessage(edit, WM_SETTEXT, IntPtr.Zero, "");
+		foreach (char c in value) SendMessage(edit, WM_CHAR, (IntPtr)c, (IntPtr)1);
 		var text = new StringBuilder(32768);
 		SendMessage(edit, WM_GETTEXT, (IntPtr)32768, text);
 		return text.ToString();
 	}
+	public static bool Click(IntPtr button) { return PostMessage(button, BM_CLICK, IntPtr.Zero, IntPtr.Zero); }
+	public static bool Enter(IntPtr edit) {
+		return PostMessage(edit, WM_KEYDOWN, (IntPtr)VK_RETURN, (IntPtr)1) && PostMessage(edit, WM_KEYUP, (IntPtr)VK_RETURN, (IntPtr)unchecked((int)0xC0000001));
+	}
+	public static IntPtr Button(IntPtr dialog, int id) { return GetDlgItem(dialog, id); }
 	public static bool Command(IntPtr dialog, int id) { return PostMessage(dialog, WM_COMMAND, (IntPtr)id, IntPtr.Zero); }
 	public static string Describe(IntPtr hwnd) { return Class(hwnd) + " id " + GetDlgCtrlID(hwnd); }
 }
@@ -104,25 +116,40 @@ while ($edit -eq [IntPtr]::Zero -and (Get-Date) -lt $deadline) {
 	$edit = [FilenE2eDialog]::FolderBox($dialog)
 	if ($edit -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500 }
 }
-$answered = $false
+$closed = $false
+function Gone($seconds) {
+	$until = (Get-Date).AddSeconds($seconds)
+	while ((Get-Date) -lt $until) {
+		if (-not [FilenE2eDialog]::IsWindow($dialog)) { return $true }
+		Start-Sleep -Milliseconds 250
+	}
+	return $false
+}
 if ($edit -eq [IntPtr]::Zero) {
 	"no Folder box (Edit 1152, or the Edit in ComboBoxEx32 1148) found"
 } else {
 	"folder box: $([FilenE2eDialog]::Describe($edit))"
-	$read = [FilenE2eDialog]::SetText($edit, ${psQuote(dir)})
+	$read = [FilenE2eDialog]::TypeText($edit, ${psQuote(dir)})
 	if ($read -ne ${psQuote(dir)}) {
-		"the folder box reads back '$read'"
+		"the folder box reads back '$read' after typing"
 	} else {
-		"folder set with WM_SETTEXT"
-		$answered = [FilenE2eDialog]::Command($dialog, 1)
-		"Select Folder (WM_COMMAND IDOK) posted: $answered"
+		"folder typed with WM_CHAR"
+		$button = [FilenE2eDialog]::Button($dialog, 1)
+		if ($button -ne [IntPtr]::Zero) {
+			"Select Folder ($([FilenE2eDialog]::Describe($button))) clicked: $([FilenE2eDialog]::Click($button))"
+			$closed = Gone 5
+		}
+		if (-not $closed) {
+			"Enter in the folder box: $([FilenE2eDialog]::Enter($edit))"
+			$closed = Gone 5
+		}
+		if (-not $closed) {
+			"WM_COMMAND IDOK posted: $([FilenE2eDialog]::Command($dialog, 1))"
+			$closed = Gone 5
+		}
 	}
 }
-$until = (Get-Date).AddSeconds(15)
-while ($answered -and (Get-Date) -lt $until) {
-	if (-not [FilenE2eDialog]::IsWindow($dialog)) { "the dialog closed"; exit 0 }
-	Start-Sleep -Milliseconds 500
-}
+if ($closed) { "the dialog closed"; exit 0 }
 [void][FilenE2eDialog]::Command($dialog, 2)
 throw 'the dialog was not answered; cancelled'
 `

@@ -13,7 +13,7 @@ import type {
 } from "@filen/shared/desktop"
 import { LEGACY_VERSION } from "../../legacy.ts"
 import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
-import { desktop, sessionStatus, signOut, unlockThroughScreen } from "../app.ts"
+import { desktop, MASTER_KEYS_REMINDER, putOffKeysReminder, sessionStatus, signOut, unlockThroughScreen } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import {
 	LEGACY_CONFLICTS,
@@ -83,8 +83,6 @@ const IMPORT_TIMEOUT_MS = 90_000
 // Seconds of inactivity before the old app locks: long enough that it never does during the run.
 const LOCK_TIMEOUT_S = 3600
 const DOT_FILE_RULES = [".*", "!/.filenignore"]
-// The title of the startup reminder a fresh session shows (filen-web), the one dialog a migration may leave visible.
-const MASTER_KEYS_REMINDER = "Back up your master keys"
 const BIN_MARKER = ".filed-by-day"
 
 function expectedConflicts(pair: string): number {
@@ -816,11 +814,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				)
 
 				if (reminder.length > 0) {
-					await page()
-						.locator('[role="dialog"], [role="alertdialog"]')
-						.filter({ hasText: MASTER_KEYS_REMINDER })
-						.getByRole("button", { name: "Remind me later", exact: true })
-						.click({ timeout: 30_000 })
+					await putOffKeysReminder(page(), 10_000)
 				}
 
 				if (problems.length > 0) {

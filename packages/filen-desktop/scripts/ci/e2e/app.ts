@@ -77,6 +77,25 @@ export async function signIn(page: Page, email: string, password: string, startT
 	return "session.get() status: present"
 }
 
+// The startup reminder a fresh session shows, modal over the shell (filen-web).
+export const MASTER_KEYS_REMINDER = "Back up your master keys"
+
+// Puts the reminder off with its own "Remind me later" when it shows within `timeoutMs`; whether it showed.
+export async function putOffKeysReminder(page: Page, timeoutMs: number): Promise<boolean> {
+	const reminder = page.locator('[role="dialog"], [role="alertdialog"]').filter({ hasText: MASTER_KEYS_REMINDER }).first()
+
+	try {
+		await reminder.waitFor({ state: "visible", timeout: timeoutMs })
+	} catch {
+		return false
+	}
+
+	await reminder.getByRole("button", { name: "Remind me later", exact: true }).click({ timeout: 30_000 })
+	await reminder.waitFor({ state: "hidden", timeout: 30_000 })
+
+	return true
+}
+
 // Names of buttons that close what may cover the shell after a sign-in (startup reminders, notices, callouts) without
 // acting on it. Anything else is closed with Escape.
 const DISMISS = /^(Remind me later|OK|Not now|Later|Skip|Close|Dismiss|Got it|Cancel)$/i
