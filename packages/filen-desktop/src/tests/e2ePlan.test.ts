@@ -128,7 +128,16 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
-		expect(DEEP_TRIAL).toEqual({})
+		expect(DEEP_TRIAL).toEqual({ "mac-arm64-dmg": ["previous"] })
+
+		// The real tables: macOS chain P is deep only in a signed custom deep run that names it.
+		const mac = plan({ ...dispatch, platforms: "mac", signed: true, depth: "deep", formats: "mac-arm64-dmg" })
+
+		expect(mac.tests.map(entry => [entry.platform, entry.deepPrevious, entry.deepLegacy, entry.signed])).toEqual([
+			["mac", true, false, true]
+		])
+		expect(logins(mac)).toBe(2)
+		expect(plan({ ...dispatch, platforms: "mac", signed: true, depth: "deep" }).tests.some(entry => entry.deep)).toBe(false)
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {

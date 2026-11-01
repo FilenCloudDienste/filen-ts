@@ -13,6 +13,7 @@ import {
 	sha256Through,
 	uninstallDeb
 } from "./linux.ts"
+import { macOs } from "./mac.ts"
 import { windowsOs } from "./windows.ts"
 
 // What the deep chains need from the desktop they run on, behind one interface per OS (linux.ts, windows.ts): the
@@ -29,6 +30,9 @@ export interface DriveLocation {
 }
 
 export interface DesktopOs {
+	// Whether a configured drive must actually run here (false where the runner cannot mount one, macOS without
+	// macFUSE: the drive's settings and its named state are checked instead, a mount only if it comes up anyway).
+	readonly liveDrive: boolean
 	// Once per chain, before anything launches (crash dump registration, say).
 	prepare(): Promise<void>
 	// Answers the app's open-directory dialog titled `title` with `dir`; evidence files start with `evidence`.
@@ -58,6 +62,7 @@ export interface DesktopOs {
 }
 
 const linuxOs: DesktopOs = {
+	liveDrive: true,
 	// Core dumps are set up by the workflow (scripts/ci/deepSession.sh), for the whole D-Bus session.
 	prepare: async () => undefined,
 	chooseDirectory,
@@ -116,6 +121,8 @@ export function osFor(target: Target): DesktopOs {
 			return linuxOs
 		case "win":
 			return windowsOs
+		case "mac":
+			return macOs
 		default:
 			return fail(`no deep chain support on ${target.platform} yet`)
 	}

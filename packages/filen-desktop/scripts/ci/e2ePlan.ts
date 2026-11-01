@@ -145,7 +145,9 @@ export const DEEP_READY: DeepScenarios = {
 }
 // Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
 // release runs stay on what is proven.
-export const DEEP_TRIAL: DeepScenarios = {}
+export const DEEP_TRIAL: DeepScenarios = {
+	"mac-arm64-dmg": ["previous"]
+}
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
 
