@@ -160,6 +160,24 @@ describe("reduceEvents", () => {
 		expect(onAuthFailed).toHaveBeenCalledOnce()
 	})
 
+	it("keeps the held conflict count over a report of a pass that read nothing", async () => {
+		const { runtime, of } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([passEvent({ tag: "PassCompleted", inner: { report: report({ paused: true }) } })])
+		runtime.conflicts("1", 1)
+		runtime.events([passEvent({ tag: "PassCompleted", inner: { report: report({ paused: true }) } }, 1n, 2000n)])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { conflicts: 1 } }] })
+		expect(of("aggregate").at(-1)).toEqual({ t: "aggregate", state: "attention" })
+
+		runtime.conflicts("1", 0)
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ issues: { conflicts: 0 } }] })
+		expect(of("aggregate").at(-1)).toEqual({ t: "aggregate", state: "idle" })
+	})
+
 	it("PassCompleted sets issue counts", async () => {
 		const { runtime, of } = feed()
 
@@ -190,7 +208,8 @@ describe("reduceEvents", () => {
 					transfers: [],
 					lastSyncedAt: 2000,
 					lastError: null,
-					issues: { conflicts: 2, heldDeletions: 3, unsyncable: 4, failed: 1 }
+					// The report's conflicts are its pass's; the held count comes from the host.
+					issues: { conflicts: 0, heldDeletions: 3, unsyncable: 4, failed: 1 }
 				}
 			]
 		})

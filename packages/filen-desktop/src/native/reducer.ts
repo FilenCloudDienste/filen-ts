@@ -40,8 +40,6 @@ export interface PairRuntime {
 	stage: DesktopSyncStage | null
 	halted: DesktopSyncHalt | null
 	refused: DesktopSyncRefusal | null
-	// A pass completed in this process, so `issues` are its counts.
-	reported: boolean
 }
 
 export function createPairRuntime(info?: SyncPairInfo, sdk?: NativeSdk): PairRuntime {
@@ -58,13 +56,13 @@ export function createPairRuntime(info?: SyncPairInfo, sdk?: NativeSdk): PairRun
 			info?.lastPassError === undefined || (sdk !== undefined && info.lastPassErrorKind === sdk.ErrorKind.StaleState)
 				? null
 				: clip(info.lastPassError),
+		// Conflicts are the engine's held ones (RuntimeFeed.conflicts), the rest the last pass's counts.
 		issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
 		degraded: { local: status?.localEventsDegraded !== undefined, remote: status?.remoteEventsDegraded !== undefined },
 		pending: null,
 		stage: null,
 		halted: sdk !== undefined && info?.lastPassErrorKind === sdk.ErrorKind.Reqwest ? "offline" : null,
-		refused: null,
-		reported: false
+		refused: null
 	}
 }
 
@@ -295,9 +293,10 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				runtime.lastError = report.passError === undefined ? null : clip(report.passError)
 				runtime.halted = halt(sdk, report.halted) ?? offlineKind(sdk, report.passErrorKind)
 				runtime.refused = refusal(sdk, report.refused)
-				runtime.reported = true
+				// A report's conflicts are the ones its pass planned: none for a pass that read nothing (paused, a
+				// wake with nothing announced), so not the count held. The host reads that one after it.
 				runtime.issues = {
-					conflicts: Number(report.conflictsTotal),
+					conflicts: runtime.issues.conflicts,
 					heldDeletions: Number(report.heldDeletions),
 					unsyncable: Number(report.unsyncableTotal),
 					failed: Number(report.errorsTotal)
@@ -392,8 +391,8 @@ export interface RuntimeFeed {
 	// The engine's pairs as listPairs reads them; a pair's runtime lives while it is listed.
 	setPairs(infos: readonly SyncPairInfo[]): void
 	pair(pairId: string): SyncPairInfo | undefined
-	// The pair's held conflicts, counted before this process saw a pass of it.
-	seedConflicts(pairId: string, conflicts: number): void
+	// How many conflicts the engine holds for the pair, as listConflicts counts them.
+	conflicts(pairId: string, total: number): void
 	events(events: readonly SyncPassEvent[]): void
 	watchStatus(pairId: bigint, status: WatchStatus): void
 	subscribe(on: boolean): void
@@ -492,11 +491,11 @@ export function createRuntimeFeed(
 			schedule()
 		},
 		pair: pairId => infos.get(pairId),
-		seedConflicts: (pairId, conflicts) => {
+		conflicts: (pairId, total) => {
 			const runtime = state.get(pairId)
 
-			if (runtime !== undefined && !runtime.reported && runtime.issues.conflicts !== conflicts) {
-				runtime.issues = { ...runtime.issues, conflicts }
+			if (runtime !== undefined && runtime.issues.conflicts !== total) {
+				runtime.issues = { ...runtime.issues, conflicts: total }
 				dirty = true
 				schedule()
 			}

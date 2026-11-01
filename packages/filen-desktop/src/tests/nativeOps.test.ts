@@ -6,7 +6,7 @@ import { createHostEngine } from "../native/ops.ts"
 import { createPlanRegistry } from "../native/plans.ts"
 import { createRuntimeFeed } from "../native/reducer.ts"
 import type { FromNative } from "../shared/nativeProtocol.ts"
-import { action, fakeEngine, fakePlan, fakeSdk, pairInfo, REMOTE_ROOT, report, sdkError } from "./nativeFakes.ts"
+import { action, fakeEngine, fakePlan, fakeSdk, pairInfo, passEvent, REMOTE_ROOT, report, sdkError } from "./nativeFakes.ts"
 
 beforeEach(() => {
 	vi.useFakeTimers()
@@ -251,6 +251,83 @@ describe("native ops", () => {
 		await vi.advanceTimersByTimeAsync(300)
 		expect(posted).toContainEqual(expect.objectContaining({ t: "aggregate", state: "attention" }))
 		expect(posted.findLast(message => message.t === "overview")).toMatchObject({ pairs: [{ issues: { conflicts: 3 } }] })
+	})
+
+	it("counts the conflicts a previous process held, whatever pass reports first", async () => {
+		const { engine, host, feed, posted } = setup()
+		let listed: (page: { conflicts: []; total: bigint }) => void = () => undefined
+
+		engine.listConflicts.mockReturnValueOnce(
+			new Promise(resolve => {
+				listed = resolve
+			})
+		)
+
+		const refreshed = host.refreshPairs()
+
+		feed.subscribe(true)
+		await vi.advanceTimersByTimeAsync(0)
+		// The pair is held paused at launch: its pass read nothing, and its report carries no conflict.
+		feed.events([passEvent({ tag: "PassCompleted", inner: { report: report({ paused: true }) } })])
+		await host.passEnded(1n, report({ paused: true }))
+		listed({ conflicts: [], total: 1n })
+		await refreshed
+		await vi.advanceTimersByTimeAsync(300)
+		expect(engine.listConflicts).toHaveBeenCalledExactlyOnceWith(1n, 0n, 0n)
+		expect(posted.findLast(message => message.t === "overview")).toMatchObject({ pairs: [{ issues: { conflicts: 1 } }] })
+	})
+
+	it("recounts conflicts after a pass that reported one and after a resolution", async () => {
+		const { engine, host, feed, posted } = setup()
+		const conflicts = () => posted.findLast(message => message.t === "overview")
+
+		engine.listConflicts.mockResolvedValue({ conflicts: [], total: 1n })
+		await host.refreshPairs()
+		feed.subscribe(true)
+
+		// A pass reports the held conflict again plus a new one; the engine holds two, not three.
+		engine.listConflicts.mockResolvedValue({ conflicts: [], total: 2n })
+		feed.events([
+			passEvent({ tag: "Conflict", inner: { relPath: "docs/notes.txt" } }),
+			passEvent({ tag: "Conflict", inner: { relPath: "b.txt" } }),
+			passEvent({ tag: "PassCompleted", inner: { report: report({ conflictsTotal: 2n }) } })
+		])
+		await host.passEnded(1n, report({ conflictsTotal: 2n }))
+		await vi.advanceTimersByTimeAsync(300)
+		expect(conflicts()).toMatchObject({ pairs: [{ issues: { conflicts: 2 } }] })
+
+		// A pass that reported none recorded none: no read.
+		await host.passEnded(1n, report())
+		expect(engine.listConflicts).toHaveBeenCalledTimes(2)
+
+		engine.listConflicts.mockResolvedValue({ conflicts: [], total: 0n })
+		await host.ops.resolveConflict({ pairId: "1", relPath: "docs/notes.txt", resolution: "keepLocal" })
+		expect(engine.listConflicts).toHaveBeenCalledTimes(3)
+		await vi.advanceTimersByTimeAsync(300)
+		expect(conflicts()).toMatchObject({ pairs: [{ issues: { conflicts: 0 } }] })
+		expect(posted.findLast(message => message.t === "aggregate")).toEqual({ t: "aggregate", state: "idle" })
+	})
+
+	it("keeps the latest conflict count when an earlier read resolves after it", async () => {
+		const { engine, host, feed, posted } = setup()
+		let listed: (page: { conflicts: []; total: bigint }) => void = () => undefined
+
+		engine.listConflicts.mockReturnValueOnce(
+			new Promise(resolve => {
+				listed = resolve
+			})
+		)
+		engine.listConflicts.mockResolvedValueOnce({ conflicts: [], total: 2n })
+
+		const refreshed = host.refreshPairs()
+
+		feed.subscribe(true)
+		await vi.advanceTimersByTimeAsync(0)
+		await host.passEnded(1n, report({ conflictsTotal: 2n }))
+		listed({ conflicts: [], total: 1n })
+		await refreshed
+		await vi.advanceTimersByTimeAsync(300)
+		expect(posted.findLast(message => message.t === "overview")).toMatchObject({ pairs: [{ issues: { conflicts: 2 } }] })
 	})
 
 	it("holds every deletion of a migrated pair until a clean pass held none", async () => {

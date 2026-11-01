@@ -34,7 +34,8 @@ export interface HostEngine {
 	watchAll(holdRemotes: readonly string[], onError: (error: unknown) => void): Promise<SyncPairInfo[]>
 	// A watch ended (stopped, or its pair removed).
 	watchEnded(pairId: bigint): void
-	// A pass ended, with its report (none for a pass that failed): lifts the migrated guard once it is no longer needed.
+	// A pass ended, with its report (none for a pass that failed): counts the conflicts it may have recorded, and lifts
+	// the migrated guard once it is no longer needed.
 	passEnded(pairId: bigint, report: SyncPassReport | null): Promise<void>
 }
 
@@ -77,35 +78,55 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 	const { sdk, engine, feed, plans } = ctx
 	// The pairs with a watch this process started; the engine owns the watches themselves.
 	const watched = new Set<string>()
-	// The pairs whose held conflicts were counted once (a pass this process saw counts them afterwards).
-	const seeded = new Set<string>()
+	// Per pair, the latest conflict count asked for: a count that resolves after a later one was asked for is stale.
+	const conflictReads = new Map<string, number>()
+	let conflictRead = 0
 	let defaults: string[] | null = null
+
+	// The conflicts the engine holds for the pair, counted from the baseline (an index seek, no network). Asked for
+	// once per pair, then only after what can change it: a pass that may have recorded one, or a resolution.
+	async function countConflicts(id: bigint): Promise<void> {
+		const key = id.toString()
+		const read = ++conflictRead
+
+		conflictReads.set(key, read)
+
+		try {
+			const { total } = await engine.listConflicts(id, 0n, 0n)
+
+			if (conflictReads.get(key) === read) {
+				feed.conflicts(key, Number(total))
+			}
+		} catch (error) {
+			const failure = classify(sdk, error)
+
+			ctx.log.warn(`sync: conflicts not counted: ${failure === "unauthenticated" ? failure : failure.code}`)
+		}
+	}
 
 	async function refreshPairs(): Promise<SyncPairInfo[]> {
 		const infos = await engine.listPairs()
 
 		feed.setPairs(infos)
-
-		const fresh = infos.filter(info => !seeded.has(info.id.toString()))
-
-		for (const info of fresh) {
-			seeded.add(info.id.toString())
-		}
-
-		// The count only; read from the baseline, no network.
-		await Promise.all(
-			fresh.map(async info => {
-				try {
-					feed.seedConflicts(info.id.toString(), Number((await engine.listConflicts(info.id, 0n, 0n)).total))
-				} catch (error) {
-					const failure = classify(sdk, error)
-
-					ctx.log.warn(`sync: conflicts not counted: ${failure === "unauthenticated" ? failure : failure.code}`)
-				}
-			})
-		)
+		await Promise.all(infos.filter(info => !conflictReads.has(info.id.toString())).map(info => countConflicts(info.id)))
 
 		return infos
+	}
+
+	async function restoreGuard(pairId: bigint, report: SyncPassReport | null): Promise<void> {
+		const key = pairId.toString()
+
+		if (report === null || !settled(report) || !isMigratedGuard(feed.pair(key)?.deleteGuard)) {
+			return
+		}
+
+		const info = (await refreshPairs()).find(entry => entry.id === pairId)
+
+		if (info?.firstPassCompleted === true && isMigratedGuard(info.deleteGuard)) {
+			await engine.setDeleteGuard(pairId, DEFAULT_GUARD.floor, DEFAULT_GUARD.ratio)
+			await refreshPairs()
+			ctx.log.info(`sync: pair ${key} synced cleanly; its deletions are guarded as usual again`)
+		}
 	}
 
 	function isStale(error: unknown): boolean {
@@ -166,7 +187,7 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			await engine.removePair(id)
 			watched.delete(pairId)
-			seeded.delete(pairId)
+			conflictReads.delete(pairId)
 			ctx.convergence.forget(info.remoteRoot)
 
 			return changed()
@@ -263,8 +284,9 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			return { total: Number(page.total), entries: page.conflicts.map(conflict => toConflict(sdk, conflict)) }
 		},
 		resolveConflict: async ({ pairId, relPath, resolution }) => {
+			const { id } = held(pairId)
 			const kept = await engine.resolveConflict(
-				held(pairId).id,
+				id,
 				relPath,
 				resolution === "keepLocal"
 					? sdk.ConflictResolution.KeepLocal
@@ -272,6 +294,9 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 						? sdk.ConflictResolution.KeepRemote
 						: sdk.ConflictResolution.KeepBoth
 			)
+
+			// The resolution re-anchors the row at once, so the count drops now, not at the next pass.
+			await countConflicts(id)
 
 			return kept === undefined ? null : clip(kept)
 		},
@@ -380,20 +405,10 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		watchEnded: pairId => {
 			watched.delete(pairId.toString())
 		},
+		// A pass records every conflict it reports, held ones again included, so one that reported none recorded none. A
+		// failed pass has no report to tell.
 		passEnded: async (pairId, report) => {
-			const key = pairId.toString()
-
-			if (report === null || !settled(report) || !isMigratedGuard(feed.pair(key)?.deleteGuard)) {
-				return
-			}
-
-			const info = (await refreshPairs()).find(entry => entry.id === pairId)
-
-			if (info?.firstPassCompleted === true && isMigratedGuard(info.deleteGuard)) {
-				await engine.setDeleteGuard(pairId, DEFAULT_GUARD.floor, DEFAULT_GUARD.ratio)
-				await refreshPairs()
-				ctx.log.info(`sync: pair ${key} synced cleanly; its deletions are guarded as usual again`)
-			}
+			await Promise.all([report === null || report.conflictsTotal > 0n ? countConflicts(pairId) : null, restoreGuard(pairId, report)])
 		}
 	}
 }
