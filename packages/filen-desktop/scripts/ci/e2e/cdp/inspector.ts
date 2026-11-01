@@ -11,8 +11,9 @@ export interface CdpTarget {
 
 export interface Cdp {
 	send(method: string, params?: Record<string, unknown>): Promise<unknown>
-	// Runtime.evaluate by value, promises awaited; an exception in the target rejects with its description.
-	evaluate(expression: string): Promise<unknown>
+	// Runtime.evaluate by value, promises awaited unless `awaitPromise` is false (a synchronous read never depends on a
+	// promise the target may collect); an exception in the target rejects with its description.
+	evaluate(expression: string, options?: { awaitPromise?: boolean }): Promise<unknown>
 	// Resolves with the params of the next `method` event (Debugger.paused, say), or rejects after `timeoutMs`.
 	nextEvent(method: string, timeoutMs: number): Promise<unknown>
 	close(): void
@@ -108,8 +109,12 @@ export async function connectCdp(url: string): Promise<Cdp> {
 
 	return {
 		send,
-		async evaluate(expression) {
-			const result = (await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })) as {
+		async evaluate(expression, options = {}) {
+			const result = (await send("Runtime.evaluate", {
+				expression,
+				returnByValue: true,
+				awaitPromise: options.awaitPromise ?? true
+			})) as {
 				result?: { value?: unknown }
 				exceptionDetails?: { text?: string; exception?: { description?: string } }
 			}

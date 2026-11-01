@@ -257,11 +257,21 @@ export async function legacySyncHold(): Promise<SyncHold> {
 				await cdp.send("Debugger.setSkipAllPauses", { skip: true })
 				await cdp.send("Debugger.resume")
 
-				return await waitFor("the old sync worker to be held", INSPECTOR_TIMEOUT_MS, async () => {
-					const state = (await cdp.evaluate("globalThis.__e2eSyncHold")) as { patched?: boolean; dropped?: string[] } | undefined
+				// A synchronous read of the hold's flag, polled; a read that meets the app mid-start is asked again.
+				return await waitFor(
+					"the old sync worker to be held",
+					INSPECTOR_TIMEOUT_MS,
+					async () => {
+						const read = await cdp
+							.evaluate("JSON.stringify(globalThis.__e2eSyncHold ?? null)", { awaitPromise: false })
+							.catch(() => null)
+						const state =
+							typeof read === "string" ? (JSON.parse(read) as { patched?: boolean; dropped?: string[] } | null) : null
 
-					return state?.patched === true ? (state.dropped ?? []) : null
-				})
+						return state?.patched === true ? (state.dropped ?? []) : null
+					},
+					250
+				)
 			} finally {
 				// Detached, so nothing holds the process at its exit for the update.
 				cdp.close()
