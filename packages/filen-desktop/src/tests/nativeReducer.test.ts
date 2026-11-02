@@ -306,6 +306,21 @@ describe("reduceEvents", () => {
 		expect(of("aggregate")).toEqual([])
 	})
 
+	it("a first pass after opening that cannot reach the server is offline, not attention", async () => {
+		const { runtime, of } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([
+			passEvent({ tag: "PassStarted", inner: { mode: fakeSdk.SyncMode.TwoWay } }),
+			passEvent({ tag: "PassFailed", inner: { error: "registering sync root", kind: fakeSdk.ErrorKind.Reqwest } })
+		])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "offline", syncing: false }] })
+		expect(of("aggregate")).toEqual([])
+	})
+
 	it("shows why a pass held its work back, an unreachable server without asking for attention", async () => {
 		const { runtime, of, onAuthFailed, onPassEnded } = feed()
 		const completed = (halted: number | undefined) =>
