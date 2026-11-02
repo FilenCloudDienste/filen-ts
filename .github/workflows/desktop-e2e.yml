@@ -141,16 +141,22 @@ on:
 permissions:
   contents: read
 
-# Routine runs (nightly, by hand) never overlap: they share the account and its login budget. A release (called from
-# another workflow, whose name github.workflow then is) has its own group, so it never waits behind a routine run.
+# A group keeps one pending run and a newer one replaces it, so no run shares a group it could be replaced in: the
+# nightly has its own (one a day), every dispatch its own run's, and a release (called from another workflow, whose
+# name github.workflow then is) its own. Runs may overlap; the login budget (90 an hour, a run costing at most 11) is
+# kept by the plan job, which refuses a dispatch while MAX_OTHER_RUNS others are active (never the nightly).
 concurrency:
-  group: desktop-e2e-${{ github.workflow == 'Desktop E2E' && 'routine' || 'release' }}
+  group: desktop-e2e-${{ github.workflow != 'Desktop E2E' && 'release' || github.event_name == 'schedule' && 'nightly' || format('dispatch-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Reading this workflow's other runs (the login budget guard).
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -185,6 +191,21 @@ jobs:
           DEPTH: ${{ inputs.depth }}
           SPIKE: ${{ inputs.spike }}
         run: node scripts/ci/e2ePlan.ts
+      # Worst case with MAX_OTHER_RUNS others: the nightly, three dispatches and a release at 11 logins each, 55 an hour,
+      # under the account's 90. A scheduled run is never refused; a release is not counted here.
+      - name: Keep overlapping runs within the login budget
+        if: steps.plan.outputs.session == 'true' && github.workflow == 'Desktop E2E' && github.event_name != 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_OTHER_RUNS: 3
+        run: |
+          active="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow desktop-e2e.yml --limit 50 --json databaseId,status \
+            --jq "[.[] | select(.status != \"completed\" and .databaseId != ${GITHUB_RUN_ID})] | length")"
+          echo "other active Desktop E2E runs: ${active}"
+          if [ "${active}" -ge "${MAX_OTHER_RUNS}" ]; then
+            echo "::error::${active} other Desktop E2E runs are active; dispatch again once one finishes (the account allows 90 logins an hour)"
+            exit 1
+          fi
 
   # The run's one harness sign-in (sdk-rs). It hands the session on sealed under a key from the account password, as a
   # file in a one-day artifact that the sweep deletes: never as a job output or an environment variable, which GitHub
