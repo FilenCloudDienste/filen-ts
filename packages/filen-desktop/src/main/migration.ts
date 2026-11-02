@@ -289,6 +289,10 @@ export interface Migration {
 	start(): Promise<MigrationResult>
 	// A session the page uses: resumed and confirmed by an authed request, or newly stored (a sign-in). Never rejects.
 	sessionConfirmed(sessionBlob: string | null): Promise<void>
+	// A sign-out: an import not finished yet ends, so nothing is read from the old client again, whoever signs in next
+	// (a rerun would import its session, or its stash read anew). Its secrets are still wiped once the wait ran out, and
+	// its rclone caches stay with its account. Rejects when the marker cannot be read or written.
+	signedOut(): Promise<void>
 }
 
 // Where a migration failure happened; logged with the cause as "<step>: <cause>".
@@ -611,6 +615,29 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 			return result
 		},
+		signedOut: () =>
+			serial(async () => {
+				const current = marker ?? parseMarker((await step("marker read", () => deps.marker.read()))?.toString("utf8") ?? null)
+
+				if (current === null) {
+					// A launch that deferred (a locked keychain) left no marker; with nothing to import there is nothing to end.
+					if (!(await step("profile probe", () => deps.legacyProfile()))) {
+						return
+					}
+
+					await save({ ...fresh("abandoned"), startedAt: deps.now() })
+				} else if (current.stage !== "started") {
+					return
+				} else if (current.volatileStash) {
+					// A read worked (its stash lived in memory only): imported, for the account it read.
+					await save({ ...current, stage: "imported", volatileStash: false, importedAt: deps.now() })
+				} else {
+					await save({ ...current, stage: "abandoned", startedAt: current.startedAt ?? deps.now() })
+				}
+
+				await removeRcloneConfig()
+				deps.info(`migration: ended by a sign-out (${marker?.stage ?? "none"})`)
+			}),
 		sessionConfirmed: async sessionBlob => {
 			if (marker === null || !verifiedBy(marker, sessionBlob)) {
 				return
@@ -653,6 +680,8 @@ export interface StashStore {
 	pending(userId: string, feature: LegacyFeature): Promise<unknown>
 	// The user's part of the feature was applied: rewritten without it, deleted once empty.
 	consume(userId: string, feature: LegacyFeature): Promise<void>
+	// A sign-out: the stash goes, in memory too.
+	discard(): Promise<void>
 }
 
 // The encrypted stash, decrypted once and served from memory. A stash that cannot be decrypted now (a locked keychain)
@@ -732,6 +761,11 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 				if (stash !== null) {
 					await store(withoutFeature(stash, userId, feature))
 				}
+			}),
+		discard: () =>
+			serial(async () => {
+				cached = null
+				await file.remove()
 			})
 	}
 }

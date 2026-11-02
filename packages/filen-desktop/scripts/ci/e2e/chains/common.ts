@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto"
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
@@ -12,6 +13,7 @@ import type {
 } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../../support.ts"
+import { PROFILE_ENTRIES } from "../../../../src/main/signOut.ts"
 import type { Target } from "../../targets.ts"
 import { APP_ORIGIN, desktop, desktopCall, signOut } from "../app.ts"
 import { listTargets } from "../cdp/inspector.ts"
@@ -22,7 +24,7 @@ import { exitWithin, launchDebuggable, type Launched } from "../launch.ts"
 import { type DesktopOs, osFor } from "../os.ts"
 import { redactor } from "../redact.ts"
 import { type Credentials, harnessRemote, type HarnessRemote, mask, secretsOf, takeCredentials } from "../session.ts"
-import { localSnapshot, type Snapshot } from "../snapshot.ts"
+import { filesHolding, localSnapshot, type Snapshot } from "../snapshot.ts"
 import { runUpdate, START_TIMEOUT_MS, tail, type UpdateHooks, type UpdateOptions } from "../update.ts"
 
 // What the deep chains share: the account (credentials, the handed session, the redacted findings), the run's local and
@@ -36,8 +38,21 @@ export const LIVE_TIMEOUT_MS = 2 * 60 * 1000
 export const EXIT_TIMEOUT_MS = 60_000
 const STAGGER_MAX_S = 300
 // What a sign-out deletes and logs (src/main/signOut.ts), the drive idle and the native host running.
-const SIGN_OUT_FILES = ["lock.vault", "signOut.pending"]
-const SIGN_OUT_LOG = ["sign-out: sync data deleted", "sign-out: network drive data deleted", "sign-out: app lock removed"]
+const SIGN_OUT_FILES = ["lock.vault", "migration.stash"]
+const PROFILE_SENTINEL_KEY = "filen-e2e-profile-sentinel"
+
+// What the chain knows before its sign-out: the launch's first main.log line, and a value the page stored then.
+export interface SignOutWitness {
+	startLine: string
+	sentinel: string
+}
+
+// An entry's identity, to tell it from one created anew.
+function identity(file: string): { ino: number; birthtimeMs: number } | null {
+	const stat = statSync(file, { throwIfNoEntry: false })
+
+	return stat === undefined ? null : { ino: stat.ino, birthtimeMs: stat.birthtimeMs }
+}
 // How long a launch may show no page before it counts as started hidden (startMinimized) and a second instance shows it.
 const HIDDEN_PROBE_MS = 30_000
 
@@ -223,9 +238,14 @@ export interface Chain {
 	quit(what: string): Promise<void>
 	// A step that leaves a session behind on failure signs out through the page first.
 	signedOutOnFailure(step: () => Promise<void>): Promise<void>
-	// After a sign-out with the drive idle and the host running: the user's sync and drive data, the PIN record and the
-	// wipe marker gone (src/main/signOut.ts), each step logged.
-	signOutWiped(): Promise<string>
+	// Before the sign-out, signed in: main.log as it is (the sign-out deletes it) and the witness.
+	beforeSignOut(): Promise<SignOutWitness>
+	// After a sign-out with the drive idle and the host running (src/main/signOut.ts): the user's sync and drive data,
+	// the stash, the PIN record and the logs gone, and the marker left for the browser profile.
+	signOutWiped(witness: SignOutWitness): Promise<string>
+	// With the app quit after its sign-out: one launch, which deletes the browser profile before ready, to its sign-in
+	// screen; none of the profile's entries is the old one and no file holds the witness's value or `oldValues`.
+	profileWipedOnLaunch(witness: SignOutWitness, oldValues?: readonly string[]): Promise<string>
 	// Deep jobs sign in some seconds apart (the plan's per-entry offset); logins are rate-limited per account.
 	stagger(): Promise<void>
 	// The local snapshot of a pair root, the engine's bin left out.
@@ -370,31 +390,86 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			}
 		},
 
-		async signOutWiped() {
+		async beforeSignOut() {
+			const log = tail(userData("logs", "main.log"), 100_000)
+
+			findings.attach(`${name}-main-before-sign-out.log`, log)
+
+			const startLine =
+				log
+					.split("\n")
+					.findLast(line => / starting \(Electron /.test(line))
+					?.trim() ?? fail("main.log has no starting line before the sign-out")
+			const sentinel = randomBytes(16).toString("hex")
+
+			await chain.page().evaluate(([key, value]) => localStorage.setItem(key, value), [PROFILE_SENTINEL_KEY, sentinel] as const)
+
+			return { startLine, sentinel }
+		},
+
+		async signOutWiped(witness) {
 			const userDirs = (root: string) =>
 				existsSync(userData(root))
 					? readdirSync(userData(root), { withFileTypes: true })
 							.filter(entry => entry.isDirectory())
 							.map(entry => `${root}/${entry.name}`)
 					: []
+			// The logs directory goes last; the file log may start a new main.log after it, never with this launch's start.
+			const oldLog = () => existsSync(userData("logs")) && tail(userData("logs", "main.log"), 100_000).includes(witness.startLine)
 			const left = () => [
 				...userDirs("sync-engine"),
 				...userDirs("mounts"),
-				...SIGN_OUT_FILES.filter(file => existsSync(userData(file)))
+				...SIGN_OUT_FILES.filter(file => existsSync(userData(file))),
+				...(oldLog() ? ["logs (this launch's main.log)"] : [])
 			]
 
 			await waitFor("the sign-out to delete the user's data", SETUP_TIMEOUT_MS, () => (left().length === 0 ? true : null)).catch(
 				(error: unknown) => fail(`${errorMessage(error)}; left: ${left().join(", ")}`)
 			)
 
-			const log = tail(userData("logs", "main.log"), 4000)
-			const missing = SIGN_OUT_LOG.filter(line => !log.includes(line))
+			const marker = readJson(userData("signOut.pending"))
 
-			if (missing.length > 0) {
-				fail(`main.log lacks: ${missing.join("; ")}`)
+			if (typeof marker !== "object" || marker === null || !("profile" in marker) || marker.profile !== true) {
+				fail(`signOut.pending does not list the browser profile: ${json(marker)}`)
 			}
 
-			return "sync-engine and mounts hold no user directory; lock.vault and signOut.pending gone"
+			return "sync-engine and mounts hold no user directory; lock.vault, migration.stash and the logs gone; signOut.pending lists the profile"
+		},
+
+		async profileWipedOnLaunch(witness, oldValues = []) {
+			const before = new Map(PROFILE_ENTRIES.map(entry => [entry, identity(userData(entry))]))
+			const launchedAt = Date.now()
+
+			await chain.connect()
+			await chain.page().getByText("Sign in to Filen").waitFor({ state: "visible", timeout: START_TIMEOUT_MS })
+			await waitFor("signOut.pending to be removed", SETUP_TIMEOUT_MS, () => (existsSync(userData("signOut.pending")) ? null : true))
+
+			if (!tail(userData("logs", "main.log"), 4000).includes("sign-out: browser profile deleted")) {
+				fail("main.log does not log the browser profile's deletion")
+			}
+
+			const kept = [...before].filter(([entry, old]) => {
+				const now = identity(userData(entry))
+
+				return old !== null && now !== null && now.ino === old.ino && now.birthtimeMs <= launchedAt
+			})
+
+			if (kept.length > 0) {
+				fail(`not deleted: ${kept.map(([entry]) => entry).join(", ")}`)
+			}
+
+			const held = PROFILE_ENTRIES.flatMap(entry =>
+				filesHolding(userData(entry), [witness.sentinel, ...oldValues]).map(file => path.join(entry, file))
+			)
+			const stored = await chain.page().evaluate(key => localStorage.getItem(key), PROFILE_SENTINEL_KEY)
+
+			if (held.length > 0 || stored !== null) {
+				fail(`old values left: ${[...held, ...(stored !== null ? ["localStorage"] : [])].join(", ")}`)
+			}
+
+			const existed = [...before].filter(([, old]) => old !== null).length
+
+			return `signOut.pending gone; ${String(existed)} profile entries deleted (recreated ones are new); no old value left`
 		},
 
 		async stagger() {

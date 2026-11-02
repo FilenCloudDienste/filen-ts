@@ -658,6 +658,87 @@ describe("createMigration", () => {
 	})
 })
 
+describe("a sign-out", () => {
+	// The next launch after the sign-out: nothing is read from the old client, whoever is signed in.
+	async function nextLaunch(stored: MigrationMarker | null, vault: SessionRead = { status: "absent" }) {
+		const run = setup({ marker: stored ?? undefined, vault })
+
+		await run.migration.start()
+		await settle()
+
+		expect(run.deps.readLegacy).not.toHaveBeenCalled()
+		expect(run.deps.writeStash).not.toHaveBeenCalled()
+		expect(run.deps.vault.set).not.toHaveBeenCalled()
+
+		return run
+	}
+
+	it("ends an import whose stash lived in memory as imported, for the account it read", async () => {
+		const first = setup()
+
+		first.deps.writeStash.mockResolvedValue(false)
+		await first.migration.start()
+		expect(first.stored()).toMatchObject({ stage: "started", volatileStash: true, stashOnly: true })
+
+		first.state.now = 5000
+		await first.migration.signedOut()
+
+		const ended = first.stored()
+
+		expect(ended).toMatchObject({ stage: "imported", volatileStash: false, userId: 123456, importedAt: 5000 })
+		// The old rclone caches still belong to the account that wrote them.
+		expect(legacyOwner(ended)).toBe("123456")
+		expect(first.deps.removeRcloneConfig).toHaveBeenCalled()
+
+		await nextLaunch(ended, { status: "present", blob: SESSION_OF("777") })
+	})
+
+	it("ends an attempt that never read anything as abandoned, which a rerun would have imported a session from", async () => {
+		const first = setup({ marker: marker({ stage: "started", userId: null, importedAt: null, startedAt: 100 }) })
+
+		await first.migration.signedOut()
+		expect(first.stored()).toMatchObject({ stage: "abandoned", startedAt: 100 })
+
+		const started = setup({ marker: marker({ stage: "started", userId: null, importedAt: null, startedAt: null }), now: 7000 })
+
+		await started.migration.signedOut()
+		expect(started.stored()).toMatchObject({ stage: "abandoned", startedAt: 7000 })
+
+		await nextLaunch(first.stored())
+	})
+
+	it("ends an import a locked keychain deferred, and leaves a fresh install alone", async () => {
+		const deferred = setup({ now: 3000 })
+
+		await deferred.migration.signedOut()
+		expect(deferred.stored()).toMatchObject({ stage: "abandoned", startedAt: 3000 })
+		await nextLaunch(deferred.stored())
+
+		const fresh = setup({ legacyProfile: false })
+
+		await fresh.migration.signedOut()
+		expect(fresh.stored()).toBeNull()
+	})
+
+	it("leaves a finished or waiting import as it is", async () => {
+		for (const stage of ["imported", "verified", "abandoned", "skipped"] as const) {
+			const run = setup({ marker: marker({ stage }) })
+			const before = run.markerFile.text()
+
+			await run.migration.signedOut()
+			expect(run.markerFile.text()).toBe(before)
+		}
+	})
+
+	it("rejects when the marker cannot be written, so the sign-out tries again", async () => {
+		const run = setup({ marker: marker({ stage: "started", volatileStash: true }) })
+
+		vi.spyOn(run.deps.marker, "write").mockRejectedValueOnce(Object.assign(new Error("full"), { code: "ENOSPC" }))
+		await expect(run.migration.signedOut()).rejects.toThrow("marker write: ENOSPC")
+		expect(run.stored()).toMatchObject({ stage: "started" })
+	})
+})
+
 describe("failure logging", () => {
 	// safeStorage's rejection: a plain Error whose message must never reach the log.
 	const safeStorageError = () => new Error("Error while encrypting the text provided to safeStorage.encryptStringAsync.")
@@ -1058,6 +1139,23 @@ describe("stash store", () => {
 		expect(await store.pending("1001", "sync")).toBeUndefined()
 		locked = false
 		expect(await store.pending("1001", "sync")).toEqual(OLD_SYNC)
+	})
+
+	it("discards the stash on a sign-out, in memory too, a volatile one included", async () => {
+		const file = memoryFile(`enc:${JSON.stringify(STASH)}`)
+		const store = createStashStore(file, () => Promise.resolve(fakeCipher()), vi.fn())
+
+		expect(await store.pending("1001", "sync")).toEqual(OLD_SYNC)
+		await store.discard()
+		expect(file.text()).toBeNull()
+		expect(await store.pending("1001", "sync")).toBeUndefined()
+		expect(await store.pending("1002", "sync")).toBeUndefined()
+
+		const volatile = createStashStore(memoryFile(), () => Promise.resolve(null), vi.fn())
+
+		await volatile.write(JSON.stringify(STASH))
+		await volatile.discard()
+		expect(await volatile.pending("1001", "sync")).toBeUndefined()
 	})
 
 	it("withoutFeature keeps other users' and other features' parts", () => {

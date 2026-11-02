@@ -30,7 +30,19 @@ import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree }
 import { CHOOSER_BUDGET_MS } from "../os.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
 import { START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
-import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QUIET_MAX_MS, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
+import {
+	inventory,
+	json,
+	LIVE_TIMEOUT_MS,
+	newestWrite,
+	ok,
+	openChain,
+	quiet,
+	QUIET_MAX_MS,
+	readJson,
+	SETUP_TIMEOUT_MS,
+	type SignOutWitness
+} from "./common.ts"
 
 // Chain P at deep depth: N-1 on a clean machine is set up through its own page (the real sign-in form, the native
 // folder chooser), syncs three pairs, and is updated to N by its own updater. N must then hold everything: no
@@ -47,7 +59,8 @@ import { inventory, json, LIVE_TIMEOUT_MS, newestWrite, ok, openChain, quiet, QU
 //   P6  prefs kept                   prefs.get() as set on N-1
 //   P7  the page boots as served     crossOriginIsolated
 //   P8  sign-out wipes               session absent, session.vault gone, the drive unmounted; the user's sync and drive
-//                                    data, lock.vault and signOut.pending gone
+//                                    data, migration.stash, lock.vault and the logs gone; the next launch deletes the
+//                                    browser profile before ready (signOut.pending then gone)
 //   P9  uninstall                    the package gone, the user's pair directories intact
 //   P10 Filen in Finder (macOS)      on N-1 before the PIN: supported, the domain registered (userEnabled reported:
 //                                    a person switches it on), an off/on round trip; left off
@@ -362,6 +375,10 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 	}
 
 	const verify = async (): Promise<void> => {
+		// Set right before the sign-out, which the steps after it need.
+		let witness: SignOutWitness | undefined
+		const signedOutWith = () => witness ?? fail("no sign-out witness")
+
 		const relaunchedAt = Math.min(...(await Promise.all(target.mainProcesses().map(entry => chain.os.processStartMs(entry.pid)))))
 		const pairs = state.pairs ?? fail("no pairs were set up")
 
@@ -583,6 +600,8 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				return json(prefs)
 			})
 
+			witness = await chain.beforeSignOut()
+
 			await findings.must("P8 sign out through the account menu", async () => {
 				const result = await signOut(page(), findings, credentials.email, artifacts, "previous")
 
@@ -600,7 +619,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				(await chain.os.driveMounted(state.drive ?? fail("no drive"))) === null ? true : null
 			)
 
-			return `session.vault gone; nothing mounted; ${await chain.signOutWiped()}`
+			return `session.vault gone; nothing mounted; ${await chain.signOutWiped(signedOutWith())}`
 		})
 		findings.info(
 			"secret store items of Filen after the sign-out",
@@ -616,6 +635,14 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 		await findings.must("N quits gracefully", async () => {
 			await quit("N")
+
+			return "exit code 0"
+		})
+		await findings.check("P8 the next launch deletes the browser profile before ready", () =>
+			chain.profileWipedOnLaunch(signedOutWith())
+		)
+		await findings.must("N quits gracefully after the profile wipe", async () => {
+			await quit("N-profile-wiped")
 
 			return "exit code 0"
 		})

@@ -41,7 +41,19 @@ import {
 } from "../legacyApp.ts"
 import { cloudSnapshot, diffSnapshots, filesHolding, localSnapshot, snapshotText, type Snapshot, type SnapshotNode } from "../snapshot.ts"
 import { legacyLogOf, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
-import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openChain, quiet, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
+import {
+	BIN_DIR,
+	EXIT_TIMEOUT_MS,
+	inventory,
+	json,
+	LIVE_TIMEOUT_MS,
+	ok,
+	openChain,
+	quiet,
+	readJson,
+	SETUP_TIMEOUT_MS,
+	type SignOutWitness
+} from "./common.ts"
 
 // Chain L at deep depth: the real 3.0.53 is signed in through its own page and given what a user sets up (prefs, a PIN
 // with a lock timeout, the network drive, WebDAV and five sync pairs, one per mode, the dot-file and local-trash switches
@@ -73,8 +85,9 @@ import { BIN_DIR, EXIT_TIMEOUT_MS, inventory, json, LIVE_TIMEOUT_MS, ok, openCha
 //                                 the cloud edit replaced, under the day's bucket; neither ever in the cloud
 //   L13  the page as served       crossOriginIsolated
 //   L14  sync works afterwards    a new local file uploads
-//   L15  sign-out and uninstall   session and drive gone; the user's sync and drive data, lock.vault and signOut.pending
-//                                 gone; the user's directories intact
+//   L15  sign-out and uninstall   session and drive gone; the user's sync and drive data, migration.stash, lock.vault
+//                                 and the logs gone, an unfinished import ended; the next launch deletes the browser
+//                                 profile before ready; the user's directories intact
 //
 // The old app's tray and notifications are not observed. Linux deb and Windows NSIS so far; what differs per OS is behind
 // scripts/ci/e2e/os.ts.
@@ -504,6 +517,11 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 	}
 
 	const verify = async (): Promise<void> => {
+		// Set right before the sign-out, which the steps after it need.
+		let witness: SignOutWitness | undefined
+		let stageAtSignOut: string | undefined
+		const signedOutWith = () => witness ?? fail("no sign-out witness")
+
 		const relaunchedAt = Math.min(...(await Promise.all(target.mainProcesses().map(item => chain.os.processStartMs(item.pid)))))
 		const engine = () => {
 			const userId = marker() as { userId?: number } | null
@@ -1012,6 +1030,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				return `${name} uploaded`
 			})
 
+			witness = await chain.beforeSignOut()
+			stageAtSignOut = marker()?.stage
+
 			await findings.must("L15 sign out through the account menu", async () => {
 				const result = await signOut(page(), findings, credentials.email, artifacts, "legacy")
 
@@ -1027,7 +1048,15 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				(await chain.os.driveMounted(drive.root)) === null ? true : null
 			)
 
-			return `session.vault gone; nothing mounted; ${await chain.signOutWiped()}`
+			// A sign-out ends an import not finished yet (src/main/migration.ts signedOut); a finished one stays as it was.
+			const stage = marker()?.stage
+			const expected = stageAtSignOut === "started" ? ["imported", "abandoned"] : [stageAtSignOut]
+
+			if (!expected.includes(stage)) {
+				fail(`migration stage ${String(stage)} after the sign-out, ${String(stageAtSignOut)} before`)
+			}
+
+			return `session.vault gone; nothing mounted; migration ${String(stage)}; ${await chain.signOutWiped(signedOutWith())}`
 		})
 		findings.info(
 			"secret store items of Filen after the sign-out",
@@ -1043,6 +1072,14 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 		await findings.must("N quits", async () => {
 			await quitN("N")
+
+			return "quit"
+		})
+		await findings.check("L15 the next launch deletes the browser profile before ready", () =>
+			chain.profileWipedOnLaunch(signedOutWith(), [LEGACY_ORIGIN])
+		)
+		await findings.must("N quits after the profile wipe", async () => {
+			await quitN("N-profile-wiped")
 
 			return "quit"
 		})

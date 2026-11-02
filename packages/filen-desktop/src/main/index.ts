@@ -80,7 +80,7 @@ import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./p
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
-import { createSignOut, removeTree } from "./signOut.ts"
+import { createSignOut, deleteProfileStorage, type ProfileOutcome, removeTree, wipeProfileBeforeReady } from "./signOut.ts"
 import { parseSessionBlob } from "@filen/shared/session"
 import {
 	createSessionVault,
@@ -205,6 +205,7 @@ const syncEngineRoot = path.join(userDataPath, "sync-engine")
 // Mounts: config, credentials and certificates per user, beside the user's rclone cache.
 const mountsRoot = path.join(userDataPath, "mounts")
 const lockFilePath = path.join(userDataPath, "lock.vault")
+const signOutMarkerPath = path.join(userDataPath, "signOut.pending")
 
 // What a sign-out deletes (signOut.ts). Its steps run only once startup has finished.
 const signOutFlow = createSignOut({
@@ -228,18 +229,26 @@ const signOutFlow = createSignOut({
 				credentialStores.delete(userId)
 			}
 		},
+		discardStash: async () => {
+			await migration.signedOut()
+			await migrationStash.discard()
+		},
 		resetLock: async () => {
 			await (await appLockLoading).reset()
 			lockChanged()
-		}
+		},
+		clearLogs: () => fileLog.clear(removeTree)
 	},
 	syncRoot: syncEngineRoot,
 	mountsRoot,
 	lockFile: lockFilePath,
-	marker: atomicFile(path.join(userDataPath, "signOut.pending")),
+	marker: atomicFile(signOutMarkerPath),
 	remove: removeTree,
+	profile: () => profileWipe,
 	log: { info, warn }
 })
+// Set before ready, once this instance holds the single-instance lock; see wipeProfileBeforeReady.
+let profileWipe: ProfileOutcome = { result: "not-due" }
 
 // What a sign-out left is deleted once this instance holds the single-instance lock, before ready.
 const signOutResumed = Promise.withResolvers<void>()
@@ -1290,6 +1299,23 @@ if (!app.requestSingleInstanceLock()) {
 } else {
 	// The main module runs to its end before Electron creates the default session and emits ready, so nothing holds the
 	// profile's storage open yet. Synchronous, so it is done before that.
+	profileWipe = wipeProfileBeforeReady({
+		readMarker: () => {
+			try {
+				return readFileSync(signOutMarkerPath, "utf8")
+			} catch (error) {
+				if (errorCode(error) === "ENOENT") {
+					return null
+				}
+
+				throw error
+			}
+		},
+		sessionStored: () => existsSync(sessionVaultPath),
+		deleteProfile: () => {
+			deleteProfileStorage(userDataPath)
+		}
+	})
 	earlyPurge = purgeBeforeReady({
 		readMarker: () => {
 			try {
@@ -1670,6 +1696,17 @@ if (!app.requestSingleInstanceLock()) {
 				registerAppProtocol(SCHEME, webDist, parseHeaders(readFileSync(path.join(webDist, "_headers"), "utf8")))
 			} else {
 				registerDevProxy(SCHEME, webDevServer)
+			}
+
+			// The profile's files went before ready; Chromium's own removal catches what that list does not name.
+			if (profileWipe.result === "deleted") {
+				await Promise.all([
+					defaultSession.clearData(),
+					defaultSession.clearStorageData(),
+					defaultSession.clearCodeCaches({})
+				]).catch((error: unknown) => {
+					warn(`sign-out: browser data not cleared: ${errorCode(error)}`)
+				})
 			}
 
 			// Before the first window, so the page boots with the imported session, PIN and prefs.

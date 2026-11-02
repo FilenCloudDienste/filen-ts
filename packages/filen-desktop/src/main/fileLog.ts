@@ -18,6 +18,9 @@ export interface FileLog {
 	read(): Promise<string>
 	// Writes what is pending now, blocking: for the last lines before the process ends, which a batch would lose.
 	flushSync(): void
+	// Drops the lines not written yet and deletes the directory with `remove` (a sign-out); the next line starts a new
+	// file. Rejects when it could not be deleted.
+	clear(remove: (directory: string) => Promise<void>): Promise<void>
 }
 
 export function formatLogLine(at: Date, level: LogLevel, message: string): string {
@@ -155,6 +158,17 @@ export function createFileLog(directory: string, now: () => Date = () => new Dat
 
 			return (await readOptional(previous)) + (await readOptional(current))
 		},
-		flushSync
+		flushSync,
+		clear: remove => {
+			const cleared = tail.then(async () => {
+				pending = ""
+				size = null
+				await remove(directory)
+			})
+
+			tail = cleared.catch(() => undefined)
+
+			return cleared
+		}
 	}
 }

@@ -1,5 +1,5 @@
-import { readFileSync, statSync } from "node:fs"
-import { mkdtemp, readdir, rm, stat } from "node:fs/promises"
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -93,5 +93,31 @@ describe("createFileLog", () => {
 
 		await log.read()
 		expect((await stat(path.join(directory, "main.log"))).size).toBeLessThanOrEqual(LOG_FILE_MAX_BYTES)
+	})
+
+	it("clears the directory with the lines not written yet, and starts a new file after", async () => {
+		const logs = path.join(directory, "logs")
+		const log = createFileLog(logs, () => AT)
+
+		log.write("info", "before")
+		await log.read()
+		await writeFile(path.join(logs, "rclone.log"), "rclone\n")
+		log.write("info", "dropped")
+		await log.clear(target => rm(target, { recursive: true, force: true }))
+
+		expect(existsSync(logs)).toBe(false)
+
+		log.write("info", "after")
+		expect(await log.read()).toBe("[2026-10-26T12:00:00.000Z] INFO after\n")
+		expect(await readdir(logs)).toEqual(["main.log"])
+	})
+
+	it("rejects a clear that failed, and keeps logging", async () => {
+		const log = createFileLog(path.join(directory, "logs"), () => AT)
+
+		await expect(log.clear(() => Promise.reject(Object.assign(new Error("busy"), { code: "EBUSY" })))).rejects.toThrow("busy")
+
+		log.write("info", "still")
+		expect(await log.read()).toBe("[2026-10-26T12:00:00.000Z] INFO still\n")
 	})
 })
