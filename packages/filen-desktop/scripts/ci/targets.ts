@@ -161,7 +161,7 @@ function killAll(processes: AppProcess[]): void {
 	}
 }
 
-function detached(executable: string, args: readonly string[], env: NodeJS.ProcessEnv, output?: number): ChildProcess {
+export function detached(executable: string, args: readonly string[], env: NodeJS.ProcessEnv, output?: number): ChildProcess {
 	const child = spawn(executable, args, {
 		detached: true,
 		stdio: output === undefined ? "ignore" : ["ignore", output, output],

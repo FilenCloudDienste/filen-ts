@@ -10,8 +10,8 @@ import { appendFileSync, readFileSync } from "node:fs"
 //   SCENARIOS   comma-separated subset of previous,legacy (default both); LEGACY=false drops legacy too
 //   FORMATS     custom only: entries such as win-x64-nsis,linux-x64-deb (default all)
 //   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep makes every main format deep
-//   SPIKE       none | s1 | s7 | cloud: a dispatch-only spike instead of the update scenarios (cloud: the harness's cloud
-//               self-test, no app)
+//   SPIKE       none | s1 | s7 | cloud | offline: a dispatch-only spike instead of the update scenarios (cloud: the
+//               harness's cloud self-test, no app; offline: deep N-1 -> N with an offline/reconnect probe, signed in)
 //
 // Deep entries sign in: `session` tells the workflow to make the run's one harness sign-in, and each deep entry gets a
 // `stagger` (seconds) that spaces the UI sign-ins of parallel jobs.
@@ -20,7 +20,7 @@ import { appendFileSync, readFileSync } from "node:fs"
 
 export type Os = "windows" | "mac" | "linux"
 export type Profile = "release" | "nightly" | "custom"
-export type Spike = "s1" | "s7" | "cloud"
+export type Spike = "s1" | "s7" | "cloud" | "offline"
 export type Depth = "auto" | "install" | "deep"
 
 interface Entry {
@@ -117,7 +117,8 @@ const entries: Entry[] = [
 const spikeEntries: Record<Spike, readonly string[]> = {
 	s1: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"],
 	s7: ["mac-arm64-dmg"],
-	cloud: []
+	cloud: [],
+	offline: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
 }
 
 // Deep depth per profile: release and nightly on every OS and architecture's main format (no rotation: arm64 every
@@ -185,10 +186,10 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	}
 
 	const spikeName = input.spike === "none" ? "" : input.spike
-	const spike = (["", "s1", "s7", "cloud"] as const).find(candidate => candidate === spikeName)
+	const spike = (["", "s1", "s7", "cloud", "offline"] as const).find(candidate => candidate === spikeName)
 
 	if (spike === undefined) {
-		invalid(`SPIKE must be none, s1, s7 or cloud (got "${input.spike}")`)
+		invalid(`SPIKE must be none, s1, s7, cloud or offline (got "${input.spike}")`)
 	}
 
 	const depth = (["auto", "install", "deep"] as const).find(candidate => candidate === (input.depth === "" ? "auto" : input.depth))
@@ -282,7 +283,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	let deepCount = 0
 	const tests = chosen.map((entry): TestEntry => {
 		const id = idOf(entry)
-		const deepPrevious = previous && wantsDeep(id) && ready(id, "previous")
+		// The offline spike is chain P at deep depth with its probe (one 4.x sign-in per entry).
+		const deepPrevious = spike === "offline" || (previous && wantsDeep(id) && ready(id, "previous"))
 		const deepLegacy = legacy && wantsDeep(id) && ready(id, "legacy")
 		const deep = deepPrevious || deepLegacy
 

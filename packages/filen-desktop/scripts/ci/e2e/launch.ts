@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process"
 import { closeSync, openSync } from "node:fs"
 import { freePort } from "../support.ts"
-import type { Target } from "../targets.ts"
+import { detached, type Target } from "../targets.ts"
 
 export interface Exit {
 	code: number | null
@@ -17,8 +17,9 @@ export interface Launched {
 
 // Starts the installed app with its renderer's debugging port on the loopback interface (and, with `inspect`, the main
 // process's Node inspector, which only 3.x honours). With `output`, Chromium's logging is on and the app's stdout and
-// stderr are appended to that file: where a CHECK, a V8 fatal error or a Node fatal error says why the app died.
-export async function launchDebuggable(target: Target, inspect = false, output?: string): Promise<Launched> {
+// stderr are appended to that file: where a CHECK, a V8 fatal error or a Node fatal error says why the app died. With
+// `via`, the executable is started through that command (a wrapper that runs it, such as sudo with another group).
+export async function launchDebuggable(target: Target, inspect = false, output?: string, via?: readonly string[]): Promise<Launched> {
 	const debugPort = await freePort()
 	const inspectPort = inspect ? await freePort() : null
 	const args = [
@@ -26,13 +27,16 @@ export async function launchDebuggable(target: Target, inspect = false, output?:
 		...(inspectPort === null ? [] : [`--inspect=127.0.0.1:${String(inspectPort)}`])
 	]
 
-	console.log(`launch ${target.executable} ${args.join(" ")}`)
+	console.log(`launch ${[...(via ?? []), target.executable, ...args].join(" ")}`)
 
 	const fd = output === undefined ? undefined : openSync(output, "a", 0o600)
 	let child: ChildProcess
 
 	try {
-		child = target.launch(fd === undefined ? { ...process.env } : { ...process.env, ELECTRON_ENABLE_LOGGING: "1" }, args, fd)
+		const env = fd === undefined ? { ...process.env } : { ...process.env, ELECTRON_ENABLE_LOGGING: "1" }
+		const [command, ...prefix] = via ?? []
+
+		child = command === undefined ? target.launch(env, args, fd) : detached(command, [...prefix, target.executable, ...args], env, fd)
 	} finally {
 		// The child holds its own copy.
 		if (fd !== undefined) {

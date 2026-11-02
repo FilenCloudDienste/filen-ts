@@ -41,6 +41,10 @@
 #        false without a person; reported as information). Signs in once with the e2e account and signs out after
 #   cloud  the harness's cloud side alone (no app, no build): the session hand-off, then a run directory created,
 #        listed, given a new file version, diffed and deleted (scripts/ci/e2eCloud.ts)
+#   offline  N-1 -> N signed in (deep), then N's network blocked for its own processes only (Linux: a group and an
+#        iptables owner rule; macOS: a group and a pf anchor; Windows: a firewall rule on Filen.exe): how long until
+#        its pairs are offline, an edit made meanwhile, how long until it uploads once the block is lifted. Reported as
+#        information (scripts/ci/e2e/spikes/offline.ts); one 4.x sign-in per entry
 #
 # Secrets: CSC_LINK, CSC_KEY_PASSWORD (Developer ID); AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (Windows
 # signing); FILEN_DESKTOP_E2E_TEST_EMAIL, FILEN_DESKTOP_E2E_TEST_PASSWORD (a dedicated account without 2FA; deep
@@ -128,6 +132,7 @@ on:
           - s1
           - s7
           - cloud
+          - offline
         default: none
   # Every night on main: every entry the release tests, on builds made here.
   schedule:
@@ -321,7 +326,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # N-1 (not for spikes); N too unless the caller built it. One job per OS builds both architectures, as the release
+  # N-1 (not for spikes but offline); N too unless the caller built it. One job per OS builds both architectures, as the release
   # does. Whether an OS's builds are signed comes from the plan.
   build:
     needs: [plan, web]
@@ -448,7 +453,7 @@ jobs:
           read -ra targets <<< "${NEXT_TARGETS}"
           pnpm run dist -- "${targets[@]}"
       - name: Build N-1
-        if: needs.plan.outputs.spike == ''
+        if: needs.plan.outputs.spike == '' || needs.plan.outputs.spike == 'offline'
         env:
           CSC_LINK: ${{ matrix.sign && secrets.CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ matrix.sign && secrets.CSC_KEY_PASSWORD || '' }}
@@ -477,7 +482,7 @@ jobs:
           retention-days: 3
           compression-level: 0
       - name: Upload N-1
-        if: needs.plan.outputs.spike == ''
+        if: needs.plan.outputs.spike == '' || needs.plan.outputs.spike == 'offline'
         uses: actions/upload-artifact@v6
         with:
           name: e2e-prev-${{ matrix.os }}
@@ -543,7 +548,7 @@ jobs:
           name: desktop-${{ matrix.os }}
           path: packages/filen-desktop/release
       - name: Download N-1
-        if: ${{ !matrix.spike }}
+        if: ${{ !matrix.spike || matrix.deepPrevious }}
         uses: actions/download-artifact@v7
         with:
           name: e2e-prev-${{ matrix.os }}
@@ -595,6 +600,7 @@ jobs:
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
           E2E_CHAIN_BUDGET_MINUTES: 85
+          E2E_OFFLINE_SPIKE: ${{ matrix.spike == 'offline' && '1' || '' }}
         run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)
         if: matrix.previous && matrix.format == 'rpm'
@@ -629,7 +635,7 @@ jobs:
       # The account's credentials reach spike s7 only, and only this step (deep entries: the step above).
       # Bounded so a hang never holds a runner for the job's whole budget.
       - name: Spike ${{ matrix.spike }}
-        if: matrix.spike
+        if: matrix.spike && !matrix.deep
         timeout-minutes: 20
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ matrix.spike == 's7' && secrets.FILEN_DESKTOP_E2E_TEST_EMAIL || '' }}

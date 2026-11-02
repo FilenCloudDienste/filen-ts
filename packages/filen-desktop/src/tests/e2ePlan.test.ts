@@ -76,6 +76,21 @@ describe("e2ePlan", () => {
 		expect(ids({ ...dispatch, profile: "nightly", spike: "s7" })).toEqual(["mac-arm64-dmg"])
 		expect(plan({ ...dispatch, signed: true, spike: "s7" }).builds).toEqual([{ os: "mac", runner: "macos-26", sign: true }])
 	})
+
+	it("plans the offline spike as chain P at deep depth on one entry per OS, signed in once each", () => {
+		const offline = plan({ ...dispatch, signed: true, spike: "offline" })
+
+		expect(offline.tests.map(entry => [`${entry.platform}-${entry.arch}-${entry.format}`, entry.stagger])).toEqual([
+			["win-x64-nsis", 0],
+			["mac-arm64-dmg", 20],
+			["linux-x64-deb", 40]
+		])
+		expect(offline.tests.every(entry => entry.spike === "offline" && entry.deep && entry.deepPrevious && !entry.deepLegacy)).toBe(true)
+		expect(offline.tests.every(entry => !entry.previous && !entry.legacy)).toBe(true)
+		// The harness sign-in, then 4.x on each OS.
+		expect(offline.session).toBe(true)
+		expect(1 + offline.tests.length).toBe(4)
+	})
 })
 
 describe("e2ePlan depth", () => {

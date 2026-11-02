@@ -26,6 +26,7 @@ import {
 	unlockThroughScreen
 } from "../app.ts"
 import { runDir } from "../cloud.ts"
+import { offlineBlockFor, runOfflineProbe } from "../spikes/offline.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
@@ -433,6 +434,14 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			return `session.vault ${String(state.vaultSize)} bytes, unchanged`
 		})
 
+		// The offline spike starts N from here through its scoped block's wrapper (spikes/offline.ts).
+		const offline = process.env["E2E_OFFLINE_SPIKE"] === "1" ? offlineBlockFor(target) : null
+
+		if (offline !== null) {
+			await findings.must("offline spike: prepared", () => offline.prepare())
+			chain.launchVia = offline.via
+		}
+
 		await findings.must("N quits gracefully and starts again with its debugging port", async () => {
 			await quit("N")
 			await connect()
@@ -599,6 +608,15 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 				return json(prefs)
 			})
+
+			if (offline !== null) {
+				await runOfflineProbe(chain, offline, {
+					pairs,
+					editPair: "e2e-twoway",
+					editCloudDir: `${cloudDir}/e2e-twoway`,
+					pin
+				})
+			}
 
 			witness = await chain.beforeSignOut()
 

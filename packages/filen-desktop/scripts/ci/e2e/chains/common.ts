@@ -223,6 +223,8 @@ export interface Chain {
 	// Chromium's logging and the app's stdout and stderr of every launch.
 	readonly appOutput: string
 	launched: Launched | null
+	// A command 4.x is started through on the next connect() (the offline spike's group), null for none.
+	launchVia: readonly string[] | null
 	renderer: Renderer | null
 	signedIn: boolean
 	// A value never to appear in a log or artifact from here on.
@@ -301,6 +303,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 		localDir,
 		appOutput,
 		launched: null,
+		launchVia: null,
 		renderer: null,
 		signedIn: false,
 		secret(value) {
@@ -317,7 +320,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 		async connect() {
 			mkdirSync(work, { recursive: true })
 
-			const launched = await launchDebuggable(target, false, appOutput)
+			const launched = await launchDebuggable(target, false, appOutput, chain.launchVia ?? undefined)
 
 			chain.launched = launched
 
