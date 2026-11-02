@@ -187,6 +187,33 @@ export function fileProviderUserEnabled(page: Page, timeoutMs: number): Promise<
 	return waitFor("macOS to report userEnabled for the domain", timeoutMs, async () => (await fileProviderState(page)).userEnabled, 2000)
 }
 
+// A held sync conflict resolved with Keep both as a user does: the rail's Computer group opened from the keyboard, its
+// Sync item, the pair in the sync sidebar, the Issues tab, the conflict row's Keep both (filen-web issuesTab.tsx). Done
+// once the row is gone (the page hides it when the resolution succeeded; a failure leaves it, with an error toast).
+export async function keepBothThroughIssues(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<void> {
+	const computer = page.locator('[aria-label^="Computer"]').first()
+
+	await computer.waitFor({ state: "visible", timeout: timeoutMs })
+	await computer.focus()
+	await page.keyboard.press("ArrowRight")
+	await page.getByRole("menuitem", { name: /^Sync/ }).click({ timeout: timeoutMs })
+	// The pair's row in the sync sidebar (its name, then its phase and directories).
+	await page.locator('a[href*="/sync/"]').filter({ hasText: pairName }).first().click({ timeout: timeoutMs })
+	await page.getByRole("link", { name: /^Issues/ }).click({ timeout: timeoutMs })
+
+	const row = page.locator('[data-slot="settings-row"]').filter({ has: page.locator(`[title="${relPath}"]`) })
+	const keepBoth = row.getByRole("button", { name: "Keep both", exact: true })
+
+	await keepBoth.waitFor({ state: "visible", timeout: timeoutMs })
+
+	if ((await keepBoth.count()) !== 1) {
+		fail(`${String(await keepBoth.count())} Keep both buttons for ${relPath}`)
+	}
+
+	await keepBoth.click({ timeout: timeoutMs })
+	await row.waitFor({ state: "detached", timeout: timeoutMs })
+}
+
 // The lock screen's PIN field (filen-web desktopLock.tsx), then its Unlock button.
 export async function unlockThroughScreen(page: Page, pin: string, timeoutMs: number): Promise<void> {
 	const field = page.getByLabel("PIN", { exact: true })

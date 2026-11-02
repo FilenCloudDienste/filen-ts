@@ -13,7 +13,16 @@ import type {
 } from "@filen/shared/desktop"
 import { LEGACY_VERSION } from "../../legacy.ts"
 import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
-import { desktop, MASTER_KEYS_REMINDER, putOffKeysReminder, sessionStatus, signOut, unlockThroughScreen } from "../app.ts"
+import {
+	desktop,
+	keepBothThroughIssues,
+	MASTER_KEYS_REMINDER,
+	pageText,
+	putOffKeysReminder,
+	sessionStatus,
+	signOut,
+	unlockThroughScreen
+} from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import {
 	LEGACY_CONFLICTS,
@@ -81,6 +90,9 @@ import {
 //                                 dialog over the page but the master-key reminder (put off)
 //   L10  only the edits           disk and cloud over N's first passes: identities unchanged except the expected deltas
 //                                 (LEGACY_DELTAS); exactly LEGACY_CONFLICTS held; N's activity and plans carry nothing else
+//   L11  a conflict resolved      the held conflict resolved through the Issues tab with Keep both: the overview counts
+//                                 none, the disk and the cloud hold the cloud's bytes at the path and the edit as the
+//                                 engine's copy (<stem>.old.<ext>), byte for byte; then nothing else transfers, plans empty
 //   L12  the bins                 each pair's bin holds exactly 3.x's local trash (moved there, content intact) and what
 //                                 the cloud edit replaced, under the day's bucket; neither ever in the cloud
 //   L13  the page as served       crossOriginIsolated
@@ -1015,8 +1027,71 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				return "purged; no secret in userData (the old logs are gone)"
 			})
 
-			await findings.check("steady state: the third launch transfers nothing; the conflicts still held", () =>
-				chain.quietActivity(pairIds, new Set(conflictActivity), conflictCounts)
+			// Keep both renames this device's copy aside (sdk-rs ConflictResolution::KeepBoth: `<stem>.old.<ext>`, `.old.N`
+			// on a collision), which uploads, and takes the cloud's bytes at the path.
+			const conflict = edits.local
+			let keptCopy: string | null = null
+
+			await findings.check("L11 the held conflict resolved through the Issues tab (Keep both)", async () => {
+				const id = pairIds.find(pair => pair.name === conflict.pair)?.id ?? fail(`no pair ${conflict.pair}`)
+				const cloudBytes =
+					state.cloud?.get(`${conflict.pair}/${conflict.path}`)?.sha256 ?? fail("no cloud baseline for the conflict")
+
+				await keepBothThroughIssues(page(), conflict.pair, conflict.path, SETUP_TIMEOUT_MS).catch(async (error: unknown) => {
+					findings.attach("legacy-issues-page.txt", await pageText(page(), 4000))
+
+					throw error
+				})
+				await waitFor("the overview to count no conflict", SETUP_TIMEOUT_MS, async () =>
+					(await chain.syncOverview()).pairs.find(pair => pair.id === id)?.issues.conflicts === 0 ? true : null
+				)
+
+				const dir = path.posix.dirname(conflict.path)
+				const ext = path.posix.extname(conflict.path)
+				const stem = `${path.posix.basename(conflict.path, ext)}.old`
+				// `<stem>.old<ext>` or `<stem>.old.<N><ext>`.
+				const aside = (name: string) =>
+					name.startsWith(stem) && name.endsWith(ext) && /^(\.\d+)?$/.test(name.slice(stem.length, name.length - ext.length))
+				const copy = await waitFor("this device's copy kept aside", SETUP_TIMEOUT_MS, () =>
+					readdirSync(path.join(rootOf(conflict.pair), ...dir.split("/"))).find(aside)
+				)
+
+				keptCopy = dir === "." ? copy : `${dir}/${copy}`
+
+				const kept = keptCopy
+				const sides = async (): Promise<string[]> => {
+					const local = await snapshotOf(conflict.pair)
+					const remote = await cloudSnapshot(cloud, `${cloudDir}/${conflict.pair}`, work)
+					const want: [string, string][] = [
+						[conflict.path, cloudBytes],
+						[kept, conflict.sha256]
+					]
+
+					return want.flatMap(([relPath, sha]) => [
+						...(local.get(relPath)?.sha256 === sha ? [] : [`disk ${relPath}`]),
+						...(remote?.get(relPath)?.sha256 === sha ? [] : [`cloud ${relPath}`])
+					])
+				}
+
+				await waitFor(
+					"both versions on disk and in the cloud",
+					LIVE_TIMEOUT_MS,
+					async () => ((await sides()).length === 0 ? true : null),
+					15_000
+				).catch(async (error: unknown) => fail(`${errorMessage(error)}; not as expected: ${(await sides()).join(", ")}`))
+
+				return `no conflict counted; ${conflict.path} holds the cloud's bytes and ${kept} the edit, on disk and in the cloud`
+			})
+
+			// The resolution's own transfers are the only new ones.
+			const resolution =
+				keptCopy === null ? [] : [`${conflict.pair}:uploaded:${String(keptCopy)}`, `${conflict.pair}:downloaded:${conflict.path}`]
+
+			await findings.check(
+				keptCopy === null
+					? "steady state: the third launch transfers nothing; the conflicts still held"
+					: "steady state: after the resolution nothing else transfers and no conflict is held",
+				() => chain.quietActivity(pairIds, new Set([...conflictActivity, ...resolution]), keptCopy === null ? conflictCounts : {})
 			)
 
 			await findings.check("L14 a live edit uploads", async () => {
