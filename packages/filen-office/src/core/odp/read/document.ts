@@ -56,6 +56,9 @@ export interface OdpOpenOptions {
 	// With adopt: refs at or below this number are never handed out (the previous reading's, which the session's
 	// history may still name); OdpParts.refsIssued() of that reading.
 	readonly refsAbove?: number
+	// With adopt: the deck's slides the saved file's pages are, in order (the order its save wrote; slides added,
+	// removed or moved since are the next save's). The deck's slides when absent.
+	readonly adoptOrder?: readonly SlideRef[]
 }
 
 export type OdpOpen = { readonly kind: "opened"; readonly deck: Deck; readonly parts: OdpParts } | Refused
@@ -318,13 +321,20 @@ export class OdpParts {
 	// A rebase's reading keeps the charts `from` translated whose object the saved file holds unchanged (same content.xml
 	// by CRC-32 and size): the pages the session parsed before the save are not read again, and their frames name them.
 	carryCharts(from: OdpParts): void {
+		// The translations by their object's content (CRC and size): a copy the save made of an object (a duplicated
+		// page's chart, emit/chart.ts copyObject) reads as its source did.
+		const byContent = new Map<string, XmlDocument>()
+		const contentKey = (entry: ZipEntry): string => `${String(entry.crc32)}:${String(entry.uncompressedSize)}`
+
 		for (const [key, document] of from.documents) {
-			if (this.documents.has(key) || !key.endsWith("/chart.xml")) continue
+			if (!key.endsWith("/chart.xml")) continue
 
 			const content = `${key.slice(0, key.length - "/chart.xml".length)}/content.xml`
 			const before = from.entries.get(content)
 			const after = this.entries.get(content)
 
+			if (before !== undefined) byContent.set(contentKey(before), document)
+			if (this.documents.has(key)) continue
 			if (
 				before !== undefined &&
 				after !== undefined &&
@@ -332,6 +342,17 @@ export class OdpParts {
 				before.uncompressedSize === after.uncompressedSize
 			)
 				this.documents.set(key, document)
+		}
+
+		if (byContent.size === 0) return
+
+		for (const [name, entry] of this.entries) {
+			if (!name.endsWith("/content.xml")) continue
+
+			const key = `${name.slice(0, name.length - "/content.xml".length)}/chart.xml`
+			const document = this.documents.has(key) ? undefined : byContent.get(contentKey(entry))
+
+			if (document !== undefined) this.documents.set(key, document)
 		}
 	}
 
@@ -510,7 +531,9 @@ export class OdpParts {
 
 				if (footer === undefined) continue
 
+				// The master's frame (ODF holds no per-page copy of it): no edit of the slide can change it.
 				footer.synthetic = true
+				footer.lock = "master"
 				shapes.push(footer)
 			}
 		}
@@ -578,20 +601,20 @@ export class OdpParts {
 		return this.refs.issued
 	}
 
-	adopt(target: Deck, refsAbove = 0): void {
+	adopt(target: Deck, refsAbove = 0, order: readonly SlideRef[] = target.slides): void {
 		const built = this.deck
 
 		// Never at or below the previous reading's refs.
 		while (this.refs.issued < refsAbove) this.refs.next()
 
-		if (built.slides.length !== target.slides.length || built.masters.length !== target.masters.length)
+		if (built.slides.length !== order.length || built.masters.length !== target.masters.length)
 			throw new PresentationError("stale", "the saved file's pages are not the deck's")
 
-		this.taken = new Set<SlideRef>([...target.nodes.keys(), ...target.slides, ...target.masters, ...target.layouts])
+		this.taken = new Set<SlideRef>([...target.nodes.keys(), ...target.slides, ...order, ...target.masters, ...target.layouts])
 
 		const map = new Map<SlideRef, SlideRef>()
 
-		built.slides.forEach((ref, index) => map.set(ref, target.slides[index] as SlideRef))
+		built.slides.forEach((ref, index) => map.set(ref, order[index] as SlideRef))
 		built.masters.forEach((ref, index) => map.set(ref, target.masters[index] as SlideRef))
 
 		for (const master of built.masters) {
@@ -1599,9 +1622,9 @@ export async function openOdp(source: ByteSource, options: OdpOpenOptions = {}):
 		)
 		parts.build(odf.facts.template, odf.facts.signed, odf.facts.macros)
 
-		if (options.adopt !== undefined) parts.adopt(options.adopt, options.refsAbove)
+		if (options.adopt !== undefined) parts.adopt(options.adopt, options.refsAbove, options.adoptOrder)
 
-		for (const [index, ref] of parts.deck.slides.entries()) {
+		for (const [index, ref] of (options.adoptOrder ?? parts.deck.slides).entries()) {
 			const name = parts.pageName(ref) ?? `page${String(index + 1)}`
 
 			if (!pages.has(name)) pages.set(name, ref)

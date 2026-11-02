@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { pdfName, type PdfDict, type PdfValue } from "./objects"
 
 // Gradients as axial (type 2) and radial (type 3) shadings (ISO 32000-1 §8.7.4.5.3-4) over a stitching
@@ -105,8 +106,11 @@ function stitched(stops: readonly Stop[], t0: number, t1: number, spread: "pad" 
 
 		if (functions.length > 0) bounds.push(k)
 
-		functions.push(...piece.functions)
-		bounds.push(...piece.bounds.map(bound => round(k + bound)))
+		appendAll(functions, piece.functions)
+		appendAll(
+			bounds,
+			piece.bounds.map(bound => round(k + bound))
+		)
 	}
 
 	const domain = [Math.floor(t0), Math.ceil(t1)]

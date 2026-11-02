@@ -18,6 +18,8 @@ import {
 	celllessSheet,
 	createSheetGrid,
 	editingChanged,
+	isMacPlatform,
+	shortcutOf,
 	useSheetGrid,
 	type SheetGridHandle,
 	type SheetGridSizes,
@@ -25,6 +27,7 @@ import {
 	type SheetShortcut
 } from "@filen/office/react/sheet"
 import { paneAfter } from "@/features/spreadsheet/components/sheetPanes"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import "@filen/office/css/sheet.css"
 import "@/features/spreadsheet/sheetTheme.css"
 import { Button } from "@/components/ui/button"
@@ -78,6 +81,17 @@ import { useSheetPrint } from "@/features/spreadsheet/print/useSheetPrint"
 import { commitForExport, liveConversion } from "@/features/spreadsheet/save/sheetConvert"
 import { resolveTheme, useTheme } from "@/providers/themeProvider"
 import { log } from "@/lib/log"
+
+// The view's shortcuts that act on the whole workbook, taken from anywhere in its layer too.
+const LAYER_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
+	"find",
+	"replace",
+	"findNext",
+	"findPrevious",
+	"print",
+	"newSheet"
+])
+const MAC = isMacPlatform()
 
 export interface SheetBodyProps {
 	handle: SheetHandle
@@ -535,6 +549,25 @@ export function SheetBody({
 			() => undefined
 		)
 	}
+
+	// The same keys pressed elsewhere in the view's layer (focus left on the preview overlay itself after a click, as
+	// Safari and macOS Firefox do): the workbook's shortcuts, and F6 into the panes. The cells' own stay theirs.
+	useEditorLayerKeys(containerRef, (event, root) => {
+		if (event.key === "F6" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+			const target = paneAfter(root, root, !event.shiftKey)
+
+			if (target !== null) {
+				event.preventDefault()
+				target.focus()
+			}
+
+			return
+		}
+
+		const shortcut = shortcutOf(event, MAC)
+
+		if (shortcut !== null && LAYER_SHORTCUTS.has(shortcut) && handleShortcut(shortcut)) event.preventDefault()
+	})
 
 	const ribbonActions: SheetRibbonActions = {
 		copy: cut => {

@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { nativeDeflate, nativeDeflateChunks } from "../docx/write/zip"
 import { memorySink, writeZip, type PartBytes, type ZipPlanItem } from "../opc/index"
 import type { DeflatedChunks, DeflatedPiece } from "../opc/zipWriter"
@@ -713,7 +714,7 @@ export class DocumentParts implements StoryContext {
 			if (entry.story.relationships.length > 0) partRelationships.set(name, entry.story.relationships)
 		}
 
-		relationships.push(...this.body.relationships)
+		appendAll(relationships, this.body.relationships)
 
 		const noteRelationships = (kind: NoteKind) => notesOf(kind).flatMap(note => note.story.relationships)
 

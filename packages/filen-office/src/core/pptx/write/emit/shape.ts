@@ -66,8 +66,10 @@ export interface EmitExtras {
 	readonly relationships?: Relationships
 	// The part `document` is, when it is not the pristine read's or the owner's (a fresh write's source part).
 	readonly documentPart?: string
-	// Markup an undo re-read after a save's rebase ("raw:N" parts), for shapes whose source is one.
+	// Markup an undo re-read after a save's rebase ("raw:N" parts), for shapes whose source is one, and that markup
+	// read again as the reader reads it (what a held shape is spliced against).
 	readonly rawDocument?: (name: string) => XmlDocument | undefined
+	readonly rawPristine?: (name: string) => Pristine | undefined
 }
 
 export type EmitContext = PptxEmitContext & EmitExtras
@@ -968,6 +970,16 @@ export function leadingSpace(context: EmitContext, node: number, out: Pieces): v
 // frame naming another chart than its source's is the chart family's to write).
 export function sameShape(a: ShapeNode, b: ShapeNode): boolean {
 	if (a.frame?.kind === "chart" && (b.frame?.kind !== "chart" || a.frame.part !== b.frame.part)) return false
+	// A diagram that names other parts (an edit holds new ones) is written anew; its drawing link is a cache.
+	if (
+		a.frame?.kind === "smartart" &&
+		(b.frame?.kind !== "smartart" ||
+			a.frame.data !== b.frame.data ||
+			a.frame.layout !== b.frame.layout ||
+			a.frame.style !== b.frame.style ||
+			a.frame.colors !== b.frame.colors)
+	)
+		return false
 	if (
 		!sameModel(
 			{ ...a, frame: undefined, media: undefined, lock: undefined, children: undefined },
@@ -989,8 +1001,9 @@ export function sameShape(a: ShapeNode, b: ShapeNode): boolean {
 	)
 }
 
-// A shape whose source is markup the session re-read (an undone delete after a save): written in model mode over that
-// document, its holes resolved there, and handed on as bytes.
+// A shape whose source is markup the session re-read (an undo after a save): spliced against that document as it
+// reads (whatever still reads as it was is copied as its bytes; model mode when it does not read), its holes resolved
+// there, and handed on as bytes.
 function rawShape(context: EmitContext, shape: ShapeNode): EmitResult {
 	const name = shape.src?.format === "pptx" ? shape.src.part : ""
 	const document = context.rawDocument?.(name)
@@ -1000,7 +1013,11 @@ function rawShape(context: EmitContext, shape: ShapeNode): EmitResult {
 		return refused("stale", `The source ${name} of shape ${String(shape.id)} cannot be copied into another part`)
 
 	const { pristine: _pristine, ...rest } = context
-	const inner: EmitContext = { ...rest, document, documentPart: name, mode: "model" }
+	const held = context.rawPristine?.(name)
+	const inner: EmitContext =
+		held === undefined
+			? { ...rest, document, documentPart: name, mode: "model" }
+			: { ...rest, document, documentPart: name, mode: "splice", pristine: held }
 	const request: EmitRequest = {
 		slide: context.pristine?.slide ?? NO_SLIDE,
 		shape,

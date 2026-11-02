@@ -37,6 +37,10 @@ export const previewPptxConvert = {
 	previewPptxConvertLossGeometry_one: "{{count}} shape outline, drawn as its nearest",
 	/** Converted copy — as previewPptxConvertLossGeometry_one, for several */
 	previewPptxConvertLossGeometry_other: "{{count}} shape outlines, drawn as their nearest",
+	/** Converted copy — kept differently: the outline level (depth in the outline) of a paragraph without a bullet, which the copy's format keeps only on bulleted paragraphs; written as the paragraph's indent */
+	previewPptxConvertLossOutlineLevel_one: "{{count}} paragraph outline level, written as its indent",
+	/** Converted copy — as previewPptxConvertLossOutlineLevel_one, for several */
+	previewPptxConvertLossOutlineLevel_other: "{{count}} paragraph outline levels, written as their indents",
 	/** Converted copy — kept differently: text settings (vertical text, line breaking, spacing, bullets, numbering) written in a nearer form */
 	previewPptxConvertLossText_one: "{{count}} text setting, written in the nearest form",
 	/** Converted copy — as previewPptxConvertLossText_one, for several */

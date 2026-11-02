@@ -1,3 +1,4 @@
+import { appendAll } from "../../../arrays"
 import type { AnimTarget, Behavior, Build, TimeCondition, TimeNode, TimingTree } from "../../../anim/model"
 import { isMediaBehavior } from "../../../anim/attributes"
 import { withoutTargets } from "../../../anim/prune"
@@ -221,7 +222,8 @@ function nodesOf(tree: TimingTree | undefined): Set<TimeNode> {
 
 	for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
 		out.add(node)
-		stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+		appendAll(stack, node.ctn.children)
+		appendAll(stack, node.ctn.subTnLst ?? [])
 	}
 
 	return out
@@ -533,6 +535,12 @@ function addEffect(deck: Deck, op: OpOf<"timing"> & { kind: "addEffect" }, conte
 
 	if (trigger !== undefined && "reason" in trigger) return trigger
 
+	// A master's field the slide shows (ODP) is not the slide's to animate: the file could not name it.
+	const animated = shapeOf(op.effect)
+	const owner = animated === undefined ? undefined : findShape(state.slide.shapes, animated)
+
+	if (owner?.lock === "master") return refused("locked", owner.lock)
+
 	const effect = placed(op.effect, state, context)
 	const sequence = sequenceFor(state.sequences, trigger)
 	const prior = state.slide.timing
@@ -643,7 +651,8 @@ function behaviorOf(node: TimeNode, id: number): Behavior | undefined {
 	for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
 		if (at.kind === "behavior" && at.ctn.id === id) return at.behavior
 
-		stack.push(...at.ctn.children, ...(at.ctn.subTnLst ?? []))
+		appendAll(stack, at.ctn.children)
+		appendAll(stack, at.ctn.subTnLst ?? [])
 	}
 
 	return undefined
@@ -787,7 +796,8 @@ function animatesParagraphs(tree: TimingTree | undefined, shape: number): boolea
 		if (node.kind === "behavior" && !isMediaBehavior(node.behavior) && paragraphTargetOn(node.behavior.common.target, shape))
 			return true
 
-		stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+		appendAll(stack, node.ctn.children)
+		appendAll(stack, node.ctn.subTnLst ?? [])
 	}
 
 	return false
@@ -877,7 +887,8 @@ function effectParagraph(effect: TimeNode, shape: number): number | undefined {
 			found = target.start
 		}
 
-		stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+		appendAll(stack, node.ctn.children)
+		appendAll(stack, node.ctn.subTnLst ?? [])
 	}
 
 	return found

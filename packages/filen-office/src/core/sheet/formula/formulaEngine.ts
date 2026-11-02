@@ -1,3 +1,4 @@
+import { appendAll, spliceAll } from "../../arrays"
 import { ISO_1900, type DateBase } from "../numfmt/date"
 import {
 	CellError,
@@ -651,7 +652,7 @@ export class FormulaEngine {
 			if (sheet !== undefined) sheets.push(sheet)
 		}
 
-		for (const inner of inputs.names) sheets.push(...this.namedWhole(inner, at, seen))
+		for (const inner of inputs.names) appendAll(sheets, this.namedWhole(inner, at, seen))
 
 		return sheets
 	}
@@ -873,11 +874,16 @@ export class FormulaEngine {
 
 			if (axis === "rows") {
 				if (count > 0 && span > 0)
-					values.splice(from, 0, ...Array.from({ length: span }, () => new Array<PluginScalar>(entry.size.cols).fill(EmptyValue)))
+					spliceAll(
+						values,
+						from,
+						0,
+						Array.from({ length: span }, () => new Array<PluginScalar>(entry.size.cols).fill(EmptyValue))
+					)
 				else if (span > 0) values.splice(from, span)
 			} else {
 				for (const line of values) {
-					if (count > 0 && span > 0) line.splice(from, 0, ...new Array<PluginScalar>(span).fill(EmptyValue))
+					if (count > 0 && span > 0) spliceAll(line, from, 0, new Array<PluginScalar>(span).fill(EmptyValue))
 					else if (span > 0) line.splice(from, span)
 				}
 			}
@@ -1659,7 +1665,7 @@ export class FormulaEngine {
 
 			for (const cell of cells) {
 				deferred.own.add(changeKey({ sheet: id, row: cell.row, col: cell.col }))
-				deferred.pending.push(...this.pending(sheet, cell))
+				appendAll(deferred.pending, this.pending(sheet, cell))
 				deferred.written.push(sheet, cell.row, cell.col)
 				this.noteTotal(id, cell.row, cell.col, cell.content instanceof HeldResult ? null : cell.content)
 			}
@@ -2231,7 +2237,7 @@ export class FormulaEngine {
 
 			if (cells !== undefined && next !== undefined) this.totals.set(next, cells)
 		})
-		this.sheetIds.splice(0, this.sheetIds.length, ...ids)
+		spliceAll(this.sheetIds, 0, this.sheetIds.length, ids)
 
 		for (const cell of cells)
 			this.noteTotal(ids[sheet] ?? 0, cell.row, cell.col, cell.content instanceof HeldResult ? null : cell.content)

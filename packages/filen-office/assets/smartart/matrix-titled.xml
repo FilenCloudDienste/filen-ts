@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutTitledMatrix
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:titled-matrix">
+	<dgm:title val="Titled matrix"/>
+	<dgm:desc val="A grid of two columns whose cells are a top-level item's sub-items, with the item itself as a title over the middle of the grid. Each further top-level item makes another titled grid."/>
+	<dgm:catLst>
+		<dgm:cat type="matrix" pri="200"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="4"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="5"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="90" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="91" srcId="1" destId="2" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="92" srcId="1" destId="3" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="93" srcId="1" destId="4" srcOrd="2" destOrd="0"/>
+				<dgm:cxn modelId="94" srcId="1" destId="5" srcOrd="3" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="panels">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:alg type="snake">
+			<dgm:param type="grDir" val="tL"/>
+			<dgm:param type="flowDir" val="row"/>
+			<dgm:param type="contDir" val="sameDir"/>
+			<dgm:param type="off" val="ctr"/>
+		</dgm:alg>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="h" for="ch" forName="panel" refType="h"/>
+			<dgm:constr type="w" for="ch" forName="panel" refType="h" refFor="ch" refForName="panel"/>
+			<dgm:constr type="w" for="ch" forName="panelGap" refType="w" refFor="ch" refForName="panel" fact="0.08"/>
+			<dgm:constr type="sp" refType="w" refFor="ch" refForName="panel" fact="0.08"/>
+			<dgm:constr type="primFontSz" for="des" forName="heading" op="equ" val="60"/>
+			<dgm:constr type="primFontSz" for="des" forName="quarter" op="equ" val="40"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:forEach name="topics" axis="ch" ptType="node">
+			<dgm:layoutNode name="panel">
+				<dgm:alg type="composite"/>
+				<dgm:shape><dgm:adjLst/></dgm:shape>
+				<dgm:presOf/>
+				<dgm:choose name="withQuarters">
+					<dgm:if name="hasQuarters" func="cnt" axis="ch" ptType="node" op="gt" val="0">
+						<dgm:constrLst>
+							<dgm:constr type="l" for="ch" forName="quarters"/>
+							<dgm:constr type="t" for="ch" forName="quarters"/>
+							<dgm:constr type="w" for="ch" forName="quarters" refType="w"/>
+							<dgm:constr type="h" for="ch" forName="quarters" refType="h"/>
+							<dgm:constr type="w" for="ch" forName="heading" refType="w" fact="0.44"/>
+							<dgm:constr type="h" for="ch" forName="heading" refType="h" fact="0.26"/>
+							<dgm:constr type="ctrX" for="ch" forName="heading" refType="w" fact="0.5"/>
+							<dgm:constr type="ctrY" for="ch" forName="heading" refType="h" fact="0.5"/>
+						</dgm:constrLst>
+					</dgm:if>
+					<dgm:else name="headingOnly">
+						<dgm:constrLst>
+							<dgm:constr type="l" for="ch" forName="heading"/>
+							<dgm:constr type="t" for="ch" forName="heading"/>
+							<dgm:constr type="w" for="ch" forName="heading" refType="w"/>
+							<dgm:constr type="h" for="ch" forName="heading" refType="h"/>
+						</dgm:constrLst>
+					</dgm:else>
+				</dgm:choose>
+				<dgm:ruleLst/>
+				<dgm:layoutNode name="quarters">
+					<dgm:choose name="quarterOrder">
+						<dgm:if name="quartersFromLeft" func="var" arg="dir" op="equ" val="norm">
+							<dgm:alg type="snake">
+								<dgm:param type="grDir" val="tL"/>
+								<dgm:param type="flowDir" val="row"/>
+								<dgm:param type="contDir" val="sameDir"/>
+								<dgm:param type="bkpt" val="fixed"/>
+								<dgm:param type="bkPtFixedVal" val="2"/>
+							</dgm:alg>
+						</dgm:if>
+						<dgm:else name="quartersFromRight">
+							<dgm:alg type="snake">
+								<dgm:param type="grDir" val="tR"/>
+								<dgm:param type="flowDir" val="row"/>
+								<dgm:param type="contDir" val="sameDir"/>
+								<dgm:param type="bkpt" val="fixed"/>
+								<dgm:param type="bkPtFixedVal" val="2"/>
+							</dgm:alg>
+						</dgm:else>
+					</dgm:choose>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst>
+						<dgm:constr type="w" for="ch" forName="quarterGap" refType="w" fact="0.02"/>
+						<dgm:constr type="sp" refType="h" fact="0.02"/>
+					</dgm:constrLst>
+					<dgm:choose name="cellRows">
+						<dgm:if name="oneCell" func="cnt" axis="ch" ptType="node" op="equ" val="1">
+							<dgm:constrLst>
+								<dgm:constr type="w" for="ch" forName="quarter" refType="w" fact="1"/>
+								<dgm:constr type="h" for="ch" forName="quarter" refType="h" fact="1"/>
+							</dgm:constrLst>
+						</dgm:if>
+						<dgm:if name="oneRow" func="cnt" axis="ch" ptType="node" op="equ" val="2">
+							<dgm:constrLst>
+								<dgm:constr type="w" for="ch" forName="quarter" refType="w" fact="0.49"/>
+								<dgm:constr type="h" for="ch" forName="quarter" refType="h" fact="1"/>
+							</dgm:constrLst>
+						</dgm:if>
+						<dgm:if name="twoRows" func="cnt" axis="ch" ptType="node" op="lte" val="4">
+							<dgm:constrLst>
+								<dgm:constr type="w" for="ch" forName="quarter" refType="w" fact="0.49"/>
+								<dgm:constr type="h" for="ch" forName="quarter" refType="h" fact="0.49"/>
+							</dgm:constrLst>
+						</dgm:if>
+						<dgm:if name="threeRows" func="cnt" axis="ch" ptType="node" op="lte" val="6">
+							<dgm:constrLst>
+								<dgm:constr type="w" for="ch" forName="quarter" refType="w" fact="0.49"/>
+								<dgm:constr type="h" for="ch" forName="quarter" refType="h" fact="0.32"/>
+							</dgm:constrLst>
+						</dgm:if>
+						<dgm:else name="moreRows">
+							<dgm:constrLst>
+								<dgm:constr type="w" for="ch" forName="quarter" refType="w" fact="0.49"/>
+								<dgm:constr type="h" for="ch" forName="quarter" refType="h" fact="0.24"/>
+							</dgm:constrLst>
+						</dgm:else>
+					</dgm:choose>
+					<dgm:ruleLst/>
+					<dgm:forEach name="quarterItems" axis="ch" ptType="node">
+						<dgm:layoutNode name="quarter" styleLbl="alignAcc1">
+							<dgm:varLst>
+								<dgm:bulletEnabled val="1"/>
+							</dgm:varLst>
+							<dgm:choose name="corner">
+								<dgm:if name="upper" func="pos" op="lte" val="2">
+									<dgm:choose name="upperSide">
+										<dgm:if name="upperLeft" func="posOdd" op="equ" val="1">
+											<dgm:alg type="tx">
+												<dgm:param type="parTxLTRAlign" val="l"/>
+												<dgm:param type="shpTxLTRAlignCh" val="l"/>
+												<dgm:param type="txAnchorVert" val="t"/>
+											</dgm:alg>
+										</dgm:if>
+										<dgm:else name="upperRight">
+											<dgm:alg type="tx">
+												<dgm:param type="parTxLTRAlign" val="r"/>
+												<dgm:param type="shpTxLTRAlignCh" val="r"/>
+												<dgm:param type="txAnchorVert" val="t"/>
+											</dgm:alg>
+										</dgm:else>
+									</dgm:choose>
+								</dgm:if>
+								<dgm:else name="lower">
+									<dgm:choose name="lowerSide">
+										<dgm:if name="lowerLeft" func="posOdd" op="equ" val="1">
+											<dgm:alg type="tx">
+												<dgm:param type="parTxLTRAlign" val="l"/>
+												<dgm:param type="shpTxLTRAlignCh" val="l"/>
+												<dgm:param type="txAnchorVert" val="b"/>
+											</dgm:alg>
+										</dgm:if>
+										<dgm:else name="lowerRight">
+											<dgm:alg type="tx">
+												<dgm:param type="parTxLTRAlign" val="r"/>
+												<dgm:param type="shpTxLTRAlignCh" val="r"/>
+												<dgm:param type="txAnchorVert" val="b"/>
+											</dgm:alg>
+										</dgm:else>
+									</dgm:choose>
+								</dgm:else>
+							</dgm:choose>
+							<dgm:shape type="rect"><dgm:adjLst/></dgm:shape>
+							<dgm:presOf axis="desOrSelf" ptType="node"/>
+							<dgm:constrLst>
+								<dgm:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+								<dgm:constr type="rMarg" refType="primFontSz" fact="0.3"/>
+								<dgm:constr type="tMarg" refType="primFontSz" fact="0.3"/>
+								<dgm:constr type="bMarg" refType="primFontSz" fact="0.3"/>
+							</dgm:constrLst>
+							<dgm:ruleLst>
+								<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+							</dgm:ruleLst>
+						</dgm:layoutNode>
+						<dgm:forEach name="quarterGaps" axis="followSib" ptType="sibTrans" cnt="1">
+							<dgm:layoutNode name="quarterGap">
+								<dgm:alg type="sp"/>
+								<dgm:shape><dgm:adjLst/></dgm:shape>
+								<dgm:presOf/>
+								<dgm:constrLst/>
+								<dgm:ruleLst/>
+							</dgm:layoutNode>
+						</dgm:forEach>
+					</dgm:forEach>
+				</dgm:layoutNode>
+				<dgm:layoutNode name="heading" styleLbl="node1">
+					<dgm:alg type="tx"/>
+					<dgm:shape type="roundRect">
+						<dgm:adjLst>
+							<dgm:adj idx="1" val="0.2"/>
+						</dgm:adjLst>
+					</dgm:shape>
+					<dgm:presOf axis="self"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="primFontSz" fact="0.2"/>
+						<dgm:constr type="rMarg" refType="primFontSz" fact="0.2"/>
+						<dgm:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+						<dgm:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+			</dgm:layoutNode>
+			<dgm:forEach name="panelGaps" axis="followSib" ptType="sibTrans" cnt="1">
+				<dgm:layoutNode name="panelGap">
+					<dgm:alg type="sp"/>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+				</dgm:layoutNode>
+			</dgm:forEach>
+		</dgm:forEach>
+	</dgm:layoutNode>
+</dgm:layoutDef>

@@ -1,3 +1,4 @@
+import { groupBounds } from "../../presentation/groupBounds"
 import { NO_PROPERTIES, parseLength, type OdfListStyle, type OdfProperties } from "../../odf/index"
 import { Evaluator, GeometryError, enhancedPath, pointsPath, svgPath, type SubPath } from "../../odt/geometry"
 import { classifyHref } from "../../presentation/actions"
@@ -27,6 +28,7 @@ import {
 	type Xfrm
 } from "../../presentation/model"
 import { NodeKind } from "../../xml/index"
+import { presetOfOdfType } from "../../odf/presetShapes"
 import { overlay, type Fragment, type OdpContext } from "./context"
 import { EMU_PER_PT, bodyPrOf, effectsOf, fillOf, lineOf, packagePart, srgb } from "./fills"
 import { asianSizeOf, embeddedListStyle, levelStyle, listStyleOf, readTextBody, type TextScope } from "./text"
@@ -63,32 +65,6 @@ export const CLASS_TYPES: Readonly<Record<string, PlaceholderType>> = {
 }
 
 const MAX_GROUP_DEPTH = 128
-
-// A draw:custom-shape type with no enhanced path (§19.145 leaves the outline to the type) as a DrawingML preset.
-const PRESETS: Readonly<Record<string, string>> = {
-	rectangle: "rect",
-	ellipse: "ellipse",
-	"round-rectangle": "roundRect",
-	"isosceles-triangle": "triangle",
-	"right-triangle": "rtTriangle",
-	parallelogram: "parallelogram",
-	trapezoid: "trapezoid",
-	diamond: "diamond",
-	hexagon: "hexagon",
-	octagon: "octagon",
-	pentagon: "pentagon",
-	star5: "star5",
-	"right-arrow": "rightArrow",
-	"left-arrow": "leftArrow",
-	"up-arrow": "upArrow",
-	"down-arrow": "downArrow",
-	cloud: "cloud",
-	heart: "heart",
-	smiley: "smileyFace",
-	ring: "donut",
-	cross: "plus",
-	frame: "frame"
-}
 
 // What the shapes of one page are read with.
 export interface ShapeScope {
@@ -131,15 +107,33 @@ function multiply(m: Matrix, n: Matrix): Matrix {
 	]
 }
 
+// draw:transform's calls in order, as /([a-zA-Z]+)\s*\(([^)]*)\)/g reads them, in time linear in the value: a name
+// starts where a run of letters does, and its arguments end at the next ")" (none: no later call closes either).
+export function transformCalls(transform: string): { readonly name: string; readonly args: string }[] {
+	const out: { name: string; args: string }[] = []
+	const opening = /(?<![a-zA-Z])([a-zA-Z]+)\s*\(/gu
+
+	for (let match = opening.exec(transform); match !== null; match = opening.exec(transform)) {
+		const from = match.index + match[0].length
+		const close = transform.indexOf(")", from)
+
+		if (close < 0) break
+
+		out.push({ name: match[1] ?? "", args: transform.slice(from, close) })
+		opening.lastIndex = close + 1
+	}
+
+	return out
+}
+
 // draw:transform as one matrix (points), the transforms applied in the order written.
-function transformMatrix(transform: string): Matrix | undefined {
+export function transformMatrix(transform: string): Matrix | undefined {
 	let out: Matrix = [1, 0, 0, 1, 0, 0]
-	const pattern = /([a-zA-Z]+)\s*\(([^)]*)\)/gu
 	let found = false
 
-	for (const match of transform.matchAll(pattern)) {
-		const name = (match[1] ?? "").toLowerCase()
-		const args = (match[2] ?? "")
+	for (const call of transformCalls(transform)) {
+		const name = call.name.toLowerCase()
+		const args = call.args
 			.trim()
 			.split(/[\s,]+/u)
 			.filter(item => item !== "")
@@ -202,7 +196,13 @@ function transformMatrix(transform: string): Matrix | undefined {
 
 // An EMU box from a box in points and an optional transform: DrawingML's offset and extent of the unrotated box and
 // its clockwise rotation about the centre.
-function xfrmOf(box: Box, matrix: Matrix | undefined, flipH = false, flipV = false): Xfrm {
+// LibreOffice mirrors a custom shape (draw:mirror-*) after its draw:transform turns it, DrawingML before: under one
+// mirror the box's turn reads the other way (LibreOffice's pptx import writes a flipped group's members so).
+function turnedBack(xfrm: Xfrm, oneMirror: boolean): Xfrm {
+	return oneMirror && xfrm.rot !== 0 ? { ...xfrm, rot: (21_600_000 - xfrm.rot) % 21_600_000 } : xfrm
+}
+
+export function xfrmOf(box: Box, matrix: Matrix | undefined, flipH = false, flipV = false): Xfrm {
 	if (matrix === undefined) {
 		return {
 			x: Math.round(box.x * EMU_PER_PT),
@@ -273,9 +273,7 @@ function viewBoxOf(
 function customPaths(
 	context: OdpContext,
 	paths: readonly SubPath[],
-	viewBox: { left: number; top: number; width: number; height: number },
-	mirrorX: boolean,
-	mirrorY: boolean
+	viewBox: { left: number; top: number; width: number; height: number }
 ): CustomPath[] {
 	const scale = 100_000 / Math.max(viewBox.width, viewBox.height, 1e-9)
 	const w = Math.max(1, Math.round(viewBox.width * scale))
@@ -289,11 +287,8 @@ function customPaths(
 		const commands: number[] = []
 		const coords: number[] = []
 		const point = (x: number, y: number): void => {
-			let px = (x - viewBox.left) * scale
-			let py = (y - viewBox.top) * scale
-
-			if (mirrorX) px = w - px
-			if (mirrorY) py = h - py
+			const px = (x - viewBox.left) * scale
+			const py = (y - viewBox.top) * scale
 
 			coords.push(Number.isFinite(px) ? px : 0, Number.isFinite(py) ? py : 0)
 		}
@@ -395,10 +390,12 @@ function styleOf(context: OdpContext, fragment: Fragment, attributes: ReadonlyMa
 	const graphic = attributes.get("draw:style-name")
 	const presentation = attributes.get("presentation:style-name")
 	const scope = fragment.scope
+	const presentationClass = attributes.get("presentation:class")
+	const classObject = presentationClass !== undefined && CLASS_STYLES[presentationClass] !== undefined ? presentationClass : undefined
 
 	return {
 		graphic: overlay(
-			context.shapeProperties(graphic, presentation, scope, "graphic", base),
+			context.shapeProperties(graphic, presentation, scope, "graphic", base, classObject),
 			context.shapeProperties(graphic, presentation, scope, "loext:graphic", base)
 		),
 		paragraph: context.shapeProperties(graphic, presentation, scope, "paragraph", base),
@@ -932,7 +929,8 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 		hidden,
 		...(alt === undefined ? {} : { alt }),
 		...(locks === undefined ? {} : { locks }),
-		...(phType === undefined ? {} : { ph: { type: phType, idx: 0 } }),
+		// The notes text is the notes page's body placeholder, idx 1 as a session's own notes and PowerPoint number it.
+		...(phType === undefined ? {} : { ph: { type: phType, idx: presentationClass === "notes" ? 1 : 0 } }),
 		...(action === undefined ? {} : { actions: { click: action } }),
 		src: fragment.src(node)
 	}
@@ -1030,7 +1028,18 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 				const adjust = pictureAdjust(style.graphic.attributes)
 				const fill =
 					adjust === undefined ? { kind: "picture" as const, part: picture } : { kind: "picture" as const, part: picture, adjust }
-				const shape: ShapeNode = { ...base, kind: "pic", xfrm, props: { ...props, fill } }
+				// A picture's style:mirror (ODF 1.3 Part 3 §20.355) is its flips: vertical, and horizontal (on every page).
+				const mirror = (style.graphic.attributes.get("style:mirror") ?? "").split(/\s+/u)
+				const flipH = mirror.some(token => token === "horizontal" || token.startsWith("horizontal-on"))
+				const flipV = mirror.includes("vertical")
+				const flipped =
+					xfrm === undefined || (!flipH && !flipV) ? xfrm : { ...xfrm, flipH: xfrm.flipH !== flipH, flipV: xfrm.flipV !== flipV }
+				const shape: ShapeNode = {
+					...base,
+					kind: "pic",
+					...(flipped === undefined ? {} : { xfrm: flipped }),
+					props: { ...props, fill }
+				}
 				const clip = clipOf(style.graphic.attributes.get("fo:clip"))
 
 				if (clip !== undefined) scope.clips.push({ shape, part: picture, clip })
@@ -1104,10 +1113,20 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 				const mirrorX = geometryAttributes.get("draw:mirror-horizontal") === "true"
 				const mirrorY = geometryAttributes.get("draw:mirror-vertical") === "true"
 				const path = geometryAttributes.get("draw:enhanced-path")
+				const type = geometryAttributes.get("draw:type") ?? ""
+				const modifiers = (geometryAttributes.get("draw:modifiers") ?? "")
+					.trim()
+					.split(/\s+/u)
+					.filter(item => item !== "")
+					.map(item => Number(item) || 0)
+				// A preset outline the type draws (§19.145 leaves it to the type when there is no path), or a DrawingML
+				// preset LibreOffice names ooxml-<preset> whatever path it carries.
+				const typeOnly = path === undefined || (geometryAttributes.get("draw:text-path") === "true" && path === "")
+				const preset = typeOnly || type.startsWith("ooxml-") ? presetOfOdfType(type, modifiers, box.w, box.h) : undefined
 
-				if (path === undefined || (geometryAttributes.get("draw:text-path") === "true" && path === "")) {
-					geometry = { kind: "preset", preset: PRESETS[geometryAttributes.get("draw:type") ?? ""] ?? "rect", guides: [] }
-					xfrm = xfrmOf(box, matrix, mirrorX, mirrorY)
+				if (typeOnly || preset !== undefined) {
+					geometry = { kind: "preset", preset: preset?.preset ?? "rect", guides: preset?.guides ?? [] }
+					xfrm = turnedBack(xfrmOf(box, matrix, mirrorX, preset?.invertsV === true ? !mirrorY : mirrorY), mirrorX !== mirrorY)
 
 					break
 				}
@@ -1128,11 +1147,6 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 					if (equationName !== undefined && formula !== undefined) equations.set(equationName, formula)
 				}
 
-				const modifiers = (geometryAttributes.get("draw:modifiers") ?? "")
-					.trim()
-					.split(/\s+/u)
-					.filter(item => item !== "")
-					.map(item => Number(item) || 0)
 				const evaluator = new Evaluator({
 					left: viewBox.left,
 					top: viewBox.top,
@@ -1146,12 +1160,15 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 				const paths = enhancedPath(path, evaluator)
 				const textRect = textAreaOf(geometryAttributes.get("draw:text-areas"), evaluator, viewBox, box)
 
+				// The outline as drawn unmirrored, its mirrors the box's flips (as a DrawingML shape holds them), so a flip
+				// edited later turns the mirror the file writes.
 				geometry = {
 					kind: "custom",
 					guides: [],
-					paths: customPaths(context, paths, viewBox, mirrorX, mirrorY),
+					paths: customPaths(context, paths, viewBox),
 					...(textRect === undefined ? {} : { textRect })
 				}
+				xfrm = turnedBack(xfrmOf(box, matrix, mirrorX, mirrorY), mirrorX !== mirrorY)
 				break
 			}
 			case "draw:rect": {
@@ -1208,9 +1225,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 						paths: customPaths(
 							context,
 							svgPath(d).map(path => ({ ...path, fill: false })),
-							viewBox,
-							false,
-							false
+							viewBox
 						)
 					}
 					break
@@ -1237,7 +1252,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 
 				if (name === "draw:polyline") for (const path of paths) path.fill = false
 
-				geometry = { kind: "custom", guides: [], paths: customPaths(context, paths, viewBox, false, false) }
+				geometry = { kind: "custom", guides: [], paths: customPaths(context, paths, viewBox) }
 				break
 			}
 			case "draw:caption":
@@ -1333,41 +1348,6 @@ function textAreaOf(
 
 		throw error
 	}
-}
-
-// A group's box: the bounds of its children as they are drawn (rotated boxes by their corners), which is where
-// LibreOffice places a group (its snap rectangle).
-function groupBounds(children: readonly ShapeNode[]): Xfrm {
-	let left = Infinity
-	let top = Infinity
-	let right = -Infinity
-	let bottom = -Infinity
-
-	for (const child of children) {
-		const xfrm = child.xfrm
-
-		if (xfrm === undefined) continue
-
-		const radians = (xfrm.rot / 60_000) * (Math.PI / 180)
-		const cos = Math.abs(Math.cos(radians))
-		const sin = Math.abs(Math.sin(radians))
-		const halfW = (xfrm.cx * cos + xfrm.cy * sin) / 2
-		const halfH = (xfrm.cx * sin + xfrm.cy * cos) / 2
-		const centerX = xfrm.x + xfrm.cx / 2
-		const centerY = xfrm.y + xfrm.cy / 2
-
-		left = Math.min(left, centerX - halfW)
-		top = Math.min(top, centerY - halfH)
-		right = Math.max(right, centerX + halfW)
-		bottom = Math.max(bottom, centerY + halfH)
-	}
-
-	if (!Number.isFinite(left)) return { x: 0, y: 0, cx: 0, cy: 0, rot: 0, flipH: false, flipV: false }
-
-	const x = Math.round(left)
-	const y = Math.round(top)
-
-	return { x, y, cx: Math.round(right) - x, cy: Math.round(bottom) - y, rot: 0, flipH: false, flipV: false }
 }
 
 // The shapes of a page's (or master page's) element, back to front.

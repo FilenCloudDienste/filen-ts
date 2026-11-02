@@ -1,3 +1,4 @@
+import { appendAll, spliceAll } from "../../arrays"
 import { BytePieces, bytesSource, memorySink, resolvePartName, writeZip } from "../../opc/index"
 import { runSliced, type SliceClock } from "../../slicing"
 import { RenderStyleTable } from "../../sheet/session"
@@ -989,7 +990,7 @@ function prepareNames(workbook: XlsxWorkbook, report: SheetLossyReport, titles: 
 		names.filter(name => !keptNames.has(`${name.sheet ?? ""}\u0000${name.name.toUpperCase()}`)).map(name => name.name.toUpperCase())
 	)
 
-	names.splice(0, names.length, ...kept)
+	spliceAll(names, 0, names.length, kept)
 
 	return dropped
 }
@@ -1682,7 +1683,7 @@ export async function xlsxToOds(source: Uint8Array, options: SheetConvertOptions
 		await prepareCells(workbook, prep, report, clock, dateCells, color => probe.styles.color(color), richStrings, dropped, tables)
 		await prepareValidations(workbook, prep, report, dropped, clock)
 		prepareFilter(prep, report)
-		databaseRanges.push(...prepareTables(prep, sheetTables.get(prep.entry.id) ?? [], report))
+		appendAll(databaseRanges, prepareTables(prep, sheetTables.get(prep.entry.id) ?? [], report))
 
 		// Panes split one way only scroll together the other way: OpenDocument keeps one position for both.
 		const view = prep.model.view

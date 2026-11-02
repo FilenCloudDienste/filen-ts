@@ -72,6 +72,7 @@ export function canConvertPresentation(deck: Deck, target: PresentationTarget): 
 const FRESH_KINDS: readonly (readonly [RegExp, ConversionLossKind])[] = [
 	[/fill$/u, "fill"],
 	[/^(dashed line|line end)$/u, "line"],
+	[/^outline level /u, "outlineLevel"],
 	[/^outline /u, "geometry"],
 	[/^(vertical |line-breaking|spacing|bullet size|numbering |run kept|picture bullet)/u, "text"],
 	[/^table style/u, "tableStyle"],

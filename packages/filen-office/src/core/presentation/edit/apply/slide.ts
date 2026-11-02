@@ -1,4 +1,5 @@
 import { matchShapes } from "./match"
+import { copiedCommentCharacters, copiedCommentsFit, countCopiedComments, setSlideComments, slideComments } from "../../comments"
 import { layoutPlaceholder } from "../../inherit"
 import {
 	refused,
@@ -14,6 +15,7 @@ import {
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Dirt, Touch } from "../apply"
 import { cloneModel, digestOf, findShape } from "../changes"
+import { holdDiagramCopies } from "./smartart"
 import { planDelete, sectionsAfterInsert, sectionsAfterMove, type JumpRewrite, type PartOf, type ReferenceFacts } from "../integrity"
 import type { DeckOp, OpOf, RawPart, SlideOp } from "../ops"
 import { isRefused, type SourceReading } from "./shape"
@@ -35,6 +37,14 @@ export interface SlideSourceReading extends SourceReading {
 	readSlides(ref: SlideRef, parts: readonly RawPart[]): readonly SlideNode[] | Refused
 	// A new part name for a slide or a notes slide, unused in the package and the session.
 	newPart(kind: "slide" | "notesSlide"): string
+	// Whether a part name an op gave before can be given again (a redo) to `ref`: no node has it, and the package
+	// either has no such part or binds it to `ref` itself (a slide an undo after a save took out, made again).
+	partFree?(name: string, ref: SlideRef): boolean
+	// The package's epoch (pptx): a held node whose parts the package still has byte for byte reads from them now.
+	readonly epoch?: number
+	// A slide restored onto the package's parts (bound to `epoch`), with the parts its delete held: a save in flight
+	// may commit a file without them, and the engine then gives the slide its held parts back.
+	restoredLive?(ref: SlideRef, parts: readonly RawPart[]): void
 	readonly facts: ReferenceFacts
 	readonly partOf: PartOf
 }
@@ -133,12 +143,53 @@ function add(deck: Deck, op: OpOf<"slide"> & { kind: "add" }, context: SlideSour
 	const sections = sectionsAfterInsert(deck.sections, order, ref)
 	const back: DeckOp[] = [{ family: "slide", kind: "delete", slides: [ref] }, ...sectionsBack(deck, sections)]
 
-	deck.nodes.set(ref, newSlide(ref, context.newPart("slide"), layout))
+	const part = partFor(context, MADE_PARTS.get(op)?.slide, "slide", ref)
+
+	deck.nodes.set(ref, newSlide(ref, part, layout))
 	deck.slides = order
 
 	if (sections !== undefined) deck.sections = sections
 
-	return { kind: "applied", inverse: { ops: back, bytes: 0 }, op: { ...op, ref, at } }
+	const applied = { ...op, ref, at }
+
+	MADE_PARTS.set(applied, { slide: part })
+
+	return { kind: "applied", inverse: { ops: back, bytes: 0 }, op: applied }
+}
+
+// The notes slide a duplicate made, by the op as applied (the history's): a redo of it makes the copy's notes under
+// the same ref again, so the later steps that name them (an edit of the copy's notes) still find them. Kept beside the
+// op, never in its contract (as notes.ts keeps what setNotes made).
+const DUPLICATED_NOTES = new WeakMap<object, SlideRef>()
+// Copies a duplicate made without notes because its source had none: their writer gives them none, whatever the
+// package's source slide relates (an undo since the last save may have left notes there, and the source may have
+// notes again by the save). A copy whose source's notes were not read is not here: it keeps the package's.
+const NOTELESS_COPIES = new WeakMap<Deck, Set<SlideRef>>()
+
+export function copiedWithoutNotes(deck: Deck, ref: SlideRef): boolean {
+	return NOTELESS_COPIES.get(deck)?.has(ref) === true
+}
+
+function noteCopyNotes(deck: Deck, ref: SlideRef, none: boolean): void {
+	let held = NOTELESS_COPIES.get(deck)
+
+	if (held === undefined) {
+		if (!none) return
+
+		held = new Set()
+		NOTELESS_COPIES.set(deck, held)
+	}
+
+	if (none) held.add(ref)
+	else held.delete(ref)
+}
+
+// The part names an add or a duplicate gave (the slide's, its notes'), by the op as applied: a redo gives them again
+// while they are free, so saving the same state again writes the same package.
+const MADE_PARTS = new WeakMap<object, { readonly slide: string; readonly notes?: string }>()
+
+function partFor(context: SlideSourceReading, made: string | undefined, kind: "slide" | "notesSlide", ref: SlideRef): string {
+	return made !== undefined && context.partFree?.(made, ref) === true ? made : context.newPart(kind)
 }
 
 function duplicate(deck: Deck, op: OpOf<"slide"> & { kind: "duplicate" }, context: SlideSourceReading): ApplyResult<typeof op> {
@@ -147,14 +198,28 @@ function duplicate(deck: Deck, op: OpOf<"slide"> & { kind: "duplicate" }, contex
 
 	if (source === undefined || index < 0) return refused("notFound", `slide ${String(op.slide)}`)
 
+	// The copy brings its source's comments (read by prepareReview), counted against the deck's bound.
+	const copied = copiedCommentCharacters(deck, op.slide) ?? 0
+
+	if (!copiedCommentsFit(deck, copied)) return refused("tooLarge", "comment characters of the copy over the deck's bound")
+
 	const ref = freshRef(deck, op.ref, context)
 	const at = Math.max(0, Math.min(op.at ?? index + 1, deck.slides.length))
 	// The copy (and its shapes) keep the source's refs: it reads from the source slide's markup until it is written.
 	const copy = clone(source)
 
 	copy.ref = ref
-	copy.part = context.newPart("slide")
+	const madeParts = MADE_PARTS.get(op)
+
+	copy.part = partFor(context, madeParts?.slide, "slide", ref)
 	copy.revision = 0
+
+	// The copy's diagrams take parts of their own.
+	const diagrams = holdDiagramCopies(deck, copy.shapes, context)
+
+	if (diagrams !== undefined) return diagrams
+
+	noteCopyNotes(deck, ref, source.notes === undefined)
 
 	if (source.notes !== undefined) {
 		const notes = deck.nodes.get(source.notes)
@@ -163,10 +228,11 @@ function duplicate(deck: Deck, op: OpOf<"slide"> & { kind: "duplicate" }, contex
 			delete copy.notes
 		} else {
 			const notesCopy = clone(notes)
-			const notesRef = context.newSlideRef()
+			const made = DUPLICATED_NOTES.get(op)
+			const notesRef = made !== undefined && !deck.nodes.has(made) ? made : context.newSlideRef()
 
 			notesCopy.ref = notesRef
-			notesCopy.part = context.newPart("notesSlide")
+			notesCopy.part = partFor(context, madeParts?.notes, "notesSlide", notesRef)
 			notesCopy.revision = 0
 			deck.nodes.set(notesRef, notesCopy)
 			copy.notes = notesRef
@@ -182,10 +248,25 @@ function duplicate(deck: Deck, op: OpOf<"slide"> & { kind: "duplicate" }, contex
 
 	deck.nodes.set(ref, copy)
 	deck.slides = order
+	// The source's comments as the session holds them (edited, added to, replied to since the file was read): the
+	// copy's, not the package's.
+	const held = slideComments(deck, op.slide)
+
+	if (held !== undefined) setSlideComments(deck, ref, { entries: [...held.entries], scope: held.scope })
+
+	countCopiedComments(deck, ref, copied)
 
 	if (sections !== undefined) deck.sections = sections
 
-	return { kind: "applied", inverse: { ops: back, bytes: 0 }, op: { ...op, ref, at } }
+	const applied = { ...op, ref, at }
+
+	if (copy.notes !== undefined) DUPLICATED_NOTES.set(applied, copy.notes)
+
+	const notesPart = copy.notes === undefined ? undefined : deck.nodes.get(copy.notes)?.part
+
+	MADE_PARTS.set(applied, { slide: copy.part, ...(notesPart === undefined ? {} : { notes: notesPart }) })
+
+	return { kind: "applied", inverse: { ops: back, bytes: 0 }, op: applied }
 }
 
 function setSiteAction(node: SlideNode, rewrite: JumpRewrite, action: Action): void {
@@ -334,6 +415,28 @@ export function overlayNode(typed: SlideNode, read: SlideNode | undefined): Slid
 	return out
 }
 
+// Every pptx source ref in `value` (a node's, its shapes', their text's) bound to `epoch`: the same part bytes, read
+// from the package as it is now.
+export function rebindEpoch(value: unknown, epoch: number): void {
+	if (typeof value !== "object" || value === null || ArrayBuffer.isView(value)) return
+
+	if (Array.isArray(value)) {
+		for (const item of value) rebindEpoch(item, epoch)
+
+		return
+	}
+
+	const record = value as Record<string, unknown>
+
+	for (const [key, item] of Object.entries(record)) {
+		if (key === "src" && typeof item === "object" && item !== null) {
+			const src = item as { readonly format?: unknown; readonly epoch?: unknown }
+
+			if (src.format === "pptx" && typeof src.epoch === "number" && src.epoch !== epoch) record[key] = { ...src, epoch }
+		} else rebindEpoch(item, epoch)
+	}
+}
+
 function restore(deck: Deck, op: OpOf<"slide"> & { kind: "restore" }, context: SlideSourceReading): ApplyResult<typeof op> {
 	const entries = op.slides
 	const restored: SlideRef[] = []
@@ -349,8 +452,15 @@ function restore(deck: Deck, op: OpOf<"slide"> & { kind: "restore" }, context: S
 			main !== undefined &&
 			(entry.parts.length === 0 || sameRawParts(context.rawParts(main, new Set(entry.parts.map(part => part.name))), entry.parts))
 		) {
-			// A slide an op made, or parts still in the package as they were: the held nodes' refs are live.
+			// A slide an op made, or parts still in the package as they were: the held nodes' refs are live (bound to the
+			// package as it is now, a save's rebase since the delete gave it a new epoch).
 			nodes = typed ?? []
+
+			if (context.epoch !== undefined && entry.parts.length > 0) {
+				for (const node of nodes) rebindEpoch(node, context.epoch)
+
+				context.restoredLive?.(entry.ref, entry.parts)
+			}
 		} else {
 			const read = context.readSlides(entry.ref, entry.parts)
 

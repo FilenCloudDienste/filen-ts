@@ -617,7 +617,9 @@ export type Action =
 			readonly raw: string
 	  }
 
-export type LockReason = "proofFailed" | "alternateContent" | "unknownFrame" | "gate" | "budget"
+// "master": a master's field (footer, date-time, page number) a slide shows as its own shape; it belongs to the master
+// (ODP), so no edit of the slide can change it.
+export type LockReason = "proofFailed" | "alternateContent" | "unknownFrame" | "gate" | "budget" | "master"
 
 export interface ShowSettings {
 	kind: "present" | "browse" | "kiosk"

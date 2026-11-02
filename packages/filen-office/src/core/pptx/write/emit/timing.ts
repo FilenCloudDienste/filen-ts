@@ -14,7 +14,7 @@ import type {
 } from "../../../anim/model"
 import { colorXml } from "../../../presentation/render/markup"
 import type { ColorModel, ShapeNode } from "../../../presentation/model"
-import { escapeText } from "../../../xml/index"
+import { encodeUtf8, escapeText } from "../../../xml/index"
 import { G } from "../../read/xml"
 import type { EmitPiece, EmitResult, PptxEmitFamily } from "../types"
 import {
@@ -89,6 +89,8 @@ class TimingWriter {
 
 	// Shapes whose frame is a chart (for graphic builds).
 	private readonly charts: ReadonlySet<number>
+	// How the part being written spells an empty element (read once, for lists written with no source of their own).
+	private spacedPart: boolean | undefined | null = null
 
 	constructor(context: EmitContext, pristine: TimingTree | undefined, shapes: readonly ShapeNode[]) {
 		this.context = context
@@ -331,6 +333,16 @@ class TimingWriter {
 		return out.text(`</p:${local}>`).out
 	}
 
+	private partSpaced(): boolean | undefined {
+		if (this.spacedPart === null) {
+			const document = this.context.document
+
+			this.spacedPart = document === undefined ? undefined : timingSpaced(document.bytes)
+		}
+
+		return this.spacedPart
+	}
+
 	private conditionList(
 		local: string,
 		conditions: readonly TimeCondition[] | undefined,
@@ -340,7 +352,13 @@ class TimingWriter {
 		if (source >= 0 && this.same(conditions, before)) return "keep"
 		if (conditions === undefined || conditions.length === 0) return ""
 
-		return `<p:${local}>${conditions.map(condition => conditionXml("cond", condition)).join("")}</p:${local}>`
+		const xml = `<p:${local}>${conditions.map(condition => conditionXml("cond", condition)).join("")}</p:${local}>`
+
+		// Spelled as the list it replaces: a file that writes "<p:cond delay="0" />" keeps the space (so a state saved
+		// again writes the bytes it was saved with). Conditions hold no attribute value with "/>" in it.
+		const spaced = source >= 0 ? spacedEmptyElements(this.context, source) : this.partSpaced()
+
+		return spaced === true ? xml.replace(/([^\s])\/>/gu, "$1 />") : xml
 	}
 
 	private cBhvr(
@@ -521,6 +539,41 @@ function iterateXml(ctn: CommonTimeNode): string {
 			: `<p:tmAbs${attr("val", formatTime(iterate.interval.ms))}/>`
 
 	return `<p:iterate${attr("type", iterate.type)}${iterate.backwards ? attr("backwards", true) : ""}>${interval}</p:iterate>`
+}
+
+const TIMING_OPEN = encodeUtf8("<p:timing")
+
+// Whether the part's p:timing (the file's own, the one this save writes over) spells empty elements with a space
+// before "/>" (undefined: it has none or no timing).
+function timingSpaced(bytes: Uint8Array): boolean | undefined {
+	let at = -1
+
+	for (let k = bytes.indexOf(0x3c); k >= 0 && at < 0; k = bytes.indexOf(0x3c, k + 1)) {
+		let match = true
+
+		for (let n = 0; n < TIMING_OPEN.length && match; n++) match = bytes[k + n] === TIMING_OPEN[n]
+
+		if (match) at = k
+	}
+
+	if (at < 0) return undefined
+
+	for (let k = at + 1; k + 1 < bytes.length; k++) if (bytes[k] === 0x2f && bytes[k + 1] === 0x3e) return bytes[k - 1] === 0x20
+
+	return undefined
+}
+
+// Whether a source element writes its empty elements with a space before "/>" (undefined: it has none).
+function spacedEmptyElements(context: EmitContext, node: number): boolean | undefined {
+	const document = context.document
+
+	if (document === undefined) return undefined
+
+	const raw = document.raw(node)
+
+	for (let k = 1; k + 1 < raw.length; k++) if (raw[k] === 0x2f && raw[k + 1] === 0x3e) return raw[k - 1] === 0x20
+
+	return undefined
 }
 
 function conditionXml(local: string, condition: TimeCondition): string {

@@ -5,9 +5,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import i18n from "i18next"
 import { slideRef, type DeckOp, type ShapeLocks, type Xfrm } from "@filen/office/core/presentation"
 import type { CommandResult, OpenInfo, PresentationSessionApi, SlideLayer, SlideRender } from "@filen/office/dom/presentation"
-import { createShapeSelection, type ShapeSelection } from "@filen/office/react/presentation"
+import { createShapeSelection, type ShapeSelection, type SlideShape } from "@filen/office/react/presentation"
 import { OfficeRibbon } from "@/features/office/components/ribbon/officeRibbon"
-import { actionOfChoice, arrangeGroups } from "@/features/presentation/components/ribbon/arrange"
+import { actionOfChoice, arrangeGroups, shapeEditLabels } from "@/features/presentation/components/ribbon/arrange"
 import type { PresentationRibbonContext } from "@/features/presentation/components/ribbon/tabs"
 import { PRESENTATION_OBJECT_ACTIONS, presentationObjectBindings } from "@/features/presentation/lib/keymap/objects"
 import "@/lib/i18n"
@@ -177,6 +177,51 @@ describe("presentation Arrange tab", () => {
 
 		await menuItem("Rotate", "Flip horizontal")
 		expect(ops[0]).toMatchObject({ family: "shape", kind: "setXfrm", target: { slide: ref, id: 2 }, xfrm: { flipH: true } })
+	})
+
+	it("offers no flip for a table or a chart, and says why, but flips a shape", async () => {
+		for (const role of ["table", "chart"] as const) {
+			mount([role, "shape"], [2])
+			fireEvent.click(within(commands()).getByRole("button", { name: "Rotate" }))
+
+			for (const name of ["Flip vertical", "Flip horizontal"])
+				expect((await screen.findByRole("menuitem", { name })).getAttribute("aria-disabled")).toBe("true")
+			expect(screen.getByText("Tables, charts, objects, media and diagrams can't be flipped")).toBeTruthy()
+			expect(screen.getByRole("menuitem", { name: "Rotate right 90°" }).getAttribute("aria-disabled")).not.toBe("true")
+			cleanup()
+		}
+
+		mount(["shape", "table"], [2])
+		await menuItem("Rotate", "Flip vertical")
+		expect(screen.queryByText("Tables, charts, objects, media and diagrams can't be flipped")).toBeNull()
+		expect(ops[0]).toMatchObject({ family: "shape", kind: "setXfrm", target: { slide: ref, id: 2 }, xfrm: { flipV: true } })
+	})
+
+	it("names a selected object by its kind: audio and video by what they play, whatever frame holds them", () => {
+		const labels = shapeEditLabels(i18n.getFixedT(null, "preview"))
+		const shape = (role: SlideShape["role"], extra: Partial<SlideShape> = {}): SlideShape => ({
+			id: 2,
+			role,
+			xfrm: box(0, 0),
+			layers: [0],
+			...extra
+		})
+		const audio = { kind: "audio", contentType: "audio/wav" } as const
+		const video = { kind: "video", contentType: "video/mp4" } as const
+
+		expect(labels.describe([shape("picture", { media: audio })])).toBe("Audio selected")
+		expect(labels.describe([shape("picture", { media: video })])).toBe("Video selected")
+		expect(labels.describe([shape("media", { media: audio })])).toBe("Audio selected")
+		expect(labels.describe([shape("media")])).toBe("Media selected")
+		expect(labels.describe([shape("picture", { media: video, alt: { descr: "Intro clip" } })])).toBe("Video, Intro clip, selected")
+		expect((["picture", "chart", "table", "smartart", "group", "shape"] as const).map(role => labels.describe([shape(role)]))).toEqual([
+			"Picture selected",
+			"Chart selected",
+			"Table selected",
+			"SmartArt graphic selected",
+			"Group selected",
+			"Shape selected"
+		])
 	})
 
 	it("edits alt text in its dialog", async () => {

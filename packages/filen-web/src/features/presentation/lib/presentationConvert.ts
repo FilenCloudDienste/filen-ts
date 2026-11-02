@@ -105,6 +105,7 @@ const LOSS_KEYS = {
 	fill: "previewPptxConvertLossFill",
 	line: "previewPptxConvertLossLine",
 	geometry: "previewPptxConvertLossGeometry",
+	outlineLevel: "previewPptxConvertLossOutlineLevel",
 	text: "previewPptxConvertLossText",
 	tableStyle: "previewPptxConvertLossTableStyle",
 	chart: "previewPptxConvertLossChart",

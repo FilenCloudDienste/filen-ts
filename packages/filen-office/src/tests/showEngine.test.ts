@@ -20,8 +20,9 @@ import {
 	showLayerIndex,
 	STATIC_LAYER
 } from "../dom/presentation/engine/show"
+import type { LayerPlan, ShowLayer } from "../dom/presentation/protocol"
 import { presentationTextServices } from "../dom/presentation/engine/view"
-import { installPresentationRealm, type RasterCanvas, type RasterImage } from "../dom/presentation/services"
+import { installPresentationRealm, MAX_CANVAS_SIDE, type RasterCanvas, type RasterImage } from "../dom/presentation/services"
 import { TIMING_XML, TimingBuilder } from "./animFixtures"
 import { fixtureTextPage } from "./fixtures/presentation/textPage"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
@@ -543,6 +544,73 @@ describe("showCapability", () => {
 			expect(canvases[4]?.width).toBe(144)
 			expect(canvases[4]?.calls.find(call => call.op === "moveTo")?.transform).toEqual([0.75, 0, 0, 0.75, 0, 0])
 			expect(canvases[4]?.calls.find(call => call.op === "moveTo")?.args).toEqual([0, 0])
+		} finally {
+			close()
+		}
+	})
+
+	it("packs the layers into shared page bitmaps when asked, each painted at its place in its page", async () => {
+		const { context, ref, close } = await harness()
+
+		try {
+			await showCapability.timegraph(context, ref)
+
+			canvases.length = 0
+
+			const plan = {
+				shapes: [2, 3, 4],
+				ranges: [undefined, [{ target: "para" as const, range: [0, 0] as const }], undefined],
+				dpr: 2
+			}
+			const single = await showCapability.layers(context, ref, 480, plan)
+			const atlased: LayerPlan = { ...plan, atlas: 1024 }
+			const tiny: LayerPlan = { ...plan, atlas: 10 }
+			const packed: readonly ShowLayer[] = await showCapability.layers(context, ref, 480, atlased)
+
+			// The same layers in the same order, at the same places on the slide.
+			expect(packed.map(layer => [layer.shape, layer.range?.range, layer.x, layer.y, layer.width, layer.height])).toEqual(
+				single.map(layer => [layer.shape, layer.range?.range, layer.x, layer.y, layer.width, layer.height])
+			)
+
+			// Fewer bitmaps than layers; each layer's place is its own bitmap's size, inside its page.
+			const pages = new Set(packed.map(layer => layer.bitmap))
+
+			expect(pages.size).toBeLessThan(packed.length)
+			packed.forEach((layer, k) => {
+				const own = single[k]?.bitmap
+
+				expect(layer.atlas).toMatchObject({ width: own?.width, height: own?.height })
+				expect((layer.atlas?.x ?? -1) + (layer.atlas?.width ?? 0)).toBeLessThanOrEqual(layer.bitmap.width)
+				expect((layer.atlas?.y ?? -1) + (layer.atlas?.height ?? 0)).toBeLessThanOrEqual(layer.bitmap.height)
+			})
+
+			// The flyer is painted from its place in the page, clipped to it.
+			const flyer = packed[4]
+			const page = canvases.find(canvas => canvas.calls.some(call => call.op === "rect" && call.args[0] === flyer?.atlas?.x))
+			const move = page?.calls.find(call => call.op === "moveTo" && call.transform?.[4] === flyer?.atlas?.x)
+
+			expect(move?.transform).toEqual([0.75, 0, 0, 0.75, flyer?.atlas?.x, flyer?.atlas?.y])
+
+			for (const layer of [...single, ...packed]) layer.bitmap.close()
+
+			await expect(showCapability.layers(context, ref, 480, tiny)).rejects.toMatchObject({ reason: "tooLarge" })
+
+			// The page side runs from 64 px to the largest canvas, in whole px.
+			for (const atlas of [63, MAX_CANVAS_SIDE + 1, 100.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+				const refusedPlan: LayerPlan = { ...plan, atlas }
+
+				await expect(showCapability.layers(context, ref, 480, refusedPlan)).rejects.toMatchObject({ reason: "tooLarge" })
+			}
+
+			for (const atlas of [64, MAX_CANVAS_SIDE]) {
+				const edgePlan: LayerPlan = { ...plan, atlas }
+				const edge: readonly ShowLayer[] = await showCapability.layers(context, ref, 480, edgePlan)
+
+				expect(edge.map(layer => layer.shape)).toEqual(single.map(layer => layer.shape))
+				expect(edge.every(layer => layer.bitmap.width <= Math.max(atlas, layer.atlas?.width ?? 0))).toBe(true)
+
+				for (const layer of edge) layer.bitmap.close()
+			}
 		} finally {
 			close()
 		}

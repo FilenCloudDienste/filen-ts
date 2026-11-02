@@ -103,10 +103,13 @@ export const TRANSITION_PRESETS: readonly TransitionPreset[] = [
 	preset("warp", "p14", "exciting", 1000, choice("dir", IN_OUT, "in")),
 	preset("newsflash", "p", "exciting", 1000),
 	preset("random", "p", "exciting", 1000),
-	preset("pan", "p14", "dynamic", 1000, choice("dir", SIDE, "u")),
+	// p:CT_SideDirectionTransition (MS-PPTX §2.3.1.21): dir defaults to "l" (ECMA-376 Part 1 PresentationML schema).
+	preset("pan", "p14", "dynamic", 1000, choice("dir", SIDE, "l")),
 	preset("ferris", "p14", "dynamic", 2000, choice("dir", LEFT_RIGHT, "l")),
 	preset("conveyor", "p14", "dynamic", 2000, choice("dir", LEFT_RIGHT, "l")),
-	preset("window", "p14", "dynamic", 1400, choice("dir", ORIENTATION, "vert")),
+	// p14:doors and p14:window are p:CT_OrientationTransition (MS-PPTX §2.3.1.7, §2.3.1.33), whose dir defaults to
+	// "horz" (ECMA-376 Part 1 PresentationML schema).
+	preset("window", "p14", "dynamic", 1400, choice("dir", ORIENTATION, "horz")),
 	preset("flythrough", "p14", "dynamic", 1000, choice("dir", IN_OUT, "in"), flag("hasBounce"))
 ]
 

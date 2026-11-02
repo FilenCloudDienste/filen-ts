@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutSegmentedCycle
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:cycle-segmented">
+	<sa:title val="Segmented cycle"/>
+	<sa:desc val="Stages as the segments of one ring, clockwise from the top, each segment turned to face the centre with its text kept upright; sub-items are bullets in their segment."/>
+	<sa:catLst>
+		<sa:cat type="cycle" pri="20"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="104"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="100" destId="102" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="100" destId="103" srcOrd="2" destOrd="0"/>
+				<sa:cxn modelId="203" srcId="100" destId="104" srcOrd="3" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="whole">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:animLvl val="lvl"/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:alg type="composite">
+			<sa:param type="ar" val="1"/>
+		</sa:alg>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="ch" type="l" refType="w" fact="0.1"/>
+			<sa:constr for="ch" type="t" refType="h" fact="0.1"/>
+			<sa:constr for="ch" type="w" refType="w" fact="0.8"/>
+			<sa:constr for="ch" type="h" refType="h" fact="0.8"/>
+			<sa:constr for="des" forName="label" type="primFontSz" op="equ" val="44"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:layoutNode name="segments">
+			<sa:choose name="turning">
+				<sa:if name="clockwise" func="var" arg="dir" op="equ" val="norm">
+					<sa:alg type="cycle">
+						<sa:param type="stAng" val="0"/>
+						<sa:param type="spanAng" val="360"/>
+						<sa:param type="rotPath" val="alongPath"/>
+					</sa:alg>
+				</sa:if>
+				<sa:else name="counterClockwise">
+					<sa:alg type="cycle">
+						<sa:param type="stAng" val="0"/>
+						<sa:param type="spanAng" val="-360"/>
+						<sa:param type="rotPath" val="alongPath"/>
+					</sa:alg>
+				</sa:else>
+			</sa:choose>
+			<sa:shape><sa:adjLst/></sa:shape>
+			<sa:presOf/>
+			<sa:constrLst>
+				<sa:constr for="ch" forName="segment" type="w" refType="w"/>
+				<sa:constr for="ch" forName="segment" type="h" refFor="ch" refForName="segment" refType="w" fact="0.8"/>
+				<sa:constr type="sibSp" refFor="ch" refForName="segment" refType="w" fact="-0.12"/>
+			</sa:constrLst>
+			<sa:ruleLst/>
+			<sa:forEach name="segmentsItems" ptType="node" axis="ch">
+				<sa:forEach name="segmentOf" ptType="parTrans" axis="precedSib" st="-1" cnt="1">
+					<sa:layoutNode name="segment" styleLbl="node1">
+						<sa:alg type="sp"/>
+						<sa:shape type="flowChartManualOperation"><sa:adjLst/></sa:shape>
+						<sa:presOf/>
+						<sa:constrLst/>
+						<sa:ruleLst/>
+					</sa:layoutNode>
+				</sa:forEach>
+			</sa:forEach>
+		</sa:layoutNode>
+		<sa:layoutNode name="labels">
+			<sa:choose name="labelTurning">
+				<sa:if name="labelsClockwise" func="var" arg="dir" op="equ" val="norm">
+					<sa:alg type="cycle">
+						<sa:param type="stAng" val="0"/>
+						<sa:param type="spanAng" val="360"/>
+					</sa:alg>
+				</sa:if>
+				<sa:else name="labelsCounterClockwise">
+					<sa:alg type="cycle">
+						<sa:param type="stAng" val="0"/>
+						<sa:param type="spanAng" val="-360"/>
+					</sa:alg>
+				</sa:else>
+			</sa:choose>
+			<sa:shape><sa:adjLst/></sa:shape>
+			<sa:presOf/>
+			<sa:constrLst>
+				<sa:constr for="ch" forName="label" type="w" refType="w"/>
+				<sa:constr for="ch" forName="label" type="h" refFor="ch" refForName="label" refType="w" fact="0.8"/>
+				<sa:constr type="sibSp" refFor="ch" refForName="label" refType="w" fact="-0.12"/>
+			</sa:constrLst>
+			<sa:ruleLst/>
+			<sa:forEach name="labelsItems" ptType="node" axis="ch">
+				<sa:layoutNode name="label" styleLbl="node1">
+					<sa:varLst>
+						<sa:bulletEnabled val="1"/>
+					</sa:varLst>
+					<sa:alg type="tx"/>
+					<sa:shape type="rect" hideGeom="1"><sa:adjLst/></sa:shape>
+					<sa:presOf axis="desOrSelf" ptType="node"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.25"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.25"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.25"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.25"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+			</sa:forEach>
+		</sa:layoutNode>
+	</sa:layoutNode>
+</sa:layoutDef>

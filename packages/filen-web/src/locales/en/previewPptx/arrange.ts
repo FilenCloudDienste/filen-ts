@@ -27,6 +27,10 @@ export const previewPptxArrange = {
 	previewPptxObjectSmartArt: "SmartArt graphic",
 	/** Presentation editor — what a selected object is, in announcements */
 	previewPptxObjectMedia: "Media",
+	/** Presentation editor — what a selected object is, in announcements: a sound clip on the slide, e.g. "Audio selected" */
+	previewPptxObjectAudio: "Audio",
+	/** Presentation editor — what a selected object is, in announcements: a video on the slide, e.g. "Video selected" */
+	previewPptxObjectVideo: "Video",
 	/** Presentation editor — what a selected object is, in announcements: an embedded object such as a spreadsheet */
 	previewPptxObjectEmbedded: "Embedded object",
 	/** Presentation editor — what a selected object is, in announcements: pen or highlighter drawing */
@@ -82,6 +86,8 @@ export const previewPptxArrange = {
 	previewPptxFlipVertical: "Flip vertical",
 	/** Presentation editor, Arrange tab, Rotate menu */
 	previewPptxFlipHorizontal: "Flip horizontal",
+	/** Presentation editor, Arrange tab, Rotate menu — why Flip is unavailable for the selection */
+	previewPptxFlipFrames: "Tables, charts, objects, media and diagrams can't be flipped",
 
 	/** Presentation editor, Arrange tab — group of the accessibility and action commands */
 	previewPptxArrangeObject: "Object",

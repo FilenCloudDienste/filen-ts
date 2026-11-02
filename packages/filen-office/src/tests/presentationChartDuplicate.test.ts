@@ -140,4 +140,42 @@ describe("a duplicated slide's chart is its own", () => {
 			expect((await titles(bytes, format, "ORIGINAL")).slides).toEqual([true, false])
 			expect((await titles(bytes, format, "COPY")).slides).toEqual([false, true])
 		})
+
+	// A chart inserted this session and saved, then edited and its slide copied before the next save: each slide
+	// relates its own chart part alone, and the file holds no chart part nothing relates.
+	for (const edited of ["original", "copy"] as const)
+		it(`pptx: a session chart saved, the ${edited} edited after a duplicate: one chart part per slide, none stale`, async () => {
+			const d = await driveSession(
+				buildPptx({
+					slides: [0, 1].map(at => ({
+						shapes: sp(2, "TextBox 1", undefined, xfrm(100_000, 100_000, 3_000_000, 500_000), body(para(`S${String(at)}`)))
+					}))
+				}),
+				"pptx"
+			)
+			const slide = d.session.deck.slides[0] as SlideRef
+
+			await viewCapability.render(d.context, [slide])
+			expect(await d.command(insertChartOp(d.session.deck, slide, 0, "column", CELLS))).toMatchObject({ ok: true })
+			await saved(d)
+
+			if (edited === "original") await retitle(d, slide, "NEW")
+
+			expect(await d.command({ family: "slide", kind: "duplicate", slide })).toMatchObject({ ok: true })
+
+			const copy = d.session.deck.slides[1] as SlideRef
+
+			await viewCapability.render(d.context, [copy])
+
+			if (edited === "copy") await retitle(d, copy, "NEW")
+
+			const files = unzipSync(await saved(d))
+			const related = Object.keys(files)
+				.filter(name => /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/u.test(name))
+				.map(name => strFromU8(files[name] as Uint8Array).match(/charts\/chart\d+\.xml/gu) ?? [])
+			const charts = Object.keys(files).filter(name => /^ppt\/charts\/chart\d+\.xml$/u.test(name))
+
+			expect(related.map(names => names.length).sort()).toEqual([0, 1, 1])
+			expect(charts).toHaveLength(2)
+		})
 })

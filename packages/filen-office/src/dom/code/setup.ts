@@ -55,7 +55,9 @@ export const codeFillParent: Extension = EditorView.theme({
 	"& .cm-scroller": { height: "100% !important" }
 })
 
-const LOCKED: Extension = [EditorState.readOnly.of(true), EditorView.editable.of(false)]
+// Still a Tab and F6 stop: browsers focus a non-editable element only with a tab index, and the text is read with the
+// keyboard (scrolled, selected, copied) as when it can be edited.
+const LOCKED: Extension = [EditorState.readOnly.of(true), EditorView.editable.of(false), EditorView.contentAttributes.of({ tabindex: "0" })]
 const UNLOCKED: Extension = []
 
 // A read-only, non-editable editor (no caret, no input). One value per state, so its identity is stable.

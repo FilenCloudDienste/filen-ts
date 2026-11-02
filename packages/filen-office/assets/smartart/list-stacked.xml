@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutStackedList
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:list-stacked">
+	<sa:title val="Stacked list"/>
+	<sa:desc val="Each top-level item is a disc set on the top edge of its own card, side by side; the sub-items are bullets on the card."/>
+	<sa:catLst>
+		<sa:cat type="list" pri="40"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="104"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="105"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="106"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="107"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="108"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="109"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="101" destId="102" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="101" destId="103" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="203" srcId="100" destId="104" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="204" srcId="104" destId="105" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="205" srcId="104" destId="106" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="206" srcId="100" destId="107" srcOrd="2" destOrd="0"/>
+				<sa:cxn modelId="207" srcId="107" destId="108" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="208" srcId="107" destId="109" srcOrd="1" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="cards">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:animLvl val="lvl"/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:choose name="reading">
+			<sa:if name="fromLeft" func="var" arg="dir" op="equ" val="norm">
+				<sa:alg type="lin">
+					<sa:param type="linDir" val="fromL"/>
+					<sa:param type="nodeVertAlign" val="mid"/>
+				</sa:alg>
+			</sa:if>
+			<sa:else name="fromRight">
+				<sa:alg type="lin">
+					<sa:param type="linDir" val="fromR"/>
+					<sa:param type="nodeVertAlign" val="mid"/>
+				</sa:alg>
+			</sa:else>
+		</sa:choose>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="ch" forName="card" type="w" refType="w"/>
+			<sa:constr for="ch" forName="card" type="h" refFor="ch" refForName="card" refType="w" fact="1.45"/>
+			<sa:constr for="ch" forName="space" type="w" refFor="ch" refForName="card" refType="w" fact="0.08"/>
+			<sa:constr for="des" forName="disc" type="primFontSz" op="equ" val="40"/>
+			<sa:constr for="des" forName="notes" type="primFontSz" op="equ" val="30"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:forEach name="items" ptType="node" axis="ch">
+			<sa:layoutNode name="card">
+				<sa:alg type="composite"/>
+				<sa:shape><sa:adjLst/></sa:shape>
+				<sa:presOf/>
+				<sa:constrLst>
+					<sa:constr for="ch" forName="body" type="l" refType="w" fact="0.04"/>
+					<sa:constr for="ch" forName="body" type="w" refType="w" fact="0.92"/>
+					<sa:constr for="ch" forName="body" type="t" refType="w" fact="0.3"/>
+					<sa:constr for="ch" forName="body" type="b" refType="h"/>
+					<sa:constr for="ch" forName="disc" type="w" refType="w" fact="0.6"/>
+					<sa:constr for="ch" forName="disc" type="h" refType="w" fact="0.6"/>
+					<sa:constr for="ch" forName="disc" type="ctrX" refType="w" fact="0.5"/>
+					<sa:constr for="ch" forName="disc" type="t"/>
+					<sa:constr for="ch" forName="notes" type="l" refType="w" fact="0.1"/>
+					<sa:constr for="ch" forName="notes" type="w" refType="w" fact="0.8"/>
+					<sa:constr for="ch" forName="notes" type="t" refType="w" fact="0.64"/>
+					<sa:constr for="ch" forName="notes" type="b" refType="h" fact="0.97"/>
+				</sa:constrLst>
+				<sa:ruleLst/>
+				<sa:layoutNode name="body" styleLbl="alignAcc1">
+					<sa:alg type="sp"/>
+					<sa:shape type="roundRect">
+						<sa:adjLst>
+							<sa:adj idx="1" val="0.1"/>
+						</sa:adjLst>
+					</sa:shape>
+					<sa:presOf/>
+					<sa:constrLst/>
+					<sa:ruleLst/>
+				</sa:layoutNode>
+				<sa:layoutNode name="notes" styleLbl="revTx">
+					<sa:varLst>
+						<sa:bulletEnabled val="1"/>
+					</sa:varLst>
+					<sa:alg type="tx">
+						<sa:param type="txAnchorVert" val="t"/>
+						<sa:param type="parTxLTRAlign" val="l"/>
+					</sa:alg>
+					<sa:shape type="rect" hideGeom="1"><sa:adjLst/></sa:shape>
+					<sa:presOf axis="des" ptType="node"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.2"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+				<sa:layoutNode name="disc" styleLbl="node1">
+					<sa:alg type="tx"/>
+					<sa:shape type="ellipse"><sa:adjLst/></sa:shape>
+					<sa:presOf axis="self"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+			</sa:layoutNode>
+			<sa:forEach name="spaces" ptType="sibTrans" axis="followSib" cnt="1">
+				<sa:layoutNode name="space">
+					<sa:alg type="sp"/>
+					<sa:shape><sa:adjLst/></sa:shape>
+					<sa:presOf/>
+					<sa:constrLst/>
+					<sa:ruleLst/>
+				</sa:layoutNode>
+			</sa:forEach>
+		</sa:forEach>
+	</sa:layoutNode>
+</sa:layoutDef>

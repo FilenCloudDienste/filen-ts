@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import {
 	BytePieces,
 	CONTENT_TYPES_PART,
@@ -160,7 +161,7 @@ export async function writeXlsx(input: XlsxSaveInput, slicing?: Slicing): Promis
 	for (const [source, change] of changes.relationships as ReadonlyMap<string, XlsxRelationshipChanges>) {
 		const edit = relationshipEdit(source)
 
-		edit.added.push(...change.added)
+		appendAll(edit.added, change.added)
 		for (const id of change.removed) edit.removed.add(id)
 	}
 

@@ -270,9 +270,28 @@ export function lineEndXfrm(xfrm: Xfrm, which: LineEnd, to: { readonly x: number
 	return { ...xfrm, x: Math.round(midX - cx / 2), y: Math.round(midY - cy / 2), cx, cy, flipH: lx < 0, flipV: ly < 0 }
 }
 
+// What a selected shape is, as far as flipping goes: its layer's role, the roles of every layer that paints it (a
+// group's children's included) and whether it plays a medium.
+export interface FlipCandidate extends PlacedShape {
+	readonly role?: string
+	readonly roles?: readonly string[]
+	readonly media?: unknown
+}
+
+const UNFLIPPABLE: ReadonlySet<string> = new Set(["table", "chart", "ole", "smartart", "media"])
+
+// Whether a shape can be flipped: a graphic frame (a table, chart, embedded object or diagram) has no flip PowerPoint
+// draws (ECMA-376 §19.3.1.21) and ODF's draw:frame holds none; a medium plays unflipped in both; a group holding one
+// would mirror it.
+export function canFlip(shape: FlipCandidate): boolean {
+	return !UNFLIPPABLE.has(shape.role ?? "") && !(shape.roles ?? []).some(role => UNFLIPPABLE.has(role)) && shape.media === undefined
+}
+
 // Rotate ▸ Flip: each shape mirrored in place. A turned shape mirrored across the slide's vertical axis keeps its
 // box and turns the other way (flips apply before the turn).
-export function flipOp(slide: SlideRef, shapes: readonly PlacedShape[], axis: "horizontal" | "vertical"): DeckOp | undefined {
+export function flipOp(slide: SlideRef, shapes: readonly FlipCandidate[], axis: "horizontal" | "vertical"): DeckOp | undefined {
+	if (!shapes.every(canFlip)) return undefined
+
 	return xfrmsOp(
 		slide,
 		shapes,

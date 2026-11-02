@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { seriesColor } from "../../drawingml/chart/palette"
 import { readColorIn, type DrawingTheme } from "../../drawingml/color"
 import { rgbaHex } from "../../drawingml/displayList"
@@ -379,7 +380,10 @@ export function chartObject(document: XmlDocument, theme: DrawingTheme, sheet: s
 			if ("refused" in written) lost = true
 			else {
 				dataStyle = written.styles[written.styles.length - 1]?.name
-				numberStyles.push(...written.styles.map(one => one.markup))
+				appendAll(
+					numberStyles,
+					written.styles.map(one => one.markup)
+				)
 			}
 		}
 

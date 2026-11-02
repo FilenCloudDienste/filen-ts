@@ -474,6 +474,41 @@ describe("SmartArt Design tab", () => {
 		])
 	})
 
+	it("closes the layout, style and colours menus on a choice, giving focus back to the trigger", async () => {
+		const { ops } = mount(smartartDesignGroups)
+
+		await waitFor(() => {
+			expect(button("Change layout").disabled).toBe(false)
+		})
+
+		for (const [trigger, index] of [
+			["Change layout", 0],
+			// The current style: no op, and the menu still closes.
+			["Style", 0],
+			["Change colors", 1]
+		] as const) {
+			const opener = button(trigger)
+
+			fireEvent.click(opener)
+
+			const items = await screen.findAllByRole("menuitemradio")
+
+			await act(async () => {
+				fireEvent.click(at(items, index))
+				await Promise.resolve()
+			})
+			await waitFor(() => {
+				expect(screen.queryByRole("menu")).toBeNull()
+			})
+			expect(opener.getAttribute("aria-expanded")).not.toBe("true")
+			await waitFor(() => {
+				expect(document.activeElement).toBe(opener)
+			})
+		}
+
+		expect(ops.map(op => op.kind)).toEqual(["setLayout", "setColors"])
+	})
+
 	it("toggles the text pane", () => {
 		mount(smartartDesignGroups)
 

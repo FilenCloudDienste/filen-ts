@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { nativeDeflate, nativeDeflateChunks } from "../../docx/write/zip"
 import { bytesSource, memorySink, planZip, writeZip, type ByteChunks, type PartChange } from "../../opc/index"
 import type { InflateHook } from "../../opc/zipReader"
@@ -368,7 +369,10 @@ export async function saveOds(document: XlsxDocument, options: OdsSaveOptions = 
 					changed.splice(0, 1)
 				}
 
-				changed.push(...added.map(change => change.name))
+				appendAll(
+					changed,
+					added.map(change => change.name)
+				)
 
 				if (options.signal?.aborted === true) return { ok: false, reason: "write", message: "The save was aborted" }
 

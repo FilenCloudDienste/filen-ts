@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { partKey } from "../../opc/partNames"
 import type { SheetId, SheetRange } from "../../sheet/protocol"
 import { heldOrSource } from "../comments/parts"
@@ -174,7 +175,7 @@ export class ChartBook {
 
 			// A pivot chart's caches are its pivot table's: no cell edit changes what it shows.
 			if (!isPivotChart(reader))
-				for (const reference of chartReferences(reader)) out.push(...(chartAreas(reference.formula, names) ?? []))
+				for (const reference of chartReferences(reader)) appendAll(out, chartAreas(reference.formula, names) ?? [])
 		} catch {
 			out.length = 0
 		}

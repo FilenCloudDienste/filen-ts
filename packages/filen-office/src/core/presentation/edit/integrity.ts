@@ -89,7 +89,9 @@ export function slideReferences(deck: Deck, ref: SlideRef, facts: ReferenceFacts
 			if (OWNED_KINDS.has(reference.kind)) {
 				owned.push(reference.part)
 				if (depth < 8) follow(reference.part, depth + 1)
-			} else if (depth === 0) {
+			} else {
+				// Shared from the slide or from a part it owns (a picture a diagram's data relates): a delete that leaves no
+				// other reference to it removes it too, so its undo holds it.
 				shared.push(reference.part)
 			}
 		}

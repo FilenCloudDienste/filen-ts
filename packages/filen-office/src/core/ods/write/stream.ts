@@ -1,3 +1,4 @@
+import { fromCharCodes } from "../../arrays"
 import { decodeCharacterData } from "../../xml/entities"
 
 // A one-pass tag scanner over content.xml as it inflates, for the writer: start, end and empty tags come out with
@@ -345,7 +346,7 @@ export function tagAttributes(tag: Uint8Array): Map<string, string> {
 
 		while (i < tag.length && tag[i] !== EQUALS && !isSpace(tag[i])) i++
 
-		const name = String.fromCharCode(...tag.subarray(nameStart, i))
+		const name = fromCharCodes(tag.subarray(nameStart, i))
 
 		while (i < tag.length && tag[i] !== QUOTE && tag[i] !== APOSTROPHE) i++
 
@@ -370,5 +371,5 @@ export function tagName(tag: Uint8Array): string {
 
 	while (i < tag.length && !isSpace(tag[i]) && tag[i] !== SLASH && tag[i] !== GT) i++
 
-	return String.fromCharCode(...tag.subarray(start, i))
+	return fromCharCodes(tag.subarray(start, i))
 }

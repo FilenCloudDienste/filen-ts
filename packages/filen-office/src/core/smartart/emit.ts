@@ -3,13 +3,14 @@ import { D, type DrawingReader } from "../drawingml/reader"
 import { Relationships } from "../opc/index"
 import { fillOf, readLine, readTextBody, readXfrm, type ReadContext } from "../pptx/read/drawing"
 import { styleOf } from "../pptx/read/slide"
-import { G, partReader } from "../pptx/read/xml"
+import { G, partReader, type PartReader } from "../pptx/read/xml"
 import { DeckTally } from "../presentation/budget"
-import type { Geometry, ShapeNode } from "../presentation/model"
+import type { FillProps, Geometry, ShapeNode } from "../presentation/model"
 import { escapeAttribute, escapeText } from "../xml/entities"
 import { parseXml } from "../xml/index"
+import { adjustGuideValue } from "./adjust"
 import { connectorRoute, type ConnectorRoute } from "./algorithms/conn"
-import { param } from "./algorithms/shared"
+import { originalShape, param } from "./algorithms/shared"
 import type { DataPoint } from "./data"
 import type { Box, DiagramLayout, LaidShape, LayoutNode } from "./interp"
 import { DiagramStyles, drawingMarkup, type ShapeStyle } from "./style"
@@ -41,6 +42,25 @@ export interface EmittedDiagram {
 	readonly drawingXml: string
 	// The text boxes of the shapes whose points hold no text (EMU in the frame): where an editor shows its prompt.
 	readonly prompts: readonly Box[]
+	// The picture placeholders (a dgm:shape with blipPhldr) as laid out: the point they belong to, the layout node's
+	// name (a presentation point's presName), and whether a picture fills them; an editor offers a picture there.
+	readonly pictures: readonly PicturePlaceholder[]
+}
+
+export interface PicturePlaceholder {
+	readonly box: Box
+	readonly node: string
+	readonly placeholder: string
+	readonly filled: boolean
+}
+
+// An image a diagram's data names before a save gives it a relationship (core/presentation/edit/apply/smartart.ts):
+// an image an op inserted ("inserted:<registry id>") or a package part ("part:/ppt/media/image1.png").
+export const INSERTED_IMAGE_ID = "inserted:"
+export const PART_IMAGE_ID = "part:"
+
+export function isPendingImageId(id: string): boolean {
+	return id.startsWith(INSERTED_IMAGE_ID) || id.startsWith(PART_IMAGE_ID)
 }
 
 function emu(value: number): string {
@@ -103,12 +123,17 @@ function plan(layout: DiagramLayout): Drawn[] {
 
 	for (const shape of shapes) {
 		if (shape.hideGeom && hasText(shape)) {
+			const moveWith = shape.node.def.moveWith
+
 			for (let i = out.length - 1; i >= 0; i--) {
 				const host = out[i] as Drawn
 
 				// The host keeps text only from a text node of its own (its alg tx); its other text is presented by this one.
 				if (host.shape.hideGeom || (host.text !== undefined && host.text.node.alg.type === "tx")) continue
 				if (host.shape.assocId !== shape.assocId || !overlaps(host.shape.box, shape.box)) continue
+				// A text node that names the shape it moves with goes on that sibling only: chart3's wedge texts all
+				// present the diagram's point over one pie box, and each is its own wedge's.
+				if (moveWith !== undefined && (host.shape.node.name !== moveWith || host.shape.node.parent !== shape.node.parent)) continue
 
 				host.text = shape
 
@@ -152,7 +177,10 @@ function geometryMarkup(shape: LaidShape, route: ConnectorRoute | undefined, box
 	const names = presetProgram(preset)?.adjustNames ?? []
 	const guides = (shape.node.shape?.adj ?? [])
 		.filter(adj => adj.idx >= 1 && adj.idx <= names.length && Number.isFinite(adj.val))
-		.map(adj => ({ name: names[adj.idx - 1] as string, formula: `val ${Math.round(adj.val * 100000)}` }))
+		.map(adj => ({
+			name: names[adj.idx - 1] as string,
+			formula: `val ${adjustGuideValue(preset, names[adj.idx - 1] as string, adj.val)}`
+		}))
 	const avLst = guides.map(guide => `<a:gd name="${guide.name}" fmla="${guide.formula}"/>`).join("")
 
 	return {
@@ -161,12 +189,37 @@ function geometryMarkup(shape: LaidShape, route: ConnectorRoute | undefined, box
 	}
 }
 
-function anchorOf(shape: LaidShape): { anchor: string; centred: boolean } {
+const ANCHORS: ReadonlySet<string> = new Set(["t", "ctr", "b", "just", "dist"])
+
+// The text body properties the first presented point sets itself (its dgm:t a:bodyPr), which PowerPoint's drawings
+// keep over the layout's: the tdf149551 decks' anchor="b" anchorCtr="1", the Gear deck's zero insets.
+function ownBodyPr(shape: LaidShape, options: EmitOptions): { readonly reader: DrawingReader; readonly node: number } | undefined {
+	const first = shape.text[0]
+	const source = first === undefined ? undefined : options.text?.(first)
+
+	if (source === undefined) return undefined
+
+	const node = source.reader.child(source.node, D.A, "bodyPr")
+
+	return node < 0 ? undefined : { reader: source.reader, node }
+}
+
+// The text's anchor: the point's own, else the layout's (txAnchorVert, txAnchorHorz).
+function anchorOf(shape: LaidShape, own: ReturnType<typeof ownBodyPr>): { anchor: string; centred: boolean } {
 	const vertical = param(shape.node, "txAnchorVert", "mid")
 	const horizontal = param(shape.node, "txAnchorHorz", "none")
+	const layout = { anchor: vertical === "t" ? "t" : vertical === "b" ? "b" : "ctr", centred: horizontal === "ctr" }
+	const anchor = own === undefined ? undefined : own.reader.attr(own.node, "anchor")
 
-	return { anchor: vertical === "t" ? "t" : vertical === "b" ? "b" : "ctr", centred: horizontal === "ctr" }
+	if (own === undefined || anchor === undefined || !ANCHORS.has(anchor)) return layout
+
+	const centred = own.reader.attr(own.node, "anchorCtr")
+
+	return { anchor, centred: centred === undefined ? layout.centred : centred === "1" || centred === "true" }
 }
+
+// A side's inset in EMU: the point's own (lIns, tIns...), else the margin the layout's constraints give.
+const INSETS: Readonly<Record<string, string>> = { lMarg: "lIns", tMarg: "tIns", rMarg: "rIns", bMarg: "bIns" }
 
 const ALIGN: Readonly<Record<string, string>> = { l: "l", r: "r", ctr: "ctr", just: "just" }
 
@@ -203,8 +256,8 @@ function paragraphsOf(point: DataPoint, level: TextLevel, options: EmitOptions):
 	const spaced = (own: ReadonlyMap<string, string>): string =>
 		["lnSpc", "spcBef", "spcAft"].map(name => own.get(name) ?? defaults[name] ?? "").join("")
 	// CT_TextParagraphProperties order: spacing, then the bullet, then tabs.
-	const pPr = (spacing: string, tabs: string): string =>
-		`<a:pPr marL="${level.level > 0 ? emu(level.level * hang) : "0"}" lvl="${level.level}" indent="${level.bullet ? emu(-hang) : "0"}" algn="${level.align}">${spacing}${level.bullet ? '<a:buChar char="•"/>' : "<a:buNone/>"}${tabs}</a:pPr>`
+	const pPr = (spacing: string, tabs: string, align = level.align): string =>
+		`<a:pPr marL="${level.level > 0 ? emu(level.level * hang) : "0"}" lvl="${level.level}" indent="${level.bullet ? emu(-hang) : "0"}" algn="${align}">${spacing}${level.bullet ? '<a:buChar char="•"/>' : "<a:buNone/>"}${tabs}</a:pPr>`
 
 	if (source === undefined) {
 		return point.paragraphs
@@ -224,6 +277,7 @@ function paragraphsOf(point: DataPoint, level: TextLevel, options: EmitOptions):
 		let inner = ""
 		const spacing = new Map<string, string>()
 		let tabs = ""
+		let align = level.align
 
 		for (let child = document.firstChildElement(p); child >= 0; child = document.nextSiblingElement(child)) {
 			if (reader.group(child) !== D.A) continue
@@ -231,7 +285,10 @@ function paragraphsOf(point: DataPoint, level: TextLevel, options: EmitOptions):
 			const name = document.localName(child)
 
 			if (name === "pPr") {
-				// The paragraph's own properties beyond what the diagram sets (spacing, tabs).
+				// The paragraph's own properties beyond what the diagram sets (spacing, tabs), and its own alignment,
+				// which PowerPoint's drawings keep.
+				align = ALIGN[reader.attr(child, "algn") ?? ""] ?? align
+
 				for (let property = document.firstChildElement(child); property >= 0; property = document.nextSiblingElement(property)) {
 					const local = document.localName(property)
 
@@ -272,7 +329,7 @@ function paragraphsOf(point: DataPoint, level: TextLevel, options: EmitOptions):
 			}
 		}
 
-		out += `<a:p>${pPr(spaced(spacing), tabs)}${inner}</a:p>`
+		out += `<a:p>${pPr(spaced(spacing), tabs, align)}${inner}</a:p>`
 	}
 
 	return out
@@ -285,8 +342,14 @@ function fontSize(pt: number): number {
 
 function textBody(shape: LaidShape, options: EmitOptions): string {
 	const values = shape.node.values
-	const margin = (name: string): string => emu(values.get(name) ?? 0)
-	const { anchor, centred } = anchorOf(shape)
+	const own = ownBodyPr(shape, options)
+	const margin = (name: string): string => {
+		const inset = own === undefined ? undefined : own.reader.attr(own.node, INSETS[name] ?? "")
+		const value = inset === undefined || !/^-?\d+$/u.test(inset) ? undefined : Number(inset)
+
+		return value === undefined ? emu(values.get(name) ?? 0) : String(value)
+	}
+	const { anchor, centred } = anchorOf(shape, own)
 	const size = shape.fontPt === undefined ? undefined : fontSize(shape.fontPt)
 	const secondary = values.get("secFontSz")
 	// With the user's own text size (custT: no fitted size) the child runs keep theirs too.
@@ -300,9 +363,10 @@ function textBody(shape: LaidShape, options: EmitOptions): string {
 	const first = shape.text[0]
 	let paragraphs = ""
 
-	// Levels count from the shape's own point: a node that presents its children (presOf des) shows them at level 1,
-	// bulleted as the text algorithm's stBulletLvl starts them (bList2's child boxes in LibreOffice and PowerPoint).
-	const base = first === undefined ? 0 : Math.min(first.depth, shape.node.point.depth)
+	// Levels count from the point the presOf walks the descendants of (the shape's own by default): a node that
+	// presents its children (presOf des) shows them at level 1, bulleted as the text algorithm's stBulletLvl starts
+	// them (bList2's child boxes in LibreOffice and PowerPoint).
+	const base = first === undefined ? 0 : Math.min(first.depth, shape.node.textBase)
 
 	shape.text.forEach((point, i) => {
 		const level = first === undefined ? 0 : Math.max(i === 0 ? 0 : 1, Math.min(8, point.depth - base))
@@ -413,11 +477,38 @@ function shapeMarkup(item: Drawn, index: number, style: ShapeStyle, options: Emi
 		body = textBody(text, options)
 
 		// The text's own box when it is not the shape's (a merged text shape, or text kept upright on a turned one).
-		if (text !== shape || shape.rot !== 0)
-			body += `<dsp:txXfrm>${xfrmMarkup(text.box, 0).replace("<a:xfrm>", "").replace("</a:xfrm>", "")}</dsp:txXfrm>`
+		if (text !== shape || shape.rot !== 0) {
+			// txXfrm turns relative to the shape: text kept upright (autoTxRot upr, the default) turns back by the shape's
+			// turn, as PowerPoint's caches write it (the Gear deck's rot="-20700000" on a shape turned 20700000); grav
+			// turns text that would read upside down by half a turn; none leaves it turned with the shape.
+			const turn = Number.isFinite(shape.rot) ? ((shape.rot % 360) + 360) % 360 : 0
+			const mode = param(text.node, "autoTxRot", "upr")
+			const relative = mode === "none" ? 0 : mode === "grav" ? (turn > 90 && turn < 270 ? 180 : 0) : -turn
+			const angle = Math.round(relative * 60000)
+			const rotation = angle === 0 ? "" : ` rot="${String(angle)}"`
+
+			body += `<dsp:txXfrm${rotation}>${xfrmMarkup(text.box, 0).replace("<a:xfrm>", "").replace("</a:xfrm>", "")}</dsp:txXfrm>`
+		}
 	}
 
 	return `<dsp:sp modelId="${escapeAttribute(modelId(shape, index))}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>${spPr}${styleMarkup(style)}${body}</dsp:sp>`
+}
+
+// A picture fill naming an image by a pending id (no relationship yet): the inserted image or the part it names.
+function pendingPicture(reader: PartReader, spPr: number): FillProps | undefined {
+	const blipFill = reader.child(spPr, G.A, "blipFill")
+	const id = reader.rel(reader.child(blipFill, G.A, "blip"), "embed")
+
+	if (id === undefined || !isPendingImageId(id)) return undefined
+
+	const source = reader.child(blipFill, G.A, "srcRect")
+	const edge = (name: string): number => Number(reader.attr(source, name) ?? "0") || 0
+	const crop = source < 0 ? undefined : { l: edge("l"), t: edge("t"), r: edge("r"), b: edge("b") }
+	const image = id.startsWith(INSERTED_IMAGE_ID)
+		? { inserted: Number(id.slice(INSERTED_IMAGE_ID.length)) }
+		: { part: id.slice(PART_IMAGE_ID.length) }
+
+	return { kind: "picture", ...image, ...(crop === undefined ? {} : { crop }) }
 }
 
 // The model's shapes, read back from the drawing as the slide reader reads a shape.
@@ -440,7 +531,7 @@ function modelShapes(drawingXml: string, drawn: readonly Drawn[], geometries: re
 		const item = drawn[index]
 		const spPr = reader.child(sp, G.Dsp, "spPr")
 		const xfrm = readXfrm(reader, reader.child(spPr, G.A, "xfrm"))
-		const fill = fillOf(context, spPr)
+		const fill = pendingPicture(reader, spPr) ?? fillOf(context, spPr)
 		const ln = reader.child(spPr, G.A, "ln")
 		const style = styleOf(reader, reader.child(sp, G.Dsp, "style"))
 		const txBody = reader.child(sp, G.Dsp, "txBody")
@@ -492,5 +583,18 @@ export function emitDiagram(layout: DiagramLayout, options: EmitOptions = {}): E
 		.filter(item => item.text === undefined && item.shape.text.length > 0 && !item.shape.hideGeom)
 		.map(item => item.shape.box)
 
-	return { shapes: modelShapes(drawingXml, drawn, geometries), drawingXml, prompts }
+	const pictures = drawn
+		.filter(item => originalShape(item.shape.node)?.blipPhldr === true && !item.shape.hideGeom)
+		.map(item => {
+			const own = item.shape.node.pres === undefined ? undefined : ownProps(item.shape.node.pres, options)
+
+			return {
+				box: item.shape.box,
+				node: item.shape.assocId,
+				placeholder: item.shape.name,
+				filled: own?.fill?.includes("blipFill") === true
+			}
+		})
+
+	return { shapes: modelShapes(drawingXml, drawn, geometries), drawingXml, prompts, pictures }
 }

@@ -9,6 +9,7 @@ import {
 	type PictureSize
 } from "../../../presentation/edit/apply/picture"
 import type { DeckOp, InsertedImage, PictureAdjust } from "../../../presentation/edit/ops"
+import { isIssuedName } from "../../../presentation/issuedNames"
 import { refused, type Deck, type FillProps, type Refused, type ShapeNode } from "../../../presentation/model"
 import { findShape } from "../../../presentation/edit/changes"
 import type { Slicing } from "../../../opc/index"
@@ -17,7 +18,7 @@ import { pictureSize, type OdpPackageView } from "../../read/document"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
 import { OdpStyles, declared, hexColor, isRefused, percent, pt, setProperty, styleChanges, type StyleChanges } from "../styles"
-import { IDENTITY, OdpShapeWriter } from "./shape"
+import { IDENTITY, OdpShapeWriter, canonicalBox, pictureMirror } from "./shape"
 import { altMarkup, frameBox } from "./table"
 
 // The picture family's ODF markup: a draw:frame holding draw:image (ODF 1.3 Part 3 §10.3.4). The frame's box, name,
@@ -64,8 +65,9 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 	return true
 }
 
-// The package path of an inserted image: named by its content (a name no source entry has), added once per save.
-function insertedEntry(styles: OdpStylesApi, id: number, image: InsertedImage): string {
+// The package path of an inserted image: named by its content and registry id, past every name the package has or a
+// package of the session had (an earlier session's insert of the same image has its name), added once per save.
+function insertedEntry(styles: OdpStylesApi, deck: Deck, id: number, image: InsertedImage): string {
 	let held = entries.get(styles)
 
 	if (held === undefined) {
@@ -87,7 +89,11 @@ function insertedEntry(styles: OdpStylesApi, id: number, image: InsertedImage): 
 		return same
 	}
 
-	const path = `Pictures/inserted-${crc.toString(16).padStart(8, "0")}-${String(id)}.${EXTENSIONS[image.contentType] ?? "bin"}`
+	const stem = `Pictures/inserted-${crc.toString(16).padStart(8, "0")}-${String(id)}`
+	const extension = EXTENSIONS[image.contentType] ?? "bin"
+	let path = `${stem}.${extension}`
+
+	for (let k = 2; styles.hasEntry?.(path) === true || isIssuedName(deck, path); k++) path = `${stem}-${String(k)}.${extension}`
 
 	styles.addEntry(path, image.bytes, image.contentType)
 	held.ids.set(id, path)
@@ -114,7 +120,11 @@ function imageOf(
 		const image = insertedImage(context.deck, fill.inserted)
 
 		if (image !== undefined)
-			return { path: insertedEntry(context.styles, fill.inserted, image), inserted: true, size: pictureSize(image.bytes) }
+			return {
+				path: insertedEntry(context.styles, context.deck, fill.inserted, image),
+				inserted: true,
+				size: pictureSize(image.bytes)
+			}
 
 		const written = insertedImageWritten(context.deck, fill.inserted)
 
@@ -225,8 +235,6 @@ function newPicture(context: OdpEmitContext, styles: OdpStyles, shape: ShapeNode
 	const xfrm = shape.xfrm
 
 	if (xfrm === undefined) return refused("unsupported", "A new picture without a box")
-	if (xfrm.flipH || xfrm.flipV) return refused("unsupported", "a mirrored picture")
-
 	const image = imageOf(context, fill)
 
 	if (isRefused(image)) return image
@@ -238,10 +246,15 @@ function newPicture(context: OdpEmitContext, styles: OdpStyles, shape: ShapeNode
 	setProperty(changes, "graphic", "draw:stroke", "none")
 	setProperty(changes, "graphic", "draw:fill", "none")
 
+	const held = canonicalBox(shape, xfrm)
+	const mirror = pictureMirror(held)
+
+	if (mirror !== undefined) setProperty(changes, "graphic", "style:mirror", mirror)
+
 	const style = styles.derived("graphic", undefined, changes)
 	const name = shape.name === "" ? "" : ` draw:name="${escapeAttribute(shape.name)}"`
 
-	return `<draw:frame${name} draw:style-name="${escapeAttribute(style)}"${frameBox(xfrm)}>${imageElement(image.path)}${altMarkup(shape)}</draw:frame>`
+	return `<draw:frame${name} draw:style-name="${escapeAttribute(style)}"${frameBox(held)}>${imageElement(image.path)}${altMarkup(shape)}</draw:frame>`
 }
 
 // The source frame's draw:image and graphic style.

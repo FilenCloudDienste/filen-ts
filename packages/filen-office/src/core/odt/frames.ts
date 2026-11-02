@@ -1,6 +1,8 @@
+import { maxOf, minOf } from "../arrays"
 import { parseLength, parsePercent, type OdfProperties } from "../odf/index"
 import { customGeometry, enhancedPath, Evaluator, GeometryError, pointsPath, svgPath, type SubPath } from "./geometry"
 import type { Translator } from "./translator"
+import { presetOfOdfType } from "../odf/presetShapes"
 import { emu, esc } from "./wml"
 
 // Frames and shapes (Part 3 §10) as DrawingML in w:drawing: images as pictures, text boxes and shapes as
@@ -10,32 +12,6 @@ import { emu, esc } from "./wml"
 // With optimal wrapping (style:wrap="dynamic"), LibreOffice flows text beside a frame only into a gap at least
 // this wide (2 cm; measured over UNO: 1.99 cm stays empty, 2.01 cm takes text). Parallel wrapping fills any gap.
 export const MIN_WRAP_WIDTH = (2 / 2.54) * 72
-
-// The DrawingML preset for an ODF shape type that has no enhanced path.
-const PRESETS: Readonly<Record<string, string>> = {
-	rectangle: "rect",
-	ellipse: "ellipse",
-	"round-rectangle": "roundRect",
-	"isosceles-triangle": "triangle",
-	"right-triangle": "rtTriangle",
-	parallelogram: "parallelogram",
-	trapezoid: "trapezoid",
-	diamond: "diamond",
-	hexagon: "hexagon",
-	octagon: "octagon",
-	pentagon: "pentagon",
-	star5: "star5",
-	"right-arrow": "rightArrow",
-	"left-arrow": "leftArrow",
-	"up-arrow": "upArrow",
-	"down-arrow": "downArrow",
-	cloud: "cloud",
-	heart: "heart",
-	smiley: "smileyFace",
-	ring: "donut",
-	cross: "plus",
-	frame: "frame"
-}
 
 export interface MediaReference {
 	// Path inside the ODF package, and the part it is linked as.
@@ -234,10 +210,10 @@ export class Frames {
 
 		if (members.length === 0) return ""
 
-		const left = Math.min(...members.map(member => member.placement.x))
-		const top = Math.min(...members.map(member => member.placement.y))
-		const right = Math.max(...members.map(member => member.placement.x + member.placement.width))
-		const bottom = Math.max(...members.map(member => member.placement.y + member.placement.height))
+		const left = minOf(members.map(member => member.placement.x))
+		const top = minOf(members.map(member => member.placement.y))
+		const right = maxOf(members.map(member => member.placement.x + member.placement.width))
+		const bottom = maxOf(members.map(member => member.placement.y + member.placement.height))
 		const x = emu(left)
 		const y = emu(top)
 		const cx = Math.max(0, emu(right - left))
@@ -498,12 +474,16 @@ export class Frames {
 		geometry: string,
 		textNode: number,
 		frame: boolean,
-		look: "placeholder" | "text" | "own" = "own"
+		look: "placeholder" | "text" | "own" = "own",
+		flips?: { readonly h: boolean; readonly v: boolean }
 	): string {
 		const translator = this.translator
 		const properties = placement.graphic.attributes
 		const id = translator.id()
-		const rotation = placement.rotation === 0 ? "" : ` rot="${Math.round(placement.rotation * 60000)}"`
+		const transform =
+			(placement.rotation === 0 ? "" : ` rot="${Math.round(placement.rotation * 60000)}"`) +
+			(flips?.h === true ? ' flipH="1"' : "") +
+			(flips?.v === true ? ' flipV="1"' : "")
 		const fill =
 			look === "placeholder"
 				? '<a:solidFill><a:srgbClr val="F2F2F2"/></a:solidFill>'
@@ -545,7 +525,7 @@ export class Frames {
 			text = `<wps:txbx><w:txbxContent>${markup}</w:txbxContent></wps:txbx>`
 		}
 
-		return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvPr id="${id}" name="${esc(placement.name || `Shape ${id}`)}"/><wps:cNvSpPr${textNode >= 0 && frame ? ' txBox="1"' : ""}/><wps:spPr><a:xfrm${rotation}><a:off x="0" y="0"/><a:ext cx="${emu(placement.width)}" cy="${emu(placement.height)}"/></a:xfrm>${geometry}${fill}${line}</wps:spPr>${text}${body}</wps:wsp></a:graphicData></a:graphic>`
+		return `<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvPr id="${id}" name="${esc(placement.name || `Shape ${id}`)}"/><wps:cNvSpPr${textNode >= 0 && frame ? ' txBox="1"' : ""}/><wps:spPr><a:xfrm${transform}><a:off x="0" y="0"/><a:ext cx="${emu(placement.width)}" cy="${emu(placement.height)}"/></a:xfrm>${geometry}${fill}${line}</wps:spPr>${text}${body}</wps:wsp></a:graphicData></a:graphic>`
 	}
 
 	private textAnchor(properties: ReadonlyMap<string, string>): string {
@@ -612,6 +592,7 @@ export class Frames {
 		let mirrorX = false
 		let mirrorY = false
 		let textPath = false
+		let flips: { readonly h: boolean; readonly v: boolean } | undefined
 
 		switch (name) {
 			case "draw:custom-shape": {
@@ -669,11 +650,22 @@ export class Frames {
 
 					paths = enhancedPath(path, evaluator)
 				} else {
-					const preset = PRESETS[geometryAttributes.get("draw:type") ?? ""]
+					// The outline the type draws (§19.145), as the DrawingML preset it is, mirrored as the shape says.
+					const modifiers = (geometryAttributes.get("draw:modifiers") ?? "")
+						.trim()
+						.split(/\s+/u)
+						.filter(item => item !== "")
+						.map(item => Number(item) || 0)
+					const preset = presetOfOdfType(geometryAttributes.get("draw:type") ?? "", modifiers, placement.width, placement.height)
 
 					if (preset === undefined) translator.lossy("shapeApproximated")
 
-					geometry = `<a:prstGeom prst="${preset ?? "rect"}"><a:avLst/></a:prstGeom>`
+					const avLst = (preset?.guides ?? [])
+						.map(guide => `<a:gd name="${esc(guide.name)}" fmla="${esc(guide.formula)}"/>`)
+						.join("")
+
+					geometry = `<a:prstGeom prst="${esc(preset?.preset ?? "rect")}"><a:avLst>${avLst}</a:avLst></a:prstGeom>`
+					flips = { h: mirrorX, v: preset?.invertsV === true ? !mirrorY : mirrorY }
 				}
 
 				break
@@ -761,7 +753,7 @@ export class Frames {
 			geometry = customGeometry({ ...viewBox, paths }, mirrorX, mirrorY)
 		}
 
-		return this.drawing(placement, this.shapeGraphic(placement, geometry, hasText ? node : -1, false, textPath ? "text" : "own"))
+		return this.drawing(placement, this.shapeGraphic(placement, geometry, hasText ? node : -1, false, textPath ? "text" : "own", flips))
 	}
 }
 

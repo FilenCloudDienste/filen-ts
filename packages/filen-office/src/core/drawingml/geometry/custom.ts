@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { D, type DrawingReader } from "../reader"
 import {
 	BUILTIN_COUNT,
@@ -49,7 +50,7 @@ export function compileCustomGeometry(reader: DrawingReader, node: number): Geom
 	const definitions = [...reader.children(adjustList, D.A, "gd"), ...reader.children(reader.child(node, D.A, "gdLst"), D.A, "gd")]
 
 	for (const gd of definitions) {
-		guides.push(...formula(gd))
+		appendAll(guides, formula(gd))
 
 		const name = reader.attr(gd, "name") ?? ""
 

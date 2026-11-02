@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutContinuousArrowProcess
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:process-continuous-arrow">
+	<sa:title val="Continuous arrow process"/>
+	<sa:desc val="One broad arrow runs across the frame, with the steps set on it left to right; a step's sub-items are bullets inside it."/>
+	<sa:catLst>
+		<sa:cat type="process" pri="40"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="100" destId="102" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="100" destId="103" srcOrd="2" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="whole">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:animLvl val="lvl"/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:alg type="composite"/>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="ch" forName="band" type="l"/>
+			<sa:constr for="ch" forName="band" type="t"/>
+			<sa:constr for="ch" forName="band" type="w" refType="w"/>
+			<sa:constr for="ch" forName="band" type="h" refType="h"/>
+			<sa:constr for="ch" forName="steps" type="l" refType="w" fact="0.04"/>
+			<sa:constr for="ch" forName="steps" type="w" refType="w" fact="0.8"/>
+			<sa:constr for="ch" forName="steps" type="h" refType="h" fact="0.5"/>
+			<sa:constr for="ch" forName="steps" type="ctrY" refType="h" fact="0.5"/>
+			<sa:constr for="des" forName="step" type="primFontSz" op="equ" val="50"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:layoutNode name="band" styleLbl="bgShp">
+			<sa:alg type="sp"/>
+			<sa:choose name="pointing">
+				<sa:if name="right" func="var" arg="dir" op="equ" val="norm">
+					<sa:shape type="rightArrow">
+						<sa:adjLst>
+							<sa:adj idx="1" val="0.7"/>
+							<sa:adj idx="2" val="0.5"/>
+						</sa:adjLst>
+					</sa:shape>
+				</sa:if>
+				<sa:else name="left">
+					<sa:shape type="leftArrow">
+						<sa:adjLst>
+							<sa:adj idx="1" val="0.7"/>
+							<sa:adj idx="2" val="0.5"/>
+						</sa:adjLst>
+					</sa:shape>
+				</sa:else>
+			</sa:choose>
+			<sa:presOf/>
+			<sa:constrLst/>
+			<sa:ruleLst/>
+		</sa:layoutNode>
+		<sa:layoutNode name="steps">
+			<sa:choose name="flow">
+				<sa:if name="flowFromLeft" func="var" arg="dir" op="equ" val="norm">
+					<sa:alg type="lin">
+						<sa:param type="linDir" val="fromL"/>
+						<sa:param type="nodeVertAlign" val="mid"/>
+					</sa:alg>
+				</sa:if>
+				<sa:else name="flowFromRight">
+					<sa:alg type="lin">
+						<sa:param type="linDir" val="fromR"/>
+						<sa:param type="nodeVertAlign" val="mid"/>
+					</sa:alg>
+				</sa:else>
+			</sa:choose>
+			<sa:shape><sa:adjLst/></sa:shape>
+			<sa:presOf/>
+			<sa:constrLst>
+				<sa:constr for="ch" forName="step" type="w" refType="w"/>
+				<sa:constr for="ch" forName="step" type="h" refType="h"/>
+				<sa:constr for="ch" forName="gap" type="w" refFor="ch" refForName="step" refType="w" fact="0.1"/>
+			</sa:constrLst>
+			<sa:ruleLst/>
+			<sa:forEach name="items" ptType="node" axis="ch">
+				<sa:layoutNode name="step" styleLbl="alignNode1">
+					<sa:varLst>
+						<sa:bulletEnabled val="1"/>
+					</sa:varLst>
+					<sa:alg type="tx"/>
+					<sa:shape type="roundRect">
+						<sa:adjLst>
+							<sa:adj idx="1" val="0.16"/>
+						</sa:adjLst>
+					</sa:shape>
+					<sa:presOf axis="desOrSelf" ptType="node"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.3"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+				<sa:forEach name="gaps" ptType="sibTrans" axis="followSib" cnt="1">
+					<sa:layoutNode name="gap">
+						<sa:alg type="sp"/>
+						<sa:shape><sa:adjLst/></sa:shape>
+						<sa:presOf/>
+						<sa:constrLst/>
+						<sa:ruleLst/>
+					</sa:layoutNode>
+				</sa:forEach>
+			</sa:forEach>
+		</sa:layoutNode>
+	</sa:layoutNode>
+</sa:layoutDef>

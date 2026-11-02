@@ -1,3 +1,4 @@
+import { minOf } from "../../arrays"
 import type { SheetId } from "../protocol"
 import { FormulaEvaluator, ruleTruth, type FormulaHost } from "../cf/formula/evaluate"
 import { parseFormula } from "../cf/formula/syntax"
@@ -112,8 +113,8 @@ function position(rule: DvRule, cell: DvCell): { sheet: SheetId; anchorRow: numb
 	let anchorCol = cell.col
 
 	if (rule.ranges.length > 0) {
-		anchorRow = Math.min(...rule.ranges.map(range => range.startRow))
-		anchorCol = Math.min(...rule.ranges.map(range => range.startCol))
+		anchorRow = minOf(rule.ranges.map(range => range.startRow))
+		anchorCol = minOf(rule.ranges.map(range => range.startCol))
 	}
 
 	return { sheet: cell.sheet, anchorRow, anchorCol, row: cell.row, col: cell.col }

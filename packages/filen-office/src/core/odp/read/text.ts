@@ -443,9 +443,14 @@ function decodeName(name: string): string {
 	}
 }
 
-// Nesting past these is refused, never read in part.
-const MAX_SPAN_DEPTH = 64
+// Nesting past these is refused, never read in part (the annotation reader shares the span bound).
+export const MAX_SPAN_DEPTH = 64
 const MAX_LIST_DEPTH = 32
+
+// A text:s's spaces (ODF 1.3 §6.1.3), at most 1000: a hostile text:c never amplifies a small file.
+export function spaceCount(value: string | undefined): number {
+	return Math.min(1000, Math.max(1, Number(value ?? "1") || 1))
+}
 
 function readRuns(context: OdpContext, scope: TextScope, node: number, rPr: RunProps, cursor: Cursor, depth: number): void {
 	const fragment = scope.fragment
@@ -485,7 +490,7 @@ function readRuns(context: OdpContext, scope: TextScope, node: number, rPr: RunP
 				break
 			}
 			case "text:s": {
-				const count = Math.min(1000, Math.max(1, Number(fragment.attributes(child).get("text:c") ?? "1") || 1))
+				const count = spaceCount(fragment.attributes(child).get("text:c"))
 
 				pushRun(cursor, { kind: "r", text: " ".repeat(count), rPr })
 				cursor.space = false

@@ -1,3 +1,4 @@
+import { appendAll, minOf } from "../../arrays"
 import {
 	BytePieces,
 	bytesSource,
@@ -2658,7 +2659,7 @@ class OdtWrite {
 			)
 
 			return (
-				(same ? 0 : Math.min(...(expectedAt[a] ?? [0]).map(place => Math.abs((at[b] ?? 0) - place))) + 1) +
+				(same ? 0 : minOf((expectedAt[a] ?? [0]).map(place => Math.abs((at[b] ?? 0) - place))) + 1) +
 				(was !== "" && now !== "" && was !== now ? 1.5 : 0)
 			)
 		}
@@ -3908,7 +3909,7 @@ class OdtWrite {
 			// What was parsed of the region's sources is not needed past it.
 			for (const done of this.released.splice(0)) done.tree = undefined
 
-			this.released.push(...region.units)
+			appendAll(this.released, region.units)
 
 			if (this.mode.prove) {
 				const unit = region.units[0]
@@ -5018,7 +5019,7 @@ class OdtWrite {
 
 				if (fixed !== undefined) out.push(fixed)
 
-				out.push(...this.framesWithin(emitter.tree, emitter.node, t))
+				appendAll(out, this.framesWithin(emitter.tree, emitter.node, t))
 
 				continue
 			}
@@ -5038,7 +5039,7 @@ class OdtWrite {
 
 			if (replaced === undefined) return undefined
 
-			out.push(...replaced)
+			appendAll(out, replaced)
 		}
 
 		for (let k = 0; k < tBlocks.length; k++) if (!insert(k)) return undefined
@@ -5984,7 +5985,7 @@ class OdtWrite {
 
 						out.push({ ...span, text: rowMarkup(added[k] ?? -1) })
 						this.written++
-					} else out.push(...replaced)
+					} else appendAll(out, replaced)
 				}
 			} else {
 				const spans = [...sources].map(sourceSpan).sort((a, b) => a.start - b.start)
@@ -6171,7 +6172,7 @@ class OdtWrite {
 
 					if (replaced === undefined) return undefined
 
-					out.push(...replaced)
+					appendAll(out, replaced)
 				}
 			} else {
 				if (cellEmitters(tree, cell.node) === undefined) return undefined
@@ -6220,7 +6221,7 @@ class OdtWrite {
 
 				if (fixed !== undefined) replacements.push(fixed)
 
-				replacements.push(...this.framesWithin(tree, node, block))
+				appendAll(replacements, this.framesWithin(tree, node, block))
 
 				continue
 			}
@@ -6229,7 +6230,7 @@ class OdtWrite {
 
 			if (replaced === undefined) throw new OdtWriteRefusal("structure", "blocks the writer cannot rewrite in place")
 
-			replacements.push(...replaced)
+			appendAll(replacements, replaced)
 		}
 
 		this.segment(

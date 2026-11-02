@@ -7,6 +7,7 @@ import {
 	detachDrawingCache,
 	editDiagramData,
 	newDiagramData,
+	pendDataRelationships,
 	type DiagramEdit,
 	type DiagramPart
 } from "../../../smartart/edit"
@@ -18,6 +19,10 @@ import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import { findShape } from "../changes"
 import { matcherOf } from "../find"
 import type { DeckOp, RawPart, SmartArtDefRef, SmartArtOp } from "../ops"
+import { INSERTED_IMAGE_ID } from "../../../smartart/emit"
+import { imageWithinBudget } from "../../../opc/mediaPolicy"
+import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
+import { registerInsertedImage } from "./picture"
 import { applyShape } from "./shape"
 
 // Applies the smartart ops: each edit makes the diagram's data part anew (core/smartart/edit.ts), holds it beside the
@@ -39,6 +44,9 @@ export interface SmartArtSourceReading {
 	releaseDiagram?(name: string): void
 	// The package's parts of a content type (the deck's own definitions, whichever diagram names them now).
 	partsOfType?(contentType: string): readonly string[]
+	// The part relationship `id` of package part `part` names ("/ppt/media/image1.png"), read before the op (a
+	// setPicture on a diagram whose data holds pictures); undefined when none or external.
+	diagramRelationshipTarget?(part: string, id: string): string | undefined
 }
 
 // Find & Replace in a diagram (FIND_IN_SMARTART's node index and offsets), written out so this family compiles before
@@ -54,6 +62,8 @@ interface SmartArtReplace {
 	readonly match?: readonly [number, number, number]
 }
 
+type SmartArtSetPicture = Extract<SmartArtOp, { readonly kind: "setPicture" }>
+
 type Op = SmartArtOp | SmartArtReplace
 type DiagramFrame = Extract<FrameRef, { kind: "smartart" }>
 
@@ -62,6 +72,7 @@ const HELD_PREFIX = "raw:"
 const DEFINITION_ROOTS = { layout: "layoutDef", style: "styleDef", colors: "colorsDef" } as const
 const MAX_GROUP_DEPTH = 128
 const NO_INVERSE = { ops: [], bytes: 0 } as const
+const NONE: readonly string[] = []
 
 function isRefused(value: unknown): value is Refused {
 	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "refused"
@@ -306,8 +317,186 @@ interface Editing {
 // the edit's pictures through it.
 const relationshipOwners = new WeakMap<Deck, Map<string, string>>()
 
+// Package data parts that held pictures of their own when an op read them: a writer that writes the diagram without
+// them writes new parts (a part's relationships stay with it when its bytes are replaced in place).
+const picturedParts = new WeakMap<Deck, Set<string>>()
+
+export function diagramDataHadPictures(deck: Deck, part: string): boolean {
+	return picturedParts.get(deck)?.has(part) === true
+}
+
+function notePictured(deck: Deck, reading: SmartArtSourceReading, frame: DiagramFrame): void {
+	if (isHeld(frame.data)) return
+
+	const document = reading.diagramDocument(frame.data)
+
+	if (document === undefined || !dataHasRelationships(document)) return
+
+	let parts = picturedParts.get(deck)
+
+	if (parts === undefined) {
+		parts = new Set()
+		picturedParts.set(deck, parts)
+	}
+
+	parts.add(frame.data)
+}
+
 export function diagramRelationshipOwner(deck: Deck, part: string): string | undefined {
 	return relationshipOwners.get(deck)?.get(part)
+}
+
+// The relationship (of the slide) a data part's dsp:dataModelExt names its drawing cache by (MS-ODRAWXML §2.3.4);
+// undefined when it names none or an edit detached it.
+export function diagramDrawingRelId(document: XmlDocument): string | undefined {
+	const reader = drawingReader(document)
+	let relId: string | undefined
+
+	for (const ext of reader.children(reader.child(document.documentElement(), D.Dgm, "extLst"), D.A, "ext")) {
+		const model = reader.child(ext, D.Dsp, "dataModelExt")
+
+		if (model >= 0) relId = reader.attr(model, "relId")
+	}
+
+	return relId === "" ? undefined : relId
+}
+
+// Held data that is a package part's bytes as they were (an undo's after a save rewrote that part, a duplicated
+// slide's copy): the writer writes it as it is, with the drawing it names, and it is not laid out again. By name, kept
+// when the name is released (an undo holds the bytes again under it).
+const asItWas = new WeakMap<Deck, Set<string>>()
+
+export function diagramDataAsItWas(deck: Deck, held: string): boolean {
+	return asItWas.get(deck)?.has(held) === true
+}
+
+function noteAsItWas(deck: Deck, held: string): void {
+	let names = asItWas.get(deck)
+
+	if (names === undefined) {
+		names = new Set()
+		asItWas.set(deck, names)
+	}
+
+	names.add(held)
+}
+
+// The frames (by object: an edit makes a new one; a copied slide's writer may emit a copy of the shape) a save's
+// writer wrote the held parts of, for the rebase to bind them to the parts written once that save lands.
+const writtenFrames = new WeakSet<object>()
+
+export function noteDiagramFrameWritten(frame: DiagramFrame): void {
+	writtenFrames.add(frame)
+}
+
+export function diagramFrameWritten(frame: DiagramFrame): boolean {
+	return writtenFrames.has(frame)
+}
+
+// The relationship (of a slide) a package data part's dsp:dataModelExt names its drawing by, as a save wrote it: a slide
+// that comes to name that data again (a redo after an undo-all) relates the drawing under that id.
+const packageDrawingRels = new WeakMap<Deck, Map<string, string>>()
+
+export function notePackageDrawingRel(deck: Deck, data: string, relId: string): void {
+	let map = packageDrawingRels.get(deck)
+
+	if (map === undefined) {
+		map = new Map()
+		packageDrawingRels.set(deck, map)
+	}
+
+	map.set(data.toLowerCase(), relId)
+}
+
+export function packageDrawingRel(deck: Deck, data: string): string | undefined {
+	return packageDrawingRels.get(deck)?.get(data.toLowerCase())
+}
+
+// The diagram frames (by object) a save's snapshot saw: the rebase binds those it wrote to the parts written; one an
+// edit replaced since is the edit's.
+const snapshotFrames = new WeakMap<Deck, WeakSet<object>>()
+
+export function noteSnapshotFrames(deck: Deck): void {
+	const frames = new WeakSet<object>()
+	const visit = (shapes: readonly ShapeNode[], depth: number): void => {
+		if (depth > MAX_GROUP_DEPTH) return
+
+		for (const shape of shapes) {
+			if (shape.frame?.kind === "smartart") frames.add(shape.frame)
+			if (shape.children !== undefined) visit(shape.children, depth + 1)
+		}
+	}
+
+	for (const node of deck.nodes.values()) visit(node.shapes, 0)
+
+	snapshotFrames.set(deck, frames)
+}
+
+export function frameInSnapshot(deck: Deck, frame: object): boolean {
+	return snapshotFrames.get(deck)?.has(frame) ?? false
+}
+
+// The parts a held data's own relationships name (by relationship id, through its owner's relationships), for a writer
+// that writes it into parts of its own (the slide's part is not the owner): an edit's data, when every one is a part.
+const relationshipTargets = new WeakMap<Deck, Map<string, ReadonlyMap<string, string>>>()
+
+export function diagramRelationshipTargets(deck: Deck, held: string): ReadonlyMap<string, string> | undefined {
+	return relationshipTargets.get(deck)?.get(held)
+}
+
+// The parts each package data part's picture relationships name, as an op read them (by owner): held data that names
+// its pictures through a part a later save dropped relates them through these.
+const ownerTargets = new WeakMap<Deck, Map<string, Map<string, string>>>()
+
+function ownerKey(owner: string): string {
+	return (owner.startsWith("/") ? owner.slice(1) : owner).toLowerCase()
+}
+
+export function diagramOwnerTargets(deck: Deck, owner: string): ReadonlyMap<string, string> | undefined {
+	return ownerTargets.get(deck)?.get(ownerKey(owner))
+}
+
+function noteOwnerTargets(deck: Deck, owner: string, targets: ReadonlyMap<string, string>): void {
+	let owners = ownerTargets.get(deck)
+
+	if (owners === undefined) {
+		owners = new Map()
+		ownerTargets.set(deck, owners)
+	}
+
+	const known = owners.get(ownerKey(owner)) ?? new Map<string, string>()
+
+	for (const [id, part] of targets) known.set(id, part)
+
+	owners.set(ownerKey(owner), known)
+}
+
+function noteTargets(deck: Deck, held: string, data: XmlDocument, owner: string | undefined, reading: SmartArtSourceReading): void {
+	const target = reading.diagramRelationshipTarget
+
+	if (owner === undefined || target === undefined) return
+
+	const targets = new Map<string, string>()
+	const pended = pendDataRelationships(data, id => {
+		const part = target(owner, id)
+
+		if (part !== undefined) targets.set(id, part)
+
+		return part
+	})
+
+	if (pended === undefined || isRefused(pended)) return
+
+	noteOwnerTargets(deck, owner, targets)
+
+	let map = relationshipTargets.get(deck)
+
+	if (map === undefined) {
+		map = new Map()
+		relationshipTargets.set(deck, map)
+	}
+
+	map.set(held, targets)
 }
 
 function noteOwner(deck: Deck, held: string, owner: string | undefined): void {
@@ -323,22 +512,13 @@ function noteOwner(deck: Deck, held: string, owner: string | undefined): void {
 	owners.set(held, owner)
 }
 
-// The package data part a picture-holding diagram's edits are written into: its own (or the one its held edit keeps
-// the relationships of); a refusal when another diagram names that part too (the writer writes a shared part under a
-// new name, which would lose the relationships).
-function pictureOwner(deck: Deck, shape: ShapeNode, data: string): string | Refused {
+// The package data part whose relationships a picture-holding diagram's data names its pictures by: its own, or the
+// one its held edit keeps them through. Where the slide's own part is not that one, the writer writes the edit into
+// parts of its own that relate the pictures themselves (emit/smartart.ts).
+function pictureOwner(data: string, deck: Deck): string | Refused {
 	const owner = isHeld(data) ? diagramRelationshipOwner(deck, data) : data
 
-	if (owner === undefined) return refused("unsupported", "a diagram with pictures whose data part is not the package's")
-
-	for (const node of deck.nodes.values())
-		for (const frame of diagramFrames(node.shapes)) {
-			if (frame === shape.frame) continue
-			if (frame.data === owner || diagramRelationshipOwner(deck, frame.data) === owner)
-				return refused("unsupported", "a diagram with pictures whose data another diagram shares")
-		}
-
-	return owner
+	return owner ?? refused("unsupported", "a diagram with pictures whose data part is not the package's")
 }
 
 // What every edit of a diagram needs: the frame, its data part (with relationships of its own, the package part that
@@ -355,7 +535,10 @@ function editing(deck: Deck, target: ShapeRef, context: ApplyContext): Editing |
 	const data = reading.diagramDocument(found.frame.data)
 
 	if (data === undefined) return refused("notFound", `diagram data ${found.frame.data} not read`)
-	const owner = dataHasRelationships(data) ? pictureOwner(deck, found.shape, found.frame.data) : undefined
+
+	notePictured(deck, reading, found.frame)
+
+	const owner = dataHasRelationships(data) ? pictureOwner(found.frame.data, deck) : undefined
 
 	if (owner !== undefined && isRefused(owner)) return owner
 
@@ -382,6 +565,7 @@ function editData(deck: Deck, op: Exclude<Op, { kind: "insert" }>, edit: Diagram
 	if (isRefused(name)) return name
 
 	noteOwner(deck, name, at.owner)
+	noteTargets(deck, name, at.data, at.owner, at.reading)
 
 	const { drawing: _drawing, ...rest } = at.frame
 
@@ -407,11 +591,13 @@ function setDefinition(
 	if (isRefused(found)) return found
 
 	const ids = definitionIds(found.document)
+	const pictureName = kind === "layout" ? picturePlaceholderName(found.document) : undefined
 	const result = editDiagramData(at.data, {
 		kind: "setDefinition",
 		which: kind,
 		uniqueId: ids.uniqueId,
-		...(ids.category === undefined ? {} : { category: ids.category })
+		...(ids.category === undefined ? {} : { category: ids.category }),
+		...(pictureName === undefined ? {} : { pictureName })
 	})
 
 	if (isRefused(result)) return result
@@ -422,12 +608,108 @@ function setDefinition(
 	if (isRefused(dataName)) return dataName
 
 	noteOwner(deck, dataName, at.owner)
+	noteTargets(deck, dataName, at.data, at.owner, at.reading)
 
 	const { drawing: _drawing, ...rest } = at.frame
 	// A definition of the deck's own is named where it is; one of the gallery is held.
 	setFrame(deck, at.reading, at.node, at.shape, { ...rest, data: dataName, [kind]: found.part ?? at.reading.holdDiagram(found.document) })
 
 	return { kind: "applied", inverse: inverseOf(op.target, at.back), op }
+}
+
+// The name of a layout's first picture placeholder (the layoutNode whose dgm:shape has blipPhldr), if any.
+function picturePlaceholderName(layout: XmlDocument): string | undefined {
+	const reader = drawingReader(layout)
+
+	for (let node = 1; node < layout.count; node++) {
+		if (!reader.is(node, D.Dgm, "shape") || !reader.bool(node, "blipPhldr", false)) continue
+
+		for (let at = layout.parent(node); at > 0; at = layout.parent(at))
+			if (reader.is(at, D.Dgm, "layoutNode")) return reader.attr(at, "name") ?? ""
+	}
+
+	return undefined
+}
+
+// The image types a placeholder takes (the page's preparePicture pipeline re-encodes anything else).
+const PICTURE_TYPES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/svg+xml"])
+
+// A picture into a placeholder: the data part's own pictures first named by their parts (so the edit needs no
+// relationships of the part it came from: the writer relates every picture from the part it writes), the image into
+// the deck's registry (named "inserted:<id>" until a save gives it a part), then the placeholder's presentation point
+// filled with it. One undo step: the inverse restores the frame's parts as they were.
+function setPicture(deck: Deck, op: SmartArtSetPicture, context: ApplyContext): ApplyResult<SmartArtOp> {
+	const reading = readingOf(context)
+
+	if (reading === undefined) return refused("unsupported", "diagrams cannot be edited in this format")
+	if (!PICTURE_TYPES.has(op.image.contentType)) return refused("unsupported", `a ${op.image.contentType} picture`)
+	if (op.image.bytes.length === 0 || !(op.image.width > 0) || !(op.image.height > 0)) return refused("malformed", "an empty picture")
+	if (op.image.width * op.image.height > DEFAULT_PRESENTATION_BUDGETS.decodedPixels || !imageWithinBudget(op.image.bytes))
+		return refused("tooLarge", "the picture")
+
+	const found = diagramAt(deck, op.target)
+
+	if (isRefused(found)) return found
+
+	let data = reading.diagramDocument(found.frame.data)
+
+	if (data === undefined) return refused("notFound", `diagram data ${found.frame.data} not read`)
+
+	notePictured(deck, reading, found.frame)
+
+	const back = heldParts(found.frame, reading)
+
+	if (isRefused(back)) return back
+
+	if (dataHasRelationships(data)) {
+		const owner = isHeld(found.frame.data) ? diagramRelationshipOwner(deck, found.frame.data) : found.frame.data
+		const target = reading.diagramRelationshipTarget
+
+		if (owner === undefined || target === undefined) return refused("unsupported", "a diagram whose pictures cannot be read")
+
+		const read = new Map<string, string>()
+		const pended = pendDataRelationships(data, id => {
+			const part = target(owner, id)
+
+			if (part !== undefined) read.set(id, part)
+
+			return part
+		})
+
+		noteOwnerTargets(deck, owner, read)
+
+		if (isRefused(pended)) return pended
+
+		if (pended !== undefined) {
+			try {
+				data = parseXml(pended)
+			} catch {
+				return refused("malformed", "diagram data")
+			}
+		}
+	}
+
+	const inserted = registerInsertedImage(deck, op.image, op.inserted)
+	const result = editDiagramData(data, {
+		kind: "setPicture",
+		node: op.node,
+		placeholder: op.placeholder,
+		embed: `${INSERTED_IMAGE_ID}${String(inserted)}`,
+		...(op.crop === undefined ? {} : { crop: op.crop })
+	})
+
+	if (isRefused(result)) return result
+	if (result.kind === "unchanged") return { kind: "applied", inverse: NO_INVERSE, op }
+
+	const name = hold(reading, result.bytes)
+
+	if (isRefused(name)) return name
+
+	const { drawing: _drawing, ...rest } = found.frame
+
+	setFrame(deck, reading, found.node, found.shape, { ...rest, data: name })
+
+	return { kind: "applied", inverse: inverseOf(op.target, back), op: { ...op, inserted } }
 }
 
 function restore(deck: Deck, op: SmartArtOp & { readonly kind: "restore" }, context: ApplyContext): ApplyResult<SmartArtOp> {
@@ -439,11 +721,14 @@ function restore(deck: Deck, op: SmartArtOp & { readonly kind: "restore" }, cont
 
 	if (isRefused(found)) return found
 
+	notePictured(deck, reading, found.frame)
+
 	const back = heldParts(found.frame, reading)
 
 	if (isRefused(back)) return back
 
 	const names: Partial<Record<DiagramPart, string>> = {}
+	let rewritten: RawPart | undefined
 
 	for (const part of op.parts) {
 		const role = DIAGRAM_PARTS.find(name => DIAGRAM_CONTENT_TYPES[name] === part.contentType)
@@ -458,19 +743,34 @@ function restore(deck: Deck, op: SmartArtOp & { readonly kind: "restore" }, cont
 			continue
 		}
 
-		// A held part comes back under its own name (the frame is as it was, saved state included); a package data part
-		// a save has rewritten since has its drawing cache detached (the relationship it names holds another drawing).
-		const name = isHeld(part.name)
-			? hold(reading, part.bytes, part.name)
-			: role === "data"
-				? holdData(reading, part.bytes)
-				: hold(reading, part.bytes)
+		// A package data part a save has rewritten since is held once the drawing is known (below).
+		if (role === "data" && !isHeld(part.name)) {
+			rewritten = part
+
+			continue
+		}
+
+		// A held part comes back under its own name (the frame is as it was, saved state included).
+		const name = isHeld(part.name) ? hold(reading, part.bytes, part.name) : hold(reading, part.bytes)
 
 		if (isRefused(name)) return name
-		// A package data part held again keeps its relationships through that part.
-		if (role === "data" && !isHeld(part.name)) noteOwner(deck, name, part.name)
 
 		names[role] = name
+	}
+
+	if (rewritten !== undefined) {
+		// With its drawing back too, the data keeps its bytes (the frame names the drawing, and the writer puts both
+		// back into the parts they were); without one its drawing cache is detached (the relationship it names holds
+		// another drawing now).
+		const name = names.drawing === undefined ? holdData(reading, rewritten.bytes) : hold(reading, rewritten.bytes)
+
+		if (isRefused(name)) return name
+
+		// A package data part held again keeps its relationships through that part (one a later save dropped: the
+		// writer relates its pictures from parts of its own, by the targets it read that part's relationships as).
+		noteOwner(deck, name, rewritten.name)
+		noteAsItWas(deck, name)
+		names.data = name
 	}
 
 	if (names.data === undefined) return refused("malformed", "a diagram restore without its data")
@@ -498,11 +798,26 @@ function galleryDefault(deck: Deck, reading: SmartArtSourceReading, kind: "style
 
 // Diagrams inserted by an op, by the op as applied (its slide and shape), and those a committed save wrote: the frame
 // naming the parts written. A redo of the op after that save names those parts again instead of adding new ones.
+// Each insert as applied has a token of its own (a later insert may take the same slide and shape id once the first
+// is undone); the shape a slide holds at an id is the latest insert's there.
 const insertedBy = new WeakMap<object, string>()
 const writtenDiagrams = new WeakMap<Deck, Map<string, Extract<NonNullable<ShapeNode["frame"]>, { kind: "smartart" }>>>()
+const insertedAt = new WeakMap<Deck, Map<string, string>>()
+let inserts = 0
 
 function diagramKey(slide: SlideRef, id: number): string {
 	return `${String(slide)}:${String(id)}`
+}
+
+function noteInsertedAt(deck: Deck, slide: SlideRef, id: number, token: string): void {
+	let at = insertedAt.get(deck)
+
+	if (at === undefined) {
+		at = new Map()
+		insertedAt.set(deck, at)
+	}
+
+	at.set(diagramKey(slide, id), token)
 }
 
 // The rebase after a save: the inserted diagram `id` of `slide` is the frame the save wrote.
@@ -519,7 +834,17 @@ export function noteDiagramWritten(
 		writtenDiagrams.set(deck, written)
 	}
 
-	written.set(diagramKey(slide, id), frame)
+	written.set(insertedAt.get(deck)?.get(diagramKey(slide, id)) ?? diagramKey(slide, id), frame)
+}
+
+// The parts a committed save wrote for the diagram an insert op (as applied) made: what a redo of it names again.
+export function insertedDiagramParts(deck: Deck, op: object): readonly string[] {
+	const key = insertedBy.get(op)
+	const frame = key === undefined ? undefined : writtenDiagrams.get(deck)?.get(key)
+
+	return frame === undefined
+		? NONE
+		: DIAGRAM_PARTS.flatMap(role => (frame[role] === undefined || frame[role] === "" ? [] : [frame[role]]))
 }
 
 function insert(deck: Deck, op: SmartArtOp & { readonly kind: "insert" }, context: ApplyContext): ApplyResult<SmartArtOp> {
@@ -542,6 +867,8 @@ function insert(deck: Deck, op: SmartArtOp & { readonly kind: "insert" }, contex
 		const id = result.op.kind === "insert" ? result.op.shape.id : op.shape.id
 
 		if (id !== op.shape.id) return refused("stale", "the diagram's place was taken")
+
+		noteInsertedAt(deck, op.slide, id, key as string)
 
 		return { kind: "applied", inverse: result.inverse, op }
 	}
@@ -585,7 +912,10 @@ function insert(deck: Deck, op: SmartArtOp & { readonly kind: "insert" }, contex
 	const id = result.op.kind === "insert" ? result.op.shape.id : op.shape.id
 	const applied = id === op.shape.id ? op : { ...op, shape: { ...op.shape, id } }
 
-	insertedBy.set(applied, diagramKey(op.slide, id))
+	const token = `${diagramKey(op.slide, id)}#${String(++inserts)}`
+
+	insertedBy.set(applied, token)
+	noteInsertedAt(deck, op.slide, id, token)
 
 	return { kind: "applied", inverse: result.inverse, op: applied }
 }
@@ -622,6 +952,8 @@ function apply(deck: Deck, op: Op, context: ApplyContext): ApplyResult<SmartArtO
 			return setDefinition(deck, op, context)
 		case "restore":
 			return restore(deck, op, context)
+		case "setPicture":
+			return setPicture(deck, op, context)
 		case "replace": {
 			const matcher = matcherOf(op)
 
@@ -648,9 +980,142 @@ export const applySmartArt: ApplyFamily<SmartArtOp> = {
 	touches: op => touches(op)
 }
 
-// The parts a step's diagram ops read (a batch's members each), for the engine's prepare.
+// The parts a step's diagram ops read (a batch's members each), for the engine's prepare: a duplicate reads every part
+// its slide's diagrams name (holdDiagramCopies).
 export function diagramPartsOf(deck: Deck, op: DeckOp): string[] {
 	if (op.family === "batch") return [...new Set(op.ops.flatMap(each => diagramPartsOf(deck, each)))]
+	if (op.family === "slide" && op.kind === "duplicate") {
+		const out: string[] = []
+
+		for (const frame of diagramFrames(deck.nodes.get(op.slide)?.shapes ?? []))
+			for (const role of DIAGRAM_PARTS) {
+				const part = frame[role]
+
+				if (part !== undefined && part !== "" && !isHeld(part)) out.push(part)
+			}
+
+		return out
+	}
 
 	return op.family === "smartart" ? diagramPartsToRead(deck, op) : []
+}
+
+// The package data parts whose relationships a step's setPicture ops read (the engine's prepare loads them).
+export function diagramPicturePartsOf(deck: Deck, op: DeckOp): string[] {
+	if (op.family === "batch") return [...new Set(op.ops.flatMap(each => diagramPicturePartsOf(deck, each)))]
+	if (op.family === "slide" && op.kind === "duplicate") {
+		const out: string[] = []
+
+		for (const frame of diagramFrames(deck.nodes.get(op.slide)?.shapes ?? [])) {
+			const owner = isHeld(frame.data) ? diagramRelationshipOwner(deck, frame.data) : frame.data
+
+			if (owner !== undefined) out.push(owner)
+			// The drawing's own pictures, for a copy written as a part of its own.
+			if (frame.drawing !== undefined && !isHeld(frame.drawing)) out.push(frame.drawing)
+		}
+
+		return out
+	}
+	// Every edit of a diagram whose data may hold pictures of its own: the relationships name them (setPicture pends
+	// them; an edit keeps them for a writer that cannot put the data back into its own part).
+	if (op.family !== "smartart" || op.kind === "insert" || op.kind === "restore") return []
+
+	const target = op.target
+	const frame = findShape(deck.nodes.get(target.slide)?.shapes ?? [], target.id)?.shape.frame
+
+	if (frame?.kind !== "smartart") return []
+
+	const owner = isHeld(frame.data) ? diagramRelationshipOwner(deck, frame.data) : frame.data
+
+	return owner === undefined ? [] : [owner]
+}
+
+// A duplicated slide's diagrams (`shapes`, the copy's) take parts of their own, as PowerPoint's copy does: every part a
+// frame names is held again under a new name (the same document: no bytes are copied until a save writes them), so a
+// copy and its source never name one part, and an edit, undo or save of either touches only its own. Data with
+// pictures keeps reading them through the package part it came from. Read before the op (diagramPartsOf).
+export function holdDiagramCopies(deck: Deck, shapes: readonly ShapeNode[], context: object): Refused | undefined {
+	const reading = readingOf(context as ApplyContext)
+
+	if (reading === undefined) return undefined
+
+	const copies = new Map<string, string>()
+	const visit = (list: readonly ShapeNode[], depth: number): Refused | undefined => {
+		if (depth > MAX_GROUP_DEPTH) return refused("tooDeep", "groups nested past the diagram copy's depth")
+
+		for (const shape of list) {
+			if (shape.children !== undefined) {
+				const nested = visit(shape.children, depth + 1)
+
+				if (nested !== undefined) return nested
+			}
+
+			const frame = shape.frame
+
+			if (frame?.kind !== "smartart") continue
+
+			const own: Partial<Record<DiagramPart, string>> = {}
+
+			for (const role of DIAGRAM_PARTS) {
+				const part = frame[role]
+
+				if (part === undefined || part === "") continue
+
+				const done = copies.get(part)
+
+				if (done !== undefined) {
+					own[role] = done
+
+					continue
+				}
+
+				const document = reading.diagramDocument(part)
+
+				if (document === undefined) {
+					// A drawing cache the package lacks (a dangling relationship): the copy has none.
+					if (role === "drawing") continue
+
+					return refused("notFound", `diagram part ${part} not read`)
+				}
+
+				const name = reading.holdDiagram(document)
+
+				copies.set(part, name)
+				own[role] = name
+
+				// A drawing names its pictures by relationships of its own part: their targets go with the copy.
+				if (role === "drawing") {
+					const targets = isHeld(part) ? diagramRelationshipTargets(deck, part) : undefined
+
+					if (targets !== undefined) relationshipTargets.get(deck)?.set(name, targets)
+					else if (!isHeld(part)) noteTargets(deck, name, document, part, reading)
+				}
+
+				if (role !== "data") continue
+				if (!isHeld(part) || diagramDataAsItWas(deck, part)) noteAsItWas(deck, name)
+
+				const owner = isHeld(part) ? diagramRelationshipOwner(deck, part) : dataHasRelationships(document) ? part : undefined
+
+				noteOwner(deck, name, owner)
+
+				const targets = isHeld(part) ? diagramRelationshipTargets(deck, part) : undefined
+
+				if (targets !== undefined) relationshipTargets.get(deck)?.set(name, targets)
+				else noteTargets(deck, name, document, owner, reading)
+			}
+
+			shape.frame = {
+				kind: "smartart",
+				data: own.data ?? frame.data,
+				layout: own.layout ?? frame.layout,
+				style: own.style ?? frame.style,
+				colors: own.colors ?? frame.colors,
+				...(own.drawing === undefined ? {} : { drawing: own.drawing })
+			}
+		}
+
+		return undefined
+	}
+
+	return visit(shapes, 0)
 }

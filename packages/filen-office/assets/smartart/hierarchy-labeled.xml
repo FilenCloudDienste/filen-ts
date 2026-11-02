@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutLabeledHierarchy
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:labeled-hierarchy">
+	<dgm:title val="Labeled hierarchy"/>
+	<dgm:desc val="The first top-level item and everything under it is a tree drawn from the top down. Every further top-level item names a band across the drawing, top to bottom, so the tree's levels can be labeled."/>
+	<dgm:catLst>
+		<dgm:cat type="hierarchy" pri="400"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="4"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="5"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="40" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="41" srcId="1" destId="2" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="42" srcId="1" destId="3" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="43" srcId="0" destId="4" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="44" srcId="0" destId="5" srcOrd="2" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="frame">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:alg type="composite"/>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:choose name="withBands">
+			<dgm:if name="someBands" func="cnt" axis="ch" ptType="node" op="gt" val="1">
+				<dgm:constrLst>
+					<dgm:constr type="l" for="ch" forName="bands"/>
+					<dgm:constr type="t" for="ch" forName="bands"/>
+					<dgm:constr type="w" for="ch" forName="bands" refType="w"/>
+					<dgm:constr type="h" for="ch" forName="bands" refType="h"/>
+					<dgm:constr type="l" for="ch" forName="tree" refType="w" fact="0.24"/>
+					<dgm:constr type="t" for="ch" forName="tree"/>
+					<dgm:constr type="w" for="ch" forName="tree" refType="w" fact="0.74"/>
+					<dgm:constr type="h" for="ch" forName="tree" refType="h"/>
+				</dgm:constrLst>
+			</dgm:if>
+			<dgm:else name="noBands">
+				<dgm:constrLst>
+					<dgm:constr type="l" for="ch" forName="tree"/>
+					<dgm:constr type="t" for="ch" forName="tree"/>
+					<dgm:constr type="w" for="ch" forName="tree" refType="w"/>
+					<dgm:constr type="h" for="ch" forName="tree" refType="h"/>
+				</dgm:constrLst>
+			</dgm:else>
+		</dgm:choose>
+		<dgm:ruleLst/>
+		<dgm:layoutNode name="bands">
+			<dgm:alg type="lin">
+				<dgm:param type="linDir" val="fromT"/>
+				<dgm:param type="nodeHorzAlign" val="l"/>
+			</dgm:alg>
+			<dgm:shape><dgm:adjLst/></dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst>
+				<dgm:constr type="w" for="ch" forName="band" refType="w"/>
+				<dgm:constr type="h" for="ch" forName="band" refType="h"/>
+				<dgm:constr type="h" for="ch" forName="bandGap" refType="h" refFor="ch" refForName="band" fact="0.06"/>
+				<dgm:constr type="primFontSz" for="des" forName="bandLabel" op="equ" val="40"/>
+			</dgm:constrLst>
+			<dgm:ruleLst/>
+			<dgm:forEach name="bandItems" axis="ch" ptType="node" st="2">
+				<dgm:layoutNode name="band">
+					<dgm:alg type="composite"/>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst>
+						<dgm:constr type="l" for="ch" forName="bandFill"/>
+						<dgm:constr type="t" for="ch" forName="bandFill"/>
+						<dgm:constr type="w" for="ch" forName="bandFill" refType="w"/>
+						<dgm:constr type="h" for="ch" forName="bandFill" refType="h"/>
+						<dgm:constr type="l" for="ch" forName="bandLabel"/>
+						<dgm:constr type="t" for="ch" forName="bandLabel"/>
+						<dgm:constr type="w" for="ch" forName="bandLabel" refType="w" fact="0.23"/>
+						<dgm:constr type="h" for="ch" forName="bandLabel" refType="h"/>
+					</dgm:constrLst>
+					<dgm:ruleLst/>
+					<dgm:layoutNode name="bandFill" styleLbl="bgAcc1">
+						<dgm:alg type="sp"/>
+						<dgm:shape type="roundRect">
+							<dgm:adjLst>
+								<dgm:adj idx="1" val="0.08"/>
+							</dgm:adjLst>
+						</dgm:shape>
+						<dgm:presOf/>
+						<dgm:constrLst/>
+						<dgm:ruleLst/>
+					</dgm:layoutNode>
+					<dgm:layoutNode name="bandLabel" styleLbl="revTx">
+						<dgm:varLst>
+							<dgm:bulletEnabled val="1"/>
+						</dgm:varLst>
+						<dgm:alg type="tx">
+							<dgm:param type="parTxLTRAlign" val="l"/>
+							<dgm:param type="txAnchorVert" val="mid"/>
+						</dgm:alg>
+						<dgm:shape type="rect" hideGeom="1">
+							<dgm:adjLst/>
+						</dgm:shape>
+						<dgm:presOf axis="desOrSelf" ptType="node"/>
+						<dgm:constrLst>
+							<dgm:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+							<dgm:constr type="rMarg" refType="primFontSz" fact="0.1"/>
+							<dgm:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+							<dgm:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+						</dgm:constrLst>
+						<dgm:ruleLst>
+							<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+						</dgm:ruleLst>
+					</dgm:layoutNode>
+				</dgm:layoutNode>
+				<dgm:forEach name="bandGaps" axis="followSib" ptType="sibTrans" cnt="1">
+					<dgm:layoutNode name="bandGap">
+						<dgm:alg type="sp"/>
+						<dgm:shape><dgm:adjLst/></dgm:shape>
+						<dgm:presOf/>
+						<dgm:constrLst/>
+						<dgm:ruleLst/>
+					</dgm:layoutNode>
+				</dgm:forEach>
+			</dgm:forEach>
+		</dgm:layoutNode>
+		<dgm:layoutNode name="tree">
+			<dgm:alg type="hierChild">
+				<dgm:param type="linDir" val="fromL"/>
+				<dgm:param type="chAlign" val="t"/>
+			</dgm:alg>
+			<dgm:shape><dgm:adjLst/></dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst>
+				<dgm:constr type="w" for="des" forName="member" refType="w" fact="0.2"/>
+				<dgm:constr type="h" for="des" forName="member" refType="w" refFor="des" refForName="member" fact="0.55"/>
+				<dgm:constr type="sp" for="des" forName="node" refType="h" refFor="des" refForName="member" fact="0.6"/>
+				<dgm:constr type="sibSp" for="des" forName="members" refType="w" refFor="des" refForName="member" fact="0.14"/>
+				<dgm:constr type="primFontSz" for="des" forName="member" op="equ" val="58"/>
+			</dgm:constrLst>
+			<dgm:ruleLst/>
+			<dgm:forEach name="treeTop" axis="ch" ptType="node" cnt="1">
+				<dgm:layoutNode name="node">
+					<dgm:alg type="hierRoot">
+						<dgm:param type="hierAlign" val="tCtrCh"/>
+					</dgm:alg>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+					<dgm:layoutNode name="member" styleLbl="node1">
+						<dgm:alg type="tx"/>
+						<dgm:shape type="roundRect">
+							<dgm:adjLst>
+								<dgm:adj idx="1" val="0.1"/>
+							</dgm:adjLst>
+						</dgm:shape>
+						<dgm:presOf axis="self"/>
+						<dgm:constrLst>
+							<dgm:constr type="lMarg" refType="primFontSz" fact="0.15"/>
+							<dgm:constr type="rMarg" refType="primFontSz" fact="0.15"/>
+							<dgm:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+							<dgm:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+						</dgm:constrLst>
+						<dgm:ruleLst>
+							<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+						</dgm:ruleLst>
+					</dgm:layoutNode>
+					<dgm:layoutNode name="members">
+						<dgm:choose name="membersOrder">
+							<dgm:if name="membersForward" func="var" arg="dir" op="equ" val="norm">
+								<dgm:alg type="hierChild">
+									<dgm:param type="linDir" val="fromL"/>
+									<dgm:param type="chAlign" val="t"/>
+								</dgm:alg>
+							</dgm:if>
+							<dgm:else name="membersBackward">
+								<dgm:alg type="hierChild">
+									<dgm:param type="linDir" val="fromR"/>
+									<dgm:param type="chAlign" val="t"/>
+								</dgm:alg>
+							</dgm:else>
+						</dgm:choose>
+						<dgm:shape><dgm:adjLst/></dgm:shape>
+						<dgm:presOf/>
+						<dgm:constrLst/>
+						<dgm:ruleLst/>
+						<dgm:forEach name="memberItems" axis="ch" ptType="node">
+							<dgm:forEach name="memberTie" axis="precedSib" ptType="parTrans" st="-1" cnt="1">
+								<dgm:layoutNode name="tie" styleLbl="parChTrans1D2">
+									<dgm:alg type="conn">
+										<dgm:param type="dim" val="1D"/>
+										<dgm:param type="connRout" val="bend"/>
+										<dgm:param type="begPts" val="bCtr"/>
+										<dgm:param type="endPts" val="tCtr"/>
+										<dgm:param type="begSty" val="noArr"/>
+										<dgm:param type="endSty" val="noArr"/>
+									</dgm:alg>
+									<dgm:shape type="conn"><dgm:adjLst/></dgm:shape>
+									<dgm:presOf axis="self"/>
+									<dgm:constrLst>
+										<dgm:constr type="begPad"/>
+										<dgm:constr type="endPad"/>
+									</dgm:constrLst>
+									<dgm:ruleLst/>
+								</dgm:layoutNode>
+							</dgm:forEach>
+							<dgm:forEach name="memberNode" ref="treeTop" axis="self"/>
+						</dgm:forEach>
+					</dgm:layoutNode>
+				</dgm:layoutNode>
+			</dgm:forEach>
+		</dgm:layoutNode>
+	</dgm:layoutNode>
+</dgm:layoutDef>

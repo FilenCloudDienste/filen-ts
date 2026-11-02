@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import type { Node } from "prosemirror-model"
 import type { EditorState, Transaction } from "prosemirror-state"
 import type { Mapping } from "prosemirror-transform"
@@ -595,7 +596,7 @@ export class DocxSpelling {
 
 		if (same) return false
 
-		issues.splice(low, high - low, ...found)
+		spliceAll(issues, low, high - low, found)
 
 		if (issues.length > MAX_SPELLING_ISSUES) {
 			issues.length = MAX_SPELLING_ISSUES

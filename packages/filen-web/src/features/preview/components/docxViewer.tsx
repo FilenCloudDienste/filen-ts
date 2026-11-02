@@ -67,7 +67,8 @@ import { LoadingState } from "@/components/loadingState"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { log } from "@/lib/log"
@@ -100,7 +101,6 @@ export interface DocxEditingProps {
 // Space around and between pages (px); fit-to-width leaves it on both sides.
 const PAGE_GAP = 16
 const WHEEL_SENSITIVITY = 0.0015
-const LAYER = "[role='dialog'], [role='alertdialog']"
 
 // What the viewer opens: the file as downloaded (the engine reads ranges of the cached buffer and gets a copy of
 // each range it asked for, never of the whole file: the buffer stays shared with the preview cache and the
@@ -1004,10 +1004,7 @@ function DocxPageList({
 				return
 			}
 
-			const layer = root.closest(LAYER)
-			const target = keyboardEvent.target instanceof Element ? keyboardEvent.target.closest(LAYER) : null
-
-			if (target !== layer || (layer === null && isAnyDialogOpen())) {
+			if (!keyForEditor(root, keyboardEvent.target)) {
 				return
 			}
 
@@ -1023,14 +1020,22 @@ function DocxPageList({
 		[state.find.open, dispatch]
 	)
 
+	const focusPages = (): void => {
+		wrapper?.querySelector<HTMLElement>(".fo-docx-pages")?.focus()
+	}
+
+	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
+	// macOS Firefox do).
+	useEditorLayerKeys(rootRef, (event, root) => {
+		onCommandBarF6(event, root, focusPages)
+	})
+
 	return (
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
 			onKeyDown={event => {
-				onCommandBarF6(event, () => {
-					wrapper?.querySelector<HTMLElement>(".fo-docx-pages")?.focus()
-				})
+				onCommandBarF6(event, event.currentTarget, focusPages)
 			}}
 		>
 			<DocxToolbar

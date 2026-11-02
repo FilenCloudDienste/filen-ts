@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutBendingPictureAccentList
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" uniqueId="urn:filen:smartart:layout:bending-picture-accent-list">
+	<dgm:title val="Bending picture accent list"/>
+	<dgm:desc val="A picture for every top-level item, with an accent strip that runs down its left side and bends into a text bar across its lower corner. Sub-items are listed in a box under the picture."/>
+	<dgm:catLst>
+		<dgm:cat type="picture" pri="200"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="110" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="111" srcId="0" destId="2" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="112" srcId="0" destId="3" srcOrd="2" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="sequence">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:choose name="sequenceOrder">
+			<dgm:if name="sequenceFromLeft" func="var" arg="dir" op="equ" val="norm">
+				<dgm:alg type="snake">
+					<dgm:param type="grDir" val="tL"/>
+					<dgm:param type="flowDir" val="row"/>
+					<dgm:param type="contDir" val="sameDir"/>
+					<dgm:param type="off" val="ctr"/>
+				</dgm:alg>
+			</dgm:if>
+			<dgm:else name="sequenceFromRight">
+				<dgm:alg type="snake">
+					<dgm:param type="grDir" val="tR"/>
+					<dgm:param type="flowDir" val="row"/>
+					<dgm:param type="contDir" val="sameDir"/>
+					<dgm:param type="off" val="ctr"/>
+				</dgm:alg>
+			</dgm:else>
+		</dgm:choose>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="w" for="ch" forName="tile" refType="w" fact="0.3"/>
+			<dgm:constr type="h" for="ch" forName="tile" refType="w" refFor="ch" refForName="tile" fact="1.25"/>
+			<dgm:constr type="w" for="ch" forName="tileGap" refType="w" refFor="ch" refForName="tile" fact="0.1"/>
+			<dgm:constr type="sp" refType="w" refFor="ch" refForName="tile" fact="0.1"/>
+			<dgm:constr type="primFontSz" for="des" forName="bar" op="equ" val="40"/>
+			<dgm:constr type="primFontSz" for="des" forName="details" op="equ" val="30"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:forEach name="tiles" axis="ch" ptType="node">
+			<dgm:layoutNode name="tile">
+				<dgm:alg type="composite"/>
+				<dgm:shape><dgm:adjLst/></dgm:shape>
+				<dgm:presOf/>
+				<dgm:constrLst>
+					<dgm:constr type="l" for="ch" forName="image" refType="w" fact="0.06"/>
+					<dgm:constr type="t" for="ch" forName="image"/>
+					<dgm:constr type="w" for="ch" forName="image" refType="w" fact="0.94"/>
+					<dgm:constr type="h" for="ch" forName="image" refType="h" fact="0.68"/>
+					<dgm:constr type="l" for="ch" forName="strip"/>
+					<dgm:constr type="t" for="ch" forName="strip" refType="h" fact="0.1"/>
+					<dgm:constr type="w" for="ch" forName="strip" refType="w" fact="0.06"/>
+					<dgm:constr type="h" for="ch" forName="strip" refType="h" fact="0.5"/>
+					<dgm:constr type="l" for="ch" forName="bar"/>
+					<dgm:constr type="t" for="ch" forName="bar" refType="h" fact="0.5"/>
+					<dgm:constr type="w" for="ch" forName="bar" refType="w" fact="0.7"/>
+					<dgm:constr type="h" for="ch" forName="bar" refType="h" fact="0.14"/>
+					<dgm:constr type="l" for="ch" forName="details" refType="w" fact="0.06"/>
+					<dgm:constr type="t" for="ch" forName="details" refType="h" fact="0.7"/>
+					<dgm:constr type="w" for="ch" forName="details" refType="w" fact="0.94"/>
+					<dgm:constr type="h" for="ch" forName="details" refType="h" fact="0.3"/>
+				</dgm:constrLst>
+				<dgm:ruleLst/>
+				<dgm:layoutNode name="image" styleLbl="alignImgPlace1">
+					<dgm:alg type="sp"/>
+					<dgm:shape type="rect" r:blip="" blipPhldr="1"><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+				</dgm:layoutNode>
+				<dgm:layoutNode name="strip" styleLbl="fgAcc1">
+					<dgm:alg type="sp"/>
+					<dgm:shape type="rect"><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+				</dgm:layoutNode>
+				<dgm:layoutNode name="bar" styleLbl="node1">
+					<dgm:alg type="tx">
+						<dgm:param type="parTxLTRAlign" val="l"/>
+					</dgm:alg>
+					<dgm:shape type="rect"><dgm:adjLst/></dgm:shape>
+					<dgm:presOf axis="self"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+						<dgm:constr type="rMarg" refType="primFontSz" fact="0.15"/>
+						<dgm:constr type="tMarg" refType="primFontSz" fact="0.08"/>
+						<dgm:constr type="bMarg" refType="primFontSz" fact="0.08"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+				<dgm:layoutNode name="details" styleLbl="revTx">
+					<dgm:varLst>
+						<dgm:bulletEnabled val="1"/>
+					</dgm:varLst>
+					<dgm:alg type="tx">
+						<dgm:param type="parTxLTRAlign" val="l"/>
+						<dgm:param type="shpTxLTRAlignCh" val="l"/>
+						<dgm:param type="txAnchorVert" val="t"/>
+					</dgm:alg>
+					<dgm:shape type="rect" hideGeom="1"><dgm:adjLst/></dgm:shape>
+					<dgm:presOf axis="des" ptType="node"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="primFontSz" fact="0.1"/>
+						<dgm:constr type="rMarg" refType="primFontSz" fact="0.1"/>
+						<dgm:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+						<dgm:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+			</dgm:layoutNode>
+			<dgm:forEach name="tileGaps" axis="followSib" ptType="sibTrans" cnt="1">
+				<dgm:layoutNode name="tileGap">
+					<dgm:alg type="sp"/>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+				</dgm:layoutNode>
+			</dgm:forEach>
+		</dgm:forEach>
+	</dgm:layoutNode>
+</dgm:layoutDef>

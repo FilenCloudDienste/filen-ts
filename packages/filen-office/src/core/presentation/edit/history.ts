@@ -47,6 +47,8 @@ export interface HistoryStep {
 	bytes: number
 	// A typing burst's identity (family, target, burst id): later transactions of the same burst coalesce.
 	readonly burst: string | undefined
+	// An op the step applies before `op` on a redo: what a step it continues made (the notes slide its text is in).
+	readonly lead?: DeckOp
 	// The history's own: the step as the dirty total counts it.
 	counted?: StepCount | undefined
 }
@@ -79,6 +81,27 @@ function sameFingerprint(a: Fingerprint, b: Fingerprint): boolean {
 }
 
 let nextId = 1
+
+// An anchor as it was before the last push changed it.
+interface AnchorCopy {
+	readonly pos: number
+	readonly baseline: ReadonlyMap<TouchKey, Fingerprint>
+	readonly lost: { readonly bytes: number; readonly keys: readonly TouchKey[]; readonly dirty: number }
+}
+
+// What a push did besides adding its step (the redo branch it discarded, the oldest steps it trimmed, the anchors it
+// moved), kept for the last push only, so retract() can put the history back exactly as it was before it.
+interface PushRecord {
+	redo: HistoryStep[]
+	trimmed: HistoryStep[]
+	readonly anchors: Map<Anchor, AnchorCopy>
+	readonly saved: Anchor
+	readonly savedReachable: boolean
+	step?: HistoryStep
+	revision?: number
+	// The step makes nothing the user sees yet (notes started, nothing typed): not dirty on its own, left out of a save.
+	provisional: boolean
+}
 
 // A step's bytes as the dirty total counts them, its keys, and how many of them are dirty now.
 export interface StepCount extends Counted {
@@ -119,6 +142,9 @@ export class DeckHistory {
 	private readonly countedByKey = new Map<TouchKey, Set<Counted>>()
 	private dirtyTotal = 0
 	private readonly fingerprint: FingerprintOf
+	// The push in progress and the last push, while nothing but saves came after it.
+	private recording: PushRecord | undefined
+	private lastPush: PushRecord | undefined
 
 	constructor(fingerprint: FingerprintOf, limits: HistoryLimits = DECK_HISTORY_LIMITS) {
 		this.fingerprint = fingerprint
@@ -134,7 +160,12 @@ export class DeckHistory {
 	}
 
 	get dirty(): boolean {
-		return this.dirtyKeys.size > 0
+		return this.dirtyKeys.size > 0 && !this.provisionalOnly()
+	}
+
+	// Steps to undo and to redo.
+	get depth(): { readonly undo: number; readonly redo: number } {
+		return { undo: this.cursor, redo: this.entries.length - this.cursor }
 	}
 
 	// Steps held and their bytes (accounting, tests).
@@ -153,7 +184,7 @@ export class DeckHistory {
 
 	// The net bytes dirty against the saved state, estimated (0 when clean).
 	get dirtyBytes(): number {
-		return this.dirtyKeys.size === 0 ? 0 : this.dirtyTotal
+		return this.dirtyKeys.size === 0 || this.provisionalOnly() ? 0 : this.dirtyTotal
 	}
 
 	// The keys dirty against the saved state.
@@ -167,12 +198,44 @@ export class DeckHistory {
 	}
 
 	// A step applied now. `burst` steps of one burst coalesce into the step on top while it is not the saved state.
-	push(step: Omit<HistoryStep, "id">): HistoryStep {
+	// `continues`: the step goes on from the last push, still on top (the first text in notes it just made): one step,
+	// undone together, redone as the last push's op then this one's.
+	// `provisional`: the step makes nothing the user sees yet (notes started, nothing typed in them): while it is the last
+	// push and on top it is not dirty on its own, and a save or an undo takes it back first.
+	push(step: Omit<HistoryStep, "id">, options: { readonly continues?: boolean; readonly provisional?: boolean } = {}): HistoryStep {
+		const record: PushRecord = {
+			redo: [],
+			trimmed: [],
+			anchors: new Map(),
+			saved: this.saved,
+			savedReachable: this.savedReachable,
+			provisional: options.provisional === true
+		}
+
+		const continued = options.continues === true ? this.lastPush?.step : undefined
+
+		this.lastPush = undefined
+		this.recording = record
 		this.discardRedo()
+
+		if (
+			continued !== undefined &&
+			continued === this.entries[this.cursor - 1] &&
+			continued.lead === undefined &&
+			this.saved.pos !== this.cursor &&
+			!this.pendingAt(this.cursor)
+		) {
+			this.recording = undefined
+
+			return this.coalesce(continued, step, continued.op)
+		}
 
 		const top = this.entries[this.cursor - 1]
 
 		if (step.burst !== undefined && top?.burst === step.burst && this.saved.pos !== this.cursor && !this.pendingAt(this.cursor)) {
+			// A coalesced step is not retracted: its burst's earlier state is gone.
+			this.recording = undefined
+
 			return this.coalesce(top, step)
 		}
 
@@ -186,8 +249,120 @@ export class DeckHistory {
 		// The step's after-state is the model's now (its caller read it just before): no key it names is read again.
 		this.refreshKeys(entry.before.keys(), entry.after)
 		this.trim(entry.after)
+		this.recording = undefined
+		record.step = entry
+		record.revision = this.revision
+		this.lastPush = record
 
 		return entry
+	}
+
+	// The step on top when it is the last push and nothing but saves came after it (its revision is `revision`):
+	// retract() can take it back. Its inverse is applied by the caller first.
+	retractable(revision: number): HistoryStep | undefined {
+		const record = this.lastPush
+
+		return record?.revision === revision && this.revision === revision && record.step === this.entries[this.cursor - 1]
+			? record.step
+			: undefined
+	}
+
+	// The provisional step on top (the last push, nothing done since), if there is one.
+	provisionalTop(): HistoryStep | undefined {
+		const record = this.lastPush
+
+		return record?.provisional === true && record.step === this.entries[this.cursor - 1] ? record.step : undefined
+	}
+
+	// The revision the provisional step on top answered when it was pushed.
+	provisionalRevision(): number | undefined {
+		return this.provisionalTop() === undefined ? undefined : this.lastPush?.revision
+	}
+
+	// The provisional step on top is all that differs from the saved state: every dirty key is one it touched, and was
+	// as saved before it. By fingerprint, so a state the saved one matches anywhere in the timeline (a retracted step
+	// made again) counts; O(the step's keys).
+	private provisionalOnly(): boolean {
+		const step = this.provisionalTop()
+
+		if (step === undefined) return false
+
+		let others = this.dirtyKeys.size
+
+		for (const [key, prior] of step.before) {
+			if (!this.dirtyKeys.has(key)) continue
+
+			const saved = this.saved.baseline.get(key) ?? this.savedValue.get(key)
+
+			if (saved === undefined ? this.inRange.get(key) !== 1 : !sameFingerprint(saved, prior)) return false
+
+			others--
+		}
+
+		return others === 0
+	}
+
+	// Takes the last push back as if it had never been applied: the redo branch it discarded and the oldest steps it
+	// trimmed come back, the anchors it moved are as they were, and it leaves no redo step. A save that landed or
+	// started on it meanwhile keeps the step's after-state in its baseline (that state is the file's, so the deck is
+	// dirty against it).
+	retract(): void {
+		const record = this.lastPush
+		const step = record?.step
+
+		if (record === undefined || step === undefined || step !== this.entries[this.cursor - 1]) return
+
+		this.lastPush = undefined
+
+		const from = this.cursor - 1
+		// Anchors made after the push (a save's) sit on the step.
+		const later = [this.saved, ...this.pending.values()].filter(anchor => !record.anchors.has(anchor) && anchor.pos > from)
+
+		for (const anchor of later) {
+			for (const [key, value] of step.after) if (!anchor.baseline.has(key)) anchor.baseline.set(key, value)
+
+			this.lose(anchor, step)
+			anchor.pos = from
+		}
+
+		this.entries.pop()
+		this.bytes -= step.bytes
+		this.cursor--
+
+		const trimmed = record.trimmed.length
+
+		if (trimmed > 0) {
+			this.entries.unshift(...record.trimmed)
+			this.cursor += trimmed
+
+			for (const entry of record.trimmed) this.bytes += entry.bytes
+			for (const anchor of later) anchor.pos += trimmed
+		}
+
+		for (const entry of record.redo) {
+			this.entries.push(entry)
+			this.bytes += entry.bytes
+		}
+
+		for (const [anchor, copy] of record.anchors) {
+			anchor.pos = copy.pos
+			anchor.baseline.clear()
+
+			for (const [key, value] of copy.baseline) anchor.baseline.set(key, value)
+
+			const keys = anchor.lost.keys as Set<TouchKey>
+
+			keys.clear()
+
+			for (const key of copy.lost.keys) keys.add(key)
+
+			anchor.lost.bytes = copy.lost.bytes
+			anchor.lost.dirty = copy.lost.dirty
+		}
+
+		this.savedReachable = this.saved === record.saved && !later.includes(this.saved) ? record.savedReachable : false
+		this.revision++
+		this.rebuild()
 	}
 
 	// The step to undo (its inverse is applied by the caller, then undone() records it).
@@ -199,7 +374,14 @@ export class DeckHistory {
 		return this.entries[this.cursor]
 	}
 
+	// Every step held, undoable and redoable (what a save's pruning judges reachable).
+	steps(): readonly HistoryStep[] {
+		return this.entries
+	}
+
 	undone(): void {
+		this.lastPush = undefined
+
 		const entry = this.entries[this.cursor - 1]
 
 		if (entry === undefined) return
@@ -214,6 +396,8 @@ export class DeckHistory {
 	}
 
 	redone(): void {
+		this.lastPush = undefined
+
 		const entry = this.entries[this.cursor]
 
 		if (entry === undefined) return
@@ -229,6 +413,8 @@ export class DeckHistory {
 
 	// A redone step's inverse, made again as it applied (its bytes read from the base source as it is now).
 	replaceInverse(step: HistoryStep, inverse: Inverse): void {
+		this.lastPush = undefined
+
 		const bytes = step.bytes - step.inverse.bytes + inverse.bytes
 
 		this.bytes += bytes - step.bytes
@@ -265,6 +451,7 @@ export class DeckHistory {
 
 	// Everything forgotten (a deck reopened from scratch): the current state is saved.
 	clear(): void {
+		this.lastPush = undefined
 		this.entries.length = 0
 		this.cursor = 0
 		this.bytes = 0
@@ -274,13 +461,27 @@ export class DeckHistory {
 		this.rebuild()
 	}
 
+	// An anchor as it is now, kept once for the push in progress before it changes.
+	private preserve(anchor: Anchor): void {
+		const record = this.recording
+
+		if (record === undefined || record.anchors.has(anchor)) return
+
+		record.anchors.set(anchor, {
+			pos: anchor.pos,
+			baseline: new Map(anchor.baseline),
+			lost: { bytes: anchor.lost.bytes, keys: [...anchor.lost.keys.keys()], dirty: anchor.lost.dirty }
+		})
+	}
+
 	private pendingAt(pos: number): boolean {
 		for (const anchor of this.pending.values()) if (anchor.pos === pos) return true
 
 		return false
 	}
 
-	private coalesce(top: HistoryStep, step: Omit<HistoryStep, "id">): HistoryStep {
+	// `lead`: the top step's op, run first on a redo (a continued step); else the top's own lead is kept.
+	private coalesce(top: HistoryStep, step: Omit<HistoryStep, "id">, lead?: DeckOp): HistoryStep {
 		const touches = [...top.touches]
 		const before = new Map(top.before)
 		const named = new Set(top.touches.map(touchKey))
@@ -298,6 +499,7 @@ export class DeckHistory {
 
 		for (const [key, value] of step.after) after.set(key, value)
 
+		const kept = lead ?? top.lead
 		const merged: HistoryStep = {
 			id: nextId++,
 			op: step.op,
@@ -305,9 +507,11 @@ export class DeckHistory {
 			touches,
 			before,
 			after,
-			bytes: top.bytes - opBytesOf(top.op) + opBytesOf(step.op),
-			burst: top.burst,
-			counted: undefined
+			bytes: lead === undefined ? top.bytes - opBytesOf(top.op) + opBytesOf(step.op) : top.bytes + opBytesOf(step.op),
+			// A continued step takes the burst of the text it continues with, so that burst's later typing joins it.
+			burst: lead === undefined ? top.burst : step.burst,
+			counted: undefined,
+			...(kept === undefined ? {} : { lead: kept })
 		}
 
 		this.leave(top)
@@ -334,6 +538,8 @@ export class DeckHistory {
 		for (const anchor of anchors) {
 			if (anchor.pos <= from) continue
 
+			this.preserve(anchor)
+
 			// The saved state was on the dropped steps: their after-state is what it held.
 			for (let index = anchor.pos - 1; index >= from; index--) {
 				const entry = this.entries[index] as HistoryStep
@@ -349,6 +555,8 @@ export class DeckHistory {
 		}
 
 		for (let index = from; index < this.entries.length; index++) this.bytes -= (this.entries[index] as HistoryStep).bytes
+
+		if (this.recording !== undefined) this.recording.redo = this.entries.slice(from)
 
 		this.entries.length = from
 
@@ -370,8 +578,11 @@ export class DeckHistory {
 
 			this.bytes -= oldest.bytes
 			this.cursor--
+			this.recording?.trimmed.push(oldest)
 
 			for (const anchor of [this.saved, ...this.pending.values()]) {
+				this.preserve(anchor)
+
 				if (anchor.pos > 0) {
 					anchor.pos--
 

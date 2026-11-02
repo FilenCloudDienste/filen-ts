@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutHierarchy
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:hierarchy">
+	<dgm:title val="Hierarchy"/>
+	<dgm:desc val="A tree from the top down: every item is a rounded block over the items below it, joined to each of them by a straight line."/>
+	<dgm:catLst>
+		<dgm:cat type="hierarchy" pri="200"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="4"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="5"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="20" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="21" srcId="1" destId="2" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="22" srcId="2" destId="3" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="23" srcId="2" destId="4" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="24" srcId="1" destId="5" srcOrd="1" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="forest">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:choose name="forestOrder">
+			<dgm:if name="forestForward" func="var" arg="dir" op="equ" val="norm">
+				<dgm:alg type="hierChild">
+					<dgm:param type="linDir" val="fromL"/>
+					<dgm:param type="chAlign" val="t"/>
+				</dgm:alg>
+			</dgm:if>
+			<dgm:else name="forestBackward">
+				<dgm:alg type="hierChild">
+					<dgm:param type="linDir" val="fromR"/>
+					<dgm:param type="chAlign" val="t"/>
+				</dgm:alg>
+			</dgm:else>
+		</dgm:choose>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="w" for="des" forName="block" refType="w" fact="0.15"/>
+			<dgm:constr type="h" for="des" forName="block" refType="w" refFor="des" refForName="block" fact="0.62"/>
+			<dgm:constr type="sp" for="des" forName="subtree" refType="h" refFor="des" refForName="block" fact="0.45"/>
+			<dgm:constr type="sibSp" for="des" forName="below" refType="w" refFor="des" refForName="block" fact="0.12"/>
+			<dgm:constr type="sibSp" refType="w" refFor="des" refForName="block" fact="0.25"/>
+			<dgm:constr type="primFontSz" for="des" forName="block" op="equ" val="58"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:forEach name="subtrees" axis="ch" ptType="node">
+			<dgm:layoutNode name="subtree">
+				<dgm:alg type="hierRoot">
+					<dgm:param type="hierAlign" val="tCtrCh"/>
+				</dgm:alg>
+				<dgm:shape><dgm:adjLst/></dgm:shape>
+				<dgm:presOf/>
+				<dgm:constrLst/>
+				<dgm:ruleLst/>
+				<dgm:layoutNode name="block" styleLbl="node1">
+					<dgm:alg type="tx"/>
+					<dgm:shape type="roundRect">
+						<dgm:adjLst>
+							<dgm:adj idx="1" val="0.18"/>
+						</dgm:adjLst>
+					</dgm:shape>
+					<dgm:presOf axis="self"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="primFontSz" fact="0.2"/>
+						<dgm:constr type="rMarg" refType="primFontSz" fact="0.2"/>
+						<dgm:constr type="tMarg" refType="primFontSz" fact="0.12"/>
+						<dgm:constr type="bMarg" refType="primFontSz" fact="0.12"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+				<dgm:layoutNode name="below">
+					<dgm:choose name="belowOrder">
+						<dgm:if name="belowForward" func="var" arg="dir" op="equ" val="norm">
+							<dgm:alg type="hierChild">
+								<dgm:param type="linDir" val="fromL"/>
+								<dgm:param type="chAlign" val="t"/>
+							</dgm:alg>
+						</dgm:if>
+						<dgm:else name="belowBackward">
+							<dgm:alg type="hierChild">
+								<dgm:param type="linDir" val="fromR"/>
+								<dgm:param type="chAlign" val="t"/>
+							</dgm:alg>
+						</dgm:else>
+					</dgm:choose>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+					<dgm:forEach name="branches" axis="ch" ptType="node">
+						<dgm:forEach name="branchLink" axis="precedSib" ptType="parTrans" st="-1" cnt="1">
+							<dgm:layoutNode name="link" styleLbl="parChTrans1D1">
+								<dgm:alg type="conn">
+									<dgm:param type="dim" val="1D"/>
+									<dgm:param type="connRout" val="stra"/>
+									<dgm:param type="begPts" val="bCtr"/>
+									<dgm:param type="endPts" val="tCtr"/>
+									<dgm:param type="begSty" val="noArr"/>
+									<dgm:param type="endSty" val="noArr"/>
+								</dgm:alg>
+								<dgm:shape type="conn"><dgm:adjLst/></dgm:shape>
+								<dgm:presOf axis="self"/>
+								<dgm:constrLst>
+									<dgm:constr type="begPad"/>
+									<dgm:constr type="endPad"/>
+								</dgm:constrLst>
+								<dgm:ruleLst/>
+							</dgm:layoutNode>
+						</dgm:forEach>
+						<dgm:forEach name="branchSubtree" ref="subtrees" axis="self"/>
+					</dgm:forEach>
+				</dgm:layoutNode>
+			</dgm:layoutNode>
+		</dgm:forEach>
+	</dgm:layoutNode>
+</dgm:layoutDef>

@@ -1,3 +1,4 @@
+import { appendAll, maxOf, minOf } from "../../arrays"
 import { Fragment, Slice, type Mark, type MarkType, type Node } from "prosemirror-model"
 import { isHistoryTransaction } from "prosemirror-history"
 import { Selection, TextSelection, type EditorState, type Transaction } from "prosemirror-state"
@@ -320,7 +321,7 @@ function addPending(
 		}
 	}
 
-	if (entry !== undefined && entry.doc === doc) entry.ranges.push(...ranges)
+	if (entry !== undefined && entry.doc === doc) appendAll(entry.ranges, ranges)
 	else pending.set(session, { ranges: [...ranges], doc, stamp })
 }
 
@@ -632,10 +633,10 @@ function realAnchors(result: Deletion, anchors: readonly { pos: number; key: str
 		if (keys.size !== 3) continue
 
 		const positions = [...keys.values()]
-		const low = Math.min(...positions)
-		const high = Math.max(...positions)
+		const low = minOf(positions)
+		const high = maxOf(positions)
 
-		if (!stays.some(pos => pos > low && pos < high)) going.push(...positions)
+		if (!stays.some(pos => pos > low && pos < high)) appendAll(going, positions)
 	}
 
 	if (going.length === 0) return false
@@ -1816,7 +1817,7 @@ function markBulk(tr: Transaction, marking: Marking): void {
 	const ops = [...marking.marks].sort((a, b) => a.from - b.from)
 	const positions = [...marking.paragraphs.keys(), ...marking.rows.keys()].sort((a, b) => a - b)
 	let low = Math.min(ops[0]?.from ?? Infinity, positions[0] ?? Infinity)
-	let high = Math.max(...ops.map(op => op.to), (positions[positions.length - 1] ?? -1) + 1)
+	let high = Math.max(maxOf(ops.map(op => op.to)), (positions[positions.length - 1] ?? -1) + 1)
 
 	if (!(high > low)) return
 

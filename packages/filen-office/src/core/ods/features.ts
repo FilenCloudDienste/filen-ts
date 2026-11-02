@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import type { OdfElement } from "../odf/tree"
 import { parseColor } from "../odf/units"
 import { parseRelationships, type Relationship } from "../opc/relationships"
@@ -1078,7 +1079,7 @@ export function* featurePartsSteps(
 				relationships.push({ id, type: relationship.type, target: relationship.target, external: false })
 			}
 
-			sections.push(...sheetCharts.sections(ids))
+			appendAll(sections, sheetCharts.sections(ids))
 		}
 
 		const relationshipsName = `xl/worksheets/_rels/sheet${index + 1}.xml.rels`

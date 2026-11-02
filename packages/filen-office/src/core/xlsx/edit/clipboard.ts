@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import {
 	CellFlag,
 	SHEET_MAX_COLS,
@@ -142,7 +143,7 @@ interface CutPlan {
 function setNames(document: XlsxDocument, names: readonly XlsxDefinedName[]): void {
 	const workbook = document.workbook
 
-	workbook.definedNames.splice(0, workbook.definedNames.length, ...names)
+	spliceAll(workbook.definedNames, 0, workbook.definedNames.length, names)
 	workbook.changes.workbookSection("definedNames")
 	document.dropEngine()
 }

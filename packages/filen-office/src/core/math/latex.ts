@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { MAX_OMML_NESTING, writeOmml, type OmmlContent, type OmmlNode, type OmmlScript, type OmmlStyle } from "./ommlWriter"
 
 // The LaTeX subset equations are typed in (fractions, roots, scripts, n-ary operators with limits, fences,
@@ -506,7 +507,7 @@ class Reader {
 		const out: OmmlNode[] = []
 
 		for (;;) {
-			out.push(...this.list(Stop.LINES))
+			appendAll(out, this.list(Stop.LINES))
 
 			if (this.pos >= this.end) break
 			// Only \\ ends the top list: a line break, between the equations of a display.
@@ -740,7 +741,7 @@ class Reader {
 				this.pos++
 				caret = true
 				sup ??= []
-				sup.push(...this.argument(start, "^", look))
+				appendAll(sup, this.argument(start, "^", look))
 			} else if (code === 0x5f) {
 				if (sub !== null) fail("unexpected", start, "_")
 

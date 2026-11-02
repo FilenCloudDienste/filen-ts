@@ -1,4 +1,3 @@
-import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import {
@@ -175,42 +174,49 @@ async function posterFrom(
 	}
 }
 
+// Opens the file chooser for a poster image. The input is the chooser's own, not the control's: a command run from the
+// ribbon's overflow closes it, and the control with it, while the chooser is still open.
+export function choosePoster(onFile: (file: File) => void): void {
+	const input = document.createElement("input")
+
+	input.type = "file"
+	input.accept = "image/png,image/jpeg,image/webp,image/gif"
+	input.addEventListener(
+		"change",
+		() => {
+			const file = input.files?.[0]
+
+			if (file !== undefined) onFile(file)
+		},
+		{ once: true }
+	)
+	input.click()
+}
+
 function PosterControls({ editor }: { editor: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
 	const selected = useSelectedMedia(editor, "video")
-	const inputRef = useRef<HTMLInputElement | null>(null)
 
 	return (
-		<>
-			<RibbonButton
-				label={t("previewPptxPosterFromFile")}
-				text={t("previewPptxPosterFromFile")}
-				icon={<ImageIcon />}
-				disabled={selected === undefined || !editor.info.editable}
-				onClick={() => inputRef.current?.click()}
-			/>
-			<input
-				ref={inputRef}
-				type="file"
-				accept="image/png,image/jpeg,image/webp,image/gif"
-				className="hidden"
-				tabIndex={-1}
-				aria-hidden
-				onChange={event => {
-					const file = event.currentTarget.files?.[0]
+		<RibbonButton
+			label={t("previewPptxPosterFromFile")}
+			text={t("previewPptxPosterFromFile")}
+			icon={<ImageIcon />}
+			disabled={selected === undefined || !editor.info.editable}
+			onClick={() => {
+				if (selected === undefined) return
 
-					event.currentTarget.value = ""
+				const target = selected.target
 
-					if (file === undefined || selected === undefined) return
-
+				choosePoster(file => {
 					void posterFrom(file)
-						.then(poster => editor.command({ family: "media", kind: "setPoster", target: selected.target, poster }))
+						.then(poster => editor.command({ family: "media", kind: "setPoster", target, poster }))
 						.catch(() => {
 							toast.error(t("previewPptxPosterFailed"))
 						})
-				}}
-			/>
-		</>
+				})
+			}}
+		/>
 	)
 }
 

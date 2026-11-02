@@ -347,20 +347,70 @@ function paragraphStyle(
 	return scope.styles.derived("paragraph", source, changes)
 }
 
-function sourceStyleOf(scope: TextWriteScope, paragraph: Paragraph): string | undefined {
+// The source element of a paragraph read from the shape's own fragment (-1 when it has none there).
+function sourceNode(scope: TextWriteScope, paragraph: Paragraph): number {
 	const src = paragraph.src
 	const fragment = scope.fragment
 
-	if (src?.format !== "odp" || fragment === undefined || src.fragment !== fragment.offset || src.epoch !== fragment.epoch)
-		return undefined
-	if (src.node <= 0 || src.node >= fragment.document.count) return undefined
+	if (src?.format !== "odp" || fragment === undefined || src.fragment !== fragment.offset || src.epoch !== fragment.epoch) return -1
+	if (src.node <= 0 || src.node >= fragment.document.count) return -1
 
-	return fragment.attributes(src.node).get("text:style-name")
+	return src.node
+}
+
+function sourceStyleOf(scope: TextWriteScope, paragraph: Paragraph): string | undefined {
+	const node = sourceNode(scope, paragraph)
+
+	return node < 0 ? undefined : scope.fragment?.attributes(node).get("text:style-name")
+}
+
+// The span styles of a paragraph's source element, for runs written again that read the same as one of them (the
+// span style then keeps what the model does not carry, such as a font's pitch).
+function sourceSpanStyles(scope: TextWriteScope, paragraph: Paragraph): string[] {
+	const node = sourceNode(scope, paragraph)
+	const fragment = scope.fragment
+
+	if (node < 0 || fragment === undefined) return []
+
+	const out: string[] = []
+	const document = fragment.document
+	const stack = [node]
+
+	for (let at = stack.pop(); at !== undefined && out.length < MAX_SOURCE_SPANS; at = stack.pop()) {
+		for (let child = document.firstChildElement(at); child >= 0; child = document.nextSiblingElement(child)) {
+			if (fragment.name(child) !== "text:span") continue
+
+			const name = fragment.attributes(child).get("text:style-name")
+
+			if (name !== undefined && !out.includes(name)) out.push(name)
+
+			stack.push(child)
+		}
+	}
+
+	return out
+}
+
+// Span styles of a source paragraph looked at for reuse.
+const MAX_SOURCE_SPANS = 16
+
+// A source span style a run's own properties read back as, when one does.
+function reusedSpanStyle(scope: TextWriteScope, candidates: readonly string[], own: RunProps, base: RunProps): string | undefined {
+	const context = scope.styles.env.context
+
+	for (const name of candidates) {
+		const read = runPropsOf(context, context.ownStyle("text", name, scope.styles.scope).text)
+
+		if (same(ownRun({ ...base, ...read }, base), own)) return name
+	}
+
+	return undefined
 }
 
 function writeRuns(scope: TextWriteScope, paragraph: Paragraph, base: RunProps): string | Refused {
 	const cursor: Cursor = { space: true, out: "" }
 	const runs = paragraph.runs
+	const spans = sourceSpanStyles(scope, paragraph)
 	let lastText = -1
 
 	for (let k = runs.length - 1; k >= 0 && lastText < 0; k--) if (runs[k]?.kind !== "br") lastText = k
@@ -370,7 +420,8 @@ function writeRuns(scope: TextWriteScope, paragraph: Paragraph, base: RunProps):
 
 		if (run.kind === "opaque") return refused("unsupported", "run content kept as its source")
 
-		const style = spanStyle(scope, ownRun(run.rPr, base))
+		const own = ownRun(run.rPr, base)
+		const style = (Object.keys(own).length === 0 ? undefined : reusedSpanStyle(scope, spans, own, base)) ?? spanStyle(scope, own)
 
 		if (isRefused(style)) return style
 
@@ -593,6 +644,17 @@ export function textMarkup(scope: TextWriteScope, body: TextBody): string | Refu
 		const entry = entries[index] as Entry
 
 		if (entry.depth === 0) {
+			const header = headerMarkup(scope, entries, index)
+
+			if (isRefused(header)) return header
+
+			if (header !== undefined) {
+				out += header.markup
+				index = header.next
+
+				continue
+			}
+
 			const markup = paragraphMarkup(scope, entry.paragraph, entry.paragraph.pPr.marL, true)
 
 			if (isRefused(markup)) return markup
@@ -612,6 +674,79 @@ export function textMarkup(scope: TextWriteScope, body: TextBody): string | Refu
 	}
 
 	return out
+}
+
+// The source list header (§5.3.3 text:list-header) of a top-level text:list a paragraph without a bullet was read
+// from: the list element, its header and its style. A paragraph written again from it stays in it, so the list's
+// style (and what the model does not carry of it) still applies.
+function sourceHeader(
+	scope: TextWriteScope,
+	paragraph: Paragraph
+): { readonly list: number; readonly header: number; readonly style: string } | undefined {
+	const node = sourceNode(scope, paragraph)
+	const fragment = scope.fragment
+
+	if (node < 0 || fragment === undefined) return undefined
+
+	const document = fragment.document
+	const header = document.parent(node)
+	const list = header < 0 ? -1 : document.parent(header)
+	const container = list < 0 ? -1 : document.parent(list)
+
+	if (header < 0 || list < 0 || container < 0) return undefined
+	if (fragment.name(header) !== "text:list-header" || fragment.name(list) !== "text:list") return undefined
+	if (fragment.name(container) === "text:list-item" || fragment.name(container) === "text:list-header") return undefined
+
+	const style = fragment.attributes(list).get("text:style-name")
+
+	return style === undefined ? undefined : { list, header, style }
+}
+
+// Paragraphs without a bullet read from one source list header, written back in a list header under the source
+// list's style, when that list's first level reads them as they are (their margin over the level's own); undefined
+// when the paragraph at `from` was not read from one, or its list reads it otherwise (then it is written plain).
+function headerMarkup(
+	scope: TextWriteScope,
+	entries: readonly Entry[],
+	from: number
+): { readonly markup: string; readonly next: number } | Refused | undefined {
+	const first = entries[from]
+	const header = first === undefined ? undefined : sourceHeader(scope, first.paragraph)
+
+	if (header === undefined) return undefined
+
+	const context = scope.styles.env.context
+	const level = context.sheet.listStyle(header.style, scope.styles.scope)?.levels.get(1)
+
+	if (level === undefined) return undefined
+
+	const read = levelProps(context, level, undefined)
+	let out = ""
+	let next = from
+
+	for (; next < entries.length; next++) {
+		const entry = entries[next] as Entry
+
+		if (entry.depth !== 0 || sourceHeader(scope, entry.paragraph)?.header !== header.header) break
+
+		const pPr = entry.paragraph.pPr
+		const ownMarL = read.marL === undefined ? pPr.marL : (pPr.marL ?? read.marL) - read.marL
+
+		if (!matches(pPr, read, false, ownMarL ?? 0)) break
+
+		const markup = paragraphMarkup(scope, entry.paragraph, ownMarL, read.marL === undefined)
+
+		if (isRefused(markup)) return markup
+
+		out += markup
+	}
+
+	if (next === from) return undefined
+
+	return {
+		markup: `<text:list text:style-name="${escapeAttribute(header.style)}"><text:list-header>${out}</text:list-header></text:list>`,
+		next
+	}
 }
 
 // The IDs a source paragraph carries (§19.914 xml:id, text:id): animations and links name the paragraph by them, so

@@ -47,16 +47,24 @@ export function pageNames(
 		out.set(ref, name)
 	}
 
+	// Where each base's numbering goes on (a number already tried is taken for good: names are only ever added), so
+	// many pages sharing a name are numbered in one pass, not each from 2 again; an unnamed page's number starts at its
+	// place, found by index.
+	const next = new Map<string, number>()
+	const place = later.length === 0 ? undefined : new Map(deck.slides.map((ref, at) => [ref, at]))
+
 	for (const ref of later) {
 		const base = (nameOf(ref) ?? "").replace(/ \(\d+\)$/u, "")
 		const stem = base === "" ? "page" : base
-		let count = base === "" ? deck.slides.indexOf(ref) + 1 : 2
+		let count = base === "" ? (place?.get(ref) ?? 0) + 1 : (next.get(base) ?? 2)
 		let name = base === "" ? `${stem}${String(count)}` : `${stem} (${String(count)})`
 
 		while (used.has(name)) {
 			count++
 			name = base === "" ? `${stem}${String(count)}` : `${stem} (${String(count)})`
 		}
+
+		if (base !== "") next.set(base, count + 1)
 
 		used.add(name)
 		out.set(ref, name)

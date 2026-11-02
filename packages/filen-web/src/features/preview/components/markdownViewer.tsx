@@ -11,6 +11,7 @@ import { readTextFile } from "@/features/preview/lib/textFile"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
@@ -75,6 +76,16 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 		}
 	}, [focusAfterToggle, mode])
 
+	const focusDocument = (): void => {
+		containerRef.current?.querySelector<HTMLElement>('[role="document"]')?.focus()
+	}
+
+	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
+	// macOS Firefox do).
+	useEditorLayerKeys(containerRef, (event, root) => {
+		onCommandBarF6(event, root, focusDocument)
+	})
+
 	if (result.status === "pending") {
 		return <PreviewLoading />
 	}
@@ -105,9 +116,7 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 			className="flex size-full flex-col"
 			// The source's F6 is the editor surface's own (it takes the key first).
 			onKeyDown={event => {
-				onCommandBarF6(event, () => {
-					containerRef.current?.querySelector<HTMLElement>('[role="document"]')?.focus()
-				})
+				onCommandBarF6(event, event.currentTarget, focusDocument)
 			}}
 		>
 			{mode === "source" ? (

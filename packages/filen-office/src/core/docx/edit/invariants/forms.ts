@@ -1,3 +1,4 @@
+import { appendAll, maxOf, minOf } from "../../../arrays"
 import { Fragment, type Mark, type Node, type Slice } from "prosemirror-model"
 import { closeHistory, isHistoryTransaction } from "prosemirror-history"
 import type { Transaction } from "prosemirror-state"
@@ -120,7 +121,7 @@ export const FORMS_STAGE: InvariantStage | null = {
 				at = at.map(pos => mapping.map(pos, -1))
 			}
 
-			points.push(...at)
+			appendAll(points, at)
 		})
 
 		const tr = state.tr
@@ -443,11 +444,11 @@ function unlockedFormatting(tr: Transaction, session: DocxEditorSession): Transa
 
 		if (parts === undefined) return undefined
 
-		markSteps.push(...parts)
+		appendAll(markSteps, parts)
 	}
 
-	const from = Math.min(...markSteps.map(step => step.from))
-	const to = Math.max(...markSteps.map(step => step.to))
+	const from = minOf(markSteps.map(step => step.from))
+	const to = maxOf(markSteps.map(step => step.to))
 	const sorted = lockedContent(session.story.part, tr.before, from, to)
 
 	if (sorted.length === 0) return undefined

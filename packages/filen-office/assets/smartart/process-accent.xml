@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutAccentProcess
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:process-accent">
+	<sa:title val="Accent process"/>
+	<sa:desc val="Steps left to right, each a heading over a tinted panel that holds its sub-items as bullets; arrows join the headings."/>
+	<sa:catLst>
+		<sa:cat type="process" pri="20"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="104"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="105"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="106"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="107"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="108"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="109"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="101" destId="102" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="101" destId="103" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="203" srcId="100" destId="104" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="204" srcId="104" destId="105" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="205" srcId="104" destId="106" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="206" srcId="100" destId="107" srcOrd="2" destOrd="0"/>
+				<sa:cxn modelId="207" srcId="107" destId="108" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="208" srcId="107" destId="109" srcOrd="1" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="row">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:animLvl val="lvl"/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:choose name="reading">
+			<sa:if name="fromLeft" func="var" arg="dir" op="equ" val="norm">
+				<sa:alg type="lin">
+					<sa:param type="linDir" val="fromL"/>
+					<sa:param type="nodeVertAlign" val="t"/>
+				</sa:alg>
+			</sa:if>
+			<sa:else name="fromRight">
+				<sa:alg type="lin">
+					<sa:param type="linDir" val="fromR"/>
+					<sa:param type="nodeVertAlign" val="t"/>
+				</sa:alg>
+			</sa:else>
+		</sa:choose>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="ch" forName="stage" type="w" refType="w"/>
+			<sa:constr for="ch" forName="stage" type="h" refType="h"/>
+			<sa:constr for="ch" forName="link" type="w" refFor="ch" refForName="stage" refType="w" fact="0.2"/>
+			<sa:constr for="ch" forName="link" type="h" refType="h"/>
+			<sa:constr for="des" forName="heading" type="primFontSz" op="equ" val="40"/>
+			<sa:constr for="des" forName="panel" type="primFontSz" op="equ" val="28"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:forEach name="stages" ptType="node" axis="ch">
+			<sa:layoutNode name="stage">
+				<sa:alg type="composite"/>
+				<sa:shape><sa:adjLst/></sa:shape>
+				<sa:presOf/>
+				<sa:constrLst>
+					<sa:constr for="ch" forName="panel" type="l" refType="w" fact="0.08"/>
+					<sa:constr for="ch" forName="panel" type="w" refType="w" fact="0.84"/>
+					<sa:constr for="ch" forName="panel" type="t" refType="h" fact="0.26"/>
+					<sa:constr for="ch" forName="panel" type="b" refType="h"/>
+					<sa:constr for="ch" forName="heading" type="l"/>
+					<sa:constr for="ch" forName="heading" type="t"/>
+					<sa:constr for="ch" forName="heading" type="w" refType="w"/>
+					<sa:constr for="ch" forName="heading" type="h" refType="h" fact="0.26"/>
+				</sa:constrLst>
+				<sa:ruleLst/>
+				<sa:layoutNode name="panel" styleLbl="alignAcc1">
+					<sa:varLst>
+						<sa:bulletEnabled val="1"/>
+					</sa:varLst>
+					<sa:alg type="tx">
+						<sa:param type="txAnchorVert" val="t"/>
+						<sa:param type="parTxLTRAlign" val="l"/>
+					</sa:alg>
+					<sa:shape type="rect"><sa:adjLst/></sa:shape>
+					<sa:presOf axis="des" ptType="node"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.4"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.3"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+				<sa:layoutNode name="heading" styleLbl="node1">
+					<sa:alg type="tx"/>
+					<sa:shape type="roundRect">
+						<sa:adjLst>
+							<sa:adj idx="1" val="0.12"/>
+						</sa:adjLst>
+					</sa:shape>
+					<sa:presOf axis="self"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.2"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.2"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+			</sa:layoutNode>
+			<sa:forEach name="links" ptType="sibTrans" axis="followSib" cnt="1">
+				<sa:layoutNode name="link">
+					<sa:alg type="composite"/>
+					<sa:shape><sa:adjLst/></sa:shape>
+					<sa:presOf/>
+					<sa:constrLst>
+						<sa:constr for="ch" forName="arrow" type="l" refType="w" fact="0.15"/>
+						<sa:constr for="ch" forName="arrow" type="w" refType="w" fact="0.7"/>
+						<sa:constr for="ch" forName="arrow" type="h" refType="w" fact="0.8"/>
+						<sa:constr for="ch" forName="arrow" type="ctrY" refType="h" fact="0.13"/>
+					</sa:constrLst>
+					<sa:ruleLst/>
+					<sa:layoutNode name="arrow" styleLbl="sibTrans2D1">
+						<sa:alg type="sp"/>
+						<sa:choose name="pointing">
+							<sa:if name="right" func="var" arg="dir" op="equ" val="norm">
+								<sa:shape type="rightArrow">
+									<sa:adjLst>
+										<sa:adj idx="1" val="0.56"/>
+										<sa:adj idx="2" val="0.5"/>
+									</sa:adjLst>
+								</sa:shape>
+							</sa:if>
+							<sa:else name="left">
+								<sa:shape type="leftArrow">
+									<sa:adjLst>
+										<sa:adj idx="1" val="0.56"/>
+										<sa:adj idx="2" val="0.5"/>
+									</sa:adjLst>
+								</sa:shape>
+							</sa:else>
+						</sa:choose>
+						<sa:presOf/>
+						<sa:constrLst/>
+						<sa:ruleLst/>
+					</sa:layoutNode>
+				</sa:layoutNode>
+			</sa:forEach>
+		</sa:forEach>
+	</sa:layoutNode>
+</sa:layoutDef>

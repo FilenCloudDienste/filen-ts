@@ -20,7 +20,8 @@ import {
 	type Refused,
 	type RunProps,
 	type SlideRef,
-	type SourceRef
+	type SourceRef,
+	type Xfrm
 } from "../../presentation/model"
 import { decodeUtf8, escapeAttribute, escapeText, type Namespaces, type XmlDocument } from "../../xml/index"
 import type { Fragment, OdpContext } from "../read/context"
@@ -117,10 +118,52 @@ export function setChild(changes: StyleChanges, kind: string, name: string, mark
 
 // --- Properties written from the model (the reader's mapping, inverted). ---
 
+// The attributes a fill is written in (§20.137 draw:fill and those it brings: §20.146 draw:fill-color, §20.144
+// draw:opacity, the drawing resources a fill names, §20.142 draw:fill-image-*…).
+export const FILL_PROPERTIES = [
+	"draw:fill",
+	"draw:fill-color",
+	"draw:opacity",
+	"draw:opacity-name",
+	"draw:fill-gradient-name",
+	"draw:gradient-step-count",
+	"draw:fill-hatch-name",
+	"draw:fill-hatch-solid",
+	"draw:fill-image-name",
+	"draw:fill-image-width",
+	"draw:fill-image-height",
+	"draw:fill-image-ref-point",
+	"draw:fill-image-ref-point-x",
+	"draw:fill-image-ref-point-y",
+	"draw:tile-repeat-offset",
+	"style:repeat"
+] as const
+
+// The attributes a line is written in (§20.163 draw:stroke and those it brings).
+const LINE_PROPERTIES = [
+	"draw:stroke",
+	"draw:stroke-dash",
+	"svg:stroke-width",
+	"svg:stroke-color",
+	"svg:stroke-opacity",
+	"svg:stroke-linecap",
+	"draw:stroke-linejoin",
+	"draw:marker-start",
+	"draw:marker-start-width",
+	"draw:marker-end",
+	"draw:marker-end-width"
+] as const
+
 // A fill (§20.137 draw:fill …): solid and none are written; a fill that needs a drawing resource (gradient, hatch,
-// bitmap) is refused when it is new, so nothing is dropped.
+// bitmap) is refused when it is new, so nothing is dropped. The inherited one (no fill of the shape's own): its own
+// fill attributes taken out, so its style chain gives it (a notes body a session made, written without one, then
+// put back by an undo from the markup a save wrote for it).
 export function fillChanges(changes: StyleChanges, fill: FillProps | "none" | undefined): Refused | undefined {
-	if (fill === undefined) return refused("unsupported", "a fill taken back to the inherited one")
+	if (fill === undefined) {
+		for (const name of FILL_PROPERTIES) setProperty(changes, "graphic", name, null)
+
+		return undefined
+	}
 
 	if (fill === "none") {
 		setProperty(changes, "graphic", "draw:fill", "none")
@@ -151,7 +194,12 @@ export function lineChanges(
 	line: LineProps | "none" | undefined,
 	kept: LineProps | "none" | undefined
 ): Refused | undefined {
-	if (line === undefined) return refused("unsupported", "a line taken back to the inherited one")
+	// The inherited one: its own line attributes taken out (as an inherited fill).
+	if (line === undefined) {
+		for (const name of LINE_PROPERTIES) setProperty(changes, "graphic", name, null)
+
+		return undefined
+	}
 
 	if (line === "none") {
 		setProperty(changes, "graphic", "draw:stroke", "none")
@@ -539,12 +587,64 @@ export function takenNames(
 }
 
 // Names a stream's markup refers to (style:name of nothing still names something to a reader that later finds one):
-// every value of an attribute whose local name ends in "style-name", by a byte scan.
+// every value of an attribute whose local name ends in "style-name", double-quoted, as written.
 export function referencedNames(bytes: Uint8Array, into: Set<string>): void {
-	const text = decodeUtf8(bytes, 0, bytes.length)
-
-	for (const match of text.matchAll(/[\w-]*style-name="([^"]*)"/gu)) into.add(match[1] ?? "")
+	attributeValues(bytes, STYLE_NAMES, false, (start, end) => {
+		into.add(decodeUtf8(bytes, start, end))
+	})
 }
+
+// Every value of an attribute whose name ends in one of `suffixes`, by a byte scan in time linear in the stream: each
+// `suffix="` (and `suffix='` when `single`) and the bytes up to the next same quote, the value's span handed to `visit`.
+// It reads as the expression /[\w.-]*(?:suffix|…)=(?:"([^"]*)"|'([^']*)')/ reads, without its backtracking: a quote is
+// ASCII, so no character straddles a value's ends, and the scan goes on after the closing quote, as a match does.
+export function attributeValues(
+	bytes: Uint8Array,
+	suffixes: readonly Uint8Array[],
+	single: boolean,
+	visit: (start: number, end: number) => void
+): void {
+	// A quote kind found unclosed: no later value of that kind closes either (the other kind still may), so it is not
+	// looked for again (looking would make the scan quadratic).
+	let doubleOpen = true
+	let singleOpen = single
+
+	for (let at = bytes.indexOf(EQUALS); at >= 0; at = bytes.indexOf(EQUALS, at + 1)) {
+		const quote = bytes[at + 1]
+
+		if (!(quote === QUOTE ? doubleOpen : quote === APOSTROPHE && singleOpen)) continue
+		if (!suffixes.some(suffix => endsAt(bytes, at, suffix))) continue
+
+		const close = bytes.indexOf(quote === QUOTE ? QUOTE : APOSTROPHE, at + 2)
+
+		if (close < 0) {
+			if (quote === QUOTE) doubleOpen = false
+			else singleOpen = false
+
+			continue
+		}
+
+		visit(at + 2, close)
+		at = close
+	}
+}
+
+function endsAt(bytes: Uint8Array, end: number, suffix: Uint8Array): boolean {
+	if (end < suffix.length) return false
+
+	for (let k = 0; k < suffix.length; k++) if (bytes[end - suffix.length + k] !== suffix[k]) return false
+
+	return true
+}
+
+const asBytes = (text: string): Uint8Array => Uint8Array.from(text, character => character.charCodeAt(0))
+
+export const STYLE_NAME_SUFFIX = asBytes("style-name")
+export const MASTER_PAGE_NAME_SUFFIX = asBytes("master-page-name")
+const STYLE_NAMES = [STYLE_NAME_SUFFIX]
+const EQUALS = 0x3d
+const QUOTE = 0x22
+const APOSTROPHE = 0x27
 
 // The names of each reading's streams, read once: a reading's streams never change (a save's rebase opens a new
 // reading, whose content bytes are another array), so every page's proof and every save copies them instead of
@@ -608,6 +708,11 @@ export interface OdpWriteEnv {
 	// The family that writes a request's element (pptx/write/emit.ts emitFamilyOf).
 	familyOf(request: EmitRequest): DeckOpFamily
 	pageName(ref: SlideRef): string | undefined
+	// The boxes of presentation objects a save marked user-transformed (OdpWriteSource.placeholderBoxes), when the
+	// writer edits a source.
+	readonly placeholderBoxes?: Map<string, Xfrm>
+	// The mirror values a save first changed (OdpWriteSource.mirrorValues).
+	readonly mirrorValues?: Map<string, string | undefined>
 }
 
 // The namespaces new markup uses, by the prefixes it writes.
@@ -630,15 +735,53 @@ export const WRITTEN_NAMESPACES: Readonly<Record<string, string>> = {
 // namespaces in scope where it goes) does not bind to the same namespace.
 export function declared(markup: string, scope: ReadonlyMap<string, string>): string {
 	const end = markup.search(/[\s/>]/u)
+	const unbound = unboundPrefixes(markup, scope)
 	let extra = ""
 
-	for (const [prefix, uri] of Object.entries(WRITTEN_NAMESPACES)) {
-		if (!markup.includes(`${prefix}:`) || scope.get(prefix) === uri) continue
-
-		extra += ` xmlns:${prefix}="${escapeAttribute(uri)}"`
-	}
+	for (const [prefix, uri] of Object.entries(WRITTEN_NAMESPACES))
+		if (unbound.has(prefix)) extra += ` xmlns:${prefix}="${escapeAttribute(uri)}"`
 
 	return extra === "" || end < 0 ? markup : markup.slice(0, end) + extra + markup.slice(end)
+}
+
+const ATTRIBUTE = /\s+([^\s=]+)\s*=\s*(?:"[^"]*"|'[^']*')/gy
+
+// The prefixes markup uses (element and attribute names) that neither `scope` nor an enclosing element of the markup
+// itself declares: markup copied with its own declarations (an object's xmlns:xlink) needs none added.
+function unboundPrefixes(markup: string, scope: ReadonlyMap<string, string>): Set<string> {
+	const out = new Set<string>()
+	const stack: string[][] = []
+	const bound = (prefix: string): boolean => scope.has(prefix) || stack.some(level => level.includes(prefix))
+
+	for (const match of markup.matchAll(/<(\/?)([A-Za-z_][\w.-]*(?::[\w.-]+)?)((?:\s+[^\s=]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/gu)) {
+		if (match[1] === "/") {
+			stack.pop()
+			continue
+		}
+
+		const declares: string[] = []
+		const used: string[] = []
+		const name = match[2] ?? ""
+
+		if (name.includes(":")) used.push(name.slice(0, name.indexOf(":")))
+
+		// Attribute by attribute from where the last ended (sticky): a scan for names at every position would also read
+		// names inside values, and take time quadratic in a long value.
+		for (const attribute of (match[3] ?? "").matchAll(ATTRIBUTE)) {
+			const attributeName = attribute[1] ?? ""
+
+			if (attributeName.startsWith("xmlns:")) declares.push(attributeName.slice(6))
+			else if (attributeName.includes(":")) used.push(attributeName.slice(0, attributeName.indexOf(":")))
+		}
+
+		stack.push(declares)
+
+		for (const prefix of used) if (prefix !== "xml" && !bound(prefix)) out.add(prefix)
+
+		if (match[4] === "/") stack.pop()
+	}
+
+	return out
 }
 
 // The declarations a style element needs in a stream whose root binds `scope`.
@@ -685,6 +828,39 @@ export class OdpStyles implements OdpStylesApi {
 		this.scope = scope
 		this.declarations = declarations
 		this.registry = new StyleRegistry(taken, declarations)
+	}
+
+	// Styles a save retired, by family and written form: a style written again with the same form takes the retired
+	// name back (the save puts its definition back where it was), so the same state saves to the same bytes.
+	reuseRetired(retired: ReadonlyMap<string, string>): void {
+		if (retired.size === 0) return
+
+		const byFamily = new Map<string, Map<string, string>>()
+
+		for (const [name, markup] of retired) {
+			const match =
+				/^<style:style(?:\s+xmlns:[\w-]+="[^"]*")* style:name="([^"]*)" style:family="([\w-]+)"((?:\s+[\w:-]+="[^"]*")*)(?:\/>|>([\s\S]*)<\/style:style>)\s*$/u.exec(
+					markup
+				)
+
+			if (match === null || match[1] !== escapeAttribute(name)) continue
+
+			const family = match[2] as string
+			let forms = byFamily.get(family)
+
+			if (forms === undefined) {
+				forms = new Map()
+				byFamily.set(family, forms)
+			}
+
+			const form = `${match[3] ?? ""}\u0000${match[4] ?? ""}`
+
+			if (!forms.has(form)) forms.set(form, name)
+		}
+
+		const empty: ReadonlyMap<string, string> = new Map()
+
+		this.registry.existing = family => byFamily.get(family) ?? empty
 	}
 
 	automatic(family: Parameters<OdpStylesApi["automatic"]>[0], properties: string): string {

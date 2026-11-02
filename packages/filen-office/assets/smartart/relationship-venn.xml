@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutVenn
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:venn">
+	<dgm:title val="Venn"/>
+	<dgm:desc val="Overlapping circles around a common middle, one per top-level item, to show what the ideas share. Sub-items are listed inside their circle."/>
+	<dgm:catLst>
+		<dgm:cat type="relationship" pri="200"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="50" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="51" srcId="0" destId="2" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="52" srcId="0" destId="3" srcOrd="2" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="overlap">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:choose name="arrangement">
+			<dgm:if name="sideBySide" func="cnt" axis="ch" ptType="node" op="equ" val="2">
+				<dgm:alg type="cycle">
+					<dgm:param type="stAng" val="270"/>
+					<dgm:param type="spanAng" val="360"/>
+				</dgm:alg>
+			</dgm:if>
+			<dgm:else name="aroundTheMiddle">
+				<dgm:choose name="turn">
+					<dgm:if name="clockwise" func="var" arg="dir" op="equ" val="norm">
+						<dgm:alg type="cycle">
+							<dgm:param type="stAng" val="0"/>
+							<dgm:param type="spanAng" val="360"/>
+						</dgm:alg>
+					</dgm:if>
+					<dgm:else name="counterClockwise">
+						<dgm:alg type="cycle">
+							<dgm:param type="stAng" val="0"/>
+							<dgm:param type="spanAng" val="-360"/>
+						</dgm:alg>
+					</dgm:else>
+				</dgm:choose>
+			</dgm:else>
+		</dgm:choose>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="w" for="ch" forName="circle" refType="h" fact="0.6"/>
+			<dgm:constr type="h" for="ch" forName="circle" refType="w" refFor="ch" refForName="circle"/>
+			<dgm:constr type="sibSp" refType="w" refFor="ch" refForName="circle" fact="-0.38"/>
+			<dgm:constr type="primFontSz" for="ch" forName="circle" op="equ" val="60"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:forEach name="sets" axis="ch" ptType="node">
+			<dgm:layoutNode name="circle" styleLbl="vennNode1">
+				<dgm:varLst>
+					<dgm:bulletEnabled val="1"/>
+				</dgm:varLst>
+				<dgm:alg type="tx"/>
+				<dgm:shape type="ellipse"><dgm:adjLst/></dgm:shape>
+				<dgm:presOf axis="desOrSelf" ptType="node"/>
+				<dgm:constrLst>
+					<dgm:constr type="lMarg" refType="w" fact="0.16"/>
+					<dgm:constr type="rMarg" refType="w" fact="0.16"/>
+					<dgm:constr type="tMarg" refType="h" fact="0.2"/>
+					<dgm:constr type="bMarg" refType="h" fact="0.2"/>
+				</dgm:constrLst>
+				<dgm:ruleLst>
+					<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+				</dgm:ruleLst>
+			</dgm:layoutNode>
+		</dgm:forEach>
+	</dgm:layoutNode>
+</dgm:layoutDef>

@@ -11,7 +11,7 @@ import { budget, cpuMs } from "./timing"
 // An edit of a 30-node diagram and its relayout (smartartPerf: within 60 ms of worker CPU): the data part edited
 // (byte splices over the part), parsed, laid out with text fitted through the slide text adapter, styled and emitted.
 
-const ASSETS = join(import.meta.dirname, "..", "..", "assets", "smartart")
+const ASSETS = join(import.meta.dirname, "fixtures", "smartart")
 const asset = (file: string): XmlDocument => parseXml(encodeUtf8(readFileSync(join(ASSETS, file), "utf8")))
 
 function outline(count: number): PointSpec[] {

@@ -114,7 +114,8 @@ import { loadOfficeSettings, saveOfficeAutosave, useOfficeSettings } from "@/fea
 import { E2E_AUTOSAVE_OFF } from "@/features/office/lib/officeAutosave"
 import { LoadingState } from "@/components/loadingState"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { log } from "@/lib/log"
@@ -135,7 +136,6 @@ export type DocxSaveSource = (options?: { auto?: boolean }) => Promise<DocxSaveS
 
 const PAGE_GAP = 16
 const WHEEL_SENSITIVITY = 0.0015
-const LAYER = "[role='dialog'], [role='alertdialog']"
 const APPLE = isMacPlatform()
 const NO_MATCHES: readonly StoryMatch[] = []
 const NO_SPELLING: readonly SpellingMark[] = []
@@ -820,6 +820,31 @@ export function DocxEditView({
 		handleRef.current?.focus()
 	}
 
+	// F6 and Shift+F6 move between the ribbon and the document, as Word's panes.
+	const onPaneKey = (event: KeyboardEvent, root: Element): void => {
+		if (event.key !== "F6" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
+			return
+		}
+
+		const ribbon = root.querySelector("[data-office-ribbon]")
+
+		if (ribbon === null) {
+			return
+		}
+
+		event.preventDefault()
+
+		if (event.target instanceof Node && ribbon.contains(event.target)) {
+			focusEditor()
+		} else {
+			ribbonLanding(ribbon)?.focus()
+		}
+	}
+
+	// The same keys pressed elsewhere in the editor's layer (focus left on the preview overlay itself after a click, as
+	// Safari and macOS Firefox do).
+	useEditorLayerKeys(rootRef, onPaneKey)
+
 	const runRef = useLatestRef((command: DocxEditorCommand, author?: string): void => {
 		if (author !== undefined) {
 			opened.editing.setAuthor(author)
@@ -968,14 +993,7 @@ export function DocxEditView({
 		keyboardEvent => {
 			const root = rootRef.current
 
-			if (root === null || keyboardEvent.defaultPrevented) {
-				return
-			}
-
-			const layer = root.closest(LAYER)
-			const target = keyboardEvent.target instanceof Element ? keyboardEvent.target.closest(LAYER) : null
-
-			if (target !== layer || (layer === null && isAnyDialogOpen())) {
+			if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
 				return
 			}
 
@@ -1233,23 +1251,7 @@ export function DocxEditView({
 			className="flex size-full flex-col"
 			// F6 and Shift+F6 move between the ribbon and the document, as Word's panes.
 			onKeyDown={event => {
-				if (event.key !== "F6" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
-					return
-				}
-
-				const ribbon = event.currentTarget.querySelector("[data-office-ribbon]")
-
-				if (ribbon === null) {
-					return
-				}
-
-				event.preventDefault()
-
-				if (event.target instanceof Node && ribbon.contains(event.target)) {
-					focusEditor()
-				} else {
-					ribbonLanding(ribbon)?.focus()
-				}
+				onPaneKey(event.nativeEvent, event.currentTarget)
 			}}
 		>
 			<DocxEditToolbar

@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutBasicMatrix
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:basic-matrix">
+	<dgm:title val="Basic matrix"/>
+	<dgm:desc val="Square cells in a grid on a square plate, as many rows as columns, one cell per top-level item with its sub-items listed inside. Four items make the classic quadrants."/>
+	<dgm:catLst>
+		<dgm:cat type="matrix" pri="100"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="4"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="80" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="81" srcId="0" destId="2" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="82" srcId="0" destId="3" srcOrd="2" destOrd="0"/>
+				<dgm:cxn modelId="83" srcId="0" destId="4" srcOrd="3" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="board">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:alg type="composite">
+			<dgm:param type="ar" val="1"/>
+		</dgm:alg>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="l" for="ch" forName="plate"/>
+			<dgm:constr type="t" for="ch" forName="plate"/>
+			<dgm:constr type="w" for="ch" forName="plate" refType="w"/>
+			<dgm:constr type="h" for="ch" forName="plate" refType="h"/>
+			<dgm:constr type="l" for="ch" forName="grid" refType="w" fact="0.05"/>
+			<dgm:constr type="t" for="ch" forName="grid" refType="h" fact="0.05"/>
+			<dgm:constr type="w" for="ch" forName="grid" refType="w" fact="0.9"/>
+			<dgm:constr type="h" for="ch" forName="grid" refType="h" fact="0.9"/>
+			<dgm:constr type="primFontSz" for="des" forName="cell" op="equ" val="60"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:layoutNode name="plate" styleLbl="bgShp">
+			<dgm:alg type="sp"/>
+			<dgm:shape type="roundRect">
+				<dgm:adjLst>
+					<dgm:adj idx="1" val="0.04"/>
+				</dgm:adjLst>
+			</dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst/>
+			<dgm:ruleLst/>
+		</dgm:layoutNode>
+		<dgm:layoutNode name="grid">
+			<dgm:choose name="fillOrder">
+				<dgm:if name="fillFromLeft" func="var" arg="dir" op="equ" val="norm">
+					<dgm:alg type="snake">
+						<dgm:param type="grDir" val="tL"/>
+						<dgm:param type="flowDir" val="row"/>
+						<dgm:param type="contDir" val="sameDir"/>
+						<dgm:param type="bkpt" val="bal"/>
+						<dgm:param type="off" val="ctr"/>
+					</dgm:alg>
+				</dgm:if>
+				<dgm:else name="fillFromRight">
+					<dgm:alg type="snake">
+						<dgm:param type="grDir" val="tR"/>
+						<dgm:param type="flowDir" val="row"/>
+						<dgm:param type="contDir" val="sameDir"/>
+						<dgm:param type="bkpt" val="bal"/>
+						<dgm:param type="off" val="ctr"/>
+					</dgm:alg>
+				</dgm:else>
+			</dgm:choose>
+			<dgm:shape><dgm:adjLst/></dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst>
+				<dgm:constr type="w" for="ch" forName="cell" refType="w" fact="0.48"/>
+				<dgm:constr type="h" for="ch" forName="cell" refType="w" refFor="ch" refForName="cell"/>
+				<dgm:constr type="w" for="ch" forName="cellGap" refType="w" fact="0.04"/>
+				<dgm:constr type="sp" refType="w" fact="0.04"/>
+			</dgm:constrLst>
+			<dgm:ruleLst/>
+			<dgm:forEach name="cells" axis="ch" ptType="node">
+				<dgm:layoutNode name="cell" styleLbl="node1">
+					<dgm:varLst>
+						<dgm:bulletEnabled val="1"/>
+					</dgm:varLst>
+					<dgm:alg type="tx"/>
+					<dgm:shape type="roundRect">
+						<dgm:adjLst>
+							<dgm:adj idx="1" val="0.1"/>
+						</dgm:adjLst>
+					</dgm:shape>
+					<dgm:presOf axis="desOrSelf" ptType="node"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="primFontSz" fact="0.25"/>
+						<dgm:constr type="rMarg" refType="primFontSz" fact="0.25"/>
+						<dgm:constr type="tMarg" refType="primFontSz" fact="0.25"/>
+						<dgm:constr type="bMarg" refType="primFontSz" fact="0.25"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+				<dgm:forEach name="cellGaps" axis="followSib" ptType="sibTrans" cnt="1">
+					<dgm:layoutNode name="cellGap">
+						<dgm:alg type="sp"/>
+						<dgm:shape><dgm:adjLst/></dgm:shape>
+						<dgm:presOf/>
+						<dgm:constrLst/>
+						<dgm:ruleLst/>
+					</dgm:layoutNode>
+				</dgm:forEach>
+			</dgm:forEach>
+		</dgm:layoutNode>
+	</dgm:layoutNode>
+</dgm:layoutDef>

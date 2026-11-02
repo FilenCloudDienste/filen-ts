@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { symbolTable, symbolToUnicode } from "../../fonts/symbols"
 import { ByteKeyMap } from "../../odt/write/byteKeys"
 import { paragraphAttributes, runAttributes } from "../../odt/write/inverse"
@@ -400,7 +401,7 @@ export class Lowering {
 			firsts.push(blocks.length > before ? before : -1)
 		}
 
-		if (last) blocks.push(...this.flushBreak())
+		if (last) appendAll(blocks, this.flushBreak())
 
 		return { xml: `<w:document ${LOWERED_NAMESPACES}><w:body>${blocks.join("")}</w:body></w:document>`, firsts }
 	}
@@ -537,7 +538,7 @@ export class Lowering {
 				if (local === "ins" || local === "moveTo")
 					for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child))
 						this.block(child, out, sectionEnd)
-				else if (document.textContent(node).trim() !== "") out.push(...this.deletedBlocks(node))
+				else if (document.textContent(node).trim() !== "") appendAll(out, this.deletedBlocks(node))
 
 				break
 			case "altChunk":
@@ -632,7 +633,7 @@ export class Lowering {
 			out.push(`<w:p>${head === "" ? "" : `<w:pPr>${head}</w:pPr>`}${piece.markup}</w:p>`)
 		}
 
-		out.push(...state.after)
+		appendAll(out, state.after)
 
 		if (sectPr >= 0) sectionEnd(this.clean(sectPr))
 	}
@@ -1582,7 +1583,7 @@ export class Lowering {
 				if (this.styles.conditionalTables.has(document.attribute(this.child(child, "tblStyle"), "w:val") ?? ""))
 					this.lossy.add("tableStyle")
 			} else if (local === "tr") rows.push(child)
-			else if (local === "sdt" || local === "customXml") rows.push(...this.wrapped(child, "tr"))
+			else if (local === "sdt" || local === "customXml") appendAll(rows, this.wrapped(child, "tr"))
 		}
 
 		this.tableWidth = 0

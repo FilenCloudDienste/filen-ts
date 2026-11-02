@@ -25,7 +25,7 @@ import { measurer } from "./smartartFixtures"
 // one batch with the text bodies, saves that write an edited diagram into its own parts (with the drawing the
 // renderer laid out) and leave nothing behind, insert from our gallery, and typed refusals.
 
-const ASSETS = join(import.meta.dirname, "..", "..", "assets", "smartart")
+const ASSETS = join(import.meta.dirname, "fixtures", "smartart")
 const asset = (file: string): string => readFileSync(join(ASSETS, file), "utf8")
 const LAYOUT = asset("test-row.xml")
 const STYLE = asset("test-style-flat.xml")
@@ -310,12 +310,12 @@ describe("SmartArt edits in the session", () => {
 					family: "smartart",
 					kind: "setLayout",
 					target: diagram.target,
-					def: { uniqueId: "urn:filen:smartart:layout:column", source: "gallery" }
+					def: { uniqueId: "urn:filen:smartart:layout:list-vertical-bullet", source: "gallery" }
 				})
 			).ok
 		).toBe(true)
 		expect(diagram.frame().layout).toMatch(/^raw:/u)
-		expect(text(diagram.data().bytes)).toContain('loTypeId="urn:filen:smartart:layout:column"')
+		expect(text(diagram.data().bytes)).toContain('loTypeId="urn:filen:smartart:layout:list-vertical-bullet"')
 		expect(diagram.outline()).toEqual(["-One", "-Two", "-Three"])
 
 		expect(
@@ -389,15 +389,15 @@ describe("SmartArt edits in the session", () => {
 		expect([...saved.keys()].filter(name => name.startsWith("ppt/diagrams/data"))).toEqual(["ppt/diagrams/data1.xml"])
 	})
 
-	it("refuses an edit of a picture diagram whose data part another diagram shares", async () => {
+	it("writes an edit of a picture diagram whose data part another diagram shares into parts of its own", async () => {
 		const pictures = await open(diagramDeck({ picture: true }))
 		const node = pictures.h.session.deck.nodes.get(pictures.node.ref)
 		const shape = node?.shapes.find(each => each.id === pictures.target.id)
 
 		if (node === undefined || shape === undefined) throw new Error("no diagram")
 
-		// A second frame naming the same data part (as a copy pasted on the slide would).
-		node.shapes.push({ ...shape, id: 99, frame: { ...pictures.frame() } })
+		// A copy of the slide names the same data part until a save writes its own.
+		expect(await pictures.h.command({ family: "slide", kind: "duplicate", slide: pictures.node.ref })).toMatchObject({ ok: true })
 
 		expect(
 			await pictures.h.command({
@@ -407,7 +407,20 @@ describe("SmartArt edits in the session", () => {
 				node: nodeId(pictures, "One"),
 				text: "y"
 			})
-		).toMatchObject({ ok: false, refusal: "unsupported" })
+		).toMatchObject({ ok: true })
+
+		await pictures.relayout()
+
+		const bytes = await saveEdits(pictures.h, 1)
+		const saved = await partsOf(bytes)
+		const written = [...saved.keys()].filter(name => /^ppt\/diagrams\/data\d+\.xml$/u.test(name))
+		const edited = written.find(name => diagramFindTexts(doc(text(saved.get(name))))[0] === "y") ?? ""
+
+		expect(await danglingReferences(bytes)).toEqual([])
+		// The copy keeps the text it was made with; the edit is in a part of its own that relates the picture itself.
+		expect(written.map(name => diagramFindTexts(doc(text(saved.get(name)))))).toContainEqual(["One", "Two", "Three"])
+		expect(diagramFindTexts(doc(text(saved.get(edited))))).toEqual(["y", "Two", "Three"])
+		expect(text(saved.get(edited.replace("diagrams/", "diagrams/_rels/") + ".rels"))).toContain("../media/image1.png")
 	})
 
 	it("drops a held part once no diagram names it, holding it again under its name on undo", async () => {
@@ -552,7 +565,7 @@ describe("SmartArt saves", () => {
 				kind: "frame",
 				xfrm: { x: 0, y: 4_000_000, cx: 4_000_000, cy: 2_000_000, rot: 0, flipH: false, flipV: false }
 			},
-			layout: { uniqueId: "urn:filen:smartart:layout:column", source: "gallery" },
+			layout: { uniqueId: "urn:filen:smartart:layout:list-vertical-bullet", source: "gallery" },
 			texts: ["", "Beta", ""]
 		})
 
@@ -610,7 +623,7 @@ describe("SmartArt saves", () => {
 				kind: "frame",
 				xfrm: { x: 0, y: 4_000_000, cx: 4_000_000, cy: 2_000_000, rot: 0, flipH: false, flipV: false }
 			},
-			layout: { uniqueId: "urn:filen:smartart:layout:column", source: "gallery" },
+			layout: { uniqueId: "urn:filen:smartart:layout:list-vertical-bullet", source: "gallery" },
 			texts: ["Alpha", "\tBeta", "Gamma"]
 		})
 
@@ -670,7 +683,7 @@ describe("SmartArt in ODF", () => {
 					kind: "frame",
 					xfrm: { x: 0, y: 0, cx: 1000, cy: 1000, rot: 0, flipH: false, flipV: false }
 				},
-				layout: { uniqueId: "urn:filen:smartart:layout:row", source: "gallery" },
+				layout: { uniqueId: "urn:filen:smartart:layout:list-basic", source: "gallery" },
 				texts: ["A"]
 			})
 		).toMatchObject({ reason: "unsupported" })

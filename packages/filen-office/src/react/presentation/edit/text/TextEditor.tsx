@@ -30,7 +30,7 @@ import { paintPage, patchPage } from "../../../docx/paint/page"
 import { deleteBeforeComposition, deleteSelectionKey, inputTransaction } from "../../../docx/edit/input"
 import { safeClipboardHtml } from "../../../docx/edit/clipboard"
 import { TextEditController } from "./controller"
-import type { TextEditing } from "./editing"
+import { applePlatform, type TextEditing } from "./editing"
 import { pendingInsertion, TextEcho } from "./echo"
 import { DEFAULT_TEXT_BINDINGS, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./keys"
 import { measureCacheFor } from "./layoutMap"
@@ -107,6 +107,15 @@ function apply(m: readonly number[], x: number, y: number): { x: number; y: numb
 	return { x: a * x + c * y + e, y: b * x + d * y + f }
 }
 
+// A worker call's refusal as the page receives it: a PresentationError, or an error carrying its reason.
+function refusalOf(error: unknown): PresentationRefusal {
+	if (error instanceof PresentationError) return error.reason
+
+	const reason = typeof error === "object" && error !== null ? (error as { readonly reason?: unknown }).reason : undefined
+
+	return typeof reason === "string" ? (reason as PresentationRefusal) : "failed"
+}
+
 // Typing: plain replacements with no paste or drop behind them (they coalesce into one undo step).
 function isTyping(tr: Transaction): boolean {
 	return (
@@ -162,12 +171,19 @@ export function PresentationTextEditor({
 
 	latest.current = { onExit, onRefused, scale, readOnly: readOnly === true, bindings }
 
-	const apple = appleProp ?? /Mac|iPhone|iPad/u.test(String(Reflect.get(Reflect.get(globalThis, "navigator") ?? {}, "platform") ?? ""))
+	const apple = appleProp ?? applePlatform()
 
-	// The seed: once per mounted body.
+	// The seed: once per mounted body. Keys typed from now until the view is ready are held, then typed into the body.
 	useEffect(() => {
 		let cancelled = false
 		let made: TextEditController | undefined
+
+		// Escape before the body is ready gives the open up, as it would close the ready editor.
+		editing.expect({
+			onCancel: () => latest.current.onExit(),
+			anchor: rootRef.current,
+			keys: { bindings: latest.current.bindings, apple }
+		})
 
 		session.textSeed(shape).then(
 			seed => {
@@ -190,13 +206,20 @@ export function PresentationTextEditor({
 			(error: unknown) => {
 				if (cancelled) return
 
-				latest.current.onRefused(error instanceof PresentationError ? error.reason : "failed")
+				const reason = refusalOf(error)
+
+				// The body is gone (an undo took the notes away meanwhile): the editor closes, and nothing was refused.
+				if (reason !== "notFound") latest.current.onRefused(reason)
+
 				latest.current.onExit()
 			}
 		)
 
 		return () => {
 			cancelled = true
+
+			// Closed before it was ready: nothing to type the held keys into.
+			if (made === undefined) editing.drop()
 
 			if (made !== undefined) {
 				const closing = made
@@ -709,7 +732,34 @@ export function PresentationTextEditor({
 				)
 		}
 
-		view.focus()
+		// What was typed while the body opened, in order, as the keys would have typed it. Focus taken elsewhere meanwhile
+		// (the find field, a ribbon tab, a dialog) stays there: the editor is open, and nothing was held for it.
+		const typedAhead = editing.take()
+
+		if (!typedAhead.focusMoved) view.focus()
+
+		for (const held of typedAhead) {
+			if (latest.current.readOnly) break
+
+			if (held.kind === "text") controller.dispatch(controller.state.tr.insertText(held.text).scrollIntoView(), true)
+			else if (held.kind === "command") bound(held.command)
+			else if (held.kind === "enter") run(held.line ? insertLineBreak : splitParagraph)
+			else {
+				const state = controller.state
+				const selected = deleteSelectionKey(state)
+				const { $from, empty } = state.selection
+
+				if (selected !== null) controller.dispatch(selected, true)
+				else if (empty && $from.parentOffset > 0) {
+					// The character before the caret (both halves of a surrogate pair), as the browser's Backspace deletes it.
+					const before = $from.parent.textBetween(Math.max(0, $from.parentOffset - 2), $from.parentOffset, undefined, "\ufffc")
+					const lead = before.length === 2 ? before.charCodeAt(0) : 0
+					const size = lead >= 0xd800 && lead <= 0xdbff ? 2 : 1
+
+					controller.dispatch(state.tr.delete($from.pos - size, $from.pos), true)
+				} else run(backspaceAtStart(defaults()), true)
+			}
+		}
 
 		return () => {
 			redraw.current = undefined

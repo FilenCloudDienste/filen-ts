@@ -1,10 +1,14 @@
 import { prepareOdpPictureOp } from "../../../core/odp/write/emit/picture"
 import { prepareChartOp } from "../../../core/presentation/edit/apply/chart"
+import { clearDormantNotes, dormantNotesOfBody, dormantNotesOfOrigin, setDormantNotes } from "./dormantNotes"
+import { notesTarget } from "../../../core/presentation/notes"
+import { issuedPartNames } from "../../../core/pptx/write/parts"
+import { notesBoxOf, prepareReview } from "./review"
 import { proveOdpSlide } from "../../../core/odp/write/proof"
 import { odpSourceReading } from "../../../core/odp/write/session"
 import { odpWriteSource } from "../../../core/odp/write/source"
 import { encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../../core/xml/index"
-import { parseRelationships, partKey, relationshipsPartName, Relationships } from "../../../core/opc/index"
+import { crc32, parseRelationships, partKey, relationshipsPartName, Relationships } from "../../../core/opc/index"
 import type { PptxParts } from "../../../core/pptx/package"
 import { readSlidePart } from "../../../core/pptx/read/slide"
 import { P_MAIN } from "../../../core/pptx/read/xml"
@@ -13,8 +17,13 @@ import { DeckTally } from "../../../core/presentation/budget"
 import { applyAll, applyOp, opTouches, type DeckChanges, type Dirt, type Inverse, type Touch } from "../../../core/presentation/edit/apply"
 import type { PictureReading } from "../../../core/presentation/edit/apply/picture"
 import { isRefused } from "../../../core/presentation/edit/apply/shape"
-import { deckDefinitionType, diagramPartsOf, type SmartArtSourceReading } from "../../../core/presentation/edit/apply/smartart"
-import type { SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
+import {
+	deckDefinitionType,
+	diagramPartsOf,
+	diagramPicturePartsOf,
+	type SmartArtSourceReading
+} from "../../../core/presentation/edit/apply/smartart"
+import { overlayNode, rebindEpoch, type SlideSourceReading } from "../../../core/presentation/edit/apply/slide"
 import { designInfo, designLayouts, predictedSizeTouches, type DesignReading } from "../../../core/presentation/edit/apply/design"
 import { inheritedDeclarations } from "../../../core/presentation/edit/canonical"
 import { deckChanges, deckFingerprints, findShape, fingerprintTouches, orderKey } from "../../../core/presentation/edit/changes"
@@ -55,10 +64,10 @@ import {
 import type { TextSeed } from "../../../core/presentation/output"
 import type { CallContext, EditCapability, EngineSession } from "../engine"
 import type { CommandResult } from "../protocol"
-import { bindSaveHistory, deckTurn } from "../save"
+import { bindSaveHistory, deckTurn, saveHistoryOf, type SaveHistory } from "../save"
 import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
-import { textCapability } from "./text"
+import { textSeedOf } from "./text"
 
 // The edit capability: commands, undo and redo over the session's model, with the deck history (edit/history.ts).
 // Before an op applies, every node it touches is parsed and its slide proved once (proof gate 1); the history
@@ -105,6 +114,8 @@ interface EditState {
 	readonly history: DeckHistory
 	readonly fingerprint: FingerprintOf
 	readonly raw: Map<string, RawDocument>
+	// Revisions of notes made again from dormant ones → the revision the page first saw for them (its retract names it).
+	readonly origins: Map<number, number>
 	// Slides proved (gate 1), with their tallies.
 	readonly proved: Map<SlideRef, ProofTally>
 	// Part bytes and relationships read for the current epoch (inverses and the reference graph).
@@ -115,6 +126,8 @@ interface EditState {
 	readonly references: Map<string, HeldReferences>
 	nextRef: number
 	nextRaw: number
+	// Slides an undo restored onto the package's parts, with the parts their delete held and the epoch they bound to.
+	readonly restored: Map<SlideRef, { readonly parts: readonly RawPart[]; epoch: number }>
 }
 
 interface HeldReferences {
@@ -149,11 +162,38 @@ function stateOf(session: EngineSession): EditState {
 		allocatedParts: new Set(),
 		references: new Map(),
 		nextRef: SESSION_REFS,
-		nextRaw: 1
+		nextRaw: 1,
+		origins: new Map(),
+		restored: new Map()
 	}
 
 	states.set(session, state)
-	bindSaveHistory(session.deck, {
+	// A save takes back notes started and not typed in (the provisional step on top) before its snapshot, as retract()
+	// would: the file never holds empty notes, and the page's open editor closes on them (the history as before them).
+	// The page's editor may still be on them: they stay answered (dormant) and its first input makes them again.
+	const settle = (): void => {
+		// Restores this save's snapshot is about to hold are its own from here: its commit binds them.
+		reconcileRestored(session, state)
+		state.restored.clear()
+
+		const step = state.history.provisionalTop()
+		const revision = state.history.provisionalRevision()
+
+		if (step === undefined || revision === undefined || step.op.family !== "notes") return
+
+		const slide = step.op.slide
+		const notes = notesTarget(session.deck, slide)
+		const box = notes === undefined ? undefined : notesBoxOf(session.deck, notes)
+
+		if (isRefused(applyAll(session.deck, step.inverse.ops, contextFor(session, state)))) return
+
+		state.history.retract()
+
+		if (notes !== undefined) setDormantNotes(session, { slide, op: step.op, notes, box, origin: originOf(state, revision) })
+
+		changed(session, state, step.touches)
+	}
+	const saveHistory: SaveHistory = {
 		get revision() {
 			return state.history.revision
 		},
@@ -171,8 +211,12 @@ function stateOf(session: EngineSession): EditState {
 		abandon: point => {
 			state.history.abandon(point)
 		},
-		revert: parts => revert(session, state, parts, {})
-	})
+		revert: parts => revert(session, state, parts, {}),
+		settle,
+		steps: state.history
+	}
+
+	bindSaveHistory(session.deck, saveHistory)
 	session.onClose(() => {
 		const parts = pptxParts(session.deck)
 
@@ -436,6 +480,7 @@ function newPartName(state: EditState, deck: Deck, parts: PptxParts, kind: keyof
 	for (const entry of parts.opc.entries()) see(entry.name)
 	for (const node of deck.nodes.values()) see(node.part)
 	for (const name of state.allocatedParts) see(name)
+	for (const name of issuedPartNames(deck)) see(name)
 
 	const name = `/${prefix}${String(highest + 1)}.xml`
 
@@ -517,13 +562,101 @@ function freePartName(state: EditState, deck: Deck, parts: PptxParts, name: stri
 	return name
 }
 
+// The package slide part whose bytes stand for a slide: its own, or for a slide an op made (a copy, read from its
+// source's markup until written) its source's while that source is the current epoch's. A delete holds those bytes,
+// as for any slide, so a restore after a save that dropped the source's parts reads the copy back from them.
+function basePart(parts: PptxParts, slide: SlideNode): string | undefined {
+	if (parts.opc.has(slide.part)) return slide.part
+
+	const src = slide.src
+
+	return src?.format === "pptx" && !src.part.startsWith(RAW_PREFIX) && src.epoch === parts.epoch && parts.opc.has(src.part)
+		? src.part
+		: undefined
+}
+
 // Relationship kinds a restored part may name outside what it held: the writer re-targets or drops slide jumps.
 const RESTORE_UNCHECKED: ReadonlySet<string> = new Set(["slide"])
+
+// A part a restored slide's restore held under its own name (a diagram part its frame names): the package lost it with
+// a save after the slide's delete, and only a save after the restore writes it back. Until then it is read from here.
+// Only while that held markup is still the slide's live source: once a save wrote the slide, the writer no longer adds
+// the held parts back, so a name the package lacks is no live part (an undo holds its bytes again instead).
+function heldRestorePart(state: EditState, deck: Deck, name: string): RawPart | undefined {
+	const key = partKey(name)
+
+	for (const [rawName, held] of state.raw) {
+		if (held.parts === undefined) continue
+
+		const part = held.parts.find(each => partKey(each.name) === key)
+
+		if (part === undefined) continue
+
+		for (const node of deck.nodes.values()) if (node.src?.format === "pptx" && node.src.part === rawName) return part
+	}
+
+	return undefined
+}
 
 function rawDocumentOf(state: EditState, part: string): XmlDocument | undefined {
 	const name = rawNameOf(state, part)
 
 	return name === undefined ? undefined : state.raw.get(name)?.document
+}
+
+// Slides an undo restored onto the package's parts while a save was in flight whose commit then moved the session
+// onto a new file: where that file still holds their parts byte for byte they are bound to it, otherwise they read
+// from the parts their delete held (as a slide restored after its delete was saved does), so they edit and save
+// whole. Before every op and every save's snapshot (which then takes them over); costs nothing with no such slide.
+function reconcileRestored(session: EngineSession, state: EditState): void {
+	if (state.restored.size === 0 || session.deck.format === "odp") return
+
+	const parts = pptxParts(session.deck)
+
+	if (parts === undefined) return
+
+	const deck = session.deck
+
+	for (const [ref, held] of state.restored) {
+		const node = deck.nodes.get(ref)
+
+		if (node === undefined || !deck.slides.includes(ref)) {
+			state.restored.delete(ref)
+			continue
+		}
+
+		if (held.epoch === parts.epoch) continue
+
+		const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
+		const same = (name: string, bytes: Uint8Array): boolean => {
+			const entry = parts.opc.entry(name)
+
+			return entry !== undefined && entry.uncompressedSize === bytes.length && entry.crc32 === crc32(bytes)
+		}
+		const kept = held.parts.every(
+			part => same(part.name, part.bytes) && (part.rels === undefined || same(relationshipsPartName(part.name.slice(1)), part.rels))
+		)
+
+		if (kept) {
+			rebindEpoch(node, parts.epoch)
+
+			if (notes !== undefined) rebindEpoch(notes, parts.epoch)
+
+			held.epoch = parts.epoch
+			continue
+		}
+
+		const read = contextFor(session, state).readSlides(ref, held.parts)
+
+		// Held parts that no longer read (a part they relate is gone): left bound as they are, refused when used.
+		if (isRefused(read)) continue
+
+		deck.nodes.set(ref, overlayNode(node, read[0]))
+
+		if (notes !== undefined && read[1] !== undefined) deck.nodes.set(notes.ref, overlayNode(notes, read[1]))
+
+		state.restored.delete(ref)
+	}
 }
 
 // The engine's half of the apply context: allocators, source bytes, and reading held markup back. Synchronous: what
@@ -570,6 +703,10 @@ function contextFor(
 
 	const reading: SlideSourceReading & PictureReading & SmartArtSourceReading & DesignReading = {
 		sourceBytes: src => sourceBytes(session, state.raw, src),
+		epoch: parts.epoch,
+		restoredLive: (ref, held) => {
+			state.restored.set(ref, { parts: held, epoch: parts.epoch })
+		},
 		newShapeId: slide => nextShapeId(deck.nodes.get(slide)?.shapes ?? []),
 		newSlideRef: () => slideRef(state.nextRef++),
 		movable: shape => isMovable(shape, part => parts.document(part) ?? state.raw.get(part)?.document),
@@ -601,7 +738,10 @@ function contextFor(
 			const held = slide.src?.format === "pptx" ? state.raw.get(slide.src.part) : undefined
 
 			if (held?.part !== undefined) return held.parts ?? [held.part]
-			if (!parts.opc.has(slide.part)) return []
+
+			const base = basePart(parts, slide)
+
+			if (base === undefined) return []
 
 			const out: RawPart[] = []
 			const hold = (name: string): void => {
@@ -621,7 +761,7 @@ function contextFor(
 				})
 			}
 			// An owned part the package does not have (the source's relationship already dangles) has nothing to hold.
-			const own = [slide.part, ...ownedParts(facts, slide.part).filter(name => parts.opc.has(name))]
+			const own = [base, ...ownedParts(facts, base).filter(name => parts.opc.has(name))]
 
 			for (const name of own) {
 				if (!cache.bytes.has(partKey(name))) return refused("notFound", `part ${name} not read`)
@@ -693,6 +833,15 @@ function contextFor(
 			return [slide, notes]
 		},
 		newPart: kind => newPartName(state, deck, parts, kind),
+		partFree: (name, ref) => {
+			const key = partKey(name)
+
+			if (parts.opc.has(name) && parts.refOf(name) !== ref) return false
+
+			for (const node of deck.nodes.values()) if (partKey(node.part) === key) return false
+
+			return true
+		},
 		facts,
 		partOf: partOf(deck, parts),
 		pictureFill(slide, shape) {
@@ -706,7 +855,11 @@ function contextFor(
 		},
 		// A diagram part prepare read (one the package no longer has is no part to name), or one an op held.
 		diagramDocument: part =>
-			part.startsWith(RAW_PREFIX) ? state.raw.get(part)?.document : parts.opc.has(part) ? parts.document(part) : undefined,
+			part.startsWith(RAW_PREFIX)
+				? state.raw.get(part)?.document
+				: parts.opc.has(part) || heldRestorePart(state, deck, part) !== undefined
+					? parts.document(part)
+					: undefined,
 		holdDiagram: (document, name) => {
 			// An undo holds a part again under the name it had, so the frame reads as it did.
 			if (name === undefined || !name.startsWith(RAW_PREFIX) || state.raw.has(name)) return holdRaw(state, parts, document)
@@ -726,6 +879,13 @@ function contextFor(
 			parts.forget(name)
 		},
 		partsOfType: type => diagramPartsOfType(parts, type),
+		diagramRelationshipTarget: (part, id) => {
+			const relationship = cache.relationships.get(partKey(part))?.byId(id)
+
+			return relationship === undefined || relationship.external || relationship.partName === undefined
+				? undefined
+				: `/${relationship.partName}`
+		},
 		// A design op's generated parts, held under their part names (the renderer and the writer resolve them).
 		holdDesign(part, ref) {
 			let document: XmlDocument
@@ -799,6 +959,9 @@ async function prove(session: EngineSession, state: EditState, node: SlideNode, 
 			slide: node,
 			document,
 			relationships: await relationshipsOf(state, parts, node.part),
+			// Shapes changed since the last save (made while a save wrote the slide, an undo or redo since): their model is
+			// not their source's, so gate 1 does not prove them against it.
+			edited: new Set(saveHistoryOf(session.deck)?.changes().parts.get(node.part)?.shapes.keys() ?? []),
 			...(options.emit === undefined ? {} : { emit: options.emit })
 		})
 	)
@@ -818,7 +981,7 @@ async function prove(session: EngineSession, state: EditState, node: SlideNode, 
 
 // What of a page an op may change without writing its shapes again: its transition, its background, its own
 // attributes (hidden, name).
-const AROUND_SHAPES: ReadonlySet<string> = new Set(["transition", "background", "attributes"])
+const AROUND_SHAPES: ReadonlySet<string> = new Set(["transition", "background", "attributes", "notes", "comments"])
 
 // The pages an op changes only around their shapes (every touch of theirs one of AROUND_SHAPES): their shapes are
 // written as they are, so they need no proof yet. A theme or size change and the slide ops rewrite shapes: none.
@@ -916,12 +1079,17 @@ async function prepare(
 	slicing: CallContext["slicing"] | undefined,
 	options: EditOptions
 ): Promise<void> {
+	reconcileRestored(session, state)
+
 	// A batch's ops each, before any applies (they name what the deck has now).
 	if (op.family === "batch") {
 		for (const each of op.ops) await prepare(session, state, each, slicing, options)
 
 		return
 	}
+
+	// A notes or comment op's slide, its comments and the deck's comment facts.
+	await prepareReview(session, op, slicing)
 
 	if (session.deck.format === "odp") return prepareOdp(session, state, op, slicing)
 
@@ -955,7 +1123,15 @@ async function prepare(
 		await scopeOf(state, parts, node.part)
 		// A transition op writes no shape (the slide's p:transition only, emit/transition.ts), so its slides need no
 		// shape proof; an op that writes shapes on them proves them when it comes.
-		if (op.family !== "transition") await prove(session, state, node, options)
+		if (op.family !== "transition" && op.family !== "comment" && op.family !== "notes") await prove(session, state, node, options)
+	}
+
+	// A duplicate's source notes, read: the copy's notes are a copy of the model's (or none), never decided later from
+	// the package (where an undo since the last save may have left notes the source no longer has).
+	if (op.family === "slide" && op.kind === "duplicate") {
+		const notes = deck.nodes.get(op.slide)?.notes
+
+		if (notes !== undefined && !deck.nodes.has(notes)) await parts.slide(notes, slicing)
 	}
 
 	// The diagram parts a smartart op reads (apply/smartart.ts), parsed beside the package's other documents; one past
@@ -963,11 +1139,36 @@ async function prepare(
 	const definitionType = deckDefinitionType(op)
 
 	for (const part of [...diagramPartsOf(deck, op), ...(definitionType === undefined ? [] : diagramPartsOfType(parts, definitionType))]) {
-		if (part.startsWith(RAW_PREFIX) || parts.document(part) !== undefined || !parts.opc.has(part)) continue
+		if (part.startsWith(RAW_PREFIX) || parts.document(part) !== undefined) continue
+
+		if (!parts.opc.has(part)) {
+			// A restored slide's frame names the diagram parts its restore held (no save since wrote them back).
+			const held = heldRestorePart(state, deck, part)
+
+			if (held === undefined) continue
+			if (held.bytes.length > parts.budgets.xmlPartBytes) throw new PresentationError("tooLarge", `diagram part ${part}`)
+
+			let document: XmlDocument
+
+			try {
+				document = parseXml(held.bytes)
+			} catch {
+				// Held markup that does not read: the file's fault, refused as such (never as a missing part).
+				throw new PresentationError("malformed", `diagram part ${part}`)
+			}
+
+			parts.adopt(part, document)
+
+			continue
+		}
+
 		if ((parts.opc.entry(part)?.uncompressedSize ?? 0) > parts.budgets.xmlPartBytes) continue
 
 		parts.adopt(part, await parts.opc.xml(part))
 	}
+
+	// A picture put into a diagram whose data holds pictures of its own: that data part's relationships name them.
+	for (const part of diagramPicturePartsOf(deck, op)) await relationshipsOf(state, parts, part)
 
 	// A chart op's chart part, its embedded workbook, a new workbook's cells, an inserted chart's workbook.
 	await prepareChartOp(deck, op, { opc: parts.opc, document: part => parts.document(part) }, slicing)
@@ -991,7 +1192,11 @@ async function prepare(
 
 	if (op.kind === "duplicate") return
 
-	const named = op.slides.map(ref => deck.nodes.get(ref)?.part ?? parts.partOf(ref))
+	const named = op.slides.map(ref => {
+		const node = deck.nodes.get(ref)
+
+		return node === undefined ? parts.partOf(ref) : (basePart(parts, node) ?? node.part)
+	})
 
 	for (const name of named) if (name !== undefined) for (const part of [name, ...ownedParts(facts, name)]) await read(part)
 
@@ -1099,9 +1304,9 @@ const SHAPE_DIRTS: readonly Dirt[] = [
 	{ kind: "text" },
 	...(["geometry", "fill", "ln", "effects", "bodyPr", "style"] as const).map(group => ({ kind: "props", group }) as const)
 ]
-const SLIDE_PART_DIRTS: readonly Dirt[] = (["background", "timing", "transition", "hf", "clrMapOvr", "attributes"] as const).map(
-	part => ({ kind: "slidePart", part }) as const
-)
+const SLIDE_PART_DIRTS: readonly Dirt[] = (
+	["background", "timing", "transition", "hf", "clrMapOvr", "attributes", "notes", "comments"] as const
+).map(part => ({ kind: "slidePart", part }) as const)
 
 // A whole node stands for every key under it (a shape's xfrm, groups and text; a slide's parts and every shape on
 // it), so a step replacing or removing a node records what each of them was and became.
@@ -1276,9 +1481,12 @@ function reportJumps(session: EngineSession, op: DeckOp, inverse: Inverse): void
 async function seedFor(context: CallContext, open: ShapeRef | undefined, touches: readonly Touch[]): Promise<TextSeed | undefined> {
 	if (open === undefined || !touches.some(touch => touch.kind === "shape" && touch.slide === open.slide && touch.shape === open.id))
 		return undefined
+	// The step took the open body away (an undo of notes made with their text): nothing to seed, and nothing refused.
+	if (!context.session.deck.nodes.has(open.slide)) return undefined
 
 	try {
-		return await textCapability.textSeed(context, open)
+		// The seed itself (in this turn already: the capability's would wait on it to make dormant notes again).
+		return await textSeedOf(context, open)
 	} catch (error) {
 		if (error instanceof PresentationError && error.reason === "notImplemented") return undefined
 
@@ -1326,8 +1534,15 @@ async function command(context: CallContext, op: DeckOp, options: EditOptions, o
 	return serial(session, async () => {
 		if (session.deck.gate.length > 0) return { ok: false, refusal: "viewOnly" }
 
+		await reviveFor(session, state, op, context.slicing, options)
+
 		const revision = state.history.revision
-		const result = await applyStep(session, state, op, context.slicing, options)
+		const base = session.package
+		const first = await applyStep(session, state, op, context.slicing, options)
+		// A save's commit moved the session onto the file it made while the op was read against the old one (its reads
+		// wait for the commit, then miss parts the save rewrote; what it read is the old package's): refused, nothing
+		// changed, so the op once more against the file as it is now.
+		const result = !first.ok && session.package !== base ? await applyStep(session, state, op, context.slicing, options) : first
 
 		if (!result.ok || open === undefined || state.history.revision === revision) return result
 
@@ -1335,6 +1550,74 @@ async function command(context: CallContext, op: DeckOp, options: EditOptions, o
 
 		return seed === undefined ? result : { ...result, seed }
 	})
+}
+
+// The revision a page first saw for a step: notes made again from dormant ones keep their first one.
+function originOf(state: EditState, revision: number): number {
+	return state.origins.get(revision) ?? revision
+}
+
+// Makes dormant notes again (the same op: the same refs and part) when an op names their body, before it applies:
+// as one provisional step, so the text that follows continues it.
+async function reviveFor(
+	session: EngineSession,
+	state: EditState,
+	op: DeckOp,
+	slicing: CallContext["slicing"] | undefined,
+	options: EditOptions
+): Promise<void> {
+	const named = "target" in op && typeof op.target === "object" ? (op.target as { readonly slide?: SlideRef }).slide : undefined
+
+	if (named !== undefined) await revive(session, state, named, slicing, options)
+}
+
+async function revive(
+	session: EngineSession,
+	state: EditState,
+	notes: SlideRef,
+	slicing: CallContext["slicing"] | undefined,
+	options: EditOptions
+): Promise<void> {
+	const dormant = dormantNotesOfBody(session, notes)
+
+	if (dormant === undefined) return
+
+	clearDormantNotes(session, dormant.slide)
+
+	const slide = session.deck.nodes.get(dormant.slide)
+
+	if (!session.deck.slides.includes(dormant.slide) || slide === undefined || slide.notes !== undefined) return
+
+	const made = await applyStep(session, state, dormant.op, slicing, options)
+
+	if (made.ok) state.origins.set(made.revision, dormant.origin)
+}
+
+// The text capability's half: a seed or a layout of a dormant notes body makes the notes again first (in the deck's
+// turn, as any op).
+// (Called before the capability checks its arguments: anything but a shape ref is the capability's to refuse.)
+export async function reviveNotesFor(context: CallContext, shape: unknown): Promise<void> {
+	if (typeof shape !== "object" || shape === null || !("slide" in shape)) return
+
+	const session = context.session
+	const notes = (shape as ShapeRef).slide
+
+	if (dormantNotesOfBody(session, notes) === undefined) return
+
+	const state = stateOf(session)
+
+	await serial(session, () => revive(session, state, notes, context.slicing, {}))
+}
+
+// The first text put in notes the last step made (notes.setNotes on a slide, then setText on its notes body): one step
+// with it, so a single undo takes the notes slide away with its text and nothing empty is left to save.
+function continuesNotes(deck: Deck, history: DeckHistory, op: DeckOp): boolean {
+	const top = history.peekUndo()
+
+	if (top === undefined || top.op.family !== "notes" || top.op.kind !== "setNotes") return false
+	if (op.family !== "text" || op.kind !== "setText") return false
+
+	return deck.nodes.get(top.op.slide)?.notes === op.target.slide
 }
 
 // One op prepared, applied and pushed as a step (inside the deck's turn).
@@ -1358,6 +1641,9 @@ async function applyStep(
 
 	for (const key of ordersBefore) before.set(key, state.fingerprint(key))
 
+	// Notes started with nothing in them on a slide without notes: nothing the user sees yet (provisional).
+	const provisional =
+		op.family === "notes" && op.kind === "setNotes" && op.body.paragraphs.length === 0 && deck.nodes.get(op.slide)?.notes === undefined
 	const result = applyOp(deck, op, contextFor(session, state))
 
 	if (result.kind === "refused") return { ok: false, refusal: result.reason }
@@ -1391,15 +1677,18 @@ async function applyStep(
 
 	const inverse = inverseWithBytes(result.inverse)
 
-	state.history.push({
-		op: result.op,
-		inverse,
-		touches,
-		before: full,
-		after,
-		bytes: inverse.bytes + opBytesOf(result.op) + fingerprintBytes(full) + fingerprintBytes(after) + touches.length * TOUCH_BYTES,
-		burst: burstOf(result.op)
-	})
+	state.history.push(
+		{
+			op: result.op,
+			inverse,
+			touches,
+			before: full,
+			after,
+			bytes: inverse.bytes + opBytesOf(result.op) + fingerprintBytes(full) + fingerprintBytes(after) + touches.length * TOUCH_BYTES,
+			burst: burstOf(result.op)
+		},
+		{ continues: continuesNotes(deck, state.history, result.op), provisional }
+	)
 	changed(session, state, touches)
 	reportJumps(session, result.op, result.inverse)
 
@@ -1417,19 +1706,43 @@ async function step(
 
 	return serial(session, async () => {
 		const history = state.history
+
+		// Notes started and left untyped are nothing the user sees: an undo takes them back and undoes what the user did
+		// before them (the step they see), in the same call.
+		if (direction === "undo") {
+			const provisional = history.provisionalTop()
+
+			if (provisional !== undefined) {
+				const back = applyAll(session.deck, provisional.inverse.ops, contextFor(session, state))
+
+				if (isRefused(back)) return { ok: false, refusal: back.reason }
+
+				history.retract()
+				changed(session, state, provisional.touches)
+			}
+		}
+
 		const entry = direction === "undo" ? history.peekUndo() : history.peekRedo()
 
 		if (entry === undefined) return { ok: true, revision: history.revision, dirty: history.dirty }
 
-		const ops = direction === "undo" ? entry.inverse.ops : [entry.op]
+		// A continued step redoes what the step it continues made first (its notes slide, then their text).
+		const ops = direction === "undo" ? entry.inverse.ops : entry.lead === undefined ? [entry.op] : [entry.lead, entry.op]
+		const base = session.package
+		const attempt = async (): Promise<ReturnType<typeof applyAll>> => {
+			try {
+				for (const op of ops) await prepare(session, state, op, context.slicing, options)
+			} catch (error) {
+				const answer = refusal(error)
 
-		try {
-			for (const op of ops) await prepare(session, state, op, context.slicing, options)
-		} catch (error) {
-			return refusal(error)
+				return refused(answer.ok ? "failed" : answer.refusal)
+			}
+
+			return applyAll(session.deck, ops, contextFor(session, state))
 		}
-
-		const result = applyAll(session.deck, ops, contextFor(session, state))
+		const first = await attempt()
+		// Read against a package a save's commit replaced meanwhile (see command): once more against the new one.
+		const result = isRefused(first) && session.package !== base ? await attempt() : first
 
 		if (isRefused(result)) return { ok: false, refusal: result.reason }
 
@@ -1449,6 +1762,53 @@ async function step(
 		const seed = await seedFor(context, open, entry.touches)
 
 		return { ok: true, revision: history.revision, dirty: history.dirty, ...(seed === undefined ? {} : { seed }) }
+	})
+}
+
+// Takes back the step that made `revision` while it is still the last thing done (saves aside): its inverse applied
+// and the history as it was before it (its redo branch back, no redo step left). Refused stale otherwise.
+async function retract(context: CallContext, asked: number, options: EditOptions): Promise<CommandResult> {
+	let revision = asked
+	const session = context.session
+	const state = stateOf(session)
+
+	return serial(session, async () => {
+		const history = state.history
+		const dormant = dormantNotesOfOrigin(session, revision)
+
+		// Taken back by a save already, and never made again: they are gone for good.
+		if (dormant !== undefined) {
+			clearDormantNotes(session, dormant.slide)
+
+			return { ok: true, revision: history.revision, dirty: history.dirty }
+		}
+
+		// The revision the page names, or the one its notes were made again under (a keystroke after a save).
+		const current = history.provisionalRevision()
+
+		if (current !== undefined && current !== revision && originOf(state, current) === revision) revision = current
+
+		const entry = history.retractable(revision)
+
+		if (entry === undefined) return { ok: false, refusal: "stale" }
+
+		try {
+			for (const op of entry.inverse.ops) await prepare(session, state, op, context.slicing, options)
+		} catch (error) {
+			return refusal(error)
+		}
+
+		// A prepare may have yielded: the step must still be the one to take back.
+		if (history.retractable(revision) !== entry) return { ok: false, refusal: "stale" }
+
+		const result = applyAll(session.deck, entry.inverse.ops, contextFor(session, state))
+
+		if (isRefused(result)) return { ok: false, refusal: result.reason }
+
+		history.retract()
+		changed(session, state, entry.touches)
+
+		return { ok: true, revision: history.revision, dirty: history.dirty }
 	})
 }
 
@@ -1535,7 +1895,8 @@ export function createEditCapability(options: EditOptions = {}): EditCapability 
 	return {
 		command: (context, op, open) => command(context, op, options, open),
 		undo: (context, open) => step(context, "undo", open, options),
-		redo: (context, open) => step(context, "redo", open, options)
+		redo: (context, open) => step(context, "redo", open, options),
+		retract: (context, revision) => retract(context, revision, options)
 	}
 }
 
@@ -1555,6 +1916,8 @@ export interface SessionEdits {
 	rawParts(name: string): readonly RawPart[] | undefined
 	// The proof tally of every slide proved so far.
 	proofs(): ReadonlyMap<SlideRef, ProofTally>
+	// Lets go of diagram parts ops held ("raw:" names) that a save wrote into the package's parts and no frame names now.
+	releaseHeld(names: readonly string[]): void
 }
 
 export function sessionEdits(session: EngineSession): SessionEdits {
@@ -1567,6 +1930,19 @@ export function sessionEdits(session: EngineSession): SessionEdits {
 		rawDocument: name => state.raw.get(name)?.document,
 		rawPart: name => state.raw.get(name)?.part,
 		rawParts: name => state.raw.get(name)?.parts,
-		proofs: () => state.proved
+		proofs: () => state.proved,
+		releaseHeld: names => {
+			const parts = pptxParts(session.deck)
+
+			for (const name of names) {
+				const held = state.raw.get(name)
+
+				// Only a part an op held (no restored slide's markup, which the writer reads by name).
+				if (held === undefined || held.part !== undefined || held.parts !== undefined || held.nodePart !== undefined) continue
+
+				state.raw.delete(name)
+				parts?.forget(name)
+			}
+		}
 	}
 }

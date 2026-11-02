@@ -424,9 +424,10 @@ function hide(node: LayoutNode): void {
 const ANGLE = (180 * 60000) / Math.PI
 const TURN = 21600000
 
-// An angle as an adjust value (ST_Angle over 100000, as layout adjustments are written), within one turn.
+// An angle as a layout adjustment: degrees, as dgm:adj gives a rotation handle's (MS-OI29500 §2.1.1615(b)), within one
+// turn and to the 60000th of a degree the guide holds.
 function angle(radians: number): number {
-	return (((Math.round(radians * ANGLE) % TURN) + TURN) % TURN) / 100000
+	return (((Math.round(radians * ANGLE) % TURN) + TURN) % TURN) / 60000
 }
 
 // A curved two-dimensional connector with a diameter (diam, §21.4.7.17 ST_ConstraintType), as PowerPoint caches

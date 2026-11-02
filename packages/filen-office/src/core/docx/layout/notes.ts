@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import type { DocxModel } from "../model/document"
 import { Ns } from "../model/namespaces"
 import { partReader } from "../model/reader"
@@ -381,7 +382,7 @@ export class FootnoteArea implements FootnoteSink {
 	load(state: FootnoteState): void {
 		if (Math.abs(state.width - this.width) > EPSILON) this.startColumn(state.left, state.width)
 
-		this.notes.splice(0, this.notes.length, ...state.notes)
+		spliceAll(this.notes, 0, this.notes.length, state.notes)
 		this.carry = state.carry.slice()
 		this.left = state.left
 		this.reserved = state.reserved

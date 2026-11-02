@@ -1,7 +1,8 @@
 import { insertedMediaContent, insertedMediaId, insertedMediaWritten, mediaPlayback } from "../../../presentation/edit/apply/media"
 import { insertedImage, insertedImageWritten, pictureFillOf } from "../../../presentation/edit/apply/picture"
 import type { InsertedImage, MediaPlayback } from "../../../presentation/edit/ops"
-import { refused, type Refused, type ShapeNode, type SlideNode } from "../../../presentation/model"
+import { isIssuedName } from "../../../presentation/issuedNames"
+import { refused, type Deck, type Refused, type ShapeNode, type SlideNode } from "../../../presentation/model"
 import { escapeAttribute, escapeText } from "../../../xml/index"
 import type { EmitResult } from "../../../pptx/write/types"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
@@ -77,8 +78,9 @@ function probing(styles: OdpStylesApi): styles is Probing {
 	return "hasEntry" in styles && typeof styles.hasEntry === "function"
 }
 
-// `<dir>/<stem><n>.<ext>` with the smallest n no entry of the package has: never a name the file holds already.
-function freeName(styles: Probing, key: string, dir: string, stem: string, extension: string): string {
+// `<dir>/<stem><n>.<ext>` with the smallest n no entry of the package has and no package of the session had: never a
+// name the file holds already, nor one a save left out that a registry or a held step may still name.
+function freeName(styles: Probing, deck: Deck, key: string, dir: string, stem: string, extension: string): string {
 	let names = named.get(styles)
 
 	if (names === undefined) {
@@ -93,9 +95,11 @@ function freeName(styles: Probing, key: string, dir: string, stem: string, exten
 	const taken = new Set(names.values())
 	let n = 1
 
-	while (taken.has(`${dir}/${stem}${String(n)}.${extension}`) || styles.hasEntry(`${dir}/${stem}${String(n)}.${extension}`)) n++
+	const nameOf = (k: number): string => `${dir}/${stem}${String(k)}.${extension}`
 
-	const name = `${dir}/${stem}${String(n)}.${extension}`
+	while (taken.has(nameOf(n)) || styles.hasEntry(nameOf(n)) || isIssuedName(deck, nameOf(n))) n++
+
+	const name = nameOf(n)
 
 	names.set(key, name)
 
@@ -113,7 +117,7 @@ function mediumEntry(context: OdpEmitContext, styles: Probing, id: number): stri
 	if (content === undefined) return refused("stale", `The inserted medium ${String(id)} is not held`)
 
 	return styles.addEntry(
-		freeName(styles, `media:${String(id)}`, "Media", "media", extensionOf(content.contentType, content.name)),
+		freeName(styles, context.deck, `media:${String(id)}`, "Media", "media", extensionOf(content.contentType, content.name)),
 		content.bytes,
 		content.contentType,
 		{ compress: false, crc32: content.crc32 }
@@ -139,7 +143,7 @@ function posterEntry(context: OdpEmitContext, styles: Probing, id: number): stri
 	if (poster === undefined) return refused("malformed", "A new medium without a poster")
 
 	return styles.addEntry(
-		freeName(styles, `poster:${String(id)}`, "Pictures", "poster", extensionOf(poster.contentType, "")),
+		freeName(styles, context.deck, `poster:${String(id)}`, "Pictures", "poster", extensionOf(poster.contentType, "")),
 		poster.bytes,
 		poster.contentType
 	)

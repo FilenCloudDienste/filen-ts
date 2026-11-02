@@ -8,6 +8,9 @@ import {
 	ownsHome,
 	type HeldChart
 } from "../../../presentation/edit/apply/chart"
+import type { ByteChunks } from "../../../opc/index"
+import { formerName, isIssuedName, noteFormerName } from "../../../presentation/issuedNames"
+import type { OdpParts } from "../../read/document"
 import { refused, type FrameRef, type Refused, type ShapeNode } from "../../../presentation/model"
 import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
@@ -34,6 +37,70 @@ const written = new WeakMap<OdpStylesApi, Map<string, string>>()
 
 function hasEntry(styles: OdpStylesApi, path: string): boolean {
 	return styles.hasEntry?.(path) ?? false
+}
+
+// Whether "Object N" is taken: the package has it, or a package of the session had it (never handed to another chart).
+function objectTaken(styles: OdpStylesApi, context: OdpEmitContext, path: string): boolean {
+	return [`${path}/content.xml`, `${path}/`].some(name => hasEntry(styles, name) || isIssuedName(context.deck, name))
+}
+
+// A new "Object N": the first name the package has not and no package of the session had; undefined past MAX_OBJECTS.
+function freeObjectPath(styles: OdpStylesApi, context: OdpEmitContext): string | undefined {
+	for (let n = 1; n <= MAX_OBJECTS; n++) if (!objectTaken(styles, context, `Object ${String(n)}`)) return `Object ${String(n)}`
+
+	return undefined
+}
+
+// Whether the package's object `path` is a chart (its directory's manifest entry, ODF 1.3 Part 2 §4.3): the objects a
+// session edits, so the ones a duplicated page must not share.
+export function isChartObject(parts: OdpParts, path: string): boolean {
+	return parts.context.mediaType(path) === CHART_OBJECT_TYPE && parts.opc.has(`${path}/content.xml`)
+}
+
+// The package's chart object `from` copied whole under an object name of its own, its manifest entries with it: the
+// object of a duplicated page's frame, so an edit of either chart leaves the other. The copy's name is the one a save
+// of the session gave it before (`key`: the copy's page and the object it copies): taken again while the package has
+// no object by it, or kept as it is when the package's object by it holds the same entries (a state saved again
+// writes the same bytes). Its entries are read when the zip is written.
+export function copyObject(context: OdpEmitContext, parts: OdpParts, from: string, key: string): string | Refused {
+	const styles = context.styles
+	const archive = parts.odf.archive
+	const inner = archive.entries.filter(entry => entry.name.startsWith(`${from}/`) && !entry.name.endsWith("/"))
+	const own = formerName(context.deck, `object ${key}`)
+
+	if (own !== undefined && hasEntry(styles, `${own}/content.xml`)) {
+		const held = new Map(archive.entries.map(entry => [entry.name, entry]))
+		const same = inner.every(entry => {
+			const copy = held.get(`${own}/${entry.name.slice(from.length + 1)}`)
+
+			return copy !== undefined && copy.crc32 === entry.crc32 && copy.uncompressedSize === entry.uncompressedSize
+		})
+
+		if (same) return own
+	}
+
+	const path =
+		own !== undefined && !hasEntry(styles, `${own}/content.xml`) && !hasEntry(styles, `${own}/`) ? own : freeObjectPath(styles, context)
+
+	if (path === undefined) return refused("tooLarge", "no free object name")
+
+	noteFormerName(context.deck, `object ${key}`, path)
+	styles.addEntry(`${path}/`, new Uint8Array(0), CHART_OBJECT_TYPE)
+
+	for (const entry of inner) {
+		const content: ByteChunks = {
+			length: entry.uncompressedSize,
+			chunks: async function* () {
+				yield await archive.read(entry)
+			}
+		}
+
+		styles.addEntry(`${path}/${entry.name.slice(from.length + 1)}`, content, parts.context.mediaType(entry.name) ?? "text/xml", {
+			crc32: entry.crc32
+		})
+	}
+
+	return path
 }
 
 // The object path a version is written to in this save: its home (its content.xml written again when the home holds
@@ -66,10 +133,7 @@ function objectOf(styles: OdpStylesApi, context: OdpEmitContext, version: HeldCh
 	if (known !== undefined) return known
 	if (version.object === undefined) return refused("failed", `the chart version ${version.name} has no object`)
 
-	let path: string | undefined
-
-	for (let n = 1; n <= MAX_OBJECTS && path === undefined; n++)
-		if (!hasEntry(styles, `Object ${String(n)}/content.xml`) && !hasEntry(styles, `Object ${String(n)}/`)) path = `Object ${String(n)}`
+	const path = freeObjectPath(styles, context)
 
 	if (path === undefined) return refused("tooLarge", "no free object name")
 

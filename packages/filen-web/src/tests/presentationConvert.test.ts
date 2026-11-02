@@ -27,6 +27,7 @@ const KINDS: Readonly<Record<ConversionLossKind, true>> = {
 	fill: true,
 	line: true,
 	geometry: true,
+	outlineLevel: true,
 	text: true,
 	tableStyle: true,
 	chart: true,

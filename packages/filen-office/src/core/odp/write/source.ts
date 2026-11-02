@@ -11,7 +11,8 @@ import {
 	type Refused,
 	type SlideNode,
 	type SlideRef,
-	type SourceRef
+	type SourceRef,
+	type Xfrm
 } from "../../presentation/model"
 import { Namespaces, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import { heldStyles } from "../../presentation/edit/apply/design"
@@ -51,6 +52,12 @@ export class OdpWriteSource {
 	readonly retired = new Map<string, string>()
 	// Of each retired style, the style it followed in office:automatic-styles (null: the first), where it goes back.
 	readonly retiredAfter = new Map<string, string | null>()
+	// Presentation objects a save marked presentation:user-transformed (their box moved off the one the file had), by
+	// page and shape, with that box: moved back to it (an undo), they are written without the mark again.
+	readonly placeholderBoxes = new Map<string, Xfrm>()
+	// The mirror attributes a save first changed (draw:mirror-*, a picture's style:mirror), by page, shape and name, with
+	// the value the file had (undefined: none): turned back to it (an undo), the source's own spelling is written again.
+	readonly mirrorValues = new Map<string, string | undefined>()
 	private heldContextCache: { readonly size: number; readonly styles: Uint8Array | undefined; readonly context: OdpContext } | undefined
 	private shadow: Promise<{ readonly deck: Deck; readonly parts: OdpParts }> | undefined
 	private order: readonly SlideRef[] | undefined

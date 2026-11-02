@@ -2,6 +2,7 @@ import { showOptionsOf, type PresentationDocument, type PresentationStore } from
 import { SetUpShowDialog } from "@/features/presentation/components/slideshow/setUpDialog"
 import { showSettingsOf } from "@/features/presentation/components/slideshow/setUpDialog.logic"
 import { setSetUpOpen, setShowOptions, useChosenShowOptions, useSetUpOpen } from "@/features/presentation/components/slideshow/showSettings"
+import { useRibbonFocusRecording } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 
 // Set Up Slide Show as the deck's show layer holds it (the Slide Show tab only asks for it). In an editable deck the
@@ -12,6 +13,9 @@ export function SetUpShowHost({ store, deck }: { store: PresentationStore; deck:
 	const chosen = useChosenShowOptions(store)
 	const editor = usePresentationEditor()?.editor
 	const saved = editor?.editable === true
+
+	// The ribbon's command that opens it (and starts a show) is recorded, for focus to go back to it.
+	useRibbonFocusRecording()
 
 	return (
 		<SetUpShowDialog

@@ -120,6 +120,28 @@ function press(view: EditorView, key: string, modifiers?: { ctrlKey?: boolean; s
 }
 
 describe("the text and code command bar", () => {
+	it("goes to the command bar with F6 pressed outside the viewer", () => {
+		mount("const a = 1")
+
+		// Focus outside the viewer, as on the preview overlay itself after a click in Safari and macOS Firefox.
+		fireEvent.keyDown(document.body, { key: "F6" })
+		expect(document.activeElement?.closest("[data-office-ribbon]")).not.toBeNull()
+	})
+
+	it("goes from the command bar to a read-only file's text with F6", () => {
+		mount("const a = 1", { editable: false })
+
+		const command = document.querySelector<HTMLElement>("[data-office-ribbon] button")
+
+		if (command === null) throw new Error("no command")
+
+		command.focus()
+		fireEvent.keyDown(command, { key: "F6" })
+		expect(document.activeElement?.classList.contains("cm-content")).toBe(true)
+		// Focusable while it takes no input (browsers do not focus a non-editable element without a tab index).
+		expect(document.activeElement?.getAttribute("tabindex")).toBe("0")
+	})
+
 	it("leaves the bar alone on a keystroke: only the position and undo and redo follow", () => {
 		const view = mount("const a = 1")
 

@@ -1,27 +1,39 @@
+import { appendAll } from "../../arrays"
 import type { FreshOdpServices } from "../../odp/write/fresh"
 import type { Relationships } from "../../opc/index"
 import type { PptxParts } from "../../pptx/package"
 import { readBlipFill, readEffects, readFill, readLine, readTextBody, readXfrm, sourceRef, type ReadContext } from "../../pptx/read/drawing"
 import { styleOf } from "../../pptx/read/slide"
 import { G, partReader } from "../../pptx/read/xml"
+import { compileCustomGeometry } from "../../drawingml/geometry/custom"
+import { evaluateGuides, textRect } from "../../drawingml/geometry/evaluate"
+import { GEOM_COMMAND_ARITY, GeomCommand, PATH_FILL_MASK, PATH_FILL_NAMES, PATH_NO_STROKE } from "../../drawingml/geometry/program"
+import { drawingReader, type DrawingReader } from "../../drawingml/reader"
 import { drawingTheme, type DrawingTheme } from "../../drawingml/color"
 import { presentationChartObject } from "../../odp/write/chartObject"
 import { chartDocument, isHeldChart } from "../../presentation/edit/apply/chart"
 import { cm } from "../../odp/write/styles"
 import { themeFillStyle } from "../../presentation/background"
 import { effectiveClrMap, readTheme, themeOf, themeSlot } from "../../presentation/theme"
-import type {
-	ColorModel,
-	Deck,
-	FillProps,
-	FrameRef,
-	Geometry,
-	LineProps,
-	ShapeNode,
-	SlideNode,
-	StyleMatrixRef,
-	SchemeSlot,
-	TextBody
+import {
+	PATH_ARC,
+	PATH_CLOSE,
+	PATH_CUBIC,
+	PATH_LINE,
+	PATH_MOVE,
+	PATH_QUAD,
+	type CustomPath,
+	type ColorModel,
+	type Deck,
+	type FillProps,
+	type FrameRef,
+	type Geometry,
+	type LineProps,
+	type ShapeNode,
+	type SlideNode,
+	type StyleMatrixRef,
+	type SchemeSlot,
+	type TextBody
 } from "../../presentation/model"
 import { parseXml, type XmlDocument } from "../../xml/index"
 
@@ -141,7 +153,7 @@ function frames(shapes: readonly ShapeNode[], depth: number): ShapeNode[] {
 
 	for (const shape of shapes) {
 		if (shape.frame?.kind === "smartart") out.push(shape)
-		if (shape.children !== undefined) out.push(...frames(shape.children, depth + 1))
+		if (shape.children !== undefined) appendAll(out, frames(shape.children, depth + 1))
 	}
 
 	return out
@@ -155,7 +167,7 @@ function chartFrames(shapes: readonly ShapeNode[], depth: number): ShapeNode[] {
 
 	for (const shape of shapes) {
 		if (shape.frame?.kind === "chart") out.push(shape)
-		if (shape.children !== undefined) out.push(...chartFrames(shape.children, depth + 1))
+		if (shape.children !== undefined) appendAll(out, chartFrames(shape.children, depth + 1))
 	}
 
 	return out
@@ -331,7 +343,7 @@ export function pptxServices(deck: Deck, parts: PptxParts, options: PptxServices
 
 			return theme === undefined ? undefined : parts.theme(theme.part)
 		},
-		group(kind, src) {
+		group(kind, src, box) {
 			if (src.format !== "pptx") return undefined
 
 			const context = contextOf(src.part)
@@ -348,9 +360,18 @@ export function pptxServices(deck: Deck, parts: PptxParts, options: PptxServices
 				case "geometry": {
 					const reader = context.reader
 
+					if (reader.local(src.node) === "custGeom")
+						return box === undefined
+							? undefined
+							: customGeometry(drawingReader(reader.document, reader.namespaces), src.node, box)
 					if (reader.local(src.node) !== "prstGeom") return undefined
 
-					const geometry: Geometry = { kind: "preset", preset: reader.attr(src.node, "prst") ?? "rect", guides: [] }
+					// a:avLst (§20.1.9.5): the preset's adjust values the shape overrides.
+					const guides = reader
+						.children(reader.child(src.node, G.A, "avLst"), G.A, "gd")
+						.map(gd => ({ name: reader.attr(gd, "name") ?? "", formula: reader.attr(gd, "fmla") ?? "" }))
+						.filter(guide => guide.name !== "" && guide.formula !== "")
+					const geometry: Geometry = { kind: "preset", preset: reader.attr(src.node, "prst") ?? "rect", guides }
 
 					return geometry
 				}
@@ -451,4 +472,70 @@ export function pptxServices(deck: Deck, parts: PptxParts, options: PptxServices
 			}
 		}
 	}
+}
+
+// a:custGeom (§20.1.9.8) as the model's custom outline for a box of `box` EMU: its guides evaluated for the box, each
+// path's commands in its own w × h space (the box's EMU without one), its text rectangle in EMU.
+function customGeometry(reader: DrawingReader, node: number, box: { readonly cx: number; readonly cy: number }): Geometry {
+	const program = compileCustomGeometry(reader, node)
+	const w = Math.max(0, box.cx)
+	const h = Math.max(0, box.cy)
+	const slots = evaluateGuides(program, w, h)
+	const value = (arg: number): number => {
+		const read = arg >= 0 ? slots[arg] : program.literals[-1 - arg]
+
+		return Number.isFinite(read) ? (read as number) : 0
+	}
+	const paths: CustomPath[] = []
+	const commands = program.paths
+	let current: { w: number; h: number; flags: number; commands: number[]; coords: number[] } | undefined
+	const finish = (): void => {
+		if (current === undefined || current.commands.length === 0) return
+
+		paths.push({
+			w: current.w,
+			h: current.h,
+			fill: (PATH_FILL_NAMES[current.flags & PATH_FILL_MASK] ?? "norm") as CustomPath["fill"],
+			stroke: (current.flags & PATH_NO_STROKE) === 0,
+			extrusionOk: true,
+			commands: Uint8Array.from(current.commands),
+			coords: Float64Array.from(current.coords)
+		})
+	}
+	const CODES: Readonly<Record<number, number>> = {
+		[GeomCommand.MOVE]: PATH_MOVE,
+		[GeomCommand.LINE]: PATH_LINE,
+		[GeomCommand.ARC]: PATH_ARC,
+		[GeomCommand.QUAD]: PATH_QUAD,
+		[GeomCommand.CUBIC]: PATH_CUBIC,
+		[GeomCommand.CLOSE]: PATH_CLOSE
+	}
+
+	for (let k = 0; k < commands.length;) {
+		const command = commands[k] ?? 0
+		const arity = GEOM_COMMAND_ARITY[command] ?? 0
+
+		if (command === GeomCommand.PATH) {
+			finish()
+			current = {
+				flags: value(commands[k + 1] ?? 0),
+				w: value(commands[k + 2] ?? 0),
+				h: value(commands[k + 3] ?? 0),
+				commands: [],
+				coords: []
+			}
+		} else if (current !== undefined && CODES[command] !== undefined) {
+			current.commands.push(CODES[command] as number)
+
+			for (let a = 1; a <= arity; a++) current.coords.push(value(commands[k + a] ?? 0))
+		}
+
+		k += 1 + arity
+	}
+
+	finish()
+
+	const [l, t, r, b] = textRect(program, slots, w, h).map(side => String(Math.round(side * EMU_PER_PX)))
+
+	return { kind: "custom", guides: [], paths, textRect: { l: l ?? "0", t: t ?? "0", r: r ?? "0", b: b ?? "0" } }
 }

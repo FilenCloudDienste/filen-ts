@@ -1,3 +1,4 @@
+import { appendAll } from "../../../core/arrays"
 import { transitionFrame, type Region, type TransitionOptions } from "../../../core/anim/transitions"
 
 // The animEffect filters of ECMA-376 Part 1 §19.5.3 (p:animEffect filter, e.g. "wipe(down)", "barn(inVertical)") as
@@ -65,7 +66,7 @@ function disjoint(rects: Float64Array): Rect[] {
 
 		for (const held of out) pieces = pieces.flatMap(piece => subtract(piece, held))
 
-		out.push(...pieces)
+		appendAll(out, pieces)
 	}
 
 	return out

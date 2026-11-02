@@ -46,6 +46,7 @@ interface ChartParts extends PartsApi {
 interface AddOptions {
 	readonly from?: string
 	readonly id?: string
+	readonly name?: string
 }
 
 // The source frame's a:graphic and the relationship id its c:chart names.
@@ -86,13 +87,15 @@ function newFrame(shape: ShapeNode, rId: string): EmitResult {
 
 // Writes a version into a new chart part (with its workbook and the relationships it keeps): the part's rId from the
 // emit's owner.
-function addChart(context: EmitContext, version: HeldChart, owner: string): string {
+// `back`: the version goes back into its own home, which the package no longer has (an undo past the save that dropped
+// it): under that name, its workbook under its own.
+function addChart(context: EmitContext, version: HeldChart, owner: string, back = false): string {
 	const parts = context.parts as ChartParts
 	const lineage = version.lineage
 	const workbook = versionWorkbook(version)
 	// A view of its own per write: the save's changes name the entry each became by identity.
 	const bytes = version.bytes.subarray(0)
-	const added = parts.addPart("chart", bytes, CHART_TYPE)
+	const added = parts.addPart("chart", bytes, CHART_TYPE, back && lineage.home !== undefined ? { name: lineage.home } : {})
 	const workbookRel = lineage.rels.find(rel => !rel.external && WORKBOOK_TYPES.has(rel.type))
 
 	noteChartWrite(context.deck, bytes, version.name, "chart", owner)
@@ -104,7 +107,11 @@ function addChart(context: EmitContext, version: HeldChart, owner: string): stri
 	}
 
 	if (workbook !== undefined) {
-		const options: { readonly crc32?: number } & AddOptions = { from: added.part, id: workbookRel?.id ?? INSERTED_WORKBOOK_ID }
+		const options: { readonly crc32?: number } & AddOptions = {
+			from: added.part,
+			id: workbookRel?.id ?? INSERTED_WORKBOOK_ID,
+			...(back && lineage.workbookHome !== undefined ? { name: lineage.workbookHome } : {})
+		}
 
 		const data = workbook.bytes.subarray(0)
 
@@ -161,7 +168,8 @@ function writeVersion(context: EmitContext, version: HeldChart, owner: string, i
 		if (copied !== undefined) return copied
 	}
 
-	if (home === undefined || converts || !ownsHome(lineage, owner) || parts.has?.(home) === false) return addChart(context, version, owner)
+	if (home === undefined || converts || !ownsHome(lineage, owner)) return addChart(context, version, owner)
+	if (parts.has?.(home) === false) return addChart(context, version, owner, true)
 
 	if (chartHeldBy(context.deck, home) !== version.name) {
 		const bytes = version.bytes.subarray(0)

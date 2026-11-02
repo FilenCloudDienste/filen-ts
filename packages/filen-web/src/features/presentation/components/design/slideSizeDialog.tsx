@@ -1,4 +1,4 @@
-import { useState, type SubmitEvent } from "react"
+import { useRef, useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { RectangleHorizontalIcon } from "lucide-react"
 import { SLIDE_SIZES, slideSizeOp, type SlideSizeName } from "@filen/office/core/presentation"
@@ -16,7 +16,6 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { lengthUnit } from "@/features/preview/components/docxEditor.logic"
 import { DocxChoiceField } from "@/features/preview/components/docxFields"
-import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
 import {
 	SIZE_LABELS,
 	SIZE_NAMES,
@@ -28,12 +27,8 @@ import {
 	validSlideLength,
 	type LengthUnit
 } from "@/features/presentation/components/design/design.logic"
-import {
-	closeDesignDialog,
-	openDesignDialog,
-	useDesignDialog,
-	useDesignHosted
-} from "@/features/presentation/components/design/designDialogs"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
+import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -212,24 +207,30 @@ export function SlideSizeDialog({
 }
 
 // The Slide Size menu: a preset or Custom opens the dialog on it.
-export function SlideSizeControl() {
+export function SlideSizeControl({ ribbon }: { ribbon: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
 	const editor = usePresentationEditor()?.editor
-	const store = editor?.store
-	const focus = useCommandMenuFocus()
-	const dialog = useDesignDialog(store)
-	const hosted = useDesignHosted(store)
+	// Every item opens the dialog, which takes focus: the closing menu leaves it there.
+	const chose = useRef(false)
+	const dialog = useRibbonDialog(ribbon)
 	const size = editor?.document.info?.size
 	const current = size === undefined ? undefined : slideSizeName(size)
 	const open = (chosen: { cx: number; cy: number; type?: string } | undefined): void => {
-		focus.ran()
-
-		if (store !== undefined) openDesignDialog(store, { kind: "size", initial: chosen })
+		chose.current = true
+		dialog.open((_live, close) => (
+			<SlideSizeDialog
+				open
+				initial={chosen}
+				onOpenChange={next => {
+					if (!next) close()
+				}}
+			/>
+		))
 	}
 
 	return (
 		<>
-			<DropdownMenu onOpenChange={focus.opened}>
+			<DropdownMenu>
 				<RibbonMenuTrigger
 					label={t("previewPptxDesignSlideSize")}
 					text={t("previewPptxDesignSlideSize")}
@@ -237,7 +238,13 @@ export function SlideSizeControl() {
 					disabled={editor?.editable !== true}
 				/>
 				<DropdownMenuContent
-					finalFocus={focus.finalFocus}
+					finalFocus={() => {
+						const leave = chose.current
+
+						chose.current = false
+
+						return !leave
+					}}
 					data-preview-surface
 				>
 					<DropdownMenuGroup>
@@ -264,16 +271,7 @@ export function SlideSizeControl() {
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
-			{hosted || dialog?.kind !== "size" ? null : (
-				<SlideSizeDialog
-					key={dialog.key}
-					open
-					initial={dialog.initial}
-					onOpenChange={next => {
-						if (!next && store !== undefined) closeDesignDialog(store)
-					}}
-				/>
-			)}
+			{dialog.view}
 		</>
 	)
 }

@@ -9,7 +9,8 @@ import { CodeChrome, detectIndent, type CodeIndent } from "@/features/preview/li
 import { useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import type { TextFile } from "@/features/preview/lib/textFile"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -29,9 +30,6 @@ export interface CodeSurfaceProps {
 	// The markdown source's view switch and formatting.
 	markdown?: MarkdownBar | undefined
 }
-
-// Find opens for keys pressed in the layer the file is shown in (the preview overlay), never one over it.
-const LAYER = "[role='dialog'], [role='alertdialog']"
 
 // "12" or "12:5" (line, column), within the file.
 function parseLine(value: string, lines: number): { line: number; column: number } | null {
@@ -68,10 +66,7 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 				return
 			}
 
-			const layer = root.closest(LAYER)
-			const target = keyboardEvent.target instanceof Element ? keyboardEvent.target.closest(LAYER) : null
-
-			if (target !== layer || (layer === null && isAnyDialogOpen())) {
+			if (!keyForEditor(root, keyboardEvent.target)) {
 				return
 			}
 
@@ -112,14 +107,22 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 		chrome.remeasure()
 	}, [chrome, settings.fontSize])
 
+	const focusEditor = (): void => {
+		chrome.focus()
+	}
+
+	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
+	// macOS Firefox do).
+	useEditorLayerKeys(rootRef, (event, root) => {
+		onCommandBarF6(event, root, focusEditor)
+	})
+
 	return (
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
 			onKeyDown={event => {
-				onCommandBarF6(event, () => {
-					chrome.focus()
-				})
+				onCommandBarF6(event, event.currentTarget, focusEditor)
 			}}
 		>
 			<CodeCommandBar

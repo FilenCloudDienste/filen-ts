@@ -35,8 +35,12 @@ import { previewPptxExport } from "@/locales/en/previewPptx/export"
 import { previewPptxPresenter } from "@/locales/en/previewPptx/presenter"
 import { previewPptxInk } from "@/locales/en/previewPptx/ink"
 import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
+import { previewPptxGalleryA } from "@/locales/en/previewPptx/galleryA"
+import { previewPptxGalleryB } from "@/locales/en/previewPptx/galleryB"
 import { previewPptxTransitions } from "@/locales/en/previewPptx/transitions"
 import { previewPptxAnimations } from "@/locales/en/previewPptx/animations"
+import { previewPptxMotionPaths } from "@/locales/en/previewPptx/motionPaths"
+import { previewPptxReview } from "@/locales/en/previewPptx/review"
 import { previewPptxConvert } from "@/locales/en/previewPptx/convert"
 import { previewPptxDesign } from "@/locales/en/previewPptx/design"
 import { previewPptxCharts } from "@/locales/en/previewPptx/charts"
@@ -762,8 +766,12 @@ export const preview = {
 	...previewPptxPresenter,
 	...previewPptxInk,
 	...previewPptxSmartArt,
+	...previewPptxGalleryA,
+	...previewPptxGalleryB,
 	...previewPptxTransitions,
 	...previewPptxAnimations,
+	...previewPptxMotionPaths,
+	...previewPptxReview,
 	...previewPptxConvert,
 	...previewPptxDesign,
 	...previewPptxCharts,

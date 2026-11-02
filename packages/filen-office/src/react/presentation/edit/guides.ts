@@ -1,3 +1,4 @@
+import { appendAll } from "../../../core/arrays"
 import type { Bounds } from "./selection"
 
 // Smart guides while dragging: the moving box snaps to the edges and centres of the other shapes and of the slide,
@@ -320,10 +321,10 @@ export class SnapTargets {
 		const guides: Guide[] = []
 		const spacing: Spacing[] = []
 
-		if (chosenX === "line") guides.push(...this.guidesAt("x", values(landed, "x"), landed))
-		if (chosenY === "line") guides.push(...this.guidesAt("y", values(landed, "y"), landed))
-		if (chosenX === "space") spacing.push(...(this.spacingFor("x", landed, 0.5)?.marks ?? []))
-		if (chosenY === "space") spacing.push(...(this.spacingFor("y", landed, 0.5)?.marks ?? []))
+		if (chosenX === "line") appendAll(guides, this.guidesAt("x", values(landed, "x"), landed))
+		if (chosenY === "line") appendAll(guides, this.guidesAt("y", values(landed, "y"), landed))
+		if (chosenX === "space") appendAll(spacing, this.spacingFor("x", landed, 0.5)?.marks ?? [])
+		if (chosenY === "space") appendAll(spacing, this.spacingFor("y", landed, 0.5)?.marks ?? [])
 
 		return { dx, dy, guides, spacing }
 	}

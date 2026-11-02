@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { canonicalName, readContentPrologue } from "../../odf/index"
 import { emitFamilyOf } from "../../pptx/write/emit"
 import type { PartChange } from "../../opc/index"
@@ -15,12 +16,23 @@ import {
 	type SlideRef
 } from "../../presentation/model"
 import { inScope } from "../../anim/prune"
-import { Namespaces, NodeKind, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
+import {
+	Namespaces,
+	NodeKind,
+	XmlEditor,
+	decodeCharacterData,
+	decodeUtf8,
+	encodeUtf8,
+	escapeAttribute,
+	parseXml,
+	type XmlDocument
+} from "../../xml/index"
 import type { Fragment } from "../read/context"
 import type { OdpParts } from "../read/document"
 import type { PageSpan } from "../read/scan"
 import type { EmitPiece } from "../../pptx/write/types"
 import { emitOdp, type OdpEmitContext } from "./emit"
+import { copyObject, isChartObject } from "./emit/chart"
 import { odpDesignStyles } from "./emit/design"
 import { IDENTITY, OdpShapeWriter, hasAspects, type Aspects } from "./emit/shape"
 import { newPage, pageAspects, pageChanges, startTag, timingPieces } from "./emit/slide"
@@ -30,7 +42,19 @@ import { newSettingsMarkup, pageNames, renameIds, settingsMarkup } from "./integ
 import { settingsAttributes, type SettingsAttribute } from "./emit/presentation"
 import { OdpWriteSource, odpWriteSource } from "./source"
 import { notesDiffer, slideDiffers } from "./meaning"
-import { OdpStyles, declared, isRefused, styleDeclarations, takenInStreams, type OdpWriteEnv } from "./styles"
+import { spliceOdpNotes } from "./emit/notes"
+import { spliceOdpComments } from "./emit/comment"
+import {
+	MASTER_PAGE_NAME_SUFFIX,
+	OdpStyles,
+	STYLE_NAME_SUFFIX,
+	attributeValues,
+	declared,
+	isRefused,
+	styleDeclarations,
+	takenInStreams,
+	type OdpWriteEnv
+} from "./styles"
 
 // The splice of an ODP save (§1.5.4): content.xml is written as the pages of the deck in order, each untouched page
 // copied as its byte span of the source (no parse), each touched page parsed as its fragment and spliced element by
@@ -49,6 +73,8 @@ export interface OdpSaveInput {
 	readonly source: OdpSaveSource
 	readonly changes: DeckChanges
 	readonly revision: number
+	// Entries this session's saves added that nothing reaches any more: left out, with their manifest entries.
+	readonly prune?: readonly string[]
 }
 
 // One page of the written content.xml: copied from the source (its span), or written (and read back by gate 2).
@@ -65,6 +91,10 @@ export interface OdpSplice {
 	readonly replace: readonly PartChange[]
 	readonly add: readonly PartChange[]
 }
+
+// The element naming an embedded object (ODF 1.3 Part 3 §10.4.6.2) and its link (canonical names).
+const DRAW_OBJECT = "draw:object"
+const XLINK_HREF = "xlink:href"
 
 // Presentation-level changes the ODP writer writes (the slide list, the custom shows and the show settings); the rest
 // belong to the families that edit them.
@@ -139,7 +169,7 @@ export function shapeAspects(target: readonly ShapeNode[], pristine: readonly Sh
 			...(same(shape.props?.ln, was.props?.ln) ? {} : { ln: true }),
 			...(same(shape.props?.effects, was.props?.effects) ? {} : { effects: true }),
 			...(same(shape.props?.bodyPr, was.props?.bodyPr) ? {} : { bodyPr: true }),
-			...(same(shape.props?.geometry, was.props?.geometry) ? {} : { geometry: true }),
+			...(same(outline(shape), outline(was)) ? {} : { geometry: true }),
 			...(same(fieldless(shape.text), fieldless(was.text)) ? {} : { text: true }),
 			...(same(shape.alt, was.alt) ? {} : { alt: true }),
 			...(shape.name === was.name ? {} : { name: true }),
@@ -152,6 +182,15 @@ export function shapeAspects(target: readonly ShapeNode[], pristine: readonly Sh
 	})
 
 	return out
+}
+
+// A shape's outline: none given is a rectangle (a frame, a session's notes body), as the reader reads one back.
+function outline(shape: ShapeNode): unknown {
+	return shape.props?.geometry ?? (shape.kind === "sp" ? { kind: "preset", preset: "rect", guides: [] } : undefined)
+}
+
+function placeholderKind(ph: ShapeNode["ph"]): unknown {
+	return ph === undefined ? undefined : { type: ph.type, idx: ph.idx }
 }
 
 // Content a shape's family alone writes (a chart, media): differs → refused until that family is built, never
@@ -180,7 +219,9 @@ function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNod
 			digestOf(shape.media) !== digestOf(was.media)
 		)
 			found = refused("notImplemented", `odp emit ${shape.frame?.kind ?? "media"}`)
-		else if (digestOf(shape.ph) !== digestOf(was.ph)) found = refused("unsupported", "a placeholder of another kind")
+		// What a placeholder is (ODF holds its kind; idxWritten is how a pptx writes its idx).
+		else if (digestOf(placeholderKind(shape.ph)) !== digestOf(placeholderKind(was.ph)))
+			found = refused("unsupported", "a placeholder of another kind")
 	})
 
 	return found
@@ -336,6 +377,9 @@ class Splicer {
 	readonly written: string[] = []
 	private readonly fragments = new WeakMap<XmlDocument, Fragment>()
 	private ids: Set<string> | undefined
+	// Ids this save gave the elements of a source page fragment, by fragment and target: a page duplicated in the same
+	// save takes the same ones before its copy is renamed, as it would after a rebase (so a state writes the same ids).
+	private readonly givenIds = new Map<string, string>()
 	// The ids the page being written gives source elements (an animated shape's, a targeted paragraph's), by node of its
 	// fragment's document: a source span copied into rewritten markup carries them (bytes()).
 	private given: { readonly document: XmlDocument; readonly ids: Map<number, readonly (readonly [string, string])[]> } | undefined
@@ -352,6 +396,8 @@ class Splicer {
 			fragmentOf: document => this.fragments.get(document),
 			sourceFragment: src => this.source.fragmentOf(src),
 			pageName: ref => names.get(ref),
+			placeholderBoxes: source.placeholderBoxes,
+			mirrorValues: source.mirrorValues,
 			dispatch: emitOdp,
 			familyOf: emitFamilyOf
 		}
@@ -364,6 +410,28 @@ class Splicer {
 
 		this.scope = prologue.namespaces.inScope(prologue.root)
 		this.styles = new OdpStyles(env, "content", taken, styleDeclarations(this.scope))
+		// The stream's own automatic styles first, then those a save retired: a style written again in the form one of them
+		// has takes its name, so a state saved again (an undo back to it) writes the same bytes.
+		const own = new Map<string, string>()
+
+		if (prologue.sliced) {
+			const document = prologue.document
+
+			for (let section = document.firstChildElement(prologue.root); section >= 0; section = document.nextSiblingElement(section)) {
+				if (document.localName(section) !== "automatic-styles") continue
+
+				for (let style = document.firstChildElement(section); style >= 0; style = document.nextSiblingElement(style)) {
+					const name = document.attributes(style).find(attribute => attribute.name === "style:name")?.value
+					const raw = document.raw(style)
+
+					if (name !== undefined && document.localName(style) === "style") own.set(name, decodeUtf8(raw, 0, raw.length))
+				}
+			}
+		}
+
+		for (const [name, markup] of source.retired) if (!own.has(name)) own.set(name, markup)
+
+		this.styles.reuseRetired(own)
 		this.context = { deck, document: undefined, editor: undefined, styles: this.styles }
 	}
 
@@ -376,6 +444,18 @@ class Splicer {
 	}
 
 	// The bytes of pieces, holes copied from `document`, generated strings kept for the style collection.
+	// A shape's markup where it goes: the prefixes it writes that the scope there does not bind declared on its start tag
+	// (a page whose document binds no xlink, a picture written into it).
+	private shapeBytes(
+		pieces: readonly EmitPiece[],
+		fragment: { readonly document: XmlDocument; readonly namespaces: Namespaces },
+		at: number
+	): Uint8Array {
+		const bytes = this.bytes(pieces, fragment.document)
+
+		return encodeUtf8(declared(decodeUtf8(bytes, 0, bytes.length), fragment.namespaces.inScope(at)))
+	}
+
 	bytes(pieces: readonly EmitPiece[], document: XmlDocument | undefined): Uint8Array {
 		for (const piece of pieces) if (typeof piece === "string") this.written.push(piece)
 
@@ -481,16 +561,37 @@ class Splicer {
 
 		const notesNode = node.notes === undefined ? undefined : this.deck.nodes.get(node.notes)
 
-		if (notesNode !== undefined || pristine.notes !== undefined) {
-			if (notesNode === undefined || pristine.notes === undefined || notesNode.src?.format !== "odp")
-				return refused("notImplemented", "odp emit notes")
-
-			const notesEdits = this.container(editor, fragment, notesNode.src.node, notesNode, notesNode.shapes, pristine.notes.shapes, {
-				...context
-			})
+		if (notesNode?.src?.format === "odp" && pristine.notes !== undefined) {
+			// The page's timing names its own shapes: the notes' shapes number apart and take none of its ids.
+			const { targetIds: _targetIds, paragraphIds: _paragraphIds, ...notesContext } = context
+			const notesEdits = this.container(
+				editor,
+				fragment,
+				notesNode.src.node,
+				notesNode,
+				notesNode.shapes,
+				pristine.notes.shapes,
+				notesContext
+			)
 
 			if (isRefused(notesEdits)) return notesEdits
+		} else if (notesNode !== undefined || pristine.notes !== undefined) {
+			// Notes the session made (or an undo took back after the save that wrote them): the page's presentation:notes.
+			const made = spliceOdpNotes(
+				node,
+				notesNode,
+				pristine.notes,
+				this.deck.slides.indexOf(node.ref) + 1,
+				fragment,
+				page,
+				editor,
+				context
+			)
+
+			if (made !== undefined) return made
 		}
+
+		spliceOdpComments(this.deck, node, fragment, page, editor)
 
 		if (attributes.size === 0 && !editor.changed && !duplicate) return undefined
 
@@ -511,7 +612,7 @@ class Splicer {
 		if (!duplicate && span !== undefined && sameBytes(bytes, this.parts.content.bytes.subarray(span.start, span.end))) return undefined
 
 		if (duplicate && span !== undefined) {
-			const renamed = this.renamed(bytes, span)
+			const renamed = this.renamed(bytes, span, node.ref)
 
 			if (isRefused(renamed)) return renamed
 
@@ -538,11 +639,18 @@ class Splicer {
 				if (a.has("xml:id") || a.has("draw:id")) continue
 			}
 
-			let name = `id${String(id)}`
+			const key = `${String(fragment.offset)}:${String(fragment.epoch)}:${String(id)}`
+			let name = this.givenIds.get(key)
 
-			for (let n = 2; this.ids.has(name); n++) name = `id${String(id)}_${String(n)}`
+			if (name === undefined) {
+				name = `id${String(id)}`
 
-			this.ids.add(name)
+				for (let n = 2; this.ids.has(name); n++) name = `id${String(id)}_${String(n)}`
+
+				this.ids.add(name)
+				this.givenIds.set(key, name)
+			}
+
 			out.set(id, name)
 		}
 
@@ -577,11 +685,18 @@ class Splicer {
 				if (a.has("xml:id") || a.has("text:id")) continue
 			}
 
-			let name = `id${String(id)}p${String(paragraph)}`
+			const key = `${String(fragment.offset)}:${String(fragment.epoch)}:${String(id)}p${String(paragraph)}`
+			let name = this.givenIds.get(key)
 
-			for (let n = 2; this.ids.has(name); n++) name = `id${String(id)}p${String(paragraph)}_${String(n)}`
+			if (name === undefined) {
+				name = `id${String(id)}p${String(paragraph)}`
 
-			this.ids.add(name)
+				for (let n = 2; this.ids.has(name); n++) name = `id${String(id)}p${String(paragraph)}_${String(n)}`
+
+				this.ids.add(name)
+				this.givenIds.set(key, name)
+			}
+
 			out.set(odpParagraphKey(id, paragraph), { node: sourced ? src.node : -1, name })
 		}
 
@@ -673,8 +788,10 @@ class Splicer {
 		return decodeUtf8(document.bytes, document.start(node), document.end(node))
 	}
 
-	// A copied page's xml:id and draw:id values made unique in the document.
-	private renamed(bytes: Uint8Array, span: PageSpan): Uint8Array | Refused {
+	// A copied page's xml:id and draw:id values made unique in the document, and each chart object its frames name from
+	// the package copied to one of the page's own (emit/chart.ts copyObject): two pages never share a chart the session
+	// may edit (other objects are kept as the file has them, shared: nothing edits them).
+	private renamed(bytes: Uint8Array, span: PageSpan, ref: SlideRef): Uint8Array | Refused {
 		const content = this.parts.content
 
 		this.ids ??= contentIds(content.bytes)
@@ -691,9 +808,34 @@ class Splicer {
 				: canonicalName(namespaces.uri(node, name.slice(0, colon)), name.slice(colon + 1))
 		}
 		const page = document.firstChildElement(document.documentElement())
-		const editor = renameIds(document, page, this.ids, canonical, node =>
-			canonicalName(namespaces.elementUri(node), document.localName(node))
-		)
+		const elementName = (node: number): string => canonicalName(namespaces.elementUri(node), document.localName(node))
+		let editor = renameIds(document, page, this.ids, canonical, elementName)
+		const objects: number[] = []
+		const stack = [page]
+
+		for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+			if (elementName(node) === DRAW_OBJECT) objects.push(node)
+
+			for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) stack.push(child)
+		}
+
+		const rewritten = new Set(this.styles.replaced().map(entry => entry.path))
+
+		for (const object of objects) {
+			const attribute = document.attributes(object).find(each => canonical(object, each.name) === XLINK_HREF)
+			const path = attribute?.value.replace(/^\.\//u, "").replace(/\/$/u, "")
+
+			// An object this save wrote a chart version into (the chart family's: its frame's own) stays the frame's.
+			if (attribute === undefined || path === undefined || !isChartObject(this.parts, path) || rewritten.has(`${path}/content.xml`))
+				continue
+
+			const copy = copyObject(this.context, this.parts, path, `${String(ref)} ${path}`)
+
+			if (isRefused(copy)) return copy
+
+			editor ??= new XmlEditor(document)
+			editor.setAttribute(object, attribute.name, `./${copy}`)
+		}
 
 		if (editor === undefined) return bytes
 
@@ -766,7 +908,7 @@ class Splicer {
 				const shape = targetShapes[k] as ShapeNode
 				const outer = targetOuter[k] as number
 
-				if (!hasAspects(aspects.get(shape)) && (shape.kind !== "grpSp" || !groupChanged(shape, aspects))) continue
+				if (!hasAspects(aspects.get(shape)) && (shape.kind !== "grpSp" || !groupChanged(shape, aspects, fragment))) continue
 
 				const pieces = writer.element(shape, IDENTITY)
 
@@ -779,28 +921,41 @@ class Splicer {
 				)
 					continue
 
-				editor.replace(outer, this.bytes(pieces, document))
+				editor.replace(outer, this.shapeBytes(pieces, fragment, outer))
 			}
 
 			return undefined
 		}
 
-		// The shapes reordered, added or taken out: the source's shapes go and the deck's are written where the first was.
+		// The shapes reordered, added or taken out: the source's shapes go, each with the whitespace before it, and the
+		// deck's are written where the first was, the k-th after the whitespace the k-th source shape had (past them,
+		// the last one's): a pretty-printed page keeps its layout, and writing the same shapes again gives the same bytes.
+		const ordered = [...sourceOuter].sort((a, b) => a - b)
+		const leads = leadingSpaces(document, ordered)
 		const markup: Uint8Array[] = []
 
-		for (const shape of targetShapes) {
-			const pieces = writer.element(shape, IDENTITY)
+		for (let k = 0; k < targetShapes.length; k++) {
+			const pieces = writer.element(targetShapes[k] as ShapeNode, IDENTITY)
 
 			if (isRefused(pieces)) return pieces
 
-			markup.push(this.bytes(pieces, document))
+			const lead = leads[Math.min(k, leads.length - 1)]
+
+			if (lead !== undefined) markup.push(document.raw(lead))
+
+			markup.push(this.shapeBytes(pieces, fragment, container))
 		}
 
 		const all = concat(markup)
-		const first = sourceOuter[0]
+		const first = ordered[0]
 
 		if (first !== undefined) {
-			editor.insertBefore(first, all)
+			const lead = leads[0]
+
+			if (lead === undefined) editor.insertBefore(first, all)
+			else editor.replace(lead, all)
+
+			for (const other of leads.slice(1)) if (other !== undefined) editor.remove(other)
 		} else {
 			let anchor = -1
 
@@ -814,17 +969,60 @@ class Splicer {
 			else if (all.length > 0) editor.append(container, all)
 		}
 
-		for (const outer of sourceOuter) editor.remove(outer)
+		for (const outer of ordered) editor.remove(outer)
 
 		return undefined
 	}
 }
 
-function groupChanged(group: ShapeNode, aspects: ReadonlyMap<ShapeNode, Aspects>): boolean {
+// Per element, the whitespace-only text right before it (its indentation in a pretty-printed page), or undefined; each
+// parent's children are walked once.
+function leadingSpaces(document: XmlDocument, nodes: readonly number[]): (number | undefined)[] {
+	const before = new Map<number, number>()
+	const walked = new Set<number>()
+
+	for (const node of nodes) {
+		const parent = document.parent(node)
+
+		if (parent < 0 || walked.has(parent)) continue
+
+		walked.add(parent)
+
+		let previous = -1
+
+		for (let child = document.firstChild(parent); child >= 0; child = document.nextSibling(child)) {
+			if (previous >= 0 && document.kind(previous) === NodeKind.Text) before.set(child, previous)
+
+			previous = child
+		}
+	}
+
+	return nodes.map(node => {
+		const text = before.get(node)
+
+		if (text === undefined) return undefined
+
+		const raw = document.raw(text)
+
+		if (raw.length === 0) return undefined
+
+		for (const byte of raw) if (byte !== 0x20 && byte !== 0x0a && byte !== 0x0d && byte !== 0x09) return undefined
+
+		return text
+	})
+}
+
+// Whether a group's members are written anew: one differs from what it was read as, is new (no aspects), or was read
+// from other markup than the page's (an undo put it back from markup it held: the page's bytes do not have it).
+function groupChanged(group: ShapeNode, aspects: ReadonlyMap<ShapeNode, Aspects>, fragment: Fragment): boolean {
 	let changed = false
 
 	walk(group.children ?? [], shape => {
+		const src = shape.src
+
 		if (hasAspects(aspects.get(shape))) changed = true
+		if (src?.format === "odp" && (src.part !== fragment.part || src.fragment !== fragment.offset || src.epoch !== fragment.epoch))
+			changed = true
 	})
 
 	return changed || (group.children ?? []).some(child => !aspects.has(child))
@@ -1134,15 +1332,29 @@ function withManifestEntries(
 }
 
 // Names a stream refers to styles by (§19.4xx *-style-name, list styles, data styles, master pages): every value of
-// an attribute whose local name ends in "style-name" or "-name" of those kinds.
-const REFERENCE = /[\w.-]*(?:style-name|-style-name|list-style-name|data-style-name|master-page-name)="([^"]*)"/gu
-
-function referenced(text: string): Set<string> {
+// an attribute whose local name ends in "style-name" or "master-page-name", either quote, the value decoded (a style
+// name spelled with a character reference names the style it decodes to); a byte scan linear in the stream
+// (styles.ts attributeValues).
+export function styleReferences(bytes: Uint8Array): Set<string> {
 	const out = new Set<string>()
 
-	for (const match of text.matchAll(REFERENCE)) out.add(match[1] ?? "")
+	attributeValues(bytes, REFERENCE_SUFFIXES, true, (start, end) => {
+		out.add(bytes.subarray(start, end).includes(AMP) ? decodeAttribute(bytes, start, end) : decodeUtf8(bytes, start, end))
+	})
 
 	return out
+}
+
+const REFERENCE_SUFFIXES = [STYLE_NAME_SUFFIX, MASTER_PAGE_NAME_SUFFIX]
+const AMP = 0x26
+
+// A value with references as an attribute decodes it; one that does not decode stays as written.
+function decodeAttribute(bytes: Uint8Array, start: number, end: number): string {
+	try {
+		return decodeCharacterData(bytes, start, end, true)
+	} catch {
+		return decodeUtf8(bytes, start, end)
+	}
 }
 
 // The automatic styles of content.xml an edit left without a reference (a deleted page's, a style a patched copy
@@ -1154,7 +1366,7 @@ function withoutOrphans(
 	retired: Map<string, string>,
 	after: Map<string, string | null>
 ): Uint8Array {
-	const before = referenced(decodeUtf8(source, 0, source.length))
+	const before = styleReferences(source)
 	let current = output
 
 	for (let pass = 0; pass < 8; pass++) {
@@ -1164,8 +1376,7 @@ function withoutOrphans(
 
 		const document = prologue.document
 		const ranges: { readonly start: number; readonly end: number }[] = []
-		const text = decodeUtf8(current, 0, current.length)
-		const now = referenced(text)
+		const now = styleReferences(current)
 
 		for (let section = document.firstChildElement(prologue.root); section >= 0; section = document.nextSiblingElement(section)) {
 			if (
@@ -1245,7 +1456,7 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>, a
 
 	const added: string[] = []
 	const adding = new Set<string>()
-	let wanted = [...referenced(decodeUtf8(output, 0, output.length))]
+	let wanted = [...styleReferences(output)]
 
 	while (wanted.length > 0) {
 		const more: string[] = []
@@ -1257,7 +1468,7 @@ function withRetired(output: Uint8Array, retired: ReadonlyMap<string, string>, a
 
 			adding.add(name)
 			added.push(name)
-			more.push(...referenced(markup))
+			appendAll(more, styleReferences(encodeUtf8(markup)))
 		}
 
 		wanted = more

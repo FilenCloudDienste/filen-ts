@@ -496,6 +496,32 @@ describe("xlsx to ods", () => {
 		expect(result.lossy).toEqual([])
 	})
 
+	it("writes a trapezoid as ODF's turned upside down, its inset measured on the width, and keeps a preset's adjustments", async () => {
+		const trapezoid = (id: number, name: string, flip: string, prst = "trapezoid", avLst = ""): string =>
+			`<xdr:oneCellAnchor><xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${String(id)}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="720000" cy="360000"/>` +
+			`<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="${String(id)}" name="${name}"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr><a:xfrm${flip}><a:off x="0" y="0"/><a:ext cx="720000" cy="360000"/></a:xfrm><a:prstGeom prst="${prst}"><a:avLst>${avLst}</a:avLst></a:prstGeom></xdr:spPr></xdr:sp><xdr:clientData/></xdr:oneCellAnchor>`
+		const source = buildWorkbook({
+			sheets: [{ name: "S", body: '<sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><drawing r:id="rId1"/>' }],
+			extra: {
+				"xl/worksheets/_rels/sheet1.xml.rels": `${RELS}<Relationship Id="rId1" Type="${REL}/drawing" Target="../drawings/drawing1.xml"/></Relationships>`,
+				"xl/drawings/drawing1.xml":
+					'<?xml version="1.0" encoding="UTF-8"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+					`${trapezoid(2, "Plain", "")}${trapezoid(3, "Flipped", ' flipV="1"')}${trapezoid(4, "Rounded", "", "roundRect", '<a:gd name="adj" fmla="val 40000"/>')}</xdr:wsDr>`
+			}
+		})
+		const content = strFromU8(unzipSync(converted(await convertSheet(source, "xlsx", "ods")).bytes)["content.xml"] ?? new Uint8Array(0))
+		const geometry = (name: string): string =>
+			new RegExp(`draw:name="${name}"[\\s\\S]*?(<draw:enhanced-geometry [^>]*>)`, "u").exec(content)?.[1] ?? ""
+
+		// 25000 of the shorter side (half the width) is 2700 of 21600 across.
+		expect(geometry("Plain")).toContain('draw:type="trapezoid" draw:modifiers="2700" draw:mirror-vertical="true"')
+		expect(geometry("Flipped")).toContain('draw:modifiers="2700"')
+		expect(geometry("Flipped")).not.toContain("draw:mirror-vertical")
+		// 40000 of the 1 cm short side: the outline's first line starts 0.4 cm (400 hundredths of a millimetre) down.
+		expect(geometry("Rounded")).toContain('draw:type="ooxml-roundRect" draw:modifiers="40000"')
+		expect(geometry("Rounded")).toContain('draw:enhanced-path="M 0 400 C')
+	})
+
 	it("writes a picture as a frame in its cell, its image in the package", async () => {
 		const png = Uint8Array.from(
 			atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="),

@@ -1,3 +1,4 @@
+import { appendAll } from "../../core/arrays"
 import type { DecorationValue } from "../../core/docx/layout/index"
 import type { FontHost } from "../../core/fonts/index"
 import type { ByteSource } from "../../core/opc/index"
@@ -210,9 +211,9 @@ export class DocxDocumentStore {
 
 				break
 			case "pages": {
-				this.styles.push(...event.styles)
-				this.decorations.push(...event.decorations)
-				this.links.push(...event.links)
+				appendAll(this.styles, event.styles)
+				appendAll(this.decorations, event.decorations)
+				appendAll(this.links, event.links)
 
 				if (event.pages.length > 0) {
 					const pages = this.pages.slice()

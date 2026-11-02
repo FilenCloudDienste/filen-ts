@@ -1,3 +1,4 @@
+import { partsNamed } from "./detailParts"
 import {
 	chunksSource,
 	crc32,
@@ -27,7 +28,19 @@ import type { CallContext, EngineSession, OpenedPackage } from "./engine"
 import type { DriveFileRef, PortLike, PresentationNotice, SaveResult } from "./protocol"
 import { layoutEditedDiagrams } from "./engine/smartart"
 import { commitInsertedWrites, insertedWrites, type InsertedWrites } from "./media"
-import { SavePortAbortedError, savePortWriter, type SavePortAbortReason, type SavePortEnd, type SavePortWriter } from "./savePort"
+import { authoredEntries, commitAuthoredEntries, prunePlan } from "./prune"
+import { noteSnapshotFrames } from "../../core/presentation/edit/apply/smartart"
+import type { DeckHistory } from "../../core/presentation/edit/history"
+import { holdDeckParts, releasedDeckParts } from "../../core/pptx/write/parts"
+import {
+	clearTimer,
+	SavePortAbortedError,
+	savePortWriter,
+	setTimer,
+	type SavePortAbortReason,
+	type SavePortEnd,
+	type SavePortWriter
+} from "./savePort"
 
 // Saving a session: the snapshot of the changed parts at revision R, taken while commands wait; the package the
 // format's writer makes (with its second proof gate: a package up to the in-memory limit checked whole before a byte
@@ -59,9 +72,16 @@ export interface SaveHistory {
 	// Reverts the ops whose net effect touches these parts (the writer's own check refused them), answering how many
 	// steps were reverted. Absent: nothing is reverted and the save is only refused.
 	revert?(parts: ReadonlySet<string>): Promise<number>
+	// Takes back, before the snapshot, what the deck holds that the user has not made yet (notes started, nothing
+	// typed): the file never holds it.
+	settle?(): void
+	// The edit engine's history itself (what its steps hold, for the prune: prune.ts prunePlan).
+	readonly steps?: DeckHistory
 }
 
 const histories = new WeakMap<Deck, SaveHistory>()
+// The diagram damage each deck's source file had when the session opened it (read on its first save, before any write).
+const sourceDamage = new WeakMap<Deck, Promise<ReadonlySet<string>>>()
 
 // Called by the edit capability when it makes the deck's history.
 export function bindSaveHistory(deck: Deck, history: SaveHistory): void {
@@ -73,12 +93,21 @@ export function saveHistoryOf(deck: Deck): SaveHistory | undefined {
 }
 
 const turns = new WeakMap<Deck, Promise<unknown>>()
+// Turns asked for and not yet ended, by deck.
+const queued = new WeakMap<Deck, number>()
 
 // Runs `task` when every earlier turn of the deck has ended: commands (the edit capability) and a save's snapshot
 // take turns, so a snapshot never interleaves with an op.
 export function deckTurn<T>(deck: Deck, task: () => Promise<T>): Promise<T> {
 	const before = turns.get(deck) ?? Promise.resolve()
-	const run = before.then(task, task)
+	const landed = (): Promise<void> | undefined => landings.get(deck)
+	const run = before.then(landed, landed).then(task, task)
+	const done = (): void => {
+		queued.set(deck, (queued.get(deck) ?? 1) - 1)
+	}
+
+	queued.set(deck, (queued.get(deck) ?? 0) + 1)
+	run.then(done, done)
 
 	turns.set(
 		deck,
@@ -123,9 +152,16 @@ interface SourceGate {
 	reading: number
 	closing: boolean
 	close: (() => void) | undefined
+	// A save made a new file from this one (it may be gone: a drive without versioning deletes it).
+	superseded: boolean
 }
 
 const gates = new WeakMap<ByteSource, SourceGate>()
+
+// A deck's save that landed and waits for its commit (until the commit or COMMIT_WAIT_MS): a turn starts after it. A
+// command run between an upload's answer and its commit would read the old package, whose reads wait for the commit
+// and then find the parts it rewrote gone (refused stale); after the commit it reads the file the save made.
+const landings = new WeakMap<Deck, Promise<void>>()
 
 function staleError(): PresentationError {
 	return new PresentationError("stale", "the deck was rebased onto its saved file")
@@ -139,7 +175,8 @@ export function rebasableSource(source: RemoteByteSource): RemoteByteSource {
 		relocate: undefined,
 		reading: 0,
 		closing: false,
-		close: source.close === undefined ? undefined : () => source.close?.()
+		close: source.close === undefined ? undefined : () => source.close?.(),
+		superseded: false
 	}
 	// A read of the source itself: a retired source is closed once the last one ends.
 	const own = async <T>(read: () => Promise<T>): Promise<T> => {
@@ -147,6 +184,11 @@ export function rebasableSource(source: RemoteByteSource): RemoteByteSource {
 
 		try {
 			return await read()
+		} catch (error) {
+			// A read of a file a save superseded (deleted by now): the deck's state moved on, typed for the caller.
+			if (gate.superseded && !(error instanceof PresentationError)) throw staleError()
+
+			throw error
 		} finally {
 			gate.reading--
 			closeIfIdle(gate)
@@ -237,14 +279,21 @@ function holdReads(source: ByteSource): () => void {
 
 	const held = Promise.withResolvers<undefined>()
 
-	gate.held = held.promise
-	gate.release = () => {
+	gate.superseded = true
+
+	const release = (): void => {
+		// Once: a later hold of the same source is that save's own.
+		if (gate.held !== held.promise) return
+
 		gate.held = undefined
 		gate.release = undefined
 		held.resolve(undefined)
 	}
 
-	return gate.release
+	gate.held = held.promise
+	gate.release = release
+
+	return release
 }
 
 function retire(source: ByteSource, relocate?: Relocate): void {
@@ -316,8 +365,17 @@ export interface DeckSaver<S = PptxSource> {
 			readonly source: S
 			readonly changes: DeckChanges
 			readonly revision: number
+			readonly prune?: readonly string[]
+			readonly keep?: readonly string[]
 		}): Promise<PptxSnapshot | Refused>
 		write: SpliceWriter["write"]
+	}
+	// The writer's proofs of a snapshot alone (before anything is written), where it has them: the whole gate (before a
+	// prune), and what every save checks; each against the damage the source file had when the session opened it.
+	readonly proof?: {
+		readonly gate: (snapshot: PptxSnapshot, baseline: ReadonlySet<string>) => Promise<Refused | undefined>
+		readonly every: (snapshot: PptxSnapshot, baseline: ReadonlySet<string>) => Promise<Refused | undefined>
+		readonly baseline: (source: S) => Promise<ReadonlySet<string>>
 	}
 	readonly source?: (session: EngineSession) => S
 	readonly seal?: SealPackage
@@ -331,6 +389,8 @@ export interface SaveDependencies {
 	readonly rebasers: { readonly [F in Format]?: DeckRebaser }
 	// Packages up to this size are written in memory (default IN_MEMORY_LIMIT).
 	readonly inMemoryLimit?: number
+	// How long a save waits for the page to commit the written save before it (default COMMIT_WAIT_MS).
+	readonly commitWaitMs?: number
 }
 
 // What a written save leaves for the rebase.
@@ -346,12 +406,17 @@ export interface SavedPackage {
 	readonly report: WriteZipReport
 	// The inserted media and images it wrote, which become their parts when it commits.
 	readonly inserted?: InsertedWrites | undefined
+	// The entries it added that are the session's own (prune.ts), and those it left out.
+	readonly authored?: readonly string[]
+	readonly pruned?: readonly string[]
 }
 
 interface PendingSave {
 	readonly saved: SavedPackage
 	// Ends the hold on the old source's reads.
 	readonly release: () => void
+	// Ends the save's turn (savesOf.cycle): the next save may run.
+	readonly settle: () => void
 }
 
 // A package written in memory whose upload did not make the file: a retry at the same revision sends it again instead
@@ -365,6 +430,8 @@ interface RetainedSave {
 	readonly written: ReadonlySet<string>
 	readonly report: WriteZipReport
 	readonly inserted: InsertedWrites | undefined
+	readonly authored?: readonly string[]
+	readonly pruned?: readonly string[]
 }
 
 interface SessionSaves {
@@ -372,7 +439,16 @@ interface SessionSaves {
 	running: boolean
 	pending: PendingSave | undefined
 	retained: RetainedSave | undefined
+	// The last save the page started, until it ends: answered without a file, or written and committed (or not
+	// committed within COMMIT_WAIT_MS of its upload's answer). A save started meanwhile waits for it.
+	cycle: Promise<void> | undefined
+	// The revision of the last save the session committed itself, the page's commit not having come in time.
+	committedLate: number | undefined
 }
+
+// How long a save waits, after the save before it was uploaded, for the page to commit that one (it always does at
+// once; a page that does not, keeps the next save waiting no longer than this).
+export const COMMIT_WAIT_MS = 10_000
 
 const sessions = new WeakMap<EngineSession, SessionSaves>()
 
@@ -380,10 +456,11 @@ function savesOf(session: EngineSession): SessionSaves {
 	let saves = sessions.get(session)
 
 	if (saves === undefined) {
-		saves = { running: false, pending: undefined, retained: undefined }
+		saves = { running: false, pending: undefined, retained: undefined, cycle: undefined, committedLate: undefined }
 		sessions.set(session, saves)
 		session.onClose(() => {
 			saves?.pending?.release()
+			saves?.pending?.settle()
 
 			if (saves !== undefined) saves.retained = undefined
 
@@ -531,7 +608,9 @@ export async function saveSession(
 
 	const history = histories.get(deck)
 
-	if (history === undefined || !history.dirty) return end("unchanged", { kind: "unchanged" })
+	// Clean with no save or command ahead of it: nothing to write. Otherwise whether it is dirty is asked in its turn,
+	// after the commands queued before it.
+	if (history === undefined || (!history.dirty && turnsIdle(session, deck))) return end("unchanged", { kind: "unchanged" })
 
 	const saver = dependencies.savers[deck.format]
 
@@ -542,13 +621,45 @@ export async function saveSession(
 	const active = saver as DeckSaver<unknown>
 
 	const saves = savesOf(session)
+	// Saves the page starts back to back (a double Mod+S, an autosave meeting one) run one after another: each waits
+	// for the one before to end and, written, to be committed, so it saves against the file that one made (its old file
+	// may be gone) and never overlaps its rebase.
+	const before = saves.cycle
+	const cycle = Promise.withResolvers<void>()
+	let landed = false
 
-	if (saves.running) return end("refused", refusedResult("locked"))
+	saves.cycle = cycle.promise
 
-	// A written save the page never committed (it chose not to rebase): its hold ends, and this save reads the old
-	// file as the session still does.
-	saves.pending?.release()
-	saves.pending = undefined
+	const ended = (): void => {
+		cycle.resolve()
+
+		if (saves.cycle === cycle.promise) saves.cycle = undefined
+		if (landings.get(deck) === cycle.promise) landings.delete(deck)
+	}
+
+	if (before !== undefined) await before
+
+	if (saves.running) {
+		ended()
+
+		return end("refused", refusedResult("locked"))
+	}
+
+	// A written save the page did not commit in time: kept in memory, the session moves onto the file it made (the old
+	// one may be gone) and the late commit finds it done; otherwise its hold on the old file's reads ends and this save
+	// reads that file as the session still does (one refusal where it is gone), the save staying for its late commit
+	// until this one lands.
+	const late = saves.pending
+
+	if (late !== undefined && late.saved.zip !== undefined) {
+		try {
+			await commitLate(context, late, dependencies)
+		} catch {
+			ended()
+
+			return end("refused", refusedResult("stale"))
+		}
+	} else late?.release()
 
 	saves.running = true
 	context.signal.onAbort(() => {
@@ -561,6 +672,10 @@ export async function saveSession(
 
 	try {
 		const taken = await deckTurn(deck, async () => {
+			history.settle?.()
+
+			if (!history.dirty) return undefined
+
 			const changes = history.changes()
 
 			changedParts = changes.parts.size + changes.presentation.size
@@ -586,15 +701,43 @@ export async function saveSession(
 				return { revision: point.revision, retained }
 			}
 
-			return {
-				revision: point.revision,
-				snapshot: await active.writer.snapshot({
-					deck,
-					source: active.source === undefined ? packageSource(session) : active.source(session),
-					changes,
-					revision: point.revision
-				})
+			const input = {
+				deck,
+				source: active.source === undefined ? packageSource(session) : active.source(session),
+				changes,
+				revision: point.revision
 			}
+			noteSnapshotFrames(deck)
+
+			const plan = await prunePlan(session, history.steps)
+
+			holdDeckParts(deck, plan.hold)
+
+			const snapshot = await active.writer.snapshot({ ...input, prune: plan.prune, keep: plan.keep })
+			const proof = active.proof
+
+			if (proof === undefined || isRefused(snapshot)) return { revision: point.revision, snapshot }
+
+			// The damage the source file had at open, read once: a save of this session is never let off for its own.
+			let baseline = sourceDamage.get(deck)
+
+			if (baseline === undefined) {
+				baseline = proof.baseline(input.source)
+				sourceDamage.set(deck, baseline)
+			}
+
+			const known = await baseline
+			// The proof is the judge of what the prune would leave out: a part the package written still needs stays (the
+			// save keeps it rather than refuse); damage the save would write refuses it.
+			const failed = plan.prune.length > 0 ? await proof.gate(snapshot, known) : await proof.every(snapshot, known)
+
+			if (failed?.reason !== "proofFailed") return { revision: point.revision, snapshot: failed ?? snapshot }
+			if (plan.prune.length === 0) return { revision: point.revision, snapshot: failed }
+
+			const kept = await active.writer.snapshot({ ...input, keep: plan.keep })
+			const still = isRefused(kept) ? undefined : await proof.every(kept, known)
+
+			return { revision: point.revision, snapshot: still ?? kept }
 		})
 
 		if (taken === undefined) return unchanged()
@@ -606,7 +749,10 @@ export async function saveSession(
 			return await resend(taken.retained)
 		}
 
-		if (isRefused(taken.snapshot)) return await refuse(taken.snapshot.reason, taken.snapshot.detail)
+		// A writer's stale (a part the session held is gone) is this session's fault, not a change of the file: stale
+		// answers only a save the file's rebase overtook.
+		if (isRefused(taken.snapshot))
+			return await refuse(taken.snapshot.reason === "stale" ? "failed" : taken.snapshot.reason, taken.snapshot.detail)
 
 		writer.announce()
 
@@ -626,6 +772,8 @@ export async function saveSession(
 		return end(reason === "aborted" ? "cancelled" : "failed", refusedResult(reason))
 	} finally {
 		saves.running = false
+
+		if (!landed) ended()
 	}
 
 	// Nothing written while the deck read dirty: the saved state moved, so the page's indicator follows.
@@ -710,8 +858,13 @@ export async function saveSession(
 		const written = writtenNames(snapshot)
 		const transfer = { downloaded: downloaded ?? downloadedBytes(pkg, outcome.report, written) }
 		const inserted = insertedWrites(deck, snapshot.changes.add, snapshot.changes.replace)
+		const authored = authoredEntries(deck, snapshot.changes.add)
+		const pruned = snapshot.changes.remove ?? []
 
-		return land({ revision, zip, upload, written, report: outcome.report, package: pkg, inserted }, transfer.downloaded)
+		return land(
+			{ revision, zip, upload, written, report: outcome.report, package: pkg, inserted, authored, pruned },
+			transfer.downloaded
+		)
 	}
 
 	// A retained package sent again: nothing is read from the source.
@@ -733,7 +886,7 @@ export async function saveSession(
 		},
 		downloaded: number
 	): Promise<SaveResult> {
-		const { revision, zip, upload, written, report, inserted } = saved
+		const { revision, zip, upload, written, report, inserted, authored, pruned } = saved
 		const release = holdReads(saved.package.source)
 
 		writer.commit()
@@ -753,7 +906,17 @@ export async function saveSession(
 
 			// Kept for a retry at this revision (an autosave after a failed upload sends it again, downloading nothing).
 			if (zip !== undefined && upload !== undefined) {
-				savesOf(session).retained = { revision, package: saved.package, zip, upload, written, report, inserted }
+				savesOf(session).retained = {
+					revision,
+					package: saved.package,
+					zip,
+					upload,
+					written,
+					report,
+					inserted,
+					...(authored === undefined ? {} : { authored }),
+					...(pruned === undefined ? {} : { pruned })
+				}
 			}
 
 			throw new PresentationError("failed", "the upload did not make the file")
@@ -761,7 +924,25 @@ export async function saveSession(
 
 		const saves = savesOf(session)
 
+		// This save's file supersedes one the page never committed.
+		saves.pending?.release()
+		saves.pending?.settle()
+
+		// Not committed in time: the reads held for the commit go on against the old file (a typed stale where it is
+		// gone), and the next save may run.
+		const wait = setTimer(() => {
+			release()
+			ended()
+		}, dependencies.commitWaitMs ?? COMMIT_WAIT_MS)
+
+		;(wait as { unref?: () => void } | undefined)?.unref?.()
+		landed = true
+		landings.set(deck, cycle.promise)
 		saves.pending = {
+			settle: () => {
+				clearTimer(wait)
+				ended()
+			},
 			saved: {
 				revision,
 				point: point ?? { revision },
@@ -769,7 +950,9 @@ export async function saveSession(
 				size: report.size,
 				written,
 				report,
-				inserted
+				inserted,
+				...(authored === undefined ? {} : { authored }),
+				...(pruned === undefined ? {} : { pruned })
 			},
 			release
 		}
@@ -790,18 +973,26 @@ export async function saveSession(
 	}
 }
 
-// The part names a writer refusal's detail mentions ("/ppt/slides/slide2.xml reads back … differently", an ODP page
-// "/content.xml#12"), as model part names; undefined when it names none.
-function partsNamed(detail: string): ReadonlySet<string> | undefined {
-	const names = detail.match(/[\w.-]+(?:\/[\w.-]+)*\.(?:xml|rels)(?:#[\w.-]+|\b)/gu)
-
-	return names === null ? undefined : new Set(names.map(name => (name.startsWith("/") ? name : `/${name}`)))
-}
-
 // The commitSaved method: the saved file is the session's base from now on. The source is the written zip when it
 // was kept in memory, otherwise the new file's range port; the package is re-opened over it and the model's refs
 // rebound, then the history's saved state is the save's.
 export async function commitSavedSession(
+	context: CallContext,
+	options: { readonly file: DriveFileRef; readonly port: PortLike; readonly size: number; readonly revision: number },
+	dependencies: SaveDependencies
+): Promise<{ readonly dirty: boolean }> {
+	const pending = savesOf(context.session).pending
+	const own = pending?.saved.revision === options.revision ? pending : undefined
+
+	try {
+		return await commitPending(context, options, dependencies)
+	} finally {
+		// Rebased (or not), the save's turn ends: a save waiting behind it runs against the session as it is now.
+		own?.settle()
+	}
+}
+
+async function commitPending(
 	context: CallContext,
 	options: { readonly file: DriveFileRef; readonly port: PortLike; readonly size: number; readonly revision: number },
 	dependencies: SaveDependencies
@@ -814,11 +1005,12 @@ export async function commitSavedSession(
 	if (pending?.saved.revision !== options.revision) {
 		closeUnused(session, options)
 
+		// The page's commit of a save the session moved onto itself (commitLate): nothing left to do.
+		if (saves.committedLate === options.revision) return { dirty: history?.dirty ?? false }
+
 		throw new PresentationError("stale", `no written save at revision ${String(options.revision)}`)
 	}
 
-	const rebaser = dependencies.rebasers[session.deck.format]
-	const old = session.package
 	let raw: ByteSource
 
 	if (pending.saved.zip !== undefined) {
@@ -833,6 +1025,33 @@ export async function commitSavedSession(
 
 		raw = session.rangeSource({ kind: "range", port: options.port, size: options.size, checked: true })
 	}
+
+	return await rebaseOnto(context, pending, raw, dependencies)
+}
+
+// A written save the page did not commit within the wait, rebased from the zip it kept: as its commit would.
+async function commitLate(context: CallContext, pending: PendingSave, dependencies: SaveDependencies): Promise<void> {
+	const zip = pending.saved.zip
+
+	if (zip === undefined) return
+
+	savesOf(context.session).committedLate = pending.saved.revision
+	await rebaseOnto(context, pending, chunksSource(zip), dependencies)
+	pending.settle()
+}
+
+// The saved file is the session's base from now on (commitSavedSession's work once its source is chosen).
+async function rebaseOnto(
+	context: CallContext,
+	pending: PendingSave,
+	raw: ByteSource,
+	dependencies: SaveDependencies
+): Promise<{ readonly dirty: boolean }> {
+	const { session } = context
+	const saves = savesOf(session)
+	const history = histories.get(session.deck)
+	const rebaser = dependencies.rebasers[session.deck.format]
+	const old = session.package
 
 	saves.pending = undefined
 	saves.retained = undefined
@@ -868,6 +1087,16 @@ export async function commitSavedSession(
 	closeRetired(old.source)
 	// Inserted media and images are the parts the save wrote from now on (their device files, drive ports and bytes let go).
 	commitInsertedWrites(session, pending.saved.inserted)
+	// The entries the save added are the session's own from now on; those it left out are gone.
+	// The parts the save's emits let go of are the session's to leave out from now on (once nothing names them).
+	commitAuthoredEntries(
+		session.deck,
+		[
+			...(pending.saved.authored ?? []),
+			...releasedDeckParts(session.deck).filter(name => !(pending.saved.pruned ?? []).includes(name))
+		],
+		pending.saved.pruned
+	)
 
 	const dirty = history?.dirty ?? false
 
@@ -876,6 +1105,11 @@ export async function commitSavedSession(
 	else emitSavedState(session, history)
 
 	return { dirty }
+}
+
+// No turn of the deck is queued or running and no save is in its turn: a clean history is clean for a save now.
+function turnsIdle(session: EngineSession, deck: Deck): boolean {
+	return (queued.get(deck) ?? 0) === 0 && sessions.get(session)?.cycle === undefined
 }
 
 function emitSavedState(session: EngineSession, history: SaveHistory): void {
@@ -910,7 +1144,8 @@ function closeUnused(session: EngineSession, options: { readonly port: PortLike;
 export function rebindSources(
 	deck: Deck,
 	epoch: number,
-	rewritten: ReadonlyMap<string, { readonly from: XmlDocument; readonly to: XmlDocument }>
+	rewritten: ReadonlyMap<string, { readonly from: XmlDocument; readonly to: XmlDocument }>,
+	gone: ReadonlySet<string> = new Set()
 ): void {
 	const memo = new Map<string, Map<number, number | undefined>>()
 	const remap = (src: SourceRef): SourceRef => {
@@ -918,7 +1153,8 @@ export function rebindSources(
 
 		const documents = rewritten.get(partKey(src.part))
 
-		if (documents === undefined) return { ...src, epoch }
+		// A part the file written does not have: its sources stay stale (they name nothing of that file).
+		if (documents === undefined) return gone.has(partKey(src.part)) ? src : { ...src, epoch }
 
 		let nodes = memo.get(src.part)
 

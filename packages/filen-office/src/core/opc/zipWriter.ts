@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { Deflate, deflateSync } from "fflate"
 import { encodeUtf8 } from "../xml/utf8"
 import { crc32 } from "./crc32"
@@ -511,7 +512,7 @@ async function deflateMixed(
 	let crc = 0
 	let fed = 0
 	const close = (final: boolean): void => {
-		if (stream !== undefined) parts.push(...stream.end(final).parts)
+		if (stream !== undefined) appendAll(parts, stream.end(final).parts)
 
 		stream = undefined
 	}

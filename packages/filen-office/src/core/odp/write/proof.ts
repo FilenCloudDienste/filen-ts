@@ -43,13 +43,15 @@ function boxProves(fragment: Fragment, shape: ShapeNode): boolean {
 
 	if (transform === undefined) return true
 
-	for (const match of transform.matchAll(/([a-zA-Z]+)\s*\(/gu)) {
-		const name = (match[1] ?? "").toLowerCase()
-
-		if (name !== "rotate" && name !== "translate") return false
-	}
+	for (const name of transformNames(transform)) if (name !== "rotate" && name !== "translate") return false
 
 	return true
+}
+
+// The names of draw:transform's functions, lower case, as /([a-zA-Z]+)\s*\(/g finds them; a name starts where a run of
+// letters does (the lookbehind): tried inside every run, the scan was quadratic in it.
+export function transformNames(transform: string): string[] {
+	return [...transform.matchAll(/(?<![a-zA-Z])([a-zA-Z]+)\s*\(/gu)].map(match => (match[1] ?? "").toLowerCase())
 }
 
 // Whether a shape's box is written by attributes alone (svg:x/y/width/height, draw:transform, a line's ends): what a

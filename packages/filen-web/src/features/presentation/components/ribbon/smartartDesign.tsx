@@ -216,12 +216,9 @@ function DefinitionMenu({
 }) {
 	const { t } = useTranslation("preview")
 	const { target, info } = useSmartArtDiagram(editor)
-	const focus = useCommandMenuFocus()
 	const { gallery, deck, current } = definitionChoices(info, kind)
 	const choose = (value: string): void => {
 		const def = refOf(value)
-
-		focus.ran()
 
 		if (def === undefined || target === undefined || value === current) return
 
@@ -229,14 +226,14 @@ function DefinitionMenu({
 	}
 
 	return (
-		<DropdownMenu onOpenChange={focus.opened}>
+		// A choice closes the menu (its entries go while the diagram is read again) and focus goes back to the trigger.
+		<DropdownMenu>
 			<RibbonMenuTrigger
 				label={t(label)}
 				icon={icon}
 				disabled={info === undefined || gallery.length + deck.length === 0}
 			/>
 			<DropdownMenuContent
-				finalFocus={focus.finalFocus}
 				data-preview-surface
 				className="max-h-[60dvh] overflow-y-auto"
 			>
@@ -277,6 +274,7 @@ function DefinitionItems({
 		<DropdownMenuRadioItem
 			key={refValue(def)}
 			value={refValue(def)}
+			closeOnClick
 		>
 			{kind === "layout" ? (
 				<SmartArtPreviewCanvas

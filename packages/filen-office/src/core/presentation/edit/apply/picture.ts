@@ -83,6 +83,14 @@ export function insertedImageWritten(deck: Deck, id: number): WrittenImage | und
 	return registries.get(deck)?.written.get(id)
 }
 
+// The part a committed save wrote an inserted image to, by the image itself (what a redo of its op names).
+export function insertedImageWrittenFor(deck: Deck, image: InsertedImage): WrittenImage | undefined {
+	const registry = registries.get(deck)
+	const id = registry?.writtenFrom.get(image)
+
+	return id === undefined ? undefined : registry?.written.get(id)
+}
+
 // The inserted images a save wrote: registry id → the name of the entry it added with the registry's own bytes.
 export function insertedImagesAdded(deck: Deck, added: ReadonlyMap<object, string>): Map<number, string> {
 	const out = new Map<number, string>()

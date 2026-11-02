@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutBasicList
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:list-basic">
+	<sa:title val="Basic list"/>
+	<sa:desc val="Every top-level item is a tile; the tiles wrap into rows that fill the frame. Sub-items are bullets inside their tile."/>
+	<sa:catLst>
+		<sa:cat type="list" pri="10"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="104"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="105"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="100" destId="102" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="100" destId="103" srcOrd="2" destOrd="0"/>
+				<sa:cxn modelId="203" srcId="100" destId="104" srcOrd="3" destOrd="0"/>
+				<sa:cxn modelId="204" srcId="100" destId="105" srcOrd="4" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="grid">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:choose name="reading">
+			<sa:if name="fromLeft" func="var" arg="dir" op="equ" val="norm">
+				<sa:alg type="snake">
+					<sa:param type="grDir" val="tL"/>
+					<sa:param type="flowDir" val="row"/>
+					<sa:param type="contDir" val="sameDir"/>
+					<sa:param type="off" val="ctr"/>
+				</sa:alg>
+			</sa:if>
+			<sa:else name="fromRight">
+				<sa:alg type="snake">
+					<sa:param type="grDir" val="tR"/>
+					<sa:param type="flowDir" val="row"/>
+					<sa:param type="contDir" val="sameDir"/>
+					<sa:param type="off" val="ctr"/>
+				</sa:alg>
+			</sa:else>
+		</sa:choose>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="ch" forName="tile" type="w" refType="w"/>
+			<sa:constr for="ch" forName="tile" type="h" refFor="ch" refForName="tile" refType="w" fact="0.62"/>
+			<sa:constr for="ch" forName="gutter" type="w" refFor="ch" refForName="tile" refType="w" fact="0.09"/>
+			<sa:constr type="sp" refFor="ch" refForName="tile" refType="w" fact="0.09"/>
+			<sa:constr for="ch" forName="tile" type="primFontSz" op="equ" val="60"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:forEach name="tiles" ptType="node" axis="ch">
+			<sa:layoutNode name="tile" styleLbl="node1">
+				<sa:varLst>
+					<sa:bulletEnabled val="1"/>
+				</sa:varLst>
+				<sa:alg type="tx"/>
+				<sa:shape type="rect"><sa:adjLst/></sa:shape>
+				<sa:presOf axis="desOrSelf" ptType="node"/>
+				<sa:constrLst>
+					<sa:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+					<sa:constr type="rMarg" refType="primFontSz" fact="0.3"/>
+					<sa:constr type="tMarg" refType="primFontSz" fact="0.3"/>
+					<sa:constr type="bMarg" refType="primFontSz" fact="0.3"/>
+				</sa:constrLst>
+				<sa:ruleLst>
+					<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+				</sa:ruleLst>
+			</sa:layoutNode>
+			<sa:forEach name="gutters" ptType="sibTrans" axis="followSib" cnt="1">
+				<sa:layoutNode name="gutter">
+					<sa:alg type="sp"/>
+					<sa:shape><sa:adjLst/></sa:shape>
+					<sa:presOf/>
+					<sa:constrLst/>
+					<sa:ruleLst/>
+				</sa:layoutNode>
+			</sa:forEach>
+		</sa:forEach>
+	</sa:layoutNode>
+</sa:layoutDef>

@@ -1,3 +1,4 @@
+import { maxOf } from "../../arrays"
 import {
 	ZipArchive,
 	chunksSource,
@@ -11,11 +12,13 @@ import {
 } from "../../opc/index"
 import { arrivalChecked, checkedItems, IN_MEMORY_LIMIT } from "../../pptx/write/save"
 import type { PptxSaveOptions, PptxSaveOutcome, PptxSnapshot } from "../../pptx/write/types"
+import { noteIssuedNames } from "../../presentation/issuedNames"
 import { PresentationError, refused, type Deck, type Refused, type SlideNode, type SlideRef } from "../../presentation/model"
-import { Namespaces, NodeKind, XmlError, parseXml } from "../../xml/index"
+import { Namespaces, NodeKind, XmlError, decodeUtf8, parseXml } from "../../xml/index"
 import { openOdp, type OdpOpen, type OdpParts } from "../read/document"
 import { packagePart } from "../read/fills"
 import { notesDiffer, slideDiffers } from "./meaning"
+import { withoutManifestEntries } from "./manifestPrune"
 import { odpSplice, type OdpSaveInput, type OdpSplice } from "./splice"
 import { isRefused } from "./styles"
 
@@ -37,6 +40,22 @@ export interface OdpSnapshot extends PptxSnapshot {
 	readonly deck: Deck
 	// The model parts the save's changes touch (what a refusal of the whole stream names).
 	readonly changed: readonly string[]
+	// The pages written from the model, and the slide order, as the snapshot saw them: the proof reads the written file
+	// back against these, not against the deck, which an edit made since may have changed (the next save writes that).
+	readonly expected: ReadonlyMap<SlideRef, { readonly node: SlideNode; readonly notes: SlideNode | undefined }>
+	readonly order: readonly SlideRef[]
+}
+
+// A model value as it is now: objects and arrays copied, byte arrays (never edited in place) shared.
+function frozen<T>(value: T): T {
+	if (value === null || typeof value !== "object" || ArrayBuffer.isView(value)) return value
+	if (Array.isArray(value)) return value.map(item => frozen(item) as unknown) as unknown as T
+
+	const out: Record<string, unknown> = {}
+
+	for (const key of Object.keys(value)) out[key] = frozen((value as Record<string, unknown>)[key])
+
+	return out as T
 }
 
 function isOdpSnapshot(snapshot: PptxSnapshot): snapshot is OdpSnapshot {
@@ -46,17 +65,117 @@ function isOdpSnapshot(snapshot: PptxSnapshot): snapshot is OdpSnapshot {
 const CHUNK = 1024 * 1024
 // The entries the media emit adds (Media/media<id>.<ext>).
 const MEDIA_ENTRY = /^Media\//u
+const MANIFEST = "META-INF/manifest.xml"
 
 export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Refused> {
+	const parts = input.source.parts
+	const archive = parts.odf.archive
+
+	// The package's names are the session's from now on: no entry this save or a later one adds takes one of them.
+	noteIssuedNames(
+		input.deck,
+		archive.entries.map(entry => entry.name)
+	)
+
 	const splice = await odpSplice(input)
 
 	if (isRefused(splice)) return splice
 
-	const changes: ZipChanges = { replace: splice.replace, add: splice.add }
-	const parts = input.source.parts
-	const copies = parts.odf.archive.entries.length - splice.replace.length
+	const replacedNames = new Set(splice.replace.map(change => change.name))
+	// Entries this session wrote that nothing reaches any more (dom/presentation/prune.ts), and their manifest entries,
+	// but those the content.xml and styles.xml this save writes name (a page copied as the package has it).
+	const proposed = (input.prune ?? []).filter(name => !replacedNames.has(name) && archive.entries.some(entry => entry.name === name))
+	const prune = proposed.length === 0 ? proposed : unnamed(proposed, splice, parts)
+	let replace = splice.replace
 
-	return { revision: splice.revision, changes, copies, splice, parts, deck: input.deck, changed: [...input.changes.parts.keys()] }
+	if (prune.length > 0) {
+		const written = replace.find(change => change.name === MANIFEST)
+		const entry = archive.entries.find(candidate => candidate.name === MANIFEST)
+		const source = written?.bytes instanceof Uint8Array ? written.bytes : entry === undefined ? undefined : await archive.read(entry)
+
+		if (source !== undefined) {
+			const manifest = { name: MANIFEST, bytes: withoutManifestEntries(source, prune) }
+
+			replace = written === undefined ? [...replace, manifest] : replace.map(change => (change.name === MANIFEST ? manifest : change))
+		}
+	}
+
+	const changes: ZipChanges = { replace, add: splice.add, ...(prune.length === 0 ? {} : { remove: prune }) }
+	const copies = archive.entries.length - replace.length - prune.length
+
+	const expected = new Map<SlideRef, { readonly node: SlideNode; readonly notes: SlideNode | undefined }>()
+
+	for (const page of splice.pages) {
+		const node = page.kind === "copied" ? undefined : input.deck.nodes.get(page.ref)
+
+		if (node === undefined) continue
+
+		const notes = node.notes === undefined ? undefined : input.deck.nodes.get(node.notes)
+
+		expected.set(page.ref, { node: frozen(node), notes: notes === undefined ? undefined : frozen(notes) })
+	}
+
+	const order = [...input.deck.slides]
+	let orders = snapshotOrders.get(input.deck)
+
+	if (orders === undefined) {
+		orders = new Map()
+		snapshotOrders.set(input.deck, orders)
+	}
+
+	orders.set(splice.revision, order)
+
+	return {
+		revision: splice.revision,
+		changes,
+		copies,
+		splice,
+		parts,
+		deck: input.deck,
+		changed: [...input.changes.parts.keys()],
+		expected,
+		order
+	}
+}
+
+// The slide order each snapshot of a deck wrote, by the save's revision: the pages of the file that save makes, in
+// order, whatever the deck does while it is uploaded or waits for its commit (a commit may come after a later save's
+// snapshot). Kept until a commit at that revision or a later one lands.
+const snapshotOrders = new WeakMap<Deck, Map<number, readonly SlideRef[]>>()
+
+// The slides the deck's snapshot at `revision` wrote, page by page (what the rebase onto that save's file binds its
+// pages to).
+export function snapshotSlideOrder(deck: Deck, revision: number): readonly SlideRef[] | undefined {
+	return snapshotOrders.get(deck)?.get(revision)
+}
+
+// The revision of the deck's latest snapshot still kept (a caller that does not say which save's file it rebases
+// onto takes that one's order).
+export function latestSnapshotRevision(deck: Deck): number | undefined {
+	const orders = snapshotOrders.get(deck)
+
+	return orders === undefined || orders.size === 0 ? undefined : maxOf(orders.keys())
+}
+
+// A commit at `revision` landed: the orders of it and every earlier save are no file's to come.
+export function releaseSnapshotOrders(deck: Deck, revision: number): void {
+	const orders = snapshotOrders.get(deck)
+
+	if (orders === undefined) return
+
+	for (const saved of [...orders.keys()]) if (saved <= revision) orders.delete(saved)
+}
+
+// The entries of `names` neither the written content.xml nor styles.xml names (by its full name, as hrefs give it).
+function unnamed(names: readonly string[], splice: OdpSplice, parts: OdpParts): string[] {
+	const styles = splice.replace.find(change => change.name === "styles.xml")?.bytes ?? parts.sheet.stylesDocument?.bytes
+
+	// Styles written as chunks are not searched: every entry stays.
+	if (styles !== undefined && !(styles instanceof Uint8Array)) return []
+
+	const texts = [decodeUtf8(splice.content ?? parts.content.bytes), styles === undefined ? "" : decodeUtf8(styles)]
+
+	return names.filter(name => !texts.some(text => text.includes(name)))
 }
 
 // A refusal of the whole content stream, naming every part the save changes.
@@ -77,7 +196,7 @@ function pageRefusal(snapshot: OdpSnapshot, index: number, ref: SlideRef, what: 
 async function verifyPages(snapshot: OdpSnapshot, opened: OdpOpen, copiedBytes: boolean): Promise<Refused | undefined> {
 	if (opened.kind === "refused") return wholeRefusal(snapshot, `does not read back: ${opened.detail ?? opened.reason}`)
 
-	const { deck, splice } = snapshot
+	const { splice } = snapshot
 	const written = opened.deck.slides
 
 	if (written.length !== splice.pages.length) return wholeRefusal(snapshot, "reads back with another page count")
@@ -104,18 +223,22 @@ async function verifyPages(snapshot: OdpSnapshot, opened: OdpOpen, copiedBytes: 
 			continue
 		}
 
-		const node = deck.nodes.get(page.ref) as SlideNode
+		const at = snapshot.expected.get(page.ref)
+
+		if (at === undefined) return pageRefusal(snapshot, index, page.ref, "has no state the snapshot saw")
+
+		const node = at.node
 		const read = await opened.parts.slide(ref)
 		const differs = slideDiffers(node, read, name, {
 			at: index,
 			count: written.length,
-			expected: target => deck.slides.indexOf(target),
+			expected: target => snapshot.order.indexOf(target),
 			read: target => written.indexOf(target)
 		})
 
 		if (differs !== undefined) return pageRefusal(snapshot, index, page.ref, `reads back differently: ${differs}`)
 
-		const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
+		const notes = at.notes
 		const readNotes = read.notes === undefined ? undefined : opened.deck.nodes.get(read.notes)
 		const notesDiffers = notesDiffer(notes, readNotes)
 
@@ -262,7 +385,7 @@ export async function writeOdpSnapshot(snapshot: PptxSnapshot, sink: ByteSink, o
 
 			if (entry === undefined || !sameRange(await back.read(entry), 0, entry.uncompressedSize, content, 0, content.length))
 				return wholeRefusal(snapshot, "reads back from the zip differently")
-			if (report.entries - splice.replace.length - splice.add.length !== planned)
+			if (report.entries - (snapshot.changes.replace?.length ?? 0) - (snapshot.changes.add?.length ?? 0) !== planned)
 				return refused("proofFailed", "The zip copied a different number of parts than planned")
 
 			const checked = await verifyPages(snapshot, await openOdp(chunksSource(chunks), { budgets: parts.budgets }), true)

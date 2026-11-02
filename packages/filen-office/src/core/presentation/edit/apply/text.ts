@@ -20,6 +20,8 @@ import type { DeckOp, OpOf, TextOp } from "../ops"
 import { isRefused, type SourceReading } from "./shape"
 import { applyTable, replaceInFrame } from "./table"
 import { remapParagraphs } from "./timing"
+import { odpParagraphTargets } from "../../../anim/odf"
+import { parseXml, type XmlDocument } from "../../../xml/index"
 
 // The text ops on the model, in place. setText puts a whole new body on one shape; its inverse is a setText of the
 // body it had, with the shape's source markup as bytes when that body came from the source (`raw`), so an undo after
@@ -235,9 +237,15 @@ function bodyInverse(target: ShapeRef, shape: ShapeNode, context: ApplyContext):
 }
 
 // The body a setText puts in: the op's own with its refs live, or, when it carries the source bytes of a body whose
-// refs went stale with a rebase, the body read back from those bytes.
-function bodyToPut(node: SlideNode, shape: ShapeNode, op: SetText, context: ApplyContext): TextBody | Refused {
+// refs went stale with a rebase, the body read back from those bytes. When those bytes hold the op's body unchanged
+// (an undo after a save), the shape takes them as its source too, so the writer copies the body as the file had it
+// (PowerPoint's self-closed elements and attributes included) instead of writing it again from the model.
+function bodyToPut(node: SlideNode, shape: ShapeNode, op: SetText, context: ApplyContext): BodyToPut | Refused {
 	const body = cloneModel(op.body)
+	const held = heldBody(node, shape, op, body, context)
+
+	if (held !== undefined) return held
+
 	const bound = rebind(body, shape.text, context)
 
 	if (op.raw === undefined || !isRefused(bound)) return bound
@@ -253,6 +261,81 @@ function bodyToPut(node: SlideNode, shape: ShapeNode, op: SetText, context: Appl
 	const from = read.text !== undefined && digestOf(read.text) === digestOf(body) ? read.text : rebind(body, read.text, context)
 
 	return isRefused(from) ? from : keptInPlace(from, shape, context)
+}
+
+// Whether every paragraph of shape `id` the effects target has an id (xml:id or text:id) in held ODP markup of
+// `count` paragraphs, its text:p and text:h elements read in document order (the reader's paragraph order; markup
+// whose paragraph elements are not exactly its paragraphs, a frame anchored in the text, does not count).
+function heldIdsCover(
+	raw: Uint8Array,
+	count: number,
+	targets: readonly { readonly shape: number; readonly paragraph: number }[],
+	id: number
+): boolean {
+	const own = targets.filter(target => target.shape === id)
+
+	if (own.length === 0) return true
+
+	let document: XmlDocument
+
+	try {
+		document = parseXml(raw)
+	} catch {
+		return false
+	}
+
+	const paragraphs: boolean[] = []
+	const stack = [document.documentElement()]
+
+	// Depth first, children in order: pushed last to first.
+	for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+		if (document.prefix(node) === "text" && (document.localName(node) === "p" || document.localName(node) === "h"))
+			paragraphs.push(document.attribute(node, "xml:id") !== undefined || document.attribute(node, "text:id") !== undefined)
+
+		const from = stack.length
+
+		for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) stack.push(child)
+
+		// In place, last to first (no spread: a paragraph may hold more children than a call takes arguments).
+		for (let low = from, high = stack.length - 1; low < high; low++, high--) {
+			const kept = stack[low] as number
+
+			stack[low] = stack[high] as number
+			stack[high] = kept
+		}
+	}
+
+	return paragraphs.length === count && own.every(target => paragraphs[target.paragraph] === true)
+}
+
+interface HeldBody {
+	readonly body: TextBody
+	readonly src: SourceRef
+}
+
+type BodyToPut = TextBody | HeldBody
+
+// The op's held markup read back, when the shape's live source is other bytes and the markup holds the op's body as it
+// is; undefined otherwise (nothing held, still live, unreadable or another body: the model is written). Both writers
+// write a shape from held markup (pptx/write/emit/shape.ts rawShape; the ODP splice compares it with what the held
+// markup reads as), so an undo after a save gives the body back as the file had it. An ODP body whose paragraphs
+// effects target takes held markup only when it carries an id on each of them: the effects name their paragraphs by id,
+// and a save gives the ones without one ids that markup held from before it does not have (the body is then written
+// from the model, which gets them again).
+function heldBody(node: SlideNode, shape: ShapeNode, op: SetText, body: TextBody, context: ApplyContext): HeldBody | undefined {
+	if (op.raw === undefined || (shape.src?.format !== "pptx" && shape.src?.format !== "odp")) return undefined
+
+	const live = context.sourceBytes(shape.src)
+
+	if (!isRefused(live) && sameBytes(live, op.raw)) return undefined
+
+	const read = reading(context)?.readShape(node, op.raw)
+
+	if (read === undefined || isRefused(read) || read.src === undefined || read.text === undefined) return undefined
+	if (shape.src.format === "odp" && !heldIdsCover(op.raw, read.text.paragraphs.length, odpParagraphTargets(node.timing), shape.id))
+		return undefined
+
+	return digestOf(read.text) === digestOf(body) ? { body: read.text, src: read.src } : undefined
 }
 
 // Content kept as source that was read back from held markup, bound to the same content in the shape's live source
@@ -361,13 +444,16 @@ function setText(deck: Deck, op: SetText, context: ApplyContext): ApplyResult<Se
 
 	if (isRefused(back)) return back
 
-	const body = bodyToPut(found.node, found.shape, op, context)
+	const put = bodyToPut(found.node, found.shape, op, context)
 
-	if (isRefused(body)) return body
+	if (isRefused(put)) return put
 
 	const before = found.shape.text
 
-	putBody(found.node, found.shape, body)
+	if ("src" in put) {
+		found.shape.src = put.src
+		putBody(found.node, found.shape, put.body)
+	} else putBody(found.node, found.shape, put)
 
 	// By-paragraph effects move with their paragraphs (apply/timing.ts); the inverse puts the timing back after the body.
 	const timing = remapParagraphs(deck.format, found.node, op.target.id, before, found.shape.text, context)

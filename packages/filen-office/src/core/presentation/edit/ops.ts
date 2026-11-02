@@ -485,6 +485,9 @@ export type MotionPathOp = {
 	readonly node: number
 	// ECMA §19.5.4 path syntax, slide-relative.
 	readonly path: string
+	// §19.5.4 ptsTypes: one letter per point of `path` (A auto, F corner, T straight, S smooth; upper case when a
+	// line follows the point, lower case when a curve does).
+	readonly ptsTypes?: string
 	readonly origin?: "parent" | "layout"
 	readonly pathEditMode?: "relative" | "fixed"
 	readonly rAng?: number
@@ -582,6 +585,20 @@ export type SmartArtOp =
 	  }
 	// The diagram's parts as they were (the inverse of any of the above).
 	| { readonly family: "smartart"; readonly kind: "restore"; readonly target: ShapeRef; readonly parts: readonly RawPart[] }
+	// A picture into a picture placeholder of a diagram (a layout node whose dgm:shape has blipPhldr): `node` the dgm:pt
+	// modelId the placeholder belongs to, `placeholder` the layout node's name (the presentation point's presName).
+	// Inserts or replaces the picture; `crop` (srcRect) fits it to the placeholder; `inserted` is the image's registry
+	// id, assigned at apply.
+	| {
+			readonly family: "smartart"
+			readonly kind: "setPicture"
+			readonly target: ShapeRef
+			readonly node: string
+			readonly placeholder: string
+			readonly image: InsertedImage
+			readonly crop?: EdgeFractions
+			readonly inserted?: number
+	  }
 
 // One pen or highlighter stroke: x, y pairs in slide EMU.
 export interface InkStroke {

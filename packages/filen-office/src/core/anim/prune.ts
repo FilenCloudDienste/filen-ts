@@ -30,7 +30,9 @@ export function inScope(raw: Uint8Array, scope: ReadonlyMap<string, string>): Ui
 	}
 
 	const head = decodeUtf8(raw, 0, end)
-	const kept = head.replace(/\s+xmlns(?::([\w.-]+))?="([^"]*)"/gu, (whole, prefix: string | undefined, value: string) =>
+	// A declaration's whitespace starts where a run of it does (the lookbehind): tried inside every run, the scan was
+	// quadratic in it.
+	const kept = head.replace(/(?<!\s)\s+xmlns(?::([\w.-]+))?="([^"]*)"/gu, (whole, prefix: string | undefined, value: string) =>
 		scope.get(prefix ?? "") === value ? "" : whole
 	)
 

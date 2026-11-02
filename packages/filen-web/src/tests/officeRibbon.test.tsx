@@ -275,7 +275,7 @@ describe("OfficeCommandBar", () => {
 		render(
 			<div
 				onKeyDown={event => {
-					onCommandBarF6(event, () => {
+					onCommandBarF6(event, event.currentTarget, () => {
 						document.getElementById("content")?.focus()
 					})
 				}}

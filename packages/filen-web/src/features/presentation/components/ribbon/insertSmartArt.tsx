@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { useTranslation } from "react-i18next"
 import { NetworkIcon } from "lucide-react"
+import { toast } from "sonner"
 import { cn } from "@filen/shared"
-import type { DeckOp, ShapeNode, ShapeRef, SlideRef, SmartArtDefRef, SmartArtOp } from "@filen/office/core/presentation"
+import type { DeckOp, InsertedImage, ShapeNode, ShapeRef, SlideRef, SmartArtDefRef, SmartArtOp } from "@filen/office/core/presentation"
 import {
 	SMARTART_LAYOUTS,
 	type SmartArtCategory,
@@ -18,9 +19,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { DocxChoiceField } from "@/features/preview/components/docxFields"
+import { fileSource } from "@/features/preview/lib/docxImages"
+import { pictureRefusalKey } from "@/features/preview/lib/docxImages.logic"
+import { preparePresentationPicture } from "@/features/presentation/components/ribbon/insertObjects"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import type { PreviewKey } from "@/lib/i18n"
+import { log } from "@/lib/log"
 import { useLatestRef } from "@/lib/useLatestRef"
 
 // Insert ▸ SmartArt: a gallery of our own layouts (core/smartart's registry) by category, each previewed by the worker
@@ -372,6 +378,105 @@ export function useSmartArtDiagram(editor: PresentationRibbonEditor | undefined)
 	return { target, shape, pane, info: sameShape(pane.target, target) ? pane.info : undefined }
 }
 
+// ---- pictures in placeholders --------------------------------------------------------------------------------------
+
+export type SmartArtPicturePlaceholder = NonNullable<SmartArtInfo["pictures"]>[number]
+
+const SMARTART_PICTURE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,.svg,.webp"
+const CROP_UNITS = 100_000
+
+// The srcRect that fills a placeholder of w × h with an image of width × height, cut evenly from the sides it
+// overflows (as PowerPoint fills a picture placeholder); undefined when the shapes match.
+export function coverCrop(
+	image: { readonly width: number; readonly height: number },
+	box: { readonly w: number; readonly h: number }
+): { l: number; t: number; r: number; b: number } | undefined {
+	if (!(image.width > 0 && image.height > 0 && box.w > 0 && box.h > 0)) return undefined
+
+	const imageRatio = image.width / image.height
+	const boxRatio = box.w / box.h
+
+	if (Math.abs(imageRatio - boxRatio) < 1e-3) return undefined
+
+	const cut = (1 - Math.min(imageRatio, boxRatio) / Math.max(imageRatio, boxRatio)) / 2
+	const edge = Math.round(cut * CROP_UNITS)
+
+	return imageRatio > boxRatio ? { l: edge, t: 0, r: edge, b: 0 } : { l: 0, t: edge, r: 0, b: edge }
+}
+
+export function setPictureOp(target: ShapeRef, placeholder: SmartArtPicturePlaceholder, image: InsertedImage): DeckOp {
+	const crop = coverCrop(image, placeholder)
+
+	return {
+		family: "smartart",
+		kind: "setPicture",
+		target,
+		node: placeholder.node,
+		placeholder: placeholder.placeholder,
+		image,
+		...(crop === undefined ? {} : { crop })
+	}
+}
+
+// A picture from this device into a placeholder: the file chosen, made what a slide holds (the presentation's
+// picture pipeline), then one setPicture op. A refused picture is said in a toast.
+export function useSmartArtPicture(editor: PresentationRibbonEditor | undefined): {
+	readonly pick: (target: ShapeRef, placeholder: SmartArtPicturePlaceholder) => void
+} {
+	const { t } = useTranslation("preview")
+	const running = useRef(new Set<AbortController>())
+
+	useEffect(() => {
+		const all = running.current
+
+		return () => {
+			for (const controller of all) controller.abort()
+		}
+	}, [])
+
+	return {
+		pick: (target, placeholder) => {
+			const input = document.createElement("input")
+
+			input.type = "file"
+			input.accept = SMARTART_PICTURE_ACCEPT
+			input.addEventListener(
+				"change",
+				() => {
+					const file = input.files?.[0]
+
+					if (file === undefined || editor === undefined) return
+
+					const controller = new AbortController()
+
+					running.current.add(controller)
+					void preparePresentationPicture(fileSource(file), controller.signal)
+						.then(prepared => {
+							if (!prepared.ok) {
+								toast.error(t(pictureRefusalKey(prepared.refusal)))
+
+								return
+							}
+
+							return editor.command(setPictureOp(target, placeholder, prepared.image))
+						})
+						.catch((error: unknown) => {
+							if (controller.signal.aborted) return
+
+							log.warn("pptx", "picture not put in the SmartArt placeholder", { error })
+							toast.error(t(pictureRefusalKey("failed")))
+						})
+						.finally(() => {
+							running.current.delete(controller)
+						})
+				},
+				{ once: true }
+			)
+			input.click()
+		}
+	}
+}
+
 // ---- previews ----------------------------------------------------------------------------------------------------
 
 export interface SmartArtPreviewRequest {
@@ -648,7 +753,7 @@ function SmartArtGalleryDialog({
 function InsertSmartArtControl({ editor }: { editor: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
-	const [open, setOpen] = useState(false)
+	const dialog = useRibbonDialog(editor)
 	const slide = editor.render?.ref ?? scope?.editor.currentRef
 	const render = editor.render ?? (slide === undefined ? undefined : scope?.editor.document.renders.get(slide))
 
@@ -686,19 +791,21 @@ function InsertSmartArtControl({ editor }: { editor: PresentationRibbonEditor })
 				icon={<NetworkIcon />}
 				disabled={slide === undefined || SMARTART_LAYOUTS.length === 0}
 				onClick={() => {
-					setOpen(true)
+					if (slide === undefined) return
+
+					const before = slideShapes(render).map(shape => shape.id)
+
+					dialog.open((live, close) => (
+						<SmartArtGalleryDialog
+							editor={live}
+							slide={slide}
+							before={before}
+							onClose={close}
+						/>
+					))
 				}}
 			/>
-			{open && slide !== undefined ? (
-				<SmartArtGalleryDialog
-					editor={editor}
-					slide={slide}
-					before={slideShapes(render).map(shape => shape.id)}
-					onClose={() => {
-						setOpen(false)
-					}}
-				/>
-			) : null}
+			{dialog.view}
 		</>
 	)
 }

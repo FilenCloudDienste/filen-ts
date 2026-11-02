@@ -35,6 +35,9 @@ export interface LayoutNode {
 	alg: Algorithm
 	shape: ShapeDef | undefined
 	text: DataPoint[]
+	// The depth the text's levels count from: the point a presOf walks the descendants of (its "ch desOrSelf" child
+	// shows at level 0), else the node's own.
+	textBase: number
 	constraints: Constraint[]
 	rules: Rule[]
 	readonly vars: Map<string, string>
@@ -257,6 +260,21 @@ export function selectPoints(model: DataModel, point: DataPoint, steps: readonly
 	return steps.length === 0 ? [] : current
 }
 
+// The depth a presOf's text levels count from: the points its last step walks the descendants of ("des",
+// "desOrSelf"), so chart3's "ch desOrSelf" shows the child at level 0 and bList2's "des" the descendants at level 1;
+// any other walk counts from the node's own point.
+function textBase(model: DataModel, point: DataPoint, steps: readonly IteratorStep[], work?: ExpansionWork): number {
+	const last = steps[steps.length - 1]
+
+	if (steps.length < 2 || (last?.axis !== "des" && last?.axis !== "desOrSelf")) return point.depth
+
+	let base = Infinity
+
+	for (const anchor of selectPoints(model, point, steps.slice(0, -1), work)) base = Math.min(base, anchor.depth)
+
+	return Number.isFinite(base) ? base : point.depth
+}
+
 function treeHeight(point: DataPoint, depth: number, limit: number): number {
 	if (depth > limit) return depth
 
@@ -413,6 +431,7 @@ class Expander {
 			alg: { type: "sp", params: new Map() },
 			shape: undefined,
 			text: [],
+			textBase: point.depth,
 			constraints: [],
 			rules: [],
 			vars: new Map(),
@@ -448,6 +467,7 @@ class Expander {
 		if (body.shape !== undefined) node.shape = body.shape
 		if (body.presOf !== undefined) {
 			node.text = selectPoints(this.model, point, body.presOf, this.work)
+			node.textBase = textBase(this.model, point, body.presOf, this.work)
 			PRESENTED.add(node)
 		}
 		if (body.constraints !== undefined) for (const constraint of body.constraints) node.constraints.push(constraint)

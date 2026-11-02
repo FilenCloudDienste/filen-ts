@@ -19,6 +19,8 @@ import { layerBoxes, layerIndices, layerPlanOf, layerTree } from "./layers"
 import { buildStageSlide, type ShowMediaHandle, type ShowMediaMount, type ShowSoundHandle, type StageSlide } from "./stage"
 import { advanceAt, ShowNavigator, type ShowOptions, type ShowPosition, type ShowSlide } from "./timeline"
 import { transitionDurationMs, transitionStyles } from "./transitions"
+import { transitions3d } from "./transitions3d"
+import { webglTransitions } from "./webgl/index"
 
 // The slide show player: a ShowController over the slides' timegraphs and the worker's layer bitmaps. Each slide is
 // prepared before it is shown (its timing compiled here from the worker's source, its layers drawn by the worker at the
@@ -48,6 +50,84 @@ export interface PlayerProps {
 	}
 }
 
+// A renderer of the transitions the 2D stage does not draw (3D, particles, morph). The worker sends the slide's own
+// transition (TimegraphSource.authored) beside the one the stage draws for it (its mc:Fallback); a renderer that
+// draws the authored kind is asked to run it, and when it declines (or stops mid-run) the fallback plays.
+export interface ShowTransitionContext {
+	readonly document: Document
+	// The stage host: the slide boxes live in it, at slide px, scaled with it.
+	readonly host: HTMLElement
+	readonly outgoing: HTMLElement | undefined
+	readonly incoming: HTMLElement
+	// The authored transition.
+	readonly transition: Transition
+	// Slide px.
+	readonly slide: { readonly w: number; readonly h: number }
+	// Device px per slide px.
+	readonly pixelRatio: number
+	// Bitmap bytes the run may hold beside the slides on stage (their own and their preparations' counted).
+	readonly budgetBytes: number
+	// What the renderer prepared for this pair of slides, when it prepared against this outgoing slide.
+	readonly prepared?: ShowTransitionPrepared
+	readonly outgoingSlide?: SlideRef
+	readonly incomingSlide: SlideRef
+}
+
+export interface ShowTransitionRun {
+	// Draws progress 0..1; false when it can draw no more (the player plays the fallback from there).
+	frame(progress: number): boolean
+	// Leaves both slide boxes as they were and frees everything the run held.
+	finish(): void
+}
+
+export interface ShowTransitionPrepared {
+	// The outgoing slide it was prepared against.
+	readonly outgoing: SlideRef | undefined
+	// Bytes held until release.
+	readonly bytes: number
+	release(): void
+}
+
+export interface ShowTransitionRequest {
+	readonly transition: Transition
+	readonly session: PresentationSessionApi | undefined
+	readonly outgoing: SlideRef | undefined
+	readonly outgoingSource: TimegraphSource | undefined
+	readonly incoming: SlideRef
+	readonly incomingSource: TimegraphSource | undefined
+	// The stage width (CSS px) layers are drawn for, and the device pixel ratio.
+	readonly widthPx: number
+	readonly dpr: number
+	readonly signal: { readonly aborted: boolean }
+}
+
+export interface ShowTransitionRenderer {
+	draws(kind: string, namespace: Transition["namespace"]): boolean
+	// Work done while the slide is prepared (programs compiled, objects drawn), so the run's start does none of it.
+	prepare?(request: ShowTransitionRequest): Promise<ShowTransitionPrepared | undefined>
+	// undefined: the player plays the file's mc:Fallback.
+	start(context: ShowTransitionContext): ShowTransitionRun | undefined
+	// Called once per show with the transition kinds the deck's slides use, at the first slide's preparation (before
+	// it is shown): set-up a renderer would otherwise do while a slide animates. Released when the show ends.
+	warm?(document: Document, kinds: readonly string[]): { release(): void } | undefined
+}
+
+const TRANSITION_RENDERERS: readonly ShowTransitionRenderer[] = [transitions3d, webglTransitions]
+
+function rendererOf(transition: Transition | undefined): ShowTransitionRenderer | undefined {
+	if (transition === undefined) return undefined
+
+	return TRANSITION_RENDERERS.find(renderer => renderer.draws(transition.kind, transition.namespace))
+}
+
+// A renderer's preparation for a slide, held with the slide.
+interface TransitionPreparation {
+	readonly renderer: ShowTransitionRenderer
+	readonly signal: { aborted: boolean }
+	readonly promise: Promise<ShowTransitionPrepared | undefined>
+	result: ShowTransitionPrepared | undefined
+}
+
 // What the player tells its React shell.
 export interface PlayerView {
 	slide(index: number): void
@@ -64,6 +144,10 @@ interface Prepared {
 	readonly source: TimegraphSource | undefined
 	readonly boxes: Float64Array
 	readonly transition: Transition | undefined
+	// The slide's own transition when `transition` is its fallback (a renderer may draw it).
+	readonly authored: Transition | undefined
+	// A renderer's preparation of `authored` (against the slide on stage when this one was prepared).
+	preparation: TransitionPreparation | undefined
 	// The sound the slide's own transition plays as it enters (also when the player draws its fallback).
 	readonly sound: Transition["sound"]
 	readonly triggers: ReadonlySet<number>
@@ -99,9 +183,12 @@ interface Playing {
 interface TransitionRun {
 	readonly from: Prepared | undefined
 	readonly to: Prepared
+	// The fallback the stage draws (from the start, or from where a renderer stopped).
 	readonly transition: Transition
 	readonly start: number
 	readonly duration: number
+	// The renderer's run of the authored transition, while it draws.
+	custom: ShowTransitionRun | undefined
 }
 
 const BUDGETS = DEFAULT_PRESENTATION_BUDGETS.timing
@@ -121,7 +208,9 @@ const TRANSITION_GRACE_MS = 100
 const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown", "PageDown", " ", "Enter", "n", "N"])
 const PREV_KEYS = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "p", "P"])
 
-type Listeners = { [T in ShowEventType]?: Set<(event: Extract<ShowEvent, { type: T }>) => void> }
+type Listeners = {
+	[T in ShowEventType]?: Set<(event: Extract<ShowEvent, { type: T }>) => void>
+}
 
 function modifierOf(event: { readonly metaKey: boolean; readonly ctrlKey: boolean }): boolean {
 	const platform: unknown = Reflect.get(Reflect.get(globalThis, "navigator") ?? {}, "platform")
@@ -148,6 +237,8 @@ export class ShowPlayer implements ShowController {
 	private screenState: ShowScreen = "slide"
 	private ended = false
 	private disposed = false
+	// What the renderers set up for the deck at show entry (undefined: not yet asked).
+	private warmed: { release(): void }[] | undefined
 	private readonly listeners: Listeners = {}
 	private raf = 0
 	private wake: ReturnType<typeof setTimeout> | undefined
@@ -318,7 +409,11 @@ export class ShowPlayer implements ShowController {
 		if (playing?.instance !== undefined && playing.step > 0) {
 			playing.instance.fire({ kind: "prev" }, this.now() - playing.clock)
 			playing.step = stepOf(playing.instance)
-			this.emit({ type: "step", index: playing.prepared.index, step: playing.step })
+			this.emit({
+				type: "step",
+				index: playing.prepared.index,
+				step: playing.step
+			})
 			this.kick()
 
 			return
@@ -477,6 +572,15 @@ export class ShowPlayer implements ShowController {
 
 		if (generation !== this.generation || this.disposed || this.ended) return
 
+		const authored = how.transition && this.playing !== undefined ? prepared?.authored : undefined
+		const renderer = rendererOf(authored)
+
+		if (prepared !== undefined && renderer !== undefined) {
+			await this.prepareTransition(prepared, renderer, this.playing?.prepared)
+
+			if (generation !== this.generation || this.disposed || this.ended) return
+		}
+
 		this.nav.go(position)
 		this.setScreen("slide")
 
@@ -533,13 +637,24 @@ export class ShowPlayer implements ShowController {
 		// Only the slides on stage stay while a transition plays; the next one is prepared once the timeline begins.
 		this.trim(new Set([prepared.index, ...(from === undefined ? [] : [from.prepared.index])]))
 
-		if (transition !== undefined && transitionDurationMs(transition) > 0) {
+		// The authored transition drawn by its renderer, else the fallback (the stage's own durations for each).
+		const custom =
+			transition === undefined || authored === undefined ? undefined : this.startCustom(authored, renderer, from?.prepared, prepared)
+		const duration =
+			custom !== undefined && authored !== undefined
+				? transitionDurationMs(authored)
+				: transition === undefined
+					? 0
+					: transitionDurationMs(transition)
+
+		if (transition !== undefined && duration > 0) {
 			const run: TransitionRun = {
 				from: from?.prepared,
 				to: prepared,
 				transition,
 				start: now,
-				duration: transitionDurationMs(transition)
+				duration,
+				custom
 			}
 
 			this.run = run
@@ -551,6 +666,7 @@ export class ShowPlayer implements ShowController {
 				if (this.run === run) this.finishTransition(this.now())
 			}, run.duration + TRANSITION_GRACE_MS)
 		} else {
+			custom?.finish()
 			this.detach(from?.prepared, prepared)
 			this.begin(playing, now, how.atEnd === true)
 		}
@@ -571,6 +687,117 @@ export class ShowPlayer implements ShowController {
 		this.kick()
 	}
 
+	// A renderer's preparation of the authored transition for the pair (outgoing → prepared), made again when the one
+	// held was prepared against another outgoing slide (a jump, a custom show).
+	private async prepareTransition(prepared: Prepared, renderer: ShowTransitionRenderer, outgoing: Prepared | undefined): Promise<void> {
+		if (renderer.prepare === undefined || prepared.authored === undefined) return
+
+		const held = prepared.preparation
+
+		if (held !== undefined && held.renderer === renderer) {
+			const result = await held.promise
+
+			if (prepared.preparation !== held) return
+			if (result === undefined || result.outgoing === outgoing?.ref) return
+		}
+
+		this.releasePreparation(prepared)
+
+		const preparation = this.requestPreparation(prepared, renderer, outgoing)
+
+		if (preparation !== undefined) await preparation.promise
+	}
+
+	private requestPreparation(
+		prepared: Prepared,
+		renderer: ShowTransitionRenderer,
+		outgoing: Prepared | undefined
+	): TransitionPreparation | undefined {
+		if (renderer.prepare === undefined || prepared.authored === undefined) return undefined
+
+		const signal = { aborted: false }
+		const preparation: TransitionPreparation = {
+			renderer,
+			signal,
+			result: undefined,
+			promise: renderer
+				.prepare({
+					transition: prepared.authored,
+					session: this.props.session,
+					outgoing: outgoing?.ref,
+					outgoingSource: outgoing?.source,
+					incoming: prepared.ref,
+					incomingSource: prepared.source,
+					widthPx: prepared.width,
+					dpr: this.dpr,
+					signal
+				})
+				.catch(() => undefined)
+				.then(result => {
+					// Released (or replaced) while it was made: freed at once.
+					if (signal.aborted || prepared.preparation !== preparation) {
+						result?.release()
+
+						return undefined
+					}
+
+					preparation.result = result
+					this.fitBudget()
+
+					return result
+				})
+		}
+
+		prepared.preparation = preparation
+
+		return preparation
+	}
+
+	private releasePreparation(prepared: Prepared): void {
+		const preparation = prepared.preparation
+
+		if (preparation === undefined) return
+
+		prepared.preparation = undefined
+		preparation.signal.aborted = true
+		preparation.result?.release()
+	}
+
+	private startCustom(
+		authored: Transition,
+		renderer: ShowTransitionRenderer | undefined,
+		from: Prepared | undefined,
+		to: Prepared
+	): ShowTransitionRun | undefined {
+		if (renderer === undefined) return undefined
+
+		const size = {
+			w: this.props.size.cx / EMU_PER_PX,
+			h: this.props.size.cy / EMU_PER_PX
+		}
+		const held = to.preparation?.renderer === renderer ? to.preparation.result : undefined
+		const prepared = held !== undefined && held.outgoing === from?.ref ? held : undefined
+		const pixelRatio = (this.stageWidth > 0 ? this.stageWidth / size.w : 1) * this.dpr
+
+		try {
+			return renderer.start({
+				document: this.document,
+				host: this.host,
+				outgoing: from?.stage.element,
+				incoming: to.stage.element,
+				transition: authored,
+				slide: size,
+				pixelRatio,
+				budgetBytes: Math.max(0, SHOW_HELD_BYTES - this.countBytes()),
+				...(prepared === undefined ? {} : { prepared }),
+				...(from === undefined ? {} : { outgoingSlide: from.ref }),
+				incomingSlide: to.ref
+			})
+		} catch {
+			return undefined
+		}
+	}
+
 	private playSound(sound: Transition["sound"]): void {
 		if (sound === undefined) return
 
@@ -580,7 +807,10 @@ export class ShowPlayer implements ShowController {
 		const session = this.props.session
 
 		if (sound.kind === "embedded" && session !== undefined)
-			this.sounding = this.props.media?.sound?.(session, { part: sound.part, loop: sound.loop })
+			this.sounding = this.props.media?.sound?.(session, {
+				part: sound.part,
+				loop: sound.loop
+			})
 	}
 
 	// The slide's timeline begins (after its transition): its timed advance is armed, the next slide prepared.
@@ -668,7 +898,10 @@ export class ShowPlayer implements ShowController {
 		if (slide === undefined) return undefined
 
 		const session = this.props.session
-		const size = { w: this.props.size.cx / EMU_PER_PX, h: this.props.size.cy / EMU_PER_PX }
+		const size = {
+			w: this.props.size.cx / EMU_PER_PX,
+			h: this.props.size.cy / EMU_PER_PX
+		}
 		let graph: CompiledTimegraph | undefined
 		let source: TimegraphSource | undefined
 
@@ -679,6 +912,12 @@ export class ShowPlayer implements ShowController {
 				if (compiled.source !== undefined) {
 					graph = compileSource(slide.ref, compiled.source, BUDGETS)
 					source = compiled.source
+
+					const kinds = compiled.source.transitionKinds
+
+					if (kinds !== undefined && this.warmed === undefined && !this.disposed) {
+						this.warmed = TRANSITION_RENDERERS.flatMap(renderer => renderer.warm?.(this.document, kinds) ?? [])
+					}
 				}
 			} catch (error) {
 				// A timing over its budgets plays without animation; anything else (no timing support) silently so.
@@ -728,6 +967,8 @@ export class ShowPlayer implements ShowController {
 			source: fallback ? undefined : source,
 			boxes: source === undefined ? new Float64Array(0) : layerBoxes(source),
 			transition: source?.transition,
+			authored: source?.authored,
+			preparation: undefined,
 			sound: (source?.authored ?? source?.transition)?.sound,
 			triggers: new Set(graph?.interactive.map(trigger => trigger.trigger.id) ?? []),
 			layerOf,
@@ -748,6 +989,11 @@ export class ShowPlayer implements ShowController {
 
 		this.place(prepared)
 
+		// Prepared against the slide on stage now (the likely outgoing one); show() prepares again for another.
+		const renderer = rendererOf(prepared.authored)
+
+		if (renderer !== undefined) this.requestPreparation(prepared, renderer, this.playing?.prepared)
+
 		return prepared
 	}
 
@@ -762,7 +1008,11 @@ export class ShowPlayer implements ShowController {
 		if (prepared.fallback) {
 			prepared.painted?.release()
 
-			const painted = this.props.painter(render, { document: this.document, session: this.props.session, signal: { aborted: false } })
+			const painted = this.props.painter(render, {
+				document: this.document,
+				session: this.props.session,
+				signal: { aborted: false }
+			})
 
 			prepared.painted = painted
 			prepared.stage.element.replaceChildren(painted.root)
@@ -809,7 +1059,12 @@ export class ShowPlayer implements ShowController {
 	}
 
 	private trigger(layer: SlideLayer, event: MouseEvent): ActionTrigger {
-		return { via: "click", mode: "show", modifier: modifierOf(event), shape: layer.shape }
+		return {
+			via: "click",
+			mode: "show",
+			modifier: modifierOf(event),
+			shape: layer.shape
+		}
 	}
 
 	private fire(prepared: Prepared, event: TimeEvent): void {
@@ -872,6 +1127,7 @@ export class ShowPlayer implements ShowController {
 	}
 
 	private releasePrepared(prepared: Prepared): void {
+		this.releasePreparation(prepared)
 		prepared.painted?.release()
 		prepared.stage.release()
 	}
@@ -881,11 +1137,12 @@ export class ShowPlayer implements ShowController {
 	private countBytes(): number {
 		let bytes = 0
 
-		for (const prepared of this.ready.values()) bytes += prepared.stage.bytes
+		for (const prepared of this.ready.values()) bytes += prepared.stage.bytes + (prepared.preparation?.result?.bytes ?? 0)
 
 		const outgoing = this.run?.from
 
-		if (outgoing !== undefined && this.ready.get(outgoing.index) !== outgoing) bytes += outgoing.stage.bytes
+		if (outgoing !== undefined && this.ready.get(outgoing.index) !== outgoing)
+			bytes += outgoing.stage.bytes + (outgoing.preparation?.result?.bytes ?? 0)
 
 		this.host.dataset["foShowBytes"] = String(bytes)
 
@@ -1046,7 +1303,10 @@ export class ShowPlayer implements ShowController {
 			if (shape < 0 || playing.scaled.has(shape)) continue
 
 			playing.scaled.add(shape)
-			this.notice({ kind: "fontScale", shape: { slide: playing.prepared.ref, id: shape } })
+			this.notice({
+				kind: "fontScale",
+				shape: { slide: playing.prepared.ref, id: shape }
+			})
 		}
 	}
 
@@ -1084,7 +1344,18 @@ export class ShowPlayer implements ShowController {
 			return this.playing !== undefined
 		}
 
-		const size = { w: this.props.size.cx / EMU_PER_PX, h: this.props.size.cy / EMU_PER_PX }
+		if (run.custom !== undefined) {
+			if (run.custom.frame(p)) return true
+
+			// It can draw no more (a lost context): the fallback plays the rest.
+			run.custom.finish()
+			run.custom = undefined
+		}
+
+		const size = {
+			w: this.props.size.cx / EMU_PER_PX,
+			h: this.props.size.cy / EMU_PER_PX
+		}
 		const styles = transitionStyles(run.transition, p, size)
 		const incoming = run.to.stage.element.style
 		const outgoing = run.from?.stage.element.style
@@ -1113,6 +1384,8 @@ export class ShowPlayer implements ShowController {
 
 		this.run = undefined
 		this.clearTransitionEnd()
+		run.custom?.finish()
+		run.custom = undefined
 
 		const style = run.to.stage.element.style
 
@@ -1193,6 +1466,11 @@ export class ShowPlayer implements ShowController {
 		this.stop()
 		this.disposed = true
 		this.generation++
+		this.run?.custom?.finish()
+
+		for (const warmed of this.warmed ?? []) warmed.release()
+
+		this.warmed = []
 
 		for (const prepared of this.ready.values()) this.releasePrepared(prepared)
 
@@ -1204,11 +1482,23 @@ export class ShowPlayer implements ShowController {
 	}
 
 	// The slide on stage and its step (tests and the presenter's mirror).
-	state(): { readonly index: number; readonly step: number; readonly steps: number; readonly screen: ShowScreen } | undefined {
+	state():
+		| {
+				readonly index: number
+				readonly step: number
+				readonly steps: number
+				readonly screen: ShowScreen
+		  }
+		| undefined {
 		const playing = this.playing
 
 		return playing === undefined
 			? undefined
-			: { index: playing.prepared.index, step: playing.step, steps: playing.steps, screen: this.screenState }
+			: {
+					index: playing.prepared.index,
+					step: playing.step,
+					steps: playing.steps,
+					screen: this.screenState
+				}
 	}
 }

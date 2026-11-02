@@ -58,6 +58,24 @@ describe("ODT frames", () => {
 	})
 })
 
+describe("a custom shape its type draws", () => {
+	it("is the DrawingML preset it names, a trapezoid turned the way ODF draws it and its inset measured on the width", async () => {
+		const shape = (type: string, extra = ""): string =>
+			`<draw:custom-shape text:anchor-type="paragraph" svg:width="4cm" svg:height="2cm"><draw:enhanced-geometry svg:viewBox="0 0 21600 21600" draw:type="${type}"${extra}/></draw:custom-shape>`
+		const xml = await documentXml({
+			body: `<text:p>${shape("trapezoid")}${shape("trapezoid", ' draw:mirror-vertical="true"')}${shape("right-arrow", ' draw:mirror-horizontal="true"')}</text:p>`
+		})
+		const shapes = xml.match(/<wps:spPr>.*?<\/a:prstGeom>/gu) ?? []
+
+		// ODF's default 5400 of 21600 across a 2:1 box is 50000 of the shorter side.
+		expect(shapes[0]).toMatch(
+			/<a:xfrm flipV="1">.*<a:prstGeom prst="trapezoid"><a:avLst><a:gd name="adj" fmla="val 50000"\/><\/a:avLst>/u
+		)
+		expect(shapes[1]).toMatch(/<a:xfrm><.*<a:prstGeom prst="trapezoid">/u)
+		expect(shapes[2]).toMatch(/<a:xfrm flipH="1">.*<a:prstGeom prst="rightArrow">/u)
+	})
+})
+
 describe("Fontwork", () => {
 	it("shows a text-path shape's text without drawing its path", async () => {
 		const xml = await documentXml({

@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { NodeKind, Namespaces, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../xml/index"
 
 // Tracked changes inside equations, as Word records them (ISO/IEC 29500-1 §17.13.5, §22.1.2.23): math runs and
@@ -455,7 +456,7 @@ function resolveChildren(children: readonly XChild[], select: (mark: XElement) =
 			if (!select(child)) {
 				if (inner.length > 0) out.push(element(child.name, child.attrs, inner))
 			} else if ((wrapper.kind === "ins") === accept) {
-				out.push(...inner)
+				appendAll(out, inner)
 			}
 
 			continue
@@ -1041,7 +1042,7 @@ function diffArgument(before: readonly XChild[], after: readonly XChild[], recor
 	const deleted = (unit: Unit): void => {
 		if (carry !== undefined) {
 			// Deleted content inside an object taken out stays deleted where it was.
-			if (unit.kind === "object") pieces.push(...carry.dead(unit))
+			if (unit.kind === "object") appendAll(pieces, carry.dead(unit))
 
 			return
 		}
@@ -1124,7 +1125,7 @@ function unitsInside(object: Unit, author: string): Unit[] {
 
 			out.push(placed)
 
-			if (placed.kind === "object") out.push(...unitsInside(placed, author))
+			if (placed.kind === "object") appendAll(out, unitsInside(placed, author))
 		}
 	}
 
@@ -1142,7 +1143,7 @@ function deadInside(object: XElement, chain: Chain, author: string, moved: Reado
 
 		for (const unit of inner) {
 			if (unit.live) {
-				if (unit.kind === "object" && !moved.has(unit.node)) pieces.push(...deadInside(unit.node, unit.chain, author, moved))
+				if (unit.kind === "object" && !moved.has(unit.node)) appendAll(pieces, deadInside(unit.node, unit.chain, author, moved))
 			} else if (unit.kind === "char") {
 				pieces.push({ text: unit.text, run: unit.node, chain: unit.chain })
 			} else if (unit.kind === "object") {
@@ -1171,7 +1172,7 @@ function carrying(
 
 		pool.push(unit)
 
-		if (unit.kind === "object") pool.push(...unitsInside(unit, recording.author))
+		if (unit.kind === "object") appendAll(pool, unitsInside(unit, recording.author))
 	})
 
 	// Units of the pool taken, and objects of it something inside was taken from (not taken whole).

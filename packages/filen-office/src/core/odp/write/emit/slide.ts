@@ -1,7 +1,7 @@
 import type { EmitPiece, EmitRequest } from "../../../pptx/write/types"
 import { digestOf } from "../../../presentation/edit/changes"
 import { refused, type Deck, type Refused, type SlideNode } from "../../../presentation/model"
-import { escapeAttribute } from "../../../xml/index"
+import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import { canonicalName } from "../../../odf/index"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
@@ -9,6 +9,8 @@ import { OdpStyles, isRefused, setProperty, styleChanges } from "../styles"
 import { odpGalleryMasterName } from "../../../presentation/edit/apply/design"
 import { odpBackgroundStyle } from "./design"
 import { IDENTITY, OdpShapeWriter, markupOf } from "./shape"
+import { odpNotesMarkup } from "./notes"
+import { odpNewPageAnnotations } from "./comment"
 import { odpTransitionPar, odpTransitionSound, odpTransitionStyle, timingRootWith, withTransitionPar } from "./transition"
 
 // A slide as a draw:page (ODF 1.3 Part 3 §10.2.4): its name (§19.162 draw:name), master page and layout
@@ -187,7 +189,13 @@ export function newPage(deck: Deck, node: SlideNode, name: string, context: OdpE
 	let notes = ""
 	const notesNode = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
 
-	if (notesNode !== undefined && notesNode.shapes.length > 0) {
+	if (notesNode !== undefined && notesNode.src === undefined) {
+		const made = odpNotesMarkup(node, notesNode, deck.slides.indexOf(node.ref) + 1, context)
+
+		if (isRefused(made)) return made
+
+		notes = made
+	} else if (notesNode !== undefined && notesNode.shapes.length > 0) {
 		const notesWriter = new OdpShapeWriter(context, undefined, notesNode, () => undefined)
 
 		for (const shape of notesNode.shapes) {
@@ -220,7 +228,7 @@ export function newPage(deck: Deck, node: SlideNode, name: string, context: OdpE
 
 	if (timing === undefined) return refused("failed", "the page's timing root")
 
-	return `<draw:page${attributes}>${shapes}${timing}${notes}</draw:page>`
+	return `<draw:page${attributes}>${shapes}${timing}${notes}${odpNewPageAnnotations(deck, node, new Map())}</draw:page>`
 }
 
 // A page's timing root as the timing family writes it (§19.4 anim:par timing-root, after the shapes and before the
@@ -275,11 +283,19 @@ export const emitOdpSlide: OdpEmitFamily = {
 export function startTag(fragment: Fragment, node: number, changes: ReadonlyMap<string, string | null>, selfClose = false): string {
 	const document = fragment.document
 	const pending = new Map(changes)
+	// Each attribute as the source spells it (its quotes and character references), for those written unchanged.
+	const spans = document.attributeSpans(node).slice()
+	const asWritten = (k: number): string => {
+		const valueStart = spans[k * 4 + 2] ?? 0
+		const quote = String.fromCharCode(document.bytes[valueStart - 1] ?? 0x22)
+
+		return `${decodeUtf8(document.bytes, spans[k * 4] ?? 0, spans[k * 4 + 1] ?? 0)}=${quote}${decodeUtf8(document.bytes, valueStart, spans[k * 4 + 3] ?? 0)}${quote}`
+	}
 	let out = `<${document.name(node)}`
 
-	for (const attribute of document.attributes(node)) {
+	for (const [k, attribute] of document.attributes(node).entries()) {
 		if (attribute.name === "xmlns" || attribute.name.startsWith("xmlns:")) {
-			out += ` ${attribute.name}="${escapeAttribute(attribute.value)}"`
+			out += ` ${asWritten(k)}`
 
 			continue
 		}
@@ -291,12 +307,13 @@ export function startTag(fragment: Fragment, node: number, changes: ReadonlyMap<
 
 			pending.delete(canonical)
 
-			if (value !== null && value !== undefined) out += ` ${attribute.name}="${escapeAttribute(value)}"`
+			if (value === attribute.value) out += ` ${asWritten(k)}`
+			else if (value !== null && value !== undefined) out += ` ${attribute.name}="${escapeAttribute(value)}"`
 
 			continue
 		}
 
-		out += ` ${attribute.name}="${escapeAttribute(attribute.value)}"`
+		out += ` ${asWritten(k)}`
 	}
 
 	for (const [name, value] of pending) if (value !== null) out += ` ${name}="${escapeAttribute(value)}"`

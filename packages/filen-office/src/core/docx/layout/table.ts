@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import { Item, RevisionView } from "../model/kinds"
 import { Ns } from "../model/namespaces"
 import type { StoryPart } from "../model/part"
@@ -449,8 +450,8 @@ export class LaidRows {
 				const items = order.map(k => entry.items[k] ?? -1)
 				const rows = order.map(k => entry.rows[k] ?? -1)
 
-				entry.items.splice(0, items.length, ...items)
-				entry.rows.splice(0, rows.length, ...rows)
+				spliceAll(entry.items, 0, items.length, items)
+				spliceAll(entry.rows, 0, rows.length, rows)
 			}
 
 			this.byPart = byPart

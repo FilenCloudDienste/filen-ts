@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch"
 import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
 import { AltTextDialog } from "@/features/presentation/components/ribbon/arrange"
 import { PictureSourceMenu } from "@/features/presentation/components/ribbon/insertObjects"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -203,12 +204,41 @@ function CorrectionsDialog({ target, run, onClose }: { target: ShapeRef; run: (o
 function PictureControls({ editor, group }: { editor: PresentationRibbonEditor; group: "adjust" | "arrange" }) {
 	const { t } = useTranslation("preview")
 	const picture = useSelectedPicture(editor)
-	const [dialog, setDialog] = useState<"crop" | "corrections" | "alt" | undefined>(undefined)
+	const dialog = useRibbonDialog(editor)
 	const run = (op: DeckOp): void => {
 		void editor.command(op)
 	}
-	const close = (): void => {
-		setDialog(undefined)
+	const open = (kind: "crop" | "corrections" | "alt"): void => {
+		if (picture === undefined) return
+
+		const { target, shape } = picture
+
+		dialog.open((live, close) => {
+			const apply = (op: DeckOp): void => {
+				void live.command(op)
+			}
+
+			return kind === "crop" ? (
+				<CropDialog
+					target={target}
+					run={apply}
+					onClose={close}
+				/>
+			) : kind === "corrections" ? (
+				<CorrectionsDialog
+					target={target}
+					run={apply}
+					onClose={close}
+				/>
+			) : (
+				<AltTextDialog
+					shape={shape}
+					slide={target.slide}
+					run={apply}
+					onClose={close}
+				/>
+			)
+		})
 	}
 
 	return (
@@ -220,7 +250,7 @@ function PictureControls({ editor, group }: { editor: PresentationRibbonEditor; 
 						icon={<SunMediumIcon />}
 						disabled={picture === undefined}
 						onClick={() => {
-							setDialog("corrections")
+							open("corrections")
 						}}
 					/>
 					{picture === undefined ? (
@@ -261,7 +291,7 @@ function PictureControls({ editor, group }: { editor: PresentationRibbonEditor; 
 						icon={<CropIcon />}
 						disabled={picture === undefined}
 						onClick={() => {
-							setDialog("crop")
+							open("crop")
 						}}
 					/>
 					<RibbonButton
@@ -269,31 +299,12 @@ function PictureControls({ editor, group }: { editor: PresentationRibbonEditor; 
 						icon={<TextQuoteIcon />}
 						disabled={picture === undefined}
 						onClick={() => {
-							setDialog("alt")
+							open("alt")
 						}}
 					/>
 				</>
 			)}
-			{picture === undefined ? null : dialog === "crop" ? (
-				<CropDialog
-					target={picture.target}
-					run={run}
-					onClose={close}
-				/>
-			) : dialog === "corrections" ? (
-				<CorrectionsDialog
-					target={picture.target}
-					run={run}
-					onClose={close}
-				/>
-			) : dialog === "alt" ? (
-				<AltTextDialog
-					shape={picture.shape}
-					slide={picture.target.slide}
-					run={run}
-					onClose={close}
-				/>
-			) : null}
+			{dialog.view}
 		</>
 	)
 }

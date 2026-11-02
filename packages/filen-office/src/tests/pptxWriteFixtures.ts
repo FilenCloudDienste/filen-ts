@@ -447,8 +447,9 @@ export async function rebaseSession(h: EditHarness, before: Uint8Array, saved: U
 	h.session.package = { ...h.session.package, bytes: source.size, source, archive: opc.zip, opc }
 }
 
-// Every internal relationship of a package names a part it has, and every relationship id a part's markup names is
-// one of its relationships: the problems found.
+// Every internal relationship of a package names a part it has, every relationship id a part's markup names is one of
+// its relationships, and every diagram's data names its drawing (dsp:dataModelExt@relId, unprefixed) by a relationship of
+// each slide that relates the data: the problems found.
 export async function danglingReferences(bytes: Uint8Array): Promise<string[]> {
 	const opc = await opcOf(bytes)
 	const problems: string[] = []
@@ -469,10 +470,23 @@ export async function danglingReferences(bytes: Uint8Array): Promise<string[]> {
 		if (!/\.xml$/iu.test(entry.name) || entry.name === "[Content_Types].xml") continue
 
 		const markup = text(await opc.read(entry.name))
-		const ids = new Set((await opc.relationships(entry.name)).all.map(relationship => relationship.id))
+		const relationships = await opc.relationships(entry.name)
+		const ids = new Set(relationships.all.map(relationship => relationship.id))
 
 		for (const found of markup.matchAll(/\sr:(?:id|embed|link|pict|dm|lo|qs|cs)="([^"]+)"/gu))
 			if (!ids.has(found[1] ?? "")) problems.push(`${entry.name} names ${found[1] ?? ""}`)
+
+		for (const found of markup.matchAll(/\sr:dm="([^"]+)"/gu)) {
+			const data = relationships.byId(found[1] ?? "")?.partName
+
+			if (data === undefined || !opc.has(data)) continue
+
+			const drawing = /\brelId="([^"]+)"/u.exec(text(await opc.read(data)))?.[1]
+
+			// A relationship whose part is missing is the relationship check's (above).
+			if (drawing !== undefined && relationships.byId(drawing) === undefined)
+				problems.push(`${entry.name}: its diagram data names drawing ${drawing}, which it does not relate`)
+		}
 	}
 
 	return problems

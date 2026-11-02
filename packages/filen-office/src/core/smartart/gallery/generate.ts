@@ -138,12 +138,13 @@ function sampleOf(reader: DrawingReader, sampData: number): { level: number; tex
 	return out
 }
 
-// Comments and the indentation between elements removed (whitespace inside an element's text is kept).
+// Comments and the indentation between elements removed, one element per line as written (whitespace inside an
+// element's text is kept).
 export function minifyDefinition(xml: string): string {
 	return xml
 		.replace(/<\?xml[^>]*\?>/gu, "")
 		.replace(/<!--[\s\S]*?-->/gu, "")
-		.replace(/>\s*\n\s*</gu, "><")
+		.replace(/>\s*\n\s*</gu, ">\n<")
 		.trim()
 }
 

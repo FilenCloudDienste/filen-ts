@@ -322,12 +322,20 @@ describe("an embedded .xls through Edit Data, undo and redo across saves", () =>
 	}
 
 	it.skipIf(!existsSync(XLS))("each save holds the one chart its frame names, with its workbook, nothing else", async () => {
-		const d = await driveSession(await xlsDeck(), "pptx")
+		const source = await xlsDeck()
+		const d = await driveSession(source, "pptx")
 		const slide = d.session.deck.slides[0] as SlideRef
 
 		await viewCapability.render(d.context, [slide])
 
 		const target = { slide, id: chartShape(d, slide).id }
+		// The undo writes the source's chart and workbook back, bytes and names (the parts its step names).
+		const same = (bytes: Uint8Array): void => {
+			const before = unzipSync(source)
+			const after = unzipSync(bytes)
+
+			for (const name of xls.split(",")) expect(after[name], name).toEqual(before[name])
+		}
 		const data = await textWorkbookXlsx(
 			[
 				["", "S"],
@@ -345,10 +353,18 @@ describe("an embedded .xls through Edit Data, undo and redo across saves", () =>
 		expect(await d.command(chartWorkbookOp(target, data.bytes))).toMatchObject({ ok: true })
 		expect(parts(await saved(d))).toEqual([xlsx, "charts/chart2.xml"])
 		expect((await d.undo()).ok).toBe(true)
-		expect(parts(await saved(d))).toEqual([xls, "charts/chart1.xml"])
+
+		const back = await saved(d)
+
+		expect(parts(back)).toEqual([xls, "charts/chart1.xml"])
+		same(back)
 		expect((await d.redo()).ok).toBe(true)
 		expect(parts(await saved(d))).toEqual([xlsx, "charts/chart2.xml"])
 		expect((await d.undo()).ok).toBe(true)
-		expect(parts(await saved(d))).toEqual([xls, "charts/chart1.xml"])
+
+		const again = await saved(d)
+
+		expect(parts(again)).toEqual([xls, "charts/chart1.xml"])
+		same(again)
 	})
 })

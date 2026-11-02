@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	presentationActions,
@@ -17,6 +17,12 @@ import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
 import { SetUpShowHost } from "@/features/presentation/components/slideshow/setUpHost"
+import {
+	focusByRibbonRule,
+	ribbonFocusTarget,
+	takeRibbonOrigin,
+	type RibbonOrigin
+} from "@/features/presentation/components/ribbon/ribbonDialogs"
 import { usePresentationShowBindings } from "@/features/presentation/lib/keymap/show"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
@@ -26,6 +32,31 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // How long the note about a refused action stays.
 const REFUSED_NOTE_MS = 4000
+
+// The ribbon command a show is started from (undefined: none, as for a key).
+function showOrigin(): RibbonOrigin | undefined {
+	const origin = takeRibbonOrigin()
+
+	return origin.control === null && origin.popup === null ? undefined : origin
+}
+
+// Where focus goes when the show ends: the ribbon command that started it by the ribbon's rule, else the slide.
+function endFocus(origin: RefObject<RibbonOrigin | undefined>, slide: RefObject<HTMLElement | null>): HTMLElement | null {
+	return (origin.current === undefined ? null : ribbonFocusTarget(origin.current)) ?? slide.current
+}
+
+// A key the deck takes: React's from the deck's root, or the page's for one pressed elsewhere in the editor's layer.
+export interface DeckKeyEvent {
+	readonly key: string
+	readonly code: string
+	readonly shiftKey: boolean
+	readonly ctrlKey: boolean
+	readonly metaKey: boolean
+	readonly altKey: boolean
+	readonly repeat: boolean
+	preventDefault(): void
+	stopPropagation(): void
+}
 
 export interface DeckPresentation {
 	readonly actions: PresentationActionActivator
@@ -43,7 +74,7 @@ export interface DeckPresentation {
 	// First on the deck's root keydown; true: the key was the show's and the page does nothing more with it. While the
 	// show runs every key is (the show's layers take them; one that reaches the root goes no further); otherwise
 	// F5 and Shift+F5 start it, from the first slide and from the slide in view, and never reload the page.
-	readonly onKey: (event: KeyboardEvent<HTMLElement>) => boolean
+	readonly onKey: (event: DeckKeyEvent) => boolean
 }
 
 // The deck's links, jumps and slide show around the slide at `index`; `go` shows another slide (a negative index
@@ -191,21 +222,28 @@ export function useDeckPresentation({
 		enteredFullscreen.current = false
 	}
 
+	// The ribbon command that started the show (none for a key). When the show ends focus goes back to it by the
+	// ribbon's rule, else to the slide.
+	const origin = useRef<RibbonOrigin | undefined>(undefined)
+
 	const presenter = usePresenter({
 		deck,
 		editable,
 		fullscreen,
 		fullscreenActive,
-		returnFocus: () => focusSlide.current
+		returnFocus: () => endFocus(origin, focusSlide)
 	})
 
 	const startShowFrom = (from?: ShowFrom): void => {
+		origin.current = showOrigin()
 		setShowing({ from })
 		void fullscreen()
 	}
 
 	const startPresenter = (from: ShowFrom): void => {
 		// The popup spends the click's activation: the stage then offers Start slideshow, whose click goes full screen.
+		origin.current = showOrigin()
+
 		const where = presenter.openPresenter()
 
 		setShowing({ from })
@@ -213,8 +251,9 @@ export function useDeckPresentation({
 		if (where === "sameWindow") void fullscreen()
 	}
 
-	// Focus goes back to the slide once the show and the presenter view are gone and the slide is shown again (however
-	// the show ended), unless something else took it meanwhile (the keep-ink prompt).
+	// Focus goes back once the show and the presenter view are gone and the slide is shown again (however
+	// the show ended), unless the keep-ink prompt took it, which gives it back the same way. Without a ribbon command
+	// it goes to the slide only from nowhere.
 	const running = showing !== undefined || presenter.active
 	const wasRunning = useRef(false)
 
@@ -223,8 +262,41 @@ export function useDeckPresentation({
 
 		wasRunning.current = running
 
-		if (ended && (document.activeElement === null || document.activeElement === document.body))
-			focusSlide.current?.focus({ preventScroll: true })
+		if (!ended) return
+
+		const settle = (): void => {
+			const active = document.activeElement
+			const from = origin.current
+			const nowhere = active === null || active === document.body
+
+			if (active?.closest('[role="alertdialog"]') != null) return
+
+			if (from !== undefined && (nowhere || ribbonFocusTarget(from) !== null)) focusByRibbonRule(from, () => focusSlide.current)
+			else if (nowhere) focusSlide.current?.focus({ preventScroll: true })
+		}
+
+		if (origin.current === undefined) {
+			settle()
+
+			return undefined
+		}
+
+		// A ribbon command started it: once full screen is left and the ribbon has fit the page again (two frames), as
+		// it may have rendered its controls anew meanwhile.
+		let frame = 0
+		const later = (): void => {
+			frame = requestAnimationFrame(() => {
+				frame = requestAnimationFrame(settle)
+			})
+		}
+
+		if (document.fullscreenElement === null) later()
+		else document.addEventListener("fullscreenchange", later, { once: true })
+
+		return () => {
+			cancelAnimationFrame(frame)
+			document.removeEventListener("fullscreenchange", later)
+		}
 	}, [running, focusSlide])
 
 	// Escape in full screen is the browser's (Firefox and Safari never pass it on): leaving the full screen the show
@@ -251,7 +323,7 @@ export function useDeckPresentation({
 		}
 	}, [])
 
-	const onKey = (event: KeyboardEvent<HTMLElement>): boolean => {
+	const onKey = (event: DeckKeyEvent): boolean => {
 		if (showing !== undefined) {
 			if (event.key !== "Tab") event.stopPropagation()
 

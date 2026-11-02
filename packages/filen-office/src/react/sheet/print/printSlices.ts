@@ -1,3 +1,4 @@
+import { appendAll } from "../../../core/arrays"
 import type { PrintPage } from "../../../core/sheet/print/paginate"
 import type { SheetPrintSpan } from "../../../core/sheet/print/setup"
 import { TILE_COLS, TILE_ROWS, type SheetTile } from "../../../core/sheet/protocol"
@@ -205,7 +206,7 @@ export class SliceTiles {
 
 		const out: SheetTile[] = []
 
-		for (const tileRow of wanted) out.push(...(this.held.get(tileRow) ?? []))
+		for (const tileRow of wanted) appendAll(out, this.held.get(tileRow) ?? [])
 
 		return out
 	}

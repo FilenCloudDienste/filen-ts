@@ -1,3 +1,4 @@
+import { appendAll, spliceAll } from "../../arrays"
 import { Fragment, type Mark, type MarkType, type Node } from "prosemirror-model"
 import { closeHistory } from "prosemirror-history"
 import type { EditorState, Transaction } from "prosemirror-state"
@@ -324,7 +325,7 @@ function collect(
 	let anchors: { from: number; to: number; markers: MarkerList }[] = []
 	let afterRemoved = false
 	const flush = (): void => {
-		if (afterRemoved) plan.outliving.push(...anchors)
+		if (afterRemoved) appendAll(plan.outliving, anchors)
 
 		anchors = []
 		afterRemoved = false
@@ -349,7 +350,7 @@ function collect(
 				if (anchorOnly(node) && !removed) {
 					anchors.push({ from: pos, to: pos + node.nodeSize, markers: survivorsOf(node) })
 				} else if (removed) {
-					plan.outliving.push(...anchors)
+					appendAll(plan.outliving, anchors)
 					anchors = []
 					afterRemoved = true
 				} else {
@@ -629,7 +630,7 @@ function collectParagraph(
 
 		if (next?.type === nodes.paragraph) {
 			plan.joins.push(pos)
-			plan.joined.push(...(next.attrs["before"] as MarkerList))
+			appendAll(plan.joined, next.attrs["before"] as MarkerList)
 		} else plan.attrs.push({ pos, name: "sectPr", value: NO_SOURCE })
 	} else if (join) {
 		// A mark holding a section break (in a table cell) stays as it was; one with no paragraph after it goes
@@ -654,7 +655,7 @@ function collectParagraph(
 		} else {
 			plan.joins.push(pos)
 
-			if (next.type === nodes.paragraph) plan.joined.push(...(next.attrs["before"] as MarkerList))
+			if (next.type === nodes.paragraph) appendAll(plan.joined, next.attrs["before"] as MarkerList)
 		}
 	}
 
@@ -1308,7 +1309,12 @@ function keepFeasibleRemovals(
 		}
 
 		removal.cells = []
-		plan.tables.splice(0, plan.tables.length, ...plan.tables.filter(entry => entry.table !== pos))
+		spliceAll(
+			plan.tables,
+			0,
+			plan.tables.length,
+			plan.tables.filter(entry => entry.table !== pos)
+		)
 
 		if (removal.rows.length === 0) removals.delete(pos)
 	}

@@ -95,6 +95,7 @@ function canvasOf(document: Document, layer: ShowLayer): HTMLCanvasElement {
 	const canvas = document.createElement("canvas")
 
 	canvas.className = "fo-show-bitmap"
+	canvas.dataset["foShowShape"] = String(layer.shape)
 	canvas.width = layer.bitmap.width
 	canvas.height = layer.bitmap.height
 	canvas.style.cssText = `position:absolute;left:${String(layer.x)}px;top:${String(layer.y)}px;width:${String(layer.width)}px;height:${String(layer.height)}px`

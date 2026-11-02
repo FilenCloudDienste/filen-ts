@@ -22,6 +22,7 @@ import {
 	type AnimationPreviewRequest
 } from "@/features/presentation/components/ribbon/animations"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
+import { customPathLabel } from "@/features/presentation/components/ribbon/motionPaths"
 
 // The Animation Pane beside the slide: the slide's effects in play order (the click sequence, then each trigger's),
 // each with its click number, its effect and object, and a bar on the slide's timeline; choosing effects here makes
@@ -249,11 +250,12 @@ export function AnimationPane({
 	// An effect's name with its class (an entrance and an exit of one name are told apart without the icon's colour).
 	const presetOf = (row: EffectRow): string => {
 		const kind = CLASS_ORDER.find(each => each === row.presetClass)
-		const key = `${kind ?? ""}\u0000${String(row.preset?.id ?? "")}\u0000${row.preset?.presetClass ?? ""}`
+		const custom = customPathLabel(t, row.presetClass, row.presetID)
+		const key = `${kind ?? ""}\u0000${String(row.preset?.id ?? "")}\u0000${row.preset?.presetClass ?? ""}\u0000${custom ?? ""}`
 		let name = presets.get(key)
 
 		if (name === undefined) {
-			const effect = presetLabel(t, row.preset)
+			const effect = custom ?? presetLabel(t, row.preset)
 
 			name = kind === undefined ? effect : t("previewPptxAnimEffectOfClass", { kind: classLabel(t, kind), effect })
 			presets.set(key, name)

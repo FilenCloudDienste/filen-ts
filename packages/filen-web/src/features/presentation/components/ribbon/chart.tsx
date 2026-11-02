@@ -24,6 +24,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { ChartDataDialog } from "@/features/presentation/components/chartDataDialog"
 import { CHART_ICONS } from "@/features/presentation/components/ribbon/insertCharts"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { ChartPanel } from "@/features/spreadsheet/charts/chartPanel"
 import { CHART_TYPES, LEGEND_OPTIONS, editableType, typeKey } from "@/features/spreadsheet/charts/chartPanel.logic"
@@ -90,12 +91,58 @@ function useChartData(editor: PresentationRibbonEditor, chart: SelectedChart | u
 	return read?.key === key ? read.data : undefined
 }
 
+// Format chart: the spreadsheet's chart panel on the chart `target`, while it stays the one selected. Between an
+// edit and the next read it keeps showing the last read, so the panel is not torn down by each edit.
+function ChartFormatDialog({ editor, target, onClose }: { editor: PresentationRibbonEditor; target: ShapeRef; onClose: () => void }) {
+	const { t } = useTranslation("preview")
+	const chart = useSelectedChart(editor)
+	const same = chart?.target.slide === target.slide && chart.target.id === target.id
+	const read = useChartData(editor, same ? chart : undefined)?.info ?? null
+	const [last, setLast] = useState<ChartData["info"]>(null)
+
+	if (read !== null && read !== last) setLast(read)
+
+	const info = same ? (read ?? last) : null
+
+	if (info === null) return null
+
+	return (
+		<Dialog
+			open
+			onOpenChange={open => {
+				if (!open) onClose()
+			}}
+		>
+			<DialogContent
+				data-preview-surface
+				className="flex max-h-[calc(100dvh-2rem)] flex-col gap-2 overflow-y-auto p-0 sm:max-w-md"
+			>
+				<DialogHeader className="px-4 pt-4">
+					<DialogTitle>{t("previewPptxChartFormatTitle")}</DialogTitle>
+					<DialogDescription className="sr-only">{t("previewPptxChartFormat")}</DialogDescription>
+				</DialogHeader>
+				<ChartPanel
+					sheet={0}
+					part={`${String(target.slide)}:${String(target.id)}`}
+					state={{ status: "ready", info, readOnly: false }}
+					canEdit
+					selection={undefined}
+					onEdit={edit => {
+						void editor.command(chartEditOp(target, edit))
+					}}
+					onClose={onClose}
+				/>
+			</DialogContent>
+		</Dialog>
+	)
+}
+
 function ChartControls({ editor, group }: { editor: PresentationRibbonEditor; group: "data" | "type" | "elements" }) {
 	const { t } = useTranslation("preview")
 	const chart = useSelectedChart(editor)
 	const data = useChartData(editor, chart)
 	const info = data?.info ?? null
-	const [dialog, setDialog] = useState<"data" | "format" | undefined>(undefined)
+	const dialog = useRibbonDialog(editor)
 	const off = chart === undefined || info === null
 	const run = (edit: SheetChartEdit): void => {
 		if (chart !== undefined) void editor.command(chartEditOp(chart.target, edit))
@@ -113,7 +160,17 @@ function ChartControls({ editor, group }: { editor: PresentationRibbonEditor; gr
 					icon={<TableIcon />}
 					disabled={chart === undefined || data?.data !== true}
 					onClick={() => {
-						setDialog("data")
+						if (chart === undefined) return
+
+						const target = chart.target
+
+						dialog.open((live, close) => (
+							<ChartDataDialog
+								editor={live}
+								target={target}
+								onClose={close}
+							/>
+						))
 					}}
 				/>
 			) : group === "type" ? (
@@ -202,48 +259,22 @@ function ChartControls({ editor, group }: { editor: PresentationRibbonEditor; gr
 						icon={<SlidersHorizontalIcon />}
 						disabled={off}
 						onClick={() => {
-							setDialog("format")
+							if (chart === undefined) return
+
+							const target = chart.target
+
+							dialog.open((live, close) => (
+								<ChartFormatDialog
+									editor={live}
+									target={target}
+									onClose={close}
+								/>
+							))
 						}}
 					/>
 				</>
 			)}
-			{chart === undefined ? null : dialog === "data" ? (
-				<ChartDataDialog
-					editor={editor}
-					target={chart.target}
-					onClose={() => {
-						setDialog(undefined)
-					}}
-				/>
-			) : dialog === "format" && info !== null ? (
-				<Dialog
-					open
-					onOpenChange={open => {
-						if (!open) setDialog(undefined)
-					}}
-				>
-					<DialogContent
-						data-preview-surface
-						className="flex max-h-[calc(100dvh-2rem)] flex-col gap-2 overflow-y-auto p-0 sm:max-w-md"
-					>
-						<DialogHeader className="px-4 pt-4">
-							<DialogTitle>{t("previewPptxChartFormatTitle")}</DialogTitle>
-							<DialogDescription className="sr-only">{t("previewPptxChartFormat")}</DialogDescription>
-						</DialogHeader>
-						<ChartPanel
-							sheet={0}
-							part={`${String(chart.target.slide)}:${String(chart.target.id)}`}
-							state={{ status: "ready", info, readOnly: false }}
-							canEdit
-							selection={undefined}
-							onEdit={run}
-							onClose={() => {
-								setDialog(undefined)
-							}}
-						/>
-					</DialogContent>
-				</Dialog>
-			) : null}
+			{dialog.view}
 		</>
 	)
 }

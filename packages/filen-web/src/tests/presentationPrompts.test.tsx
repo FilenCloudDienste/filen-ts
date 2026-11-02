@@ -77,6 +77,7 @@ vi.mock("@/features/presentation/lib/presentationEngine", () => ({
 			},
 			thumbnails: () => new Promise(() => undefined),
 			image: () => Promise.resolve(null),
+			review: () => new Promise(() => undefined),
 			close: () => undefined
 		} as unknown as PresentationSessionApi
 

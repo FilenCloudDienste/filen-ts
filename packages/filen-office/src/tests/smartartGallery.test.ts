@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { format, resolveConfig } from "prettier"
 import { describe, expect, it } from "vitest"
+import { D, drawingReader } from "../core/drawingml/reader"
 import { parseDataModel } from "../core/smartart/data"
 import { newDiagramData } from "../core/smartart/edit"
 import { emitDiagram } from "../core/smartart/emit"
@@ -98,7 +99,7 @@ describe("SmartArt gallery generation", () => {
 	})
 
 	it("minifies a definition without touching text", () => {
-		expect(minifyDefinition('<?xml version="1.0"?>\n<!-- c -->\n<a>\n\t<b> x </b>\n</a>\n')).toBe("<a><b> x </b></a>")
+		expect(minifyDefinition('<?xml version="1.0"?>\n<!-- c -->\n<a>\n\t<b> x </b>\n</a>\n')).toBe("<a>\n<b> x </b>\n</a>")
 	})
 
 	it("registers every definition with its text, each written by us", () => {
@@ -106,9 +107,19 @@ describe("SmartArt gallery generation", () => {
 		expect(SMARTART_STYLES.length).toBeGreaterThanOrEqual(1)
 		expect(SMARTART_COLORS.length).toBeGreaterThanOrEqual(1)
 
-		for (const entry of SMARTART_LAYOUTS) expect(smartArtLayoutDef(entry.uniqueId), entry.uniqueId).toMatch(/^<dgm:layoutDef /u)
-		for (const entry of SMARTART_STYLES) expect(smartArtStyleDef(entry.uniqueId), entry.uniqueId).toMatch(/^<dgm:styleDef /u)
-		for (const entry of SMARTART_COLORS) expect(smartArtColorsDef(entry.uniqueId), entry.uniqueId).toMatch(/^<dgm:colorsDef /u)
+		// The root element by namespace and name: a definition may bind the diagram namespace to any prefix.
+		const root = (text: string | undefined): string | undefined => {
+			if (text === undefined) return undefined
+
+			const document = parseXml(encodeUtf8(text))
+			const element = document.documentElement()
+
+			return drawingReader(document).group(element) === D.Dgm ? document.localName(element) : undefined
+		}
+
+		for (const entry of SMARTART_LAYOUTS) expect(root(smartArtLayoutDef(entry.uniqueId)), entry.uniqueId).toBe("layoutDef")
+		for (const entry of SMARTART_STYLES) expect(root(smartArtStyleDef(entry.uniqueId)), entry.uniqueId).toBe("styleDef")
+		for (const entry of SMARTART_COLORS) expect(root(smartArtColorsDef(entry.uniqueId)), entry.uniqueId).toBe("colorsDef")
 	})
 
 	it("lays every registry layout out with 1, 3, 8 and 30 nodes within the relayout budget, every text drawn", { timeout: 60_000 }, () => {

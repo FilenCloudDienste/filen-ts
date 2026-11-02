@@ -45,8 +45,16 @@ export interface PartsApi {
 		// crc32: the CRC-32 `content` must have (a stored medium streams once, checked as it goes). from: a part this
 		// save added that the new part is related from instead of `owner` (a new chart's embedded workbook); id: the
 		// relationship id to use when it is free (the id the new part's markup names); shared: one part per key in a save,
-		// the same key again relating the part added for it (a transition sound on every slide is stored once).
-		options?: { readonly crc32?: number; readonly from?: string; readonly id?: string; readonly shared?: object }
+		// the same key again relating the part added for it (a transition sound on every slide is stored once); name: the
+		// part's own former name, taken back when the package written has no part by it (a part an undo writes back,
+		// which a step the history holds names; any other new part never takes a name the session has had).
+		options?: {
+			readonly crc32?: number
+			readonly from?: string
+			readonly id?: string
+			readonly shared?: object
+			readonly name?: string
+		}
 	): { readonly part: string; readonly rId: string }
 	// A relationship from `owner` to an existing part (or an external target), reused when one exists.
 	relate(target: string, type: string, external?: boolean): string
@@ -122,6 +130,12 @@ export interface PptxSaveInput {
 	readonly source: PptxSource
 	readonly changes: DeckChanges
 	readonly revision: number
+	// Parts this session's saves added that nothing reaches any more (zip names): left out, with what only they kept
+	// and the relationships that named them.
+	readonly prune?: readonly string[]
+	// Parts this session's saves added that a step it holds may name again (zip names): never taken with a removed
+	// slide, even where it was their only referrer.
+	readonly keep?: readonly string[]
 }
 
 export interface PptxSaveOptions {

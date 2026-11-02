@@ -45,6 +45,8 @@ interface Typing {
 	linkListeners: number
 	editorProps: Record<string, unknown>[]
 	overrides: Record<string, string>
+	// A body open in the text editor, as the store reports it (a test's stand-in controller).
+	active?: unknown
 }
 
 const { sdk, engine, settings, toasts, typing } = vi.hoisted(() => ({
@@ -91,6 +93,7 @@ vi.mock("@filen/office/react/presentation", async importOriginal => ({
 
 			return Object.create(real, {
 				pending: { get: () => typing.pending || real.pending },
+				active: { get: () => typing.active ?? real.active },
 				command: {
 					value: (op: unknown, session: Parameters<typeof real.command>[1]) => {
 						typing.commands.push(op)
@@ -307,6 +310,7 @@ function rail(): HTMLElement {
 }
 
 afterEach(() => {
+	typing.active = undefined
 	cleanup()
 	vi.clearAllMocks()
 	engine.listener = null
@@ -502,6 +506,65 @@ describe("presentation editor find", () => {
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Replace" }))
 		expect(await screen.findByRole("searchbox", { name: "Find" })).toBeTruthy()
 		expect(screen.getByRole("textbox", { name: "Replace with" })).toBeTruthy()
+	})
+
+	it("takes its keys with focus on the preview overlay itself (left there after a click in Safari and macOS Firefox)", async () => {
+		await openEditor({}, editing(), "deck.pptx", true)
+
+		const overlay = screen.getByRole("region", { name: "deck.pptx" }).closest<HTMLElement>('[role="dialog"]')
+
+		if (overlay === null) throw new Error("no overlay")
+
+		fireEvent.keyDown(overlay, { key: "f", code: "KeyF", ctrlKey: true, metaKey: true })
+		expect(await screen.findByRole("searchbox", { name: "Find" })).toBeTruthy()
+		fireEvent.click(screen.getByRole("button", { name: "Close find" }))
+
+		// F6 goes to the ribbon from there too.
+		fireEvent.keyDown(overlay, { key: "F6", code: "F6" })
+		expect(document.activeElement?.closest("[data-office-ribbon]")).not.toBeNull()
+	})
+
+	it("gives focus back to the open body's editor when Find closes, else to the slide", async () => {
+		await openEditor({}, editing(), "deck.pptx", true)
+
+		const region = screen.getByRole("region", { name: "deck.pptx" })
+		// The notes editor, open and focused (its body is the store's active one).
+		const host = document.createElement("div")
+		const body = document.createElement("div")
+
+		host.setAttribute("data-fo-text-editor", "")
+		body.setAttribute("contenteditable", "true")
+		body.tabIndex = 0
+		host.append(body)
+		region.append(host)
+		typing.active = {
+			shape: { slide: 256, id: 2 },
+			defaults: { paragraph: () => ({}) },
+			format: () => ({ run: {}, paragraph: {}, bodyPr: {} }),
+			run: () => true,
+			setBodyPr: () => undefined,
+			subscribe: () => () => undefined
+		}
+		body.focus()
+
+		fireEvent.keyDown(body, { key: "f", code: "KeyF", ctrlKey: true, metaKey: true })
+		fireEvent.keyDown(await screen.findByRole("searchbox", { name: "Find" }), { key: "Escape" })
+		await waitFor(() => {
+			expect(screen.queryByRole("searchbox", { name: "Find" })).toBeNull()
+		})
+		expect(document.activeElement).toBe(body)
+
+		// No body open: the slide.
+		typing.active = undefined
+		host.remove()
+		fireEvent.keyDown(region, { key: "f", code: "KeyF", ctrlKey: true, metaKey: true })
+		fireEvent.keyDown(await screen.findByRole("searchbox", { name: "Find" }), { key: "Escape" })
+		await waitFor(() => {
+			expect(screen.queryByRole("searchbox", { name: "Find" })).toBeNull()
+		})
+		// The slide's area (the canvas around the slide editor).
+		expect(document.activeElement?.hasAttribute("data-preview-surface")).toBe(true)
+		expect(region.contains(document.activeElement)).toBe(true)
 	})
 
 	it("stands down for a key pressed in a dialog over the editor", async () => {

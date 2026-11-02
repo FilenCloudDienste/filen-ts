@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import { partKey } from "../../opc/partNames"
 import { joinBytes } from "../../opc/pieces"
 import { Relationships, type Relationship } from "../../opc/relationships"
@@ -747,7 +748,7 @@ export async function duplicateSheet(
 
 		if (activeAfter !== activeBefore) changeLog.workbookSection("bookViews")
 		if (names.after.length !== names.before.length) {
-			workbook.definedNames.splice(0, workbook.definedNames.length, ...names.after)
+			spliceAll(workbook.definedNames, 0, workbook.definedNames.length, names.after)
 			changeLog.workbookSection("definedNames")
 		}
 		if (sharedStrings > 0) {
@@ -782,7 +783,7 @@ export async function duplicateSheet(
 			for (const op of plan.parts) state.setPart(op.name, op.contentType, undefined)
 
 			workbook.activeTab = activeBefore
-			workbook.definedNames.splice(0, workbook.definedNames.length, ...names.before)
+			spliceAll(workbook.definedNames, 0, workbook.definedNames.length, names.before)
 			document.shownResults.delete(id)
 
 			if (names.after.length !== names.before.length) changeLog.workbookSection("definedNames")

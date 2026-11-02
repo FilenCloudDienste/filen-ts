@@ -15,8 +15,8 @@ import {
 	type PaintContext
 } from "./fill"
 import { compileCustomGeometry } from "./geometry/custom"
-import { emitPaths, evaluateGuides, evaluateOp, presetProgram, textRect, type GeometryPath } from "./geometry/evaluate"
-import { BUILTIN_COUNT, OP_BY_FORMULA, builtinIndex, opArity, type GeometryProgram } from "./geometry/program"
+import { emitPaths, evaluateGuides, formulaAdjust, presetProgram, textRect, type GeometryPath } from "./geometry/evaluate"
+import type { GeometryProgram } from "./geometry/program"
 import { readBlip } from "./picture"
 import { D, EMU_PER_PX, drawingReader, type DrawingReader } from "./reader"
 import { DEFAULT_TEXT, readBodyProps, readTextBody, resolveTypeface, type TextDefaults } from "./text"
@@ -146,7 +146,7 @@ function hidden(reader: DrawingReader, node: number): boolean {
 	return false
 }
 
-// Evaluates an avLst override formula (usually "val n"); built-ins and earlier adjust values may appear.
+// The shape's a:avLst overrides as an adjust function.
 function adjustOverride(
 	reader: DrawingReader,
 	avLst: number,
@@ -160,35 +160,7 @@ function adjustOverride(
 
 	for (const gd of overrides) formulas.set(reader.attr(gd, "name") ?? "", reader.attr(gd, "fmla") ?? "")
 
-	return (name, slots) => {
-		const formula = formulas.get(name)
-
-		if (formula === undefined) return undefined
-
-		const [opName, ...args] = formula.trim().split(/\s+/)
-		const op = OP_BY_FORMULA.get(opName ?? "")
-
-		if (op === undefined) return undefined
-
-		const value = (token: string | undefined): number => {
-			if (token === undefined) return 0
-
-			const number = Number(token)
-
-			if (token !== "" && Number.isFinite(number)) return number
-
-			const builtin = builtinIndex(token)
-
-			if (builtin >= 0) return slots[builtin] ?? 0
-
-			const adjust = program.adjustNames.indexOf(token)
-
-			return adjust >= 0 ? (slots[BUILTIN_COUNT + adjust] ?? 0) : 0
-		}
-		const arity = opArity(op)
-
-		return evaluateOp(op, value(args[0]), arity > 1 ? value(args[1]) : 0, arity > 2 ? value(args[2]) : 0)
-	}
+	return formulaAdjust(formulas, program)
 }
 
 // The geometry of a shape's properties: a:prstGeom (unknown presets draw as rectangles) or a:custGeom.

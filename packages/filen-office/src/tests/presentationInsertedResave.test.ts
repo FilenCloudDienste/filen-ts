@@ -231,7 +231,7 @@ describe("an inserted diagram saved, then edited and saved again", () => {
 			kind: "insert",
 			slide,
 			shape: { id: 0, name: "Diagram", hidden: false, kind: "frame", xfrm: { ...BOX, y: 2_000_000 } } as ShapeNode,
-			layout: { uniqueId: "urn:filen:smartart:layout:column", source: "gallery" },
+			layout: { uniqueId: "urn:filen:smartart:layout:list-vertical-bullet", source: "gallery" },
 			texts: ["Alpha", "Beta"]
 		})
 
@@ -415,7 +415,7 @@ describe("an insert undone past a save and redone", () => {
 					kind: "insert",
 					slide,
 					shape,
-					layout: { uniqueId: "urn:filen:smartart:layout:column", source: "gallery" },
+					layout: { uniqueId: "urn:filen:smartart:layout:list-vertical-bullet", source: "gallery" },
 					texts: ["Alpha", "Beta"]
 				}
 			else {

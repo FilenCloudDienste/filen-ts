@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import type { SheetId, SheetRange } from "../protocol"
 import { cellName } from "../refs/cellRef"
 import type { XlsxBorderEdge, XlsxColor, XlsxDxf, XlsxFont } from "../../xlsx/model/types"
@@ -371,7 +372,7 @@ export class SheetConditionalFormats {
 			if (seen.has(rule.index)) continue
 
 			seen.add(rule.index)
-			ranges.push(...addedRanges(rule.index))
+			appendAll(ranges, addedRanges(rule.index))
 		}
 
 		return ranges
@@ -480,7 +481,7 @@ export class SheetConditionalFormats {
 			if (other.rangesKey !== rule.rangesKey || seen.has(other.index)) continue
 
 			seen.add(other.index)
-			ranges.push(...addedRanges(other.index))
+			appendAll(ranges, addedRanges(other.index))
 		}
 
 		later(statistics, ranges)
@@ -526,7 +527,7 @@ export class SheetConditionalFormats {
 
 			if (!seen.has(rule.index)) {
 				seen.add(rule.index)
-				warmed.push(...addedRanges(rule.index))
+				appendAll(warmed, addedRanges(rule.index))
 			}
 		}
 

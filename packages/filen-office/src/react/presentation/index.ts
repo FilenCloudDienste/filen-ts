@@ -53,6 +53,7 @@ export {
 	type SlideShape
 } from "./edit/selection"
 export { ShapeEditLayer, HANDLES_LIMIT, type ShapeEditLabels, type ShapeEditLayerProps } from "./edit/overlay"
+export * from "./edit/motionPath/index"
 export { OBJECT_COMMANDS, type ObjectCommand, type ObjectKeyBindings } from "./edit/keyboard"
 export { PresentationTextEditor, type PresentationTextEditorProps, type TextEditorLabels } from "./edit/text/TextEditor"
 export { TextEditController, COMMIT_IDLE_MS, type TextEditFormat } from "./edit/text/controller"

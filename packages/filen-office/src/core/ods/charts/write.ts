@@ -1,3 +1,4 @@
+import { maxOf, minOf } from "../../arrays"
 import type { PartChange } from "../../opc/index"
 import { OdfNs } from "../../odf/namespaces"
 import { canonicalAttributes, elementName } from "../../odf/tree"
@@ -574,7 +575,7 @@ function movedPlotArea(current: string, pairs: readonly [Box, Box][], ownSheet: 
 		const bound = (side: 0 | 1, pick: (box: Box) => number, low: boolean): number => {
 			const values = inside.map(pair => pick(pair[side]))
 
-			return low ? Math.min(...values) : Math.max(...values)
+			return low ? minOf(values) : maxOf(values)
 		}
 		const startRow = box.startRow + bound(1, b => b.startRow, true) - bound(0, b => b.startRow, true)
 		const startCol = box.startCol + bound(1, b => b.startCol, true) - bound(0, b => b.startCol, true)

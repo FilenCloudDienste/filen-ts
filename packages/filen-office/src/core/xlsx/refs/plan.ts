@@ -1,3 +1,4 @@
+import { appendAll, spliceAll } from "../../arrays"
 import { partKey } from "../../opc/partNames"
 import type { Relationship } from "../../opc/relationships"
 import type { SheetId, SheetRefusal } from "../../sheet/protocol"
@@ -498,7 +499,7 @@ async function plan(workbook: XlsxWorkbookModel, edit: RefEdit): Promise<RefPlan
 
 	if (shift !== null && targetModel !== null) {
 		if (shift.band === undefined) planCells(workbook, target, targetModel, shift, [...tableShifts.values()], steps, touch)
-		else headers.push(...tableHeaders(shift, [...tableShifts.values()]))
+		else appendAll(headers, tableHeaders(shift, [...tableShifts.values()]))
 	}
 
 	// --- Defined names and the workbook's other children ---
@@ -985,7 +986,7 @@ function planNames(
 	touch("definedNames")
 
 	const set = (names: readonly XlsxDefinedName[]): void => {
-		workbook.definedNames.splice(0, workbook.definedNames.length, ...names)
+		spliceAll(workbook.definedNames, 0, workbook.definedNames.length, names)
 		workbook.changes.workbookSection("definedNames")
 	}
 

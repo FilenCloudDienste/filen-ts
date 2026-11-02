@@ -1,3 +1,4 @@
+import { spliceAll } from "../../../arrays"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
 import {
 	refused,
@@ -226,7 +227,7 @@ const ROWS: Axis = {
 		const like = table.rows[reference]
 		const rows = Array.from({ length: count }, () => ({ h: like?.h ?? 0, cells: table.grid.map((_, c) => cellLike(like?.cells[c])) }))
 
-		table.rows.splice(at, 0, ...rows)
+		spliceAll(table.rows, at, 0, rows)
 	},
 	remove(table, at, count) {
 		table.rows.splice(at, count)

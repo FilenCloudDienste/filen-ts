@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import type { LineSpacingRule } from "../../fonts/index"
 import { Exclusions, LINE_FLOATS, LINE_INTS, LineInt, MeasureCache, StyleTable, Wrap, type TextMeasurer } from "../../text/index"
 import type { DocxModel, Section } from "../model/document"
@@ -914,7 +915,7 @@ class Paginator {
 		this.lineSection = snapshot.lineSection
 		this.endnotesDone = snapshot.endnotesDone
 		this.globalLine = snapshot.globalLine
-		this.sectionPageCounts.splice(0, this.sectionPageCounts.length, ...snapshot.sectionPageCounts)
+		spliceAll(this.sectionPageCounts, 0, this.sectionPageCounts.length, snapshot.sectionPageCounts)
 
 		// Taken before the document had lists (planned ones came since): nothing counted yet.
 		if (snapshot.counters !== undefined) story.counters?.restore(snapshot.counters)

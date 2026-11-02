@@ -1,5 +1,6 @@
 import { evaluateGuides, presetProgram, textRect } from "../../drawingml/index"
 import { EMU_PER_PX } from "../../drawingml/reader"
+import { adjustGuideValue } from "../adjust"
 import { matchesType } from "../constraints"
 import { pointText } from "../data"
 import type { LayoutContext, LayoutNode } from "../interp"
@@ -27,9 +28,20 @@ export function txLayout(node: LayoutNode, context: LayoutContext): void {
 
 	if (start === undefined || text.trim() === "") return
 
-	// A custom text size (custT) is the user's: the text keeps the sizes its runs carry.
+	// A custom text size (custT) is the user's: the text keeps the sizes its runs carry, and margins set from the font
+	// size follow the first run's (the Pie deck's 0.1 × primFontSz insets are 12700 EMU at its 10 pt runs).
 	if (node.text.some(point => point.props.custT === true)) {
 		node.fontPt = undefined
+
+		const custom = customSize(node)
+
+		if (custom !== undefined) {
+			for (const name of fontRelativeMargins(node)) {
+				const value = node.values.get(name)
+
+				if (value !== undefined) node.values.set(name, (value * custom) / start)
+			}
+		}
 
 		return
 	}
@@ -66,7 +78,7 @@ export function txLayout(node: LayoutNode, context: LayoutContext): void {
 	const inset = geometryInset(node)
 	const measurer = context.measurer
 	const rich =
-		measurer.measureText === undefined ? undefined : measureText(node.text, node.vars.get("bulletEnabled") === "1", node.point.depth)
+		measurer.measureText === undefined ? undefined : measureText(node.text, node.vars.get("bulletEnabled") === "1", node.textBase)
 	const secondary = node.values.get("secFontSz")
 	const longest = longestWords(text)
 	const fits = (pt: number): boolean => {
@@ -136,7 +148,7 @@ export function textHeight(node: LayoutNode, width: number, context: LayoutConte
 	const measured =
 		measurer.measureText === undefined
 			? measurer.measure(text, start, inner)
-			: measurer.measureText(measureText(node.text, node.vars.get("bulletEnabled") === "1", node.point.depth), start, childPt, inner)
+			: measurer.measureText(measureText(node.text, node.vars.get("bulletEnabled") === "1", node.textBase), start, childPt, inner)
 
 	return measured.height + margin("tMarg") + margin("bMarg")
 }
@@ -194,7 +206,7 @@ function geometryInset(node: LayoutNode): { readonly w: number; readonly h: numb
 	for (const adj of shape?.adj ?? []) {
 		const name = names[adj.idx - 1]
 
-		if (name !== undefined && Number.isFinite(adj.val)) adjust.set(name, adj.val * 100000)
+		if (name !== undefined && Number.isFinite(adj.val)) adjust.set(name, adjustGuideValue(shape?.type ?? "", name, adj.val))
 	}
 
 	const [l, t, r, b] = textRect(
@@ -223,6 +235,15 @@ function fontRelativeMargins(node: LayoutNode): Set<string> {
 	}
 
 	return out
+}
+
+// The size in points of the first run that sets one, in the node's text.
+function customSize(node: LayoutNode): number | undefined {
+	for (const point of node.text)
+		for (const paragraph of point.rich ?? [])
+			for (const run of paragraph.runs) if (run.sz !== undefined && run.sz > 0) return run.sz / 100
+
+	return undefined
 }
 
 // The size text starts from: the primFontSz constraint, unless an ancestor's grouping constraint (op equ, no value)

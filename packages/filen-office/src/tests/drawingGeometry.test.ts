@@ -29,7 +29,9 @@ function bounds(list: DrawingList): number[] {
 
 describe("preset geometry table", () => {
 	it("holds every ECMA-376 preset", () => {
-		expect(presetNames()).toHaveLength(186)
+		// Every ST_ShapeType value (§20.1.10.56), upArrow included.
+		expect(presetNames()).toHaveLength(187)
+		expect(presetNames()).toContain("upArrow")
 		expect(Object.hasOwn(PRESET_GEOMETRY, "rect")).toBe(true)
 		expect(presetProgram("constructor")).toBeUndefined()
 		expect(presetProgram("noSuchShape")).toBeUndefined()
@@ -202,5 +204,45 @@ describe("custom geometry", () => {
 
 		emitPaths(list, program, evaluateGuides(program, EMU, EMU), EMU, EMU)
 		expect(list.coords[0]).toBeCloseTo(5 / EMU, 9)
+	})
+})
+
+describe("an arc in a path with its own coordinate space", () => {
+	it("measures its angles on the arc the path draws, then scales the arc to the shape", () => {
+		// A quarter-sized circle of radius 50 in a 100 x 100 path, swept 45 degrees from its rightmost point, drawn
+		// on a 200 x 100 px shape: the path's circle becomes an ellipse whose point is the scaled circle's.
+		const program = parseProgram("|||P 0 100 100 M 100 50 A 50 50 0 2700000")
+		const list = new DrawingList()
+
+		emitPaths(list, program, evaluateGuides(program, 200 * EMU, 100 * EMU), 200 * EMU, 100 * EMU)
+
+		const end = Math.SQRT1_2 * 50
+
+		expect(list.coords[list.coordCount - 2]).toBeCloseTo((50 + end) * 2, 3)
+		expect(list.coords[list.coordCount - 1]).toBeCloseTo(50 + end, 3)
+	})
+})
+
+describe("upArrow, which ECMA-376's definitions leave out", () => {
+	it("draws as downArrow upside down, its text rectangle turned with it", () => {
+		const w = 120 * EMU
+		const h = 200 * EMU
+		const up = draw("upArrow", w, h)
+		const down = draw("downArrow", w, h)
+		const upPoints = Array.from(up.list.coords.subarray(0, up.list.coordCount))
+		const downPoints = Array.from(down.list.coords.subarray(0, down.list.coordCount))
+
+		expect(upPoints.length).toBe(downPoints.length)
+		upPoints.forEach((value, k) => expect(value).toBeCloseTo(k % 2 === 0 ? (downPoints[k] ?? 0) : 200 - (downPoints[k] ?? 0), 4))
+
+		const upProgram = presetProgram("upArrow")
+		const downProgram = presetProgram("downArrow")
+
+		if (upProgram === undefined || downProgram === undefined) throw new Error("missing preset")
+
+		const [l, t, r, b] = textRect(upProgram, evaluateGuides(upProgram, w, h), w, h)
+		const [dl, dt, dr, db] = textRect(downProgram, evaluateGuides(downProgram, w, h), w, h)
+
+		expect([l, t, r, b].map(v => Math.round(v * 1000))).toEqual([dl, 200 - db, dr, 200 - dt].map(v => Math.round(v * 1000)))
 	})
 })

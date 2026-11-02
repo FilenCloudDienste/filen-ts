@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRange } from "../../sheet/protocol"
 import {
 	CARRIED,
@@ -901,7 +902,7 @@ export class SheetStore implements XlsxSheetStore {
 			if (block !== undefined && this.writeInPlace(index, block, group)) continue
 
 			this.version++
-			this.blocks.splice(index, block === undefined ? 0 : 1, ...writtenBlocks(block, group, this.rowBase))
+			spliceAll(this.blocks, index, block === undefined ? 0 : 1, writtenBlocks(block, group, this.rowBase))
 			this.measure()
 		}
 	}
@@ -1045,7 +1046,7 @@ export class SheetStore implements XlsxSheetStore {
 			start = end
 		}
 
-		this.blocks.splice(index, block === undefined ? 0 : 1, ...rebuilt)
+		spliceAll(this.blocks, index, block === undefined ? 0 : 1, rebuilt)
 		this.measure()
 	}
 

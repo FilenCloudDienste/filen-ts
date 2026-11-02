@@ -749,13 +749,19 @@ export function PreviewOverlay({
 		if (
 			!editable ||
 			!dirty ||
-			saving ||
 			targetItem === undefined ||
 			targetRawItem === undefined ||
 			remote.prompt !== null ||
 			unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null) ||
 			menuDialogKind !== null
 		) {
+			return false
+		}
+
+		// One in flight: this one runs once it settles, if the file is still dirty then (saveAgain below).
+		if (saving) {
+			saveAgainRef.current = (saveAgainRef.current ?? true) && auto
+
 			return false
 		}
 
@@ -967,6 +973,23 @@ export function PreviewOverlay({
 	// Idle autosave (the Word document editor's, the spreadsheet editor's) runs the same save, with its guards, as it
 	// stands now.
 	const performSaveRef = useLatestRef(performSave)
+	// A save asked for while one was in flight (a second Mod+S, an autosave meeting one), and whether only autosaves
+	// asked: run once that one settles and the file is still dirty, so no request is dropped with the deck left dirty.
+	const saveAgainRef = useRef<boolean | null>(null)
+
+	useEffect(() => {
+		const auto = saveAgainRef.current
+
+		if (saving || auto === null) {
+			return
+		}
+
+		saveAgainRef.current = null
+
+		if (dirty) {
+			performSaveRef.current(auto)
+		}
+	}, [saving, dirty, performSaveRef])
 
 	useAction(
 		"preview.save",

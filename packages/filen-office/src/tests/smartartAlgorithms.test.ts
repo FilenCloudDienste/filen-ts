@@ -3,6 +3,8 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource, OpcPackage } from "@filen/office/core/opc"
 import { CORPUS_DIR } from "./corpusDir"
+import { presetProgram } from "../core/drawingml/geometry/evaluate"
+import { adjustGuideValue } from "../core/smartart/adjust"
 import { connectorRoute, MIN_CONNECTOR_EXTENT } from "../core/smartart/algorithms/conn"
 import type { Box, DiagramLayout } from "../core/smartart/interp"
 import { MM, boxes, data, layout, round, run } from "./smartartFixtures"
@@ -242,8 +244,12 @@ describe("SmartArt connectors", () => {
 			<dgm:forEach axis="ch" ptType="sibTrans" cnt="1"><dgm:layoutNode name="link"><dgm:alg type="conn"><dgm:param type="connRout" val="curve"/>
 			<dgm:param type="srcNode" val="src"/><dgm:param type="dstNode" val="dst"/><dgm:param type="begPts" val="${beg}"/><dgm:param type="endPts" val="${end}"/></dgm:alg>
 			<dgm:shape type="conn"/><dgm:presOf axis="self"/></dgm:layoutNode></dgm:forEach>`)
-	const adj = (shape: DiagramLayout["shapes"][number] | undefined): number[] =>
-		(shape?.node.shape?.adj ?? []).map(a => Math.round(a.val * 100000))
+	// The guide values the drawing writes (angles in 60000ths of a degree, fractions in 100000ths).
+	const adj = (shape: DiagramLayout["shapes"][number] | undefined): number[] => {
+		const names = presetProgram(shape?.node.shape?.type ?? "")?.adjustNames ?? []
+
+		return (shape?.node.shape?.adj ?? []).map(a => adjustGuideValue(shape?.node.shape?.type ?? "", names[a.idx - 1] ?? "", a.val))
+	}
 	// Within one unit: PowerPoint's rounding of halves differs from ours.
 	const near = (actual: readonly number[], expected: readonly number[]): void => {
 		expect(actual).toHaveLength(expected.length)

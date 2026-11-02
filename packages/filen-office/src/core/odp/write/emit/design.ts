@@ -18,6 +18,7 @@ import {
 	type ShapeNode,
 	type SlideRef
 } from "../../../presentation/model"
+import { formerName, isIssuedName, noteFormerName } from "../../../presentation/issuedNames"
 import { filenTheme } from "../../../templates/themes/catalog"
 import { themeName } from "../../../templates/themes/model"
 import { cm as themeCm, odpGalleryMaster } from "../../../templates/themes/odp"
@@ -26,6 +27,7 @@ import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
 import { resourceFillChanges, type DrawResourceSink } from "../resources"
 import {
+	FILL_PROPERTIES,
 	OdpStyles,
 	WRITTEN_NAMESPACES,
 	cm,
@@ -48,29 +50,10 @@ import { IDENTITY, compose, groupAffine, lineEnds, placed, type Affine } from ".
 // only nearly (more than two gradient stops, a cropped picture) is refused, never written changed. A theme is a
 // master page: the slide family writes the master references, odpDesignStyles the gallery's master pages.
 
-const FILL_PROPERTIES = [
-	"draw:fill",
-	"draw:fill-color",
-	"draw:opacity",
-	"draw:opacity-name",
-	"draw:fill-gradient-name",
-	"draw:gradient-step-count",
-	"draw:fill-hatch-name",
-	"draw:fill-hatch-solid",
-	"draw:fill-image-name",
-	"draw:fill-image-width",
-	"draw:fill-image-height",
-	"draw:fill-image-ref-point",
-	"draw:fill-image-ref-point-x",
-	"draw:fill-image-ref-point-y",
-	"draw:tile-repeat-offset",
-	"style:repeat"
-] as const
-
 type ResourceElement = Parameters<DrawResourceSink["named"]>[0]
 
 // The drawing resources a source save adds to styles.xml: named past every name the file has for the element, each
-// distinct one once; a pattern's tile stored once per distinct bytes. What was written only nearly is kept in
+// distinct one once; a pattern's tile stored once per distinct bytes, under a name no package of the session had. What was written only nearly is kept in
 // `approximations` (the caller refuses it).
 class SourceDrawResources implements DrawResourceSink {
 	readonly elements: string[] = []
@@ -78,10 +61,12 @@ class SourceDrawResources implements DrawResourceSink {
 	private readonly names = new Map<string, string>()
 	private readonly tiles = new Map<string, string>()
 	private readonly styles: OdpStylesApi
+	private readonly deck: Deck
 	private readonly taken: (element: ResourceElement, name: string) => boolean
 
-	constructor(styles: OdpStylesApi, taken: (element: ResourceElement, name: string) => boolean) {
+	constructor(styles: OdpStylesApi, deck: Deck, taken: (element: ResourceElement, name: string) => boolean) {
 		this.styles = styles
+		this.deck = deck
 		this.taken = taken
 	}
 
@@ -111,13 +96,22 @@ class SourceDrawResources implements DrawResourceSink {
 
 		if (held !== undefined) return held
 
-		let path = ""
+		// The name a save of the session gave these bytes: the package's entry still (its own bytes), or taken back.
+		const own = formerName(this.deck, `tile ${key}`)
+		let path = own ?? ""
 
-		for (let n = this.tiles.size + 1; path === "" || this.styles.hasEntry?.(path) === true; n++)
+		for (
+			let n = this.tiles.size + 1;
+			path === "" || (path !== own && (this.styles.hasEntry?.(path) === true || isIssuedName(this.deck, path)));
+			n++
+		)
 			path = `Pictures/filen-tile${String(n)}.${extension}`
 
-		this.styles.addEntry(path, bytes, extension === "png" ? "image/png" : `image/${extension}`)
+		if (path !== own || this.styles.hasEntry?.(path) !== true)
+			this.styles.addEntry(path, bytes, extension === "png" ? "image/png" : `image/${extension}`)
+
 		this.tiles.set(key, path)
+		noteFormerName(this.deck, `tile ${key}`, path)
 
 		return path
 	}
@@ -136,13 +130,13 @@ class SourceDrawResources implements DrawResourceSink {
 // One sink per save (its OdpStyles): the slide family's pages and odpDesignStyles share it.
 const RESOURCES = new WeakMap<OdpStylesApi, SourceDrawResources>()
 
-function resourcesOf(styles: OdpStylesApi): SourceDrawResources {
+function resourcesOf(styles: OdpStylesApi, deck: Deck): SourceDrawResources {
 	let sink = RESOURCES.get(styles)
 
 	if (sink === undefined) {
 		const sheet = styles instanceof OdpStyles ? styles.sheet : undefined
 
-		sink = new SourceDrawResources(styles, (element, name) => sheet?.drawResources.get(element)?.has(name) === true)
+		sink = new SourceDrawResources(styles, deck, (element, name) => sheet?.drawResources.get(element)?.has(name) === true)
 		RESOURCES.set(styles, sink)
 	}
 
@@ -190,7 +184,7 @@ export function odpBackgroundStyle(
 		written = { ...rest, part: `/${entry}` }
 	}
 
-	const sink = resourcesOf(context.styles)
+	const sink = resourcesOf(context.styles, context.deck)
 	const before = sink.approximations.length
 
 	if (!resourceFillChanges(changes, written, sink, "drawing-page")) return refused("notFound", "the picture of the page's background")

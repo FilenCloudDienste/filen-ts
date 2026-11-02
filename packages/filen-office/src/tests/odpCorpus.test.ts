@@ -14,7 +14,8 @@ import { loCacheDir, readLoCache, type LoDeck, type LoShape } from "./oracles/pr
 //
 // Comparison conventions (what UNO reports, not what the reader decides):
 //   - a rotated shape's UNO position is its rotated box's first corner (draw:transform's translation), and its
-//     RotateAngle counter-clockwise in 1/100°; ours are DrawingML's unrotated offset and clockwise angle;
+//     RotateAngle counter-clockwise in 1/100°; ours are DrawingML's unrotated offset and clockwise angle (under one
+//     mirror of a custom shape, LibreOffice's turn the other way: it mirrors after turning, DrawingML before);
 //   - UNO's shape text is cut at 400 characters by the oracle script;
 //   - fields show what each side evaluates (slide number, date, file path): a field run matches any text.
 
@@ -225,7 +226,10 @@ describe.skipIf(PRESENT.length === 0)("OpenDocument presentation corpus", () => 
 					for (const [shape, theirs] of pairs) {
 						if (shape.xfrm === undefined || theirs.box100mm === undefined) continue
 
-						const uno = unoBox(shape.xfrm)
+						// LibreOffice mirrors a custom shape after turning it, DrawingML before: under one mirror the model's turn is
+						// LibreOffice's the other way (odp/read/shapes.ts turnedBack; ink 0 against LibreOffice's render).
+						const oneMirror = shape.kind === "sp" && shape.xfrm.flipH !== shape.xfrm.flipV && shape.xfrm.rot !== 0
+						const uno = unoBox(oneMirror ? { ...shape.xfrm, rot: (21_600_000 - shape.xfrm.rot) % 21_600_000 } : shape.xfrm)
 						const ok = uno.box.every((value, at) => Math.abs(value - (theirs.box100mm?.[at] ?? Number.NaN)) <= 50)
 
 						total++

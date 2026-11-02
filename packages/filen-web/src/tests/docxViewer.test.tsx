@@ -247,6 +247,23 @@ afterEach(() => {
 })
 
 describe("DocxViewer", () => {
+	it("goes to the command bar with F6 pressed outside the viewer", async () => {
+		render(
+			<DocxViewer
+				item={item}
+				alt="doc.docx"
+			/>
+		)
+		await emit(pages())
+		await waitFor(() => {
+			expect(document.querySelector("[data-office-ribbon]")).not.toBeNull()
+		})
+
+		// Focus outside the viewer, as on the preview overlay itself after a click in Safari and macOS Firefox.
+		fireEvent.keyDown(document.body, { key: "F6" })
+		expect(document.activeElement?.closest("[data-office-ribbon]")).not.toBeNull()
+	})
+
 	it("reads ranges of the cached buffer without copying it", async () => {
 		const view = render(
 			<DocxViewer

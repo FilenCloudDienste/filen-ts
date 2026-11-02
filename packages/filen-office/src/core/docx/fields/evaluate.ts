@@ -1,3 +1,4 @@
+import { appendAll, spliceAll } from "../../arrays"
 import type { Mark, MarkType, Node } from "prosemirror-model"
 import { NO_SOURCE, docxSchema } from "../edit/schema"
 import type { DocxEditorSession } from "../edit/session"
@@ -928,10 +929,10 @@ export class FieldEvaluation {
 
 				for (const segment of outer) covered.add(segment.level)
 
-				segments.unshift(...outer)
+				spliceAll(segments, 0, 0, outer)
 			}
 
-		segments.push(...own)
+		appendAll(segments, own)
 
 		// Relative: the leading levels the REF's own paragraph shares, when it is numbered in the same list.
 		if (context === "relative") {

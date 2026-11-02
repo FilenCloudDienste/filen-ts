@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutBasicPyramid
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:pyramid-basic">
+	<sa:title val="Basic pyramid"/>
+	<sa:desc val="Levels stacked into one triangle, the first item at the apex and each next one wider below it; sub-items are bullets in their level."/>
+	<sa:catLst>
+		<sa:cat type="pyramid" pri="10"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="100" destId="102" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="100" destId="103" srcOrd="2" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="pyramid">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:animLvl val="lvl"/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:alg type="pyra">
+			<sa:param type="linDir" val="fromB"/>
+			<sa:param type="pyraLvlNode" val="tier"/>
+		</sa:alg>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="des" forName="label" type="primFontSz" op="equ" val="60"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:forEach name="levels" ptType="node" axis="ch">
+			<sa:layoutNode name="level">
+				<sa:alg type="composite"/>
+				<sa:shape><sa:adjLst/></sa:shape>
+				<sa:presOf/>
+				<sa:constrLst>
+					<sa:constr for="ch" forName="label" type="ctrX" refFor="ch" refForName="tier" refType="ctrX"/>
+					<sa:constr for="ch" forName="label" type="w" refFor="ch" refForName="tier" refType="w" fact="0.62"/>
+					<sa:constr for="ch" forName="label" type="t" refFor="ch" refForName="tier" refType="t"/>
+					<sa:constr for="ch" forName="label" type="h" refFor="ch" refForName="tier" refType="h"/>
+				</sa:constrLst>
+				<sa:ruleLst/>
+				<sa:forEach name="tierOf" ptType="parTrans" axis="precedSib" st="-1" cnt="1">
+					<sa:layoutNode name="tier" styleLbl="node1">
+						<sa:alg type="sp"/>
+						<sa:shape type="trapezoid"><sa:adjLst/></sa:shape>
+						<sa:presOf/>
+						<sa:constrLst/>
+						<sa:ruleLst/>
+					</sa:layoutNode>
+				</sa:forEach>
+				<sa:layoutNode name="label" styleLbl="node1">
+					<sa:varLst>
+						<sa:bulletEnabled val="1"/>
+					</sa:varLst>
+					<sa:alg type="tx"/>
+					<sa:shape type="rect" hideGeom="1"><sa:adjLst/></sa:shape>
+					<sa:presOf axis="desOrSelf" ptType="node"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+			</sa:layoutNode>
+		</sa:forEach>
+	</sa:layoutNode>
+</sa:layoutDef>

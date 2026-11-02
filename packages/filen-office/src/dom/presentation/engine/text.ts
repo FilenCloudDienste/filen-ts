@@ -1,3 +1,4 @@
+import { reviveNotesFor } from "./edit"
 import type { FontRequest } from "../../../core/fonts/index"
 import type { Slicing } from "../../../core/opc/index"
 import { findShape } from "../../../core/presentation/edit/changes"
@@ -9,7 +10,7 @@ import { resolveBody, type BodyContext } from "../../../core/presentation/text/r
 import { transferableLayout } from "../../../core/presentation/text/transfer"
 import type { CallContext, EngineSession, TextCapability } from "../engine"
 import { writeTextMailbox } from "../textMailbox"
-import { renderSlideFor } from "./view"
+import { renderNodeFor, renderSlideFor } from "./view"
 
 // The text capability. layoutText lays out a body the editor holds (not committed yet) in its shape's inheritance
 // chain and box, in this worker, the session's one measuring realm, so the editor's line breaks equal the
@@ -67,7 +68,10 @@ export async function layoutShapeText(
 export async function textSeedOf(context: CallContext, shape: ShapeRef): Promise<TextSeed> {
 	const session = context.session
 	const services = servicesOf(session)
-	const render = await renderSlideFor(context, shape.slide)
+	// A notes body (the notes pane's) on its notes page; any other on its slide.
+	const render = session.deck.slides.includes(shape.slide)
+		? await renderSlideFor(context, shape.slide)
+		: await renderNodeFor(context, shape.slide)
 	const node = session.deck.nodes.get(shape.slide)
 	const model = node === undefined ? undefined : findShape(node.shapes, shape.id)?.shape
 
@@ -138,8 +142,15 @@ function cellMatrix(layer: SlideLayer, cell: ShapeRef["cell"]): readonly number[
 }
 
 export const textCapability: TextCapability = {
-	textSeed: (context, shape) => textSeedOf(context, shape),
+	// A body of notes a save took back (dormant) is made again first: the editor on it goes on.
+	textSeed: async (context, shape) => {
+		await reviveNotesFor(context, shape)
+
+		return textSeedOf(context, shape)
+	},
 	layoutText: async (context, shape, body, _caretHint, mailbox) => {
+		await reviveNotesFor(context, shape)
+
 		const result = await layoutShapeText(context.session, shape, body, context.slicing)
 
 		// Written before the answer is posted (which transfers its buffers): the page may read it in its next frame.

@@ -205,7 +205,8 @@ function nestedLineLayout(node: LayoutNode, context: LayoutContext, vertical: bo
 	const vAlign = param(node, "nodeVertAlign", "mid")
 	const hAlign = param(node, "nodeHorzAlign", "ctr")
 	const crossAlign = vertical ? (hAlign === "l" ? 0 : hAlign === "r" ? 1 : 0.5) : vAlign === "t" ? 0 : vAlign === "b" ? 1 : 0.5
-	let cursor = reverse ? mainAvail - start : start
+	// The alignment places the whole line in the box; a line from the far end starts at its own far end.
+	let cursor = reverse ? start + laid : start
 
 	node.children.forEach((child, index) => {
 		const extent = extents[index] as Extent
@@ -394,7 +395,8 @@ export function linLayout(node: LayoutNode, context: LayoutContext): void {
 
 	const along = vertical ? param(node, "vertAlign", "mid") : param(node, "horzAlign", "ctr")
 	const start = along === "l" || along === "t" ? 0 : along === "r" || along === "b" ? mainAvail - total : (mainAvail - total) / 2
-	let cursor = reverse ? mainAvail - start : start
+	// The alignment places the whole line in the box; a line from the far end starts at its own far end.
+	let cursor = reverse ? start + total : start
 	const vAlign = param(node, "nodeVertAlign", "mid")
 	const hAlign = param(node, "nodeHorzAlign", "ctr")
 	const crossAlign = vertical ? (hAlign === "l" ? 0 : hAlign === "r" ? 1 : 0.5) : vAlign === "t" ? 0 : vAlign === "b" ? 1 : 0.5

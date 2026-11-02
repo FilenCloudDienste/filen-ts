@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { XIcon } from "lucide-react"
+import { ImageIcon, ImagePlusIcon, XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import type { DeckOp, ShapeRef, SmartArtOp } from "@filen/office/core/presentation"
 import type { SmartArtInfo, SmartArtNodeInfo } from "@filen/office/core/smartart"
@@ -12,7 +12,9 @@ import {
 	nodeMoves,
 	runSmartArtOp,
 	smartArtPane,
-	useSmartArtDiagram
+	useSmartArtDiagram,
+	useSmartArtPicture,
+	type SmartArtPicturePlaceholder
 } from "@/features/presentation/components/ribbon/insertSmartArt"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 
@@ -46,9 +48,12 @@ interface FieldProps {
 	readonly keysId: string
 	readonly register: (id: string, field: HTMLTextAreaElement | null) => void
 	readonly onEscape: () => void
+	// The node's picture placeholder, when the layout has one for it, and what picks a picture for it.
+	readonly picture: SmartArtPicturePlaceholder | undefined
+	readonly onPicture: (placeholder: SmartArtPicturePlaceholder) => void
 }
 
-function NodeField({ editor, target, info, index, keysId, register, onEscape }: FieldProps) {
+function NodeField({ editor, target, info, index, keysId, register, onEscape, picture, onPicture }: FieldProps) {
 	const { t } = useTranslation("preview")
 	const node = info.nodes[index] ?? EMPTY_NODE
 	const [value, setValue] = useState(node.text)
@@ -239,6 +244,24 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape }: 
 				}}
 				onKeyDown={onKeyDown}
 			/>
+			{picture === undefined ? null : (
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					className="mt-0.5 shrink-0"
+					aria-label={t(picture.filled ? "previewPptxSmartArtPictureChangeFor" : "previewPptxSmartArtPictureInsertFor", {
+						number: index + 1
+					})}
+					title={t(picture.filled ? "previewPptxSmartArtPictureChangeFor" : "previewPptxSmartArtPictureInsertFor", {
+						number: index + 1
+					})}
+					onClick={() => {
+						onPicture(picture)
+					}}
+				>
+					{picture.filled ? <ImageIcon /> : <ImagePlusIcon />}
+				</Button>
+			)}
 		</li>
 	)
 }
@@ -254,6 +277,7 @@ export function SmartArtTextPane({
 }) {
 	const { t } = useTranslation("preview")
 	const { target, info, pane } = useSmartArtDiagram(editor)
+	const pictures = useSmartArtPicture(editor)
 	const fields = useRef(new Map<string, HTMLTextAreaElement>())
 	const closeRef = useRef<HTMLButtonElement | null>(null)
 	const keysId = useId()
@@ -355,6 +379,10 @@ export function SmartArtTextPane({
 							onEscape={() => {
 								closeRef.current?.focus()
 							}}
+							picture={info.pictures?.find(each => each.node === node.id)}
+							onPicture={placeholder => {
+								pictures.pick(target, placeholder)
+							}}
 						/>
 					))}
 				</ul>
@@ -372,11 +400,13 @@ const PROMPT_HALO = "0 0 1px rgb(0, 0, 0), 0 0 2px rgb(0, 0, 0), 0 0 3px rgba(0,
 export function SmartArtPrompts({ editor, scale }: { editor: PresentationRibbonEditor; scale: number }) {
 	const { t } = useTranslation("preview")
 	const { target, info } = useSmartArtDiagram(editor)
+	const pictures = useSmartArtPicture(editor)
 	const layer =
 		target === undefined ? undefined : editor.render?.layers.find(each => each.role === "smartart" && each.box?.id === target.id)
 	const prompts = info?.prompts ?? []
+	const empty = (info?.pictures ?? []).filter(each => !each.filled)
 
-	if (layer === undefined || prompts.length === 0) return null
+	if (layer === undefined || target === undefined || (prompts.length === 0 && empty.length === 0)) return null
 
 	const [a = 1, b = 0, c = 0, d = 1, e = 0, f = 0] = layer.matrix
 
@@ -407,6 +437,39 @@ export function SmartArtPrompts({ editor, scale }: { editor: PresentationRibbonE
 				>
 					{t("previewPptxSmartArtNodePlaceholder")}
 				</span>
+			))}
+			{/* A click in an empty picture placeholder picks a picture (the text pane offers the same, focusable). */}
+			{empty.map(placeholder => (
+				<button
+					key={`${placeholder.node}:${placeholder.placeholder}`}
+					type="button"
+					tabIndex={-1}
+					data-smartart-picture=""
+					className="pointer-events-auto absolute flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden text-center"
+					style={{
+						color: PROMPT_COLOR,
+						textShadow: PROMPT_HALO,
+						left: placeholder.x / EMU_PER_PX,
+						top: placeholder.y / EMU_PER_PX,
+						width: placeholder.w / EMU_PER_PX,
+						height: placeholder.h / EMU_PER_PX,
+						fontSize: Math.max(6, Math.min(20, placeholder.h / EMU_PER_PX / 6))
+					}}
+					onPointerDown={event => {
+						// The slide's own selection gesture never sees this click.
+						event.stopPropagation()
+					}}
+					onClick={event => {
+						event.stopPropagation()
+						pictures.pick(target, placeholder)
+					}}
+				>
+					<ImagePlusIcon
+						aria-hidden="true"
+						className="size-[1.6em] drop-shadow"
+					/>
+					{t("previewPptxSmartArtPicturePrompt")}
+				</button>
 			))}
 		</div>
 	)

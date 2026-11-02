@@ -1,3 +1,4 @@
+import { appendAll } from "../../../arrays"
 import type { CommonTimeNode, TimeCondition, TimeNode, TimeNodeType, TimingTree } from "../../model"
 
 // A slide's effects as authoring sees them: the main sequence and each trigger's interactive sequence as flat lists of
@@ -143,7 +144,8 @@ export function usedIds(node: TimeNode, out: Set<number> = new Set()): Set<numbe
 
 	for (let at = stack.pop(); at !== undefined; at = stack.pop()) {
 		out.add(at.ctn.id)
-		stack.push(...at.ctn.children, ...(at.ctn.subTnLst ?? []))
+		appendAll(stack, at.ctn.children)
+		appendAll(stack, at.ctn.subTnLst ?? [])
 	}
 
 	return out
@@ -390,7 +392,7 @@ export function writeSequences(sequences: SlideSequences, ids: IdAllocator, auto
 
 	if (!mainPlaced && main !== undefined) children.unshift(main)
 
-	children.push(...added)
+	appendAll(children, added)
 
 	if (children.length === 0 && sequences.builds.length === 0) return undefined
 

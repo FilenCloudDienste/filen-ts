@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react"
 import type { PresentationStore, ShowOptions } from "@filen/office/react/presentation"
+import { returnRibbonFocus, takeRibbonOrigin, type RibbonOrigin } from "@/features/presentation/components/ribbon/ribbonDialogs"
 
 // What Set Up Slide Show chose for an open deck it could not save it in (a deck that can only be viewed, or a refused
 // change; used by every show started until the deck is closed, in place of the deck's own settings, OpenInfo.show),
@@ -9,6 +10,8 @@ import type { PresentationStore, ShowOptions } from "@filen/office/react/present
 interface DeckShowState {
 	chosen: ShowOptions | undefined
 	setUpOpen: boolean
+	// Where focus goes back to when the dialog closes (the ribbon's rule).
+	origin: RibbonOrigin | undefined
 	readonly listeners: Set<() => void>
 }
 
@@ -18,7 +21,7 @@ function stateOf(store: PresentationStore): DeckShowState {
 	let state = states.get(store)
 
 	if (state === undefined) {
-		state = { chosen: undefined, setUpOpen: false, listeners: new Set() }
+		state = { chosen: undefined, setUpOpen: false, origin: undefined, listeners: new Set() }
 		states.set(store, state)
 	}
 
@@ -43,7 +46,15 @@ export function setSetUpOpen(store: PresentationStore, open: boolean): void {
 	if (state.setUpOpen === open) return
 
 	state.setUpOpen = open
+
+	if (open) state.origin = takeRibbonOrigin()
+
 	changed(state)
+
+	if (!open && state.origin !== undefined) {
+		returnRibbonFocus(state.origin, () => state.setUpOpen)
+		state.origin = undefined
+	}
 }
 
 function subscribe(store: PresentationStore): (listener: () => void) => () => void {

@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { Fragment, type Mark, type MarkType, type Node, type Schema } from "prosemirror-model"
 import type { Transaction } from "prosemirror-state"
 import { AddMarkStep, RemoveMarkStep, Step, StepResult, type Mappable } from "prosemirror-transform"
@@ -136,7 +137,7 @@ abstract class PieceMarksStep<P extends Range> extends Step {
 		if (at < end) parts.push(node.isText ? node.cut(at - pos, end - pos) : node)
 
 		if (same) out.push(node)
-		else out.push(...parts)
+		else appendAll(out, parts)
 	}
 
 	override invert(doc: Node): Step {

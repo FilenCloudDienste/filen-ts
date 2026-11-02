@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import type { Fragment } from "../odp/read/context"
 import type { EmitPiece } from "../pptx/write/types"
 import type { ColorModel, ShapeNode, SourceRef } from "../presentation/model"
@@ -5,6 +6,7 @@ import { tooDeep, tooLarge } from "../presentation/refusal"
 import { OdfNs, canonicalName } from "../odf/index"
 import { decodeCharacterData, decodeUtf8, encodeUtf8, escapeAttribute } from "../xml/index"
 import { attributeEntry, attributeFromOdf, attributeToOdf, isMediaBehavior } from "./attributes"
+import { svgMotionPath } from "./motionEdit"
 import { heldMarkup, inScope } from "./prune"
 import { isPageTransitionPar } from "./presets/transitions/odf"
 import type {
@@ -1366,7 +1368,8 @@ export function odpParagraphTargets(tree: TimingTree | undefined): readonly { re
 				out.set(odpParagraphKey(target.shape, target.start), { shape: target.shape, paragraph: target.start })
 		}
 
-		stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+		appendAll(stack, node.ctn.children)
+		appendAll(stack, node.ctn.subTnLst ?? [])
 	}
 
 	return [...out.values()]
@@ -1512,7 +1515,7 @@ class OdfTimingWriter {
 		for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
 			for (const sub of node.ctn.subTnLst ?? []) if (sub.ctn.masterRel === "nextClick") nexts.push(sub)
 
-			stack.push(...node.ctn.children)
+			appendAll(stack, node.ctn.children)
 		}
 
 		if (nexts.length === 0) return
@@ -1527,7 +1530,7 @@ class OdfTimingWriter {
 
 			for (let node = inner.pop(); node !== undefined; node = inner.pop()) {
 				clickOf.set(node.ctn.id, k)
-				inner.push(...node.ctn.children)
+				appendAll(inner, node.ctn.children)
 			}
 		})
 
@@ -1836,8 +1839,13 @@ class OdfTimingWriter {
 				)
 			case "animMotion":
 				// ODF 1.3 requires smil:attributeName on anim:animateMotion (common-anim-named-target-attlist); a motion that
-				// names none is written "translate", which reads back as naming none.
-				return head + attribute("smil:attributeName", name ?? MOTION_ATTRIBUTE) + attribute("svg:path", behavior.path)
+				// names none is written "translate", which reads back as naming none. svg:path is SVG path data, which has
+				// no §19.5.4 E end mark.
+				return (
+					head +
+					attribute("smil:attributeName", name ?? MOTION_ATTRIBUTE) +
+					attribute("svg:path", behavior.path === undefined ? undefined : svgMotionPath(behavior.path))
+				)
 			case "animRot": {
 				const angle = (value: number | undefined): string | undefined => (value === undefined ? undefined : decimal(value / 60000))
 

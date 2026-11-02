@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { ZipError, sliceClock, type ByteSource, type SliceClock, type Slicing, type ZipLimits } from "../opc/index"
 import { runSliced } from "../slicing"
 import type { LinkedPart } from "../opc/package"
@@ -536,9 +537,12 @@ function assemble(
 
 	for (const [name, bytes] of translator.pages.parts) parts.set(name, bytes)
 
-	overrides.push(...translator.pages.contentTypes)
+	appendAll(overrides, translator.pages.contentTypes)
 	// Headers and footers are translated as pages first use them: their origins go in styles.xml's stream order.
-	origins.push(...translator.pages.origins.slice().sort((a, b) => a.start - b.start))
+	appendAll(
+		origins,
+		translator.pages.origins.slice().sort((a, b) => a.start - b.start)
+	)
 
 	const archive = odf.archive
 

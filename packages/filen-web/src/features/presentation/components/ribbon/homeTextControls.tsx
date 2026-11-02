@@ -90,6 +90,12 @@ import {
 	type TextRibbonEditor,
 	type TextTarget
 } from "@/features/presentation/components/ribbon/homeText.logic"
+import {
+	returnRibbonFocus,
+	takeRibbonOrigin,
+	useRibbonFocusRecording,
+	type RibbonOrigin
+} from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PreviewKey } from "@/lib/i18n"
 import { i18n } from "@/lib/i18n"
 
@@ -829,7 +835,9 @@ function ParagraphControls({ target, editor }: { target: TextTarget; editor: Tex
 				pressed={target.run.hlinkClick !== undefined}
 				disabled={disabled}
 				onClick={() => {
-					setLinking(true)
+					// The editor's link host shows the dialog (this control unmounts when it runs from the ribbon's
+					// overflow); without one, the control shows it.
+					if (!editor.text.requestLink()) setLinking(true)
 				}}
 			/>
 			{linking ? (
@@ -848,23 +856,27 @@ function ParagraphControls({ target, editor }: { target: TextTarget; editor: Tex
 // The link dialog the open body's link key (Mod+K by default) asks for: mounted by the editor next to the text editor,
 // so the key works whichever ribbon tab shows.
 export function TextLinkHost({ editor, editable }: { editor: TextRibbonEditor; editable: boolean }) {
-	const [linking, setLinking] = useState(false)
+	// Where focus goes back to when the dialog closes: undefined while it is not open. A key leaves no origin, and the
+	// dialog gives focus back to the text itself.
+	const [origin, setOrigin] = useState<RibbonOrigin | undefined>(undefined)
 	const target = useTextTarget(editor, editable)
 
+	useRibbonFocusRecording()
 	useEffect(
 		() =>
 			editor.text.onLinkRequest(() => {
-				setLinking(true)
+				setOrigin(takeRibbonOrigin())
 			}),
 		[editor.text]
 	)
 
-	return linking && target.enabled ? (
+	return origin !== undefined && target.enabled ? (
 		<LinkDialog
 			target={target}
 			editor={editor}
 			onClose={() => {
-				setLinking(false)
+				setOrigin(undefined)
+				returnRibbonFocus(origin)
 			}}
 		/>
 	) : null

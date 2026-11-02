@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { CfbError, CfbFile, isCompoundFile } from "../cfb/index"
 import { relationshipKind } from "../docx/index"
 import { isEncryptedContainer } from "../encryption/index"
@@ -276,7 +277,7 @@ async function openParts(opc: OpcPackage, options: PptxOpenOptions): Promise<Ppt
 		if (policy.kind === "tooLarge") return policyRefusal(policy)
 
 		media = policy.media
-		notices.push(...policy.notices)
+		appendAll(notices, policy.notices)
 	}
 
 	const parts = new PptxParts(opc, contentTypes, budgets, options, media, notices)
@@ -1086,7 +1087,7 @@ export class PptxParts {
 
 			const authors = await this.xml(part)
 
-			deck.authors.push(...readLegacyAuthors(this.context(part, partReader(authors), relationships), authors.documentElement()))
+			appendAll(deck.authors, readLegacyAuthors(this.context(part, partReader(authors), relationships), authors.documentElement()))
 		}
 
 		for (const relationship of relationships.byType(MODERN_AUTHORS)) {
@@ -1095,7 +1096,7 @@ export class PptxParts {
 			const part = `/${relationship.partName}`
 			const authors = await this.xml(part)
 
-			deck.authors.push(...readModernAuthors(this.context(part, partReader(authors), relationships), authors.documentElement()))
+			appendAll(deck.authors, readModernAuthors(this.context(part, partReader(authors), relationships), authors.documentElement()))
 		}
 
 		if (this.hiddenAtOpen.size > 0) deck.hiddenSlides = this.hiddenAtOpen

@@ -318,6 +318,14 @@ describe("PdfViewer", () => {
 		expect(document.activeElement).toBe(scroller)
 	})
 
+	it("goes to the command bar with F6 pressed outside the viewer", async () => {
+		await mount()
+
+		// Focus outside the viewer, as on the preview overlay itself after a click in Safari and macOS Firefox.
+		fireEvent.keyDown(document.body, { key: "F6" })
+		expect(document.activeElement?.closest("[data-office-ribbon]")).not.toBeNull()
+	})
+
 	it("keeps the command row one Tab stop with the zoom menu's steps and fits", async () => {
 		await mount()
 

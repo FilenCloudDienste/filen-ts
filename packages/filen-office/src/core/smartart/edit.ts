@@ -1,9 +1,11 @@
+import { spliceAll } from "../arrays"
 import { D, drawingReader, type DrawingReader } from "../drawingml/reader"
 import { matchesIn, type Matcher } from "../presentation/edit/find"
 import { refused, type Refused } from "../presentation/model"
 import { escapeAttribute, escapeText } from "../xml/entities"
 import { decodeUtf8, encodeUtf8, parseXml, XmlEditor, type XmlDocument } from "../xml/index"
 import { DEFAULT_SMARTART_BUDGETS, parseDataModel, SmartArtError, type DataModel, type DataPoint, type PointType } from "./data"
+import { isPendingImageId, PART_IMAGE_ID } from "./emit"
 
 // Editing a diagram's data model (ECMA-376 §21.4.3 dgm:dataModel) as the text pane and Find & Replace do: node text,
 // adding, removing, promoting, demoting and moving nodes, replacing text, and the layout, style and colours a diagram
@@ -71,6 +73,19 @@ export type DiagramEdit =
 			readonly which: "layout" | "style" | "colors"
 			readonly uniqueId: string
 			readonly category?: string
+			// A new layout's picture placeholder (the layout node a picture fills): the presentation points holding a
+			// picture are kept under that name, so their pictures stay; without one they are kept as they are.
+			readonly pictureName?: string
+	  }
+	// A picture into the placeholder `placeholder` (a layout node's name) of node `node`: the presentation point's
+	// spPr fill, made when there is none. `embed` names the image (a pending id, emit.ts INSERTED_IMAGE_ID), `crop`
+	// is its srcRect (1/100,000 of the image per edge).
+	| {
+			readonly kind: "setPicture"
+			readonly node: string
+			readonly placeholder: string
+			readonly embed: string
+			readonly crop?: { readonly l: number; readonly t: number; readonly r: number; readonly b: number }
 	  }
 
 export type DiagramEditResult =
@@ -239,6 +254,7 @@ class DataPart {
 				if (
 					colon > 0 &&
 					attribute.name.slice(0, colon) !== "xmlns" &&
+					!isPendingImageId(attribute.value) &&
 					this.reader.namespaces.uri(node, attribute.name.slice(0, colon)) === R_URI
 				)
 					return true
@@ -640,7 +656,7 @@ function removeNode(part: DataPart, editor: XmlEditor, model: DataModel, id: str
 	const parent = at.parent as Outline
 	const index = parent.children.indexOf(at)
 
-	parent.children.splice(index, 1, ...at.children)
+	spliceAll(parent.children, index, 1, at.children)
 
 	for (const child of at.children) child.parent = parent
 
@@ -878,7 +894,8 @@ function setDefinition(
 	editor: XmlEditor,
 	which: "layout" | "style" | "colors",
 	uniqueId: string,
-	category: string | undefined
+	category: string | undefined,
+	pictureName?: string
 ): DiagramEditResult {
 	const reader = part.reader
 	const doc = part.pts.find(pt => pt.type === "doc")
@@ -899,13 +916,173 @@ function setDefinition(
 	}
 
 	if (which === "layout") {
-		// The presentation points are the old layout's.
-		removePoints(part, editor, new Set(part.pts.filter(pt => pt.type === "pres").map(pt => pt.id)))
+		// The presentation points are the old layout's; those holding a picture are the user's and stay, under the new
+		// layout's picture placeholder when it has one.
+		const pictures = part.pts.filter(pt => pt.type === "pres" && holdsPicture(part, pt.node))
+		const kept = new Set(pictures.map(pt => pt.id))
+
+		removePoints(part, editor, new Set(part.pts.filter(pt => pt.type === "pres" && !kept.has(pt.id)).map(pt => pt.id)))
+
+		for (const pt of pictures) {
+			const prSet = reader.child(pt.node, D.Dgm, "prSet")
+
+			if (prSet < 0) continue
+			if (pictureName !== undefined) editor.setAttribute(prSet, "presName", pictureName)
+
+			for (const name of ["presStyleIdx", "presStyleCnt"])
+				if (reader.attr(prSet, name) !== undefined) editor.removeAttribute(prSet, name)
+		}
 	}
 
 	dropDrawingCache(part, editor)
 
 	return finish(editor)
+}
+
+const FILL_NAMES: ReadonlySet<string> = new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"])
+// CT_ShapeProperties children that come before the fill.
+const BEFORE_FILL: ReadonlySet<string> = new Set(["xfrm", "custGeom", "prstGeom"])
+
+// Whether a presentation point's dgm:spPr fills its shape with a picture.
+function holdsPicture(part: DataPart, pt: number): boolean {
+	const reader = part.reader
+
+	return reader.child(reader.child(pt, D.Dgm, "spPr"), D.A, "blipFill") >= 0
+}
+
+function blipFillXml(part: DataPart, embed: string, crop: Extract<DiagramEdit, { kind: "setPicture" }>["crop"]): string {
+	const { prefix, declare } = part.aPrefix()
+	const edge = (name: string, value: number): string => (Math.round(value) === 0 ? "" : ` ${name}="${String(Math.round(value))}"`)
+	const source = crop === undefined ? "" : `${edge("l", crop.l)}${edge("t", crop.t)}${edge("r", crop.r)}${edge("b", crop.b)}`
+
+	return (
+		`<${prefix}blipFill${declare} xmlns:r="${R_URI}" rotWithShape="1"><${prefix}blip r:embed="${escapeAttribute(embed)}"/>` +
+		`<${prefix}srcRect${source}/><${prefix}stretch><${prefix}fillRect/></${prefix}stretch></${prefix}blipFill>`
+	)
+}
+
+function setPicture(
+	part: DataPart,
+	editor: XmlEditor,
+	model: DataModel,
+	edit: Extract<DiagramEdit, { kind: "setPicture" }>
+): DiagramEditResult {
+	const point = model.points.get(edit.node)
+
+	if (point === undefined || (point.type !== "node" && point.type !== "asst")) return refused("notFound", `node ${edit.node}`)
+	if (edit.placeholder === "") return refused("malformed", "a picture placeholder without a name")
+
+	const reader = part.reader
+	const fill = blipFillXml(part, edit.embed, edit.crop)
+	const pres = part.pts.find(pt => {
+		if (pt.type !== "pres") return false
+
+		const prSet = reader.child(pt.node, D.Dgm, "prSet")
+
+		return reader.attr(prSet, "presAssocID") === edit.node && reader.attr(prSet, "presName") === edit.placeholder
+	})
+
+	if (pres === undefined) {
+		const ids = new Ids(part, `${edit.node}\u0000${edit.placeholder}`)
+		const pt = part.tag("pt")
+
+		appendPoints(
+			part,
+			editor,
+			`<${pt} modelId="${ids.take()}" type="pres"><${part.tag("prSet")} presAssocID="${escapeAttribute(edit.node)}" presName="${escapeAttribute(edit.placeholder)}"/>` +
+				`<${part.tag("spPr")}>${fill}</${part.tag("spPr")}></${pt}>`,
+			""
+		)
+	} else {
+		const spPr = reader.child(pres.node, D.Dgm, "spPr")
+
+		if (spPr < 0) {
+			const prSet = reader.child(pres.node, D.Dgm, "prSet")
+			const markup = `<${part.tag("spPr")}>${fill}</${part.tag("spPr")}>`
+
+			if (prSet >= 0) editor.insertAfter(prSet, markup)
+			else editor.prepend(pres.node, markup)
+		} else {
+			let before = -1
+			let placed = false
+
+			for (let child = part.document.firstChildElement(spPr); child >= 0; child = part.document.nextSiblingElement(child)) {
+				if (reader.group(child) !== D.A) continue
+
+				const name = part.document.localName(child)
+
+				if (BEFORE_FILL.has(name)) before = child
+				else if (FILL_NAMES.has(name)) {
+					if (placed) editor.remove(child)
+					else editor.replace(child, fill)
+
+					placed = true
+				}
+			}
+
+			if (!placed) {
+				if (before >= 0) editor.insertAfter(before, fill)
+				else editor.prepend(spPr, fill)
+			}
+		}
+	}
+
+	dropDrawingCache(part, editor)
+
+	return finish(editor)
+}
+
+// Every relationship a data part names (r:embed, r:link, r:id on its pictures), as a pending id naming the target part
+// (emit.ts PART_IMAGE_ID), so the part no longer needs relationships of its own: undefined when it names none; refused
+// when one is no part of the package (an external link).
+export function pendDataRelationships(document: XmlDocument, target: (id: string) => string | undefined): Uint8Array | Refused | undefined {
+	const part = new DataPart(document)
+	const editor = new XmlEditor(document)
+	let changed = false
+
+	for (let node = 1; node < document.count; node++) {
+		for (const attribute of document.attributes(node)) {
+			const colon = attribute.name.indexOf(":")
+
+			if (colon <= 0 || attribute.name.slice(0, colon) === "xmlns" || isPendingImageId(attribute.value)) continue
+			if (part.reader.namespaces.uri(node, attribute.name.slice(0, colon)) !== R_URI) continue
+
+			const name = target(attribute.value)
+
+			if (name === undefined) return refused("unsupported", `a diagram picture whose relationship ${attribute.value} names no part`)
+
+			editor.setAttribute(node, attribute.name, `${PART_IMAGE_ID}${name}`)
+			changed = true
+		}
+	}
+
+	return changed ? editor.serialize() : undefined
+}
+
+// The pending image ids a data part or drawing names, in document order, each once.
+export function pendingImageIds(document: XmlDocument): string[] {
+	const out = new Set<string>()
+
+	for (let node = 1; node < document.count; node++)
+		for (const attribute of document.attributes(node))
+			if (attribute.name.endsWith(":embed") || attribute.name.endsWith(":link") || attribute.name.endsWith(":id"))
+				if (isPendingImageId(attribute.value)) out.add(attribute.value)
+
+	return [...out]
+}
+
+// The bytes with every pending image id replaced by the relationship id `ids` gives it.
+export function withImageRelationships(document: XmlDocument, ids: ReadonlyMap<string, string>): Uint8Array {
+	const editor = new XmlEditor(document)
+
+	for (let node = 1; node < document.count; node++)
+		for (const attribute of document.attributes(node)) {
+			const id = ids.get(attribute.value)
+
+			if (id !== undefined && isPendingImageId(attribute.value)) editor.setAttribute(node, attribute.name, id)
+		}
+
+	return editor.serialize()
 }
 
 // One edit of a data part, as the part's bytes after it (or a typed refusal: an unknown node, a move the tree has no
@@ -937,7 +1114,9 @@ export function editDiagramData(document: XmlDocument, edit: DiagramEdit): Diagr
 		case "replace":
 			return replace(part, editor, edit.matcher, edit.replacement, edit.match)
 		case "setDefinition":
-			return setDefinition(part, editor, edit.which, edit.uniqueId, edit.category)
+			return setDefinition(part, editor, edit.which, edit.uniqueId, edit.category, edit.pictureName)
+		case "setPicture":
+			return setPicture(part, editor, model, edit)
 	}
 }
 
@@ -1099,6 +1278,17 @@ export interface SmartArtInfo {
 	// Where the empty nodes' text goes as last laid out (EMU in the frame): an editor shows its text prompt there (never
 	// written, never drawn by the show, thumbnails or exports). Absent before a layout.
 	readonly prompts?: readonly { readonly x: number; readonly y: number; readonly w: number; readonly h: number }[]
+	// The picture placeholders as last laid out (EMU in the frame): the node each belongs to, the layout node's name
+	// (what a setPicture op names) and whether a picture fills it. Absent before a layout.
+	readonly pictures?: readonly {
+		readonly x: number
+		readonly y: number
+		readonly w: number
+		readonly h: number
+		readonly node: string
+		readonly placeholder: string
+		readonly filled: boolean
+	}[]
 }
 
 // The diagram's outline and definitions; `definitions` are the documents of the deck's diagrams' layout, style and

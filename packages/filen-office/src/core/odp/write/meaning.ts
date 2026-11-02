@@ -15,8 +15,9 @@ import type {
 	TextBody,
 	Xfrm
 } from "../../presentation/model"
+import { odfCustomCommands } from "../../odf/presetShapes"
 import { jumpIndex } from "./emit/text"
-import { IDENTITY, compose, groupAffine, lineEnds, placed, type Affine } from "./emit/shape"
+import { IDENTITY, canonicalBox, compose, groupAffine, lineEnds, placed, type Affine } from "./emit/shape"
 import { isRefused } from "./styles"
 
 // What a written page means, compared with what the session holds (proof gate 2 for ODP: the touched pages of the
@@ -45,7 +46,15 @@ function near(a: number, b: number, tolerance = TOLERANCE): boolean {
 	return Math.abs(a - b) <= tolerance
 }
 
-function boxDiffers(expected: Xfrm, read: Xfrm): boolean {
+// A box's flips as one vertical mirror at most: a horizontal one is a vertical one half a turn round (and both, half a
+// turn), text included under DrawingML's meaning of them; a mirroring draw:transform reads back so.
+function oneMirror(box: Xfrm): Xfrm {
+	return box.flipH ? { ...box, rot: (box.rot + 10_800_000) % 21_600_000, flipH: false, flipV: !box.flipV } : box
+}
+
+function boxDiffers(wanted: Xfrm, got: Xfrm): boolean {
+	const expected = oneMirror(wanted)
+	const read = oneMirror(got)
 	const turn = (rot: number): number => ((rot % 21_600_000) + 21_600_000) % 21_600_000
 	const rotation = Math.abs(turn(expected.rot) - turn(read.rot))
 
@@ -246,8 +255,12 @@ function shapeDiffers(expected: ShapeNode, read: ShapeNode, m: Affine, readM: Af
 			const got = lineEnds(read.xfrm, readM)
 
 			if (want.some((value, k) => !near(value, got[k] ?? Number.NaN))) return "line ends"
-		} else if (boxDiffers(placed(expected.xfrm, m), placed(read.xfrm, readM))) {
-			return "box"
+		} else {
+			const want = placed(expected.xfrm, m)
+			const got = placed(read.xfrm, readM)
+
+			// A frame holds a mirrored box as the box DrawingML means (canonicalBox).
+			if (boxDiffers(want, got) && boxDiffers(canonicalBox(expected, want), got)) return "box"
 		}
 	}
 
@@ -330,10 +343,17 @@ function sameGeometry(want: Geometry, got: Geometry | undefined): boolean {
 	if (want.kind !== "custom" || got.kind !== "custom") return same(want, got)
 	if (want.paths.length !== got.paths.length) return false
 
+	// As the outline is written (odfCustomCommands): a quadratic or an arc as cubics, a fill ODF holds as filled or not.
 	return want.paths.every((path, k) => {
 		const other = got.paths[k]
+		const written = odfCustomCommands(path)
 
-		return other !== undefined && path.fill === other.fill && path.stroke === other.stroke && same(path.commands, other.commands)
+		return (
+			other !== undefined &&
+			written.filled === (other.fill !== "none") &&
+			path.stroke === other.stroke &&
+			same(written.commands, Array.from(other.commands))
+		)
 	})
 }
 

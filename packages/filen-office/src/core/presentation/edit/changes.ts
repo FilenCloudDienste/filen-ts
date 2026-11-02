@@ -1,6 +1,8 @@
 import { slideRef, type Deck, type Refused, type ShapeNode, type SlideNode, type SlideRef, type SourceRef } from "../model"
 import type { DeckChanges, Dirt, PartChanges, Touch } from "./apply"
 import { UNKNOWN_FINGERPRINT, touchKey, type DeckHistory, type Fingerprint, type FingerprintOf, type TouchKey } from "./history"
+import { commentsValue } from "../comments"
+import { notesValue } from "../notes"
 
 // What differs from the saved state, recomputed from the history's dirty keys: a key is dirty when the model's
 // fingerprint of it now differs from the one it had in the saved state (history.ts). Fingerprints are digests of
@@ -192,8 +194,12 @@ export function parseTouchKey(key: TouchKey): ParsedKey {
 	}
 }
 
-function slidePartValue(node: SlideNode, part: string): unknown {
+function slidePartValue(deck: Deck, node: SlideNode, part: string): unknown {
 	switch (part) {
+		case "notes":
+			return notesValue(deck, node)
+		case "comments":
+			return commentsValue(deck, node)
 		case "background":
 			return node.background
 		case "timing":
@@ -314,7 +320,7 @@ export function deckFingerprints(deck: Deck, sourceBytes: SourceBytes): Fingerpr
 					}
 				}
 
-				return { digest: digestOf(slidePartValue(node, parsed.dirt.slice(3))), exists: true, part: node.part }
+				return { digest: digestOf(slidePartValue(deck, node, parsed.dirt.slice(3))), exists: true, part: node.part }
 			}
 			case "presentation":
 				return { digest: digestOf(presentationValue(deck, parsed.what)), exists: true }

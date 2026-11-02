@@ -168,6 +168,7 @@ function CollapsedGroup({ group }: { group: RibbonGroup }) {
 									size="sm"
 									aria-label={group.label}
 									data-ribbon-group={group.id}
+									data-ribbon-popup-trigger={group.id}
 									className="shrink-0 gap-0.5 px-1.5"
 									onMouseDown={keepFocus}
 								>
@@ -218,6 +219,7 @@ function Overflow({ groups }: { groups: readonly RibbonGroup[] }) {
 									variant="ghost"
 									size="icon-sm"
 									aria-label={t("previewOfficeRibbonMore")}
+									data-ribbon-popup-trigger="more"
 									className="shrink-0"
 									onMouseDown={keepFocus}
 								>

@@ -2,10 +2,12 @@ import type { ByteSource } from "../../opc/index"
 import { resolvePath, structuralPath, visitSources, type PathStep } from "../../pptx/sourcePath"
 import { NodeKind, type XmlDocument } from "../../xml/index"
 import { refused, type Deck, type Refused, type ShapeNode, type SlideNode, type SourceRef } from "../../presentation/model"
+import { isHeldChart } from "../../presentation/edit/apply/chart"
 import { openOdp, type OdpOpenOptions, type OdpParts } from "../read/document"
 import { readOdpTiming } from "../../anim/odf"
 import type { TimeCondition, TimeNode } from "../../anim/model"
 import type { Fragment } from "../read/context"
+import { latestSnapshotRevision, releaseSnapshotOrders, snapshotSlideOrder } from "./save"
 import { odpWriteSource } from "./source"
 
 // A deck moved onto its saved file (§1.5.6): the saved package read again taking over the session's deck (its refs,
@@ -20,9 +22,25 @@ const RESOURCE_FILLS: ReadonlySet<string> = new Set(["gradient", "pattern", "pic
 // What the open takes for a rebase (OdpOpenOptions gains `adopt`).
 type RebaseOptions = OdpOpenOptions & { readonly adopt: Deck }
 
-export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSource): Promise<OdpParts | Refused> {
-	// Refs the previous reading handed out stay retired: the history may restore a slide under one.
-	const options: RebaseOptions = { epoch: parts.epoch + 1, budgets: parts.budgets, adopt: deck, refsAbove: parts.refsIssued() }
+export async function rebaseOdpDeck(
+	deck: Deck,
+	parts: OdpParts,
+	source: ByteSource,
+	// The save whose file `source` is: its snapshot's slide order is the file's pages (unsaid: the latest snapshot's;
+	// none kept: the deck's slides).
+	revision?: number
+): Promise<OdpParts | Refused> {
+	// Refs the previous reading handed out stay retired: the history may restore a slide under one. The saved file's
+	// pages are the slides its snapshot wrote (`order`): one deleted, added or moved since is the next save's.
+	const saved = revision ?? latestSnapshotRevision(deck)
+	const order = (saved === undefined ? undefined : snapshotSlideOrder(deck, saved)) ?? deck.slides
+	const options: RebaseOptions = {
+		epoch: parts.epoch + 1,
+		budgets: parts.budgets,
+		adopt: deck,
+		adoptOrder: order,
+		refsAbove: parts.refsIssued()
+	}
 	const opened = await openOdp(source, options)
 
 	if (opened.kind === "refused") return opened
@@ -34,6 +52,8 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 	// Styles a save retired stay known to the session: held markup may still name them.
 	for (const [name, markup] of before.retired) after.retired.set(name, markup)
 	for (const [name, place] of before.retiredAfter) after.retiredAfter.set(name, place)
+	for (const [key, box] of before.placeholderBoxes) after.placeholderBoxes.set(key, box)
+	for (const [key, value] of before.mirrorValues) after.mirrorValues.set(key, value)
 	after.adoptHeld(before)
 	// The charts translated for pages parsed before the save, whose objects the saved file holds unchanged.
 	opened.parts.carryCharts(parts)
@@ -42,7 +62,30 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 	const key = (src: { readonly part: string; readonly fragment: number }): string => `${src.part}\u0000${String(src.fragment)}`
 	const memo = new Map<string, Map<number, number | undefined>>()
 
-	for (const [index, ref] of deck.slides.entries()) {
+	// A slide made since the snapshot (a duplicate, an undo putting a deleted one back) is no page of the saved file:
+	// the page it was read from is held as it was, its refs moved into it node for node (the same document), so the
+	// next save reads it as an undo's held page.
+	const written = new Set(order)
+
+	for (const ref of deck.slides) {
+		const node = deck.nodes.get(ref)
+		const src = node?.src
+
+		if (written.has(ref) || node === undefined || src?.format !== "odp") continue
+
+		const from = before.fragmentOf(src)
+
+		if (from === undefined || from.part !== "content.xml") continue
+
+		const to = after.hold(from.document)
+		const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
+
+		rebind(node, from, to)
+
+		if (notes !== undefined) rebind(notes, from, to)
+	}
+
+	for (const [index, ref] of order.entries()) {
 		const node = deck.nodes.get(ref)
 		const src = node?.src
 		const span = opened.parts.content.pages[index]
@@ -102,6 +145,8 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 
 		return node === undefined ? src : { ...src, node, epoch }
 	})
+
+	if (saved !== undefined) releaseSnapshotOrders(deck, saved)
 
 	return opened.parts
 
@@ -172,14 +217,7 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 		if (mine.length !== theirs.length || mine.some((shape, k) => shape.kind !== theirs[k]?.kind || shape.name !== theirs[k]?.name))
 			return
 
-		mine.forEach((shape, k) => {
-			const other = theirs[k] as ShapeNode
-			const src = shape.src
-			const held = src?.format === "odp" ? before.fragmentOf(src) : undefined
-
-			if (src?.format !== "odp" || other.src?.format !== "odp" || held === undefined) return
-
-			moveShape(shape, held, src.node, page, other.src.node)
+		const members = (shape: ShapeNode, other: ShapeNode): void =>
 			adoptByOrder(
 				(shape.children ?? []).filter(child => child.src?.format === "odp" && child.src.epoch !== page.epoch),
 				(other.children ?? []).filter((_, j) => {
@@ -189,6 +227,28 @@ export async function rebaseOdpDeck(deck: Deck, parts: OdpParts, source: ByteSou
 				}),
 				page
 			)
+
+		mine.forEach((shape, k) => {
+			const other = theirs[k] as ShapeNode
+			const src = shape.src
+			const held = src?.format === "odp" ? before.fragmentOf(src) : undefined
+
+			// A group the save wrote new holds members from the old page: they move onto the members it wrote, not by their
+			// old paths (which now lead to other shapes).
+			if (src === undefined && shape.kind === "grpSp" && other.kind === "grpSp") {
+				if (other.src?.format === "odp") shape.src = other.src
+				members(shape, other)
+
+				return
+			}
+
+			if (src?.format !== "odp" || other.src?.format !== "odp" || held === undefined) return
+
+			// A file's chart the save gave an object of its own (a duplicated page's copy): the frame names it from now on.
+			if (shape.frame?.kind === "chart" && other.frame?.kind === "chart" && !isHeldChart(shape.frame.part)) shape.frame = other.frame
+
+			moveShape(shape, held, src.node, page, other.src.node)
+			members(shape, other)
 		})
 	}
 

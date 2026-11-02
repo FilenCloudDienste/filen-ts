@@ -1,3 +1,4 @@
+import { appendAll } from "../../../arrays"
 import { Fragment, type ContentMatch, type Mark, type Node, type NodeType } from "prosemirror-model"
 import { closeHistory } from "prosemirror-history"
 import { TextSelection, type EditorState, type Transaction } from "prosemirror-state"
@@ -1114,7 +1115,7 @@ export function mergeCells(state: EditorState, at: TableAt): Transaction | null 
 		if (r === rect.top) {
 			content = []
 			keep.forEach(block => content.push(block))
-			content.push(...moved)
+			appendAll(content, moved)
 
 			if (content.at(-1)?.type === nodes.table) content.push(nodes.paragraph.create())
 
@@ -1264,7 +1265,7 @@ export function splitCell(state: EditorState, part: StoryPart, at: TableAt, rows
 			const span = row.spans[index] ?? 1
 			const cell = map.cell(r, index)
 
-			if (r >= rect.top && r < rect.bottom && start === rect.left) cells.push(...subCells(cell, r - rect.top))
+			if (r >= rect.top && r < rect.bottom && start === rect.left) appendAll(cells, subCells(cell, r - rect.top))
 			else cells.push(added === 0 ? cell : cellWith(cell, { colspan: respan(start, span) }))
 		}
 

@@ -49,3 +49,24 @@ export const OPEN_OVERLAY_SELECTOR = `${OPEN_DIALOG_SELECTOR}, ${OPEN_MENU_SELEC
 export function isAnyOverlayOpen(): boolean {
 	return document.querySelector(OPEN_OVERLAY_SELECTOR) !== null
 }
+
+// Whether a key pressed with focus on `target` is for the editor at `root`: pressed in the editor, or anywhere else in
+// the layer the editor is shown in (the preview overlay, which Safari and macOS Firefox leave focused after a click),
+// but never in a native field outside the editor, which owns the key, nor in a dialog over the editor.
+export function keyForEditor(root: Element, target: EventTarget | null): boolean {
+	if (!(target instanceof Element)) {
+		return false
+	}
+
+	if (root.contains(target)) {
+		return true
+	}
+
+	if (target.matches("input, textarea, select") || (target instanceof HTMLElement && target.isContentEditable)) {
+		return false
+	}
+
+	const layer = dialogLayerOf(root)
+
+	return dialogLayerOf(target) === layer && (layer !== null || !isAnyDialogOpen())
+}

@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { OdfNs } from "../../odf/namespaces"
 import { declaresCalcext } from "./cells"
 import { runSliced, type SliceClock } from "../../slicing"
@@ -478,7 +479,7 @@ export class ContentWriter implements StreamHandler {
 			)
 		}
 
-		out.push(...(filters?.added ?? []))
+		appendAll(out, filters?.added ?? [])
 		this.ownStructure(out.length === 0 ? "" : `<table:database-ranges>${out.join("")}</table:database-ranges>`)
 		this.filtersDone = true
 		this.rangesStart = -1
@@ -532,7 +533,7 @@ export class ContentWriter implements StreamHandler {
 			else if (replacement !== null) out.push(replacement)
 		}
 
-		out.push(...(plan?.added ?? []))
+		appendAll(out, plan?.added ?? [])
 		this.ownStructure(out.length === 0 ? "" : `<table:named-expressions>${out.join("")}</table:named-expressions>`)
 		this.namesDone.add(scope)
 		this.namesStart = -1

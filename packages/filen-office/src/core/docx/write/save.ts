@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import {
 	addRelationships,
 	editContentTypes,
@@ -1068,7 +1069,7 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 				copiedRelationships.set(partKey(part.name), await retargeted(part.relationships))
 		}
 
-		stories.push(...result.stories)
+		appendAll(stories, result.stories)
 
 		if (clock?.due === true) await clock.pause()
 	}

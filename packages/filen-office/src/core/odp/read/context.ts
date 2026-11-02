@@ -18,6 +18,18 @@ import type { Namespaces, XmlDocument } from "../../xml/index"
 // the page names (for jumps), and one parsed fragment (a page of content.xml, or styles.xml whole) with canonical
 // names (namespaces compared by URI, Part 3 §1.5).
 
+// What LibreOffice 7.5 puts under a presentation object whose master writes no style for its class (its pixels): a
+// notes body takes its built-in notes style (no fill, no line); any other object naming a presentation style takes no
+// line from under it (the chain's own fill stays); one naming none stays on the standard graphic style.
+const CLASS_NOTES_GRAPHIC: OdfProperties = {
+	attributes: new Map([
+		["draw:fill", "none"],
+		["draw:stroke", "none"]
+	]),
+	children: []
+}
+const CLASS_STYLE_GRAPHIC: OdfProperties = { attributes: new Map([["draw:stroke", "none"]]), children: [] }
+
 export class Fragment {
 	readonly document: XmlDocument
 	readonly namespaces: Namespaces
@@ -234,9 +246,17 @@ export class OdpContext {
 		presentation: string | undefined,
 		scope: StyleScope,
 		kind: string,
-		base?: string
+		base?: string,
+		// The class of a presentation object (title, outline, notes…) whose master writes no style for it: what
+		// LibreOffice puts under its chain then.
+		presentationClass?: string
 	): OdfProperties {
 		let out = this.sheet.defaults.get("graphic")?.properties.get(kind) ?? NO_PROPERTIES
+
+		if (presentationClass !== undefined && base === undefined && kind === "graphic") {
+			if (presentationClass === "notes") out = overlay(out, CLASS_NOTES_GRAPHIC)
+			else if (presentation !== undefined) out = overlay(out, CLASS_STYLE_GRAPHIC)
+		}
 
 		// The presentation family's default style under a presentation object's chain: only the line-spacing rule is
 		// taken from it (§20.297), the rest of the shape's defaults stay the graphic ones.

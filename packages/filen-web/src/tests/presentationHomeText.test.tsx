@@ -18,6 +18,7 @@ import { createShapeSelection, createTextEditing, type TextEditController, type 
 import { OfficeRibbon } from "@/features/office/components/ribbon/officeRibbon"
 import { homeTextGroups, presentationTextLabels } from "@/features/presentation/components/ribbon/homeText"
 import { linkOfChoice } from "@/features/presentation/components/ribbon/homeText.logic"
+import { TextLinkHost } from "@/features/presentation/components/ribbon/homeTextControls"
 import type { PresentationRibbonContext } from "@/features/presentation/components/ribbon/tabs"
 import "@/lib/i18n"
 
@@ -99,6 +100,8 @@ function mount(options: {
 	readonly selected?: readonly number[]
 	readonly body?: { readonly run: Partial<RunProps>; readonly paragraph?: Partial<ParaProps> }
 	readonly editable?: boolean
+	// The editor's link host beside the ribbon, as the editor mounts it.
+	readonly linkHost?: boolean
 }): Mounted {
 	const selection = createShapeSelection()
 	const text: TextEditing = createTextEditing()
@@ -148,6 +151,14 @@ function mount(options: {
 			groups={homeTextGroups(context)}
 		/>
 	)
+
+	if (options.linkHost === true)
+		render(
+			<TextLinkHost
+				editor={context.editor as never}
+				editable
+			/>
+		)
 
 	return { ops, runs, bodyPrs, session }
 }
@@ -240,6 +251,32 @@ describe("presentation Home text groups", () => {
 
 		expect(within(commands()).queryByRole("button", { name: "Bold" })).toBeNull()
 		expect(within(commands()).getAllByRole("button").length).toBeGreaterThan(0)
+	})
+
+	it("gives focus back to More commands after the link dialog opened from it closes", async () => {
+		size.width = 40
+		const mounted = mount({ body: { run: {} }, linkHost: true })
+
+		fireEvent.click(screen.getByRole("button", { name: "More commands" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Link" }))
+
+		const dialog = await screen.findByRole("dialog", { name: "Link" })
+
+		await waitFor(() => {
+			expect(screen.queryByRole("button", { name: "Link" })).toBeNull()
+		})
+		fireEvent.change(within(dialog).getByRole("textbox", { name: "Address" }), { target: { value: "https://filen.io" } })
+		await act(async () => {
+			fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+			await Promise.resolve()
+		})
+		expect(mounted.runs).toHaveLength(1)
+		await act(async () => {
+			await new Promise(resolve => requestAnimationFrame(resolve))
+			await new Promise(resolve => requestAnimationFrame(resolve))
+		})
+
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "More commands" }))
 	})
 
 	it("opens More text formats with its labelled case and spacing groups, and sets small caps", async () => {

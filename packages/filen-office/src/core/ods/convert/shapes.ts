@@ -4,6 +4,7 @@ import type { DrawingReader } from "../../drawingml/reader"
 import { childByLocal } from "../../xlsx/refs/markup"
 import { escapeAttribute, type XmlDocument } from "../../xml/index"
 import { paragraphText } from "../write/cells"
+import { odfPresetAttributes } from "../../odf/presetShapes"
 
 // Shapes, text boxes, connectors and groups of a sheet's drawing (ECMA-376 Part 1 §20.5.2.29 sp, §20.5.2.13 cxnSp,
 // §20.5.2.17 grpSp) as OpenDocument shapes (ODF 1.3 Part 3 §10.3): a preset geometry LibreOffice knows as a
@@ -13,55 +14,6 @@ import { paragraphText } from "../write/cells"
 // geometry, fills other than a colour, effects, rotated text.
 
 const EMU_PER_CM = 360_000
-
-// a:prstGeom names (ST_ShapeType, §20.1.10.56) as the draw:type LibreOffice draws them as.
-const PRESETS: Readonly<Record<string, string>> = {
-	rect: "rectangle",
-	roundRect: "round-rectangle",
-	ellipse: "ellipse",
-	triangle: "isosceles-triangle",
-	rtTriangle: "right-triangle",
-	diamond: "diamond",
-	parallelogram: "parallelogram",
-	trapezoid: "trapezoid",
-	hexagon: "hexagon",
-	octagon: "octagon",
-	pentagon: "pentagon",
-	plus: "cross",
-	can: "can",
-	cube: "cube",
-	smileyFace: "smiley",
-	heart: "heart",
-	sun: "sun",
-	moon: "moon",
-	star4: "star4",
-	star5: "star5",
-	star8: "star8",
-	star24: "star24",
-	rightArrow: "right-arrow",
-	leftArrow: "left-arrow",
-	upArrow: "up-arrow",
-	downArrow: "down-arrow",
-	leftRightArrow: "left-right-arrow",
-	upDownArrow: "up-down-arrow",
-	homePlate: "pentagon-right",
-	chevron: "chevron",
-	flowChartProcess: "flowchart-process",
-	flowChartDecision: "flowchart-decision",
-	flowChartTerminator: "flowchart-terminator",
-	flowChartAlternateProcess: "flowchart-alternate-process",
-	flowChartDocument: "flowchart-document",
-	flowChartConnector: "flowchart-connector",
-	wedgeRectCallout: "rectangular-callout",
-	wedgeRoundRectCallout: "round-rectangular-callout",
-	wedgeEllipseCallout: "round-callout",
-	cloudCallout: "cloud-callout",
-	frame: "frame",
-	donut: "ring",
-	blockArc: "block-arc",
-	foldedCorner: "paper",
-	bevel: "quad-bevel"
-}
 
 // The paths ODF itself gives the two commonest, for readers without LibreOffice's types (§19.145 draw:enhanced-path).
 const PATHS: Readonly<Record<string, string>> = {
@@ -379,13 +331,25 @@ export class ShapeWriter {
 			])}><text:p/></draw:line>`
 		}
 
-		let type = preset === undefined ? undefined : PRESETS[preset]
+		// a:avLst (§20.1.9.5): the adjust values the shape gives its preset.
+		const guides = children(document, this.child(geometry, "avLst"))
+			.filter(gd => document.localName(gd) === "gd")
+			.map(gd => ({ name: document.attribute(gd, "name") ?? "", formula: document.attribute(gd, "fmla") ?? "" }))
+		let outline = preset === undefined ? undefined : odfPresetAttributes(preset, guides, { cx: box.cx, cy: box.cy, flipH, flipV })
 
-		// A custom geometry, or a preset without an ODF type: its box, drawn as a rectangle.
-		if (type === undefined) {
+		// A custom geometry, or no preset: its box, drawn as a rectangle.
+		if (outline === undefined) {
 			this.lost++
-			type = "rectangle"
+			outline = odfPresetAttributes("rect", [], { cx: box.cx, cy: box.cy, flipH, flipV }) ?? []
 		}
+
+		// The paths ODF itself gives the two commonest, for readers without LibreOffice's types.
+		const type = outline.find(([name]) => name === "draw:type")?.[1] ?? ""
+		const path = PATHS[type]
+		const enhanced =
+			path === undefined
+				? outline
+				: outline.flatMap(entry => (entry[0] === "draw:type" ? [entry, ["draw:enhanced-path", path] as const] : [entry]))
 
 		const body = this.child(node, "txBody")
 		const text = body < 0 ? { paragraphs: "", graphic: [] } : this.text(body, style)
@@ -393,8 +357,6 @@ export class ShapeWriter {
 			"graphic",
 			`<style:graphic-properties${attributes([...this.graphic(spPr, style, false), ...text.graphic])}/>`
 		)
-		const path = PATHS[type]
-
 		return (
 			`<draw:custom-shape${attributes([
 				...common,
@@ -403,13 +365,7 @@ export class ShapeWriter {
 				["svg:height", length(box.cy)],
 				...this.placement(box, rotation)
 			])}>${text.paragraphs}` +
-			`<draw:enhanced-geometry${attributes([
-				["svg:viewBox", "0 0 21600 21600"],
-				["draw:type", type],
-				["draw:enhanced-path", path],
-				["draw:mirror-horizontal", flipH ? "true" : undefined],
-				["draw:mirror-vertical", flipV ? "true" : undefined]
-			])}/></draw:custom-shape>`
+			`<draw:enhanced-geometry${attributes(enhanced.map(([name, value]): [string, string] => [name, value]))}/></draw:custom-shape>`
 		)
 	}
 }

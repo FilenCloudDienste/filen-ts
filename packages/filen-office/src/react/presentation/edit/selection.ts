@@ -22,12 +22,15 @@ export interface SlideShape {
 	readonly media?: SlideMediaInfo
 	// Drawn as a line between two ends (a connector or a line preset).
 	readonly line?: true
+	// The roles of the layers that paint it and of the frames and media its members hold (what flipping it would mirror).
+	readonly roles?: readonly LayerRole[]
 }
 
 // Whether a click, the marquee, Tab or Select All may select the shape: not one the file locks against selection
-// (noSelect, as PowerPoint leaves such shapes to its Selection Pane).
+// (noSelect, as PowerPoint leaves such shapes to its Selection Pane), nor a master's field the slide shows (as
+// LibreOffice leaves those to master view: no edit of the slide can change them).
 export function selectable(shape: SlideShape): boolean {
-	return shape.locks?.noSelect !== true
+	return shape.locks?.noSelect !== true && shape.lock !== "master"
 }
 
 // Axis-aligned bounds of a box as it shows (its corners turned by rot about its centre), EMU.
@@ -48,8 +51,8 @@ export function slideShapes(render: SlideRender | undefined): readonly SlideShap
 
 	if (known !== undefined) return known
 
-	const byId = new Map<number, { shape: SlideShape; layers: number[] }>()
-	const out: { shape: SlideShape; layers: number[] }[] = []
+	const byId = new Map<number, { shape: SlideShape; layers: number[]; roles: LayerRole[] }>()
+	const out: { shape: SlideShape; layers: number[]; roles: LayerRole[] }[] = []
 
 	render.layers.forEach((layer, index) => {
 		const box = layer.box
@@ -60,11 +63,14 @@ export function slideShapes(render: SlideRender | undefined): readonly SlideShap
 
 		if (seen !== undefined) {
 			seen.layers.push(index)
+			seen.roles.push(layer.role)
+			for (const role of layer.holds ?? []) seen.roles.push(role)
 
 			return
 		}
 
 		const layers = [index]
+		const roles: LayerRole[] = [layer.role, ...(layer.holds ?? [])]
 		// A group's layers name its role "group" on its own layers; a child frame's overlay keeps the group's.
 		const shape: SlideShape = {
 			id: box.id,
@@ -76,9 +82,10 @@ export function slideShapes(render: SlideRender | undefined): readonly SlideShap
 			...(box.line === true ? { line: true as const } : {}),
 			...(layer.actions === undefined || layer.shape.id !== box.id ? {} : { actions: layer.actions }),
 			...(layer.lock === undefined || layer.shape.id !== box.id ? {} : { lock: layer.lock }),
-			...(layer.media === undefined || layer.shape.id !== box.id ? {} : { media: layer.media })
+			...(layer.media === undefined || layer.shape.id !== box.id ? {} : { media: layer.media }),
+			roles
 		}
-		const entry = { shape, layers }
+		const entry = { shape, layers, roles }
 
 		byId.set(box.id, entry)
 		out.push(entry)

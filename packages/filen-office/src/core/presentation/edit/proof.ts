@@ -22,6 +22,9 @@ export interface ProofInput {
 	readonly relationships: Relationships
 	// The emitters (emitPptx by default; tests pass their own).
 	readonly emit?: EmitFunction
+	// Shapes the session changed since their source was read (edits made while a save wrote the slide, an undo or
+	// redo): their model is not their source's, so they are not proved against it (the next save writes them from it).
+	readonly edited?: ReadonlySet<number>
 }
 
 export interface ShapeProof {
@@ -258,7 +261,7 @@ export function proveSlide(input: ProofInput, proof: ShapeProof = emitterProof):
 					continue
 				}
 
-				const reason = insideProved ? undefined : proof.check(input, shape)
+				const reason = insideProved || input.edited?.has(shape.id) === true ? undefined : proof.check(input, shape)
 
 				if (reason !== undefined) {
 					shape.lock = reason

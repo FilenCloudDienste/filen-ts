@@ -144,7 +144,8 @@ describe("transition catalog", () => {
 		expect(of("morph", "morph")).toEqual({ kind: "fade", options: {} })
 		expect(of("vortex", "p14", { dir: "r" })).toEqual({ kind: "fade", options: {} })
 		expect(of("pan", "p14", { dir: "d" })).toEqual({ kind: "push", options: { dir: "d" } })
-		expect(of("pan", "p14")).toEqual({ kind: "push", options: { dir: "u" } })
+		// p:CT_SideDirectionTransition: dir defaults to "l".
+		expect(of("pan", "p14")).toEqual({ kind: "push", options: { dir: "l" } })
 		expect(of("doors", "p14", { dir: "vert" })).toEqual({ kind: "split", options: { orient: "vert", dir: "out" } })
 		expect(of("warp", "p14", { dir: "out" })).toEqual({ kind: "zoom", options: { dir: "out" } })
 		expect(of("reveal", "p14", { thruBlk: true })).toEqual({ kind: "fade", options: { thruBlk: true } })

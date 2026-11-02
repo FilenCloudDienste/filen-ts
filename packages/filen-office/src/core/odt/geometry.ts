@@ -512,6 +512,11 @@ const COMMAND_ARGUMENTS: Readonly<Record<string, number>> = {
 	N: 0,
 	F: 0,
 	S: 0,
+	// LibreOffice's darken, darkenLess, lighten and lightenLess (a DrawingML path's fill mode): filled, as drawn here.
+	H: 0,
+	I: 0,
+	J: 0,
+	K: 0,
 	T: 6,
 	U: 6,
 	A: 8,
@@ -548,7 +553,7 @@ export function enhancedPath(path: string, evaluator: Evaluator): SubPath[] {
 				if (command === "Z") builder.close()
 				else if (command === "N") builder.end()
 				else if (command === "F") builder.noFill()
-				else builder.noStroke()
+				else if (command === "S") builder.noStroke()
 			}
 
 			continue

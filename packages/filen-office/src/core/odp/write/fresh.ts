@@ -42,7 +42,8 @@ import { odpParagraphId, odpParagraphKey, odpParagraphTargets, odpTargetId, odpT
 import { withoutShapes } from "../../anim/prune"
 import { OdpContext } from "../read/context"
 import { openOdp } from "../read/document"
-import { IDENTITY, OdpShapeWriter, markupOf, compose, groupAffine, placed, type Affine } from "./emit/shape"
+import { IDENTITY, OdpShapeWriter, canonicalBox, markupOf, compose, groupAffine, pictureMirror, placed, type Affine } from "./emit/shape"
+import { odfWritesPreset } from "../../odf/presetShapes"
 import { pageNames } from "./integrity"
 import { OdpStyles, cm, fillChanges, isRefused, setProperty, styleChanges, type OdpWriteEnv, type StyleChanges } from "./styles"
 import { emitOdp, type OdpEmitContext } from "./emit"
@@ -93,7 +94,12 @@ export interface FreshOdpServices {
 	// The theme a node's colours and fonts resolve through.
 	theme(node: SlideNode): PresentationTheme | undefined
 	// A level's property group kept as source markup, read as the model's type; undefined when it cannot be.
-	group?(kind: "geometry" | "fill" | "ln" | "effects", src: SourceRef): Geometry | FillProps | LineProps | "none" | EffectList | undefined
+	// A custom outline (a:custGeom) reads for the shape's box (`box`, EMU): its guides may use the box's size.
+	group?(
+		kind: "geometry" | "fill" | "ln" | "effects",
+		src: SourceRef,
+		box?: { readonly cx: number; readonly cy: number }
+	): Geometry | FillProps | LineProps | "none" | EffectList | undefined
 	// The fill and line a shape's p:style references give (theme matrix), resolved.
 	styleProps?(shape: ShapeNode, node: SlideNode): { readonly fill?: FillProps | "none"; readonly ln?: LineProps | "none" } | undefined
 	// A chart frame's object (its content.xml), when its source has the chart's part.
@@ -157,11 +163,15 @@ class Flattener {
 		return { theme: this.services.theme(node), clrMap: background?.clrMap ?? clrMapOf(this.deck, node) }
 	}
 
-	private group<K extends "geometry" | "fill" | "ln" | "effects">(kind: K, source: GroupSource<K> | undefined): unknown {
+	private group<K extends "geometry" | "fill" | "ln" | "effects">(
+		kind: K,
+		source: GroupSource<K> | undefined,
+		box?: { readonly cx: number; readonly cy: number }
+	): unknown {
 		if (source === undefined) return undefined
 		if (source.kind === "props") return source.value
 
-		return this.services.group?.(kind, source.src)
+		return this.services.group?.(kind, source.src, box)
 	}
 
 	// The fills of the groups being written, innermost last: what a member's a:grpFill (§20.1.8.35) takes.
@@ -324,7 +334,12 @@ class Flattener {
 		)
 		const fill = this.fill((this.group("fill", resolved.fill) as FillProps | "none" | undefined) ?? style?.fill, colors, true)
 		const ln = this.line((this.group("ln", resolved.ln) as LineProps | "none" | undefined) ?? style?.ln, colors, true)
-		const geometry = this.geometry(this.group("geometry", resolved.geometry) as Geometry | undefined, shape)
+		const read = this.group("geometry", resolved.geometry, resolved.xfrm) as Geometry | undefined
+
+		// An outline the source has that does not read is a loss, named (written as a rectangle).
+		if (read === undefined && resolved.geometry !== undefined) count(this.report.approximated, "outline unread")
+
+		const geometry = this.geometry(read, shape)
 		const text = shape.text === undefined ? undefined : this.text(resolved, shape.text, colors, node)
 		// A shape outlined as a line is a line (draw:line).
 		const line = geometry?.kind === "preset" && geometry.preset === "line"
@@ -473,7 +488,8 @@ class Flattener {
 	private geometry(geometry: Geometry | undefined, shape: ShapeNode): Geometry | undefined {
 		if (geometry === undefined) return shape.kind === "sp" ? { kind: "preset", preset: "rect", guides: [] } : undefined
 		if (geometry.kind === "preset" && (geometry.preset === "rect" || geometry.preset === "line")) return { ...geometry, guides: [] }
-		if (geometry.kind === "preset" && geometry.guides.length === 0 && PRESETS.has(geometry.preset)) return geometry
+		if (geometry.kind === "preset" && shape.kind !== "cxnSp" && odfWritesPreset(geometry.preset, geometry.guides)) return geometry
+		if (geometry.kind === "custom" && shape.kind !== "cxnSp" && geometry.paths.length > 0) return geometry
 
 		count(this.report.approximated, `outline ${geometry.kind === "preset" ? geometry.preset : "custom"}`)
 
@@ -739,32 +755,6 @@ const DEFAULT_CLR_MAP: ColorContext["clrMap"] = {
 // Numberings ODF's formats read back as (emit/text.ts SCHEMES).
 const NUMBERINGS = /^(arabicPlain|(arabic|alphaLc|alphaUc|romanLc|romanUc)(Period|ParenR|ParenBoth))$/u
 
-// The presets the shape writer has a draw:type for.
-const PRESETS: ReadonlySet<string> = new Set([
-	"rect",
-	"ellipse",
-	"roundRect",
-	"triangle",
-	"rtTriangle",
-	"parallelogram",
-	"trapezoid",
-	"diamond",
-	"hexagon",
-	"octagon",
-	"pentagon",
-	"star5",
-	"rightArrow",
-	"leftArrow",
-	"upArrow",
-	"downArrow",
-	"cloud",
-	"heart",
-	"smileyFace",
-	"donut",
-	"plus",
-	"frame"
-])
-
 const MEDIA_TYPES: Readonly<Record<string, string>> = {
 	png: "image/png",
 	jpg: "image/jpeg",
@@ -974,11 +964,15 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 					continue
 				}
 
-				const box = placed(flat.xfrm, m)
+				const box = canonicalBox(flat, placed(flat.xfrm, m))
 				const changes = styleChanges()
 
 				fillChanges(changes, "none")
 				setProperty(changes, "graphic", "draw:stroke", flat.props?.ln === undefined || flat.props.ln === "none" ? "none" : "solid")
+
+				const mirror = pictureMirror(box)
+
+				if (mirror !== undefined) setProperty(changes, "graphic", "style:mirror", mirror)
 
 				const style = styles.derived("graphic", undefined, changes)
 				const turn = box.rot === 0 ? `svg:x="${cm(box.x)}" svg:y="${cm(box.y)}"` : transformAttributes(box)

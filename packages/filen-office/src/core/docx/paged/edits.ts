@@ -1,3 +1,4 @@
+import { appendAll, fromCharCodes, spliceAll } from "../../arrays"
 import { Fragment, type Node } from "prosemirror-model"
 import type { Transaction } from "prosemirror-state"
 import { AddNodeMarkStep, AttrStep, RemoveNodeMarkStep, ReplaceAroundStep, ReplaceStep, StepMap } from "prosemirror-transform"
@@ -253,7 +254,7 @@ export function namePrefixes(bytes: Uint8Array, out: Set<string>): boolean {
 		const declared = colon < 0 ? !attribute : !equalsAscii(bytes, start, colon, "xml")
 
 		if (declared && !sameBytes(bytes, start, prefixEnd, lastStart, lastEnd)) {
-			out.add(colon < 0 ? "" : String.fromCharCode(...bytes.subarray(start, colon)))
+			out.add(colon < 0 ? "" : fromCharCodes(bytes.subarray(start, colon)))
 			lastStart = start
 			lastEnd = prefixEnd
 		}
@@ -858,7 +859,7 @@ export class DocumentEdits implements LayoutEdits {
 		const previous = sections[changed - 1]
 
 		sections.length = changed
-		sections.push(...inheritedSections(bases, changed, previous))
+		appendAll(sections, inheritedSections(bases, changed, previous))
 
 		return changed
 	}
@@ -1461,7 +1462,7 @@ export class StoryEdits {
 
 		for (const entry of pending) this.release(entry)
 
-		this.entries.splice(first, oldLast - first + 1, ...fresh)
+		spliceAll(this.entries, first, oldLast - first + 1, fresh)
 		this.building.clear()
 
 		if (newCount !== oldCount) {
@@ -2688,7 +2689,7 @@ export class StoryEdits {
 		const left: QueuedBlock[] = []
 
 		if (added === undefined) {
-			left.push(...blocks)
+			appendAll(left, blocks)
 		} else {
 			// Each block gets the first paragraph or table that starts within its bytes.
 			const document = added.part.document
@@ -2741,9 +2742,9 @@ export class StoryEdits {
 			const laid = entry.laid.filter(keep)
 			const offsets = entry.offsets.filter(keep)
 
-			entry.base.splice(0, entry.base.length, ...base)
-			entry.laid.splice(0, entry.laid.length, ...laid)
-			entry.offsets.splice(0, entry.offsets.length, ...offsets)
+			spliceAll(entry.base, 0, entry.base.length, base)
+			spliceAll(entry.laid, 0, entry.laid.length, laid)
+			spliceAll(entry.offsets, 0, entry.offsets.length, offsets)
 
 			const breaks = entry.breaks
 

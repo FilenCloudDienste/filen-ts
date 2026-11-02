@@ -102,6 +102,9 @@ export interface AnimationPaneState {
 	readonly revision: number
 	// Undefined while the worker reads them.
 	readonly effects: SlideEffects | undefined
+	// The slide's timing and its shapes' boxes as the worker resolved them with `effects` (the motion paths on the
+	// canvas); undefined while read and for an unanimated slide.
+	readonly source?: Awaited<ReturnType<PresentationSessionApi["timegraph"]>>["source"]
 	readonly failed: boolean
 	// Effect ids chosen in the pane.
 	readonly selected: readonly number[]
@@ -184,13 +187,13 @@ function createAnimationPane() {
 			if (!animated) {
 				const effects = stableEffects(state.effects, NO_EFFECTS)
 
-				if (other || effects !== state.effects || state.failed)
-					set({ slide, revision, effects, failed: false, ...(other ? { selected: [] } : {}) })
+				if (other || effects !== state.effects || state.failed || state.source !== undefined)
+					set({ slide, revision, effects, source: undefined, failed: false, ...(other ? { selected: [] } : {}) })
 
 				return
 			}
 
-			if (other) set({ slide, revision, failed: false, selected: [], effects: undefined })
+			if (other) set({ slide, revision, failed: false, selected: [], effects: undefined, source: undefined })
 
 			void session.timegraph(slide).then(
 				graph => {
@@ -198,10 +201,10 @@ function createAnimationPane() {
 
 					const effects = stableEffects(state.effects, slideEffects(graph.source?.timing))
 
-					if (effects !== state.effects || state.failed) set({ revision, effects, failed: false })
+					set({ revision, effects, source: graph.source, failed: false })
 				},
 				() => {
-					if (mine === token) set({ revision, failed: true, effects: undefined })
+					if (mine === token) set({ revision, failed: true, effects: undefined, source: undefined })
 				}
 			)
 		},

@@ -18,7 +18,8 @@ import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
@@ -41,9 +42,6 @@ const PDFJS: PdfJsDom = { getDocument, GlobalWorkerOptions, PDFDataRangeTranspor
 // destroyed with it: pdf.js tears down the worker of the task it destroys. pdf.js has no eval path, so the CSP
 // needs nothing more.
 const OPTIONS: PdfDocumentOptions = { worker: { kind: "script", src: new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href } }
-
-// Find opens for keys pressed in the layer the document is shown in (the preview overlay), never one over it.
-const LAYER = "[role='dialog'], [role='alertdialog']"
 
 const CLASS_NAMES = {
 	column: "flex flex-col items-center gap-4 py-4",
@@ -116,6 +114,7 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 		}
 	}, [document])
 
+	// Find opens for keys pressed in the layer the document is shown in (the preview overlay), never one over it.
 	useAction(
 		"editor.find",
 		keyboardEvent => {
@@ -125,10 +124,7 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 				return
 			}
 
-			const layer = root.closest(LAYER)
-			const target = keyboardEvent.target instanceof Element ? keyboardEvent.target.closest(LAYER) : null
-
-			if (target !== layer || (layer === null && isAnyDialogOpen())) {
+			if (!keyForEditor(root, keyboardEvent.target)) {
 				return
 			}
 
@@ -144,14 +140,22 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 		[state.find.open, dispatch]
 	)
 
+	const focusPages = (): void => {
+		viewer.pages.scrollerRef.current?.focus()
+	}
+
+	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
+	// macOS Firefox do).
+	useEditorLayerKeys(rootRef, (event, root) => {
+		onCommandBarF6(event, root, focusPages)
+	})
+
 	return (
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
 			onKeyDown={event => {
-				onCommandBarF6(event, () => {
-					viewer.pages.scrollerRef.current?.focus()
-				})
+				onCommandBarF6(event, event.currentTarget, focusPages)
 			}}
 		>
 			<PdfCommandBar

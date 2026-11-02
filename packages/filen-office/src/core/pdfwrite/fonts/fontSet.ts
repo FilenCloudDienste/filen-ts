@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import type { PdfFaceSource } from "../../fonts/manager"
 import { BIDI_REMOVED, BidiResolver, applyL1, hasRightToLeft, reorder } from "../../text/bidi"
 import { readSfnt, type SfntFont } from "../../fonts/sfnt"
@@ -258,7 +259,7 @@ export class PdfFontSet {
 
 		if (rtl) runs.reverse()
 
-		out.push(...runs)
+		appendAll(out, runs)
 
 		return width
 	}

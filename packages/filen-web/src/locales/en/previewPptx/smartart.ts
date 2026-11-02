@@ -114,5 +114,11 @@ export const previewPptxSmartArt = {
 	/** Presentation editor — text pane: shown when the graphic has no shapes */
 	previewPptxSmartArtTextPaneEmpty: "This graphic has no shapes yet.",
 	/** Presentation editor — text pane: button that adds the first shape to an empty graphic */
-	previewPptxSmartArtTextPaneAddFirst: "Add a shape"
+	previewPptxSmartArtTextPaneAddFirst: "Add a shape",
+	/** Presentation editor — on the slide: the prompt in an empty picture placeholder of a SmartArt graphic; clicking it picks a picture from this device */
+	previewPptxSmartArtPicturePrompt: "Insert a picture",
+	/** Presentation editor — text pane: button beside item {{number}} that puts a picture from this device into its empty picture placeholder */
+	previewPptxSmartArtPictureInsertFor: "Insert a picture for item {{number}}",
+	/** Presentation editor — text pane: button beside item {{number}} that replaces the picture in its picture placeholder with one from this device */
+	previewPptxSmartArtPictureChangeFor: "Change the picture of item {{number}}"
 }

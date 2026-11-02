@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { partKey } from "../../opc/partNames"
 import type { SheetRange, SheetRefusal } from "../../sheet/protocol"
 import { formulaTranslator, sameSheet } from "../../sheet/refs/formulaRefs"
@@ -327,7 +328,7 @@ async function plan(workbook: XlsxWorkbookModel, move: CellMove, slicing: Slicin
 	const sourceAfter = left(sourceModel, source)
 	const destinationAfter = destination === source ? sourceAfter : left(destinationModel, destination)
 
-	destinationAfter.push(...moving)
+	appendAll(destinationAfter, moving)
 
 	for (const [entry, model, after] of destination === source
 		? ([[source, sourceModel, sourceAfter]] as const)

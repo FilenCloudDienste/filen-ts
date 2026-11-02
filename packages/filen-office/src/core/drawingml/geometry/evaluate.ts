@@ -5,10 +5,13 @@ import {
 	GEOM_COMMAND_ARITY,
 	GeomCommand,
 	GuideOp,
+	OP_BY_FORMULA,
 	PATH_FILL_MASK,
 	PATH_NO_STROKE,
 	PathFill,
+	builtinIndex,
 	fillBuiltins,
+	opArity,
 	parseProgram,
 	type GeometryProgram
 } from "./program"
@@ -124,6 +127,43 @@ export function evaluateGuides(
 	return slots
 }
 
+// Adjust overrides from a:avLst formulas by guide name (usually "val n"; built-ins and earlier adjust values may
+// appear), for evaluateGuides.
+export function formulaAdjust(
+	formulas: ReadonlyMap<string, string>,
+	program: GeometryProgram
+): (name: string, slots: Float64Array) => number | undefined {
+	return (name, slots) => {
+		const formula = formulas.get(name)
+
+		if (formula === undefined) return undefined
+
+		const [opName, ...args] = formula.trim().split(/\s+/)
+		const op = OP_BY_FORMULA.get(opName ?? "")
+
+		if (op === undefined) return undefined
+
+		const value = (token: string | undefined): number => {
+			if (token === undefined) return 0
+
+			const number = Number(token)
+
+			if (token !== "" && Number.isFinite(number)) return number
+
+			const builtin = builtinIndex(token)
+
+			if (builtin >= 0) return slots[builtin] ?? 0
+
+			const adjust = program.adjustNames.indexOf(token)
+
+			return adjust >= 0 ? (slots[BUILTIN_COUNT + adjust] ?? 0) : 0
+		}
+		const arity = opArity(op)
+
+		return evaluateOp(op, value(args[0]), arity > 1 ? value(args[1]) : 0, arity > 2 ? value(args[2]) : 0)
+	}
+}
+
 // The text rectangle in px: [left, top, right, bottom].
 export function textRect(program: GeometryProgram, slots: Float64Array, w: number, h: number): [number, number, number, number] {
 	const rect = program.rect
@@ -156,7 +196,8 @@ function parametric(angle: number, rx: number, ry: number): number {
 	return Math.atan2(rx * Math.sin(angle), ry * Math.cos(angle))
 }
 
-// Appends cubic segments for a:arcTo from the current point (x, y); returns the end point.
+// Appends cubic segments for a:arcTo from the current point (x, y); returns the end point. The angles are measured
+// on the arc as the path's own coordinates draw it (radii pathRx, pathRy), before the path is scaled to the shape.
 export function appendArc(
 	list: DrawingList,
 	x: number,
@@ -165,7 +206,9 @@ export function appendArc(
 	ry: number,
 	start: number,
 	sweep: number,
-	end: [number, number]
+	end: [number, number],
+	pathRx = rx,
+	pathRy = ry
 ): void {
 	end[0] = x
 	end[1] = y
@@ -174,13 +217,13 @@ export function appendArc(
 
 	const startRadians = start * TO_RADIANS
 	const sweepRadians = Math.max(-CIRCLE, Math.min(CIRCLE, sweep)) * TO_RADIANS
-	const t0 = parametric(startRadians, rx, ry)
+	const t0 = parametric(startRadians, pathRx, pathRy)
 	let delta: number
 
 	if (Math.abs(sweepRadians) >= 2 * Math.PI - 1e-9) {
 		delta = Math.sign(sweepRadians) * 2 * Math.PI
 	} else {
-		delta = parametric(startRadians + sweepRadians, rx, ry) - t0
+		delta = parametric(startRadians + sweepRadians, pathRx, pathRy) - t0
 
 		if (sweepRadians > 0 && delta < 0) delta += 2 * Math.PI
 		if (sweepRadians < 0 && delta > 0) delta -= 2 * Math.PI
@@ -309,7 +352,9 @@ export function emitPaths(list: DrawingList, program: GeometryProgram, slots: Fl
 					Math.abs(value(a2) * scaleY),
 					value(paths[k + 3] ?? 0),
 					value(paths[k + 4] ?? 0),
-					end
+					end,
+					Math.abs(value(a1)),
+					Math.abs(value(a2))
 				)
 				x = end[0]
 				y = end[1]

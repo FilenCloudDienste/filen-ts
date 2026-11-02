@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutBalance
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:balance">
+	<dgm:title val="Balance"/>
+	<dgm:desc val="Two sides weighed on a beam over a pivot. Top-level items alternate between the left and the right side, each one a label under a stack of its sub-items, the first ones resting on the beam."/>
+	<dgm:catLst>
+		<dgm:cat type="relationship" pri="100"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="4"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="5"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="70" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="71" srcId="1" destId="2" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="72" srcId="1" destId="3" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="73" srcId="0" destId="4" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="74" srcId="4" destId="5" srcOrd="0" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="scale">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:alg type="composite">
+			<dgm:param type="ar" val="1.6"/>
+		</dgm:alg>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="w" for="ch" forName="beam" refType="w" fact="0.9"/>
+			<dgm:constr type="h" for="ch" forName="beam" refType="h" fact="0.035"/>
+			<dgm:constr type="ctrX" for="ch" forName="beam" refType="w" fact="0.5"/>
+			<dgm:constr type="t" for="ch" forName="beam" refType="h" fact="0.72"/>
+			<dgm:constr type="w" for="ch" forName="pivot" refType="h" fact="0.24"/>
+			<dgm:constr type="h" for="ch" forName="pivot" refType="h" fact="0.24"/>
+			<dgm:constr type="ctrX" for="ch" forName="pivot" refType="w" fact="0.5"/>
+			<dgm:constr type="t" for="ch" forName="pivot" refType="h" fact="0.755"/>
+			<dgm:constr type="l" for="ch" forName="first" refType="w" fact="0.06"/>
+			<dgm:constr type="w" for="ch" forName="first" refType="w" fact="0.4"/>
+			<dgm:constr type="t" for="ch" forName="first"/>
+			<dgm:constr type="h" for="ch" forName="first" refType="h" fact="0.71"/>
+			<dgm:constr type="l" for="ch" forName="second" refType="w" fact="0.54"/>
+			<dgm:constr type="w" for="ch" forName="second" refType="w" fact="0.4"/>
+			<dgm:constr type="t" for="ch" forName="second"/>
+			<dgm:constr type="h" for="ch" forName="second" refType="h" fact="0.71"/>
+			<dgm:constr type="w" for="des" forName="weight" refType="w" fact="0.32"/>
+			<dgm:constr type="h" for="des" forName="weight" refType="h" fact="0.12"/>
+			<dgm:constr type="w" for="des" forName="side" refType="w" fact="0.36"/>
+			<dgm:constr type="h" for="des" forName="side" refType="h" fact="0.14"/>
+			<dgm:constr type="h" for="des" forName="weightGap" refType="h" fact="0.012"/>
+			<dgm:constr type="h" for="des" forName="blockGap" refType="h" fact="0.04"/>
+			<dgm:constr type="primFontSz" for="des" forName="side" op="equ" val="40"/>
+			<dgm:constr type="primFontSz" for="des" forName="weight" op="equ" val="30"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:layoutNode name="first">
+			<dgm:alg type="lin">
+				<dgm:param type="linDir" val="fromB"/>
+				<dgm:param type="nodeHorzAlign" val="ctr"/>
+				<dgm:param type="vertAlign" val="b"/>
+			</dgm:alg>
+			<dgm:shape><dgm:adjLst/></dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst/>
+			<dgm:ruleLst/>
+			<dgm:forEach name="firstSide" axis="ch" ptType="node" st="1" step="2">
+				<dgm:layoutNode name="side" styleLbl="node1">
+					<dgm:alg type="tx"/>
+					<dgm:shape type="roundRect">
+						<dgm:adjLst>
+							<dgm:adj idx="1" val="0.12"/>
+						</dgm:adjLst>
+					</dgm:shape>
+					<dgm:presOf axis="self"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="primFontSz" fact="0.2"/>
+						<dgm:constr type="rMarg" refType="primFontSz" fact="0.2"/>
+						<dgm:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+						<dgm:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+				<dgm:forEach name="firstWeights" axis="ch" ptType="node">
+					<dgm:layoutNode name="weightGap">
+						<dgm:alg type="sp"/>
+						<dgm:shape><dgm:adjLst/></dgm:shape>
+						<dgm:presOf/>
+						<dgm:constrLst/>
+						<dgm:ruleLst/>
+					</dgm:layoutNode>
+					<dgm:layoutNode name="weight" styleLbl="alignAccFollowNode1">
+						<dgm:varLst>
+							<dgm:bulletEnabled val="1"/>
+						</dgm:varLst>
+						<dgm:alg type="tx"/>
+						<dgm:shape type="rect"><dgm:adjLst/></dgm:shape>
+						<dgm:presOf axis="desOrSelf" ptType="node"/>
+						<dgm:constrLst>
+							<dgm:constr type="lMarg" refType="primFontSz" fact="0.2"/>
+							<dgm:constr type="rMarg" refType="primFontSz" fact="0.2"/>
+							<dgm:constr type="tMarg" refType="primFontSz" fact="0.08"/>
+							<dgm:constr type="bMarg" refType="primFontSz" fact="0.08"/>
+						</dgm:constrLst>
+						<dgm:ruleLst>
+							<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+						</dgm:ruleLst>
+					</dgm:layoutNode>
+				</dgm:forEach>
+				<dgm:layoutNode name="blockGap">
+					<dgm:alg type="sp"/>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+				</dgm:layoutNode>
+			</dgm:forEach>
+		</dgm:layoutNode>
+		<dgm:layoutNode name="second">
+			<dgm:alg type="lin">
+				<dgm:param type="linDir" val="fromB"/>
+				<dgm:param type="nodeHorzAlign" val="ctr"/>
+				<dgm:param type="vertAlign" val="b"/>
+			</dgm:alg>
+			<dgm:shape><dgm:adjLst/></dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst/>
+			<dgm:ruleLst/>
+			<dgm:forEach name="secondSide" ref="firstSide" axis="ch" ptType="node" st="2" step="2"/>
+		</dgm:layoutNode>
+		<dgm:layoutNode name="beam" styleLbl="fgAcc1">
+			<dgm:alg type="sp"/>
+			<dgm:shape type="rect"><dgm:adjLst/></dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst/>
+			<dgm:ruleLst/>
+		</dgm:layoutNode>
+		<dgm:layoutNode name="pivot" styleLbl="fgAcc1">
+			<dgm:alg type="sp"/>
+			<dgm:shape type="triangle"><dgm:adjLst/></dgm:shape>
+			<dgm:presOf/>
+			<dgm:constrLst/>
+			<dgm:ruleLst/>
+		</dgm:layoutNode>
+	</dgm:layoutNode>
+</dgm:layoutDef>

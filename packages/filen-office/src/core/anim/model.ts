@@ -1,4 +1,5 @@
 import type { Rgba } from "../drawingml/index"
+import type { MorphShape } from "./morph"
 import type { ColorModel, ShapeRef, SlideNode, SlideRef, SourceRef } from "../presentation/model"
 
 // Timing and transitions, format-neutral (ECMA-376 §19.5 and §19.3.1.50; ODF SMIL animations map onto the same
@@ -253,6 +254,11 @@ export interface TimegraphSource {
 	readonly transition?: Transition
 	// The slide's own transition when the player draws its fallback instead (a p14/p15 kind without a renderer).
 	readonly authored?: Transition
+	// The slide's visible top-level objects as morph matches them (core/anim/morph.ts); absent past its budget.
+	readonly morph?: readonly MorphShape[]
+	// The WebGL transitions (core/anim/morph.ts WEBGL_TRANSITION_KINDS) any slide of the deck uses, read once per
+	// session; absent for a deck the worker does not scan (ODP, PowerPoint 97–2003 converted in memory: none of them).
+	readonly transitionKinds?: readonly string[]
 }
 
 // One animated attribute of one layer over one behaviour's active interval.

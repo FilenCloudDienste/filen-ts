@@ -1,4 +1,5 @@
 import {
+	type OpcPackage,
 	ZipArchive,
 	chunksSource,
 	crc32,
@@ -15,6 +16,7 @@ import {
 	type ZipPlanItem
 } from "../../opc/index"
 import { PresentationError, refused, type Refused } from "../../presentation/model"
+import { decodeUtf8 } from "../../xml/index"
 import { spliceSnapshot, type SpliceSnapshot } from "./splice"
 import type { PptxSaveInput, PptxSaveOptions, PptxSaveOutcome, PptxSnapshot, SavePptx, SpliceWriter } from "./types"
 import { FinalPackage, verifyFinal } from "./verify"
@@ -124,6 +126,86 @@ async function sameBytes(archive: ZipArchive, name: string, expected: PartBytes)
 	for (let k = 0; k < written.length; k++) if (written[k] !== wanted[k]) return false
 
 	return true
+}
+
+// Gate 2 alone, on a snapshot about to be written (what writeSnapshot checks first): a refusal, else undefined.
+export async function gateSnapshot(snapshot: PptxSnapshot, baseline: ReadonlySet<string>): Promise<Refused | undefined> {
+	const splice = snapshot as SpliceSnapshot
+
+	if (splice.expectation === undefined) return refused("failed", "Not a splice writer snapshot")
+
+	const final = new FinalPackage(splice.source.package, snapshot.changes)
+
+	return (await verifyFinal(final, splice.expectation)) ?? (await diagramDrawingsProblem(final, baseline))
+}
+
+// The diagram check alone (what every save runs; gateSnapshot runs it with gate 2 before a prune).
+export async function checkDiagramDrawings(snapshot: PptxSnapshot, baseline: ReadonlySet<string>): Promise<Refused | undefined> {
+	const splice = snapshot as SpliceSnapshot
+
+	if (splice.expectation === undefined) return refused("failed", "Not a splice writer snapshot")
+
+	return diagramDrawingsProblem(new FinalPackage(splice.source.package, snapshot.changes), baseline)
+}
+
+// The diagram damage the source file had when the session opened it (what no save of the session is blamed for).
+export async function sourceDiagramDamage(source: OpcPackage): Promise<ReadonlySet<string>> {
+	return new Set(await diagramDamage(new FinalPackage(source, {})))
+}
+
+const SLIDE_PART = /^ppt\/slides\/slide\d+\.xml$/iu
+const DIAGRAM_DATA_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramData"
+const DRAWING_REL_ID = /(?<![:\w])relId="([^"]+)"/u
+
+// Every diagram a slide shows (its frames' r:dm) whose data names its drawing (dsp:dataModelExt@relId, MS-ODRAWXML
+// §2.3.4) by a relationship the slide lacks, or to a part the package lacks: "slide|data|id", what a reader of the
+// cache loses. Each data part is read once.
+async function diagramDamage(final: FinalPackage): Promise<string[]> {
+	const out: string[] = []
+	const ids = new Map<string, string | undefined>()
+
+	for (const slide of final.names()) {
+		if (!SLIDE_PART.test(slide)) continue
+
+		const relationships = await final.relationships(slide)
+
+		if (!relationships.all.some(relationship => relationship.type === DIAGRAM_DATA_TYPE)) continue
+
+		// Another version's data the slide still relates is no diagram of it.
+		const shown = new Set([...decodeUtf8(await final.read(slide)).matchAll(/\br:dm="([^"]+)"/gu)].map(match => match[1] ?? ""))
+
+		for (const relationship of relationships.all) {
+			if (relationship.external || relationship.type !== DIAGRAM_DATA_TYPE || relationship.partName === undefined) continue
+			if (!shown.has(relationship.id) || !final.has(relationship.partName)) continue
+
+			const key = relationship.partName.toLowerCase()
+
+			if (!ids.has(key)) ids.set(key, DRAWING_REL_ID.exec(decodeUtf8(await final.read(relationship.partName)))?.[1])
+
+			const id = ids.get(key)
+
+			if (id === undefined || id === "") continue
+
+			const drawing = relationships.byId(id)?.partName
+
+			if (drawing === undefined || !final.has(drawing)) out.push(`${slide}|${relationship.partName}|${id}`)
+		}
+	}
+
+	return out
+}
+
+// Damage the source file did not have when the session opened it (whatever save of the session wrote it) refuses.
+async function diagramDrawingsProblem(final: FinalPackage, baseline: ReadonlySet<string>): Promise<Refused | undefined> {
+	for (const damage of await diagramDamage(final)) {
+		if (baseline.has(damage)) continue
+
+		const [slide, data, id] = damage.split("|")
+
+		return refused("proofFailed", `${slide ?? ""}: its diagram data ${data ?? ""} names drawing ${id ?? ""}, which it does not relate`)
+	}
+
+	return undefined
 }
 
 // Writes a snapshot: gate 2, then the zip (in memory and read back, or streamed and checked).

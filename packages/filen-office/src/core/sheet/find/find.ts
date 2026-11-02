@@ -1,3 +1,4 @@
+import { maxOf, minOf } from "../../arrays"
 import { sliceClock, type SliceClock } from "../../slicing"
 import {
 	SHEET_MAX_COLS,
@@ -162,10 +163,10 @@ async function walk(
 		within === null
 			? null
 			: {
-					startRow: Math.min(...within.map(range => range.startRow)),
-					startCol: Math.min(...within.map(range => range.startCol)),
-					endRow: Math.max(...within.map(range => range.endRow)),
-					endCol: Math.max(...within.map(range => range.endCol))
+					startRow: minOf(within.map(range => range.startRow)),
+					startCol: minOf(within.map(range => range.startCol)),
+					endRow: maxOf(within.map(range => range.endRow)),
+					endCol: maxOf(within.map(range => range.endCol))
 				}
 
 	for (const { sheet, ranges } of planned) {

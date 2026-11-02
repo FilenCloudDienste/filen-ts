@@ -12,6 +12,8 @@ export type ConversionLossKind =
 	| "line"
 	// An outline the target has no preset for, drawn as its nearest.
 	| "geometry"
+	// A paragraph's outline level the target holds only on a bulleted paragraph, written without it.
+	| "outlineLevel"
 	// Text written in a nearer form: vertical text, line-breaking rules, spacing, bullet size or numbering.
 	| "text"
 	// A table style written as the cells' own properties.

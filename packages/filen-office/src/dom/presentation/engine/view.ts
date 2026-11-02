@@ -608,7 +608,9 @@ export const presentationTextServices: TextServices = {
 			text.capture = capture
 
 			try {
-				await renderSlideFor({ session, signal, lane: "priority", slicing }, shape.slide)
+				const render = node.kind === "notes" ? renderNodeFor : renderSlideFor
+
+				await render({ session, signal, lane: "priority", slicing }, shape.slide)
 			} finally {
 				text.capture = undefined
 			}
@@ -630,7 +632,14 @@ export const presentationTextServices: TextServices = {
 			},
 			options: {
 				fields: {
-					slideNumber: session.deck.firstSlideNumber + Math.max(0, session.deck.slides.indexOf(shape.slide)),
+					slideNumber:
+						session.deck.firstSlideNumber +
+						Math.max(
+							0,
+							node.kind === "notes"
+								? session.deck.slides.findIndex(ref => session.deck.nodes.get(ref)?.notes === shape.slide)
+								: session.deck.slides.indexOf(shape.slide)
+						),
 					now: new Date()
 				},
 				hyperlinks: true,

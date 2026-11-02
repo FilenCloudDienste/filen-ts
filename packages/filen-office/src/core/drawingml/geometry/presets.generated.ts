@@ -290,6 +290,8 @@ export const PRESET_GEOMETRY: Readonly<Record<string, string>> = {
 	trapezoid:
 		"adj 25000|m 50000 g i p 0 R S m i T 200000 m i T 100000 a c 0 V a c 0 U m w T S m v T S a c 0 Y|Y Z aa a|P 0 0 0 M e a L V f L W f L c a Z",
 	triangle: "adj 50000|p 0 R 100000 m g S 200000 m g S 100000 a T k 0|T d V a|P 0 0 0 M e a L U f L c a Z",
+	upArrow:
+		"adj1 50000 adj2 50000|m 100000 h i p 0 R 100000 p 0 S T m i V 100000 a a 0 W m g U 200000 a b 0 Y a b Y 0 m Z W k a X ab 0 a h 0 ac a h 0 f a h 0 X a h 0 a|Z ad aa ae|P 0 0 0 M e af L Z af L Z ae L aa ae L aa af L c af L b ag Z",
 	upArrowCallout:
 		"adj1 25000 adj2 25000 adj3 25000 adj4 64977|m 50000 g i p 0 S V m W 2 1 p 0 R X m 100000 h i p 0 T Z m aa i h a 100000 0 ab p 0 U ac m i W 100000 m i Y 200000 a b 0 ae a b 0 af a b af 0 a b ae 0 m i aa 100000 m h ad 100000 a a 0 al d am a 2|e am c a|P 0 0 0 M e am L ah am L ah ak L ag ak L b f L aj ak L ai ak L ai am L c am L c a L e a Z",
 	upDownArrow:
@@ -307,4 +309,16 @@ export const PRESET_GEOMETRY: Readonly<Record<string, string>> = {
 		"adj1 -20833 adj2 62500|m g R 100000 m h S 100000 a b T 0 a d U 0 a V 0 b a W 0 d m T h g b U b Z a aa 0 ab q T 7 2 q T 10 5 m g ad 12 m g ae 12 q U 7 2 q U 10 5 m h ah 12 m h ai 12 q T e V q ac e al q U af V q ac an af q T V c q ac c ap q U V af q ac ar af q T aj W q ac aj at q U f W q ac av f q T W aj q ac aj ax q U W a q ac az a|e f c a|P 0 0 0 M e f L af f L ao aw L ag f L c f L c aj L aq ay L c ak L c a L ag a L as aA L af a L e a L e ak L am au L e aj Z",
 	wedgeRoundRectCallout:
 		"adj1 -20833 adj2 62500 adj3 16667|m g R 100000 m h S 100000 a b U 0 a d V 0 m U h g b V b Y a Z 0 aa q U 7 2 q U 10 5 m g ac 12 m g ad 12 q V 7 2 q V 10 5 m h ag 12 m h ah 12 q U e W q ab e ak q V ae W q ab am ae q U W c q ab c ao q V W ae q ab aq ae q U ai X q ab ai as q V f X q ab au f q U X ai q ab ai aw q V X a q ab ay a m i T 100000 a c 0 aA a a 0 aA m aA 29289 100000 a c 0 aD a a 0 aD|aD aD aE aF|P 0 0 0 M e aA A aA aA l j L ae f L an av L af f L aB f A aA aA n j L c ai L ap ax L c aj L c aC A aA aA 0 j L af a L ar az L ae a L aA a A aA aA j j L e aj L al at L e ai Z"
+}
+
+// Per preset, the adjust values its polar handles turn (a:ahPolar@gdRefAng): angles.
+export const PRESET_ANGLE_ADJUSTS: Readonly<Record<string, readonly string[]>> = {
+	arc: ["adj1", "adj2"],
+	blockArc: ["adj1", "adj2"],
+	chord: ["adj1", "adj2"],
+	circularArrow: ["adj2", "adj4", "adj3"],
+	leftCircularArrow: ["adj2", "adj4", "adj3"],
+	leftRightCircularArrow: ["adj2", "adj4", "adj3"],
+	mathNotEqual: ["adj2"],
+	pie: ["adj1", "adj2"]
 }

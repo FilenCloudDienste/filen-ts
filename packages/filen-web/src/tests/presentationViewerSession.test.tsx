@@ -122,6 +122,26 @@ afterEach(() => {
 })
 
 describe("presentation viewer session", () => {
+	it("goes to the command bar with F6 pressed outside the viewer", async () => {
+		render(
+			<PresentationViewer
+				item={deckItem()}
+				alt="deck.pptx"
+			/>
+		)
+		await waitFor(() => {
+			expect(engine.opens).toHaveLength(1)
+		})
+		await emit(opened)
+		await waitFor(() => {
+			expect(document.querySelector("[data-office-ribbon]")).not.toBeNull()
+		})
+
+		// Focus outside the viewer, as on the preview overlay itself after a click in Safari and macOS Firefox.
+		fireEvent.keyDown(document.body, { key: "F6" })
+		expect(document.activeElement?.closest("[data-office-ribbon]")).not.toBeNull()
+	})
+
 	it("keeps the deck's range port when the item is renamed or favourited", async () => {
 		const view = render(
 			<PresentationViewer

@@ -73,7 +73,10 @@ const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set([
 	"presentation",
 	"transition",
 	"chart",
-	"timing"
+	"timing",
+	"motionPath",
+	"notes",
+	"comment"
 ])
 const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"design",
@@ -87,7 +90,10 @@ const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"ink",
 	"presentation",
 	"transition",
-	"chart"
+	"chart",
+	"motionPath",
+	"notes",
+	"comment"
 ])
 const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"design",
@@ -101,7 +107,10 @@ const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"ink",
 	"presentation",
 	"transition",
-	"chart"
+	"chart",
+	"motionPath",
+	"notes",
+	"comment"
 ])
 const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"jobsPort",
@@ -115,7 +124,9 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"registerMedia",
 	"chartData",
 	"freshParts",
-	"jobsPort"
+	"jobsPort",
+	"review",
+	"retract"
 ])
 
 const context: ApplyContext = {

@@ -147,6 +147,9 @@ export interface SlideLayer {
 	readonly lock?: LockReason
 	// What the layer plays, when it is a medium.
 	readonly media?: SlideMediaInfo
+	// A group's: the roles of the graphic frames and media among its members however deep, drawn on this layer or on
+	// their own (what flipping the group would mirror).
+	readonly holds?: readonly LayerRole[]
 	// The slide's own top-level shape this layer draws (absent on master and layout layers): its id (a group's for a
 	// layer of one of its children), its box as the model resolves it (EMU; a placeholder's inherited box when it has
 	// none of its own) and its alt text. What the editor's selection and arrange commands start from.

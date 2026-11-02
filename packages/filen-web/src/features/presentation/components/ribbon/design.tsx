@@ -42,8 +42,8 @@ export const designGroups: PresentationGroups = context =>
 					priority: 2,
 					content: (
 						<>
-							<SlideSizeControl />
-							<BackgroundControl />
+							<SlideSizeControl ribbon={context.editor} />
+							<BackgroundControl ribbon={context.editor} />
 						</>
 					)
 				}

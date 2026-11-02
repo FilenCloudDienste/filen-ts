@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { paragraphAttributes, runAttributes } from "../../odt/write/inverse"
 import { readProps, type PropertyValue, type Props } from "../../odt/write/meaning"
 import { levelStyle } from "../../odt/write/writer"
@@ -131,7 +132,7 @@ export function propertiesMarkup(
 			else pAttributes.set(name, item)
 		}
 
-		paragraphText.push(...(written.text ?? []))
+		appendAll(paragraphText, written.text ?? [])
 
 		if (written.tabs !== undefined) tabs = written.tabs
 	}

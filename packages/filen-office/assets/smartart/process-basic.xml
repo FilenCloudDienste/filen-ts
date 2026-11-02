@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutBasicProcess
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:process-basic">
+	<sa:title val="Basic process"/>
+	<sa:desc val="Steps in one row, left to right, each joined to the next by an arrow; a step's sub-items are bullets inside it."/>
+	<sa:catLst>
+		<sa:cat type="process" pri="10"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="100" destId="102" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="100" destId="103" srcOrd="2" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="row">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:animLvl val="lvl"/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:choose name="reading">
+			<sa:if name="fromLeft" func="var" arg="dir" op="equ" val="norm">
+				<sa:alg type="lin">
+					<sa:param type="linDir" val="fromL"/>
+					<sa:param type="nodeVertAlign" val="mid"/>
+				</sa:alg>
+			</sa:if>
+			<sa:else name="fromRight">
+				<sa:alg type="lin">
+					<sa:param type="linDir" val="fromR"/>
+					<sa:param type="nodeVertAlign" val="mid"/>
+				</sa:alg>
+			</sa:else>
+		</sa:choose>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="ch" forName="step" type="w" refType="w"/>
+			<sa:constr for="ch" forName="step" type="h" refFor="ch" refForName="step" refType="w" fact="0.64"/>
+			<sa:constr for="ch" forName="arrow" type="w" refFor="ch" refForName="step" refType="w" fact="0.24"/>
+			<sa:constr for="ch" forName="arrow" type="h" refFor="ch" refForName="step" refType="w" fact="0.22"/>
+			<sa:constr for="ch" forName="step" type="primFontSz" op="equ" val="60"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:forEach name="steps" ptType="node" axis="ch">
+			<sa:layoutNode name="step" styleLbl="node1">
+				<sa:varLst>
+					<sa:bulletEnabled val="1"/>
+				</sa:varLst>
+				<sa:alg type="tx"/>
+				<sa:shape type="roundRect">
+					<sa:adjLst>
+						<sa:adj idx="1" val="0.1"/>
+					</sa:adjLst>
+				</sa:shape>
+				<sa:presOf axis="desOrSelf" ptType="node"/>
+				<sa:constrLst>
+					<sa:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+					<sa:constr type="rMarg" refType="primFontSz" fact="0.3"/>
+					<sa:constr type="tMarg" refType="primFontSz" fact="0.3"/>
+					<sa:constr type="bMarg" refType="primFontSz" fact="0.3"/>
+				</sa:constrLst>
+				<sa:ruleLst>
+					<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+				</sa:ruleLst>
+			</sa:layoutNode>
+			<sa:forEach name="links" ptType="sibTrans" axis="followSib" cnt="1">
+				<sa:layoutNode name="arrow" styleLbl="sibTrans2D1">
+					<sa:alg type="sp"/>
+					<sa:choose name="pointing">
+						<sa:if name="right" func="var" arg="dir" op="equ" val="norm">
+							<sa:shape type="rightArrow">
+								<sa:adjLst>
+									<sa:adj idx="1" val="0.56"/>
+									<sa:adj idx="2" val="0.5"/>
+								</sa:adjLst>
+							</sa:shape>
+						</sa:if>
+						<sa:else name="left">
+							<sa:shape type="leftArrow">
+								<sa:adjLst>
+									<sa:adj idx="1" val="0.56"/>
+									<sa:adj idx="2" val="0.5"/>
+								</sa:adjLst>
+							</sa:shape>
+						</sa:else>
+					</sa:choose>
+					<sa:presOf/>
+					<sa:constrLst/>
+					<sa:ruleLst/>
+				</sa:layoutNode>
+			</sa:forEach>
+		</sa:forEach>
+	</sa:layoutNode>
+</sa:layoutDef>

@@ -32,6 +32,7 @@ import {
 	canUngroup,
 	canZOrder,
 	distributeOp,
+	canFlip,
 	flipOp,
 	groupOp,
 	presentationHref,
@@ -60,7 +61,9 @@ import { FormDialog } from "@/components/dialogs/formDialog"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
+	DropdownMenuLabel,
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,
 	DropdownMenuSeparator
@@ -72,6 +75,7 @@ import { Switch } from "@/components/ui/switch"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { DocxChoiceField } from "@/features/preview/components/docxFields"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { PRESENTATION_OBJECT_BINDINGS } from "@/features/presentation/lib/keymap/objects"
 import type { PreviewKey } from "@/lib/i18n"
@@ -101,6 +105,13 @@ const ROLE_KEYS: Readonly<Record<SlideShape["role"], PreviewKey>> = {
 	group: "previewPptxObjectGroup"
 }
 
+// What an object is called: a medium by what it plays (a .pptx holds one as a picture), else by its role.
+function objectKey(shape: SlideShape): PreviewKey {
+	if (shape.media !== undefined) return shape.media.kind === "audio" ? "previewPptxObjectAudio" : "previewPptxObjectVideo"
+
+	return ROLE_KEYS[shape.role]
+}
+
 export function shapeEditLabels(t: TFunction<"preview">): ShapeEditLabels {
 	return {
 		canvas: t("previewPptxCanvasLabel"),
@@ -110,7 +121,7 @@ export function shapeEditLabels(t: TFunction<"preview">): ShapeEditLabels {
 
 			if (only === undefined) return shapes.length === 0 ? "" : t("previewPptxSelectedMany", { count: shapes.length })
 
-			const name = t(ROLE_KEYS[only.role])
+			const name = t(objectKey(only))
 			const alt = only.alt?.decorative === true ? undefined : (only.alt?.descr ?? only.alt?.title)
 
 			return alt === undefined || alt === "" ? t("previewPptxSelectedOne", { name }) : t("previewPptxSelectedNamed", { name, alt })
@@ -374,11 +385,13 @@ function RotateControls({ editor }: { editor: PresentationRibbonEditor }) {
 	const { slide, selected, run } = useArrange(editor)
 	const focus = useCommandMenuFocus()
 	const off = slide === undefined || selected.length === 0
-	const item = (icon: LucideIcon, label: PreviewKey, op: () => DeckOp | undefined) => (
+	// A graphic frame (table, chart, object, medium, diagram) has no flip either format draws.
+	const unflippable = !off && !selected.every(canFlip)
+	const item = (icon: LucideIcon, label: PreviewKey, op: () => DeckOp | undefined, disabled = off) => (
 		<MenuItem
 			icon={icon}
 			label={t(label)}
-			disabled={off}
+			disabled={disabled}
 			onClick={() => {
 				focus.ran()
 				run(op())
@@ -401,8 +414,20 @@ function RotateControls({ editor }: { editor: PresentationRibbonEditor }) {
 					<>
 						{item(RotateCwIcon, "previewPptxRotateRight", () => rotateOp(slide, selected, 1))}
 						{item(RotateCcwIcon, "previewPptxRotateLeft", () => rotateOp(slide, selected, -1))}
-						{item(FlipVertical2Icon, "previewPptxFlipVertical", () => flipOp(slide, selected, "vertical"))}
-						{item(FlipHorizontal2Icon, "previewPptxFlipHorizontal", () => flipOp(slide, selected, "horizontal"))}
+						{item(FlipVertical2Icon, "previewPptxFlipVertical", () => flipOp(slide, selected, "vertical"), off || unflippable)}
+						{item(
+							FlipHorizontal2Icon,
+							"previewPptxFlipHorizontal",
+							() => flipOp(slide, selected, "horizontal"),
+							off || unflippable
+						)}
+						{unflippable ? (
+							<DropdownMenuGroup>
+								<DropdownMenuLabel className="max-w-64 text-xs font-normal text-muted-foreground">
+									{t("previewPptxFlipFrames")}
+								</DropdownMenuLabel>
+							</DropdownMenuGroup>
+						) : null}
 					</>
 				)}
 			</DropdownMenuContent>
@@ -703,8 +728,8 @@ export function ActionDialog({
 
 function ObjectControls({ editor }: { editor: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
-	const { slide, selected, run } = useArrange(editor)
-	const [dialog, setDialog] = useState<"alt" | "action" | undefined>(undefined)
+	const { slide, selected } = useArrange(editor)
+	const dialog = useRibbonDialog(editor)
 	const only = selected.length === 1 ? selected[0] : undefined
 
 	return (
@@ -714,7 +739,18 @@ function ObjectControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<TextQuoteIcon />}
 				disabled={only === undefined}
 				onClick={() => {
-					setDialog("alt")
+					if (only === undefined || slide === undefined) return
+
+					dialog.open((live, close) => (
+						<AltTextDialog
+							shape={only}
+							slide={slide}
+							run={op => {
+								void live.command(op)
+							}}
+							onClose={close}
+						/>
+					))
 				}}
 			/>
 			<RibbonButton
@@ -722,30 +758,19 @@ function ObjectControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<MousePointerClickIcon />}
 				disabled={only === undefined}
 				onClick={() => {
-					setDialog("action")
+					if (only === undefined || slide === undefined) return
+
+					dialog.open((live, close) => (
+						<ActionDialog
+							shape={only}
+							slide={slide}
+							editor={live}
+							onClose={close}
+						/>
+					))
 				}}
 			/>
-			{only === undefined || slide === undefined ? null : dialog === "alt" ? (
-				<AltTextDialog
-					key={only.id}
-					shape={only}
-					slide={slide}
-					run={run}
-					onClose={() => {
-						setDialog(undefined)
-					}}
-				/>
-			) : dialog === "action" ? (
-				<ActionDialog
-					key={only.id}
-					shape={only}
-					slide={slide}
-					editor={editor}
-					onClose={() => {
-						setDialog(undefined)
-					}}
-				/>
-			) : null}
+			{dialog.view}
 		</>
 	)
 }

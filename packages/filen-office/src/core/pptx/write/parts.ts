@@ -13,8 +13,9 @@ import {
 	type Relationship,
 	type ZipChanges
 } from "../../opc/index"
+import { formerName, issuedNames, noteFormerName, noteIssuedNames } from "../../presentation/issuedNames"
 import { PresentationError } from "../../presentation/model"
-import { XmlEditor, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
+import { XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import type { PartsApi, PptxPartKind } from "./types"
 
 // The package as a save edits it: names for new parts, relationships with their ids, content types, and the
@@ -295,6 +296,53 @@ export interface SaveNotice {
 
 // The editable package: one per save. Base parts are read through `opc`; every document a writer edits is loaded
 // first (loadDocument), so the PartsApi calls the emit families make stay synchronous.
+// A relationship of the emitted part under a given id (one its parts' markup names already): true when the part has it
+// (made now, or there already with that target and type), false when the id holds another.
+export interface RelatingWithId {
+	// replaceable: whether the part the id relates now may be let go of for it (nothing else of the part names it).
+	relateWithId(target: string, type: string, id: string, replaceable?: (part: string) => boolean): boolean
+	// A part the emitted markup stops naming: it goes with the save when nothing relates it once every part is written
+	// (and no step the history holds names it).
+	letGo(part: string): void
+	// The part `part` is a copy of (a duplicated slide's own copy, made by this save); undefined for any other part.
+	copiedFrom(part: string): string | undefined
+	// The ids of the emitted part's relationships of `type` that this save's emits did not make.
+	relationshipIds(type: string): readonly string[]
+	// The type of the emitted part's relationship `id`; undefined when it has none by that id.
+	relationshipType(id: string): string | undefined
+}
+
+// What the session's history names, for the deck's next save (dom/presentation/prune.ts prunePlan.hold; undefined: not
+// known, so nothing an emit lets go of is left out), and the parts that save's emits let go of (for the session to
+// leave out once nothing names them): by deck.
+const deckHeld = new WeakMap<object, readonly string[] | undefined>()
+const deckReleased = new WeakMap<object, readonly string[]>()
+
+export function holdDeckParts(deck: object, parts: readonly string[] | undefined): void {
+	deckHeld.set(deck, parts)
+}
+
+export function heldDeckParts(deck: object): readonly string[] | undefined {
+	return deckHeld.has(deck) ? deckHeld.get(deck) : []
+}
+
+function zipNameOf(part: string): string {
+	return part.startsWith("/") ? part.slice(1) : part
+}
+
+// Every part name a package of the deck's session has had (core/presentation/issuedNames.ts, shared with ODP): a part a
+// save adds never takes one, so nothing a step the history holds still names (a slide an undo restores relates the
+// parts it had) is handed to another part.
+export { issuedNames as issuedPartNames } from "../../presentation/issuedNames"
+
+export function noteDeckReleased(deck: object, parts: readonly string[]): void {
+	deckReleased.set(deck, parts)
+}
+
+export function releasedDeckParts(deck: object): readonly string[] {
+	return deckReleased.get(deck) ?? []
+}
+
 export class PackageWriter {
 	readonly opc: OpcPackage
 	readonly contentTypes: ContentTypes
@@ -306,8 +354,10 @@ export class PackageWriter {
 	private readonly replaced = new Map<string, PartBytes>()
 	private readonly relationshipEdits = new Map<string, RelationshipsEdit>()
 	private readonly added = new Map<string, AddedPart>()
-	// Parts this save added as copies of another (copyPart).
-	private readonly copies = new Set<string>()
+	// Relationships this save's emits made (api: addPart, relate, relateWithId), as "<owner key>|<id>".
+	private readonly emitted = new Set<string>()
+	// Parts this save added as copies of another (copyPart): the source's model name, by the copy's key.
+	private readonly copies = new Map<string, string>()
 	// Targets of relationships an emit dropped (unrelate), removed with their orphans when nothing relates them.
 	private readonly unrelated: string[] = []
 	// Parts added under an addPart `shared` key in this save.
@@ -316,6 +366,9 @@ export class PackageWriter {
 	private readonly overrides = new Map<string, string>()
 	// Every name taken: base parts (removed ones too: a removed name is never reused in the same save) and new ones.
 	private readonly taken = new Set<string>()
+	// Names no new part is allocated (issue()), and the deck whose session issued them.
+	private issued: ReadonlySet<string> = new Set()
+	private deck: object | undefined
 	private allRelationships: Map<string, readonly Relationship[]> | undefined
 	// Relationship ids each new part's markup came with (seed()).
 	readonly seeded = new Map<string, readonly string[]>()
@@ -329,6 +382,29 @@ export class PackageWriter {
 		for (const entry of opc.entries()) this.taken.add(partKey(entry.name))
 	}
 
+	// The names the deck's session has issued (issuedPartNames), this package's among them from now on: allocate never
+	// gives them out (a name the model chose is still claimed as it is).
+	issue(deck: object): void {
+		noteIssuedNames(
+			deck,
+			Array.from(this.opc.entries(), entry => entry.name)
+		)
+		this.issued = issuedNames(deck)
+		this.deck = deck
+	}
+
+	// A name for the logical part `key` names (its owner and role): the one a save of the deck's session gave it, when
+	// the package written has no part by it (a redo writing it again), else a new one (allocate), its own from now on.
+	allocateOwn(key: string, kind: PptxPartKind | undefined, contentType: string, like?: string): string {
+		const deck = this.deck
+		const own = deck === undefined ? undefined : formerName(deck, key)
+		const name = own !== undefined && this.claim(own) ? own : this.allocate(kind, contentType, like)
+
+		if (deck !== undefined) noteFormerName(deck, key, name)
+
+		return name
+	}
+
 	// The part exists after the edits so far.
 	exists(name: string): boolean {
 		const key = partKey(name)
@@ -338,6 +414,11 @@ export class PackageWriter {
 
 	isAdded(name: string): boolean {
 		return this.added.has(partKey(name))
+	}
+
+	// Replaced in place by this save (its relationships kept).
+	isReplaced(name: string): boolean {
+		return this.replaced.has(partKey(name))
 	}
 
 	isRemoved(name: string): boolean {
@@ -364,7 +445,7 @@ export class PackageWriter {
 			const stem = dot > 0 ? file.slice(0, dot) : file
 
 			directory = like.slice(0, slash + 1)
-			base = stem.replace(/\d+$/u, "")
+			base = withoutTrailingDigits(stem)
 			extension = dot > 0 ? file.slice(dot) : ""
 		} else {
 			const template = NAME_TEMPLATES[kind ?? "other"]
@@ -377,7 +458,7 @@ export class PackageWriter {
 		for (let n = 1; ; n++) {
 			const name = `${directory}${base}${String(n)}${extension}`
 
-			if (!this.taken.has(partKey(name))) {
+			if (!this.taken.has(partKey(name)) && !this.issued.has(partKey(name))) {
 				this.taken.add(partKey(name))
 
 				return name
@@ -444,6 +525,111 @@ export class PackageWriter {
 		else this.replaced.set(key, bytes)
 	}
 
+	// Of `candidates` (part keys), those a part this save writes names (the save's own output, whatever the session
+	// predicted): by a relationship id its markup names, or, from a slide, the drawing relationship its diagram data
+	// names (dsp:dataModelExt@relId); with what those relate in turn.
+	// A copy's relationships to charts this save copied for it that its written markup names by no id: the copy's
+	// frame was written into a chart part of its own (a chart the session holds), so the copied chart goes, with what
+	// only it related, unless something else relates it. (Notes and comments are related by type, never named.)
+	async dropUnnamedCopies(name: string): Promise<void> {
+		const key = partKey(name)
+		const added = this.added.get(key)
+		const edit = this.relationshipEdits.get(key)
+
+		if (added === undefined || edit === undefined) return
+
+		const text = decodeUtf8(await this.bytesOf(added))
+
+		for (const relationship of edit.all()) {
+			if (relationship.external || relationshipKind(relationship.type) !== "chart" || !this.copies.has(partKey(relationship.target)))
+				continue
+			if (text.includes(`"${relationship.id}"`) || text.includes(`'${relationship.id}'`)) continue
+
+			edit.remove(relationship.id)
+			this.unrelated.push(relationship.target)
+		}
+	}
+
+	async namedByWritten(candidates: ReadonlySet<string>): Promise<Set<string>> {
+		const named = new Set<string>()
+
+		if (candidates.size === 0) return named
+
+		const texts = new Map<string, string>()
+		const textOf = async (key: string): Promise<string> => {
+			let text = texts.get(key)
+
+			if (text === undefined) {
+				const added = this.added.get(key)
+				const replaced = this.replaced.get(key)
+				const editor = this.editors.get(key)
+				const entry = this.opc.entry(key)
+				const bytes =
+					added !== undefined
+						? await this.bytesOf(added)
+						: replaced !== undefined
+							? await joinBytes(replaced)
+							: editor?.changed === true
+								? editor.serialize()
+								: entry === undefined
+									? new Uint8Array(0)
+									: await this.opc.read(entry.name)
+
+				text = decodeUtf8(bytes)
+				texts.set(key, text)
+			}
+
+			return text
+		}
+		const live = this.liveRelationships(await this.everyRelationship())
+		const written = new Set([
+			...this.added.keys(),
+			...this.replaced.keys(),
+			...[...this.editors].filter(([, editor]) => editor.changed).map(([key]) => key)
+		])
+
+		for (const [key, { all }] of live) {
+			const relationships = all.filter(relationship => !relationship.external)
+			const hits = relationships.filter(relationship => candidates.has(partKey(relationship.target)))
+
+			if (hits.length === 0) continue
+
+			// A part this save writes names them by its markup.
+			const text = written.has(key) ? await textOf(key) : undefined
+			// Any part's drawing relationships the diagram data it relates names, where this save writes the one or the
+			// other (data written in place names the drawing of the slide that relates it).
+			const drawingIds = new Set<string>()
+
+			for (const relationship of relationships) {
+				const data = partKey(relationship.target)
+
+				if (relationshipKind(relationship.type) !== "diagramData" || (!written.has(key) && !written.has(data))) continue
+
+				for (const match of (await textOf(data)).matchAll(/(?<![:\w])relId="([^"]+)"/gu)) drawingIds.add(match[1] ?? "")
+			}
+
+			for (const relationship of hits)
+				if (text?.includes(`"${relationship.id}"`) === true || drawingIds.has(relationship.id))
+					named.add(partKey(relationship.target))
+		}
+
+		// What a part kept relates stays with it.
+		for (const queue = [...named]; queue.length > 0;) {
+			const key = queue.pop() as string
+
+			for (const relationship of live.get(key)?.all ?? []) {
+				const target = partKey(relationship.target)
+
+				if (!relationship.external && candidates.has(target) && !named.has(target)) {
+					named.add(target)
+					queue.push(target)
+				}
+			}
+		}
+
+		return named
+	}
+
 	private async bytesOf(part: AddedPart): Promise<Uint8Array> {
 		if (part.bytes === undefined) throw new PresentationError("failed", `The new part ${part.name} has no content`)
 		return part.bytes instanceof Uint8Array ? part.bytes : joinBytes(part.bytes)
@@ -472,7 +658,7 @@ export class PackageWriter {
 		const key = partKey(name)
 
 		if (this.added.delete(key)) {
-			this.relationshipEdits.delete(partKey(relationshipsPartName(name)))
+			this.relationshipEdits.delete(key)
 
 			return
 		}
@@ -536,17 +722,60 @@ export class PackageWriter {
 	}
 
 	// The PartsApi of the emits for `owner`.
-	api(owner: string): PartsApi {
+	api(owner: string): PartsApi & RelatingWithId {
 		const ownerName = owner.startsWith("/") ? owner.slice(1) : owner
+		const made = (rId: string): string => {
+			this.emitted.add(`${partKey(ownerName)}|${rId}`)
+
+			return rId
+		}
 
 		return {
+			letGo: part => {
+				const name = part.startsWith("/") ? part.slice(1) : part
+
+				this.unrelated.push(name)
+				this.released.push(name)
+			},
+			relationshipType: id => this.relationshipsOf(ownerName).byId(id)?.type,
+			relationshipIds: type =>
+				this.relationshipsOf(ownerName)
+					.all()
+					.flatMap(relationship =>
+						relationship.type === type &&
+						!relationship.external &&
+						!this.emitted.has(`${partKey(ownerName)}|${relationship.id}`)
+							? [relationship.id]
+							: []
+					),
+			copiedFrom: part => this.copies.get(partKey(part.startsWith("/") ? part.slice(1) : part)),
+			relateWithId: (target, type, id, replaceable) => {
+				const edit = this.relationshipsOf(ownerName)
+				const to = target.startsWith("/") ? target.slice(1) : target
+				const held = edit.all().find(relationship => relationship.id === id)
+
+				if (held !== undefined) {
+					if (held.external || held.type !== type) return false
+					if (partKey(held.target) === partKey(to)) return true
+					if (replaceable?.(`/${held.target}`) !== true) return false
+
+					edit.retarget(id, to)
+					this.unrelated.push(held.target)
+					made(id)
+
+					return true
+				}
+
+				return made(edit.add(type, to, false, id)) === id
+			},
 			owner,
 			addPart: (kind, content, contentType, options) => {
 				const shared = options?.shared === undefined ? undefined : this.sharedParts.get(options.shared)
 
-				if (shared !== undefined) return { part: `/${shared}`, rId: this.relate(ownerName, shared, RELATIONSHIP_TYPES[kind]) }
+				if (shared !== undefined) return { part: `/${shared}`, rId: made(this.relate(ownerName, shared, RELATIONSHIP_TYPES[kind])) }
 
-				const name = this.allocate(kind, contentType)
+				const former = options?.name === undefined ? undefined : zipNameOf(options.name)
+				const name = former !== undefined && this.claim(former) ? former : this.allocate(kind, contentType)
 
 				if (options?.shared !== undefined) this.sharedParts.set(options.shared, name)
 
@@ -558,7 +787,7 @@ export class PackageWriter {
 						? this.relate(source, name, RELATIONSHIP_TYPES[kind])
 						: this.relationshipsOf(source).add(RELATIONSHIP_TYPES[kind], name, false, options.id)
 
-				return { part: `/${name}`, rId }
+				return { part: `/${name}`, rId: source === ownerName ? made(rId) : rId }
 			},
 			relateFrom: (from, target, type, options) => {
 				const source = this.addedSource(from)
@@ -571,11 +800,13 @@ export class PackageWriter {
 			},
 			has: part => this.exists(part.startsWith("/") ? part.slice(1) : part),
 			relate: (target, type, external) =>
-				this.relate(
-					ownerName,
-					external === true ? target : target.startsWith("/") ? target.slice(1) : target,
-					type,
-					external === true
+				made(
+					this.relate(
+						ownerName,
+						external === true ? target : target.startsWith("/") ? target.slice(1) : target,
+						type,
+						external === true
+					)
 				),
 			target: rId => {
 				const relationship = this.relationshipsOf(ownerName).byId(rId)
@@ -652,7 +883,7 @@ export class PackageWriter {
 			name !== undefined && !this.opc.has(name) && this.claim(name) ? name : this.allocate(undefined, contentType, like ?? source)
 
 		this.add(target, contentType, await this.opc.read(source), { compress: this.opc.entry(source)?.method !== 0 })
-		this.copies.add(partKey(target))
+		this.copies.set(partKey(target), `/${source}`)
 		await this.copyRelationships(source, target, backFrom ?? source, backTo ?? target)
 
 		return target
@@ -665,7 +896,8 @@ export class PackageWriter {
 		to: string,
 		backFrom: string,
 		backTo: string,
-		nameOf?: (relationship: PendingRelationship) => string | undefined
+		nameOf?: (relationship: PendingRelationship) => string | undefined,
+		keep?: (relationship: PendingRelationship) => boolean
 	): Promise<void> {
 		// The source's relationships as the base has them (edits to the original in this save are its own).
 		const base: PendingRelationship[] = this.added.has(partKey(from))
@@ -679,9 +911,11 @@ export class PackageWriter {
 				})
 		const edit = await this.loadRelationships(to)
 
-		this.seed(to, base)
+		this.seed(to, keep === undefined ? base : base.filter(relationship => keep(relationship)))
 
 		for (const relationship of base) {
+			if (keep?.(relationship) === false) continue
+
 			let target = relationship.target
 
 			if (!relationship.external) {
@@ -743,6 +977,31 @@ export class PackageWriter {
 	// What removing `parts` takes with it: they and every part only they referenced, transitively, judged against every
 	// surviving referrer (new parts included, so a copy keeps what it shares with a removed original). A part that was
 	// already unreferenced is not touched. Returns the part keys that go.
+	// Parts a removal never takes with it (keepParts), by key.
+	private readonly kept = new Set<string>()
+	// Parts a step the history holds names (holdParts): never let go of when nothing relates them, by key.
+	private readonly held = new Set<string>()
+	private holdAll = false
+	// Parts emits stopped naming (letGo), by zip name.
+	private readonly released: string[] = []
+
+	// undefined: what the history names is not known, so no part an emit lets go of goes with this save.
+	holdParts(parts: readonly string[] | undefined): void {
+		if (parts === undefined) this.holdAll = true
+		else for (const part of parts) this.held.add(partKey(part))
+	}
+
+	// The parts this save's emits stopped naming: from now on the session's to leave out once nothing names them.
+	releasedParts(): readonly string[] {
+		return this.released
+	}
+
+	// Parts that stay whatever removal would orphan them (a part an undo or redo may name again: the session's own, a
+	// picture held diagram data names); one a removal leaves unrelated becomes the session's to leave out later.
+	keepParts(parts: readonly string[]): void {
+		for (const part of parts) this.kept.add(partKey(part))
+	}
+
 	async planRemoval(parts: readonly string[]): Promise<Set<string>> {
 		return this.plan(parts, this.liveRelationships(await this.everyRelationship()))
 	}
@@ -788,6 +1047,13 @@ export class PackageWriter {
 			for (const key of candidates) {
 				if (gone.has(key) || !this.opc.has(key)) continue
 				if ((referrers.get(key) ?? []).some(source => source !== key && !gone.has(source))) continue
+
+				// A part the session may name again stays, the session's to leave out once nothing names it.
+				if (this.kept.has(key)) {
+					this.released.push(this.opc.entry(key)?.name ?? key)
+
+					continue
+				}
 
 				gone.add(key)
 				visit(key)
@@ -835,9 +1101,43 @@ export class PackageWriter {
 		for (const { all } of live.values())
 			for (const relationship of all) if (!relationship.external) related.add(partKey(relationship.target))
 
-		const loose = [...new Set(this.unrelated.map(partKey))].filter(key => !related.has(key) && this.opc.entry(key) !== undefined)
+		const keys = [...new Set(this.unrelated.map(partKey))]
+		const loose = keys.filter(
+			key =>
+				!related.has(key) &&
+				!this.kept.has(key) &&
+				!this.held.has(key) &&
+				!(this.holdAll && this.released.some(name => partKey(name) === key)) &&
+				this.opc.entry(key) !== undefined
+		)
 
 		this.unrelated.length = 0
+
+		// A part this save added (a copy's own) that nothing relates now goes, and what only it related after it.
+		for (let added = keys.filter(key => !related.has(key) && this.added.has(key)); added.length > 0;) {
+			const next: string[] = []
+
+			for (const key of added) {
+				const part = this.added.get(key)
+
+				if (part === undefined || this.kept.has(key)) continue
+
+				const targets = this.relationshipEdits.get(key)?.all() ?? []
+
+				this.remove(part.name)
+
+				const live = this.liveRelationships(await this.everyRelationship())
+				const still = new Set<string>()
+
+				for (const { all } of live.values())
+					for (const relationship of all) if (!relationship.external) still.add(partKey(relationship.target))
+				for (const relationship of targets)
+					if (!relationship.external && this.added.has(partKey(relationship.target)) && !still.has(partKey(relationship.target)))
+						next.push(partKey(relationship.target))
+			}
+
+			added = next
+		}
 
 		if (loose.length > 0) await this.removeWithOrphans(loose, dangling)
 	}
@@ -980,6 +1280,16 @@ export class PackageWriter {
 
 		return { changes: { replace, add, remove }, copies }
 	}
+}
+
+// A part name's stem without its number ("slide12" → "slide"); a loop, where /\d+$/ would try every digit of a long run
+// as its start.
+export function withoutTrailingDigits(stem: string): string {
+	let end = stem.length
+
+	while (end > 0 && stem.charCodeAt(end - 1) >= 0x30 && stem.charCodeAt(end - 1) <= 0x39) end--
+
+	return stem.slice(0, end)
 }
 
 export function zipName(modelPart: string): string {

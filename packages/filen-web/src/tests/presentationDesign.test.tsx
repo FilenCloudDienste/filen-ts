@@ -16,16 +16,18 @@ import {
 	unitToEmu,
 	validSlideLength
 } from "@/features/presentation/components/design/design.logic"
-import { subscribeDesignDialogs } from "@/features/presentation/components/design/designDialogs"
-import { DesignDialogsHost } from "@/features/presentation/components/design/designDialogsHost"
 import { designGroups } from "@/features/presentation/components/ribbon/design"
+import { RibbonDialogsHost } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import { PresentationEditorContext, type PresentationEditorScope } from "@/features/presentation/hooks/usePresentationSession"
 import "@/lib/i18n"
 
 // The Design tab against a fake editor: the theme gallery (the presentation's own themes, Filen's eight, all slides or
 // the selected ones), the variants of the current Filen theme, Slide Size and Format Background, each sending its op.
 
-vi.mock("@/lib/useElementSize", () => ({ useElementSize: () => ({ width: 2000, height: 40 }) }))
+// The ribbon's width: room for every group, unless a test leaves none (every group under More commands).
+const size = vi.hoisted(() => ({ width: 2000 }))
+
+vi.mock("@/lib/useElementSize", () => ({ useElementSize: () => ({ width: size.width, height: 40 }) }))
 
 const SLIDES = [0, 1, 2].map(n => ({ ref: slideRef(256 + n), hidden: false }))
 const MASTER = slideRef(1)
@@ -71,6 +73,7 @@ function mount(
 	const scope = {
 		editor: {
 			store: {},
+			session: {},
 			editable: true,
 			current: 1,
 			currentRef: SLIDES[1]?.ref,
@@ -92,7 +95,7 @@ function mount(
 
 	const view = (ribbon: boolean) => (
 		<PresentationEditorContext value={scope}>
-			{hosted ? <DesignDialogsHost /> : null}
+			{hosted ? <RibbonDialogsHost editor={scope.editor as never} /> : null}
 			{ribbon ? (
 				<OfficeRibbon
 					label="Ribbon"
@@ -124,6 +127,7 @@ function mount(
 
 afterEach(() => {
 	cleanup()
+	size.width = 2000
 })
 
 async function openThemes(): Promise<HTMLElement> {
@@ -225,12 +229,6 @@ describe("Design tab", () => {
 
 		expect(variant.getAttribute("aria-disabled")).toBe("true")
 		expect(variant.hasAttribute("disabled")).toBe(false)
-	})
-
-	it("subscribes to a deck's design dialogs with one function", () => {
-		const store = {} as never
-
-		expect(subscribeDesignDialogs(store)).toBe(subscribeDesignDialogs(store))
 	})
 
 	it("switches the current slide's master to another variant", () => {
@@ -390,6 +388,39 @@ describe("Design tab", () => {
 		hideRibbon()
 
 		expect(screen.getByRole("dialog", { name: "Format background" })).toBeTruthy()
+	})
+
+	it("opens Slide size and Format background from More commands, which closes as they run", async () => {
+		size.width = 40
+		const { ops } = mount("pptx", true)
+
+		fireEvent.click(screen.getByRole("button", { name: "More commands" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Format background" }))
+		await waitFor(() => {
+			expect(screen.queryByRole("button", { name: "Format background" })).toBeNull()
+		})
+		fireEvent.click(within(await screen.findByRole("dialog", { name: "Format background" })).getByRole("button", { name: "Cancel" }))
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog", { name: "Format background" })).toBeNull()
+		})
+
+		fireEvent.click(screen.getByRole("button", { name: "More commands" }))
+		fireEvent.click(await screen.findByRole("button", { name: "Slide size" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Standard (4:3)" }))
+
+		const dialog = await screen.findByRole("dialog", { name: "Slide size" })
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+		await waitFor(() => {
+			expect(ops.at(-1)).toMatchObject({ family: "design", kind: "setSize" })
+		})
+		// The overflow closed with the menu's item: focus goes back to its trigger, More commands.
+		await act(async () => {
+			await new Promise(resolve => requestAnimationFrame(resolve))
+			await new Promise(resolve => requestAnimationFrame(resolve))
+		})
+		expect(screen.queryByRole("button", { name: "Slide size" })).toBeNull()
+		expect(document.activeElement).toBe(screen.getByRole("button", { name: "More commands" }))
 	})
 
 	it("offers every fill kind in an OpenDocument presentation", async () => {

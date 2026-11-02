@@ -60,13 +60,13 @@ export class SavePortAbortedError extends Error {
 }
 
 // Timers through globalThis: the module type-checks without DOM or Node typings.
-function setTimer(run: () => void, ms: number): unknown {
+export function setTimer(run: () => void, ms: number): unknown {
 	const set: unknown = Reflect.get(globalThis, "setTimeout")
 
 	return typeof set === "function" ? Reflect.apply(set, globalThis, [run, ms]) : undefined
 }
 
-function clearTimer(handle: unknown): void {
+export function clearTimer(handle: unknown): void {
 	const clear: unknown = Reflect.get(globalThis, "clearTimeout")
 
 	if (typeof clear === "function") Reflect.apply(clear, globalThis, [handle])

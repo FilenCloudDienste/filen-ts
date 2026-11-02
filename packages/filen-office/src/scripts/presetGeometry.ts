@@ -73,8 +73,9 @@ function child(document: XmlDocument, node: number, local: string): number {
 
 const INTEGER = /^-?\d+$/
 
-// One shape element -> its encoded program.
-export function encodeShape(document: XmlDocument, shape: number): string {
+// One shape element -> its encoded program; `mirrorY` turns it upside down (every y read as h - y, the text
+// rectangle's top and bottom swapped). Arcs refuse: their sweeps would have to turn too.
+export function encodeShape(document: XmlDocument, shape: number, mirrorY = false): string {
 	const name = document.localName(shape)
 	const slots = new Map<string, number>(BUILTIN_GUIDES.map((guide, index) => [guide, index]))
 	let next = BUILTIN_GUIDES.length
@@ -117,13 +118,32 @@ export function encodeShape(document: XmlDocument, shape: number): string {
 		slots.set(document.attribute(gd, "name") ?? "", next++)
 	}
 
+	const mirrored = new Map<string, string>()
+	// A y as the mirror reads it: a guide h - y, added once per y.
+	const y = (token: string | undefined): string => {
+		if (!mirrorY) return argument(token)
+
+		const key = token ?? ""
+		let slot = mirrored.get(key)
+
+		if (slot === undefined) {
+			guides.push(GUIDE_OPS[OP_BY_FORMULA.get("+-") ?? 0]?.[1] ?? "", argument("h"), "0", argument(token))
+			slot = encodeSlot(next++)
+			mirrored.set(key, slot)
+		}
+
+		return slot
+	}
 	const rectNode = child(document, shape, "rect")
+	const side = (key: string): string | undefined => document.attribute(rectNode, key) ?? (key === "l" || key === "t" ? "l" : key)
 	const rect =
 		rectNode < 0
 			? []
-			: ["l", "t", "r", "b"].map(side => argument(document.attribute(rectNode, side) ?? (side === "l" || side === "t" ? "l" : side)))
+			: mirrorY
+				? [argument(side("l")), y(side("b")), argument(side("r")), y(side("t"))]
+				: ["l", "t", "r", "b"].map(key => argument(side(key)))
 	const paths: string[] = []
-	const point = (pt: number): string[] => [argument(document.attribute(pt, "x")), argument(document.attribute(pt, "y"))]
+	const point = (pt: number): string[] => [argument(document.attribute(pt, "x")), y(document.attribute(pt, "y"))]
 	const pathList = child(document, shape, "pathLst")
 
 	for (const path of pathList < 0 ? [] : elements(document, pathList)) {
@@ -152,6 +172,8 @@ export function encodeShape(document: XmlDocument, shape: number): string {
 					paths.push("L", ...point(pts[0] ?? -1))
 					break
 				case "arcTo":
+					if (mirrorY) throw new Error(`${name}: an arc cannot be mirrored`)
+
 					paths.push("A", ...["wR", "hR", "stAng", "swAng"].map(attribute => argument(document.attribute(command, attribute))))
 					break
 				case "quadBezTo":
@@ -172,10 +194,33 @@ export function encodeShape(document: XmlDocument, shape: number): string {
 	return [adjust.join(" "), guides.join(" "), rect.join(" "), paths.join(" ")].join("|")
 }
 
-export function presetTable(definitions: Uint8Array): Map<string, string> {
+// The adjust values a shape's polar handles turn (a:ahPolar@gdRefAng, §20.1.9.3): angles, which a SmartArt
+// layout gives in degrees (MS-OI29500 §2.1.1615).
+export function angleAdjusts(document: XmlDocument, shape: number): string[] {
+	const handles = child(document, shape, "ahLst")
+	const adjusts = child(document, shape, "avLst")
+	const names = new Set((adjusts < 0 ? [] : elements(document, adjusts)).map(gd => document.attribute(gd, "name") ?? ""))
+	const out: string[] = []
+
+	for (const handle of handles < 0 ? [] : elements(document, handles)) {
+		const angle = document.localName(handle) === "ahPolar" ? document.attribute(handle, "gdRefAng") : undefined
+
+		if (angle !== undefined && names.has(angle) && !out.includes(angle)) out.push(angle)
+	}
+
+	return out
+}
+
+export interface PresetTables {
+	readonly programs: Map<string, string>
+	readonly angles: Map<string, string[]>
+}
+
+export function presetTable(definitions: Uint8Array): PresetTables {
 	const document = parseXml(definitions)
 	const root = document.documentElement()
-	const out = new Map<string, string>()
+	const programs = new Map<string, string>()
+	const angles = new Map<string, string[]>()
 
 	for (const shape of elements(document, root)) {
 		if (document.kinds[shape] !== NodeKind.Element) continue
@@ -184,23 +229,45 @@ export function presetTable(definitions: Uint8Array): Map<string, string> {
 		const encoded = encodeShape(document, shape)
 
 		// upDownArrow is defined twice, identically.
-		if (out.has(name) && out.get(name) !== encoded) throw new Error(`${name} is defined twice, differently`)
+		if (programs.has(name) && programs.get(name) !== encoded) throw new Error(`${name} is defined twice, differently`)
 
-		out.set(name, encoded)
+		programs.set(name, encoded)
+
+		const angle = angleAdjusts(document, shape)
+
+		if (angle.length > 0) angles.set(name, angle)
 	}
 
-	return out
+	// ECMA-376 5th edition defines upDownArrow twice and upArrow not at all. PowerPoint's upArrow is downArrow upside
+	// down: LibreOffice's import of each, the latter flipped, draws the same pixels (measured).
+	if (!programs.has("upArrow")) {
+		const down = elements(document, root).find(shape => document.localName(shape) === "downArrow")
+
+		if (down === undefined) throw new Error("downArrow is missing")
+
+		programs.set("upArrow", encodeShape(document, down, true))
+	}
+
+	return { programs, angles }
 }
 
-export async function renderTable(table: ReadonlyMap<string, string>): Promise<string> {
-	const entries = [...table].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+function sorted<T>(table: ReadonlyMap<string, T>): [string, T][] {
+	return [...table].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+export async function renderTable(tables: PresetTables): Promise<string> {
 	const source = [
 		`// Generated by \`pnpm run generate:geometry\` from ECMA-376 Part 1 (5th edition) ${SOURCE.presets}`,
 		`// (SHA-256 ${SOURCE.presetsSha256}), © Ecma International, see THIRD_PARTY_NOTICES.md.`,
 		"// Do not edit. Encoding: program.ts.",
 		"",
 		"export const PRESET_GEOMETRY: Readonly<Record<string, string>> = {",
-		...entries.map(([name, encoded]) => `\t${JSON.stringify(name)}: ${JSON.stringify(encoded)},`),
+		...sorted(tables.programs).map(([name, encoded]) => `\t${JSON.stringify(name)}: ${JSON.stringify(encoded)},`),
+		"}",
+		"",
+		"// Per preset, the adjust values its polar handles turn (a:ahPolar@gdRefAng): angles.",
+		"export const PRESET_ANGLE_ADJUSTS: Readonly<Record<string, readonly string[]>> = {",
+		...sorted(tables.angles).map(([name, angle]) => `\t${JSON.stringify(name)}: ${JSON.stringify(angle)},`),
 		"}",
 		""
 	].join("\n")

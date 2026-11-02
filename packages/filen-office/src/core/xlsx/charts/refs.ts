@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import type { SheetRange } from "../../sheet/protocol"
 import { referenceSpans, type RefArea } from "../../sheet/refs/formulaRefs"
 import { MAX_COLUMNS, MAX_ROWS } from "../../sheet/model/model"
@@ -104,7 +105,7 @@ export function chartAreas(formula: string, names: ChartNameLookup | null, depth
 
 		if (resolved === null) return null
 
-		out.push(...resolved)
+		appendAll(out, resolved)
 	}
 
 	return out

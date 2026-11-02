@@ -15,22 +15,27 @@ import {
 	type SlideRef,
 	type Xfrm
 } from "../../presentation/model"
-import { encodeUtf8, escapeAttribute, escapeText, type XmlDocument, type XmlEditor } from "../../xml/index"
-import { readSlidePart } from "../read/slide"
+import { encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument, type XmlEditor } from "../../xml/index"
+import { readSlidePart, SlidePartError } from "../read/slide"
 import { timingElement } from "../read/timing"
 import { G, P_MAIN, partReader, type PartReader } from "../read/xml"
 import { emitFamilyOf, emitPptx } from "./emit"
+import { notePackageDiagramData, noteSharedDiagramParts, type PackageDiagramData } from "./emit/smartart"
 import { URIS, alternateUnit, childElements, sameModel, xfrmXml, type EmitContext, type Pristine } from "./emit/shape"
 import { slideRoot } from "./emit/slide"
 import { placeTransition } from "./emit/transition"
 import { builtinTableStyleIds, builtinTableStylesPart } from "./emit/table"
 import { showPrMarkup, spliceShowPr } from "./emit/presentation"
 import { spliceDesign } from "./emit/design"
+import { spliceNotes } from "./emit/notes"
+import { spliceComments } from "./emit/comment"
 import { DEFAULT_SHOW } from "../read/props"
 import {
 	PART_CONTENT_TYPES,
 	PackageWriter,
 	RELATIONSHIPS,
+	heldDeckParts,
+	noteDeckReleased,
 	copiedKind,
 	modelName,
 	zipName,
@@ -38,6 +43,8 @@ import {
 	type SaveNotice
 } from "./parts"
 import type { RawPart } from "../../presentation/edit/ops"
+import { copiedWithoutNotes } from "../../presentation/edit/apply/slide"
+import { diagramDrawingRelId, diagramRelationshipOwner, notePackageDrawingRel } from "../../presentation/edit/apply/smartart"
 import type { EmitPiece, EmitRequest, EmitResult, PptxPartIndex, PptxSaveInput, PptxSnapshot, PptxSource } from "./types"
 import { normalSlide, type GateExpectation, type NormalSlide } from "./verify"
 
@@ -64,6 +71,9 @@ export function isRawPart(part: string): boolean {
 }
 
 const SLIDE_RELATIONSHIP = `${RELATIONSHIPS}slide`
+const DIAGRAM_DRAWING_RELATIONSHIP = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
+const MAX_DIAGRAM_DEPTH = 128
+const DIAGRAM_KINDS: ReadonlySet<string> = new Set(["diagramData", "diagramLayout", "diagramQuickStyle", "diagramColors", "diagramDrawing"])
 const LAYOUT_RELATIONSHIP = `${RELATIONSHIPS}slideLayout`
 const SECTIONS_EXT = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"
 const P14_URI = URIS["p14"] ?? ""
@@ -432,8 +442,11 @@ class Splice {
 	// Final slide parts (zip names) by ref.
 	private readonly finalParts = new Map<SlideRef, string>()
 	private readonly removedSlides = new Set<string>()
+	private readonly rawPristines = new Map<string, Pristine | undefined>()
 	// The sections as written (slides in no section joined to the one before them), when the list was rewritten.
 	private writtenSections: { name: string; id: string; slides: string[] }[] | undefined
+	// Each slide's p:sldId as presentation.xml is written.
+	private writtenIds = new Map<SlideRef, number>()
 
 	constructor(input: PptxSaveInput, writer: PackageWriter) {
 		this.input = input
@@ -496,7 +509,14 @@ class Splice {
 			const name = part === undefined ? undefined : zipName(part)
 			const base = name === undefined ? undefined : this.baseSlides.find(slide => partKey(slide.part) === partKey(name))
 
-			if (base !== undefined && !kept.has(partKey(base.part)) && this.changesOf(base.part)?.change !== "added") {
+			// The package's part is this slide's only when the index binds it to this slide: a slide the session holds
+			// under a name a save gave another node (deleted while that save landed, then restored) is written anew.
+			if (
+				base !== undefined &&
+				!kept.has(partKey(base.part)) &&
+				this.changesOf(base.part)?.change !== "added" &&
+				this.index.refOf(modelName(base.part)) === ref
+			) {
 				kept.add(partKey(base.part))
 				this.finalParts.set(ref, base.part)
 
@@ -519,7 +539,15 @@ class Splice {
 
 		// New slides first, so what a removal takes is judged against every part that stays, copies included (a copy
 		// shares its original's pictures and media).
-		for (const { ref, node } of added) {
+		// Diagram parts more than one slide of the package relates (an edit of one diagram writes parts of its own).
+		await this.noteSharedDiagramParts()
+		await this.notePackageDiagramData()
+
+		// A slide written from the model whose diagrams name parts this save adds (a slide an undo restored brings them
+		// back) comes after those, so it relates what they are.
+		const later = added.filter(({ node }) => this.namesAddedDiagramData(node))
+
+		for (const { ref, node } of [...added.filter(each => !later.includes(each)), ...later]) {
 			const result = await this.addSlide(ref, node)
 
 			if (result !== undefined) return result
@@ -555,6 +583,14 @@ class Splice {
 
 		// Chart parts a frame no longer names (its chart written into another part), with what only they kept.
 		await writer.removeUnrelated((source, relationship) => this.dangling(source, relationship))
+
+		// Parts this session wrote that nothing reaches any more (dom/presentation/prune.ts), with what only they kept.
+		const proposed = (this.input.prune ?? []).filter(name => writer.exists(name) && !writer.isAdded(name) && !writer.isReplaced(name))
+		// The save's own output is the judge: a part a part it writes names stays.
+		const named = await writer.namedByWritten(new Set(proposed.map(name => partKey(name))))
+		const prune = proposed.filter(name => !named.has(partKey(name)))
+
+		if (prune.length > 0) await writer.removeWithOrphans(prune, (source, relationship) => this.dangling(source, relationship))
 
 		// Removals last: what they take with them, and the jumps that pointed at them.
 		if (removedParts.length > 0) {
@@ -595,6 +631,23 @@ class Splice {
 		const presentationResult = await this.presentation(presentation)
 
 		if (presentationResult !== undefined) return presentationResult
+
+		// Notes slides and notes masters the session made or took back, then the comment and author parts.
+		const review = {
+			writer,
+			deck,
+			changes: this.input.changes,
+			mainPart: this.mainPart,
+			slidePart: (ref: SlideRef) => this.finalParts.get(ref),
+			slideId: (ref: SlideRef) => this.writtenIds.get(ref)
+		}
+		const notesResult = await spliceNotes(review)
+
+		if (notesResult !== undefined) return notesResult
+
+		const commentsResult = await spliceComments(review)
+
+		if (commentsResult !== undefined) return commentsResult
 
 		await this.appProperties()
 
@@ -694,8 +747,18 @@ class Splice {
 			const notesName = notes === undefined ? undefined : zipName(notes.part)
 
 			writer.add(name, writer.typeOf(original) ?? PART_CONTENT_TYPES.slide, await writer.opc.read(original))
-			await writer.copyRelationships(original, name, original, name, relationship =>
-				relationshipKind(relationship.type) === "notesSlide" ? notesName : undefined
+			// The package's notes slide unless the copy was made without notes (its source had none then: an undo since
+			// the last save may have left the package's, and the source may have notes again now). Notes not read yet
+			// are still the source's: copied.
+			const notesGone = notes === undefined && copiedWithoutNotes(this.deck, ref)
+
+			await writer.copyRelationships(
+				original,
+				name,
+				original,
+				name,
+				relationship => (relationshipKind(relationship.type) === "notesSlide" ? notesName : undefined),
+				relationship => !notesGone || relationshipKind(relationship.type) !== "notesSlide"
 			)
 
 			const refusal = await this.writeFromSource(
@@ -708,12 +771,19 @@ class Splice {
 			)
 
 			if (refusal !== undefined) return refusal
+
+			await writer.dropUnnamedCopies(name)
+
 			if (layoutPart !== undefined) await this.retargetLayout(name, layoutPart)
 
 			// Its notes slide, with the notes node's edits spliced in.
 			const copiedNotes = (await writer.loadRelationships(name))
 				.all()
 				.find(relationship => relationshipKind(relationship.type) === "notesSlide")
+
+			// Notes the session made (no source: a save wrote them from the model, and the rebase left them so) are
+			// written from the model under the copy's notes name, as any made notes slide is (emit/notes.ts).
+			if (notes !== undefined && notes.src === undefined) return undefined
 
 			if (notes !== undefined && copiedNotes !== undefined && !copiedNotes.external) {
 				const source = notes.src?.format === "pptx" && notes.src.epoch === this.index.epoch ? zipName(notes.src.part) : undefined
@@ -742,15 +812,22 @@ class Splice {
 
 		if (layoutPart === undefined) return refused("failed", "A new slide without a layout")
 
+		// First, while the new part's relationship ids are all free: the ones its diagrams' data parts name.
+		const drawings = await this.diagramDrawings(name, node.shapes, 0)
+
+		if (drawings !== undefined) return drawings
+
 		writer.relate(name, zipName(layoutPart), LAYOUT_RELATIONSHIP)
 
+		// The parts the session holds resolve here too (a diagram inserted on a slide added since the last save).
 		const context: EmitContext = {
 			deck: this.deck,
 			document: undefined,
 			parts: writer.api(modelName(name)),
 			mode: "model",
 			slidePart: this.slidePart,
-			dispatch
+			dispatch,
+			...(this.source.raw === undefined ? {} : { rawDocument: this.source.raw.document.bind(this.source.raw) })
 		}
 		const result = markupOf(slideRoot(context, node))
 
@@ -758,6 +835,186 @@ class Splice {
 
 		writer.replace(name, concat(encodeUtf8(XML_DECLARATION), assemble(undefined, result)))
 		this.expect(name, node)
+
+		return undefined
+	}
+
+	// A slide written from the model relates every part its diagrams name: a diagram whose data is a package part
+	// names its drawing by a relationship of the slide (dsp:dataModelExt@relId, MS-ODRAWXML §2.3.4), which the new part
+	// takes under that id (the frame's drawing is its target). A held data part is the diagram emitter's to write.
+	private async noteSharedDiagramParts(): Promise<void> {
+		let held = false
+
+		for (const node of this.deck.nodes.values())
+			walk(node.shapes, shape => {
+				const frame = shape.frame
+
+				if (
+					frame?.kind === "smartart" &&
+					(isRawPart(frame.data) || isRawPart(frame.layout) || isRawPart(frame.style) || isRawPart(frame.colors))
+				)
+					held = true
+			})
+
+		// Only a save that writes a diagram's parts asks.
+		if (!held) {
+			noteSharedDiagramParts(this.deck, new Set())
+
+			return
+		}
+
+		const seen = new Map<string, number>()
+
+		for (const slide of this.baseSlides)
+			for (const relationship of (await this.writer.opc.relationships(slide.part)).all)
+				if (
+					!relationship.external &&
+					relationship.partName !== undefined &&
+					DIAGRAM_KINDS.has(relationshipKind(relationship.type) ?? "")
+				)
+					seen.set(partKey(relationship.partName), (seen.get(partKey(relationship.partName)) ?? 0) + 1)
+
+		noteSharedDiagramParts(this.deck, new Set([...seen].filter(([, count]) => count > 1).map(([key]) => key)))
+	}
+
+	// The package diagram data the frames of the slides this save writes name (held data: the package part it was read
+	// from): its drawing relationship id for the emitter, and its document and picture targets, for data written into
+	// parts of its own (a slide that holds that id for another part, a part another diagram shares).
+	private async notePackageDiagramData(): Promise<void> {
+		const names = new Set<string>()
+		const changed = new Set([...this.input.changes.parts.keys()].map(part => partKey(part)))
+		const nodes = [...this.deck.nodes.values()]
+		let writes = false
+
+		// Only a save that writes a slide with a diagram reads them (every diagram's: a copy names its source's).
+		for (const node of nodes)
+			if (changed.has(partKey(node.part)) || this.finalParts.has(node.ref))
+				walk(node.shapes, shape => {
+					if (shape.frame?.kind === "smartart") writes = true
+				})
+
+		if (!writes) {
+			notePackageDiagramData(this.deck, new Map())
+
+			return
+		}
+
+		for (const node of nodes) {
+			walk(node.shapes, shape => {
+				const frame = shape.frame
+
+				if (frame?.kind !== "smartart") return
+
+				// Held data with pictures of its own names them through its package part's relationships.
+				const data = isRawPart(frame.data) ? diagramRelationshipOwner(this.deck, frame.data) : frame.data
+
+				if (data !== undefined) names.add(data)
+			})
+		}
+
+		const out = new Map<string, PackageDiagramData>()
+
+		// Parts a slide an undo restored holds (this save writes them back), as the session holds them.
+		for (const node of nodes) {
+			if (node.src?.format !== "pptx" || !isRawPart(node.src.part)) continue
+
+			for (const part of this.source.raw?.parts?.(node.src.part) ?? []) {
+				if (!names.has(part.name) || out.has(part.name.toLowerCase())) continue
+
+				let document: XmlDocument
+
+				try {
+					document = parseXml(part.bytes)
+				} catch {
+					continue
+				}
+
+				const relationships = part.rels === undefined ? new Relationships([]) : parseRelationships(part.rels, zipName(part.name))
+				const relId = diagramDrawingRelId(document)
+
+				if (relId !== undefined) notePackageDrawingRel(this.deck, part.name, relId)
+
+				out.set(part.name.toLowerCase(), {
+					document,
+					targets: new Map(
+						relationships.all.flatMap(relationship =>
+							relationship.external || relationship.partName === undefined
+								? []
+								: [[relationship.id, `/${relationship.partName}`] as const]
+						)
+					)
+				})
+			}
+		}
+
+		for (const name of names) {
+			const zip = zipName(name)
+
+			if (out.has(name.toLowerCase()) || !this.writer.opc.has(zip)) continue
+
+			const document = await this.writer.loadDocument(zip)
+			const relId = diagramDrawingRelId(document)
+			const targets = new Map<string, string>()
+
+			for (const relationship of (await this.writer.opc.relationships(zip)).all)
+				if (!relationship.external && relationship.partName !== undefined) targets.set(relationship.id, `/${relationship.partName}`)
+
+			if (relId !== undefined) notePackageDrawingRel(this.deck, name, relId)
+
+			out.set(name.toLowerCase(), { document, targets })
+		}
+
+		notePackageDiagramData(this.deck, out)
+	}
+
+	private namesAddedDiagramData(node: SlideNode): boolean {
+		let found = false
+
+		walk(node.shapes, shape => {
+			const frame = shape.frame
+
+			if (frame?.kind === "smartart" && !isRawPart(frame.data) && !this.writer.opc.has(zipName(frame.data))) found = true
+		})
+
+		return found
+	}
+
+	private async diagramDrawings(name: string, shapes: readonly ShapeNode[], depth: number): Promise<Refused | undefined> {
+		if (depth > MAX_DIAGRAM_DEPTH) return refused("tooDeep", "groups nested past the writer's depth")
+
+		for (const shape of shapes) {
+			if (shape.children !== undefined) {
+				const nested = await this.diagramDrawings(name, shape.children, depth + 1)
+
+				if (nested !== undefined) return nested
+			}
+
+			const frame = shape.frame
+
+			if (frame?.kind !== "smartart" || frame.drawing === undefined || isRawPart(frame.data) || isRawPart(frame.drawing)) continue
+
+			const data = zipName(frame.data)
+			const drawing = zipName(frame.drawing)
+
+			if (!this.writer.exists(data) || !this.writer.exists(drawing)) continue
+
+			const relId = diagramDrawingRelId(await this.writer.loadDocument(data))
+
+			if (relId === undefined) continue
+
+			const edit = this.writer.relationshipsOf(name)
+			const held = edit.all().find(relationship => relationship.id === relId)
+
+			if (held !== undefined) {
+				if (held.external || partKey(held.target) !== partKey(drawing))
+					return refused("failed", `Two diagrams of ${modelName(name)} name relationship ${relId} for different drawings`)
+
+				continue
+			}
+
+			if (edit.add(DIAGRAM_DRAWING_RELATIONSHIP, drawing, false, relId) !== relId)
+				return refused("failed", `The relationship ${relId} of ${modelName(name)} is taken`)
+		}
 
 		return undefined
 	}
@@ -790,7 +1047,7 @@ class Splice {
 		if (refusal !== undefined) return refusal
 
 		const pristine = readPristine(writer, this.index, this.baseRefs, node, sourcePart, document, relationships, epoch)
-		const context = this.context(document, modelName(name), pristine)
+		const context = this.context(document, modelName(name), pristine, relationships)
 		const r = partReader(document)
 		const overlay: Overlay = new Map()
 
@@ -860,9 +1117,12 @@ class Splice {
 		const owned = new Set<string>()
 		const seen = new Set<string>([slideKey])
 		let notesKey: string | undefined
+		// The held slide's notes when the slide has none now (an undo took them away): neither written nor related.
+		const notesGone = (part: RawPart, relationship: { readonly type: string }): boolean =>
+			notesNode === undefined && partKey(zipName(part.name)) === slideKey && relationshipKind(relationship.type) === "notesSlide"
 		const walk = (part: RawPart): void => {
 			for (const relationship of relsOf(part).all) {
-				if (relationship.external || relationship.partName === undefined) continue
+				if (relationship.external || relationship.partName === undefined || notesGone(part, relationship)) continue
 
 				const key = partKey(relationship.partName)
 				const target = byKey.get(key)
@@ -928,7 +1188,7 @@ class Splice {
 			for (const relationship of relationships) {
 				let target = relationship.external ? relationship.target : relationship.partName
 
-				if (target === undefined) continue
+				if (target === undefined || notesGone(part, relationship)) continue
 
 				if (!relationship.external) {
 					const mapped = names.get(partKey(target))
@@ -981,7 +1241,7 @@ class Splice {
 		return undefined
 	}
 
-	private context(document: XmlDocument, owner: string, pristine: Pristine): EmitContext {
+	private context(document: XmlDocument, owner: string, pristine: Pristine, relationships: Relationships): EmitContext {
 		return {
 			deck: this.deck,
 			document,
@@ -990,8 +1250,36 @@ class Splice {
 			pristine,
 			slidePart: this.slidePart,
 			dispatch,
-			...(this.source.raw === undefined ? {} : { rawDocument: this.source.raw.document.bind(this.source.raw) })
+			...(this.source.raw === undefined
+				? {}
+				: {
+						rawDocument: this.source.raw.document.bind(this.source.raw),
+						rawPristine: (name: string) => this.rawPristine(name, pristine.slide, relationships)
+					})
 		}
+	}
+
+	// A held shape document read as the reader reads it, once per save (its shapes are spliced against it, so what
+	// still reads as it was is copied as its bytes); undefined when it is not held or does not read.
+	private rawPristine(name: string, node: SlideNode, relationships: Relationships): Pristine | undefined {
+		if (this.rawPristines.has(name)) return this.rawPristines.get(name)
+
+		const document = this.source.raw?.document(name)
+		let pristine: Pristine | undefined
+
+		try {
+			pristine =
+				document === undefined
+					? undefined
+					: readPristine(this.writer, this.index, this.baseRefs, node, name, document, relationships)
+		} catch (error) {
+			// A held element that is no slide tree (no reader's view of it): written from the model over it.
+			if (!(error instanceof PresentationError) && !(error instanceof SlidePartError)) throw error
+		}
+
+		this.rawPristines.set(name, pristine)
+
+		return pristine
 	}
 
 	private async retargetLayout(name: string, layoutPart: string): Promise<void> {
@@ -1043,7 +1331,7 @@ class Splice {
 		if (refusal !== undefined) return refusal
 
 		const pristine = readPristine(writer, this.index, this.baseRefs, node, modelName(name), document, relationships)
-		const context = this.context(document, modelName(name), pristine)
+		const context = this.context(document, modelName(name), pristine, relationships)
 		const r = partReader(document)
 		const root = document.documentElement()
 		const tree = r.path(root, G.P, "cSld", "spTree")
@@ -1165,6 +1453,8 @@ class Splice {
 
 		const editor = writer.editor(main)
 		const rIds = new Map<SlideRef, string>()
+
+		this.writtenIds = ids
 
 		for (const ref of deck.slides) {
 			const part = this.finalParts.get(ref) ?? ""
@@ -1690,8 +1980,17 @@ export async function spliceSnapshot(input: PptxSaveInput): Promise<SpliceSnapsh
 
 	const writer = new PackageWriter(input.source.package, await input.source.package.contentTypes())
 
+	writer.issue(input.deck)
+
+	writer.keepParts(input.keep ?? [])
+	writer.holdParts(heldDeckParts(input.deck))
+
 	try {
-		return await new Splice(input, writer).run()
+		const snapshot = await new Splice(input, writer).run()
+
+		noteDeckReleased(input.deck, [...writer.releasedParts()])
+
+		return snapshot
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
 

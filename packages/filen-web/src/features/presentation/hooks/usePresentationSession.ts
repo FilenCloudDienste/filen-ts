@@ -20,7 +20,13 @@ import {
 	type Section,
 	type SlideRef
 } from "@filen/office/core/presentation"
-import type { CommandResult, PresentationLayoutInfo, PresentationSessionApi, SaveResult } from "@filen/office/dom/presentation"
+import {
+	PresentationCallError,
+	type CommandResult,
+	type PresentationLayoutInfo,
+	type PresentationSessionApi,
+	type SaveResult
+} from "@filen/office/dom/presentation"
 import type { PresentationDocument, PresentationStore, ShowFrom } from "@filen/office/react/presentation"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { presentationSaveEdits, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
@@ -154,7 +160,19 @@ const REFUSAL_KEYS: Partial<Record<PresentationRefusal, PreviewKey>> = {
 	tooLarge: "previewPptxEditorRefusedTooLarge",
 	tooDeep: "previewPptxEditorRefusedTooLarge",
 	stale: "previewPptxEditorRefusedStale",
-	notFound: "previewPptxEditorRefusedStale"
+	notFound: "previewPptxEditorRefusedStale",
+	malformed: "previewPptxEditorRefusedMalformed"
+}
+
+// A command the session could not answer: the reason a worker call error carries (a session closed meanwhile), else
+// "failed".
+export function commandFailure(error: unknown): CommandResult {
+	return { ok: false, refusal: error instanceof PresentationCallError ? error.reason : "failed" }
+}
+
+// Whether a refusal is told: not one a closed session gave (the file closed meanwhile; nothing the user did was refused).
+export function refusalToTell(refusal: PresentationRefusal): boolean {
+	return refusal !== "closed"
 }
 
 export function refusalKey(refusal: PresentationRefusal): PreviewKey {
@@ -358,11 +376,11 @@ export function usePresentationSession({
 			(error: unknown): CommandResult => {
 				log.warn("presentation", "a command failed", { error })
 
-				return { ok: false, refusal: "failed" }
+				return commandFailure(error)
 			}
 		)
 
-		if (!result.ok) {
+		if (!result.ok && refusalToTell(result.refusal)) {
 			toast.error(t(refusalKey(result.refusal)))
 		}
 

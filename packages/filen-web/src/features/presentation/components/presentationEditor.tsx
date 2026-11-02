@@ -46,8 +46,8 @@ import { LegacyPresentationBar, type LegacySaveCopy } from "@/features/presentat
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
 import { SmartArtPrompts, SmartArtTextPane } from "@/features/presentation/components/smartartTextPane"
 import { AnimationPane, AnimationPreview } from "@/features/presentation/components/animationPane"
+import { PresentationCommentsPane } from "@/features/presentation/components/commentsPane"
 import { PresentationFileMenu } from "@/features/presentation/components/presentationFileMenu"
-import { DesignDialogsHost } from "@/features/presentation/components/design/designDialogsHost"
 import { usePresentationFind } from "@/features/presentation/components/presentationFind"
 import { PresentationMediaFrames } from "@/features/presentation/components/mediaFrame"
 import { PresentationShapeLayer } from "@/features/presentation/components/ribbon/arrange"
@@ -56,6 +56,7 @@ import { usePresentationPictureDrop } from "@/features/presentation/components/r
 import { PresentationTableRange, tableCellAt } from "@/features/presentation/components/ribbon/table"
 import { presentationTextLabels } from "@/features/presentation/components/ribbon/homeText.logic"
 import { TextLinkHost } from "@/features/presentation/components/ribbon/homeTextControls"
+import { RibbonDialogsHost } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import { PresentationSlideRail } from "@/features/presentation/components/slideRail"
 import {
 	presentationTabGroups,
@@ -74,14 +75,16 @@ import {
 	type PresentationEditor as Editor,
 	type PresentationEditorScope
 } from "@/features/presentation/hooks/usePresentationSession"
-import { useDeckPresentation } from "@/features/presentation/hooks/useDeckPresentation"
+import { useDeckPresentation, type DeckKeyEvent } from "@/features/presentation/hooks/useDeckPresentation"
 import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
-import { dialogLayerOf } from "@/lib/keymap/dialogGuard"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { useOverrides } from "@/lib/keymap/registry"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import type { PreviewKey } from "@/lib/i18n"
+import { PresentationMotionPaths } from "@/features/presentation/components/ribbon/motionPaths"
 
 // The presentation editor: the ribbon (File, then the tabs whose groups the deck offers: in a deck that can only be
 // viewed that is the View tab and the read-only groups of others), the slide list with its edit commands (selection,
@@ -264,12 +267,33 @@ function PresentationRibbon({
 					editable={editable}
 				/>
 			)}
+			{/* The dialogs the ribbon's commands open, outliving the overflow menu they may run from. */}
+			{editor === undefined ? null : <RibbonDialogsHost editor={editor} />}
 		</>
 	)
 }
 
+// A key the editor takes: React's from its root, or the page's for one pressed elsewhere in its layer.
+type EditorKeyEvent = DeckKeyEvent & { readonly target: EventTarget | null; readonly defaultPrevented: boolean }
+
+// F6 and Shift+F6 move between the ribbon and the slide, as PowerPoint's panes.
+function onPaneKey(event: EditorKeyEvent, root: Element, focusSlide: () => void): boolean {
+	if (event.key !== "F6" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return false
+
+	const ribbon = root.querySelector("[data-office-ribbon]")
+
+	if (ribbon === null) return false
+
+	event.preventDefault()
+
+	if (event.target instanceof Node && ribbon.contains(event.target)) focusSlide()
+	else ribbonLanding(ribbon)?.focus()
+
+	return true
+}
+
 // The keys the editor takes wherever it has focus (outside a text being typed in); the rail's own take the selection.
-function onEditorKey(event: KeyboardEvent<HTMLElement>, editor: Editor, overrides: Readonly<Record<string, string>>): void {
+function onEditorKey(event: EditorKeyEvent, editor: Editor, overrides: Readonly<Record<string, string>>): void {
 	if (event.defaultPrevented || isTextField(event.target)) return
 
 	switch (presentationEditorKey(event, overrides)) {
@@ -480,16 +504,9 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 		replace: boolean
 	): void => {
 		const root = rootRef.current
-		const target = keyboardEvent.target instanceof Element ? keyboardEvent.target : null
-
-		// The editor's own layer: the preview overlay is itself a dialog, and a dialog over the editor portals out of it.
-		if (
-			root === null ||
-			keyboardEvent.defaultPrevented ||
-			target === null ||
-			!root.contains(target) ||
-			dialogLayerOf(target) !== dialogLayerOf(root)
-		) {
+		// The editor's own layer (keyForEditor): the preview overlay is itself a dialog, and a dialog over the editor portals
+		// out of it.
+		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
 			return
 		}
 
@@ -511,6 +528,17 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 		},
 		IN_EDITORS
 	)
+	const focusCanvas = (): void => {
+		canvasRef.current?.focus()
+	}
+
+	// The same keys pressed elsewhere in the editor's layer (focus left on the preview overlay itself after a click, as
+	// Safari and macOS Firefox do): the show's, the panes' and the editor's shortcuts. Paging stays the slide's own.
+	useEditorLayerKeys(rootRef, (event, root) => {
+		if (show.onKey(event) || onPaneKey(event, root, focusCanvas)) return
+
+		onEditorKey(event, editor, overrides)
+	})
 	const scope: PresentationEditorScope = {
 		editor,
 		view: {
@@ -583,7 +611,14 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				focus={find.focus}
 				onClosed={() => {
 					setFind({ open: false, replace: false, focus: 0 })
-					canvasRef.current?.focus({ preventScroll: true })
+
+					// Editing a body (the notes or a slide's text): back into it, as PowerPoint does; else the slide.
+					const body =
+						text.active === undefined
+							? null
+							: (rootRef.current?.querySelector<HTMLElement>("[data-fo-text-editor] [contenteditable]") ?? null)
+
+					;(body ?? canvasRef.current)?.focus({ preventScroll: true })
 				}}
 				replaceOpen={find.replace}
 			/>
@@ -606,19 +641,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					// The show's keys first: while it runs the editor takes none (no edit reaches the deck under it).
 					if (show.onKey(event)) return
 
-					// F6 and Shift+F6 move between the ribbon and the slide, as PowerPoint's panes.
-					if (event.key === "F6" && !event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.altKey) {
-						const ribbon = event.currentTarget.querySelector("[data-office-ribbon]")
-
-						if (ribbon !== null) {
-							event.preventDefault()
-
-							if (event.target instanceof Node && ribbon.contains(event.target)) canvasRef.current?.focus()
-							else ribbonLanding(ribbon)?.focus()
-						}
-
-						return
-					}
+					if (onPaneKey(event, event.currentTarget, focusCanvas)) return
 
 					onEditorKey(event, editor, overrides)
 					onPageKey(event, show.showing, step => {
@@ -735,6 +758,10 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 													editor={slideEditor}
 													scale={scale}
 												/>
+												<PresentationMotionPaths
+													editor={slideEditor}
+													scale={scale}
+												/>
 												<div
 													ref={setMediaControls}
 													className="pointer-events-none absolute inset-0"
@@ -775,11 +802,27 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 							<PresentationNotesPane
 								text={render?.notesText ?? ""}
 								phone={phone}
+								{...(editor.editable && slideEditor !== undefined
+									? {
+											editor: slideEditor,
+											otherEditing: editingText !== undefined,
+											onEditStart: () => {
+												setEditingText(undefined)
+											}
+										}
+									: {})}
 							/>
 						) : null}
 					</div>
 					{show.showing ? null : (
 						<AnimationPane
+							editor={slideEditor}
+							editable={editor.editable}
+							phone={phone}
+						/>
+					)}
+					{show.showing ? null : (
+						<PresentationCommentsPane
 							editor={slideEditor}
 							editable={editor.editable}
 							phone={phone}
@@ -811,7 +854,6 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					}}
 				/>
 			</div>
-			<DesignDialogsHost />
 		</PresentationEditorContext>
 	)
 }

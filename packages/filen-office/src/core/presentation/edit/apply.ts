@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import type { Deck, Refused, SlideRef, SourceRef } from "../model"
 import type { BatchOp, DeckOp, DeckOpFamily, FamilyOp, OpOf } from "./ops"
 import { applyChart } from "./apply/chart"
@@ -23,13 +24,16 @@ import { applyTransition } from "./apply/transition"
 // from the touches of the ops between them.
 
 // How much of a node an op dirtied: its xfrm only, one property group, its text, one part of a slide (its background,
-// p:timing, p:transition, header/footer flags, clrMapOvr, or its own attributes: show, hidden, name, showMasterSp),
-// or the whole node. On a slide, `node` means only add, duplicate, restore and setLayout: a whole-p:sld rewrite.
+// p:timing, p:transition, header/footer flags, clrMapOvr, its own attributes: show, hidden, name, showMasterSp, its
+// notes slide, its comments), or the whole node. On a slide, `node` means only add, duplicate, restore and setLayout: a whole-p:sld rewrite.
 export type Dirt =
 	| { readonly kind: "xfrm" }
 	| { readonly kind: "props"; readonly group: "geometry" | "fill" | "ln" | "effects" | "bodyPr" | "style" }
 	| { readonly kind: "text" }
-	| { readonly kind: "slidePart"; readonly part: "background" | "timing" | "transition" | "hf" | "clrMapOvr" | "attributes" }
+	| {
+			readonly kind: "slidePart"
+			readonly part: "background" | "timing" | "transition" | "hf" | "clrMapOvr" | "attributes" | "notes" | "comments"
+	  }
 	| { readonly kind: "node" }
 
 // What an op touches: a shape of a slide, a slide node, a presentation-level part, or a part added or removed.
@@ -156,7 +160,7 @@ function applyBatch(deck: Deck, op: BatchOp, context: ApplyContext): ApplyResult
 	for (let index = result.inverses.length - 1; index >= 0; index--) {
 		const inverse = result.inverses[index] as Inverse
 
-		ops.push(...inverse.ops)
+		appendAll(ops, inverse.ops)
 		bytes += inverse.bytes
 	}
 

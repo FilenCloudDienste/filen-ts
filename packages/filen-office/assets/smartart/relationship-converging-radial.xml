@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutConvergingRadial
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:converging-radial">
+	<dgm:title val="Converging radial"/>
+	<dgm:desc val="Each top-level item is a circle in the middle, its sub-items are blocks around it, and an arrow from every block points in at the circle."/>
+	<dgm:catLst>
+		<dgm:cat type="relationship" pri="300"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="4"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="60" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="61" srcId="1" destId="2" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="62" srcId="1" destId="3" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="63" srcId="1" destId="4" srcOrd="2" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="hubs">
+		<dgm:varLst>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:choose name="hubOrder">
+			<dgm:if name="hubsForward" func="var" arg="dir" op="equ" val="norm">
+				<dgm:alg type="snake">
+					<dgm:param type="grDir" val="tL"/>
+					<dgm:param type="flowDir" val="row"/>
+					<dgm:param type="contDir" val="sameDir"/>
+					<dgm:param type="off" val="ctr"/>
+				</dgm:alg>
+			</dgm:if>
+			<dgm:else name="hubsBackward">
+				<dgm:alg type="snake">
+					<dgm:param type="grDir" val="tR"/>
+					<dgm:param type="flowDir" val="row"/>
+					<dgm:param type="contDir" val="sameDir"/>
+					<dgm:param type="off" val="ctr"/>
+				</dgm:alg>
+			</dgm:else>
+		</dgm:choose>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="h" for="ch" forName="hub" refType="h"/>
+			<dgm:constr type="w" for="ch" forName="hub" refType="h" refFor="ch" refForName="hub"/>
+			<dgm:constr type="w" for="ch" forName="hubGap" refType="w" refFor="ch" refForName="hub" fact="0.06"/>
+			<dgm:constr type="sp" refType="h" fact="0.04"/>
+			<dgm:constr type="primFontSz" for="des" forName="core" op="equ" val="60"/>
+			<dgm:constr type="primFontSz" for="des" forName="source" op="equ" val="60"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:forEach name="ideas" axis="ch" ptType="node">
+			<dgm:layoutNode name="hub">
+				<dgm:alg type="cycle">
+					<dgm:param type="stAng" val="0"/>
+					<dgm:param type="spanAng" val="360"/>
+					<dgm:param type="ctrShpMap" val="fNode"/>
+				</dgm:alg>
+				<dgm:shape><dgm:adjLst/></dgm:shape>
+				<dgm:presOf/>
+				<dgm:constrLst>
+					<dgm:constr type="w" for="ch" forName="core" refType="h" fact="0.4"/>
+					<dgm:constr type="h" for="ch" forName="core" refType="w" refFor="ch" refForName="core"/>
+					<dgm:constr type="w" for="ch" forName="source" refType="w" refFor="ch" refForName="core" fact="0.7"/>
+					<dgm:constr type="h" for="ch" forName="source" refType="w" refFor="ch" refForName="core" fact="0.42"/>
+					<dgm:constr type="sp" refType="w" refFor="ch" refForName="core" fact="0.45"/>
+					<dgm:constr type="h" for="ch" forName="arrow" refType="w" refFor="ch" refForName="core" fact="0.14"/>
+					<dgm:constr type="begPad" for="ch" forName="arrow" refType="w" refFor="ch" refForName="core" fact="0.05"/>
+					<dgm:constr type="endPad" for="ch" forName="arrow" refType="w" refFor="ch" refForName="core" fact="0.05"/>
+				</dgm:constrLst>
+				<dgm:ruleLst/>
+				<dgm:layoutNode name="core" styleLbl="node1">
+					<dgm:alg type="tx"/>
+					<dgm:shape type="ellipse"><dgm:adjLst/></dgm:shape>
+					<dgm:presOf axis="self"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="w" fact="0.15"/>
+						<dgm:constr type="rMarg" refType="w" fact="0.15"/>
+						<dgm:constr type="tMarg" refType="h" fact="0.15"/>
+						<dgm:constr type="bMarg" refType="h" fact="0.15"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+				<dgm:forEach name="contributions" axis="ch" ptType="node">
+					<dgm:layoutNode name="source" styleLbl="alignAcc1">
+						<dgm:varLst>
+							<dgm:bulletEnabled val="1"/>
+						</dgm:varLst>
+						<dgm:alg type="tx"/>
+						<dgm:shape type="roundRect">
+							<dgm:adjLst>
+								<dgm:adj idx="1" val="0.12"/>
+							</dgm:adjLst>
+						</dgm:shape>
+						<dgm:presOf axis="desOrSelf" ptType="node"/>
+						<dgm:constrLst>
+							<dgm:constr type="lMarg" refType="primFontSz" fact="0.2"/>
+							<dgm:constr type="rMarg" refType="primFontSz" fact="0.2"/>
+							<dgm:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+							<dgm:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+						</dgm:constrLst>
+						<dgm:ruleLst>
+							<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+						</dgm:ruleLst>
+					</dgm:layoutNode>
+					<dgm:forEach name="inward" axis="precedSib" ptType="parTrans" st="-1" cnt="1">
+						<dgm:layoutNode name="arrow" styleLbl="sibTrans2D1">
+							<dgm:alg type="conn">
+								<dgm:param type="dim" val="2D"/>
+								<dgm:param type="begSty" val="arr"/>
+								<dgm:param type="endSty" val="noArr"/>
+							</dgm:alg>
+							<dgm:shape type="conn"><dgm:adjLst/></dgm:shape>
+							<dgm:presOf axis="self"/>
+							<dgm:constrLst/>
+							<dgm:ruleLst/>
+						</dgm:layoutNode>
+					</dgm:forEach>
+				</dgm:forEach>
+			</dgm:layoutNode>
+			<dgm:forEach name="hubGaps" axis="followSib" ptType="sibTrans" cnt="1">
+				<dgm:layoutNode name="hubGap">
+					<dgm:alg type="sp"/>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+				</dgm:layoutNode>
+			</dgm:forEach>
+		</dgm:forEach>
+	</dgm:layoutNode>
+</dgm:layoutDef>

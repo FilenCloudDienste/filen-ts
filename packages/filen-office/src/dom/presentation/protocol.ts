@@ -1,6 +1,7 @@
 import type { CompiledTimegraph } from "../../core/anim/model"
 import type { PresentationDesignInfo } from "../../core/presentation/edit/commands/design"
 import type { DeckOp, FileLike, InsertedMedia, SmartArtDefRef } from "../../core/presentation/edit/ops"
+import type { SlideReview } from "../../core/presentation/comments"
 import type { SmartArtInfo } from "../../core/smartart/edit"
 import type {
 	CustomShow,
@@ -202,6 +203,9 @@ export interface LayerPlan {
 	// Per shape of `shapes`, its text sub-ranges built on their own.
 	readonly ranges?: readonly (readonly { readonly target: "para" | "char"; readonly range: readonly [number, number] }[] | undefined)[]
 	readonly dpr: number
+	// Pack the layers into shared page bitmaps of at most this side (device px, 64 to MAX_CANVAS_SIDE) instead of one
+	// bitmap each: each layer then names its place in its page (ShowLayer.atlas).
+	readonly atlas?: number
 }
 
 // A layer bitmap cropped to its shape's bounds plus effect extents (slide px), transferred.
@@ -209,6 +213,9 @@ export interface ShowLayer {
 	readonly shape: number
 	readonly range?: { readonly target: "para" | "char"; readonly range: readonly [number, number] }
 	readonly bitmap: BitmapLike
+	// With LayerPlan.atlas: where its pixels are in `bitmap`, a page its other layers share (transferred once; closing
+	// it again is a no-op).
+	readonly atlas?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 	readonly x: number
 	readonly y: number
 	readonly width: number
@@ -259,6 +266,10 @@ export interface PresentationSessionApi {
 	command(op: DeckOp, open?: ShapeRef): Promise<CommandResult>
 	undo(open?: ShapeRef): Promise<CommandResult>
 	redo(open?: ShapeRef): Promise<CommandResult>
+	// Takes back the step whose command answered `revision`, while it is still the last thing done (saves aside): the
+	// deck and the history as they were before it, its discarded redo branch back, no redo step left. Refused "stale"
+	// otherwise (anything done, undone or redone since). The notes pane's notes started and left with nothing typed.
+	retract(revision: number): Promise<CommandResult>
 	// PRESENTATION_FIND_INTS per match.
 	find(query: string, options?: FindOptions): Promise<Int32Array>
 	media(part: string, port: PortLike): Promise<PortStreamMeta | MediaRefusal>
@@ -298,6 +309,9 @@ export interface PresentationSessionApi {
 	jobsPort(port: PortLike): Promise<void>
 	// Streams a fresh package of the session's state to `port`.
 	freshParts(target: "pptx" | "odp", port: PortLike): Promise<ConversionReport>
+	// A slide's notes body and comments for the review panes (core/presentation/comments.ts); `comments: false` (the
+	// notes pane): the slide's comments are neither read nor kept, and `comments` is empty.
+	review(slide: SlideRef, options?: { readonly comments?: boolean }): Promise<SlideReview>
 	// Drops the session's password and caches.
 	close(): void
 }
@@ -312,6 +326,7 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"command",
 	"undo",
 	"redo",
+	"retract",
 	"find",
 	"media",
 	"registerMedia",
@@ -324,7 +339,8 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"save",
 	"commitSaved",
 	"jobsPort",
-	"freshParts"
+	"freshParts",
+	"review"
 ]
 
 export type PresentationArgs<M extends PresentationMethod> = Parameters<PresentationSessionApi[M]>
@@ -442,6 +458,7 @@ function resultTransferables(result: PresentationResult, into: Set<unknown>): vo
 		case "command":
 		case "undo":
 		case "redo":
+		case "retract":
 			if (result.value.ok && result.value.seed !== undefined) {
 				presentationTransferables(result.value.seed.page, into)
 				presentationTransferables(result.value.seed.layout, into)

@@ -33,6 +33,8 @@ export const previewPptxEditor = {
 	previewPptxEditorViewOnlyLegacy: "It's in the PowerPoint 97–2003 format, which can only be viewed here.",
 	/** Toast — a change to the presentation could not be made */
 	previewPptxEditorRefused: "That change couldn't be made.",
+	/** Toast — a change was refused because it holds something the file cannot store (such as a control character in text) */
+	previewPptxEditorRefusedMalformed: "That change holds something the presentation can't store.",
 	/** Toast — a change was refused because the presentation can only be viewed */
 	previewPptxEditorRefusedViewOnly: "This presentation can only be viewed, so it can't be changed.",
 	/** Toast — a change was refused because what it changes is locked in the file */

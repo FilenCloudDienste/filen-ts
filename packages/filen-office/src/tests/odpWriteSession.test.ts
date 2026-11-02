@@ -143,13 +143,30 @@ describe("an ODP save refused on one page", () => {
 
 		if ("reason" in snapshot) throw new Error(snapshot.detail)
 
-		// The model changes after the snapshot: the written page no longer reads as the session holds it.
-		shapeNamed(middle, "Jump").name = "Elsewhere"
+		// The page as the snapshot holds it is not what was written (a writer that wrote another state).
+		shapeNamed(snapshot.expected.get(middle.ref)?.node as SlideNode, "Jump").name = "Elsewhere"
 
 		const outcome = (await writeOdpSnapshot(snapshot, memorySink())) as PptxSaveOutcome
 
 		expect(outcome).toMatchObject({ kind: "refused", reason: "proofFailed" })
 		expect(outcome.kind === "refused" ? outcome.detail : "").toContain(`(${middle.part})`)
+	})
+
+	it("an edit made after the snapshot is the next save's: the write is proved against the state the snapshot saw", async () => {
+		const opened = await openOdpDeck(odpDeck())
+		const middle = touched(slideAt(opened, 1))
+		const title = shapeNamed(middle, "Title2")
+
+		title.xfrm = { ...title.xfrm!, x: title.xfrm!.x + 12700 }
+
+		const snapshot = await odpSnapshot({ deck: opened.deck, source: { parts: opened.parts }, changes: changes(), revision: 1 })
+
+		if ("reason" in snapshot) throw new Error(snapshot.detail)
+
+		shapeNamed(middle, "Jump").name = "Elsewhere"
+		title.xfrm = { ...title.xfrm, x: title.xfrm.x + 12700 }
+
+		expect(await writeOdpSnapshot(snapshot, memorySink())).toMatchObject({ kind: "written" })
 	})
 
 	it("reverts only the steps of the page a refused save names, keeping an edit on another page", async () => {

@@ -1,3 +1,4 @@
+import { appendAll } from "../../../arrays"
 import type { EmitPiece, EmitRequest, EmitResult } from "../../../pptx/write/types"
 import {
 	refused,
@@ -28,6 +29,9 @@ import {
 	styleChanges,
 	type StyleChanges
 } from "../styles"
+import { odfCustomAttributes, odfPresetAttributes, odfPresetGeometry, presetDependsOnSize } from "../../../odf/presetShapes"
+import { parseLength } from "../../../odf/index"
+import { transformMatrix, xfrmOf } from "../../read/shapes"
 import { resourceFillChanges, resourceLineChanges } from "../resources"
 import { changedLengths } from "./box"
 import { odpScaledTextChanges } from "./design"
@@ -78,10 +82,10 @@ function apply(m: Affine, x: number, y: number): [number, number] {
 	return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]
 }
 
-// A group's mapping of its members' space (chOff/chExt) onto its own box, turned about the box's centre.
+// A group's mapping of its members' space (chOff/chExt) onto its own box, mirrored (flipH, flipV) and then turned about
+// the box's centre (ECMA-376 §20.1.7.6, the group's own transform after its child space).
 export function groupAffine(xfrm: Xfrm | undefined): Affine | Refused {
 	if (xfrm === undefined) return IDENTITY
-	if (xfrm.flipH || xfrm.flipV) return refused("unsupported", "a mirrored group")
 
 	const chX = xfrm.chX ?? xfrm.x
 	const chY = xfrm.chY ?? xfrm.y
@@ -89,15 +93,28 @@ export function groupAffine(xfrm: Xfrm | undefined): Affine | Refused {
 	const chCy = xfrm.chCy ?? xfrm.cy
 	const sx = chCx === 0 ? 1 : xfrm.cx / chCx
 	const sy = chCy === 0 ? 1 : xfrm.cy / chCy
-	const scale: Affine = { a: sx, b: 0, c: 0, d: sy, e: xfrm.x - chX * sx, f: xfrm.y - chY * sy }
+	const cx = xfrm.x + xfrm.cx / 2
+	const cy = xfrm.y + xfrm.cy / 2
+	let scale: Affine = { a: sx, b: 0, c: 0, d: sy, e: xfrm.x - chX * sx, f: xfrm.y - chY * sy }
+
+	if (xfrm.flipH || xfrm.flipV) {
+		const mirror: Affine = {
+			a: xfrm.flipH ? -1 : 1,
+			b: 0,
+			c: 0,
+			d: xfrm.flipV ? -1 : 1,
+			e: xfrm.flipH ? 2 * cx : 0,
+			f: xfrm.flipV ? 2 * cy : 0
+		}
+
+		scale = compose(mirror, scale)
+	}
 
 	if (xfrm.rot === 0) return scale
 
 	const radians = (xfrm.rot / 60_000) * (Math.PI / 180)
 	const cos = Math.cos(radians)
 	const sin = Math.sin(radians)
-	const cx = xfrm.x + xfrm.cx / 2
-	const cy = xfrm.y + xfrm.cy / 2
 	const turn: Affine = { a: cos, b: sin, c: -sin, d: cos, e: cx - cos * cx + sin * cy, f: cy - sin * cx - cos * cy }
 
 	return compose(turn, scale)
@@ -111,19 +128,52 @@ export function placed(xfrm: Xfrm, m: Affine): Xfrm {
 	const [x, y] = apply(m, xfrm.x + xfrm.cx / 2, xfrm.y + xfrm.cy / 2)
 	const sx = Math.hypot(m.a, m.b)
 	const sy = Math.hypot(m.c, m.d)
-	const turn = Math.round(((Math.atan2(m.b, m.a) * 180) / Math.PI) * 60_000)
 	const cx = Math.round(xfrm.cx * sx)
 	const cy = Math.round(xfrm.cy * sy)
+	const turnOf = (radians: number): number => Math.round(((radians * 180) / Math.PI) * 60_000)
+	const angle = (rot: number): number => ((rot % 21_600_000) + 21_600_000) % 21_600_000
+	const box = { x: Math.round(x - cx / 2), y: Math.round(y - cy / 2), cx, cy }
 
-	return {
-		x: Math.round(x - cx / 2),
-		y: Math.round(y - cy / 2),
-		cx,
-		cy,
-		rot: (((xfrm.rot + turn) % 21_600_000) + 21_600_000) % 21_600_000,
-		flipH: xfrm.flipH,
-		flipV: xfrm.flipV
-	}
+	if (m.a * m.d - m.b * m.c >= 0)
+		return { ...box, rot: angle(xfrm.rot + turnOf(Math.atan2(m.b, m.a))), flipH: xfrm.flipH, flipV: xfrm.flipV }
+
+	// A mirroring mapping (a mirrored group's): a turn after one mirror, the box's own turn then running the other way.
+	// Of the two ways to say it (a vertical mirror turned by atan2(b, a), a horizontal one by atan2(-b, -a)), the one
+	// with the smaller turn, as LibreOffice writes a mirrored group's members.
+	const vertical = Math.atan2(m.b, m.a)
+	const horizontal = Math.atan2(-m.b, -m.a)
+
+	return Math.abs(horizontal) < Math.abs(vertical) - 1e-9
+		? { ...box, rot: angle(turnOf(horizontal) - xfrm.rot), flipH: !xfrm.flipH, flipV: xfrm.flipV }
+		: { ...box, rot: angle(turnOf(vertical) - xfrm.rot), flipH: xfrm.flipH, flipV: !xfrm.flipV }
+}
+
+// The box an ODF element holds for a shape's flips, under DrawingML's meaning of them (a horizontal flip leaves text
+// as it reads, a vertical one turns it half a turn): a rectangle (a text frame, or any outline that is one) mirrored is
+// itself, so it holds the turn alone; a frame of a table, chart, medium or object holds no flip (PowerPoint draws none
+// on a graphic frame); a picture holds a horizontal flip as style:mirror, any other outline its flips as draw:mirror-*.
+export function canonicalBox(shape: ShapeNode, box: Xfrm): Xfrm {
+	if (!box.flipH && !box.flipV) return box
+	// LibreOffice 7.5 mirrors a picture only horizontally (it reads style:mirror="vertical" as none): a vertical flip is
+	// a horizontal one half a turn round, as its pptx import writes it.
+	if (shape.kind === "pic") return box.flipV ? { ...box, rot: (box.rot + 10_800_000) % 21_600_000, flipH: !box.flipH, flipV: false } : box
+	if (shape.kind === "grpSp" || shape.kind === "cxnSp") return box
+	if (shape.kind === "frame") return { ...box, flipH: false, flipV: false }
+
+	const geometry = shape.props?.geometry
+
+	// A rectangle, rounded rectangle or ellipse mirrored is itself.
+	if (geometry !== undefined && !(geometry.kind === "preset" && SYMMETRIC.has(geometry.preset))) return box
+
+	return { ...box, rot: box.flipV ? (box.rot + 10_800_000) % 21_600_000 : box.rot, flipH: false, flipV: false }
+}
+
+const SYMMETRIC: ReadonlySet<string> = new Set(["rect", "roundRect", "ellipse"])
+
+// A picture's horizontal flip (canonicalBox turns a vertical one into it) as its graphic style's style:mirror (ODF 1.3
+// Part 3 §20.355); undefined for none.
+export function pictureMirror(box: Xfrm): string | undefined {
+	return box.flipH ? "horizontal" : undefined
 }
 
 // A line's ends where `m` puts them (DrawingML's box with its flips and turn, §20.1.7.6).
@@ -242,32 +292,6 @@ const CLASS_OF: Partial<Record<PlaceholderType, string>> = {
 
 const STYLE_SUFFIX: Readonly<Record<string, string>> = { title: "title", subtitle: "subtitle", outline: "outline1", notes: "notes" }
 
-// DrawingML presets the reader takes from a custom shape's draw:type (read/shapes.ts PRESETS), by preset.
-const TYPES: Readonly<Record<string, string>> = {
-	rect: "rectangle",
-	ellipse: "ellipse",
-	roundRect: "round-rectangle",
-	triangle: "isosceles-triangle",
-	rtTriangle: "right-triangle",
-	parallelogram: "parallelogram",
-	trapezoid: "trapezoid",
-	diamond: "diamond",
-	hexagon: "hexagon",
-	octagon: "octagon",
-	pentagon: "pentagon",
-	star5: "star5",
-	rightArrow: "right-arrow",
-	leftArrow: "left-arrow",
-	upArrow: "up-arrow",
-	downArrow: "down-arrow",
-	cloud: "cloud",
-	heart: "heart",
-	smileyFace: "smiley",
-	donut: "ring",
-	plus: "cross",
-	frame: "frame"
-}
-
 // Elements whose box is svg:x/y/width/height (with draw:transform).
 const BOXED: ReadonlySet<string> = new Set([
 	"draw:frame",
@@ -369,12 +393,12 @@ export class OdpShapeWriter {
 			// Held markup carries the declarations in scope where it was on its start tag (to be read on its own): those in
 			// scope here again come off, so the element is written as it was.
 			if (first !== undefined && this.fragment !== undefined && typeof first !== "object") {
-				const scope = rootScope(this.fragment.document)
+				const scope = this.landingScope()
 				const kept = inScope(encodeUtf8(first), scope)
 
 				out[0] = decodeUtf8(kept)
 			} else if (first instanceof Uint8Array && this.fragment !== undefined) {
-				out[0] = inScope(first, rootScope(this.fragment.document))
+				out[0] = inScope(first, this.landingScope())
 			}
 
 			return out
@@ -455,26 +479,38 @@ export class OdpShapeWriter {
 			changes.push({ name: "xml:id", value: target }, { name: "draw:id", value: target })
 
 		if (aspects.xfrm === true && name !== "draw:g") {
-			const box = this.boxChanges(shape, name, m, fragment.attributes(node))
+			const box = this.boxChanges(shape, name, m, fragment.attributes(node), aspects.pristine?.xfrm)
 
 			if (isRefused(box)) return box
 
-			changes.push(...changedLengths(box, fragment.attributes(node)))
+			appendAll(changes, changedLengths(box, fragment.attributes(node)))
 		}
 
-		const style = this.styleChange(shape, node, aspects)
+		// The box the element holds: the shape's own placed by the groups it moved with (a mirrored group mirrors it).
+		const box = shape.xfrm === undefined ? undefined : placed(shape.xfrm, m)
+		// A picture holds its flips as its graphic style's style:mirror (ODF 1.3 Part 3 §20.355), as canonicalBox says.
+		const before = aspects.pristine?.xfrm === undefined ? undefined : canonicalBox(shape, aspects.pristine.xfrm)
+		const held = box === undefined ? undefined : canonicalBox(shape, box)
+		const mirror =
+			shape.kind === "pic" && aspects.xfrm === true && held !== undefined && held.flipH !== (before?.flipH ?? false)
+				? this.mirrorSpelling(shape, "style:mirror", this.ownMirror(node), pictureMirror(held), held.flipH)
+				: undefined
+		const style = this.styleChange(shape, node, aspects, mirror)
 
 		if (isRefused(style)) return style
 		if (style !== undefined) changes.push(style)
 
-		if (aspects.geometry === true) {
-			const geometry = this.geometryChange(shape, node, name)
+		const outline = aspects.geometry === true ? "rewrite" : this.boxOutline(shape, node, name, aspects, box)
+		let mirrors: AttributeChange[] | undefined
+
+		if (outline === "rewrite") {
+			const geometry = this.geometryChange(shape, name, box)
 
 			if (isRefused(geometry)) return geometry
 
-			changes.push(...geometry.attributes)
+			appendAll(changes, geometry.attributes)
 			if (geometry.enhanced !== undefined) replaced.set("draw:enhanced-geometry", geometry.enhanced)
-		}
+		} else mirrors = outline
 
 		if (aspects.text === true) {
 			const text = this.text(shape)
@@ -483,8 +519,14 @@ export class OdpShapeWriter {
 
 			textMarkup = text
 
-			if (fragment.attributes(node).get("presentation:placeholder") === "true" && hasText(shape))
-				changes.push({ name: "presentation:placeholder", value: null })
+			// A presentation object is a placeholder exactly while it holds no text (LibreOffice writes the flag on an empty
+			// one), so text taken back out of it makes it one again.
+			const own = fragment.attributes(node)
+			const flagged = own.get("presentation:placeholder") === "true"
+
+			if (flagged && hasText(shape)) changes.push({ name: "presentation:placeholder", value: null })
+			else if (!flagged && own.has("presentation:class") && !hasText(shape))
+				changes.push({ name: "presentation:placeholder", value: "true" })
 		}
 
 		if (aspects.alt === true) {
@@ -519,13 +561,13 @@ export class OdpShapeWriter {
 			pieces.push(this.startTag(outer, href ?? [], false))
 		}
 
-		pieces.push(this.startTag(node, changes, false))
-
-		const children = this.children(shape, node, name, m, replaced, textMarkup)
+		const children = this.children(shape, node, name, m, replaced, textMarkup, mirrors)
 
 		if (isRefused(children)) return children
 
-		pieces.push(...children, `</${document.name(node)}>`)
+		// An element the source closes on its own start tag, still empty, is written so again.
+		if (children.length === 0 && document.isSelfClosing(node)) pieces.push(this.startTag(node, changes, true))
+		else pieces.push(this.startTag(node, changes, false), ...children, `</${document.name(node)}>`)
 
 		if (wrapped && wrapper !== null) pieces.push(`</${document.name(outer)}>`)
 
@@ -554,8 +596,28 @@ export class OdpShapeWriter {
 		}
 
 		let out = `<${document.name(node)}`
+		// A box attribute the element lacks goes where LibreOffice writes it, before the first of the box's later ones the
+		// element has (svg:x and svg:y back before svg:width, as they were before a turn took them out).
+		const present = new Set(document.attributes(node).map(attribute => attribute.name))
+		const placeBefore = (name: string): void => {
+			const at = BOX_ORDER.indexOf(name)
+
+			if (at < 0) return
+
+			for (const qualified of BOX_ORDER.slice(0, at)) {
+				const value = wanted.get(qualified)
+
+				if (present.has(qualified) || value === undefined) continue
+
+				wanted.delete(qualified)
+
+				if (value !== null) out += ` ${qualified}="${escapeAttribute(value)}"`
+			}
+		}
 
 		for (const attribute of document.attributes(node)) {
+			placeBefore(attribute.name)
+
 			if (wanted.has(attribute.name)) {
 				const value = wanted.get(attribute.name)
 
@@ -584,7 +646,8 @@ export class OdpShapeWriter {
 		name: string,
 		m: Affine,
 		replaced: Map<string, string | null>,
-		text: string | undefined
+		text: string | undefined,
+		mirrors?: readonly AttributeChange[]
 	): EmitPiece[] | Refused {
 		const fragment = this.fragment as Fragment
 		const document = fragment.document
@@ -621,7 +684,7 @@ export class OdpShapeWriter {
 				const childName = document.kind(child) === NodeKind.Element ? fragment.name(child) : ""
 
 				if (isShapeElement(childName)) {
-					if (!membersPlaced) out.push(...members)
+					if (!membersPlaced) appendAll(out, members)
 					membersPlaced = true
 
 					continue
@@ -632,7 +695,7 @@ export class OdpShapeWriter {
 				if (kept !== undefined) out.push(kept)
 			}
 
-			if (!membersPlaced) out.push(...members)
+			if (!membersPlaced) appendAll(out, members)
 
 			return out
 		}
@@ -642,7 +705,11 @@ export class OdpShapeWriter {
 			const childName = kind === NodeKind.Element ? fragment.name(child) : ""
 
 			if (frame && childName === "draw:text-box" && text !== undefined && !textPlaced) {
-				out.push(this.startTag(child, [], false), text, `</${document.name(child)}>`)
+				out.push(
+					...(text === ""
+						? [this.startTag(child, [], true)]
+						: [this.startTag(child, [], false), text, `</${document.name(child)}>`])
+				)
 				textPlaced = true
 
 				continue
@@ -665,6 +732,21 @@ export class OdpShapeWriter {
 				insertMissing(["office:event-listeners"])
 			if (frame && (childName === "draw:contour-polygon" || childName === "draw:contour-path"))
 				insertMissing(["svg:title", "svg:desc"])
+
+			// A shape the box turned over keeps its outline (type, modifiers, formulas and handles), its mirrors changed.
+			if (childName === "draw:enhanced-geometry" && mirrors !== undefined && mirrors.length > 0 && !replaced.has(childName)) {
+				const empty = document.firstChild(child) < 0
+
+				out.push(this.startTag(child, mirrors, empty))
+
+				if (!empty) {
+					for (let inner = document.firstChild(child); inner >= 0; inner = document.nextSibling(inner)) out.push({ hole: inner })
+
+					out.push(`</${document.name(child)}>`)
+				}
+
+				continue
+			}
 
 			const kept = this.keep(child, childName, replaced, done)
 
@@ -719,7 +801,7 @@ export class OdpShapeWriter {
 
 			if (isRefused(pieces)) return pieces
 
-			out.push(...pieces)
+			appendAll(out, pieces)
 		}
 
 		return out
@@ -727,7 +809,13 @@ export class OdpShapeWriter {
 
 	// --- Box. ---
 
-	private boxChanges(shape: ShapeNode, name: string, m: Affine, attributes: ReadonlyMap<string, string>): AttributeChange[] | Refused {
+	private boxChanges(
+		shape: ShapeNode,
+		name: string,
+		m: Affine,
+		attributes: ReadonlyMap<string, string>,
+		pristine?: Xfrm
+	): AttributeChange[] | Refused {
 		const xfrm = shape.xfrm
 
 		if (xfrm === undefined) return []
@@ -748,25 +836,81 @@ export class OdpShapeWriter {
 
 		if (!BOXED.has(name)) return refused("unsupported", `the box of ${name}`)
 
-		const box = placed(xfrm, m)
+		// An element without a mirror of its own holds its box as DrawingML means the flips (canonicalBox); a polygon,
+		// polyline or path that stays mirrored holds the mirror in its draw:transform.
+		const box = name === "draw:custom-shape" ? placed(xfrm, m) : canonicalBox(shape, placed(xfrm, m))
 
-		if ((box.flipH || box.flipV) && name !== "draw:custom-shape") return refused("unsupported", `a mirrored ${name}`)
+		if ((box.flipH || box.flipV) && name !== "draw:custom-shape" && shape.kind !== "pic") {
+			if (!MIRRORED_BY_TRANSFORM.has(name)) return refused("unsupported", `a mirrored ${name}`)
 
-		const out = boxAttributes(box)
+			const out = mirroredBoxAttributes(box)
 
-		if (attributes.has("presentation:class")) out.push({ name: "presentation:user-transformed", value: "true" })
+			if (attributes.has("presentation:class")) out.push({ name: "presentation:user-transformed", value: "true" })
+
+			return out
+		}
+
+		// A custom shape's draw:mirror-* (one of them for an ODF trapezoid that is no mirror in DrawingML).
+		const geometry = shape.props?.geometry
+		let trapezoid = false
+
+		if (name === "draw:custom-shape" && geometry?.kind === "preset" && geometry.preset === "trapezoid") {
+			const fragment = this.fragment as Fragment
+
+			for (
+				let child = fragment.document.firstChildElement(this.sourceNode(shape) ?? -1);
+				child >= 0;
+				child = fragment.document.nextSiblingElement(child)
+			) {
+				const enhanced = fragment.name(child) === "draw:enhanced-geometry" ? fragment.attributes(child) : undefined
+
+				if (enhanced?.get("draw:type") === "trapezoid" && !enhanced.has("draw:enhanced-path"))
+					trapezoid =
+						odfPresetAttributes("trapezoid", geometry.guides, box)?.find(([key]) => key === "draw:type")?.[1] === "trapezoid"
+			}
+		}
+
+		const out = boxAttributes(name === "draw:custom-shape" ? mirrorTurn(box, trapezoid) : box)
+
+		// A presentation object a save moves is marked user-transformed (ODF 1.3 Part 3 §19.415: LibreOffice then keeps it
+		// off its layout's box). The box it had is kept for the session: moved back there (an undo), the mark goes again.
+		if (attributes.has("presentation:class")) {
+			const boxes = this.styles.env.placeholderBoxes
+			const key = `${String(this.slide.ref)}\u0000${String(shape.id)}`
+			const near = (a: Xfrm, b: Xfrm): boolean =>
+				Math.abs(a.x - b.x) <= 1 &&
+				Math.abs(a.y - b.y) <= 1 &&
+				Math.abs(a.cx - b.cx) <= 1 &&
+				Math.abs(a.cy - b.cy) <= 1 &&
+				a.rot === b.rot
+			const original = boxes?.get(key)
+
+			if (attributes.get("presentation:user-transformed") === "true") {
+				if (original !== undefined && near(original, box)) {
+					out.push({ name: "presentation:user-transformed", value: null })
+					boxes?.delete(key)
+				}
+			} else if (pristine === undefined || !near(pristine, box)) {
+				// The source's box, on its page (an ODP group's members are placed in page space).
+				out.push({ name: "presentation:user-transformed", value: "true" })
+
+				if (pristine !== undefined) boxes?.set(key, pristine)
+			}
+		}
 
 		return out
 	}
 
 	// --- Style. ---
 
-	private styleChange(shape: ShapeNode, node: number, aspects: Aspects): AttributeChange | Refused | undefined {
+	private styleChange(shape: ShapeNode, node: number, aspects: Aspects, mirror?: string | null): AttributeChange | Refused | undefined {
 		const groups = (["fill", "ln", "effects", "bodyPr"] as const).filter(group => aspects[group] === true)
 
-		if (groups.length === 0 && aspects.text !== true) return undefined
+		if (groups.length === 0 && aspects.text !== true && mirror === undefined) return undefined
 
 		const changes = styleChanges()
+
+		if (mirror !== undefined) setProperty(changes, "graphic", "style:mirror", mirror)
 		const props = shape.props ?? {}
 
 		for (const group of groups) {
@@ -818,34 +962,141 @@ export class OdpShapeWriter {
 		return { name: "draw:style-name", value: this.styles.derived("graphic", graphic, changes) }
 	}
 
+	// The declarations in force where this writer's shapes land: its page's or notes element's (the notes of a page may
+	// bind prefixes of their own, as LibreOffice writes office:forms there).
+	private landingScope(): ReadonlyMap<string, string> {
+		const fragment = this.fragment as Fragment
+		const src = this.slide.src
+		const node =
+			src?.format === "odp" && src.part === fragment.part && src.fragment === fragment.offset && src.epoch === fragment.epoch
+				? src.node
+				: -1
+		const root = rootScope(fragment.document)
+
+		if (node <= 0 || node >= fragment.document.count) return root
+
+		const own = fragment.namespaces.inScope(node)
+
+		return own.size === 0 ? root : new Map([...root, ...own])
+	}
+
 	// --- Geometry. ---
+	// The value a mirror attribute is written with (`fresh` for one turned on): the file's own value when the mirror goes
+	// back to what the file had (its spelling, draw:mirror-horizontal="false" or style:mirror="none", or none), kept for
+	// the session from the first save that changed it.
+	private mirrorSpelling(
+		shape: ShapeNode,
+		name: string,
+		current: string | undefined,
+		fresh: string | undefined,
+		on: boolean
+	): string | null {
+		const values = this.styles.env.mirrorValues
+		const key = `${String(this.slide.ref)}\u0000${String(shape.id)}\u0000${name}`
+
+		if (values !== undefined && !values.has(key)) values.set(key, current)
+
+		const original = values === undefined ? current : values.get(key)
+		const originalOn = name === "style:mirror" ? (original ?? "").includes("horizontal") : original === "true"
+
+		if (on === originalOn) return original ?? null
+
+		return fresh ?? null
+	}
+
+	// A picture's own style:mirror (its graphic style's), as the file writes it.
+	private ownMirror(node: number): string | undefined {
+		const name = (this.fragment as Fragment).attributes(node).get("draw:style-name")
+		const style = name === undefined ? undefined : this.styles.style("graphic", name)
+
+		return style?.properties.get("graphic")?.attributes.get("style:mirror")
+	}
+
+	// What a custom shape's new box does to its draw:enhanced-geometry: an outline evaluated for the box (ooxml-*, a
+	// preset written from DrawingML) is written again when the size or a flip changes; any other (an ODF type with its
+	// modifiers, a path with its formulas and handles) is kept, its mirrors turned as the flips changed (and a
+	// trapezoid's inset kept on its new width).
+	private boxOutline(
+		shape: ShapeNode,
+		node: number,
+		name: string,
+		aspects: Aspects,
+		after: Xfrm | undefined
+	): "rewrite" | AttributeChange[] | undefined {
+		const before = aspects.pristine?.xfrm
+
+		if (aspects.xfrm !== true || name !== "draw:custom-shape" || before === undefined || after === undefined) return undefined
+
+		const fragment = this.fragment as Fragment
+		const document = fragment.document
+		let enhanced = -1
+
+		for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child))
+			if (fragment.name(child) === "draw:enhanced-geometry") enhanced = child
+
+		if (enhanced < 0) return undefined
+
+		const attributes = fragment.attributes(enhanced)
+		const geometry = shape.props?.geometry
+		const turnedH = before.flipH !== after.flipH
+		const turnedV = before.flipV !== after.flipV
+		const resized = before.cx !== after.cx || before.cy !== after.cy
+
+		// An outline of plain numbers is one evaluated for its box; LibreOffice's own ooxml-* outlines are formulas,
+		// which follow any box.
+		const evaluated = /^[A-Z0-9 .-]*$/u.test(attributes.get("draw:enhanced-path") ?? "?")
+
+		if ((attributes.get("draw:type") ?? "").startsWith("ooxml-") && evaluated && geometry?.kind === "preset")
+			return resized || turnedH || turnedV ? "rewrite" : undefined
+
+		const changes: AttributeChange[] = []
+		const mirror = (attribute: string, turned: boolean): void => {
+			if (turned) {
+				const on = attributes.get(attribute) !== "true"
+
+				changes.push({
+					name: attribute,
+					value: this.mirrorSpelling(shape, attribute, attributes.get(attribute), on ? "true" : undefined, on)
+				})
+			}
+		}
+
+		// The new box is written without the source's draw:transform, so a mirror it held (read as a vertical flip)
+		// moves to the outline.
+		const matrix = transformMatrix(fragment.attributes(node).get("draw:transform") ?? "")
+		const mirrored = matrix !== undefined && matrix[0] * matrix[3] - matrix[1] * matrix[2] < 0
+
+		mirror("draw:mirror-horizontal", turnedH)
+		mirror("draw:mirror-vertical", turnedV !== mirrored)
+
+		// ODF measures a trapezoid's inset on the width and DrawingML on the shorter side: its modifier follows the
+		// box so the shape keeps the adjustment it has.
+		if (resized && attributes.get("draw:type") === "trapezoid" && geometry?.kind === "preset" && geometry.preset === "trapezoid") {
+			const outline = odfPresetAttributes("trapezoid", geometry.guides, after) ?? []
+			const modifier = outline.find(([key]) => key === "draw:modifiers")?.[1]
+
+			// An adjustment the type cannot hold on the new box is written as the evaluated outline.
+			if (outline.find(([key]) => key === "draw:type")?.[1] !== "trapezoid") return "rewrite"
+			if (modifier !== undefined) changes.push({ name: "draw:modifiers", value: modifier })
+		}
+
+		return changes
+	}
 
 	private geometryChange(
 		shape: ShapeNode,
-		node: number,
-		name: string
+		name: string,
+		box: Xfrm | undefined
 	): { readonly attributes: AttributeChange[]; readonly enhanced?: string } | Refused {
 		const geometry = shape.props?.geometry
 
 		if (geometry === undefined) return refused("unsupported", "a geometry taken back to the inherited one")
 
 		if (name === "draw:custom-shape") {
-			const type = presetType(geometry)
+			// The new outline is the preset's: the old path, formulas and handles go.
+			const enhanced = presetMarkup(geometry, box ?? this.inheritedBox(shape))
 
-			if (isRefused(type)) return type
-
-			const fragment = this.fragment as Fragment
-			let enhanced = -1
-
-			for (let child = fragment.document.firstChildElement(node); child >= 0; child = fragment.document.nextSiblingElement(child))
-				if (fragment.name(child) === "draw:enhanced-geometry") enhanced = child
-
-			const mirror = enhancedMirror(shape.xfrm)
-
-			if (enhanced < 0) return { attributes: [], enhanced: `<draw:enhanced-geometry draw:type="${type}"${mirror}/>` }
-
-			// The new outline is the type's: the old path, formulas and handles go.
-			return { attributes: [], enhanced: `<draw:enhanced-geometry svg:viewBox="0 0 21600 21600" draw:type="${type}"${mirror}/>` }
+			return isRefused(enhanced) ? enhanced : { attributes: [], enhanced }
 		}
 
 		return refused("unsupported", `a new outline for ${name}`)
@@ -1005,10 +1256,12 @@ export class OdpShapeWriter {
 		if (xfrm === undefined) return refused("unsupported", "a new shape without a box")
 
 		const box = placed(xfrm, m)
-		const boxMarkup = boxAttributes(box)
-			.filter(change => change.value !== null)
-			.map(change => ` ${change.name}="${escapeAttribute(change.value as string)}"`)
-			.join("")
+		const markupOf = (held: Xfrm): string =>
+			boxAttributes(held)
+				.filter(change => change.value !== null)
+				.map(change => ` ${change.name}="${escapeAttribute(change.value as string)}"`)
+				.join("")
+		const boxMarkup = markupOf(box)
 		const text = shape.text === undefined ? "" : this.text(shape)
 
 		if (isRefused(text)) return text
@@ -1037,19 +1290,24 @@ export class OdpShapeWriter {
 
 		if (placeholder !== undefined) return refused("unsupported", "a placeholder with an outline")
 
-		const type = rectangle
-			? "rectangle"
+		const enhanced = rectangle
+			? presetMarkup({ kind: "preset", preset: "rect", guides: [] }, box)
 			: geometry === undefined
 				? refused("unsupported", "a new shape without an outline")
-				: presetType(geometry)
+				: presetMarkup(geometry, box)
 
-		if (isRefused(type)) return type
+		if (isRefused(enhanced)) return enhanced
 
 		const style = this.newStyle(shape)
 
 		if (isRefused(style)) return style
 
-		return `<draw:custom-shape${common}${style}${boxMarkup}>${alt}${listeners}${text}<draw:enhanced-geometry svg:viewBox="0 0 21600 21600" draw:type="${type}"${enhancedMirror(box)}/></draw:custom-shape>`
+		// The turn as LibreOffice reads it under the outline's mirrors (mirrorTurn).
+		const mirrored = (attribute: string): boolean => enhanced.includes(` ${attribute}="true"`)
+		const turned = mirrored("draw:mirror-horizontal") !== mirrored("draw:mirror-vertical") && box.rot !== 0
+		const held = turned ? markupOf({ ...box, rot: (21_600_000 - box.rot) % 21_600_000 }) : boxMarkup
+
+		return `<draw:custom-shape${common}${style}${held}>${alt}${listeners}${text}${enhanced}</draw:custom-shape>`
 	}
 
 	// The box a new placeholder takes from its layout or master (the model leaves it to inheritance): written, so the
@@ -1184,13 +1442,59 @@ export class OdpShapeWriter {
 	}
 }
 
+// The box attributes in the order LibreOffice writes them.
+const BOX_ORDER: readonly string[] = ["svg:x", "svg:y", "svg:width", "svg:height", "draw:transform"]
+
 // The canonical names of elements that are shapes (members of a page or a group).
 export function isShapeElement(name: string): boolean {
 	return name === "draw:a" || BOXED.has(name) || LINES.has(name) || name === "draw:g" || name === "draw:page-thumbnail"
 }
 
+// Whether a shape holds text (LibreOffice's presentation:placeholder="true" is a placeholder without any).
 function hasText(shape: ShapeNode): boolean {
-	return shape.text?.paragraphs.some(paragraph => paragraph.runs.length > 0) ?? false
+	return shape.text?.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "r" || run.text !== "")) ?? false
+}
+
+// Elements a mirrored box is written for by a mirroring draw:transform (§19.229 scale with a negative factor).
+const MIRRORED_BY_TRANSFORM: ReadonlySet<string> = new Set(["draw:polygon", "draw:polyline", "draw:path"])
+
+// A mirrored box as draw:transform "scale (1 -1) rotate (a) translate (x y)" about the element's own origin: its
+// vertical mirror, then its turn (a horizontal mirror is a vertical one half a turn round, ECMA-376 §20.1.7.6 and the
+// reader's reading of a mirroring transform), its centre where the box's is.
+export function mirroredBoxAttributes(box: Xfrm): AttributeChange[] {
+	const vertical = box.flipH ? { rot: (box.rot + 10_800_000) % 21_600_000, flipV: !box.flipV } : { rot: box.rot, flipV: box.flipV }
+	const size = [
+		{ name: "svg:width", value: cm(box.cx) },
+		{ name: "svg:height", value: cm(box.cy) }
+	]
+
+	if (!vertical.flipV) return boxAttributes({ ...box, rot: vertical.rot, flipH: false, flipV: false })
+
+	const turned = -((vertical.rot / 60_000) * Math.PI) / 180
+	const a = turned <= -Math.PI ? turned + 2 * Math.PI : turned > Math.PI ? turned - 2 * Math.PI : turned
+	const cos = Math.cos(a)
+	const sin = Math.sin(a)
+	// R(a) S (w/2, h/2) with S = scale (1, -1): the half-size point after the mirror and the turn.
+	const halfW = box.cx / 2
+	const halfH = -box.cy / 2
+	const tx = box.x + box.cx / 2 - (cos * halfW + sin * halfH)
+	const ty = box.y + box.cy / 2 - (-sin * halfW + cos * halfH)
+
+	return [
+		{ name: "svg:x", value: null },
+		{ name: "svg:y", value: null },
+		...size,
+		{
+			name: "draw:transform",
+			value: `scale (1 -1) rotate (${String(Number(a.toFixed(10)))}) translate (${cm(Math.round(tx))} ${cm(Math.round(ty))})`
+		}
+	]
+}
+
+// LibreOffice mirrors a custom shape (draw:mirror-*) after its draw:transform turns it, DrawingML before: under one
+// mirror the turn is written the other way. `invertsV`: the shape's vertical mirror is its ODF type's (a trapezoid).
+export function mirrorTurn(box: Xfrm, invertsV = false): Xfrm {
+	return box.flipH !== (box.flipV !== invertsV) && box.rot !== 0 ? { ...box, rot: (21_600_000 - box.rot) % 21_600_000 } : box
 }
 
 // svg:x/y/width/height of an unturned box; a turned one is placed by draw:transform about its corner.
@@ -1204,8 +1508,10 @@ export function boxAttributes(box: Xfrm): AttributeChange[] {
 		return [{ name: "svg:x", value: cm(box.x) }, { name: "svg:y", value: cm(box.y) }, ...size, { name: "draw:transform", value: null }]
 	}
 
-	// The reader's angle a turns counter-clockwise; DrawingML's rot clockwise.
-	const a = -((box.rot / 60_000) * Math.PI) / 180
+	// The reader's angle a turns counter-clockwise; DrawingML's rot clockwise. Written as LibreOffice writes it (within
+	// half a turn either way, to 10 decimals, the translation to the EMU), so a box turned back writes its source's text.
+	const turned = -((box.rot / 60_000) * Math.PI) / 180
+	const a = turned <= -Math.PI ? turned + 2 * Math.PI : turned > Math.PI ? turned - 2 * Math.PI : turned
 	const cos = Math.cos(a)
 	const sin = Math.sin(a)
 	const halfW = box.cx / 2
@@ -1213,25 +1519,45 @@ export function boxAttributes(box: Xfrm): AttributeChange[] {
 	const tx = box.x + halfW - (cos * halfW + sin * halfH)
 	const ty = box.y + halfH - (-sin * halfW + cos * halfH)
 
-	return [
-		{ name: "svg:x", value: null },
-		{ name: "svg:y", value: null },
-		...size,
-		{ name: "draw:transform", value: `rotate (${a.toFixed(12)}) translate (${cm(tx)} ${cm(ty)})` }
-	]
+	// Of the translations within an EMU, the one this box reads back from (the reader rounds again), so a box written,
+	// read and written again keeps its text.
+	const rotate = `rotate (${String(Number(a.toFixed(10)))})`
+	const width = parseLength(cm(box.cx)) ?? 0
+	const height = parseLength(cm(box.cy)) ?? 0
+	let transform = `${rotate} translate (${cm(Math.round(tx))} ${cm(Math.round(ty))})`
+
+	search: for (const dx of [0, -1, 1])
+		for (const dy of [0, -1, 1]) {
+			const candidate = `${rotate} translate (${cm(Math.round(tx) + dx)} ${cm(Math.round(ty) + dy)})`
+			const matrix = transformMatrix(candidate)
+			const read = matrix === undefined ? undefined : xfrmOf({ x: 0, y: 0, w: width, h: height }, matrix)
+
+			if (read !== undefined && read.x === box.x && read.y === box.y) {
+				transform = candidate
+				break search
+			}
+		}
+
+	return [{ name: "svg:x", value: null }, { name: "svg:y", value: null }, ...size, { name: "draw:transform", value: transform }]
 }
 
-function enhancedMirror(xfrm: Xfrm | undefined): string {
-	return `${xfrm?.flipH === true ? ' draw:mirror-horizontal="true"' : ""}${xfrm?.flipV === true ? ' draw:mirror-vertical="true"' : ""}`
-}
+// A preset's draw:enhanced-geometry for its box (an outline evaluated for a box depends on its size).
+function presetMarkup(geometry: Geometry, box: Xfrm | undefined): string | Refused {
+	if (geometry.kind !== "preset") {
+		if (box === undefined) return refused("unsupported", "an outline without a box")
 
-function presetType(geometry: Geometry): string | Refused {
-	if (geometry.kind !== "preset") return refused("unsupported", "a custom outline")
-	if (geometry.guides.length > 0) return refused("unsupported", `adjusted ${geometry.preset}`)
+		const attributes = odfCustomAttributes(geometry.paths, geometry.textRect, box)
 
-	const type = TYPES[geometry.preset]
+		return `<draw:enhanced-geometry${attributes.map(([name, value]) => ` ${name}="${value}"`).join("")}/>`
+	}
 
-	return type === undefined ? refused("unsupported", `preset ${geometry.preset}`) : type
+	const markup = odfPresetGeometry(geometry.preset, geometry.guides, box ?? { cx: 0, cy: 0, flipH: false, flipV: false })
+
+	if (markup === undefined) return refused("unsupported", `preset ${geometry.preset}`)
+	if (box === undefined && presetDependsOnSize(geometry.preset, geometry.guides))
+		return refused("unsupported", "an outline without a box")
+
+	return markup
 }
 
 const JUMPS: Readonly<Record<string, string>> = {

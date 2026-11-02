@@ -157,11 +157,23 @@ export {
 	type SlideLayoutChoice,
 	type SlideListRow
 } from "./edit/commands/slide"
-export { actionOp, altOp, flipOp, nudgeOp, rotateOp, settableAction, type AltText, type PlacedShape } from "./edit/commands/shape"
+export {
+	actionOp,
+	altOp,
+	canFlip,
+	flipOp,
+	nudgeOp,
+	rotateOp,
+	settableAction,
+	type AltText,
+	type FlipCandidate,
+	type PlacedShape
+} from "./edit/commands/shape"
 export { canZOrder, zOrderOp, Z_ORDERS } from "./edit/commands/arrange"
 export { presentationHref, xmlSafeText } from "./edit/xmlText"
 export { canGroup, canUngroup, groupOp, ungroupOps } from "./edit/commands/group"
 export { oneStep } from "./edit/commands/batch"
+export { initialsOf, MAX_COMMENT_CHARACTERS, type CommentFormat, type CommentView, type SlideReview } from "./comments"
 export {
 	DEFAULT_TABLE_STYLE,
 	MAX_INSERT_COLS,

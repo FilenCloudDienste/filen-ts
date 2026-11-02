@@ -1,3 +1,5 @@
+import { partKey } from "../../../core/opc/index"
+import { diagramDataAsItWas } from "../../../core/presentation/edit/apply/smartart"
 import { DrawingList, IDENTITY } from "../../../core/drawingml/displayList"
 import { D, EMU_PER_PX, drawingReader, type DrawingReader } from "../../../core/drawingml/reader"
 import { convertSmartArt } from "../../../core/drawingml/smartart"
@@ -29,6 +31,7 @@ import { parseXml, type XmlDocument } from "../../../core/xml/index"
 import type { EngineSession, SmartArtCapability } from "../engine"
 import { presentationRealm } from "../services"
 import { rasterizeSlide } from "../thumbs"
+import { sessionEdits } from "./edit"
 import { pptxParts } from "./open/pptx"
 
 // The SmartArt engine in the presentation worker: a diagram without a usable drawing cache is laid out from its
@@ -168,13 +171,19 @@ function frameOf(deck: Deck, target: ShapeRef): { shape: ShapeNode; frame: Extra
 }
 
 // The prompt boxes of each diagram as last laid out (slide:id → the data part it was laid out from and its boxes).
-const prompts = new WeakMap<EngineSession, Map<string, { readonly data: string; readonly boxes: EmittedDiagram["prompts"] }>>()
+interface Laid {
+	readonly data: string
+	readonly boxes: EmittedDiagram["prompts"]
+	readonly pictures: EmittedDiagram["pictures"]
+}
 
-function promptsOf(session: EngineSession): Map<string, { readonly data: string; readonly boxes: EmittedDiagram["prompts"] }> {
+const prompts = new WeakMap<EngineSession, Map<string, Laid>>()
+
+function promptsOf(session: EngineSession): Map<string, Laid> {
 	let held = prompts.get(session)
 
 	if (held === undefined) {
-		const created = new Map<string, { readonly data: string; readonly boxes: EmittedDiagram["prompts"] }>()
+		const created = new Map<string, Laid>()
 
 		prompts.set(session, created)
 		session.onClose(() => created.clear())
@@ -242,7 +251,11 @@ async function relayoutTarget(
 	const remember = (emitted: EmittedDiagram): void => {
 		const data = host.services.xml(frame.data)
 
-		promptsOf(session).set(`${String(target.slide)}:${String(target.id)}`, { data: frame.data, boxes: emitted.prompts })
+		promptsOf(session).set(`${String(target.slide)}:${String(target.id)}`, {
+			data: frame.data,
+			boxes: emitted.prompts,
+			pictures: emitted.pictures
+		})
 
 		if (data !== undefined) rememberDrawing(data, drawingKey(frame.layout, frame.style, frame.colors, box.w, box.h), emitted.drawingXml)
 	}
@@ -415,7 +428,8 @@ async function diagramPart(session: EngineSession, part: string): Promise<XmlDoc
 
 	const held = parts.document(part)
 
-	if (held !== undefined || part.startsWith("raw:") || !parts.opc.has(part)) return held
+	if (held !== undefined || part.startsWith("raw:")) return held
+	if (!parts.opc.has(part)) return restoredPart(session, part)
 	if ((parts.opc.entry(part)?.uncompressedSize ?? 0) > parts.budgets.xmlPartBytes) throw new PresentationError("tooLarge", part)
 
 	const document = await parts.opc.xml(part)
@@ -423,6 +437,37 @@ async function diagramPart(session: EngineSession, part: string): Promise<XmlDoc
 	parts.adopt(part, document)
 
 	return document
+}
+
+// A diagram part of a slide an undo restored after a save left its parts out: the bytes its delete held (the edit
+// session's, which ops read too), adopted into the package's documents once.
+function restoredPart(session: EngineSession, part: string): XmlDocument | undefined {
+	const parts = pptxParts(session.deck)
+
+	if (parts === undefined) return undefined
+
+	const key = partKey(part)
+
+	for (const node of session.deck.nodes.values()) {
+		const src = node.src
+
+		if (src?.format !== "pptx" || !src.part.startsWith("raw:")) continue
+
+		const held = sessionEdits(session)
+			.rawParts(src.part)
+			?.find(each => partKey(each.name) === key)
+
+		if (held === undefined) continue
+		if (held.bytes.length > parts.budgets.xmlPartBytes) throw new PresentationError("tooLarge", part)
+
+		const document = parseXml(held.bytes)
+
+		parts.adopt(part, document)
+
+		return document
+	}
+
+	return undefined
 }
 
 // Edited diagrams (a frame whose data an op holds) laid out before a save's snapshot, so the writer saves the drawing
@@ -443,6 +488,8 @@ export async function layoutEditedDiagrams(session: EngineSession, changes: Deck
 			const frame = shape?.frame
 
 			if (frame?.kind !== "smartart" || !frame.data.startsWith("raw:") || shape?.xfrm === undefined) continue
+			// Data as it was (an undo's after a save, a copy's) is written as it is, with the drawing it names (no layout).
+			if (diagramDataAsItWas(session.deck, frame.data)) continue
 			if (!(shape.xfrm.cx > 0 && shape.xfrm.cy > 0)) continue
 
 			try {
@@ -497,8 +544,10 @@ async function diagramInfoOf(session: EngineSession, target: ShapeRef, slicing: 
 
 		let laid = promptsOf(session).get(`${String(target.slide)}:${String(target.id)}`)
 
-		// A diagram drawn from its saved drawing (or laid out from older data): laid out now, for an empty node's prompt.
+		// A diagram drawn from its saved drawing (or laid out from older data): laid out now, for an empty node's prompt
+		// or a picture placeholder.
 		const host = hosts.get(session)
+		const layoutDocument = host?.services.xml(frame.layout)
 		const xfrm = shape.xfrm
 
 		if (
@@ -507,7 +556,7 @@ async function diagramInfoOf(session: EngineSession, target: ShapeRef, slicing: 
 			xfrm !== undefined &&
 			xfrm.cx > 0 &&
 			xfrm.cy > 0 &&
-			info.nodes.some(node => node.text === "")
+			(info.nodes.some(node => node.text === "") || (layoutDocument !== undefined && hasPicturePlaceholders(layoutDocument)))
 		) {
 			await relayoutTarget(session, host, target, frame, { w: xfrm.cx, h: xfrm.cy }, slicing)
 			laid = promptsOf(session).get(`${String(target.slide)}:${String(target.id)}`)
@@ -515,10 +564,32 @@ async function diagramInfoOf(session: EngineSession, target: ShapeRef, slicing: 
 
 		return laid === undefined || laid.data !== frame.data
 			? info
-			: { ...info, prompts: laid.boxes.map(box => ({ x: box.x, y: box.y, w: box.w, h: box.h })) }
+			: {
+					...info,
+					prompts: laid.boxes.map(box => ({ x: box.x, y: box.y, w: box.w, h: box.h })),
+					pictures: laid.pictures.map(each => ({
+						x: each.box.x,
+						y: each.box.y,
+						w: each.box.w,
+						h: each.box.h,
+						node: each.node,
+						placeholder: each.placeholder,
+						filled: each.filled
+					}))
+				}
 	} catch (error) {
 		throw refusal(error)
 	}
+}
+
+// Whether a layout definition has a picture placeholder (a dgm:shape with blipPhldr).
+function hasPicturePlaceholders(layout: XmlDocument): boolean {
+	const reader = drawingReader(layout)
+
+	for (let node = 1; node < layout.count; node++)
+		if (reader.is(node, D.Dgm, "shape") && reader.bool(node, "blipPhldr", false)) return true
+
+	return false
 }
 
 export const smartartCapability: SmartArtCapability = {

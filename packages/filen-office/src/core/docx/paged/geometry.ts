@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import type { Node } from "prosemirror-model"
 import {
 	FRAGMENT_FLOATS,
@@ -598,7 +599,7 @@ export class PagedGeometry {
 					current = next
 				} else {
 					current.right = Math.max(current.right, next.right)
-					current.lines.push(...next.lines)
+					appendAll(current.lines, next.lines)
 				}
 			}
 

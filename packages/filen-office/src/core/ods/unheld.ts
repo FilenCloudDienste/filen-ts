@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { decodeCharacterData, encodeUtf8, escapeAttribute } from "../xml/index"
 import type { SourceAxis } from "./write/axis"
 import { storeValue } from "./write/cells"
@@ -905,7 +906,7 @@ export function namedBoxes(item: UnheldItem, shifter: Shifter): NamedBox[] | nul
 
 		if (boxes === null) return null
 
-		out.push(...boxes)
+		appendAll(out, boxes)
 	}
 
 	return out

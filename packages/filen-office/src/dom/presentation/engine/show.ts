@@ -40,7 +40,8 @@ import type { RenderEffects, SlideLayer, SlideRender, TextPage } from "../../../
 import { drawingData } from "../../../core/presentation/render/slide"
 import { G, PartReader } from "../../../core/pptx/read/xml"
 import { fileFallback } from "../../../core/pptx/read/transition"
-import { playableTransition } from "../../../core/anim/presets/transitions/catalog"
+import { playableTransition, transitionOption } from "../../../core/anim/presets/transitions/catalog"
+import { deckWebglTransitions, morphShapes, pptxGeometry } from "../../../core/anim/morphShapes"
 import { pptxParts } from "./open/pptx"
 import { effectiveClrMap, resolveColor, themeOf, toRgba } from "../../../core/presentation/theme"
 import { sliceClock } from "../../../core/slicing"
@@ -58,7 +59,8 @@ import {
 } from "../../../core/text/displayList"
 import type { XmlDocument } from "../../../core/xml/index"
 import type { CallContext, EngineSession, ShowCapability } from "../engine"
-import type { LayerPlan, ShowLayer } from "../protocol"
+import type { BitmapLike, LayerPlan, ShowLayer } from "../protocol"
+import { packAtlas } from "../../../core/anim/morph"
 import { MAX_CANVAS_SIDE, presentationRealm, type RasterCanvas } from "../services"
 import { decodeSlidePictures, paintSlideCanvas } from "../thumbs"
 import { sessionPictures } from "./thumbs"
@@ -75,6 +77,10 @@ import { readPart, renderSlideFor, viewParts } from "./view"
 
 // The shape id of a static run in layers().
 export const STATIC_LAYER = -1
+// The backdrop: the background with the master and layout art shown under the slide's own shapes, drawn apart only
+// for a slide a content-only transition enters or leaves (the page keeps it still while the content moves).
+export const BACKDROP_LAYER = -2
+const CONTENT_ONLY: ReadonlySet<string> = new Set(["window", "ferris", "conveyor", "flythrough", "pan"])
 // Bitmap bytes of one slide's layers (the page holds the slide on stage and the next one).
 export const SHOW_LAYER_BYTES = 128 * 1024 * 1024
 // Stage widths served (px, before the device pixel ratio).
@@ -745,6 +751,27 @@ interface HeldRender {
 const KEPT_RENDERS = 2
 const renders = new WeakMap<EngineSession, HeldRender[]>()
 
+// The WebGL transitions the deck's slides use, on each call (a transition set in the session counts): parsed slides
+// from their model, the others' parts each scanned once per session.
+const scannedKinds = new WeakMap<EngineSession, Map<SlideRef, readonly string[]>>()
+
+function transitionKinds(context: CallContext): Promise<readonly string[]> | undefined {
+	const session = context.session
+	const deck = session.deck
+	const pptx = pptxParts(deck)
+
+	if (pptx === undefined) return undefined
+
+	let scanned = scannedKinds.get(session)
+
+	if (scanned === undefined) {
+		scanned = new Map()
+		scannedKinds.set(session, scanned)
+	}
+
+	return deckWebglTransitions(pptx, deck.slides, context.slicing, deck.nodes, scanned).catch(() => [])
+}
+
 async function slideRender(context: CallContext, ref: SlideRef): Promise<{ readonly node: SlideNode; readonly render: SlideRender }> {
 	const session = context.session
 	const parts = viewParts(session.deck)
@@ -806,6 +833,12 @@ async function timegraph(context: CallContext, ref: SlideRef): Promise<CompiledT
 	const fallback =
 		authored === undefined || document === undefined || pptx === undefined ? undefined : fileFallback(authored, document, pptx.epoch)
 	const transition = authored === undefined ? undefined : playableTransition(authored, stageDraws, fallback)
+	const morph = morphShapes(
+		node.shapes,
+		render,
+		document === undefined || pptx === undefined ? undefined : pptxGeometry(document, pptx.epoch)
+	)
+	const kinds = await transitionKinds(context)
 	const source: TimegraphSource = {
 		timing,
 		layers,
@@ -814,7 +847,9 @@ async function timegraph(context: CallContext, ref: SlideRef): Promise<CompiledT
 		geometry: shapeGeometry(render, new Set(layers.shapes)),
 		colors: [...colors],
 		...(transition === undefined ? {} : { transition }),
-		...(authored === undefined || authored === transition ? {} : { authored })
+		...(authored === undefined || authored === transition ? {} : { authored }),
+		...(morph === undefined ? {} : { morph }),
+		...(kinds === undefined ? {} : { transitionKinds: kinds })
 	}
 	// Compiled here once so a hostile tree is refused before the page plays it.
 	const graph = compileSource(ref, source, parts.budgets.timing)
@@ -1024,14 +1059,28 @@ function pieceBounds(piece: LayerPiece): Box | undefined {
 	return text === undefined ? box : union(box, text)
 }
 
+// Whether a slide entered with `own` or left with `next` (the next slide's transition) is drawn with its backdrop
+// apart: the transitions that move only the content (MS-PPTX: p14:prism with isContent, §2.3.3.20 and Figure 13;
+// p14:window, ferris, conveyor, flythrough and pan, Figures 21, 3, 1, 6 and 10).
+export function backdropWanted(own: Transition | undefined, next: Transition | undefined): boolean {
+	const contentOnly = (transition: Transition | undefined): boolean =>
+		transition?.namespace === "p14" &&
+		(CONTENT_ONLY.has(transition.kind) || (transition.kind === "prism" && transitionOption(transition, "isContent") === true))
+
+	return contentOnly(own) || contentOnly(next)
+}
+
 // The output layers of a render for a plan, in z-order: static runs (shape -1, the first with the background) and the
-// planned shapes' layers, each with its bounds (slide px, kept within one slide size around the slide).
+// planned shapes' layers, each with its bounds (slide px, kept within one slide size around the slide). With
+// `backdrop`, the background and the master and layout art before the slide's own shapes are a layer of their own
+// (shape -2) under the first static run.
 export function planShowLayers(
 	render: SlideRender,
 	node: SlideNode,
 	plan: LayerPlan,
 	slide: { readonly w: number; readonly h: number },
-	measure?: TextMeasure
+	measure?: TextMeasure,
+	options: { readonly backdrop?: boolean } = {}
 ): PlannedLayer[] {
 	const planned = new Set(plan.shapes)
 	const rangesOf = new Map<number, readonly Range[]>()
@@ -1043,7 +1092,11 @@ export function planShowLayers(
 	})
 
 	const chains = ancestry(node.shapes)
-	const out: PlannedLayer[] = [{ shape: STATIC_LAYER, background: true, pieces: [], bounds: [0, 0, 0, 0] }]
+	const out: PlannedLayer[] = [
+		{ shape: options.backdrop === true ? BACKDROP_LAYER : STATIC_LAYER, background: true, pieces: [], bounds: [0, 0, 0, 0] }
+	]
+	// Master and layout art reach the backdrop until the slide's own first shape.
+	let backdrop = options.backdrop === true
 	const output = (shape: number, range: Range | undefined): PlannedLayer => {
 		const last = out[out.length - 1]
 
@@ -1064,6 +1117,14 @@ export function planShowLayers(
 	}
 
 	for (const layer of render.layers) {
+		if (backdrop && layer.shape.slide !== render.ref) {
+			out[0]?.pieces.push({ layer })
+
+			continue
+		}
+
+		backdrop = false
+
 		const chain =
 			layer.shape.slide === render.ref ? (chains.get(layer.shape.id) ?? [layer.box?.id ?? layer.shape.id, layer.shape.id]) : []
 		let owner = STATIC_LAYER
@@ -1176,9 +1237,11 @@ function paintLayer(
 	render: SlideRender,
 	layer: PlannedLayer,
 	scale: number,
-	images: Parameters<typeof paintSlideCanvas>[3]
+	images: Parameters<typeof paintSlideCanvas>[3],
+	// Where in the canvas the layer's top left goes (device px; an atlas page's slot).
+	at: { readonly x: number; readonly y: number } = { x: 0, y: 0 }
 ): void {
-	const origin = { x: layer.bounds[0], y: layer.bounds[1] }
+	const origin = { x: layer.bounds[0] - at.x / scale, y: layer.bounds[1] - at.y / scale }
 
 	if (layer.background) paintSlideCanvas(ctx, { ...render, layers: [] }, scale, images, origin)
 
@@ -1248,6 +1311,31 @@ function paintRun(ctx: Parameters<typeof paintSlideCanvas>[0], text: TextPage, m
 	}
 }
 
+// The transition of the slide shown after `ref` in deck order (hidden slides skipped): the one it is left with in a
+// show that runs on.
+async function nextTransition(
+	context: CallContext,
+	parts: NonNullable<ReturnType<typeof viewParts>>,
+	ref: SlideRef
+): Promise<Transition | undefined> {
+	const deck = context.session.deck
+	const slides = deck.slides
+
+	for (let k = slides.indexOf(ref) + 1; k > 0 && k < slides.length; k++) {
+		const next = slides[k] as SlideRef
+
+		if (deck.hiddenSlides?.has(next) === true && deck.nodes.get(next)?.hidden !== false) continue
+
+		const node = await parts.slide(next, context.slicing)
+
+		if (node.hidden) continue
+
+		return node.transition
+	}
+
+	return undefined
+}
+
 async function layers(context: CallContext, ref: SlideRef, widthPx: number, plan: LayerPlan): Promise<readonly ShowLayer[]> {
 	const realm = presentationRealm()
 
@@ -1260,14 +1348,17 @@ async function layers(context: CallContext, ref: SlideRef, widthPx: number, plan
 	if (
 		!(widthPx >= MIN_STAGE_WIDTH && widthPx <= MAX_STAGE_WIDTH) ||
 		!(plan.dpr > 0 && plan.dpr <= 4) ||
-		plan.shapes.length > parts.budgets.shapesPerSlide
+		plan.shapes.length > parts.budgets.shapesPerSlide ||
+		!(plan.atlas === undefined || (Number.isInteger(plan.atlas) && plan.atlas >= 64 && plan.atlas <= MAX_CANVAS_SIDE))
 	)
 		throw new PresentationError("tooLarge", "show layers")
 
 	const { node, render } = await slideRender(context, ref)
 	const slide = { w: session.deck.size.cx / EMU_PER_PX, h: session.deck.size.cy / EMU_PER_PX }
 	const scale = Math.min((widthPx * plan.dpr) / slide.w, MAX_CANVAS_SIDE / slide.w)
-	const planned = planShowLayers(render, node, plan, slide, canvasMeasure())
+	const planned = planShowLayers(render, node, plan, slide, canvasMeasure(), {
+		backdrop: backdropWanted(node.transition, await nextTransition(context, parts, ref))
+	})
 	const scales = layerScales(planned, scale)
 	const pictures = await decodeSlidePictures(
 		render,
@@ -1280,8 +1371,31 @@ async function layers(context: CallContext, ref: SlideRef, widthPx: number, plan
 		},
 		Math.min(4096, Math.ceil(slide.w * scale * 2))
 	)
-	const out: ShowLayer[] = []
 	const clock = sliceClock(context.slicing)
+
+	try {
+		return plan.atlas === undefined
+			? await layerBitmaps(context, render, planned, scales, scale, pictures.images, clock)
+			: await atlasBitmaps(context, render, planned, scales, scale, pictures.images, clock, plan.atlas)
+	} finally {
+		pictures.release()
+	}
+}
+
+type LayerImages = Parameters<typeof paintSlideCanvas>[3]
+
+// One bitmap per layer.
+async function layerBitmaps(
+	context: CallContext,
+	render: SlideRender,
+	planned: readonly PlannedLayer[],
+	scales: readonly number[],
+	scale: number,
+	images: LayerImages,
+	clock: ReturnType<typeof sliceClock>
+): Promise<ShowLayer[]> {
+	const realm = presentationRealm()
+	const out: ShowLayer[] = []
 
 	try {
 		for (let k = 0; k < planned.length; k++) {
@@ -1294,12 +1408,12 @@ async function layers(context: CallContext, ref: SlideRef, widthPx: number, plan
 
 			if (width <= 0 || height <= 0) continue
 
-			const canvas = realm.canvas.canvas(Math.max(1, Math.ceil(width * layerScale)), Math.max(1, Math.ceil(height * layerScale)))
+			const canvas = realm?.canvas.canvas(Math.max(1, Math.ceil(width * layerScale)), Math.max(1, Math.ceil(height * layerScale)))
 			const ctx = canvas?.getContext("2d") ?? null
 
 			if (canvas === undefined || ctx === null) throw new PresentationError("tooLarge", "show layer canvas")
 
-			paintLayer(ctx, render, layer, layerScale, pictures.images)
+			paintLayer(ctx, render, layer, layerScale, images)
 			out.push({
 				shape: layer.shape,
 				...(layer.range === undefined ? {} : { range: layer.range }),
@@ -1316,11 +1430,104 @@ async function layers(context: CallContext, ref: SlideRef, widthPx: number, plan
 		for (const layer of out) layer.bitmap.close()
 
 		throw error
-	} finally {
-		pictures.release()
 	}
 
 	return out
+}
+
+// The layers packed into pages of at most `side` px (core/anim/morph packAtlas), each painted at its place, clipped
+// to it; a page's layers share its bitmap.
+async function atlasBitmaps(
+	context: CallContext,
+	render: SlideRender,
+	planned: readonly PlannedLayer[],
+	scales: readonly number[],
+	scale: number,
+	images: LayerImages,
+	clock: ReturnType<typeof sliceClock>,
+	side: number
+): Promise<ShowLayer[]> {
+	const realm = presentationRealm()
+	const sizes = planned.map((layer, k) => {
+		const width = layer.bounds[2] - layer.bounds[0]
+		const height = layer.bounds[3] - layer.bounds[1]
+		const layerScale = scales[k] ?? scale
+
+		return width <= 0 || height <= 0
+			? { w: 0, h: 0 }
+			: { w: Math.max(1, Math.ceil(width * layerScale)), h: Math.max(1, Math.ceil(height * layerScale)) }
+	})
+	const packed = packAtlas(sizes, side)
+	const byPage: number[][] = packed.pages.map(() => [])
+
+	packed.slots.forEach((slot, k) => {
+		if (slot !== undefined) byPage[slot.page]?.push(k)
+	})
+
+	const placed: (ShowLayer | undefined)[] = planned.map(() => undefined)
+	const pages: BitmapLike[] = []
+
+	try {
+		for (let page = 0; page < packed.pages.length; page++) {
+			const size = packed.pages[page] ?? { w: 1, h: 1 }
+			const canvas = realm?.canvas.canvas(size.w, size.h)
+			const ctx = canvas?.getContext("2d") ?? null
+
+			if (canvas === undefined || ctx === null) throw new PresentationError("tooLarge", "show layer canvas")
+
+			const members = byPage[page] ?? []
+
+			for (const k of members) {
+				if (context.signal.aborted) throw new PresentationError("aborted", "show layers")
+
+				const layer = planned[k] as PlannedLayer
+				const slot = packed.slots[k]
+				const pixels = sizes[k]
+				const layerScale = scales[k] ?? scale
+
+				if (slot === undefined || pixels === undefined) continue
+
+				ctx.save()
+				ctx.beginPath()
+				ctx.rect(slot.x, slot.y, pixels.w, pixels.h)
+				ctx.clip()
+				paintLayer(ctx, render, layer, layerScale, images, slot)
+				ctx.restore()
+
+				if (clock.due) await clock.pause()
+			}
+
+			const bitmap = canvas.transferToImageBitmap()
+
+			pages.push(bitmap)
+
+			for (const k of members) {
+				const layer = planned[k] as PlannedLayer
+				const slot = packed.slots[k]
+				const pixels = sizes[k]
+
+				if (slot === undefined || pixels === undefined) continue
+
+				placed[k] = {
+					shape: layer.shape,
+					...(layer.range === undefined ? {} : { range: layer.range }),
+					bitmap,
+					atlas: { x: slot.x, y: slot.y, width: pixels.w, height: pixels.h },
+					x: layer.bounds[0],
+					y: layer.bounds[1],
+					width: layer.bounds[2] - layer.bounds[0],
+					height: layer.bounds[3] - layer.bounds[1]
+				}
+			}
+		}
+	} catch (error) {
+		for (const page of pages) page.close()
+
+		throw error
+	}
+
+	// In plan order, as one bitmap each would come.
+	return placed.filter(layer => layer !== undefined)
 }
 
 export const showCapability: ShowCapability = { timegraph, layers }

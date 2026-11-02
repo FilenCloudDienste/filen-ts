@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtColorsAccent2
+-->
+<sa:colorsDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:colors:accent2">
+	<sa:title val="Accent 2"/>
+	<sa:desc val="The theme's second accent colour, with light text."/>
+	<sa:catLst>
+		<sa:cat type="accent2" pri="20"/>
+	</sa:catLst>
+	<sa:styleLbl name="node0">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="node1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="node2">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="node3">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="node4">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="lnNode1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="vennNode1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="alignNode1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="asst0">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="asst1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="asst2">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="asst3">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="asst4">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgAcc0">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgAcc2">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgAcc3">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgAcc4">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgAccFollowNode1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="conFgAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="solidFgAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="alignAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="alignAccFollowNode1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="solidAlignAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="trAlignAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/><dr:alpha val="90000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="bgAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="20000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="20000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="bgAccFollowNode1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="20000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="20000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="solidBgAcc1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="20000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="20000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="bgShp">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="40000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst/>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="dkBgShp">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:shade val="80000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst/>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="trBgShp">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="50000"/><dr:alpha val="40000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst/>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgShp">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="60000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="sibTrans2D1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="60000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgSibTrans2D1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="60000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="bgSibTrans2D1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="60000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="parChTrans1D1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:shade val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="tx1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="parChTrans1D2">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:shade val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="tx1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="parChTrans1D3">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:shade val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="tx1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="parChTrans1D4">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:shade val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="tx1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="sibTrans1D1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:shade val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="tx1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgSibTrans1D1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:shade val="60000"/></dr:schemeClr></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="tx1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="bgImgPlace1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="50000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="fgImgPlace1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="50000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="alignImgPlace1">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="accent2"><dr:tint val="50000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="lt1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="revTx">
+		<sa:fillClrLst/>
+		<sa:linClrLst/>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="tx1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+	<sa:styleLbl name="callout">
+		<sa:fillClrLst meth="repeat"><dr:schemeClr val="lt1"><dr:alpha val="90000"/></dr:schemeClr></sa:fillClrLst>
+		<sa:linClrLst meth="repeat"><dr:schemeClr val="accent2"/></sa:linClrLst>
+		<sa:txFillClrLst meth="repeat"><dr:schemeClr val="dk1"/></sa:txFillClrLst>
+	</sa:styleLbl>
+</sa:colorsDef>

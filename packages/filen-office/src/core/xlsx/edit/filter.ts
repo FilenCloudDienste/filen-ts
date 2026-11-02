@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import {
 	DATE_1904_OFFSET,
 	FilterTest,
@@ -823,7 +824,7 @@ function applyParts(
 	if (parts.names !== null) {
 		const names = which === "before" ? parts.names.before : parts.names.after
 
-		document.workbook.definedNames.splice(0, document.workbook.definedNames.length, ...names)
+		spliceAll(document.workbook.definedNames, 0, document.workbook.definedNames.length, names)
 		document.workbook.changes.workbookSection("definedNames")
 		document.dropEngine()
 	}

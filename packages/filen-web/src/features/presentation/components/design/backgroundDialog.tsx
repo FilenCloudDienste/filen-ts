@@ -24,12 +24,8 @@ import {
 } from "@/features/presentation/components/design/design.logic"
 import { designState } from "@/features/presentation/components/design/designState"
 import { preparePresentationPicture } from "@/features/presentation/components/ribbon/insertObjects"
-import {
-	closeDesignDialog,
-	openDesignDialog,
-	useDesignDialog,
-	useDesignHosted
-} from "@/features/presentation/components/design/designDialogs"
+import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
+import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -438,12 +434,10 @@ export function BackgroundDialog({ open, onOpenChange }: { open: boolean; onOpen
 	)
 }
 
-export function BackgroundControl() {
+export function BackgroundControl({ ribbon }: { ribbon: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
 	const editor = usePresentationEditor()?.editor
-	const store = editor?.store
-	const dialog = useDesignDialog(store)
-	const hosted = useDesignHosted(store)
+	const dialog = useRibbonDialog(ribbon)
 
 	return (
 		<>
@@ -453,22 +447,17 @@ export function BackgroundControl() {
 				icon={<PaintBucketIcon />}
 				disabled={editor === undefined || !editor.editable || editor.document.slides.length === 0}
 				onClick={() => {
-					// After the click: a ribbon popup the button sits in closes on it first (an overflow menu), and a dialog
-					// opened in the same click is dismissed with it.
-					requestAnimationFrame(() => {
-						if (store !== undefined) openDesignDialog(store, { kind: "background" })
-					})
+					dialog.open((_live, close) => (
+						<BackgroundDialog
+							open
+							onOpenChange={next => {
+								if (!next) close()
+							}}
+						/>
+					))
 				}}
 			/>
-			{hosted || dialog?.kind !== "background" ? null : (
-				<BackgroundDialog
-					key={dialog.key}
-					open
-					onOpenChange={next => {
-						if (!next && store !== undefined) closeDesignDialog(store)
-					}}
-				/>
-			)}
+			{dialog.view}
 		</>
 	)
 }

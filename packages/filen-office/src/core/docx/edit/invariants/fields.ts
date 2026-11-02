@@ -1,3 +1,4 @@
+import { maxOf, minOf } from "../../../arrays"
 import type { Fragment, Mark, MarkType, Node, Slice } from "prosemirror-model"
 import { isHistoryTransaction } from "prosemirror-history"
 import type { EditorState, Transaction } from "prosemirror-state"
@@ -742,8 +743,8 @@ function repairCharacters(transactions: readonly Transaction[], state: EditorSta
 	const char = open.length === 1 ? open[0] : undefined
 
 	if (char !== undefined && removed.length > 0) {
-		const after = Math.min(...removed.filter(point => point > char.pos))
-		const before = Math.max(...removed.filter(point => point <= char.pos))
+		const after = minOf(removed.filter(point => point > char.pos))
+		const before = maxOf(removed.filter(point => point <= char.pos))
 
 		if (char.kind === "begin" && Number.isFinite(after)) ranges.push([char.pos, after])
 		else if (char.kind === "end" && Number.isFinite(before)) ranges.push([before, char.pos + 1])

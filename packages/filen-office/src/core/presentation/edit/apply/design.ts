@@ -826,7 +826,8 @@ function scaleContent(
 	touches: Touch[]
 ): void {
 	const shape = (node: SlideNode, each: ShapeNode, top: boolean): void => {
-		if (each.lock !== undefined) return
+		// A master's field a slide shows (locked "master") follows its master like the master's own shapes.
+		if (each.lock !== undefined && each.synthetic !== true) return
 
 		let touched = false
 
@@ -945,8 +946,9 @@ function setSize(deck: Deck, op: SetSize, context: ApplyContext): ApplyResult<Se
 		for (const node of nodes)
 			for (const shape of node.shapes)
 				if (
-					(moves && shape.lock !== undefined && shape.xfrm !== undefined && node.synthetic !== true) ||
-					(s !== 1 && holdsLock(shape))
+					shape.synthetic !== true &&
+					((moves && shape.lock !== undefined && shape.xfrm !== undefined && node.synthetic !== true) ||
+						(s !== 1 && holdsLock(shape)))
 				)
 					return refused("locked", `${shape.name || "a shape"} is locked and would not follow the slide size`)
 

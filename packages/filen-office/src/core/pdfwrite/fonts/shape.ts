@@ -1,3 +1,4 @@
+import { fromCodePoints } from "../../arrays"
 import type { SfntFont } from "../../fonts/sfnt"
 import { ZWJ } from "./apply"
 import { GlyphBuffer, ShapingLimitError } from "./buffer"
@@ -648,7 +649,7 @@ export class ShapingFace {
 
 	private chooseForm(grapheme: number[], compose: Shaper["compose"]): number[] {
 		const covered = (list: readonly number[]): boolean => list.every(cp => this.hasGlyph(cp) || isDefaultIgnorable(cp))
-		const text = String.fromCodePoint(...grapheme)
+		const text = fromCodePoints(grapheme)
 		const decomposed = codePoints(text.normalize("NFD"))
 
 		sortMarks(decomposed)

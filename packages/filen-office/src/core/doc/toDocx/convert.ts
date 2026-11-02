@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import type { DocModel, DocBlock, DocParagraph, DocPlaceholder, DocRun, DocStory, DocStoryKind, DocTable, DocTextBox } from "../model"
 import type { DocChar, DocCell, DocRevision, DocRow, DocWidth } from "../props"
 import type { DocFile } from "../read"
@@ -819,7 +820,7 @@ export class StoryWriter {
 
 				if (cell !== undefined && (cell.horzMerge === 2 || cell.horzMerge === 3) && previous !== undefined) {
 					previous.span += span
-					previous.blocks.push(...blocks)
+					appendAll(previous.blocks, blocks)
 				} else {
 					cells.push({ blocks: [...blocks], cell, span, column: endColumn })
 				}

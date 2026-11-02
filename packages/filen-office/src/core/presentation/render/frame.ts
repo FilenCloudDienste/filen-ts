@@ -11,6 +11,7 @@ import type { FrameRef, ShapeNode, ShapeRef } from "../model"
 import type { RenderReport } from "./effects"
 import type { RenderServices } from "./services"
 import type { SmartArtTexts } from "./smartartText"
+import { INSERTED_IMAGE_ID, PART_IMAGE_ID } from "../../smartart/emit"
 import { drawingMarkup } from "../../smartart/style"
 
 // Graphic frames other than tables: charts (the shared chart converter), SmartArt (the drawing PowerPoint caches
@@ -19,6 +20,15 @@ import { drawingMarkup } from "../../smartart/style"
 
 function imagesOf(services: RenderServices, part: string): PaintContext["images"] {
 	return id => {
+		// A picture an edit put into a diagram names its image before a save relates it: an inserted image (served as
+		// "inserted:<id>") or a package part.
+		if (id.startsWith(INSERTED_IMAGE_ID)) return { partName: id, contentType: services.contentType(id) }
+		if (id.startsWith(PART_IMAGE_ID)) {
+			const name = id.slice(PART_IMAGE_ID.length)
+
+			return { partName: name, contentType: services.contentType(name) }
+		}
+
 		const relationship = services.relationship(part, id)
 
 		return relationship === undefined || relationship.external

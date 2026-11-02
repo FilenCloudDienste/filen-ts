@@ -1,3 +1,4 @@
+import { minOf } from "../../arrays"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetLocale, type SheetRange } from "../../sheet/protocol"
 import type { SheetChangeSink, SheetHandled } from "../../sheet/registry"
 import { numberText } from "../../sheet/cf/formula/values"
@@ -70,7 +71,7 @@ function unwrapped(editor: XmlEditor): string {
 
 // The cell a range list's formulas are written for: the top-left cell of the rectangle around its ranges.
 function anchorOf(ranges: readonly SheetRange[]): { readonly row: number; readonly col: number } {
-	return { row: Math.min(...ranges.map(range => range.startRow)), col: Math.min(...ranges.map(range => range.startCol)) }
+	return { row: minOf(ranges.map(range => range.startRow)), col: minOf(ranges.map(range => range.startCol)) }
 }
 
 // A formula written for one cell, written again for another.

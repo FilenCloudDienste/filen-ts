@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import { formulaTranslator, rewriteFormula, sameSheet, type FormulaRef } from "../../sheet/refs/formulaRefs"
 import type { SheetRange } from "../../sheet/protocol"
 import { cellName } from "../../sheet/refs/cellRef"
@@ -339,7 +340,7 @@ export class SheetFormulas {
 			return
 
 		if (range.startRow !== head.at.row || range.startCol !== head.at.col) {
-			own.push(...kept)
+			appendAll(own, kept)
 			kept.length = 0
 			range = { startRow: head.at.row, startCol: head.at.col, endRow: head.at.row, endCol: head.at.col }
 		}

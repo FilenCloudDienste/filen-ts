@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
+import { useId, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react"
 
 // The speaker notes under the slide: a region with a collapse toggle and a horizontal splitter that resizes it by
 // pointer or keyboard (a separator with its value). Collapsed and height are controlled or uncontrolled.
@@ -20,6 +20,8 @@ export interface NotesPanelProps {
 	readonly minHeight?: number
 	readonly maxHeight?: number
 	readonly className?: string
+	// Shown in the body in place of `text` (the notes editor of an editable deck).
+	readonly children?: ReactNode
 }
 
 export const NOTES_DEFAULT_HEIGHT = 120
@@ -141,11 +143,13 @@ export function NotesPanel(props: NotesPanelProps) {
 				className="fo-notes-body"
 				hidden={collapsed}
 				style={collapsed ? undefined : { height }}
-				tabIndex={collapsed ? undefined : 0}
+				tabIndex={collapsed || props.children !== undefined ? undefined : 0}
 				role="document"
 				aria-label={props.label}
 			>
-				{paragraphs.length === 0 ? (
+				{props.children !== undefined ? (
+					props.children
+				) : paragraphs.length === 0 ? (
 					<p
 						className="fo-notes-empty"
 						data-fo-empty=""

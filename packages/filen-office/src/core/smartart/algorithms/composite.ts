@@ -117,7 +117,7 @@ function fitLineAcross(child: LayoutNode, context: LayoutContext): void {
 }
 
 // Children whose constraints carry them past the node's box on an axis, as a whole no larger than the box, are
-// centred in it on that axis (venn1's circles, positioned from the box's centre, stand clear of its top in
+// centred in it on that axis (or aligned as the composite's horzAlign/vertAlign say) (venn1's circles, positioned from the box's centre, stand clear of its top in
 // PowerPoint's caches by the same margin as of its bottom).
 function keepInside(node: LayoutNode): void {
 	const box = node.box
@@ -140,8 +140,27 @@ function keepInside(node: LayoutNode): void {
 	if (!(x1 > x0 && y1 > y0)) return
 
 	const slack = 1
-	const dx = (x0 < box.x - slack || x1 > box.x + box.w + slack) && x1 - x0 <= box.w ? box.x + (box.w - (x1 - x0)) / 2 - x0 : 0
-	const dy = (y0 < box.y - slack || y1 > box.y + box.h + slack) && y1 - y0 <= box.h ? box.y + (box.h - (y1 - y0)) / 2 - y0 : 0
+	// A composite that names its alignment (horzAlign, vertAlign) aligns its children as a group within its box:
+	// chart3's exploded wedge leaves the pie's bounds off the square, and PowerPoint's cache centres those bounds.
+	const aligned = (name: string, near: string, far: string, start: number, extent: number, from: number, to: number): number => {
+		const value = node.alg.params.get(name)
+
+		if (value === undefined || to - from > extent) return Number.NaN
+
+		return value === near ? start - from : value === far ? start + extent - to : start + (extent - (to - from)) / 2 - from
+	}
+	const alignX = aligned("horzAlign", "l", "r", box.x, box.w, x0, x1)
+	const alignY = aligned("vertAlign", "t", "b", box.y, box.h, y0, y1)
+	const dx = Number.isFinite(alignX)
+		? alignX
+		: (x0 < box.x - slack || x1 > box.x + box.w + slack) && x1 - x0 <= box.w
+			? box.x + (box.w - (x1 - x0)) / 2 - x0
+			: 0
+	const dy = Number.isFinite(alignY)
+		? alignY
+		: (y0 < box.y - slack || y1 > box.y + box.h + slack) && y1 - y0 <= box.h
+			? box.y + (box.h - (y1 - y0)) / 2 - y0
+			: 0
 
 	if (dx === 0 && dy === 0) return
 

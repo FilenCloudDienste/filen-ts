@@ -1,3 +1,4 @@
+import { maxOf, minOf } from "../arrays"
 import type { Rgba, ShadeRamp } from "./displayList"
 
 // Rasterises a "shaded" paint (triangles with a colour per vertex: GDI gradient triangles, GDI+ path
@@ -124,7 +125,7 @@ export function shadeRaster(
 		const xs = [points[p] ?? 0, points[p + 2] ?? 0, points[p + 4] ?? 0]
 		const ys = [points[p + 1] ?? 0, points[p + 3] ?? 0, points[p + 5] ?? 0]
 
-		area += (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys))
+		area += (maxOf(xs) - minOf(xs)) * (maxOf(ys) - minOf(ys))
 	}
 
 	const fit = Math.min(scale, Math.sqrt(maxPixels / (spanX * spanY)), area > 0 ? Math.sqrt(maxWork / area) : scale)

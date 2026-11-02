@@ -1,3 +1,4 @@
+import { maxOf } from "../../arrays"
 import { sniffImage } from "../../docx/objects/images"
 import { RtfOut, RtfWriteRefusal } from "./out"
 import { encodeText } from "./encode"
@@ -50,7 +51,7 @@ export function stretchDibMetafile(image: Uint8Array, format: "png" | "jpeg", wi
 	u16(0x0300)
 	u32(total)
 	u16(0)
-	u32(Math.max(...records))
+	u32(maxOf(records))
 	u16(0)
 	// META_SETWINDOWORG (y, x) and META_SETWINDOWEXT (height, width).
 	u32(5)

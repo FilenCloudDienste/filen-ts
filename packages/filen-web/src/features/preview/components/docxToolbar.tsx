@@ -494,6 +494,9 @@ export function DocxFindField({
 								label={t("previewDocxReplace")}
 								disabled={replace.disabled || find.count === 0 || !searched}
 								onClick={() => {
+									// The last match replaced disables this button: focus goes to the find field, not the overlay.
+									if (find.count === 1) inputRef.current?.focus()
+
 									replace.one(replacement)
 								}}
 							>
@@ -503,6 +506,8 @@ export function DocxFindField({
 								label={t("previewDocxReplaceAll")}
 								disabled={replace.disabled || find.count === 0 || !searched}
 								onClick={() => {
+									// No match is left, and this button disables itself: focus goes to the find field.
+									inputRef.current?.focus()
 									replace.all(replacement)
 								}}
 							>

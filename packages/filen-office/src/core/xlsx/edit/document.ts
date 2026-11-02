@@ -1,3 +1,4 @@
+import { appendAll } from "../../arrays"
 import type { RawCellContent } from "hyperformula"
 import { isSealedOfficeFile } from "../../encryption/index"
 import type { SliceClock, Slicing } from "../../slicing"
@@ -1965,7 +1966,7 @@ export class XlsxDocument {
 
 				if (more === null) return null
 
-				areas.push(...more)
+				appendAll(areas, more)
 			}
 		}
 

@@ -1,3 +1,4 @@
+import { appendAll } from "../../../arrays"
 import { Fragment, Slice, type Mark, type MarkType, type Node, type NodeType, type ResolvedPos } from "prosemirror-model"
 import { Plugin, PluginKey, type EditorState, type Transaction } from "prosemirror-state"
 import {
@@ -685,7 +686,7 @@ function freshNode(node: Node, keep?: KeptMarkers): Node | null {
 	if ("end" in attrs && type !== nodes.field) attrs["end"] = kept(attrs["end"])
 	if (type === nodes.field) {
 		// A new field has no bytes to hold markers: they go next to it.
-		held?.orphans.push(...kept(attrs["markers"]))
+		if (held !== undefined) appendAll(held.orphans, kept(attrs["markers"]))
 		attrs["end"] = NO_SOURCE
 		attrs["markers"] = NO_MARKERS
 
@@ -940,7 +941,7 @@ export function changedRanges(tr: Transaction, marks = true, attrs?: ReadonlySet
 		} else if (step instanceof AttrStep) {
 			if (attrs === undefined || attrs.has(step.attr)) out.push(step.pos, step.pos + 1)
 		} else if (step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep) out.push(step.pos, step.pos + 1)
-		else if (step instanceof RebuildStep) out.push(...replacedAfter(step))
+		else if (step instanceof RebuildStep) appendAll(out, replacedAfter(step))
 		else {
 			const parts = markStepsOf(step)
 

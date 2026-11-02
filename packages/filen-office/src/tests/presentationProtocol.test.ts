@@ -140,6 +140,7 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 						})
 			}),
 		redo: () => Promise.resolve({ ok: true, revision: 5, dirty: true }),
+		retract: (_context, revision) => Promise.resolve({ ok: true, revision: revision + 1, dirty: false }),
 		find: (_context, query) => Promise.resolve(new Int32Array([0, 2, 0, 0, query.length, 0])),
 		media: (_context, part, media) => {
 			media.postMessage({ part })
@@ -173,7 +174,16 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 			return Promise.resolve()
 		},
 		freshParts: (_context, target) =>
-			Promise.resolve({ target, bytes: 2048, losses: [{ kind: "smartartAsGroup", count: 1, slides: [0] }] })
+			Promise.resolve({ target, bytes: 2048, losses: [{ kind: "smartartAsGroup", count: 1, slides: [0] }] }),
+		review: (_context, slide) =>
+			Promise.resolve({
+				slide,
+				format: "modern",
+				comments: [],
+				notes: { slide: slideRef(30), id: 3 },
+				notesText: "Speak slowly",
+				can: { reply: true, resolve: true }
+			})
 	}
 }
 
@@ -265,6 +275,7 @@ describe("the presentation protocol", () => {
 
 		expect(reseeded.ok && reseeded.seed?.page.page.sourceTexts).toEqual(["Slide 1"])
 		expect(await session.call("redo").answer).toEqual({ ok: true, revision: 5, dirty: true })
+		expect(await session.call("retract", 4).answer).toEqual({ ok: true, revision: 5, dirty: false })
 		expect(await session.call("image", "/ppt/media/image1.png").answer).toEqual({
 			bytes: new Uint8Array([0x89, 0x50]),
 			type: "image/png"
@@ -346,6 +357,15 @@ describe("the presentation protocol", () => {
 			end.mine.close()
 		}
 
+		expect(await session.call("review", slideRef(10)).answer).toEqual({
+			slide: slideRef(10),
+			format: "modern",
+			comments: [],
+			notes: { slide: slideRef(30), id: 3 },
+			notesText: "Speak slowly",
+			can: { reply: true, resolve: true }
+		})
+
 		const called = new Set(channel.toWorker.flatMap(message => (message.t === "call" ? [message.method] : [])))
 
 		expect([...called].sort()).toEqual([...PRESENTATION_METHODS].sort())
@@ -401,6 +421,7 @@ describe("the presentation protocol", () => {
 			command: () => session.call("command", { family: "slide", kind: "reset", slide: slideRef(10) }).answer,
 			undo: () => session.call("undo").answer,
 			redo: () => session.call("redo").answer,
+			retract: () => session.call("retract", 1).answer,
 			find: () => session.call("find", "x").answer,
 			media: () => session.call("media", "/ppt/media/media1.mp4", ports()).answer,
 			registerMedia: () =>
@@ -415,7 +436,8 @@ describe("the presentation protocol", () => {
 			smartArtInfo: () => session.call("smartArtInfo", shape).answer,
 			chartData: () => session.call("chartData", shape).answer,
 			jobsPort: () => session.call("jobsPort", ports()).answer,
-			freshParts: () => session.call("freshParts", "pptx", ports()).answer
+			freshParts: () => session.call("freshParts", "pptx", ports()).answer,
+			review: () => session.call("review", slideRef(10)).answer
 		}
 
 		// Built by their slices: edits (command, undo, redo), saving (save, commitSaved), find, the SmartArt text pane's
@@ -424,6 +446,7 @@ describe("the presentation protocol", () => {
 			"command",
 			"undo",
 			"redo",
+			"retract",
 			"save",
 			"commitSaved",
 			"find",
@@ -432,7 +455,8 @@ describe("the presentation protocol", () => {
 			"chartData",
 			"jobsPort",
 			"jobsPort",
-			"freshParts"
+			"freshParts",
+			"review"
 		])
 
 		for (const method of PRESENTATION_METHODS.filter(method => !built.has(method))) {

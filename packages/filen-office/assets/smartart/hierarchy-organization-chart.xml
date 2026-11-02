@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutOrganizationChart
+-->
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:organization-chart">
+	<dgm:title val="Organization chart"/>
+	<dgm:desc val="A reporting tree drawn top down: each person is a card, joined to the people who report to them by elbow lines. Assistants hang between a manager and the rest of the team."/>
+	<dgm:catLst>
+		<dgm:cat type="hierarchy" pri="100"/>
+	</dgm:catLst>
+	<dgm:sampData>
+		<dgm:dataModel>
+			<dgm:ptLst>
+				<dgm:pt modelId="0" type="doc"/>
+				<dgm:pt modelId="1"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="2"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="3"><dgm:prSet phldr="1"/></dgm:pt>
+				<dgm:pt modelId="4"><dgm:prSet phldr="1"/></dgm:pt>
+			</dgm:ptLst>
+			<dgm:cxnLst>
+				<dgm:cxn modelId="10" srcId="0" destId="1" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="11" srcId="1" destId="2" srcOrd="0" destOrd="0"/>
+				<dgm:cxn modelId="12" srcId="1" destId="3" srcOrd="1" destOrd="0"/>
+				<dgm:cxn modelId="13" srcId="1" destId="4" srcOrd="2" destOrd="0"/>
+			</dgm:cxnLst>
+			<dgm:bg/>
+			<dgm:whole/>
+		</dgm:dataModel>
+	</dgm:sampData>
+	<dgm:layoutNode name="chart">
+		<dgm:varLst>
+			<dgm:orgChart val="1"/>
+			<dgm:dir/>
+			<dgm:resizeHandles val="exact"/>
+		</dgm:varLst>
+		<dgm:choose name="topDirection">
+			<dgm:if name="topLeftToRight" func="var" arg="dir" op="equ" val="norm">
+				<dgm:alg type="hierChild">
+					<dgm:param type="linDir" val="fromL"/>
+					<dgm:param type="chAlign" val="t"/>
+				</dgm:alg>
+			</dgm:if>
+			<dgm:else name="topRightToLeft">
+				<dgm:alg type="hierChild">
+					<dgm:param type="linDir" val="fromR"/>
+					<dgm:param type="chAlign" val="t"/>
+				</dgm:alg>
+			</dgm:else>
+		</dgm:choose>
+		<dgm:shape><dgm:adjLst/></dgm:shape>
+		<dgm:presOf/>
+		<dgm:constrLst>
+			<dgm:constr type="w" for="des" forName="card" refType="w" fact="0.18"/>
+			<dgm:constr type="h" for="des" forName="card" refType="w" refFor="des" refForName="card" fact="0.48"/>
+			<dgm:constr type="sp" for="des" forName="person" refType="h" refFor="des" refForName="card" fact="0.55"/>
+			<dgm:constr type="sibSp" for="des" forName="team" refType="w" refFor="des" refForName="card" fact="0.16"/>
+			<dgm:constr type="sibSp" for="des" forName="aides" refType="w" refFor="des" refForName="card" fact="0.16"/>
+			<dgm:constr type="sibSp" refType="w" refFor="des" refForName="card" fact="0.3"/>
+			<dgm:constr type="primFontSz" for="des" forName="card" op="equ" val="60"/>
+		</dgm:constrLst>
+		<dgm:ruleLst/>
+		<dgm:forEach name="people" axis="ch" ptType="node">
+			<dgm:layoutNode name="person">
+				<dgm:alg type="hierRoot">
+					<dgm:param type="hierAlign" val="tCtrCh"/>
+				</dgm:alg>
+				<dgm:shape><dgm:adjLst/></dgm:shape>
+				<dgm:presOf/>
+				<dgm:constrLst/>
+				<dgm:ruleLst/>
+				<dgm:layoutNode name="card" styleLbl="node1">
+					<dgm:varLst>
+						<dgm:bulletEnabled val="0"/>
+					</dgm:varLst>
+					<dgm:alg type="tx"/>
+					<dgm:shape type="rect"><dgm:adjLst/></dgm:shape>
+					<dgm:presOf axis="self"/>
+					<dgm:constrLst>
+						<dgm:constr type="lMarg" refType="primFontSz" fact="0.15"/>
+						<dgm:constr type="rMarg" refType="primFontSz" fact="0.15"/>
+						<dgm:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+						<dgm:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+					</dgm:constrLst>
+					<dgm:ruleLst>
+						<dgm:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</dgm:ruleLst>
+				</dgm:layoutNode>
+				<dgm:layoutNode name="aides">
+					<dgm:alg type="hierChild">
+						<dgm:param type="linDir" val="fromL"/>
+						<dgm:param type="chAlign" val="t"/>
+					</dgm:alg>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+					<dgm:forEach name="assistants" axis="ch" ptType="asst">
+						<dgm:forEach name="assistantLine" axis="precedSib" ptType="parTrans" st="-1" cnt="1">
+							<dgm:layoutNode name="aideLine" styleLbl="parChTrans1D2">
+								<dgm:alg type="conn">
+									<dgm:param type="dim" val="1D"/>
+									<dgm:param type="connRout" val="bend"/>
+									<dgm:param type="begPts" val="bCtr"/>
+									<dgm:param type="endPts" val="midL midR"/>
+									<dgm:param type="begSty" val="noArr"/>
+									<dgm:param type="endSty" val="noArr"/>
+								</dgm:alg>
+								<dgm:shape type="conn"><dgm:adjLst/></dgm:shape>
+								<dgm:presOf axis="self"/>
+								<dgm:constrLst>
+									<dgm:constr type="begPad"/>
+									<dgm:constr type="endPad"/>
+								</dgm:constrLst>
+								<dgm:ruleLst/>
+							</dgm:layoutNode>
+						</dgm:forEach>
+						<dgm:forEach name="assistantPerson" ref="people" axis="self"/>
+					</dgm:forEach>
+				</dgm:layoutNode>
+				<dgm:layoutNode name="team">
+					<dgm:choose name="teamDirection">
+						<dgm:if name="teamLeftToRight" func="var" arg="dir" op="equ" val="norm">
+							<dgm:alg type="hierChild">
+								<dgm:param type="linDir" val="fromL"/>
+								<dgm:param type="chAlign" val="t"/>
+							</dgm:alg>
+						</dgm:if>
+						<dgm:else name="teamRightToLeft">
+							<dgm:alg type="hierChild">
+								<dgm:param type="linDir" val="fromR"/>
+								<dgm:param type="chAlign" val="t"/>
+							</dgm:alg>
+						</dgm:else>
+					</dgm:choose>
+					<dgm:shape><dgm:adjLst/></dgm:shape>
+					<dgm:presOf/>
+					<dgm:constrLst/>
+					<dgm:ruleLst/>
+					<dgm:forEach name="reports" axis="ch" ptType="nonAsst">
+						<dgm:forEach name="reportLine" axis="precedSib" ptType="parTrans" st="-1" cnt="1">
+							<dgm:layoutNode name="line" styleLbl="parChTrans1D2">
+								<dgm:alg type="conn">
+									<dgm:param type="dim" val="1D"/>
+									<dgm:param type="connRout" val="bend"/>
+									<dgm:param type="begPts" val="bCtr"/>
+									<dgm:param type="endPts" val="tCtr"/>
+									<dgm:param type="begSty" val="noArr"/>
+									<dgm:param type="endSty" val="noArr"/>
+								</dgm:alg>
+								<dgm:shape type="conn"><dgm:adjLst/></dgm:shape>
+								<dgm:presOf axis="self"/>
+								<dgm:constrLst>
+									<dgm:constr type="begPad"/>
+									<dgm:constr type="endPad"/>
+								</dgm:constrLst>
+								<dgm:ruleLst/>
+							</dgm:layoutNode>
+						</dgm:forEach>
+						<dgm:forEach name="reportPerson" ref="people" axis="self"/>
+					</dgm:forEach>
+				</dgm:layoutNode>
+			</dgm:layoutNode>
+		</dgm:forEach>
+	</dgm:layoutNode>
+</dgm:layoutDef>

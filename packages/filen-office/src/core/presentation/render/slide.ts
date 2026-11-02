@@ -18,6 +18,7 @@ import { NodeKind, parseXml, sliceClock, type SliceClock, type XmlDocument } fro
 import { runSliced, type Slicing } from "../../slicing"
 import { DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../budget"
 import { mediaPlayback } from "../edit/apply/media"
+import { notesText } from "../notes"
 import {
 	PresentationError,
 	type Deck,
@@ -528,18 +529,6 @@ export function textBox(
 	return { matrix: multiply(item, [1, 0, 0, 1, ix, iy]), width: iw, height: ih }
 }
 
-function notesText(deck: Deck, node: SlideNode): string {
-	const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
-
-	if (notes === undefined) return ""
-
-	return notes.shapes
-		.filter(shape => shape.ph?.type === "body")
-		.flatMap(shape => shape.text?.paragraphs ?? [])
-		.map(paragraph => paragraph.runs.map(run => (run.kind === "br" ? "\n" : run.text)).join(""))
-		.join("\n")
-}
-
 export interface RenderOptions {
 	// The editor's view: a slide's empty placeholders carry their prompt (SlideLayer.prompt) in these strings.
 	readonly prompts?: PlaceholderPrompts
@@ -731,8 +720,15 @@ function entryMatrix(entry: Entry): number[] {
 // slide names that layout or master, so it never shares a ref with a slide shape of the same id). `child` names the
 // group child (of entry.shape) the layer draws, with its own role and alt text (the group's actions and lock hold for
 // its children unless the child has its own).
-function layerBase(entry: Entry, id: number, child?: ShapeNode): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock" | "media"> {
+function layerBase(
+	entry: Entry,
+	id: number,
+	child?: ShapeNode
+): Pick<SlideLayer, "shape" | "role" | "alt" | "actions" | "lock" | "media" | "holds"> {
 	const shape = child ?? entry.shape
+	// A group drawn in parts: each part's layer carries what the whole group holds, so a group shown only through its
+	// children's layers still says what flipping it would mirror.
+	const holds = entryHeldRoles(entry)
 	const alt = shape.alt?.decorative === true ? undefined : (shape.alt?.descr ?? shape.alt?.title)
 	const actions = shape.actions ?? entry.shape.actions
 	const lock = shape.lock ?? entry.shape.lock
@@ -743,8 +739,47 @@ function layerBase(entry: Entry, id: number, child?: ShapeNode): Pick<SlideLayer
 		...(alt === undefined || alt === "" ? {} : { alt }),
 		...(actions === undefined ? {} : { actions }),
 		...(lock === undefined ? {} : { lock }),
-		...(shape.media === undefined ? {} : { media: mediaInfo(shape.media, entry.owner, shape.id) })
+		...(shape.media === undefined ? {} : { media: mediaInfo(shape.media, entry.owner, shape.id) }),
+		...(holds.length === 0 ? {} : { holds })
 	}
+}
+
+const FRAME_ROLES: ReadonlySet<LayerRole> = new Set(["table", "chart", "smartart", "ole", "media"])
+
+// The roles of the graphic frames and media among a group's members, however deep (drawn on the group's layer or on
+// their own): what flipping the group would mirror. Empty for a shape that is no group.
+// Once per render's entry (a group drawn in parts asks for every part's layer; the model may change between renders).
+const heldRolesOf = new WeakMap<Entry, LayerRole[]>()
+
+function entryHeldRoles(entry: Entry): LayerRole[] {
+	let roles = heldRolesOf.get(entry)
+
+	if (roles === undefined) {
+		roles = heldRoles(entry.shape)
+		heldRolesOf.set(entry, roles)
+	}
+
+	return roles
+}
+
+function heldRoles(shape: ShapeNode): LayerRole[] {
+	if (shape.children === undefined) return []
+
+	const out = new Set<LayerRole>()
+	const stack = [...shape.children]
+
+	for (let member = stack.pop(); member !== undefined; member = stack.pop()) {
+		if (member.media !== undefined) out.add("media")
+		if (member.kind === "frame") {
+			const kind = member.frame?.kind
+
+			if (kind !== undefined && FRAME_ROLES.has(kind as LayerRole)) out.add(kind as LayerRole)
+		}
+
+		for (const inner of member.children ?? []) stack.push(inner)
+	}
+
+	return [...out]
 }
 
 // What a medium's layer plays, with its playback options from the slide's timing.

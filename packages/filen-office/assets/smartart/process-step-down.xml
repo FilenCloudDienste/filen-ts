@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Filen SmartArt gallery definition. Written by Filen from the semantics of ECMA-376 Part 1 §21.4 (DrawingML
+	diagrams); no Microsoft definition file was copied or used as a source.
+	nameKey: previewPptxSmartArtLayoutStepDownProcess
+-->
+<sa:layoutDef xmlns:sa="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:dr="http://schemas.openxmlformats.org/drawingml/2006/main" uniqueId="urn:filen:smartart:layout:process-step-down">
+	<sa:title val="Step-down process"/>
+	<sa:desc val="Steps descend like a staircase from the top left, each one a step further right, with a bent arrow down to the next; a step's sub-items sit beside it."/>
+	<sa:catLst>
+		<sa:cat type="process" pri="30"/>
+	</sa:catLst>
+	<sa:sampData>
+		<sa:dataModel>
+			<sa:ptLst>
+				<sa:pt modelId="100" type="doc"/>
+				<sa:pt modelId="101"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="102"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="103"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="104"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="105"><sa:prSet phldr="1"/></sa:pt>
+				<sa:pt modelId="106"><sa:prSet phldr="1"/></sa:pt>
+			</sa:ptLst>
+			<sa:cxnLst>
+				<sa:cxn modelId="200" srcId="100" destId="101" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="201" srcId="101" destId="102" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="202" srcId="100" destId="103" srcOrd="1" destOrd="0"/>
+				<sa:cxn modelId="203" srcId="103" destId="104" srcOrd="0" destOrd="0"/>
+				<sa:cxn modelId="204" srcId="100" destId="105" srcOrd="2" destOrd="0"/>
+				<sa:cxn modelId="205" srcId="105" destId="106" srcOrd="0" destOrd="0"/>
+			</sa:cxnLst>
+			<sa:bg/>
+			<sa:whole/>
+		</sa:dataModel>
+	</sa:sampData>
+	<sa:layoutNode name="stairs">
+		<sa:varLst>
+			<sa:dir/>
+			<sa:animLvl val="lvl"/>
+			<sa:resizeHandles val="exact"/>
+		</sa:varLst>
+		<sa:alg type="lin">
+			<sa:param type="linDir" val="fromT"/>
+			<sa:param type="nodeHorzAlign" val="l"/>
+		</sa:alg>
+		<sa:shape><sa:adjLst/></sa:shape>
+		<sa:presOf/>
+		<sa:constrLst>
+			<sa:constr for="ch" forName="tread" type="w" refType="w"/>
+			<sa:constr for="ch" forName="tread" type="h" refType="w" fact="0.1"/>
+			<sa:constr for="ch" forName="riser" type="w" refType="w"/>
+			<sa:constr for="ch" forName="riser" type="h" refType="w" fact="0.06"/>
+			<sa:constr for="des" forName="step" type="primFontSz" op="equ" val="44"/>
+			<sa:constr for="des" forName="aside" type="primFontSz" op="equ" val="30"/>
+		</sa:constrLst>
+		<sa:ruleLst/>
+		<sa:forEach name="steps" ptType="node" axis="ch">
+			<sa:layoutNode name="tread">
+				<sa:choose name="reading">
+					<sa:if name="fromLeft" func="var" arg="dir" op="equ" val="norm">
+						<sa:alg type="lin">
+							<sa:param type="linDir" val="fromL"/>
+							<sa:param type="horzAlign" val="l"/>
+							<sa:param type="nodeVertAlign" val="mid"/>
+						</sa:alg>
+					</sa:if>
+					<sa:else name="fromRight">
+						<sa:alg type="lin">
+							<sa:param type="linDir" val="fromR"/>
+							<sa:param type="horzAlign" val="r"/>
+							<sa:param type="nodeVertAlign" val="mid"/>
+						</sa:alg>
+					</sa:else>
+				</sa:choose>
+				<sa:shape><sa:adjLst/></sa:shape>
+				<sa:presOf/>
+				<sa:constrLst>
+					<sa:constr for="ch" forName="indent" type="w" refType="h" fact="1.1"/>
+					<sa:constr for="ch" forName="indent" type="h" refType="h"/>
+					<sa:constr for="ch" forName="step" type="w" refType="h" fact="2.4"/>
+					<sa:constr for="ch" forName="step" type="h" refType="h"/>
+					<sa:constr for="ch" forName="aside" type="w" refType="h" fact="3.6"/>
+					<sa:constr for="ch" forName="aside" type="h" refType="h"/>
+				</sa:constrLst>
+				<sa:ruleLst/>
+				<sa:forEach name="before" ptType="node" axis="precedSib">
+					<sa:layoutNode name="indent">
+						<sa:alg type="sp"/>
+						<sa:shape><sa:adjLst/></sa:shape>
+						<sa:presOf/>
+						<sa:constrLst/>
+						<sa:ruleLst/>
+					</sa:layoutNode>
+				</sa:forEach>
+				<sa:layoutNode name="step" styleLbl="node1">
+					<sa:alg type="tx"/>
+					<sa:shape type="roundRect">
+						<sa:adjLst>
+							<sa:adj idx="1" val="0.24"/>
+						</sa:adjLst>
+					</sa:shape>
+					<sa:presOf axis="self"/>
+					<sa:constrLst>
+						<sa:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="rMarg" refType="primFontSz" fact="0.3"/>
+						<sa:constr type="tMarg" refType="primFontSz" fact="0.2"/>
+						<sa:constr type="bMarg" refType="primFontSz" fact="0.2"/>
+					</sa:constrLst>
+					<sa:ruleLst>
+						<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+					</sa:ruleLst>
+				</sa:layoutNode>
+				<sa:choose name="details">
+					<sa:if name="hasDetails" func="cnt" axis="ch" ptType="node" op="gte" val="1">
+						<sa:layoutNode name="aside" styleLbl="revTx">
+							<sa:varLst>
+								<sa:bulletEnabled val="1"/>
+							</sa:varLst>
+							<sa:alg type="tx">
+								<sa:param type="parTxLTRAlign" val="l"/>
+							</sa:alg>
+							<sa:shape type="rect" hideGeom="1"><sa:adjLst/></sa:shape>
+							<sa:presOf axis="des" ptType="node"/>
+							<sa:constrLst>
+								<sa:constr type="lMarg" refType="primFontSz" fact="0.3"/>
+								<sa:constr type="rMarg" refType="primFontSz" fact="0.1"/>
+								<sa:constr type="tMarg" refType="primFontSz" fact="0.1"/>
+								<sa:constr type="bMarg" refType="primFontSz" fact="0.1"/>
+							</sa:constrLst>
+							<sa:ruleLst>
+								<sa:rule type="primFontSz" val="5" fact="NaN" max="NaN"/>
+							</sa:ruleLst>
+						</sa:layoutNode>
+					</sa:if>
+					<sa:else name="noDetails"/>
+				</sa:choose>
+			</sa:layoutNode>
+			<sa:forEach name="turns" ptType="sibTrans" axis="followSib" cnt="1">
+				<sa:layoutNode name="riser">
+					<sa:choose name="turnReading">
+						<sa:if name="turnFromLeft" func="var" arg="dir" op="equ" val="norm">
+							<sa:alg type="lin">
+								<sa:param type="linDir" val="fromL"/>
+								<sa:param type="horzAlign" val="l"/>
+								<sa:param type="nodeVertAlign" val="mid"/>
+							</sa:alg>
+						</sa:if>
+						<sa:else name="turnFromRight">
+							<sa:alg type="lin">
+								<sa:param type="linDir" val="fromR"/>
+								<sa:param type="horzAlign" val="r"/>
+								<sa:param type="nodeVertAlign" val="mid"/>
+							</sa:alg>
+						</sa:else>
+					</sa:choose>
+					<sa:shape><sa:adjLst/></sa:shape>
+					<sa:presOf/>
+					<sa:constrLst>
+						<sa:constr for="ch" forName="turnIndent" type="w" refType="h" fact="1.8333"/>
+						<sa:constr for="ch" forName="turnIndent" type="h" refType="h"/>
+						<sa:constr for="ch" forName="lead" type="w" refType="h" fact="0.3"/>
+						<sa:constr for="ch" forName="lead" type="h" refType="h"/>
+						<sa:constr for="ch" forName="bend" type="w" refType="h" fact="1.5333"/>
+						<sa:constr for="ch" forName="bend" type="h" refType="h"/>
+					</sa:constrLst>
+					<sa:ruleLst/>
+					<sa:forEach name="beforeTurn" ptType="node" axis="precedSib" st="2">
+						<sa:layoutNode name="turnIndent">
+							<sa:alg type="sp"/>
+							<sa:shape><sa:adjLst/></sa:shape>
+							<sa:presOf/>
+							<sa:constrLst/>
+							<sa:ruleLst/>
+						</sa:layoutNode>
+					</sa:forEach>
+					<sa:layoutNode name="lead">
+						<sa:alg type="sp"/>
+						<sa:shape><sa:adjLst/></sa:shape>
+						<sa:presOf/>
+						<sa:constrLst/>
+						<sa:ruleLst/>
+					</sa:layoutNode>
+					<sa:layoutNode name="bend" styleLbl="sibTrans2D1">
+						<sa:alg type="sp"/>
+						<sa:choose name="turning">
+							<sa:if name="toRight" func="var" arg="dir" op="equ" val="norm">
+								<sa:shape type="bentUpArrow" rot="90">
+									<sa:adjLst>
+										<sa:adj idx="1" val="0.3"/>
+										<sa:adj idx="2" val="0.3"/>
+										<sa:adj idx="3" val="0.3"/>
+									</sa:adjLst>
+								</sa:shape>
+							</sa:if>
+							<sa:else name="toLeft">
+								<sa:shape type="bentArrow" rot="90">
+									<sa:adjLst>
+										<sa:adj idx="1" val="0.3"/>
+										<sa:adj idx="2" val="0.3"/>
+										<sa:adj idx="3" val="0.3"/>
+										<sa:adj idx="4" val="0"/>
+									</sa:adjLst>
+								</sa:shape>
+							</sa:else>
+						</sa:choose>
+						<sa:presOf/>
+						<sa:constrLst/>
+						<sa:ruleLst/>
+					</sa:layoutNode>
+				</sa:layoutNode>
+			</sa:forEach>
+		</sa:forEach>
+	</sa:layoutNode>
+</sa:layoutDef>

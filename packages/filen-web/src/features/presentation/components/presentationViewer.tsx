@@ -32,6 +32,7 @@ import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { BAR_BUTTON, pageControlsWidth, useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { CommandFileMenu, FullScreenButton, PageControls } from "@/features/preview/components/commandBarControls"
 import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
+import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { DocxPasswordGate, type PasswordVerdict } from "@/features/preview/components/docxPasswordPrompt"
 import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { TextViewer } from "@/features/preview/components/textViewer"
@@ -530,6 +531,7 @@ function DeckSurface({
 	const [railOpen, setRailOpen] = useState(true)
 	const [notesOpen, setNotesOpen] = useState(true)
 	const canvasRef = useRef<HTMLDivElement | null>(null)
+	const rootRef = useRef<HTMLDivElement | null>(null)
 	const count = deck.slides.length
 	const index = Math.min(current, Math.max(0, count - 1))
 	const ref: SlideRef | undefined = deck.slides[index]?.ref
@@ -651,17 +653,26 @@ function DeckSurface({
 		})
 	}
 
+	const focusSlide = (): void => {
+		canvasRef.current?.focus()
+	}
+
+	// The show's keys and F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a
+	// click, as Safari and macOS Firefox do). Paging stays the slide's own.
+	useEditorLayerKeys(rootRef, (event, root) => {
+		if (!show.onKey(event)) onCommandBarF6(event, root, focusSlide)
+	})
+
 	return (
 		<div
+			ref={rootRef}
 			role="region"
 			aria-label={alt}
 			className="flex size-full flex-col"
 			onKeyDown={event => {
 				if (show.onKey(event)) return
 
-				onCommandBarF6(event, () => {
-					canvasRef.current?.focus()
-				})
+				onCommandBarF6(event, event.currentTarget, focusSlide)
 				onPageKey(event, show.showing, step => {
 					go(step === "first" ? 0 : step === "last" ? count - 1 : index + step)
 				})

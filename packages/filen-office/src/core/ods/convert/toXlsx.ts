@@ -1,3 +1,4 @@
+import { spliceAll } from "../../arrays"
 import { BytePieces, OpcPackage, bytesSource, memorySink, parseRelationships, writeZip, type ByteChunks } from "../../opc/index"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../sheet/protocol"
 import { encodeUtf8, escapeAttribute, escapeText, decodeUtf8 } from "../../xml/index"
@@ -329,7 +330,12 @@ function placeStyleRuns(
 
 		for (let row = at; row <= LAST_ROW; row++) rowStyles.set(row, 0)
 
-		list.splice(0, list.length, ...list.filter(run => !runs.includes(run)))
+		spliceAll(
+			list,
+			0,
+			list.length,
+			list.filter(run => !runs.includes(run))
+		)
 	}
 
 	for (const [startRow, startCol, endRow, endCol, style] of list) {

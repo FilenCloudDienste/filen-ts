@@ -1,8 +1,11 @@
+import { refitGroups } from "../../groupBounds"
 import type { TimeNode } from "../../../anim/model"
 import { holdMarkup, timingTargets, withoutShapes } from "../../../anim/prune"
 import { matchShapes } from "./match"
+import { applyMotionPath, lockedPathOps } from "./motionPath"
 import { classifyHref } from "../../actions"
-import { resolveShape } from "../../inherit"
+import { motionBehaviors } from "../../../anim/motionEdit"
+import { inheritLevels, resolveShape } from "../../inherit"
 import {
 	refused,
 	type Deck,
@@ -93,9 +96,26 @@ function moveLock(shape: ShapeNode, context: ApplyContext): Refused | undefined 
 	}
 }
 
-// Delete, reorder and group keep the element's bytes; only a deck-level lock refuses them.
+// A graphic frame (a table, chart, embedded object or diagram, ODF's draw:frame) and a medium have no flip either
+// format draws (ECMA-376 §19.3.1.21), and a group holding one would mirror it: a box that changes their flips is
+// refused as the command. An ODF 3D scene (an unknown frame of an ODP) is written mirrored, as LibreOffice mirrors it.
+function unflippable(shape: ShapeNode): boolean {
+	if (shape.kind === "frame") return !(shape.frame?.kind === "unknown" && shape.src?.format === "odp")
+
+	return shape.media !== undefined || (shape.children ?? []).some(unflippable)
+}
+
+function frameFlip(shape: ShapeNode, xfrm: Xfrm | undefined): Refused | undefined {
+	if (xfrm === undefined || !unflippable(shape)) return undefined
+	if (xfrm.flipH === (shape.xfrm?.flipH ?? false) && xfrm.flipV === (shape.xfrm?.flipV ?? false)) return undefined
+
+	return refused("unsupported", "a table, chart, object, medium or diagram cannot be flipped")
+}
+
+// Delete, reorder and group keep the element's bytes; only a deck-level lock refuses them, and a master's field (the
+// slide does not hold it).
 function structureLock(shape: ShapeNode): Refused | undefined {
-	return shape.lock === "gate" || shape.lock === "budget" ? refused("locked", shape.lock) : undefined
+	return shape.lock === "gate" || shape.lock === "budget" || shape.lock === "master" ? refused("locked", shape.lock) : undefined
 }
 
 function bump(node: SlideNode): void {
@@ -947,6 +967,10 @@ function setXfrm(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrm" }, conte
 
 	if (locked !== undefined) return locked
 
+	const flip = frameFlip(at.shape, op.xfrm)
+
+	if (flip !== undefined) return flip
+
 	const prior = at.shape.xfrm
 
 	if (op.xfrm === undefined) delete at.shape.xfrm
@@ -964,6 +988,19 @@ function setXfrm(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrm" }, conte
 	}
 }
 
+// The shapes of a tree by id, groups' children included; the first of an id in document order.
+function shapeIndex(shapes: readonly ShapeNode[]): Map<number, ShapeNode> {
+	const out = new Map<number, ShapeNode>()
+	const stack = [...shapes].reverse()
+
+	for (let shape = stack.pop(); shape !== undefined; shape = stack.pop()) {
+		if (!out.has(shape.id)) out.set(shape.id, shape)
+		if (shape.children !== undefined) for (let k = shape.children.length - 1; k >= 0; k--) stack.push(shape.children[k] as ShapeNode)
+	}
+
+	return out
+}
+
 // setXfrm for several shapes as one step; refused whole when one is missing, named twice or cannot move.
 function setXfrms(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrms" }, context: ApplyContext): ApplyResult<typeof op> {
 	if (op.xfrms.length === 0) return refused("malformed", "no shapes")
@@ -972,21 +1009,27 @@ function setXfrms(node: SlideNode, op: OpOf<"shape"> & { kind: "setXfrms" }, con
 
 	const shapes: ShapeNode[] = []
 	const seen = new Set<number>()
+	// Each shape of the slide by id, found in one walk (the first in document order, as findShape finds it).
+	const byId = shapeIndex(node.shapes)
 
-	for (const { id } of op.xfrms) {
+	for (const { id, xfrm } of op.xfrms) {
 		if (seen.has(id)) return refused("malformed", `shape ${String(id)} twice`)
 
 		seen.add(id)
 
-		const at = findShape(node.shapes, id)
+		const shape = byId.get(id)
 
-		if (at === undefined) return refused("notFound", `shape ${String(id)}`)
+		if (shape === undefined) return refused("notFound", `shape ${String(id)}`)
 
-		const locked = moveLock(at.shape, context)
+		const locked = moveLock(shape, context)
 
 		if (locked !== undefined) return locked
 
-		shapes.push(at.shape)
+		const flip = frameFlip(shape, xfrm)
+
+		if (flip !== undefined) return flip
+
+		shapes.push(shape)
 	}
 
 	const back: { id: number; xfrm: Xfrm | undefined }[] = []
@@ -1009,6 +1052,83 @@ function carries(text: string | undefined): boolean {
 	return text === undefined || xmlSafeText(text) === text
 }
 
+// The slide-space centres (EMU) of the shapes in `ids`: each one's box (a placeholder without its own takes the one
+// it inherits, a box no level gives is the zero box at the origin, MS-OI29500 §2.1.1284) through its groups' boxes.
+function slideCentres(deck: Deck, node: SlideNode, ids: ReadonlySet<number>): Map<number, { x: number; y: number }> {
+	const out = new Map<number, { x: number; y: number }>()
+	const walk = (shapes: readonly ShapeNode[], groups: readonly Xfrm[]): void => {
+		for (const shape of shapes) {
+			if (out.size === ids.size) return
+
+			if (ids.has(shape.id)) {
+				const box = shape.xfrm ?? inheritLevels(deck, node, shape).levels.find(level => level.shape.xfrm !== undefined)?.shape.xfrm
+				let centre = box === undefined ? { x: 0, y: 0 } : { x: box.x + box.cx / 2, y: box.y + box.cy / 2 }
+
+				for (let k = groups.length - 1; k >= 0; k--) centre = toParent(groups[k] as Xfrm, centre.x, centre.y)
+
+				out.set(shape.id, centre)
+			}
+
+			if (shape.children !== undefined && shape.xfrm !== undefined) walk(shape.children, [...groups, shape.xfrm])
+			else if (shape.children !== undefined) walk(shape.children, groups)
+		}
+	}
+
+	walk(node.shapes, [])
+
+	return out
+}
+
+// A move of shapes with locked motion paths shifts those paths back by how far their shapes' centres moved on the
+// slide (a shape inside a moved or resized group included), in the same step. The inverse puts the boxes back first
+// (which shifts the paths back by the same rule), then the paths as they were.
+function withLockedPaths(deck: Deck, node: SlideNode, move: () => ApplyResult<ShapeOp>, context: ApplyContext): ApplyResult<ShapeOp> {
+	const locked = new Set(
+		motionBehaviors(node.timing)
+			.filter(motion => motion.pathEditMode === "fixed")
+			.map(motion => motion.shape)
+	)
+
+	if (locked.size === 0) return move()
+
+	const before = slideCentres(deck, node, locked)
+	const result = move()
+
+	if (isRefused(result)) return result
+
+	const after = slideCentres(deck, node, locked)
+	const moves: { id: number; dx: number; dy: number }[] = []
+
+	for (const [id, prior] of before) {
+		const now = after.get(id)
+
+		if (now !== undefined) moves.push({ id, dx: now.x - prior.x, dy: now.y - prior.y })
+	}
+
+	const inverses: DeckOp[] = []
+	let bytes = result.inverse.bytes
+
+	for (const op of lockedPathOps(node, moves, deck.size)) {
+		const applied = applyMotionPath.apply(deck, op, context)
+
+		// A path that cannot be shifted (refused) moves with its shape, as an unlocked one does.
+		if (isRefused(applied)) continue
+
+		inverses.unshift(...applied.inverse.ops)
+		bytes += applied.inverse.bytes
+	}
+
+	return inverses.length === 0 ? result : { ...result, inverse: { ops: [...result.inverse.ops, ...inverses], bytes } }
+}
+
+// An ODP deck's groups that hold moved shapes take their members' bounds again (an ODP group's box is where its members
+// are, as the reader reads it); an undo moves the members back and refits them the same way.
+function refitted<R>(deck: Deck, node: SlideNode, ids: readonly number[], result: R): R {
+	if (deck.format === "odp" && !isRefused(result as unknown)) refitGroups(node.shapes, new Set(ids))
+
+	return result
+}
+
 function applied<O extends ShapeOp>(back: Inverse | Refused, op: O): ApplyResult<O> {
 	return isRefused(back) ? back : { kind: "applied", inverse: back, op }
 }
@@ -1026,9 +1146,19 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 		case "delete":
 			return remove(node, op, context)
 		case "setXfrm":
-			return setXfrm(node, op, context)
+			return refitted(
+				deck,
+				node,
+				[op.target.id],
+				withLockedPaths(deck, node, () => setXfrm(node, op, context), context)
+			)
 		case "setXfrms":
-			return setXfrms(node, op, context)
+			return refitted(
+				deck,
+				node,
+				op.xfrms.map(each => each.id),
+				withLockedPaths(deck, node, () => setXfrms(node, op, context), context)
+			)
 		case "restore":
 			return restore(node, op, context)
 		case "setProps":

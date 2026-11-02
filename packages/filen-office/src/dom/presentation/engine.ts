@@ -28,6 +28,7 @@ import {
 } from "./protocol"
 import { designInfo, designLayouts } from "../../core/presentation/edit/apply/design"
 import { chartCapability } from "./engine/chart"
+import { reviewCapability } from "./engine/review"
 import { convertCapability } from "./engine/convert"
 import { editCapability } from "./engine/edit"
 import { findCapability } from "./engine/find"
@@ -83,6 +84,7 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	command: "priority",
 	undo: "priority",
 	redo: "priority",
+	retract: "priority",
 	find: "background",
 	media: "background",
 	registerMedia: "background",
@@ -95,7 +97,8 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	save: "background",
 	commitSaved: "background",
 	jobsPort: "background",
-	freshParts: "background"
+	freshParts: "background",
+	review: "priority"
 }
 
 export interface CallSignal {
@@ -162,7 +165,7 @@ export type Capability<M extends PresentationMethod> = { readonly [K in M]: Meth
 export type ViewCapability = Capability<"render" | "image">
 export type ThumbsCapability = Capability<"thumbnails">
 export type TextCapability = Capability<"textSeed" | "layoutText">
-export type EditCapability = Capability<"command" | "undo" | "redo">
+export type EditCapability = Capability<"command" | "undo" | "redo" | "retract">
 export type SaveCapability = Capability<"save" | "commitSaved">
 export type MediaCapability = Capability<"media" | "registerMedia">
 export type ShowCapability = Capability<"timegraph" | "layers">
@@ -170,6 +173,7 @@ export type FindCapability = Capability<"find">
 export type JobsCapability = Capability<"jobsPort">
 export type ConvertCapability = Capability<"freshParts">
 export type ChartCapability = Capability<"chartData">
+export type ReviewCapability = Capability<"review">
 
 // The faces the deck's text is measured and drawn with (bundled substitutes and decoded embedded fonts).
 export interface FontsCapability {
@@ -224,7 +228,8 @@ export const CAPABILITIES = {
 	find: findCapability,
 	jobs: jobsCapability,
 	convert: convertCapability,
-	chart: chartCapability
+	chart: chartCapability,
+	review: reviewCapability satisfies ReviewCapability
 } as const
 
 export const SERVICES: EngineServices = { fonts: fontsCapability, smartart: smartartCapability }
@@ -249,6 +254,7 @@ export const METHOD_HANDLERS: Handlers = {
 	...CAPABILITIES.jobs,
 	...CAPABILITIES.convert,
 	...CAPABILITIES.chart,
+	...CAPABILITIES.review,
 	smartArtPreview: (context, ...args) => context.session.services.smartart.smartArtPreview(context, ...args),
 	smartArtInfo: (context, ...args) => context.session.services.smartart.smartArtInfo(context, ...args)
 }
@@ -259,6 +265,7 @@ const VIEW_ONLY_ANSWERS: { readonly [M in PresentationMethod]?: PresentationValu
 	command: { ok: false, refusal: "viewOnly" },
 	undo: { ok: false, refusal: "viewOnly" },
 	redo: { ok: false, refusal: "viewOnly" },
+	retract: { ok: false, refusal: "viewOnly" },
 	save: { kind: "refused", reason: "viewOnly" }
 }
 

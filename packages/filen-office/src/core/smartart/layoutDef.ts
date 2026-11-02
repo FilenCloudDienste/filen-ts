@@ -53,6 +53,8 @@ export interface ShapeDef {
 	readonly hideGeom: boolean
 	readonly zOrderOff: number
 	readonly adj: readonly { readonly idx: number; readonly val: number }[]
+	// §21.4.3.8 shape@blipPhldr: the shape is a placeholder for a picture (the presentation point's blipFill fills it).
+	readonly blipPhldr?: boolean
 }
 
 // The parts a layoutNode, forEach, if or else may carry; the last of each kind seen wins when a
@@ -72,6 +74,8 @@ export interface LayoutNodeDef extends Body {
 	readonly name: string
 	readonly styleLbl?: string | undefined
 	readonly chOrder: "b" | "t"
+	// The sibling layout node whose shape this one's text goes with (§21.4.2.19 moveWith).
+	readonly moveWith?: string | undefined
 }
 
 export interface ForEachDef extends Body {
@@ -240,6 +244,7 @@ class DefReader {
 			name: reader.attr(node, "name") ?? "",
 			styleLbl: reader.attr(node, "styleLbl"),
 			chOrder: reader.attr(node, "chOrder") === "t" ? "t" : "b",
+			moveWith: reader.attr(node, "moveWith"),
 			...this.body(node, depth)
 		}
 	}
@@ -307,6 +312,7 @@ class DefReader {
 			// A turn that is no number (INF, NaN) turns nothing.
 			rot: finiteOr(toNumber(reader.attr(node, "rot"), 0), 0),
 			hideGeom: reader.bool(node, "hideGeom", false),
+			...(reader.bool(node, "blipPhldr", false) ? { blipPhldr: true } : {}),
 			zOrderOff: Math.trunc(finiteOr(toNumber(reader.attr(node, "zOrderOff"), 0), 0)),
 			adj: reader.children(reader.child(node, D.Dgm, "adjLst"), D.Dgm, "adj").map(adj => ({
 				idx: Math.trunc(toNumber(reader.attr(adj, "idx"), 1)),

@@ -1,3 +1,4 @@
+import { appendAll } from "../arrays"
 import { escapeAttribute, escapeText } from "../xml/index"
 import { CHECKPOINT_SPACING, deepCopy, deepEqual, type Checkpoint, type FrameState, type RtfCheckpoints } from "./checkpoint"
 import { SYMBOL_CODEPAGE, charsetCodepage, codepageSupported, decodeCodepage } from "./codepage"
@@ -808,7 +809,7 @@ class Reader {
 		}))
 
 		this.frame = frames.pop() ?? this.frame
-		this.stack.push(...frames)
+		appendAll(this.stack, frames)
 		this.depth = from.depth
 		this.skip = from.skip
 		this.noteMark = from.noteMark
@@ -2746,7 +2747,7 @@ class Reader {
 
 			for (const block of content.blocks) story.insert(block, depthInTable)
 
-			story.relationships.push(...content.relationships)
+			appendAll(story.relationships, content.relationships)
 
 			this.preserve("drawingObject", "do", start, this.tokens.position)
 		}
@@ -2816,7 +2817,7 @@ class Reader {
 			for (const block of content.blocks) shape.story.insert(block, depthInTable)
 
 			// Pictures in the box are related from the part the box's paragraphs are written to.
-			shape.story.relationships.push(...content.relationships)
+			appendAll(shape.story.relationships, content.relationships)
 		}
 
 		return true

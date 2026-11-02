@@ -74,11 +74,13 @@ function nameBox(): string {
 }
 
 async function openViewer(
-	sheets: readonly { readonly name: string; readonly rows: readonly (readonly string[])[] }[] = [{ name: "Fruit", rows: FRUIT }]
+	sheets: readonly { readonly name: string; readonly rows: readonly (readonly string[])[] }[] = [{ name: "Fruit", rows: FRUIT }],
+	// Shown in a preview overlay, as the app shows it.
+	overlay = false
 ): Promise<HTMLElement> {
 	bytes.current = await book(sheets)
 
-	render(
+	const viewer = (
 		<SheetViewer
 			item={file("fruit.xlsx")}
 			documentKey="find"
@@ -86,6 +88,21 @@ async function openViewer(
 			editable
 			saveRef={{ current: null }}
 		/>
+	)
+
+	render(
+		overlay ? (
+			<div
+				role="dialog"
+				data-open=""
+				tabIndex={-1}
+				aria-label="Overlay"
+			>
+				{viewer}
+			</div>
+		) : (
+			viewer
+		)
 	)
 
 	return await screen.findByRole("grid")
@@ -177,6 +194,14 @@ describe("the spreadsheet find bar", () => {
 		await waitFor(() => {
 			expect(screen.queryByRole("search")).toBeNull()
 		})
+	})
+
+	it("opens with Mod+F with focus on the preview overlay itself (left there after a click in Safari and macOS Firefox)", async () => {
+		await openViewer(undefined, true)
+
+		fireEvent.keyDown(screen.getByRole("dialog", { name: "Overlay" }), { key: "f", code: "KeyF", ctrlKey: true })
+
+		expect(await screen.findByRole("searchbox", { name: preview.previewDocxFindPlaceholder })).toBeTruthy()
 	})
 
 	it("finds from the active cell past the most one find lists, and steps on past either end of them", async () => {

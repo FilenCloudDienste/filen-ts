@@ -568,6 +568,18 @@ describe("presentation save", () => {
 		expect(h.events.at(-1)).toMatchObject({ type: "changed", dirty: false, slides: [] })
 	})
 
+	it("a snapshot the writer refuses stale (a part the session held is gone) answers failed: the file did not change", async () => {
+		const h = await harness()
+		const deps = dependencies({
+			snapshot: () => Promise.resolve({ kind: "refused", reason: "stale", detail: "the diagram part raw:1 is no longer held" }),
+			write: () => Promise.resolve({ kind: "unchanged" })
+		})
+
+		h.history.edit()
+		expect((await h.save(deps)).result).toEqual({ kind: "refused", reason: "failed" })
+		expect(h.history.dirty).toBe(true)
+	})
+
 	it("a snapshot the writer finds nothing to write in commits its state as saved", async () => {
 		const h = await harness()
 		const writer = testWriter(() => new Map([[SLIDE1, new TextEncoder().encode("<p:sld/>")]]))
