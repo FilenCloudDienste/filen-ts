@@ -334,7 +334,7 @@ export const SYNC_OPS = {
 	},
 	releasePlan: { args: type({ planId: planIdSchema, "+": "reject" }), result: done },
 	conflicts: { args: pageArgs, result: type({ total: countSchema, entries: conflictSchema.array(), "+": "reject" }) },
-	// The result is where keepBoth put the local copy.
+	// The result is where keepRemote moved the differing local copy in the pair's bin; null otherwise.
 	resolveConflict: {
 		args: type({
 			pairId: pairIdSchema,

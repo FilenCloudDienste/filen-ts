@@ -23,6 +23,7 @@ import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { runSyncAction, syncErrorLabel } from "@/features/sync/lib/syncActions"
 import {
 	conflictDetailKey,
+	conflictResolvedToast,
 	HALT_KEY,
 	HELD_REASON_KEY,
 	isRootRuleFile,
@@ -58,9 +59,9 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 		if (done !== null) {
 			setResolved(previous => new Set(previous).add(relPath))
 
-			if (done.value !== null) {
-				toast.success(t("conflictKeptBoth", { path: done.value }))
-			}
+			const message = conflictResolvedToast(resolution, done.value)
+
+			toast.success(message.path === null ? t(message.key) : t(message.key, { path: message.path }))
 		}
 	}
 

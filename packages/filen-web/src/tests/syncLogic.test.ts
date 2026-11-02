@@ -8,6 +8,7 @@ import {
 	ACTION_KIND_KEY,
 	aggregateSyncState,
 	conflictDetailKey,
+	conflictResolvedToast,
 	FINDING_KEY,
 	HALT_KEY,
 	HELD_REASON_KEY,
@@ -321,6 +322,17 @@ describe("sync status helpers", () => {
 		expect(conflictDetailKey({ relPath: "a", local: null, remote: "file" })).toBe("conflictLocalDeleted")
 		expect(conflictDetailKey({ relPath: "a", local: "file", remote: null })).toBe("conflictRemoteDeleted")
 		expect(conflictDetailKey({ relPath: "a", local: "file", remote: "file" })).toBe("conflictBoth")
+	})
+
+	it("confirms each conflict resolution, naming the bin path only when the cloud's version replaced this device's", () => {
+		const bin = "/Users/a/Sync/.filen-sync-trash/2026-11-02/notes.txt"
+
+		expect(conflictResolvedToast("keepLocal", null)).toEqual({ key: "conflictKeptLocal", path: null })
+		expect(conflictResolvedToast("keepRemote", bin)).toEqual({ key: "conflictKeptRemoteBinned", path: bin })
+		expect(conflictResolvedToast("keepRemote", null)).toEqual({ key: "conflictKeptRemote", path: null })
+		expect(conflictResolvedToast("keepBoth", null)).toEqual({ key: "conflictKeptBoth", path: null })
+		expect(sync.conflictKeptRemoteBinned).toContain("{{path}}")
+		expect(sync.conflictKeptBoth).not.toContain("{{path}}")
 	})
 })
 

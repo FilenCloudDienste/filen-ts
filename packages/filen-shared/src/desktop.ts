@@ -506,7 +506,7 @@ export interface DesktopSync {
 	planPage(planId: string, list: DesktopSyncPlanList, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncPlanPage>>
 	releasePlan(planId: string): Promise<void>
 	conflicts(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncConflict>>>
-	// Resolves with where keepBoth put the local copy.
+	// Resolves with where keepRemote moved this device's differing copy in the pair's bin; null otherwise.
 	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<DesktopSyncResult<string | null>>
 	heldDeletions(pairId: string): Promise<DesktopSyncResult<DesktopSyncHeldDeletions>>
 	approveDeletions(pairId: string, passToken: string): Promise<DesktopSyncResult<null>>

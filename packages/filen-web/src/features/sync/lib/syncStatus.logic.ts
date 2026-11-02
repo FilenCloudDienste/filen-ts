@@ -16,6 +16,7 @@ import {
 	type DesktopSyncPlanSummary,
 	type DesktopSyncRefusal,
 	type DesktopSyncReviewFinding,
+	type DesktopSyncResolution,
 	type DesktopSyncActionKind
 } from "@filen/shared/desktop"
 import type { SyncKey } from "@/lib/i18n"
@@ -264,4 +265,25 @@ export function conflictDetailKey(conflict: DesktopSyncConflict): SyncKey {
 	}
 
 	return conflict.remote === null ? "conflictRemoteDeleted" : "conflictBoth"
+}
+
+// The toast a resolved conflict reports. Only keepRemote names a path: where this device's differing copy went in the
+// pair's bin. keepBoth sets the local copy aside under a name the result does not carry.
+export type ConflictResolvedToast =
+	{ key: "conflictKeptLocal" | "conflictKeptRemote" | "conflictKeptBoth"; path: null } | { key: "conflictKeptRemoteBinned"; path: string }
+
+export function conflictResolvedToast(resolution: DesktopSyncResolution, binPath: string | null): ConflictResolvedToast {
+	switch (resolution) {
+		case "keepLocal": {
+			return { key: "conflictKeptLocal", path: null }
+		}
+
+		case "keepRemote": {
+			return binPath === null ? { key: "conflictKeptRemote", path: null } : { key: "conflictKeptRemoteBinned", path: binPath }
+		}
+
+		case "keepBoth": {
+			return { key: "conflictKeptBoth", path: null }
+		}
+	}
 }

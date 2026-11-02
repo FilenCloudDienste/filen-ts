@@ -264,8 +264,14 @@ export const sync = {
 	conflictKeepRemote: "Keep the cloud's",
 	/** Conflict — keep both */
 	conflictKeepBoth: "Keep both",
-	/** Toast — keep both renamed the local copy */
-	conflictKeptBoth: "Kept both. This device's copy is now {{path}}.",
+	/** Toast — the conflict resolved to the local version */
+	conflictKeptLocal: "Kept this device's version.",
+	/** Toast — the conflict resolved to the cloud version, with no local copy to set aside */
+	conflictKeptRemote: "Kept the cloud's version.",
+	/** Toast — the conflict resolved to the cloud version; path is where the local copy went in the pair's bin */
+	conflictKeptRemoteBinned: "Kept the cloud's version. This device's version is in the pair's bin: {{path}}",
+	/** Toast — the conflict resolved keeping both versions */
+	conflictKeptBoth: "Kept both versions.",
 	/** Conflict — the pair's own .filenignore, after it stopped only downloading */
 	conflictRuleFileHint:
 		"This is the pair's .filenignore. Its copy on this device was never uploaded while the pair only downloaded; keep both to merge the rules by hand.",
