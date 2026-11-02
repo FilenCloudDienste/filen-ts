@@ -1075,14 +1075,15 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 			return "quit"
 		})
-		await findings.check("L15 the next launch deletes the browser profile before ready", () =>
-			chain.profileWipedOnLaunch(signedOutWith(), [LEGACY_ORIGIN])
-		)
+		await findings.check("L15 the next launch deletes the browser profile before ready", () => chain.profileWipedOnLaunch())
 		await findings.must("N quits after the profile wipe", async () => {
 			await quitN("N-profile-wiped")
 
 			return "quit"
 		})
+		await findings.check("L15 old profile entries are gone and none holds a value from before the sign-out", () =>
+			chain.profileHoldsNoOldValue(signedOutWith(), [LEGACY_ORIGIN])
+		)
 
 		await findings.check("L15 the app uninstalled as a user does, the user's directories left", async () => {
 			const removed = await chain.os.uninstall(target)

@@ -638,14 +638,15 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 			return "exit code 0"
 		})
-		await findings.check("P8 the next launch deletes the browser profile before ready", () =>
-			chain.profileWipedOnLaunch(signedOutWith())
-		)
+		await findings.check("P8 the next launch deletes the browser profile before ready", () => chain.profileWipedOnLaunch())
 		await findings.must("N quits gracefully after the profile wipe", async () => {
 			await quit("N-profile-wiped")
 
 			return "exit code 0"
 		})
+		await findings.check("P8 old profile entries are gone and none holds a value from before the sign-out", () =>
+			chain.profileHoldsNoOldValue(signedOutWith())
+		)
 
 		await findings.check("P9 the app uninstalled as a user does, the user's directories left", async () => {
 			const removed = await chain.os.uninstall(target)

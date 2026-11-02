@@ -244,8 +244,12 @@ export interface Chain {
 	// the stash, the PIN record and the logs gone, and the marker left for the browser profile.
 	signOutWiped(witness: SignOutWitness): Promise<string>
 	// With the app quit after its sign-out: one launch, which deletes the browser profile before ready, to its sign-in
-	// screen; none of the profile's entries is the old one and no file holds the witness's value or `oldValues`.
-	profileWipedOnLaunch(witness: SignOutWitness, oldValues?: readonly string[]): Promise<string>
+	// screen, the marker gone and the page without the value stored before the sign-out. The profile's files are left
+	// alone while it runs (Windows refuses to open what Chromium holds).
+	profileWipedOnLaunch(): Promise<string>
+	// Once that launch quit: none of the profile's entries is the one from before it, and no profile file holds the
+	// witness's value or `oldValues`.
+	profileHoldsNoOldValue(witness: SignOutWitness, oldValues?: readonly string[]): string
 	// Deep jobs sign in some seconds apart (the plan's per-entry offset); logins are rate-limited per account.
 	stagger(): Promise<void>
 	// The local snapshot of a pair root, the engine's bin left out.
@@ -279,6 +283,9 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 	const localDir = path.join(homedir(), "FilenE2E", path.posix.basename(runDir()), name)
 	const userData = (...parts: string[]) => path.join(target.userData, ...parts)
 	const appOutput = path.join(work, `${name}-app-output.log`)
+
+	// The profile's entries as they were before the launch after a sign-out, and when it started.
+	let profileBefore: { at: number; entries: Map<string, ReturnType<typeof identity>> } | undefined
 
 	const chain: Chain = {
 		name,
@@ -436,9 +443,8 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			return "sync-engine and mounts hold no user directory; lock.vault, migration.stash and the logs gone; signOut.pending lists the profile"
 		},
 
-		async profileWipedOnLaunch(witness, oldValues = []) {
-			const before = new Map(PROFILE_ENTRIES.map(entry => [entry, identity(userData(entry))]))
-			const launchedAt = Date.now()
+		async profileWipedOnLaunch() {
+			profileBefore = { at: Date.now(), entries: new Map(PROFILE_ENTRIES.map(entry => [entry, identity(userData(entry))])) }
 
 			await chain.connect()
 			await chain.page().getByText("Sign in to Filen").waitFor({ state: "visible", timeout: START_TIMEOUT_MS })
@@ -448,10 +454,19 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 				fail("main.log does not log the browser profile's deletion")
 			}
 
-			const kept = [...before].filter(([entry, old]) => {
+			if ((await chain.page().evaluate(key => localStorage.getItem(key), PROFILE_SENTINEL_KEY)) !== null) {
+				fail("the page's localStorage still has the value stored before the sign-out")
+			}
+
+			return "signOut.pending gone; main.log logs the deletion; localStorage without the old value"
+		},
+
+		profileHoldsNoOldValue(witness, oldValues = []) {
+			const before = profileBefore ?? fail("the profile was not recorded before the launch")
+			const kept = [...before.entries].filter(([entry, old]) => {
 				const now = identity(userData(entry))
 
-				return old !== null && now !== null && now.ino === old.ino && now.birthtimeMs <= launchedAt
+				return old !== null && now !== null && now.ino === old.ino && now.birthtimeMs <= before.at
 			})
 
 			if (kept.length > 0) {
@@ -461,15 +476,14 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			const held = PROFILE_ENTRIES.flatMap(entry =>
 				filesHolding(userData(entry), [witness.sentinel, ...oldValues]).map(file => path.join(entry, file))
 			)
-			const stored = await chain.page().evaluate(key => localStorage.getItem(key), PROFILE_SENTINEL_KEY)
 
-			if (held.length > 0 || stored !== null) {
-				fail(`old values left: ${[...held, ...(stored !== null ? ["localStorage"] : [])].join(", ")}`)
+			if (held.length > 0) {
+				fail(`old values left in ${held.join(", ")}`)
 			}
 
-			const existed = [...before].filter(([, old]) => old !== null).length
+			const existed = [...before.entries].filter(([, old]) => old !== null).length
 
-			return `signOut.pending gone; ${String(existed)} profile entries deleted (recreated ones are new); no old value left`
+			return `${String(existed)} profile entries deleted (recreated ones are new); no profile file holds a value from before the sign-out`
 		},
 
 		async stagger() {

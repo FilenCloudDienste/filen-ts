@@ -1,5 +1,5 @@
 import type { Browser, Page } from "playwright-core"
-import { waitFor } from "../../support.ts"
+import { errorMessage, waitFor } from "../../support.ts"
 import { listTargets } from "./inspector.ts"
 
 // The app's page through playwright-core over --remote-debugging-port: the only way into 4.x, whose fuses remove
@@ -9,6 +9,8 @@ export interface Renderer {
 	browser: Browser
 	page: Page
 }
+
+const FIRST_CONNECT_MS = 60_000
 
 // The first page whose URL starts with `origin` (filendesktop://bundle for 3.x, filen://app for 4.x).
 // The port opens some time after the launch; connectOverCDP does not wait for it, so the endpoint is polled first.
@@ -22,7 +24,16 @@ export async function connectRenderer(port: number, origin: string, timeoutMs: n
 		500
 	)
 
-	const browser = await chromium.connectOverCDP(`http://127.0.0.1:${String(port)}`, { timeout: timeoutMs })
+	const endpoint = `http://127.0.0.1:${String(port)}`
+	// Connecting takes seconds; one that stalls with the socket open (a target never answering the attach) is dropped
+	// once and tried again, the targets it saw logged.
+	const browser = await chromium.connectOverCDP(endpoint, { timeout: FIRST_CONNECT_MS }).catch(async (error: unknown) => {
+		const targets = (await listTargets(port))?.map(target => `${target.type} ${target.url}`) ?? []
+
+		console.log(`connectOverCDP stalled (${errorMessage(error).split("\n")[0] ?? ""}); targets: ${targets.join(", ") || "none"}; again`)
+
+		return chromium.connectOverCDP(endpoint, { timeout: timeoutMs })
+	})
 	const page = await waitFor(
 		`a page at ${origin}`,
 		timeoutMs,

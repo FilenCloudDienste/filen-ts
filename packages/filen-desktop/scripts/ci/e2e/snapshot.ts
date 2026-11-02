@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
+import { createReadStream, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
 import { pipeline } from "node:stream/promises"
 import type { Cloud } from "./cloud.ts"
@@ -141,17 +141,25 @@ export function snapshotText(snapshot: Snapshot): string {
 		.join("\n")
 }
 
-// Every file below `root` (at most `maxBytes` each) holding any of `values`, as UTF-8 or UTF-16LE (Chromium's
-// localStorage keeps strings either way); file names only, never what matched.
+// Every file at or below `root` (a file or a directory; at most `maxBytes` each) holding any of `values`, as UTF-8 or
+// UTF-16LE (Chromium's localStorage keeps strings either way); paths relative to `root` ("" for a file root), never
+// what matched.
 export function filesHolding(root: string, values: readonly string[], maxBytes = 64 * 1024 * 1024): string[] {
 	const needles = values.filter(value => value.length >= 4).flatMap(value => [Buffer.from(value, "utf8"), Buffer.from(value, "utf16le")])
 	const hits: string[] = []
+	const kind = statSync(root, { throwIfNoEntry: false })
+	const files =
+		kind === undefined
+			? []
+			: kind.isDirectory()
+				? readdirSync(root, { withFileTypes: true, recursive: true })
+						.filter(entry => entry.isFile())
+						.map(entry => path.join(entry.parentPath, entry.name))
+				: [root]
 
-	for (const entry of existsSync(root) ? readdirSync(root, { withFileTypes: true, recursive: true }) : []) {
-		const file = path.join(entry.parentPath, entry.name)
-
+	for (const file of files) {
 		try {
-			if (!entry.isFile() || statSync(file).size > maxBytes) {
+			if (statSync(file).size > maxBytes) {
 				continue
 			}
 
