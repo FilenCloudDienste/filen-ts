@@ -332,6 +332,12 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			).catch(() => false)
 
 			if (!shown) {
+				const exit = await exitWithin(launched, 0)
+
+				if (exit !== null) {
+					fail(`the launch exited before its debugging port answered, handed to an instance still running: ${json(exit)}`)
+				}
+
 				// The single-instance lock hands the second launch to the first, which shows its window.
 				target.launch({ ...process.env })
 			}
@@ -346,6 +352,10 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			chain.renderer = null
 
 			const pids = target.mainProcesses().map(item => item.pid)
+
+			if (pids.length === 0 && chain.launched !== null && (await exitWithin(chain.launched, 0)) === null) {
+				fail(`${what}: the launched instance is running but no main process is visible`)
+			}
 
 			await os.requestQuit(pids)
 

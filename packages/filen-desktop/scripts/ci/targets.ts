@@ -64,11 +64,23 @@ function linuxPids(): number[] {
 		.filter(pid => Number.isSafeInteger(pid))
 }
 
-function linuxExe(pid: number): string | null {
+// The executable of `pid`. /proc/<pid>/exe needs ptrace access, which a process of the same user under another group
+// (N started with `sudo -g`) denies; its command line stays readable, so its first argument stands in, cut where a
+// retitled Chromium child joined its arguments.
+export function linuxExe(pid: number): string | null {
 	try {
 		return readlinkSync(`/proc/${String(pid)}/exe`)
 	} catch {
-		return null
+		try {
+			const argv0 =
+				readFileSync(`/proc/${String(pid)}/cmdline`, "utf8")
+					.split("\0")[0]
+					?.split(" --")[0] ?? ""
+
+			return argv0.startsWith("/") ? argv0 : null
+		} catch {
+			return null
+		}
 	}
 }
 

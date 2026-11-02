@@ -1,8 +1,9 @@
-import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { crc32, deflateSync } from "node:zlib"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { errorMessage, fail, run, runBounded, waitFor } from "../support.ts"
+import { linuxExe } from "../targets.ts"
 
 // Linux desktop session pieces of the deep chains: the GTK folder chooser driven with xdotool under Xvfb (no window
 // manager, so focus is set on the window itself), mounts, the keyring and the package manager. Every tool runs
@@ -246,14 +247,10 @@ export function processesUnder(prefix: string): string[] {
 
 	for (const entry of readdirSync("/proc")) {
 		if (/^\d+$/.test(entry)) {
-			try {
-				const exe = readlinkSync(`/proc/${entry}/exe`)
+			const exe = linuxExe(Number(entry))
 
-				if (exe.startsWith(prefix)) {
-					found.push(`${entry} ${exe}`)
-				}
-			} catch {
-				// Gone, or another user's.
+			if (exe?.startsWith(prefix) === true) {
+				found.push(`${entry} ${exe}`)
 			}
 		}
 	}
