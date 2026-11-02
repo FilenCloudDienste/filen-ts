@@ -98,18 +98,17 @@ describe("e2ePlan depth", () => {
 			"win-x64-nsis@0",
 			"win-arm64-nsis@20",
 			"mac-arm64-dmg@40",
-			"linux-x64-deb@60"
+			"linux-x64-deb@60",
+			"linux-arm64-deb@80"
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
 		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, true])
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
-		// No rotation: every main format every night once ready; trials run at install depth until promoted.
-		expect(nightly.notices).toContain(
-			"Deep depth is not built yet for linux-arm64-deb previous, linux-arm64-deb legacy; they run at install depth."
-		)
-		// The session, then 4.x and 3.0.53 on Windows x64, Windows arm64, macOS arm64 and Linux x64.
-		expect(logins(nightly)).toBe(9)
+		// No rotation: every main format every night, all of them deep.
+		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
+		// The session, then 4.x and 3.0.53 on Windows x64 and arm64, macOS arm64 and Linux x64 and arm64.
+		expect(logins(nightly)).toBe(11)
 		// Once every trial is promoted: both chains on five entries.
 		expect(
 			logins(
@@ -134,7 +133,8 @@ describe("e2ePlan depth", () => {
 			"win-x64-nsis@0",
 			"win-arm64-nsis@20",
 			"mac-arm64-dmg@40",
-			"linux-x64-deb@60"
+			"linux-x64-deb@60",
+			"linux-arm64-deb@80"
 		])
 	})
 
@@ -155,9 +155,7 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
-		expect(DEEP_TRIAL).toEqual({
-			"linux-arm64-deb": ["previous", "legacy"]
-		})
+		expect(DEEP_TRIAL).toEqual({})
 
 		// The real tables: a custom deep run naming Windows arm64 runs both chains on its own runner.
 		const arm = plan({ ...dispatch, platforms: "windows", depth: "deep", formats: "win-arm64-nsis" })
