@@ -434,12 +434,11 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			return `session.vault ${String(state.vaultSize)} bytes, unchanged`
 		})
 
-		// The offline spike starts N from here through its scoped block's wrapper (spikes/offline.ts).
+		// The offline spike (spikes/offline.ts) starts N through its block's wrapper for its probe only.
 		const offline = process.env["E2E_OFFLINE_SPIKE"] === "1" ? offlineBlockFor(target) : null
 
 		if (offline !== null) {
 			await findings.must("offline spike: prepared", () => offline.prepare())
-			chain.launchVia = offline.via
 		}
 
 		await findings.must("N quits gracefully and starts again with its debugging port", async () => {

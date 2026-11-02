@@ -25,6 +25,8 @@ const TOOL_TIMEOUT_MS = 60_000
 const CAP_MS = 5 * 60 * 1000
 const QUEUE_MS = 2 * 60 * 1000
 const POLL_MS = 2000
+// When the open connections are listed again during a live drop.
+const CONNECTIONS_AGAIN_MS = 60_000
 
 export interface OfflineBlock {
 	// The command N is started through (null: as it is).
@@ -122,13 +124,16 @@ const linuxBlock: OfflineBlock = {
 		return `${String(removed.length)} rules removed`
 	},
 	async connections(pids) {
-		const listed = await tool("ss", ["-tnpH", "state", "established"])
-		const mine = listed.stdout
+		// As root: the app's processes run with another group, and ss names a socket's process only where it may look.
+		const listed = await tool("sudo", ["ss", "-tnpH", "state", "established"])
+		const peers = listed.stdout
 			.split("\n")
 			.filter(line => pids.some(pid => line.includes(`pid=${String(pid)},`)))
-			.filter(line => !/\s(127\.\d+\.\d+\.\d+|\[::1\]|\[::ffff:127\.[\d.]+\]):\d+\s/.test(line))
+			// Columns: Recv-Q Send-Q Local Peer Process.
+			.map(line => line.trim().split(/\s+/)[3] ?? "?")
+			.filter(peer => !/^(127\.|\[::1\]|\[::ffff:127\.)/.test(peer))
 
-		return `${String(mine.length)} established off loopback`
+		return perRemote(peers)
 	}
 }
 
@@ -176,12 +181,13 @@ const macBlock: OfflineBlock = {
 		return `anchor flushed (${output(flushed)}); ${released === null ? "no token to release" : `token released (${output(released)})`}`
 	},
 	async connections(pids) {
-		return `${String((await macRemotes(pids)).length)} remote addresses with established connections`
+		return perRemote(await macRemotes(pids, false))
 	}
 }
 
-// The remote addresses of N's established TCP connections off the loopback interface.
-async function macRemotes(pids: readonly number[]): Promise<string[]> {
+// The remote ends of N's established TCP connections off the loopback interface: addresses only (distinct), or
+// address:port per connection.
+async function macRemotes(pids: readonly number[], addressOnly = true): Promise<string[]> {
 	if (pids.length === 0) {
 		return []
 	}
@@ -189,10 +195,26 @@ async function macRemotes(pids: readonly number[]): Promise<string[]> {
 	const listed = await tool("lsof", ["-nP", "-iTCP", "-sTCP:ESTABLISHED", "-a", "-p", pids.join(",")])
 	const remotes = listed.stdout
 		.split("\n")
-		.map(line => /->(\[?[^\]\s]+?\]?):\d+\s/.exec(line)?.[1]?.replace(/^\[|\]$/g, ""))
-		.filter((remote): remote is string => remote !== undefined && !remote.startsWith("127.") && remote !== "::1")
+		.map(line => /->(\[?[^\]\s]+?\]?):(\d+)\s/.exec(line))
+		.filter(match => match !== null)
+		.map(match => ({ address: (match[1] ?? "").replace(/^\[|\]$/g, ""), port: match[2] ?? "" }))
+		.filter(remote => !remote.address.startsWith("127.") && remote.address !== "::1")
+		.map(remote => (addressOnly ? remote.address : `${remote.address}:${remote.port}`))
 
-	return [...new Set(remotes)]
+	return addressOnly ? [...new Set(remotes)] : remotes
+}
+
+// Connections counted per remote end: "3 established off loopback: a:443 x2, b:443".
+function perRemote(peers: readonly string[]): string {
+	const counts = new Map<string, number>()
+
+	for (const peer of peers) {
+		counts.set(peer, (counts.get(peer) ?? 0) + 1)
+	}
+
+	const listed = [...counts].map(([peer, count]) => (count > 1 ? `${peer} x${String(count)}` : peer))
+
+	return `${String(peers.length)} established off loopback${listed.length > 0 ? `: ${listed.join(", ")}` : ""}`
 }
 
 // The firewall profiles as the runner had them, put back on lift.
@@ -248,11 +270,16 @@ const windowsBlock: OfflineBlock = {
 		}
 
 		const result = await powershellBounded(
-			`@(Get-NetTCPConnection -State Established -OwningProcess ${pids.join(",")} -ErrorAction SilentlyContinue | Where-Object { $_.RemoteAddress -notmatch '^(127\\.|::1$)' }).Count`,
+			`Get-NetTCPConnection -State Established -OwningProcess ${pids.join(",")} -ErrorAction SilentlyContinue | Where-Object { $_.RemoteAddress -notmatch '^(127\\.|::1$)' } | ForEach-Object { "$($_.RemoteAddress):$($_.RemotePort)" }`,
 			TOOL_TIMEOUT_MS
 		)
 
-		return `${result.stdout.trim() || "?"} established off loopback`
+		return perRemote(
+			result.stdout
+				.split(/\r?\n/)
+				.map(line => line.trim())
+				.filter(line => line !== "")
+		)
 	}
 }
 
@@ -285,6 +312,8 @@ export async function runOfflineProbe(chain: Chain, block: OfflineBlock, options
 	const pids = async () =>
 		(await chain.os.appProcesses(target)).map(line => Number(line.split(" ")[0])).filter(pid => Number.isInteger(pid) && pid > 0)
 	let attentionSeen: string[] = []
+	// Every distinct "<pair>: <halted> <lastError>" seen, in order.
+	const errorsSeen: string[] = []
 
 	const sample = async (): Promise<Sample> => {
 		const overview = await chain.syncOverview()
@@ -301,6 +330,14 @@ export async function runOfflineProbe(chain: Chain, block: OfflineBlock, options
 
 		if (attention && !attentionSeen.includes(rail)) {
 			attentionSeen = [...attentionSeen, rail]
+		}
+
+		for (const pair of mine) {
+			const seen = `${pair.name}: ${pair.halted ?? "not halted"}, ${pair.lastError ?? "no lastError"}`
+
+			if ((pair.lastError !== null || pair.halted !== null) && !errorsSeen.includes(seen)) {
+				errorsSeen.push(seen)
+			}
 		}
 
 		return {
@@ -330,8 +367,25 @@ export async function runOfflineProbe(chain: Chain, block: OfflineBlock, options
 	const seconds = (from: number, to: number) => `${((to - from) / 1000).toFixed(1)} s`
 	const describe = (sample: Sample) => `${sample.phases}; rail "${sample.rail}"`
 
+	// N through `via` (null: as the chain starts it), unlocked; the drive N mounts is reachable only by its own group.
+	const relaunch = async (what: string, via: readonly string[] | null): Promise<void> => {
+		chain.launchVia = via
+		await chain.quit(what)
+		await chain.connect()
+
+		const lock = await desktop<DesktopLockStatus>(chain.page(), "window.desktop.lock.status()")
+
+		if (lock.locked) {
+			await unlockThroughScreen(chain.page(), options.pin, START_TIMEOUT_MS)
+		}
+	}
+
 	await findings.check("offline spike: the probe ran (harness errors only)", async () => {
 		try {
+			if (block.via !== null) {
+				await relaunch("N-before-offline", block.via)
+			}
+
 			findings.info("offline: before the block", `${describe(await sample())}; ${await block.connections(await pids())}`)
 
 			const blocked = Date.now()
@@ -340,11 +394,20 @@ export async function runOfflineProbe(chain: Chain, block: OfflineBlock, options
 			findings.info("offline: right after the block", await block.connections(await pids()))
 
 			let first: Sample | null = null
-			let reached = await watch(CAP_MS, current => {
+			const allOffline = (current: Sample) => {
 				first ??= current.offline > 0 ? current : null
 
 				return current.offline === current.pairs
-			})
+			}
+			let reached = await watch(CONNECTIONS_AGAIN_MS, allOffline)
+
+			if (reached.hit === null) {
+				findings.info(
+					`offline: ${seconds(0, CONNECTIONS_AGAIN_MS)} into the block`,
+					`${describe(reached.last)}; ${await block.connections(await pids())}`
+				)
+				reached = await watch(CAP_MS - CONNECTIONS_AGAIN_MS, allOffline)
+			}
 
 			findings.info(
 				"offline: live drop",
@@ -430,12 +493,20 @@ export async function runOfflineProbe(chain: Chain, block: OfflineBlock, options
 				"offline: attention over the probe",
 				attentionSeen.length === 0 ? "never (the rail stayed neutral)" : attentionSeen.join(" | ")
 			)
+			findings.info("offline: halts and lastError texts over the probe", errorsSeen.join(" | ") || "none")
 
 			return "measured (see the offline findings)"
 		} catch (error) {
 			fail(`harness: ${errorMessage(error)}`)
 		} finally {
 			findings.info("offline: lifted in the end", await block.lift().catch(errorMessage))
+
+			// The chain goes on with N as it starts it: the group's drive is out of the harness's reach (FUSE lets only
+			// the mounting user and group in).
+			if (block.via !== null) {
+				await relaunch("N-after-offline", null)
+				findings.info("offline: N started again without the wrapper", "connected")
+			}
 		}
 	})
 }
