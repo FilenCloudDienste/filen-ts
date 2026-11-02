@@ -622,9 +622,6 @@ jobs:
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
           E2E_CHAIN_BUDGET_MINUTES: 85
           E2E_OFFLINE_SPIKE: ${{ matrix.spike == 'offline' && '1' || '' }}
-          # P11 (offline and back, scripts/ci/e2e/chains/offlineCheck.ts): "1" with the sdk-rs release that reports an
-          # engine opened offline as offline and wakes it on reconnect.
-          E2E_OFFLINE_CHECK: "0"
         run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)
         if: matrix.previous && matrix.format == 'rpm'

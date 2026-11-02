@@ -69,8 +69,7 @@ import {
 //                                    a person switches it on), an off/on round trip; left off
 //   P11 offline and back         N cut off alone (offlineBlock.ts): a live drop queues an edit and uploads it after the
 //                                lift; a launch under the block shows every pair offline, none in error, and recovers
-//                                within 60 s of the lift; sync never asks for attention (E2E_OFFLINE_CHECK, see
-//                                chains/offlineCheck.ts)
+//                                within 60 s of the lift; sync never asks for attention (chains/offlineCheck.ts)
 //
 // Linux deb, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the OS sees it,
 // quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
@@ -614,10 +613,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				return json(prefs)
 			})
 
-			// P11, until the sdk-rs release that reports an offline start as offline and wakes on reconnect is in.
-			if (process.env["E2E_OFFLINE_CHECK"] === "1") {
-				await runOfflineCheck(chain, { pairs, editPair: "e2e-twoway", editCloudDir: `${cloudDir}/e2e-twoway`, pin })
-			}
+			await runOfflineCheck(chain, { pairs, editPair: "e2e-twoway", editCloudDir: `${cloudDir}/e2e-twoway`, pin })
 
 			if (offline !== null) {
 				await runOfflineProbe(chain, offline, {
