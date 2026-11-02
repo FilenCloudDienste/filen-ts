@@ -189,8 +189,28 @@ export function fileProviderUserEnabled(page: Page, timeoutMs: number): Promise<
 
 // A held sync conflict resolved with Keep both as a user does: the rail's Computer group opened from the keyboard, its
 // Sync item, the pair in the sync sidebar, the Issues tab, the conflict row's Keep both (filen-web issuesTab.tsx). Done
-// once the row is gone (the page hides it when the resolution succeeded; a failure leaves it, with an error toast).
-export async function keepBothThroughIssues(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<void> {
+// once the row is gone (the page hides it when the resolution succeeded; a failure leaves it, with an error toast). The
+// master-key reminder, modal over the shell, may show at any point of a launch: put off whenever it covers a step.
+// Resolves with how often it was.
+export async function keepBothThroughIssues(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<number> {
+	const reminder = page.locator('[role="dialog"], [role="alertdialog"]').filter({ hasText: MASTER_KEYS_REMINDER })
+	let putOff = 0
+
+	await page.addLocatorHandler(reminder, async dialog => {
+		await dialog.getByRole("button", { name: "Remind me later", exact: true }).click({ timeout: 30_000 })
+		putOff++
+	})
+
+	try {
+		await resolveKeepBoth(page, pairName, relPath, timeoutMs)
+	} finally {
+		await page.removeLocatorHandler(reminder)
+	}
+
+	return putOff
+}
+
+async function resolveKeepBoth(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<void> {
 	const computer = page.locator('[aria-label^="Computer"]').first()
 
 	await computer.waitFor({ state: "visible", timeout: timeoutMs })

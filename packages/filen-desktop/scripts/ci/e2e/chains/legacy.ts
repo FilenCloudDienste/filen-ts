@@ -1037,11 +1037,19 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				const cloudBytes =
 					state.cloud?.get(`${conflict.pair}/${conflict.path}`)?.sha256 ?? fail("no cloud baseline for the conflict")
 
-				await keepBothThroughIssues(page(), conflict.pair, conflict.path, SETUP_TIMEOUT_MS).catch(async (error: unknown) => {
-					findings.attach("legacy-issues-page.txt", await pageText(page(), 4000))
+				const putOff = await keepBothThroughIssues(page(), conflict.pair, conflict.path, SETUP_TIMEOUT_MS).catch(
+					async (error: unknown) => {
+						findings.attach("legacy-issues-page.txt", await pageText(page(), 4000))
+						await chain.os.screenDump(path.join(chain.artifacts, "legacy-issues-page.png"))
 
-					throw error
-				})
+						throw error
+					}
+				)
+
+				findings.info(
+					"L11 the master-key reminder over the Issues path",
+					putOff === 0 ? "not shown" : `put off ${String(putOff)} time(s)`
+				)
 				await waitFor("the overview to count no conflict", SETUP_TIMEOUT_MS, async () =>
 					(await chain.syncOverview()).pairs.find(pair => pair.id === id)?.issues.conflicts === 0 ? true : null
 				)
