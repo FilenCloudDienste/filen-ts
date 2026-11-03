@@ -39,6 +39,8 @@ const SHIPIT_QUIET_MS = 15 * 1000
 const SHIPIT_WAIT_MS = 5 * 60 * 1000
 // dpkg -i of the whole package, run by the updater on the app's way out.
 const DPKG_WAIT_MS = 5 * 60 * 1000
+// The app's own report of a failed install (src/main/updater.ts), which keeps it running on N-1.
+const INSTALL_FAILED_LOG = "updater: install failed: "
 
 export interface UpdateKillOptions {
 	target: Target
@@ -261,11 +263,12 @@ async function killDpkg({ target, findings, options, pids, token }: Running): Pr
 
 	const afterKill = logMark(target)
 
-	await findings.check("update-kill: N-1 keeps running after its install failed", async () => {
+	await findings.check("update-kill: N-1 keeps running after its install failed, and says so", async () => {
 		// The updater follows a failed dpkg with apt-get install -f, which cannot finish a package it has no archive for;
-		// both run inside the app's main process, so its error is the end of the attempt.
+		// both run inside the app's main process, so its error is the end of the attempt. The app takes it as a failed
+		// install (its warning, a later quit retries), as it does after a user's restart.
 		await waitFor("the updater to report the failed install", INSTALL_WAIT_MS, () =>
-			logSince(target, afterKill).includes("updater: Error: ") || gone(pids) ? true : null
+			logSince(target, afterKill).includes(INSTALL_FAILED_LOG) || gone(pids) ? true : null
 		)
 		await holds(`${options.prevVersion} running`, ALIVE_MS, () => !gone(pids))
 
@@ -303,11 +306,11 @@ async function killDpkg({ target, findings, options, pids, token }: Running): Pr
 }
 
 async function failMv({ target, findings, options, pids, mark }: Running, original: string): Promise<void> {
-	await findings.check("update-kill: a failed mv leaves the running AppImage in place (F4)", async () => {
+	await findings.check("update-kill: a failed mv leaves the running AppImage in place (F4), and the app says so", async () => {
 		await waitFor("the updater's mv to fail", INSTALL_WAIT_MS, () => {
 			const text = logSince(target, mark)
 
-			return text.includes("Command failed: mv") || gone(pids) ? true : null
+			return text.includes(`${INSTALL_FAILED_LOG}Command failed: mv`) || gone(pids) ? true : null
 		})
 
 		if (!existsSync(target.executable)) {

@@ -157,6 +157,8 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 	let squirrel: PromiseWithResolvers<void> | null = null
 	// An install was started and has not failed.
 	let installing = false
+	// Ready while its check still ran, not announced yet.
+	let announce: string | null = null
 	const stall = stallWatch(UPDATE_STALL_MS, () => {
 		log.warn(`updater: no progress for ${String(UPDATE_STALL_MS / 1000)} s, closing its connections`)
 		deps.closeConnections().catch((error: unknown) => {
@@ -177,7 +179,14 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 
 	function markReady(version: string): void {
 		state.ready = version
-		deps.onReady(version)
+
+		// Announced once the check that found it settled: an install started from onReady (the test feed's, at once)
+		// then fails as an install, never as the check's error.
+		if (state.checking) {
+			announce = version
+		} else {
+			deps.onReady(version)
+		}
 	}
 
 	function installFailed(message: string): void {
@@ -305,6 +314,15 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 		} finally {
 			stall.disarm()
 			state.checking = false
+
+			const version = announce
+
+			announce = null
+
+			// Squirrel may have refused it since.
+			if (version !== null && state.ready === version) {
+				deps.onReady(version)
+			}
 		}
 	}
 

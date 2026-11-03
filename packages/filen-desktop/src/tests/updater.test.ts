@@ -317,6 +317,7 @@ describe("startUpdater", () => {
 
 			h.native?.downloaded()
 			expect(updater.ready()).toBe("4.0.1")
+			await vi.advanceTimersByTimeAsync(0)
 			expect(h.onReady).toHaveBeenCalledWith("4.0.1")
 		})
 
@@ -459,6 +460,29 @@ describe("startUpdater", () => {
 			download.finish()
 			await vi.advanceTimersByTimeAsync(0)
 			expect(h.engine.installs).toBe(1)
+		})
+
+		it("announces the update once its check settled, so an install started from there fails as an install", async () => {
+			const h = harness({ testFeed: "http://127.0.0.1:43210/" })
+			const download = downloadingCheck(h.engine, "4.0.1")
+			const updater = startUpdater(h.deps)
+
+			// The test feed's path: onReady installs at once, and electron-updater reports the failed install as an error.
+			h.onReady.mockImplementation(() => {
+				expect(updater.install()).toBe(true)
+			})
+			h.engine.onInstall = () => {
+				h.engine.emit("error", new Error("Command failed: mv"))
+			}
+			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS)
+			h.engine.downloaded("4.0.1")
+			expect(updater.ready()).toBe("4.0.1")
+			expect(h.onReady).not.toHaveBeenCalled()
+			download.finish()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(h.onReady).toHaveBeenCalledOnce()
+			expect(h.onInstallFailed).toHaveBeenCalledOnce()
+			expect(h.warnings.some(line => line.includes("install failed: Command failed: mv"))).toBe(true)
 		})
 
 		it("an error outside an install is not an install failure", async () => {

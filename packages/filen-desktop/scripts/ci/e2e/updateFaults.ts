@@ -431,13 +431,27 @@ export async function runFaultLaunch(options: FaultLaunchOptions): Promise<() =>
 		server.release()
 
 		// Whatever runs from the install now is the fault launch's (the real launch needs the single-instance lock).
-		const left = processesAt(target).map(found => found.pid)
+		let left = processesAt(target).map(found => found.pid)
+		const ended = (pids: readonly number[]) => (processesAt(target).some(found => pids.includes(found.pid)) ? null : true)
+
+		// A deep chain's N-1 runs signed in with its drive and serve up: quit it gracefully first, so it unmounts and
+		// stops them itself. A main pid killed outright orphans rclone with the mount point still busy.
+		if (left.length > 0 && stop !== undefined) {
+			const quitting = left
+
+			await stop(quitting)
+				.then(() => waitFor(`${fromVersion} to end (quit)`, EXIT_TIMEOUT_MS, () => ended(quitting)))
+				.catch((error: unknown) => console.log(`fault launch cleanup: ${errorMessage(error)}`))
+			left = processesAt(target).map(found => found.pid)
+		}
 
 		if (left.length > 0) {
-			target.kill(left)
-			await waitFor(`${fromVersion} to end (killed)`, EXIT_TIMEOUT_MS, () =>
-				processesAt(target).some(found => left.includes(found.pid)) ? null : true
-			).catch((error: unknown) => console.log(`fault launch cleanup: ${errorMessage(error)}`))
+			const killing = left
+
+			target.kill(killing)
+			await waitFor(`${fromVersion} to end (killed)`, EXIT_TIMEOUT_MS, () => ended(killing)).catch((error: unknown) =>
+				console.log(`fault launch cleanup: ${errorMessage(error)}`)
+			)
 		}
 
 		await server.close()
