@@ -113,18 +113,34 @@ describe("e2ePlan depth", () => {
 			"win-x64-nsis@0",
 			"win-arm64-nsis@20",
 			"mac-arm64-dmg@40",
-			"linux-x64-deb@60",
-			"linux-arm64-deb@80"
+			"mac-x64-dmg@60",
+			"linux-x64-deb@80",
+			"linux-x64-AppImage@100",
+			"linux-arm64-deb@120",
+			"linux-arm64-AppImage@140"
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
 		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, true])
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
-		// No rotation: every main format every night, all of them deep.
+		// Both AppImages and macOS x64 run both chains every night too.
+		expect(
+			nightly.tests
+				.filter(entry => entry.format === "AppImage" || (entry.platform === "mac" && entry.arch === "x64"))
+				.map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])
+		).toEqual([
+			["macos-26-intel", true, true],
+			["ubuntu-24.04", true, true],
+			["ubuntu-24.04-arm", true, true]
+		])
+		// rpm stays at install depth.
+		expect(nightly.tests.filter(entry => entry.format === "rpm").some(entry => entry.deep)).toBe(false)
+		// No rotation: every deep format every night, all of them deep.
 		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
-		// The session, then 4.x and 3.0.53 on Windows x64 and arm64, macOS arm64 and Linux x64 and arm64.
-		expect(logins(nightly)).toBe(11)
-		// Once every trial is promoted: both chains on five entries.
+		// The session, then 4.x and 3.0.53 on Windows x64 and arm64, macOS arm64 and x64, and Linux deb and AppImage on
+		// x64 and arm64.
+		expect(logins(nightly)).toBe(17)
+		// Once every trial is promoted: both chains on eight entries.
 		expect(
 			logins(
 				plan(
@@ -140,7 +156,7 @@ describe("e2ePlan depth", () => {
 					}
 				)
 			)
-		).toBe(11)
+		).toBe(17)
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
@@ -148,9 +164,14 @@ describe("e2ePlan depth", () => {
 			"win-x64-nsis@0",
 			"win-arm64-nsis@20",
 			"mac-arm64-dmg@40",
-			"linux-x64-deb@60",
-			"linux-arm64-deb@80"
+			"mac-x64-dmg@60",
+			"linux-x64-deb@80",
+			"linux-x64-AppImage@100",
+			"linux-arm64-deb@120",
+			"linux-arm64-AppImage@140"
 		])
+		// A custom deep run without FORMATS takes the release's deep entries.
+		expect(logins(plan({ ...dispatch, signed: true, depth: "deep" }))).toBe(17)
 	})
 
 	it("runs a trial entry deep only when a custom deep run names it", () => {
@@ -183,6 +204,34 @@ describe("e2ePlan depth", () => {
 
 		expect(mac.tests.map(entry => [entry.format, entry.deepPrevious, entry.deepLegacy])).toEqual([["dmg", true, false]])
 		expect(logins(mac)).toBe(2)
+
+		// An AppImage named in a custom deep run: both chains.
+		const appImage = plan({ ...dispatch, platforms: "linux", depth: "deep", formats: "linux-arm64-AppImage" })
+
+		expect(appImage.tests.map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])).toEqual([
+			["ubuntu-24.04-arm", true, true]
+		])
+	})
+
+	it("runs a trial entry outside the deep formats when a custom deep run names it", () => {
+		const readiness = { ready: DEEP_READY, trial: { "linux-x64-rpm": ["previous"] as const } }
+		const deepWith = (input: PlanInput) =>
+			plan(input, readiness)
+				.tests.filter(entry => entry.deep)
+				.map(entry => `${entry.platform}-${entry.arch}-${entry.format}:${String(entry.deepPrevious)}:${String(entry.deepLegacy)}`)
+
+		expect(deepWith({ ...dispatch, platforms: "linux", depth: "deep", formats: "linux-x64-rpm" })).toEqual(["linux-x64-rpm:true:false"])
+		// Its legacy chain is not built: a notice, and install depth for it.
+		expect(plan({ ...dispatch, platforms: "linux", depth: "deep", formats: "linux-x64-rpm" }, readiness).notices).toEqual([
+			"Deep depth is not built yet for linux-x64-rpm legacy; they run at install depth."
+		])
+		// Named but not deep, or deep but not named: install depth.
+		expect(deepWith({ ...dispatch, platforms: "linux", formats: "linux-x64-rpm" })).toEqual([])
+		expect(deepWith({ ...dispatch, platforms: "linux", depth: "deep", formats: "linux-x64-deb" })).toEqual(["linux-x64-deb:true:true"])
+		expect(deepWith({ ...dispatch, platforms: "linux", depth: "deep" }).some(entry => entry.includes("rpm"))).toBe(false)
+		expect(
+			deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" }).some(entry => entry.includes("rpm"))
+		).toBe(false)
 	})
 
 	it("keeps install depth when asked and for spikes; legacy-only runs are deep too", () => {

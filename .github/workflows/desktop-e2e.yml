@@ -144,7 +144,7 @@ permissions:
 
 # A group keeps one pending run and a newer one replaces it, so no run shares a group it could be replaced in: the
 # nightly has its own (one a day), every dispatch its own run's, and a release (called from another workflow, whose
-# name github.workflow then is) its own. Runs may overlap; the login budget (90 an hour, a run costing at most 11) is
+# name github.workflow then is) its own. Runs may overlap; the login budget (90 an hour, a run costing at most 17) is
 # kept by the plan job, which refuses a dispatch while MAX_OTHER_RUNS others are active (never the nightly).
 concurrency:
   group: desktop-e2e-${{ github.workflow != 'Desktop E2E' && 'release' || github.event_name == 'schedule' && 'nightly' || format('dispatch-{0}', github.run_id) }}
@@ -192,7 +192,7 @@ jobs:
           DEPTH: ${{ inputs.depth }}
           SPIKE: ${{ inputs.spike }}
         run: node scripts/ci/e2ePlan.ts
-      # Worst case with MAX_OTHER_RUNS others: the nightly, three dispatches and a release at 11 logins each, 55 an hour,
+      # Worst case with MAX_OTHER_RUNS others: the nightly, three dispatches and a release at 17 logins each, 85 an hour,
       # under the account's 90. A scheduled run is never refused; a release is not counted here.
       - name: Keep overlapping runs within the login budget
         if: steps.plan.outputs.session == 'true' && github.workflow == 'Desktop E2E' && github.event_name != 'schedule'

@@ -9,7 +9,8 @@ import { appendFileSync, readFileSync } from "node:fs"
 //   SIGNED      true | false: sign every build (release and custom); nightly signs macOS only, never notarized
 //   SCENARIOS   comma-separated subset of previous,legacy (default both); LEGACY=false drops legacy too
 //   FORMATS     custom only: entries such as win-x64-nsis,linux-x64-deb (default all)
-//   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep makes every main format deep
+//   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep those of a release (and any
+//               DEEP_TRIAL entry FORMATS names)
 //   SPIKE       none | s1 | s7 | cloud | offline: a dispatch-only spike instead of the update scenarios (cloud: the
 //               harness's cloud self-test, no app; offline: deep N-1 -> N with an offline/reconnect probe, signed in)
 //
@@ -121,13 +122,22 @@ const spikeEntries: Record<Spike, readonly string[]> = {
 	offline: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
 }
 
-// Deep depth per profile: release and nightly on every OS and architecture's main format (no rotation: arm64 every
-// night too), by hand one per OS unless DEPTH says otherwise. Other formats stay at install depth: deep flows do not
-// depend on them.
-const MAIN_FORMATS = ["win-x64-nsis", "win-arm64-nsis", "mac-arm64-dmg", "linux-x64-deb", "linux-arm64-deb"]
+// Deep depth per profile: release and nightly on every OS and architecture's main format, plus macOS x64 and both
+// AppImages, whose updaters and process trees differ (no rotation: all of them every night), by hand one per OS unless
+// DEPTH says otherwise. rpm stays at install depth: its updater is the deb's with another package manager.
+const DEEP_FORMATS = [
+	"win-x64-nsis",
+	"win-arm64-nsis",
+	"mac-arm64-dmg",
+	"mac-x64-dmg",
+	"linux-x64-deb",
+	"linux-arm64-deb",
+	"linux-x64-AppImage",
+	"linux-arm64-AppImage"
+]
 const deepEntries: Record<Profile, readonly string[]> = {
-	release: MAIN_FORMATS,
-	nightly: MAIN_FORMATS,
+	release: DEEP_FORMATS,
+	nightly: DEEP_FORMATS,
 	custom: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
 }
 // Which deep chains are built so far, per entry; the rest of a deep request runs at install depth, with a notice.
@@ -144,8 +154,11 @@ export const DEEP_READY: DeepScenarios = {
 	"win-x64-nsis": ["previous", "legacy"],
 	"win-arm64-nsis": ["previous", "legacy"],
 	"mac-arm64-dmg": ["previous", "legacy"],
+	"mac-x64-dmg": ["previous", "legacy"],
 	"linux-x64-deb": ["previous", "legacy"],
-	"linux-arm64-deb": ["previous", "legacy"]
+	"linux-arm64-deb": ["previous", "legacy"],
+	"linux-x64-AppImage": ["previous", "legacy"],
+	"linux-arm64-AppImage": ["previous", "legacy"]
 }
 // Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
 // release runs stay on what is proven.
@@ -259,9 +272,14 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		invalid("nothing to test")
 	}
 
-	const wantsDeep = (id: string) =>
-		spike === "" && (previous || legacy) && depth !== "install" && (depth === "deep" ? MAIN_FORMATS : deepEntries[profile]).includes(id)
 	const trial = profile === "custom" && depth === "deep"
+	// A trial entry is wanted wherever it is named: it may be a format no profile runs deep yet.
+	const wantsDeep = (id: string) =>
+		spike === "" &&
+		(previous || legacy) &&
+		depth !== "install" &&
+		((depth === "deep" ? DEEP_FORMATS : deepEntries[profile]).includes(id) ||
+			(trial && formats.includes(id) && Object.hasOwn(readiness.trial, id)))
 	const ready = (id: string, scenario: "previous" | "legacy") =>
 		readiness.ready[id]?.includes(scenario) === true ||
 		(trial && formats.includes(id) && readiness.trial[id]?.includes(scenario) === true)
