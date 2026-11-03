@@ -24,6 +24,7 @@ import {
 	driveRootChanges,
 	firstRunProblems,
 	firstRunSettled,
+	heldPlanProblem,
 	LEGACY_FIRST_RUN,
 	ROOT_PAIR,
 	rootPairFile,
@@ -208,6 +209,33 @@ describe("L16 and L17 first-run table", () => {
 		// Without the setup step, a review is unexpected.
 		expect(() => firstRunSettled(shell(review), new Set(), new Set())).toThrow(/e2e-l2c waits in review/)
 		expect(() => firstRunSettled(shell({ "e2e-c2l": { state: "review" } }, [root]), held, refused)).toThrow(/e2e-c2l waits in review/)
+	})
+
+	it("L10 takes a held pair's plan that only adopts the baseline, and names what else it carries", () => {
+		const want = { heldDeletions: 1, heldReason: "firstSyncWithDeletions" as const }
+		const summary = {
+			actions: 2,
+			uploadBytes: 0,
+			downloadBytes: 0,
+			heldDeletions: 1,
+			heldReason: "firstSyncWithDeletions" as const,
+			conflicts: 0,
+			unsyncable: 0,
+			ignored: 0,
+			refused: null
+		}
+		const adopt = (relPath: string) => ({ relPath, kind: "adoptBaseline" as const, to: null, node: "file" as const, size: 3 })
+		const actions = [adopt("a.txt"), adopt("b.txt")]
+
+		expect(heldPlanProblem(summary, actions, want)).toBeNull()
+		expect(heldPlanProblem({ ...summary, actions: 0 }, [], want)).toBeNull()
+		expect(heldPlanProblem(summary, [adopt("a.txt"), { ...adopt("b.txt"), kind: "upload" }], want)).toContain("upload b.txt")
+		expect(heldPlanProblem(summary, actions.slice(1), want)).toContain("1 actions listed: adoptBaseline b.txt")
+		expect(heldPlanProblem({ ...summary, uploadBytes: 3 }, actions, want)).not.toBeNull()
+		expect(heldPlanProblem({ ...summary, downloadBytes: 3 }, actions, want)).not.toBeNull()
+		expect(heldPlanProblem({ ...summary, heldDeletions: 2 }, actions, want)).not.toBeNull()
+		expect(heldPlanProblem({ ...summary, conflicts: 1 }, actions, want)).not.toBeNull()
+		expect(heldPlanProblem({ ...summary, refused: "remoteCollision" as const }, actions, want)).not.toBeNull()
 	})
 
 	it("compares a pair's review, phase and pause with the table", () => {

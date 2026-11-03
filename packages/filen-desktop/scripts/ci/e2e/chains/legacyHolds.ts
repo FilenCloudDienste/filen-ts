@@ -6,6 +6,9 @@ import type {
 	DesktopSyncPair,
 	DesktopSyncPhase,
 	DesktopSyncPlan,
+	DesktopSyncPlanAction,
+	DesktopSyncPlanPage,
+	DesktopSyncPlanSummary,
 	DesktopSyncResult,
 	DesktopSyncReview
 } from "@filen/shared/desktop"
@@ -38,12 +41,37 @@ export const CLOSED_UPLOAD = {
 	path: "from-cloud-while-closed.txt",
 	bytes: seededBytes("legacy/from-cloud-while-closed", 1500)
 } as const
+// The plan's actions are read this many at a time.
+const PLAN_PAGE = 50
+
 export const ROOT_PAIR = { name: "e2e-root", bytes: seededBytes("legacy/e2e-root", 900) } as const
 
 // The whole-drive pair's one local file, named per run, job and chain (from the chain's cloud directory): an upload one
 // run's pair left at the drive root never reads as another run's.
 export function rootPairFile(cloudDir: string): string {
 	return `root-local-${cloudDir.replace(/[^\w-]+/g, "-")}.txt`
+}
+
+// What is wrong with the dry run of a pair N's first run holds (L10), or null: its held deletions are the table's, with
+// no conflict and no refusal, and every action (all of them listed) only adopts the baseline, moving no bytes.
+export function heldPlanProblem(
+	summary: DesktopSyncPlanSummary,
+	actions: readonly DesktopSyncPlanAction[],
+	want: Pick<FirstRunHold, "heldDeletions" | "heldReason">
+): string | null {
+	const ok =
+		actions.length === summary.actions &&
+		actions.every(action => action.kind === "adoptBaseline") &&
+		summary.uploadBytes === 0 &&
+		summary.downloadBytes === 0 &&
+		summary.heldDeletions === want.heldDeletions &&
+		summary.heldReason === want.heldReason &&
+		summary.conflicts === 0 &&
+		summary.refused === null
+
+	return ok
+		? null
+		: `plan ${json(summary)}; ${String(actions.length)} actions listed: ${actions.map(action => `${action.kind} ${action.relPath}`).join(", ") || "none"}`
 }
 
 // How N's first run leaves a migrated pair it does not start.
@@ -219,7 +247,8 @@ export function legacyHolds(chain: Chain, findings: Findings = chain.findings) {
 		shellSettled: (pairs: readonly ShellPairState[] | undefined): boolean =>
 			firstRunSettled(pairs, new Set(Object.keys(LEGACY_FIRST_RUN).filter(name => hold(name) !== null)), refused()),
 
-		// L10 for the held pairs: their dry run holds exactly the table's deletions and nothing else.
+		// L10 for the held pairs: their dry run holds exactly the table's deletions and nothing else. A migrated pair held
+		// in review never ran a pass on N, so its plan adopts the baseline (adoptBaseline rows) and moves no bytes.
 		async heldPlans(pairIds: readonly { name: string; id: string }[]): Promise<string> {
 			const problems: string[] = []
 			const seen: string[] = []
@@ -242,21 +271,37 @@ export function legacyHolds(chain: Chain, findings: Findings = chain.findings) {
 					continue
 				}
 
-				await desktopCall(page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
+				const actions: DesktopSyncPlanAction[] = []
 
-				const { actions, heldDeletions, heldReason, conflicts, refused: refusal } = plan.summary
+				try {
+					for (let offset = 0; offset < plan.summary.actions; offset += PLAN_PAGE) {
+						const listed = ok(
+							"planPage",
+							await desktop<DesktopSyncResult<DesktopSyncPlanPage>>(
+								page(),
+								`window.desktop.sync.planPage(${json(plan.planId)}, "actions", ${String(offset)}, ${String(PLAN_PAGE)})`
+							)
+						)
 
-				if (
-					actions !== 0 ||
-					heldDeletions !== want.heldDeletions ||
-					heldReason !== want.heldReason ||
-					conflicts !== 0 ||
-					refusal !== null
-				) {
-					problems.push(`${name}: plan ${json(plan.summary)}`)
+						if (listed.list !== "actions" || listed.entries.length === 0) {
+							break
+						}
+
+						actions.push(...listed.entries)
+					}
+				} finally {
+					await desktopCall(page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
 				}
 
-				seen.push(`${name} holds ${String(heldDeletions)} (${String(heldReason)})`)
+				const problem = heldPlanProblem(plan.summary, actions, want)
+
+				if (problem !== null) {
+					problems.push(`${name}: ${problem}`)
+				}
+
+				seen.push(
+					`${name} holds ${String(plan.summary.heldDeletions)} (${String(plan.summary.heldReason)}), adopts ${String(actions.length)} baseline entries`
+				)
 			}
 
 			if (problems.length > 0) {
