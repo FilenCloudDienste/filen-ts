@@ -284,7 +284,8 @@ jobs:
   # failure fails the deep jobs and the sweep is skipped.
   session:
     needs: plan
-    if: needs.plan.outputs.session == 'true'
+    # A reseed runs here too, so a scale_reseed dispatch at install depth still brings the job up.
+    if: needs.plan.outputs.session == 'true' || inputs.scale_reseed
     runs-on: ubuntu-latest
     # `dropped` when the account's auth version is one 3.0.47 cannot sign in to: its signed-in chain gives way to its
     # install-only update. Nothing else leaves this job.
