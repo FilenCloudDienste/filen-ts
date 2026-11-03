@@ -22,7 +22,8 @@ import { LEGACY_SDK_CONFIG_SHAPE } from "../seed.ts"
 //
 // From 3.0.47 (scripts/ci/legacy.ts OLDER_PIN): L1-L10, L13 and L15-L17 with its inventory; L11, L12, L14 and the
 // profile wipe test N alone, which chain L does from 3.0.53, and are recorded as not run. 3.0.47's web (0.1.87) turns
-// the network drive off when it fails to start, so where it cannot mount (macOS, no FUSE-T) N must import it off.
+// the network drive off when it fails to start, so where it cannot mount N must import it off. On macOS its start waits
+// on FUSE-T's administrator prompt instead, a known 3.0.47 limitation (FUSE_T_PROMPT_ISSUE): the drive stays on.
 
 // The fixture pair stored without its two switches: both are off in its fixture, so every other expectation holds.
 export const BARE_PAIR = "e2e-lbak"
@@ -173,7 +174,7 @@ export function bareImported(overview: DesktopSyncOverview, root: string): strin
 }
 
 // The old page's network drive switch as its web reads it: the account's map entry, else desktopConfig's.
-async function legacyDriveEnabled(page: Page): Promise<boolean | null> {
+async function legacyDriveEnabled(page: Pick<Page, "evaluate">): Promise<boolean | null> {
 	return (await page
 		.evaluate(
 			([desktopKey, sdkKey, driveKey]) => {
@@ -195,15 +196,22 @@ async function legacyDriveEnabled(page: Page): Promise<boolean | null> {
 		.catch(() => null)) as boolean | null
 }
 
+// On macOS 3.0.47's drive start waits on FUSE-T's installer, which asks for an administrator; on a hosted runner
+// nobody answers, so it neither mounts nor turns the drive off.
+export const FUSE_T_PROMPT_ISSUE =
+	"3.0.47 on macOS: its network drive's start waits on FUSE-T's administrator prompt, which nobody answers here, so it never turns the drive off (a 3.0.47 limitation; N imports the drive as configured)"
+
 // 3.0.47's drive once its start settled: mounted, or turned off by its web (where it cannot mount, that is the
 // expected outcome, a check). Waits at most `timeoutMs`; neither by then is the outcome too (its start still hangs:
-// the drive stays configured, as 3.0.53's does where it cannot mount, and N gets it on).
+// the drive stays configured, as 3.0.53's does where it cannot mount, and N gets it on); on macOS that hang is
+// FUSE_T_PROMPT_ISSUE, recorded as known.
 export async function olderDrive(
-	page: Page,
-	os: DesktopOs,
+	page: Pick<Page, "evaluate">,
+	os: Pick<DesktopOs, "legacyDriveLive" | "driveMounted">,
 	root: string,
 	findings: Findings,
-	timeoutMs: number
+	timeoutMs: number,
+	platform: NodeJS.Platform = process.platform
 ): Promise<{ off: boolean; detail: string }> {
 	const outcome = await waitFor(
 		"3.0.47's network drive to mount or turn off",
@@ -227,13 +235,20 @@ export async function olderDrive(
 			fail(`the drive did not mount here: ${outcome.detail}`)
 		}
 	} else {
-		await findings.check(`${OLDER_PIN.version} turns its network drive off where it cannot mount`, () => {
+		const check = `${OLDER_PIN.version} turns its network drive off where it cannot mount`
+		const probe = (): string => {
 			if (!outcome.off) {
 				fail(outcome.detail)
 			}
 
 			return outcome.detail
-		})
+		}
+
+		if (platform === "darwin" && !outcome.off) {
+			await findings.known(check, FUSE_T_PROMPT_ISSUE, probe)
+		} else {
+			await findings.check(check, probe)
+		}
 	}
 
 	return { off: outcome.off, detail: outcome.detail }

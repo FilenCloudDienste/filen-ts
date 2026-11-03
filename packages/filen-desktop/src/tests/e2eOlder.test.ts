@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { EventEmitter } from "node:events"
 import { generateKeyPairSync } from "node:crypto"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { runInNewContext } from "node:vm"
@@ -13,9 +13,11 @@ import {
 	bareImported,
 	fallbackImported,
 	findingsFor,
+	FUSE_T_PROMPT_ISSUE,
 	legacyNetworkDriveGone,
 	leftoversBeside,
 	OLDER_SDK_CONFIG_SHAPE,
+	olderDrive,
 	OLDER_SKIPPED,
 	OTHER_ACCOUNT_PAIR,
 	plantedHeld,
@@ -515,6 +517,42 @@ describe("older shapes planted in chain L", () => {
 })
 
 describe("chain L from 3.0.47", () => {
+	// 3.0.47's page with its drive switch, and an OS where it cannot mount.
+	const drivePage = (enabled: boolean) => ({ evaluate: () => Promise.resolve(enabled) }) as unknown as Pick<Page, "evaluate">
+	const noMount = { legacyDriveLive: false, driveMounted: () => Promise.resolve(null) }
+	const recorded = (artifacts: string) =>
+		JSON.parse(readFileSync(path.join(artifacts, "older-findings.json"), "utf8")) as { ok: boolean; known: boolean; detail: string }[]
+
+	it("counts a macOS drive start hanging on FUSE-T's administrator prompt as a known 3.0.47 limitation", async () => {
+		const artifacts = tempDir()
+		const findings = createFindings("older", artifacts)
+
+		expect(await olderDrive(drivePage(true), noMount, "/Volumes/Filen", findings, 0, "darwin")).toEqual({
+			off: false,
+			detail: "neither mounted nor turned off: its start still runs"
+		})
+		findings.finish()
+		expect(recorded(artifacts)).toEqual([
+			expect.objectContaining({ ok: true, known: true, detail: expect.stringContaining(FUSE_T_PROMPT_ISSUE) as unknown })
+		])
+	})
+
+	it("passes a drive 3.0.47 turned off on macOS, and fails one still starting elsewhere", async () => {
+		const mac = tempDir()
+		const macFindings = createFindings("older", mac)
+
+		expect(await olderDrive(drivePage(false), noMount, "/Volumes/Filen", macFindings, 0, "darwin")).toMatchObject({ off: true })
+		macFindings.finish()
+		expect(recorded(mac)).toEqual([expect.objectContaining({ ok: true, known: false })])
+
+		const linux = tempDir()
+		const linuxFindings = createFindings("older", linux)
+
+		await olderDrive(drivePage(true), noMount, "/mnt/filen", linuxFindings, 0, "linux")
+		expect(() => linuxFindings.finish()).toThrow(/turns its network drive off/)
+		expect(recorded(linux)).toEqual([expect.objectContaining({ ok: false, known: false })])
+	})
+
 	it("records the checks that test N alone as not run, and files its evidence under its own name", async () => {
 		const artifacts = tempDir()
 		const inner = createFindings("older", artifacts)
