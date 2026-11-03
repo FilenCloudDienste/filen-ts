@@ -1,5 +1,6 @@
 import {
 	app,
+	autoUpdater as squirrel,
 	BrowserWindow,
 	clipboard,
 	dialog,
@@ -77,6 +78,7 @@ import { anyDemand, createNativeSupervisor } from "./native/supervisor.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
+import { type HostProxy, PROXY_RESOLVE_WAIT_MS, resolveHostProxy } from "./proxy.ts"
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
@@ -106,7 +108,7 @@ import {
 	trayStatusLines,
 	trayTooltip
 } from "./tray.ts"
-import { startUpdater, testUpdateFeed, type Updater } from "./updater.ts"
+import { startUpdater, testUpdateFeed, type Updater, type UpdaterEngine } from "./updater.ts"
 import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } from "./window.ts"
 
 // Payloads from the renderer are untrusted input.
@@ -444,8 +446,16 @@ const fuseContext: FuseContext = {
 }
 const { fuseInstaller } = fuseContext
 
+// Resolved once the app is ready; the rclone the host starts inherits its environment.
+let hostProxy: HostProxy | null = null
+
 const nativeSupervisor = createNativeSupervisor({
-	fork: () => utilityProcess.fork(path.join(import.meta.dirname, "native.js"), [], { serviceName: "Filen Helper", stdio: "pipe" }),
+	fork: () =>
+		utilityProcess.fork(path.join(import.meta.dirname, "native.js"), [], {
+			serviceName: "Filen Helper",
+			stdio: "pipe",
+			env: hostProxy?.env() ?? process.env
+		}),
 	vault: sessionVault,
 	addonPath: () =>
 		addonPath({
@@ -729,11 +739,26 @@ function installUpdateNow(): void {
 	installingUpdate = true
 
 	if (!updater.install()) {
-		warn("updater: the update could not be installed")
+		warn("updater: nothing to install")
 		quitting = false
 		installingUpdate = false
 	}
 }
+
+// The installer did not start (a declined elevation, Squirrel's error): the app keeps running and says so.
+function updateInstallFailed(): void {
+	quitting = false
+	installingUpdate = false
+
+	const options = {
+		type: "warning" as const,
+		message: "The update could not be installed",
+		detail: "Filen keeps running on this version and tries again later."
+	}
+
+	void (mainWindow === null ? dialog.showMessageBox(options) : dialog.showMessageBox(mainWindow, options))
+}
+
 // The window needs the app protocol and the migration; a show asked for before (activate, second-instance, the
 // tray) is remembered and honoured once startup finished.
 let started = false
@@ -1654,9 +1679,24 @@ if (!app.requestSingleInstanceLock()) {
 			if (app.isPackaged) {
 				const testFeed = testUpdateFeed(process.env["FILEN_DESKTOP_TEST_UPDATE_FEED"])
 
-				updater = startUpdater(
-					{ info, warn },
-					version => {
+				updater = startUpdater({
+					log: { info, warn },
+					testFeed,
+					load: async () => {
+						const engine: UpdaterEngine = (await import("electron-updater")).autoUpdater
+
+						return engine
+					},
+					// electron-updater's own session (its NET_SESSION_NAME).
+					closeConnections: () => session.fromPartition("electron-updater", { cache: false }).closeAllConnections(),
+					native:
+						PLATFORM === "darwin"
+							? events => {
+									squirrel.on("update-downloaded", events.downloaded)
+									squirrel.on("error", events.error)
+								}
+							: null,
+					onReady: version => {
 						info(`updater: ${version} is ready to install`)
 
 						if (testFeed !== null) {
@@ -1665,8 +1705,8 @@ if (!app.requestSingleInstanceLock()) {
 							mainWindow?.webContents.send(CHANNELS.updateReady, version)
 						}
 					},
-					testFeed
-				)
+					onInstallFailed: updateInstallFailed
+				})
 			}
 		})
 		.catch((error: unknown) => {
@@ -1712,11 +1752,20 @@ if (!app.requestSingleInstanceLock()) {
 				})
 			}
 
+			hostProxy = resolveHostProxy({
+				env: process.env,
+				resolve: url => defaultSession.resolveProxy(url),
+				log: { info, warn },
+				waitMs: PROXY_RESOLVE_WAIT_MS
+			})
+
 			// Before the first window, so the page boots with the imported session, PIN and prefs.
 			if ((await migration.start()).pinImported) {
 				lockNow()
 			}
 
+			// Resolved alongside the migration, so this rarely waits.
+			await hostProxy.ready
 			started = true
 			nativeSupervisor.ensure("launch")
 			void fileProvider.launch()

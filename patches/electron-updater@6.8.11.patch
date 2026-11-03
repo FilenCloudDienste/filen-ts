@@ -1,0 +1,186 @@
+diff --git a/out/AppImageUpdater.js b/out/AppImageUpdater.js
+index 452e93f819eaeb5e6532a831255adc70d854df4b..2c737fc550f76dcf3d73e871681936264ba5f420 100644
+--- a/out/AppImageUpdater.js
++++ b/out/AppImageUpdater.js
+@@ -77,8 +77,6 @@ class AppImageUpdater extends BaseUpdater_1.BaseUpdater {
+         if (!path.isAbsolute(appImageFile) || appImageFile.includes("\0")) {
+             throw (0, builder_util_runtime_1.newError)(`APPIMAGE env is not a valid absolute path: "${appImageFile}"`, "ERR_UPDATER_OLD_FILE_NOT_FOUND");
+         }
+-        // https://stackoverflow.com/a/1712051/1910191
+-        (0, fs_1.unlinkSync)(appImageFile);
+         let destination;
+         const existingBaseName = path.basename(appImageFile);
+         const installerPath = this.installerPath;
+@@ -95,8 +93,28 @@ class AppImageUpdater extends BaseUpdater_1.BaseUpdater {
+         else {
+             destination = path.join(path.dirname(appImageFile), path.basename(installerPath));
+         }
+-        (0, child_process_1.execFileSync)("mv", ["-f", installerPath, destination]);
+-        if (destination !== appImageFile) {
++        // The running AppImage is replaced only once the new one is in place: a failed mv leaves it untouched. The move
++        // goes to a sibling first (mv may copy across file systems), then renames over the old file in one step.
++        if (destination === appImageFile) {
++            const staged = path.join(path.dirname(appImageFile), `.${existingBaseName}.update`);
++            try {
++                (0, child_process_1.execFileSync)("mv", ["-f", installerPath, staged]);
++                (0, fs_1.renameSync)(staged, appImageFile);
++            }
++            catch (e) {
++                (0, fs_1.rmSync)(staged, { force: true });
++                throw e;
++            }
++        }
++        else {
++            (0, child_process_1.execFileSync)("mv", ["-f", installerPath, destination]);
++            // https://stackoverflow.com/a/1712051/1910191
++            try {
++                (0, fs_1.unlinkSync)(appImageFile);
++            }
++            catch (e) {
++                this._logger.warn(`Cannot remove the old AppImage ${appImageFile}: ${e.message || e}`);
++            }
+             this.emit("appimage-filename-updated", destination);
+         }
+         const env = {
+diff --git a/out/BaseUpdater.js b/out/BaseUpdater.js
+index f7c2965929a773ff54ac3124eec7a023e13ef1c9..a1252c5a96f579cd754cc62fdbaea6fb4691de41 100644
+--- a/out/BaseUpdater.js
++++ b/out/BaseUpdater.js
+@@ -9,20 +9,41 @@ class BaseUpdater extends AppUpdater_1.AppUpdater {
+         super(options, app);
+         this.quitAndInstallCalled = false;
+         this.quitHandlerAdded = false;
++        // Set by a doInstall whose installer starts asynchronously: resolves whether it started.
++        this.installerStarted = null;
+     }
+     quitAndInstall(isSilent = false, isForceRunAfter = false) {
+         this._logger.info(`Install on explicit quitAndInstall`);
+         // If NOT in silent mode use `autoRunAppAfterInstall` to determine whether to force run the app
+         const isInstalled = this.install(isSilent, isSilent ? isForceRunAfter : this.autoRunAppAfterInstall);
+-        if (isInstalled) {
++        const quit = () => {
+             setImmediate(() => {
+                 // this event is normally emitted when calling quitAndInstall, this emulates that
+                 require("electron").autoUpdater.emit("before-quit-for-update");
+                 this.app.quit();
+             });
++        };
++        const started = this.installerStarted;
++        this.installerStarted = null;
++        if (!isInstalled) {
++            this.quitAndInstallCalled = false;
++        }
++        else if (started == null) {
++            quit();
+         }
+         else {
+-            this.quitAndInstallCalled = false;
++            // The app quits only once the installer runs: a declined elevation or a failed spawn keeps it running, and the
++            // update installs on a later quit.
++            void started.then(ok => {
++                if (ok) {
++                    quit();
++                }
++                else {
++                    this.quitAndInstallCalled = false;
++                }
++            }, () => {
++                this.quitAndInstallCalled = false;
++            });
+         }
+     }
+     executeDownload(taskOptions) {
+@@ -53,6 +74,7 @@ class BaseUpdater extends AppUpdater_1.AppUpdater {
+         }
+         // prevent calling several times
+         this.quitAndInstallCalled = true;
++        this.installerStarted = null;
+         try {
+             this._logger.info(`Install: isSilent: ${isSilent}, isForceRunAfter: ${isForceRunAfter}`);
+             return this.doInstall({
+diff --git a/out/NsisUpdater.js b/out/NsisUpdater.js
+index 6fb70b4275a59741d28aecc389c2736909130a3e..87dda653d0e912d92342d01db8463531f5b57f02 100644
+--- a/out/NsisUpdater.js
++++ b/out/NsisUpdater.js
+@@ -2,6 +2,7 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.NsisUpdater = void 0;
+ const builder_util_runtime_1 = require("builder-util-runtime");
++const child_process_1 = require("child_process");
+ const path = require("path");
+ const BaseUpdater_1 = require("./BaseUpdater");
+ const FileWithEmbeddedBlockMapDifferentialDownloader_1 = require("./differentialDownloader/FileWithEmbeddedBlockMapDifferentialDownloader");
+@@ -120,29 +121,65 @@ class NsisUpdater extends BaseUpdater_1.BaseUpdater {
+             // only = form is supported
+             args.push(`--package-file=${packagePath}`);
+         }
+-        const callUsingElevation = () => {
+-            this.spawnLog(path.join(process.resourcesPath, "elevate.exe"), [installerPath].concat(args)).catch(e => this.dispatchError(e));
+-        };
++        // Resolves once elevate.exe has exited: 0 when the installer was started elevated, anything else when the
++        // elevation was declined or failed.
++        const callUsingElevation = () => new Promise(resolve => {
++            let settled = false;
++            const fail = (e) => {
++                if (settled) {
++                    return;
++                }
++                settled = true;
++                resolve(false);
++                this.dispatchError(e);
++            };
++            let p;
++            try {
++                const elevate = path.join(process.resourcesPath, "elevate.exe");
++                const elevateArgs = [installerPath].concat(args);
++                this._logger.info(`Executing: ${elevate} with args: ${elevateArgs}`);
++                p = (0, child_process_1.spawn)(elevate, elevateArgs, { stdio: "ignore", detached: true });
++            }
++            catch (e) {
++                fail(e);
++                return;
++            }
++            p.on("error", fail);
++            p.on("exit", code => {
++                if (code === 0) {
++                    settled = true;
++                    resolve(true);
++                }
++                else {
++                    fail(new Error(`The installer did not start: elevate.exe exited with code ${code}`));
++                }
++            });
++            p.unref();
++        });
+         if (options.isAdminRightsRequired) {
+             this._logger.info("isAdminRightsRequired is set to true, run installer using elevate.exe");
+-            callUsingElevation();
++            this.installerStarted = callUsingElevation();
+             return true;
+         }
+-        this.spawnLog(installerPath, args).catch((e) => {
++        this.installerStarted = this.spawnLog(installerPath, args).then(() => true, (e) => {
+             // https://github.com/electron-userland/electron-builder/issues/1129
+             // Node 8 sends errors: https://nodejs.org/dist/latest-v8.x/docs/api/errors.html#errors_common_system_errors
+             const errorCode = e.code;
+             this._logger.info(`Cannot run installer: error code: ${errorCode}, error message: "${e.message}", will be executed again using elevate if EACCES, and will try to use electron.shell.openItem if ENOENT`);
+             if (errorCode === "UNKNOWN" || errorCode === "EACCES") {
+-                callUsingElevation();
++                return callUsingElevation();
+             }
+             else if (errorCode === "ENOENT") {
+-                require("electron")
++                return require("electron")
+                     .shell.openPath(installerPath)
+-                    .catch((err) => this.dispatchError(err));
++                    .then(() => true, (err) => {
++                    this.dispatchError(err);
++                    return false;
++                });
+             }
+             else {
+                 this.dispatchError(e);
++                return false;
+             }
+         });
+         return true;

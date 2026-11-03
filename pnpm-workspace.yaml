@@ -116,6 +116,10 @@ patchedDependencies:
   # Passes cache_ram_mib and the context-checkpoint params to the self-built wasm (filen-web
   # scripts/wllama), capping a prompt cache that outgrew the heap. Drop once a wllama release exposes them.
   '@wllama/wllama@3.8.1': patches/@wllama__wllama@3.8.1.patch
+  # Desktop updates: the AppImage is replaced only after the new one is moved into place (a failed mv deleted the
+  # running app), and the Windows app quits only once elevate.exe started the installer (a declined UAC prompt
+  # quit it with nothing installed). Drop each once upstream fixes it.
+  electron-updater@6.8.11: patches/electron-updater@6.8.11.patch
   # A single AudioPlayer shows previous/next on the lock screen and notification and hands the presses to JS
   # (remoteNextTrack/remotePreviousTrack) for the app's own queue. Drop once expo-audio supports that.
   expo-audio@58.0.10: patches/expo-audio@58.0.10.patch
