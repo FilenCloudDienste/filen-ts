@@ -41,3 +41,39 @@ export function startsHidden(argv: readonly string[], startMinimized: boolean, o
 export function appIdentity(packaged: boolean): { name: string; userData: string } {
 	return packaged ? { name: "Filen", userData: "@filen/desktop" } : { name: "Filen Dev", userData: "@filen/desktop-dev" }
 }
+
+// electron-updater's AppImage install starts the new AppImage with this set to "true" before the old instance quits,
+// and the old one holds the single-instance lock while its native host stops.
+export const UPDATER_RELAUNCH_ENV = "APPIMAGE_SILENT_INSTALL"
+// How long that relaunch waits for the lock, and how often it asks again.
+export const RELAUNCH_LOCK_WAIT_MS = 30_000
+export const RELAUNCH_LOCK_RETRY_MS = 250
+
+export interface InstanceLockContext {
+	request(): boolean
+	// Started by the updater, so the instance holding the lock is quitting.
+	relaunched: boolean
+	now(): number
+	// Blocking: the lock decides what runs before ready.
+	sleep(ms: number): void
+}
+
+// The single-instance lock: asked once, or, for the updater's relaunch, until the quitting instance lets go of it.
+export function acquireInstanceLock(context: InstanceLockContext): { held: boolean; attempts: number; waitedMs: number } {
+	const start = context.now()
+	let attempts = 0
+
+	for (;;) {
+		attempts++
+
+		if (context.request()) {
+			return { held: true, attempts, waitedMs: context.now() - start }
+		}
+
+		if (!context.relaunched || context.now() - start >= RELAUNCH_LOCK_WAIT_MS) {
+			return { held: false, attempts, waitedMs: context.now() - start }
+		}
+
+		context.sleep(RELAUNCH_LOCK_RETRY_MS)
+	}
+}

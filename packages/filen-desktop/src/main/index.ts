@@ -50,7 +50,16 @@ import { createFileProviderAddon, type FileProviderAddonContext, fileProviderAdd
 import { registerFileProviderIpc } from "./fileProvider/ipc.ts"
 import { createFileProviderService, runsTranslocated } from "./fileProvider/service.ts"
 import { createFileProviderStore } from "./fileProvider/store.ts"
-import { appIdentity, closeAction, HIDDEN_ARG, IDLE_DESTROY_DELAY_MS, keepsRendererAlive, startsHidden } from "./lifecycle.ts"
+import {
+	acquireInstanceLock,
+	appIdentity,
+	closeAction,
+	HIDDEN_ARG,
+	IDLE_DESTROY_DELAY_MS,
+	keepsRendererAlive,
+	startsHidden,
+	UPDATER_RELAUNCH_ENV
+} from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { deleteLegacyStores, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
@@ -1338,9 +1347,27 @@ function isTrusted(senderFrame: WebFrameMain | null): boolean {
 	return isTrustedSender(senderFrame?.url, APP_ORIGIN)
 }
 
-if (!app.requestSingleInstanceLock()) {
+const instanceLock = acquireInstanceLock({
+	request: () => app.requestSingleInstanceLock(),
+	relaunched: process.env[UPDATER_RELAUNCH_ENV] === "true",
+	now: Date.now,
+	sleep: ms => {
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+	}
+})
+
+if (!instanceLock.held) {
+	info(
+		`another instance holds the single-instance lock${instanceLock.attempts > 1 ? ` (waited ${String(instanceLock.waitedMs)} ms)` : ""}; quitting`
+	)
+	// Electron tears down next; a batched line would never reach the disk.
+	fileLog.flushSync()
 	app.quit()
 } else {
+	if (instanceLock.attempts > 1) {
+		info(`single-instance lock taken after ${String(instanceLock.waitedMs)} ms (the previous instance was quitting)`)
+	}
+
 	// The main module runs to its end before Electron creates the default session and emits ready, so nothing holds the
 	// profile's storage open yet. Synchronous, so it is done before that.
 	profileWipe = wipeProfileBeforeReady({
@@ -1381,7 +1408,12 @@ if (!app.requestSingleInstanceLock()) {
 		}
 	})
 	void signOutFlow.resume().then(signOutResumed.resolve)
-	app.on("second-instance", showWindow)
+	// A quitting app opens no window: the updater's relaunch asks for the lock while this one stops its native host.
+	app.on("second-instance", () => {
+		if (!quitting) {
+			showWindow()
+		}
+	})
 	app.on("before-quit", () => {
 		if (!quitting) {
 			info("quit: closing windows")
