@@ -44,7 +44,8 @@ import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.
 //   PN3 every cloud-seeded item keeps its uuid and exact name; the ones this OS can hold are on disk with their bytes
 //   PN4 every device-seeded item that syncs is in the cloud once, with its bytes (sha256Of); the rest are not; NFD names
 //       keep their spelling on disk with no NFC sibling
-//   PN5 on N: a case rename on each side and an edit of the cloud's NFD file each leave exactly one cloud item
+//   PN5 on N: a case rename on each side and an edit of the cloud's NFD file each leave exactly one cloud item; each
+//       renamed one keeps the uuid it had before (a rename, not a deletion and a new upload)
 
 const ENTRIES = new Set(["linux-x64-deb", "win-x64-nsis", "mac-arm64-dmg"])
 const SCALE_PAIR = "e2e-scale"
@@ -78,6 +79,37 @@ function seconds(ms: number): string {
 
 const nfc = (relPath: string) => relPath.normalize("NFC")
 const folded = (relPath: string) => nfc(relPath).toLowerCase()
+
+// PN5's case renames as they stand (`listed`: the cloud's files, `local`: the paths on disk, `ids`: each renamed file's
+// cloud uuid before the rename): what does not hold yet. Each is exactly one cloud item, spelled as renamed, with the
+// uuid it had (a rename, not a deletion and a new upload); the cloud's rename is on disk once, as spelled.
+export function renameProblems(
+	listed: readonly CloudEntry[],
+	local: Iterable<string>,
+	ids: Readonly<Record<"local" | "cloud", string>>
+): string[] {
+	const localPaths = [...local]
+	const problems: string[] = []
+
+	for (const side of ["local", "cloud"] as const) {
+		const spelled = NAMES_RENAMES[side].to
+		const found = listed.filter(item => folded(item.path) === folded(spelled))
+
+		if (found.length !== 1 || found[0]?.path !== spelled) {
+			problems.push(`cloud ${json(found.map(item => item.path))}, expected [${json(spelled)}]`)
+		} else if (found[0].id !== ids[side]) {
+			problems.push(`${json(spelled)} has uuid ${found[0].id}, not ${ids[side]}: deleted and uploaded anew, not renamed`)
+		}
+	}
+
+	const onDisk = localPaths.filter(relPath => folded(relPath) === folded(NAMES_RENAMES.cloud.to))
+
+	if (onDisk.length !== 1 || onDisk[0] !== NAMES_RENAMES.cloud.to) {
+		problems.push(`on disk ${json(onDisk)}, expected [${json(NAMES_RENAMES.cloud.to)}]`)
+	}
+
+	return problems
+}
 
 export function realWorldFor(chain: Chain, arch: string): RealWorld {
 	const { findings, cloud, target } = chain
@@ -475,23 +507,11 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 	}
 
 	// PN5's three outcomes as they stand: null when every one holds, else what does not.
-	const renamesPending = async (root: string): Promise<string | null> => {
+	const renamesPending = async (root: string, ids: Readonly<Record<"local" | "cloud", string>>): Promise<string | null> => {
 		const listed = ((await cloud.list(cloudNames)) ?? []).filter(item => !item.isDir)
 		const local = await localSnapshot(root, { raw: true, skip: relPath => relPath === BIN_DIR })
-		const cloudOnes = (name: string) => listed.filter(item => folded(item.path) === folded(name)).map(item => item.path)
-		const localOnes = (name: string) => [...local.keys()].filter(relPath => folded(relPath) === folded(name))
-		const problems: string[] = []
-		const { local: localRename, cloud: cloudRename, edit } = NAMES_RENAMES
-		const exactlyOne = (where: string, found: string[], spelled: string) => {
-			if (found.length !== 1 || found[0] !== spelled) {
-				problems.push(`${where} ${json(found)}, expected [${json(spelled)}]`)
-			}
-		}
-
-		exactlyOne("cloud", cloudOnes(localRename.to), localRename.to)
-		exactlyOne("cloud", cloudOnes(cloudRename.to), cloudRename.to)
-		exactlyOne("on disk", localOnes(cloudRename.to), cloudRename.to)
-
+		const problems = renameProblems(listed, local.keys(), ids)
+		const { edit } = NAMES_RENAMES
 		const edited: CloudEntry[] = listed.filter(item => nfc(item.path) === nfc(edit.path))
 
 		if (edited.length !== 1 || edited[0] === undefined) {
@@ -507,12 +527,17 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 		const root = chain.rootOf(NAMES_PAIR)
 
 		await findings.check(
-			"PN5 a case rename on each side and an edit of the cloud's NFD file each leave exactly one cloud item",
+			"PN5 a case rename on each side and an edit of the cloud's NFD file each leave exactly one cloud item, the renamed ones with their uuids",
 			async () => {
 				const { local: localRename, cloud: cloudRename, edit } = NAMES_RENAMES
 				const local = await localSnapshot(root, { raw: true })
 				const editedOnDisk =
 					[...local.keys()].find(relPath => nfc(relPath) === nfc(edit.path)) ?? fail(`${json(edit.path)} is not on disk`)
+				const before = (await cloud.list(cloudNames)) ?? fail(`${cloudNames} is gone`)
+				const idOf = (spelled: string) =>
+					before.find(item => !item.isDir && item.path === spelled)?.id ??
+					fail(`${json(spelled)} is not in the cloud before its rename`)
+				const ids = { local: idOf(localRename.from), cloud: idOf(cloudRename.from) }
 
 				renameSync(path.join(root, localRename.from), path.join(root, localRename.to))
 				await cloud.moveto(`${cloudNames}/${cloudRename.from}`, `${cloudNames}/${cloudRename.to}`)
@@ -525,18 +550,18 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 				await syncNow(chain, pair.id)
 
 				const started = Date.now()
-				let pending = await renamesPending(root)
+				let pending = await renamesPending(root, ids)
 
 				while (pending !== null && Date.now() - started < RENAMES_MS) {
 					await new Promise(resolve => setTimeout(resolve, 5000))
-					pending = await renamesPending(root)
+					pending = await renamesPending(root, ids)
 				}
 
 				if (pending !== null) {
 					fail(`after 3 min: ${pending}; the pair: ${describePair(await overviewOf(pair))}`)
 				}
 
-				return `report.txt and notes.md once each, as renamed; the NFD file's edit in its one cloud item (${seconds(Date.now() - started)})`
+				return `report.txt and notes.md once each, as renamed, with their uuids; the NFD file's edit in its one cloud item (${seconds(Date.now() - started)})`
 			}
 		)
 	}

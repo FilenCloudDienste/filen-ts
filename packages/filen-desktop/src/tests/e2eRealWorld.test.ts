@@ -3,7 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Chain } from "../../scripts/ci/e2e/chains/common.ts"
-import { realWorldFor } from "../../scripts/ci/e2e/chains/realWorld.ts"
+import { realWorldFor, renameProblems } from "../../scripts/ci/e2e/chains/realWorld.ts"
 import { type Cloud, type CloudEntry, excludeArgs } from "../../scripts/ci/e2e/cloud.ts"
 import { expectedUnsyncable, NAME_FIXTURES, namesFor, NAMES_PAIR, NAMES_RENAMES } from "../../scripts/ci/e2e/fixtures.ts"
 import { createFindings, type Finding } from "../../scripts/ci/e2e/findings.ts"
@@ -194,6 +194,28 @@ describe("e2e names pair", () => {
 			])
 			expect(fixtures.filter(fixture => fixture.expect === "ignored")).toHaveLength(20)
 		}
+	})
+
+	it("takes PN5's case renames only as one cloud item each, spelled as renamed, with the uuid it had", () => {
+		const file = (relPath: string, id: string): CloudEntry => ({ path: relPath, isDir: false, size: 1, modTime: "", id })
+		const ids = { local: "uuid-report", cloud: "uuid-notes" }
+		const renamed = [file("report.txt", "uuid-report"), file("notes.md", "uuid-notes"), file("other.txt", "uuid-other")]
+
+		expect(renameProblems(renamed, ["report.txt", "notes.md"], ids)).toEqual([])
+		expect(renameProblems([file("report.txt", "uuid-new"), file("notes.md", "uuid-notes")], ["notes.md"], ids)).toEqual([
+			'"report.txt" has uuid uuid-new, not uuid-report: deleted and uploaded anew, not renamed'
+		])
+		expect(
+			renameProblems(
+				[file("Report.txt", "uuid-report"), file("report.txt", "uuid-new"), file("notes.md", "uuid-notes")],
+				["notes.md"],
+				ids
+			)
+		).toEqual(['cloud ["Report.txt","report.txt"], expected ["report.txt"]'])
+		expect(renameProblems([file("report.txt", "uuid-report"), file("Notes.md", "uuid-notes")], ["Notes.md"], ids)).toEqual([
+			'cloud ["Notes.md"], expected ["notes.md"]',
+			'on disk ["Notes.md"], expected ["notes.md"]'
+		])
 	})
 
 	it("holds names at the limits it is meant to", () => {
