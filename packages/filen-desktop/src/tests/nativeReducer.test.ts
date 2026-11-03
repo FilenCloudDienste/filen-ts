@@ -401,6 +401,44 @@ describe("reduceEvents", () => {
 		expect(state.get("1")).toMatchObject({ syncing: true, halted: null, lastError: null })
 	})
 
+	it("a pass back online that waits for the cloud listing is neither offline, an error nor attention", async () => {
+		const { runtime, of } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		runtime.events([
+			passEvent({
+				tag: "PassCompleted",
+				inner: { report: report({ passError: "lock", passErrorKind: fakeSdk.ErrorKind.Reqwest, errorsTotal: 2n }) }
+			})
+		])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "offline", lastError: "lock" }] })
+
+		// The engine emits AwaitingRemote before PassStarted, and the wait can last while another device holds the lock.
+		runtime.events([passEvent({ tag: "AwaitingRemote" })])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+
+		expect(of("overview").at(-1)).toMatchObject({
+			pairs: [{ halted: null, lastError: null, syncing: false, stage: { kind: "waitingForCloud" }, issues: { failed: 0 } }]
+		})
+		expect(of("aggregate")).toEqual([])
+
+		// Still unreachable: offline again.
+		runtime.events([passEvent({ tag: "PassFailed", inner: { error: "connect", kind: fakeSdk.ErrorKind.Reqwest } })])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "offline", lastError: "connect" }] })
+		expect(of("aggregate")).toEqual([])
+	})
+
+	it("a wait for the cloud listing keeps a halt or error that is not offline", () => {
+		const state = new Map([["1", createPairRuntime()]])
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassFailed", inner: { error: "boom", kind: fakeSdk.ErrorKind.Server } })])
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "AwaitingRemote" })])
+		expect(state.get("1")).toMatchObject({ halted: null, lastError: "boom", stage: { kind: "waitingForCloud" } })
+	})
+
 	it("a watch reporting an unfinished cloud listing is no error, an unreachable server is offline", () => {
 		const runtime = createPairRuntime()
 		const status = { consecutiveFailures: 1, lastError: "stale", lastErrorKind: fakeSdk.ErrorKind.StaleState, state: 0 }

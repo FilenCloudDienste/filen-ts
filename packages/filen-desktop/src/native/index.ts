@@ -24,12 +24,13 @@ import { createMountsHost, type MountsHost, type MountsOpHandlers } from "./moun
 import { createHostEngine, type HostEngine, type OpHandlers, toNativePair } from "./ops.ts"
 import { createPlanRegistry } from "./plans.ts"
 import { createRuntimeFeed, type RuntimeFeed } from "./reducer.ts"
+import { closeWithin } from "./shutdown.ts"
 
 // The native host: a utility process that owns the account's one SDK client and sync engine and runs every engine call
 // main asks for. Everything crossing to main is validated there; what comes in is validated here.
 
-// How long a shutdown waits for the engine to close (a transfer in flight finishes first) and rclone to stop; main
-// kills at 25 s.
+// How long a shutdown waits for the engine to close (a transfer in flight finishes first, then the account's
+// drive-write lock is released, else it blocks other devices until it expires) and rclone to stop; main kills at 25 s.
 const CLOSE_TIMEOUT_MS = 20_000
 
 // The app's version, which scripts/build.ts bakes in; rclone sends it as its user agent.
@@ -60,6 +61,8 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 	let feed: RuntimeFeed | null = null
 	let engine: SyncEngine | null = null
 	let host: HostEngine | null = null
+	// The engine open in flight, to the engine it opens: a shutdown waits for it, so an engine that opens late is closed.
+	let opening: Promise<SyncEngine | null> | null = null
 	let mounts: MountsHost | null = null
 	let subscribed = false
 	let mountsSubscribed = false
@@ -164,7 +167,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		runtime.subscribe(subscribed)
 
 		try {
-			const opened = await openEngine(addon, client, message.dir, {
+			const pending = openEngine(addon, client, message.dir, {
 				cache: convergence,
 				sync: {
 					onEvents: events => {
@@ -179,6 +182,15 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 					}
 				}
 			})
+
+			opening = pending.then(
+				result => ("engine" in result ? result.engine : null),
+				() => null
+			)
+
+			const opened = await pending
+
+			opening = null
 
 			if ("fatal" in opened) {
 				fatal(opened.fatal, opened.error)
@@ -290,34 +302,10 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		feed?.stop()
 		plans.releaseAll()
 
-		const closing: Promise<void>[] = []
-
-		if (engine !== null) {
-			closing.push(
-				engine.close().catch((error: unknown) => {
-					console.error(`engine close failed: ${sdk === null ? String(error) : describe(classify(sdk, error))}`)
-				})
-			)
-		}
-
-		if (mounts !== null) {
-			closing.push(mounts.shutdown())
-		}
-
-		if (closing.length > 0) {
-			let timer: NodeJS.Timeout | undefined
-
-			await Promise.race([
-				Promise.all(closing),
-				new Promise<void>(resolve => {
-					timer = setTimeout(() => {
-						console.error("engine close or rclone stop timed out")
-						resolve()
-					}, CLOSE_TIMEOUT_MS)
-				})
-			])
-			clearTimeout(timer)
-		}
+		await closeWithin({ opening: () => opening, engine: () => engine, mounts: () => mounts }, CLOSE_TIMEOUT_MS, {
+			warn: log.warn,
+			describe: error => (sdk === null ? String(error) : describe(classify(sdk, error)))
+		})
 
 		console.log("stopped")
 		post({ t: "stopped" })

@@ -157,6 +157,16 @@ function started(runtime: PairRuntime, transfer: DesktopSyncTransfer): void {
 	]
 }
 
+// A pass tries the server again: its own end says how it went. The failures the offline pass reported were the
+// outage's, no attention while offline, so they leave with it.
+function retrying(runtime: PairRuntime): void {
+	if (runtime.halted === "offline") {
+		runtime.halted = null
+		runtime.lastError = null
+		runtime.issues = { ...runtime.issues, failed: 0 }
+	}
+}
+
 // Folds a chunk of engine events into the pairs' runtime. Progress only updates the transfer it belongs to: it never
 // becomes activity, and what reaches main is the coalesced state.
 export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, events: readonly SyncPassEvent[]): Reduced {
@@ -176,6 +186,9 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 
 		switch (event.tag) {
 			case "AwaitingRemote":
+				// The engine announces the wait for the cloud listing before PassStarted, and that wait is the pass trying
+				// the server again (it can last as long as another device holds the drive-write lock).
+				retrying(runtime)
 				runtime.stage = { kind: "waitingForCloud" }
 				break
 			case "Scanning": {
@@ -194,13 +207,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 			case "PassStarted":
 				endPass(runtime)
 				runtime.syncing = true
-
-				// The pass that tries the server again: its own end says how it went.
-				if (runtime.halted === "offline") {
-					runtime.halted = null
-					runtime.lastError = null
-				}
-
+				retrying(runtime)
 				break
 			case "Planned":
 				runtime.planned = Number(event.inner.actions)
