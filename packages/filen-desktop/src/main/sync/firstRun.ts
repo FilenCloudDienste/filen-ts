@@ -507,11 +507,7 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 		}
 
 		if (!pair.wholeDriveConfirmed && deps.driveRoot !== null && pair.remoteRoot.toLowerCase() === deps.driveRoot.toLowerCase()) {
-			await patch(
-				wholeDriveOverlaps(deps.store.get().pairs, id)
-					? wholeDriveRefusal(pair)
-					: { state: "preparing", review: null, holds: withHold(pair.holds, "driveRoot", new Set()) }
-			)
+			await patch({ state: "preparing", review: null, holds: withHold(pair.holds, "driveRoot", new Set()) })
 
 			return
 		}
@@ -590,17 +586,20 @@ export function attachable(pair: ShellPair): boolean {
 }
 
 // Every pair the engine does not hold, one at a time: migrated ones, ones waiting for their directory and ones a
-// baseline reset lost. A whole-drive pair held for the user is refused once another pair overlaps it.
+// baseline reset lost. A whole-drive pair held for the user is refused once another pair overlaps it, checked only
+// after every other pair was attached or refused, so a sibling refused later in the same pass never counts.
 export async function attachUnheld(deps: FirstRunDeps): Promise<void> {
 	for (const pair of deps.store.get().pairs) {
 		if (attachable(pair)) {
 			await attach(deps, pair)
-		} else if (pair.notices.length === 0 && pair.holds.includes("driveRoot")) {
-			const id = shellPairId(pair)
+		}
+	}
 
-			if (wholeDriveOverlaps(deps.store.get().pairs, id)) {
-				await patchPair(deps.store, entry => shellPairId(entry) === id, wholeDriveRefusal(pair))
-			}
+	for (const pair of deps.store.get().pairs) {
+		const id = shellPairId(pair)
+
+		if (pair.notices.length === 0 && pair.holds.includes("driveRoot") && wholeDriveOverlaps(deps.store.get().pairs, id)) {
+			await patchPair(deps.store, entry => shellPairId(entry) === id, wholeDriveRefusal(pair))
 		}
 	}
 }

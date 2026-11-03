@@ -361,6 +361,31 @@ describe("attachUnheld", () => {
 		})
 	})
 
+	it("holds a pair of the whole drive when the sibling listed after it is refused in the same pass", async () => {
+		const elsewhere = await realpath(await mkdtemp(path.join(tmpdir(), "filen-elsewhere-")))
+		const store = memoryStore([
+			shellPair({ legacyUuid: LEGACY, state: "waitingForRoot" }),
+			shellPair({
+				legacyUuid: "6f7a8b9c-0d1e-4f2a-8b3c-4d5e6f7a8b9c",
+				localRoot: elsewhere,
+				remoteRoot: "0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d",
+				state: "waitingForRoot"
+			})
+		])
+		const { deps } = fakeNative(store, { addPair: () => new Refusal("remoteRootMissing") })
+
+		deps.driveRoot = REMOTE
+
+		try {
+			await attachUnheld(deps)
+		} finally {
+			await rm(elsewhere, { recursive: true, force: true })
+		}
+
+		expect(store.get().pairs[0]).toMatchObject({ pairId: null, state: "preparing", holds: ["driveRoot"], notices: [] })
+		expect(store.get().pairs[1]).toMatchObject({ state: "unsupported", notices: ["refusedRemoteMissing"] })
+	})
+
 	it("refuses a held pair of the whole drive once another pair overlaps it, never for a refused one", async () => {
 		const other = "0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d"
 		const held = shellPair({ legacyUuid: LEGACY, state: "preparing", holds: ["driveRoot"] })
