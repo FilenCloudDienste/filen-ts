@@ -516,8 +516,8 @@ export interface DesktopSync {
 	conflicts(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncConflict>>>
 	// Resolves with where keepRemote moved this device's differing copy in the pair's bin; null otherwise.
 	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<DesktopSyncResult<string | null>>
-	// Resolves at most `count` of the pair's conflicts the same way, one after another; the overview's count drops as
-	// they go.
+	// Resolves at most `count` of the pair's conflicts, as listed when called, the same way one after another; the
+	// overview's count drops as they go.
 	resolveConflicts(
 		pairId: string,
 		resolution: DesktopSyncResolution,

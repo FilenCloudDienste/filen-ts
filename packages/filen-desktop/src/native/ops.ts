@@ -301,23 +301,22 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 
 			return kept === undefined ? null : clip(kept)
 		},
-		// One at a time: the engine resolves a path at a time, each waiting for a scan in progress. The paths are the
-		// engine's own, never a clipped copy; the count is read once for the batch.
-		resolveConflicts: async ({ pairId, resolution, offset, limit }) => {
+		// One at a time: the engine resolves a path at a time, each waiting for a scan in progress. The count is read
+		// once for the batch.
+		resolveConflicts: async ({ pairId, resolution, relPaths }) => {
 			const { id } = held(pairId)
-			const { conflicts } = await engine.listConflicts(id, BigInt(offset), BigInt(limit))
 			const chosen = conflictResolution(sdk, resolution)
 			let resolved = 0
 			let failed = 0
 
 			try {
-				for (const conflict of conflicts) {
+				for (const relPath of relPaths) {
 					if (ctx.signal.aborted) {
 						break
 					}
 
 					try {
-						await engine.resolveConflict(id, conflict.relPath, chosen)
+						await engine.resolveConflict(id, relPath, chosen)
 						resolved++
 					} catch (error) {
 						const failure = classify(sdk, error)

@@ -558,26 +558,44 @@ describe("registerSyncIpc", () => {
 		expect(argsOf("unsyncablePaths")).toEqual([{ pairId: "7", offset: 0, limit: 50 }])
 	})
 
-	it("resolves conflicts in batches past the failed ones, stopping where the list ends or at the count", async () => {
-		const batches = [
-			{ resolved: 24, failed: 1 },
-			{ resolved: 3, failed: 0 }
-		]
+	it("resolves the conflicts listed up front in batches, never retrying a failed path or taking a later one", async () => {
+		const listed = Array.from({ length: 40 }, (_, index) => ({
+			relPath: `p${String(index).padStart(2, "0")}`,
+			local: null,
+			remote: null
+		}))
+		const pages = [{ total: 40, entries: listed.slice(0, 30) }]
 		const { invoke, argsOf } = setup({
 			pairs: [shellPair()],
-			answers: { resolveConflicts: () => batches.shift() ?? { resolved: 0, failed: 0 } }
+			answers: {
+				conflicts: () => pages.shift() ?? { total: 0, entries: [] },
+				resolveConflicts: (args: unknown) => {
+					const { relPaths } = args as { relPaths: string[] }
+
+					return { resolved: relPaths.length - (relPaths.includes("p03") ? 1 : 0), failed: relPaths.includes("p03") ? 1 : 0 }
+				}
+			}
 		})
 
-		expect(await invoke("resolveConflicts", "7", "keepBoth", 30)).toEqual({ ok: true, value: { resolved: 27, failed: 1 } })
+		expect(await invoke("resolveConflicts", "7", "keepBoth", 30)).toEqual({ ok: true, value: { resolved: 29, failed: 1 } })
+		expect(argsOf("conflicts")).toEqual([{ pairId: "7", offset: 0, limit: 30 }])
 		expect(argsOf("resolveConflicts")).toEqual([
-			{ pairId: "7", resolution: "keepBoth", offset: 0, limit: 25 },
-			{ pairId: "7", resolution: "keepBoth", offset: 1, limit: 5 },
-			{ pairId: "7", resolution: "keepBoth", offset: 1, limit: 2 }
+			{ pairId: "7", resolution: "keepBoth", relPaths: listed.slice(0, 25).map(entry => entry.relPath) },
+			{ pairId: "7", resolution: "keepBoth", relPaths: listed.slice(25, 30).map(entry => entry.relPath) }
 		])
 
-		batches.push({ resolved: 3, failed: 0 })
-		expect(await invoke("resolveConflicts", "7", "keepLocal", 3)).toEqual({ ok: true, value: { resolved: 3, failed: 0 } })
-		expect(argsOf("resolveConflicts")).toHaveLength(4)
+		// A list shifted between pages yields each path once; an empty page ends it short of the count.
+		pages.push({ total: 3, entries: listed.slice(0, 2) }, { total: 3, entries: listed.slice(1, 3) }, { total: 3, entries: [] })
+		expect(await invoke("resolveConflicts", "7", "keepLocal", 10)).toEqual({ ok: true, value: { resolved: 3, failed: 0 } })
+		expect(argsOf("conflicts").slice(1)).toEqual([
+			{ pairId: "7", offset: 0, limit: 10 },
+			{ pairId: "7", offset: 2, limit: 8 },
+			{ pairId: "7", offset: 4, limit: 7 }
+		])
+		expect(argsOf("resolveConflicts")[2]).toEqual({ pairId: "7", resolution: "keepLocal", relPaths: ["p00", "p01", "p02"] })
+
+		expect(await invoke("resolveConflicts", "7", "keepLocal", 3)).toEqual({ ok: true, value: { resolved: 0, failed: 0 } })
+		expect(argsOf("resolveConflicts")).toHaveLength(3)
 		await expect(invoke("resolveConflicts", "7", "keepEither", 3)).rejects.toThrow("invalid sync payload")
 	})
 

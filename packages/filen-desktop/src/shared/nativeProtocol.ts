@@ -347,9 +347,14 @@ export const SYNC_OPS = {
 		}),
 		result: relPathSchema.or("null")
 	},
-	// Resolves the conflicts listed at offset..offset+limit one after another, a path that fails left in place.
+	// Resolves the given conflicts one after another, a path that fails left in place.
 	resolveConflicts: {
-		args: type({ pairId: pairIdSchema, resolution: resolutionSchema, offset: countSchema, limit: pageLimitSchema, "+": "reject" }),
+		args: type({
+			pairId: pairIdSchema,
+			resolution: resolutionSchema,
+			relPaths: relPathArgSchema.array().moreThanLength(0).atMostLength(1000),
+			"+": "reject"
+		}),
 		result: type({ resolved: countSchema, failed: countSchema, "+": "reject" })
 	},
 	heldDeletions: { args: pairArgs, result: heldDeletionsSchema },

@@ -64,6 +64,9 @@ export const OVERVIEW_PUSH_INTERVAL_MS = 250
 // Conflicts resolved per host call: each resolution may wait for a scan, and every call has to beat its timeout.
 export const RESOLVE_BATCH = 25
 
+// The most conflicts the engine lists at a time.
+const CONFLICT_PAGE = 1000
+
 export interface SyncServiceDeps {
 	supervisor: Pick<NativeSupervisor, "call" | "subscribe" | "ensure" | "retry" | "user" | "state">
 	storeFor(userId: string): Promise<SyncStore>
@@ -782,8 +785,8 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		conflicts: (pairId, offset, limit) => engineCall(pairId, "conflicts", id => ({ pairId: id, offset, limit })),
 		resolveConflict: (pairId, relPath, resolution) =>
 			engineCall(pairId, "resolveConflict", id => ({ pairId: id, relPath, resolution })),
-		// In batches, each well inside the host's call timeout. A path that failed stays at the head of the list, so the
-		// next batch starts past the failures; stopping at `count` leaves conflicts recorded since alone.
+		// The paths are read up front, so conflicts recorded while the run goes on are left alone and a path that
+		// failed is never tried again. Then in batches, each well inside the host's call timeout.
 		resolveConflicts: async (pairId, resolution, count) => {
 			const found = await findHeld(pairId)
 
@@ -791,23 +794,43 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 				return fail("pairNotFound")
 			}
 
+			const relPaths = new Set<string>()
+			let offset = 0
+
+			while (relPaths.size < count) {
+				const page = await supervisor.call("conflicts", {
+					pairId: found.engineId,
+					offset,
+					limit: Math.min(CONFLICT_PAGE, count - relPaths.size)
+				})
+
+				if (!page.ok) {
+					return page
+				}
+
+				if (page.value.entries.length === 0) {
+					break
+				}
+
+				offset += page.value.entries.length
+
+				for (const entry of page.value.entries) {
+					relPaths.add(entry.relPath)
+				}
+			}
+
+			const listed = [...relPaths]
 			const done = { resolved: 0, failed: 0 }
 
-			while (done.resolved + done.failed < count) {
+			for (let at = 0; at < listed.length; at += RESOLVE_BATCH) {
 				const batch = await supervisor.call("resolveConflicts", {
 					pairId: found.engineId,
 					resolution,
-					offset: done.failed,
-					limit: Math.min(RESOLVE_BATCH, count - done.resolved - done.failed)
+					relPaths: listed.slice(at, at + RESOLVE_BATCH)
 				})
 
 				if (!batch.ok) {
 					return batch
-				}
-
-				// The list ran out before `count`.
-				if (batch.value.resolved + batch.value.failed === 0) {
-					break
 				}
 
 				done.resolved += batch.value.resolved
