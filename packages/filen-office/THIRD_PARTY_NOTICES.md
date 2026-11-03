@@ -74,7 +74,7 @@ Support. For questions and support, please contact dochelp@microsoft.com.
 
 - Source: [MS-ODRAW] v20250819 (release August 19, 2025), PDF (SHA-256 `fbc67309646b0b95e87f66eb7a3d89c6f08153c46379f496b886a8deae42d7e5`), https://officeprotocoldoc.z19.web.core.windows.net/files/MS-ODRAW/%5bMS-ODRAW%5d.pdf
 - Copyright: © 2025 Microsoft Corporation
-- `src/core/doc/toDocx/officeArt.ts` holds the record types of §2.2 and the property ids of §2.3 it reads (re-encoded as constants, not copied), under the same permission. `src/core/doc/toDocx/convert.ts` implements the shape properties it converts from the specification; none of its text is copied.
+- `src/core/doc/toDocx/officeArt.ts` and `src/core/ppt/officeArt.ts` hold the record types of §2.2 and the property ids of §2.3 they read (re-encoded as constants, not copied), under the same permission. `src/core/doc/toDocx/convert.ts` implements the shape properties it converts from the specification; none of its text is copied.
 - Licence: the "Intellectual Property Rights Notice for Open Specifications Documentation" on the document's first page, reproduced verbatim (line breaks of the PDF joined into paragraphs):
 
 ```
@@ -91,7 +91,31 @@ Tools. The Open Specifications documentation does not require the use of Microso
 Support. For questions and support, please contact dochelp@microsoft.com.
 ```
 
+
+## [MS-PPT] PowerPoint (.ppt) Binary File Format
+
+- Source: [MS-PPT] v20241112 (release November 12, 2024), PDF (SHA-256 `4cdd467ceb57bb91aa40c2733b8d6f3408b41b4ed3b652270a73901487a9adf1`), https://officeprotocoldoc.z19.web.core.windows.net/files/MS-PPT/%5BMS-PPT%5D.pdf
+- Copyright: © 2024 Microsoft Corporation
+- `src/core/ppt/records.ts` holds the record types of §2.13.24 the reader uses, and `src/core/ppt/anim.ts` and `src/core/ppt/text.ts` the values of the time node and text property fields they read (re-encoded as constants, not copied), under the notice's permission to make copies in order to develop implementations. The rest of `src/core/ppt/` implements the format from the specification; none of its text is copied.
+- Licence: the "Intellectual Property Rights Notice for Open Specifications Documentation" on the document's first page, reproduced verbatim (line breaks of the PDF joined into paragraphs):
+
+```
+Intellectual Property Rights Notice for Open Specifications Documentation
+Technical Documentation. Microsoft publishes Open Specifications documentation (“this documentation”) for protocols, file formats, data portability, computer languages, and standards support. Additionally, overview documents cover inter-protocol relationships and interactions.
+Copyrights. This documentation is covered by Microsoft copyrights. Regardless of any other terms that are contained in the terms of use for the Microsoft website that hosts this documentation, you can make copies of it in order to develop implementations of the technologies that are described in this documentation and can distribute portions of it in your implementations that use these technologies or in your documentation as necessary to properly document the implementation. You can also distribute in your implementation, with or without modification, any schemas, IDLs, or code samples that are included in the documentation. This permission also applies to any documents that are referenced in the Open Specifications documentation.
+No Trade Secrets. Microsoft does not claim any trade secret rights in this documentation.
+Patents. Microsoft has patents that might cover your implementations of the technologies described in the Open Specifications documentation. Neither this notice nor Microsoft's delivery of this documentation grants any licenses under those patents or any other Microsoft patents. However, a given Open Specifications document might be covered by the Microsoft Open Specifications Promise or the Microsoft Community Promise. If you would prefer a written license, or if the technologies described in this documentation are not covered by the Open Specifications Promise or Community Promise, as applicable, patent licenses are available by contacting iplg@microsoft.com.
+License Programs. To see all of the protocols in scope under a specific license program and the associated patents, visit the Patent Map.
+Trademarks. The names of companies and products contained in this documentation might be covered by trademarks or similar intellectual property rights. This notice does not grant any licenses under those rights. For a list of Microsoft trademarks, visit www.microsoft.com/trademarks.
+Fictitious Names. The example companies, organizations, products, domain names, email addresses, logos, people, places, and events that are depicted in this documentation are fictitious. No association with any real company, organization, product, domain name, email address, logo, person, place, or event is intended or should be inferred.
+Reservation of Rights. All other rights are reserved, and this notice does not grant any rights other than as specifically described above, whether by implication, estoppel, or otherwise.
+Tools. The Open Specifications documentation does not require the use of Microsoft programming tools or programming environments in order for you to develop an implementation. If you have access to Microsoft programming tools and environments, you are free to take advantage of them. Certain Open Specifications documents are intended for use in conjunction with publicly available standards specifications and network programming art and, as such, assume that the reader either is familiar with the aforementioned material or has immediate access to it.
+Support. For questions and support, please contact dochelp@microsoft.com.
+```
 ## Unicode symbol-font mappings
+
+- Source: Unicode, Inc. symbol mappings of 2012-11-06 (ISO/IEC JTC1/SC2/WG2 N4384) and 2011-07-12 (Adobe Symbol Encoding to Unicode 1.0), https://www.unicode.org/
+- Copyright: Unicode, Inc.
 
 `src/core/fonts/symbols.generated.ts` is generated by `src/scripts/symbolTables.ts` from two Unicode, Inc. publications (re-encoded as code tables, not copied):
 
@@ -117,6 +141,9 @@ attached.
 
 ## Metafile symbol-font supplements
 
+- Source: Apple's Mac OS Symbol to Unicode mapping version c02 (2005-04-05), Adobe's Symbol font metrics and the Mozilla MathML project's MT Extra encoding page, https://www.unicode.org/Public/MAPPINGS/VENDORS/APPLE/SYMBOL.TXT
+- Copyright: (c) 1994-2002, 2005 Apple Computer, Inc.; © 1998–2009 individual mozilla.org contributors
+
 `src/core/metafile/text.ts` and `src/core/metafile/mtextra.ts` map further symbol-font tables for metafile text, re-encoded as code tables (no file is copied):
 
 - The Symbol font's bracket, brace and integral pieces and arrow extensions: 22 factual code-to-character mappings (0xBD → U+23D0, 0xBE → U+23AF, 0xE6–0xEF → U+239B–U+239D, U+23A1–U+23A3, U+23A7–U+23AA, 0xF4 → U+23AE, 0xF6–0xFE → U+239E–U+23A0, U+23A4–U+23A6, U+23AB–U+23AD) taken from Apple's "Map (external version) from Mac OS Symbol character set to Unicode 4.0 and later", version c02 (2005-04-05), https://www.unicode.org/Public/MAPPINGS/VENDORS/APPLE/SYMBOL.TXT (SHA-256 `b8c529daba09a45872ec3b493e944680528206b829193594dcdd774a02d49d12`). Its copyright line and disclaimer, reproduced verbatim:
@@ -138,6 +165,7 @@ defect or inaccuracy in this document or the included data.
   - Source: the Mozilla MathML project's "MT Extra" encoding page, https://www-archive.mozilla.org/projects/mathml/fonts/encoding/mtextra (SHA-256 `b36a96233316626a49c26e9e30d42ae422283798c3b87664510474c7da03e06a`). No MT Extra font file was read.
   - Attribution: "Portions of this content are © 1998–2009 by individual mozilla.org contributors".
   - Licence to us: Creative Commons Attribution-ShareAlike 4.0 International (https://creativecommons.org/licenses/by-sa/4.0/). The page's licence (https://www.mozilla.org/foundation/licensing/website-content/) is CC BY-SA 3.0 Unported "or any later version".
+  - Disclaimer: the material is offered as-is, without warranties of any kind (section 5 of the licence).
   - Modified: the combining embellishments are mapped to their spacing forms, the arrow embellishments to spacing arrows, and the stretchy brace pieces are left out.
   - Our adaptation is licensed under the GNU General Public License version 3 (GPL-3.0-only), under Creative Commons' declared one-way compatibility of BY-SA 4.0 with GPLv3 (https://wiki.creativecommons.org/wiki/ShareAlike_compatibility:_GPLv3), and is combined with the rest of `@filen/office` under section 13 of the GNU Affero General Public License v3.0.
 

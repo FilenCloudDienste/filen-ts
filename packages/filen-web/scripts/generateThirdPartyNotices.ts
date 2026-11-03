@@ -651,6 +651,27 @@ const OFFICE_DERIVED: {
 		text: sections => noticeFence(sections, "[MS-ODRAW] Office Drawing Binary File Format")
 	},
 	{
+		section: "[MS-PPT] PowerPoint (.ppt) Binary File Format",
+		name: "[MS-PPT] PowerPoint (.ppt) Binary File Format",
+		version: /^\[MS-PPT\] (v\d+) /,
+		license: "LicenseRef-Microsoft-Open-Specifications-IP-Notice",
+		text: sections => noticeFence(sections, "[MS-PPT] PowerPoint (.ppt) Binary File Format")
+	},
+	{
+		section: "Unicode symbol-font mappings",
+		name: "Unicode symbol-font mappings",
+		version: / of (\d{4}-\d{2}-\d{2}) /,
+		license: "LicenseRef-Unicode-Mapping-Notice AND LicenseRef-Unicode-Terms-Of-Use",
+		text: sections => noticeFences(sections, "Unicode symbol-font mappings")
+	},
+	{
+		section: "Metafile symbol-font supplements",
+		name: "Metafile symbol-font supplements",
+		version: / version (c\d+) /,
+		license: "LicenseRef-Apple-Mapping-Disclaimer AND CC-BY-SA-4.0",
+		text: sections => noticeFences(sections, "Metafile symbol-font supplements")
+	},
+	{
 		section: "CodeMirror highlight styles",
 		name: "CodeMirror highlight styles",
 		version: /@codemirror\/theme-one-dark (\d+\.\d+\.\d+) /,
@@ -890,6 +911,17 @@ function noticeFence(sections: Map<string, NoticeSection>, heading: string): str
 	}
 
 	return fence
+}
+
+/** Every fenced block of a section (one per source whose notice the section reproduces), verbatim. */
+function noticeFences(sections: Map<string, NoticeSection>, heading: string): readonly string[] {
+	const fences = [...noticeSection(sections, heading).body.matchAll(/^```\n([\s\S]*?)\n```$/gm)].map(match => match[1] ?? "")
+
+	if (fences.length === 0) {
+		throw new Error(`${OFFICE_NOTICES}: section "${heading}" has no notice text`)
+	}
+
+	return fences
 }
 
 function officeDerivedNotices(): Collected[] {
