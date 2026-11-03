@@ -1,9 +1,13 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import type { Page } from "playwright-core"
 import { describe, expect, it, vi } from "vitest"
 import {
 	backdateImport,
 	cipherSeen,
 	type CipherSeen,
+	fallbackKeyFiles,
 	heldProblems,
 	keychainLines,
 	keyringEncrypted,
@@ -18,7 +22,7 @@ import { loadAppLock } from "../main/appLock.ts"
 import { LEGACY_KEYS, legacyPin, legacyPrefs, legacySession, legacyStash, WIPE_SCRIPT } from "../main/legacyData.ts"
 import { createMigration, createStashStore, MAX_FAILED_STARTS, parseMarker, waitExpired, WIPE_AFTER_MS } from "../main/migration.ts"
 import { createSessionVault, isSessionBlob, lazyCipher, type VaultCipher } from "../main/sessionVault.ts"
-import { fakeCipher, memoryFile } from "./fileFakes.ts"
+import { fakeCipher, linuxCipher, memoryFile } from "./fileFakes.ts"
 
 // Chain K's synthetic profile and the expectations it checks (scripts/ci/e2e/chains/keyring.ts), against the real
 // migration, vault, stash and app lock of src/main with in-memory files: what each kind of keychain failure leaves is
@@ -53,14 +57,16 @@ const anonymous = {
 const seed = keyringSeed()
 const writes = keyringWrites(seed, anonymous)
 
-// The keychain each launch meets, as safeStorage reports it through src/main/index.ts sessionCipher: none (null), a
-// probe that rejects, or encryption that rejects; then a working one.
-type Keychain = Exclude<CipherSeen, "encrypted"> | "working"
+// The keychain each launch meets, as safeStorage reports it through src/main/index.ts sessionCipher: none (null),
+// Linux's fallback key (read-only), a probe that rejects, or encryption that rejects; then a working one.
+type Keychain = Exclude<CipherSeen, "encrypted"> | "fallback" | "working"
 
 function cipherOf(keychain: Keychain): () => Promise<VaultCipher | null> {
 	switch (keychain) {
 		case "memory":
 			return () => Promise.resolve(null)
+		case "fallback":
+			return () => Promise.resolve(linuxCipher("fallback"))
 		case "probe-rejected":
 			return () => Promise.reject(new Error("the keyring is locked"))
 		case "encrypt-rejected":
@@ -122,8 +128,8 @@ async function launch(files: ReturnType<typeof disk>, keychain: Keychain, now = 
 
 	return {
 		log: text,
-		// index.ts logs this itself when the cipher resolves null; the rest comes from src/main as it is.
-		seen: keychain === "memory" ? ("memory" as const) : cipherSeen(text),
+		// index.ts logs this itself in memory mode; the rest comes from src/main as it is.
+		seen: keychain === "memory" || keychain === "fallback" ? ("memory" as const) : cipherSeen(text),
 		marker: parseMarker(files.marker.data?.toString("utf8") ?? null),
 		lock,
 		vault,
@@ -224,7 +230,7 @@ describe("chain K's synthetic 3.x profile", () => {
 })
 
 describe("chain K's expectations against B1", () => {
-	for (const keychain of ["memory", "probe-rejected", "encrypt-rejected"] as const) {
+	for (const keychain of ["memory", "fallback", "probe-rejected", "encrypt-rejected"] as const) {
 		it(`holds the import uncounted while the keyring is ${keychain}, then completes it and keeps the lock usable`, async () => {
 			const files = disk()
 
@@ -232,14 +238,13 @@ describe("chain K's expectations against B1", () => {
 			for (let index = 0; index <= MAX_FAILED_STARTS; index++) {
 				const locked = await launch(files, keychain)
 
-				expect(locked.seen).toBe(keychain)
+				const memory = keychain === "memory" || keychain === "fallback"
+
+				expect(locked.seen).toBe(memory ? "memory" : keychain)
 				expect(heldProblems(locked.marker, locked.seen)).toEqual([])
 				// Only an import in memory takes the PIN (as a plain record), and N then starts locked.
-				expect(locked.lock.status()).toMatchObject({
-					enabled: keychain === "memory",
-					locked: keychain === "memory",
-					unreadable: false
-				})
+				expect(locked.lock.status()).toMatchObject({ enabled: memory, locked: memory, unreadable: false })
+				expect(files.lock.data?.subarray(0, 3).toString() ?? null).not.toBe("v10")
 			}
 
 			expect(files.vault.data).toBeNull()
@@ -257,7 +262,7 @@ describe("chain K's expectations against B1", () => {
 			expect(files.stash.data?.toString().startsWith("enc:")).toBe(true)
 			expect(files.lock.data?.toString().startsWith("enc:")).toBe(true)
 			// The memory path imported the session for that run only; the stash import afterwards leaves it.
-			expect((await unlocked.vault.get()).status).toBe(keychain === "memory" ? "absent" : "present")
+			expect((await unlocked.vault.get()).status).toBe(keychain === "memory" || keychain === "fallback" ? "absent" : "present")
 			expect(unlocked.lock.status()).toMatchObject({ enabled: true, locked: true, unreadable: false })
 			await expect(unlocked.lock.unlock(seed.pin)).resolves.toEqual({ ok: true })
 		})
@@ -301,7 +306,15 @@ describe("chain K's expectations against B1", () => {
 		expect(cipherSeen("session vault encryption unavailable: Error")).toBe("probe-rejected")
 		expect(cipherSeen("migration: deferred, tried again next launch: stash: safeStorage")).toBe("encrypt-rejected")
 		expect(cipherSeen("migration: deferred, tried again next launch: vault status: unreadable")).toBe("encrypted")
-		expect(keychainLines(" INFO Filen 4.0.0 starting\n WARN migration: deferred (x)\n INFO app lock: y\n")).toEqual([
+		expect(cipherSeen("session vault: no secure storage (gnome_libsecret, fallback key); keeping the session in memory only")).toBe(
+			"memory"
+		)
+		expect(
+			keychainLines(
+				" INFO Filen 4.0.0 starting\n INFO secure storage: available, backend gnome_libsecret, probe v10\n WARN migration: deferred (x)\n INFO app lock: y\n"
+			)
+		).toEqual([
+			"INFO secure storage: available, backend gnome_libsecret, probe v10",
 			"WARN migration: deferred (x)",
 			"INFO app lock: y"
 		])
@@ -327,5 +340,23 @@ describe("chain K's Secret Service and files", () => {
 		expect(keyringEncrypted(Buffer.from("v10abc"))).toBe(false)
 		expect(keyringEncrypted(Buffer.from('{"version":1}'))).toBe(false)
 		expect(keyringEncrypted(null)).toBe(false)
+	})
+})
+
+describe("chain K's fallback-key check", () => {
+	it("names the safeStorage files encrypted with the fallback key (v10), and nothing else", () => {
+		const userData = mkdtempSync(path.join(os.tmpdir(), "filen-e2e-keyring-"))
+
+		try {
+			expect(fallbackKeyFiles(userData)).toEqual([])
+			mkdirSync(path.join(userData, "mounts", "123"), { recursive: true })
+			writeFileSync(path.join(userData, "session.vault"), "v11abc")
+			writeFileSync(path.join(userData, "lock.vault"), '{"version":1}')
+			writeFileSync(path.join(userData, "migration.stash"), "v10abc")
+			writeFileSync(path.join(userData, "mounts", "123", "credentials.bin"), "v10abc")
+			expect(fallbackKeyFiles(userData)).toEqual(["migration.stash", path.join("mounts", "123", "credentials.bin")])
+		} finally {
+			rmSync(userData, { recursive: true, force: true })
+		}
 	})
 })

@@ -14,6 +14,7 @@ import {
 	backdateImport,
 	cipherSeen,
 	type CipherSeen,
+	fallbackKeyFiles,
 	heldProblems,
 	keychainLines,
 	keyringEncrypted,
@@ -44,9 +45,14 @@ import { EXIT_TIMEOUT_MS, inventory, json, readJson, SETUP_TIMEOUT_MS } from "./
 // and on a Secret Service of its own (linux.ts secretService): none, the login keyring locked with no prompt
 // possible (a dismissed prompt), or unlocked.
 //
+// Without a working keyring, Electron's safeStorage on Linux encrypts with Chromium's hardcoded fallback key ("v10") and
+// still reports the keyring's backend; N takes that probe as no secure storage (src/main/index.ts sessionCipher), so
+// such a launch is in memory (or deferred, where safeStorage rejects), never "encrypted", and stores nothing with v10.
+//
 // The assertion table (each one a finding):
 //   K1   no Secret Service        the import waits instead of failing: stage started, failedStarts 0, prefs imported,
-//                                 in memory (volatileStash) or deferred as safeStorage reported it; the prefs verbatim
+//                                 in memory (volatileStash) or deferred as safeStorage reported it, nothing stored
+//                                 with the fallback key (v10); the prefs verbatim
 //                                 (and N starts hidden); the app lock as that path leaves it (the PIN locks and
 //                                 unlocks, or waits with the session), never stuck; nothing wiped (the old origin still
 //                                 holds its account and PIN, read through CDP on filendesktop://bundle; the old logs
@@ -56,8 +62,9 @@ import { EXIT_TIMEOUT_MS, inventory, json, readJson, SETUP_TIMEOUT_MS } from "./
 //                                 Storage"; N starts locked and the PIN unlocks it (the lock is not stuck)
 //   K3   the 7-day wait ran out   importedAt backdated 8 days: verified, wiped and logsDeleted; the old logs gone; the
 //                                 old origin's secrets gone, read through CDP on filendesktop://bundle
-//   KB1-3  k-base, keyring locked  three launches: each one defers, uncounted (never abandoned, though B1's bug gave up
-//                                 after MAX_FAILED_STARTS); the prefs imported
+//   KB1-3  k-base, keyring locked  three launches: each one holds the import in memory or defers, uncounted (never
+//                                 abandoned, though B1's bug gave up after MAX_FAILED_STARTS), nothing stored with the
+//                                 fallback key (v10); the prefs imported
 //   KB4  then unlocked            the import completes
 //
 // What safeStorage did in each launch (no secure storage, a rejected probe, a refused encryption) is recorded as
@@ -245,6 +252,17 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 		return `${launch.seen() === "memory" ? "in memory (volatileStash), read again next launch" : "deferred"}; failedStarts 0; prefs imported; stage started`
 	}
 
+	// Nothing stored with the fallback key this launch: it protects nothing.
+	const noFallbackKey = (): string => {
+		const files = fallbackKeyFiles(target.userData)
+
+		if (files.length > 0) {
+			fail(`encrypted with the fallback key (v10): ${files.join(", ")}`)
+		}
+
+		return `no v10 file; ${["session.vault", "lock.vault", "migration.stash"].map(name => `${name} ${existsSync(userData(name)) ? "present" : "absent"}`).join(", ")}`
+	}
+
 	const imported = (): string => {
 		const read = marker()
 
@@ -337,6 +355,7 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 		const k1Seen = k1.seen()
 
 		await findings.check("K1 no Secret Service: the import waits, uncounted, nothing abandoned", () => held(k1))
+		await findings.check("K1 nothing stored with the fallback key (v10)", noFallbackKey)
 		await findings.check("K1 prefs imported verbatim", () => prefsImported(k1))
 		await findings.check("K1 the app lock as the import left it, never stuck", async () => {
 			// In memory the PIN is imported with the session (as a plain record); a deferral leaves both for later.
@@ -460,9 +479,10 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 			const launch = await launchN(`KB${String(index)}`, await serviceFor("locked", keyringB))
 
 			recordCipher(launch, "with the keyring locked and its prompt dismissed")
-			await findings.check(`KB${String(index)} keyring locked, prompt dismissed: the import defers, uncounted, never abandoned`, () =>
+			await findings.check(`KB${String(index)} keyring locked, prompt dismissed: the import waits, uncounted, never abandoned`, () =>
 				held(launch)
 			)
+			await findings.check(`KB${String(index)} nothing stored with the fallback key (v10)`, noFallbackKey)
 			await findings.check(`KB${String(index)} prefs still imported`, () => prefsImported(launch))
 			await quitN(launch)
 		}

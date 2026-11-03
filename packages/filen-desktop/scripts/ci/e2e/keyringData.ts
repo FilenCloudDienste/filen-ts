@@ -1,7 +1,10 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, randomInt, randomUUID } from "node:crypto"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import path from "node:path"
 import type * as Sdk from "@filen/sdk-rs"
 import type { Page } from "playwright-core"
 import { LEGACY_KEYS } from "../../../src/main/legacyData.ts"
+import { fallbackKeyEncrypted } from "../../../src/main/sessionVault.ts"
 import { fail, waitFor } from "../support.ts"
 import { type LegacyAnonymous, legacySeed } from "./seed.ts"
 
@@ -206,8 +209,9 @@ export async function readLegacyOrigin(page: Page, secrets: readonly string[]): 
 }
 
 // What N's safeStorage did in a launch, from what main logged (src/main/index.ts sessionCipher, sessionVault.ts,
-// migration.ts): no secure storage (isAsyncEncryptionAvailable false, or Linux's basic_text), the probe rejecting, an
-// encryption the keychain refused (a deferral from a step that encrypts), or none of these (it encrypted).
+// migration.ts): no secure storage (isAsyncEncryptionAvailable false, Linux's basic_text, or a probe encrypted with
+// Chromium's fallback key, as without a Secret Service or with a locked keyring), the probe rejecting, an encryption
+// the keychain refused (a deferral from a step that encrypts), or none of these (it encrypted).
 export type CipherSeen = "memory" | "probe-rejected" | "encrypt-rejected" | "encrypted"
 
 export function cipherSeen(log: string): CipherSeen {
@@ -230,7 +234,7 @@ export function cipherSeen(log: string): CipherSeen {
 export function keychainLines(log: string): string[] {
 	return log
 		.split("\n")
-		.filter(line => /session vault|migration:|app lock/.test(line))
+		.filter(line => /secure storage:|session vault|migration:|app lock/.test(line))
 		.map(line => line.trim())
 }
 
@@ -248,9 +252,10 @@ export interface MarkerRead {
 }
 
 // What B1 (src/main/migration.ts) leaves after a launch whose keychain could not store anything: the attempt waits,
-// uncounted, with the prefs imported and nothing wiped. Without secure storage at all (`memory`) the read worked and
-// its stash lives in memory only (volatileStash, read again next launch); otherwise the keychain refused and the
-// session is left undecided (deferred). Either way never abandoned. The problems, empty when it is so.
+// uncounted, with the prefs imported and nothing wiped. Without secure storage (`memory`, Linux's fallback key
+// included) the read worked and its stash lives in memory only (volatileStash, read again next launch); otherwise the
+// keychain refused and the session is left undecided (deferred). Either way never abandoned. The problems, empty when
+// it is so.
 export function heldProblems(marker: MarkerRead | null, seen: CipherSeen): string[] {
 	if (marker === null) {
 		return ["no migration.json"]
@@ -303,4 +308,26 @@ export function backdateImport(text: string, ms: number): string {
 // Chromium's Linux encryption with the key it keeps in the Secret Service ("v11"; "v10" is the hardcoded basic_text key).
 export function keyringEncrypted(data: Buffer | null): boolean {
 	return data !== null && data.subarray(0, 3).toString("latin1") === "v11"
+}
+
+// The files N encrypts with safeStorage that hold Chromium's fallback-key ciphertext ("v10"), which protects nothing: a
+// launch without a working keyring keeps their contents in memory instead (src/main/sessionVault.ts vaultMode).
+export function fallbackKeyFiles(userData: string): string[] {
+	const mounts = path.join(userData, "mounts")
+	const files = [
+		"session.vault",
+		"lock.vault",
+		"migration.stash",
+		...(existsSync(mounts)
+			? readdirSync(mounts, { withFileTypes: true })
+					.filter(entry => entry.isDirectory())
+					.map(entry => path.join("mounts", entry.name, "credentials.bin"))
+			: [])
+	]
+
+	return files.filter(file => {
+		const full = path.join(userData, file)
+
+		return existsSync(full) && fallbackKeyEncrypted(readFileSync(full))
+	})
 }

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
@@ -122,5 +123,40 @@ describe("desktop e2e workflow chain K", () => {
 	it("offers the keyring-mac spike and the keyring scenario by hand", () => {
 		expect(text).toContain("          - keyring-mac\n")
 		expect(text.match(/description: Comma-separated subset of [a-z,-]*\bkeyring\b/g)).toHaveLength(2)
+	})
+})
+
+// The deep chains' desktop session (scripts/ci/deepSession.sh): Linux's keyring is proven before the chain starts.
+describe("the deep chains' desktop session", () => {
+	const file = fileURLToPath(new URL("../../scripts/ci/deepSession.sh", import.meta.url))
+	const text = readFileSync(file, "utf8")
+	const inner = /bash -ec '\n([\s\S]*)\n' e2e "\$@"\n$/.exec(text)?.[1] ?? ""
+
+	it.runIf(process.platform !== "win32")("parses, the D-Bus session's script too", () => {
+		expect(inner).not.toBe("")
+		expect(spawnSync("bash", ["-n", file]).status).toBe(0)
+		expect(spawnSync("bash", ["-n"], { input: inner }).status).toBe(0)
+	})
+
+	it("starts gnome-keyring on directories of its own, keeping its output, and never hands its password on", () => {
+		expect(inner).toContain(
+			'XDG_DATA_HOME="${KEYRING_HOME}/data" XDG_RUNTIME_DIR="${KEYRING_HOME}/run" \\\n\t\t\tgnome-keyring-daemon --foreground --unlock --components=secrets >> "${KEYRING_LOG}" 2>&1 &'
+		)
+		expect(inner.indexOf("unset KEYRING_PASSWORD")).toBeLessThan(inner.indexOf("exec node scripts/ci/e2e.ts"))
+		expect(inner).not.toMatch(/export XDG_(DATA_HOME|RUNTIME_DIR)/)
+	})
+
+	it("fails before the chain unless the login collection is unlocked, the default, and stores without a prompt", () => {
+		const start = inner.indexOf("exec node scripts/ci/e2e.ts")
+
+		for (const step of [
+			'*"boolean false"*) ;;',
+			"org.freedesktop.Secret.Service.SetAlias string:default",
+			"secret-tool store",
+			'secret-tool lookup filen-e2e keyring-probe)" = "${probe}" ]'
+		]) {
+			expect(inner.indexOf(step)).toBeGreaterThan(-1)
+			expect(inner.indexOf(step)).toBeLessThan(start)
+		}
 	})
 })
