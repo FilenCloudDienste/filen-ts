@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { request } from "node:http"
 import { type AddressInfo, connect, createServer, type Server, type Socket } from "node:net"
 import os from "node:os"
@@ -17,6 +17,7 @@ import {
 	freeDriveLetter
 } from "../../scripts/ci/e2e/smallVolume.ts"
 import { allIdle, proxyLaunch, tunnelsPerHost } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
+import { tempFiles } from "../../scripts/ci/e2e/chains/diskFullCheck.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS, STEP_MINUTES } from "../../scripts/ci/e2ePlan.ts"
 import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
 
@@ -295,6 +296,28 @@ describe("e2e small volumes", () => {
 
 		cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
 		expect(freeBytes(dir)).toBeGreaterThan(0)
+	})
+})
+
+describe("e2e disk full: download temps", () => {
+	// A volume root holding a directory nobody may read (macOS's .Spotlight-V100, root-owned, mode 700).
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("finds the temps and skips what it may not read", () => {
+		const dir = mkdtempSync(path.join(os.tmpdir(), "filen-e2e-temps-"))
+		const sealed = path.join(dir, ".Spotlight-V100")
+
+		cleanups.push(() => {
+			chmodSync(sealed, 0o700)
+			rmSync(dir, { recursive: true, force: true })
+		})
+		mkdirSync(path.join(dir, "pair", "sub"), { recursive: true })
+		mkdirSync(sealed)
+		writeFileSync(path.join(dir, "pair", "sub", "a.filendl"), "")
+		writeFileSync(path.join(dir, "pair", "b.bin"), "")
+		writeFileSync(path.join(sealed, "c.filendl"), "")
+		chmodSync(sealed, 0)
+
+		expect(tempFiles(dir)).toEqual([path.join("pair", "sub", "a.filendl")])
+		expect(tempFiles(path.join(dir, "gone"))).toEqual([])
 	})
 })
 

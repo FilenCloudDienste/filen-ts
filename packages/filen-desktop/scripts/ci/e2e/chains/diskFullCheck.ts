@@ -1,6 +1,7 @@
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync, writeSync } from "node:fs"
+import { closeSync, type Dirent, existsSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync, writeSync } from "node:fs"
 import path from "node:path"
-import { errorMessage, fail, waitFor } from "../../support.ts"
+import { errorCode } from "../../../../src/main/atomicFile.ts"
+import { errorMessage, fail, onTimeout, waitFor } from "../../support.ts"
 import { addPairThroughChooser, describePair, pairOf, removePair, sha256, sha256File, type ExtraPair, waitPair } from "../extraPair.ts"
 import { fixtureTree, seededBytes, treeSnapshot, writeTree } from "../fixtures.ts"
 import { createSampler } from "../offlineBlock.ts"
@@ -27,8 +28,33 @@ const HALT_MS = 3 * 60 * 1000
 const RECOVER_MS = 3 * 60 * 1000
 const TMP_SUFFIX = ".filendl"
 
-function tempFiles(root: string): string[] {
-	return existsSync(root) ? readdirSync(root, { recursive: true, encoding: "utf8" }).filter(entry => entry.endsWith(TMP_SUFFIX)) : []
+// The download temps under `root`, relative to it. A directory nobody may read is skipped: a macOS volume's root holds
+// root-only ones (.Spotlight-V100, .fseventsd), and the engine, which writes its temps beside the files it downloads,
+// cannot have put one there either.
+export function tempFiles(root: string, relative = ""): string[] {
+	let entries: Dirent[]
+
+	try {
+		entries = readdirSync(path.join(root, relative), { withFileTypes: true })
+	} catch (error) {
+		const code = errorCode(error)
+
+		if (code === "EACCES" || code === "EPERM" || (code === "ENOENT" && relative === "")) {
+			return []
+		}
+
+		throw error
+	}
+
+	return entries.flatMap(entry => {
+		const name = path.join(relative, entry.name)
+
+		if (entry.isDirectory()) {
+			return tempFiles(root, name)
+		}
+
+		return entry.name.endsWith(TMP_SUFFIX) ? [name] : []
+	})
 }
 
 // `bytes` of zeros in 1 MiB writes (no buffer of the whole size).
@@ -157,7 +183,7 @@ export async function runDiskFullCheck(chain: Chain): Promise<void> {
 
 			const landed = await waitFor(`${BIG} on disk`, Math.max(5000, freed + RECOVER_MS - Date.now()), () =>
 				existsSync(path.join(root, BIG)) && tempFiles(small.root).length === 0 ? true : null
-			).catch(() => false)
+			).catch(onTimeout(false))
 
 			if (!landed) {
 				fail(`${BIG} not on disk: ${describePair(await pairOf(chain, extra.id))}`)

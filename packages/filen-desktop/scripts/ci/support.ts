@@ -19,6 +19,20 @@ export function fail(message: string): never {
 	throw new TestFailure(message)
 }
 
+// A waitFor that reached its deadline; what its probe throws stays that error.
+export class WaitTimeout extends TestFailure {}
+
+// For a .catch after waitFor: a timeout stands for `value`, and anything else (the probe's own error) goes on.
+export function onTimeout<T>(value: T): (error: unknown) => T {
+	return error => {
+		if (error instanceof WaitTimeout) {
+			return value
+		}
+
+		throw error
+	}
+}
+
 export function section(title: string): void {
 	console.log(`\n== ${title}`)
 }
@@ -81,7 +95,7 @@ export async function waitFor<T>(
 		}
 
 		if (Date.now() >= deadline) {
-			fail(`timed out after ${String(Math.round(timeoutMs / 1000))} s waiting for ${what}`)
+			throw new WaitTimeout(`timed out after ${String(Math.round(timeoutMs / 1000))} s waiting for ${what}`)
 		}
 
 		await sleep(intervalMs)

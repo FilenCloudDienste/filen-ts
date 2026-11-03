@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { encodePowerShell, powershellErrorText, psQuote } from "../../scripts/ci/support.ts"
+import { encodePowerShell, onTimeout, powershellErrorText, psQuote, waitFor } from "../../scripts/ci/support.ts"
 
 describe("encodePowerShell", () => {
 	it("round-trips the script as UTF-16LE base64, stopping on errors and exiting 0 after it", () => {
@@ -29,5 +29,19 @@ describe("powershellErrorText", () => {
 
 		expect(powershellErrorText(clixml)).toBe("no dialog titled 'x'\r\nAt line:3 char:1 <here>")
 		expect(powershellErrorText("plain text\n")).toBe("plain text")
+	})
+})
+
+describe("onTimeout", () => {
+	it("stands for the value when the wait timed out", async () => {
+		await expect(waitFor("never", 0, () => null).catch(onTimeout(false))).resolves.toBe(false)
+	})
+
+	it("lets the probe's own error through", async () => {
+		const probe = () => {
+			throw new Error("EACCES: permission denied, scandir '/Volumes/x/.Spotlight-V100'")
+		}
+
+		await expect(waitFor("a file", 1000, probe).catch(onTimeout(false))).rejects.toThrow("EACCES")
 	})
 })
