@@ -3,6 +3,7 @@ import type { DesktopFileProviderResult, DesktopFileProviderState } from "@filen
 import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../support.ts"
 import type { Findings } from "./findings.ts"
+import { resolveThroughIssues } from "./syncUi.ts"
 
 // The 4.x page, driven over CDP: the real sign-in and sign-out forms, the lock screen, and reads of the window.desktop
 // contract (@filen/shared/desktop). Every read crosses CDP as a derived, non-secret value.
@@ -187,12 +188,9 @@ export function fileProviderUserEnabled(page: Page, timeoutMs: number): Promise<
 	return waitFor("macOS to report userEnabled for the domain", timeoutMs, async () => (await fileProviderState(page)).userEnabled, 2000)
 }
 
-// A held sync conflict resolved with Keep both as a user does: the rail's Computer group opened from the keyboard, its
-// Sync item, the pair in the sync sidebar, the Issues tab, the conflict row's Keep both (filen-web issuesTab.tsx). Done
-// once the row is gone (the page hides it when the resolution succeeded; a failure leaves it, with an error toast). The
-// master-key reminder, modal over the shell, may show at any point of a launch: put off whenever it covers a step.
-// Resolves with how often it was.
-export async function keepBothThroughIssues(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<number> {
+// `run` with the master-key reminder put off whenever it covers a step: modal over the shell, it may show at any point
+// of a launch. Resolves with run's value and how often the reminder was put off.
+export async function underReminder<T>(page: Page, run: () => Promise<T>): Promise<{ value: T; putOff: number }> {
 	const reminder = page.locator('[role="dialog"], [role="alertdialog"]').filter({ hasText: MASTER_KEYS_REMINDER })
 	let putOff = 0
 
@@ -202,36 +200,18 @@ export async function keepBothThroughIssues(page: Page, pairName: string, relPat
 	})
 
 	try {
-		await resolveKeepBoth(page, pairName, relPath, timeoutMs)
+		return { value: await run(), putOff }
 	} finally {
 		await page.removeLocatorHandler(reminder)
 	}
-
-	return putOff
 }
 
-async function resolveKeepBoth(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<void> {
-	const computer = page.locator('[aria-label^="Computer"]').first()
+// A held sync conflict resolved with Keep both as a user does (syncUi.ts resolveThroughIssues), the reminder put off
+// whenever it covers a step. Resolves with how often it was.
+export async function keepBothThroughIssues(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<number> {
+	const { putOff } = await underReminder(page, () => resolveThroughIssues(page, pairName, relPath, "keepBoth", timeoutMs))
 
-	await computer.waitFor({ state: "visible", timeout: timeoutMs })
-	await computer.focus()
-	await page.keyboard.press("ArrowRight")
-	await page.getByRole("menuitem", { name: /^Sync/ }).click({ timeout: timeoutMs })
-	// The pair's row in the sync sidebar (its name, then its phase and directories).
-	await page.locator('a[href*="/sync/"]').filter({ hasText: pairName }).first().click({ timeout: timeoutMs })
-	await page.getByRole("link", { name: /^Issues/ }).click({ timeout: timeoutMs })
-
-	const row = page.locator('[data-slot="settings-row"]').filter({ has: page.locator(`[title="${relPath}"]`) })
-	const keepBoth = row.getByRole("button", { name: "Keep both", exact: true })
-
-	await keepBoth.waitFor({ state: "visible", timeout: timeoutMs })
-
-	if ((await keepBoth.count()) !== 1) {
-		fail(`${String(await keepBoth.count())} Keep both buttons for ${relPath}`)
-	}
-
-	await keepBoth.click({ timeout: timeoutMs })
-	await row.waitFor({ state: "detached", timeout: timeoutMs })
+	return putOff
 }
 
 // The lock screen's PIN field (filen-web desktopLock.tsx), then its Unlock button.

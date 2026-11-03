@@ -64,6 +64,7 @@ import {
 	SETUP_TIMEOUT_MS,
 	type SignOutWitness
 } from "./common.ts"
+import { firstRunProblems, legacyHolds } from "./legacyHolds.ts"
 
 // Chain L at deep depth: the real 3.0.53 is signed in through its own page (or seeded with the run's session where the
 // plan says so: what its login stores, scripts/ci/e2e/seed.ts) and given what a user sets up (prefs, a PIN with a lock
@@ -102,6 +103,11 @@ import {
 //   L15  sign-out and uninstall   session and drive gone; the user's sync and drive data, migration.stash, lock.vault
 //                                 and the logs gone, an unfinished import ended; the next launch deletes the browser
 //                                 profile before ready; the user's directories intact
+//   L16  review card              a cloud file added while 3.x is closed holds e2e-l2c in review; its card, one-click
+//                                 changes, Start syncing, the held deletion approved (chains/legacyHolds.ts)
+//   L17  whole-drive pair         a paused drive-root pair from 3.x is refused with Remove pair only; removed, the drive
+//                                 root and its directory unchanged (chains/legacyHolds.ts)
+// L8, L9 and L10 expect e2e-l2c in review and the drive-root pair refused, as LEGACY_FIRST_RUN says.
 //
 // The old app's tray and notifications are not observed. Linux deb and AppImage, Windows NSIS and macOS dmg so far; what
 // differs per OS is behind scripts/ci/e2e/os.ts.
@@ -141,6 +147,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 	const chain = await openChain("legacy", options, artifacts)
 	const { findings, cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf } = chain
+	const holds = legacyHolds(chain)
 	const pin = String(randomInt(100_000, 1_000_000))
 	const webdav = { username: `e2e-${randomBytes(4).toString("hex")}`, password: randomBytes(18).toString("hex"), port: await freePort() }
 	// What 3.x's drive is set to (a mount point, or a letter on Windows) and where 4.x must then reach it.
@@ -371,6 +378,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			}
 		)
 
+		await findings.check(`L17 setup: a paused whole-drive pair added to ${LEGACY_VERSION}`, () => holds.addRootPair(legacyPage()))
+
 		await findings.must(`${LEGACY_VERSION} quits through app.quit(), rclone with it`, async () => {
 			await state.legacy?.renderer.browser.close().catch(() => undefined)
 
@@ -412,6 +421,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 			return exit
 		})
+
+		await findings.check("L16 setup: a file added to e2e-l2c's cloud directory while 3.x is closed", () => holds.uploadWhileClosed())
 
 		await findings.must("the closed-app edits: one file on disk, one in the cloud", async () => {
 			const localFile = path.join(rootOf(edits.local.pair), ...edits.local.path.split("/"))
@@ -588,16 +599,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					MIGRATE_TIMEOUT_MS,
 					() => {
 						const read = readJson(path.join(engine(), "shell.json")) as ShellState | null
-						const review = read?.pairs?.find(pair => pair.state === "review")
 
-						if (review !== undefined) {
-							fail(`${review.name} waits in review: ${json(review.review)}`)
-						}
-
-						return read?.pairs?.length === LEGACY_PAIRS.length &&
-							read.pairs.every(pair => pair.state === "active" && pair.pairId !== null)
-							? read
-							: null
+						// Active, but for the held and refused pairs of LEGACY_FIRST_RUN (chains/legacyHolds.ts).
+						return holds.shellSettled(read?.pairs) ? read : null
 					},
 					5000
 				)
@@ -870,7 +874,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			const overview = await waitFor("the pairs to be idle", SETUP_TIMEOUT_MS, async () => {
 				const read = await chain.syncOverview()
 
-				return findPairs(read).every(({ found }) => found?.phase === "idle") ? read : null
+				return findPairs(read).every(({ fixture, found }) => found?.phase === (holds.hold(fixture.name)?.phase ?? "idle"))
+					? read
+					: null
 			}).catch(() => chain.syncOverview())
 
 			await findings.check("L8 every pair present with its mode, roots and running", () => {
@@ -884,14 +890,14 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 						mode: fixture.mode,
 						localRoot: realpathSync(rootOf(fixture.name)),
 						remoteRoot: legacy?.remoteParentUUID,
-						paused: false
+						paused: holds.hold(fixture.name)?.paused ?? false
 					}
 					const got = { mode: found.mode, localRoot: found.localRoot, remoteRoot: found.remoteRoot, paused: found.paused }
 
 					return json(want) === json(got) ? [] : [`${fixture.name}: ${json(got)}, expected ${json(want)}`]
 				})
 
-				if (overview.pairs.length !== LEGACY_PAIRS.length) {
+				if (overview.pairs.length !== LEGACY_PAIRS.length + holds.extraPairs()) {
 					problems.push(`${String(overview.pairs.length)} pairs`)
 				}
 
@@ -908,7 +914,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					found === undefined
 						? []
 						: [
-								...(found.review === null ? [] : [`${fixture.name}: review ${json(found.review)}`]),
+								...firstRunProblems(fixture.name, found, holds.hold(fixture.name)),
 								...(found.holds.length === 0 ? [] : [`${fixture.name}: holds ${json(found.holds)}`]),
 								...(found.notices.length === 0 ? [] : [`${fixture.name}: notices ${json(found.notices)}`]),
 								...(found.rootProblem === null ? [] : [`${fixture.name}: root ${json(found.rootProblem)}`]),
@@ -922,8 +928,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 									failed: 0
 								})
 									? []
-									: [`${fixture.name}: issues ${json(found.issues)}`]),
-								...(found.phase === "idle" ? [] : [`${fixture.name}: ${found.phase}`])
+									: [`${fixture.name}: issues ${json(found.issues)}`])
 							]
 				)
 				const mounts = await chain.mountsOverview()
@@ -976,8 +981,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			])
 
 			await findings.check("L10 N's activity and plans carry nothing but the edits and the expected conflicts", () =>
-				chain.quietActivity(pairIds, allowed, conflictCounts)
+				chain.quietActivity(
+					pairIds.filter(pair => holds.hold(pair.name) === null),
+					allowed,
+					conflictCounts
+				)
 			)
+			await findings.check("L10 a pair held in review plans exactly its held deletions", () => holds.heldPlans(pairIds))
 
 			await findings.check("L10 exactly the expected conflicts are held, both sides kept", async () => {
 				const problems: string[] = []
@@ -1004,6 +1014,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 				return `held: ${conflictActivity.join(", ")}; the disk keeps the edit, the cloud the old bytes`
 			})
+
+			await holds.run(pairIds)
 
 			await findings.must("N quits on SIGTERM and starts a third time", async () => {
 				await quitN("N")

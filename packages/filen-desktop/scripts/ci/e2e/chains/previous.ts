@@ -31,6 +31,7 @@ import { offlineBlockFor } from "../offlineBlock.ts"
 import { runOfflineProbe } from "../spikes/offline.ts"
 import { runOfflineCheck } from "./offlineCheck.ts"
 import { inP11Turn } from "./offlineListing.ts"
+import { runConflictsCheck, seedConflictsCheck } from "./conflictsCheck.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
@@ -76,6 +77,9 @@ import {
 //                                holding drive-write) takes every pair offline within 30 s and converges after the
 //                                lift; sync never asks for attention (chains/offlineCheck.ts); one entry's P11 at a
 //                                time on the account (chains/offlineListing.ts)
+//   P12 conflicts and held       in the two-way pair: a held batch approved while paused (applies on resume), conflicts
+//                                resolved one by one and in bulk through the Issues tab; disk, cloud and bin byte for
+//                                byte (chains/conflictsCheck.ts)
 //
 // Linux deb and AppImage, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the
 // OS sees it, quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
@@ -99,6 +103,9 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 	const { syncOverview, mountsOverview, signedOutOnFailure } = chain
 	const pin = String(randomInt(100_000, 1_000_000))
 	const trees = new Map(PREVIOUS_PAIRS.map(pair => [pair.name, fixtureTree(`previous/${pair.name}`, false)]))
+
+	// P12's files (gap4/) sync with the two-way pair's tree from N-1 on.
+	seedConflictsCheck(trees.get("e2e-twoway") ?? fail("no tree for e2e-twoway"))
 	const state: {
 		pairs?: PairState[]
 		local?: Map<string, Snapshot>
@@ -636,6 +643,8 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 				return json(prefs)
 			})
+
+			await runConflictsCheck(chain, { pairs, pair: "e2e-twoway", cloudDir: `${cloudDir}/e2e-twoway` })
 
 			await inP11Turn(chain, () =>
 				runOfflineCheck(chain, { pairs, editPair: "e2e-twoway", editCloudDir: `${cloudDir}/e2e-twoway`, pin })

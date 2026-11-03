@@ -279,3 +279,32 @@ export async function legacySyncHold(): Promise<SyncHold> {
 		}
 	}
 }
+
+// One more pair, as the old sync settings add one: appended to the account's sync config (desktopConfig and its
+// per-user map), with the storage events its hooks re-read. Returns how many pairs the config holds now.
+export async function addLegacyPair(page: Page, pair: LegacySyncPair): Promise<number> {
+	const count = await page.evaluate(
+		`((keys, pair) => {
+			const parse = (key, fallback) => {
+				try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback } catch { return fallback }
+			}
+			const config = parse(keys.desktopConfig, null)
+			const userId = parse(keys.sdkConfig, {}).userId
+			if (config === null || !(userId > 1)) throw new Error("the old app holds no desktopConfig or account")
+			const syncConfig = { ...config.syncConfig, syncPairs: [...(config.syncConfig?.syncPairs ?? []), pair] }
+			const users = parse(keys.sync, {})
+			const writes = {
+				[keys.desktopConfig]: { ...config, syncConfig },
+				[keys.sync]: { ...(users !== null && typeof users === "object" && !Array.isArray(users) ? users : {}), [userId]: syncConfig }
+			}
+			for (const [key, value] of Object.entries(writes)) {
+				const raw = JSON.stringify(value)
+				localStorage.setItem(key, raw)
+				window.dispatchEvent(new StorageEvent("storage", { key, newValue: raw }))
+			}
+			return syncConfig.syncPairs.length
+		})(${JSON.stringify(LEGACY_KEYS)}, ${JSON.stringify(pair)})`
+	)
+
+	return count as number
+}

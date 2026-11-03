@@ -265,11 +265,12 @@ export interface Chain {
 	snapshotOf(name: string): Promise<Snapshot>
 	rootOf(name: string): string
 	// No transfer in any pair's activity but the `allowed` ("<pair>:<kind>:<relPath>"), and every plan empty but for
-	// exactly the held `conflicts` per pair name.
+	// exactly the held `conflicts` per pair name. With `since` (epoch ms), only the activity from then on counts.
 	quietActivity(
 		pairs: readonly { name: string; id: string }[],
 		allowed: ReadonlySet<string>,
-		conflicts?: Readonly<Record<string, number>>
+		conflicts?: Readonly<Record<string, number>>,
+		since?: number
 	): Promise<string>
 	// The update scenario with the chain's hooks, then evidence, cleanup and the findings.
 	run(options: Omit<UpdateOptions, "hooks">, hooks: Omit<UpdateHooks, "beforeReset">): Promise<void>
@@ -524,7 +525,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 			}
 		},
 
-		async quietActivity(pairs, allowed, conflicts = {}) {
+		async quietActivity(pairs, allowed, conflicts = {}, since = 0) {
 			const problems: string[] = []
 
 			for (const pair of pairs) {
@@ -532,7 +533,12 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 
 				problems.push(
 					...activity
-						.filter(item => TRANSFER_KINDS.has(item.kind) && !allowed.has(`${pair.name}:${item.kind}:${item.relPath ?? ""}`))
+						.filter(
+							item =>
+								item.at >= since &&
+								TRANSFER_KINDS.has(item.kind) &&
+								!allowed.has(`${pair.name}:${item.kind}:${item.relPath ?? ""}`)
+						)
 						.map(item => `${pair.name}: ${item.kind} ${item.relPath ?? ""}`)
 				)
 
