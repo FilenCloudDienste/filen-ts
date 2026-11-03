@@ -9,15 +9,18 @@ import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 //   PLATFORMS   comma-separated subset of windows,mac,linux (default all)
 //   PROFILE     release | nightly | custom; empty means nightly for a scheduled run, custom otherwise
 //   SIGNED      true | false: sign every build (release and custom); nightly signs macOS only, never notarized
-//   SCENARIOS   comma-separated subset of previous,legacy,older,update-kill (default previous,legacy); LEGACY=false
-//               drops legacy and older. older (3.0.47 -> N, scripts/ci/olderPlan.ts) runs at release and one night a
-//               week with legacy, by hand only when named. update-kill (N-1's installer killed mid-install, install
-//               depth) runs in every release run and when named; never at night, and not for rpm
+//   SCENARIOS   comma-separated subset of previous,legacy,older,update-kill,keyring (default previous,legacy);
+//               LEGACY=false drops legacy and older. older (3.0.47 -> N, scripts/ci/olderPlan.ts) runs at release and
+//               one night a week with legacy, by hand only when named. update-kill (N-1's installer killed mid-install,
+//               install depth) runs in every release run and when named; never at night, and not for rpm. keyring
+//               (chain K, no sign-in) runs on linux-x64-deb: in every nightly and release run that is not at install
+//               depth, and in a custom one that names it
 //   FORMATS     custom only: entries such as win-x64-nsis,linux-x64-deb (default all)
 //   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep those of a release (and any
 //               DEEP_TRIAL entry FORMATS names)
-//   SPIKE       none | s1 | s7 | cloud | offline: a dispatch-only spike instead of the update scenarios (cloud: the
-//               harness's cloud self-test, no app; offline: deep N-1 -> N with an offline/reconnect probe, signed in)
+//   SPIKE       none | s1 | s7 | cloud | offline | keyring-mac: a dispatch-only spike instead of the update scenarios
+//               (cloud: the harness's cloud self-test, no app; offline: deep N-1 -> N with an offline/reconnect probe,
+//               signed in; keyring-mac: a locked keychain under 3.x -> N's import, signed macOS, no sign-in)
 //   SIGNIN      custom only: auto | real. auto signs in through a form once per OS and chain (the rest seeded), real
 //               signs every deep chain in through its form
 //
@@ -34,7 +37,7 @@ import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 
 export type Os = "windows" | "mac" | "linux"
 export type Profile = "release" | "nightly" | "custom"
-export type Spike = "s1" | "s7" | "cloud" | "offline"
+export type Spike = "s1" | "s7" | "cloud" | "offline" | "keyring-mac"
 export type Depth = "auto" | "install" | "deep"
 // How a deep chain signs in: through its app's real form, or seeded with the run's session (scripts/ci/e2e/seed.ts).
 export type SignIn = "real" | "seeded"
@@ -62,6 +65,8 @@ export interface TestEntry extends Entry {
 	older: boolean
 	deepOlder: boolean
 	signInOlder: SignIn | ""
+	// Chain K on this entry (no sign-in; it needs the harness, so it makes the entry deep).
+	keyring: boolean
 	stagger: number
 	spike: Spike | ""
 	// Scenario update-kill (scripts/ci/e2e/updateKill.ts).
@@ -150,8 +155,11 @@ const spikeEntries: Record<Spike, readonly string[]> = {
 	s1: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"],
 	s7: ["mac-arm64-dmg"],
 	cloud: [],
-	offline: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
+	offline: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"],
+	"keyring-mac": ["mac-arm64-dmg"]
 }
+// Chain K's entry: the deb, whose N runs on the session's own D-Bus and Secret Service.
+const KEYRING_ENTRY = "linux-x64-deb"
 
 // Deep depth per profile: release and nightly on every OS and architecture's main format, plus macOS x64 and both
 // AppImages, whose updaters and process trees differ (no rotation: all of them every night), by hand one per OS unless
@@ -236,10 +244,10 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	}
 
 	const spikeName = input.spike === "none" ? "" : input.spike
-	const spike = (["", "s1", "s7", "cloud", "offline"] as const).find(candidate => candidate === spikeName)
+	const spike = (["", "s1", "s7", "cloud", "offline", "keyring-mac"] as const).find(candidate => candidate === spikeName)
 
 	if (spike === undefined) {
-		invalid(`SPIKE must be none, s1, s7, cloud or offline (got "${input.spike}")`)
+		invalid(`SPIKE must be none, s1, s7, cloud, offline or keyring-mac (got "${input.spike}")`)
 	}
 
 	const depth = (["auto", "install", "deep"] as const).find(candidate => candidate === (input.depth === "" ? "auto" : input.depth))
@@ -266,9 +274,11 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 
 	if (
 		scenarios.length === 0 ||
-		scenarios.some(item => item !== "previous" && item !== "legacy" && item !== OLDER_SCENARIO && item !== "update-kill")
+		scenarios.some(
+			item => item !== "previous" && item !== "legacy" && item !== OLDER_SCENARIO && item !== "update-kill" && item !== "keyring"
+		)
 	) {
-		invalid(`SCENARIOS must list some of previous, legacy, older, update-kill (got "${input.scenarios}")`)
+		invalid(`SCENARIOS must list some of previous, legacy, older, update-kill, keyring (got "${input.scenarios}")`)
 	}
 
 	const formats = list(input.formats)
@@ -292,8 +302,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			: { windows: input.signed, mac: input.signed, linux: input.signed }
 	const notices: string[] = []
 
-	if (spike === "s7" && !sign.mac) {
-		invalid("spike s7 needs a Developer-ID-signed macOS build: dispatch with signed: true or profile: nightly")
+	if ((spike === "s7" || spike === "keyring-mac") && !sign.mac) {
+		invalid(`spike ${spike} needs a Developer-ID-signed macOS build: dispatch with signed: true or profile: nightly`)
 	}
 
 	// Squirrel.Mac installs an update only if it satisfies the running app's designated requirement, which ad-hoc signed
@@ -320,13 +330,15 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	const updateKill = spike === "" && (profile === "release" || scenarios.includes("update-kill"))
 	const killed = (entry: Entry) => updateKill && entry.format !== "rpm"
 	const older = runsOlder({ profile, scenarios, legacy: input.legacy, spike, day: input.day })
+	const keyring = spike === "" && depth !== "install" && (profile === "custom" ? scenarios.includes("keyring") : true)
+	const keyringOn = (entry: Entry) => keyring && idOf(entry) === KEYRING_ENTRY
 
-	if (chosen.length === 0 || (spike === "" && !previous && !legacy && !older && !chosen.some(killed))) {
+	if (chosen.length === 0 || (spike === "" && !previous && !legacy && !older && !keyring && !chosen.some(killed))) {
 		invalid("nothing to test")
 	}
 
 	// update-kill alone: only the entries it runs on (not rpm).
-	if (spike === "" && !previous && !legacy && !older) {
+	if (spike === "" && !previous && !legacy && !older && !keyring) {
 		chosen.splice(0, chosen.length, ...chosen.filter(killed))
 	}
 
@@ -367,8 +379,15 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			...olderFor(id, older, wantsDeep(id), profile)
 		}
 	})
-	// An entry with nothing to run (3.0.47 or update-kill without the update scenarios, elsewhere) gets no job.
-	const running = deepChains.filter(item => spike !== "" || previous || legacy || item.older || killed(item.entry))
+	// An entry with nothing to run (3.0.47, update-kill or chain K without the update scenarios, elsewhere) gets no job.
+	const running = deepChains.filter(
+		item => spike !== "" || previous || legacy || item.older || killed(item.entry) || keyringOn(item.entry)
+	)
+
+	if (running.length === 0) {
+		invalid(`nothing to test: keyring runs on ${KEYRING_ENTRY} only`)
+	}
+
 	// Per OS, the entries whose chain signs in for real: one 4.x and one 3.0.53, the next entry along for 3.0.53, so the
 	// two land on different entries where there are two. At night the turn is the day's; otherwise the first.
 	const turn = profile === "nightly" ? input.day : 0
@@ -393,13 +412,14 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		const signInPrevious = signInOf(deepPrevious, realPrevious.has(entry))
 		const signInLegacy = signInOf(deepLegacy, realLegacy.has(entry))
 		const signInOlder = signInOf(deepOlder, realOlder.has(entry))
+		const keyringHere = keyringOn(entry)
 
 		return {
 			...entry,
 			signed: sign[entry.os],
 			previous,
 			legacy,
-			deep: deepPrevious || deepLegacy || deepOlder,
+			deep: deepPrevious || deepLegacy || deepOlder || keyringHere,
 			deepPrevious,
 			deepLegacy,
 			signInPrevious,
@@ -407,6 +427,7 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			older: olderEntry,
 			deepOlder,
 			signInOlder,
+			keyring: keyringHere,
 			// Only the form sign-ins are spaced; a seeded chain makes no login.
 			stagger: signInPrevious === "real" || signInLegacy === "real" || signInOlder === "real" ? STAGGER_SECONDS * realCount++ : 0,
 			spike,
@@ -417,7 +438,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		.filter(os => tests.some(entry => entry.os === os))
 		.map((os): BuildEntry => ({ os, runner: builders[os], sign: sign[os] }))
 
-	const session = tests.some(entry => entry.deep)
+	// Chain K signs nothing in and reaches no cloud.
+	const session = tests.some(entry => entry.deepPrevious || entry.deepLegacy || entry.deepOlder)
 	// Spike s7 signs in through the 4.x form on its own.
 	const logins =
 		(session ? SESSION_SLOTS : 0) +

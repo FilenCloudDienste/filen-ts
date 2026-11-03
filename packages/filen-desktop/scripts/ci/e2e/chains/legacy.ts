@@ -36,6 +36,7 @@ import {
 	treeSnapshot,
 	writeTree
 } from "../fixtures.ts"
+import { keyringEncrypted } from "../keyringData.ts"
 import { launchDebuggable, type Launched } from "../launch.ts"
 import {
 	configureLegacy,
@@ -92,8 +93,8 @@ import {
 //
 // The assertion table (each one a finding):
 //   L1   update path              the update scenario's own checks (scripts/ci/e2e/update.ts)
-//   L2   signed in, no prompt     marker `imported` within 90 s with a stored stash; session.vault; no in-memory session;
-//                                 session.get() present and no sign-in form once unlocked
+//   L2   signed in, no prompt     marker `imported` within 90 s with a stored stash; session.vault (v11 on Linux); no
+//                                 in-memory session; session.get() present and no sign-in form once unlocked
 //   L3   PIN migrated             N starts locked; the 3.x PIN unlocks through the lock screen
 //   L4   prefs migrated           N starts hidden; prefs.get() minimizeToTray and startMinimized on
 //   L5   mounts migrated          the drive at the 3.x mount point, running, a fixture read through it; WebDAV on the same
@@ -655,6 +656,21 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 			return `stage ${String(read.stage)} ${String(Math.round((Date.now() - relaunchedAt) / 1000))} s after N started`
 		})
+
+		// Chromium's key from the Secret Service, not the hardcoded basic_text one (v10).
+		if (target.platform === "linux") {
+			await findings.check("L2 session.vault is encrypted with the keyring's key (v11)", () => {
+				const vault = existsSync(userData("session.vault")) ? readFileSync(userData("session.vault")) : null
+
+				if (!keyringEncrypted(vault)) {
+					fail(
+						`session.vault ${vault === null ? "missing" : `starts with ${JSON.stringify(vault.subarray(0, 3).toString("latin1"))}`}`
+					)
+				}
+
+				return "starts with v11"
+			})
+		}
 
 		await findings.check(
 			"L10 N's first passes carry the cloud edit, hold the disk edit, move nothing else (disk and cloud)",

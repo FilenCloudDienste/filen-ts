@@ -89,3 +89,30 @@ describe("desktop e2e workflow secrets", () => {
 		expect(text).toMatch(/retention-days: 1\n\s+overwrite: true/)
 	})
 })
+
+describe("desktop e2e workflow chain K", () => {
+	const text = workflow("desktop-e2e.yml")
+	const step = (name: string) => {
+		const start = text.indexOf(`- name: ${name}\n`)
+
+		return start === -1 ? "" : text.slice(start, text.indexOf("\n      - name:", start + 1))
+	}
+
+	it("runs chain K after chain L's steps with no secret and no session", () => {
+		const chain = step("Keyring chain K, no sign-in")
+
+		expect(chain).toContain("if: ${{ !cancelled() && matrix.keyring }}")
+		expect(chain).toContain("run: node scripts/ci/e2e.ts --scenario keyring ${{ env.TEST_ARGS }} --artifacts e2e-artifacts")
+		expect(chain).not.toMatch(/secrets\.|env:/)
+		expect(text.indexOf("- name: Keyring chain K, no sign-in")).toBeGreaterThan(text.indexOf("- name: 3.0.53 -> N, signed in"))
+		expect(step("Prepare the keyring chain")).toContain("dbus-bin")
+		// A keyring-only entry is deep (the harness) without a session to download.
+		expect(text).toContain("- name: Download the sealed session\n        if: matrix.deepPrevious || matrix.deepLegacy\n")
+		expect(text).not.toContain("if: matrix.deep\n")
+	})
+
+	it("offers the keyring-mac spike and the keyring scenario by hand", () => {
+		expect(text).toContain("          - keyring-mac\n")
+		expect(text.match(/description: Comma-separated subset of [a-z,-]*\bkeyring\b/g)).toHaveLength(2)
+	})
+})

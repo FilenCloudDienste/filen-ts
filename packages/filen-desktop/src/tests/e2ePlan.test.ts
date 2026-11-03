@@ -398,6 +398,48 @@ describe("e2ePlan sign-ins", () => {
 		expect(plan({ ...dispatch, depth: "install" }).logins).toBe(0)
 	})
 
+	it("runs chain K on linux-x64-deb every night and release, by hand when named, with no session or login", () => {
+		const nightly = plan({ ...dispatch, platforms: "", profile: "", eventName: "schedule", scenarios: "", spike: "" })
+		const keyring = (input: PlanInput) =>
+			plan(input)
+				.tests.filter(entry => entry.keyring)
+				.map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)
+
+		expect(keyring({ ...dispatch, platforms: "", profile: "", eventName: "schedule", scenarios: "", spike: "" })).toEqual([
+			"linux-x64-deb"
+		])
+		expect(nightly.tests.find(entry => entry.keyring)?.deep).toBe(true)
+		expect(keyring({ ...dispatch, profile: "release", eventName: "push", signed: true })).toEqual(["linux-x64-deb"])
+		expect(keyring({ ...dispatch, profile: "release", eventName: "push", depth: "install" })).toEqual([])
+		expect(keyring(dispatch)).toEqual([])
+		expect(keyring({ ...dispatch, profile: "nightly", spike: "s1" })).toEqual([])
+
+		// Alone by hand: one entry, deep for the harness, without the session job, a login or the update scenarios.
+		const alone = plan({ ...dispatch, scenarios: "keyring" })
+
+		expect(alone.tests.map(entry => [entry.platform, entry.arch, entry.format, entry.keyring, entry.deep])).toEqual([
+			["linux", "x64", "deb", true, true]
+		])
+		expect(alone.tests[0]).toMatchObject({ previous: false, legacy: false, deepPrevious: false, deepLegacy: false, stagger: 0 })
+		expect(alone.session).toBe(false)
+		expect(alone.logins).toBe(0)
+		expect(alone.builds.map(entry => entry.os)).toEqual(["linux"])
+		expect(keyring({ ...dispatch, scenarios: "legacy,keyring", formats: "linux-x64-deb,win-x64-nsis" })).toEqual(["linux-x64-deb"])
+		expect(() => plan({ ...dispatch, scenarios: "keyring", platforms: "windows" })).toThrow(/keyring runs on linux-x64-deb/)
+		expect(() => plan({ ...dispatch, scenarios: "keyring", depth: "install" })).toThrow(/nothing to test/)
+	})
+
+	it("plans the keyring-mac spike on signed macOS arm64 only, with no session or login", () => {
+		const spike = plan({ ...dispatch, profile: "nightly", spike: "keyring-mac" })
+
+		expect(spike.tests.map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)).toEqual(["mac-arm64-dmg"])
+		expect(spike.tests.every(entry => !entry.deep && !entry.keyring && entry.spike === "keyring-mac")).toBe(true)
+		expect(spike.session).toBe(false)
+		expect(spike.logins).toBe(0)
+		expect(() => plan({ ...dispatch, spike: "keyring-mac" })).toThrow(/Developer-ID-signed/)
+		expect(plan({ ...dispatch, signed: true, spike: "keyring-mac" }).tests).toHaveLength(1)
+	})
+
 	it("counts the session job's slots", () => {
 		expect(SESSION_SLOTS).toBe(Object.keys(SLOTS).length)
 	})

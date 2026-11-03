@@ -14,13 +14,16 @@ import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 //   older      3.0.47 -> N through 3.0.47's own updater, hooked to the local feed (scripts/ci/e2e/update.ts)
 //   spike-s1   can the packaged 3.0.53 and N be driven over their debugging ports (scripts/ci/e2e/spikes/s1.ts)
 //   spike-s7   can Filen in Finder be switched on with nobody at the Mac (scripts/ci/e2e/spikes/s7.ts)
+//   keyring    chain K: the 3.x import without, with a locked and with an unlocked keyring, no sign-in (Linux deb;
+//              scripts/ci/e2e/chains/keyring.ts)
+//   spike-keyring-mac  what safeStorage and the import do with a locked keychain (scripts/ci/e2e/spikes/keyringMac.ts)
 //
 // At --depth deep, both also sign in and drive the apps around the update (scripts/ci/e2e/chains/previous.ts and
 // legacy.ts).
 //
-//   node scripts/ci/e2e.ts --scenario <previous|legacy|older|update-kill|spike-s1|spike-s7> --platform <win|mac|linux> --arch <x64|arm64>
-//       --format <nsis|dmg|deb|rpm|AppImage> --next <dir> --next-version <v> [--prev <dir> --prev-version <v>] [--signed]
-//       [--depth <install|deep>] [--artifacts <dir>]
+//   node scripts/ci/e2e.ts --scenario <previous|legacy|older|update-kill|keyring|spike-s1|spike-s7|spike-keyring-mac>
+//       --platform <win|mac|linux> --arch <x64|arm64> --format <nsis|dmg|deb|rpm|AppImage> --next <dir>
+//       --next-version <v> [--prev <dir> --prev-version <v>] [--signed] [--depth <install|deep>] [--artifacts <dir>]
 //
 // The update scenarios at install depth need Node built-ins only; deep chains and spikes load playwright-core (and deep
 // chains rclone's pinned release), so they need the package's dependencies installed.
@@ -62,7 +65,16 @@ function required(name: string, value: string | undefined): string {
 	return value
 }
 
-const scenario = oneOf("scenario", values.scenario, ["previous", "legacy", "older", "update-kill", "spike-s1", "spike-s7"] as const)
+const scenario = oneOf("scenario", values.scenario, [
+	"previous",
+	"legacy",
+	"older",
+	"update-kill",
+	"keyring",
+	"spike-s1",
+	"spike-s7",
+	"spike-keyring-mac"
+] as const)
 const platform = oneOf<Platform>("platform", values.platform, ["win", "mac", "linux"])
 const arch = oneOf<Arch>("arch", values.arch, ["x64", "arm64"])
 const format = oneOf<Format>("format", values.format, ["nsis", "dmg", "deb", "rpm", "AppImage"])
@@ -130,6 +142,21 @@ async function main(): Promise<void> {
 				artifacts: path.resolve(values.artifacts)
 			})
 
+			return
+		}
+
+		case "keyring": {
+			const { runKeyring } = await import("./e2e/chains/keyring.ts")
+
+			await runKeyring({ target, nextDir, nextVersion, work, artifacts: path.resolve(values.artifacts) })
+
+			return
+		}
+
+		case "spike-keyring-mac": {
+			const { runKeyringMac } = await import("./e2e/spikes/keyringMac.ts")
+
+			await runKeyringMac({ target, nextDir, nextVersion, signed, work, artifacts: path.resolve(values.artifacts) })
 			return
 		}
 

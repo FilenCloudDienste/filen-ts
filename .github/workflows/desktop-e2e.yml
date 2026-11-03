@@ -44,6 +44,12 @@
 # MAX_LOGINS_PER_RUN times (scripts/ci/e2ePlan.ts). Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any older
 # than a day, even after a failure.
 #
+# Chain K (scenario keyring, scripts/ci/e2e/chains/keyring.ts) runs on linux-x64-deb in every nightly and release run
+# and by hand when `scenarios` names it: 3.0.53 given a synthetic signed-in profile, N installed over it, and N's 3.x
+# import without a Secret Service, with a locked keyring whose prompt nobody answers, once it is unlocked, and after the
+# 7-day wait for the wipe. No sign-in and no cloud: every launch of N runs behind the offline block, on a D-Bus session
+# and Secret Service of its own.
+#
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
 # their findings go to the job summary and an artifact:
 #   s1   are the packaged 3.0.53 and N drivable over --remote-debugging-port (3.0.53 also over --inspect), and does
@@ -57,6 +63,9 @@
 #        iptables owner rule; macOS: a group and a pf anchor; Windows: firewall rules on Filen.exe and rclone.exe): how
 #        long until its pairs are offline, an edit made meanwhile, how long until it uploads once the block is lifted.
 #        Reported as information (scripts/ci/e2e/spikes/offline.ts); one 4.x sign-in per entry
+#   keyring-mac  macOS arm64, signed: a dedicated keychain locked as N first starts over chain K's synthetic 3.x
+#        profile; what safeStorage does (a prompt, a rejection, or no encryption), with the prompt cancelled and the
+#        keychain unlocked from outside, as information (scripts/ci/e2e/spikes/keyringMac.ts); no sign-in
 #
 # Secrets: CSC_LINK, CSC_KEY_PASSWORD (Developer ID); AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (Windows
 # signing); FILEN_DESKTOP_E2E_TEST_EMAIL, FILEN_DESKTOP_E2E_TEST_PASSWORD (a dedicated account without 2FA; deep
@@ -89,7 +98,7 @@ on:
         type: string
         default: release
       scenarios:
-        description: Comma-separated subset of previous,legacy,update-kill (a release runs update-kill always)
+        description: Comma-separated subset of previous,legacy,update-kill,keyring (a release runs update-kill always)
         type: string
         default: previous,legacy
       formats:
@@ -123,7 +132,7 @@ on:
           - release
         default: custom
       scenarios:
-        description: Comma-separated subset of previous,legacy,older,update-kill (older is 3.0.47 -> N, by hand only when named; a release runs update-kill always)
+        description: Comma-separated subset of previous,legacy,older,update-kill,keyring (older is 3.0.47 -> N, by hand only when named; a release runs update-kill always)
         type: string
         default: previous,legacy
       formats:
@@ -147,6 +156,7 @@ on:
           - s7
           - cloud
           - offline
+          - keyring-mac
         default: none
       signin:
         description: Custom profile only. auto signs in through a form once per OS and chain and seeds the rest; real signs in every deep chain
@@ -642,7 +652,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Download the sealed session
-        if: matrix.deep
+        if: matrix.deepPrevious || matrix.deepLegacy
         uses: actions/download-artifact@v7
         with:
           name: desktop-e2e-session
@@ -767,6 +777,15 @@ jobs:
         if: ${{ !cancelled() && matrix.updateKill }}
         timeout-minutes: 45
         run: node scripts/ci/e2e.ts --scenario update-kill ${{ env.TEST_ARGS }}
+      # Chain K starts its own D-Bus sessions and talks to them with dbus-send. After chain L, whose 3.0.53 download it
+      # reuses; it signs nothing in, so it gets no secret.
+      - name: Prepare the keyring chain
+        if: ${{ !cancelled() && matrix.keyring }}
+        run: sudo apt-get install --yes --no-install-recommends dbus-bin dbus-daemon gnome-keyring libsecret-tools
+      - name: Keyring chain K, no sign-in
+        if: ${{ !cancelled() && matrix.keyring }}
+        timeout-minutes: 45
+        run: node scripts/ci/e2e.ts --scenario keyring ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       # The account's credentials reach spike s7 only, and only this step (deep entries: the step above).
       # Bounded so a hang never holds a runner for the job's whole budget.
       - name: Spike ${{ matrix.spike }}

@@ -1,4 +1,16 @@
-import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs"
+import { spawn, type ChildProcess } from "node:child_process"
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	rmSync,
+	writeFileSync
+} from "node:fs"
 import os from "node:os"
 import { crc32, deflateSync } from "node:zlib"
 import path from "node:path"
@@ -172,9 +184,14 @@ export async function sha256Through(file: string, timeoutMs: number): Promise<st
 }
 
 // The secret service items an application stored, by label and attributes only: secret-tool prints the secrets too,
-// and those lines are dropped before anything else sees the output.
-export async function keyringItems(application: string): Promise<string[]> {
-	const result = await runBounded("secret-tool", ["search", "--all", "application", application], TOOL_TIMEOUT_MS)
+// and those lines are dropped before anything else sees the output. `env` points it at another session bus.
+export async function keyringItems(application: string, env?: NodeJS.ProcessEnv): Promise<string[]> {
+	const result = await runBounded(
+		"secret-tool",
+		["search", "--all", "application", application],
+		TOOL_TIMEOUT_MS,
+		env === undefined ? {} : { env: { ...process.env, ...env } }
+	)
 
 	return `${result.stdout}\n${result.stderr}`
 		.split("\n")
@@ -330,4 +347,223 @@ export function appImageProcesses(executable: string): string[] {
 		.filter(entry => entry !== null)
 
 	return appImageTree(entries, executable, appImagePrefixes(os.tmpdir()))
+}
+
+// A Secret Service for one launch of chain K (scripts/ci/e2e/chains/keyring.ts), on a D-Bus session bus of its own that
+// nothing else uses: "none" is the bus alone (no service directories, so nothing is activated on it either: not
+// gnome-keyring, not a prompter), "unlocked" gnome-keyring with the login keyring unlocked (created on first use),
+// "locked" gnome-keyring with that keyring locked, as after a login that did not unlock it. No prompter can start on
+// the bus, so an unlock prompt fails at once: what a user dismissing it gives the app. The app reaches only this bus
+// (`env`), as a GNOME session's apps do.
+
+export type SecretServiceMode = "none" | "locked" | "unlocked"
+
+// Where a login keyring lives across launches (gnome-keyring's XDG_DATA_HOME), and its password.
+export interface KeyringStore {
+	dir: string
+	password: string
+}
+
+export interface SecretService {
+	readonly mode: SecretServiceMode
+	// What a launch merges into its environment to use this bus and nothing else.
+	readonly env: NodeJS.ProcessEnv
+	// The service's items for `application`, by label and attributes (keyringItems on this bus); none without a service.
+	items(application: string): Promise<string[]>
+	// Bus and daemon ended; idempotent.
+	stop(): Promise<void>
+}
+
+const SECRETS_NAME = "org.freedesktop.secrets"
+const LOGIN_COLLECTION = "/org/freedesktop/secrets/collection/login"
+const SERVICE_TIMEOUT_MS = 30_000
+
+function xmlText(value: string): string {
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+// A session bus listening on `socket` only, with the session bus's open policy and no service directories.
+export function dbusSessionConfig(socket: string): string {
+	return [
+		'<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"',
+		' "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">',
+		"<busconfig>",
+		"  <type>session</type>",
+		"  <keep_umask/>",
+		`  <listen>unix:path=${xmlText(socket)}</listen>`,
+		"  <auth>EXTERNAL</auth>",
+		'  <policy context="default">',
+		'    <allow send_destination="*" eavesdrop="true"/>',
+		'    <allow eavesdrop="true"/>',
+		'    <allow own="*"/>',
+		"  </policy>",
+		"</busconfig>",
+		""
+	].join("\n")
+}
+
+// gnome-keyring-daemon's arguments: secrets only, in the foreground (this harness ends it), replacing any on the bus;
+// with `unlock` it reads the login keyring's password from stdin and unlocks (or creates) that keyring.
+export function keyringDaemonArgs(unlock: boolean): string[] {
+	return ["--replace", "--foreground", "--components=secrets", ...(unlock ? ["--unlock"] : [])]
+}
+
+// A long-running child in its own process group, so that stopping it takes whatever it started.
+function daemon(command: string, args: readonly string[], env: NodeJS.ProcessEnv, log: string, input?: string): ChildProcess {
+	const fd = openSync(log, "a", 0o600)
+
+	try {
+		const child = spawn(command, args, { detached: true, stdio: ["pipe", fd, fd], env })
+
+		child.on("error", error => {
+			console.error(`${command}: ${error.message}`)
+		})
+		// Never logged: the keyring's password.
+		child.stdin?.end(input)
+
+		return child
+	} finally {
+		closeSync(fd)
+	}
+}
+
+async function end(child: ChildProcess | null): Promise<void> {
+	if (child === null || child.exitCode !== null || child.signalCode !== null || child.pid === undefined) {
+		return
+	}
+
+	const exited = new Promise<void>(resolve => child.once("exit", () => resolve()))
+
+	for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+		try {
+			process.kill(-child.pid, signal)
+		} catch {
+			// Already gone.
+		}
+
+		let timer: NodeJS.Timeout | undefined
+		const done = await Promise.race([
+			exited.then(() => true),
+			new Promise<boolean>(resolve => {
+				timer = setTimeout(() => resolve(false), 5000)
+			})
+		])
+
+		clearTimeout(timer)
+
+		if (done) {
+			return
+		}
+	}
+}
+
+async function busCall(env: NodeJS.ProcessEnv, args: readonly string[]): Promise<string> {
+	const result = await runBounded("dbus-send", ["--session", "--print-reply", ...args], TOOL_TIMEOUT_MS, {
+		env: { ...process.env, ...env }
+	})
+
+	if (result.status !== 0) {
+		fail(`dbus-send ${args.join(" ")}: ${result.timedOut ? "timed out" : `exit ${String(result.status)}`} ${result.stderr.trim()}`)
+	}
+
+	return result.stdout
+}
+
+// Whether the login keyring is locked, as the service reports it.
+async function loginLocked(env: NodeJS.ProcessEnv): Promise<boolean> {
+	const reply = await busCall(env, [
+		`--dest=${SECRETS_NAME}`,
+		LOGIN_COLLECTION,
+		"org.freedesktop.DBus.Properties.Get",
+		"string:org.freedesktop.Secret.Collection",
+		"string:Locked"
+	])
+
+	return /boolean true/.test(reply)
+}
+
+// Starts the bus and, unless `mode` is "none", gnome-keyring on it with `keyring`; its output goes to `log`.
+export async function secretService(mode: SecretServiceMode, work: string, log: string, keyring?: KeyringStore): Promise<SecretService> {
+	mkdirSync(work, { recursive: true })
+
+	const runtime = mkdtempSync(path.join(work, "bus-"))
+	const socket = path.join(runtime, "bus")
+	const config = path.join(runtime, "session.conf")
+	// Nothing of the harness's own session reaches the app: its bus is this one, and no keyring control socket.
+	const env: NodeJS.ProcessEnv = {
+		DBUS_SESSION_BUS_ADDRESS: `unix:path=${socket}`,
+		XDG_CURRENT_DESKTOP: "GNOME",
+		GNOME_KEYRING_CONTROL: undefined
+	}
+	let bus: ChildProcess | null = null
+	let keyringDaemon: ChildProcess | null = null
+
+	const stop = async () => {
+		await end(keyringDaemon)
+		await end(bus)
+		keyringDaemon = null
+		bus = null
+		rmSync(runtime, { recursive: true, force: true })
+	}
+
+	try {
+		writeFileSync(config, dbusSessionConfig(socket))
+		bus = daemon("dbus-daemon", ["--config-file", config, "--nofork", "--nopidfile"], process.env, log)
+		await waitFor("the session bus", SERVICE_TIMEOUT_MS, () => (existsSync(socket) ? true : null), 200)
+
+		if (mode !== "none") {
+			const store = keyring ?? fail(`a ${mode} Secret Service needs a keyring`)
+			const daemonEnv = { ...process.env, ...env, XDG_DATA_HOME: store.dir, XDG_RUNTIME_DIR: runtime }
+			// Asked again while the daemon is still coming up.
+			const owned = async () =>
+				/boolean true/.test(
+					await busCall(env, [
+						"--dest=org.freedesktop.DBus",
+						"/org/freedesktop/DBus",
+						"org.freedesktop.DBus.NameHasOwner",
+						`string:${SECRETS_NAME}`
+					]).catch(() => "")
+				)
+					? true
+					: null
+			const start = async (unlock: boolean) => {
+				keyringDaemon = daemon(
+					"gnome-keyring-daemon",
+					keyringDaemonArgs(unlock),
+					daemonEnv,
+					log,
+					unlock ? store.password : undefined
+				)
+				await waitFor(`gnome-keyring to own ${SECRETS_NAME}`, SERVICE_TIMEOUT_MS, owned, 300)
+			}
+			const loginKeyring = path.join(store.dir, "keyrings", "login.keyring")
+
+			mkdirSync(store.dir, { recursive: true, mode: 0o700 })
+
+			// A locked keyring is one that exists: created (unlocked) first, then started without its password.
+			if (mode === "locked" && !existsSync(loginKeyring)) {
+				await start(true)
+				await waitFor("the login keyring to be written", SERVICE_TIMEOUT_MS, () => (existsSync(loginKeyring) ? true : null), 300)
+				await end(keyringDaemon)
+				keyringDaemon = null
+			}
+
+			await start(mode === "unlocked")
+
+			if ((await loginLocked(env)) !== (mode === "locked")) {
+				fail(`the login keyring is not ${mode}`)
+			}
+		}
+	} catch (error) {
+		await stop()
+
+		throw error
+	}
+
+	return {
+		mode,
+		env,
+		items: async application => (mode === "none" ? [] : keyringItems(application, env)),
+		stop
+	}
 }
