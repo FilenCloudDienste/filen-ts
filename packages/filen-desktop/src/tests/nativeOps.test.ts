@@ -205,6 +205,19 @@ describe("native ops", () => {
 		expect(engine.requestPass.mock.calls).toEqual([[1n]])
 	})
 
+	it("asks for a pass after a path's retry of a running pair only", async () => {
+		const { engine, host } = setup([pairInfo({ id: 1n }), pairInfo({ id: 2n, localRoot: "/b", paused: true })])
+
+		await host.watchAll([], () => undefined)
+		await expect(host.ops.retryPath({ pairId: "1", relPath: "a.bin" })).resolves.toBeNull()
+		await expect(host.ops.retryPath({ pairId: "2", relPath: "b.bin" })).resolves.toBeNull()
+		expect(engine.retryPath.mock.calls).toEqual([
+			[1n, "a.bin"],
+			[2n, "b.bin"]
+		])
+		expect(engine.requestPass.mock.calls).toEqual([[1n]])
+	})
+
 	it("asks for a pass after an approval of a running pair only, starting its watch when it has none", async () => {
 		const { engine, host } = setup([pairInfo({ id: 1n }), pairInfo({ id: 2n, localRoot: "/b", paused: true })])
 

@@ -357,7 +357,14 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 			return ops.requestPass({ pairId })
 		},
 		retryPath: async ({ pairId, relPath }) => {
-			await engine.retryPath(held(pairId).id, relPath)
+			const { id, info } = held(pairId)
+
+			await engine.retryPath(id, relPath)
+
+			// The engine runs no pass for it: without one the path waits for the next change or the safety net.
+			if (watched.has(pairId) && !info.paused) {
+				await engine.requestPass(id)
+			}
 
 			return null
 		},
