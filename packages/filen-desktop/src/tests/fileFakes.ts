@@ -42,3 +42,28 @@ export function fakeCipher(): VaultCipher & { failDecrypt: boolean } {
 
 	return cipher
 }
+
+// safeStorage on Linux as sessionCipher hands it out: "keyring" encrypts with the Secret Service's key ("v11") and reads
+// what the fallback key encrypted too, asking for a re-encryption; "fallback" is memory mode on Chromium's hardcoded key
+// ("v10", read-only), which cannot read the keyring's; "unprobed" is that key taken for secure storage, as builds did
+// before the probe, which wrote what a later run finds.
+export function linuxCipher(key: "keyring" | "fallback" | "unprobed"): VaultCipher {
+	const prefix = key === "keyring" ? "v11" : "v10"
+	const cipher: VaultCipher = {
+		encrypt: plain => Promise.resolve(Buffer.from(`${prefix}${Buffer.from(plain).toString("base64")}`)),
+		decrypt: encrypted => {
+			const head = encrypted.subarray(0, 3).toString("latin1")
+
+			if (head !== "v10" && !(head === "v11" && key === "keyring")) {
+				return Promise.reject(new Error("decrypt failed"))
+			}
+
+			return Promise.resolve({
+				result: Buffer.from(encrypted.subarray(3).toString(), "base64").toString(),
+				shouldReEncrypt: head !== prefix
+			})
+		}
+	}
+
+	return key === "fallback" ? { ...cipher, readOnly: true } : cipher
+}

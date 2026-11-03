@@ -18,6 +18,7 @@ import {
 	verifyPin
 } from "../main/appLock.ts"
 import type { VaultCipher } from "../main/sessionVault.ts"
+import { linuxCipher } from "./fileFakes.ts"
 
 function memoryFile(initial: Buffer | null = null): AtomicFile & { data: Buffer | null } {
 	const file = {
@@ -323,6 +324,45 @@ describe("loadAppLock", () => {
 		await expect(lock.discardUndecryptable(cipher)).resolves.toBe(true)
 		expect(file.data).toBeNull()
 		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+	})
+
+	describe("on Linux's fallback key", () => {
+		it("reads a record the fallback key encrypted, so the PIN still locks, and stores plain records from then on", async () => {
+			const { file } = await lockWithPin("1234", memoryFile(), linuxCipher("unprobed"))
+
+			expect(file.data?.subarray(0, 3).toString()).toBe("v10")
+
+			const lock = await loadAppLock(file, () => Promise.resolve(linuxCipher("fallback")), warn)
+
+			expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+			expect(file.data?.subarray(0, 3).toString()).toBe("v10")
+			await expect(lock.unlock("1234")).resolves.toEqual({ ok: true })
+			expect(parseLockRecord(file.data?.toString("utf8") ?? "")).not.toBeNull()
+		})
+
+		it("keeps a record the keyring encrypted unused and unchanged", async () => {
+			const { file } = await lockWithPin("1234", memoryFile(), linuxCipher("keyring"))
+			const stored = file.data
+			const lock = await loadAppLock(file, () => Promise.resolve(linuxCipher("fallback")), warn)
+
+			expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+			expect(file.data).toBe(stored)
+		})
+
+		it("re-encrypts a fallback-key record with the keyring's key once a run has it", async () => {
+			const { file } = await lockWithPin("1234", memoryFile(), linuxCipher("unprobed"))
+			const lock = await loadAppLock(file, () => Promise.resolve(linuxCipher("keyring")), warn)
+
+			expect(lock.status()).toMatchObject({ enabled: true, locked: true, unreadable: false })
+			expect(file.data?.subarray(0, 3).toString()).toBe("v11")
+			await expect(lock.unlock("1234")).resolves.toEqual({ ok: true })
+		})
+
+		it("never stores a PIN with the fallback key", async () => {
+			const { file } = await lockWithPin("1234", memoryFile(), linuxCipher("fallback"))
+
+			expect(parseLockRecord(file.data?.toString("utf8") ?? "")).not.toBeNull()
+		})
 	})
 
 	it("never discards a plain record, which needs no key", async () => {

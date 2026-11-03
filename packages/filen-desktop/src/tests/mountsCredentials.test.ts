@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { createCredentialStore, credentialsProblem, generateCredentials, type ServeCredentials } from "../main/mounts/credentials.ts"
 import { s3AuthSchema, basicAuthSchema } from "../shared/nativeProtocol.ts"
-import { fakeCipher, memoryFile } from "./fileFakes.ts"
+import { fakeCipher, linuxCipher, memoryFile } from "./fileFakes.ts"
 
 function secretsOf(credentials: ServeCredentials): string[] {
 	return credentials.kind === "basic" ? [credentials.password] : [credentials.accessKeyId, credentials.secretAccessKey]
@@ -107,6 +107,37 @@ describe("createCredentialStore", () => {
 		expect(file.writes).toBe(1)
 		cipher.failDecrypt = false
 		expect(await locked.ensure("restic")).toEqual(kept)
+	})
+
+	it("on Linux's fallback key, reads what a run on that key stored, writes nothing, and the keyring's run re-encrypts it", async () => {
+		const file = memoryFile()
+		const stored = await createCredentialStore(file, () => Promise.resolve(linuxCipher("unprobed")), vi.fn()).ensure("webdav")
+
+		expect(file.data?.subarray(0, 3).toString()).toBe("v10")
+
+		const fallback = createCredentialStore(file, () => Promise.resolve(linuxCipher("fallback")), vi.fn())
+
+		expect(await fallback.get("webdav")).toEqual(stored)
+		expect(await fallback.persistent()).toBe(false)
+		await fallback.ensure("s3")
+		expect(file.writes).toBe(1)
+
+		const keyring = createCredentialStore(file, () => Promise.resolve(linuxCipher("keyring")), vi.fn())
+
+		expect(await keyring.get("webdav")).toEqual(stored)
+		expect(await keyring.persistent()).toBe(true)
+		expect(file.data?.subarray(0, 3).toString()).toBe("v11")
+	})
+
+	it("on Linux's fallback key, keeps what the keyring encrypted unread and unchanged", async () => {
+		const file = memoryFile()
+		const stored = await createCredentialStore(file, () => Promise.resolve(linuxCipher("keyring")), vi.fn()).ensure("webdav")
+		const before = file.data
+		const fallback = createCredentialStore(file, () => Promise.resolve(linuxCipher("fallback")), vi.fn())
+
+		expect(await fallback.get("webdav")).toBeNull()
+		expect(await fallback.ensure("webdav")).not.toEqual(stored)
+		expect(file.data).toBe(before)
 	})
 
 	it("refuses credentials of the wrong kind", async () => {

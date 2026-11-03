@@ -18,7 +18,7 @@ import {
 	parseStash
 } from "./legacyData.ts"
 import { serialQueue } from "../shared/serial.ts"
-import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
+import { readingCipher, sessionUserId, storingCipher, type VaultCipher } from "./sessionVault.ts"
 
 // The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where
 // it got to:
@@ -782,7 +782,8 @@ export interface StashStore {
 }
 
 // The encrypted stash, decrypted once and served from memory. A stash that cannot be decrypted now (a locked keychain)
-// is read again next time and never removed.
+// is read again next time and never removed. In memory mode only one encrypted with Linux's fallback key is read, and
+// a run with secure storage re-encrypts that.
 export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCipher | null>, warn: (message: string) => void): StashStore {
 	// undefined: not read yet.
 	let cached: LegacyStash | null | undefined
@@ -794,7 +795,7 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 		}
 
 		const data = await file.read()
-		const active = data === null ? null : await cipher()
+		const active = data === null ? null : readingCipher(await cipher(), data)
 
 		if (data === null || active === null) {
 			cached = null
@@ -802,7 +803,8 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 			return null
 		}
 
-		const stash = parseStash((await active.decrypt(data)).result)
+		const decrypted = await active.decrypt(data)
+		const stash = parseStash(decrypted.result)
 
 		if (stash === null) {
 			warn("migration: the stash is invalid; ignoring it")
@@ -810,12 +812,18 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 
 		cached = stash
 
+		if (stash !== null && decrypted.shouldReEncrypt && storingCipher(active) !== null) {
+			await store(stash).catch((error: unknown) => {
+				warn(`migration: stash re-encryption failed: ${errorCode(error)}`)
+			})
+		}
+
 		return stash
 	}
 
 	// False when the stash is kept for this run only.
 	async function store(stash: LegacyStash | null): Promise<boolean> {
-		const active = await cipher()
+		const active = storingCipher(await cipher())
 		let persisted = true
 
 		if (stash === null) {

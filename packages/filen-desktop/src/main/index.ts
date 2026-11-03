@@ -86,6 +86,7 @@ import { createSignOut, deleteProfileStorage, type ProfileOutcome, removeTree, w
 import { parseSessionBlob } from "@filen/shared/session"
 import {
 	createSessionVault,
+	fallbackKeyEncrypted,
 	isSessionBlob,
 	lazyCipher,
 	removeIfUndecryptable,
@@ -172,20 +173,36 @@ const webDist = app.isPackaged
 // `pnpm run dev` (scripts/dev.ts) serves the page from filen-web's Vite server instead, for hot reload.
 const webDevServer = app.isPackaged ? undefined : process.env["FILEN_DESKTOP_WEB_DEV_URL"]
 
-// Probed on first use, after app ready: safeStorage reports nothing useful before it.
+// Probed on first use, after app ready: safeStorage reports nothing useful before it. On Linux a missing or locked
+// Secret Service (or a dismissed prompt) still reports the keyring's backend while encrypting with Chromium's hardcoded
+// fallback key, which only a probe's "v10" shows.
 async function sessionCipher(): Promise<VaultCipher | null> {
-	const backend = PLATFORM === "linux" ? safeStorage.getSelectedStorageBackend() : ""
-
-	if (vaultMode(PLATFORM, backend, await safeStorage.isAsyncEncryptionAvailable()) === "memory") {
-		warn(`session vault: no secure storage (${backend || "unavailable"}); keeping the session in memory only`)
-
-		return null
-	}
-
-	return {
+	const linux = PLATFORM === "linux"
+	const backend = linux ? safeStorage.getSelectedStorageBackend() : ""
+	const available = await safeStorage.isAsyncEncryptionAvailable()
+	const probe = linux && available ? await safeStorage.encryptStringAsync("probe") : null
+	const fallbackKey = probe !== null && fallbackKeyEncrypted(probe)
+	// The ciphertext's version prefix only.
+	const prefix = probe?.subarray(0, 3).toString("latin1") ?? "none"
+	const cipher: VaultCipher = {
 		encrypt: plain => safeStorage.encryptStringAsync(plain),
 		decrypt: encrypted => safeStorage.decryptStringAsync(encrypted)
 	}
+
+	info(
+		`secure storage: ${available ? "available" : "unavailable"}${linux ? `, backend ${backend || "none"}, probe ${/^(v\d\d|none)$/.test(prefix) ? prefix : "unrecognised"}` : ""}`
+	)
+
+	if (vaultMode(PLATFORM, backend, available, fallbackKey) === "memory") {
+		warn(
+			`session vault: no secure storage (${fallbackKey ? `${backend}, fallback key` : backend || "unavailable"}); keeping the session in memory only`
+		)
+
+		// What a run on the fallback key stored stays readable; nothing is stored with it.
+		return linux && available ? { ...cipher, readOnly: true } : null
+	}
+
+	return cipher
 }
 
 // Shared by the session vault and the app lock's PIN record. safeStorage works only after ready.
