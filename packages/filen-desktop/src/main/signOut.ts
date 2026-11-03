@@ -64,6 +64,10 @@ export interface SignOut {
 	// Deletes what an earlier sign-out left and records what wipeProfileBeforeReady did. Before the app lock, the
 	// migration, the sync and the mounts stores read anything. Never rejects.
 	resume(): Promise<void>
+	// Before the session leaves the vault: the browser profile is listed, so a sign-out cut short after that has it
+	// deleted on the next launch (unless a session is stored again), and with it everything the page's own flag would
+	// finish, which the migration's purge of Local Storage may delete. Never rejects.
+	begin(): Promise<void>
 	// After the session left the vault. Never rejects.
 	signOut(userId: string | null): Promise<void>
 	// A sign-in as `userId`: what is left of an earlier sign-out is deleted now or kept for good, so that no later start
@@ -485,6 +489,15 @@ export function createSignOut(deps: SignOutDeps): SignOut {
 		resume: () =>
 			serial(resume).catch((error: unknown) => {
 				log.warn(`sign-out: leftovers not deleted: ${errorCode(error)}`)
+			}),
+		begin: () =>
+			serial(async () => {
+				if (!pending.globals.has("profile")) {
+					pending.globals.add("profile")
+					await save()
+				}
+			}).catch((error: unknown) => {
+				log.warn(`sign-out: start not recorded: ${errorCode(error)}`)
 			}),
 		signOut: userId =>
 			serial(() => run(userId)).catch((error: unknown) => {

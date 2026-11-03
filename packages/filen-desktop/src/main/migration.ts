@@ -230,24 +230,21 @@ export type PurgeOutcome = { result: "not-due" } | { result: "deleted" } | { res
 export interface PurgeDeps {
 	// The marker file's text, null when it is absent.
 	readMarker(): string | null
-	// The session vault file exists.
-	sessionStored(): boolean
 	// Deletes the old origin's IndexedDB and the Local Storage store; throws when an entry stays.
 	deleteStores(): void
-	// Deletes the browser profile's storage (signOut.ts deleteProfileStorage), the old origin's stores among it.
-	deleteProfile(): void
 }
 
 // LevelDB keeps deleted values until a compaction, so the old origin's stores are deleted from disk once its secrets
 // are wiped. Chromium opens the profile's Local Storage store once the default session exists, and Windows refuses to
 // delete open files (EBUSY), so this runs synchronously before ready, after the single-instance lock; `start` records
-// the outcome. The new page loses its few localStorage values (theme choice, splash hint) once.
+// the outcome. The new page loses its few localStorage values (theme choice, splash hint) once; the rest of the page's
+// storage (unsynced local data among it) stays.
 // Deleting the Local Storage store also deletes the page's own flag that finishes a sign-out cut short (filen-web
-// signOutPending.ts), whose loss would leave the signed-out account's local data behind. That flag can outlive the
-// session only: sign-out clears the vault first among its wipes, removing its file (in memory-only mode too), and an
-// existing file means a stored session (or a sign-out that stopped before clearing anything, which the page then shows
-// as still signed in). Without the vault file (signed out, or no secure storage to store a session in) the flag may be
-// set, so the whole profile goes, as after a sign-out: everything the flag would finish goes with it.
+// signOutPending.ts), whose loss would leave the signed-out account's local data behind. A sign-out lists the browser
+// profile in its own marker before it clears the session (signOut.ts begin), and wipeProfileBeforeReady, which runs
+// first, deletes the whole profile for it unless a session is stored again: everything the flag would finish goes with
+// it. A sign-out that stopped before clearing the session cleared nothing, and the next launch shows what a launch shows
+// without one (signed in from a stored session, or the sign-in of a run without secure storage).
 export function purgeBeforeReady(deps: PurgeDeps): PurgeOutcome {
 	let current: MigrationMarker | null
 
@@ -263,11 +260,7 @@ export function purgeBeforeReady(deps: PurgeDeps): PurgeOutcome {
 	}
 
 	try {
-		if (deps.sessionStored()) {
-			deps.deleteStores()
-		} else {
-			deps.deleteProfile()
-		}
+		deps.deleteStores()
 	} catch (error) {
 		return { result: "failed", code: errorCode(error) }
 	}

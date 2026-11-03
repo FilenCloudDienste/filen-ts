@@ -1410,12 +1410,8 @@ if (!instanceLock.held) {
 				throw error
 			}
 		},
-		sessionStored: () => existsSync(sessionVaultPath),
 		deleteStores: () => {
 			deleteLegacyStores(userDataPath)
-		},
-		deleteProfile: () => {
-			deleteProfileStorage(userDataPath)
 		}
 	})
 	void signOutFlow.resume().then(signOutResumed.resolve)
@@ -1522,6 +1518,9 @@ if (!instanceLock.held) {
 	})
 	handle(CHANNELS.sessionClear, async () => {
 		const user = await nativeSupervisor.user()
+
+		// Listed before the session goes, so a sign-out cut short from here on still has its page's wipes finished.
+		await signOutFlow.begin()
 
 		try {
 			await sessionVault.clear()

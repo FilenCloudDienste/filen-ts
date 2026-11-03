@@ -408,6 +408,23 @@ describe("sign-out", () => {
 		expect(await marker()).toEqual(pendingOf({ stash: true }))
 	})
 
+	it("lists the profile when a sign-out begins, deleting nothing, so one cut short there still loses it next launch", async () => {
+		const { signOut, remove, steps } = setup()
+
+		await signOut.begin()
+
+		expect(await marker()).toEqual(pendingOf({ profile: true }))
+		expect(remove).not.toHaveBeenCalled()
+		expect(steps.stopHost).not.toHaveBeenCalled()
+		expect(existsSync(at("lock.vault"))).toBe(true)
+
+		// The sign-out then runs as ever; a sign-in afterwards keeps the profile for the new session.
+		await signOut.signOut(USER)
+		expect(await marker()).toEqual(pendingOf({ profile: true }))
+		await signOut.signedIn(USER)
+		expect(await marker()).toBeNull()
+	})
+
 	it("signs in with nothing pending without any file access", async () => {
 		const { signOut, remove, steps } = setup()
 

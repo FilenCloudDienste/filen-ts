@@ -28,7 +28,7 @@ import {
 } from "../main/migration.ts"
 import { loadAppLock, parseLockRecord } from "../main/appLock.ts"
 import { createSessionVault, lazyCipher, type VaultCipher } from "../main/sessionVault.ts"
-import { removeTree } from "../main/signOut.ts"
+import { deleteProfileStorage, removeTree, wipeProfileBeforeReady } from "../main/signOut.ts"
 import { applyLegacySync, LEGACY_BUILTIN_RULES, type LegacySyncDeps } from "../main/sync/legacyPairs.ts"
 import type { SessionRead } from "../shared/channels.ts"
 import { fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
@@ -1205,9 +1205,7 @@ describe("purging the old stores", () => {
 	function purgeDeps(text: string | null, overrides: Partial<PurgeDeps> = {}) {
 		return {
 			readMarker: vi.fn(() => text),
-			sessionStored: vi.fn(() => true),
 			deleteStores: vi.fn(() => undefined),
-			deleteProfile: vi.fn(() => undefined),
 			...overrides
 		} satisfies PurgeDeps
 	}
@@ -1255,21 +1253,6 @@ describe("purging the old stores", () => {
 		expect(purgeBeforeReady(unreadable)).toEqual({ result: "not-due" })
 		expect(purgeBeforeReady(purgeDeps("{not json"))).toEqual({ result: "not-due" })
 		expect(unreadable.deleteStores).not.toHaveBeenCalled()
-	})
-
-	it("without a stored session, deletes the whole profile, so nothing a sign-out cut short left outlives its flag", async () => {
-		const deleteProfile = vi.fn(() => undefined)
-		const run = await launch(WIPED, { sessionStored: () => false, deleteProfile })
-
-		expect(run.outcome).toEqual({ result: "deleted" })
-		expect(run.deleteStores).not.toHaveBeenCalled()
-		expect(deleteProfile).toHaveBeenCalledTimes(1)
-		expect(run.stored()).toMatchObject({ purged: true })
-
-		const next = await launch(run.stored(), { sessionStored: () => false, deleteProfile })
-
-		expect(next.outcome).toEqual({ result: "not-due" })
-		expect(deleteProfile).toHaveBeenCalledTimes(1)
 	})
 
 	it("waits for the next launch when the marker could not be read before ready", async () => {
@@ -1336,6 +1319,51 @@ describe("purging the old stores", () => {
 			expect(() => {
 				deleteLegacyStores(userData)
 			}).not.toThrow()
+		} finally {
+			await rm(userData, { recursive: true, force: true })
+		}
+	})
+
+	it("without a stored session keeps the page's other storage, unless a sign-out began: its profile goes first", async () => {
+		const userData = await mkdtemp(path.join(tmpdir(), "filen-purge-"))
+
+		try {
+			const newDb = path.join(userData, "IndexedDB", "filen_app_0.indexeddb.leveldb")
+			const opfs = path.join(userData, "File System", "000")
+			const localStorage = path.join(userData, "Local Storage", "leveldb")
+			// Before ready, as main runs them: the sign-out's profile wipe, then the purge.
+			const beforeReady = (signOutMarker: string | null) => {
+				const profile = wipeProfileBeforeReady({
+					readMarker: () => signOutMarker,
+					sessionStored: () => false,
+					deleteProfile: () => {
+						deleteProfileStorage(userData)
+					}
+				})
+				const purge = purgeBeforeReady({
+					readMarker: () => serializeMarker(WIPED),
+					deleteStores: () => {
+						deleteLegacyStores(userData)
+					}
+				})
+
+				return { profile, purge }
+			}
+
+			for (const dir of [newDb, opfs, localStorage]) {
+				await mkdir(dir, { recursive: true })
+				await writeFile(path.join(dir, "000003.log"), "value")
+			}
+
+			expect(beforeReady(null)).toEqual({ profile: { result: "not-due" }, purge: { result: "deleted" } })
+			expect(existsSync(path.join(userData, "Local Storage"))).toBe(false)
+			expect([newDb, opfs].every(dir => existsSync(path.join(dir, "000003.log")))).toBe(true)
+
+			// What a sign-out lists before it clears the session (signOut.ts begin), then cut short.
+			const begun = JSON.stringify({ version: 1, users: {}, lock: false, profile: true })
+
+			expect(beforeReady(begun)).toEqual({ profile: { result: "deleted" }, purge: { result: "deleted" } })
+			expect([newDb, opfs].filter(dir => existsSync(dir))).toEqual([])
 		} finally {
 			await rm(userData, { recursive: true, force: true })
 		}
