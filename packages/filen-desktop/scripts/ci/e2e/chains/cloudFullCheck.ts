@@ -6,6 +6,7 @@ import { CLOUD_ROOT, type Cloud, type CloudUsage, openCloud } from "../cloud.ts"
 import { addPairThroughChooser, describePair, issuesShow, removePair, sha256, sha256File, type ExtraPair, waitPair } from "../extraPair.ts"
 import { seededBytes } from "../fixtures.ts"
 import { createSampler } from "../offlineBlock.ts"
+import { takeQuotaLease } from "../quotaLease.ts"
 import { type Credentials, harnessSession, secretsOf, slotCredentials } from "../session.ts"
 import { START_TIMEOUT_MS } from "../update.ts"
 import type { Chain } from "./common.ts"
@@ -18,7 +19,8 @@ import type { Chain } from "./common.ts"
 //   the rest    a small cloud change still lands on disk meanwhile
 //   recovery    with the filler deleted and the trash emptied, the file uploads byte for byte within the engine's
 //               backoff (4 minutes), no syncNow; then the account is signed out through the account menu
-// Skipped (information) when the quota account's secrets or its session are not there.
+// Skipped (information) when the quota account's secrets or its session are not there, or while another run holds the
+// account (quotaLease.ts).
 
 const MIB = 1024 * 1024
 const FILLER_DIR = `${CLOUD_ROOT}-quota`
@@ -32,7 +34,6 @@ const USAGE_MS = 2 * 60 * 1000
 const CONVERGE_MS = 3 * 60 * 1000
 const HALT_MS = 3 * 60 * 1000
 const RECOVER_MS = 4 * 60 * 1000
-const STALE_MS = 24 * 60 * 60 * 1000
 const STORAGE_FULL_TEXT = "Your Filen storage is full"
 
 // Taken out of the environment before anything launches (nothing started from the harness inherits them); null without
@@ -53,12 +54,16 @@ function freeOf(usage: CloudUsage): number {
 
 // The filler in place and counted by the account's usage; restored when missing.
 async function filled(cloud: Cloud, work: string): Promise<string> {
-	const present =
-		(await cloud.list(FILLER_DIR, false))?.some(entry => entry.path === "filler.bin" && entry.size === FILLER_BYTES) === true
+	const listed = (await cloud.list(FILLER_DIR, false)) ?? []
+	const present = listed.length === 1 && listed.some(entry => entry.path === "filler.bin" && entry.size === FILLER_BYTES)
 
 	if (!present) {
 		const file = path.join(work, "filler.bin")
 
+		// Anything else there (a filler of another size, a duplicate) goes first, trash included: an upload over an
+		// existing file would keep the old one as a version, which still counts against the storage.
+		await cloud.purge(FILLER_DIR)
+		await cloud.emptyTrash()
 		writeFileSync(file, seededBytes("quota-filler", FILLER_BYTES))
 		await cloud.uploadFile(file, FILLER)
 	}
@@ -109,11 +114,29 @@ export async function runCloudFullCheck(chain: Chain, credentials: Credentials |
 
 	mkdirSync(work, { recursive: true })
 
+	let taken: Awaited<ReturnType<typeof takeQuotaLease>>
+
+	try {
+		taken = await takeQuotaLease(cloud)
+	} catch (error) {
+		await findings.check("P17 the quota account's lease taken", () => fail(errorMessage(error)))
+
+		return
+	}
+
+	if ("heldBy" in taken) {
+		findings.info("P17 cloud storage full", `skipped: another run holds the quota account (${taken.heldBy})`)
+
+		return
+	}
+
+	const { lease } = taken
+
 	try {
 		const ready = await findings.check("P17 the quota account nearly full: the filler counted", async () => {
-			// What runs killed before their cleanup left (the sweep reaches the test account only).
+			// What other runs left, killed before their cleanup: with the lease held, no other run is using any of it.
 			for (const entry of (await cloud.list(CLOUD_ROOT, false)) ?? []) {
-				if (entry.isDir && Date.now() - Date.parse(entry.modTime) > STALE_MS) {
+				if (entry.isDir) {
 					await cloud.purge(`${CLOUD_ROOT}/${entry.path}`)
 				}
 			}
@@ -289,5 +312,6 @@ export async function runCloudFullCheck(chain: Chain, credentials: Credentials |
 			.catch(errorMessage)
 
 		findings.info("P17 the quota account cleaned up", cleaned)
+		findings.info("P17 the quota account's lease released", await lease.release().then(() => "released", errorMessage))
 	}
 }

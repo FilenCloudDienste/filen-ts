@@ -18,6 +18,7 @@ import {
 } from "../../scripts/ci/e2e/smallVolume.ts"
 import { allIdle, proxyLaunch, tunnelsPerHost } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS } from "../../scripts/ci/e2ePlan.ts"
+import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
 
 // The pure parts of the gap-5 checks (plan D3): the CONNECT proxy and its faults against a local echo server, the
 // small volumes' tool scripts and parsers, the lock holder's script, the plan's quota entry and the workflow's wiring.
@@ -351,6 +352,30 @@ describe("e2e plan: the quota account's check", () => {
 		expect(full.logins).toBe(MAX_LOGINS_PER_RUN)
 		expect(full.tests.some(entry => entry.quota)).toBe(false)
 		expect(full.notices.some(notice => notice.startsWith("The cloud-storage-full check is skipped"))).toBe(true)
+	})
+})
+
+describe("e2e quota lease", () => {
+	const now = 1_800_000_000_000
+
+	it("names a lease so that the earliest sorts first", () => {
+		const name = leaseName(now, "123-1", "ab12cd34")
+
+		expect(name).toBe("001800000000000-123-1-ab12cd34")
+		expect(leaseStart(name)).toBe(now)
+		expect(leaseStart("filler.bin")).toBe(null)
+		expect(leaseName(now - 1, "999-1", "ff").localeCompare(name)).toBeLessThan(0)
+	})
+
+	it("gives the account to the earliest unexpired lease and expires the rest past the lease time", () => {
+		const old = leaseName(now - LEASE_MS - 1, "1-1", "aa")
+		const first = leaseName(now - 1000, "2-1", "bb")
+		const second = leaseName(now, "3-1", "cc")
+
+		expect(leaseState([second, old, "stray", first], now)).toEqual({ expired: [old, "stray"], holder: first })
+		expect(leaseState([], now)).toEqual({ expired: [], holder: null })
+		// Two runs listing the same two leases agree on the holder.
+		expect(leaseState([first, second], now).holder).toBe(leaseState([second, first], now).holder)
 	})
 })
 

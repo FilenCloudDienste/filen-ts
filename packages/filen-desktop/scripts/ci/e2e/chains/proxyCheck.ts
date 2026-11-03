@@ -19,9 +19,12 @@ import type { Chain } from "./common.ts"
 //   P14 proxy only     the proxy carried gateway, ingest and egest; a local edit uploads and a cloud edit downloads
 //                      within 60 s; the drive reads a file; never offline, no attention. The websocket ignores proxies
 //                      until the SDK's proxy-aware connector lands (plan A5), so remote change notifications are a
-//                      known bug: without them a cloud edit is found by syncNow (or the safety net) instead
+//                      known bug, seen as no tunnel to the socket's host: without it a cloud edit is found by syncNow
+//                      (or the safety net) instead. The engine's degraded flag says nothing here: the subscription
+//                      validates the root over HTTP, through the proxy, and succeeds without the socket
 //   P15 faults         through the same proxy, one at a time, each must fire:
-//                      F1 the first 2 ingest tunnels reset after ~1.5 MiB up; F2 the same on egest, down;
+//                      F1 the first 2 ingest tunnels reset after 512 KiB up; F2 the same on egest, down (sdk-rs speaks
+//                      HTTP/1.1 and moves 1 MiB chunks concurrently, one per tunnel, so the reset lands mid-chunk);
 //                      F3 a gateway tunnel reset during a listing; F4 everything throttled to 256 KiB/s with an 8 MiB
 //                      upload; F5 the gateway's first reply bytes held 20 s; F6 every ingest tunnel reset for 60 s.
 //                      F1-F5 never offline, never error or attention, the file byte for byte; F6 offline, no
@@ -33,6 +36,9 @@ const KIB = 1024
 const GATEWAY = "gateway.filen.io"
 const INGEST = "ingest.filen.io"
 const EGEST = "egest.filen.io"
+const SOCKET = "socket.filen.io"
+// Below one 1 MiB chunk: a tunnel often carries a single chunk.
+const RESET_BYTES = 512 * KIB
 const START_MS = 3 * 60 * 1000
 const EDIT_MS = 60_000
 const FAULT_MS = 3 * 60 * 1000
@@ -146,17 +152,21 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 			name => ({ name, error: null }),
 			(error: unknown) => ({ name: null, error: errorMessage(error) })
 		)
+		// The websocket through the proxy or not: the proxy is the only way out, so no tunnel means no socket.
+		const socketTunneled = proxy.hosts().includes(`${SOCKET}:443`)
 		const degraded = (await pairOf(chain, pair.id)).degraded.remote
 
 		await findings.known(
 			"P14 remote change notifications through the proxy (the websocket)",
 			"plan A5: the SDK's websocket connects directly and ignores proxies",
 			() => {
-				if (degraded) {
-					fail(`${pair.name}: remote events degraded`)
+				const detail = `the cloud edit ${heard.name === null ? "not heard" : "heard"}; remote events ${degraded ? "degraded" : "not degraded"}`
+
+				if (!socketTunneled) {
+					fail(`no tunnel to ${SOCKET}; ${detail}`)
 				}
 
-				return `${pair.name}: remote events not degraded`
+				return `${SOCKET} tunneled; ${detail}`
 			}
 		)
 		await findings.check("P14 a cloud edit downloads within 60 s", async () => {
@@ -164,11 +174,12 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 				return `${heard.name} downloaded`
 			}
 
-			if (!degraded) {
+			// With the socket through the proxy, the edit must have been heard.
+			if (socketTunneled) {
 				fail(heard.error ?? "not downloaded")
 			}
 
-			return `not heard (remote events degraded); ${await download("proxy-down-nudged", 64 * KIB, EDIT_MS, true)} downloaded on syncNow`
+			return `not heard (no socket, the known A5); ${await download("proxy-down-nudged", 64 * KIB, EDIT_MS, true)} downloaded on syncNow`
 		})
 
 		await findings.check("P14 the drive reads a file through the proxy", async () => {
@@ -235,13 +246,13 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		}
 
 		await fault(
-			"P15 F1 the first 2 ingest tunnels reset after 1.5 MiB: the upload completes, byte for byte",
-			{ kind: "resetAfter", host: INGEST, direction: "up", bytes: 1.5 * MIB, tunnels: 2 },
+			"P15 F1 the first 2 ingest tunnels reset after 512 KiB: the upload completes, byte for byte",
+			{ kind: "resetAfter", host: INGEST, direction: "up", bytes: RESET_BYTES, tunnels: 2 },
 			async () => `${await upload("f1", 6 * MIB, FAULT_MS)} uploaded`
 		)
 		await fault(
-			"P15 F2 the first 2 egest tunnels reset after 1.5 MiB: the download completes, byte for byte",
-			{ kind: "resetAfter", host: EGEST, direction: "down", bytes: 1.5 * MIB, tunnels: 2 },
+			"P15 F2 the first 2 egest tunnels reset after 512 KiB: the download completes, byte for byte",
+			{ kind: "resetAfter", host: EGEST, direction: "down", bytes: RESET_BYTES, tunnels: 2 },
 			async () => `${await download("f2", 6 * MIB, FAULT_MS, true)} downloaded`
 		)
 		await fault(
