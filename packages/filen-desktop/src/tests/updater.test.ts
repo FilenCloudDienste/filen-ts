@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Logger, UpdateCheckResult } from "electron-updater"
+import { CancellationToken } from "electron-updater/out/types.js"
 import {
 	type NativeUpdaterEvents,
 	shouldCheckForUpdate,
@@ -112,7 +113,7 @@ describe("stallWatch", () => {
 	})
 })
 
-type CheckResult = Pick<UpdateCheckResult, "downloadPromise"> | null
+type CheckResult = Pick<UpdateCheckResult, "downloadPromise" | "cancellationToken"> | null
 
 class FakeEngine extends EventEmitter implements UpdaterEngine {
 	logger: Logger | null = null
@@ -157,7 +158,6 @@ interface Harness {
 	warnings: string[]
 	onReady: ReturnType<typeof vi.fn<(version: string) => void>>
 	onInstallFailed: ReturnType<typeof vi.fn<() => void>>
-	closeConnections: ReturnType<typeof vi.fn<() => Promise<void>>>
 }
 
 function harness(options: { mac?: boolean; testFeed?: string | null } = {}): Harness {
@@ -165,14 +165,12 @@ function harness(options: { mac?: boolean; testFeed?: string | null } = {}): Har
 	const warnings: string[] = []
 	const onReady = vi.fn<(version: string) => void>()
 	const onInstallFailed = vi.fn<() => void>()
-	const closeConnections = vi.fn<() => Promise<void>>(() => Promise.resolve())
 	const result: Harness = {
 		engine,
 		native: null,
 		warnings,
 		onReady,
 		onInstallFailed,
-		closeConnections,
 		deps: {
 			log: {
 				info: () => undefined,
@@ -182,7 +180,6 @@ function harness(options: { mac?: boolean; testFeed?: string | null } = {}): Har
 			},
 			testFeed: options.testFeed ?? null,
 			load: () => Promise.resolve(engine),
-			closeConnections,
 			native:
 				options.mac === true
 					? events => {
@@ -198,12 +195,14 @@ function harness(options: { mac?: boolean; testFeed?: string | null } = {}): Har
 }
 
 // A check that finds an update and downloads it once `finish` is called.
-function downloadingCheck(engine: FakeEngine, version: string): { finish(): void } {
+function downloadingCheck(engine: FakeEngine, version: string): { token: CancellationToken; finish(): void } {
 	const { promise, resolve } = Promise.withResolvers<string[]>()
+	const token = new CancellationToken()
 
-	engine.nextCheck = () => Promise.resolve({ downloadPromise: promise })
+	engine.nextCheck = () => Promise.resolve({ downloadPromise: promise, cancellationToken: token })
 
 	return {
+		token,
 		finish: () => {
 			engine.downloaded(version)
 			resolve([])
@@ -249,27 +248,64 @@ describe("startUpdater", () => {
 	})
 
 	describe("watchdog", () => {
-		it("closes the connections of a check that moves nothing, and the next check runs", async () => {
+		// A download as electron-updater runs it: its promise settles only through its token (a stalled request).
+		function stalledDownload(): { token: CancellationToken; result: CheckResult } {
+			const token = new CancellationToken()
+
+			return { token, result: { cancellationToken: token, downloadPromise: token.createPromise<string[]>(() => undefined) } }
+		}
+
+		const stalls = (h: Harness) => h.warnings.filter(line => line.includes("no progress for")).length
+
+		it("ends a check whose manifest moves nothing, and the next check runs", async () => {
 			const h = harness()
-			const { promise, reject } = Promise.withResolvers<CheckResult>()
 
 			startUpdater(h.deps)
-			h.engine.nextCheck = () => promise
-			h.closeConnections.mockImplementation(() => {
-				reject(new Error("net::ERR_ABORTED"))
-
-				return Promise.resolve()
-			})
 			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS)
 			await vi.advanceTimersByTimeAsync(UPDATE_STALL_MS - 1)
-			expect(h.closeConnections).not.toHaveBeenCalled()
+			expect(stalls(h)).toBe(0)
 			await vi.advanceTimersByTimeAsync(1)
-			expect(h.closeConnections).toHaveBeenCalledOnce()
-			expect(h.warnings.some(line => line.includes("check failed: net::ERR_ABORTED"))).toBe(true)
+			expect(stalls(h)).toBe(1)
+			expect(h.warnings.filter(line => line.includes("check failed: stalled"))).toHaveLength(1)
 
 			h.engine.nextCheck = () => Promise.resolve(null)
 			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - UPDATE_STALL_MS)
 			expect(h.engine.checks).toBe(2)
+		})
+
+		it("cancels a download that moves nothing through its token, and the next check runs", async () => {
+			const h = harness()
+			const download = stalledDownload()
+
+			startUpdater(h.deps)
+			h.engine.nextCheck = () => Promise.resolve(download.result)
+			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS)
+			await vi.advanceTimersByTimeAsync(UPDATE_STALL_MS - 1)
+			expect(download.token.cancelled).toBe(false)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(download.token.cancelled).toBe(true)
+			await expect(download.result?.downloadPromise).rejects.toThrow("cancelled")
+			expect(h.warnings.filter(line => line.includes("check failed:"))).toHaveLength(1)
+
+			h.engine.nextCheck = () => Promise.resolve(null)
+			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - UPDATE_STALL_MS)
+			expect(h.engine.checks).toBe(2)
+		})
+
+		it("cancels the download of a manifest that answers only after the stall", async () => {
+			const h = harness()
+			const manifest = Promise.withResolvers<CheckResult>()
+			const download = stalledDownload()
+
+			startUpdater(h.deps)
+			h.engine.nextCheck = () => manifest.promise
+			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS + UPDATE_STALL_MS)
+			expect(h.warnings.some(line => line.includes("check failed: stalled"))).toBe(true)
+
+			manifest.resolve(download.result)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(download.token.cancelled).toBe(true)
+			await expect(download.result?.downloadPromise).rejects.toThrow("cancelled")
 		})
 
 		it("lets a download run as long as it reports progress", async () => {
@@ -286,7 +322,8 @@ describe("startUpdater", () => {
 
 			download.finish()
 			await vi.advanceTimersByTimeAsync(UPDATE_STALL_MS * 2)
-			expect(h.closeConnections).not.toHaveBeenCalled()
+			expect(stalls(h)).toBe(0)
+			expect(download.token.cancelled).toBe(false)
 		})
 
 		it("stops watching once the download is in", async () => {
@@ -296,9 +333,10 @@ describe("startUpdater", () => {
 			startUpdater(h.deps)
 			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS)
 			download.finish()
-			// Squirrel takes its time; no connection of the updater's is involved.
+			// Squirrel takes its time; no request of the updater's is involved.
 			await vi.advanceTimersByTimeAsync(UPDATE_STALL_MS * 3)
-			expect(h.closeConnections).not.toHaveBeenCalled()
+			expect(stalls(h)).toBe(0)
+			expect(download.token.cancelled).toBe(false)
 		})
 	})
 

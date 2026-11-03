@@ -5,7 +5,7 @@ export const UPDATE_FIRST_CHECK_DELAY_MS = 15 * 1000
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 // Under the e2e tests' feed, so a failed or stalled attempt is retried within the test.
 export const TEST_UPDATE_CHECK_INTERVAL_MS = 30 * 1000
-// A check or download that moved no data for this long is cut off. electron-updater's own request timeout never fires
+// A check or download that moved no data for this long is cancelled. electron-updater's own request timeout never fires
 // on Electron's net module, so a stalled connection would otherwise hold every later check back.
 export const UPDATE_STALL_MS = 2 * 60 * 1000
 // macOS: how long a check waits for Squirrel to take or refuse a download. An answer after that still counts.
@@ -50,7 +50,7 @@ export interface UpdaterEngine {
 	on(event: "error", listener: (error: Error) => void): unknown
 	on(event: "checking-for-update" | "update-available" | "download-progress", listener: () => void): unknown
 	on(event: "update-downloaded", listener: (event: UpdateDownloadedEvent) => void): unknown
-	checkForUpdates(): Promise<Pick<UpdateCheckResult, "downloadPromise"> | null>
+	checkForUpdates(): Promise<Pick<UpdateCheckResult, "downloadPromise" | "cancellationToken"> | null>
 	quitAndInstall(isSilent: boolean, isForceRunAfter: boolean): void
 }
 
@@ -63,8 +63,6 @@ export interface UpdaterDeps {
 	log: UpdaterLog
 	testFeed: string | null
 	load(): Promise<UpdaterEngine>
-	// Terminates the connections of the updater's own session, so a stalled request fails.
-	closeConnections(): Promise<void>
 	// macOS: subscribes to Squirrel.Mac (Electron's autoUpdater). electron-updater reports a download before Squirrel
 	// has fetched and verified it, and only Squirrel installs; null elsewhere.
 	native: ((events: NativeUpdaterEvents) => void) | null
@@ -159,11 +157,11 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 	let installing = false
 	// Ready while its check still ran, not announced yet.
 	let announce: string | null = null
+	// Ends the running check, set while one runs.
+	let cancelCheck: (() => void) | null = null
 	const stall = stallWatch(UPDATE_STALL_MS, () => {
-		log.warn(`updater: no progress for ${String(UPDATE_STALL_MS / 1000)} s, closing its connections`)
-		deps.closeConnections().catch((error: unknown) => {
-			log.warn(`updater: connections not closed: ${messageOf(error)}`)
-		})
+		log.warn(`updater: no progress for ${String(UPDATE_STALL_MS / 1000)} s, cancelling the check`)
+		cancelCheck?.()
 	})
 	const updaterLog = {
 		info: (message?: unknown) => {
@@ -298,20 +296,44 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 		}
 
 		state.checking = true
+
+		// The watchdog ends the check at once, and cancels its download through electron-updater's own token: the
+		// download's promise rejects and its partial file is removed (the request is aborted too:
+		// patches/electron-updater@6.8.11.patch). No token reaches the manifest request: one that answers after all is
+		// cancelled as its download starts.
+		const stalled = Promise.withResolvers<never>()
+		let checking: ReturnType<UpdaterEngine["checkForUpdates"]> | null = null
+
+		// A stall may come once nothing awaits it any more.
+		stalled.promise.catch(() => undefined)
+		cancelCheck = () => {
+			stalled.reject(new Error("stalled"))
+			void checking?.then(
+				result => {
+					result?.downloadPromise?.catch(() => undefined)
+					result?.cancellationToken?.cancel()
+				},
+				() => undefined
+			)
+		}
 		stall.arm()
 
 		try {
 			const updater = await loading
-			const result = await updater.checkForUpdates()
+
+			checking = updater.checkForUpdates()
+
+			const result = await Promise.race([checking, stalled.promise])
 
 			// Held until the download settles, so the next interval never starts a second one.
-			await result?.downloadPromise
+			await Promise.race([result?.downloadPromise, stalled.promise])
 			await squirrelAnswer()
 		} catch (error) {
 			// Squirrel was never handed a complete download.
 			settleSquirrel()
 			log.warn(`updater: check failed: ${messageOf(error)}`)
 		} finally {
+			cancelCheck = null
 			stall.disarm()
 			state.checking = false
 

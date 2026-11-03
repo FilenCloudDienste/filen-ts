@@ -1689,8 +1689,6 @@ if (!app.requestSingleInstanceLock()) {
 
 						return engine
 					},
-					// electron-updater's own session (its NET_SESSION_NAME).
-					closeConnections: () => session.fromPartition("electron-updater", { cache: false }).closeAllConnections(),
 					native:
 						PLATFORM === "darwin"
 							? events => {
