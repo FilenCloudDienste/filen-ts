@@ -3,30 +3,37 @@ import { existsSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import type { DesktopLockStatus } from "@filen/shared/desktop"
-import { errorMessage, fail, runBounded, waitFor } from "../../support.ts"
+import { errorMessage, fail, onTimeout, runBounded, waitFor } from "../../support.ts"
 import { desktop, unlockThroughScreen } from "../app.ts"
-import { type ConnectProxy, type Fault, startConnectProxy } from "../connectProxy.ts"
+import { type ConnectProxy, type Fault, startConnectProxy, type Tunnel } from "../connectProxy.ts"
+import { DRIVE_LOCK_TIMING } from "../driveLock.ts"
 import { nothingSeen, pairOf, sha256, sha256File, syncNow, watchPairs, type PairWatch } from "../extraPair.ts"
 import { seededBytes } from "../fixtures.ts"
 import type { LaunchExtra } from "../launch.ts"
 import { createSampler, describeSample, offlineBlockFor, relaunchThrough, type Sample, type Sampler } from "../offlineBlock.ts"
 import { tail, START_TIMEOUT_MS } from "../update.ts"
+import { type LogMark, logMark, logSince } from "../updateFaults.ts"
 import type { Chain } from "./common.ts"
 
 // P14 and P15: N with no network but a proxy. Its direct egress is blocked (offlineBlock.ts; the loopback interface
 // stays open, and the harness, outside the block, keeps its own) and N starts with HTTPS_PROXY, NO_PROXY for loopback
 // and Chromium's --proxy-server, all pointing at a CONNECT proxy on 127.0.0.1 (connectProxy.ts), which only relays.
-//   P14 proxy only     the proxy carried gateway, ingest and egest; a local edit uploads and a cloud edit downloads
-//                      within 60 s; the drive reads a file; never offline, no attention. The websocket ignores proxies
-//                      until the SDK's proxy-aware connector lands (plan A5), so remote change notifications are a
-//                      known bug, seen as no tunnel to the socket's host: without it a cloud edit is found by syncNow
-//                      (or the safety net) instead. The engine's degraded flag says nothing here: the subscription
-//                      validates the root over HTTP, through the proxy, and succeeds without the socket
+//   P14 proxy only     N starts with every pair idle and no attention (none inherited from an earlier check); the proxy
+//                      carried gateway, ingest and egest; a local edit uploads and a cloud edit downloads within 60 s;
+//                      the drive reads a file; never offline, no attention. The SDK's websocket ignores proxies until
+//                      its proxy-aware connector lands (plan A5), a known bug read from main.log (the renderer's own
+//                      socket, which honours --proxy-server, makes a tunnel to the socket's host either way). While the
+//                      socket is down a pass enumerates the cloud from the SDK's cache, which nothing refreshes, and the
+//                      engine does not report remote events degraded (the subscription validates the root over HTTP,
+//                      through the proxy), so syncNow does not find a cloud edit either: a second known bug. Until both
+//                      are fixed the cloud edit is found by a relaunch under the proxy, whose first listing is over HTTP
 //   P15 faults         through the same proxy, one at a time, each must fire:
 //                      F1 the first 2 ingest tunnels reset after 512 KiB up; F2 the same on egest, down (sdk-rs speaks
-//                      HTTP/1.1 and moves 1 MiB chunks concurrently, one per tunnel, so the reset lands mid-chunk);
+//                      HTTP/1.1 and moves 1 MiB chunks concurrently, one per tunnel, so the reset lands mid-chunk; the
+//                      cloud file found as P14's was);
 //                      F3 a gateway tunnel reset during a listing; F4 everything throttled to 256 KiB/s with an 8 MiB
-//                      upload; F5 the gateway's first reply bytes held 20 s; F6 every ingest tunnel reset for 60 s.
+//                      upload; F5 the gateway's first reply bytes held 20 s; F6 every ingest tunnel reset for 60 s from
+//                      N's first new one (a foreign hold of drive-write can keep N from ingest for up to its cap).
 //                      F1-F5 never offline, never error or attention, the file byte for byte; F6 offline, no
 //                      attention, and recovered (the file uploaded) within 60 s of the end of the outage
 // Information: N's renderer started without --proxy-server (HTTPS_PROXY alone). N is started plainly again at the end.
@@ -36,7 +43,6 @@ const KIB = 1024
 const GATEWAY = "gateway.filen.io"
 const INGEST = "ingest.filen.io"
 const EGEST = "egest.filen.io"
-const SOCKET = "socket.filen.io"
 // Below one 1 MiB chunk: a tunnel often carries a single chunk.
 const RESET_BYTES = 512 * KIB
 const START_MS = 3 * 60 * 1000
@@ -44,6 +50,16 @@ const EDIT_MS = 60_000
 const FAULT_MS = 3 * 60 * 1000
 const OUTAGE_MS = 60_000
 const RECOVER_MS = 60_000
+
+// The released SDK's two bugs behind a cloud edit not found under the proxy.
+const SOCKET_ISSUE =
+	"plan A5: the SDK's websocket connects directly and ignores proxies (sdk-rs socket/native.rs connect: CONNECT through HTTPS_PROXY/ALL_PROXY, honouring NO_PROXY)"
+const STALE_CACHE_ISSUE =
+	"plan A5: with the websocket down the SDK does not report remote events degraded, so a whole pass enumerates the cloud from a cache nothing refreshes (sdk-rs: degraded.remote while the socket is not authed, a whole pass relisting over HTTP)"
+const SOCKET_REFUSED = "Error initializing WebSocket connection"
+const SOCKET_DIAL_FAILED = "failed to connect to websocket"
+// The SDK's handshake span: it starts on a connected socket only, which under the block is the proxy's.
+const SOCKET_HANDSHAKE = "websocket_handshake"
 
 export interface ProxyCheckOptions {
 	pairs: readonly { name: string; id: string; localRoot: string }[]
@@ -95,24 +111,32 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 
 		return name
 	}
-	// A cloud file of `bytes` downloads byte for byte within `timeoutMs`, asked for with syncNow when `nudge`; its name.
-	const download = async (label: string, bytes: number, timeoutMs: number, nudge: boolean): Promise<string> => {
+	// A cloud file of `bytes`, put there by the harness.
+	const inCloudOnly = async (label: string, bytes: number): Promise<CloudEdit> => {
 		const name = `${label}-${randomBytes(4).toString("hex")}.bin`
 		const content = seededBytes(name, bytes)
 		const staged = path.join(chain.work, name)
-		const local = path.join(pair.localRoot, name)
 
 		writeFileSync(staged, content)
 		await cloud.uploadFile(staged, `${options.editCloudDir}/${name}`)
 
-		if (nudge) {
-			await syncNow(chain, pair.id)
-		}
-
-		await waitFor(`${name} on disk`, timeoutMs, () => (existsSync(local) && sha256File(local) === sha256(content) ? true : null))
-
-		return name
+		return { name, content }
 	}
+	// The cloud file downloaded byte for byte within `timeoutMs`.
+	const onDisk = async (edit: CloudEdit, timeoutMs: number): Promise<void> => {
+		const local = path.join(pair.localRoot, edit.name)
+
+		await waitFor(`${edit.name} on disk`, timeoutMs, () =>
+			existsSync(local) && sha256File(local) === sha256(edit.content) ? true : null
+		)
+	}
+	// N started again under the proxy: a launch lists each pair's cloud over HTTP, so it finds what the cache missed.
+	const relaunchUnderProxy = async (label: string): Promise<void> => {
+		await chain.quit(label)
+		await startWith(chain, block.via, options.pin, proxyLaunch(proxy))
+	}
+	// Where main.log stood at N's launch under the proxy.
+	let launched: LogMark | null = null
 
 	// Neither stops the chain: without them every check below is moot, and the rest of chain P still runs.
 	if (!(await findings.check("P14 the offline block prepared", () => block.prepare()))) {
@@ -127,12 +151,16 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		const started = await findings.check("P14 N started with direct egress blocked and the proxy only", async () => {
 			await chain.quit("N-before-proxy")
 			await block.block(target, [])
+			launched = logMark(target)
 			await startWith(chain, block.via, options.pin, proxyLaunch(proxy))
 
-			const settled = await sampler.watch(START_MS, allIdle)
+			const settled = await sampler.watch(START_MS, startedClean)
 
+			// Attention the proxy has not caused yet would be blamed on it by every check below.
 			if (settled.hit === null) {
-				fail(`not every pair idle within 3 min: ${describeSample(settled.last)}`)
+				fail(
+					`${settled.last.syncAttention ? "attention before any fault (left by an earlier check)" : "not every pair idle within 3 min"}: ${describeSample(settled.last)}`
+				)
 			}
 
 			return `proxy ${proxy.url}; ${describeSample(settled.hit)}`
@@ -146,41 +174,6 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		watch = watchPairs(sampler)
 
 		await findings.check("P14 a local edit uploads within 60 s", async () => `${await upload("proxy-up", 64 * KIB, EDIT_MS)} uploaded`)
-
-		// Heard (the cache's websocket) or not: without notifications only a pass finds the edit, which syncNow asks for.
-		const heard = await download("proxy-down", 64 * KIB, EDIT_MS, false).then(
-			name => ({ name, error: null }),
-			(error: unknown) => ({ name: null, error: errorMessage(error) })
-		)
-		// The websocket through the proxy or not: the proxy is the only way out, so no tunnel means no socket.
-		const socketTunneled = proxy.hosts().includes(`${SOCKET}:443`)
-		const degraded = (await pairOf(chain, pair.id)).degraded.remote
-
-		await findings.known(
-			"P14 remote change notifications through the proxy (the websocket)",
-			"plan A5: the SDK's websocket connects directly and ignores proxies",
-			() => {
-				const detail = `the cloud edit ${heard.name === null ? "not heard" : "heard"}; remote events ${degraded ? "degraded" : "not degraded"}`
-
-				if (!socketTunneled) {
-					fail(`no tunnel to ${SOCKET}; ${detail}`)
-				}
-
-				return `${SOCKET} tunneled; ${detail}`
-			}
-		)
-		await findings.check("P14 a cloud edit downloads within 60 s", async () => {
-			if (heard.name !== null) {
-				return `${heard.name} downloaded`
-			}
-
-			// With the socket through the proxy, the edit must have been heard.
-			if (socketTunneled) {
-				fail(heard.error ?? "not downloaded")
-			}
-
-			return `not heard (no socket, the known A5); ${await download("proxy-down-nudged", 64 * KIB, EDIT_MS, true)} downloaded on syncNow`
-		})
 
 		await findings.check("P14 the drive reads a file through the proxy", async () => {
 			const root = chain.os.driveRoot((await chain.mountsOverview()).drive) ?? fail("the drive reports no location")
@@ -199,6 +192,55 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 			}
 
 			return `${options.driveFile.path} reads back byte for byte`
+		})
+
+		// Heard (the cache's websocket) or not: what the SDK's websocket did is read from main.log, since the launch.
+		const edit = await inCloudOnly("proxy-down", 64 * KIB)
+		const heard = await onDisk(edit, EDIT_MS).then(
+			() => null,
+			(error: unknown) => errorMessage(error)
+		)
+		const socket = sdkSocket(logSince(target, launched ?? fail("no launch mark")))
+		const degraded = (await pairOf(chain, pair.id)).degraded.remote
+		const detail = `the cloud edit ${heard === null ? "heard" : "not heard"}; remote events ${degraded ? "degraded" : "not degraded"}`
+
+		await findings.known("P14 remote change notifications through the proxy (the SDK's websocket)", SOCKET_ISSUE, () => {
+			if (socket !== "proxied") {
+				fail(`${SOCKET_STATES[socket]}; ${detail}`)
+			}
+
+			return `${SOCKET_STATES[socket]}; ${detail}`
+		})
+
+		// Whether a pass reads a stale cache while the socket is down: a syncNow for the edit not heard.
+		const staleCache =
+			heard !== null &&
+			socket !== "proxied" &&
+			(await findings.known("P14 a cloud edit found by syncNow while the SDK's websocket is down", STALE_CACHE_ISSUE, async () => {
+				await syncNow(chain, pair.id)
+				await onDisk(edit, EDIT_MS)
+
+				return `${edit.name} downloaded on syncNow; remote events ${degraded ? "degraded" : "not degraded"}`
+			}))
+
+		await findings.check("P14 a cloud edit downloads within 60 s", async () => {
+			if (heard === null) {
+				return `${edit.name} downloaded`
+			}
+
+			// With the socket through the proxy, the edit must have been heard.
+			if (socket === "proxied") {
+				fail(heard)
+			}
+
+			if (!staleCache) {
+				return `not heard (the known A5); ${edit.name} downloaded on syncNow`
+			}
+
+			await relaunchUnderProxy("N-proxy-relist")
+			await onDisk(edit, EDIT_MS)
+
+			return `not heard and not found by syncNow (the known A5); ${edit.name} downloaded by a relaunch's first listing`
 		})
 
 		await findings.check("P14 the proxy carried gateway, ingest and egest", () => {
@@ -253,7 +295,19 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		await fault(
 			"P15 F2 the first 2 egest tunnels reset after 512 KiB: the download completes, byte for byte",
 			{ kind: "resetAfter", host: EGEST, direction: "down", bytes: RESET_BYTES, tunnels: 2 },
-			async () => `${await download("f2", 6 * MIB, FAULT_MS, true)} downloaded`
+			async () => {
+				const file = await inCloudOnly("f2", 6 * MIB)
+
+				if (staleCache) {
+					await relaunchUnderProxy("N-proxy-f2")
+				} else {
+					await syncNow(chain, pair.id)
+				}
+
+				await onDisk(file, FAULT_MS)
+
+				return `${file.name} downloaded${staleCache ? " by a relaunch's first listing (the known A5)" : " on syncNow"}`
+			}
 		)
 		await fault(
 			"P15 F3 a gateway tunnel reset during a listing: the pass completes",
@@ -293,15 +347,29 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 			const armed = proxy.arm({ kind: "resetAll", host: INGEST })
 			const armedAt = Date.now()
 			let offline: string
+			let reached: string
 
 			try {
 				writeFileSync(path.join(pair.localRoot, name), content)
 
-				const went = await sampler.watch(OUTAGE_MS, sample => sample.phases.includes(`${pair.name}:offline`))
+				// The outage starts when N first tries ingest: another client's hold of the account's drive-write keeps
+				// N's pass waiting for the lock (up to its cap) before any upload, and an idle tunnel's reset fails nothing.
+				const outageAt = await waitFor(
+					`a new ${INGEST} tunnel`,
+					DRIVE_LOCK_TIMING.capMs,
+					() => firstNewTunnel(proxy.tunnels(), INGEST, armedAt),
+					500
+				)
+
+				reached = `N reached ${INGEST} ${String(Math.round((outageAt - armedAt) / 1000))} s after the edit`
+
+				const went = await sampler.watch(Math.max(0, outageAt + OUTAGE_MS - Date.now()), sample =>
+					sample.phases.includes(`${pair.name}:offline`)
+				)
 
 				offline = went.hit === null ? "" : describeSample(went.hit)
 				// The outage lasts its whole minute either way: it is the fault.
-				await sleep(Math.max(0, armedAt + OUTAGE_MS - Date.now()))
+				await sleep(Math.max(0, outageAt + OUTAGE_MS - Date.now()))
 			} finally {
 				armed.disarm()
 			}
@@ -310,7 +378,7 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 			const recovered = await sampler.watch(RECOVER_MS, sample => sample.offline === 0 && sample.errors === 0)
 			const uploaded = await waitFor(`${name} in the cloud`, Math.max(0, lifted + RECOVER_MS - Date.now()), async () =>
 				(await inCloud(name)) ? true : null
-			).catch(() => false)
+			).catch(onTimeout(false))
 			const seen = await watching.stop()
 
 			if (armed.fired === 0) {
@@ -329,7 +397,7 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 				fail(`${name} in the cloud differs from the local file`)
 			}
 
-			return `fired ${String(armed.fired)}x; offline (${offline}); recovered and uploaded in ${String(Math.round((Date.now() - lifted) / 1000))} s; ${nothingSeen(seen, ["attention"])}`
+			return `fired ${String(armed.fired)}x; ${reached}; offline (${offline}); recovered and uploaded in ${String(Math.round((Date.now() - lifted) / 1000))} s; ${nothingSeen(seen, ["attention"])}`
 		})
 
 		findings.info(
@@ -351,6 +419,51 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 // Every pair of the sample idle (a lastError aside) and none offline.
 export function allIdle(sample: Pick<Sample, "phases" | "offline">): boolean {
 	return sample.offline === 0 && sample.phases.split(", ").every(phase => /:idle(\(lastError\))?$/.test(phase))
+}
+
+// P14's start: every pair idle and the sync status asking for no attention.
+export function startedClean(sample: Pick<Sample, "phases" | "offline" | "syncAttention">): boolean {
+	return allIdle(sample) && !sample.syncAttention
+}
+
+interface CloudEdit {
+	name: string
+	content: Buffer
+}
+
+export type SdkSocket = "proxied" | "direct" | "silent"
+
+const SOCKET_STATES: Record<SdkSocket, string> = {
+	proxied: "the SDK's websocket connected through the proxy",
+	direct: "the SDK's websocket dials directly, refused under the block",
+	silent: "main.log has no line of the SDK's websocket"
+}
+
+// What the SDK's websocket did last in `log` (main.log since N's launch under the block): a handshake, which needs a
+// connected socket, or a failed dial, the block refusing a direct connection.
+export function sdkSocket(log: string): SdkSocket {
+	const lines = log.split("\n")
+
+	for (let index = lines.length - 1; index >= 0; index--) {
+		const line = lines[index] ?? ""
+
+		if (line.includes(SOCKET_HANDSHAKE)) {
+			return "proxied"
+		}
+
+		if (line.includes(SOCKET_REFUSED) && line.includes(SOCKET_DIAL_FAILED)) {
+			return "direct"
+		}
+	}
+
+	return "silent"
+}
+
+// When the first tunnel to `host` opened after `since`; null before one did.
+export function firstNewTunnel(tunnels: readonly Pick<Tunnel, "host" | "openedAt">[], host: string, since: number): number | null {
+	const opened = tunnels.filter(tunnel => tunnel.host === host && tunnel.openedAt > since).map(tunnel => tunnel.openedAt)
+
+	return opened.length === 0 ? null : Math.min(...opened)
 }
 
 export function tunnelsPerHost(proxy: Pick<ConnectProxy, "tunnels">): string {

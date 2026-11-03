@@ -16,7 +16,7 @@ import {
 	freeBytes,
 	freeDriveLetter
 } from "../../scripts/ci/e2e/smallVolume.ts"
-import { allIdle, proxyLaunch, tunnelsPerHost } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
+import { allIdle, firstNewTunnel, proxyLaunch, sdkSocket, startedClean, tunnelsPerHost } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
 import { tempFiles } from "../../scripts/ci/e2e/chains/diskFullCheck.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS, STEP_MINUTES } from "../../scripts/ci/e2ePlan.ts"
 import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
@@ -246,6 +246,42 @@ describe("e2e CONNECT proxy", () => {
 		expect(allIdle({ phases: "a:idle, b:idle(lastError)", offline: 0 })).toBe(true)
 		expect(allIdle({ phases: "a:idle, b:syncing", offline: 0 })).toBe(false)
 		expect(allIdle({ phases: "a:offline", offline: 1 })).toBe(false)
+	})
+
+	it("starts P14 only without attention, so none left by an earlier check is blamed on the proxy", () => {
+		expect(startedClean({ phases: "a:idle, b:idle", offline: 0, syncAttention: false })).toBe(true)
+		expect(startedClean({ phases: "a:idle, b:idle", offline: 0, syncAttention: true })).toBe(false)
+		expect(startedClean({ phases: "a:syncing", offline: 0, syncAttention: false })).toBe(false)
+	})
+
+	it("reads the SDK's websocket from main.log, never from a tunnel the renderer's own socket makes", () => {
+		const refused =
+			"[2026-11-03T10:46:07.450Z] WARN filen_sdk_rs::socket::thread_handling: Error initializing WebSocket connection: failed to connect to websocket: IO error: Connection refused (os error 111), retrying..."
+		const handshake = "[2026-11-03T10:46:08.120Z] INFO filen_sdk_rs::socket::thread_handling: websocket_handshake close time.busy=2ms"
+		const unrelated = "[2026-11-03T10:46:09.000Z] INFO http_request{endpoint=v3/dir} close"
+
+		expect(sdkSocket([refused, unrelated, refused].join("\n"))).toBe("direct")
+		expect(sdkSocket([refused, handshake, unrelated].join("\n"))).toBe("proxied")
+		// A dial refused after a handshake: the socket went back to dialling directly.
+		expect(sdkSocket([handshake, refused].join("\n"))).toBe("direct")
+		expect(sdkSocket(unrelated)).toBe("silent")
+		// A refusal that is not the dial (the proxy refusing, say) proves nothing either way.
+		expect(sdkSocket("WARN filen_sdk_rs::socket::thread_handling: Error initializing WebSocket connection: unauthorized")).toBe(
+			"silent"
+		)
+	})
+
+	it("starts F6's outage at the first tunnel N opens to the host after arming", () => {
+		const tunnels = [
+			{ host: "ingest.filen.io", openedAt: 900 },
+			{ host: "gateway.filen.io", openedAt: 1100 },
+			{ host: "ingest.filen.io", openedAt: 1300 },
+			{ host: "ingest.filen.io", openedAt: 1200 }
+		]
+
+		expect(firstNewTunnel(tunnels, "ingest.filen.io", 1000)).toBe(1200)
+		expect(firstNewTunnel(tunnels, "ingest.filen.io", 1300)).toBeNull()
+		expect(firstNewTunnel(tunnels, "egest.filen.io", 0)).toBeNull()
 	})
 })
 
