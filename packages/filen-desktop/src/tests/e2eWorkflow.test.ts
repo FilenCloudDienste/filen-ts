@@ -13,14 +13,17 @@ describe("desktop e2e workflow secrets", () => {
 
 	it("never puts the sealed session in an environment variable or a job output", () => {
 		expect(text).not.toMatch(/FILEN_DESKTOP_E2E_SESSION\s*:/)
-		expect(text).not.toMatch(/steps\.login\.outputs|needs\.session\.outputs/)
+		expect(text).not.toMatch(/steps\.login\.outputs/)
+		// The session job's one output: whether 3.0.47's signed-in chain was dropped for the account's auth version.
+		expect([...new Set([...text.matchAll(/needs\.session\.outputs\.([\w-]+)/g)].map(match => match[1]))]).toEqual(["older"])
+		expect(text).toContain("    outputs:\n      older: ${{ steps.pins.outputs.older }}\n")
 		expect(text.match(/FILEN_DESKTOP_E2E_SESSION_DIR: \$\{\{ runner\.temp \}\}\/e2e-session\n/g)?.length).toBeGreaterThan(1)
 		// The session job's step outputs: whether each slot minted, which gates saving it to the cache; nothing else.
 		expect(
 			[...new Set([...text.matchAll(/steps\.([\w-]+)\.outputs\.([\w-]+)/g)].map(match => `${match[1] ?? ""}.${match[2] ?? ""}`))]
 				.filter(output => !output.startsWith("plan.") && !output.startsWith("submodules."))
 				.sort()
-		).toEqual(["quota.minted", "test.minted"])
+		).toEqual(["pins.older", "quota.minted", "test.minted"])
 	})
 
 	it("takes the accounts' emails and passwords and the sealing key from secrets only", () => {
@@ -65,17 +68,19 @@ describe("desktop e2e workflow secrets", () => {
 		expect(text).toContain("per IP")
 	})
 
-	it("runs 3.0.47 -> N at install depth and deep, and checks the account's auth version for the old clients first", () => {
+	it("runs 3.0.47 -> N at install depth and deep, checks the account's auth version first and drops only its chain", () => {
 		expect(text).toContain("pins: ${{ steps.plan.outputs.pins }}")
 		expect(text).toMatch(
-			/Check the test account against the old clients\n\s+if: needs\.plan\.outputs\.pins != ''[\s\S]{0,400}E2E_SIGN_IN_PINS: \$\{\{ needs\.plan\.outputs\.pins \}\}\n\s+run: node scripts\/ci\/e2eCloud\.ts pins\n/
+			/Check the test account against the old clients\n\s+id: pins\n\s+if: needs\.plan\.outputs\.pins != ''[\s\S]{0,400}E2E_SIGN_IN_PINS: \$\{\{ needs\.plan\.outputs\.pins \}\}\n\s+run: node scripts\/ci\/e2eCloud\.ts pins\n/
 		)
 		// Before the quota slot and the hand-off's upload, after the test session is written.
 		expect(text.indexOf("Check the test account against the old clients")).toBeGreaterThan(text.indexOf("Cache the new test session"))
 		expect(text.indexOf("Check the test account against the old clients")).toBeLessThan(text.indexOf("Hand the sealed sessions on"))
 		expect(text).toContain(
-			"if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}\n        timeout-minutes: 30\n        run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}"
+			"if: ${{ !cancelled() && matrix.older && (!matrix.deepOlder || needs.session.outputs.older == 'dropped') }}\n        timeout-minutes: 30\n        run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}"
 		)
+		// An account 3.0.47 cannot sign in to drops its signed-in chain only: the install-only update runs in its place.
+		expect(text).toContain("if: ${{ !cancelled() && matrix.deepOlder && needs.session.outputs.older != 'dropped' }}")
 		expect(text).toContain("E2E_SIGN_IN: ${{ matrix.signInOlder }}")
 		expect(text).toContain("bash scripts/ci/deepSession.sh --scenario older --depth deep")
 	})

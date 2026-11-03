@@ -28,7 +28,7 @@ import { configureLegacy, type LegacySyncPair } from "../../scripts/ci/e2e/legac
 import { hookReady, hookScript, type HookState } from "../../scripts/ci/e2e/legacyHook.ts"
 import { installedBy, legacyLinkProblems, promptShim, updateEnvFor } from "../../scripts/ci/e2e/olderUpdate.ts"
 import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed } from "../../scripts/ci/e2e/seed.ts"
-import { authVersionProblem, LEGACY_PIN, LEGACY_SHA512, OLDER_PIN, pinFor } from "../../scripts/ci/legacy.ts"
+import { authVersionCheck, LEGACY_PIN, LEGACY_SHA512, OLDER_PIN, pinFor } from "../../scripts/ci/legacy.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput } from "../../scripts/ci/e2ePlan.ts"
 import { OLDER_DEEP_ENTRIES, OLDER_INSTALL_ENTRIES, weekday } from "../../scripts/ci/olderPlan.ts"
 import type { Target } from "../../scripts/ci/targets.ts"
@@ -79,11 +79,20 @@ describe("3.0.47 pin", () => {
 		expect(pinFor("toString")).toBeNull()
 	})
 
-	it("refuses an account whose auth version an old client the run uses cannot sign in to", () => {
-		expect(authVersionProblem(2, "3.0.53,3.0.47")).toBeNull()
-		expect(authVersionProblem(3, "3.0.53")).toBeNull()
-		expect(authVersionProblem(3, "")).toBeNull()
-		expect(authVersionProblem(3, "3.0.53,3.0.47")).toMatch(/auth v3, which 3\.0\.47 \(v1, v2 only\) cannot sign in to/)
+	it("drops only 3.0.47's chain for an account whose auth version it cannot sign in to, failing nothing", () => {
+		expect(authVersionCheck(2, "3.0.53,3.0.47")).toEqual({ dropOlder: null, problem: null })
+		expect(authVersionCheck(3, "3.0.53")).toEqual({ dropOlder: null, problem: null })
+		expect(authVersionCheck(3, "")).toEqual({ dropOlder: null, problem: null })
+
+		const check = authVersionCheck(3, "3.0.53,3.0.47")
+
+		expect(check.problem).toBeNull()
+		expect(check.dropOlder).toMatch(/auth v3, which 3\.0\.47 \(v1, v2 only\) cannot sign in to: its signed-in chain is dropped/)
+		expect(check.dropOlder).toMatch(/install-only update runs instead/)
+		expect(authVersionCheck(4, "3.0.53,3.0.47")).toMatchObject({
+			dropOlder: expect.stringMatching(/3\.0\.47/) as unknown,
+			problem: expect.stringMatching(/auth v4, which 3\.0\.53 \(v1, v2, v3 only\) cannot sign in to/) as unknown
+		})
 	})
 })
 

@@ -87,15 +87,24 @@ export function pinFor(scenario: string): LegacyPin | null {
 	return Object.hasOwn(PINS, scenario) ? PINS[scenario as PinnedScenario] : null
 }
 
-// Why the account cannot serve the old clients a run signs in or seeds (`pins`: their versions, comma-separated), or
-// null. Checked on the run's session before any of them is launched: a login one of them cannot make proves nothing
-// and costs the budget.
-export function authVersionProblem(authVersion: number, pins: string): string | null {
+// The old clients a run signs in or seeds (`pins`: their versions, comma-separated) against the account's auth version,
+// checked on the run's session before any of them is launched: a login one of them cannot make proves nothing and costs
+// the budget. 3.0.47's signed-in chain is dropped (`dropOlder`, with a notice) and the rest of the run goes on, its
+// install-only update included; any other old client that cannot sign in is a `problem` that fails the run.
+export function authVersionCheck(authVersion: number, pins: string): { dropOlder: string | null; problem: string | null } {
 	const refusing = Object.values(PINS).filter(
 		pin => pins.split(",").some(item => item.trim() === pin.version) && !pin.authVersions.includes(authVersion)
 	)
+	const others = refusing.filter(pin => pin !== OLDER_PIN)
+	const only = (pin: LegacyPin) => `${pin.version} (v${pin.authVersions.join(", v")} only)`
 
-	return refusing.length === 0
-		? null
-		: `the test account uses auth v${String(authVersion)}, which ${refusing.map(pin => `${pin.version} (v${pin.authVersions.join(", v")} only)`).join(" and ")} cannot sign in to: drop that scenario or use an account it can`
+	return {
+		dropOlder: refusing.includes(OLDER_PIN)
+			? `the test account uses auth v${String(authVersion)}, which ${only(OLDER_PIN)} cannot sign in to: its signed-in chain is dropped from this run, its install-only update runs instead`
+			: null,
+		problem:
+			others.length === 0
+				? null
+				: `the test account uses auth v${String(authVersion)}, which ${others.map(only).join(" and ")} cannot sign in to: drop that scenario or use an account it can`
+	}
 }

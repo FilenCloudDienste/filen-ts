@@ -42,7 +42,8 @@
 # through their real forms (rotated by the day at night, fixed otherwise; input `signin` real signs in every one),
 # spaced by the plan's stagger, and one 3.0.47 chain a run; every other deep chain is seeded with the handed session as
 # a sign-in stores it (scripts/ci/e2e/seed.ts). Job `session` first checks that the account's auth version is one every
-# old client the run signs in or seeds can take. Each chain signs out at the end. A run logs in at most
+# old client the run signs in or seeds can take; one 3.0.47 cannot take drops only the 3.0.47 chain, whose entries then
+# run its install-only update. Each chain signs out at the end. A run logs in at most
 # MAX_LOGINS_PER_RUN times (scripts/ci/e2ePlan.ts). Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any older
 # than a day, even after a failure.
 #
@@ -284,6 +285,10 @@ jobs:
     needs: plan
     if: needs.plan.outputs.session == 'true'
     runs-on: ubuntu-latest
+    # `dropped` when the account's auth version is one 3.0.47 cannot sign in to: its signed-in chain gives way to its
+    # install-only update. Nothing else leaves this job.
+    outputs:
+      older: ${{ steps.pins.outputs.older }}
     # A reseed uploads about 8,500 entries.
     timeout-minutes: ${{ inputs.scale_reseed && 60 || 25 }}
     defaults:
@@ -326,8 +331,10 @@ jobs:
           path: ${{ runner.temp }}/e2e-cache/test.sealed
           key: desktop-e2e-session-v1-test-${{ github.run_id }}-${{ github.run_attempt }}
       # Before any old client is signed in or seeded: the account's auth version is one each of them can sign in to
-      # (3.0.47's SDK takes v1 and v2 only). Reads the hand-off just written; no login, no request.
+      # (3.0.47's SDK takes v1 and v2 only). Reads the hand-off just written; no login, no request. An account 3.0.47
+      # cannot take drops its signed-in chain only, with a notice (output `older`); the rest of the run goes on.
       - name: Check the test account against the old clients
+        id: pins
         if: needs.plan.outputs.pins != ''
         timeout-minutes: 2
         env:
@@ -801,12 +808,13 @@ jobs:
           e2e --scenario legacy ${{ env.TEST_ARGS }}
       # 3.0.47 (scripts/ci/olderPlan.ts): its update launch is hooked through its inspector; on Linux its updater gets a
       # pkexec of its own (scripts/ci/e2e/olderUpdate.ts), the real prompts staying hidden.
+      # Also where the account's auth version dropped the signed-in chain (job `session`, output `older`).
       - name: 3.0.47 -> N
-        if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}
+        if: ${{ !cancelled() && matrix.older && (!matrix.deepOlder || needs.session.outputs.older == 'dropped') }}
         timeout-minutes: 30
         run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}
       - name: 3.0.47 -> N, signed in
-        if: ${{ !cancelled() && matrix.deepOlder }}
+        if: ${{ !cancelled() && matrix.deepOlder && needs.session.outputs.older != 'dropped' }}
         shell: bash
         timeout-minutes: 120
         env:

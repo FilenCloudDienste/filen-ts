@@ -29,7 +29,7 @@ import {
 } from "./e2e/session.ts"
 import { currentScale, reseedScale, type ScaleCurrent, SCALE_NAME, SCALE_UNSEEDED, verifyScale } from "./e2e/scaleTree.ts"
 import { cloudSnapshot, diffSnapshots } from "./e2e/snapshot.ts"
-import { authVersionProblem } from "./legacy.ts"
+import { authVersionCheck } from "./legacy.ts"
 import { errorMessage, fail, section } from "./support.ts"
 
 // The desktop e2e's cloud side (see .github/workflows/desktop-e2e.yml), on any runner:
@@ -41,7 +41,8 @@ import { errorMessage, fail, section } from "./support.ts"
 //              directory, and read the account's storage
 //   sweep      with the handed session: delete this run's directories and any older than a day, then empty the trash
 //   pins       with the handed session: the test account's auth version is one every old client the run signs in or
-//              seeds (E2E_SIGN_IN_PINS, the plan's `pins`) can sign in to; no login, no request
+//              seeds (E2E_SIGN_IN_PINS, the plan's `pins`) can sign in to; no login, no request. Where 3.0.47 cannot,
+//              its signed-in chain is dropped with a notice (older=dropped to $GITHUB_OUTPUT), and the run goes on
 //   fixtures   with the handed session: check the permanent scale tree's current generation against its manifest
 //              (scripts/ci/e2e/scaleTree.ts; unseeded is a warning); --reseed writes a new generation first (dispatch
 //              input scale_reseed)
@@ -310,13 +311,21 @@ if (import.meta.main) {
 		} else if (command === "pins") {
 			const pins = process.env["E2E_SIGN_IN_PINS"] ?? ""
 			const { authVersion } = harnessSession().client
-			const problem = authVersionProblem(authVersion, pins)
+			const { dropOlder, problem } = authVersionCheck(authVersion, pins)
 
 			if (problem !== null) {
 				fail(problem)
 			}
 
-			console.log(`the test account uses auth v${String(authVersion)}, which ${pins} can all sign in to`)
+			if (dropOlder === null) {
+				console.log(`the test account uses auth v${String(authVersion)}, which ${pins} can all sign in to`)
+			} else {
+				console.log(`::notice title=3.0.47 chain dropped::${dropOlder}`)
+
+				if (process.env["GITHUB_OUTPUT"]) {
+					appendFileSync(process.env["GITHUB_OUTPUT"], "older=dropped\n")
+				}
+			}
 		} else if (command === "selftest" || command === "sweep" || command === "fixtures") {
 			const credentials = takeCredentials()
 			const { remote } = harnessSession()
