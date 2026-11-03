@@ -5,13 +5,14 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 import { isFeedPlatform } from "./feed.ts"
 import { APPEX_NAME } from "../src/main/fileProvider/addon.ts"
+import { LEGACY_EXECUTABLE, LINUX_INSTALL_DIR, listsLegacyExecutableLink } from "./legacyExecutable.ts"
 import { nativeArchOf } from "./nativeArch.ts"
 import { MAC_TEAM } from "./signRclone.ts"
 
 // Checks the unpacked apps electron-builder leaves in release/: the web build, tray assets, the sync addon and rclone
 // (both built for the app's arch) and, on Windows, WinFsp's installer made it in, and the app-update.yml baked into
 // each app polls the frozen feed with no channel. On Linux, rclone must be the binary whose sha256 the main bundle
-// carries. With --signed, the Windows one must also pin the publisher, which is what makes the updater verify an
+// carries, and the deb and rpm, where built, must install 3.x's executable name as a link to it. With --signed, the Windows one must also pin the publisher, which is what makes the updater verify an
 // update's signature, and rclone.exe must carry the publisher's valid Authenticode signature; on macOS the addon and
 // rclone must carry the team's valid signature (the hardened runtime loads nothing else), rclone with the hardened
 // runtime, a secure timestamp and exactly build/entitlements.rclone.plist. A macOS app also carries the File Provider
@@ -253,6 +254,24 @@ for (const arch of archs) {
 				) {
 					failures.push(`${appex}: not signed as io.filen.desktop.FileProvider`)
 				}
+			}
+		}
+	}
+
+	if (platform === "linux") {
+		// Only release builds make the packages.
+		const packages = [
+			{ file: path.join("release", `Filen_linux_${arch === "x64" ? "amd64" : "arm64"}.deb`), command: "dpkg-deb", args: ["-c"] },
+			{ file: path.join("release", `Filen_linux_${arch === "x64" ? "x86_64" : "aarch64"}.rpm`), command: "rpm", args: ["-qlpv"] }
+		]
+
+		for (const { file, command, args } of packages.filter(({ file }) => existsSync(file))) {
+			const listing = spawnSync(command, [...args, file], { encoding: "utf8" })
+
+			if (listing.status !== 0) {
+				failures.push(`${file}: ${command} failed: ${listing.error?.message ?? listing.stderr.trim()}`)
+			} else if (!listsLegacyExecutableLink(listing.stdout, path.basename(executable))) {
+				failures.push(`${file}: no ${LINUX_INSTALL_DIR}/${LEGACY_EXECUTABLE} link to ${path.basename(executable)}`)
 			}
 		}
 	}

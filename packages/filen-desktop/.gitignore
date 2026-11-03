@@ -6,3 +6,4 @@ build/rclone/*/
 build/rclone/manifest.json
 build/deps/
 build/fileProvider/
+build/linux/

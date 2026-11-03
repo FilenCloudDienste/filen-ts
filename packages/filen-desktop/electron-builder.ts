@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { Arch, type Configuration, type WindowsConfiguration } from "electron-builder"
+import { Arch, LinuxPackager, type Configuration, type WindowsConfiguration } from "electron-builder"
 import { appexSource, installAppex, signMac } from "./scripts/fileProviderAppex.ts"
+import { legacyLinkFpmMapping, stageLegacyExecutableLink } from "./scripts/legacyExecutable.ts"
 import { signRclone } from "./scripts/signRclone.ts"
 
 // Everything here that installed 3.x clients can observe (appId, productName, artifact names, feed URL, install
@@ -78,6 +79,10 @@ const config: Configuration = {
 
 		if (os === "win") {
 			required.push({ file: path.join(packageDir, "build", "deps", "win", "winfsp.msi"), stage: "scripts/stageRclone.ts" })
+		}
+
+		if (context.packager instanceof LinuxPackager) {
+			stageLegacyExecutableLink(context.packager.executableName)
 		}
 
 		if (os === "mac") {
@@ -196,9 +201,10 @@ const config: Configuration = {
 	},
 	// electron-builder derives the package name from package.json name only when it is unscoped.
 	// fuse3 mounts the network drive; recommended rather than required, so the app installs without it. The deb keeps
-	// electron-builder's default recommendation.
-	deb: { packageName: "Filen", recommends: ["libappindicator3-1", "fuse3"] },
-	rpm: { packageName: "Filen", fpm: ["--rpm-tag", "Recommends: fuse3"] },
+	// electron-builder's default recommendation. Both packages also install 3.x's executable name as a link
+	// (scripts/legacyExecutable.ts); the mapping stays last in fpm, which takes it as a source, not an option.
+	deb: { packageName: "Filen", recommends: ["libappindicator3-1", "fuse3"], fpm: [legacyLinkFpmMapping] },
+	rpm: { packageName: "Filen", fpm: ["--rpm-tag", "Recommends: fuse3", legacyLinkFpmMapping] },
 	toolsets: {
 		appimage: "1.0.3"
 	}
