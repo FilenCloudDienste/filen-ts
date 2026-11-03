@@ -173,14 +173,14 @@ const spikeEntries: Record<Spike, readonly string[]> = {
 // Chain K's entry: the deb, whose N runs on the session's own D-Bus and Secret Service.
 const KEYRING_ENTRY = "linux-x64-deb"
 
-// Deep depth per profile: release and nightly on every OS and architecture's main format, plus macOS x64 and both
-// AppImages, whose updaters and process trees differ (no rotation: all of them every night), by hand one per OS unless
-// DEPTH says otherwise. rpm stays at install depth: its updater is the deb's with another package manager.
+// Deep depth per profile: release and nightly on every OS and architecture's main format, plus both AppImages, whose
+// updaters and process trees differ (no rotation: all of them every night), by hand one per OS unless DEPTH says
+// otherwise. rpm stays at install depth: its updater is the deb's with another package manager. macOS x64 stays at
+// install depth: Intel Macs end with macOS 26, and the Intel runner's open panel often never appears.
 const DEEP_FORMATS = [
 	"win-x64-nsis",
 	"win-arm64-nsis",
 	"mac-arm64-dmg",
-	"mac-x64-dmg",
 	"linux-x64-deb",
 	"linux-arm64-deb",
 	"linux-x64-AppImage",
@@ -205,7 +205,6 @@ export const DEEP_READY: DeepScenarios = {
 	"win-x64-nsis": ["previous", "legacy"],
 	"win-arm64-nsis": ["previous", "legacy"],
 	"mac-arm64-dmg": ["previous", "legacy"],
-	"mac-x64-dmg": ["previous", "legacy"],
 	"linux-x64-deb": ["previous", "legacy"],
 	"linux-arm64-deb": ["previous", "legacy"],
 	"linux-x64-AppImage": ["previous", "legacy"],

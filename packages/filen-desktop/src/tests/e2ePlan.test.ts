@@ -129,9 +129,8 @@ describe("e2ePlan depth", () => {
 			"win-x64-nsis@0",
 			"win-arm64-nsis@20",
 			"mac-arm64-dmg@40",
-			"mac-x64-dmg@60",
-			"linux-x64-deb@80",
-			"linux-x64-AppImage@100",
+			"linux-x64-deb@60",
+			"linux-x64-AppImage@80",
 			"linux-arm64-deb@0",
 			"linux-arm64-AppImage@0"
 		])
@@ -139,18 +138,20 @@ describe("e2ePlan depth", () => {
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
 		expect([mac?.deepPrevious, mac?.deepLegacy]).toEqual([true, true])
 		expect(nightly.tests.find(entry => entry.format === "deb" && entry.arch === "x64")?.deepLegacy).toBe(true)
-		// Both AppImages and macOS x64 run both chains every night too.
+		// Both AppImages run both chains every night too.
 		expect(
-			nightly.tests
-				.filter(entry => entry.format === "AppImage" || (entry.platform === "mac" && entry.arch === "x64"))
-				.map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])
+			nightly.tests.filter(entry => entry.format === "AppImage").map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])
 		).toEqual([
-			["macos-26-intel", true, true],
 			["ubuntu-24.04", true, true],
 			["ubuntu-24.04-arm", true, true]
 		])
-		// rpm stays at install depth.
-		expect(nightly.tests.filter(entry => entry.format === "rpm").some(entry => entry.deep)).toBe(false)
+		// rpm and macOS x64 stay at install depth.
+		expect(
+			nightly.tests
+				.filter(entry => entry.format === "rpm" || (entry.platform === "mac" && entry.arch === "x64"))
+				.some(entry => entry.deep)
+		).toBe(false)
+		expect(nightly.tests.some(entry => entry.platform === "mac" && entry.arch === "x64")).toBe(true)
 		// No rotation: every deep format every night, all of them deep.
 		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
 		// Both slots at worst, then one 4.x and one 3.0.53 form sign-in per OS (the other chains are seeded), and the
@@ -159,7 +160,7 @@ describe("e2ePlan depth", () => {
 		expect(nightly.tests.filter(entry => entry.quota).map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)).toEqual([
 			"linux-x64-deb"
 		])
-		// Once every trial is promoted: both chains on eight entries, still one form sign-in per OS and chain.
+		// Once every trial is promoted: both chains on seven entries, still one form sign-in per OS and chain.
 		expect(
 			plan(
 				{ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" },
@@ -182,12 +183,11 @@ describe("e2ePlan depth", () => {
 			"win-x64-nsis@0",
 			"win-arm64-nsis@20",
 			"mac-arm64-dmg@40",
-			"mac-x64-dmg@60",
-			"linux-x64-deb@80",
-			"linux-x64-AppImage@100",
+			"linux-x64-deb@60",
+			"linux-x64-AppImage@80",
 			"linux-arm64-deb@0",
 			"linux-arm64-AppImage@0",
-			"win-x64-nsis@120",
+			"win-x64-nsis@100",
 			"mac-arm64-dmg@0",
 			"linux-x64-deb@0"
 		])
@@ -296,24 +296,22 @@ describe("e2ePlan sign-ins", () => {
 		expect(signIns({ ...nightly, day: 0 })).toEqual([
 			"win-x64-nsis real/seeded@0",
 			"win-arm64-nsis seeded/real@20",
-			"mac-arm64-dmg real/seeded@40",
-			"mac-x64-dmg seeded/real@60",
-			"linux-x64-deb real/seeded@80",
-			"linux-x64-AppImage seeded/real@100",
+			"mac-arm64-dmg real/real@40",
+			"linux-x64-deb real/seeded@60",
+			"linux-x64-AppImage seeded/real@80",
 			"linux-arm64-deb seeded/seeded@0",
 			"linux-arm64-AppImage seeded/seeded@0"
 		])
 		expect(signIns({ ...nightly, day: 1 })).toEqual([
 			"win-x64-nsis seeded/real@0",
 			"win-arm64-nsis real/seeded@20",
-			"mac-arm64-dmg seeded/real@40",
-			"mac-x64-dmg real/seeded@60",
+			"mac-arm64-dmg real/real@40",
 			"linux-x64-deb seeded/seeded@0",
-			"linux-x64-AppImage real/seeded@80",
-			"linux-arm64-deb seeded/real@100",
+			"linux-x64-AppImage real/seeded@60",
+			"linux-arm64-deb seeded/real@80",
 			"linux-arm64-AppImage seeded/seeded@0"
 		])
-		// Linux's four entries take four nights to come round, Windows' and macOS's two.
+		// Linux's four entries take four nights to come round, Windows' two; macOS's one entry signs both chains in every night.
 		expect(signIns({ ...nightly, day: 4 })).toEqual(signIns({ ...nightly, day: 0 }))
 		expect(signIns({ ...nightly, day: 2 })).not.toEqual(signIns({ ...nightly, day: 0 }))
 	})
@@ -332,7 +330,7 @@ describe("e2ePlan sign-ins", () => {
 				// Each entry's own job (a second job runs 3.0.47 and chain K only).
 				const deep = result.tests.filter(entry => entry.deep && entry.lane === "")
 
-				expect(deep.length).toBe(input === nightly || input === release || input.depth === "deep" ? 8 : 3)
+				expect(deep.length).toBe(input === nightly || input === release || input.depth === "deep" ? 7 : 3)
 				expect(deep.every(entry => entry.deepPrevious && entry.deepLegacy)).toBe(true)
 
 				for (const os of ["windows", "mac", "linux"] as const) {
@@ -373,7 +371,7 @@ describe("e2ePlan sign-ins", () => {
 		}
 
 		// Within the first four nights every deep entry's both forms have signed in.
-		expect(formed.size).toBe(16)
+		expect(formed.size).toBe(14)
 	})
 
 	it("keeps release and custom runs on one choice whatever the day", () => {
@@ -387,7 +385,6 @@ describe("e2ePlan sign-ins", () => {
 			"win-x64-nsis real/@0",
 			"win-arm64-nsis seeded/@0",
 			"mac-arm64-dmg real/@20",
-			"mac-x64-dmg seeded/@0",
 			"linux-x64-deb real/@40",
 			"linux-x64-AppImage seeded/@0",
 			"linux-arm64-deb seeded/@0",
@@ -398,13 +395,10 @@ describe("e2ePlan sign-ins", () => {
 	it("signs every deep chain in through its form only when a custom run asks, within the run's login cap", () => {
 		const custom = { ...dispatch, platforms: "windows,mac", signed: true, depth: "deep", signin: "real" }
 
-		expect(signIns(custom)).toEqual([
-			"win-x64-nsis real/real@0",
-			"win-arm64-nsis real/real@20",
-			"mac-arm64-dmg real/real@40",
-			"mac-x64-dmg real/real@60"
-		])
-		expect(plan(custom).logins).toBe(MAX_LOGINS_PER_RUN)
+		expect(signIns(custom)).toEqual(["win-x64-nsis real/real@0", "win-arm64-nsis real/real@20", "mac-arm64-dmg real/real@40"])
+		// Both slots, then six form sign-ins: Windows' two entries both chains, macOS's one both chains.
+		expect(plan(custom).logins).toBe(SESSION_SLOTS + 6)
+		expect(plan(custom).logins).toBeLessThanOrEqual(MAX_LOGINS_PER_RUN)
 		// Linux's four deep entries alone sign in eight times through forms, at the cap; every OS is above it.
 		expect(plan({ ...custom, platforms: "linux" }).logins).toBe(MAX_LOGINS_PER_RUN)
 		expect(() => plan({ ...custom, platforms: "" })).toThrow(/MAX_LOGINS_PER_RUN/)
