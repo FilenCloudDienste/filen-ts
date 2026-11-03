@@ -1,12 +1,25 @@
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import {
 	acquireDriveLock,
+	DRIVE_LOCK_TIMING,
 	DRIVE_WRITE,
+	driveWriteGrants,
 	type LockAnswer,
 	lockAnswerOf,
 	type LockPost,
-	type LockType
+	LOCK_SERVER_TTL_MS,
+	type LockType,
+	LEASE_MARGIN_MS,
+	lockWaitNote,
+	orphanedLease,
+	outputMark,
+	outputSince,
+	residualBackoff
 } from "../../scripts/ci/e2e/driveLock.ts"
+import { LIVE_TIMEOUT_MS, LIVE_UPLOAD_MS } from "../../scripts/ci/e2e/chains/common.ts"
 import { allWaiting, backOnline, converged, offlineFailure, P11_TURN, P11_TURN_TIMING } from "../../scripts/ci/e2e/chains/offlineListing.ts"
 import type { Sample } from "../../scripts/ci/e2e/offlineBlock.ts"
 
@@ -169,5 +182,150 @@ describe("P11 listing drop", () => {
 		)
 		expect(offlineFailure(sample(0, 2, 1))).toBe("1 of 3 pairs in error instead of offline")
 		expect(offlineFailure(sample(0, 2, 0))).toBe("2 of 3 pairs offline")
+	})
+})
+
+describe("e2e drive-write in N's log", () => {
+	// Lines as the chain's app output has them (main.log prefixes its own timestamp and level: the same match).
+	const grant = (at: string, idle = "98.2ms") =>
+		`native: ${at}  INFO acquire_lock{resource="drive-write"}: filen_sdk_rs::sync::lock: close time.busy=25.0µs time.idle=${idle}`
+	const attempt =
+		'native: 2026-11-03T12:49:13.886735Z  WARN acquire_lock{resource="drive-write"}: filen_sdk_rs::sync::lock: Attempt 7/60: lock request for resource drive-write failed, retrying in 2s: Error of kind Reqwest'
+	const running = (at: string, ms: number) =>
+		`native: ${at}  WARN filen_sdk_rs::obs: operation still running op_target=filen_sdk_rs::sync::lock op_name="acquire_lock" op_fields= elapsed_ms=${String(ms)}`
+	const backoff = (at: string, s: number) =>
+		`native: ${at}  WARN filen_sdk_rs::sync_engine::watch: sync pair 2: 3 consecutive failure(s); waiting ${String(s)}s before the next pass`
+
+	const poll = (at: string, id: number) =>
+		`native: ${at}  INFO http_request{endpoint=v3/user/lock request_id=${String(id)}}: filen_sdk_rs::auth::http::logging: close time.busy=139µs time.idle=103ms`
+	const pollFailed = (at: string, id: number) =>
+		`native: ${at}  WARN http_request{endpoint=v3/user/lock request_id=${String(id)}}: filen_sdk_rs::auth::http::logging: request failed elapsed_ms=1583 error=Error of kind Reqwest`
+
+	it("reads when N got drive-write: the acquire's close right after the poll the server answered", () => {
+		const output = [
+			attempt,
+			poll("2026-11-03T12:54:28.076408Z", 39),
+			grant("2026-11-03T12:54:28.076534Z", "58.6s"),
+			`[2026-11-03T12:54:30.000Z] INFO ${poll("2026-11-03T12:54:29.990000Z", 49)}`,
+			`[2026-11-03T12:54:30.000Z] INFO ${grant("2026-11-03T12:54:30.000000Z", "103ms")}`
+		].join("\n")
+
+		expect(driveWriteGrants(output)).toEqual([Date.parse("2026-11-03T12:54:28.076Z"), Date.parse("2026-11-03T12:54:30.000Z")])
+		expect(driveWriteGrants(attempt)).toEqual([])
+	})
+
+	it("never takes for a grant a close in µs, one with no answered poll before it, or one after a failed poll", () => {
+		// Closes before any request answered (a launch's), and the close of an acquire whose poll failed offline.
+		expect(driveWriteGrants(grant("2026-11-03T12:57:13.483845Z", "27.4µs"))).toEqual([])
+		expect(driveWriteGrants(grant("2026-11-03T12:57:13.925182Z", "10.6ms"))).toEqual([])
+		expect(
+			driveWriteGrants(
+				[
+					pollFailed("2026-11-03T12:57:15.498160Z", 7),
+					poll("2026-11-03T12:57:15.498166Z", 7),
+					grant("2026-11-03T12:57:15.498447Z", "19.9ms")
+				].join("\n")
+			)
+		).toEqual([])
+		// An answered poll too long before the close is another request's.
+		expect(
+			driveWriteGrants([poll("2026-11-03T12:57:10.000000Z", 3), grant("2026-11-03T12:57:13.925182Z", "10.6ms")].join("\n"))
+		).toEqual([])
+	})
+
+	it("finds a lease N's lost network left, while the server still keeps it", () => {
+		const output = [
+			poll("2026-11-03T12:57:13.769220Z", 3),
+			poll("2026-11-03T12:57:13.910538Z", 4),
+			pollFailed("2026-11-03T12:57:15.498098Z", 6),
+			poll("2026-11-03T12:57:15.498123Z", 6),
+			"native: 2026-11-03T12:57:15.498131Z  WARN filen_sdk_rs::sync::lock: Failed to release lock drive-write: Error of kind Reqwest"
+		].join("\n")
+		const blocked = Date.parse("2026-11-03T12:57:13.750Z")
+		const lifted = Date.parse("2026-11-03T12:57:18.100Z")
+		const confirmedAt = Date.parse("2026-11-03T12:57:13.910Z")
+
+		expect(orphanedLease(output, blocked, lifted, 10_000)).toEqual({
+			failedAt: Date.parse("2026-11-03T12:57:15.498Z"),
+			confirmedAt,
+			lapsesAt: confirmedAt + LOCK_SERVER_TTL_MS - LEASE_MARGIN_MS
+		})
+		// Lapsed (or too close to it) by the lift: nothing to tell a release sent again from the TTL by.
+		expect(orphanedLease(output, blocked, Date.parse("2026-11-03T12:58:05.000Z"), 10_000)).toBeNull()
+		// A release that failed after the lift is not this outage's.
+		expect(orphanedLease(output, blocked, Date.parse("2026-11-03T12:57:15.000Z"), 10_000)).toBeNull()
+		// Sent (1583 ms before it failed) before the block went in: it may have reached the server.
+		expect(orphanedLease(output, Date.parse("2026-11-03T12:57:14.000Z"), lifted, 10_000)).toBeNull()
+		expect(orphanedLease(output.split("\n").slice(0, 4).join("\n"), blocked, lifted, 10_000)).toBeNull()
+		// No lock request answered before it: no confirmation to date the lease from.
+		expect(orphanedLease(output.split("\n").slice(2).join("\n"), blocked, lifted, 10_000)).toBeNull()
+	})
+
+	it("matches a failed lock request to its close by id and time, ids restarting with each launch", () => {
+		const output = [
+			pollFailed("2026-11-03T12:50:00.000000Z", 7),
+			poll("2026-11-03T12:50:00.000100Z", 7),
+			poll("2026-11-03T12:51:00.000000Z", 7),
+			grant("2026-11-03T12:51:00.000200Z", "2.1s")
+		].join("\n")
+
+		expect(driveWriteGrants(output)).toEqual([Date.parse("2026-11-03T12:51:00.000Z")])
+	})
+
+	it("says whether N was still waiting for drive-write after its last grant", () => {
+		expect(
+			lockWaitNote(
+				[
+					poll("2026-11-03T12:57:05.899000Z", 3),
+					grant("2026-11-03T12:57:05.900000Z"),
+					running("2026-11-03T12:57:56.900000Z", 39_447)
+				].join("\n")
+			)
+		).toBe("N still waiting for drive-write (acquire_lock running 39 s at 2026-11-03T12:57:56.900000Z): another client holds it")
+		expect(
+			lockWaitNote(
+				[
+					running("2026-11-03T12:57:56.900000Z", 39_447),
+					poll("2026-11-03T12:58:04.990000Z", 9),
+					grant("2026-11-03T12:58:05.000000Z")
+				].join("\n")
+			)
+		).toBe("N's log shows no acquire of drive-write still running")
+	})
+
+	it("takes what the last pass backoff before a moment still had to run, within a cap", () => {
+		const at = Date.parse("2026-11-03T12:57:12.000Z")
+		const output = [backoff("2026-11-03T12:56:59.000000Z", 8), backoff("2026-11-03T12:57:03.497000Z", 16)].join("\n")
+
+		expect(residualBackoff(output, at, 60_000)).toBe(7497)
+		expect(residualBackoff(output, at, 5000)).toBe(5000)
+		// Logged after the moment: not yet a backoff then.
+		expect(residualBackoff(backoff("2026-11-03T12:57:13.000000Z", 32), at, 60_000)).toBe(0)
+		expect(residualBackoff(backoff("2026-11-03T12:50:00.000000Z", 32), at, 60_000)).toBe(0)
+		expect(residualBackoff("", at, 60_000)).toBe(0)
+	})
+
+	it("reads what a launch appended to the chain's output since a mark", () => {
+		const dir = mkdtempSync(path.join(os.tmpdir(), "e2e-output-"))
+		const file = path.join(dir, "app-output.log")
+
+		try {
+			expect(outputMark(file)).toBe(0)
+			expect(outputSince(file, 0)).toBe("")
+			writeFileSync(file, "before\n")
+
+			const mark = outputMark(file)
+
+			appendFileSync(file, "after µ\n")
+			expect(outputSince(file, mark)).toBe("after µ\n")
+			expect(outputSince(file, outputMark(file))).toBe("")
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("gives a live upload one foreign batch and an orphaned lease on top of the live window", () => {
+		expect(LIVE_UPLOAD_MS).toBe(LIVE_TIMEOUT_MS + 60_000 + LOCK_SERVER_TTL_MS)
+		expect(DRIVE_LOCK_TIMING.capMs).toBeGreaterThan(LOCK_SERVER_TTL_MS)
 	})
 })

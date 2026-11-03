@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { closeSync, openSync, readSync, statSync } from "node:fs"
 import { setTimeout as sleep } from "node:timers/promises"
 import { type } from "arktype"
 import { errorMessage, fail } from "../support.ts"
@@ -27,6 +28,9 @@ export interface DriveLockTiming {
 }
 
 export const DRIVE_LOCK_TIMING: DriveLockTiming = { pollMs: 2000, acquireMs: 120_000, refreshMs: 15_000, capMs: 150_000 }
+// How long the server keeps a lease nobody refreshes (sdk-rs LOCK_SERVER_TTL): a client that loses the network while it
+// holds drive-write cannot release it, so every other client waits that long.
+export const LOCK_SERVER_TTL_MS = 60_000
 
 export type LockType = "acquire" | "refresh" | "release"
 
@@ -178,5 +182,142 @@ export async function acquireDriveLock(
 		capped: () => byCap,
 		refreshFailures: () => failures,
 		release
+	}
+}
+
+// What N's native host logged about drive-write (its lines in the chain's app output, or in main.log). Each line
+// carries the host's own UTC timestamp, from the same clock as the harness's. sdk-rs's acquire_lock span also closes
+// on a failed acquire and, on some paths, before its request answered (both with an idle time in µs), so a grant is a
+// close that waited on the network (an idle time in ms or s) right after a lock request that answered: the poll the
+// server granted. The watchdog reports an acquire still waiting, and a pair's pass backoff names its wait.
+const NATIVE_TIME = String.raw`native: (\d{4}-\d\d-\d\dT[\d:.]+Z)\s+`
+const ACQUIRE_CLOSE = new RegExp(
+	String.raw`${NATIVE_TIME}INFO acquire_lock\{resource="drive-write"\}: \S+ close .*time\.idle=[\d.]+(µs|ns|ms|s)\b`
+)
+// A lock request's span: its id, and whether this line is its close or its failure.
+const LOCK_REQUEST = new RegExp(
+	String.raw`${NATIVE_TIME}(?:INFO|WARN) (?:\S+:)?http_request\{endpoint=v3/user/lock request_id=(\d+)\}: \S+ (close |request failed)(?: elapsed_ms=(\d+))?`
+)
+const ACQUIRE_RUNNING = new RegExp(String.raw`${NATIVE_TIME}WARN \S+: operation still running .*op_name="acquire_lock" .*elapsed_ms=(\d+)`)
+const RELEASE_FAILED = new RegExp(String.raw`${NATIVE_TIME}WARN \S+: Failed to release lock drive-write`)
+const PASS_BACKOFF = new RegExp(
+	String.raw`${NATIVE_TIME}WARN \S+: sync pair \S+: \d+ consecutive failure\(s\); waiting (\d+)s before the next pass`
+)
+// How close after the granting poll's answer the acquire returns.
+const GRANT_AFTER_POLL_MS = 50
+
+function matches(output: string, pattern: RegExp): RegExpExecArray[] {
+	return output.split("\n").flatMap(line => {
+		const match = pattern.exec(line)
+
+		return match === null ? [] : [match]
+	})
+}
+
+// Every lock request that answered, as the time of its close. A request that failed logs the failure inside its span
+// just before the span closes; request ids restart with each launch, so the failure is matched by id and time.
+function answeredLockRequests(output: string): number[] {
+	const requests = matches(output, LOCK_REQUEST).map(match => ({
+		at: Date.parse(match[1] ?? ""),
+		id: match[2],
+		failure: match[3] !== "close "
+	}))
+	const failures = requests.filter(request => request.failure)
+
+	return requests
+		.filter(
+			request =>
+				!request.failure &&
+				!failures.some(failure => failure.id === request.id && request.at >= failure.at && request.at - failure.at <= 1000)
+		)
+		.map(request => request.at)
+}
+
+// When N got drive-write, in the order logged (epoch ms).
+export function driveWriteGrants(output: string): number[] {
+	const answered = answeredLockRequests(output)
+
+	return matches(output, ACQUIRE_CLOSE)
+		.filter(match => match[2] === "ms" || match[2] === "s")
+		.map(match => Date.parse(match[1] ?? ""))
+		.filter(at => answered.some(poll => poll <= at && at - poll <= GRANT_AFTER_POLL_MS))
+}
+
+// Why N has no drive-write yet: its acquire still running after its last grant (the watchdog's report), or nothing.
+export function lockWaitNote(output: string): string {
+	const lastGrant = Math.max(0, ...driveWriteGrants(output))
+	const waiting = matches(output, ACQUIRE_RUNNING).filter(match => Date.parse(match[1] ?? "") > lastGrant)
+	const last = waiting.at(-1)
+
+	return last === undefined
+		? "N's log shows no acquire of drive-write still running"
+		: `N still waiting for drive-write (acquire_lock running ${String(Math.round(Number(last[2]) / 1000))} s at ${last[1] ?? ""}): another client holds it`
+}
+
+// How much of a pass backoff logged before `at` was still to run then (ms, 0 when none), at most `capMs`.
+export function residualBackoff(output: string, at: number, capMs: number): number {
+	const ends = matches(output, PASS_BACKOFF)
+		.map(match => ({ logged: Date.parse(match[1] ?? ""), ends: Date.parse(match[1] ?? "") + Number(match[2]) * 1000 }))
+		.filter(backoff => backoff.logged <= at)
+		.map(backoff => backoff.ends)
+
+	return Math.min(capMs, Math.max(0, ...ends.map(end => end - at)))
+}
+
+// How much earlier than its last confirmation plus the TTL the server may let a lease lapse (the two clocks, the
+// request's own time on the wire).
+export const LEASE_MARGIN_MS = 5000
+
+export interface OrphanedLease {
+	// When N's release failed, and when the server last confirmed the lease (N's last lock request that answered).
+	failedAt: number
+	confirmedAt: number
+	// Before this, only a release N sent again can have freed the lease: the server keeps it until then.
+	lapsesAt: number
+}
+
+// A drive-write lease N's release could not free because N was cut off at `blockedAt` (sdk-rs sends a release once and
+// never again), still alive at `lifted` with `minRoomMs` left for N's next acquire before it lapses; null otherwise.
+// Only a release whose request was sent after the block counts: one sent before it may have reached the server, whose
+// answer alone was lost.
+export function orphanedLease(output: string, blockedAt: number, lifted: number, minRoomMs: number): OrphanedLease | null {
+	const failures = matches(output, LOCK_REQUEST)
+		.filter(match => match[3] === "request failed")
+		.map(match => ({ at: Date.parse(match[1] ?? ""), sentAt: Date.parse(match[1] ?? "") - Number(match[4] ?? Number.NaN) }))
+	const failedAt = Math.max(
+		0,
+		...matches(output, RELEASE_FAILED)
+			.map(match => Date.parse(match[1] ?? ""))
+			.filter(at => at >= blockedAt && at <= lifted)
+			// The release's own request failed just before it was reported, sent after the block went in.
+			.filter(at => failures.some(failure => failure.at <= at && at - failure.at <= 50 && failure.sentAt >= blockedAt))
+	)
+	const confirmedAt = Math.max(0, ...answeredLockRequests(output).filter(at => at <= failedAt))
+	const lapsesAt = confirmedAt + LOCK_SERVER_TTL_MS - LEASE_MARGIN_MS
+
+	return failedAt === 0 || confirmedAt === 0 || lapsesAt - lifted < minRoomMs ? null : { failedAt, confirmedAt, lapsesAt }
+}
+
+// The chain's app output file is appended by every launch: where it ends now, and what was appended since.
+export function outputMark(file: string): number {
+	return statSync(file, { throwIfNoEntry: false })?.size ?? 0
+}
+
+export function outputSince(file: string, mark: number): string {
+	const size = outputMark(file)
+
+	if (size <= mark) {
+		return ""
+	}
+
+	const fd = openSync(file, "r")
+
+	try {
+		const buffer = Buffer.alloc(size - mark)
+		const read = readSync(fd, buffer, 0, buffer.length, mark)
+
+		return buffer.subarray(0, read).toString("utf8")
+	} finally {
+		closeSync(fd)
 	}
 }

@@ -68,6 +68,7 @@ import {
 	type SignOutWitness
 } from "./common.ts"
 import { firstRunProblems, legacyHolds } from "./legacyHolds.ts"
+import { liveEditUploads } from "./offlineListing.ts"
 import {
 	BARE_PAIR,
 	bareImported,
@@ -115,7 +116,8 @@ import {
 //   L12  the bins                 each pair's bin holds exactly 3.x's local trash (moved there, content intact) and what
 //                                 the cloud edit replaced, under the day's bucket; neither ever in the cloud
 //   L13  the page as served       crossOriginIsolated
-//   L14  sync works afterwards    a new local file uploads
+//   L14  sync works afterwards    a new local file uploads, in the account's P11 turn so that no other entry's network
+//                                 drop holds drive-write meanwhile (chains/offlineListing.ts liveEditUploads)
 //   L15  sign-out and uninstall   session and drive gone; the user's sync and drive data, migration.stash, lock.vault
 //                                 and the logs gone, an unfinished import ended; the next launch deletes the browser
 //                                 profile before ready; the user's directories intact
@@ -1231,15 +1233,12 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				() => chain.quietActivity(pairIds, new Set([...conflictActivity, ...resolution]), keptCopy === null ? conflictCounts : {})
 			)
 
-			await findings.check("L14 a live edit uploads", async () => {
-				const name = `live-${randomBytes(4).toString("hex")}.txt`
-
-				writeFileSync(path.join(rootOf("e2e-twoway"), name), `${name}\n`)
-				await waitFor("the live file in the cloud", LIVE_TIMEOUT_MS, async () =>
-					(await cloud.list(`${cloudDir}/e2e-twoway`, false))?.some(item => item.path === name) === true ? true : null
-				)
-
-				return `${name} uploaded`
+			await liveEditUploads(chain, {
+				name: "L14 a live edit uploads",
+				file: `live-${randomBytes(4).toString("hex")}.txt`,
+				localRoot: rootOf("e2e-twoway"),
+				cloudDir: `${cloudDir}/e2e-twoway`,
+				findings
 			})
 
 			witness = await chain.beforeSignOut()

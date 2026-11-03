@@ -20,6 +20,7 @@ import { APP_ORIGIN, desktop, desktopCall, signOut } from "../app.ts"
 import { listTargets } from "../cdp/inspector.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { openCloud, runDir, type Cloud } from "../cloud.ts"
+import { LOCK_SERVER_TTL_MS } from "../driveLock.ts"
 import { createFindings, type Findings } from "../findings.ts"
 import { exitWithin, launchDebuggable, type LaunchExtra, type Launched } from "../launch.ts"
 import { type DesktopOs, osFor } from "../os.ts"
@@ -37,6 +38,9 @@ export const SETUP_TIMEOUT_MS = 2 * 60 * 1000
 export const QUIET_MS = 30_000
 export const QUIET_MAX_MS = 3 * 60 * 1000
 export const LIVE_TIMEOUT_MS = 2 * 60 * 1000
+// A live edit's upload, which waits for the account's drive-write first: the live window, plus one ordinary batch of
+// another client (sdk-rs PASS_LOCK_MAX_HOLD, 60 s) and a lease another entry's lost network left for the server's TTL.
+export const LIVE_UPLOAD_MS = LIVE_TIMEOUT_MS + 60_000 + LOCK_SERVER_TTL_MS
 export const EXIT_TIMEOUT_MS = 60_000
 const STAGGER_MAX_S = 300
 // What a sign-out deletes and logs (src/main/signOut.ts), the drive idle and the native host running.

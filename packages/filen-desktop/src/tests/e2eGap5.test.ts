@@ -16,7 +16,16 @@ import {
 	freeBytes,
 	freeDriveLetter
 } from "../../scripts/ci/e2e/smallVolume.ts"
-import { allIdle, firstNewTunnel, proxyLaunch, sdkSocket, startedClean, tunnelsPerHost } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
+import {
+	allIdle,
+	firstNewTunnel,
+	listingRetried,
+	nextTry,
+	proxyLaunch,
+	sdkSocket,
+	startedClean,
+	tunnelsPerHost
+} from "../../scripts/ci/e2e/chains/proxyCheck.ts"
 import { tempFiles } from "../../scripts/ci/e2e/chains/diskFullCheck.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS, STEP_MINUTES } from "../../scripts/ci/e2ePlan.ts"
 import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
@@ -59,14 +68,30 @@ async function proxy(): Promise<ConnectProxy> {
 	return started
 }
 
-// A tunnel through `via` to 127.0.0.1:`port`, after the proxy's 200.
-async function tunnel(via: ConnectProxy, port: number): Promise<Socket> {
+// A server on 127.0.0.1 that answers each chunk it reads, a decimal byte count, with that many bytes (as a server
+// answers a request).
+async function replyServer(): Promise<number> {
+	const server: Server = createServer(socket => {
+		socket.on("error", () => undefined)
+		socket.on("data", (chunk: Buffer) => socket.write(Buffer.alloc(Number(chunk.toString()), 5)))
+	})
+
+	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve))
+	cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())))
+
+	return (server.address() as AddressInfo).port
+}
+
+// A tunnel through `via` to 127.0.0.1:`port`, after the proxy's 200; with `userAgent`, the CONNECT names it.
+async function tunnel(via: ConnectProxy, port: number, userAgent?: string): Promise<Socket> {
 	const socket = connect(via.port, "127.0.0.1")
 
 	cleanups.push(() => {
 		socket.destroy()
 	})
-	socket.write(`CONNECT 127.0.0.1:${String(port)} HTTP/1.1\r\nHost: 127.0.0.1:${String(port)}\r\n\r\n`)
+	socket.write(
+		`CONNECT 127.0.0.1:${String(port)} HTTP/1.1\r\nHost: 127.0.0.1:${String(port)}\r\n${userAgent === undefined ? "" : `User-Agent: ${userAgent}\r\n`}\r\n`
+	)
 
 	await new Promise<void>((resolve, reject) => {
 		let head = ""
@@ -89,6 +114,32 @@ async function tunnel(via: ConnectProxy, port: number): Promise<Socket> {
 	})
 
 	return socket
+}
+
+// One request of `bytes` to a replyServer through `socket`: how its reply ended.
+async function exchange(socket: Socket, bytes: number): Promise<string> {
+	const reply = new Promise<string>(resolve => {
+		let length = 0
+		const done = (end: string) => {
+			socket.off("data", onData)
+			resolve(end)
+		}
+		const onData = (chunk: Buffer) => {
+			length += chunk.length
+
+			if (length >= bytes) {
+				done("complete")
+			}
+		}
+
+		socket.on("data", onData)
+		socket.once("error", () => done("reset"))
+		socket.once("close", () => done("reset"))
+	})
+
+	socket.write(String(bytes))
+
+	return reply
 }
 
 // Everything the socket reads until `bytes` arrived or it closed, and how it ended.
@@ -174,6 +225,57 @@ describe("e2e CONNECT proxy", () => {
 		expect(fault.fired).toBe(1)
 		expect(via.tunnels()[0]?.end).toMatch(/resetAfter/)
 		fault.disarm()
+	})
+
+	it("records each CONNECT's User-Agent, null without one", async () => {
+		const port = await echoServer()
+		const via = await proxy()
+
+		await tunnel(via, port)
+		await tunnel(via, port, "Mozilla/5.0 Chrome")
+
+		expect(via.tunnels().map(item => item.userAgent)).toEqual([null, "Mozilla/5.0 Chrome"])
+	})
+
+	it("resets an SDK tunnel inside its first large reply, never the handshake flight or a small reply", async () => {
+		const port = await replyServer()
+		const via = await proxy()
+		const fault = via.arm({ kind: "resetInReply", host: "127.0.0.1", minReplyBytes: 16 * 1024, tunnels: 1, sdkOnly: true })
+		// A tunnel with a User-Agent (Chromium's, rclone's) is never the SDK's.
+		const browser = await tunnel(via, port, "Mozilla/5.0 Chrome")
+
+		expect(await exchange(browser, 1000)).toBe("complete")
+		expect(await exchange(browser, 40_000)).toBe("complete")
+
+		const sdk = await tunnel(via, port)
+
+		// The first reply is the TLS server's flight; then each reply counts from the request before it.
+		expect(await exchange(sdk, 40_000)).toBe("complete")
+		expect(await exchange(sdk, 8 * 1024)).toBe("complete")
+		expect(await exchange(sdk, 12 * 1024)).toBe("complete")
+		expect(fault.fired).toBe(0)
+		expect(await exchange(sdk, 40_000)).toBe("reset")
+		expect(fault.fired).toBe(1)
+		expect(via.tunnels()[1]?.end).toMatch(/^reset in a reply at \d+ bytes down \(resetInReply\)$/)
+
+		// Only `tunnels` of them.
+		const next = await tunnel(via, port)
+
+		expect(await exchange(next, 10)).toBe("complete")
+		expect(await exchange(next, 40_000)).toBe("complete")
+		expect(fault.fired).toBe(1)
+		fault.disarm()
+	})
+
+	it("counts any tunnel's reply without sdkOnly", async () => {
+		const port = await replyServer()
+		const via = await proxy()
+		const fault = via.arm({ kind: "resetInReply", host: "127.0.0.1", minReplyBytes: 16 * 1024, tunnels: 1, sdkOnly: false })
+		const browser = await tunnel(via, port, "Mozilla/5.0 Chrome")
+
+		expect(await exchange(browser, 10)).toBe("complete")
+		expect(await exchange(browser, 40_000)).toBe("reset")
+		expect(fault.fired).toBe(1)
 	})
 
 	it("resets every tunnel to the host while armed, open and new, and none once disarmed", async () => {
@@ -282,6 +384,36 @@ describe("e2e CONNECT proxy", () => {
 		expect(firstNewTunnel(tunnels, "ingest.filen.io", 1000)).toBe(1200)
 		expect(firstNewTunnel(tunnels, "ingest.filen.io", 1300)).toBeNull()
 		expect(firstNewTunnel(tunnels, "egest.filen.io", 0)).toBeNull()
+	})
+
+	it("takes F6's next try at N's first drive-write grant or new ingest tunnel after the lift, whichever came first", () => {
+		const tunnels = [
+			{ host: "ingest.filen.io", openedAt: 900 },
+			{ host: "ingest.filen.io", openedAt: 1500 }
+		]
+
+		expect(nextTry([800, 1200], tunnels, "ingest.filen.io", 1000)).toBe(1200)
+		expect(nextTry([800], tunnels, "ingest.filen.io", 1000)).toBe(1500)
+		expect(nextTry([1100], [], "ingest.filen.io", 1000)).toBe(1100)
+		expect(nextTry([800], [{ host: "ingest.filen.io", openedAt: 900 }], "ingest.filen.io", 1000)).toBeNull()
+	})
+
+	it("finds F3's reset in the resync listing's request span, not in another request's", () => {
+		const died =
+			"native: 2026-11-03T12:55:00.100000Z  WARN list_dir_recursive{[redacted]}:http_request{endpoint=v3/dir/download request_id=13}: filen_sdk_rs::auth::http: connection died during the request kind=ConnectionReset os_error=Some(104)"
+		const failed =
+			"[2026-11-03T12:55:00.200Z] INFO native: 2026-11-03T12:55:00.200000Z  WARN list_dir_recursive{[redacted]}:http_request{endpoint=v3/dir/download request_id=14}: filen_sdk_rs::auth::http::logging: request failed elapsed_ms=120 error=Error of kind Reqwest"
+		const fine =
+			"native: 2026-11-03T12:55:00.300000Z  INFO list_dir_recursive{[redacted]}:http_request{endpoint=v3/dir/download request_id=15}: filen_sdk_rs::auth::http::logging: close time.busy=153µs time.idle=99.5ms"
+		const otherRequest =
+			"native: 2026-11-03T12:55:00.400000Z  WARN http_request{endpoint=v3/user/lock request_id=12}: filen_sdk_rs::auth::http: connection died during the request kind=ConnectionReset os_error=Some(104)"
+
+		expect(listingRetried([fine, died].join("\n"))).toBe(true)
+		expect(listingRetried(failed)).toBe(true)
+		expect(listingRetried("native: 2026-11-03T12:55:00Z DEBUG filen_sdk_rs::cache::state: resync: not converged; retrying in 5s")).toBe(
+			true
+		)
+		expect(listingRetried([fine, otherRequest].join("\n"))).toBe(false)
 	})
 })
 

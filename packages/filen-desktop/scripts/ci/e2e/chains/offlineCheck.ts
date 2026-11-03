@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { errorMessage, fail } from "../../support.ts"
+import { outputMark } from "../driveLock.ts"
 import {
 	appPids,
 	createSampler,
@@ -17,7 +18,7 @@ import {
 	watchOffline
 } from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
-import { backOnline, CONVERGE_MS, converged, RECOVER_MS, runListingDrop } from "./offlineListing.ts"
+import { backOnline, CONVERGE_MS, converged, RECOVER_MS, releaseSentAgain, runListingDrop } from "./offlineListing.ts"
 
 // P11: N offline and back, with its own processes cut off (offlineBlock.ts) and everything else on the runner online.
 //   live drop      with N running and every pair converged: an edit takes its pair offline within 30 s (on mac x64
@@ -32,7 +33,9 @@ import { backOnline, CONVERGE_MS, converged, RECOVER_MS, runListingDrop } from "
 //                  then the block lifted, every pair online within 60 s and converged within 120 s (offlineListing.ts)
 // N runs through the block's wrapper (Linux, macOS) for this check only and is started plainly again after it. The
 // convergence windows tolerate one foreign drive-write hold (offlineListing.ts, CONVERGE_MS); the time each sub-step
-// took to converge is reported (info).
+// took to converge is reported (info). When the live drop cut N off while it held drive-write and its release failed,
+// N's next drive-write before the server could let that lease lapse proves the release was sent again; until sdk-rs
+// does, that is a known bug (offlineListing.ts RELEASE_ISSUE).
 
 // A launch's own start and first passes before every pair can have tried the network.
 const START_OFFLINE_MS = 90_000
@@ -115,8 +118,12 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 				fail(`not converged before the drop: ${describeSample(settled.last)}`)
 			}
 
+			const mark = outputMark(chain.appOutput)
+			let blockedAt: number
+
 			try {
 				await block.block(target, await appPids(chain))
+				blockedAt = Date.now()
 				writeFileSync(path.join(pair.localRoot, name), `${name}\n`)
 
 				const offline = await watchOffline(
@@ -142,6 +149,7 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 
 			// Back online clears the offline halt before the pass that uploads the edit has finished.
 			toConverged.live = await recover(sampler, lifted, `${name} uploaded`, () => inCloud(name).catch(() => false))
+			await releaseSentAgain(chain, "P11 a live drop", mark, blockedAt, lifted)
 
 			return `offline, ${name} queued; back online, uploaded and converged after the lift; ${noSyncAttention(sampler)}`
 		})

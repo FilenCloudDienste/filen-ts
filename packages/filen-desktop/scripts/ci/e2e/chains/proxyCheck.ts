@@ -1,16 +1,16 @@
 import { randomBytes } from "node:crypto"
-import { existsSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import type { DesktopLockStatus } from "@filen/shared/desktop"
 import { errorMessage, fail, onTimeout, runBounded, waitFor } from "../../support.ts"
 import { desktop, unlockThroughScreen } from "../app.ts"
 import { type ConnectProxy, type Fault, startConnectProxy, type Tunnel } from "../connectProxy.ts"
-import { DRIVE_LOCK_TIMING } from "../driveLock.ts"
+import { DRIVE_LOCK_TIMING, driveWriteGrants, lockWaitNote, outputMark, outputSince, residualBackoff } from "../driveLock.ts"
 import { nothingSeen, pairOf, sha256, sha256File, syncNow, watchPairs, type PairWatch } from "../extraPair.ts"
 import { seededBytes } from "../fixtures.ts"
 import type { LaunchExtra } from "../launch.ts"
-import { createSampler, describeSample, offlineBlockFor, relaunchThrough, type Sample, type Sampler } from "../offlineBlock.ts"
+import { createSampler, describeSample, offlineBlockFor, relaunchThrough, type Sample, type Sampler, seconds } from "../offlineBlock.ts"
 import { tail, START_TIMEOUT_MS } from "../update.ts"
 import { type LogMark, logMark, logSince } from "../updateFaults.ts"
 import type { Chain } from "./common.ts"
@@ -19,7 +19,8 @@ import type { Chain } from "./common.ts"
 // stays open, and the harness, outside the block, keeps its own) and N starts with HTTPS_PROXY, NO_PROXY for loopback
 // and Chromium's --proxy-server, all pointing at a CONNECT proxy on 127.0.0.1 (connectProxy.ts), which only relays.
 //   P14 proxy only     N starts with every pair idle and no attention (none inherited from an earlier check); the proxy
-//                      carried gateway, ingest and egest; a local edit uploads and a cloud edit downloads within 60 s;
+//                      carried gateway, ingest and egest; a local edit uploads within 60 s of N's drive-write and a
+//                      cloud edit downloads within 60 s;
 //                      the drive reads a file; never offline, no attention. The SDK's websocket ignores proxies until
 //                      its proxy-aware connector lands (plan A5), a known bug read from main.log (the renderer's own
 //                      socket, which honours --proxy-server, makes a tunnel to the socket's host either way). While the
@@ -31,11 +32,17 @@ import type { Chain } from "./common.ts"
 //                      F1 the first 2 ingest tunnels reset after 512 KiB up; F2 the same on egest, down (sdk-rs speaks
 //                      HTTP/1.1 and moves 1 MiB chunks concurrently, one per tunnel, so the reset lands mid-chunk; the
 //                      cloud file found as P14's was);
-//                      F3 a gateway tunnel reset during a listing; F4 everything throttled to 256 KiB/s with an 8 MiB
-//                      upload; F5 the gateway's first reply bytes held 20 s; F6 every ingest tunnel reset for 60 s from
-//                      N's first new one (a foreign hold of drive-write can keep N from ingest for up to its cap).
-//                      F1-F5 never offline, never error or attention, the file byte for byte; F6 offline, no
-//                      attention, and recovered (the file uploaded) within 60 s of the end of the outage
+//                      F3 a gateway tunnel reset inside the launch's resync listing (`dir/download`, inflated by 128
+//                      seeded files): retried, every seeded file on disk, no attention; F4 everything throttled to
+//                      256 KiB/s with an 8 MiB upload; F5 the gateway's first reply bytes held 20 s; F6 every ingest
+//                      tunnel reset for 60 s from N's first new one.
+//                      F1-F5 never offline, never error or attention, the file byte for byte; F6 offline, no attention,
+//                      back online within 60 s of the end of the outage, N at drive-write or ingest again within its
+//                      leftover pass backoff plus the lock's cap, and the file uploaded within 60 s of that
+// Every upload's window starts when N gets the account's drive-write, not when the file is written: every deep entry of
+// a run shares the lock and it has no queue, so N's wait for it can be a chain of other entries' holds (each up to 60 s,
+// PASS_LOCK_MAX_HOLD, or a lease another entry's lost network left for its 60 s TTL), bounded by the lock's cap (150 s)
+// from the edit and reported. The upload itself must then complete within its own window.
 // Information: N's renderer started without --proxy-server (HTTPS_PROXY alone). N is started plainly again at the end.
 
 const MIB = 1024 * 1024
@@ -50,6 +57,12 @@ const EDIT_MS = 60_000
 const FAULT_MS = 3 * 60 * 1000
 const OUTAGE_MS = 60_000
 const RECOVER_MS = 60_000
+// The most of a pass backoff the engine may still have to sleep at F6's lift (sdk-rs doubles it from 2 s per failure).
+const BACKOFF_CAP_MS = 60_000
+// F3's seeded files: enough small ones that the pair root's `dir/download` reply is tens of KiB, far above any other
+// reply the SDK gets from the gateway (lock, messageIds, `v3/dir`, user and keys), so only that listing is reset.
+const F3_FILES = 128
+const F3_REPLY_BYTES = 16 * KIB
 
 // The released SDK's two bugs behind a cloud edit not found under the proxy.
 const SOCKET_ISSUE =
@@ -97,19 +110,40 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 	const inCloud = async (name: string) =>
 		(await cloud.list(options.editCloudDir, false))?.some(item => item.path === name && !item.isDir) === true
 
-	// A local file of `bytes` uploads byte for byte within `timeoutMs`; its name.
+	// A local file of `bytes` uploads byte for byte: N gets drive-write within the lock's cap of the edit, and the file
+	// is in the cloud within `timeoutMs` of that grant. Its name, the lock wait and the time from grant to upload.
 	const upload = async (label: string, bytes: number, timeoutMs: number): Promise<string> => {
 		const name = `${label}-${randomBytes(4).toString("hex")}.bin`
 		const content = seededBytes(name, bytes)
+		const mark = outputMark(chain.appOutput)
+		const written = Date.now()
 
 		writeFileSync(path.join(pair.localRoot, name), content)
-		await waitFor(`${name} in the cloud`, timeoutMs, async () => ((await inCloud(name)) ? true : null))
+
+		const granted = await waitFor(
+			`N's drive-write after ${name}`,
+			DRIVE_LOCK_TIMING.capMs,
+			() => driveWriteGrants(outputSince(chain.appOutput, mark)).find(at => at >= written),
+			500
+		).catch(onTimeout(null))
+
+		if (granted === null) {
+			fail(`N never got drive-write within ${seconds(0, DRIVE_LOCK_TIMING.capMs)} of the edit (${name})`)
+		}
+
+		await waitFor(`${name} in the cloud`, Math.max(0, granted + timeoutMs - Date.now()), async () =>
+			(await inCloud(name)) ? true : null
+		).catch((error: unknown) =>
+			fail(`${errorMessage(error)} (${seconds(0, timeoutMs)} from N's drive-write, ${seconds(written, granted)} after the edit)`)
+		)
+
+		const uploaded = Date.now()
 
 		if ((await cloud.sha256Of(`${options.editCloudDir}/${name}`)) !== sha256(content)) {
 			fail(`${name} in the cloud differs from the local file`)
 		}
 
-		return name
+		return `${name} uploaded; drive-write ${seconds(written, granted)} after the edit, in the cloud ${seconds(granted, uploaded)} after it`
 	}
 	// A cloud file of `bytes`, put there by the harness.
 	const inCloudOnly = async (label: string, bytes: number): Promise<CloudEdit> => {
@@ -173,7 +207,7 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		sampler.reset()
 		watch = watchPairs(sampler)
 
-		await findings.check("P14 a local edit uploads within 60 s", async () => `${await upload("proxy-up", 64 * KIB, EDIT_MS)} uploaded`)
+		await findings.check("P14 a local edit uploads within 60 s of N's drive-write", () => upload("proxy-up", 64 * KIB, EDIT_MS))
 
 		await findings.check("P14 the drive reads a file through the proxy", async () => {
 			const root = chain.os.driveRoot((await chain.mountsOverview()).drive) ?? fail("the drive reports no location")
@@ -290,7 +324,7 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		await fault(
 			"P15 F1 the first 2 ingest tunnels reset after 512 KiB: the upload completes, byte for byte",
 			{ kind: "resetAfter", host: INGEST, direction: "up", bytes: RESET_BYTES, tunnels: 2 },
-			async () => `${await upload("f1", 6 * MIB, FAULT_MS)} uploaded`
+			() => upload("f1", 6 * MIB, FAULT_MS)
 		)
 		await fault(
 			"P15 F2 the first 2 egest tunnels reset after 512 KiB: the download completes, byte for byte",
@@ -310,95 +344,167 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 			}
 		)
 		await fault(
-			"P15 F3 a gateway tunnel reset during a listing: the pass completes",
-			{ kind: "resetAfter", host: GATEWAY, direction: "down", bytes: 2 * KIB, tunnels: 1 },
+			"P15 F3 a gateway tunnel reset inside the launch's resync listing: retried, every seeded file on disk",
+			{ kind: "resetInReply", host: GATEWAY, minReplyBytes: F3_REPLY_BYTES, tunnels: 1, sdkOnly: true },
 			async () => {
-				const since = (await pairOf(chain, pair.id)).lastSyncedAt ?? 0
+				// The drive moves while N is quit, so its launch relists every root over HTTP whether its socket is up or
+				// not; the seeded files make the edit pair's `dir/download` reply the one the fault resets.
+				await chain.quit("N-proxy-f3")
 
-				// A directory beside the pairs changes the drive, so the pass lists the cloud again.
-				await cloud.mkdir(`${chain.cloudDir}/relist-${randomBytes(4).toString("hex")}`)
-				await syncNow(chain, pair.id)
-				await waitFor(`a completed pass of ${pair.name}`, FAULT_MS, async () => {
-					const read = await pairOf(chain, pair.id)
+				const dir = `f3-${randomBytes(4).toString("hex")}`
+				const staged = path.join(chain.work, dir)
+				const seeded = Array.from({ length: F3_FILES }, (_, index) => {
+					const name = `f3-${String(index).padStart(3, "0")}-${randomBytes(15).toString("hex")}.bin`
 
-					return read.phase === "idle" && (read.lastSyncedAt ?? 0) > since ? true : null
+					return { name, sha256: sha256(seededBytes(name, KIB)) }
 				})
 
-				return "a pass completed after the reset"
+				mkdirSync(staged, { recursive: true })
+
+				for (const file of seeded) {
+					writeFileSync(path.join(staged, file.name), seededBytes(file.name, KIB))
+				}
+
+				await cloud.upload(staged, `${options.editCloudDir}/${dir}`)
+
+				const mark = logMark(target)
+
+				await startWith(chain, block.via, options.pin, proxyLaunch(proxy))
+
+				const verified = new Set<string>()
+
+				await waitFor(`every seeded file of ${dir} on disk and every pair idle`, FAULT_MS, async () => {
+					for (const file of seeded) {
+						const local = path.join(pair.localRoot, dir, file.name)
+
+						if (!verified.has(file.name) && existsSync(local) && sha256File(local) === file.sha256) {
+							verified.add(file.name)
+						}
+					}
+
+					if (verified.size < seeded.length) {
+						return null
+					}
+
+					const sample = await sampler.sample().catch(() => null)
+
+					return sample !== null && allIdle(sample) && sample.waiting === 0 ? true : null
+				}).catch((error: unknown) => fail(`${errorMessage(error)}: ${String(verified.size)} of ${String(seeded.length)} on disk`))
+
+				const reset = proxy.tunnels().find(tunnel => tunnel.end?.includes("(resetInReply)") === true)
+				const tunnel =
+					reset === undefined
+						? "no tunnel reset"
+						: `tunnel ${String(reset.id)} (${reset.userAgent ?? "no User-Agent"}): ${reset.end ?? ""}`
+
+				// The reset must have hit the listing, not another request of the launch.
+				if (reset !== undefined && !listingRetried(logSince(target, mark))) {
+					fail(`main.log shows no failed or retried ${LISTING} since the relaunch: the reset hit another request (${tunnel})`)
+				}
+
+				return `${String(seeded.length)} seeded files on disk byte for byte; ${tunnel}`
 			}
 		)
 		await fault(
 			"P15 F4 everything throttled to 256 KiB/s: an 8 MiB upload completes, byte for byte",
 			{ kind: "throttle", bytesPerSecond: 256 * KIB },
-			async () => `${await upload("f4", 8 * MIB, 5 * 60 * 1000)} uploaded`
+			() => upload("f4", 8 * MIB, 5 * 60 * 1000)
 		)
 		await fault(
 			"P15 F5 the gateway's first reply bytes held 20 s: an edit still uploads",
 			{ kind: "holdFirstReply", host: GATEWAY, ms: 20_000 },
-			async () => `${await upload("f5", 64 * KIB, FAULT_MS)} uploaded`
+			() => upload("f5", 64 * KIB, FAULT_MS)
 		)
 
-		await findings.check("P15 F6 every ingest tunnel reset for 60 s: offline, no attention; recovered within 60 s", async () => {
-			sampler.reset()
+		await findings.check(
+			"P15 F6 every ingest tunnel reset for 60 s: offline, no attention; back online within 60 s, the file uploaded within 60 s of N's next drive-write",
+			async () => {
+				sampler.reset()
 
-			const watching = watchPairs(sampler)
-			const name = `f6-${randomBytes(4).toString("hex")}.bin`
-			const content = seededBytes(name, 2 * MIB)
-			const armed = proxy.arm({ kind: "resetAll", host: INGEST })
-			const armedAt = Date.now()
-			let offline: string
-			let reached: string
+				const watching = watchPairs(sampler)
+				const name = `f6-${randomBytes(4).toString("hex")}.bin`
+				const content = seededBytes(name, 2 * MIB)
+				const mark = outputMark(chain.appOutput)
+				const armed = proxy.arm({ kind: "resetAll", host: INGEST })
+				const armedAt = Date.now()
+				let offline: string
+				let reached: string
 
-			try {
-				writeFileSync(path.join(pair.localRoot, name), content)
+				try {
+					writeFileSync(path.join(pair.localRoot, name), content)
 
-				// The outage starts when N first tries ingest: another client's hold of the account's drive-write keeps
-				// N's pass waiting for the lock (up to its cap) before any upload, and an idle tunnel's reset fails nothing.
-				const outageAt = await waitFor(
-					`a new ${INGEST} tunnel`,
-					DRIVE_LOCK_TIMING.capMs,
-					() => firstNewTunnel(proxy.tunnels(), INGEST, armedAt),
+					// The outage starts when N first tries ingest: another client's hold of the account's drive-write keeps
+					// N's pass waiting for the lock (up to its cap) before any upload, and an idle tunnel's reset fails nothing.
+					const outageAt = await waitFor(
+						`a new ${INGEST} tunnel`,
+						DRIVE_LOCK_TIMING.capMs,
+						() => firstNewTunnel(proxy.tunnels(), INGEST, armedAt),
+						500
+					)
+
+					reached = `N reached ${INGEST} ${String(Math.round((outageAt - armedAt) / 1000))} s after the edit`
+
+					const went = await sampler.watch(Math.max(0, outageAt + OUTAGE_MS - Date.now()), sample =>
+						sample.phases.includes(`${pair.name}:offline`)
+					)
+
+					offline = went.hit === null ? "" : describeSample(went.hit)
+					// The outage lasts its whole minute either way: it is the fault.
+					await sleep(Math.max(0, outageAt + OUTAGE_MS - Date.now()))
+				} finally {
+					armed.disarm()
+				}
+
+				const lifted = Date.now()
+				// What the resets' pass backoff still had to run at the lift (the last one logged before it).
+				const backoff = residualBackoff(outputSince(chain.appOutput, mark), lifted, BACKOFF_CAP_MS)
+				const recovered = await sampler.watch(RECOVER_MS, sample => sample.offline === 0 && sample.errors === 0)
+				// N's next try after the lift: a drive-write grant, or a new ingest tunnel when it held the lock through the
+				// outage. A hold of another client (a lease its lost network left included) delays it up to the lock's cap.
+				const retried = await waitFor(
+					`N at drive-write or ${INGEST} after the lift`,
+					backoff + DRIVE_LOCK_TIMING.capMs,
+					() => nextTry(driveWriteGrants(outputSince(chain.appOutput, mark)), proxy.tunnels(), INGEST, lifted),
 					500
-				)
+				).catch(onTimeout(null))
+				const uploaded =
+					retried !== null &&
+					(await waitFor(`${name} in the cloud`, Math.max(0, retried + RECOVER_MS - Date.now()), async () =>
+						(await inCloud(name)) ? true : null
+					).catch(onTimeout(false)))
+				const uploadedAt = Date.now()
+				const seen = await watching.stop()
+				const timing = `residual backoff ${seconds(0, backoff)}; from the lift to N's next drive-write or ${INGEST} ${retried === null ? "never" : seconds(lifted, retried)}`
 
-				reached = `N reached ${INGEST} ${String(Math.round((outageAt - armedAt) / 1000))} s after the edit`
+				if (armed.fired === 0) {
+					fail("the fault never fired")
+				}
 
-				const went = await sampler.watch(Math.max(0, outageAt + OUTAGE_MS - Date.now()), sample =>
-					sample.phases.includes(`${pair.name}:offline`)
-				)
+				if (offline === "") {
+					fail(`${pair.name} not offline during the outage`)
+				}
 
-				offline = went.hit === null ? "" : describeSample(went.hit)
-				// The outage lasts its whole minute either way: it is the fault.
-				await sleep(Math.max(0, outageAt + OUTAGE_MS - Date.now()))
-			} finally {
-				armed.disarm()
+				if (recovered.hit === null) {
+					fail(`not back online within 60 s of the lift: ${describeSample(recovered.last)}`)
+				}
+
+				if (retried === null) {
+					fail(
+						`N neither got drive-write nor reached ${INGEST} within ${seconds(0, backoff + DRIVE_LOCK_TIMING.capMs)} of the lift (${timing}): ${lockWaitNote(outputSince(chain.appOutput, mark))}`
+					)
+				}
+
+				if (!uploaded) {
+					fail(`${name} not uploaded within 60 s of N's next try (${timing}): ${describeSample(recovered.last)}`)
+				}
+
+				if ((await cloud.sha256Of(`${options.editCloudDir}/${name}`)) !== sha256(content)) {
+					fail(`${name} in the cloud differs from the local file`)
+				}
+
+				return `fired ${String(armed.fired)}x; ${reached}; offline (${offline}); back online ${seconds(lifted, recovered.hit.at)} after the lift; ${timing}; uploaded ${seconds(retried, uploadedAt)} after it; ${nothingSeen(seen, ["attention"])}`
 			}
-
-			const lifted = Date.now()
-			const recovered = await sampler.watch(RECOVER_MS, sample => sample.offline === 0 && sample.errors === 0)
-			const uploaded = await waitFor(`${name} in the cloud`, Math.max(0, lifted + RECOVER_MS - Date.now()), async () =>
-				(await inCloud(name)) ? true : null
-			).catch(onTimeout(false))
-			const seen = await watching.stop()
-
-			if (armed.fired === 0) {
-				fail("the fault never fired")
-			}
-
-			if (offline === "") {
-				fail(`${pair.name} not offline during the outage`)
-			}
-
-			if (recovered.hit === null || !uploaded) {
-				fail(`not recovered within 60 s (${name} ${uploaded ? "uploaded" : "not uploaded"}): ${describeSample(recovered.last)}`)
-			}
-
-			if ((await cloud.sha256Of(`${options.editCloudDir}/${name}`)) !== sha256(content)) {
-				fail(`${name} in the cloud differs from the local file`)
-			}
-
-			return `fired ${String(armed.fired)}x; ${reached}; offline (${offline}); recovered and uploaded in ${String(Math.round((Date.now() - lifted) / 1000))} s; ${nothingSeen(seen, ["attention"])}`
-		})
+		)
 
 		findings.info(
 			"P14 the renderer without --proxy-server (HTTPS_PROXY only)",
@@ -457,6 +563,29 @@ export function sdkSocket(log: string): SdkSocket {
 	}
 
 	return "silent"
+}
+
+// N's first try after `since`: its first drive-write grant (driveWriteGrants) or its first new tunnel to `host`,
+// whichever came first; null before either.
+export function nextTry(
+	grants: readonly number[],
+	tunnels: readonly Pick<Tunnel, "host" | "openedAt">[],
+	host: string,
+	since: number
+): number | null {
+	const first = Math.min(...grants.filter(at => at >= since), firstNewTunnel(tunnels, host, since) ?? Number.POSITIVE_INFINITY)
+
+	return Number.isFinite(first) ? first : null
+}
+
+// The resync's listing, as sdk-rs's request span names it.
+const LISTING = "endpoint=v3/dir/download"
+
+// Whether `log` (main.log since a launch) shows the resync's listing failing or retried: a WARN inside its request span
+// (a connection that died mid-request, which the request's retry absorbs, or the request failing), or a resync that
+// did not converge and retries.
+export function listingRetried(log: string): boolean {
+	return log.split("\n").some(line => (line.includes(LISTING) && / WARN /.test(line)) || line.includes("resync: not converged"))
 }
 
 // When the first tunnel to `host` opened after `since`; null before one did.

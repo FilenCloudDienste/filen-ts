@@ -1,7 +1,20 @@
 import { randomBytes } from "node:crypto"
+import { writeFileSync } from "node:fs"
+import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
-import { errorMessage, fail } from "../../support.ts"
-import { acquireDriveLock, type DriveLock, type DriveLockTiming, lockPost } from "../driveLock.ts"
+import { errorMessage, fail, onTimeout, waitFor } from "../../support.ts"
+import type { Findings } from "../findings.ts"
+import {
+	acquireDriveLock,
+	type DriveLock,
+	type DriveLockTiming,
+	driveWriteGrants,
+	lockPost,
+	lockWaitNote,
+	orphanedLease,
+	outputMark,
+	outputSince
+} from "../driveLock.ts"
 import {
 	appPids,
 	describeSample,
@@ -14,7 +27,7 @@ import {
 	startThrough,
 	watchOffline
 } from "../offlineBlock.ts"
-import type { Chain } from "./common.ts"
+import { type Chain, LIVE_UPLOAD_MS } from "./common.ts"
 
 // P11's third sub-step: the network lost while a launch's first cloud listing waits. The harness holds the account's
 // drive-write lock (driveLock.ts) and has written outside the pairs while N was quit, so N's launch must relist and
@@ -27,17 +40,21 @@ import type { Chain } from "./common.ts"
 // drive-write covers the whole account, and every deep entry of a run (and of an overlapping nightly or dispatch)
 // shares it: while one entry holds it, every other entry's N waits to write or relist. So the whole of P11 runs in the
 // account's P11 turn (P11_TURN, a lock of the harness's own on the same API): no two entries' P11 sub-steps, whose
-// windows are 30-60 s, ever overlap a listing drop or each other. Checks outside P11 can still meet a foreign hold of
-// up to the cap (150 s, typically a launch plus 40 s): sdk-rs clients of the account already hold drive-write for up
-// to 60 s a batch (PASS_LOCK_MAX_HOLD), and the hold's wall-clock window is reported (info) so a timed failure in
-// another entry can be matched against it.
+// windows are 30-60 s, ever overlap a listing drop or each other; a short live-upload check outside P11 (L14, P4) takes
+// the same turn, so it never runs during another entry's drop, whose lost network leaves its lease for the server's
+// 60 s TTL. Other checks can still wait for drive-write: the lock has no queue, so the wait is a chain of other
+// clients' holds (each up to 60 s a batch, PASS_LOCK_MAX_HOLD, a launch's up to the harness's 150 s cap), bounded by
+// time, not by a number of holds. The hold's wall-clock window is reported (info) so a timed failure in another entry
+// can be matched against it.
 
 // Back online after the lift (none offline, none in error; a pair waiting for the cloud is online): the engine wakes
 // on reconnect. The same for P11's other two sub-steps.
 export const RECOVER_MS = 60_000
 // Converged after the lift: N's next pass must take drive-write again, and the lock has no queue. Another entry's N (or
-// its 3.x and rclone writers) can win it first and hold it for a batch of up to 60 s (sdk-rs PASS_LOCK_MAX_HOLD) before
-// N retries (every 5 s), so convergence tolerates one foreign hold. The same for P11's other two sub-steps.
+// its 3.x and rclone writers) can win it first, and again at every handoff, since N retries only every 5 s; each hold
+// is a batch of up to 60 s (sdk-rs PASS_LOCK_MAX_HOLD). The window covers one such hold, not a chain of them: inside the
+// P11 turn no other entry drops its network, which is what leaves the longest waits. The same for P11's other two
+// sub-steps.
 export const CONVERGE_MS = RECOVER_MS + 60_000
 // A launch's start and its first pass's wait for the cloud.
 const WAITING_MS = 60_000
@@ -49,13 +66,17 @@ export const DWELL_SAMPLES = 3
 export const P11_TURN = "filen-desktop-e2e-p11"
 export const P11_TURN_TIMING: DriveLockTiming = { pollMs: 10_000, acquireMs: 40 * 60 * 1000, refreshMs: 15_000, capMs: 20 * 60 * 1000 }
 
-// Runs P11 inside the account's turn; when the turn does not come, P11 is skipped with a failed staging check.
-export async function inP11Turn(chain: Chain, run: () => Promise<void>): Promise<void> {
-	const { findings } = chain
+// Runs `run` (P11, or the check named by `step`) inside the account's turn; when the turn does not come, it is skipped
+// with a failed staging check. `findings` are the chain's own unless the caller has its own view of them.
+export async function inP11Turn(
+	chain: Chain,
+	run: () => Promise<unknown>,
+	{ step = "P11", findings = chain.findings }: { step?: string; findings?: Findings } = {}
+): Promise<void> {
 	const started = Date.now()
 	const turn: { held: DriveLock | null } = { held: null }
 
-	await findings.check("P11 the account's turn taken (no other entry's P11 at the same time)", async () => {
+	await findings.check(`${step} the account's P11 turn taken (no other entry's P11 at the same time)`, async () => {
 		turn.held = await acquireDriveLock(lockPost(chain.remote.apiKey), P11_TURN_TIMING, P11_TURN).catch((error: unknown) =>
 			fail(`staging: ${errorMessage(error)}`)
 		)
@@ -74,8 +95,79 @@ export async function inP11Turn(chain: Chain, run: () => Promise<void>): Promise
 	} finally {
 		const released = await held.release()
 
-		findings.info("P11 the account's turn", `${released}${held.capped() ? " (cap reached: P11 overran it)" : ""}`)
+		findings.info(`${step} the account's P11 turn`, `${released}${held.capped() ? ` (cap reached: ${step} overran it)` : ""}`)
 	}
+}
+
+// The check `name` (its first word the step): a new file `file` in `localRoot` is in `cloudDir` within LIVE_UPLOAD_MS,
+// inside the account's P11 turn, so it never runs during another entry's network drop. On a timeout it says whether N
+// was still waiting for drive-write, so a lock wait reads as one and not as a sync bug.
+export async function liveEditUploads(
+	chain: Chain,
+	{ name, file, localRoot, cloudDir, findings = chain.findings }: LiveEdit
+): Promise<void> {
+	await inP11Turn(
+		chain,
+		() =>
+			findings.check(name, async () => {
+				const mark = outputMark(chain.appOutput)
+
+				writeFileSync(path.join(localRoot, file), `${file}\n`)
+				await waitFor("the live file in the cloud", LIVE_UPLOAD_MS, async () =>
+					(await chain.cloud.list(cloudDir, false))?.some(item => item.path === file) === true ? true : null
+				).catch((error: unknown) => fail(`${errorMessage(error)}; ${lockWaitNote(outputSince(chain.appOutput, mark))}`))
+
+				return `${file} uploaded`
+			}),
+		{ step: name.split(" ")[0] ?? name, findings }
+	)
+}
+
+export interface LiveEdit {
+	name: string
+	file: string
+	localRoot: string
+	cloudDir: string
+	findings?: Findings
+}
+
+// sdk-rs sends a drive-write release once: one that fails while N is cut off leaves the lease on the server until its
+// TTL, which keeps every client of the account, N included, from the lock for up to a minute after the network is back.
+export const RELEASE_ISSUE =
+	"gap/sdk: a drive-write release that fails in transport is never sent again, so the server keeps the lease for its 60 s TTL (sdk-rs sync/lock release(), from spawn_release: on ErrorKind::Reqwest send it again every LOCK_RETRY_INTERVAL until it succeeds or LOCK_SERVER_TTL has passed since the lease's last confirmation)"
+// The least time a lease left by a failed release must still have at the lift for N's next acquire to tell a release
+// sent again from the server's TTL.
+const ORPHAN_ROOM_MS = 10_000
+
+// After a lift: when N's release of drive-write failed while it was cut off (from `blockedAt`) and the server still
+// keeps the lease, whether N got drive-write again before the lease could lapse, which only a release sent again
+// allows. `mark` is where the chain's app output stood before the block.
+export async function releaseSentAgain(chain: Chain, step: string, mark: number, blockedAt: number, lifted: number): Promise<void> {
+	const lease = orphanedLease(outputSince(chain.appOutput, mark), blockedAt, lifted, ORPHAN_ROOM_MS)
+
+	if (lease === null) {
+		return
+	}
+
+	await chain.findings.known(
+		`${step}: a drive-write release that failed offline is sent again once back online`,
+		RELEASE_ISSUE,
+		async () => {
+			const grant = await waitFor(
+				"N's drive-write before the lease could lapse",
+				Math.max(0, lease.lapsesAt - Date.now()),
+				() => driveWriteGrants(outputSince(chain.appOutput, mark)).find(at => at >= lifted && at < lease.lapsesAt),
+				500
+			).catch(onTimeout(null))
+			const times = `the release failed ${seconds(lease.failedAt, lifted)} before the lift; the lease, last confirmed ${seconds(lease.confirmedAt, lifted)} before it, could lapse ${seconds(lifted, lease.lapsesAt)} after it`
+
+			if (grant === null) {
+				fail(`N got drive-write again only once the lease could lapse (${times})`)
+			}
+
+			return `N got drive-write ${seconds(lifted, grant)} after the lift (${times})`
+		}
+	)
 }
 
 // Every pair waiting for the cloud's listing, none offline or in error.

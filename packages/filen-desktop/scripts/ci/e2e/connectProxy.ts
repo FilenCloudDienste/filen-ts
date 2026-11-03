@@ -3,14 +3,20 @@ import { type AddressInfo, connect, type Socket } from "node:net"
 
 // A CONNECT proxy on the loopback interface for the proxy-only and connection-fault checks (chains/proxyCheck.ts). It
 // only relays: each tunnel is a TCP stream to the host:port the client named, TLS stays end to end (nothing is
-// intercepted or decrypted), so what it sees is a host, a port and byte counts. Every tunnel is logged by host:port.
-// Faults are armed while it runs: a reset after so many bytes, every tunnel to a host reset, the first reply bytes held,
-// a throttle. Plain HTTP requests are refused (405): the clients under test speak HTTPS only.
+// intercepted or decrypted), so what it sees is a host, a port, the CONNECT's User-Agent and byte counts. Every tunnel
+// is logged by host:port and User-Agent. Faults are armed while it runs: a reset after so many bytes, a reset inside a
+// large reply, every tunnel to a host reset, the first reply bytes held, a throttle. Plain HTTP requests are refused
+// (405): the clients under test speak HTTPS only.
+// Who opened a tunnel: Chromium's CONNECT carries its Mozilla User-Agent and rclone's its own, while sdk-rs builds
+// reqwest without one, and reqwest names a User-Agent on a CONNECT only when one is set, so the SDK's tunnels are those
+// without. sdk-rs speaks HTTP/1.1 only to the gateway, so a reply there is the down bytes between two up chunks.
 
 export interface Tunnel {
 	id: number
 	host: string
 	port: number
+	// The CONNECT request's User-Agent, null without one (sdk-rs).
+	userAgent: string | null
 	openedAt: number
 	// Bytes relayed client -> server and server -> client.
 	up: number
@@ -25,6 +31,10 @@ export type Direction = "up" | "down"
 export type Fault =
 	// The first `tunnels` tunnels to `host` that relay `bytes` in `direction` after arming are reset there.
 	| { kind: "resetAfter"; host: string; direction: Direction; bytes: number; tunnels: number }
+	// The first `tunnels` tunnels to `host` (with `sdkOnly`, only those whose CONNECT had no User-Agent) reset once one
+	// reply, the down bytes since the tunnel's last up chunk, reaches `minReplyBytes`. A tunnel's first down burst, the
+	// TLS server's handshake flight, never counts.
+	| { kind: "resetInReply"; host: string; minReplyBytes: number; tunnels: number; sdkOnly: boolean }
 	// Every tunnel to `host`, open or new, is reset while armed (a new one at its first byte).
 	| { kind: "resetAll"; host: string }
 	// The first reply bytes any tunnel to `host` gets after arming are held `ms`, then relayed.
@@ -60,6 +70,8 @@ interface Armed extends ArmedFault {
 	// resetAfter: bytes per tunnel since arming; holdFirstReply: whether a hold has started.
 	counted: Map<number, number>
 	held: boolean
+	// resetInReply: per tunnel, its up chunks seen since arming and the current reply's bytes.
+	replies: Map<number, { ups: number; reply: number }>
 }
 
 interface Live {
@@ -156,6 +168,26 @@ export async function startConnectProxy(log: (line: string) => void = line => co
 				}
 			}
 
+			if (spec.kind === "resetInReply" && fault.fired < spec.tunnels && (!spec.sdkOnly || entry.tunnel.userAgent === null)) {
+				const state = fault.replies.get(entry.tunnel.id) ?? { ups: 0, reply: 0 }
+
+				fault.replies.set(entry.tunnel.id, state)
+
+				if (direction === "up") {
+					state.ups++
+					state.reply = 0
+				} else if (state.ups > 1) {
+					state.reply += chunk.length
+
+					if (state.reply >= spec.minReplyBytes) {
+						fault.fired++
+						reset(entry, `reset in a reply at ${String(state.reply)} bytes down (resetInReply)`)
+
+						return
+					}
+				}
+			}
+
 			if (spec.kind === "holdFirstReply" && direction === "down" && !fault.held) {
 				fault.held = true
 				fault.fired++
@@ -214,10 +246,12 @@ export async function startConnectProxy(log: (line: string) => void = line => co
 			return
 		}
 
+		const userAgent = request.headers["user-agent"] ?? null
 		const tunnel: Tunnel = {
 			id: nextId++,
 			host: target.host,
 			port: target.port,
+			userAgent,
 			openedAt: Date.now(),
 			up: 0,
 			down: 0,
@@ -229,7 +263,7 @@ export async function startConnectProxy(log: (line: string) => void = line => co
 
 		tunnels.push(tunnel)
 		live.set(tunnel.id, entry)
-		log(`proxy: tunnel ${String(tunnel.id)} ${target.host}:${String(target.port)}`)
+		log(`proxy: tunnel ${String(tunnel.id)} ${target.host}:${String(target.port)} (${userAgent ?? "no User-Agent"})`)
 
 		let finished = false
 		const finish = (why: string) => {
@@ -297,6 +331,7 @@ export async function startConnectProxy(log: (line: string) => void = line => co
 				active: true,
 				counted: new Map(),
 				held: false,
+				replies: new Map(),
 				disarm() {
 					entry.active = false
 					armed = armed.filter(other => other !== entry)

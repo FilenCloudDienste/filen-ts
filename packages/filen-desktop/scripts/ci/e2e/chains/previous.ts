@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto"
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, statSync } from "node:fs"
 import path from "node:path"
 import type {
 	DesktopLockAttempt,
@@ -29,7 +29,7 @@ import { crossCheck, describeVault, seedSession, SESSION_SHAPE } from "../seed.t
 import { offlineBlockFor } from "../offlineBlock.ts"
 import { runOfflineProbe } from "../spikes/offline.ts"
 import { runOfflineCheck } from "./offlineCheck.ts"
-import { inP11Turn } from "./offlineListing.ts"
+import { inP11Turn, liveEditUploads } from "./offlineListing.ts"
 import { runConflictsCheck, seedConflictsCheck } from "./conflictsCheck.ts"
 import { runCloudFullCheck, takeQuotaCredentials } from "./cloudFullCheck.ts"
 import { runDiskFullCheck } from "./diskFullCheck.ts"
@@ -65,7 +65,8 @@ import {
 //   P2  session survives             session.vault kept, secure storage in use, session.get() present on N
 //   P3  PIN and app lock             N starts locked; a wrong PIN is refused once; the PIN unlocks through the screen
 //   P4  pairs keep running           disk and cloud unchanged over N's first launch (identities included); same pairs,
-//                                    no review, holds or transfers; an empty plan; a live edit uploads
+//                                    no review, holds or transfers; an empty plan; a live edit uploads (in the
+//                                    account's P11 turn, chains/offlineListing.ts liveEditUploads)
 //   P5  mounts come back             drive running at the same point, a fixture read through it; WebDAV answers
 //   P6  prefs kept                   prefs.get() as set on N-1
 //   P7  the page boots as served     crossOriginIsolated
@@ -577,15 +578,12 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 			await findings.check("P4 no transfer in N's activity and an empty plan", () => chain.quietActivity(pairs, new Set()))
 
-			await findings.check("P4 a live edit on N uploads", async () => {
-				const name = `live-${path.posix.basename(runDir())}.txt`
-
-				writeFileSync(path.join(rootOf("e2e-twoway"), name), `${name}\n`)
-				await waitFor("the live file in the cloud", LIVE_TIMEOUT_MS, async () =>
-					(await cloud.list(`${cloudDir}/e2e-twoway`, false))?.some(item => item.path === name) === true ? true : null
-				)
-
-				return `${name} uploaded`
+			await liveEditUploads(chain, {
+				name: "P4 a live edit on N uploads",
+				file: `live-${path.posix.basename(runDir())}.txt`,
+				localRoot: rootOf("e2e-twoway"),
+				cloudDir: `${cloudDir}/e2e-twoway`,
+				findings
 			})
 
 			await findings.check("P5 the drive runs at the same mount point and reads a fixture", async () => {
