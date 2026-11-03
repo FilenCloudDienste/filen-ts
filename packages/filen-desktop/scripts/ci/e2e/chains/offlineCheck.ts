@@ -7,20 +7,21 @@ import {
 	appPids,
 	createSampler,
 	describeSample,
-	liveOfflineMs,
 	offlineBlockFor,
 	POLL_MS,
 	relaunchThrough,
 	type Sampler,
 	seconds,
-	startThrough
+	silentBlock,
+	startThrough,
+	watchOffline
 } from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
 import { backOnline, CONVERGE_MS, converged, RECOVER_MS, runListingDrop } from "./offlineListing.ts"
 
 // P11: N offline and back, with its own processes cut off (offlineBlock.ts) and everything else on the runner online.
-//   live drop      with N running and every pair converged: an edit takes its pair offline within 30 s (150 s on mac
-//                  x64, liveOfflineMs), stays out of the cloud, the sync status never asks for attention; once the
+//   live drop      with N running and every pair converged: an edit takes its pair offline within 30 s (on mac x64
+//                  later, up to the SDK's read timeout, is a known bug: watchOffline), stays out of the cloud, the sync status never asks for attention; once the
 //                  block is lifted every pair is back online (none offline or in error) within 60 s, and the edit
 //                  uploads and every pair converges (none waiting, no lastError) within 120 s
 //   offline start  N launched under the block: every pair offline (none in error), no attention; once lifted, every
@@ -91,7 +92,6 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 	const sampler = createSampler(chain, new Set(options.pairs.map(pair => pair.id)))
 	const pair = options.pairs.find(candidate => candidate.name === options.editPair) ?? fail(`no pair ${options.editPair}`)
 	const inCloud = async (name: string) => (await chain.cloud.list(options.editCloudDir, false))?.some(item => item.path === name) === true
-	const offlineWindow = liveOfflineMs(target.platform, process.arch)
 	// Each sub-step's time from the lift to converged, reported whatever its outcome.
 	const toConverged: { live: string | null; start: string | null } = { live: null, start: null }
 
@@ -119,10 +119,16 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 				await block.block(target, await appPids(chain))
 				writeFileSync(path.join(pair.localRoot, name), `${name}\n`)
 
-				const offline = await sampler.watch(offlineWindow, current => current.phases.includes(`${pair.name}:offline`))
+				const offline = await watchOffline(
+					findings,
+					"P11 a live drop: offline",
+					sampler,
+					silentBlock(target.platform, process.arch),
+					current => current.phases.includes(`${pair.name}:offline`)
+				)
 
 				if (offline.hit === null) {
-					fail(`${pair.name} not offline within ${seconds(0, offlineWindow)} of the edit: ${describeSample(offline.last)}`)
+					fail(`${pair.name} not offline within ${seconds(0, offline.capMs)} of the edit: ${describeSample(offline.last)}`)
 				}
 
 				if (await inCloud(name)) {

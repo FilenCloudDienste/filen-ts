@@ -79,7 +79,7 @@ import {
 //   P11 offline and back         N cut off alone (offlineBlock.ts): a live drop queues an edit and uploads it after the
 //                                lift; a launch under the block shows every pair offline, none in error; a drop while
 //                                the first cloud listing waits (the harness holding drive-write) takes every pair
-//                                offline within 30 s (150 s on mac x64); after each lift every pair is back online
+//                                offline within 30 s (mac x64: a known SDK bug); after each lift every pair is back online
 //                                within 60 s and converged within 120 s (one foreign drive-write hold); sync never
 //                                asks for attention (chains/offlineCheck.ts); one entry's P11 at a time on the
 //                                account (chains/offlineListing.ts)

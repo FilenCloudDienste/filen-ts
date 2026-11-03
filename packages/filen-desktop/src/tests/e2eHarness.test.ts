@@ -21,12 +21,15 @@ import { parseAbout } from "../../scripts/ci/e2e/cloud.ts"
 import { createFindings } from "../../scripts/ci/e2e/findings.ts"
 import { appImagePrefixes, appImageTree, type ProcessEntry, xwdToPng } from "../../scripts/ci/e2e/linux.ts"
 import {
+	DEAD_PEER_ISSUE,
 	describeSample,
 	LIVE_OFFLINE_MS,
-	liveOfflineMs,
-	MAC_X64_DEAD_PEER_MS,
 	pfStateKills,
+	type Sample,
 	sampleOf,
+	SDK_READ_TIMEOUT_MS,
+	silentBlock,
+	watchOffline,
 	windowsFirewallRules
 } from "../../scripts/ci/e2e/offlineBlock.ts"
 import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed, SESSION_SHAPE, sessionEnvelope } from "../../scripts/ci/e2e/seed.ts"
@@ -420,13 +423,79 @@ describe("e2e offline block", () => {
 		expect(pfStateKills([])).toEqual([])
 	})
 
-	it("gives a live drop on mac x64 the time to find a dead peer", () => {
-		expect(liveOfflineMs("mac", "x64")).toBe(LIVE_OFFLINE_MS + MAC_X64_DEAD_PEER_MS)
-		// Past the 92 s a request in flight was seen to hang on mac x64.
-		expect(liveOfflineMs("mac", "x64")).toBe(150_000)
-		expect(liveOfflineMs("mac", "arm64")).toBe(LIVE_OFFLINE_MS)
-		expect(liveOfflineMs("linux", "x64")).toBe(LIVE_OFFLINE_MS)
-		expect(liveOfflineMs("win", "x64")).toBe(LIVE_OFFLINE_MS)
+	describe("watchOffline", () => {
+		const offline = sampleOf([], "Computer", 0)
+		const run = async (silent: boolean, results: { hit: Sample | null; last: Sample }[]) => {
+			const caps: number[] = []
+			const known = vi.fn(async (_name: string, _issue: string, probe: () => string | Promise<string>) => {
+				await expect(Promise.resolve().then(probe)).rejects.toThrow(/reached after/)
+
+				return true
+			})
+			const result = await watchOffline(
+				{ known },
+				"P11 a drop",
+				{
+					watch: capMs => {
+						caps.push(capMs)
+
+						return Promise.resolve(results[caps.length - 1] ?? { hit: null, last: offline })
+					}
+				},
+				silent,
+				() => true
+			)
+
+			return { result, caps, known }
+		}
+
+		it("is silent only where pf resets nothing", () => {
+			expect(silentBlock("mac", "x64")).toBe(true)
+			expect(silentBlock("mac", "arm64")).toBe(false)
+			expect(silentBlock("linux", "x64")).toBe(false)
+			expect(silentBlock("win", "x64")).toBe(false)
+		})
+
+		it("gives every platform 30 s, and a reset block no more", async () => {
+			const prompt = await run(false, [{ hit: offline, last: offline }])
+
+			expect(prompt.caps).toEqual([LIVE_OFFLINE_MS])
+			expect(prompt.result.hit).toBe(offline)
+			expect(prompt.known).not.toHaveBeenCalled()
+
+			const missed = await run(false, [{ hit: null, last: offline }])
+
+			expect(missed.caps).toEqual([LIVE_OFFLINE_MS])
+			expect(missed.result).toMatchObject({ hit: null, capMs: LIVE_OFFLINE_MS })
+		})
+
+		it("records a silent block's late offline as the known SDK bug, up to its read timeout", async () => {
+			const late = await run(true, [
+				{ hit: null, last: offline },
+				{ hit: offline, last: offline }
+			])
+
+			expect(late.caps).toHaveLength(2)
+			expect(late.caps[0]).toBe(LIVE_OFFLINE_MS)
+			expect(late.caps[1]).toBeLessThanOrEqual(SDK_READ_TIMEOUT_MS + LIVE_OFFLINE_MS)
+			expect(late.caps[1]).toBeGreaterThan(SDK_READ_TIMEOUT_MS)
+			expect(late.result).toMatchObject({ hit: offline, capMs: SDK_READ_TIMEOUT_MS + LIVE_OFFLINE_MS })
+			expect(late.known).toHaveBeenCalledWith("P11 a drop within 30.0 s on mac x64", DEAD_PEER_ISSUE, expect.any(Function))
+		})
+
+		it("still fails a silent block that never goes offline within the SDK's bound", async () => {
+			const never = await run(true, [])
+
+			expect(never.result).toMatchObject({ hit: null, capMs: SDK_READ_TIMEOUT_MS + LIVE_OFFLINE_MS })
+			expect(never.known).not.toHaveBeenCalled()
+		})
+
+		it("records nothing for a silent block offline within 30 s", async () => {
+			const prompt = await run(true, [{ hit: offline, last: offline }])
+
+			expect(prompt.caps).toEqual([LIVE_OFFLINE_MS])
+			expect(prompt.known).not.toHaveBeenCalled()
+		})
 	})
 
 	it("counts pairs waiting for the cloud apart from offline and error ones", () => {
